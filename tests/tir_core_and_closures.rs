@@ -1123,6 +1123,10 @@ fn run() {
 #[test]
 fn closure_capture_reads_current_storage_and_reuses_owned_copy() {
     let src = r#"
+fn make_owned_read() -[..E]> fn() -> Int -[..E]> {
+    text :: "snapshot"
+    return () -> text.len()
+}
 fn run() {
     first := 41
     first_read :: () -> first
@@ -1137,12 +1141,24 @@ fn run() {
     current_items :: [current_read]
     print(current_items[0].call())
     print(current)
+
+    text := "first"
+    text_read :: () -> text.len()
+    text_items :: [text_read]
+    text = "changed text"
+    print(text_items[0].call())
+    print(text_items[0].call())
+    print(text.len())
+    // The creator frame is gone; the materialized Read capture owns storage.
+    returned :: make_owned_read()
+    print(returned.call())
+    print(returned.call())
 }
 "#;
     assert_tiers_agree(
         "tir_closure_capture_current_storage",
         src,
-        "41\n41\n1\n7\n7\n",
+        "41\n41\n1\n7\n7\n5\n5\n12\n8\n8\n",
     );
 }
 

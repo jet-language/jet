@@ -326,8 +326,15 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         // Rust `arg_expect`: a self-typed numeric read widens into the
         // parameter after it is checked on its own.
         self_typed :: sema_stmt_numeric_slot_self_typed(args[index].expr, required)
+        trait_parameter :: if required == {
+            .TraitObject(_) -> true
+            else -> false
+        }
+        // A borrowed trait parameter lends the original concrete storage.
+        // Expected-type coercion would instead construct an owned TraitBox.
+        borrowed_trait :: trait_parameter && parameter.convention != AccessConvention.Move
         argument_expected := Type?{None}
-        if !self_typed -> argument_expected = Val(required)
+        if !self_typed && !borrowed_trait -> argument_expected = Val(required)
         checked_argument :: if apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(args[index].expr, argument_expected, environment, &scopes, &state, &tail_store, &context, sema_call_lambda_escape_policy(parameter, abi), &diagnostics) else -> sema_check_expression(args[index].expr, argument_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         if binder_refs.len() > 0 {
             sema_scope_leave(&scopes, &state)
@@ -339,7 +346,7 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         checked_value :: checked_argument ?? return None
         if parameter.convention == AccessConvention.Move && !sema_copy_site_check_guard_owned(checked_value, environment, scopes, context, &diagnostics, args[index].convention == AccessConvention.Move) -> return None
         value :: if self_typed -> sema_stmt_numeric_slot_value(checked_value, required, environment, &diagnostics) ?? return None else -> checked_value
-        compatible :: sema_call_type_assignable(required_declared, value.ty, environment) ?? return None
+        compatible :: if trait_parameter && parameter.convention == AccessConvention.Write -> type_identity_equal(required, sema_call_resolved_type(value.ty, environment)) else -> sema_call_type_assignable(required_declared, value.ty, environment) ?? return None
         if !compatible {
             &diagnostics.push(sema_type_mismatch(required, value.ty, args[index].span))
             return None

@@ -103,6 +103,7 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
             | TExprKind::Clone(arg, _)
             | TExprKind::ExplicitCopy(arg)
             | TExprKind::MaterializeView(arg)
+            | TExprKind::TraitBox { value: arg, .. }
             | TExprKind::DistinctRaw(arg)
             | TExprKind::Present(arg)
             | TExprKind::Ok(arg)
@@ -2426,19 +2427,20 @@ pub(crate) fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -
         return expr;
     };
     for elem in elems {
-        let concrete = match &elem.ty {
-            Type::Named(name) => Some(name.clone()),
-            Type::Apply { name, .. } => Some(name.clone()),
-            _ => None,
-        };
-        let (Some(concrete), TExprKind::StructLit { as_trait, .. }) = (concrete, &mut elem.kind)
-        else {
+        if !matches!(&elem.ty, Type::Named(_) | Type::Apply { .. })
+            || !matches!(&elem.kind, TExprKind::StructLit { .. })
+        {
             continue;
-        };
-        if as_trait.is_none() {
-            *as_trait = Some((trait_name.clone(), concrete));
-            elem.ty = Type::TraitObject(vec![trait_name.clone()]);
         }
+        let source = std::mem::replace(elem, TExpr {
+            ty: Type::Unit,
+            kind: TExprKind::Absent,
+        });
+        let target = Type::TraitObject(vec![trait_name.clone()]);
+        *elem = TExpr {
+            ty: target.clone(),
+            kind: TExprKind::TraitBox { value: Box::new(source), target },
+        };
     }
     expr.ty = expected.clone();
     expr

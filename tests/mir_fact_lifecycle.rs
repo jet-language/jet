@@ -46,6 +46,181 @@ fn function<'a>(
         .unwrap_or_else(|| panic!("missing MIR function {name}"))
 }
 
+fn checked_image_bytes() -> Vec<u8> {
+    let program = lower_checked("fn run() {}");
+    jet_foundation::MIR::mir_program_image_bytes(&program).expect("actual checked MIR image")
+}
+
+fn image_reader_failures(bytes: &[u8]) -> Vec<&'static str> {
+    let mut failures = Vec::new();
+    if jet_foundation::MIR::mir_program_from_image_bytes(bytes).is_ok() {
+        failures.push("whole");
+    }
+    if jet_foundation::MIR::mir_program_signatures_from_image_bytes(bytes).is_ok() {
+        failures.push("signatures");
+    }
+    failures
+}
+
+#[test]
+fn current_mir_image_round_trips_whole_and_signature_rows() {
+    let bytes = checked_image_bytes();
+    assert_eq!(&bytes[..8], b"JETMIR\0\0");
+    assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), jet_foundation::MIR::MIR_SCHEMA_VERSION);
+    let whole = jet_foundation::MIR::mir_program_from_image_bytes(&bytes).unwrap();
+    let signatures = jet_foundation::MIR::mir_program_signatures_from_image_bytes(&bytes).unwrap();
+    whole.validate().unwrap();
+    assert_eq!(whole.schema_version, jet_foundation::MIR::MIR_SCHEMA_VERSION);
+    assert_eq!(signatures.schema_version, whole.schema_version);
+    assert_eq!(signatures.functions.len(), whole.functions.len());
+    assert!(signatures.functions.iter().all(|function| function.blocks.is_empty()));
+}
+
+#[test]
+fn current_mir_image_rejects_every_truncated_prefix_in_both_readers() {
+    let bytes = checked_image_bytes();
+    let failures: Vec<_> = (0..42).flat_map(|length| {
+        image_reader_failures(&bytes[..length]).into_iter().map(move |reader| (length, reader))
+    }).collect();
+    assert!(failures.is_empty(), "accepted truncated prefixes: {failures:?}");
+}
+
+#[test]
+fn current_mir_image_rejects_wrong_magic_in_both_readers() {
+    let mut bytes = checked_image_bytes();
+    bytes[0] ^= 1;
+    assert!(image_reader_failures(&bytes).is_empty());
+}
+
+#[test]
+fn current_mir_image_rejects_wrong_schema_in_both_readers() {
+    let mut bytes = checked_image_bytes();
+    bytes[8] ^= 1;
+    assert!(image_reader_failures(&bytes).is_empty());
+}
+
+#[test]
+fn current_mir_image_rejects_wrong_layout_seal_in_both_readers() {
+    let mut bytes = checked_image_bytes();
+    bytes[10] ^= 1;
+    assert!(image_reader_failures(&bytes).is_empty());
+}
+
+/// A validator fixture retaining a real checked closure's declaration, capture
+/// type and source identity. Its isolated body tests the address capability,
+/// not closure execution or an optimizer transformation.
+fn place_only_capture_fixture() -> (jet_foundation::MIR::MirProgram, usize, jet_foundation::MIR::MirValueId) {
+    use jet_foundation::MIR::{
+        MirAccess, MirOwnership, MirPlace, MirPlaceId, MirTerminator, MirTypeKind,
+    };
+    let mut program = lower_checked(r#"
+fn run() {
+    text :: "borrowed capture"
+    show :: () -> print(text)
+    show.call()
+}
+"#);
+    let index = program.functions.iter().position(|function| {
+        function.capture_params.iter().any(|capture| capture.access == MirAccess::Read)
+    }).expect("checked closure retains its read capture");
+    let function = &mut program.functions[index];
+    assert!(matches!(function.return_type.kind(), MirTypeKind::Unit));
+    let (slot, capture) = function.capture_params.iter_mut().enumerate()
+        .find(|(_, capture)| capture.access == MirAccess::Read).unwrap();
+    capture.place_only = true;
+    capture.ownership = MirOwnership::from_access(MirAccess::Read);
+    let ty = capture.ty.clone();
+    let span = capture.span;
+    let instruction = function.blocks.iter().flat_map(|block| &block.instructions)
+        .find(|instruction| matches!(instruction.operation, MirOperation::Capture { slot: actual } if actual == slot))
+        .expect("capture has its actual checked definition").clone();
+    let value = instruction.result.expect("capture has a result");
+    function.values.iter_mut().find(|row| row.0 == value).unwrap().3 =
+        MirOwnership::from_access(MirAccess::Read);
+    let mut entry = function.blocks.iter().find(|block| block.id == function.entry).unwrap().clone();
+    entry.instructions = vec![instruction];
+    entry.terminator = MirTerminator::Return { value: None };
+    function.blocks = vec![entry];
+    function.locals.clear();
+    function.scopes.clear();
+    function.drops.clear();
+    function.places = vec![MirPlace {
+        id: MirPlaceId(jet_foundation::MIR::stable_id("mir-place", "place-only-capture-validator")),
+        span,
+        ty,
+        base: MirPlaceBase::Capture(value),
+        projections: Vec::new(),
+        access: MirAccess::Read,
+        persist_key: None,
+    }];
+    (program, index, value)
+}
+
+#[test]
+fn place_only_capture_accepts_its_capture_place_anchor() {
+    let (program, _, _) = place_only_capture_fixture();
+    program.validate().expect("borrowed capture address is a legal capture-place anchor");
+}
+
+#[test]
+fn place_only_capture_rejects_ssa_return() {
+    let (mut program, index, value) = place_only_capture_fixture();
+    program.functions[index].blocks[0].terminator =
+        jet_foundation::MIR::MirTerminator::Return { value: Some(value) };
+    let error = program.validate().unwrap_err().to_string();
+    assert!(error.contains("place-only Capture result is used as an SSA value"), "{error}");
+}
+
+#[test]
+fn place_only_capture_rejects_temporary_place_anchor() {
+    let (mut program, index, value) = place_only_capture_fixture();
+    program.functions[index].places[0].base = MirPlaceBase::Temporary(value);
+    let error = program.validate().unwrap_err().to_string();
+    assert!(error.contains("place-only Capture result is used as an SSA value"), "{error}");
+}
+
+#[test]
+fn place_only_capture_rejects_owned_mode() {
+    let (mut program, index, _) = place_only_capture_fixture();
+    program.functions[index].capture_params[0].ownership = jet_foundation::MIR::MirOwnership::Owned;
+    let error = program.validate().unwrap_err().to_string();
+    assert!(error.contains("place-only capture"), "{error}");
+}
+
+#[test]
+fn place_only_capture_rejects_projection_operand() {
+    let (mut program, index, value) = place_only_capture_fixture();
+    let function = &mut program.functions[index];
+    let span = function.places[0].span;
+    function.places[0].projections.push(MirProjection::Range {
+        range: value,
+        location: jet_foundation::MIR::MirPanicLoc {
+            file: function.source_file,
+            line: 1,
+            column: 1,
+        },
+        span,
+    });
+    let error = program.validate().unwrap_err().to_string();
+    assert!(error.contains("place-only Capture result is used as an SSA value"), "{error}");
+}
+
+#[test]
+fn place_only_capture_rejects_deadline_operand() {
+    let (mut program, index, value) = place_only_capture_fixture();
+    let function = &mut program.functions[index];
+    function.scopes.push(jet_foundation::MIR::MirScope {
+        id: jet_foundation::MIR::MirScopeId(jet_foundation::MIR::stable_id("mir-scope", "place-only-deadline-validator")),
+        kind: jet_foundation::MIR::MirScopeKind::Context,
+        span: function.span,
+        name: None,
+        deadline: Some(value),
+        facts: std::collections::BTreeMap::new(),
+    });
+    let error = program.validate().unwrap_err().to_string();
+    assert!(error.contains("place-only Capture result is used as an SSA value"), "{error}");
+}
+
 #[test]
 fn changed_mir_recomputes_facts_and_rejects_stale_passes() {
     let source = r#"

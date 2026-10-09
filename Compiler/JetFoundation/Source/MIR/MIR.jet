@@ -1771,7 +1771,6 @@ pub enum MIRSemanticOp {
         type_id: MIRTypeID,
         fields: [MIRFieldValue],
         extra: MIRStructExtra?,
-        trait_coercion: MIRTypeID?,
         boxed_fields: [MIRFieldID]
     )
     CellGuardProject(
@@ -2556,7 +2555,7 @@ pub fn mir_semantic_op_value_uses(operation: MIRSemanticOp) -> [MIRValueID] Neve
             &uses.push(left)
             &uses.push(right)
         }
-        .StructLiteral(_, fields, _, _, _) -> {
+        .StructLiteral(_, fields, _, _) -> {
             loop field in fields -> &uses.push(field.value)
         }
         .CellGuardProject(_, _, guard, _, _, _)
@@ -2762,10 +2761,7 @@ pub fn mir_semantic_op_type_uses(operation: MIRSemanticOp) -> [MIRTypeID] Never!
     uses := [MIRTypeID]{}
     if operation == {
         .MathBuiltin(type_id, _, _) | .PreciseBuiltin(type_id, _, _) -> &uses.push(type_id)
-        .StructLiteral(type_id, _, _, trait_coercion, _) -> {
-            &uses.push(type_id)
-            if trait_coercion == Val(trait_id) -> &uses.push(trait_id)
-        }
+        .StructLiteral(type_id, _, _, _) -> &uses.push(type_id)
         .StaticPreludeCall(_, args, owner_type_args, type_args) -> {
             loop type_id in mir_call_arg_type_uses(args) -> &uses.push(type_id)
             loop type_arg in owner_type_args {

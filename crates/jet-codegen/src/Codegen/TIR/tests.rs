@@ -3871,7 +3871,7 @@ fn maybe_shape(s: Shape) -> Shape? {
 
 #[test]
 fn covers_trait_object_param() {
-    // c109 Phase 30: a TRAIT-OBJECT param (`s: Shape` → `&Box<dyn __jet_Shape>`). The
+    // A Read trait-object param (`s: Shape`) lends `&dyn __jet_Shape`.
     // param type is admitted (`is_covered_trait_object_ty`); a body with no method
     // call is structurally in-subset (the dynamic-dispatch shape needs sema's
     // `recv_type`, proven by the TIR feature integration targets + parity). An
@@ -3885,6 +3885,36 @@ fn takes_shape(s: Shape) {
 }
 ";
     assert!(covers(src, "takes_shape"));
+}
+
+#[test]
+fn owned_trait_literal_preserves_original_generic_child() {
+    let lowered = lower_after_sema(
+        r#"
+trait Shape { fn area(self) -> Int }
+struct GenericShape<T> { value: T }
+impl GenericShape.Shape { fn area(self) -> Int { 7 } }
+fn make() {
+    shapes :: [Shape]{GenericShape<Int>{value: 7}}
+}
+"#,
+        "make",
+    );
+    let init = lowered.body.iter().find_map(|statement| match statement {
+        TStmt::Let { name, init, .. } if name == "shapes" => Some(init),
+        _ => None,
+    }).expect("trait list binding");
+    let TExprKind::ListLit(elements) = &init.kind else { panic!("expected literal list") };
+    let [element] = elements.as_slice() else { panic!("expected one trait value") };
+    let TExprKind::TraitBox { value, target } = &element.kind else {
+        panic!("owned trait coercion must use the canonical wrapper");
+    };
+    assert_eq!(target, &element.ty);
+    assert!(matches!(target, Type::TraitObject(bounds) if bounds.len() == 1));
+    assert!(matches!(&value.ty, Type::Apply { name, args }
+        if name.rsplit("::").next() == Some("GenericShape") && args == &[Type::Int]));
+    assert!(matches!(&value.kind, TExprKind::StructLit { fields, .. }
+        if fields.len() == 1 && fields[0].0 == "value"));
 }
 
 #[test]

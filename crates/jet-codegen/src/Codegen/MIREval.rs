@@ -9445,7 +9445,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 type_id,
                 fields,
                 extra,
-                trait_coercion,
                 boxed_fields,
             } => {
                 let type_name = type_instance_name(self.program, *type_id, span)?;
@@ -9453,7 +9452,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     .iter()
                     .map(|(field, value)| Ok((*field, self.transfer_value(frame_index, *value, span)?)))
                     .collect::<Result<Vec<_>, Diagnostic>>()?;
-                let _ = (extra, trait_coercion, boxed_fields);
+                let _ = (extra, boxed_fields);
                 self.aggregate_or_data(type_name, values, span)
             }
             MirSemanticOp::ReflectOf {

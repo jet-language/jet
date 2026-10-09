@@ -135,6 +135,8 @@ fn jet_rust_emit_body_index(function: MIRFunction) -> JetRustEmitBodyIndex Never
     branch_bases := [U64:Int]{}
     use_slots := [U64:Int]{}
     uses := [[JetRustEmitUse]]{}
+    capture_values := [Int:MIRValueID]{}
+    moved_captures := [U64:Bool]{}
     used_places := [U64:Bool]{}
     moves := [MIRPlaceID]{}
     test_member_blocks := [U64:Int]{}
@@ -151,6 +153,9 @@ fn jet_rust_emit_body_index(function: MIRFunction) -> JetRustEmitBodyIndex Never
                 if definition_blocks.get(result.value) == None {
                     _ := &definition_blocks.add(result.value, block_position)
                     _ := &definition_positions.add(result.value, position)
+                }
+                if instruction.operation == .Capture(slot) {
+                    if capture_values.get(slot) == None -> _ := &capture_values.add(slot, result)
                 }
             }
             loop used in mir_operation_value_uses(instruction.operation) -> jet_rust_emit_index_use(&use_slots, &uses, used.value, JetRustEmitUse{block: block_position, instruction: position})
@@ -183,6 +188,9 @@ fn jet_rust_emit_body_index(function: MIRFunction) -> JetRustEmitBodyIndex Never
     slot_read_values := [U64:Bool]{}
     loop (position, row) in function.places {
         if place_rows.get(row.id.value) == None -> _ := &place_rows.add(row.id.value, position)
+        if row.access == MIRAccess.Move {
+            if row.base == .Capture(value) -> _ := &moved_captures.add(value.value, true)
+        }
         if row.base == .Temporary(base) {
             if used_places.get(row.id.value) != None -> _ := &slot_read_values.add(base.value, true)
         }
@@ -219,6 +227,8 @@ fn jet_rust_emit_body_index(function: MIRFunction) -> JetRustEmitBodyIndex Never
         value_rows: value_rows,
         block_positions: block_positions,
         branch_bases: branch_bases,
+        capture_values: capture_values,
+        moved_captures: moved_captures,
         shared_locals: [U64:Bool]{},
         use_slots: use_slots,
         uses: uses,
@@ -578,11 +588,38 @@ fn jet_rust_emit_parameter_expression(function: MIRFunction, index: Int, access:
     }
 }
 
-// MIRRust capture_expression: the target capture's own access decides; a Move
-// capture is the owned binding, a Read/Write capture is a borrow to clone.
-fn jet_rust_emit_capture_expression(function: MIRFunction, slot: Int) -> String Never! {
+// A checked Move place rooted at the FIRST Capture result owns the binding,
+// even when the environment's capture convention is Read (materialized copy).
+fn jet_rust_emit_capture_move_required(ctx: &JetRustEmitContext, function: MIRFunction, slot: Int) -> Bool Never! {
+    if ctx.body_index.function == (Val(function.id)) {
+        value :: ctx.body_index.capture_values.get(slot) ?? return false
+        return ctx.body_index.moved_captures.get(value.value) != None
+    }
+    // Target signatures/closure calls may be queried before its body is indexed.
+    captured := MIRValueID?{None}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if captured == None {
+                if instruction.operation == .Capture(actual) {
+                    if actual == slot -> captured = instruction.result
+                }
+            }
+        }
+    }
+    value :: captured ?? return false
+    loop place in function.places {
+        if place.access == MIRAccess.Move && place.base == (MIRPlaceBase.Capture{value: value}) -> return true
+    }
+    false
+}
+
+fn jet_rust_emit_capture_binding_access(ctx: &JetRustEmitContext, function: MIRFunction, slot: Int) -> MIRAccess Never! {
+    if jet_rust_emit_capture_move_required(&ctx, function, slot) -> MIRAccess.Move else -> jet_rust_emit_capture_access(function, slot)
+}
+
+fn jet_rust_emit_capture_expression(ctx: &JetRustEmitContext, function: MIRFunction, slot: Int) -> String Never! {
     name :: jet_rust_emit_capture_name(slot)
-    if jet_rust_emit_capture_access(function, slot) == MIRAccess.Move -> name else -> "(*{name}).clone()"
+    if jet_rust_emit_capture_binding_access(&ctx, function, slot) == MIRAccess.Move -> name else -> "(*{name}).clone()"
 }
 
 fn jet_rust_emit_capture_access(function: MIRFunction, slot: Int) -> MIRAccess Never! {
@@ -677,7 +714,7 @@ fn jet_rust_emit_binding_uses_move_slot(ctx: JetRustEmitContext, function: MIRFu
     access := MIRAccess.Read
     if instruction.operation == {
         .Parameter(index, _) -> access = jet_rust_emit_find_parameter(function, index).access
-        .Capture(slot) -> access = jet_rust_emit_capture_access(function, slot)
+        .Capture(slot) -> access = jet_rust_emit_capture_binding_access(&ctx, function, slot)
         else -> return false
     }
     if access != MIRAccess.Move -> return false
@@ -703,7 +740,7 @@ fn jet_rust_emit_unread_binding(ctx: &JetRustEmitContext, function: MIRFunction,
     access := MIRAccess.Move
     if instruction.operation == {
         .Parameter(index, _) -> access = jet_rust_emit_find_parameter(function, index).access
-        .Capture(slot) -> access = jet_rust_emit_capture_access(function, slot)
+        .Capture(slot) -> access = jet_rust_emit_capture_binding_access(&ctx, function, slot)
         else -> return false
     }
     if access == MIRAccess.Move -> return false
@@ -758,7 +795,7 @@ fn jet_rust_emit_place_bindings(ctx: JetRustEmitContext, function: MIRFunction) 
                     if parameter.access == MIRAccess.Read && !jet_rust_emit_is_receiver(function, index) && !jet_rust_emit_type_is_borrowed(parameter.ty) -> next
                     access = parameter.access
                 }
-                .Capture(slot) -> access = jet_rust_emit_capture_access(function, slot)
+                .Capture(slot) -> access = jet_rust_emit_capture_binding_access(&ctx, function, slot)
                 else -> next
             }
             if access == MIRAccess.Move || kept.get(value.value) != None || bindings.get(value.value) != None -> next
@@ -927,7 +964,7 @@ fn jet_rust_emit_parameter_place(ctx: JetRustEmitContext, function: MIRFunction,
         }
         .Capture(slot) -> {
             name :: jet_rust_emit_capture_name(slot)
-            access :: jet_rust_emit_capture_access(function, slot)
+            access :: jet_rust_emit_capture_binding_access(&ctx, function, slot)
             if access == MIRAccess.Move -> return name
             if mutable && access != MIRAccess.Write -> panic("MIR capture place is not writable")
             return "*{name}"
@@ -1111,7 +1148,7 @@ fn jet_rust_emit_partial_direct_borrow_call(ctx: &JetRustEmitContext, function: 
         if arg.value == value {
             if index >= borrow_mask.len() || !borrow_mask[index] -> return false
             if arg.access != MIRAccess.Read && arg.access != MIRAccess.Write -> return false
-            if arg.authority_boundary || arg.implicit_clone || arg.shared_auto_clone || arg.widen_fixed_to_list || arg.widen_to_union != None || arg.box_as_trait != None || arg.fn_coercion != None -> return false
+            if arg.authority_boundary || arg.implicit_clone || arg.shared_auto_clone || arg.widen_fixed_to_list || arg.widen_to_union != None || (arg.box_as_trait != None && arg.access != MIRAccess.Read) || arg.fn_coercion != None -> return false
             if {
                 arg.place == None -> {
                 if arg.access != MIRAccess.Read || jet_rust_emit_partial_value_reference(&ctx, function, value) == None -> return false

@@ -13,7 +13,7 @@ use crate::Sema::Diagnostics::{
 };
 use crate::Sema::{Checker, KnowledgeGate, KnowledgePlane, TypeDef};
 use crate::Syntax;
-use crate::AST::Type;
+use crate::AST::{AccessConvention, Type};
 
 fn union_member_has_open_shape(ty: &Type) -> bool {
     match ty {
@@ -1462,17 +1462,31 @@ impl<'a> Checker<'a> {
         false
     }
 
-    /// S48 (syntax-decisions.md:1613; spec.md:839, ratified): a
-    /// trait name in type position (`fn f(s: Shape)`) means dynamic dispatch
-    /// with INVISIBLE boxing. A concrete value whose type implements the
-    /// named trait therefore MEETS that slot — sema decides acceptance only;
-    /// the box itself is materialised by the slot-driven boxing lowering
-    /// already applies to a `[Shape]` list element (`TCallArg::box_as_trait`
-    /// / `preserve_typed_list_shape`), never by a second mechanism here.
-    ///
-    /// Single-trait only (the S48 shape). A multi-name `TraitObject` is the
-    /// D-ANY-JAI1 variadic loop element, which has no one `Box<dyn T>` to
-    /// coerce toward and stays on the ordinary equality path.
+    /// Whether the declared slot has the existing trait-object meaning.
+    pub(crate) fn is_trait_parameter(&self, ty: &Type) -> bool {
+        matches!(ty, Type::TraitObject(_))
+            || matches!(ty, Type::Named(name)
+                if self.trait_reg.is_trait_name(name) && !self.registry.contains(name))
+    }
+
+    pub(crate) fn borrowed_trait_parameter(&self, ty: &Type, access: AccessConvention) -> bool {
+        access != AccessConvention::Move && self.is_trait_parameter(ty)
+    }
+
+    pub(crate) fn trait_parameter_identity(&self, want: &Type, got: &Type) -> bool {
+        match (want, got) {
+            (Type::Named(name), Type::TraitObject(bounds))
+            | (Type::TraitObject(bounds), Type::Named(name))
+                if bounds.len() == 1
+                    && self.trait_reg.is_trait_name(name)
+                    && !self.registry.contains(name) =>
+            {
+                self.same_declared_name_identity(name, &bounds[0])
+            }
+            _ => self.nominal_type_identity(want, got),
+        }
+    }
+
     pub(crate) fn trait_slot_accepts(&self, want: &Type, got: &Type) -> bool {
         // A value that already IS the trait value needs no coercion: an
         // unresolved bare-trait parameter spelling can equal the argument's

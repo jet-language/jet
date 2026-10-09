@@ -4929,7 +4929,6 @@ pub enum MirSemanticOp {
         type_id: MirTypeId,
         fields: Vec<(MirFieldId, MirValueId)>,
         extra: Option<MirStructExtra>,
-        trait_coercion: Option<MirTypeId>,
         boxed_fields: Vec<MirFieldId>,
     },
     /// Projection of a task-local Cell read/edit guard. Paths are checked
@@ -5358,13 +5357,7 @@ impl MirSemanticOp {
         match self {
             Self::MathBuiltin { type_id, .. }
             | Self::PreciseBuiltin { type_id, .. } => vec![*type_id],
-            Self::StructLiteral {
-                type_id,
-                trait_coercion,
-                ..
-            } => std::iter::once(*type_id)
-                .chain(trait_coercion.iter().copied())
-                .collect(),
+            Self::StructLiteral { type_id, .. } => vec![*type_id],
             Self::StaticPreludeCall {
                 args,
                 owner_type_args,

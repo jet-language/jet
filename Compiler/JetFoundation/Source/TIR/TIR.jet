@@ -523,7 +523,7 @@ pub enum TExprKind {
     Binary(op: TBinaryOp, overflow: Bool, line: Int, lhs: TExpr, rhs: TExpr)
     CompareChain(operands: [TExpr], operators: [TBinaryOp], hooks: [Bool])
     Unary(op: TUnaryOp, operand: TExpr)
-    StructLit(fields: [TStructFieldValue], extra: TStructExtra?, as_trait: TCoercionTarget?)
+    StructLit(fields: [TStructFieldValue], extra: TStructExtra?)
     Field(receiver: TExpr, field: TFieldRef)
     Index(base: TExpr, index: TExpr, kind: TIndexKind, access: AccessConvention, checked_call: SymbolID?, location: TPanicLoc)
     Slice(base: TExpr, start: TExpr, end: TExpr, range: TExpr?, location: TPanicLoc)
@@ -1450,10 +1450,6 @@ pub enum TStructExtra {
     HTTPRequestParams
 }
 
-pub struct TCoercionTarget {
-    pub trait_symbol: SymbolID
-    pub concrete_type: SymbolID
-}
 
 pub struct TMethodRef {
     pub symbol: SymbolID
@@ -2522,7 +2518,7 @@ pub fn tir_expr_children(expression: TExpr) -> [TExpr] {
         }
         .CompareChain(operands, _, _) -> loop value in operands -> &children.push(value)
         .Unary(_, operand) -> &children.push(operand)
-        .StructLit(fields, _, _) -> loop field in fields -> &children.push(field.value)
+        .StructLit(fields, _) -> loop field in fields -> &children.push(field.value)
         .Field(receiver, _) -> &children.push(receiver)
         .Index(base, index, _, _, _, _) | .IndexRead(base, index, _, _, _) -> {
             &children.push(base)

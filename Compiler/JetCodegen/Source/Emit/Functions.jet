@@ -40,12 +40,15 @@ fn jet_rust_emit_function_param_type(ctx: &JetRustEmitContext, function: MIRFunc
     jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
 }
 
-// MIRRust capture_parameter_type: a Read capture is always a shared borrow
-// (whatever its scalar ABI), a Write capture a unique borrow, a Move capture
-// the owned `mut` binding.
-fn jet_rust_emit_capture_param(ctx: &JetRustEmitContext, capture: MIRCaptureParam) -> String Never! {
+// Capture binding ABI is owned when an actual checked Move place consumes it;
+// otherwise Read lends the captured value and Write lends it uniquely.
+fn jet_rust_emit_capture_param(ctx: &JetRustEmitContext, function: MIRFunction, capture: MIRCaptureParam) -> String Never! {
     rendered :: jet_rust_emit_type(&ctx, capture.ty)
     name :: jet_rust_emit_capture_name(capture.slot)
+    if jet_rust_emit_capture_move_required(&ctx, function, capture.slot) -> return "{name}: {rendered}"
+    if capture.access == MIRAccess.Read {
+        if jet_rust_emit_read_trait_type(&ctx, capture.ty) == .Val(borrowed) -> return "{name}: &{borrowed}"
+    }
     if capture.access == {
         .Read -> "{name}: &{rendered}"
         .Write -> "{name}: &mut {rendered}"
@@ -65,8 +68,10 @@ fn jet_rust_emit_local_declaration(ctx: &JetRustEmitContext, local: MIRLocal) ->
     // MIRRust: a shared-capture local is one shared cell (S47/M2).
     if jet_rust_emit_local_is_shared(&ctx, local.id) -> return "let {jet_rust_emit_local_slot(local.id)}: std::rc::Rc<std::cell::RefCell<Option<{jet_rust_emit_type(&ctx, local.ty)}>>> = std::rc::Rc::new(std::cell::RefCell::new(None));"
     // MIRRust emit_slots: a reference binding holds the value it binds in place.
-    borrow :: if ctx.ref_bindings.locals.get(local.id.value) != None -> "&" else -> ""
-    "let mut {jet_rust_emit_local_slot(local.id)}: Option<{borrow}{jet_rust_emit_type(&ctx, local.ty)}> = None;"
+    reference_binding :: ctx.ref_bindings.locals.get(local.id.value) != None
+    borrow :: if reference_binding -> "&" else -> ""
+    ty :: if reference_binding -> jet_rust_emit_read_trait_type(&ctx, local.ty) ?? jet_rust_emit_type(&ctx, local.ty) else -> jet_rust_emit_type(&ctx, local.ty)
+    "let mut {jet_rust_emit_local_slot(local.id)}: Option<{borrow}{ty}> = None;"
 }
 
 // MIRRust emit_slots: a `Global` read of a shared constant holds the shared
@@ -1441,7 +1446,7 @@ fn jet_rust_emit_function_signature(ctx: &JetRustEmitContext, function: MIRFunct
     params := [String]{}
     types := [String]{}
     loop capture in function.capture_params {
-        rendered :: jet_rust_emit_capture_param(&ctx, capture)
+        rendered :: jet_rust_emit_capture_param(&ctx, function, capture)
         &params.push(rendered)
         &types.push(rendered)
     }

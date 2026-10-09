@@ -327,7 +327,11 @@ impl<'a> Checker<'a> {
                     .unwrap_or(AccessConvention::Read);
                 let saved = self.expected_type.clone();
                 let saved_borrow = self.borrow_ctx;
-                self.expected_type = Some(param_ty.clone());
+                self.expected_type = if self.borrowed_trait_parameter(param_ty, param_convention) {
+                    None
+                } else {
+                    Some(param_ty.clone())
+                };
                 // A `&name` argument grants the place itself, and a write
                 // parameter is a borrow slot; never copy either.
                 self.borrow_ctx = arg.convention == AccessConvention::Write
@@ -346,7 +350,10 @@ impl<'a> Checker<'a> {
                         self.widen_numeric_argument(&mut arg.expr, got, param_ty, param_convention);
                     let got =
                         self.lift_optional_argument(&mut arg.expr, got, param_ty, param_convention);
-                    let boxes_as_trait = self.trait_slot_accepts(param_ty, &got);
+                    let boxes_as_trait = param_convention != AccessConvention::Write
+                        && self.trait_slot_accepts(param_ty, &got);
+                    let trait_identity = self.is_trait_parameter(param_ty)
+                        && self.trait_parameter_identity(param_ty, &got);
                     let callable_shape_compatible = matches!(param_ty, Type::Fn { .. })
                         && matches!(&got, Type::Fn { .. })
                         && fn_types_compatible(param_ty, &got);
@@ -375,11 +382,17 @@ impl<'a> Checker<'a> {
                     let callable_compatible = callable_shape_compatible
                         && Type::obligations_satisfy(param_ty, &got)
                         && !missing_strict_contract;
-                    if boxes_as_trait {
+                    if boxes_as_trait && param_convention == AccessConvention::Move {
                         self.note_move_if_direct_ident(&arg.expr, "the call");
                     }
                     let type_mismatch =
-                        if matches!(param_ty, Type::Fn { .. }) && matches!(&got, Type::Fn { .. }) {
+                        if self.is_trait_parameter(param_ty)
+                            && param_convention == AccessConvention::Write
+                        {
+                            !trait_identity
+                        } else if trait_identity {
+                            false
+                        } else if matches!(param_ty, Type::Fn { .. }) && matches!(&got, Type::Fn { .. }) {
                             !callable_compatible
                         } else {
                             !Type::compute_tensor_compatible(param_ty, &got)

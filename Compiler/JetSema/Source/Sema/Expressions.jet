@@ -28,7 +28,6 @@ use jet_foundation.[
     TBinaryOp,
     TCallArg,
     TCanonicalField,
-    TCoercionTarget,
     TComptimeValue,
     TEnumPayload,
     TExpr,
@@ -813,28 +812,6 @@ fn sema_expr_expected_assignable(required: Type, offered: Type, environment: Sem
     Val(sema_type_assignable(required, offered))
 }
 
-fn sema_expr_expected_trait_symbol(graph: SemaRegistrationGraph, bound: String, caller_module: String) -> Symbol? {
-    resolved := sema_registration_lookup_name(graph, caller_module, bound)
-    if resolved != None {
-        symbol :: resolved ?? return None
-        if symbol.symbol.kind == SymbolKind.Trait -> return Val(symbol.symbol)
-    }
-    parts := bound.split("::").to_list()
-    if parts.len() < 2 -> return None
-    leaf := parts[parts.len() - 1]
-    module_parts := [String]{}
-    index := 0
-    loop index < parts.len() - 1 {
-        &module_parts.push(parts[index])
-        index += 1
-    }
-    module_name := module_parts.join("::")
-    module_index :: sema_registration_module_index(graph, module_name) ?? return None
-    loop symbol in graph.modules[module_index].symbols {
-        if symbol.kind == SymbolKind.Trait && symbol.name == leaf -> return Val(symbol)
-    }
-    None
-}
 
 fn sema_expr_expected_trait_coercion(value: ^TExpr, required: Type, offered: Type, environment: SemaScopeEnvironment) -> TExpr Never! {
     updated := value
@@ -842,23 +819,6 @@ fn sema_expr_expected_trait_coercion(value: ^TExpr, required: Type, offered: Typ
         .TraitObject(bounds) -> {
             if bounds.len() != 1 -> return updated
             if offered == .TraitObject(_) -> return updated
-            if updated.kind == {
-                .StructLit(fields, extra, coercion) -> {
-                    if coercion != None {
-                        updated.ty = required
-                        return updated
-                    }
-                    graph_option :: environment.registration_graph
-                    graph :: graph_option ?? return updated
-                    trait_name :: bounds[0]
-                    trait_symbol :: sema_expr_expected_trait_symbol(graph, trait_name, environment.module_identity) ?? return updated
-                    concrete :: sema_type_resolve_nominal_row(graph, offered, environment.module_identity) ?? return updated
-                    updated.ty = required
-                    updated.kind = TExprKind.StructLit{fields: fields, extra: extra, as_trait: Val(TCoercionTarget{trait_symbol: trait_symbol.id, concrete_type: graph.modules[concrete.module_index].nominals[concrete.row].symbol.id})}
-                    return updated
-                }
-                else -> {}
-            }
             source := updated
             updated.ty = required
             updated.kind = TExprKind.TraitBox{value: source, target: required}

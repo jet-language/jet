@@ -10993,14 +10993,6 @@ impl<'a> LowerCtx<'a> {
             Type::Named(name) if self.is_trait_name(name)
         );
         let box_as_trait = (!source_is_trait_object).then_some(arg.box_as_trait.as_ref()).flatten();
-        // A checked concrete-to-trait coercion transfers the concrete value to
-        // the box even when the trait parameter's convention is Read. Keep the
-        // ordinary borrow path for already-boxed or genuinely borrowed values.
-        let consumes_trait_box = box_as_trait.is_some()
-            && arg.borrow
-            && !arg.mut_borrow
-            && !arg.clone
-            && !arg.arc_clone;
         let consumes_union = arg.widen_to_union.is_some()
             && !arg.borrow
             && !arg.mut_borrow
@@ -11012,7 +11004,7 @@ impl<'a> LowerCtx<'a> {
             );
         let access = if arg.mut_borrow {
             MirAccess::Write
-        } else if consumes_trait_box || consumes_union {
+        } else if consumes_union {
             MirAccess::Move
         } else if arg.borrow {
             MirAccess::Read
@@ -11056,7 +11048,7 @@ impl<'a> LowerCtx<'a> {
             None
         };
         let value = if let Some(place) = place {
-            let operation = if consumes_trait_box || consumes_union {
+            let operation = if consumes_union {
                 MirOperation::MovePlace { place }
             } else {
                 MirOperation::ReadPlace(place)
@@ -11093,7 +11085,9 @@ impl<'a> LowerCtx<'a> {
             _ => None,
         };
         let value = adapted.unwrap_or(value);
-        let call_place = if consumes_trait_box || arg.widen_to_union.is_some() || adapted.is_some() {
+        let owned_trait_box = box_as_trait.is_some()
+            && !(access == MirAccess::Read && !arg.clone && !arg.arc_clone);
+        let call_place = if owned_trait_box || arg.widen_to_union.is_some() || adapted.is_some() {
             None
         } else {
             place
@@ -11108,7 +11102,7 @@ impl<'a> LowerCtx<'a> {
             spread: false,
             implicit_clone: arg.clone || clones_union,
             shared_auto_clone: arg.arc_clone,
-            owned_last_use: matches!(access, MirAccess::Move) || box_as_trait.is_some()
+            owned_last_use: matches!(access, MirAccess::Move) || owned_trait_box
                 || (arg.widen_to_union.is_some() && place.is_none() && !copy_source),
             authority_boundary: false,
             fn_coercion: None,
@@ -11937,6 +11931,7 @@ impl<'a> LowerCtx<'a> {
             TExprKind::Clone(..)
             | TExprKind::ExplicitCopy(_)
             | TExprKind::MaterializeView(_)
+            | TExprKind::TraitBox { .. }
             | TExprKind::Move(_)
             | TExprKind::ResourceTake(_) => (MirAccess::Move, None),
             _ if crate::Collections::is_iter_type(&arg.ty) => (MirAccess::Move, None),

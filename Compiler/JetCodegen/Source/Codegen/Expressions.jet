@@ -91,7 +91,6 @@ use jet_foundation.[
     TCapture,
     TCaptureFacts,
     TClosureOp,
-    TCoercionTarget,
     TCompilerBuiltin,
     TComptimeKey,
     TComptimeValue,
@@ -525,7 +524,6 @@ fn jet_codegen_call_argument_needs_trait_box(argument: TCallArg) -> Bool Never! 
 
 fn jet_codegen_call_access(argument: TCallArg, formal: AccessConvention?) -> MIRAccess Never! {
     if argument.mut_borrow -> return MIRAccess.Write
-    if jet_codegen_call_argument_needs_trait_box(argument) && argument.borrow && !argument.clone && !argument.arc_clone -> return MIRAccess.Move
     if argument.widen_to_union != None && !argument.borrow && !argument.mut_borrow && !argument.clone && !argument.arc_clone && !jet_codegen_is_copy_type(argument.value.ty) {
         return MIRAccess.Move
     }
@@ -742,9 +740,10 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
         // union. A Copy source is copied into the wrapper, never consumed.
         copy_source :: jet_codegen_is_copy_type(argument.value.ty)
         clones_union := widen_to_union != None && access == MIRAccess.Read && place != None && !copy_source
-        owned_last_use := access == MIRAccess.Move || box_as_trait != None || (widen_to_union != None && place == .None && !copy_source)
+        owned_trait_box :: box_as_trait != None && access != MIRAccess.Read
+        owned_last_use := access == MIRAccess.Move || owned_trait_box || (widen_to_union != None && place == .None && !copy_source)
         call_place := place
-        if box_as_trait != None || argument.widen_to_union != None || materialize_view_clone -> call_place = None
+        if owned_trait_box || argument.widen_to_union != None || materialize_view_clone -> call_place = None
         &lowered.push(MIRCallArg{
             value: value,
             place: call_place,
@@ -1539,7 +1538,7 @@ fn jet_codegen_lower_range_value(builder: &JetCodegenBuilder, program: JetCodege
         MIRFieldValue{field: jet_codegen_range_record_field_id("end"), value: lowered_end},
         MIRFieldValue{field: jet_codegen_range_record_field_id("exclusive"), value: lowered_exclusive},
     }
-    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.StructLiteral{type_id: mir_type_id(JET_CODEGEN_RANGE_RECORD), fields: fields, extra: None, trait_coercion: None, boxed_fields: [MIRFieldID]{}}})
+    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.StructLiteral{type_id: mir_type_id(JET_CODEGEN_RANGE_RECORD), fields: fields, extra: None, boxed_fields: [MIRFieldID]{}}})
 }
 
 // A checked field reference's MIR field. A declared owner resolves through
@@ -1777,16 +1776,8 @@ fn jet_codegen_lower_optional_method_call(builder: &JetCodegenBuilder, program: 
 }
 
 
-fn jet_codegen_lower_struct_literal(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, fields: [TStructFieldValue], extra: TStructExtra?, as_trait: TCoercionTarget?) -> MIRValueID {
-    if as_trait != None -> jet_codegen_require_trait_box_target(expression.ty, builder, program)
-    owner := if as_trait == {
-        None -> jet_codegen_mir_type_id_for_type(program.modules, builder.function.module_identity, builder.generic_type_names, expression.ty)
-        Val(target) -> jet_codegen_mir_type_id_for_symbol(program.modules, target.concrete_type)
-    }
-    trait_coercion := if as_trait == {
-        None -> None
-        Val(target) -> Val(jet_codegen_mir_type_id_for_symbol(program.modules, target.trait_symbol))
-    }
+fn jet_codegen_lower_struct_literal(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, fields: [TStructFieldValue], extra: TStructExtra?) -> MIRValueID {
+    owner :: jet_codegen_mir_type_id_for_type(program.modules, builder.function.module_identity, builder.generic_type_names, expression.ty)
     lowered_fields := [MIRFieldValue]{}
     boxed_fields := [MIRFieldID]{}
     loop field in fields {
@@ -1801,7 +1792,7 @@ fn jet_codegen_lower_struct_literal(builder: &JetCodegenBuilder, program: JetCod
             .HTTPRequestParams -> Val(MIRStructExtra.HTTPRequestParams)
         }
     }
-    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.StructLiteral{type_id: owner, fields: lowered_fields, extra: extra_fact, trait_coercion: trait_coercion, boxed_fields: boxed_fields}})
+    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.StructLiteral{type_id: owner, fields: lowered_fields, extra: extra_fact, boxed_fields: boxed_fields}})
 }
 
 fn jet_codegen_lower_comptime_key(value: TComptimeKey) -> MIRConstKey? {
@@ -5228,7 +5219,7 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
             loop part in parts -> &lowered_parts.push(jet_codegen_lower_string_part(&builder, program, part))
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.BuildString{parts: lowered_parts})
         }
-        .StructLit(fields, extra, as_trait) -> jet_codegen_lower_struct_literal(&builder, program, expression, fields, extra, as_trait)
+        .StructLit(fields, extra) -> jet_codegen_lower_struct_literal(&builder, program, expression, fields, extra)
         .EnumLit(enum_type, variant, payload) -> jet_codegen_lower_enum_literal(&builder, program, expression, enum_type, variant, payload)
         .EnumCtor(owner, variant, payload) -> jet_codegen_lower_enum_constructor(&builder, program, expression, owner, variant, payload)
         .Local(local) -> {

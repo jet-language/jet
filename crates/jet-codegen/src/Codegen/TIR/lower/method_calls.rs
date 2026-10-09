@@ -988,7 +988,6 @@ fn lower_plot_column(
                 ),
             ],
             extra: None,
-            as_trait: None,
         },
     };
     let value_type = Type::Named("JetDataPlotValue".to_string());

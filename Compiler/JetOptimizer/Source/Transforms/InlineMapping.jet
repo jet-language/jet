@@ -929,7 +929,7 @@ fn mir_pass_inline_semantic(operation: MIRSemanticOp, maps: MIRInlineMaps, subst
             MIRSemanticOp.ReflectOf{type_name: type_name, path: path, display: mir_pass_inline_value(maps, display), fields: mapped}
         }
         .LayoutLiteral(inner) -> MIRSemanticOp.LayoutLiteral{inner: mir_pass_inline_value(maps, inner)}
-        .StructLiteral(type_id, fields, extra, trait_coercion, boxed_fields) -> MIRSemanticOp.StructLiteral{type_id: type_id, fields: mir_pass_inline_field_values(fields, maps), extra: extra, trait_coercion: trait_coercion, boxed_fields: boxed_fields}
+        .StructLiteral(type_id, fields, extra, boxed_fields) -> MIRSemanticOp.StructLiteral{type_id: type_id, fields: mir_pass_inline_field_values(fields, maps), extra: extra, boxed_fields: boxed_fields}
         .CellGuardProject(map_call, split_call, guard, paths, editable, disjoint) -> MIRSemanticOp.CellGuardProject{map_call: map_call, split_call: split_call, guard: mir_pass_inline_value(maps, guard), paths: paths, editable: editable, edit_paths_disjoint: disjoint}
         .SharedGuardMap(call, guard, path, editable) -> MIRSemanticOp.SharedGuardMap{call: call, guard: mir_pass_inline_value(maps, guard), path: path, editable: editable}
         .SharedGuardSplit(call, map_call, guard, first, second, editable) -> MIRSemanticOp.SharedGuardSplit{call: call, map_call: map_call, guard: mir_pass_inline_value(maps, guard), first: first, second: second, editable: editable}

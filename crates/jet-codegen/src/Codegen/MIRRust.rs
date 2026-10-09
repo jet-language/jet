@@ -503,66 +503,6 @@ fn alias_parameter_uses(def: &MirTypeDef) -> Option<Vec<bool>> {
     )
 }
 
-/// Calls `found` with the trait name of every single-bound trait object
-/// (`Box<dyn T>`) inside `ty`.
-fn mir_type_single_trait_objects(ty: &MirType, found: &mut impl FnMut(&str)) {
-    match ty.kind() {
-        MirTypeKind::TraitObject(bounds) => {
-            if let [bound] = bounds.as_slice() {
-                found(&bound.name);
-            }
-        }
-        MirTypeKind::Apply { args: inner, .. } | MirTypeKind::Union(inner) => {
-            for ty in inner {
-                mir_type_single_trait_objects(ty, found);
-            }
-        }
-        MirTypeKind::List(inner)
-        | MirTypeKind::Shared(inner)
-        | MirTypeKind::Option(inner)
-        | MirTypeKind::FixedList { elem: inner, .. }
-        | MirTypeKind::InlineRange { base: inner, .. }
-        | MirTypeKind::Tagged { inner, .. }
-        | MirTypeKind::Quantity { base: inner, .. } => mir_type_single_trait_objects(inner, found),
-        MirTypeKind::Map { key, value }
-        | MirTypeKind::Result {
-            ok: key,
-            err: value,
-        } => {
-            mir_type_single_trait_objects(key, found);
-            mir_type_single_trait_objects(value, found);
-        }
-        MirTypeKind::Tuple(fields) => {
-            for (_, field) in fields {
-                mir_type_single_trait_objects(field, found);
-            }
-        }
-        MirTypeKind::Fn(signature) => {
-            for param in &signature.params {
-                mir_type_single_trait_objects(param, found);
-            }
-            if let Some(ret) = signature.ret.as_deref() {
-                mir_type_single_trait_objects(ret, found);
-            }
-        }
-        MirTypeKind::SendFn { params, ret, .. } => {
-            for param in params {
-                mir_type_single_trait_objects(param, found);
-            }
-            if let Some(ret) = ret.as_deref() {
-                mir_type_single_trait_objects(ret, found);
-            }
-        }
-        MirTypeKind::Int
-        | MirTypeKind::Float
-        | MirTypeKind::Bool
-        | MirTypeKind::String
-        | MirTypeKind::Char
-        | MirTypeKind::IntN { .. }
-        | MirTypeKind::Float32
-        | MirTypeKind::Measure(_) => {}
-    }
-}
 
 /// Which `program.impls` rows to emit when stage zero prunes codecs. The
 /// candidates are derived serde impls (`compiler_generated` with a codec) on
@@ -3440,10 +3380,6 @@ struct RustEmitter<'a> {
     user_impls_by_trait: BTreeMap<&'a str, Vec<&'a MirImplDef>>,
     traits: BTreeMap<MirTraitId, String>,
     traits_by_name: BTreeMap<String, String>,
-    /// Symbols of the declared traits used as single-bound trait objects
-    /// (`Box<dyn T>`). Each gets a clone-box supertrait so the boxed value is
-    /// `Clone` and does not block the derives of the rows that carry it.
-    dyn_clone_traits: BTreeSet<String>,
     fields: BTreeMap<MirFieldId, String>,
     history_capture_encoders: std::cell::RefCell<BTreeMap<String, String>>,
     history_callable_arities: std::cell::RefCell<BTreeSet<usize>>,
@@ -3606,7 +3542,6 @@ impl<'a> RustEmitter<'a> {
         }
         let mut traits = BTreeMap::new();
         let mut traits_by_name = BTreeMap::new();
-        let mut user_traits_by_name = BTreeMap::new();
         for definition in &program.traits {
             let compiler_owned =
                 crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(&definition.name);
@@ -3615,23 +3550,9 @@ impl<'a> RustEmitter<'a> {
             } else {
                 mangle_path(&definition.key)
             };
-            if !compiler_owned
-                && !crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(&definition.key)
-            {
-                user_traits_by_name.insert(definition.key.as_str(), symbol.clone());
-                user_traits_by_name.insert(definition.name.as_str(), symbol.clone());
-            }
             traits.insert(definition.id, symbol.clone());
             traits_by_name.insert(definition.key.clone(), symbol.clone());
             traits_by_name.insert(definition.name.clone(), symbol);
-        }
-        let mut dyn_clone_traits = BTreeSet::new();
-        for ty in &program.type_instances {
-            mir_type_single_trait_objects(ty, &mut |name: &str| {
-                if let Some(symbol) = user_traits_by_name.get(name) {
-                    dyn_clone_traits.insert(symbol.clone());
-                }
-            });
         }
         let mut emitter = Self {
             program,
@@ -3655,7 +3576,6 @@ impl<'a> RustEmitter<'a> {
             user_impls_by_trait,
             traits,
             traits_by_name,
-            dyn_clone_traits,
             fields,
             history_capture_encoders: std::cell::RefCell::new(BTreeMap::new()),
             history_callable_arities: std::cell::RefCell::new(BTreeSet::new()),
@@ -6577,7 +6497,97 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
+    fn read_trait_type(&self, ty: &MirType) -> Option<String> {
+        let MirTypeKind::TraitObject(bounds) = ty.kind() else {
+            return None;
+        };
+        let mut rendered = String::from("dyn ");
+        for (index, bound) in bounds.iter().enumerate() {
+            if index != 0 {
+                rendered.push_str(" + ");
+            }
+            rendered.push_str(self.traits.get(&bound.id).expect("checked trait declaration"));
+        }
+        Some(rendered)
+    }
+
+    fn read_trait_place_is_loan(&self, function: &MirFunction, place: MirPlaceId) -> bool {
+        let row = self.place_row(function, place).expect("checked trait loan place");
+        if !row.projections.is_empty() || !matches!(row.ty.kind(), MirTypeKind::TraitObject(_)) {
+            return false;
+        }
+        match &row.base {
+            MirPlaceBase::Parameter(value) | MirPlaceBase::Capture(value) => {
+                self.read_trait_value_is_loan(function, *value)
+            }
+            MirPlaceBase::Local(local) => self.ref_binding_local(function, *local),
+            MirPlaceBase::Temporary(_) | MirPlaceBase::Static(_) => false,
+        }
+    }
+
+    fn read_trait_value_is_loan(&self, function: &MirFunction, value: MirValueId) -> bool {
+        if !matches!(self.value_type(function, value).kind(), MirTypeKind::TraitObject(_)) {
+            return false;
+        }
+        if self.ref_binding_payload(function, value) {
+            return true;
+        }
+        match self.value_definition(function, value) {
+            Some(MirOperation::Parameter { index, .. }) => function
+                .params
+                .iter()
+                .find(|param| param.index == *index)
+                .is_some_and(|param| param.access == MirAccess::Read),
+            Some(MirOperation::Capture { slot }) => {
+                self.capture_param(function, *slot).access == MirAccess::Read
+                    && !self.capture_move_required(function, *slot)
+            }
+            Some(MirOperation::ReadPlace(place) | MirOperation::AddressOf { place, .. }) => {
+                self.read_trait_place_is_loan(function, *place)
+            }
+            _ => self
+                .transparent_read(function, value)
+                .filter(|_| self.inspected_transfer(function, value))
+                .is_some_and(|read| self.read_trait_value_is_loan(function, read)),
+        }
+    }
+
+    fn read_trait_referent(&self, ty: &MirType, reference: String, borrowed: bool) -> String {
+        if !borrowed && matches!(ty.kind(), MirTypeKind::TraitObject(_)) {
+            format!("({reference}).as_ref()")
+        } else {
+            reference
+        }
+    }
+
+    fn read_trait_call_reference(&self, function: &MirFunction, arg: &MirCallArg) -> String {
+        if self.ref_binding_payload(function, arg.value) {
+            return self.ref_payload_reference(function, arg.value);
+        }
+        let value = self.transparent_read(function, arg.value)
+            .filter(|_| self.inspected_transfer(function, arg.value))
+            .unwrap_or(arg.value);
+        let reference = if let Some(place) = arg.place {
+            self.place_reference(function, place, MirAccess::Read)
+        } else {
+            self.borrowed_value_reference(function, value, MirAccess::Read)
+        };
+        if matches!(self.value_type(function, value).kind(), MirTypeKind::TraitObject(_)) {
+            let borrowed = arg.place
+                .map(|place| self.read_trait_place_is_loan(function, place))
+                .unwrap_or_else(|| self.read_trait_value_is_loan(function, value));
+            self.read_trait_referent(self.value_type(function, value), reference, borrowed)
+        } else {
+            reference
+        }
+    }
+
     fn callable_parameter_type(&self, ty: &MirType, access: MirAccess) -> String {
+        if access == MirAccess::Read {
+            if let Some(ty) = self.read_trait_type(ty) {
+                return format!("&{ty}");
+            }
+        }
         let rendered = self.rust_type(ty);
         match access {
             MirAccess::Write => format!("&mut {rendered}"),
@@ -6720,6 +6730,11 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn parameter_type(&self, param: &jet_foundation::MIR::MirParam) -> String {
+        if param.access == MirAccess::Read {
+            if let Some(ty) = self.read_trait_type(&param.ty) {
+                return format!("&{ty}");
+            }
+        }
         let ty = self.rust_parameter_type(&param.ty);
         match param.access {
             MirAccess::Write => format!("&mut {ty}"),
@@ -6899,6 +6914,11 @@ impl<'a> RustEmitter<'a> {
         let ty = self.rust_parameter_type(&capture.ty);
         if self.capture_move_required(function, capture.slot) {
             return ty;
+        }
+        if capture.access == MirAccess::Read {
+            if let Some(ty) = self.read_trait_type(&capture.ty) {
+                return format!("&{ty}");
+            }
         }
         match capture.access {
             MirAccess::Read => format!("&{ty}"),
@@ -7237,21 +7257,7 @@ impl<'a> RustEmitter<'a> {
     ) {
         let visibility = self.visibility(definition.visibility);
         let name = self.trait_name(definition.id);
-        // A trait used as `Box<dyn T>` clones its boxed value through a
-        // clone-box supertrait, so `Box<dyn T>` is `Clone` like every other
-        // Jet value carrier.
-        let dyn_clone = self.dyn_clone_traits.contains(&name);
-        if dyn_clone {
-            let _ = writeln!(
-                out,
-                "{visibility}trait {name}__JetCloneBox {{ fn __jet_clone_box(&self) -> Box<dyn {name}>; }}\n\
-                 impl<JetSelf: {name} + Clone + 'static> {name}__JetCloneBox for JetSelf {{ fn __jet_clone_box(&self) -> Box<dyn {name}> {{ Box::new(self.clone()) }} }}\n\
-                 impl Clone for Box<dyn {name}> {{ fn clone(&self) -> Self {{ (**self).__jet_clone_box() }} }}"
-            );
-            let _ = writeln!(out, "{visibility}trait {name}: {name}__JetCloneBox {{");
-        } else {
-            let _ = writeln!(out, "{visibility}trait {name} {{");
-        }
+        let _ = writeln!(out, "{visibility}trait {name} {{");
         for associated in &definition.associated_types {
             let _ = writeln!(out, "    type {};", mangle(&associated.name));
         }
@@ -8478,15 +8484,7 @@ impl<'a> RustEmitter<'a> {
             MirTypeKind::Shared(_) | MirTypeKind::Fn(_) | MirTypeKind::SendFn { .. } => {
                 trait_name == "Clone"
             }
-            // Only `Clone`, and only through the clone-box supertrait that
-            // `emit_trait_def` gives every trait used as a single-bound object.
-            MirTypeKind::TraitObject(bounds) => {
-                trait_name == "Clone"
-                    && matches!(bounds.as_slice(), [bound] if self
-                        .traits_by_name
-                        .get(&bound.name)
-                        .is_some_and(|symbol| self.dyn_clone_traits.contains(symbol)))
-            }
+            MirTypeKind::TraitObject(_) => false,
             // `JetColumnList` implements only `Clone` and `Debug`.
             MirTypeKind::List(inner)
                 if self.columnar_type_def(inner).is_some()
@@ -11286,7 +11284,7 @@ impl<'a> RustEmitter<'a> {
                 };
                 let name = self.capture_param_name(capture.slot);
                 let _ = writeln!(setup, "let {name} = ({captured}).clone();");
-                let call_arg = format!("&{name}");
+                let call_arg = self.read_trait_referent(&capture.ty, format!("&{name}"), false);
                 call_args.push(call_arg);
             }
             let event_param = target
@@ -17420,7 +17418,7 @@ impl<'a> RustEmitter<'a> {
         match self.value_definition(function, value)? {
             MirOperation::Capture { slot } => Some((
                 MirPlaceBase::Capture(value),
-                self.capture_param(function, *slot).access,
+                self.capture_binding_access(function, *slot),
             )),
             MirOperation::Parameter { index, .. } => {
                 let param = function.params.iter().find(|param| param.index == *index)?;
@@ -18025,7 +18023,7 @@ impl<'a> RustEmitter<'a> {
             && !arg.shared_auto_clone
             && !arg.widen_fixed_to_list
             && arg.widen_to_union.is_none()
-            && arg.box_as_trait.is_none()
+            && (arg.box_as_trait.is_none() || arg.access == MirAccess::Read)
             && arg.fn_coercion.is_none()
     }
 
@@ -19131,10 +19129,15 @@ impl<'a> RustEmitter<'a> {
             .expect("checked binding read");
         // An element of an in-place loop borrows the walked list's row.
         if let MirOperation::LoopIterValue { cursor, .. } = operation {
-            return format!(
+            let reference = format!(
                 "{{ let (items, at) = *{}.as_ref().expect(\"MIR value\"); &items[at] }}",
                 value_slot(*cursor)
             );
+            return if matches!(self.value_type(function, value).kind(), MirTypeKind::TraitObject(_)) {
+                self.read_trait_referent(self.value_type(function, value), reference, false)
+            } else {
+                reference
+            };
         }
         let read = match operation {
             MirOperation::EnumPayload { subject, .. }
@@ -19147,7 +19150,7 @@ impl<'a> RustEmitter<'a> {
             .immutable_read_place(function, read)
             .expect("checked stable binding place");
         let reference = self.place_reference(function, place, MirAccess::Read);
-        match operation {
+        let reference = match operation {
             MirOperation::ReadPlace(_) => reference,
             MirOperation::EnumPayload { subject, owner, variant, index } => {
                 let (pattern, boxed) = self
@@ -19165,6 +19168,13 @@ impl<'a> RustEmitter<'a> {
             _ => format!(
                 "match {reference} {{ Ok(value) => value, Err(_) => unreachable!(\"MIR option payload missing\") }}"
             ),
+        };
+        if matches!(self.value_type(function, value).kind(), MirTypeKind::TraitObject(_)) {
+            let borrowed = matches!(operation, MirOperation::ReadPlace(place)
+                if self.read_trait_place_is_loan(function, *place));
+            self.read_trait_referent(self.value_type(function, value), reference, borrowed)
+        } else {
+            reference
         }
     }
 
@@ -19583,7 +19593,7 @@ impl<'a> RustEmitter<'a> {
         let access = match self.value_definition(function, value) {
             Some(MirOperation::Parameter { index, .. }) => function.params.iter()
                 .find(|parameter| parameter.index == *index).expect("checked MIR parameter").access,
-            Some(MirOperation::Capture { slot }) => self.capture_param(function, *slot).access,
+            Some(MirOperation::Capture { slot }) => self.capture_binding_access(function, *slot),
             _ => return false,
         };
         access == MirAccess::Move && !self.is_scalar(self.value_type(function, value))
@@ -19704,9 +19714,14 @@ impl<'a> RustEmitter<'a> {
                     local_slot(local.id)
                 );
             } else {
-                let ty = self.rust_local_type(&local.ty);
                 // A reference binding holds the payload it binds in place.
-                let borrow = if self.ref_binding_local(function, local.id) { "&" } else { "" };
+                let reference_binding = self.ref_binding_local(function, local.id);
+                let ty = if reference_binding {
+                    self.read_trait_type(&local.ty).unwrap_or_else(|| self.rust_local_type(&local.ty))
+                } else {
+                    self.rust_local_type(&local.ty)
+                };
+                let borrow = if reference_binding { "&" } else { "" };
                 let _ = writeln!(
                     out,
                     "    let mut {}: Option<{borrow}{ty}> = None;",
@@ -21011,10 +21026,17 @@ impl<'a> RustEmitter<'a> {
             .is_some_and(|value| index.moved_captures.contains(value))
     }
 
+    fn capture_binding_access(&self, function: &MirFunction, slot: usize) -> MirAccess {
+        if self.capture_move_required(function, slot) {
+            MirAccess::Move
+        } else {
+            self.capture_param(function, slot).access
+        }
+    }
+
     fn capture_expression(&self, function: &MirFunction, slot: usize) -> String {
-        let capture = self.capture_param(function, slot);
         let name = self.capture_param_name(slot);
-        match capture.access {
+        match self.capture_binding_access(function, slot) {
             MirAccess::Read | MirAccess::Write => format!("(*{name}).clone()"),
             MirAccess::Move => name,
         }
@@ -27558,6 +27580,24 @@ impl<'a> RustEmitter<'a> {
             let _ = self.trait_object_type(trait_id);
         }
         let needs_trait_box = self.call_arg_needs_trait_box(function, arg);
+        let trait_source = matches!(self.value_type(function, arg.value).kind(), MirTypeKind::TraitObject(_));
+        if borrowed
+            && arg.access == MirAccess::Read
+            && (arg.box_as_trait.is_some() || trait_source)
+            && !arg.authority_boundary
+            && !arg.implicit_clone
+            && !arg.shared_auto_clone
+            && !arg.widen_fixed_to_list
+            && arg.widen_to_union.is_none()
+            && arg.fn_coercion.is_none()
+        {
+            let target = arg.box_as_trait
+                .map(|id| self.trait_object_type(id))
+                .unwrap_or_else(|| self.value_type(function, arg.value));
+            let ty = self.read_trait_type(target).expect("checked read trait target");
+            let reference = self.read_trait_call_reference(function, arg);
+            return format!("({reference}) as &{ty}");
+        }
         if arg.access == MirAccess::Write {
             if let Some(place) = arg.place {
                 return self.place_reference(function, place, MirAccess::Write);
@@ -27618,7 +27658,14 @@ impl<'a> RustEmitter<'a> {
         if arg.box_as_trait.is_some() && !needs_trait_box {
             effective.box_as_trait = None;
         }
-        self.call_arg(&effective, borrowed)
+        if borrowed && (effective.box_as_trait.is_some() || trait_source) {
+            // A genuinely owned argument is constructed/transferred first.
+            // Only its referent crosses a Read trait formal.
+            let value = self.call_arg(&effective, false);
+            format!("({value}).as_ref()")
+        } else {
+            self.call_arg(&effective, borrowed)
+        }
     }
     fn cell_host_method(
         &self,
@@ -28023,7 +28070,9 @@ impl<'a> RustEmitter<'a> {
                     } else {
                         slot.clone()
                     };
-                    (initial, format!("&({value})"), format!("&({value})"))
+                    let reference = format!("&({value})");
+                    let argument = self.read_trait_referent(&capture.ty, reference.clone(), false);
+                    (initial, reference, argument)
                 }
                 MirAccess::Write if self.shared_capture_local(outer, operand).is_some() => {
                     // S47/M2: the environment shares the owner's cell and
@@ -28197,7 +28246,7 @@ impl<'a> RustEmitter<'a> {
                 name
             } else {
                 match (capture.access, operand) {
-                    (MirAccess::Read, _) => format!("&{name}"),
+                    (MirAccess::Read, _) => self.read_trait_referent(&capture.ty, format!("&{name}"), false),
                     (MirAccess::Write, MirCaptureOperand::Value(_)) => format!("&mut {name}"),
                     (MirAccess::Write, MirCaptureOperand::Place(_))
                         if self.shared_capture_local(outer, operand).is_some() =>
@@ -29733,17 +29782,9 @@ impl<'a> RustEmitter<'a> {
                 type_id,
                 fields,
                 boxed_fields,
-                trait_coercion,
                 ..
             } => {
-                let value = self.rust_struct_literal(*type_id, fields, boxed_fields, true);
-                match trait_coercion {
-                    Some(trait_id) => {
-                        let trait_object = self.trait_object_type(*trait_id);
-                        format!("Box::new({value}) as {}", self.rust_type(trait_object))
-                    }
-                    None => value,
-                }
+                self.rust_struct_literal(*type_id, fields, boxed_fields, true)
             }
             MirSemanticOp::ReflectOf {
                 type_name,
@@ -32160,7 +32201,7 @@ impl<'a> RustEmitter<'a> {
                     let capture = self.capture_param(function, *slot);
                     Some((
                         self.capture_param_name(*slot),
-                        capture.access,
+                        self.capture_binding_access(function, *slot),
                         self.is_scalar(&capture.ty),
                         true,
                     ))

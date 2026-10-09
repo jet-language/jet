@@ -18,7 +18,6 @@ use jet_foundation.[
     StrPart,
     Symbol,
     SymbolKind,
-    TCoercionTarget,
     TComptimeValue,
     TEnumArg,
     TEnumPayload,
@@ -364,7 +363,7 @@ fn sema_expression_core_record_literal(owner_name: String, fields: [ExprField], 
             break
         }
     }
-    value :: sema_tir_expr(Type.Named{name: owner_name}, TExprKind.StructLit{fields: values, extra: None, as_trait: None}, span)
+    value :: sema_tir_expr(Type.Named{name: owner_name}, TExprKind.StructLit{fields: values, extra: None}, span)
     sema_expr_expected(value, expected, environment, &diagnostics)
 }
 
@@ -438,7 +437,7 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
         checked :: sema_expression_struct_field_value(field, default_value, field.name_span, owner, names, args, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         &values.push(checked)
     }
-    coercion := TCoercionTarget?{None}
+    value := sema_tir_expr(result_ty, TExprKind.StructLit{fields: values, extra: None}, span)
     if as_trait == .Val(trait_name) {
         trait_symbol_index :: sema_scope_resolve_index(scopes, trait_name)
         if trait_symbol_index == None || scopes.bindings[trait_symbol_index ?? 0].symbol.kind != SymbolKind.Trait {
@@ -447,14 +446,13 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
         }
         trait_symbol :: scopes.bindings[trait_symbol_index ?? 0].symbol
         &context.name_references.push(SemaNameReferenceFact{span: span, symbol: trait_symbol, kind: "trait"})
-        coercion = Val(TCoercionTarget{trait_symbol: trait_symbol.id, concrete_type: owner.id})
         resolved_trait :: sema_expr_expected_type(Type.Named{name: trait_name}, environment)
-        result_ty = if resolved_trait == {
+        target :: if resolved_trait == {
             .TraitObject(_) -> resolved_trait
             else -> Type.TraitObject{bounds: [String]{trait_symbol.name}}
         }
+        value = sema_tir_expr(target, TExprKind.TraitBox{value: value, target: target}, span)
     }
-    value :: sema_tir_expr(result_ty, TExprKind.StructLit{fields: values, extra: None, as_trait: coercion}, span)
     sema_expr_expected(value, expected, environment, &diagnostics)
 }
 

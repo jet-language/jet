@@ -2499,7 +2499,9 @@ impl<'a> Checker<'a> {
                     // D-SG9/D-TYPE2-DEFAULT1: let a numeric literal argument adopt the
                     // parameter's carrier or width and be checked at the literal.
                     self.expected_type = Some(param_ty.clone());
-                } else if matches!(param_ty, Type::Named(_) | Type::Option(_) | Type::Result { .. } | Type::Tuple(_)) {
+                } else if matches!(param_ty, Type::Named(_) | Type::Option(_) | Type::Result { .. } | Type::Tuple(_))
+                    && !self.borrowed_trait_parameter(param_ty, *param_conv)
+                {
                     // D-ENUMDOT2=A: named/optional type so `.Variant` can
                     // resolve from context. D-FAIL-CARRIER1=A: a `T !E`
                     // parameter is the carrier itself; without this slot
@@ -2732,7 +2734,10 @@ impl<'a> Checker<'a> {
                 let reported = write_needs_a_place
                     || write_range_window
                     || reads_expiring_secret_loan
-                    || self.check_type_assignable(&param_ty, &arg_ty, arg.expr.span());
+                    || (!(self.is_trait_parameter(&param_ty)
+                        && (*param_conv == AccessConvention::Write
+                            || self.trait_parameter_identity(&param_ty, &arg_ty)))
+                        && self.check_type_assignable(&param_ty, &arg_ty, arg.expr.span()));
                 // D-FIXARR1: [T#N] widens to [T] at a call site — compatible but codegen
                 // will emit .to_vec() on the argument.
                 let fixed_widens = matches!((&param_ty, &arg_ty),
@@ -2749,22 +2754,26 @@ impl<'a> Checker<'a> {
                         fn_types_compatible(&param_ty, &arg_ty)
                             && Type::obligations_satisfy(&param_ty, &arg_ty)
                     } else {
-                        arg_ty == param_ty && Type::obligations_satisfy(&param_ty, &arg_ty)
+                        (arg_ty == param_ty
+                            || (self.is_trait_parameter(&param_ty)
+                                && self.trait_parameter_identity(&param_ty, &arg_ty)))
+                            && Type::obligations_satisfy(&param_ty, &arg_ty)
                     };
-                // S48: a concrete value meets a trait-typed parameter and is
-                // boxed invisibly (`TCallArg::box_as_trait` at lowering).
-                let boxes_as_trait = self.trait_slot_accepts(&param_ty, &arg_ty);
-                let compatible = exact_or_obligation_compatible
-                    || fixed_widens
-                    || union_widens
-                    || boxes_as_trait
-                    || reads_expiring_secret_loan;
-                if boxes_as_trait {
-                    // The box owns the concrete value, exactly as a trait-object
-                    // list element does (`infer_owned_list_element` →
-                    // `note_move_if_direct_ident`), so a direct name gives its
-                    // value away here. A caller that needs to keep it writes
-                    // `~c` (the copy marker) — no clone is ever silent (D-MEM1/S2).
+                let boxes_as_trait = *param_conv != AccessConvention::Write
+                    && self.trait_slot_accepts(&param_ty, &arg_ty);
+                let compatible = if *param_conv == AccessConvention::Write
+                    && self.is_trait_parameter(&param_ty)
+                {
+                    self.trait_parameter_identity(&param_ty, &arg_ty)
+                } else {
+                    exact_or_obligation_compatible
+                        || fixed_widens
+                        || union_widens
+                        || boxes_as_trait
+                        || reads_expiring_secret_loan
+                };
+                if boxes_as_trait && *param_conv == AccessConvention::Move {
+                    // Only an owning trait slot transfers the concrete owner.
                     self.note_move_if_direct_ident(&arg.expr, &format!("`{}`", call.name));
                 }
                 if !reported && !compatible {

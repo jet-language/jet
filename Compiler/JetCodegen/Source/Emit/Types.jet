@@ -60,7 +60,18 @@ fn jet_rust_emit_type_is_borrowed(ty: MIRType) -> Bool Never! {
     if ty.kind == MIRTypeKind.Int -> true else -> !mir_type_is_scalar(ty)
 }
 
+fn jet_rust_emit_read_trait_type(ctx: &JetRustEmitContext, ty: MIRType) -> String? Never! {
+    if ty.kind == .TraitObject(bounds) {
+        names :: loop bound in bounds -> jet_rust_emit_trait_name(&ctx, bound.id)
+        return Val("dyn {names.join(" + ")}")
+    }
+    None
+}
+
 fn jet_rust_emit_callable_param_type(ctx: &JetRustEmitContext, ty: MIRType, access: MIRAccess) -> String Never! {
+    if access == MIRAccess.Read {
+        if jet_rust_emit_read_trait_type(&ctx, ty) == .Val(borrowed) -> return "&{borrowed}"
+    }
     rendered :: jet_rust_emit_type(&ctx, ty)
     if access == {
         .Write -> "&mut {rendered}"
