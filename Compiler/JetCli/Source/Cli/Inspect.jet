@@ -87,10 +87,10 @@ fn jet_cli_inspect_pid(value: String) -> Int? Never! {
     Val(pid)
 }
 
-// CLI.rs `inspect_flag_takes_value`.
+// CLI.rs `inspect_flag_takes_value`: only a bare flag consumes the next
+// word; a joined `--flag=value` leaves the target intact.
 fn jet_cli_inspect_flag_takes_value(argument: String) -> Bool Never! {
-    name :: argument.split("=").to_list()[0]
-    [String]{"--before", "--color", "--facts", "--gate", "--kind", "--output", "--profile", "--scope", "--set", "--target", "--topic"}.contains(name)
+    [String]{"--before", "--color", "--facts", "--gate", "--kind", "--output", "--profile", "--scope", "--set", "--target", "--topic", "--threads"}.contains(argument)
 }
 
 // CLI.rs `parse_inspect_args` over the normalized argv (`inspect <plane> ...`).
