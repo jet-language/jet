@@ -8,7 +8,7 @@
 // as executed registries. The authoritative source order is Bootstrap/sources.list.
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
@@ -83,7 +83,7 @@ function inventory() {
         return existsSync(directory) ? filesUnder(directory).map(path => {
             const source = relative(repo, path), text = readFileSync(path, 'utf8'), masked = codeMask(text);
             const names = testsIn(text), entry = /^fn run\s*\(/m.test(masked);
-            const abiRegistry = /Tests\.jet$/.test(source) && /\bfn\s+\w*(?:tests|test_all)\s*\(/i.test(masked);
+            const abiRegistry = /Tests\.jet$/.test(source) && /\bfn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(masked);
             const nestedInput = /\/Tests\/(?:fixtures|Fixtures)\//.test(source);
             return { package: item.name, source, sha256: hash(Buffer.from(text)), names, entry,
                 role: !nestedInput && (names.length || entry || abiRegistry) ? 'registry' : 'support-or-fixture' };
@@ -95,8 +95,11 @@ function testkitInventory() {
         .map(name => `Tools/testkit/${name}`);
     sources.push('Tools/testkit/package.jet');
     const cases = filesUnder(join(repo, 'tests/cases'), '.case').map(path => relative(repo, path));
+    const rustToolRequirements = cases.flatMap(path => readFileSync(join(repo, path), 'utf8').split('\n')
+        .flatMap((line, index) => /^(?:requires: tool:|when tool |step: )/.test(line) && /\b(?:cargo|rustc|rustup)\b/.test(line)
+            ? [{ path, line: index + 1, source: line }] : []));
     return { sources: sources.map(path => ({ path, sha256: hash(readFileSync(join(repo, path))) })),
-        cases: cases.map(path => ({ path, sha256: hash(readFileSync(join(repo, path))) })) };
+        cases: cases.map(path => ({ path, sha256: hash(readFileSync(join(repo, path))) })), rustToolRequirements };
 }
 function retiredBootstrapTests() {
     const path = 'Compiler/Bootstrap/Tests.rs';
@@ -166,16 +169,19 @@ function generate() {
         path: join(kitDir, 'run.jet'), cwd: repo, sha256: hash(readFileSync(join(kitDir, 'run.jet'))),
         stdout: JSON.stringify({ PASS: kit.cases.length, FAIL: 0, 'KNOWN-FAILING': 0, 'UNEXPECTED-PASS': 0,
             UNSUPPORTED: 0, 'SKIP-HOST': 0, 'OPT-IN': 0, REFUSED: 0, ERROR: 0, TIMEOUT: 0, suites: ['cases'] }) + '\n',
-        testCount: kit.cases.length, sources: kit.sources.map(source => source.path), caseNames: kit.cases.map(source => source.path) });
+        testCount: kit.cases.length, sources: kit.sources.map(source => source.path), caseNames: kit.cases.map(source => source.path),
+        ...(kit.rustToolRequirements.length ? { status: 'BLOCKED',
+            reason: `full testkit cases have ${kit.rustToolRequirements.length} active Rust tool requirements/guards; removing Rust would skip required case branches. See testkit.rustToolRequirements for exact paths/lines` } : {}) });
     if (options.head !== currentHead()) throw Error('head advanced during assembly; regenerate on the newest committed head');
     const manifest = { head: options.head, completeCompilerRegistries: true, repo, sourceManifests: manifests,
-        compilerSources: sourceMap?.files ?? [], inventory: census, testkit: kit, entries };
+        compilerSources: (sourceMap?.files ?? []).map(({ path, sha256 }) => ({ path, sha256 })), inventory: census, testkit: kit, entries };
     json(join(out, 'manifest.json'), manifest);
     json(join(out, 'retired-with-Rust.json'), retiredBootstrapTests());
     console.log(JSON.stringify(manifest, null, 2));
 }
 function run() {
     if (!options.jet || !options.manifest) throw Error(usage);
+    options.jet = realpathSync(options.jet);
     const bytes = readFileSync(options.manifest), manifest = JSON.parse(bytes);
     if (manifest.head !== currentHead() || manifest.completeCompilerRegistries !== true || !manifest.entries?.length) throw Error('complete current-head manifest required');
     // Re-census: a forged/truncated entries array cannot turn omissions into PASS.
