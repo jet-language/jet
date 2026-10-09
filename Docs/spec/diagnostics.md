@@ -52,6 +52,17 @@ a span omits that block. Every report keeps `Why:`, `Fix:`, and
 block compilation by default; a package may deny a named lint through its lint
 policy, but a diagnostic code is never a policy value.
 
+A default-error entry report uses `Error [E3015]:` with the registry-owned
+What, Why, Fix, and More. The error value's own code remains report data rather
+than replacing the diagnostic identity. A handled `Err` printed as a value is
+not this unhandled-entry report.
+
+In this report, journey locations retain columns supplied by their producer.
+Unavailable source must not acquire an invented snippet, caret, path, or zero
+column. Terminal escaping is display-only: it does not rewrite the error or
+journey data. This does not change standalone journey transport's ordinary
+text policy.
+
 What, Why, and Fix are sentence-cased plain language. What names the rejected
 operation or value, Why states the rule, and Fix gives an imperative next step.
 A familiar non-canonical form may receive a teaching diagnostic, but a known

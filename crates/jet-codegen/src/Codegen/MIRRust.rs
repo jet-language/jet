@@ -3139,6 +3139,92 @@ mod core_native_projection_tests {
     };
 
     #[test]
+    fn nominal_ingress_rejects_duplicate_identity_but_not_shared_leaf_names() {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let bundle = crate::Codegen::TIR::tests::checked_bundle(
+            r#"
+module left { pub struct Item { pub value: Int } }
+module right { pub struct Item { pub value: Int } }
+fn run() {
+    first :: left.Item{value: 1}
+    second :: right.Item{value: 2}
+    print(first.value + second.value)
+}
+"#,
+        );
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mut program, artifact) =
+            crate::Codegen::TIR::lower_checked_mir_program_for(&bundle, request)
+                .expect("real checked nominal fixture lowers");
+        let item_rows: Vec<_> = program
+            .types
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.key.ends_with("Item"))
+            .map(|(index, _)| index)
+            .collect();
+        assert_eq!(item_rows.len(), 2, "both checked Item declarations are retained");
+        let left = item_rows[0];
+        let right = item_rows[1];
+        assert_ne!(program.types[left].id, program.types[right].id);
+        assert_ne!(program.types[left].key, program.types[right].key);
+        let left_id = program.types[left].id;
+        let right_id = program.types[right].id;
+        let config = super::MirRustConfig {
+            target: jet_foundation::Layout::TargetLayout::host(),
+            target_kind: super::MirRustTarget::Native,
+            root_prefix: String::new(),
+            execution: super::MirRustExecutionConfig::for_artifact(artifact),
+        };
+        // Inline modules hoist distinct display names. For this raw-ingress
+        // positive case, share only the leaf display name; the checked nominal
+        // IDs, fully qualified keys, field rows and reference facts stay intact.
+        program.types[left].name = "Item".to_string();
+        program.types[right].name = "Item".to_string();
+        program.validate().expect("shared leaf names are legal MIR");
+        program = jet_foundation::MIR::optimize_mir_program(
+            program,
+            &jet_foundation::MIR::MirOptimizationPolicy::conservative(),
+        )
+        .expect("legal display-metadata collision receives a fresh canonical seal");
+        // The canonical pass may reorder rows: follow checked IDs, not indexes.
+        let left = program.types.iter().position(|row| row.id == left_id).unwrap();
+        let right = program.types.iter().position(|row| row.id == right_id).unwrap();
+        assert_eq!(program.types[left].name, program.types[right].name);
+        let identity = program
+            .artifact_identity(artifact)
+            .expect("cache canonical artifact identity before duplicate mutations");
+        {
+            let emitter = super::RustEmitter::new(&program, &config, identity.clone());
+            assert_ne!(
+                emitter.type_name(program.types[left].id),
+                emitter.type_name(program.types[right].id),
+            );
+        }
+        let duplicate = program.types[left].clone();
+        program.types.push(duplicate);
+        let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            super::RustEmitter::new(&program, &config, identity.clone());
+        }))
+        .expect_err("raw ingress must reject a duplicate type ID");
+        assert!(failure.downcast_ref::<String>().unwrap().contains("type definition ID"));
+        let mut duplicate = program.types.pop().unwrap();
+        duplicate.id.0 = program.types.iter().map(|row| row.id.0).max().unwrap()
+            .checked_add(1).expect("fresh fixture type ID");
+        program.types.push(duplicate);
+        let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            super::RustEmitter::new(&program, &config, identity);
+        }))
+        .expect_err("raw ingress must reject a duplicate type key with a distinct ID");
+        assert!(failure.downcast_ref::<String>().unwrap().contains("type definition key"));
+        });
+    }
+
+    #[test]
     fn imported_core_native_names_project_without_matching_user_qualified_names() {
         let compute_error = "<corelib>/Core/compute::Core/compute/compute.jet::ComputeError";
         let vjp_run = "<corelib>/Core/compute::Core/compute/compute.jet::VJPRun";
@@ -3475,8 +3561,12 @@ impl<'a> RustEmitter<'a> {
         let mut type_def_by_key = BTreeMap::new();
         let mut type_def_by_name = BTreeMap::new();
         for (index, def) in program.types.iter().enumerate() {
-            type_def_by_id.entry(def.id).or_insert(index);
-            type_def_by_key.entry(def.key.as_str()).or_insert(index);
+            if type_def_by_id.insert(def.id, index).is_some() {
+                panic!("MIR type definition ID {:?} is duplicated", def.id);
+            }
+            if type_def_by_key.insert(def.key.as_str(), index).is_some() {
+                panic!("MIR type definition key {:?} is duplicated", def.key);
+            }
             type_def_by_name.entry(def.name.as_str()).or_insert(index);
             let symbol = mangle_path(&def.key);
             types.insert(def.id, symbol.clone());

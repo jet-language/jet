@@ -1131,6 +1131,10 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR type identity is duplicated", "each nominal type must have one stable source-emission symbol", Val(definition.span))
             return ctx
         }
+        if ctx.type_index_by_key.get(definition.key) != Val(definition_index) {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR type definition key is duplicated", "each nominal type key must identify one checked declaration", Val(definition.span))
+            return ctx
+        }
         // MIRRust type_name/collect_type_fields: a Prelude carrier keeps its native
         // Rust spelling and its raw field and variant names. The compiler-owned
         // default Err is the Prelude `JetErr` (Rust keys it `Err`, which the
