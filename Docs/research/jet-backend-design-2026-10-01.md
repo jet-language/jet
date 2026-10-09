@@ -409,6 +409,16 @@ definitions reset them. These bits do not change any value's ABI layout. Whole
 escape into an aggregate, callee or return is rejected if a Close-bearing path
 can still be moved out (backward reaching definitions follow local bit transfers).
 
+The Close Lower fixture uses an actually owned `Secret { id: Int, token: String }`
+in both generic `ClosePair<Secret>` and concrete `CloseDirectPair`. After taking
+the first field, its structural assertion finds the Struct's owner storage by
+the MIR pair local's checked type identity (not a byte-size heuristic), follows
+O0 LIR control flow and private live-bit reset/clear stores: the owner's
+first-field ordinary Close glue
+must be unreachable, while the remaining sibling and the taken value each have
+one reachable ordinary Close call. The `27\n28\n` stdout expectation is separate
+from this structural assertion and requires an admitted runtime execution.
+
 ### Locals, places and SSA
 
 Every root place (a local, a parameter or a temporary, with no projections)
