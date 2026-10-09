@@ -337,6 +337,7 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
             }
         }
         checked_value :: checked_argument ?? return None
+        if parameter.convention == AccessConvention.Move && !sema_copy_site_check_guard_owned(checked_value, environment, scopes, context, &diagnostics, args[index].convention == AccessConvention.Move) -> return None
         value :: if self_typed -> sema_stmt_numeric_slot_value(checked_value, required, environment, &diagnostics) ?? return None else -> checked_value
         compatible :: sema_call_type_assignable(required_declared, value.ty, environment) ?? return None
         if !compatible {

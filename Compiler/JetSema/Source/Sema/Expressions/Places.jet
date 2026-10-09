@@ -101,6 +101,7 @@ fn sema_expression_exact_move(value: Expr, span: Span, expected: Type?, environm
     mark_span :: Span{start: span.start, end: span.start + 1}
     checked :: sema_check_expression(value, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if sema_ownership_type_is_copy(checked.ty) -> return Val(checked)
+    if !sema_copy_site_check_guard_owned(checked, environment, scopes, context, &diagnostics, true) -> return None
     if value == .Index(_, _, _, _) {
         &diagnostics.push(diagnostic_with_edit(sema_error("E0225", mark_span, "the move marker `^` cannot take an element out of its collection", "`^` moves a name or one of its fields; an element stays owned by its collection, which has no hole to leave behind", "remove `^` to copy the element"), TextEdit{span: mark_span, new_text: ""}))
         return None

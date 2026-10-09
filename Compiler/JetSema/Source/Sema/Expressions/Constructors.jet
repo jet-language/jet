@@ -263,6 +263,7 @@ fn sema_expression_struct_field_value(field: Field, field_value: Expr, field_ref
     if !string_view -> sema_copy_site_check_field(field_value, environment, scopes, &tail_store, &context, &diagnostics)
     checked_value := if string_view -> sema_string_view_check_field(field_value, field_ty, environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression_with_lambda_escapes(field_value, Val(field_ty), environment, &scopes, &state, &tail_store, &context, Val(true), &diagnostics)
     checked :: checked_value ?? return None
+    if !string_view && !sema_copy_site_check_guard_owned(checked, environment, scopes, context, &diagnostics, false) -> return None
     compatible :: sema_expr_expected_assignable(field_ty, checked.ty, environment) ?? return None
     if !compatible {
         &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(field_ty, environment), sema_expr_expected_type(checked.ty, environment), expr_span(field_value)))
@@ -298,6 +299,7 @@ fn sema_expression_core_record_name(struct_name: String, type_args: [Type], expe
 fn sema_expression_core_record_field_value(owner_name: String, field: TypeTupleField, field_value: Expr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStructFieldValue? {
     sema_copy_site_check_field(field_value, environment, scopes, &tail_store, &context, &diagnostics)
     checked :: sema_check_expression_with_lambda_escapes(field_value, Val(field.ty), environment, &scopes, &state, &tail_store, &context, Val(true), &diagnostics) ?? return None
+    if !sema_copy_site_check_guard_owned(checked, environment, scopes, context, &diagnostics, false) -> return None
     compatible :: sema_expr_expected_assignable(field.ty, checked.ty, environment) ?? return None
     if !compatible {
         &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(field.ty, environment), sema_expr_expected_type(checked.ty, environment), expr_span(field_value)))
@@ -588,6 +590,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
             payload_ty :: sema_inference_substitute_type(sema_expression_field_owner_type(environment, owner.module_name, ty, generic_names), generic_names, generic_args)
             sema_copy_site_check_field(payload_expr, environment, scopes, &tail_store, &context, &diagnostics)
             checked :: sema_check_expression(payload_expr, Val(payload_ty), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+            if !sema_copy_site_check_guard_owned(checked, environment, scopes, context, &diagnostics, false) -> return None
             compatible :: sema_expr_expected_assignable(payload_ty, checked.ty, environment) ?? return None
             if !compatible {
                 &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(payload_ty, environment), sema_expr_expected_type(checked.ty, environment), expr_span(payload_expr)))
@@ -635,6 +638,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
                 field_ty :: sema_inference_substitute_type(sema_expression_field_owner_type(environment, owner.module_name, fields[found].ty, generic_names), generic_names, generic_args)
                 sema_copy_site_check_field(payload_expr, environment, scopes, &tail_store, &context, &diagnostics)
                 checked :: sema_check_expression(payload_expr, Val(field_ty), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+                if !sema_copy_site_check_guard_owned(checked, environment, scopes, context, &diagnostics, false) -> return None
                 compatible :: sema_expr_expected_assignable(field_ty, checked.ty, environment) ?? return None
                 if !compatible {
                     &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(field_ty, environment), sema_expr_expected_type(checked.ty, environment), expr_span(payload_expr)))
@@ -684,6 +688,7 @@ fn sema_expression_core_enum_literal(enum_name: String, variants: [String], vari
         payload_ty :: payload_types[index]
         sema_copy_site_check_field(payload_expr, environment, scopes, &tail_store, &context, &diagnostics)
         checked :: sema_check_expression(payload_expr, Val(payload_ty), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+        if !sema_copy_site_check_guard_owned(checked, environment, scopes, context, &diagnostics, false) -> return None
         compatible :: sema_expr_expected_assignable(payload_ty, checked.ty, environment) ?? return None
         if !compatible {
             &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(payload_ty, environment), sema_expr_expected_type(checked.ty, environment), expr_span(payload_expr)))
