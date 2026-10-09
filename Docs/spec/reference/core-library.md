@@ -2319,6 +2319,8 @@ Parsing retains written scale, addition and subtraction use the finer operand
 scale, and multiplication removes trailing zeros only down to that finer scale.
 Division returns a `Fraction`; conversion to a `Decimal` rejects repeating
 denominators. Decimal rounding uses ties away from zero.
+Fraction arithmetic uses the ordinary `+`, `-`, `*`, and `/` operators rather
+than retired named `sub`, `mul`, and `div` methods.
 
 The policies and rendering live in `Core/math/math.jet`. Checked precise TIR
 operations resolve their reserved helpers by the loaded math module identity;
