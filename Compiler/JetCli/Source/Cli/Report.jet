@@ -129,11 +129,11 @@ fn jet_cli_json_control_quote(value: String) -> String Never! {
         }
         width := 1
         if escape.len() == 0 {
-            if byte < 32 || byte == 127 -> escape = "\\u00{jet_cli_report_hex_digit((byte >> 4) & 15)}{jet_cli_report_hex_digit(byte & 15)}"
+            if byte < 32 || byte == 127 -> escape = "\\u00{jet_cli_report_hex_digit((byte >> 4).bit_and(15))}{jet_cli_report_hex_digit(byte.bit_and(15))}"
             if byte == 194 && index + 1 < bytes.len() {
                 next_byte :: Int.from_u8(bytes[index + 1])
                 if next_byte >= 128 && next_byte <= 159 {
-                    escape = "\\u00{jet_cli_report_hex_digit((next_byte >> 4) & 15)}{jet_cli_report_hex_digit(next_byte & 15)}"
+                    escape = "\\u00{jet_cli_report_hex_digit((next_byte >> 4).bit_and(15))}{jet_cli_report_hex_digit(next_byte.bit_and(15))}"
                     width = 2
                 }
             }

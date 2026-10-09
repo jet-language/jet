@@ -279,7 +279,7 @@ struct JetLibArtifact {
         stamp := JetLibStamp.decode_prefix(&reader) ?? return Err(err)
         if bytes.len() - reader.at < 8 -> return Err("truncated .jetlib artifact (payload length)")
         declared := 0
-        loop index in 0..<8 -> declared = (declared << 8) | Int.from_u8(bytes[reader.at + index])
+        loop index in 0..<8 -> declared = (declared << 8).bit_or(Int.from_u8(bytes[reader.at + index]))
         if declared > host_max -> return Err("the .jetlib payload is too large for this host")
         payload :: bytes[reader.at + 8..<bytes.len()]
         if payload.len() != declared -> return Err("truncated .jetlib artifact (payload declares {declared} bytes, found {payload.len()})")
@@ -303,7 +303,7 @@ struct JetLibWriter {
     fn push_u32(&self, value: Int) Never! {
         assert(value >= 0 && value <= 4294967295, ".jetlib header value exceeds u32")
         shift_values :: [Int]{24, 16, 8, 0}
-        loop shift in shift_values -> &self.bytes.push(U8{(value >> shift) & 0xFF})
+        loop shift in shift_values -> &self.bytes.push(U8{(value >> shift).bit_and(0xFF)})
     }
 
     // A u32 length prefix, then the bytes.
@@ -331,7 +331,7 @@ struct JetLibReader {
     fn take_u32(&self, what: String) -> Int Err! {
         if self.bytes.len() - self.at < 4 -> return Err("truncated .jetlib header ({what})")
         value := 0
-        loop index in 0..<4 -> value = (value << 8) | Int.from_u8(self.bytes[self.at + index])
+        loop index in 0..<4 -> value = (value << 8).bit_or(Int.from_u8(self.bytes[self.at + index]))
         self.at += 4
         Ok(value)
     }

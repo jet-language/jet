@@ -82,7 +82,7 @@ fn jet_cli_json_string(value: String) -> String Never! {
             9 -> "\\t"
             8 -> "\\b"
             12 -> "\\f"
-            else -> if byte < 32 -> "\\u00{jet_cli_status_hex_digit((byte >> 4) & 15)}{jet_cli_status_hex_digit(byte & 15)}" else -> ""
+            else -> if byte < 32 -> "\\u00{jet_cli_status_hex_digit((byte >> 4).bit_and(15))}{jet_cli_status_hex_digit(byte.bit_and(15))}" else -> ""
         }
         if escape.len() > 0 {
             if segment_start < index {

@@ -592,7 +592,7 @@ struct FoundationDirectoryAuthority {
             if row.identity.size > MAX_TREE_FILE_BYTES || row.identity.size > MAX_TREE_TOTAL_BYTES - total -> return Err(IOError.InvalidData(foundation_io_context(.Read, row.relative, "package tree exceeds the hashing size bound")))
             &hasher.update(row.relative.bytes())
             &hasher.update([U8]{0})
-            length :: loop shift in FOUNDATION_U64_SHIFTS -> U8{(row.identity.size >> shift) & 255}
+            length :: loop shift in FOUNDATION_U64_SHIFTS -> U8{(row.identity.size >> shift).bit_and(255)}
             &hasher.update(length)
             actual := 0
             loop {
