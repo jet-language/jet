@@ -65,3 +65,34 @@ Its `seed/jet` is a Jet-built, Rust-origin seed, **not** a Rust-free delivery;
 `seed.json` records that distinction. It uses no private `Tests.rs` main.
 Builds and full fixed-point runs still require Main's measured proofq admission.
 
+## Compiler-owned registries
+
+`Tools/agent/compiler-registries.mjs` is the canonical census and runner for
+executable `Compiler/*/Tests` Jet registries and the complete testkit case corpus.
+It uses the canonical bootstrap assembly order, appends one registry plus its
+shared support, and keeps generated units outside the checkout. It does not run
+Cargo, select a Rust oracle, filter tests, accept skipped tests, or treat
+known-failing cases as passes.
+
+```sh
+Tools/agent/jet-env node Tools/agent/compiler-registries.mjs \
+  manifest FULL_CURRENT_HEAD --out /disk/compiler-registries
+Tools/agent/jet-env node Tools/agent/compiler-registries.mjs \
+  run --jet /path/to/stage3/jet --manifest /disk/compiler-registries/manifest.json \
+  --receipt /disk/compiler-registries/receipt.json
+```
+
+Manifest generation is source assembly only; execution still needs Main's
+measured proofq admission. The manifest binds the current head, source manifests,
+compiler source bytes, registry inventory, assembled units, testkit sources and
+case IDs. Unsupported fixture transports are explicit `BLOCKED` entries and
+prevent a successful receipt, never silently disappear. A `run` registry counts
+one complete registry callback and prints an exact terminal counted sentinel.
+`test` registries use the existing `jet.test.v1` JSON reporter, requiring the
+complete test-name multiset, exact outcome count, and zero skips or failures.
+Testkit builds natively with the supplied compiler, enables opt-in cases, and
+requires every case outcome to be `PASS`. Logs and an incrementally written
+receipt preserve every failure while the runner continues through the census.
+Rust bootstrap tests are separately inventoried in `retired-with-Rust.json`;
+they are not Jet registry entries or cutover blockers.
+
