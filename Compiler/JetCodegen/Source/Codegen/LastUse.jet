@@ -316,10 +316,18 @@ fn jet_codegen_last_use_value_events(events: &[JetCodegenLastUseEvent], copy_end
     }
 }
 
+// One instruction position (or block and candidate pair) as one integer
+// table key; positions and candidates stay far below the stride.
+JET_CODEGEN_LAST_USE_KEY_STRIDE :: 4294967296
+
+fn jet_codegen_last_use_key(block: Int, index: Int) -> Int Never! {
+    block * JET_CODEGEN_LAST_USE_KEY_STRIDE + index
+}
+
 // Whether `index` lies strictly inside one of the read windows of
 // `candidate` in `block` (flattened start/end pairs).
-fn jet_codegen_last_use_in_window(windows: [String:[Int]], block: Int, index: Int, candidate: Int) -> Bool Never! {
-    bounds :: windows.get("{block}:{candidate}") ?? { return false }
+fn jet_codegen_last_use_in_window(windows: [Int:[Int]], block: Int, index: Int, candidate: Int) -> Bool Never! {
+    bounds :: windows.get(jet_codegen_last_use_key(block, candidate)) ?? { return false }
     position := 0
     loop position + 1 < bounds.len() {
         if bounds[position] < index && index < bounds[position + 1] -> return true
@@ -858,13 +866,13 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
         }
     }
     &event_start.push(events.len())
-    read_windows := [String:[Int]]{}
+    read_windows := [Int:[Int]]{}
     loop value in copy_order {
         if copy_end.get(value) == .Val(window_end) {
             window_block :: copy_block.get(value) ?? -1
             window_candidates :: touches.get(copy_place.get(value) ?? 0) ?? [Int]{}
             loop window_candidate in window_candidates {
-                key :: "{window_block}:{window_candidate}"
+                key :: jet_codegen_last_use_key(window_block, window_candidate)
                 bounds := read_windows.get(key) ?? [Int]{}
                 &bounds.push(copy_index.get(value) ?? -1)
                 &bounds.push(window_end)
@@ -950,9 +958,9 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
     }
 
     // Decide each read against the liveness right after it.
-    group_end := [String:Int]{}
-    loop (group_index, row) in groups -> _ := &group_end.add("{row.block}:{row.payloads[row.payloads.len() - 1]}", group_index)
-    conversions := [String:Int]{}
+    group_end := [Int:Int]{}
+    loop (group_index, row) in groups -> _ := &group_end.add(jet_codegen_last_use_key(row.block, row.payloads[row.payloads.len() - 1]), group_index)
+    conversions := [Int:Int]{}
     moved_groups := [Int]{}
     loop block in 0..<block_count {
         if !reachable[block] -> next
@@ -1002,11 +1010,11 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
                         if bit != own && (live_out[block].get(bit) ?? false) -> other_copy = true
                     }
                     if worth && !rejected[target] && !rejected[root] && !(live_out[block].get(target) ?? false) && !jet_codegen_last_use_in_window(read_windows, block, index, target) && !other_copy && jet_codegen_read_window_of(builder, program, result) == None && jet_codegen_last_use_consumed(builder, program, users_block, users_index, result) {
-                        _ := &conversions.add("{block}:{index}", target)
+                        _ := &conversions.add(jet_codegen_last_use_key(block, index), target)
                     }
                 }
             }
-            if group_end.get("{block}:{index}") == .Val(group_index) {
+            if group_end.get(jet_codegen_last_use_key(block, index)) == .Val(group_index) {
                 candidate :: groups[group_index].candidate
                 if !rejected[candidate] && !(live_out[block].get(candidate) ?? false) -> &moved_groups.push(group_index)
             }
@@ -1023,8 +1031,8 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
     // converted read becomes a MovePlace of its own place, and a whole
     // local's is followed by its drop-flag clear. A field move leaves its
     // owner live: the refill that follows makes it whole again.
-    takes := [String:MIRInstruction]{}
-    retarget := [String:MIRValueID]{}
+    takes := [Int:MIRInstruction]{}
+    retarget := [Int:MIRValueID]{}
     touched := [Int:Bool]{}
     loop group_index in moved_groups {
         row :: groups[group_index]
@@ -1036,16 +1044,16 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
         moved_take :: jet_codegen_last_use_instruction(&builder, program, first_span, "match.payload.take", Val(subject_ty), mir_ownership_from_access(MIRAccess.Move), MIROperation.Move{value: subject})
         if moved_take.result == None -> next
         taken :: moved_take.result ?? panic("checked last-use row is missing")
-        _ := &takes.add("{row.block}:{row.payloads[0]}", moved_take)
-        loop payload in row.payloads -> _ := &retarget.add("{row.block}:{payload}", taken)
+        _ := &takes.add(jet_codegen_last_use_key(row.block, row.payloads[0]), moved_take)
+        loop payload in row.payloads -> _ := &retarget.add(jet_codegen_last_use_key(row.block, payload), taken)
         _ := &touched.add(row.block, true)
     }
-    moved_reads := [String:MIRPlaceID]{}
-    clears := [String:[MIRInstruction]]{}
+    moved_reads := [Int:MIRPlaceID]{}
+    clears := [Int:[MIRInstruction]]{}
     bool_type :: jet_codegen_lower_type_for_function(Type.Bool, builder, program)
     loop block in 0..<block_count {
         loop index in 0..<builder.blocks[block].instructions.len() {
-            key :: "{block}:{index}"
+            key :: jet_codegen_last_use_key(block, index)
             if conversions.get(key) == None -> next
             candidate :: conversions.get(key) ?? panic("checked last-use row is missing")
             read_place := no_place
@@ -1069,7 +1077,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
         if touched.get(block) == None -> next
         rewritten := [MIRInstruction]{}
         loop (index, original) in builder.blocks[block].instructions {
-            key :: "{block}:{index}"
+            key :: jet_codegen_last_use_key(block, index)
             if takes.get(key) == .Val(moved_take) -> &rewritten.push(moved_take)
             instruction := original
             if retarget.get(key) == .Val(taken) && original.operation == .EnumPayload(_, owner, variant, field) {
