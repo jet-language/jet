@@ -3820,6 +3820,11 @@ impl<'a> Checker<'a> {
         // Most fact tags are type-transparent. These compiler-owned tags
         // carry method policy and must survive through method lookup.
         let recv_ty = match recv_ty {
+            Type::Tagged {
+                marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::SystemClock),
+                inner,
+            } if matches!(inner.as_ref(), Type::Named(name) | Type::Apply { name, .. }
+                if self.core_source_declares_method(name, method)) => *inner,
             Type::Tagged { marker, inner }
                 if matches!(
                     marker,
@@ -6335,7 +6340,8 @@ impl<'a> Checker<'a> {
             other => other,
         };
         if let Type::Named(handle_ty) = handle_receiver {
-            let source_owned = self.source_owns_nominal(handle_ty);
+            let source_owned = self.source_owns_nominal(handle_ty)
+                || self.core_source_declares_method(handle_ty, method);
             // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: the carried
             // Authority value is ordinary data. Its only instance family is
             // the Prelude `with`/`without` narrowing pair.
@@ -7901,7 +7907,8 @@ impl<'a> Checker<'a> {
         }
         if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false)
             .filter(|_| !matches!(&recv_ty, Type::Named(name) | Type::Apply { name, .. }
-                if self.source_owns_nominal(name) || self.resolve_opaque_method_sig(name, method).is_some())) {
+                if self.source_owns_nominal(name) || self.core_source_declares_method(name, method)
+                    || self.resolve_opaque_method_sig(name, method).is_some())) {
             let nominal_recv = match &recv_ty {
                 Type::Named(name) => Some(name.as_str()),
                 Type::Apply { name, args } if name == "Atomic" && args.len() == 1 => {
@@ -8133,7 +8140,8 @@ impl<'a> Checker<'a> {
         let builtin_methods = Collections::builtin_method_names(&recv_ty);
         if operator_signature.is_none() && !builtin_methods.is_empty()
             && !matches!(&recv_ty, Type::Named(name) | Type::Apply { name, .. }
-                if self.source_owns_nominal(name) || self.resolve_opaque_method_sig(name, method).is_some())
+                if self.source_owns_nominal(name) || self.core_source_declares_method(name, method)
+                    || self.resolve_opaque_method_sig(name, method).is_some())
             && !matches!(
                 &recv_ty,
                 Type::Apply { name, .. }

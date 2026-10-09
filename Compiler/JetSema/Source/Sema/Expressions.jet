@@ -2245,7 +2245,7 @@ fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, receiver
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return false
     // A resolved receiver carries its canonical identity (`module::URL`).
-    base_name :: sema_expr_type_base_name(receiver_type) ?? return false
+    base_name :: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver_type)) ?? return false
     loop owner_row in graph.modules {
         if !sema_registration_source_owns_impl(owner_row, base_name) -> next
         loop implementation in owner_row.impls {
@@ -2256,7 +2256,16 @@ fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, receiver
         }
     }
     receiver_name :: sema_expr_operator_row_name(base_name)
-    if !sema_type_source_owns_nominal(graph, base_name, environment.module_identity) && !sema_text_handle_known_method(receiver_name, method) && !sema_network_handle_known_method(receiver_name, method) -> return false
+    source_declaration := sema_type_source_owns_nominal(graph, base_name, environment.module_identity)
+    if sema_type_resolve_nominal_row(graph, sema_expr_unwrap_tag(receiver_type), environment.module_identity) == .Val(owner) {
+        module_row :: graph.modules[owner.module_index]
+        if module_row.module_identity.starts_with("<corelib>/") {
+            loop row in CORE_SOURCE_OWNED_ROWS {
+                if row.module_name == module_row.module_name && row.alias == module_row.core_source_alias && module_row.source_file == "<corelib>/{row.path}" -> source_declaration = true
+            }
+        }
+    }
+    if !source_declaration && !sema_text_handle_known_method(receiver_name, method) && !sema_network_handle_known_method(receiver_name, method) -> return false
     loop nominal_row in sema_registration_nominal_rows_named(graph, receiver_name) {
         methods :: graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods
         loop method_index in 0..<methods.len() {

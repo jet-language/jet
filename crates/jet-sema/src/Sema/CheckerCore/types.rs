@@ -16,6 +16,20 @@ impl<'a> Checker<'a> {
         registry.contains(leaf) && registry.source_owns_type(leaf)
     }
 
+    /// A loaded Core declaration owns its methods even when its carrier has
+    /// not crossed the nominal ownership ledger (for example `Clock`).
+    pub(crate) fn core_source_declares_method(&self, name: &str, method: &str) -> bool {
+        let (namespace, leaf) = self.struct_type_name_parts(name);
+        let Some(owner) = self.struct_owner_module(leaf, namespace) else { return false };
+        let registry = if owner == self.module_idx {
+            self.registry
+        } else {
+            let Some(module) = self.modules.and_then(|modules| modules.get(owner)) else { return false };
+            &module.registry
+        };
+        registry.core_source_module.is_some() && registry.method(leaf, method).is_some()
+    }
+
     /// A raw projection uses the base registered by the declaring module, not
     /// a same-spelled type in the reader's registry.
     pub(crate) fn distinct_base_for_reader(&self, name: &str) -> Option<Type> {

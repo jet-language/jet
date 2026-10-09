@@ -9328,3 +9328,11 @@ time with the Path grammar's diagnostic. **Technical:** Marker signature change 
 power use numeric methods, leaving marks to ownership and outcomes. Amends
 D-EXPOP1, D-XORSPELL1, D-BITNOT1 and D-BITOREXPR1; shifts are unchanged.
 
+
+**2026-10-09 — Core time checker roots:** Loaded Core declaration methods
+take precedence over native method fallbacks, including carriers such as
+`Clock` that have not crossed the nominal ownership ledger. This preserves
+the source method's result, receiver convention, and effect row rather than
+substituting the native time contract. The owner-only `__clock_mono_ns` seam
+retains its pure zero-argument `Int` signature; labeled Clock state variants
+construct with `System.{started_ns: ..., offset_ms: ...}`.
