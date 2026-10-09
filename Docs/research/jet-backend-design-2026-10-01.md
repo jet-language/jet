@@ -3192,6 +3192,166 @@ with `--wrap=jet_rt_free`. Its `.stdout` file is expected output, not an
 execution receipt. Whole-unit seed suppression and native caller/import/layout
 admission remain composition gates.
 
+`ServiceEnums.jet` uses those same enum-owner helpers for the private
+JetServiceRestart and JetServiceDelivery handles. Declaration-order tags
+from `Services.rs:39-44,92-96` render exactly `OneForOne`, `OneForAll`,
+`RestForOne` and `AtMostOnce`, `DurableAtLeastOnce`; show and display agree.
+These are native providers, not Core source-module registrations or Rust
+enum layout aliases. `ServiceEnumsWitness.c` checks every tag, pairwise
+equality, independent borrowed-input cloning, independent rendered owners,
+null drop and exact-once shell frees against real providers with
+`--wrap=jet_rt_free`. Its stdout fixture is an expectation, not an execution
+receipt. Native layout/MIR/import admission, seed-body suppression and actual
+link/execution remain the same composition gates.
+
+`ServiceError.jet` owns a private 16-byte tag/Text-pointer carrier in
+`DataABI.jet`, with declaration-order tags from `ServiceAuthority.rs:198-216`.
+Its ten constructors clone borrowed Text; clone is deep, equality compares
+the variant before its payload, and drop releases both owners exactly once.
+Each getter checks its variant before cloning Text, using the shared
+`rt_record_variant_panic` on mismatch just as `CAbiRoutes.rs:11197-11303` does.
+Show returns a fresh copy of the raw payload, including NUL and Unicode:
+`Services.rs:1248-1263` matches all ten variants to `m.clone()`, with no
+label, escaping or redaction. No display/debug API is added by analogy.
+The real-provider `ServiceErrorWitness.c` checks all variants, ownership,
+byte-exact show/getters and inequality; `wrong-N` modes test each getter's
+variant failure against the existing record-variant stop contract. Its
+stdout fixture is expected output only; native execution and source-layout
+admission require composition, not a syntax receipt.
+
+`ServiceValues.jet` implements the plain StateStore and Runtime carriers,
+not any channel, authority or task owner. Their private layouts in `DataABI`
+are an owned Text pointer and an owned Text pointer plus raw i64 retention.
+Constructors borrow inputs, clone Text and check exact Int narrowing before
+allocation; getters return fresh owners. Retention remains unchanged,
+including negative values. Runtime has no equality export. Show/display use
+the exact `Services.rs:1142-1150,1187-1195` formats and append the existing
+signed decimal formatter directly without allocating a temporary Text.
+The Runtime constructor follows `CAbiRoutes.rs:11319-11320`'s `native(m1)`:
+`CAbi.rs:169-172` stops on out-of-range exact Int. The native
+`jet_int_owned_to_i64` (`Int.jet:370-373`) selects `int_stop` reason 4,
+which delegates to `trap_native_index_range_stop` (`Int.jet:337-340`).
+`ServiceValuesWitness.c` tests both signed endpoints, negative and zero
+retention, NUL/Unicode Text, ownership and canonical narrowing stop modes
+against actual providers. Its stdout is an expectation; execution, native
+admission and old-body suppression remain composition checks.
+
+`ConditionHandles.jet` provides named handle clone/drop on the existing
+runtime-native Condition48 returned by `jet_rt_native_condition_new`.
+Cloning retains the same protocol, and dropping the last reference frees it;
+it never copies FIFO waiters, pending notifications, epoch or mutex state.
+This matches `MathTaskMem.rs:3081-3099`'s shared protocol semantics without
+reinterpreting its Rust Arc/Box representation. The named null drop is inert.
+`ConditionHandlesWitness.c` uses the real native factory and notify kernels
+to observe clone identity, shared pending notifications after partial drops
+and exact-once final release under `--wrap=jet_rt_free`. Its stdout fixture
+is an expectation, not execution evidence. Named CAbi nominal route
+admission and seed-route regeneration must happen in the composed native
+unit; these providers do not introduce a second factory or protocol.
+
+`CountMinSketch.jet` is the native Count-Min producer and mutable owner.
+CR4 card #4828 (`D-SKETCH-CLONE1`) requires the seed's Arc/Mutex sharing:
+handle clones retain the same 4112-byte state, not independent row snapshots.
+The state contains reference count, mutex and four rows of 256 packed u32
+counters. `Sketch.rs:3-18,125-168` supplies the two wrapping FNV hashes,
+declaration-order row indexing, saturating increment and minimum count.
+Hashing is outside the lock; all four counter reads or mutations are inside
+one unchanged mutex scope. Count returns a fresh exact Int; show is exactly
+`CountMinSketch` (`Core.rs:666-670`) and does not read rows.
+The actual producer `JetCountMinSketch_new` and canonical
+`jet_rt_native_cms_add`/`jet_rt_native_cms_count` exports serve both runtime
+method callers and `CountMinSketchWitness.c`, without test-only adapters.
+The witness checks deterministic rows, clone-visible mutation, u32 saturation,
+concurrent shared increments and last-owner release with `--wrap=jet_rt_free`.
+Its stdout is expected output only. Native method-rail admission and
+seed-route regeneration remain composed native-backend gates.
+
+`HyperLogLog.jet` uses the same shared ownership rule on Native272: references
+at 0, mutex at 8 and 256 packed U8 registers at 16 (stride exactly one).
+Its real producer and canonical `jet_rt_native_hll_add`/`jet_rt_native_hll_count`
+operate on this state; clone retains the same pointer. FNV hashing is outside
+the single mutation lock. The logical hash shift preserves the seed's eight
+high zero bits, including its rest-zero rank 57. Count scans in register order
+under one lock, then unlocks before exact-Int allocation or show rendering.
+The no-empty estimator preserves `Sketch.rs:55-57`'s sequential sum and alpha
+operation order, with exact powers of two from audited float bitcasts and
+positive round-half-away followed by saturating i64 conversion.
+For empty-register counts 1..256, `hll_linear` freezes the actual seed's finite
+domain instead of introducing a logarithm provider. The one offline oracle
+includes the actual `Sketch.rs`, SHA256
+`7d96fe7210b904876ac89a87a319f3cced6bf1758f937ef795262d83eb8851be`;
+its frozen output SHA256 is
+`b8c28826e186fb5c2acd43f821afaae7588893e09c3417b94a892d0c1f962fc7`.
+No entry is within 1e-9 of a half-integer; nearest is empty140, distance
+0.004965598786071723. Cargo is only an offline seed oracle, never a provider.
+`HyperLogLogWitness.c` checks all finite-domain counts, frozen full-register
+vectors, uniform ranks through 255, mixed ranks, exact show, shared concurrent
+mutation and last-owner free. Its stdout file is expected output, not proof;
+native method routing, execution and obsolete seed suppression remain gates.
+
+`TDigest.jet` preserves `Sketch.rs:61-122` on a shared Native40 owner
+(references0, mutex8, embedded canonical sequence24 at16). Its centroid buffer
+has stride16, mean0 and weight8. One mutex covers insertion/compression; one
+covers quantile. The exact rustc1.97.1 `slice::partition_point` binary-search
+shape is retained, including its non-monotone NaN behavior. In-place
+compression is safe because write never overtakes read, and avoids the seed's
+temporary allocation without changing floating operation order. In particular,
+cumulative advances only when a centroid is pushed, not when it is merged.
+The canonical new/add/quantile exports serve real callers and the C witness,
+which compares all 250 frozen centroid pairs in `TDigestVectors.txt` bit for
+bit after 512 samples and reports the first mismatch index. Pass that vector
+file as argv1. It also checks ten seed quantiles, NaN at first/middle/last,
+IEEE edges, concurrent shared mutation and final buffer/shell ownership.
+The separately authorized NaN-only offline seed output SHA256 is
+`f26a9917f71a55a4e476d2e32554fc4680d1f247116e787c3161367b98bedbb9`.
+This is reference data, not a shipping Rust dependency or native-execution
+proof. Composed native routing, execution and seed suppression remain gates.
+
+`ReservoirSampler.jet` retains the seed's shared Native64 state:
+references0, mutex8, clamped raw-i64 limit16, unsigned count24, RNG32 and
+embedded canonical List24 at40. The list's owned E4 Text elements have
+stride8; sample returns a separately owned holder and deep-cloned elements
+using the existing ProcessSpec list helper and the native List layout from
+`Lower/Lists.jet:1-7`. Lower consumers own the returned inline header; a C
+client releases its allocated holder after dropping elements and buffer.
+The seed xorshift13/7/17 starts at deadbeefcafebabe, advances only after the
+reservoir fills and uses unsigned modulo over the full count. Do not replace
+it with Core's divergent SplitMix64 ordinary record. Storage grows lazily,
+even when the configured limit is I64.MAX. Each operation holds one mutex;
+show snapshots the count and unlocks before rendering its full U64 decimal.
+The U64.MAX increment invokes the existing canonical integer-overflow panic
+before mutating the state, rather than creating a new trap or wrapping to zero.
+The real-producer witness checks every frozen slot and RNG state after
+128 samples at five clamped capacities, clone sharing, sample independence,
+raw NUL/UTF8, concurrent adds, both unsigned endpoints and exact-once
+Text/data/buffer/shell release. Its overflow mode expects the canonical
+overflow stop; stdout expectations are not execution evidence. Canonical
+method routing, execution and obsolete seed suppression remain composed gates.
+
+`EmailError.jet` provides the three retained Error clone/drop/equality exports
+on the registry-plain `EmailError` layout, not on a Rust enum or private facade.
+`Lower/Lower.jet:439,443` and `Lower/Values.jet:49-55,65-74,111-127,137-145`
+give a 40-byte enum box: tag at 0; owned operation Text at 8; nullable server
+Option-box pointer at 16; nullable code Option-box pointer at 24; owned reason
+Text at 32. Both Option boxes are eight bytes, with their payload at zero.
+Clone deep-copies Text and Option boxes and retains the exact Int code without
+narrowing; drop releases owned contents before their boxes. Equality checks tag
+first, then operation, server, code and reason in declaration order. Producers
+are checked source literals and native SMTP, so no constructor facade is exported.
+All three operations validate the tag in 0..10 through the shared record-variant
+stop. Option allocation (`ProcessSpec.jet:4-7`) and release
+(`EncodingErrors.jet:16-17`) use the identical `ENCODING_ENUM_BYTES`/alignment-8
+payload-box contract. Witness modes `bad-clone`, `bad-drop`, `bad-eq-left`,
+`bad-eq-right` (also with `-negative`) require the canonical record-variant stop,
+exit 70 and empty stdout; they cover invalid tags 11 and -1.
+`EmailErrorWitness.c` uses real allocator/Text/Int providers to build that native
+layout and checks all eleven tags, nullable fields, raw text, arbitrary-precision
+codes, clone independence and exactly-once release. Its stdout fixture is an
+expectation, not an execution receipt. Post-freeze native cutover must retire the
+opaque `EmailError`→`Error` rows in `RuntimeRoutes.jet`, admit the canonical plain
+enum at the Core-definition override and permit real source literals in
+`Places.jet`; native execution and obsolete seed-export suppression remain gates.
+
 ### Native UI scalar and record carriers
 
 `UiCarriersABI.jet` in JetBackend/Source defines opaque native-private
@@ -3361,4 +3521,60 @@ storage repair. It additionally requires exactly one row to guard the
 fault-detection/stop separation. The client must be composed with the actual
 SentryTests source; no Rust driver or fabricated ledger writer is used.
 Native execution is not established by the syntax receipt.
+This Node runner is development-test debt: at native cutover, replace
+its launch and all six ledger predicates with the Jet test kit runner, then
+remove the Node implementation after identical exercised results.
+
+### Native data metadata mirrors
+
+`DataMetadata.jet` supplies the 36 native-mapped exports for DataFormat,
+DataLoaderKind, DataAuthority, DataSourceIdentity, DataProvenance and
+DataSnapshotIdentity. These mirror `Core/data/data.jet:29,164-187`, not registered
+source-owned nominals. A future source-module registration must retire the
+corresponding hand carrier and seed glue in one composition.
+
+`DataABI.jet` defines the private carriers: shared enum8, Authority16,
+SourceIdentity32, Provenance24, Snapshot40. Nested text/list/record pointers own
+deep independent values. Equality follows Rust field order. Record text getters
+return fresh owners, source text field helpers copy read/clone-only 24-byte stack
+headers, and provenance field helpers lend its nested records. Existing Authority
+and Snapshot constructors clone borrowed texts; snapshot format is checked before
+allocation. No SourceIdentity or Provenance constructor export is invented; real
+native producers and the ABI witness construct these carriers.
+
+`DataPublicText.jet` is the single private rendering policy port from
+`PreludeDataFlow.rs:167-230,265-307,738-739`: Unicode whitespace trim, ASCII-only
+case folding, first `=` split, SHA-256 digest for empty/keyless parameters,
+substring-sensitive keys, prefix-sensitive values, raw member bounding at a
+4096-byte UTF-8 boundary, fragment removal and first userinfo `@` removal after
+`://`. Locator base text is not bounded. Query entries preserve empty segments,
+order and duplicates. Source list parameters are rendered separately with `?`,
+even when the locator already has a query. Authority bounds/redacts each part;
+Snapshot text remains unbounded and unredacted. Shared `Sha256.jet` owns the hash
+algorithm; the public renderer borrows input bytes and frees its one scratch
+block after appending lowercase hexadecimal.
+
+`Tests/DataPublicGoldens.h` was frozen by the actual Rust Foundation functions,
+not a reimplementation: rustc 1.97.1 (8bab26f4f 2026-07-14), oracle tool exit 0,
+5.14 seconds. Generator command (one-time development oracle, light lane):
+`Tools/agent/jet-env rustc --edition=2021 ~/.cache/jet-dev/scratch/RtBurn1b/data-public-oracle.rs -o ~/.cache/jet-dev/scratch/RtBurn1b/data-public-oracle`,
+then that binary with `Compiler/JetRuntime/Tests/DataPublicGoldens.h`.
+Both invocations ran through `CHEAP_LANE=light ~/.cache/jet-dev/cheap.sh`.
+SHA-256 receipts:
+
+- fixture: `b084a2de95e5a4154f4c016ccbff708b01a4f89a39884baa0be418df49f99f4a`
+- Foundation policy: `badd03a1f45f2c80a844245c1bb7459207b2a28ec4c42154bccb2e02831ebbd7`
+- Foundation SHA: `45f0dd77827f9d6dfd5eb8ae86571b8f2807b5419a30f4270092c7e1682a6e9b`
+- generator: `b18c9b1d2f152e9bed86fb8da54dfbe1bc2b61c8ba63078f413da6c3aab5f5bb`
+
+`DataMetadataWitness.c` links only actual native providers and frozen vectors,
+with `--wrap=jet_rt_free` for exact-once deep-owner release. It covers all 36
+families, constructor borrows, fresh getters, field lifetimes, every equality
+field, enum labels, redaction, first-`=` handling, SHA digests including empty
+input, URL/userinfo/query boundaries, Unicode trimming and multibyte truncation.
+Its `negative` and `range` modes require the canonical native-index-range stop,
+exit 70 and empty stdout. The stdout fixture is expected output, not a native
+execution receipt. Composition must admit fresh layout/MIR/imports and suppress
+obsolete seed exports before linking/running; syntax checks do not establish
+runtime parity or Rust/toolchain retirement.
 
