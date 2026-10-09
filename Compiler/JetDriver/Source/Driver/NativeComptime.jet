@@ -205,8 +205,8 @@ fn jet_driver_native_comptime_eval(program: MIRProgram, graph: SemaRegistrationG
     executor.register_closure_sources(snapshot, sources)
     lowered :: lir_lower_callables(program, [MIRFunctionID]{function_id})
     if lowered.issues.len() > 0 {
-        issue :: lowered.issues[0]
-        return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Unsupported, "native comptime cannot lower {issue.function}", issue.message)
+        findings :: loop issue in lowered.issues -> "{issue.function}: {issue.message}"
+        return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Unsupported, "native comptime cannot lower its selected dependency graph", findings.join("\n"))
     }
     entry :: lowered.value_callables.get(function_id.value) ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Compiler, "native comptime lost its typed selected entry", "native lowering must return the selected value callable identity")
     release_id :: lowered.value_releases.get(function_id.value) ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Compiler, "native comptime lost its typed release glue", "native lowering must return the selected value ownership boundary")

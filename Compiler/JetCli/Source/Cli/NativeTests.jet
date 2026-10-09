@@ -150,13 +150,16 @@ fn jet_cli_native_test_selection(program: MIRProgram, harness: MIRHarnessPlan, f
 fn jet_cli_native_test_build(program: MIRProgram, tests: [MIRTestCase], harness: MIRHarnessPlan, serial: Bool, binary: String, pack_path: String) Err! {
     roots :: loop test in tests -> test.function
     lowered :: lir_lower_tests(program, roots, harness.output_checks, serial)
-    if lowered.issues.len() > 0 -> return Err("{lowered.issues[0].function}: {lowered.issues[0].message}")
+    if lowered.issues.len() > 0 {
+        findings :: loop issue in lowered.issues -> "{issue.function}: {issue.message}"
+        return Err(findings.join("\n"))
+    }
     entry :: lowered.entry ?? return Err("native test lowering lost the harness entry")
     object :: x64_relocatable_object(lowered.lir, entry)
-    if object.errors.len() > 0 -> return Err(object.errors[0])
+    if object.errors.len() > 0 -> return Err(object.errors.join("\n"))
     pack :: native_test_files.read_bytes(pack_path) ?? return Err("couldn't read native test runtime {pack_path}: {err}")
     image :: x64_link_executable([String]{"{binary}.o", pack_path}, ^[[U8]]{object.bytes, pack})
-    if image.errors.len() > 0 -> return Err(image.errors[0])
+    if image.errors.len() > 0 -> return Err(image.errors.join("\n"))
     native_test_files.write_bytes(binary, image.bytes) ?? return Err("couldn't write native test executable {binary}: {err}")
     native_test_files.set_mode(binary, 0o755) ?? return Err("couldn't make native test executable runnable: {err}")
 }
