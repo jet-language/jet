@@ -778,6 +778,78 @@ of the logical environment overlay. File-zone reads transfer owned native
 byte lists; native embedded-zone absence is the platform seed's actual fact
 (the embedded TZif table is a wasm fact), not a file-system fallback.
 
+The Jet runtime-only source manifest is assembled by the runtime-object path,
+never the compiler bootstrap unit. Adjacent `// runtime-init: N` and
+`// runtime-fini: N` comments on `#Export(c)` declarations produce explicit
+`symbol init N` / `symbol fini N` export-list rows. Lifecycle functions take
+no arguments and return nothing; the object writer emits the corresponding
+priority-suffixed ELF init/fini arrays, without special-casing function names.
+Allocator initialization has priority zero; host stdio initializes after it.
+
+D-STDOUT-BUFFER1=A gives stdout one locked 8192-byte process-wide buffer:
+newline flushing on terminals, full-buffer flushing on files and pipes.
+stderr drains stdout first and writes immediately. The shared
+`jet_rt_stdout_flush` hook is also a fini entry and is called at input,
+blocking, child-launch, error-report and explicit-exit boundaries. Print
+borrows the E4 text and appends its newline without allocating a second frame.
+IOError crosses host C boundaries as seven eight-byte fields: kind, operation,
+nullable owned resource text, OS-code presence, OS code, nullable owned cause
+text, and resource-limit tag. Tags are generated from the canonical Core enum
+registry; no Rust enum or String layout is inspected.
+IOContext uses a 40-byte owner: operation, nullable resource text, OS-code
+presence, raw i64 OS code, nullable cause text. It is the contiguous payload
+at IOError+8; variant getters deep-clone it, while constructors consume its
+header and transfer the text owners. The OS-code projection encodes exact Int
+through the canonical numeric seam, never by treating a boxed Int as i64.
+Core stdio wrappers check `IO.Write`/`IO.Flush` faults before entering the
+raw transport. Runtime print, panic and abort do not consult those switches.
+stderr text lines use a borrowed text iovec and a stack-local LF, avoiding a
+temporary line allocation; byte lists compact eight-byte slots into bounded
+mapping-owned scratch. A zero write keeps a distinct WriteZero sentinel,
+not a fabricated errno. OS causes use pinned musl 1.2.5 wording from
+`JetRuntime/Assets/MuslErrno1_2_5`, with source hashes and MIT attribution.
+
+The native main wrapper captures argc/argv/envp through the explicit
+`jet_rt_host_arguments` entry before user code. Runtime-private module globals
+are the sole raw startup snapshot, not foreign data imports or a second
+environment map. Entryless hosts must call that entry explicitly before
+argument/environment access. Core owns the once-published logical Shared
+environment and all subsequent writes; raw startup bytes remain immutable.
+Entryless hosts lend environment arrays only during capture: valid entries
+are copied once into a single runtime-owned NUL-terminated byte block and the
+index points into it. Later host `setenv`/`putenv` cannot invalidate the
+snapshot. argv remains borrowed for the runtime lifetime. Zero-sized process
+stream tokens are the constant non-null word 1 and have no allocation/drop.
+Startup indexing follows Rust 1.90 `sys/env/unix.rs`: skip empty/malformed
+entries and search `=` after byte zero, preserving names beginning with `=`,
+non-UTF-8 bytes, duplicate rows and host order. Core transfers use owned
+List<U8> headers with eight-byte slots. Runtime-only scheduler/deadline flags
+read this immutable snapshot through an internal helper; Core overlay writes
+do not alter those flags. No overlay-provider callback is registered.
+
+Raw clock samples carry exact Int words, not truncated i64 timestamps. Wall
+samples preserve the unsigned duration magnitude and an independent
+before-epoch flag, including normalized negative POSIX timespecs. Host
+monotonic samples use one lazily published process-relative origin, mirroring
+Rust's `TimeMonotonic.rs` static `OnceLock<Instant>`, rather than substituting
+the scheduler's absolute monotonic clock. Clock syscalls borrow the calling
+thread's existing timespec scratch and read both words before any other call
+can reuse it. Core alone selects world, replay or host samples and clamps
+the public Instant scalar.
+The reserved Core Clock `__clock_mono_ns` seam samples that same host epoch
+without controlled, world or replay selection; it preserves the existing
+hidden Clock implementation, not a new user-callable pure clock operation.
+Controlled monotonic callbacks live in the existing dynamic TLS registry;
+the clock root owns just the registry key, not another thread-context slot.
+Private TUI capability inputs sample the real stdout tty and owned immutable
+startup environment values through two narrow host-fact exports. TCGETS
+continues to borrow host scratch only while the host mutex is held.
+Time-zone environment reads lend the immutable startup snapshot and decode
+invalid UTF-8 lossily, matching `var_os(...).to_string_lossy()` independently
+of the logical environment overlay. File-zone reads transfer owned native
+byte lists; native embedded-zone absence is the platform seed's actual fact
+(the embedded TZif table is a wasm fact), not a file-system fallback.
+
 A Jet type that generated Rust holds as a native runtime type crosses as an owned
 `Box<T>` handle. The generator reads Context.rs and predicates.rs name tables and the
 explicit names in MIRRust `rust_apply_type`, using the same canonical-Core probe as

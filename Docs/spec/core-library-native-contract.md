@@ -20,6 +20,62 @@ leave with the rest of Rust once the Jet back end covers every program (D-EXEC2,
 D-BACKEND-OWN1, owner directive 19). No Core contract is defined as
 permanently owned by a particular compiler implementation.
 
+Native task-stop publication requires both a current task control and the
+compiler's scoped publication capability: only a checked operation immediately
+followed by MIR `Poll(Propagate)` may arm it. Plain calls and root bodies remain
+process-fatal. Runtime-internal traps (overflow, division by zero, and list
+bounds) in task bodies are not publishable unless compiler-armed.
+`jet_rt_poll_call_leave` restores the saved TCB64 word on a returning call.
+If a compiled callback leaves through its `Stopped` exit instead, the task
+runner restores the body word through `scheduler_body_leave(body)` after
+`coll_call2` (`Compiler/JetRuntime/Source/Task.jet`). A process-fatal call does
+not resume the scheduler and therefore needs no surviving capability restore.
+
+Program-side require, panic, and index-miss producers run registered cleanup
+before the call only when they cannot emit a real Propagate (plain mode,
+cleanup-masked code, transactions, or a closed block). Otherwise the Poll stop
+edge owns that cleanup exactly once, and an unconditional stop's impossible
+resume seals `Stopped`. This minimal runtime-port seam is mirrored in
+`crates/jet-codegen/src/Codegen/TIR/{mir,tir_to_mir_expr}.rs`; that seed and
+verification mirror dies at the Rust cutover.
+The Rust seed's plain `TOrFallback::Panic` path in `tir_to_mir_expr.rs`
+emits RequireStop then Unreachable without pre-call cleanup, unlike the Jet
+`jet_codegen_lower_fallback_panic` path in `Statements.jet`. This seam preserves
+that pre-existing plain-mode divergence rather than changing seed semantics.
+
+The factory selects `jet_driver_compile_native_mir` for native programs and
+the unchanged plain `jet_driver_compile_mir` for runtime-library objects.
+`jet_codegen_lower_native_program` shares the plain lowering implementation
+but enables stop points, not comptime budgets. This matches the Rust task
+boundary's panic-to-TaskFailure catch rather than letting an ordinary native
+task panic abort its whole process. Plain/no-task MIR production uses the
+same false-mode implementation; its output is expected to remain byte-identical.
+
+Native cleanup frames lend TCB64 bit4 through `jet_rt_cleanup_enter/leave`,
+saving/restoring the whole word for nesting. The first owned Stop stays in the
+control slot, while Check/Propagate delivery is masked even inside deferred
+thunks and resource closes. Cancellation and deadlines do not interrupt those
+closes. A new panic during cleanup with a pending Stop is process-fatal (70),
+matching the Rust seed's panic-during-unwinding abort semantics
+(`crates/jet-codegen/src/Prelude/Scheduler.rs:234–244`). No additional TLS state
+or specialized plain cleanup call graph is introduced.
+The Source acceptance runner
+`Compiler/JetBackend/Tests/run-trap-source-fixtures.mjs` reuses the registered
+`defer close(^resource)` examples, checking native task publication, plain
+task/root fatal report parity, LIFO closes exactly once, cancellation held
+through closing and delivered at the next wait, fatal panic inside closing,
+and the plain no-task output against its existing byte golden. Its
+`assemble/lower/link/run` modes require the fresh composed runtime for execution;
+source parsing alone is not a behavioral receipt.
+
+Native expectation probes consume only a pending panic with a recorded raw
+`E3001` or `R0801`–`R0803` stop in the innermost matching scope. A successful
+`jet_rt_test_catch_for_scope` clears the original scheduler stop and completes
+that expectation; a mismatch replaces it with `E3001` and sets unmet so no
+parent can catch the mismatch. Cancellation, deadlines, skips, unrecognized
+codes, and probes for another scope do not mutate the pending stop. Sentry
+records its raw fault detail before dropping it, never its rendered report.
+
 ## Purpose and scope
 
 Core modules own public behavior. A Core API must be useful for real programs,

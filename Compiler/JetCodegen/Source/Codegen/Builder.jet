@@ -1218,6 +1218,17 @@ fn jet_codegen_emit_poll(builder: &JetCodegenBuilder, program: JetCodegenProgram
     builder.current = resume
 }
 
+// Shared with explicit program-side stops: skip pre-call cleanup only when
+// the operation's actual Propagate edge will own the canonical cleanup.
+fn jet_codegen_can_emit_propagate(builder: JetCodegenBuilder, program: JetCodegenProgram) -> Bool Never! {
+    program.stop_points && !builder.stop_cleanup_active && builder.transactions.len() == 0 && jet_codegen_current_is_open(builder, program)
+}
+
+fn jet_codegen_terminate_program_stop(builder: &JetCodegenBuilder, program: JetCodegenProgram, propagated: Bool, reason: String) Never! {
+    if propagated -> jet_codegen_terminate(&builder, program, MIRTerminator.Stopped)
+    else -> jet_codegen_terminate(&builder, program, MIRTerminator.Unreachable{reason: reason})
+}
+
 // The entry of a stop-point function, after its parameters are bound: a
 // compiler callable first enters one level of comptime depth, then the Check.
 fn jet_codegen_emit_entry_check(builder: &JetCodegenBuilder, program: JetCodegenProgram) Never! {
@@ -1254,6 +1265,16 @@ fn jet_codegen_current_is_open(builder: JetCodegenBuilder, program: JetCodegenPr
 fn jet_codegen_terminate(builder: &JetCodegenBuilder, program: JetCodegenProgram, terminator: MIRTerminator) Never! {
     at :: builder.block_positions.get(builder.current.value) ?? panic("Jet codegen tried to terminate a missing MIR block")
     builder.blocks[at].terminator = terminator
+}
+
+// Read checked operand metadata only for Deref; no type cloning/search for
+// the common call path and no sentry Propagate after Shared/ref dereferences.
+fn jet_codegen_operation_can_stop(builder: JetCodegenBuilder, operation: MIROperation) -> Bool Never! {
+    if operation == .Deref(value) {
+        position :: builder.value_positions.get(value.value) ?? return false
+        return mir_operation_can_stop(operation, Val(builder.values[position].ty))
+    }
+    mir_operation_can_stop(operation, None)
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::emit
@@ -1936,6 +1957,14 @@ fn jet_codegen_emit_cleanup_suffix(builder: &JetCodegenBuilder, program: JetCode
 fn jet_codegen_emit_cleanup_frame(builder: &JetCodegenBuilder, program: JetCodegenProgram, frame_index: Int) Never! {
     if frame_index < 0 || frame_index >= builder.cleanup_frames.len() -> panic("MIR cleanup frame index is outside the active stack")
     frame := builder.cleanup_frames[frame_index]
+    masked :: builder.stop_cleanup_active
+    builder.stop_cleanup_active = true
+    saved := MIRValueID?{None}
+    if program.stop_points && !program.comptime_budget && frame.actions.len() > 0 {
+        route :: jet_codegen_static_prelude_call(&builder, program, "core.cleanup", "enter", "jet_rt_cleanup_enter", [Bool]{}, None, TFailureCarrier.Infallible, false)
+        span :: builder.current_span
+        saved = Val(jet_codegen_emit_static_prelude_call(&builder, program, span, Type.IntN{signed: true, bits: 64}, route, [MIRValueID]{}))
+    }
     loop automatic in [false, true] {
         index := frame.actions.len()
         loop index > 0 {
@@ -1954,6 +1983,12 @@ fn jet_codegen_emit_cleanup_frame(builder: &JetCodegenBuilder, program: JetCodeg
             if !jet_codegen_current_is_open(builder, program) -> return
         }
     }
+    if saved == .Val(word) {
+        route :: jet_codegen_static_prelude_call(&builder, program, "core.cleanup", "leave", "jet_rt_cleanup_leave", [Bool]{false}, None, TFailureCarrier.Infallible, false)
+        span :: builder.current_span
+        _ := jet_codegen_emit_static_prelude_call(&builder, program, span, Type.Named{name: "Unit"}, route, [MIRValueID]{word})
+    }
+    builder.stop_cleanup_active = masked
     if frame.owner != None && jet_codegen_current_is_open(builder, program) {
         scope :: frame.owner ?? panic("owned cleanup frame lost its MIR scope")
         current_span := builder.current_span

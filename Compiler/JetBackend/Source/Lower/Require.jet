@@ -159,8 +159,10 @@ fn lower_require_stop(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     descriptor :: lower_pointer(&f)
     lower_emit(&f, LIRInst.DataAddress{dst: descriptor, data: data})
     ordinal :: lower_const(&f, if kind == .Require -> 0 else -> if kind == .RequireEq -> 1 else -> 2)
-    if m.stop_points {
+    if m.stop_points && lower_instruction_has_stop_poll(c, f, instruction) {
+        saved :: lower_poll_call_enter(&m, &f)
         lower_call_runtime(&m, &f, "jet_rt_require_stop", [LIRValueID]{ordinal, descriptor, message, left, right, locals}, None)
+        lower_poll_call_leave(&m, &f, saved)
         if message_owned -> lower_emit(&f, LIRInst.Drop{value: message})
         if kind == .RequireEq {
             lower_emit(&f, LIRInst.Drop{value: left})

@@ -1916,6 +1916,31 @@ fn lower_has_stop_points(p: MIRProgram, prepared: [LowerPreparedFunction]) -> Bo
     false
 }
 
+// A global native-host program may still contain plain/noreturn functions.
+// Arm publication only for this checked operation's immediate real Propagate
+// terminator, never merely because some other function has stop points.
+fn lower_instruction_has_stop_poll(c: LowerContext, f: LowerFunction, instruction: MIRInstruction) -> Bool Never! {
+    at :: c.block_index.get(f.mir_block.value) ?? return false
+    block :: c.mir.blocks[at]
+    if block.instructions.len() == 0 -> return false
+    if block.instructions[block.instructions.len() - 1].id != instruction.id -> return false
+    if block.terminator == {
+        .Poll(kind, _, _) -> return kind == MIRPollKind.Propagate
+        else -> {}
+    }
+    false
+}
+
+fn lower_poll_call_enter(m: &LowerModule, f: &LowerFunction) -> LIRValueID Never! {
+    saved :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_poll_call_enter", [LIRValueID]{}, Val(saved))
+    saved
+}
+
+fn lower_poll_call_leave(m: &LowerModule, f: &LowerFunction, saved: LIRValueID) Never! {
+    lower_call_runtime(&m, &f, "jet_rt_poll_call_leave", [LIRValueID]{saved}, None)
+}
+
 // A bare return from a fallible function whose success type is Unit returns
 // Ok(()) (MIRRust.rs default_return); the box is lower_result_box's layout.
 fn lower_return_implicit_ok(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction) Never! {

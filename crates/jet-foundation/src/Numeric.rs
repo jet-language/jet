@@ -2930,21 +2930,27 @@ unsafe impl Sync for JetIntNode {}
 /// append-only registry. Records are never freed: a scanner may run after a
 /// thread exits, and retaining the record is cheaper and safer than a
 /// use-after-free. Numeric nodes themselves remain fully reclaimable.
+#[cfg(not(jet_native_pack))]
 struct JetIntHazardRecord {
     hazard: AtomicPtr<JetIntNode>,
     next: AtomicPtr<JetIntHazardRecord>,
 }
 
+#[cfg(not(jet_native_pack))]
 unsafe impl Send for JetIntHazardRecord {}
+#[cfg(not(jet_native_pack))]
 unsafe impl Sync for JetIntHazardRecord {}
 
+#[cfg(not(jet_native_pack))]
 static JET_INT_HAZARDS: AtomicPtr<JetIntHazardRecord> = AtomicPtr::new(ptr::null_mut());
 
+#[cfg(not(jet_native_pack))]
 thread_local! {
     static JET_INT_HAZARD_RECORD: Cell<*mut JetIntHazardRecord> =
         const { Cell::new(ptr::null_mut()) };
 }
 
+#[cfg(not(jet_native_pack))]
 fn jet_int_hazard_record() -> *mut JetIntHazardRecord {
     JET_INT_HAZARD_RECORD.with(|slot| {
         if let Some(record) = NonNull::new(slot.get()) {
@@ -2970,10 +2976,12 @@ fn jet_int_hazard_record() -> *mut JetIntHazardRecord {
     })
 }
 
+#[cfg(not(jet_native_pack))]
 struct JetIntReadGuard {
     record: *mut JetIntHazardRecord,
 }
 
+#[cfg(not(jet_native_pack))]
 impl JetIntReadGuard {
     fn enter() -> Self {
         Self {
@@ -2987,6 +2995,7 @@ impl JetIntReadGuard {
     }
 }
 
+#[cfg(not(jet_native_pack))]
 impl Drop for JetIntReadGuard {
     fn drop(&mut self) {
         // SAFETY: the record is process-lifetime and owned by this thread.
@@ -3003,7 +3012,30 @@ impl Drop for JetIntReadGuard {
         }
     }
 }
+// RUST-EXIT: opaque native guard transport only; no Rust domain or layout.
+#[cfg(jet_native_pack)]
+struct JetIntReadGuard { record: i64 }
+#[cfg(jet_native_pack)]
+impl JetIntReadGuard {
+    fn enter() -> Self {
+        // RUST-EXIT: Jet owns per-thread registration and publication.
+        Self { record: unsafe { jet_rt_int_hazard_enter() } }
+    }
+    fn protect(&self, node: *mut JetIntNode) {
+        // RUST-EXIT: no pointer-layout projection, only an opaque FFI word.
+        unsafe { jet_rt_int_hazard_protect(self.record, node as usize as i64) };
+    }
+}
+#[cfg(jet_native_pack)]
+impl Drop for JetIntReadGuard {
+    fn drop(&mut self) {
+        // RUST-EXIT: Jet clears protection and reclaims the sole retired list.
+        unsafe { jet_rt_int_hazard_clear(self.record) };
+    }
+}
 
+
+#[cfg(not(jet_native_pack))]
 fn jet_int_push_retired(node: *mut JetIntNode) {
     loop {
         let head = JET_INT_RETIRED.load(Ordering::Acquire);
@@ -3019,6 +3051,7 @@ fn jet_int_push_retired(node: *mut JetIntNode) {
     }
 }
 
+#[cfg(not(jet_native_pack))]
 fn jet_int_is_hazard(node: *mut JetIntNode) -> bool {
     let mut record = JET_INT_HAZARDS.load(Ordering::Acquire);
     while !record.is_null() {
@@ -3033,6 +3066,7 @@ fn jet_int_is_hazard(node: *mut JetIntNode) -> bool {
     false
 }
 
+#[cfg(not(jet_native_pack))]
 unsafe fn jet_int_deallocate(node: *mut JetIntNode) {
     // SAFETY: no owner or hazard references this immutable carrier. The
     // allocation transport matches construction on each execution tier.
@@ -3042,6 +3076,7 @@ unsafe fn jet_int_deallocate(node: *mut JetIntNode) {
     jet_int_free(node.cast(), std::mem::size_of::<JetIntNode>(), 8);
 }
 
+#[cfg(not(jet_native_pack))]
 fn jet_int_retire_zero(node: *mut JetIntNode) {
     // A reader that publishes this node after the check must revalidate its
     // atomic word before dereferencing it. If it does not revalidate, its
@@ -3081,6 +3116,7 @@ fn jet_int_reclaim_retired() {
     }
 }
 
+#[cfg(not(jet_native_pack))]
 fn jet_int_try_retain(node: *mut JetIntNode) -> bool {
     loop {
         // SAFETY: the caller has published a hazard for `node`.
@@ -3106,6 +3142,7 @@ fn jet_int_try_retain(node: *mut JetIntNode) -> bool {
     }
 }
 
+#[cfg(not(jet_native_pack))]
 static JET_INT_RETIRED: AtomicPtr<JetIntNode> = AtomicPtr::new(ptr::null_mut());
 
 fn jet_int_try_node(value: CtBigInt) -> Result<NonNull<JetIntNode>, AllocError> {
@@ -3206,6 +3243,7 @@ unsafe fn jet_int_retain(node: *mut JetIntNode) {
     }
 }
 
+#[cfg(not(jet_native_pack))]
 #[inline(never)]
 unsafe fn jet_int_release(node: *mut JetIntNode) {
     loop {
@@ -3318,6 +3356,7 @@ impl JetInt {
         Self(raw)
     }
 
+    #[cfg(not(jet_native_pack))]
     /// Clone a word read from an atomic location. The reader publishes a
     /// per-thread hazard, revalidates the word, then retains only a nonzero
     /// node reference before clearing that hazard.
@@ -3351,6 +3390,21 @@ impl JetInt {
             drop(read_guard);
             return Self(raw);
         }
+    }
+
+    #[cfg(jet_native_pack)]
+    pub fn clone_from_atomic<F>(raw: u64, mut reload: F) -> Self
+    where
+        F: FnMut() -> u64,
+    {
+        // RUST-EXIT: synchronous callback transport only. Jet implements all
+        // hazard publication, reload validation, retain and reclamation policy.
+        unsafe extern "C" fn reload_word<F: FnMut() -> u64>(context: i64) -> i64 {
+            // SAFETY: the enclosing FFI call borrows this live closure once.
+            unsafe { (&mut *(context as usize as *mut F))() as i64 }
+        }
+        let context = &mut reload as *mut F as usize as i64;
+        Self(unsafe { jet_rt_int_clone_atomic_reload(raw as i64, reload_word::<F> as usize, context) } as u64)
     }
 
     /// Compare an atomic raw word with an owned value under numeric equality.
@@ -3523,6 +3577,12 @@ impl Clone for JetInt {
 impl Drop for JetInt {
     #[inline]
     fn drop(&mut self) {
+        #[cfg(jet_native_pack)]
+        {
+            // RUST-EXIT: consume the owner in Jet, sharing its hazard domain.
+            unsafe { jet_rt_int_drop(self.0 as i64) };
+        }
+        #[cfg(not(jet_native_pack))]
         if jet_int_is_pointer(self.0) {
             // SAFETY: Drop consumes this owner's reference.
             unsafe { jet_int_release(jet_int_pointer(self.0)) };

@@ -4928,7 +4928,8 @@ fn lower_require_stop(
     // automatic scope-end close first. A conditional stop branches so only
     // its failure edge runs them; the success edge keeps them for its own
     // scope exits. The stop report never reads a local those cleanups moved.
-    let stop_cleanups = ctx.has_stop_path_cleanups();
+    let propagated = ctx.can_emit_propagate();
+    let stop_cleanups = !propagated && ctx.has_stop_path_cleanups();
     if stop_cleanups {
         let moved = ctx.stop_path_moved_locals();
         context.locals.retain(|(_, local)| !moved.contains(local));
@@ -4957,9 +4958,7 @@ fn lower_require_stop(
                     always_stops: true,
                 }),
             )?;
-            ctx.terminate(MirTerminator::Unreachable {
-                reason: "checked conditional stop".to_string(),
-            });
+            ctx.terminate_program_stop(propagated, "checked conditional stop");
             ctx.switch_to(success);
             return ctx.emit(
                 "require-pass",
@@ -4985,9 +4984,7 @@ fn lower_require_stop(
         }),
     )?;
     if always_stops {
-        ctx.terminate(MirTerminator::Unreachable {
-            reason: "checked unconditional stop".to_string(),
-        });
+        ctx.terminate_program_stop(propagated, "checked unconditional stop");
     }
     Ok(value)
 }
@@ -6948,6 +6945,7 @@ fn lower_fallback_block(
                     })
                     .collect(),
             };
+            let propagated = ctx.can_emit_propagate();
             ctx.emit(
                 "or-fallback-panic",
                 Some(expr.ty.clone()),
@@ -6961,9 +6959,7 @@ fn lower_fallback_block(
                     always_stops: true,
                 }),
             )?;
-            ctx.terminate(MirTerminator::Unreachable {
-                reason: "or-fallback panic".to_string(),
-            });
+            ctx.terminate_program_stop(propagated, "or-fallback panic");
             Ok(None)
         }
         super::TOrFallback::Break => {

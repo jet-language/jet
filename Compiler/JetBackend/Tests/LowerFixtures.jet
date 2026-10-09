@@ -698,13 +698,23 @@ fn fx_compare_value(b: &FxBuilder, operation: MIROperation) -> MIRValueID Never!
 // Lower `program`, print its LIR and issues, then write its relocatable object,
 // explicit fresh-pack executable and in-memory image/import manifest.
 fn fx_report(name: String, program: MIRProgram) -> Bool {
+    fx_report_mode(name, program, false)
+}
+
+// Task-control imports exist only in the composed Jet runtime. Static image
+// coverage stays held until native image cutover; never supply fake providers.
+fn fx_report_native(name: String, program: MIRProgram) -> Bool {
+    fx_report_mode(name, program, true)
+}
+
+fn fx_report_mode(name: String, program: MIRProgram, native_only: Bool) -> Bool {
     lowered :: lir_lower_entry(program, mir_function_id("run"))
     print("== {name}")
     print(lir_print_module(lowered.lir))
     loop issue in lowered.issues -> print("issue {issue.function}: {issue.message}")
     if lowered.issues.len() > 0 -> return false
     entry :: lowered.entry ?? panic("lowering without issues has an entry")
-    fx_report_image(name, lowered.lir, entry.value)
+    fx_report_image(name, lowered.lir, entry.value, native_only)
 }
 
 // Runtime witnesses use the same admitted pack as every other fixture.
@@ -723,7 +733,7 @@ fn fx_report_runtime(name: String, program: MIRProgram) -> Bool {
 fn fx_report_lir(name: String, program: LIRModule) -> Bool {
     entry := -1
     loop function in program.functions { if function.name == "run" -> entry = function.id.value }
-    fx_report_image(name, program, entry)
+    fx_report_image(name, program, entry, false)
 }
 
 // Lints `program` and writes its images, started at function `entry` (a
@@ -995,7 +1005,10 @@ fn run() {
     if !fx_report("statics-list", fx_statics_list()) -> clean = false
     if !fx_report("statics-strings", fx_statics_strings()) -> clean = false
     if !fx_report("require-pass", fx_require_pass()) -> clean = false
-    if !fx_report("require-native-pass", fx_require_native_pass()) -> clean = false
+    if !fx_report_native("require-native-pass", fx_require_native_pass()) -> clean = false
+    if !fx_report_native("panic-task-checked", fx_panic_capability(true)) -> clean = false
+    if !fx_report_native("panic-task-plain", fx_panic_capability(false)) -> clean = false
+    if !fx_report_native("panic-root-checked", fx_panic_capability(true)) -> clean = false
     if !fx_report("require-fail", fx_require_fail()) -> clean = false
     if !fx_report("require-eq-int", fx_require_eq_int()) -> clean = false
     if !fx_report("require-eq-string", fx_require_eq_string()) -> clean = false

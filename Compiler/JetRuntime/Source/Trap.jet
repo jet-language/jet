@@ -214,6 +214,68 @@ fn trap_context(file: I64, file_len: I64, line: I64, function: I64, function_len
     trap_msg_newline()
 }
 
+// Owned equivalent of trap_context for a stop carried by a native control.
+// The no-control path still uses the original heap-free writes below.
+fn trap_build_context(report: I64, file: I64, file_len: I64, line: I64, function: I64, function_len: I64, source: I64, source_len: I64, column: I64, caret: I64) {
+    if (file_len != I64{0}) {
+        trap_build_msg_location(report)
+        jet_rt_string_builder_push_static(report, file, file_len)
+        trap_build_msg_colon(report)
+        rt_text_push_number(report, line)
+        if (function_len != I64{0}) {
+            trap_build_msg_in_function(report)
+            jet_rt_string_builder_push_static(report, function, function_len)
+        }
+        trap_build_msg_newline(report)
+    }
+    if (source_len == I64{0}) -> return
+    digits := I64{1}
+    remainder := line
+    loop remainder >= (I64{10}) {
+        digits += I64{1}
+        remainder = remainder /% I64{10}
+    }
+    spaces := I64{0}
+    loop spaces < digits + (I64{3}) {
+        trap_build_msg_space(report)
+        spaces += I64{1}
+    }
+    trap_build_msg_gutter_line(report)
+    rt_text_push_number(report, line)
+    trap_build_msg_gutter_source(report)
+    jet_rt_string_builder_push_static(report, source, source_len)
+    trap_build_msg_newline(report)
+    spaces = I64{0}
+    loop spaces < digits + (I64{3}) {
+        trap_build_msg_space(report)
+        spaces += I64{1}
+    }
+    trap_build_msg_gutter_caret(report)
+    spaces = I64{1}
+    loop spaces < column {
+        trap_build_msg_space(report)
+        spaces += I64{1}
+    }
+    spaces = I64{0}
+    length :: if (caret < I64{1}) -> I64{1} else -> caret
+    loop spaces < length {
+        trap_build_msg_caret(report)
+        spaces += I64{1}
+    }
+    trap_build_msg_newline(report)
+}
+
+fn trap_can_publish() -> Bool {
+    scheduler_control_current() != I64{0} && (sync_load(thread_base() + I64{64}) & I64{2}) != I64{0} && !scheduler_cleanup_panic_fatal()
+}
+
+fn trap_publish_report(report: I64, raw_message: I64, raw_length: I64) {
+    test_scope_record_e3001(raw_message, raw_length)
+    trap_build_footer_e3001(report)
+    // Transfers the builder to the actual control, without copying its bytes.
+    rt_task_panic_publish_owned(report, I64{1})
+}
+
 fn trap_footer(code: I64) {
     trap_footer_bytes(code)
     trap_exit(I64{70})
@@ -423,6 +485,22 @@ fn rt_record_variant_panic() {
 }
 
 fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, caret: I64, message: I64, locals: I64) {
+    if trap_can_publish() {
+        report :: jet_rt_string_builder_new()
+        trap_build_msg_header_panic(report)
+        jet_rt_string_builder_push(report, message)
+        trap_build_msg_message_end(report)
+        trap_build_context(report, trap_word(file), trap_word(file + I64{8}), trap_line(line), trap_word(function), trap_word(function + I64{8}), trap_word(source), trap_word(source + I64{8}), trap_line(column), trap_line(caret))
+        if (locals != I64{0}) {
+            if (trap_word(locals + I64{8}) > I64{0}) {
+                trap_build_msg_locals(report)
+                jet_rt_string_builder_push(report, locals)
+                trap_build_msg_newline(report)
+            }
+        }
+        trap_publish_report(report, trap_word(message), trap_word(message + I64{8}))
+        return
+    }
     trap_header(I64{0})
     trap_write_handle(message)
     trap_msg_message_end()
@@ -455,6 +533,31 @@ fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, care
 }
 
 #Export(c) fn jet_rt_require_stop(kind: I64, descriptor: I64, message: I64, left: I64, right: I64, locals: I64) {
+    if trap_can_publish() {
+        raw := message
+        if (kind == I64{1}) {
+            raw = jet_rt_string_builder_new()
+            trap_build_msg_expected(raw)
+            jet_rt_string_builder_push(raw, right)
+            trap_build_msg_got(raw)
+            jet_rt_string_builder_push(raw, left)
+        }
+        report :: jet_rt_string_builder_new()
+        trap_build_msg_header_panic(report)
+        jet_rt_string_builder_push(report, raw)
+        trap_build_msg_message_end(report)
+        trap_build_context(report, trap_word(descriptor), trap_word(descriptor + I64{8}), trap_line(trap_word(descriptor + I64{16})), trap_word(descriptor + I64{24}), trap_word(descriptor + I64{32}), trap_word(descriptor + I64{40}), trap_word(descriptor + I64{48}), trap_line(trap_word(descriptor + I64{56})), trap_line(trap_word(descriptor + I64{64})))
+        if (locals != I64{0}) {
+            if (trap_word(locals + I64{8}) > I64{0}) {
+                trap_build_msg_locals(report)
+                jet_rt_string_builder_push(report, locals)
+                trap_build_msg_newline(report)
+            }
+        }
+        trap_publish_report(report, trap_word(raw), trap_word(raw + I64{8}))
+        if (kind == I64{1}) -> test_text_drop(raw)
+        return
+    }
     trap_header(I64{0})
     if {
         (kind == I64{1}) -> {

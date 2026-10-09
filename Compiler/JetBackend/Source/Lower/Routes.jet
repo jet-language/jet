@@ -318,12 +318,44 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         }
         &lowered.push(value)
     }
-    lower_route_result(p, c, &m, &f, instruction, route, lowered, what, name)
+    panic_route :: route.symbol == "jet_panic" || route.symbol == "jet_panic_rich"
+    if panic_route && m.stop_points && lower_instruction_has_stop_poll(c, f, instruction) {
+        saved :: lower_poll_call_enter(&m, &f)
+        lower_route_result(p, c, &m, &f, instruction, route, lowered, what, name)
+        lower_poll_call_leave(&m, &f, saved)
+    } else {
+        lower_route_result(p, c, &m, &f, instruction, route, lowered, what, name)
+    }
     if f.failed -> return
     loop handle in temporaries -> lower_emit(&f, LIRInst.Drop{value: handle})
     loop lent in record_lists {
         lower_call_helper(&m, &f, "list.record_handles_free", lent.ty, [LIRValueID]{lent.buffer, lent.length}, None)
     }
+}
+
+// Compiler-owned native control calls use the runtime's raw word ABI, not a
+// Core value-carrier adapter (the same rail as Poll's session imports).
+fn lower_cleanup_control_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, args: [MIRValueID]) -> Bool Never! {
+    symbol :: lower_route_symbol(row)
+    if symbol != "jet_rt_cleanup_enter" && symbol != "jet_rt_cleanup_leave" -> return false
+    entering :: symbol == "jet_rt_cleanup_enter"
+    if args.len() != (if entering -> 0 else -> 1) {
+        lower_fail(&m, &f, "native cleanup control call has incorrect arity")
+        return true
+    }
+    values := [LIRValueID]{}
+    if !entering {
+        saved :: lower_use(&m, &f, args[0]) ?? return true
+        &values.push(saved)
+    }
+    if entering {
+        saved :: lower_result(p, c, &m, &f, instruction) ?? return true
+        lower_call_runtime(&m, &f, symbol, values, Val(saved))
+    } else {
+        lower_call_runtime(&m, &f, symbol, values, None)
+        lower_alias_absent(&f, instruction)
+    }
+    true
 }
 
 // Result arms are exclusive, so each arm writes to the same payload slot.
