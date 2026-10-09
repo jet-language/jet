@@ -1,6 +1,7 @@
 // Lower guard, notification, allocator, and terminal expressions from checked TIR.
 use jet_foundation.[
     Effect,
+    MIRAccess,
     MIRAllocatorKind,
     MIRFieldID,
     MIROperation,
@@ -125,9 +126,12 @@ fn jet_codegen_lower_alloc_new(builder: &JetCodegenBuilder, program: JetCodegenP
 
 fn jet_codegen_lower_guard_expression(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr) -> MIRValueID {
     if expression.kind == {
-        .SharedGuardValue(guard, _) -> {
-            value := jet_codegen_lower_expr(&builder, program, guard)
-            jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Deref{value: value})
+        .SharedGuardValue(_, _) -> {
+            // The guard lends its payload; reading it must not manufacture a
+            // second owner with a raw pointer load. Use the same checked place
+            // read as a borrowed field (copy/clone, never a move).
+            place :: jet_codegen_lower_expression_place(&builder, program, expression, MIRAccess.Read) ?? panic("checked guard value lost its place")
+            jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.ReadPlace{place: place})
         }
         .SharedGuardMap(guard, path, editable) -> jet_codegen_lower_shared_guard_map(&builder, program, expression, guard, path, editable)
         .SharedGuardSplit(guard, first, second, editable) -> jet_codegen_lower_shared_guard_split(&builder, program, expression, guard, first, second, editable)

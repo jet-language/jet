@@ -222,6 +222,7 @@ fn sema_stmt_check_loop_value_break(value: Expr, label: String?, label_span: Spa
     payload_expected := Type?{None}
     if frame.ty == .Val(expected_type) && !sema_expr_is_numeric(expected_type) -> payload_expected = Val(expected_type)
     checked :: sema_check_expression(value, payload_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if !sema_copy_site_check_guard_owned(checked, environment, scopes, context, &diagnostics, false) -> return None
     if frame.kind == SemaLoopValueKind.Collecting {
         &diagnostics.push(sema_error("E0075", span, "a collecting loop can't break with a value", "collecting loops produce items with `yield`; only the loop's own break without a payload is valid", "remove the break payload or use an ordinary result loop"))
         return None
@@ -239,6 +240,7 @@ fn sema_stmt_check_loop_value_break(value: Expr, label: String?, label_span: Spa
 fn sema_stmt_check_yield(value: Expr, span: Span, return_type: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     if span.start == span.end && context.collect_item_types.len() > 0 {
         item :: sema_loop_value_check_collecting_item(value, expr_span(value), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+        if !sema_copy_site_check_guard_owned(item, environment, scopes, context, &diagnostics, false) -> return None
         if !sema_stmt_move_direct(value, &state, scopes, "the collecting loop", &diagnostics) -> return None
         return Val(TStmt.ExprStmt{value: item, span: span})
     }
@@ -250,6 +252,7 @@ fn sema_stmt_check_yield(value: Expr, span: Span, return_type: Type?, environmen
         return None
     }
     checked :: sema_check_expression(value, Val(elem_type), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if !sema_copy_site_check_guard_owned(checked, environment, scopes, context, &diagnostics, false) -> return None
     yielded := checked
     if !type_identity_equal(checked.ty, elem_type) {
         if {
@@ -2992,6 +2995,10 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
         sema_stmt_declare_unchecked_binding(binding, environment, &scopes)
         return None
     }
+    if !sema_copy_site_check_guard_owned(init, environment, scopes, context, &diagnostics, false) {
+        sema_stmt_declare_unchecked_binding(binding, environment, &scopes)
+        return None
+    }
     sema_copy_site_check_conditional(binding.init, binding.ty, environment, scopes, context, &diagnostics)
     // D-MEM1 stage S5 (Rust `string_view_call_source`): `x :: s.trim()`,
     // `s.after(sep)` or `s.before(sep)` on a local or parameter `String`
@@ -3263,6 +3270,7 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
     // reads the literal as Float rather than exact Decimal.
     if op != None && sema_expr_decimal_literal_operand(expr, true) && sema_expr_expects_machine_float(Val(required)) -> expected = Val(required)
     checked_value :: sema_check_expression(expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if !sema_copy_site_check_guard_owned(checked_value, environment, scopes, context, &diagnostics, false) -> return None
     checked := checked_value
     // A compound operand widens into the place's numeric type first
     // (`total += byte`), as Rust `widen_numeric_expr` does after inference.
@@ -3342,6 +3350,7 @@ fn sema_stmt_check_module_storage_assignment(symbol: Symbol, name: String, name_
         }
         tir_op = Val(sema_stmt_binary_type(operator))
     }
+    if !sema_copy_site_check_guard_owned(checked, environment, scopes, context, &diagnostics, false) -> return None
     if !sema_stmt_move_direct(expr, &state, scopes, "the assignment to `{name}`", &diagnostics) -> return None
     line :: sema_source_line_at(environment.source_segments, name_span) ?? return None
     storage := tir_persistent_local(name, environment.module_identity, required, name_span)
@@ -4080,6 +4089,7 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
     // Same compound contract as `sema_stmt_check_local_assignment`.
     if op != None && sema_expr_decimal_literal_operand(expr, true) && sema_expr_expects_machine_float(Val(place.ty)) -> expected = Val(place.ty)
     checked_value :: sema_check_expression(expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if !sema_copy_site_check_guard_owned(checked_value, environment, scopes, context, &diagnostics, false) -> return None
     checked := checked_value
     if op != None && sema_stmt_compound_widens(checked.ty, place.ty) {
         widen_line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
@@ -4335,6 +4345,7 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
         return sema_stmt_check_returned_value(Expr.Place{value: value, access: PlaceAccess.Read, span: expr_span(value)}, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     checked :: sema_stmt_check_return_value(value, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if !sema_stmt_return_is_view_boundary(return_type) && !sema_copy_site_check_guard_owned(checked, environment, scopes, context, &diagnostics, false) -> return None
     value_is_ident := if value == {
         .Ident(_, _) -> true
         else -> false

@@ -1618,7 +1618,7 @@ fn jet_codegen_is_field_read_chain(builder: JetCodegenBuilder, program: JetCodeg
         else -> {}
     }
     if expression.kind == {
-        .Local(_) -> true
+        .Local(_) | .SharedGuardValue(_, _) -> true
         .Index(base, _, kind, access, checked_call, _) -> {
             if checked_call != None || access != AccessConvention.Read -> return false
             place_kind :: if kind == {

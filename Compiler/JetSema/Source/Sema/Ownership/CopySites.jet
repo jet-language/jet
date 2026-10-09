@@ -15,6 +15,8 @@ use jet_foundation.[
     Span,
     SymbolKind,
     TextEdit,
+    TExpr,
+    TExprKind,
     Type,
     diagnostic_with_edit_grade,
     type_name,
@@ -79,6 +81,41 @@ fn sema_copy_site_push(diagnostic: Diagnostic, site: SemaCopySite, environment: 
         return
     }
     &diagnostics.push(diagnostic)
+}
+
+// A guard owns the lease, not its payload. Follow typed projections instead
+// of syntax so temporary, named, mapped and edit guards obey the same rule.
+fn sema_copy_site_guard_projection(value: TExpr) -> Bool Never! {
+    if value.kind == {
+        .SharedGuardValue(_, _) -> true
+        .Field(base, _) | .Index(base, _, _, _, _, _) | .IndexRead(base, _, _, _, _) | .OptField(base, _, _) -> sema_copy_site_guard_projection(base)
+        else -> false
+    }
+}
+
+pub fn sema_copy_site_check_guard_owned(value: TExpr, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic], exact_move: Bool) -> Bool {
+    if sema_copy_site_guard_projection(value) {
+        facts :: sema_copy_classify(value.ty, SemaCopyIntent.Clone, environment, context.generic_params, false)
+        if facts.copyable -> return true
+        if !exact_move && !scopes.copies_explicit && facts.complete && facts.cloneable && !facts.resource -> return true
+        diagnostic :: sema_error("E0120", value.span, "this guard lends its value, so it cannot be moved into an owning destination", "the value stays owned by the shared storage; moving it would leave the guard and the destination owning the same data", "copy the value explicitly with `~`, or pass it to a read parameter instead")
+        if !exact_move && facts.complete && facts.cloneable && !facts.resource {
+            &diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: value.span.start, end: value.span.start}, new_text: "~"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+        } else {
+            &diagnostics.push(diagnostic)
+        }
+        return false
+    }
+    if value.kind == {
+        .Present(inner) | .Ok(inner) | .Err(inner) | .Move(inner) | .TraitBox(inner, _) -> sema_copy_site_check_guard_owned(inner, environment, scopes, context, &diagnostics, exact_move)
+        .IfExpr(_, _, then_value, _, else_value) -> {
+            left :: sema_copy_site_check_guard_owned(then_value, environment, scopes, context, &diagnostics, exact_move)
+            right :: sema_copy_site_check_guard_owned(else_value, environment, scopes, context, &diagnostics, exact_move)
+            left && right
+        }
+        // An authored copy or a window is not a payload move.
+        else -> true
+    }
 }
 
 // A bare read or write parameter of a non-scalar type (Rust `is_scalar`, not
