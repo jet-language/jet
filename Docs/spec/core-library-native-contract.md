@@ -232,6 +232,16 @@ records take their checked shapes from canonical Core source declarations.
 They must not also appear in compiler-owned record inventories. Root-Prelude
 carrier mappings remain ABI spellings, not owners of those checked fields.
 
+The bootstrap Rust assembler embeds the SQL and bounded CSV-read kernels into
+the generated source; it does not retain paths relative to the Prelude tree.
+Its private String/byte carrier helpers come solely from `Core/ForeignBytes.rs`,
+including the borrowed-slice and iterator packing paths.
+Nested bootstrap host kernels explicitly import the generated Foundation facade;
+their physical C-ABI headers are projected from the same generated carrier
+declarations as the native-backend adapters, without importing optional wrappers.
+File-handle kernels have one owner in the CommonTypes dependency closure;
+selecting mapped-file operations must not emit a second copy.
+
 Native record-sequence provider symbols use `jet_rt_record_seq_` followed by
 the checked sequence kind with dots replaced by underscores. The lowering
 computes that suffix before interpolating the symbol, preserving the same

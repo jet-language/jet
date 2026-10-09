@@ -32,6 +32,7 @@ const CORE_SOURCE_TEXTS: &[(&str, &str)] = &[
     ("core.data.sketch.reservoir", include_str!("../../../Core/data/sketch/reservoir.jet")),
     ("core.data.sketch.tdigest", include_str!("../../../Core/data/sketch/tdigest.jet")),
     ("core.db", include_str!("../../../Core/db/db.jet")),
+    ("core.db.sql", include_str!("../../../Core/db/sql.jet")),
     ("core.email", include_str!("../../../Core/email/email.jet")),
     ("core.encoding", include_str!("../../../Core/encoding/encoding.jet")),
     ("core.encoding.base32", include_str!("../../../Core/encoding/base32.jet")),
@@ -119,7 +120,6 @@ const CORE_SOURCE_TEXTS: &[(&str, &str)] = &[
 // Body text of every runtime unit in
 // `jet_foundation::CoreSourceParts::CORE_RUNTIME_PARTS`, keyed by its module.
 const CORE_RUNTIME_SOURCE_TEXTS: &[(&str, &str)] = &[
-    ("core.db.runtime.kernel_sql_query", include_str!("../../../Core/db/runtime/kernel_sql_query.jet")),
     ("core.files.runtime.kernel_path_components", include_str!("../../../Core/files/runtime/kernel_path_components.jet")),
     ("core.prelude.runtime.kernel_fixed_arithmetic", include_str!("../../../Core/prelude/runtime/kernel_fixed_arithmetic.jet")),
     ("core.text.runtime.assets.assets", include_str!("../../../Core/text/runtime/assets/assets.jet")),
