@@ -16,7 +16,7 @@ priv fn build_session_declarations_fixture() -> Bool Never! {
     if foreign == {.Failure(_) -> {} else -> return false}
     target_reply :: build_session_call(&session, "add_library", [BuildSessionValue]{.Text("schema"), .List([BuildSessionValue]{.Text(".jet/generated/fixture/schema.jet")}), .List([BuildSessionValue]{action})}, None, false, 31, 40)
     target :: if target_reply == {.Value(value) -> value else -> return false}
-    source :: "package { name: \"fixture.schema\" }\nVALUE :: 7\n"
+    source :: "package {{ name: \"fixture.schema\" }}\nVALUE :: 7\n"
     generated :: build_session_call(&session, "generate", [BuildSessionValue]{.Text("schema")}, Val(source), false, 41, 50)
     if generated != .Value(.Unit) -> return false
     wrong_generate :: build_session_call(&session, "generate", [BuildSessionValue]{.Text("retired"), .Text(source)}, None, false, 51, 60)

@@ -16,17 +16,17 @@ use c.[sqlite3 as sql]
 fn run() {
     #Unsafe("exclusive out-slots hold SQLite pointers; zero words mean null, SQL is NUL-terminated for each borrowed call, and each live pointer is finalized/closed once") {
         database := U64{0}
-        if sql.open(":memory:", &database, I32{6}, U64{0}) != I32{0} -> panic("SQLite open failed")
+        if (sql.open(":memory:", &database, I32{6}, U64{0}) != I32{0}) -> panic("SQLite open failed")
         error := U64{0}
-        if sql.exec(database, "create table items(value integer); insert into items values (19), (23);", U64{0}, U64{0}, &error) != I32{0} -> panic("SQLite create/insert failed")
+        if (sql.exec(database, "create table items(value integer); insert into items values (19), (23);", U64{0}, U64{0}, &error) != I32{0}) -> panic("SQLite create/insert failed")
         statement := U64{0}
         tail := U64{0}
-        if sql.prepare(database, "select sum(value) from items", I32{-1}, &statement, &tail) != I32{0} -> panic("SQLite prepare failed")
-        if sql.step(statement) != I32{100} -> panic("SQLite select returned no row")
-        if sql.column(statement, I32{0}) != I64{42} -> panic("SQLite select value differed")
-        if sql.step(statement) != I32{101} -> panic("SQLite select did not complete")
-        if sql.finalize(statement) != I32{0} -> panic("SQLite finalize failed")
-        if sql.close(database) != I32{0} -> panic("SQLite close failed")
+        if (sql.prepare(database, "select sum(value) from items", I32{-1}, &statement, &tail) != I32{0}) -> panic("SQLite prepare failed")
+        if (sql.step(statement) != I32{100}) -> panic("SQLite select returned no row")
+        if (sql.column(statement, I32{0}) != I64{42}) -> panic("SQLite select value differed")
+        if (sql.step(statement) != I32{101}) -> panic("SQLite select did not complete")
+        if (sql.finalize(statement) != I32{0}) -> panic("SQLite finalize failed")
+        if (sql.close(database) != I32{0}) -> panic("SQLite close failed")
     }
     print("sqlite-memory=42")
 }

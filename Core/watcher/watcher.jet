@@ -144,17 +144,17 @@ impl WatchEvent.Equatable {
 
 #Test("WatchEvent source layout keeps all fields and independent copies") {
     event :: WatchEvent{domain: .Process, kind: .Exited, path: "p", detail: "gone", pid: -1, port: 65535}
-    copy := ~event
-    assert(event.equal(copy))
-    copy.path = "changed"
+    cloned_event := event.copy()
+    assert(event.equal(cloned_event))
+    cloned_event.path = "changed"
     assert_eq(event.path, "p")
-    assert(!event.equal(copy))
+    assert(!event.equal(cloned_event))
     assert_eq(event.pid, -1)
     assert_eq(event.port, 65535)
     assert_eq(watch_domain_tag(event.domain), 1)
     assert_eq(watch_kind_tag(event.kind), 4)
-    assert_eq(event.__show(), "WatchEvent { domain: Process, kind: Exited, path: p, detail: gone }")
-    assert_eq(event.__debug(), "WatchEvent { domain: Process, kind: Exited, path: \"p\", detail: \"gone\", pid: -1, port: 65535 }")
+    assert_eq(event.__show(), "WatchEvent {{ domain: Process, kind: Exited, path: p, detail: gone }}")
+    assert_eq(event.__debug(), "WatchEvent {{ domain: Process, kind: Exited, path: \"p\", detail: \"gone\", pid: -1, port: 65535 }}")
 }
 
 #Test("WatchEvent enum tags retain the native order and old exported enum") {
