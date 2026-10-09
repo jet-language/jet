@@ -52,9 +52,9 @@ impl JetSQLSelectItem {
     fn output_name(self) -> String Never! {
         if self == {
             .Wildcard -> "*"
-            .Field(field, alias) -> alias ?? ~field
+            .Field(field, alias) -> alias ?? field.copy()
             .Aggregate(function, field, alias) -> {
-                if alias == .Val(name) -> return ~name
+                if alias == .Val(name) -> return name.copy()
                 if field == .Val(name) -> return "{function.as_str()}_{name}"
                 function.as_str()
             }
@@ -170,9 +170,9 @@ fn sql_tokens(sql: String) -> [String] Err! {
 // Rust unquote:265–276. Only matching ASCII quotes; doubled delimiter collapses.
 fn unquote(value: String) -> String Never! {
     raw :: sql_text.utf8_bytes(value)
-    if raw.len() < 2 -> return ~value
+    if raw.len() < 2 -> return value.copy()
     first :: Int.from_u8(raw[0])
-    if (first != 39 && first != 34) || raw[raw.len() - 1] != raw[0] -> return ~value
+    if (first != 39 && first != 34) || raw[raw.len() - 1] != raw[0] -> return value.copy()
     out := [U8]{}
     at := 1
     end :: raw.len() - 1
@@ -330,7 +330,9 @@ impl JetSQLQuery {
         self.projection.len() == 1 && self.projection[0] == .Wildcard
     }
     fn has_aggregate(self) -> Bool Never! {
-        loop item in self.projection -> if item.is_aggregate() -> return true
+        loop item in self.projection {
+            if item.is_aggregate() -> return true
+        }
         false
     }
     fn needs_projection_execution(self) -> Bool Never! {
@@ -390,12 +392,12 @@ fn parse_float(text: String) -> Float? Never! {
 // Rust group_field:387–408.
 fn group_field(query: JetSQLQuery, key: JetSQLGroupKey) -> String Err! {
     if key == {
-        .Field(field) -> ~field
+        .Field(field) -> field.copy()
         .Ordinal(ordinal) -> {
             if ordinal == (U64{0}) || ordinal > (U64.from_int(query.projection.len()) ?? panic("SQL projection length")) -> return Err("SQL GROUP BY ordinal {ordinal} is outside the SELECT list")
             item :: query.projection[Int.from_u64(ordinal - U64{1})] // #4500: retaining loan.
             if item == {
-                .Field(field, _) -> ~field
+                .Field(field, _) -> field.copy()
                 .Wildcard -> return Err("SQL GROUP BY ordinal cannot reference a wildcard projection")
                 .Aggregate(_, _, _) -> return Err("SQL GROUP BY ordinal must reference a non-aggregate projection")
             }
@@ -416,7 +418,7 @@ fn query_shape_error(query: JetSQLQuery) -> String? Never! {
         if key == {
             .Field(name) -> {
                 if fields.has(name) -> return Val("SQL GROUP BY repeats a grouping key")
-                &fields.add(~name)
+                &fields.add(name.copy())
             }
             .Ordinal(ordinal) -> {
                 if ordinals.has(ordinal) -> return Val("SQL GROUP BY repeats a grouping key")
@@ -438,7 +440,9 @@ fn query_shape_error(query: JetSQLQuery) -> String? Never! {
 // Rust sql_query_fields:469–496. ORDER outputs and valid usize tokens are
 // excluded, including zero; callback order and repeated visits stay unchanged.
 fn sql_query_fields(query: JetSQLQuery, visit: fn(String)) Never! {
-    loop item in query.projection -> if item.field() == .Val(field) -> visit(field)
+    loop item in query.projection {
+        if item.field() == .Val(field) -> visit(field)
+    }
     loop key in query.group_by {
         field :: group_field(query, key) ?? next
         visit(field)
@@ -446,7 +450,9 @@ fn sql_query_fields(query: JetSQLQuery, visit: fn(String)) Never! {
     if query.filter == .Val(filter) -> visit(filter.field)
     if query.order == .Val(order) {
         output := false
-        loop item in query.projection -> if item.output_name() == order.field -> output = true
+        loop item in query.projection {
+            if item.output_name() == order.field -> output = true
+        }
         if !output && parse_usize(order.field) == None -> visit(order.field)
     }
 }
@@ -456,7 +462,7 @@ fn sql_query_fields(query: JetSQLQuery, visit: fn(String)) Never! {
 fn validate_sql_query_schema(query: JetSQLQuery, has_field: fn(String) -> Bool, label: String) Err! {
     missing := String?{None}
     sql_query_fields(query, (field: String) -> {
-        if missing == None && !has_field(field) -> missing = Val(~field)
+        if missing == None && !has_field(field) -> missing = Val(field.copy())
     })
     if missing == .Val(field) -> return Err("{label} references unknown field `{field}`")
     Ok()
@@ -497,7 +503,7 @@ fn parse_sql_query(sql: String) -> JetSQLQuery Err! {
             if operator != "=" && operator != "!=" && operator != ">" && operator != ">=" && operator != "<" && operator != "<=" -> return Err("SQL WHERE operator must be one of `=`, `!=`, `>`, `>=`, `<`, or `<=`")
             value :: token_at(tokens, cursor + 3) ?? return Err("SQL WHERE needs `field operator value`")
             if clause_keyword(value) || value == "," || value == ")" -> return Err("SQL WHERE needs a literal value")
-            query.filter = Val((field: field, operator: ~operator, value: ~value))
+            query.filter = Val((field: field, operator: operator.copy(), value: value.copy()))
             cursor += 4
             next
         }
@@ -529,7 +535,7 @@ fn parse_sql_query(sql: String) -> JetSQLQuery Err! {
             if !keyword(by, "by") -> return Err("SQL ORDER BY needs `ORDER BY field [ASC|DESC]`")
             stage = U8{3}
             token :: token_at(tokens, cursor + 2) ?? return Err("SQL ORDER BY needs a field")
-            field :: if parse_usize(token) != None -> ~token else -> identifier(Val(token), "ORDER BY field") ?? return Err(err)
+            field :: if parse_usize(token) != None -> token.copy() else -> identifier(Val(token), "ORDER BY field") ?? return Err(err)
             descending := false
             explicit := false
             if token_at(tokens, cursor + 3) == .Val(direction) {
@@ -576,7 +582,7 @@ impl JetSQLValue {
         if keyword(trimmed, "false") -> return .Bool(false)
         if parse_i64(trimmed) == .Val(value) -> return .Int(value)
         if parse_float(trimmed) == .Val(value) -> return .Float(value)
-        .Text(unquote(trimmed))
+        return .Text(unquote(trimmed))
     }
     fn number(self) -> Float? Never! {
         if self == {
@@ -600,13 +606,13 @@ impl JetSQLValue {
             .Bool(value) -> "{value}"
             .Int(value) -> "{value}"
             .Float(value) -> sql_number(value)
-            .Text(value) -> ~value
+            .Text(value) -> value.copy()
         }
     }
 }
 #Equatable
 struct JetSQLResultRow {
-    fields: [(String, JetSQLValue)]
+    fields: [(field: String, value: JetSQLValue)]
     source_indices: [U64]
 }
 
@@ -622,8 +628,12 @@ fn sql_compare_values(left: JetSQLValue, right: JetSQLValue) -> Ordering Never! 
         return Ordering.Less
     }
     if right == .Null -> return Ordering.Greater
-    if left.number() == .Val(a) -> if right.number() == .Val(b) -> return float_compare(a, b)
-    if left == .Bool(a) -> if right == .Bool(b) -> return a <=> b
+    if left.number() == .Val(a) {
+        if right.number() == .Val(b) -> return float_compare(a, b)
+    }
+    if left == .Bool(a) {
+        if right == .Bool(b) -> return a <=> b
+    }
     left.display_text() <=> right.display_text()
 }
 fn sql_compare(left: JetSQLValue, operator: String, right: JetSQLValue) -> Bool Never! {
@@ -651,7 +661,7 @@ fn compare_sql_cell(left: String, operator: String, right: String) -> Bool Never
         }
         else -> {}
     }
-    sql_compare(value ?? JetSQLValue.Text(~left), operator, literal)
+    sql_compare(value ?? JetSQLValue.Text(left.copy()), operator, literal)
 }
 fn sql_number(value: Float) -> String Never! {
     if value == (Float{0.0}) -> return "0"
@@ -757,35 +767,37 @@ fn sql_aggregate_value(group: [U64], function: JetSQLAggregate, field: String?, 
     if count == (I64{0}) -> return .Null
     if function == {
         .Sum -> {
-            if all_int -> if sum_i64(integer_sum) == .Val(value) -> return .Int(value)
-            .Float(float_sum)
+            if all_int {
+                if sum_i64(integer_sum) == .Val(value) -> return .Int(value)
+            }
+            return .Float(float_sum)
         }
-        .Avg -> .Float(float_sum / Float.from_i64(count))
+        .Avg -> return .Float(float_sum / Float.from_i64(count))
         .Min -> selected ?? JetSQLValue.Null
         .Max -> selected ?? JetSQLValue.Null
-        .Count -> .Int(count)
+        .Count -> return .Int(count)
     }
 }
 
 // Rust sql_project_group:891–941. Transfer the consumed grouping positions
 // into the result rather than cloning the otherwise dead Rust group Vec.
 fn sql_project_group(fields: [String], query: JetSQLQuery, group: ^[U64], cell: fn(U64, String) -> JetSQLValue?) -> JetSQLResultRow Never! {
-    projected := [(String, JetSQLValue)]{}
+    projected := [(field: String, value: JetSQLValue)]{}
     loop item in query.projection {
         if item == {
             .Wildcard -> {
                 loop field in fields {
                     value := JetSQLValue.Null
                     if group.len() != 0 -> value = cell(group[0], field) ?? JetSQLValue.Null
-                    &projected.push((~field, ^value))
+                    &projected.push((field: field.copy(), value: ^value))
                 }
             }
             .Field(field, alias) -> {
                 value := JetSQLValue.Null
                 if group.len() != 0 -> value = cell(group[0], field) ?? JetSQLValue.Null
-                &projected.push((alias ?? ~field, ^value))
+                &projected.push((field: alias ?? field.copy(), value: ^value))
             }
-            .Aggregate(function, field, _) -> &projected.push((item.output_name(), sql_aggregate_value(group, function, field, cell)))
+            .Aggregate(function, field, _) -> &projected.push((field: item.output_name(), value: sql_aggregate_value(group, function, field, cell)))
         }
     }
     JetSQLResultRow{fields: projected, source_indices: ^group}
@@ -795,9 +807,11 @@ fn sql_project_group(fields: [String], query: JetSQLQuery, group: ^[U64], cell: 
 fn sql_output_value(row: JetSQLResultRow, field: String) -> JetSQLValue? Never! {
     if parse_usize(field) == .Val(ordinal) {
         if ordinal == (U64{0}) || ordinal > (U64.from_int(row.fields.len()) ?? panic("SQL output length")) -> return None
-        return Val(~row.fields[Int.from_u64(ordinal - U64{1})].1)
+        return Val(row.fields[Int.from_u64(ordinal - U64{1})].value.copy())
     }
-    loop entry in row.fields -> if entry.0 == field -> return Val(~entry.1)
+    loop entry in row.fields {
+        if entry.field == field -> return Val(entry.value.copy())
+    }
     None
 }
 struct SQLOrderedRow { row: JetSQLResultRow, order: JetSQLValue? }
@@ -848,7 +862,7 @@ fn execute_sql_rows(fields: [String], row_count: U64, query: JetSQLQuery, cell: 
                     position = found
                 } else {
                     position = unsorted.len()
-                    positions[~key] = position
+                    positions[key.copy()] = position
                     &keys.push(key)
                     &unsorted.push([U64]{})
                 }
@@ -874,8 +888,10 @@ fn execute_sql_rows(fields: [String], row_count: U64, query: JetSQLQuery, cell: 
         &projected.push(SQLOrderedRow{row: row, order: order})
     }
     // Rust performs this pass AFTER every row and ORDER fallback is evaluated.
-    loop entry in projected -> loop field in entry.row.fields {
-        if field.1 == .Float(number) && !sql_math.is_finite(number) -> return Err("SQL query produced a non-finite numeric value")
+    loop entry in projected {
+        loop field in entry.row.fields {
+            if field.value == .Float(number) && !sql_math.is_finite(number) -> return Err("SQL query produced a non-finite numeric value")
+        }
     }
     if query.order == .Val(clause) {
         &projected.sort_by((left: SQLOrderedRow, right: SQLOrderedRow) -> {
@@ -886,7 +902,7 @@ fn execute_sql_rows(fields: [String], row_count: U64, query: JetSQLQuery, cell: 
         })
     }
     if query.limit == .Val(limit) {
-        loop (U64.from_int(projected.len()) ?? panic("SQL result length")) > limit -> _ :: &projected.pop()
+        loop limit < (U64.from_int(projected.len()) ?? panic("SQL result length")) -> _ :: &projected.pop()
     }
     rows := [JetSQLResultRow]{}
     loop at in 0..<projected.len() -> &rows.push(^projected[at].row)
@@ -916,11 +932,13 @@ fn select_sql_indices(row_count: U64, query: JetSQLQuery, cell: fn(U64, String) 
         })
     }
     if query.limit == .Val(limit) {
-        loop (U64.from_int(selected.len()) ?? panic("SQL selection length")) > limit -> _ :: &selected.pop()
+        loop limit < (U64.from_int(selected.len()) ?? panic("SQL selection length")) -> _ :: &selected.pop()
     }
     selected
 }
 fn compare_sql_order_values(left: String, right: String) -> Ordering Never! {
-    if parse_float(left) == .Val(a) -> if parse_float(right) == .Val(b) -> return float_compare(a, b)
+    if parse_float(left) == .Val(a) {
+        if parse_float(right) == .Val(b) -> return float_compare(a, b)
+    }
     left <=> right
 }

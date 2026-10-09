@@ -12,18 +12,33 @@ use core.db.runtime.kernel_sql_query as sql_kernel
     assert(!sql_kernel.compare_sql_cell("10", ">", "'2'"))
     assert(sql_kernel.compare_sql_cell("true", "=", "true"))
     assert(!sql_kernel.compare_sql_cell("TRUE", "=", "true"))
-    assert(sql_kernel.identifier(Val("'9id'"), "column") == .Ok("9id"))
+    assert_eq(sql_kernel.identifier(Val("'9id'"), "column") ?? panic("quoted identifier"), "9id")
     assert(sql_kernel.identifier(Val("9id"), "column") == .Err(_))
 }
 #Test("SQL sum uses wide integer accumulation before narrowing") {
     indices :: [U64]{U64{0}, U64{1}, U64{2}}
     cell :: (index: U64, field: String) -> sql_kernel.JetSQLValue? {
-        if index == (U64{0}) -> Val(sql_kernel.JetSQLValue.Int(I64{9223372036854775807}))
-        else -> if index == (U64{1}) -> Val(sql_kernel.JetSQLValue.Int(I64{1}))
-        else -> Val(sql_kernel.JetSQLValue.Int(I64{-1}))
+        if {
+            index == (U64{0}) -> Val(sql_kernel.JetSQLValue.Int(I64{9223372036854775807}))
+            index == (U64{1}) -> Val(sql_kernel.JetSQLValue.Int(I64{1}))
+            else -> Val(sql_kernel.JetSQLValue.Int(I64{-1}))
+        }
     }
     sum :: sql_kernel.sql_aggregate_value(indices, sql_kernel.JetSQLAggregate.Sum, Val("value"), cell)
     assert_eq(sum, sql_kernel.JetSQLValue.Int(I64{9223372036854775807}))
     count :: sql_kernel.sql_aggregate_value(indices, sql_kernel.JetSQLAggregate.Count, None, cell)
     assert_eq(count, sql_kernel.JetSQLValue.Int(I64{3}))
+}
+#Test("SQL named result fields retain ordinal and column lookup") {
+    row :: sql_kernel.JetSQLResultRow{
+        fields: [(field: String, value: sql_kernel.JetSQLValue)]{
+            (field: "label", value: sql_kernel.JetSQLValue.Text("second")),
+            (field: "a", value: sql_kernel.JetSQLValue.Int(I64{2})),
+        },
+        source_indices: [U64]{U64{1}},
+    }
+    assert_eq(sql_kernel.sql_output_value(row, "1") ?? panic("first output"), sql_kernel.JetSQLValue.Text("second"))
+    assert_eq(sql_kernel.sql_output_value(row, "a") ?? panic("named output"), sql_kernel.JetSQLValue.Int(I64{2}))
+    assert_eq(sql_kernel.sql_output_value(row, "0"), None)
+    assert_eq(sql_kernel.sql_output_value(row, "3"), None)
 }
