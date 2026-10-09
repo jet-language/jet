@@ -4891,6 +4891,34 @@ fn jet_codegen_lower_union_render(builder: &JetCodegenBuilder, value: MIRValueID
     jet_codegen_emit_value(&builder, span, Type.String, MIROperation.Phi{incoming: incoming})
 }
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs::lower_union_string_format
+// Branches on the member tag and renders that member with its own render;
+// the last member needs no test because the union is closed.
+fn jet_codegen_lower_union_render(builder: &JetCodegenBuilder, value: MIRValueID, value_type: Type, members: [Type], trait_name: String, member: String, symbol: String, span: Span) -> MIRValueID Never! {
+    owner :: jet_codegen_lower_type_for_function(jet_codegen_unwrap_pattern_tags(value_type), builder).identity ?? panic("checked union type has no MIR identity")
+    join := jet_codegen_new_block(&builder, span, "union-format-join")
+    incoming := [MIRPhiIncoming]{}
+    loop (index, member_type) in members {
+        variant :: jet_codegen_union_member_tag(member_type)
+        next_block := MIRBlockID?{None}
+        if index + 1 < members.len() {
+            test := jet_codegen_emit_value(&builder, span, Type.Bool, MIROperation.EnumIs{subject: value, owner: owner, variant: variant})
+            arm := jet_codegen_new_block(&builder, span, "union-format-arm")
+            following := jet_codegen_new_block(&builder, span, "union-format-next")
+            jet_codegen_terminate(&builder, MIRTerminator.Branch{condition: test, then_target: arm, else_target: following})
+            jet_codegen_switch_block(&builder, arm)
+            next_block = Val(following)
+        }
+        payload := jet_codegen_emit_value(&builder, span, member_type, MIROperation.EnumPayload{subject: value, owner: owner, variant: variant, index: 0})
+        rendered := jet_codegen_lower_direct_render(&builder, payload, member_type, trait_name, member, symbol, span)
+        &incoming.push(MIRPhiIncoming{block: builder.current, value: rendered})
+        jet_codegen_terminate(&builder, MIRTerminator.Jump{target: join})
+        if next_block == .Val(following) -> jet_codegen_switch_block(&builder, following)
+    }
+    jet_codegen_switch_block(&builder, join)
+    jet_codegen_emit_value(&builder, span, Type.String, MIROperation.Phi{incoming: incoming})
+}
+
 fn jet_codegen_numeric_bound_constant(ty: Type, member: String) -> MIRConstant? {
     if ty == Type.Float32 {
         if member == "MAX" -> return Val(MIRConstant.Float{value: 3.4028234663852886e38, f32: true, spelling: None})

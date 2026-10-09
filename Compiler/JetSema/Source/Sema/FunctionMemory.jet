@@ -450,6 +450,16 @@ pub fn sema_function_memory_owner(kind: TFuncKind) -> String Never! {
     }
 }
 
+// The owner name a method's memory row is found by: the base name of its
+// owning type, "" for a free function.
+pub fn sema_function_memory_owner(kind: TFuncKind) -> String Never! {
+    if kind == {
+        .Method(_, owner_type) -> sema_type_graph_base_name(owner_type) ?? ""
+        .TraitMethod(_, _, owner_type, _, _) -> sema_type_graph_base_name(owner_type) ?? ""
+        else -> ""
+    }
+}
+
 pub fn sema_function_memory_tir_promotion(promotion: GCPromotion) -> TGCPromotion Never! {
     edges := [TGCPromotionEdge]{}
     loop edge in promotion.edges {
