@@ -933,6 +933,11 @@ is written and the last line does not match it, E0113 reports the value's
 type or shape and names the conversion or wrap; the declared return type is
 the contract and is never the suggested fix.
 
+An infallible unit call written with no return arrow and `Never!` also has
+no result to lose: its checked `Result<Unit, Never>` carrier is classified by
+its `Unit` success value. This does not expose effects intentionally hidden
+by an audited `#Unsafe` block or change the callee's public effect row.
+
 ## Physical dimensions
 
 The compiler knows the dimension identities of `Length`, `Time`, `Speed`,

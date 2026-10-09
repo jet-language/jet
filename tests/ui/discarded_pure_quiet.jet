@@ -42,11 +42,24 @@ fn checked_half(n: Int) -> Int Err! {
 
 fn double(n: Int) -> Int { n * 2 }
 
+// An explicitly infallible no-arrow function still has no result to discard.
+fn quiet_unit() Never! {}
+fn audited_unit() Never! {
+    #Unsafe("the test deliberately keeps this stderr write behind its audit boundary") {
+        print("audited unit")
+    }
+}
+
 fn run() {
     // The callee prints, so the call has an effect.
     logged_double(2)
     // A Unit result carries nothing to lose.
     announce(3)
+    quiet_unit()
+    audited_unit()
+    // The same infallible Unit carrier remains harmless in a lambda body.
+    each := () -> { quiet_unit() }
+    each()
     // A callback argument brings its own effects to this call site.
     apply((x: Int) -> {
         print(x)

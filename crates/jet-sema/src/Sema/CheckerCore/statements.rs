@@ -197,6 +197,7 @@ impl<'a> Checker<'a> {
             label: pending_label.or_else(|| label.map(|(name, _)| name.clone())),
             kind,
             ty: None,
+            moved_before: self.flow.moved.clone(),
         });
     }
 
@@ -237,7 +238,7 @@ impl<'a> Checker<'a> {
         may_skip: bool,
     ) {
         if after_body.reachable {
-            self.check_loop_move_backedge(self.loop_depth);
+            self.check_loop_move_backedge(self.loop_value_frames.len());
         }
         let checked_body = self.flow.clone();
         let after_body = &checked_body;
@@ -562,7 +563,14 @@ impl<'a> Checker<'a> {
         calls_start: usize,
         diagnostics_start: usize,
     ) {
-        if matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE) || ty.is_never()
+        // `Never!` retains its Result carrier at a bare statement site.
+        // D-DISCARD1 concerns the success value, not the infallible wrapper.
+        let success = match ty.without_user_tags() {
+            Type::Result { ok, err } if err.is_never() => ok.without_user_tags(),
+            other => other,
+        };
+        if matches!(success, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+            || success.is_never()
         {
             return;
         }
@@ -2630,8 +2638,6 @@ impl<'a> Checker<'a> {
                 // zero times, so the facts after the loop join the zero-turn
                 // path with the path one walk of the body left behind.
                 let before_loop = self.flow.clone();
-                self.push_loop_value_frame(label.as_ref());
-                self.push_loop_break_frame();
                 match kind {
                     ForKind::Range {
                         start,
@@ -2699,6 +2705,8 @@ impl<'a> Checker<'a> {
                         {
                             self.diags.push(diagnostic);
                         }
+                        self.push_loop_value_frame(label.as_ref());
+                        self.push_loop_break_frame();
                         self.loop_depth += 1;
                         self.push_scope();
                         let vs = *var_span;
@@ -2888,6 +2896,8 @@ impl<'a> Checker<'a> {
                             }
                             _ => None,
                         };
+                        self.push_loop_value_frame(label.as_ref());
+                        self.push_loop_break_frame();
                         self.loop_depth += 1;
                         if let Some(n) = driven.clone() {
                             self.iter_borrowed.insert(n);
@@ -3092,9 +3102,9 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                self.pop_loop_value_frame();
                 let after_body = self.flow.clone();
                 self.join_loop_flow(&before_loop, &after_body, true);
+                self.pop_loop_value_frame();
                 if label.is_some() {
                     self.loop_labels.pop();
                 }
