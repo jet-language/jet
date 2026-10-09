@@ -5983,24 +5983,25 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("function-value call must preserve read access");
-    // f003de290 (2026-07-31) stores function values as `Rc` so a collection can
-    // clone them; `Box` was the container, never the property. The property is
-    // the `&`: the callback crosses this call as a read borrow, so the caller
-    // still owns its function value afterwards. Pin the whole prefix — the
-    // parameter's own borrow AND the callback's read-borrowed `&str`
-    // argument (the concrete String read ABI) — so neither half can drift
-    // into an owned slot unnoticed.
+    // The callable slot retains its function between invocations. Pin both
+    // the parameter's read borrow and the callback's concrete read-String ABI,
+    // rather than the retired immutable `Rc<dyn Fn>` representation.
     assert!(
-        out.rust.contains("__jet_f: &std::rc::Rc<dyn Fn(&str)"),
+        out.rust.contains("__jet_f: &std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnMut(&str)"),
         "the function value must arrive as a read borrow: {}",
         out.rust
     );
     assert!(out.rust.contains("__jet_value: &str"), "{}", out.rust);
-    assert!(
-        out.rust.contains("((*__jet_f))(&((*__jet_value)))"),
-        "{}",
-        out.rust
-    );
+    let call_args = out.rust
+        .split_once("let __jet_fn_result = (*__jet_fn)(")
+        .expect("borrowed function value invocation")
+        .1
+        .split_once(");")
+        .expect("completed function value invocation")
+        .0;
+    assert!(call_args.contains("__jet_value"), "{}", out.rust);
+    assert!(!call_args.contains(".to_owned()") && !call_args.contains(".clone()"), "{}", out.rust);
+    assert!(out.rust.contains("__jet_fn_slot.borrow_mut().replace(__jet_fn)"), "{}", out.rust);
     assert!(
         !out.rust.contains("((*__jet_value)).clone()"),
         "{}",
