@@ -101,7 +101,10 @@ impl<'a> Checker<'a> {
         }
         for (i, arg) in args.iter_mut().enumerate() {
             if let Some(want) = expected.get(i) {
-                self.expect_core_arg_consuming(variant, i, want, arg);
+                self.expect_core_arg_moving(variant, i, want, arg);
+                if arg.convention == crate::AST::AccessConvention::Move {
+                    self.note_exact_move(&arg.expr, Some(want), arg.span);
+                }
             } else {
                 self.infer(&mut arg.expr);
             }
@@ -188,11 +191,15 @@ impl<'a> Checker<'a> {
         }
         for (i, arg) in args.iter_mut().enumerate() {
             if let Some(want) = expected.get(i) {
-                self.expect_core_arg_consuming(variant, i, want, arg);
+                self.expect_core_arg_moving(variant, i, want, arg);
+                if arg.convention == crate::AST::AccessConvention::Move {
+                    self.note_exact_move(&arg.expr, Some(want), arg.span);
+                }
                 // A DBValue/JSON constructor stores its payload in an owning
                 // enum slot. Copy a live owned local once, matching map-literal
                 // payload semantics without cloning a last-use value.
-                let copy_owned_value = matches!(&arg.expr, crate::AST::Expr::Ident(name, _) if self
+                let copy_owned_value = arg.convention != crate::AST::AccessConvention::Move
+                    && matches!(&arg.expr, crate::AST::Expr::Ident(name, _) if self
                 .lookup(name)
                 .is_some_and(|info| {
                     info.param_conv.is_none()

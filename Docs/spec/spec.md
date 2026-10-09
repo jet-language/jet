@@ -980,6 +980,15 @@ value entering an owning destination is materialized automatically. A bare
 `#Policy(copies: .Explicit)` require an explicit `.copy()` or an owning `^`
 contract (D-MEM1, D-MEM-COPYSEM1).
 
+Move facts follow executable control-flow paths. A loop repeats a move only
+when that path reaches its back edge (including `next`); a `return` or `break`
+after a move ends that path instead. Assigning a fresh whole value clears the
+old move fact before another iteration. An owned pattern table such as
+`if ^owned == { .Object(entries) -> … }` consumes its subject once and binds
+each arm's payload from that already-checked subject, not by moving it again.
+Owning `Dyn` and `DBValue` constructors accept explicit payload transfers,
+for example `Dyn.Text(^text)`; the payload stays moved and is not copied.
+
 Public Jet APIs return newly computed answers (D-OUTPUT-RETURNS1=A). Use one
 value, tuple, or named struct for multiple results, including trait requirements
 and callback contracts. Do not make callers initialize a dummy `&T` merely to

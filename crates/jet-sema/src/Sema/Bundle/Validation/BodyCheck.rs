@@ -111,7 +111,6 @@ pub(crate) fn checker_for_module<'a>(
         concrete_unit_values: vec![HashMap::new()],
         suppress_partial_move_root_read: false,
         loop_depth: 0,
-        loop_exit_depth: None,
         share_sites: Vec::new(),
         implicit_take_sites: HashMap::new(),
         once_lambda_sites: HashMap::new(),

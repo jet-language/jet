@@ -236,6 +236,11 @@ impl<'a> Checker<'a> {
         after_body: &crate::Sema::FlowFacts::FlowFacts,
         may_skip: bool,
     ) {
+        if after_body.reachable {
+            self.check_loop_move_backedge(self.loop_depth);
+        }
+        let checked_body = self.flow.clone();
+        let after_body = &checked_body;
         let mut break_paths = self
             .loop_break_flows
             .pop()
@@ -2464,11 +2469,7 @@ impl<'a> Checker<'a> {
                 self.expected_type = saved_expected;
             }
             Stmt::Return(expr, span) => {
-                // D-COPY-DEFAULT1=A: `return` leaves every loop, so its moves
-                // are last uses, not reuses on a later iteration.
-                let saved_exit = self.loop_exit_depth.replace((0, self.loop_depth));
                 self.check_return_expr(expr, span, None);
-                self.loop_exit_depth = saved_exit;
             }
             // D-STREAMYIELD1: `yield expr` — legal only in a function whose return
             // type is `Stream<T>` (E0805 otherwise); `expr: T` (E0807 on mismatch).
@@ -3115,18 +3116,15 @@ impl<'a> Checker<'a> {
                 self.check_break_without_value(None, *span);
             }
             Stmt::BreakValue(value, span) => {
-                // D-COPY-DEFAULT1=A: an unlabeled `break` value leaves the
-                // innermost loop only.
-                let saved_exit = self
-                    .loop_exit_depth
-                    .replace((self.loop_depth.saturating_sub(1), self.loop_depth));
                 self.check_break_value(None, value, *span);
-                self.loop_exit_depth = saved_exit;
             }
             Stmt::Continue(span) => {
                 if self.loop_depth == 0 {
                     self.diags
                         .push(loop_control_outside(Syntax::KW_NEXT, *span));
+                }
+                if self.loop_depth > 0 {
+                    self.check_loop_move_backedge(self.loop_depth);
                 }
             }
             // D-ARROW-CONTROL1: `break(name)` / `next(name)`.
@@ -3143,6 +3141,9 @@ impl<'a> Checker<'a> {
                 } else if !self.loop_labels.iter().any(|l| l == name) {
                     self.diags
                         .push(undefined_loop_label(name, &self.loop_labels, *span));
+                } else if let Some(index) = self.loop_value_frames.iter()
+                    .rposition(|frame| frame.label.as_deref() == Some(name)) {
+                    self.check_loop_move_backedge(index + 1);
                 }
             }
             Stmt::CountedLoop {

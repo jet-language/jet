@@ -2145,11 +2145,6 @@ pub(crate) struct Checker<'a> {
     /// partial-root move report there; the complete field place is checked first.
     suppress_partial_move_root_read: bool,
     loop_depth: usize,
-    /// D-COPY-DEFAULT1=A: while a `return` or `break` value is checked, the
-    /// loop depth that exit lands at, paired with the depth it was set at. A
-    /// move there is the last use for every loop it leaves, so it is not a
-    /// reuse on a later iteration.
-    loop_exit_depth: Option<(usize, usize)>,
     /// D-COPY-DEFAULT1=A: unmarked move sites that a later use turned into
     /// shares. After the body check each site becomes `name.copy()`; the paired
     /// E0121 is reported only if that site cannot be found in the body.

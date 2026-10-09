@@ -4137,7 +4137,11 @@ impl<'a> Checker<'a> {
             Expr::PatternTest {
                 subject, pattern, ..
             } => {
-                if subject_name.is_some_and(|n| expr_is_same_ident(subject, n)) {
+                let tested = match subject.without_parens() {
+                    Expr::Place(inner, crate::AST::PlaceAccess::Take, _) => inner.without_parens(),
+                    expr => expr,
+                };
+                if subject_name.is_some_and(|n| expr_is_same_ident(tested, n)) {
                     Some(pattern.clone())
                 } else {
                     None

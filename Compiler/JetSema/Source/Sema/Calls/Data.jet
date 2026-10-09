@@ -7,6 +7,7 @@ use jet_foundation.[
     FunctionDefaultRef,
     MIRCopyFact,
     ParamZone,
+    PlaceAccess,
     Span,
     StrPart,
     TExpr,
@@ -543,17 +544,18 @@ fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], span: 
     clone_arg := false
     if expected_payload == .Val(want) {
         argument :: args[0]
-        if argument.convention == AccessConvention.Move -> &diagnostics.push(sema_error("E0203", argument.span, "a value was passed with the move marker `^` to a parameter that does not consume", "Dyn and DBValue constructors own their payload without accepting an explicit move marker", "remove `^` or copy the value explicitly"))
         value :: sema_check_expression(argument.expr, Val(want), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         payload = Val(value)
         clone_arg = argument.flags.implicit_clone || argument.flags.shared_auto_clone
         borrowed := sema_data_argument_is_borrowed(argument.expr, scopes)
-        if borrowed && !sema_ownership_type_is_copy(want) {
+        if argument.convention != AccessConvention.Move && borrowed && !sema_ownership_type_is_copy(want) {
             if sema_ownership_type_cloneable(want) == (Val(true)) -> clone_arg = true
             &diagnostics.push(sema_error("E0209", argument.span, "implicit clone of this borrowed payload", "the Dyn/DBValue constructor stores its own value, so borrowed storage cannot be moved", "copy the payload explicitly before constructing the value"))
         }
-        if !borrowed && !sema_ownership_type_is_copy(want) && sema_data_dbvalue_payload_live_after(ty, argument.expr, &tail_store, &context) && sema_ownership_type_cloneable(want) == (Val(true)) -> clone_arg = true
-        if !clone_arg && !sema_ownership_consume_expression(&state, argument.expr, scopes, "`{type_name(ty)}.{variant}`", &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        if argument.convention != AccessConvention.Move && !borrowed && !sema_ownership_type_is_copy(want) && sema_data_dbvalue_payload_live_after(ty, argument.expr, &tail_store, &context) && sema_ownership_type_cloneable(want) == (Val(true)) -> clone_arg = true
+        if argument.convention == AccessConvention.Move -> clone_arg = false
+        taken :: if argument.convention == AccessConvention.Move -> Expr.Place{value: argument.expr, access: PlaceAccess.Take, span: argument.span} else -> argument.expr
+        if !clone_arg && !sema_ownership_consume_expression(&state, taken, scopes, "`{type_name(ty)}.{variant}`", &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         }
     result_ty := if ty == (Type.Named{name: "DBValue"}) -> sema_data_value_type() else -> sema_dyn_type()
     value := sema_tir_expr(result_ty, if ty == (Type.Named{name: "DBValue"}) -> TExprKind.DBValueLit{variant: variant, arg: payload, clone_arg: clone_arg} else -> TExprKind.JSONLit{variant: variant, arg: payload, clone_arg: clone_arg}, span)

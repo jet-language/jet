@@ -5339,44 +5339,6 @@ impl<'a> Checker<'a> {
         let shareable = unmarked
             && (self.implicit_take_sites.contains_key(&span)
                 || self.move_is_shareable(&place, span));
-        if let Some(info) = self.lookup(&name) {
-            // D-COPY-DEFAULT1=A: a `return` or `break` value leaves the loops
-            // it exits, so a move there is not repeated on a later iteration.
-            // A loop nested inside that value (in a lambda) is not left.
-            let exit_depth = match self.loop_exit_depth {
-                Some((exit, at)) if at == self.loop_depth => exit,
-                _ => self.loop_depth,
-            };
-            if info.decl_loop_depth < exit_depth {
-                // A second visit to a loop is a reuse of the first move. Keep
-                // that original provenance so E0121 can name both the first
-                // consuming call and the later re-move site. The fallback is
-                // needed when this is the first move seen on a loop path.
-                let moved = self
-                    .flow
-                    .moved
-                    .iter()
-                    .filter(|(moved, _)| Self::move_keys_overlap(&place_name, moved))
-                    .min_by_key(|(moved, _)| moved.len())
-                    .map(|(moved, origin)| (moved.to_string(), origin.clone()))
-                    .unwrap_or_else(|| {
-                        (
-                            place_name.clone(),
-                            crate::Sema::FlowFacts::MoveOrigin::new(span, consumer),
-                        )
-                    });
-                let diagnostic =
-                    self.moved_use_diagnostic(&moved.0, &moved.1, span, Some(&info.ty));
-                if shareable {
-                    // The next iteration uses the name again, so this
-                    // unmarked move shares and the source stays usable.
-                    self.record_share_site(span, diagnostic);
-                } else {
-                    self.push_moved_use_diagnostic(diagnostic);
-                }
-                return;
-            }
-        }
         self.flow.moved.set(
             &place_name,
             if shareable {
@@ -5389,6 +5351,27 @@ impl<'a> Checker<'a> {
             // D-TRACK-ORIGIN1=A: moving a whole binding ends access to its
             // origin fact; no stale metadata survives a move.
             self.clear_origin(&name);
+        }
+    }
+
+    /// Only a path that reaches the loop's back edge can repeat a move.
+    /// Reinitialization clears the fact before this point; return and break
+    /// paths never visit it. `next` checks its own edge before ending the path.
+    pub(crate) fn check_loop_move_backedge(&mut self, depth: usize) {
+        let repeats: Vec<_> = self.flow.moved.iter().filter_map(|(place, origin)| {
+            let root = place.split(['.', '[']).next()?;
+            let info = self.lookup(root)?;
+            (info.decl_loop_depth < depth)
+                .then(|| (place.to_string(), origin.clone(), info.ty.clone()))
+        }).collect();
+        for (place, origin, ty) in repeats {
+            let diagnostic = self.moved_use_diagnostic(&place, &origin, origin.span, Some(&ty));
+            if origin.is_shareable() {
+                self.record_share_site(origin.span, diagnostic);
+                self.flow.moved.remove(&place);
+            } else {
+                self.push_moved_use_diagnostic(diagnostic);
+            }
         }
     }
 

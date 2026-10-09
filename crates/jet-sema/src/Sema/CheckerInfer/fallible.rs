@@ -1569,6 +1569,8 @@ impl<'a> Checker<'a> {
                 if self.loop_depth == 0 {
                     self.diags
                         .push(loop_control_outside(Syntax::KW_NEXT, *kw_span));
+                } else {
+                    self.check_loop_move_backedge(self.loop_depth);
                 }
                 Some(payload)
             }
@@ -1599,6 +1601,9 @@ impl<'a> Checker<'a> {
                             &self.loop_labels,
                             *span,
                         ));
+                } else if let Some(index) = self.loop_value_frames.iter()
+                    .rposition(|frame| frame.label.as_deref() == Some(name)) {
+                    self.check_loop_move_backedge(index + 1);
                 }
                 Some(payload)
             }

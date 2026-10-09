@@ -185,23 +185,8 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Same elaboration as `expect_core_arg`, but for the handful of std
-    /// constructors that genuinely store the argument as their own payload
-    /// (`JSON.Text`/`DBValue.Text` own their `String`, etc. — see
-    /// `check_core_json_lit` / `check_core_dbvalue_lit`). Only these call
-    /// sites may trip the implicit-clone E0209 below; an ordinary read-only
-    /// stdlib call (e.g. `fs.read(path)`) must not, even though its param
-    /// type is also String/List/Map (D-MEM1/S2 false-positive fix).
-    pub(crate) fn expect_core_arg_consuming(
-        &mut self,
-        call_name: &str,
-        idx: usize,
-        param_ty: &Type,
-        arg: &mut crate::AST::CallArg,
-    ) {
-        self.expect_core_arg_impl(call_name, idx, param_ty, arg, true, false);
-    }
-
+    /// Elaborate an owning Core argument that permits an explicit take.
+    /// The owning position records its payload move after elaboration.
     pub(crate) fn expect_core_arg_moving(
         &mut self,
         call_name: &str,
@@ -315,12 +300,9 @@ impl<'a> Checker<'a> {
             if let Some((root, place, place_span)) = core_consuming_place(&arg.expr) {
                 if self.is_borrowed_binding(&root) {
                     arg.flags.implicit_clone = true;
-                    // D-MEM1/S2 (was D-L0201 lint): a hard error now, regardless
-                    // of liveness — no clone is ever silent. Unlike a Move-param
-                    // user function, this is a fixed std read-only signature —
-                    // `^` is never accepted here (E0203), so `name.copy()`
-                    // (D-COPY-WORD1) is the only fix,
-                    // not a liveness-dependent move/reorder menu.
+                    // Borrowed storage cannot become this constructor's
+                    // owned payload. A take marker is valid only for an
+                    // owner, so an explicit copy is the repair here.
                     let (what, fix) = match place {
                             Some(place) => (
                                 format!("implicit clone of `{}`", place),
