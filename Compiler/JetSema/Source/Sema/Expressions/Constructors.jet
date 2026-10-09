@@ -270,19 +270,40 @@ fn sema_expression_struct_type(type_name: String, type_args: [Type], expected: T
     Val(SemaExpressionResolvedType{ty: resolved_ty, owner: resolved_owner})
 }
 
+// D-PLACE1 / Rust CheckerItems::atomic_field_inner: only supported Atomic
+// fields take a scalar initializer. Ordinary generic owners keep their type.
+fn sema_atomic_field_inner(ty: Type) -> Type? Never! {
+    if ty == .Apply(name, args) {
+        if sema_atomic_type_name(name) && args.len() > 0 && jet_target_layout_atomic_scalar_type(args[0]) -> return Val(args[0])
+    }
+    None
+}
+
+// Reuse the canonical Atomic.new row so typed field construction reaches the
+// same MIR carrier as an explicit constructor, without rechecking/moving twice.
+fn sema_atomic_field_initializer(field_ty: Type, value: TExpr, source: Expr) -> TExpr? {
+    inner :: sema_atomic_field_inner(field_ty) ?? return Val(value)
+    row :: sema_call_builtin_static_row("Atomic", "new", "") ?? return None
+    argument :: CallArg{convention: row.parameter_convention, expr: source, span: expr_span(source), flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    bindings :: [SemaInferenceBinding]{SemaInferenceBinding{name: row.type_params[0], ty: inner, source: "atomic field initializer"}}
+    kind :: sema_call_builtin_static_lowered(row, [TExpr]{value}, [CallArg]{argument}, bindings, 0, value.span) ?? return None
+    Val(sema_tir_expr(field_ty, kind, value.span))
+}
+
 // One struct field initializer, written or a declared default, checked
 // against the field type with the owner's generic arguments substituted. Its
 // move is recorded at this point of the literal's evaluation order.
-fn sema_expression_struct_field_value(field: Field, field_value: Expr, field_reference_span: Span, owner: Symbol, names: [String], args: [Type], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStructFieldValue? {
+fn sema_expression_struct_field_value(field: Field, field_value: Expr, field_reference_span: Span, atomic_payload: Bool, owner: Symbol, names: [String], args: [Type], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStructFieldValue? {
     field_ty :: sema_inference_substitute_type(sema_expression_field_owner_type(environment, owner.module_name, field.ty, names), names, args)
+    expected_ty :: if atomic_payload -> sema_atomic_field_inner(field_ty) ?? field_ty else -> field_ty
     string_view :: sema_stmt_string_view_type(field_ty)
     if !string_view -> sema_copy_site_check_field(field_value, environment, scopes, &tail_store, &context, &diagnostics)
-    checked_value := if string_view -> sema_string_view_check_field(field_value, field_ty, environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression_with_lambda_escapes(field_value, Val(field_ty), environment, &scopes, &state, &tail_store, &context, Val(true), &diagnostics)
+    checked_value := if string_view -> sema_string_view_check_field(field_value, field_ty, environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression_with_lambda_escapes(field_value, Val(expected_ty), environment, &scopes, &state, &tail_store, &context, Val(true), &diagnostics)
     checked :: checked_value ?? return None
     if !string_view && !sema_copy_site_check_guard_owned(checked, environment, scopes, context, &diagnostics, false) -> return None
     compatible :: sema_expr_expected_assignable(field_ty, checked.ty, environment) ?? return None
     if !compatible {
-        &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(field_ty, environment), sema_expr_expected_type(checked.ty, environment), expr_span(field_value)))
+        &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(expected_ty, environment), sema_expr_expected_type(checked.ty, environment), expr_span(field_value)))
         return None
     }
     if !string_view && !sema_copy_site_record_move(field_value, scopes, &state, &tail_store, &context, &diagnostics) -> return None
@@ -291,7 +312,8 @@ fn sema_expression_struct_field_value(field: Field, field_value: Expr, field_ref
     &context.name_references.push(SemaNameReferenceFact{span: field_reference_span, symbol: symbol, kind: "field"})
     reference := sema_expression_field_ref(symbol, Val(owner.id), field_ty)
     reference.boxed = sema_scope_environment_boxed_edge(environment, owner.id, field.name)
-    Val(TStructFieldValue{field: reference, value: checked, boxed: reference.boxed})
+    initialized :: if atomic_payload -> sema_atomic_field_initializer(field_ty, checked, field_value) ?? return None else -> checked
+    Val(TStructFieldValue{field: reference, value: initialized, boxed: reference.boxed})
 }
 
 // A builtin Core record (`IOContext{...}`, `Tensor{...}`) has no Jet
@@ -424,7 +446,7 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
     loop source in fields {
         loop field in struct_def.fields {
             if field.name != source.name -> next
-            checked :: sema_expression_struct_field_value(field, source.value, source.name_span, owner, names, args, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+            checked :: sema_expression_struct_field_value(field, source.value, source.name_span, true, owner, names, args, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
             &values.push(checked)
             break
         }
@@ -435,7 +457,7 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
             &diagnostics.push(sema_error("E0108", span, "field `{field.name}` needs a value", "a struct literal must initialize every field without a default", "supply `{field.name}: ...` or declare a field default"))
             return None
         }
-        checked :: sema_expression_struct_field_value(field, default_value, field.name_span, owner, names, args, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+        checked :: sema_expression_struct_field_value(field, default_value, field.name_span, false, owner, names, args, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         &values.push(checked)
     }
     value := sema_tir_expr(result_ty, TExprKind.StructLit{fields: values, extra: None}, span)

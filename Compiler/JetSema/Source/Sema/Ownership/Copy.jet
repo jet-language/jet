@@ -122,9 +122,15 @@ fn sema_copy_named_is_builtin_resource(name: String) -> Bool Never! {
     }
 }
 
+// One Atomic owner recognition shared by copy policy and field initialization.
+fn sema_atomic_type_name(name: String) -> Bool Never! {
+    name == "Atomic"
+}
+
 fn sema_copy_apply_is_noncloneable(name: String) -> Bool Never! {
+    if sema_atomic_type_name(name) -> return true
     if name == {
-        "Atomic" | "DataArrowBatch" | "MutationPlan" | "VaultWrite" | "ExpiringSecret" | "ViewMut" | "ViewIter" | "CellReadGuard" | "CellEditGuard" | "SharedGuard" -> true
+        "DataArrowBatch" | "MutationPlan" | "VaultWrite" | "ExpiringSecret" | "ViewMut" | "ViewIter" | "CellReadGuard" | "CellEditGuard" | "SharedGuard" -> true
         else -> false
     }
 }
