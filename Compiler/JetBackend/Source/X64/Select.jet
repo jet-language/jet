@@ -137,11 +137,9 @@ fn x64_emit_move(emitter: &X64Emitter, src: X64Loc, dst: X64Loc) Never! {
         if from != to -> x64_float_move(&emitter.code, single, to, from)
         return
     }
-    if dst == .FloatStack(slot, _) {
-        if src == .Xmm(from, _) -> return x64_finish_float(&emitter, dst, from)
-        // Word-held Float sources already have the F32 zero-extension invariant.
-        from :: x64_operand(&emitter, src, X64_R11)
-        return x64_store_slot(&emitter, slot, from)
+    if dst == .FloatStack(_, single) {
+        from :: x64_float_operand(&emitter, src, single, 0)
+        return x64_finish_float(&emitter, dst, from)
     }
     if dst == .Imm(_) -> return
     from :: x64_operand(&emitter, src, X64_R11)
@@ -237,8 +235,12 @@ fn x64_operand(emitter: &X64Emitter, loc: X64Loc, scratch: Int) -> Int Never! {
             x64_float_from_xmm(&emitter.code, if single -> lir_layout_float32() else -> lir_layout_float(), scratch, reg)
             scratch
         }
-        .FloatStack(slot, _) -> {
-            x64_load_slot(&emitter, scratch, slot)
+        .FloatStack(slot, single) -> {
+            if single {
+                x64_load32(&emitter.code, scratch, X64_RBP, x64_slot_disp(emitter.saved.len(), slot))
+            } else {
+                x64_load_slot(&emitter, scratch, slot)
+            }
             scratch
         }
         .Stack(slot) -> {
@@ -837,15 +839,34 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             x64_finish_result(&emitter, locations[dst.value], reg)
         }
         .Convert(dst, src) -> {
-            src_reg :: x64_operand(&emitter, locations[src.value], X64_R10)
-            reg :: x64_result_register(locations[dst.value], X64_RAX)
-            if x64_is_float(function, dst) {
-                x64_cvtsi2sd(&emitter.code, 0, src_reg)
-                x64_movq_from_xmm(&emitter.code, reg, 0)
+            to :: function.values[dst.value].layout
+            if to.class == .Float {
+                reg :: x64_float_result(locations[dst.value], 0)
+                if x64_is_float(function, src) {
+                    source_single :: x64_is_float32(function, src)
+                    src_reg :: x64_float_operand(&emitter, locations[src.value], source_single, 0)
+                    if to == function.values[src.value].layout {
+                        if reg != src_reg -> x64_float_move(&emitter.code, source_single, reg, src_reg)
+                    } else if to == lir_layout_float32() {
+                        x64_cvtsd2ss(&emitter.code, reg, src_reg)
+                    } else {
+                        x64_cvtss2sd(&emitter.code, reg, src_reg)
+                    }
+                } else {
+                    src_reg :: x64_operand(&emitter, locations[src.value], X64_R10)
+                    if to == lir_layout_float32() {
+                        x64_cvtsi2ss(&emitter.code, reg, src_reg)
+                    } else {
+                        x64_cvtsi2sd(&emitter.code, reg, src_reg)
+                    }
+                }
+                x64_finish_float(&emitter, locations[dst.value], reg)
             } else if !x64_is_float(function, src) {
+                src_reg :: x64_operand(&emitter, locations[src.value], X64_R10)
+                reg :: x64_result_register(locations[dst.value], X64_RAX)
                 from :: function.values[src.value].layout.size
-                to :: function.values[dst.value].layout.size
-                x64_integer_width(&emitter.code, reg, src_reg, if from < to -> from else -> to)
+                x64_integer_width(&emitter.code, reg, src_reg, if from < to.size -> from else -> to.size)
+                x64_finish_result(&emitter, locations[dst.value], reg)
             } else {
                 src_reg :: x64_float_operand(&emitter, locations[src.value], x64_is_float32(function, src), 0)
                 reg :: x64_result_register(locations[dst.value], X64_RAX)

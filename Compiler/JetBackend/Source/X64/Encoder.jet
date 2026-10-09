@@ -490,9 +490,9 @@ fn x64_movd_from_xmm(code: &[U8], dst: Int, xmm: Int) Never! { x64_sse(&code, 0x
 // movd xmm, r32 (66 0F 6E /r).
 fn x64_movd_to_xmm(code: &[U8], xmm: Int, src: Int) Never! { x64_sse(&code, 0x66, false, 0x6e, xmm, src) }
 
-// movapd/movaps dst, src: copy an xmm register without a GPR round trip.
+// Scalar movss for binary32; movapd retains the existing binary64 copy.
 fn x64_float_move(code: &[U8], single: Bool, dst: Int, src: Int) Never! {
-    x64_sse(&code, if single -> 0 else -> 0x66, false, 0x28, dst, src)
+    x64_sse(&code, if single -> 0xf3 else -> 0x66, false, if single -> 0x10 else -> 0x28, dst, src)
 }
 
 // movsd/movss xmm, [base + disp], or the reverse store (0F 10/11).

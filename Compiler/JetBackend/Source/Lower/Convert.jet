@@ -110,6 +110,51 @@ fn lower_convert_scalar(ty: MIRType) -> LowerScalar Never! {
     }
 }
 
+// Float32Bits is a raw low-32 word at the MIR/runtime boundary, not an
+// integer value to numerically convert. Only typed SSE temporaries are Float32.
+fn lower_convert_f32_operand(f: &LowerFunction, value: LIRValueID) -> LIRValueID Never! {
+    single :: lower_new_value(&f, lir_layout_float32(), LIRDrop.Trivial, None)
+    lower_emit(&f, LIRInst.Bitcast{dst: single, src: value})
+    single
+}
+
+fn lower_convert_f32_result(f: &LowerFunction, dst: LIRValueID, value: LIRValueID) Never! {
+    single :: lower_new_value(&f, lir_layout_float32(), LIRDrop.Trivial, None)
+    lower_emit(&f, LIRInst.Convert{dst: single, src: value})
+    lower_emit(&f, LIRInst.Bitcast{dst: dst, src: single})
+}
+
+// Rust's unsigned-to-float cast: a high-bit U64 becomes a signed half with
+// a sticky low bit, then doubles after rounding. This avoids double rounding.
+fn lower_convert_u64_float(f: &LowerFunction, dst: LIRValueID, value: LIRValueID) Never! {
+    no_args :: [LIRValueID]{}
+    direct :: lower_new_block(&f)
+    high :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    sign :: lower_flag(&f)
+    zero :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Compare{dst: sign, condition: LIRCondition.Ge, left: value, right: zero})
+    lower_seal(&f, LIRTerminator.Branch{condition: sign, then_target: lower_target(direct, no_args), else_target: lower_target(high, no_args)})
+    lower_start(&f, direct, no_args)
+    small :: lower_new_value(&f, lower_value_layout(f, dst), LIRDrop.Trivial, None)
+    lower_emit(&f, LIRInst.Convert{dst: small, src: value})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{small})})
+    lower_start(&f, high, no_args)
+    one :: lower_const(&f, 1)
+    half :: lower_word(&f)
+    low :: lower_word(&f)
+    sticky :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: half, op: LIRBinaryOp.UShr, left: value, right: one})
+    lower_emit(&f, LIRInst.Binary{dst: low, op: LIRBinaryOp.And, left: value, right: one})
+    lower_emit(&f, LIRInst.Binary{dst: sticky, op: LIRBinaryOp.Or, left: half, right: low})
+    rounded :: lower_new_value(&f, lower_value_layout(f, dst), LIRDrop.Trivial, None)
+    large :: lower_new_value(&f, lower_value_layout(f, dst), LIRDrop.Trivial, None)
+    lower_emit(&f, LIRInst.Convert{dst: rounded, src: sticky})
+    lower_emit(&f, LIRInst.Binary{dst: large, op: LIRBinaryOp.Add, left: rounded, right: rounded})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{large})})
+    lower_start(&f, done, [LIRValueID]{dst})
+}
+
 fn lower_convert_numeric(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID, target: MIRType) Never! {
     source_type :: lower_value_type(c, value) ?? return lower_fail(&m, &f, "numeric conversion without a checked source type is not lowered at O0 yet")
     source :: lower_convert_scalar(source_type)
@@ -126,14 +171,31 @@ fn lower_convert_numeric(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     // an independent owner, unlike a transparent carrier transfer.
     if from_exact && to_exact -> return lower_copy(p, c, &m, &f, instruction, value)
     if source != .Other && source == destination -> return lower_forward(c, &m, &f, instruction, value)
-    // MIRRust.rs NumericCast is Rust `as`: F32 -> Float widens exactly; Float
-    // and a narrow or I64 word -> F32 round to nearest (SSE's default mode).
-    // F32 -> integer `as` saturates, which a truncating convert does not.
+    // Reuse the numeric pairs from 08dadc79e; unlike that original lowering,
+    // cross the raw-binary32 carrier boundary explicitly.
     to_float32 :: destination == .Float32
-    if (source == .Float32 && to_float) || ((from_float || source == .Narrow || from_i64) && to_float32) {
+    if source == .Float32 && to_float {
         operand :: lower_use(&m, &f, value) ?? return
         dst :: lower_result(p, c, &m, &f, instruction) ?? return
-        return lower_emit(&f, LIRInst.Convert{dst: dst, src: operand})
+        single :: lower_convert_f32_operand(&f, operand)
+        return lower_emit(&f, LIRInst.Convert{dst: dst, src: single})
+    }
+    if to_float32 && (from_float || source == .Narrow || from_i64 || from_exact || lower_is_unsigned_word(lower_convert_type(source_type))) {
+        operand :: lower_use(&m, &f, value) ?? return
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return
+        if from_exact {
+            // Jet's exact-Int NumericCast uses the same f64 adapter as Float
+            // before the final `as f32` (Emit/Operations.jet:4791).
+            wide :: lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
+            lower_convert_exact(&m, &f, wide, operand, "jet_int_owned_to_f64", true)
+            return lower_convert_f32_result(&f, dst, wide)
+        }
+        if lower_is_unsigned_word(lower_convert_type(source_type)) {
+            single :: lower_new_value(&f, lir_layout_float32(), LIRDrop.Trivial, None)
+            lower_convert_u64_float(&f, single, operand)
+            return lower_emit(&f, LIRInst.Bitcast{dst: dst, src: single})
+        }
+        return lower_convert_f32_result(&f, dst, operand)
     }
     if (from_exact && (to_i64 || to_float || to_char)) || (from_i64 && (to_exact || to_float)) || (from_char && to_exact) {
         operand :: lower_use(&m, &f, value) ?? return
@@ -180,9 +242,15 @@ fn lower_convert_numeric(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
 // Prelude route (lower_call); a symbol the image runtime lacks is a link error.
 fn lower_convert_prelude(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID, parameters: [MIRValueID], call: MIRPreludeCallID, location: MIRPanicLoc, fallibility: MIRCallFallibility) Never! {
     row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "conversion naming missing Prelude call {call.value} is not lowered at O0 yet")
+    if row.member == "int_checked_fixed" {
+        target :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "checked wide constructor has no target")
+        if lower_wide_signed(p, target) != None -> return lower_wide_checked_construct(p, c, &m, &f, instruction, value, target, location)
+    }
     symbol :: lower_runtime_symbol(row)
     if (row.member == "int_try_from" || row.member == "fixed_try_from") && fallibility != MIRCallFallibility.Infallible -> return lower_convert_try_fixed(p, c, &m, &f, instruction, row.member, value, fallibility)
     if row.member == "inline_range" && fallibility != MIRCallFallibility.Infallible -> return lower_convert_inline_range(p, c, &m, &f, instruction, value, parameters)
+    if row.member == "float_to_int" || row.member == "float_narrow" -> return lower_convert_checked_float(p, c, &m, &f, instruction, row.member, value, parameters, fallibility)
+    if row.member == "checked_widen" -> return lower_convert_checked_widen(p, c, &m, &f, instruction, value, parameters, symbol, location, fallibility)
     // Unit conversions already name the canonical shared kernel. Their
     // checked Option/Result is the normal runtime route carrier, not a
     // backend-local rounding or failure policy.
@@ -208,6 +276,174 @@ fn lower_convert_prelude(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     dst :: lower_result(p, c, &m, &f, instruction)
     if f.failed -> return
     lower_call_runtime(&m, &f, symbol, args, dst)
+}
+
+// Numeric.jet's admitted ABI takes an E4 text handle for file context, not
+// the pointer/length pair used by the older generic Prelude C adapters.
+fn lower_convert_checked_widen(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID, parameters: [MIRValueID], symbol: String, location: MIRPanicLoc, fallibility: MIRCallFallibility) Never! {
+    unsupported :: "checked integer-to-float widening of this shape is not lowered at O0 yet"
+    source :: lower_value_type(c, value) ?? return lower_fail(&m, &f, unsupported)
+    target :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, unsupported)
+    if fallibility != .Infallible -> return lower_fail(&m, &f, unsupported)
+    if lower_convert_scalar(target) != .Float && lower_convert_scalar(target) != .Float32 -> return lower_fail(&m, &f, unsupported)
+    exact :: lower_is_exact_int(source)
+    if !exact {
+        if lower_convert_type(source).kind == .IntN(_, bits) {
+            if bits > 64 -> return lower_fail(&m, &f, unsupported)
+        } else {
+            return lower_fail(&m, &f, unsupported)
+        }
+    }
+    if parameters.len() != (if exact -> 1 else -> 2) -> return lower_fail(&m, &f, unsupported)
+    operand :: lower_use(&m, &f, value) ?? return
+    args := [LIRValueID]{operand}
+    loop parameter in parameters {
+        flag :: lower_use(&m, &f, parameter) ?? return
+        &args.push(flag)
+    }
+    file :: lower_pointer(&f)
+    path :: lower_static_text(&m, &f, lower_source_path(p, m, location.file))
+    lower_call_runtime(&m, &f, "jet_rt_string_from_static", path, Val(file))
+    &args.push(file)
+    &args.push(lower_const(&f, location.line))
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    if lower_convert_scalar(target) == .Float32 {
+        // Precision24 acceptance returns an exactly representable f64 carrier.
+        wide :: lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
+        lower_call_runtime(&m, &f, symbol, args, Val(wide))
+        lower_convert_f32_result(&f, dst, wide)
+    } else {
+        lower_call_runtime(&m, &f, symbol, args, Val(dst))
+    }
+    lower_call_runtime(&m, &f, "jet_rt_string_drop", [LIRValueID]{file}, None)
+}
+
+// Shared checked Float policy (NumericConversion.rs:121-141): ordered bounds
+// reject NaN/infinity before any truncating machine conversion. F32 first
+// widens exactly to F64, as Emit/Operations.jet:4836 does.
+fn lower_convert_float_bits(f: &LowerFunction, bits: Int) -> LIRValueID Never! {
+    value :: lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
+    lower_emit(&f, LIRInst.Const{dst: value, value: bits})
+    value
+}
+
+fn lower_convert_float_word(f: &LowerFunction, value: LIRValueID, unsigned: Bool, bits: Int) -> LIRValueID Never! {
+    result :: lower_word(&f)
+    if !unsigned || bits < 64 {
+        lower_emit(&f, LIRInst.Convert{dst: result, src: value})
+        return result
+    }
+    // SSE's signed conversion cannot represent [2^63, 2^64). Subtract the
+    // exact 2^63 first, truncate the remainder, then restore its high bit.
+    half :: lower_convert_float_bits(&f, (1023 + 63) << 52)
+    small :: lower_new_block(&f)
+    high :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    no_args :: [LIRValueID]{}
+    fits :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: fits, condition: LIRCondition.Lt, left: value, right: half})
+    lower_seal(&f, LIRTerminator.Branch{condition: fits, then_target: lower_target(small, no_args), else_target: lower_target(high, no_args)})
+    lower_start(&f, small, no_args)
+    direct :: lower_word(&f)
+    lower_emit(&f, LIRInst.Convert{dst: direct, src: value})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{direct})})
+    lower_start(&f, high, no_args)
+    remainder :: lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
+    low :: lower_word(&f)
+    restored :: lower_word(&f)
+    sign :: lower_const(&f, -9223372036854775807 - 1)
+    lower_emit(&f, LIRInst.Binary{dst: remainder, op: LIRBinaryOp.Sub, left: value, right: half})
+    lower_emit(&f, LIRInst.Convert{dst: low, src: remainder})
+    lower_emit(&f, LIRInst.Binary{dst: restored, op: LIRBinaryOp.Or, left: low, right: sign})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{restored})})
+    lower_start(&f, done, [LIRValueID]{result})
+    result
+}
+
+fn lower_convert_checked_float(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, member: String, value: MIRValueID, parameters: [MIRValueID], fallibility: MIRCallFallibility) Never! {
+    unsupported :: "Prelude conversion {member} of this shape is not lowered at O0 yet"
+    target :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, unsupported)
+    source :: lower_value_type(c, value) ?? return lower_fail(&m, &f, unsupported)
+    if lower_convert_scalar(source) != .Float && lower_convert_scalar(source) != .Float32 -> return lower_fail(&m, &f, unsupported)
+    if fallibility == {
+        .Failure(.Result(_, _)) -> {}
+        else -> return lower_fail(&m, &f, unsupported)
+    }
+    if target.kind == {
+        .Result(_, _) -> {}
+        else -> return lower_fail(&m, &f, unsupported)
+    }
+    ok_ty :: if target.kind == .Result(ok, _) -> ok else -> panic("checked float Result")
+    err_ty :: if target.kind == .Result(_, err) -> err else -> panic("checked float Result")
+    if !lower_text_type(err_ty) -> return lower_fail(&m, &f, unsupported)
+    narrow :: member == "float_narrow"
+    scalar :: lower_convert_type(ok_ty)
+    exact :: lower_is_exact_int(ok_ty)
+    signed := true
+    bits := 64
+    if narrow {
+        if lower_convert_scalar(ok_ty) != .Float32 || parameters.len() != 0 -> return lower_fail(&m, &f, unsupported)
+    } else {
+        if parameters.len() != 1 -> return lower_fail(&m, &f, unsupported)
+        if scalar.kind == .IntN(is_signed, width) {
+            signed = is_signed
+            bits = width
+        } else if !exact -> return lower_fail(&m, &f, unsupported)
+        if bits != 8 && bits != 16 && bits != 32 && bits != 64 -> return lower_fail(&m, &f, unsupported)
+    }
+    operand :: lower_use(&m, &f, value) ?? return
+    floating := operand
+    if lower_convert_scalar(source) == .Float32 {
+        single :: lower_convert_f32_operand(&f, operand)
+        floating = lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
+        lower_emit(&f, LIRInst.Convert{dst: floating, src: single})
+    }
+    high_bits :: if narrow -> ((1023 + 127) << 52) | (((1 << 23) - 1) << 29) else -> (1023 + bits - (if signed -> 1 else -> 0)) << 52
+    high :: lower_convert_float_bits(&f, high_bits)
+    low :: lower_convert_float_bits(&f, if narrow || signed -> high_bits | (-9223372036854775807 - 1) else -> 0)
+    above :: lower_flag(&f)
+    below :: lower_flag(&f)
+    fits :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: above, condition: LIRCondition.Ge, left: floating, right: low})
+    lower_emit(&f, LIRInst.Compare{dst: below, condition: if narrow -> LIRCondition.Le else -> LIRCondition.Lt, left: floating, right: high})
+    lower_logic(&f, fits, true, above, below)
+    ok_block :: lower_new_block(&f)
+    err_block :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    no_args :: [LIRValueID]{}
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_seal(&f, LIRTerminator.Branch{condition: fits, then_target: lower_target(ok_block, no_args), else_target: lower_target(err_block, no_args)})
+    lower_start(&f, ok_block, no_args)
+    converted :: if {
+        narrow -> {
+            raw :: lower_word(&f)
+            lower_convert_f32_result(&f, raw, floating)
+            raw
+        }
+        else -> {
+            word :: lower_convert_float_word(&f, floating, !signed, bits)
+            if exact -> {
+                owned :: lower_word(&f)
+                lower_convert_exact(&m, &f, owned, word, "jet_int_owned_from_i64", false)
+                owned
+            } else -> word
+        }
+    }
+    ok_box :: lower_pointer(&f)
+    lower_alloc(&m, &f, ok_box, lower_result_box_size(p, ok_ty, err_ty))
+    lower_store_word(&f, ok_box, 0, lower_result_selector(true))
+    lower_write_at(p, &f, ok_box, lower_result_payload_offset(), converted, ok_ty)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{ok_box})})
+    lower_start(&f, err_block, no_args)
+    err_box :: lower_pointer(&f)
+    lower_alloc(&m, &f, err_box, lower_result_box_size(p, ok_ty, err_ty))
+    lower_store_word(&f, err_box, 0, lower_result_selector(false))
+    text :: lower_pointer(&f)
+    message :: lower_static_text(&m, &f, if narrow -> "value doesn't fit in F32" else -> "value doesn't fit in destination type")
+    lower_call_runtime(&m, &f, "jet_rt_string_from_static", message, Val(text))
+    lower_write_at(p, &f, err_box, lower_result_payload_offset(), text, err_ty)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{err_box})})
+    lower_start(&f, done, [LIRValueID]{dst})
 }
 
 // MIRRust.rs numeric_conversion `inline_range` from an exact Int: the
@@ -386,10 +622,6 @@ fn lower_convert_try_big(m: &LowerModule, f: &LowerFunction, value: LIRValueID, 
 }
 
 fn lower_convert(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID, parameters: [MIRValueID], target: MIRType, conversion: MIRConversion) Never! {
-    if lower_value_type(c, value) == .Val(source_type) {
-        if lower_repr(p, source_type) == .Float32Bits -> return lower_fail(&m, &f, "Float32 conversions are not lowered at O0 yet")
-    }
-    if lower_repr(p, target) == .Float32Bits -> return lower_fail(&m, &f, "Float32 conversions are not lowered at O0 yet")
     if conversion == {
         .Transparent -> lower_forward(c, &m, &f, instruction, value)
         .NumericCast -> {
