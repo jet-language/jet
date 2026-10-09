@@ -4003,7 +4003,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     #[allow(unused_assignments)]
     let mut visible_lints: Vec<jet::Diagnostics::Diagnostic> = Vec::new();
     let execution_lints: Vec<jet::Diagnostics::Diagnostic>;
-    let mut checked_runtime: Option<jet::AST::ProgramBundle> = None;
+    let mut checked_runtime: Option<jet::Driver::CheckedSourceBundle> = None;
     let mut programmable_build_target: Option<String> = None;
     progress.major("Generating", "native code");
 
@@ -4124,9 +4124,9 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             invocation_authority,
             cmd == "build",
         ) {
-            Ok(output) => {
+            Ok(mut output) => {
                 programmable_build_target = programmable_build_target_name(&output);
-                checked_runtime = (!emit_rust).then_some(output.runtime).flatten();
+                checked_runtime = if !emit_rust { output.take_checked_runtime() } else { None };
                 Ok(output.compile)
             }
             Err(diags) => Err(diags),
@@ -4153,9 +4153,9 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             invocation_authority,
             cmd == "build",
         ) {
-            Ok(output) => {
+            Ok(mut output) => {
                 programmable_build_target = programmable_build_target_name(&output);
-                checked_runtime = (!emit_rust).then_some(output.runtime).flatten();
+                checked_runtime = if !emit_rust { output.take_checked_runtime() } else { None };
                 Ok(output.compile)
             }
             Err(diags) => Err(diags),
@@ -4182,9 +4182,9 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             invocation_authority,
             cmd == "build",
         ) {
-            Ok(output) => {
+            Ok(mut output) => {
                 programmable_build_target = programmable_build_target_name(&output);
-                checked_runtime = (!emit_rust).then_some(output.runtime).flatten();
+                checked_runtime = if !emit_rust { output.take_checked_runtime() } else { None };
                 Ok(output.compile)
             }
             Err(diags) => Err(diags),
@@ -4302,10 +4302,10 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     };
     let game_runtime = checked_runtime
         .as_ref()
-        .is_some_and(program_uses_game_runtime)
+        .is_some_and(|checked| program_uses_game_runtime(&checked.bundle))
         || src.contains("core.game");
     if let Some(bundle) = checked_runtime.as_mut() {
-        tier.project(&mut bundle.build_facts, &profile);
+        tier.project(&mut bundle.bundle.build_facts, &profile);
     }
     inject_game_crash_reporter_bootstrap(&mut rust_code, game_runtime);
     progress.minor("generated Rust", &format!("{} bytes", rust_code.len()));
@@ -4434,13 +4434,13 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                 (checked_runtime.as_mut(), application_authority.as_ref())
             {
                 let required_effects = bundle
-                    .package_guarantees
+                    .bundle.package_guarantees
                     .application_authority
                     .required_effects
                     .clone();
                 let mut applied = application_authority.clone();
                 applied.required_effects = required_effects;
-                bundle.package_guarantees.application_authority = applied;
+                bundle.bundle.package_guarantees.application_authority = applied;
             }
             let effect_summary = jet::EffectBudget::render_effect_projection_line(&projection);
             // Program stdout stays the program's (U7 / D-DEVMODE1). The
@@ -4583,7 +4583,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             // The checked program answers whether any gate applies; only a
             // program that declares one pays the gates' own front-end check.
             let build_gated = checked_runtime.as_ref().map_or(true, |bundle| {
-                crate::CmdBudget::has_build_gates(bundle, budget_target, &budget_profile)
+                crate::CmdBudget::has_build_gates(&bundle.bundle, budget_target, &budget_profile)
             });
             if build_gated
                 && crate::CmdBudget::run_build_gates(
@@ -14335,7 +14335,7 @@ fn build_library(
 fn build_inner(
     file: &str,
     rust_code: &str,
-    runtime_bundle: Option<&jet::AST::ProgramBundle>,
+    runtime_checked: Option<&jet::Driver::CheckedSourceBundle>,
     bin: PathBuf,
     profile: BuildProfile,
     ffi: Option<&jet::FFI::FfiLink>,
@@ -14354,6 +14354,7 @@ fn build_inner(
     cache_key: Option<String>,
     target_machine: Option<&jet::TargetMachine::TargetMachine>,
 ) {
+    let runtime_bundle = runtime_checked.map(|checked| &checked.bundle);
     // D-BUILD2: `jet build -v` makes the hidden Jet→Rust→native bridge honest.
     // Step labels are deterministic so they can be golden-tested.
     let step = |msg: String| {
@@ -15013,7 +15014,7 @@ fn build_inner(
 pub(crate) fn build(
     file: &str,
     rust_code: &str,
-    runtime_bundle: Option<&jet::AST::ProgramBundle>,
+    runtime_checked: Option<&jet::Driver::CheckedSourceBundle>,
     bin: PathBuf,
     profile: BuildProfile,
     ffi: Option<&jet::FFI::FfiLink>,
@@ -15029,7 +15030,7 @@ pub(crate) fn build(
     build_inner(
         file,
         rust_code,
-        runtime_bundle,
+        runtime_checked,
         bin,
         profile,
         ffi,
@@ -15048,7 +15049,7 @@ pub(crate) fn build(
 pub(crate) fn build_target_machine(
     file: &str,
     rust_code: &str,
-    runtime_bundle: Option<&jet::AST::ProgramBundle>,
+    runtime_checked: Option<&jet::Driver::CheckedSourceBundle>,
     bin: PathBuf,
     profile: BuildProfile,
     ffi: Option<&jet::FFI::FfiLink>,
@@ -15065,7 +15066,7 @@ pub(crate) fn build_target_machine(
     build_inner(
         file,
         rust_code,
-        runtime_bundle,
+        runtime_checked,
         bin,
         profile,
         ffi,

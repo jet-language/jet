@@ -1235,6 +1235,7 @@ mod tests {
     fn structure(layout: StructLayout, fields: Vec<Field>) -> StructDef {
         StructDef {
             span: Span::new(0, 0),
+            compiler_builtin_error: false,
             is_pub: true,
             is_package_pub: false,
             compiler_builtin_error: false,

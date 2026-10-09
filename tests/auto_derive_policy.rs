@@ -479,8 +479,8 @@ fn generic_deny_list_refuses_auto_derive() {
         assert_eq!(impl_count(&rust, rust_trait, "Enabled"), 1, "{rust_trait} Enabled");
         assert_eq!(impl_count(&rust, rust_trait, "Missing"), 0, "{rust_trait} Missing");
     }
-    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
-    let facts = &facts[bundle.entry];
+    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle.bundle, &bundle.bundle.name_ledger);
+    let facts = &facts[bundle.bundle.entry];
     assert!(!facts.auto_encode.contains("Missing"));
     assert!(!facts.auto_decode.contains("Missing"));
     assert_eq!(impl_count(&rust, "JetDebug", "Manual"), 1);

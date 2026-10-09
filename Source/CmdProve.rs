@@ -3882,7 +3882,7 @@ pub(crate) fn proof_mir_identity_for_file(
     let checked = load_checked_proof_bundle(file, profile, setting_overrides)
         .ok_or_else(|| format!("could not check `{file}` for MIR artifact identity"))?;
     let source_digest = jet::SHA256::sha256_hex(member.bytes.as_slice());
-    let core_abi = proof_core_abi(Some(&checked.0), &source_digest);
+    let core_abi = proof_core_abi(Some(&checked.bundle), &source_digest);
     Ok(proof_mir_identity(
         Some(&checked),
         &source_digest,

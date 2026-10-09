@@ -62,7 +62,8 @@ fn typed_crypto_matches_aot_in_default_dev_with_honest_jit_boundary() {
         std::fs::read_to_string("Examples/features/expected/crypto/typed_crypto.out").unwrap();
 
     let mut bundle = jet::Loader::load_entry(path).expect("typed crypto bundle loads");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     let errors: Vec<_> = diagnostics
         .iter()
         .filter(|diagnostic| diagnostic.severity == Severity::Error)

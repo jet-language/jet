@@ -537,7 +537,8 @@ fn run() {
         let shown = path.to_string_lossy().into_owned();
 
         let mut bundle = jet::Loader::load_entry(&shown).expect("parity bundle should load");
-        let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+        let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+        let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
         assert!(
             diagnostics.iter().all(|diagnostic| !matches!(
                 diagnostic.severity,

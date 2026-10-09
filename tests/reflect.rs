@@ -337,6 +337,7 @@ fn state_info_keeps_no_entry_reachability_unknown() {
 fn type_info_exposes_methods_type_params_and_markers() {
     let s = StructDef {
         span: span(),
+        compiler_builtin_error: false,
         is_pub: true,
         is_package_pub: false,
         compiler_builtin_error: false,
@@ -417,6 +418,7 @@ fn type_info_exposes_methods_type_params_and_markers() {
 fn field_info_carries_visibility() {
     let s = StructDef {
         span: span(),
+        compiler_builtin_error: false,
         is_pub: true,
         is_package_pub: false,
         compiler_builtin_error: false,
@@ -474,6 +476,7 @@ fn marker_arguments_are_typed_in_the_written_view() {
     };
     let s = StructDef {
         span: span(),
+        compiler_builtin_error: false,
         is_pub: true,
         is_package_pub: false,
         compiler_builtin_error: false,
@@ -629,6 +632,7 @@ fn registered_type_planes_reflect_as_typed_values() {
     }
     let info = build_struct_type_info(&StructDef {
         span: span(),
+        compiler_builtin_error: false,
         is_pub: true,
         is_package_pub: false,
         compiler_builtin_error: false,

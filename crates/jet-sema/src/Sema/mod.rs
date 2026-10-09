@@ -2015,6 +2015,17 @@ pub(crate) struct ModuleState {
     fragment_facts: CheckerCore::FragmentMemo<crate::AST::MirFragmentNominalFacts>,
 }
 
+impl ModuleState {
+    fn nominal_items(&self) -> impl Iterator<Item = &crate::AST::Item> {
+        self.items.iter().chain(
+            self.compiler_builtin_error_program
+                .into_iter()
+                .flat_map(|program| program.items.iter())
+                .filter(|item| matches!(item, crate::AST::Item::Struct(_))),
+        )
+    }
+}
+
 /// D-INTBIG1: whether a checked type carries Jet's default exact `Int`.
 /// Fixed-width integers remain separate and must not pull in the exact runtime.
 pub(crate) fn type_uses_default_int(ty: &Type) -> bool {

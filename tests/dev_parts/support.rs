@@ -661,7 +661,7 @@ fn build_oracle_binary_from_bundle(
     let ffi = jet::FFI::prepare(bundle).map_err(OracleBuildFailure::FrontEnd)?;
     let rust = emit_native_aot(bundle, checked_nominals, ffi.as_ref());
     let clinks =
-        jet::resolve_c_links_for_bundle(bundle, None).map_err(OracleBuildFailure::CLinks)?;
+        jet::resolve_c_links_for_bundle(&bundle.bundle, None).map_err(OracleBuildFailure::CLinks)?;
     build_oracle_binary_from_parts(dir, tag, i, stem, file, rust, ffi, clinks)
 }
 
@@ -1672,6 +1672,7 @@ fn check_job_runner_interpreter(root: &PathBuf, file: &str) {
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "job_runner front end: {errors:?}");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     for (job, expected_name) in [
         ("greet", "job_runner.greet"),
         ("seed_data", "job_runner.seed_data"),
@@ -1701,16 +1702,16 @@ fn check_job_runner_interpreter(root: &PathBuf, file: &str) {
 /// as this helper does, and as any embedder holding its own bundle would --
 /// skips the driver's own boundary. Without it a 2 MiB libtest worker aborts
 /// the whole binary and reports every other in-flight test as failed.
-fn checked_bundle_from_path(file: &str) -> jet::AST::ProgramBundle {
+fn checked_bundle_from_path(file: &str) -> jet::Driver::CheckedSourceBundle {
     jet::run_compiler_work(|| {
         let mut b = jet::Loader::load_entry(file).expect("bundle should load");
-        let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
+        let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut b, jet::Sema::CompileMode::Run);
         let errors: Vec<_> = diags
             .into_iter()
             .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
             .collect();
         assert!(errors.is_empty(), "fixture must type-check: {errors:?}");
-        b
+        jet::Driver::CheckedSourceBundle::new(b, facts, nominals)
     })
 }
 
@@ -1977,7 +1978,7 @@ fn assert_ui_and_web_three_way(file: &str, stem: &str) {
         return;
     }
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
@@ -2034,7 +2035,7 @@ fn assert_concurrency_and_game_three_way(file: &str, stem: &str) {
         return;
     }
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
@@ -2100,7 +2101,7 @@ fn assert_crypto_auth_vault_three_way(file: &str, stem: &str) {
         return;
     }
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
@@ -2152,7 +2153,7 @@ fn assert_network_http_browser_three_way(file: &str, stem: &str) {
         return;
     }
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
@@ -2235,7 +2236,7 @@ fn assert_data_pipelines_parsing_three_way(file: &str, stem: &str) {
         return;
     }
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
@@ -2374,7 +2375,7 @@ fn assert_io_cli_terminal_time_three_way(file: &str, stem: &str) {
         return;
     }
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
@@ -2469,7 +2470,7 @@ fn assert_lowlevel_and_safety_three_way(file: &str, stem: &str) {
         return;
     }
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))

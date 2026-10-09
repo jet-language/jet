@@ -4,7 +4,7 @@ use crate::Sema::Diagnostics::{owned_type_for_read_view, soft_public_use};
 use crate::Sema::NominalWalk::NominalQuery;
 use crate::Syntax;
 use crate::AST::{
-    AccessConvention, BinOp, Call, EnumLitArg, Expr, Pattern, StrMatchPart, StructPatField, Type,
+    AccessConvention, BinOp, Call, EnumLitArg, Expr, Item, Pattern, StrMatchPart, StructPatField, Type,
     VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
@@ -2952,7 +2952,7 @@ impl<'a> Checker<'a> {
     /// type (`use types.[Kind]`), so its identity is the owner's canonical one.
     pub(crate) fn member_imported_type(&self, name: &str) -> bool {
         !name.contains("::")
-            && !self.registry.contains(name)
+            && self.name_ledger.declaration(self.module_idx, name).is_none()
             && self
                 .name_ledger
                 .alias(self.module_idx, name)

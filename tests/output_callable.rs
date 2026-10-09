@@ -174,6 +174,7 @@ fn aot_dev_and_jit_consume_the_resolved_entry() {
     let (diagnostics, _facts, checked_nominals) =
         jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
 
     let rust = emit_native_aot(&bundle, &checked_nominals);
     assert!(rust.contains("match __jet_start()"), "{rust}");
@@ -559,7 +560,7 @@ fn checked_default_selects_one_of_multiple_executables() {
         "jet_output_checked_default",
         jet::Sema::CompileMode::Run,
     );
-    let selected = bundle.modules[bundle.entry]
+    let selected = bundle.bundle.modules[bundle.bundle.entry]
         .items
         .iter()
         .find_map(|item| {

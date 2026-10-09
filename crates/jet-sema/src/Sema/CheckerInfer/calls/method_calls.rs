@@ -1989,6 +1989,19 @@ impl<'a> Checker<'a> {
                                 .map(|v| v.contains_key(method))
                                 .unwrap_or(false);
                             if has_variant {
+                                let enum_name = if jet_foundation::CoreModuleExports::core_source_modules()
+                                    .iter().any(|source| source.module == ns.as_str())
+                                {
+                                    let requested = format!("{alias}.{leaf}");
+                                    // Keep unresolved source spelling for the
+                                    // ordinary missing-enum diagnostic; never
+                                    // substitute a bare carrier for its owner.
+                                    self.import_qualified_nominal(&requested).unwrap_or(requested)
+                                } else {
+                                    // Genuine native-only enums retain their
+                                    // existing checked intrinsic type identity.
+                                    type_name.clone()
+                                };
                                 let saved: Vec<Expr> = args
                                     .iter_mut()
                                     .map(|a| {
@@ -2001,7 +2014,7 @@ impl<'a> Checker<'a> {
                                 let mut enum_args: Vec<EnumLitArg> =
                                     saved.into_iter().map(EnumLitArg::Positional).collect();
                                 let ty = self.check_enum_lit(
-                                    &type_name,
+                                    &enum_name,
                                     method,
                                     &mut enum_args,
                                     span,
@@ -2012,10 +2025,9 @@ impl<'a> Checker<'a> {
                                         arg.expr = expr;
                                     }
                                 }
-                                // Leave recv_type unset. TIR lowers
-                                // `DataEvent.Key(...)` only when the receiver
-                                // is a type ident and recv_type is None.
-                                **receiver = Expr::Ident(type_name.clone(), span);
+                                // Leave recv_type unset: this is a checked
+                                // enum constructor, not a value receiver.
+                                **receiver = Expr::Ident(enum_name, span);
                                 return Some(ty);
                             }
                         }

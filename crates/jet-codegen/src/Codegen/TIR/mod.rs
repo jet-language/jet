@@ -3787,6 +3787,7 @@ fn lower_mir_fragment(
         for (name, fields) in struct_fields {
             items.push(crate::AST::Item::Struct(crate::AST::StructDef {
                 span: empty_span,
+                compiler_builtin_error: false,
                 is_pub: false,
                 is_package_pub: false,
                 compiler_builtin_error: false,
@@ -4865,6 +4866,16 @@ fn nominal_identity_projection(
     unique.extend(scoped.into_iter().map(|((module, spelling), identity)| {
         (format!("{module}::{spelling}"), identity)
     }));
+    for facts in checked_nominals {
+        for (identity, definition) in &facts.structs {
+            if !definition.compiler_builtin_error {
+                continue;
+            }
+            let leaf = identity.rsplit_once("::").map_or(identity.as_str(), |(_, leaf)| leaf);
+            unique.insert(format!("{}::{leaf}", facts.module_identity), identity.clone());
+            unique.insert(leaf.to_string(), identity.clone());
+        }
+    }
     unique
 }
 /// Select zero-argument entries by canonical module-qualified semantic keys.
@@ -5377,6 +5388,17 @@ fn lower_checked_tir_program_on_stack(
         }
     }
     jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
+        if checked_nominals.len() != bundle.modules.len()
+            || checked_nominals.iter().enumerate().any(|(idx, facts)| {
+                bundle.name_ledger.module_identity(idx).as_deref()
+                    != Some(facts.module_identity.as_str())
+            })
+        {
+            return Err(LowerError::new(
+                crate::Diagnostics::Span::new(0, 0),
+                "checked nominal facts are missing or belong to another module context",
+            ));
+        }
         let module = bundle.modules.get(bundle.entry).ok_or_else(|| {
             LowerError::new(crate::Diagnostics::Span::new(0, 0), "missing entry module")
         })?;

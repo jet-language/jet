@@ -85,6 +85,50 @@ pub struct Err {
     }}
 }
 
+// Original compiler-owned declarations. These private records are ordinary
+// checked nominal types; only Err carries the existing default-error role.
+// Fresh construction evaluates the declared metadata default in this owner.
+// Copy, context and conversion retain the existing stored metadata instead.
+struct __jet_ErrorContextFrame {
+    text: String
+    file: String
+    line: Int
+}
+struct __jet_ErrorConversion {
+    source: String
+    target: String
+}
+struct __jet_ErrorField {
+    name: String
+    value: String
+}
+struct __jet_ErrorSpan {
+    start: Int
+    end: Int
+}
+struct __jet_ErrorDetails {
+    variant: String
+    fields: [__jet_ErrorField]
+    source_span: __jet_ErrorSpan?
+}
+struct __jet_ErrorMetadata {
+    typed_identity: String?
+    context_frames: [__jet_ErrorContextFrame]
+    conversion_history: [__jet_ErrorConversion]
+    details: __jet_ErrorDetails?
+}
+pub struct Err {
+    pub message: String
+    pub code: String?
+    pub cause: Err?
+    __jet___memo_error_metadata: __jet_ErrorMetadata = __jet_ErrorMetadata{
+        typed_identity: None,
+        context_frames: [__jet_ErrorContextFrame]{},
+        conversion_history: [__jet_ErrorConversion]{},
+        details: None,
+    }
+}
+
 impl AppError -> Err {
     return Err("{self}")
 }

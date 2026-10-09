@@ -25,6 +25,116 @@ fn run() {
 }
 
 #[test]
+fn source_core_enum_constructors_retain_the_declared_owner() {
+    let scratch = common::Scratch::new("source_core_enum_owner");
+    tir_support::write_test_package(&scratch.path, tir_support::TIR_TEST_PACKAGE);
+    let path = scratch.path.join("main.jet");
+    fs::write(
+        &path,
+        r#"
+use core.encoding as encoding
+use core.encoding.[DataEvent as Event]
+fn take(value: encoding.DataEvent) {}
+fn run() {
+    take(encoding.DataEvent.ArrayStart)
+    take(encoding.DataEvent.Key("qualified"))
+    take(Event.ArrayEnd)
+    take(Event.Key("member"))
+}
+"#,
+    )
+    .unwrap();
+    let (diagnostics, bundle, _, nominals) =
+        jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
+    assert!(
+        diagnostics.iter().all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
+        "{diagnostics:#?}"
+    );
+    let bundle = bundle.expect("checked source enum fixture");
+    let declared_variants = bundle.modules.iter().flat_map(|module| &module.items)
+        .find_map(|item| match item {
+            jet::AST::Item::Enum(definition) if definition.name == "DataEvent" => {
+                Some(definition.variants.iter().map(|variant| variant.name.clone()).collect::<Vec<_>>())
+            }
+            _ => None,
+        }).expect("original source DataEvent declaration");
+    let request = jet_foundation::MIR::MirArtifactRequest::new(
+        jet_foundation::MIR::MirArtifactTarget::Cranelift,
+        jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+        jet_foundation::MIR::MirArtifactBuildMode::Dev,
+    );
+    let (program, _) = jet::Codegen::TIR::lower_checked_mir_program_for(&bundle, &nominals, request)
+        .expect("source enum constructors lower with their original declaration projection");
+    program.validate().expect("source enum nominal ownership validates");
+    let definitions = program.types.iter().filter(|definition| definition.name == "DataEvent")
+        .collect::<Vec<_>>();
+    assert_eq!(definitions.len(), 1, "one original DataEvent declaration");
+    assert_eq!(
+        definitions[0].variants.iter().map(|variant| variant.name.clone()).collect::<Vec<_>>(),
+        declared_variants,
+        "the source declaration owns every emitted variant",
+    );
+}
+
+#[test]
+fn user_same_leaf_enum_keeps_its_own_payload_projection() {
+    let scratch = common::Scratch::new("user_encoding_enum_owner");
+    tir_support::write_test_package(&scratch.path, tir_support::TIR_TEST_PACKAGE);
+    let local = scratch.path.join("local.jet");
+    fs::write(&local, "pub enum DataEvent { Local(String) }\npub fn make() -> DataEvent { return DataEvent.Local(\"local\") }\n").unwrap();
+    let path = scratch.path.join("main.jet");
+    fs::write(&path, r#"
+use "local"
+use core.encoding as encoding
+fn take_local(value: local.DataEvent) {}
+fn take_core(value: encoding.DataEvent) {}
+fn run() {
+    take_local(local.DataEvent.Local("local"))
+    take_local(local.make())
+    take_core(encoding.DataEvent.Key("core"))
+}
+"#).unwrap();
+    let (diagnostics, bundle, _, nominals) =
+        jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
+    assert!(diagnostics.iter().all(|d| d.severity != jet::Diagnostics::Severity::Error),
+        "{diagnostics:#?}");
+    let bundle = bundle.expect("checked distinct nominal owners");
+    let owners = nominals.iter().flat_map(|facts| facts.enums.iter())
+        .filter(|(_, definition)| definition.name == "DataEvent")
+        .map(|(identity, _)| identity.clone()).collect::<std::collections::HashSet<_>>();
+    assert_eq!(owners.len(), 2, "same leaf names have distinct original owners");
+    let local_module = bundle.modules.iter().position(|module| module.path == local.to_string_lossy())
+        .expect("original local enum module");
+    let local_decl = bundle.modules[local_module].items.iter().find_map(|item| match item {
+        jet::AST::Item::Enum(definition) if definition.name == "DataEvent" => Some(definition),
+        _ => None,
+    }).expect("original local enum declaration");
+    assert_eq!(local_decl.variants.len(), 1);
+    assert_eq!(local_decl.variants[0].name, "Local");
+}
+
+#[test]
+fn native_only_core_enum_keeps_its_intrinsic_constructor_identity() {
+    assert!(jet_foundation::CoreModuleExports::core_source_module("core.term").is_none(),
+        "this fixture must exercise an actual no-source Core namespace");
+    let scratch = common::Scratch::new("native_only_enum_owner");
+    tir_support::write_test_package(&scratch.path, tir_support::TIR_TEST_PACKAGE);
+    let path = scratch.path.join("main.jet");
+    fs::write(&path, r#"
+use core.term as terminal
+fn take(value: terminal.Key) {}
+fn run() {
+    take(terminal.Key.Escape)
+}
+"#).unwrap();
+    let (diagnostics, bundle, _, _) =
+        jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
+    assert!(bundle.is_some(), "native-only constructor fixture retains its checked bundle");
+    assert!(diagnostics.iter().all(|d| d.severity != jet::Diagnostics::Severity::Error),
+        "{diagnostics:#?}");
+}
+
+#[test]
 fn soft_public_imports_warn_once_per_outside_use() {
     let dir = std::env::temp_dir().join(format!("jet_soft_public_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);

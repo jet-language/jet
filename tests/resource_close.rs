@@ -489,6 +489,7 @@ fn deferred_close_agrees_on_interpreter_and_native() {
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
 
     let native = compile_and_run(SIMPLE, "jet_resource_close_native_parity");
     assert!(native.status.success());

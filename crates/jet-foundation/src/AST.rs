@@ -108,6 +108,12 @@ pub use comptime::{
     ViewSource, ViewSourcePath, ViewSourceProjection,
 };
 
+#[path = "AST/checked_nominals.rs"]
+mod checked_nominals;
+pub use checked_nominals::{
+    MirFragmentCoreSourceModule, MirFragmentCoreSourceSignature, MirFragmentNominalFacts,
+};
+
 #[path = "AST/ffi.rs"]
 mod ffi;
 pub use ffi::{

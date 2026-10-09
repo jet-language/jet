@@ -115,6 +115,7 @@ fn shared_weak_cycle_matches_aot_and_default_tiers() {
             .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
             .collect::<Vec<_>>();
         assert!(errors.is_empty(), "{errors:?}");
+        let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
 
         let policy = common::development_policy();
         match common::run_interpreted(&bundle, &checked_nominals, &policy) {

@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use crate::AST::{
     ComptimeInput, CtFloat, CtKey, CtReport, Expr, Func, MirFragmentNominalFacts,

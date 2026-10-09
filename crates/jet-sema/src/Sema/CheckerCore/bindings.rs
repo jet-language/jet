@@ -125,6 +125,14 @@ fn fragment_identity(
                 return Some(identity.to_owned());
             }
         }
+        if let Some(error_owner) = state.compiler_builtin_error_owner {
+            if crate::Sema::Prelude::error_prelude_program().ok().is_some_and(|program| {
+                program.items.iter().any(|item| matches!(item,
+                    crate::AST::Item::Struct(definition) if definition.name == name))
+            }) {
+                return struct_identities.get(&(error_owner, name.to_string())).cloned();
+            }
+        }
     }
     let owner = source_paths.generated_type_owner(name)
         .or_else(|| source_paths.namespace_owner(owner, name)).unwrap_or(owner);
@@ -512,6 +520,9 @@ impl<'a> Checker<'a> {
         &self,
     ) -> Option<std::sync::Arc<crate::AST::MirFragmentNominalFacts>> {
         let modules = self.modules?;
+        if let Some(facts) = modules.get(self.module_idx)?.checked_nominals.as_ref() {
+            return Some(std::sync::Arc::clone(facts));
+        }
         checked_comptime_nominals_for_context(modules, self.module_idx, self.name_ledger)
     }
 }
@@ -777,6 +788,7 @@ fn project_comptime_nominals(
     // package aliases anew for each isolated comptime context.
     let source_paths = name_ledger;
 
+    let error_owner = current.compiler_builtin_error_owner;
     let mut queue = VecDeque::new();
     let mut queued = HashSet::new();
     queued.insert(module_idx);
@@ -818,6 +830,11 @@ fn project_comptime_nominals(
             queue.push_back(sibling);
         }
     }
+    if let Some(owner) = error_owner {
+        if queued.insert(owner) {
+            queue.push_back(owner);
+        }
+    }
 
     let mut facts = crate::AST::MirFragmentNominalFacts {
         module_idx,
@@ -839,6 +856,28 @@ fn project_comptime_nominals(
             row.trait_impls.clear();
             row.derives.clear();
             facts.enums.insert(row.name.clone(), row);
+        }
+        if let crate::AST::Item::Struct(def) = item {
+            let Some(identity) = struct_identities.get(&(module_idx, def.name.clone())) else {
+                continue;
+            };
+            let mut row = def.clone();
+            row.name = identity.clone();
+            row.methods.clear();
+            row.trait_impls.clear();
+            row.derives.clear();
+            for field in &mut row.fields {
+                field.ty = canonical_fragment_type(
+                    &field.ty,
+                    module_idx,
+                    modules,
+                    &source_paths,
+                    &struct_identities,
+                    &known_identities,
+                );
+            }
+            facts.foreign_modules.insert(identity.clone(), current.module_alias.clone());
+            facts.structs.insert(identity.clone(), row);
         }
     }
     for (alias, &target) in &current.imports {
@@ -1004,7 +1043,7 @@ fn project_comptime_nominals(
         let Some(state) = modules.get(sibling) else {
             continue;
         };
-        for item in &state.items {
+        for item in state.nominal_items() {
             let name = match item {
                 crate::AST::Item::Struct(def) => &def.name,
                 crate::AST::Item::Enum(def) => &def.name,

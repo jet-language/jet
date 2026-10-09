@@ -78,7 +78,8 @@ fn assert_jit_compiles(name: &str, source: &str) {
         .spawn(move || {
             let (dir, path) = taskgroup_project("jit", &name, &source);
             let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-            let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+            let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+            let errors = diagnostics
                 .into_iter()
                 .filter(|diagnostic| {
                     matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)

@@ -1255,6 +1255,7 @@ impl<'a> Parser<'a> {
         let item_end = self.bump().span.end; // }
         Ok(crate::AST::StructDef {
             span: Span::new(item_start, item_end),
+            compiler_builtin_error: false,
             is_pub,
             is_package_pub,
             compiler_builtin_error: false,

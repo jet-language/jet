@@ -640,7 +640,7 @@ pub fn compile_bundle_path_with_target_machine_and_profile_and_settings_with_sou
     setting_overrides: &BTreeMap<String, String>,
     source_closure: &[(std::path::PathBuf, String)],
     application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
-) -> Result<(crate::CompileOutput, crate::AST::ProgramBundle), TargetMachineCompileError> {
+) -> Result<(crate::CompileOutput, CheckedSourceBundle), TargetMachineCompileError> {
     crate::run_compiler_work(|| {
         compile_bundle_path_with_target_machine_on_compiler_stack_with_runtime(
             file,
@@ -666,7 +666,7 @@ fn compile_bundle_path_with_target_machine_on_compiler_stack_with_runtime(
     setting_overrides: &BTreeMap<String, String>,
     source_closure: &[(std::path::PathBuf, String)],
     application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
-) -> Result<(crate::CompileOutput, crate::AST::ProgramBundle), TargetMachineCompileError> {
+) -> Result<(crate::CompileOutput, CheckedSourceBundle), TargetMachineCompileError> {
     let usage = target_machine_usage_for_file(
         file,
         mode,
@@ -4442,6 +4442,7 @@ fn compile_build_from_front_end(
         )?;
         lints.extend(planned_lints);
         runtime_effect_facts = planned_facts;
+        runtime_checked_nominals = planned_nominals;
     }
     // Recompute after generated sources replace the runtime bundle. The final
     // source-owned closure, not the build-entry projection, is authoritative.
@@ -6518,7 +6519,7 @@ pub fn compile_bundle_path_opts_with_source_closure_and_runtime(
     entry_fn: Option<&str>,
     source_closure: &[(std::path::PathBuf, String)],
     application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
-) -> Result<(crate::CompileOutput, crate::AST::ProgramBundle), Vec<Diagnostic>> {
+) -> Result<(crate::CompileOutput, CheckedSourceBundle), Vec<Diagnostic>> {
     crate::run_compiler_work(|| {
         compile_bundle_path_opts_on_compiler_stack_with_runtime(
             file,
@@ -7076,7 +7077,7 @@ fn compile_bundle_path_opts_on_compiler_stack_with_runtime(
         inferred_layer: bundle.inferred_layer,
         layer_ceiling: bundle.layer_ceiling,
     };
-    Ok((output, bundle))
+    Ok((output, CheckedSourceBundle::new(bundle, effect_facts, checked_nominals)))
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -8555,6 +8556,7 @@ fn job_argument_record(
     let zero = crate::Diagnostics::Span::new(0, 0);
     Some(StructDef {
         span: zero,
+        compiler_builtin_error: false,
         is_pub: false,
         is_package_pub: false,
         compiler_builtin_error: false,

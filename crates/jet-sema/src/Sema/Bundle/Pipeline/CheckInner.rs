@@ -2342,6 +2342,18 @@ pub(super) fn check_bundle_opts_for_output_inner(
     }
 
     resolve_inline_module_imports(bundle, &mut states, &mut name_ledger, &mut diags);
+    // All user registration is complete. Publish the original supplier AST
+    // once to the checked bundle; body/default checking now sees its actual
+    // owner while reserved-name checks remain exclusive to user declarations.
+    for (owner, state) in states.iter_mut().enumerate() {
+        if let Some(program) = state.compiler_builtin_error_program.take() {
+            bundle.modules[owner].items.extend(
+                program.items.iter()
+                    .filter(|item| matches!(item, Item::Struct(_)))
+                    .cloned(),
+            );
+        }
+    }
 
     // D-STATE-TERMINAL1: freeze the checked graph snapshot before body
     // reflection and every downstream semantic consumer read it. The graph is

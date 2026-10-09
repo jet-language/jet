@@ -621,7 +621,8 @@ fn run() {
 
     let mut bundle =
         jet::Loader::load_entry(file.to_str().unwrap()).expect("loop-value bundle should load");
-    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors = diags
         .into_iter()
         .filter(|diag| matches!(diag.severity, jet::Diagnostics::Severity::Error))
         .collect::<Vec<_>>();
@@ -1704,7 +1705,7 @@ fn scheduler_spawn_runs_via_jit() {
     }
     let file = "Examples/features/concurrency/scheduler_spawn.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
@@ -3074,7 +3075,7 @@ fn run() {
     fs::write(&file, src).unwrap();
     let shown = file.to_string_lossy().to_string();
     let bundle = checked_bundle_from_path(&shown);
-    let run_func = bundle.modules[bundle.entry]
+    let run_func = bundle.bundle.modules[bundle.bundle.entry]
         .items
         .iter()
         .find_map(|item| match item {

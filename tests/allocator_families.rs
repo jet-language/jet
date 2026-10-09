@@ -636,6 +636,7 @@ fn run() {
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
 
     let policy = common::development_policy();
     match common::run_interpreter_checked_bundle(

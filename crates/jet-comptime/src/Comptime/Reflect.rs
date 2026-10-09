@@ -3360,6 +3360,7 @@ mod tests {
     fn type_info_includes_methods_and_type_params() {
         let s = StructDef {
             span: span(),
+            compiler_builtin_error: false,
             is_pub: true,
             is_package_pub: false,
             compiler_builtin_error: false,

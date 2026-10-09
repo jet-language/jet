@@ -496,6 +496,7 @@ fn builder_field(base: &str, field: &str, span: Span) -> Expr {
 fn build_validate_builder_struct(span: Span) -> StructDef {
     StructDef {
         span,
+        compiler_builtin_error: false,
         is_pub: false,
         is_package_pub: false,
         compiler_builtin_error: false,
