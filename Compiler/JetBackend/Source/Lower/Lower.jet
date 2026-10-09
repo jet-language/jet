@@ -587,6 +587,13 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
             }
         }
     }
+    if !shared_sites_dynamic {
+        // Getters are published only after the host runs this noarg Unit
+        // startup. Emit it last so helper bodies have discovered every fixup.
+        startup :: lower_helper_id(&m, "core.shared.init", mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: [MIRType]{}}))
+        &functions.push(lower_helper_function(program, &m, m.glue[startup.value - m.glue_base]))
+        lowered_entry = Val(startup)
+    }
     lowered :: LIRModule{signatures: ~m.signatures, functions: functions, data: ~m.data}
     issues := ~m.issues
     if issues.len() == 0 {
