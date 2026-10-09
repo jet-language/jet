@@ -2418,8 +2418,6 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("__ResolveError", &["kind", "has_os_code", "os_code", "message"]),
     ("AsyncPolicy", &["capacity", "overflow"]),
     ("CSVRow", &["fields", "line"]),
-    ("__JetcRaw", &["value", "errno", "bytes", "linux"]),
-    ("__JetcStat", &["status", "errno", "dev", "ino", "len", "mtime", "mtime_ns", "nlink", "is_file", "is_dir"]),
     (
         "DataLineOptions",
         &[
@@ -3909,6 +3907,19 @@ pub(crate) fn is_compiler_owned_trait(name: &str) -> bool {
 #[cfg(test)]
 mod native_encoding_record_tests {
     use super::*;
+
+    #[test]
+    fn compiler_owned_core_records_all_have_canonical_fields() {
+        let mut missing = Vec::new();
+        for (name, fields) in COMPILER_OWNED_CORE_RECORDS {
+            for field in *fields {
+                if crate::Sema::core_struct_field_type(name, field, &[]).is_none() {
+                    missing.push(format!("{name}.{field}"));
+                }
+            }
+        }
+        assert!(missing.is_empty(), "missing canonical Core fields: {missing:?}");
+    }
 
     #[test]
     fn private_source_records_do_not_get_synthetic_compiler_owned_rows() {

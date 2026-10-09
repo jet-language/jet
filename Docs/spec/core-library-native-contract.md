@@ -226,6 +226,12 @@ values and fail-closed policy in Jet; the OS CSPRNG is a host cell. The raw
 algorithm controls in `core.crypto.expert` remain an explicit audited door, not
 a hidden provider policy.
 
+Private service delivery/mailbox reader results, CSV bounded-read results,
+crypto physical records (`__JetcRaw` and `__JetcStat`), and testing transport
+records take their checked shapes from canonical Core source declarations.
+They must not also appear in compiler-owned record inventories. Root-Prelude
+carrier mappings remain ABI spellings, not owners of those checked fields.
+
 Native record-sequence provider symbols use `jet_rt_record_seq_` followed by
 the checked sequence kind with dots replaced by underscores. The lowering
 computes that suffix before interpolating the symbol, preserving the same
