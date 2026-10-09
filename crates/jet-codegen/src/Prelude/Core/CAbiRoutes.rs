@@ -14191,7 +14191,7 @@ mod jet_c_abi_routes {
         guard(|| handle(crate::jet_auth_session_user(unsafe { &*a0 })))
     }
 
-    /// core.auth.session_validate
+    /// core.auth.__store_load
     #[no_mangle]
     pub extern "C" fn jet_auth_session_validate(a0: JetCString, a1: i64, ok: *mut *mut crate::JetAuthSession, err: *mut JetCString) -> i64 {
         guard(|| match crate::jet_auth_session_validate(&borrowed(a0), a1) {

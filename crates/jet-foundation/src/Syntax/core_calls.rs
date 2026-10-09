@@ -325,6 +325,8 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
                 "magic_link_consume",
                 "oauth_begin",
                 "oauth_finish",
+                "__store_load",
+                "__store_replace",
             ],
         )
     {
