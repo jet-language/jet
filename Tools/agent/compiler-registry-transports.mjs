@@ -3,9 +3,11 @@
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseRuntimeExports, runtimeLifecycleList } from './runtime-route-abi.mjs';
+import { collectGoldenEntries } from './compiler-diff.mjs';
+import { copyFeatureProject, featureProjectRoot } from './run-feature-examples.mjs';
 
 const adapter = fileURLToPath(import.meta.url);
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -66,6 +68,8 @@ function specification(id) {
         if (name === 'GenericRouteSchema') return { type: 'direct', runner: 'Compiler/JetRuntime/Tests/GenericRouteSchema.jet', expected: '' };
         return { blocked: `No registered transport for ${id}; the source must not be counted without an exact native verdict` };
     }
+    if (id === 'JetOptimizer/Tests/LintCorpus') return { type: 'corpus', runner: 'Compiler/JetOptimizer/Tests/run-lint-corpus.mjs' };
+    if (!id.startsWith('JetBackend/Tests/')) return null;
     const name = id.slice('JetBackend/Tests/'.length);
     if (name === 'CallImages' || name === 'SessionHostFixtures') return { type: 'calls', runner: be + 'run-call-images.mjs', session: name === 'SessionHostFixtures' };
     if (name === 'LinkIndexes') return { type: 'indices', runner: be + 'run-link.mjs' };
@@ -73,11 +77,26 @@ function specification(id) {
     if (name === 'LinkRuntime') return { type: 'link', runner: be + 'run-link.mjs' };
     if (name === 'LowerFixtures' || name === 'LoadImages') return { type: 'lower', runner: be + 'run-lower-fixtures.mjs', loader: name === 'LoadImages' };
     if (name === 'RuntimeLower') return { type: 'runtime-lower', runner: be + 'run-runtime.mjs' };
-    if (name === 'GoldenLower') return { type: 'golden-lower', runner: be + 'run-runtime.mjs' };
+    if (name === 'GoldenLower') return { type: 'golden-lower', runner: be + 'run-goldens.mjs' };
     if (name === 'ExpectProducer') return { type: 'producer', runner: be + 'run-expect-producer.mjs' };
     if (name === 'SelfHost/SelfHostLower') return { type: 'selfhost', runner: be + 'SelfHost/assemble-lower.mjs' };
     return null;
 }
+// Exactly the committed oracle corpus used by run-goldens, without filters or
+// alternate feature roots. Both registries consume this same native MIR set.
+function nativeCorpus(repo, out) {
+    const features = join(repo, 'Examples/features');
+    const cases = collectGoldenEntries(features)
+        .filter(entry => ['.out', '.err.out'].some(suffix => existsSync(join(features, 'expected', entry.stem + suffix))))
+        .map(entry => {
+            const slug = entry.stem.replace(/[^A-Za-z0-9_-]+/gu, '_');
+            return { ...entry, slug, file: join(out, 'work', slug, relative(repo, entry.path)), mird: join(out, 'lower', slug + '.mird') };
+        });
+    if (!cases.length) throw Error(`complete committed golden corpus is unavailable at ${features}`);
+    if (new Set(cases.map(c => c.slug)).size !== cases.length) throw Error('golden corpus has colliding native MIR filenames');
+    return { caseCount: cases.length, cases };
+}
+
 export function prepareTransport(row, { repo, out }) {
     const id = row.source.replace(/^Compiler\//, '').replace(/\.jet$/, '');
     const spec = specification(id);
@@ -88,6 +107,7 @@ export function prepareTransport(row, { repo, out }) {
     const witness = row.source.replace(/\.jet$/, '.c');
     if (spec.type === 'c' && existsSync(join(repo, witness))) entry.sources.push(witness);
     if (spec.blocked) return { ...entry, status: 'BLOCKED', reason: spec.blocked };
+    if (spec.type === 'golden-lower' || spec.type === 'corpus') entry.corpus = nativeCorpus(repo, entry.cwd);
     return { ...entry, transport: { ...spec, runnerSha256: digest(readFileSync(join(repo, spec.runner))) } };
 }
 
@@ -96,6 +116,7 @@ export function prepareTransport(row, { repo, out }) {
 export function planTransport(entry, { jet, repo, runtimePack }) {
     const spec = specification(entry.id), out = entry.cwd;
     if (!spec || spec.blocked) return { id: entry.id, status: 'BLOCKED', reason: spec?.blocked ?? 'unknown registry' };
+    const corpus = spec.type === 'golden-lower' || spec.type === 'corpus' ? nativeCorpus(repo, out) : null;
     const steps = [], node = (file, ...args) => steps.push({ command: process.execPath, args: [join(repo, file), ...args], cwd: out });
     const build = file => steps.push({ command: jet, args: ['build', file], cwd: dirname(file) });
     const run = (command, args = [], expected = null, env = {}) => steps.push({ command, args, cwd: out, env, ...(expected ? { expected } : {}) });
@@ -128,13 +149,31 @@ export function planTransport(entry, { jet, repo, runtimePack }) {
         }
     } else if (spec.type === 'direct') {
         steps.push({ action: 'copy real source to isolated project', source: join(repo, spec.runner) }); build(join(out, 'unit.jet')); run(join(out, 'registry-native.exe'), [], { code: 0, stdout: spec.expected, stderr: '' });
-    } else if (spec.type === 'runtime-lower' || spec.type === 'golden-lower') {
+    } else if (spec.type === 'runtime-lower') {
         node(spec.runner, out, '--until', 'assemble');
-        mir(spec.type === 'runtime-lower' ? join(out, 'library/Source/Runtime.jet') : join(out, 'golden-input/unit.jet'), join(out, spec.type === 'runtime-lower' ? 'runtime.mird' : 'golden.mird'));
-        steps.push({ action: spec.type === 'runtime-lower' ? 'remove entry-id wire header for library driver' : 'assemble actual GoldenLower entry with existing runtime assembler and real decoder' });
+        mir(join(out, 'library/Source/Runtime.jet'), join(out, 'runtime.mird'));
+        steps.push({ action: 'remove entry-id wire header for library driver' });
         build(join(out, 'unit.jet')); run(join(out, 'registry-native.exe'));
-        if (spec.type === 'runtime-lower') { node(rt + 'check-object.mjs', join(out, 'jet_runtime_jet.o'), join(out, 'object-check')); node(rt + 'run-cabi-driver.mjs', join(out, 'cabi'), join(out, 'jet_runtime_jet.o')); }
-        else run(join(out, 'golden.exe'), [], { code: 0, stdout: 'registry golden\n', stderr: '' });
+        node(rt + 'check-object.mjs', join(out, 'jet_runtime_jet.o'), join(out, 'object-check')); node(rt + 'run-cabi-driver.mjs', join(out, 'cabi'), join(out, 'jet_runtime_jet.o'));
+    } else if (corpus) {
+        steps.push({ action: 'assemble canonical compiler plus explicit checked-MIR Jet transport entry', source: join(out, 'mir-transport/transport.jet') });
+        build(join(out, 'mir-transport/transport.jet'));
+        for (const c of corpus.cases) {
+            steps.push({ action: 'stage real feature source with copyFeatureProject and fixture-state semantics', source: c.path, output: c.file });
+            run(join(out, 'mir-transport/transport.exe'), [c.file, c.mird], { code: 0, stdout: 'checked registry MIR: pass\n', stderr: '' });
+        }
+        const golden = spec.type === 'golden-lower', folder = join(out, golden ? 'lower' : 'lint');
+        node(spec.runner, out, ...(golden ? ['--stage', 'lower', '--until', 'lower'] : []));
+        steps.at(-1).env = { JET_GOLDEN_FEATURES: join(repo, 'Examples/features'), JET_GOLDEN_NATIVE_MIR: '1', JET_RUNTIME_PACK: runtimePack, ...(golden ? { JET_LOWER_ASSEMBLE_ONLY: '1', JET_LOWER_RESUME: '0' } : { JET_LINT_ASSEMBLE_ONLY: '1' }) };
+        steps.push({ action: 'write complete native corpus cases.txt and explicit runtime-pack.txt', caseCount: corpus.caseCount, output: join(folder, 'cases.txt') });
+        build(join(folder, 'unit.jet'));
+        run(join(folder, 'registry-native.exe'), [], { code: 0, stdout: corpus.cases.map(c => `${golden ? c.slug : '../lower/' + c.slug}\t${golden ? 'pack' : '0'}\n`).join(''), stderr: '' });
+        steps.at(-1).cwd = folder;
+        if (golden) {
+            node(spec.runner, out, '--stage', 'run');
+            steps.at(-1).env = { JET_GOLDEN_FEATURES: join(repo, 'Examples/features'), JET_GOLDEN_NATIVE_MIR: '1', JET_RUNTIME_PACK: runtimePack };
+            steps.push({ action: 'require complete results.tsv in corpus order, every committed golden output/status verdict pass', caseCount: corpus.caseCount, output: join(out, 'results.tsv') });
+        }
     } else if (spec.type === 'producer') {
         steps.push({ action: 'assemble canonical compiler in external assembly-home', output: join(out, 'assembly-home/.cache/jet-luna/compiler-bootstrap/project/src/compiler.jet') });
         node(spec.runner, out, 'assemble', join(out, 'assembly-home/.cache/jet-luna/compiler-bootstrap/project/src/compiler.jet'));
@@ -162,17 +201,7 @@ export function planTransport(entry, { jet, repo, runtimePack }) {
             }
         }
     }
-    return { id: entry.id, testCount: 1, inputs: { jet, runtimePack, runtimeObject: join(dirname(runtimePack), 'jet_runtime_jet.o'), provider: 'Jet-only; system C compiler permitted' }, steps };
-}
-function stripImports(text) {
-    return text.replace(/^use jet_\w+\.\[[^\]]*\]\s*$/gm, '').replace(/^use jet_\w+\.[^\n]*$/gm, '');
-}
-function withoutDeclaration(text, name) {
-    const lines = text.split('\n'), start = lines.findIndex(line => new RegExp(`^(?:pub )?(?:fn|struct) ${name}\\b`).test(line));
-    if (start < 0) throw Error(`missing declaration ${name}`);
-    const end = lines[start].trimEnd().endsWith('}') ? start : lines.findIndex((line, index) => index > start && line === '}');
-    if (end < start) throw Error(`unterminated declaration ${name}`);
-    return [...lines.slice(0, start), ...lines.slice(end + 1)].join('\n');
+    return { id: entry.id, testCount: 1, ...(corpus ? { corpus, prerequisites: [`production native jet executable: ${jet}`, `fresh admitted native Jet runtime pack: ${runtimePack}`] } : {}), inputs: { jet, runtimePack, runtimeObject: join(dirname(runtimePack), 'jet_runtime_jet.o'), provider: 'Jet-only; system C compiler permitted' }, steps };
 }
 function cSource(name, repo) {
     const head = '#define _GNU_SOURCE\n#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n';
@@ -217,6 +246,7 @@ export async function runTransport(entry, { jet, repo, logDir, runtimePack, runt
     function exact(result, stdout = '', stderr = '') {
         if (result.stdout !== stdout || result.stderr !== stderr) throw Error(`exact native verdict differs: ${JSON.stringify({ stdout: result.stdout, stderr: result.stderr, expectedStdout: stdout, expectedStderr: stderr })}`);
     }
+    let checkedMirDriver;
     async function compile(file, root, prefix, mir = null) {
         if (!existsSync(join(root, 'package.jet'))) writeFileSync(join(root, 'package.jet'), packageSource);
         if (mir) {
@@ -224,12 +254,12 @@ export async function runTransport(entry, { jet, repo, logDir, runtimePack, runt
             // the same authorized CLI request; no Tests.rs factory protocol.
             const transportRoot = join(out, 'mir-transport'); mkdirSync(transportRoot, { recursive: true });
             const source = join(transportRoot, 'transport.jet');
-            if (!existsSync(source)) {
+            if (!checkedMirDriver) {
                 writeFileSync(source, readFileSync(await aggregate(), 'utf8') + '\n' + mirTransportSource);
                 writeFileSync(join(transportRoot, 'package.jet'), packageSource);
+                checkedMirDriver = await compile(source, transportRoot, join(transportRoot, 'transport'));
             }
-            const driver = await compile(source, transportRoot, join(transportRoot, 'transport'));
-            exact(execute(driver, [file, mir]), 'checked registry MIR: pass\n');
+            exact(execute(checkedMirDriver, [file, mir]), 'checked registry MIR: pass\n');
             return mir;
         }
         const built = join(root, '.jet/build', basename(file, '.jet'));
@@ -346,31 +376,54 @@ export async function runTransport(entry, { jet, repo, logDir, runtimePack, runt
                 const shared = join(out, 'libjet_runtime.so'); execute(process.env.CC ?? 'cc', ['-shared', runtimeObject, '-lpthread', '-ldl', '-lm', '-o', shared]);
                 await program(join(out, 'load/load.jet'), ['hello', shared], 'hello, world\n', { cwd: out });
             }
-        } else if (spec.type === 'runtime-lower' || spec.type === 'golden-lower') {
+        } else if (spec.type === 'runtime-lower') {
             node(spec.runner, out, '--until', 'assemble');
             const file = join(out, 'unit.jet');
-            if (spec.type === 'runtime-lower') {
-                // Execute RuntimeLower itself, not run-runtime's production hook bypass.
-                await compile(join(out, 'library/Source/Runtime.jet'), join(out, 'library'), join(out, 'runtime-feed'), join(out, 'runtime.mird'));
-                const stream = readFileSync(join(out, 'runtime.mird'), 'utf8');
-                writeFileSync(join(out, 'runtime.mird'), stream.slice(stream.indexOf('\n') + 1));
-                await program(file);
-                node(rt + 'check-object.mjs', join(out, 'jet_runtime_jet.o'), join(out, 'object-check'));
-                node(rt + 'run-cabi-driver.mjs', join(out, 'cabi'), join(out, 'jet_runtime_jet.o'));
-            } else {
-                let unit = readFileSync(file, 'utf8');
-                for (const name of ['run', 'MIRDReader', 'mird_next', 'mird_int', 'mird_u64', 'mird_bool', 'mird_float', 'mird_hex', 'mird_string']) unit = withoutDeclaration(unit, name);
-                unit += '\n' + stripImports(readFileSync(join(repo, be + 'GoldenLower.jet'), 'utf8'));
-                for (const name of ['Archive', 'StaticLink', 'RuntimePack']) unit += '\n' + stripImports(readFileSync(join(repo, 'Compiler/JetBackend/Source/Image/' + name + '.jet'), 'utf8'));
-                unit += '\n' + stripImports(readFileSync(join(repo, 'Compiler/JetBackend/Source/LIR/Sanitize.jet'), 'utf8')) + '\n' + stripImports(readFileSync(join(repo, be + 'TestPack.jet'), 'utf8'));
-                const imports = new Set();
-                unit = unit.replace(/^use core\.[^\n]*$/gm, line => { if (imports.has(line)) return ''; imports.add(line); return line; });
-                writeFileSync(file, unit);
-                const seed = join(out, 'golden-input'); mkdirSync(seed, { recursive: true }); const seedFile = join(seed, 'unit.jet'); writeFileSync(seedFile, 'fn run() { print("registry golden") }\n');
-                await compile(seedFile, seed, join(out, 'golden-feed'), join(out, 'golden.mird'));
-                writeFileSync(join(out, 'cases.txt'), 'golden\n'); writeFileSync(join(out, 'runtime-pack.txt'), runtimePack + '\n');
-                await program(file, [], 'golden\tpack\n'); exact(execute(join(out, 'golden.exe')), 'registry golden\n');
+            // Execute RuntimeLower itself, not run-runtime's production hook bypass.
+            await compile(join(out, 'library/Source/Runtime.jet'), join(out, 'library'), join(out, 'runtime-feed'), join(out, 'runtime.mird'));
+            const stream = readFileSync(join(out, 'runtime.mird'), 'utf8');
+            writeFileSync(join(out, 'runtime.mird'), stream.slice(stream.indexOf('\n') + 1));
+            await program(file);
+            node(rt + 'check-object.mjs', join(out, 'jet_runtime_jet.o'), join(out, 'object-check'));
+            node(rt + 'run-cabi-driver.mjs', join(out, 'cabi'), join(out, 'jet_runtime_jet.o'));
+        } else if (spec.type === 'golden-lower' || spec.type === 'corpus') {
+            const corpus = nativeCorpus(repo, out), golden = spec.type === 'golden-lower';
+            const lower = join(out, 'lower'), folder = golden ? lower : join(out, 'lint');
+            // Generated artifacts cannot stand in for a fresh native verdict.
+            rmSync(lower, { recursive: true, force: true }); mkdirSync(lower, { recursive: true });
+            if (!golden) rmSync(folder, { recursive: true, force: true });
+            for (const c of corpus.cases) {
+                const work = join(out, 'work', c.slug);
+                rmSync(work, { recursive: true, force: true });
+                const project = featureProjectRoot(c);
+                if (project) copyFeatureProject(project, join(work, relative(repo, project)));
+                else if (basename(c.path) === 'run.jet') copyFeatureProject(dirname(c.path), dirname(c.file));
+                else { mkdirSync(dirname(c.file), { recursive: true }); copyFileSync(c.path, c.file); }
+                await compile(c.file, project ? join(work, relative(repo, project)) : dirname(c.file), join(lower, c.slug), c.mird);
+                if (!existsSync(c.mird)) throw Error(`native checked-MIR transport omitted ${c.mird}`);
             }
+            const corpusEnv = { ...env, JET_GOLDEN_FEATURES: join(repo, 'Examples/features'), JET_GOLDEN_NATIVE_MIR: '1', JET_LOWER_RESUME: '0' };
+            execute(process.execPath, [join(repo, spec.runner), out, ...(golden ? ['--stage', 'lower', '--until', 'lower'] : [])], {
+                env: { ...corpusEnv, ...(golden ? { JET_LOWER_ASSEMBLE_ONLY: '1' } : { JET_LINT_ASSEMBLE_ONLY: '1' }) },
+            });
+            const names = corpus.cases.map(c => golden ? c.slug : '../lower/' + c.slug);
+            writeFileSync(join(folder, 'cases.txt'), names.join('\n') + '\n');
+            if (golden) writeFileSync(join(folder, 'runtime-pack.txt'), runtimePack + '\n');
+            const binary = await compile(join(folder, 'unit.jet'), folder, join(folder, 'registry-native'));
+            const verdict = execute(binary, [], { cwd: folder });
+            if (golden) {
+                execute(process.execPath, [join(repo, spec.runner), out, '--stage', 'run'], { env: corpusEnv });
+                const rows = readFileSync(join(out, 'results.tsv'), 'utf8').trimEnd().split('\n').map(line => line.split('\t'));
+                if (rows.length !== corpus.caseCount || rows.some((row, index) => row[0] !== corpus.cases[index].stem)) throw Error('golden run-only receipt differs from the complete native corpus');
+                const failures = rows.filter(row => row[1] !== 'pass');
+                if (failures.length) throw Error(`${failures.length}/${corpus.caseCount} committed native golden verdicts failed; first: ${failures[0].join('\t')}; see ${join(out, 'results.tsv')}`);
+            } else {
+                exact(verdict, names.map(name => `${name}\t0\n`).join(''));
+                for (const c of corpus.cases) if (readFileSync(join(lower, c.slug + '.lint'), 'utf8') !== '') throw Error(`native lint reported zero but wrote findings for ${c.stem}`);
+                writeFileSync(join(out, 'lint.tsv'), corpus.cases.map(c => `${c.stem}\tclean\t`).join('\n') + '\n');
+                writeFileSync(join(out, 'lint-summary.txt'), `cases: ${corpus.caseCount}\nclean: ${corpus.caseCount}\ngate: PASS\n`);
+            }
+            if (golden) exact(verdict, names.map(name => `${name}\tpack\n`).join(''));
         } else if (spec.type === 'producer') {
             node(spec.runner, out, 'assemble', await aggregate());
             const binary = await compile(join(out, 'unit.jet'), out, join(out, 'producer-unit'));

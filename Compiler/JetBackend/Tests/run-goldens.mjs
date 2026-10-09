@@ -35,6 +35,12 @@
 //        [JET_LOWER_OPT=<level>] optimizes the lowered LIR at that level first (Opt/Opt.jet; Compiler/JetBackend/Docs/O1.md); 0 by default.
 //        [JET_MIR_EMIT=1] dumps freshly checked MIR with `jet emit --rust`, without compiling/running the Rust output.
 //        [JET_LOWER_ASSEMBLE_ONLY=1] stops the lower stage after assembling its unit (for focused `jet check`).
+// Native registry transport uses lower ASSEMBLE_ONLY with the complete checked
+// `.mird` corpus, builds GoldenLower with production `jet build`, then invokes
+// --stage run to compare every committed output/status oracle. It does not run
+// this script's legacy Rust MIR or factory front-end stages.
+// JET_GOLDEN_NATIVE_MIR=1 records externally checked native MIR provenance and
+// permits only lower/run stages; it never selects a compiler front end.
 //        node Compiler/JetBackend/Tests/run-goldens.mjs <outdir> [--stage mir|convert|lower|run] [--until mir|convert|lower|run] [--case-list FILE | filter...]
 // A later stage reuses the files of the earlier ones in <outdir>.
 // Run-only reuses native artifacts and compares golden byte/status oracles,
@@ -63,7 +69,7 @@ if (!outDir) {
 let first = "mir";
 let last = "run";
 const filters = [];
-let front = "rust";
+let front = process.env.JET_GOLDEN_NATIVE_MIR === "1" ? "native" : "rust";
 let selectedStems = null;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--stage") first = args[++i];
@@ -79,7 +85,8 @@ const STAGES = ["mir", "convert", "lower", "run"];
 const from = STAGES.indexOf(first);
 const until = STAGES.indexOf(last);
 if (from < 0 || until < from) throw new Error(`bad stage range ${first}..${last}`);
-if (!["rust", "jet"].includes(front)) throw new Error("--front must be rust or jet");
+if (!["rust", "jet", "native"].includes(front)) throw new Error("--front must be rust, jet, or native");
+if (front === "native" && from < 2) throw new Error("native checked MIR requires --stage lower or --stage run");
 const candidate = front === "jet" ? candidateJetc0() : null;
 const safeJet = `${process.env.HOME}/.cache/jet-dev/safe-jet.sh`;
 const runtimePack = process.env.JET_RUNTIME_PACK;
@@ -371,7 +378,7 @@ for (const c of front === "rust" && from <= 2 ? open() : []) {
 const read = (path) => readFileSync(join(repo, path), "utf8");
 function item(path, name) {
   const lines = read(path).split("\n");
-  const start = lines.findIndex((line) => new RegExp(`^(struct|enum) ${name}\\b`).test(line));
+  const start = lines.findIndex((line) => new RegExp(`^(?:pub )?(struct|enum) ${name}\\b`).test(line));
   if (start < 0) throw new Error(`${path}: no declaration ${name}`);
   if (lines[start].trimEnd().endsWith("}")) return lines[start];
   const end = lines.findIndex((line, index) => index > start && line === "}");
@@ -440,7 +447,8 @@ function assembleUnit() {
   // SUPPORT_ITEMS also owns the canonical shared DerivationTypes declarations.
   for (const [path, names] of SUPPORT_ITEMS) for (const name of names) support.push(item(path, name));
   const zone = read("Compiler/JetFoundation/Source/Types/Types.jet").split("\n");
-  const zoneStart = zone.findIndex((line) => line.startsWith("fn param_zone_name("));
+  const zoneStart = zone.findIndex((line) => /^(?:pub )?fn param_zone_name\(/.test(line));
+  if (zoneStart < 0) throw new Error("Types.jet: no declaration param_zone_name");
   support.push(zone.slice(zoneStart, zone.findIndex((line, index) => index > zoneStart && line === "}") + 1).join("\n"));
   const parts = [
     "// [unit source: Foundation items named by the Jet MIR schema]",
@@ -550,11 +558,12 @@ function runShard(command, index, shard) {
   });
 }
 
-if (front === "rust" && from <= 2 && until >= 2) {
+if (front !== "jet" && from <= 2 && until >= 2) {
   const resume = process.env.JET_LOWER_RESUME === "1";
   if (resume && !existsSync(join(dirs.lower, "unit.jet"))) throw new Error("resume requires the original frozen lower/unit.jet");
   if (!resume) assembleUnit();
   if (process.env.JET_LOWER_ASSEMBLE_ONLY === "1") process.exit(0);
+  if (front === "native") throw new Error("native checked MIR lower stage requires JET_LOWER_ASSEMBLE_ONLY=1; the registry transport builds and executes GoldenLower");
   const pending = open().filter((c) => {
     if (!existsSync(join(dirs.lower, `${c.slug}.mird`))) return false;
     if (!resume) return true;

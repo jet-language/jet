@@ -1,9 +1,8 @@
 #!/usr/bin/env node
-// MIR Lint over a real-program corpus (#4619 criterion 3): every `.mird` that
-// run-goldens.mjs's convert stage wrote (<out>/lower/<case>.mird, checked MIR
-// from the Rust compiler in the Jet MIR schema) goes through every MIR Lint
-// rule. Rust-checked MIR is well-formed by contract, so every finding is a
-// lint false positive or a compiler defect; the gate is zero findings.
+// MIR Lint over the complete real-program corpus (#4619 criterion 3): every
+// native checked `.mird` in <out>/lower/<case>.mird goes through every MIR Lint
+// rule. Checked MIR is well-formed by contract, so every finding is a lint
+// false positive or a compiler defect; the gate is zero findings.
 //
 // The unit (<out>/lint/unit.jet) holds the Foundation items the MIR schema
 // names, MIR.jet, Lint.jet, the `.mird` line reader of
@@ -17,6 +16,9 @@
 // no-mird.
 //
 // usage: [JET=<jet binary>] node Compiler/JetOptimizer/Tests/run-lint-corpus.mjs <outdir> [--case-list FILE]
+// JET_LINT_ASSEMBLE_ONLY=1 writes the existing decoder/registry unit and exits.
+// The native registry transport supplies the full checked-MIR corpus, builds
+// this unit with production `jet build`, and requires a zero count per case.
 // Writes <outdir>/lint.tsv and <outdir>/lint-summary.txt.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -78,9 +80,9 @@ function body(path) {
 const support = [];
 // Shared DerivationTypes declarations enter through SUPPORT_ITEMS, not MIR.jet.
 for (const [path, names] of SUPPORT_ITEMS) for (const name of names) support.push(item(path, new RegExp(`^(pub )?(struct|enum) ${name}\\b`)));
-support.push(item("Compiler/JetFoundation/Source/Types/Types.jet", /^pub fn param_zone_name\(/));
+support.push(item("Compiler/JetFoundation/Source/Types/Types.jet", /^(?:pub )?fn param_zone_name\(/));
 const golden = "Compiler/JetBackend/Tests/GoldenLower.jet";
-const reader = [/^struct MIRDReader\b/, /^fn mird_next\(/, /^fn mird_int\(/, /^fn mird_bool\(/, /^fn mird_float\(/, /^fn mird_hex\(/, /^fn mird_string\(/].map((head) => item(golden, head));
+const reader = [/^struct MIRDReader\b/, /^fn mird_next\(/, /^fn mird_int\(/, /^fn mird_u64\(/, /^fn mird_bool\(/, /^fn mird_float\(/, /^fn mird_hex\(/, /^fn mird_string\(/].map((head) => item(golden, head));
 for (const line of read(golden).split("\n")) if (/^use core\.math\b/.test(line)) coreUses.add(line);
 const parts = [
   "// [unit source: Foundation items named by the Jet MIR schema]",
@@ -97,6 +99,7 @@ const parts = [
 ];
 writeFileSync(join(lintDir, "unit.jet"), [...coreUses, "", ...parts].join("\n"));
 writeFileSync(join(lintDir, "package.jet"), 'name: "jet_optimizer_lint_corpus"\nversion: "0.1.0"\nauthority: { holds: { allow: [FS.Read, FS.Write, IO, Mem.Alloc] } }\n');
+if (process.env.JET_LINT_ASSEMBLE_ONLY === "1") process.exit(0);
 
 // 2. Lint every case in fresh processes of at most JET_LINT_BATCH cases.
 const slugs = readdirSync(lower).filter((name) => name.endsWith(".mird")).map((name) => name.slice(0, -5)).sort();
