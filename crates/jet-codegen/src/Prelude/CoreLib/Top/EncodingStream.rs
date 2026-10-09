@@ -4259,8 +4259,8 @@ fn jet_raw_encoding_flush(writer: &mut JetFileWriter) -> Result<(), jet_std::Enc
 }
 
 // #4737: ordered Object carrier transfers; all codec policy stays in Jet.
-fn jet_raw_object_from_entries(entries: Vec<(String, jet_std::DataTree)>) -> jet_std::DataTree {
-    jet_std::DataTree::Object(entries)
+fn jet_raw_object_from_entries(entries: Vec<(String, jet_std::Dyn)>) -> jet_std::Dyn {
+    jet_std::Dyn::Object(entries)
 }
 
 
@@ -4269,16 +4269,16 @@ fn jet_raw_encoding_write_text(writer: &mut JetFileWriter, text: &str) -> Result
 }
 
 // The returned slice borrows the caller's Object storage, never its children.
-fn jet_raw_object_entries_view(value: &jet_std::DataTree) -> &[(String, jet_std::DataTree)] {
-    let jet_std::DataTree::Object(entries) = value else {
+fn jet_raw_object_entries_view(value: &jet_std::Dyn) -> &[(String, jet_std::Dyn)] {
+    let jet_std::Dyn::Object(entries) = value else {
         unreachable!("vetted Core caller must check the Object variant before borrowing it")
     };
     entries.as_slice()
 }
 
 // The returned slice borrows the caller's Bytes allocation without copying.
-fn jet_raw_bytes_view(value: &jet_std::DataTree) -> &[u8] {
-    let jet_std::DataTree::Bytes(bytes) = value else {
+fn jet_raw_bytes_view(value: &jet_std::Dyn) -> &[u8] {
+    let jet_std::Dyn::Bytes(bytes) = value else {
         panic!("vetted Core caller must check the Bytes variant before borrowing it")
     };
     bytes.as_slice()
@@ -4288,7 +4288,7 @@ fn jet_raw_bytes_view(value: &jet_std::DataTree) -> &[u8] {
 // Object backing directly; neither path clones a tree or sorts its keys.
 #[cfg(all(not(jet_evalhost), not(target_arch = "wasm32")))]
 #[no_mangle]
-pub extern "C" fn jet_rt_encoding_object_entries_view(value: *const jet_std::DataTree, data: *mut *const (String, jet_std::DataTree)) -> usize {
+pub extern "C" fn jet_rt_encoding_object_entries_view(value: *const jet_std::Dyn, data: *mut *const (String, jet_std::Dyn)) -> usize {
     jet_c_abi::guard(|| {
         // SAFETY: the vetted caller holds the Object owner for this view.
         let entries = jet_raw_object_entries_view(unsafe { &*value });
@@ -4297,7 +4297,20 @@ pub extern "C" fn jet_rt_encoding_object_entries_view(value: *const jet_std::Dat
     })
 }
 
-fn jet_raw_typed_text(text: String) -> jet_std::DataTree {
-    jet_std::DataTree::TypedText(text)
+fn jet_raw_typed_text(text: String) -> jet_std::Dyn {
+    jet_std::Dyn::Text(text)
 }
 
+
+fn jet_encoding_datetime_text(value: &JetZonedDateTime, format: jet_std::EncodingFormat) -> Result<String, jet_std::EncodingError> {
+    let instant = value.to_datetime();
+    let offset = value.zone().offset_at_utc(instant.unix_seconds_anchor());
+    if offset % 60 != 0 || offset.abs() >= 86400 {
+        return Err(jet_std::EncodingError::new(format, jet_std::EncodingErrorKind::Unsupported,
+            0, Err(JetAbsent), Err(JetAbsent), "$", "DateTime requires a minute-aligned RFC 3339 offset"));
+    }
+    let tree = jet_std::Dyn::datetime(instant.unix_seconds_anchor(), instant.nanosecond() as u32,
+        instant.is_leap_second(), offset as i32);
+    let jet_std::Dyn::DateTime(value) = tree else { unreachable!() };
+    Ok(value.to_rfc3339())
+}

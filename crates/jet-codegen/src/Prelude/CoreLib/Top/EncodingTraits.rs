@@ -663,7 +663,7 @@ fn jet_codec_decode<T: __jet_Decode>(
     T::jet_decode(tree)
 }
 
-fn jet_enc_json_error_text(error: &jet_std::EncodingError) -> String {
+pub fn jet_enc_json_error_text(error: &jet_std::EncodingError) -> String {
     JetShow::jet_show(error)
 }
 
@@ -697,7 +697,7 @@ fn jet_enc_json_validate(tree: &jet_std::Dyn) -> Result<(), jet_std::EncodingErr
     Ok(())
 }
 
-fn jet_enc_json_to_string<T: __jet_Encode>(v: &T) -> Result<String, jet_std::EncodingError> {
+pub fn jet_enc_json_to_string<T: __jet_Encode>(v: &T) -> Result<String, jet_std::EncodingError> {
     let tree = v.jet_encode();
     jet_enc_json_validate(&tree)?;
     Ok(jet_std::render_dyn_json(&tree, false, 0))
@@ -708,7 +708,7 @@ fn jet_enc_json_to_string_pretty<T: __jet_Encode>(v: &T) -> Result<String, jet_s
     Ok(jet_std::render_dyn_json(&tree, true, 0))
 }
 
-fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
+pub fn jet_enc_json_decode<T: __jet_Decode>(text: &str) -> Result<T, Vec<jet_std::FieldError>> {
     let tree = jet_std::parse_json_dyn(text).map_err(|e| {
         let line = e.line.ok().unwrap_or(0);
         jet_std::FieldError::one(format!("invalid JSON (line {}): {}", line, e.reason))
