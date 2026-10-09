@@ -1,0 +1,17 @@
+Error [E0205]: Cannot edit through this read-only `SharedGuard` view
+  --> shared_read_guard_value_is_not_writable.jet:7:17
+    |
+  7 |     guard.value.value += 1
+    |                 ^^^^^
+ Why: A public guard type outside its acquisition site preserves read access unless a helper explicitly receives it with write access
+ Fix: Keep the edit at the acquisition site, or pass the guard to a helper with the write-access marker `&`, such as `&guard: SharedGuard<T>`
+More: jet-lang.dev/e/E0205
+
+Error [E0205]: Cannot edit `value` — `guard` does not have the write-access marker `&`
+  --> shared_read_guard_value_is_not_writable.jet:7:17
+    |
+  7 |     guard.value.value += 1
+    |                 ^^^^^
+ Why: Editing a field requires the write-access marker `&` on the owning place
+ Fix: Declare it with `guard := ...` to give it write access
+More: jet-lang.dev/e/E0205

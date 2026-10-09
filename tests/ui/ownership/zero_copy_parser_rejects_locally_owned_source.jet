@@ -1,0 +1,16 @@
+
+struct Token {
+    text: View<str>,
+    rest: View<str>
+}
+
+fn parse_owned() -[]> Token {
+    source := "name:value"
+    text :: source.before(":")
+    rest :: source.after(":")
+    return Token{ text: text, rest: rest }
+}
+
+fn run() {
+    print(parse_owned().text)
+}

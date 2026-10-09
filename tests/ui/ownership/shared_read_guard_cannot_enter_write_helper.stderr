@@ -1,0 +1,8 @@
+Error [E0205]: A read `SharedGuard` cannot enter a write helper
+  --> shared_read_guard_cannot_enter_write_helper.jet:9:11
+    |
+  9 |     bump(&guard)
+    |           ^^^^^
+ Why: The helper can edit through this parameter, so its caller must hold an exclusive Shared guard
+ Fix: Create the guard with `guard_edit()` before passing it with the write-access marker `&`
+More: jet-lang.dev/e/E0205

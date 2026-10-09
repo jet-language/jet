@@ -1,0 +1,26 @@
+Error [E0204]: `values` is being changed in this call, so it can't be used again here
+  --> builtin_and_composite_receivers_use_the_call_access_frame.jet:4:30
+    |
+  4 |     &values.insert(0, values.remove(0, .Slot))
+    |                              ^^^^^^
+ Why: While something is being changed through the write-access marker `&`, nobody else may be looking at it
+ Fix: Pass the write-access marker `&` (`&values`) only once, or copy first with `~values`
+More: jet-lang.dev/e/E0204
+
+Error [E0224]: This call writes `values`, but `values` has no `&` mark
+  --> builtin_and_composite_receivers_use_the_call_access_frame.jet:4:23
+    |
+  4 |     &values.insert(0, values.remove(0, .Slot))
+    |                       ^^^^^^
+ Why: The method is declared with `&self`, so the call writes the named place it is called on; the mark sits on that place, the same way `edit(&buf)` and `consume(^text)` mark arguments
+ Fix: Write `&values`
+More: jet-lang.dev/e/E0224
+
+Error [E0108]: Argument 2 to `.insert()` should be Int (a whole number), not Int?
+  --> builtin_and_composite_receivers_use_the_call_access_frame.jet:4:30
+    |
+  4 |     &values.insert(0, values.remove(0, .Slot))
+    |                              ^^^^^^
+ Why: Built-in methods need arguments of the right type
+ Fix: Use Int (a whole number) here
+More: jet-lang.dev/e/E0108

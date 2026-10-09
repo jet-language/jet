@@ -1,0 +1,20 @@
+
+enum Selection { One(View<Int>) }
+
+fn select(values: [Int]) -[]> Selection {
+    selected :: values[0..1]
+    return Selection.One(selected)
+}
+
+fn run() {
+    values := [7, 8]
+    selected :: select(values)
+    if selected == {
+        .One(part) -> {
+            &values.push(9)
+            print(part[0])
+        }
+    }
+}
+
+// KNOWN-FAILING #4797: original Rust test passes but CLI misses E0212 (I3 divergence); preserve the original rejection, not a skip.

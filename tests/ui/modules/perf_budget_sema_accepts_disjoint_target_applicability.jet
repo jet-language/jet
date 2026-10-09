@@ -1,0 +1,23 @@
+module perf.release {
+    budgets: [
+        Budget{
+            name: "linux",
+            metric: .BinarySize,
+            limit: .AtMost(2MiB),
+            applies: BudgetApplies{
+                targets: .Only([.Triple("x86_64-unknown-linux-gnu")]),
+                profiles: .All,
+            },
+        },
+        Budget{
+            name: "windows",
+            metric: .BinarySize,
+            limit: .AtMost(2MiB),
+            applies: BudgetApplies{
+                targets: .Only([.Triple("x86_64-pc-windows-msvc")]),
+                profiles: .All,
+            },
+        },
+    ]
+}
+

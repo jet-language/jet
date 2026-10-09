@@ -1,0 +1,14 @@
+
+trait Inspect {
+    fn touch(self)
+}
+trait Edit {
+    fn touch(&self)
+}
+fn call(callback: fn()) { callback() }
+fn edit_all(items: ...[Edit, Inspect]) {
+    loop item in items {
+        call(() -> { item.touch() })
+    }
+}
+fn run() {}

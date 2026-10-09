@@ -1,0 +1,17 @@
+Error [E0204]: `values` is already shared in this call, so it can't be changed here too
+  --> move_lambda_capture_identity_matches_rust_2021_places_6.jet:6:30
+    |
+  6 |     both(() -> first.len(), &values)
+    |                              ^^^^^^
+ Why: While something is being looked at, nobody else may be changing it
+ Fix: Drop the extra use of `values`, or copy first with `~values`
+More: jet-lang.dev/e/E0204
+
+Error [E0212]: `values` cannot be passed with write access while `first` is still looking into it
+  --> move_lambda_capture_identity_matches_rust_2021_places_6.jet:6:30
+    |
+  6 |     both(() -> first.len(), &values)
+    |                              ^^^^^^
+ Why: `first` is a live read view into `values[…]`; changing or moving the owner could invalidate that view
+ Fix: Finish using `first` before changing `values`, narrow the view's scope, or make an owned copy
+More: jet-lang.dev/e/E0212

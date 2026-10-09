@@ -1,0 +1,15 @@
+
+struct NoClone { label: Int }
+
+fn run() {
+    item :: NoClone{ label: 7 }
+    values := [1, 2]
+    #Off {
+        callback :: () -> item.label
+        window :: values[0..1]
+        retained :: () -> window[0]
+    }
+    &values.push(3)
+    print(item.label)
+    print(values.len())
+}

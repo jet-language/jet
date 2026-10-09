@@ -1,0 +1,16 @@
+use slots
+
+fn inventory_total() -> Int {
+    items :: [Item]{Item{weight: 3}, Item{weight: 2}}
+    picked :: first_or(items, Item{weight: 0})
+    slot :: Slot<Item>{value: picked}
+    copied :: pool_copy(Pool<Item>{items: items})
+    shape :: Shape{mass: slot.get().weight}
+    matched :: count_where(items, (item: Item) -> item.weight > 2)
+    shape.weight() + matched + pool_len(copied) + stage_weight(Stage.Ready(4))
+}
+
+fn qualified_total() -> Int {
+    slot :: slots.wrap(Item{weight: 7})
+    slots.identity(slot.get().weight) + slots.identity(3)
+}

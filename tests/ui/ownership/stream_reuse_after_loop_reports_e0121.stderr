@@ -1,0 +1,13 @@
+Error [E0121]: `s` was consumed by `.loop()`, so it can't be used here
+  --> stream_reuse_after_loop_reports_e0121.jet:12:15
+    |
+ 12 |     loop x in s { print("{x}") }
+    |               ^
+  --> stream_reuse_after_loop_reports_e0121.jet:11:15
+    |
+ 11 |     loop x in s { print("{x}") }
+    |               ^ `s` moved to `.loop()` here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `s` after the move, or give `.loop()` a copy with `~s` where it moved.
+ Note: `s` is one-pass and cannot be copied — create a fresh source for the second drive
+More: jet-lang.dev/e/E0121

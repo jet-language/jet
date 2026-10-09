@@ -1,0 +1,21 @@
+Error [E0112]: `both` wants fn() for argument 1, but this is fn() -[]> Int
+  --> move_lambda_construction_consumes_owned_nonscalar_captures.jet:8:10
+    |
+  8 |     both(() -> values.len(), values)
+    |          ^^^^^^^^^^^^^^^^
+ Why: Every argument must match its parameter's type
+ Fix: Use fn() here
+More: jet-lang.dev/e/E0112
+
+Error [E0121]: `values` was consumed by a lambda that captures it, so it can't be used here
+  --> move_lambda_construction_consumes_owned_nonscalar_captures.jet:8:30
+    |
+  8 |     both(() -> values.len(), values)
+    |                              ^^^^^^
+  --> move_lambda_construction_consumes_owned_nonscalar_captures.jet:8:16
+    |
+  8 |     both(() -> values.len(), values)
+    |                ^^^^^^ `values` moved to a lambda that captures it here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `values` after the move, or give a lambda that captures it a copy with `~values` where it moved.
+More: jet-lang.dev/e/E0121

@@ -1,0 +1,8 @@
+Error [E2307]: `result` cannot be returned without an owning copy
+  --> returned_string_view_cannot_outlive_local_owner.jet:5:12
+    |
+  5 |     return result
+    |            ^^^^^^
+ Why: `result` is a zero-copy view into `email` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled
+ Fix: Write `~result` first, or remove `copies: .Explicit` to use the default owning copy
+More: jet-lang.dev/e/E2307

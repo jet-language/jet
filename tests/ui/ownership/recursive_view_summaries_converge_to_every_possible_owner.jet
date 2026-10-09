@@ -1,0 +1,24 @@
+
+fn alpha(left: [Int], right: [Int], choose_left: Bool) -[]> View<Int> {
+    if choose_left {
+        selected :: left[0..1]
+        return selected
+    }
+    return beta(left, right, choose_left)
+}
+
+fn beta(left: [Int], right: [Int], choose_left: Bool) -[]> View<Int> {
+    if !choose_left {
+        selected :: right[0..1]
+        return selected
+    }
+    return alpha(left, right, choose_left)
+}
+
+fn run() {
+    left := [7, 8]
+    right := [9, 10]
+    selected :: alpha(left, right, false)
+    &right.push(11)
+    print(selected[0])
+}
