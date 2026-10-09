@@ -3372,13 +3372,6 @@ enum SemaBodyJob {
     ImplMethod(ordinal: Int, implementation_index: Int, method_index: Int)
 }
 
-fn sema_check_body_job_index(job: SemaBodyJob) -> Int Never! {
-    if job == {
-        .TopLevel(index) -> index
-        .NominalMethod(ordinal, _, _) | .ImplMethod(ordinal, _, _) -> ordinal
-    }
-}
-
 fn sema_incremental_job_queries(memo: SemaModuleMemo?, source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, jobs: [SemaBodyJob]) -> [Int:SemaBodyMemoQuery] {
     queries := [Int:SemaBodyMemoQuery]{}
     if memo == None -> return ^queries
@@ -4038,16 +4031,6 @@ fn sema_check_body_part(shared: Shared<SemaCheckShared>, slot: Shared<SemaBodyPa
         }
     }
     permit.value.bodies.len()
-}
-
-fn sema_host_hook_unwant(wanted: Shared<SemaHostHookWanted>) {
-    permit :: wanted.guard_edit()
-    permit.value.wanted = false
-}
-
-fn sema_host_hook_was_wanted(wanted: Shared<SemaHostHookWanted>) -> Bool {
-    permit :: wanted.guard_read()
-    permit.value.wanted
 }
 
 // `environment` is the graph pass's one environment (sema_check_pass_environment):
@@ -6088,16 +6071,6 @@ fn sema_check_shared_fill(shared_state: Shared<SemaCheckShared>, environment: ^S
     permit :: shared_state.guard_edit()
     &permit.value.environments.push(^environment)
     &permit.value.memory_plans.push(^memory_plan)
-}
-
-fn sema_check_shared_take_environment(shared_state: Shared<SemaCheckShared>) -> SemaScopeEnvironment {
-    permit :: shared_state.guard_edit()
-    &permit.value.environments.pop() ?? panic("the body-check environment left the threads' shared state")
-}
-
-fn sema_check_shared_take_memory_plan(shared_state: Shared<SemaCheckShared>) -> SemaFunctionMemoryPlan {
-    permit :: shared_state.guard_edit()
-    &permit.value.memory_plans.pop() ?? panic("the body-check memory plan left the threads' shared state")
 }
 
 // The diagnostic `diagnostic` defers to the failure solve: the key of the

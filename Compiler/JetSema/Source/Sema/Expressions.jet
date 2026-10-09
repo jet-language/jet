@@ -3211,28 +3211,6 @@ fn sema_dyn_float_literal_value(expr: Expr) -> Float? Never! {
     }
 }
 
-// The opposite Dyn operand contextualizes a fractional literal without
-// rechecking either expression (Decimal variables still do not auto-wrap).
-fn sema_dyn_float_literal_value(expr: Expr) -> Float? Never! {
-    if expr == {
-        .Float(value, _, is_f32, _) -> if is_f32 -> None else -> Val(value)
-        .Paren(inner, _) -> sema_dyn_float_literal_value(inner)
-        .Unary(op, inner, _) -> if op == UnOp.Neg -> Val(-(sema_dyn_float_literal_value(inner) ?? return None)) else -> None
-        else -> None
-    }
-}
-
-// The opposite Dyn operand contextualizes a fractional literal without
-// rechecking either expression (Decimal variables still do not auto-wrap).
-fn sema_dyn_float_literal_value(expr: Expr) -> Float? Never! {
-    if expr == {
-        .Float(value, _, is_f32, _) -> if is_f32 -> None else -> Val(value)
-        .Paren(inner, _) -> sema_dyn_float_literal_value(inner)
-        .Unary(op, inner, _) -> if op == UnOp.Neg -> Val(-(sema_dyn_float_literal_value(inner) ?? return None)) else -> None
-        else -> None
-    }
-}
-
 // Rust `expr_wants_expected_type` for a decimal literal operand. A binary's
 // left operand also inherits the surrounding expectation in Rust, so
 // `through_binary` follows it for an operand that is itself checked under

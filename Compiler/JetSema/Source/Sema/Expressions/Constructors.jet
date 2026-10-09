@@ -810,45 +810,6 @@ fn sema_expression_core_enum_literal(enum_name: String, variants: [String], vari
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 
-// A variant of a Core enum without a source declaration: unit variants take no
-// payload and payload variants take one positional value per row type.
-fn sema_expression_core_enum_literal(enum_name: String, variants: [String], variant: String, args: [EnumLitArg], variant_span: Span?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    payload_types :: core_enum_variant_payload(enum_name, variant) ?? {
-        &diagnostics.push(sema_enum_unknown_variant(enum_name, variant, variants, span, variant_span))
-        return None
-    }
-    if payload_types.len() == 0 && args.len() != 0 {
-        &diagnostics.push(sema_enum_unit_payload(enum_name, variant, span))
-        return None
-    }
-    if args.len() != payload_types.len() {
-        &diagnostics.push(sema_error("E0104", span, "variant `{variant}` expects {payload_types.len()} payload values", "this Core enum variant has positional payload fields", "pass exactly {payload_types.len()} values"))
-        return None
-    }
-    checked_args := [TEnumArg]{}
-    loop (index, argument) in args {
-        payload_expr :: if argument == {
-            .Positional(value) -> value
-            else -> {
-                &diagnostics.push(sema_error("E0764", span, "variant `{variant}` takes a positional payload", "Core enum payload values do not have field labels", "pass the value without a label"))
-                return None
-            }
-        }
-        payload_ty :: payload_types[index]
-        sema_copy_site_check_field(payload_expr, environment, program, scopes, &tail_store, &context, &diagnostics)
-        checked :: sema_check_expression(payload_expr, Val(payload_ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-        compatible :: sema_expr_expected_assignable(payload_ty, checked.ty, environment, program) ?? return None
-        if !compatible {
-            &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(payload_ty, environment, program), sema_expr_expected_type(checked.ty, environment, program), expr_span(payload_expr)))
-            return None
-        }
-        if !sema_copy_site_record_move(payload_expr, scopes, &state, &tail_store, &context, &diagnostics) -> return None
-        &checked_args.push(TEnumArg{value: checked, clone: false, move: false})
-    }
-    payload :: if checked_args.len() == 0 -> TEnumPayload.Unit else -> TEnumPayload.Positional{args: checked_args}
-    value :: sema_tir_expr(Type.Named{name: enum_name}, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: payload}, span)
-    sema_expr_expected(value, expected, environment, program, &diagnostics)
-}
 struct SemaExpressionTypedTextParts {
     literals: [String]
     holes: [TExpr]

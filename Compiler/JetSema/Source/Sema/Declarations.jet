@@ -63,45 +63,6 @@ fn sema_raw_protocol_trait(trait_name: String?) -> Bool Never! {
     name == "Display" || name == "Debug" || name == "Encode" || name == "Decode" || name == "Equatable" || name == "Comparable" || name == "Add" || name == "Sub" || name == "Mul" || name == "Div"
 }
 
-// Whether a trait-impl method keeps its declared return raw (the Rust
-// reference's `uses_raw_protocol_function_return`).
-fn sema_raw_protocol_function_return(trait_name: String?, implementation_generated: Bool, func: Func) -> Bool Never! {
-    if sema_raw_protocol_trait(trait_name) -> return true
-    func.compiler_generated && (implementation_generated || func.state_transition != None)
-}
-
-// A callable's checked return: a raw protocol return keeps its declared type
-// (Unit when omitted); every other return projects through the failure rail
-// (the Rust reference's `checked_return_types`).
-fn sema_checked_return_type(return_type: Type?, raw_protocol_return: Bool) -> Type Never! {
-    if raw_protocol_return -> return return_type ?? Type.Named{name: "Unit"}
-    sema_effective_return_type(return_type)
-}
-
-// D-FAILURE-FOUNDATION1: these traits are raw protocol ABIs (String, Bool,
-// Ordering, Dyn, and same-type arithmetic), never the implicit failure
-// carrier, for user and derived impls alike (the Rust reference's
-// `uses_raw_protocol_return`).
-fn sema_raw_protocol_trait(trait_name: String?) -> Bool Never! {
-    name :: trait_name ?? return false
-    name == "Display" || name == "Debug" || name == "Encode" || name == "Decode" || name == "Equatable" || name == "Comparable" || name == "Add" || name == "Sub" || name == "Mul" || name == "Div"
-}
-
-// Whether a trait-impl method keeps its declared return raw (the Rust
-// reference's `uses_raw_protocol_function_return`).
-fn sema_raw_protocol_function_return(trait_name: String?, implementation_generated: Bool, func: Func) -> Bool Never! {
-    if sema_raw_protocol_trait(trait_name) -> return true
-    func.compiler_generated && (implementation_generated || func.state_transition != None)
-}
-
-// A callable's checked return: a raw protocol return keeps its declared type
-// (Unit when omitted); every other return projects through the failure rail
-// (the Rust reference's `checked_return_types`).
-fn sema_checked_return_type(return_type: Type?, raw_protocol_return: Bool) -> Type Never! {
-    if raw_protocol_return -> return return_type ?? Type.Named{name: "Unit"}
-    sema_effective_return_type(return_type)
-}
-
 // The stable provenance of a callable's effective failure route, projected
 // from its written return type (the Rust reference's
 // `FailureContract::from_return_type(..).source()`).
