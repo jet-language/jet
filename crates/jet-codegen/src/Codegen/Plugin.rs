@@ -12,8 +12,8 @@
 use std::collections::BTreeSet;
 
 use jet_foundation::MIR::{
-    MirAccess, MirArtifactId, MirArtifactKind, MirArtifactTarget, MirProgram, MirType,
-    MirTypeDef, MirTypeDefKind, MirTypeKind,
+    MirAccess, MirArtifactId, MirArtifactKind, MirArtifactTarget, MirFailureCarrier, MirProgram,
+    MirType, MirTypeDef, MirTypeDefKind, MirTypeKind,
 };
 use jet_foundation::Names::{mangle, mangle_generated, mangle_path};
 use super::Embedding::{ComponentSignature, ComponentSignatureDescriptor, ComponentTypeDescriptor, ExportScalar};
@@ -1071,11 +1071,7 @@ fn plugin_component_wrapper(
             MirAccess::Move => format!("p{index}"),
         });
     }
-    let call = format!(
-        "match {}({}) {{ Ok(value) => value, Err(error) => jet_entry_error_exit_jet(error) }}",
-        export.callee,
-        call_args.join(", ")
-    );
+    let call = plugin_export_call(&export.callee, &call_args, &export.failure);
     let result_slots = plugin_flat_slots(&descriptor.result);
     let mut wrapper = format!(
         "#[export_name = \"{kebab}\"]\npub extern \"C\" fn {wrapper_name}(",
@@ -1147,6 +1143,19 @@ fn plugin_component_wrapper(
         ));
     }
     wrapper
+}
+
+/// The export wrapper's call to its checked callee. Only a callee that carries
+/// a failure rail returns a `Result` to unwrap; an infallible callee returns
+/// its value directly and a diverging one never returns.
+fn plugin_export_call(callee: &str, args: &[String], failure: &MirFailureCarrier) -> String {
+    let call = format!("{callee}({})", args.join(", "));
+    match failure {
+        MirFailureCarrier::Result { .. } | MirFailureCarrier::Optional { .. } => format!(
+            "match {call} {{ Ok(value) => value, Err(error) => jet_entry_error_exit_jet(error) }}"
+        ),
+        MirFailureCarrier::Infallible | MirFailureCarrier::Diverges { .. } => call,
+    }
 }
 
 
@@ -1488,10 +1497,10 @@ pub fn emit_plugin(
                         MirAccess::Move => format!("p{i}"),
                     })
                     .collect();
+                // An infallible callee may return a view of its parameter.
                 let call = format!(
-                    "match {}({}) {{ Ok(value) => value, Err(error) => jet_entry_error_exit_jet(error) }}",
-                    callee,
-                    call_args.join(", ")
+                    "String::from({})",
+                    plugin_export_call(callee, &call_args, &export.failure)
                 );
                 wrapper_fns.push_str(&format!(
                     "#[export_name = \"{kebab}\"]\npub extern \"C\" fn {wrapper_name}({rust_params}) -> i32 {{ {locals} jet_ffi_callback_boundary(|| {{ {plugin_return_text}({call}) }}) }}\n#[export_name = \"cabi_post_{kebab}\"]\npub extern \"C\" fn {post_name}(ret_ptr: i32) {{ {plugin_post_text}(ret_ptr) }}\n",
@@ -1526,11 +1535,7 @@ pub fn emit_plugin(
                         MirAccess::Read | MirAccess::Move => format!("p{i}"),
                     })
                     .collect();
-                let call = format!(
-                    "match {}({}) {{ Ok(value) => value, Err(error) => jet_entry_error_exit_jet(error) }}",
-                    callee,
-                    call_args.join(", ")
-                );
+                let call = plugin_export_call(callee, &call_args, &export.failure);
                 wrapper_fns.push_str(&format!(
                     "#[export_name = \"{kebab}\"]\npub extern \"C\" fn {wrapper_name}({rust_params}) -> {ret} {{ {locals} jet_ffi_callback_boundary(|| {{ {call} }}) }}\n",
                     wrapper_name = wrapper_name,
