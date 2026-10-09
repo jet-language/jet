@@ -415,6 +415,23 @@ fn __jet_bootstrap_harness_main() {
             "unknown bootstrap factory tier `{factory_tier_name}`: stage zero runs the compiler factory only as AOT"
         ),
     };
+    if mode == "image-identity-check" {
+        let image = crate::__jet_bootstrap_compiler_image()
+            .unwrap_or_else(|error| panic!("cannot restore compiler identity: {error}"));
+        let cached = crate::__jet_bootstrap_compiler_image()
+            .unwrap_or_else(|error| panic!("cannot reuse compiler identity: {error}"));
+        assert!(std::sync::Arc::ptr_eq(&image, &cached), "compiler image cache changed owner");
+        let fresh = image.program.sealed_execution_identity(Some(image.header.artifact))
+            .unwrap_or_else(|error| panic!("cannot recompute compiler identity: {error}"));
+        let encode = crate::compiler_bootstrap_compiler_image::encode_identity;
+        assert_eq!(
+            encode(&image.header.identity).expect("cannot encode cached compiler identity"),
+            encode(&fresh).expect("cannot encode fresh compiler identity"),
+            "cached compiler identity differs from the same artifact"
+        );
+        println!("compiler-image-identity-check: complete");
+        return;
+    }
     // JET_BOOTSTRAP_BATCH names a file of `source_root<TAB>entry<TAB>output<TAB>receipt`
     // rows: one process compiles them in order, restoring the compiler image
     // once. A panicking entry is reported between its `jet-bootstrap-batch:`
@@ -699,6 +716,7 @@ fn __jet_bootstrap_harness_entry(
             .unwrap_or_else(|error| panic!("cannot register task-root Source cursor: {error}"));
         let fixture_ok = crate::__jet_bootstrap_task_roots_fixture(
             &mut source_program,
+            checked_mir,
             &mut runtime_config,
             &callback_id,
             &capability.handle,
@@ -4114,7 +4132,9 @@ fn build_backend_artifact_with_native_library(
 ) -> (PathBuf, String) {
     let manifest_path =
         write_backend_project(repo, project, package_name, source, compiler_image, native_library, ffi);
-    let target = repo.join("target");
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo.join("target"));
     let profile = backend_release_profile();
 
     let mut command = Command::new(repo.join("Tools/agent/jet-env"));

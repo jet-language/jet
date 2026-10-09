@@ -478,7 +478,25 @@
       "lanes": {
         "full": "both programs, both arms, 5 samples: at every speed-card close and at milestones",
         "quick": "bench30k (same generator, --code-lines 30000) frontend phases with JET_TRACE_FILE, 3 samples: every compiler-touching change, regression budget 15% per phase (Tools/perf/baseline.json budgets) against Tools/perf/throughput/quick-baseline.json"
-      }
+      },
+      "implementation_pairs": [
+        {
+          "id": "native-host-shape-view",
+          "scope": "existing native compiler ABI marshalling; canonical Source shape semantics and image identity/root checks unchanged",
+          "plain": "986c9f278:Compiler/Bootstrap/Host/Native.rs",
+          "optimized": "checkout:Compiler/Bootstrap/Host/Native.rs",
+          "program_driver": "same trusted hello project compiled by both immutable compiler artifacts",
+          "harness": "Tools/perf/jetc-profile/startup.mjs",
+          "arms": ["plain", "optimized"],
+          "metrics": ["wall_ns", "compile_ns", "pre_parse_ns"],
+          "warmups": 1,
+          "trials": 3,
+          "sampling": "interleaved matched trials, same source hash, machine, environment and compiler build profile; written pre-flight and main-agent admission required",
+          "output_validation": "complete canonical AOT compile receipts, zero reports, actual input snapshot bytes and per-trial invocation roots/hashes matched, byte-identical emitted artifacts; actual codec-projected Source TaskRoots parity and negative identity checks",
+          "comparator": "each optimized/plain median strictly below 1; equality, missing evidence, nonzero process exit or mismatched output is failure",
+          "loss_owner": 4551
+        }
+      ]
     }
   },
   "loss_owners": {
