@@ -682,18 +682,6 @@ MIR_PASS_STEP_REDUCE_AGAIN :: 7
 MIR_PASS_STEP_CANONICAL :: 8
 MIR_PASS_STEP_ACCELERATION :: 9
 
-// The pass a step completes, marked on each function and validated under full
-// verification.
-fn mir_pass_step_completes(step: Int) -> MIROptimizationPassID? Never! {
-    if step == MIR_PASS_STEP_UNREACHABLE -> return Val(MIROptimizationPassID.UnreachableBlockElimination)
-    if step == MIR_PASS_STEP_CFG -> return Val(MIROptimizationPassID.CFGSimplification)
-    if step == MIR_PASS_STEP_FOLD -> return Val(MIROptimizationPassID.ExactConstantFolding)
-    if step == MIR_PASS_STEP_BOUNDS -> return Val(MIROptimizationPassID.BoundsCheckElimination)
-    if step == MIR_PASS_STEP_DEAD -> return Val(MIROptimizationPassID.DeadPureValueElimination)
-    if step == MIR_PASS_STEP_CANONICAL -> return Val(MIROptimizationPassID.CanonicalLoopFacts)
-    None
-}
-
 // The read-only rows every thread of a wave receives (a copy each; they are
 // small). `cleanup` says the previous fixed-reduction normalization rewrote
 // some function, which a wave starting at step 7 or 8 acts on.
@@ -701,52 +689,6 @@ struct MIRPassWaveInputs {
     prelude_calls: [MIRPreludeCall]
     purity: [U64:Bool]
     cleanup: Bool
-}
-
-// What a wave's steps did, summed over functions. `first_bounds`,
-// `first_loops`, and `first_vectors` count the facts the first bounds and
-// loop passes derived; `bounds`, `loops`, and `vectors` the final ones.
-struct MIRPassWaveCounts {
-    blocks_removed: Int
-    folded: Int
-    dead: Int
-    first_bounds: Int
-    bounds: Int
-    first_loops: Int
-    first_vectors: Int
-    loops: Int
-    vectors: Int
-    normalized: Int
-    acceleration: Int
-    rewrote: Bool
-}
-
-fn mir_pass_wave_counts() -> MIRPassWaveCounts Never! {
-    MIRPassWaveCounts{blocks_removed: 0, folded: 0, dead: 0, first_bounds: 0, bounds: 0, first_loops: 0, first_vectors: 0, loops: 0, vectors: 0, normalized: 0, acceleration: 0, rewrote: false}
-}
-
-fn mir_pass_wave_counts_add(total: &MIRPassWaveCounts, part: MIRPassWaveCounts) Never! {
-    total.blocks_removed += part.blocks_removed
-    total.folded += part.folded
-    total.dead += part.dead
-    total.first_bounds += part.first_bounds
-    total.bounds += part.bounds
-    total.first_loops += part.first_loops
-    total.first_vectors += part.first_vectors
-    total.loops += part.loops
-    total.vectors += part.vectors
-    total.normalized += part.normalized
-    total.acceleration += part.acceleration
-    total.rewrote = total.rewrote || part.rewrote
-}
-
-// Unreachable-block and dead-value elimination after a fixed-reduction
-// normalization that rewrote some function (any function of the program).
-fn mir_pass_reduction_cleanup(function: &MIRFunction, inputs: MIRPassWaveInputs, counts: &MIRPassWaveCounts) Never! {
-    before :: function.blocks.len()
-    mir_pass_eliminate_unreachable_function(&function)
-    counts.blocks_removed += before - function.blocks.len()
-    counts.dead += mir_pass_dead_pure_function(&function, inputs.purity)
 }
 
 // Steps `first` through `last` on one function, in order.
@@ -910,98 +852,11 @@ fn mir_pass_validate_after(program: MIRProgram, pass: MIROptimizationPassID, ful
     mir_pass_check(program, pass, true)
 }
 
-// MIR Lint over the program `pass` produced; a failure names the pass and rule.
-fn mir_pass_lint(program: MIRProgram, pass: MIROptimizationPassID) -> MIROptimizationError? {
-    failure :: mir_lint_program(program) ?? return None
-    Val(mir_pass_lint_error(pass, failure))
-}
-
-fn mir_pass_lint_error(pass: MIROptimizationPassID, failure: MIRLintError) -> MIROptimizationError Never! {
-    mir_pass_error(pass, .Lint, Val(failure.function), failure.span, "MIR lint failed after pass {mir_pass_name(pass)}: {mir_lint_error_text(failure)}")
-}
-
-// Keep-going (driver) support: `error`, then every other function the check
-// that raised it (legality, or MIR Lint) rejects in `program` as it stands,
-// one failure per function in program order. The driver traps them all before
-// a single rerun, so reruns grow with the failing checks, not the failing
-// functions. An error naming no function is returned alone.
-fn mir_optimizer_function_failures(program: MIRProgram, error: MIROptimizationError) -> [MIROptimizationError] {
-    pass :: error.pass
-    lint :: error.kind == .Lint
-    reported :: error.function ?? return [MIROptimizationError]{error}
-    failures := [MIROptimizationError]{error}
-    if lint {
-        loop failure in mir_lint_program_scan(program, true) {
-            if failure.function != reported -> &failures.push(mir_pass_lint_error(pass, failure))
-        }
-        return failures
-    }
-    loop failure in mir_pass_validate_program_scan(program, pass, true) {
-        if failure.function != Val(reported) -> &failures.push(failure)
-    }
-    failures
-}
-
-fn mir_pass_name(pass: MIROptimizationPassID) -> String Never! {
-    if pass == {
-        .LegalityVerification -> "legality-verification"
-        .UnreachableBlockElimination -> "unreachable-block-elimination"
-        .CFGSimplification -> "cfg-simplification"
-        .ExactConstantFolding -> "exact-constant-folding"
-        .BoundsCheckElimination -> "bounds-check-elimination"
-        .DeadPureValueElimination -> "dead-pure-value-elimination"
-        .CanonicalLoopFacts -> "canonical-loop-facts"
-    }
-}
-
-// Legality after `pass`, then MIR Lint when every pass is linted.
-fn mir_pass_check(program: MIRProgram, pass: MIROptimizationPassID, lint: Bool) -> MIROptimizationError? {
-    validation :: mir_pass_validate_program(program, pass)
-    if validation != None || !lint -> return validation
-    mir_pass_lint(program, pass)
-}
 
 // MIR Lint over the program `pass` produced; a failure names the pass and rule.
 fn mir_pass_lint(program: MIRProgram, pass: MIROptimizationPassID) -> MIROptimizationError? {
     failure :: mir_lint_program(program) ?? return None
     Val(mir_pass_error(pass, .Lint, Val(failure.function), failure.span, "MIR lint failed after pass {mir_pass_name(pass)}: {mir_lint_error_text(failure)}"))
-}
-
-fn mir_pass_name(pass: MIROptimizationPassID) -> String Never! {
-    if pass == {
-        .LegalityVerification -> "legality-verification"
-        .UnreachableBlockElimination -> "unreachable-block-elimination"
-        .CFGSimplification -> "cfg-simplification"
-        .ExactConstantFolding -> "exact-constant-folding"
-        .BoundsCheckElimination -> "bounds-check-elimination"
-        .DeadPureValueElimination -> "dead-pure-value-elimination"
-        .CanonicalLoopFacts -> "canonical-loop-facts"
-    }
-}
-
-// Legality after `pass`, then MIR Lint when every pass is linted.
-fn mir_pass_check(program: MIRProgram, pass: MIROptimizationPassID, lint: Bool) -> MIROptimizationError? {
-    validation :: mir_pass_validate_program(program, pass)
-    if validation != None || !lint -> return validation
-    mir_pass_lint(program, pass)
-}
-
-// MIR Lint over the program `pass` produced; a failure names the pass and rule.
-fn mir_pass_lint(program: MIRProgram, pass: MIROptimizationPassID) -> MIROptimizationError? {
-    failure :: mir_lint_program(program) ?? return None
-    Val(mir_pass_error(pass, .Lint, Val(failure.function), failure.span, "MIR lint failed after pass {mir_pass_name(pass)}: {mir_lint_error_text(failure)}"))
-}
-
-fn mir_pass_name(pass: MIROptimizationPassID) -> String Never! {
-    if pass == {
-        .LegalityVerification -> "legality-verification"
-        .UnreachableBlockElimination -> "unreachable-block-elimination"
-        .CFGSimplification -> "cfg-simplification"
-        .ExactConstantFolding -> "exact-constant-folding"
-        .BoundsCheckElimination -> "bounds-check-elimination"
-        .DeadPureValueElimination -> "dead-pure-value-elimination"
-        .CanonicalLoopFacts -> "canonical-loop-facts"
-    }
 }
 
 // Only a program whose every function carries the complete pass order and a

@@ -588,40 +588,6 @@ fn mir_pass_validate_consumed_stop_uses(function: MIRFunction, dominance: MIRPas
     None
 }
 
-// Rust validate_consumed_stop_uses: a consuming cleanup cannot be replayed.
-fn mir_pass_validate_consumed_stop_uses(function: MIRFunction, dominance: MIRPassDominance, operation: MIROperation, stop: MIRBlockID) -> String? {
-    args :: if operation == {
-        .Call(_, values, _) | .IndirectCall(_, values, _) | .CoreCall(_, _, values, _, _, _) -> values
-        else -> [MIRCallArg]{}
-    }
-    thunk :: if operation == .IndirectCall(callee, _, _) -> Val(callee) else -> MIRValueID?{None}
-    moved := [MIRValueID]{}
-    loop arg in args {
-        if arg.access == .Move -> &moved.push(arg.value)
-    }
-    if moved.len() == 0 && thunk == None -> return None
-    pending := [MIRBlockID]{stop}
-    seen := [U64:Bool]{}
-    loop pending.len() > 0 {
-        id :: &pending.pop() ?? panic("stop-use worklist underflow")
-        if seen.get(id.value) != None -> next
-        _ := &seen.add(id.value, true)
-        position :: dominance.positions.get(id.value) ?? next
-        block :: function.blocks[position]
-        loop instruction in block.instructions {
-            if instruction.operation == .IndirectCall(callee, _, _) {
-                if thunk == Val(callee) -> return Val("MIR stop edge reuses an already-consumed cleanup input")
-            }
-            uses :: mir_operation_value_uses(instruction.operation)
-            loop value in moved {
-                if uses.contains(value) -> return Val("MIR stop edge reuses an already-consumed cleanup input")
-            }
-        }
-        loop target in mir_terminator_targets(block.terminator) -> &pending.push(target)
-    }
-    None
-}
-
 fn mir_pass_validate_resume_uses(function: MIRFunction, definitions: MIRPassDefinitions, dominance: MIRPassDominance, result: MIRValueID, resume: MIRBlockID) -> String? {
     loop block in function.blocks {
         resumed :: mir_pass_dominates(dominance, resume, block.id)
