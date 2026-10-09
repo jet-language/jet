@@ -379,30 +379,6 @@ impl<T, const N: usize> JetListPushSurface for jet_mem::JetInlineList<T, N> {
     }
 }
 
-// #4566 slice 8 inline storage: `jet_mem::JetInlineList` (the vetted memory
-// prelude owns its unsafe storage); the list surfaces here are safe code.
-impl<T, const N: usize> JetListSurface for jet_mem::JetInlineList<T, N> {
-    #[inline(always)]
-    fn jet_len(&self) -> i64 {
-        <[T]>::len(self) as i64
-    }
-
-    #[inline(always)]
-    fn jet_is_empty(&self) -> bool {
-        <[T]>::is_empty(self)
-    }
-}
-
-impl<T, const N: usize> JetListPushSurface for jet_mem::JetInlineList<T, N> {
-    type Item = T;
-
-    #[inline(always)]
-    fn jet_push(&mut self, value: Self::Item) {
-        self.push(value);
-    }
-}
-
-
 #[inline(always)]
 fn jet_list_push<C: JetListPushSurface>(xs: &mut C, value: C::Item) {
     xs.jet_push(value);
@@ -433,15 +409,6 @@ fn jet_index_vec_ref<'a, T>(xs: &'a [T], i: i64, file: &str, line: u32) -> &'a T
     jet_fixed_list_index(xs.len(), i, |index| &xs[index])
         .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()))
 }
-// Embedded Core-only port seam; dies at Rust cutover.
-#[inline(always)]
-fn jet_list_swap<T>(xs: &mut [T], first: i64, second: i64) {
-    // Borrow-only indexing checks reuse the ordinary indexing stop exactly.
-    let _ = jet_index_vec_ref(xs, first, "<core.prelude>", 0);
-    let _ = jet_index_vec_ref(xs, second, "<core.prelude>", 0);
-    xs.swap(first as usize, second as usize);
-}
-
 #[inline(always)]
 fn jet_list_sort<T: Ord>(xs: &mut [T]) {
     xs.sort();
@@ -874,7 +841,7 @@ fn jet_deque_join<T: JetShow>(
 
 fn jet_deque_join_by<T, F: Fn(&T) -> String>(
     queue: &std::collections::VecDeque<T>,
-    separator: &String,
+    separator: &str,
     show: F,
 ) -> String {
     queue.iter().map(show).collect::<Vec<_>>().join(separator)

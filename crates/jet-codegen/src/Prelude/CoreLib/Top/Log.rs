@@ -767,37 +767,37 @@ fn jet_log_emit(level: &str, msg: &str, fields: &[jet_std::LogField]) {
     }
 }
 
-fn jet_ring_log_debug(msg: &String) {
+fn jet_ring_log_debug(msg: &str) {
     jet_log_emit("debug", msg, &[]);
 }
-fn jet_ring_log_info(msg: &String) {
+fn jet_ring_log_info(msg: &str) {
     jet_log_emit("info", msg, &[]);
 }
-fn jet_ring_log_warn(msg: &String) {
+fn jet_ring_log_warn(msg: &str) {
     jet_log_emit("warn", msg, &[]);
 }
-fn jet_ring_log_error(msg: &String) {
+fn jet_ring_log_error(msg: &str) {
     jet_log_emit("error", msg, &[]);
 }
-fn jet_ring_log_critical(msg: &String) {
+fn jet_ring_log_critical(msg: &str) {
     jet_log_emit("critical", msg, &[]);
 }
-fn jet_ring_log_fatal(msg: &String) {
+fn jet_ring_log_fatal(msg: &str) {
     jet_log_emit("fatal", msg, &[]);
     jet_ring_log_flush();
     jet_log_process_exit(1);
 }
 
-fn jet_ring_log_debug_fields(msg: &String, fields: &Vec<jet_std::LogField>) {
+fn jet_ring_log_debug_fields(msg: &str, fields: &Vec<jet_std::LogField>) {
     jet_log_emit("debug", msg, fields);
 }
-fn jet_ring_log_info_fields(msg: &String, fields: &Vec<jet_std::LogField>) {
+fn jet_ring_log_info_fields(msg: &str, fields: &Vec<jet_std::LogField>) {
     jet_log_emit("info", msg, fields);
 }
-fn jet_ring_log_warn_fields(msg: &String, fields: &Vec<jet_std::LogField>) {
+fn jet_ring_log_warn_fields(msg: &str, fields: &Vec<jet_std::LogField>) {
     jet_log_emit("warn", msg, fields);
 }
-fn jet_ring_log_error_fields(msg: &String, fields: &Vec<jet_std::LogField>) {
+fn jet_ring_log_error_fields(msg: &str, fields: &Vec<jet_std::LogField>) {
     jet_log_emit("error", msg, fields);
 }
 

@@ -1194,7 +1194,7 @@ impl JetZone {
             let offset = jet_time_parse_offset(name)?;
             if offset == 0 { return Ok(Self::utc()); }
             return Ok(Self {
-                name: name.clone(), transitions: Vec::new(),
+                name: name.to_owned(), transitions: Vec::new(),
                 infos: vec![JetTtInfo { offset, is_dst: false }],
             });
         }
