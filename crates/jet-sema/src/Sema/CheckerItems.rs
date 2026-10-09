@@ -4,7 +4,7 @@ use crate::Sema::Diagnostics::{owned_type_for_read_view, soft_public_use};
 use crate::Sema::NominalWalk::NominalQuery;
 use crate::Syntax;
 use crate::AST::{
-    AccessConvention, BinOp, Call, EnumLitArg, Expr, Item, Pattern, StrMatchPart, StructPatField, Type,
+    AccessConvention, BinOp, Call, EnumLitArg, Expr, Pattern, StrMatchPart, StructPatField, Type,
     VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
@@ -2072,10 +2072,10 @@ impl<'a> Checker<'a> {
             })
         };
         for (_, ty) in &mut sig.params {
-            *ty = self.qualify_method_type(owner, ty, &generic_names);
+            *ty = qualify(ty);
         }
         if let Some(ret) = &mut sig.return_type {
-            *ret = self.qualify_method_type(owner, ret, &generic_names);
+            *ret = qualify(ret);
         }
     }
 
@@ -3268,7 +3268,9 @@ impl<'a> Checker<'a> {
                 let got = self.infer(fexpr);
                 self.clone_borrowed_struct_field_value(Some(fname), fexpr, got.as_ref());
                 self.expected_type = saved;
-                let _ = (&str_map_ty, &expected_ty);
+                if let (Some(expected), Some(got)) = (expected_ty.as_ref(), got.as_ref()) {
+                    self.check_type_assignable(expected, got, fexpr.span());
+                }
             }
             // Report missing fields.
             let missing: Vec<_> = core_fields

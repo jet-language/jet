@@ -1,5 +1,5 @@
 use super::*;
-use super::super::Validation::check_ui_capabilities;
+use super::super::Validation::{attach_module_origin, check_ui_capabilities};
 
 pub(super) fn complete_bundle_check(
     bundle: &mut ProgramBundle,
@@ -458,7 +458,7 @@ pub(super) fn complete_bundle_check(
                 }
             }
         }
-        super::CheckInner::attach_module_origin(
+        attach_module_origin(
             module,
             module_index == bundle.entry,
             &mut diags[phase_diagnostic_start..],
@@ -474,7 +474,7 @@ pub(super) fn complete_bundle_check(
     for (module_index, module) in bundle.modules.iter().enumerate() {
         let phase_diagnostic_start = diags.len();
         apply_effect_via(&module.items, &mut effect_summaries, &mut diags);
-        super::CheckInner::attach_module_origin(
+        attach_module_origin(
             module,
             module_index == bundle.entry,
             &mut diags[phase_diagnostic_start..],
@@ -663,7 +663,7 @@ pub(super) fn complete_bundle_check(
             &public_reachability.nodes_with("secret", Effect::Secret.name()),
             &mut diags,
         );
-        super::CheckInner::attach_module_origin(
+        attach_module_origin(
             module,
             module_index == bundle.entry,
             &mut diags[phase_diagnostic_start..],

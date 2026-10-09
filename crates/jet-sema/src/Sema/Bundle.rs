@@ -1785,13 +1785,6 @@ fn populate_name_ledger(
 
     for (module_idx, module) in bundle.modules.iter().enumerate() {
         let state = &states[module_idx];
-        if let Some(program) = state.compiler_builtin_error_program {
-            for item in &program.items {
-                if matches!(item, Item::Struct(_)) {
-                    declare_item_names(ledger, module_idx, &module.alias, item);
-                }
-            }
-        }
         for item in &module.items {
             declare_item_names(ledger, module_idx, &module.alias, item);
             if let Item::CodeModule(instance) = item {

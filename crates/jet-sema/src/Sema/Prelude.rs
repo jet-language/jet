@@ -80,6 +80,9 @@ pub(crate) fn retain_error_prelude_module(bundle: &mut ProgramBundle) -> Result<
         path: std::path::PathBuf::from(ERROR_PRELUDE_SOURCE_PATH),
         display: ERROR_PRELUDE_MODULE_PATH.to_owned(),
         source: ERROR_PRELUDE_SOURCE.to_owned(),
+        core_identifier_demand: crate::Lexer::core_identifier_demand(
+            &crate::Lexer::lex_generated(ERROR_PRELUDE_SOURCE).0,
+        ),
         alias,
         imports: program.imports.clone(),
         items: program.items.iter().filter(|item| matches!(item,
@@ -87,7 +90,6 @@ pub(crate) fn retain_error_prelude_module(bundle: &mut ProgramBundle) -> Result<
         script_body: Vec::new(),
         block_spans: program.block_spans.clone(),
         web_target_ceiling: program.web_target_ceiling,
-        pub_file: program.pub_file,
         no_prelude: program.no_prelude,
         default_target: program.default_target.clone(),
         html_path: program.html_path.clone(),

@@ -563,7 +563,7 @@ pub(crate) fn expand_marker_groups(bundle: &mut ProgramBundle) -> Vec<Diagnostic
             }
         }
         if declaration_rows(&module.items).iter().any(|(_, declaration, _)| declaration.group.is_some()) {
-            let (tokens, _) = crate::Lexer::lex_generated(module.frontend_source.as_deref().unwrap_or(&module.source));
+            let (tokens, _) = crate::Lexer::lex_generated(&module.source);
             raw_groups.insert(index, crate::Parser::named_marker_groups(&crate::Lexer::without_comments(&tokens)));
         }
     }
@@ -597,7 +597,7 @@ pub(crate) fn expand_marker_groups(bundle: &mut ProgramBundle) -> Vec<Diagnostic
             groups.push(raw);
         }
         if groups.is_empty() { continue; }
-        let source = bundle.modules[index].frontend_source.as_deref().unwrap_or(&bundle.modules[index].source);
+        let source = &bundle.modules[index].source;
         let (tokens, errors) = crate::Lexer::lex_generated(source);
         if !errors.is_empty() { diagnostics.extend(errors); continue; }
         let tokens = crate::Lexer::without_comments(&tokens);
@@ -639,7 +639,6 @@ pub(crate) fn expand_marker_groups(bundle: &mut ProgramBundle) -> Vec<Diagnostic
                     declaration.source = module.display.clone(); declaration
                 }));
                 module.web_target_ceiling = program.web_target_ceiling;
-                module.pub_file = program.pub_file;
                 module.no_prelude = program.no_prelude;
                 module.default_target = program.default_target;
                 module.html_path = program.html_path;

@@ -603,9 +603,7 @@ fn hoist_inline_module_types(
         // nested module's own name (`bank` inside `vis2`) is a relative
         // spelling inside its parent's body; exporting it file-wide would let
         // `vis2.bank.Account` answer for a top-level `bank.Account`.
-        if is_pub {
-            exported.insert(format!("{source_path}.{name}"), resolved);
-        }
+        exported.insert(format!("{source_path}.{name}"), resolved);
     }
 
     let mut kept = Vec::with_capacity(body.len());

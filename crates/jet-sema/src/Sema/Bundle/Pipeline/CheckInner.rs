@@ -24,6 +24,30 @@ pub(super) fn check_bundle_opts_for_output_inner(
             std::sync::Arc::from([]),
         ),
     };
+    let group_diagnostics = super::super::MarkerModules::expand_marker_groups(bundle);
+    if !group_diagnostics.is_empty() {
+        return (
+            group_diagnostics,
+            super::super::Effects::SemIndexEffectFacts::default(),
+            std::sync::Arc::from([]),
+        );
+    }
+    let marker_diagnostics = super::super::MarkerModules::check_marker_namespaces(bundle);
+    if !marker_diagnostics.is_empty() {
+        return (
+            marker_diagnostics,
+            super::super::Effects::SemIndexEffectFacts::default(),
+            std::sync::Arc::from([]),
+        );
+    }
+    super::super::MarkerModules::bind_marker_applications(bundle);
+    let bound_marker_declarations = super::super::MarkerModules::bound_marker_declarations(bundle);
+    let mut marker_vocabularies: Vec<_> = (0..bundle.modules.len())
+        .map(|index| super::super::MarkerModules::module_marker_vocabulary(bundle, index, std::iter::empty())
+            .with_bound_declarations(bound_marker_declarations.clone())
+            .with_bound_names(bundle.modules[index].rule_facts.iter()
+                .filter(|fact| fact.marker.declaration.is_some()).map(|fact| fact.marker.name.clone())))
+        .collect();
     let foreign_diags = validate_foreign_imports(bundle);
     if !foreign_diags.is_empty() {
         return (
@@ -237,7 +261,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 },
                 module_alias: m.alias.clone(),
                 items: m.items.clone(),
-                is_core_source: m.is_core_source(),
+                checked_nominals: None,
                 compiler_builtin_error_owner: Some(error_owner),
                 build_facts: bundle.build_facts.clone(),
                 allow_compiler_api: allow_compiler_api && module_idx == bundle.entry,
@@ -2312,18 +2336,6 @@ pub(super) fn check_bundle_opts_for_output_inner(
     }
 
     resolve_inline_module_imports(bundle, &mut states, &mut name_ledger, &mut diags);
-    // All user registration is complete. Publish the original supplier AST
-    // once to the checked bundle; body/default checking now sees its actual
-    // owner while reserved-name checks remain exclusive to user declarations.
-    for (owner, state) in states.iter_mut().enumerate() {
-        if let Some(program) = state.compiler_builtin_error_program.take() {
-            bundle.modules[owner].items.extend(
-                program.items.iter()
-                    .filter(|item| matches!(item, Item::Struct(_)))
-                    .cloned(),
-            );
-        }
-    }
 
     // D-STATE-TERMINAL1: freeze the checked graph snapshot before body
     // reflection and every downstream semantic consumer read it. The graph is

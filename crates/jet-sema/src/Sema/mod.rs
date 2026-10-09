@@ -1939,8 +1939,8 @@ pub(crate) struct ModuleState {
     /// is the producer for `Type.reflect()` and direct registered fact reads;
     /// no reflection lookup table is kept beside it.
     items: Vec<crate::AST::Item>,
-    /// Loader-authenticated embedded Core origin, not a user path/alias guess.
-    is_core_source: bool,
+    /// Final immutable declaration projection shared by normal and fragment lowering.
+    checked_nominals: Option<std::sync::Arc<crate::AST::MirFragmentNominalFacts>>,
     /// Actual module owning the original parsed Prelude error declarations.
     compiler_builtin_error_owner: Option<usize>,
     /// The bundle-wide build fact snapshot, copied into each module state so
@@ -2030,12 +2030,7 @@ pub(crate) struct ModuleState {
 
 impl ModuleState {
     fn nominal_items(&self) -> impl Iterator<Item = &crate::AST::Item> {
-        self.items.iter().chain(
-            self.compiler_builtin_error_program
-                .into_iter()
-                .flat_map(|program| program.items.iter())
-                .filter(|item| matches!(item, crate::AST::Item::Struct(_))),
-        )
+        self.items.iter()
     }
 }
 
