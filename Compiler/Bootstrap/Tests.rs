@@ -32,16 +32,22 @@ const BACKEND_DEV_HOST_PROFILE: &str = "\n[profile.dev.package.jet-foundation]\n
 /// stage-zero backend build runs inside the bootstrap test's memory cap, so
 /// at most this many unit or repository crates compile at once. Measured
 /// peaks: sharded unit crates <= 2.1 GB each, jet_evalhost <= 5.7 GB, so six
-/// jobs stay well inside a 22 GB cap.
+/// jobs stay well inside a 22 GB cap. `JET_BACKEND_BUILD_JOBS` overrides it
+/// (`backend_build_jobs`).
 const BACKEND_BUILD_JOBS: &str = "6";
 /// Stack for the backend build's rustc threads (`RUST_MIN_STACK`): the
 /// emitted units' deeply nested blocks overflow rustc's default 8 MiB in
 /// LLVM's debuginfo scope walk (`DwarfCompileUnit::createAndAddScopeChildren`).
 const BACKEND_RUSTC_STACK: &str = "268435456";
 /// A unit crate longer than this is sharded (`shard_unit`) into crates of
-/// about this size: rustc's memory grows with the crate, and the compiler's
-/// largest units alone would not fit the bootstrap's memory cap.
-const BACKEND_SHARD_BYTES: usize = 12 << 20;
+/// at most about this size on average: rustc's memory and time grow with
+/// the crate, and one rustc per shard is the backend build's unit of
+/// parallelism. At 12 MB the compiler's unit split into 13 hot shards whose
+/// slowest took 590 s at opt-level 1 after the 128 s facade, the whole
+/// backend build's critical path; 4 MB shards spread the same code over
+/// several times as many rustc runs. `JET_BACKEND_SHARD_BYTES` overrides it
+/// (`backend_shard_bytes`).
+const BACKEND_SHARD_BYTES: usize = 4 << 20;
 /// Impl methods at least this long move out of a sharded unit's facade.
 const BACKEND_DELEGATE_METHOD_BYTES: usize = 2048;
 /// A moved function at least this long is cold (`shard_unit`) whatever its
@@ -49,6 +55,8 @@ const BACKEND_DELEGATE_METHOD_BYTES: usize = 2048;
 /// function (one function is one codegen unit). Measured at opt-level 2:
 /// seven Jet functions of 200-455 KB (2.3 MB) build in 55 s at 1.1 GB, while
 /// a shard holding 2-3 MB decoders and tables took 773 s at 9.1 GB.
+/// `JET_BACKEND_COLD_FUNCTION_BYTES` overrides it
+/// (`backend_cold_function_bytes`).
 const BACKEND_COLD_FUNCTION_BYTES: usize = 1 << 20;
 /// Traits whose impl methods are cold (`shard_unit`): the derived codecs run
 /// only on compiler image load and save, derived orderings rarely, and their
@@ -65,6 +73,43 @@ const BACKEND_COLD_PROFILE: &str = "opt-level = 0\ndebug = false\n";
 /// cold shard 4.6 GB (opt-level 0); with jet_evalhost (<= 5.7 GB in dev) five
 /// jobs stay under a 22 GB cap.
 const BACKEND_RELEASE_BUILD_JOBS: &str = "5";
+
+/// A positive integer from environment variable `name`, if set and
+/// non-empty; any other value is a harness misconfiguration.
+fn backend_env_count(name: &str) -> Option<usize> {
+    let value = std::env::var(name).ok().filter(|value| !value.is_empty())?;
+    match value.parse::<usize>() {
+        Ok(count) if count > 0 => Some(count),
+        _ => panic!("`{name}` must be a positive integer, not `{value}`"),
+    }
+}
+
+/// The shard size of backend unit crates: `JET_BACKEND_SHARD_BYTES`, else
+/// `BACKEND_SHARD_BYTES`. Smaller shards trade more crates (each re-reading
+/// its facade's metadata) for shorter critical-path rustc runs and more
+/// parallelism; shard boundaries never change what the program does.
+fn backend_shard_bytes() -> usize {
+    backend_env_count("JET_BACKEND_SHARD_BYTES").unwrap_or(BACKEND_SHARD_BYTES)
+}
+
+/// The size from which a moved function is cold:
+/// `JET_BACKEND_COLD_FUNCTION_BYTES`, else `BACKEND_COLD_FUNCTION_BYTES`.
+/// Cold shards build unoptimized under the release profile, so a lower
+/// threshold trades the run time of the largest functions for a shorter
+/// backend critical path.
+fn backend_cold_function_bytes() -> usize {
+    backend_env_count("JET_BACKEND_COLD_FUNCTION_BYTES").unwrap_or(BACKEND_COLD_FUNCTION_BYTES)
+}
+
+/// Parallel rustc jobs of a backend build: `JET_BACKEND_BUILD_JOBS`, else
+/// `BACKEND_BUILD_JOBS` (dev) or `BACKEND_RELEASE_BUILD_JOBS` (release
+/// profile).
+fn backend_build_jobs(release: bool) -> String {
+    backend_env_count("JET_BACKEND_BUILD_JOBS").map_or_else(
+        || (if release { BACKEND_RELEASE_BUILD_JOBS } else { BACKEND_BUILD_JOBS }).to_string(),
+        |jobs| jobs.to_string(),
+    )
+}
 /// `JET_STAGE_ZERO_PROFILE=release` builds this test run's backend artifacts
 /// (jetc0 above all) with this Cargo profile instead of dev: stage one is
 /// jetc0 compiling the whole compiler, where a debug jetc0 is many times
@@ -3221,14 +3266,14 @@ fn split_backend_workspace(source: &str) -> Option<BackendWorkspace> {
                 prelude.push_str(&format!("use {dep}::*;\n"));
             }
             let text = members.iter().map(|member| sections[*member].1.as_str()).collect::<String>();
-            let (source, shards) = match shard_unit(&text, BACKEND_SHARD_BYTES) {
+            let (source, shards) = match shard_unit(&text, backend_shard_bytes()) {
                 Some(sharded) => {
                     let source = format!(
                         "{prelude}{}unsafe extern \"Rust\" {{\n{}}}\n",
                         jet_store::runtime::export_crate_source(&sharded.facade),
                         sharded.declarations,
                     );
-                    let shard = |(index, text): (usize, &String), cold: bool| BackendShard {
+                    let shard = |(index, text): &(usize, String), cold: bool| BackendShard {
                         name: format!("{crate_name}_{}{index}", if cold { "cold" } else { "s" }),
                         source: format!(
                             "{prelude}use {crate_name}::*;\n{}",
@@ -3236,8 +3281,8 @@ fn split_backend_workspace(source: &str) -> Option<BackendWorkspace> {
                         ),
                         cold,
                     };
-                    let hot = sharded.shards.iter().enumerate().map(|indexed| shard(indexed, false));
-                    let cold = sharded.cold_shards.iter().enumerate().map(|indexed| shard(indexed, true));
+                    let hot = sharded.shards.iter().map(|indexed| shard(indexed, false));
+                    let cold = sharded.cold_shards.iter().map(|indexed| shard(indexed, true));
                     let shards = hot.chain(cold).collect();
                     (source, shards)
                 }
@@ -3497,23 +3542,25 @@ struct ShardedUnit {
     facade: String,
     /// `unsafe extern "Rust"` block members declaring each moved function.
     declarations: String,
-    /// Moved hot function definitions, at most about `shard_bytes` each.
-    shards: Vec<String>,
+    /// Moved hot function definitions by shard index (`pack_shards`).
+    shards: Vec<(usize, String)>,
     /// Moved cold function definitions (`MovedFunction::cold`), packed the
     /// same way into their own crates.
-    cold_shards: Vec<String>,
+    cold_shards: Vec<(usize, String)>,
 }
 
 /// One function moved out of a facade: its declaration and its definition
 /// under its own symbol.
 struct MovedFunction {
+    /// The function's symbol, which alone places it (`pack_shards`).
+    name: String,
     declaration: String,
     definition: String,
     /// Code an optimized build should not optimize: a cold-trait impl
     /// method (`BACKEND_COLD_TRAITS`), constant table code (a parameterless
     /// function whose body is a `vec!` literal, or one chunk of a cached
     /// table's row fill, whose body starts `rows.push(`), or any function of
-    /// at least `BACKEND_COLD_FUNCTION_BYTES`.
+    /// at least `backend_cold_function_bytes()`.
     cold: bool,
 }
 
@@ -3525,7 +3572,8 @@ struct MovedFunction {
 /// and no shard depends on another. Impls stay beside their types (orphan
 /// rule), but a large method body moves as a free function the method
 /// calls. Cold and hot functions pack into separate shards, so the release
-/// profile can leave the cold ones unoptimized. `None` for a small unit or
+/// profile can leave the cold ones unoptimized; each function's shard
+/// depends only on its symbol (`pack_shards`). `None` for a small unit or
 /// one with macros, which shards could not see.
 fn shard_unit(text: &str, shard_bytes: usize) -> Option<ShardedUnit> {
     if text.len() <= shard_bytes {
@@ -3560,22 +3608,42 @@ fn shard_unit(text: &str, shard_bytes: usize) -> Option<ShardedUnit> {
         }
     }
     facade.push_str(&text[end..]);
-    let (mut shards, mut cold_shards): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
-    for function in moved {
-        let packed = if function.cold { &mut cold_shards } else { &mut shards };
-        match packed.last_mut() {
-            Some(shard) if shard.len() + function.definition.len() <= shard_bytes => {
-                shard.push_str(&function.definition)
-            }
-            _ => packed.push(format!("{uses}{}", function.definition)),
-        }
-    }
+    let (cold, hot): (Vec<MovedFunction>, Vec<MovedFunction>) = moved.into_iter().partition(|function| function.cold);
     Some(ShardedUnit {
         facade,
         declarations,
-        shards,
-        cold_shards,
+        shards: pack_shards(&hot, &uses, shard_bytes),
+        cold_shards: pack_shards(&cold, &uses, shard_bytes),
     })
+}
+
+/// Pack moved functions into shard texts by symbol: a function lands in
+/// shard `symbol_hash(name) % count`, where `count` is the functions' total
+/// size over `shard_bytes` rounded up to a power of two. A function's shard
+/// so depends only on its own symbol and that rarely changing count, never
+/// on the size of the functions emitted before it: an edit rewrites only the
+/// shards whose functions change (cargo rebuilds nothing else), and the two
+/// arms of an A/B build give a function the same shard and profile. Each
+/// shard keeps its index; empty ones make no crate.
+fn pack_shards(functions: &[MovedFunction], uses: &str, shard_bytes: usize) -> Vec<(usize, String)> {
+    let total = functions.iter().map(|function| function.definition.len()).sum::<usize>();
+    let count = total.div_ceil(shard_bytes).max(1).next_power_of_two();
+    let mut shards = vec![String::new(); count];
+    for function in functions {
+        shards[(symbol_hash(&function.name) % count as u64) as usize].push_str(&function.definition);
+    }
+    shards
+        .into_iter()
+        .enumerate()
+        .filter(|(_, text)| !text.is_empty())
+        .map(|(index, text)| (index, format!("{uses}{text}")))
+        .collect()
+}
+
+/// FNV-1a of a symbol: stable across toolchains and runs, unlike std's
+/// hashers, so shard placement is reproducible.
+fn symbol_hash(symbol: &str) -> u64 {
+    symbol.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3))
 }
 
 /// Byte ranges of the top-level items of masked Rust `code`, each starting
@@ -3715,6 +3783,7 @@ fn movable_function(item: &str, code: &str) -> Option<MovedFunction> {
     let body_code = code[body + 1..].trim_start();
     let table = (parameters.is_empty() && body_code.starts_with("vec![")) || body_code.starts_with("rows.push(");
     Some(MovedFunction {
+        name: name.to_string(),
         declaration: format!(
             "    pub {} fn {name}({}) {};\n",
             if unsafe_function { "unsafe" } else { "safe" },
@@ -3722,7 +3791,7 @@ fn movable_function(item: &str, code: &str) -> Option<MovedFunction> {
             item[close + 1..body].trim()
         ),
         definition: format!("\n#[no_mangle]\n{}", &item[lead..]),
-        cold: table || code.len() >= BACKEND_COLD_FUNCTION_BYTES,
+        cold: table || code.len() >= backend_cold_function_bytes(),
     })
 }
 
@@ -4024,7 +4093,7 @@ fn backend_workspace_splits_runtime_without_unit_sections() {
 #[test]
 fn backend_shards_separate_cold_code() {
     let steps = "    __jet_n += 1;\n".repeat(200);
-    let giant = "    __jet_n += 1;\n".repeat(BACKEND_COLD_FUNCTION_BYTES / 16);
+    let giant = "    __jet_n += 1;\n".repeat(backend_cold_function_bytes() / 16);
     let text = format!(
         "pub struct __jet_T {{ __jet_n: i64 }}\n\
          pub fn __jet_hot(__jet_x: i64) -> i64 {{ __jet_x + 1 }}\n\
@@ -4036,7 +4105,8 @@ fn backend_shards_separate_cold_code() {
          pub fn __jet_giant(mut __jet_n: i64) -> i64 {{\n{giant}    __jet_n\n}}\n"
     );
     let sharded = shard_unit(&text, 64 << 10).expect("a unit over the shard size shards");
-    let (hot, cold) = (sharded.shards.concat(), sharded.cold_shards.concat());
+    let texts = |shards: &[(usize, String)]| shards.iter().map(|(_, text)| text.as_str()).collect::<String>();
+    let (hot, cold) = (texts(&sharded.shards), texts(&sharded.cold_shards));
     for name in ["fn __jet_hot(", "fn __jet_list(", "fn __jet_impl___jet_T___jet_Equatable_equals("] {
         assert!(hot.contains(name) && !cold.contains(name), "`{name}` is hot");
     }
@@ -4048,8 +4118,38 @@ fn backend_shards_separate_cold_code() {
     ] {
         assert!(cold.contains(name) && !hot.contains(name), "`{name}` is cold");
     }
-    // The tables and the decoder share a cold shard; the giant fills its own.
-    assert_eq!(sharded.cold_shards.len(), 2);
+}
+
+/// `shard_unit` places a function by its symbol alone: growing or adding
+/// other functions leaves every function's shard index unchanged while the
+/// shard count holds.
+#[test]
+fn backend_shard_placement_depends_only_on_the_symbol() {
+    let body = |lines: usize| "    __jet_n += 1;\n".repeat(lines);
+    let unit = |first_lines: usize, extra: bool| {
+        let mut text = format!("pub fn __jet_first(mut __jet_n: i64) -> i64 {{\n{}    __jet_n\n}}\n", body(first_lines));
+        if extra {
+            text.push_str(&format!("pub fn __jet_extra(mut __jet_n: i64) -> i64 {{\n{}    __jet_n\n}}\n", body(8)));
+        }
+        for index in 0..64 {
+            text.push_str(&format!("pub fn __jet_f{index}(mut __jet_n: i64) -> i64 {{\n{}    __jet_n\n}}\n", body(16)));
+        }
+        shard_unit(&text, 5 << 10).expect("a unit over the shard size shards")
+    };
+    let placement = |sharded: &ShardedUnit| {
+        (0..64)
+            .map(|index| {
+                let name = format!("fn __jet_f{index}(");
+                let shards = sharded.shards.iter().filter(|(_, text)| text.contains(&name)).collect::<Vec<_>>();
+                assert_eq!(shards.len(), 1, "`{name}` is in exactly one shard");
+                shards[0].0
+            })
+            .collect::<Vec<_>>()
+    };
+    let base = unit(16, false);
+    assert!(base.shards.len() > 1, "the unit spreads over several shards");
+    assert_eq!(placement(&base), placement(&unit(40, false)));
+    assert_eq!(placement(&base), placement(&unit(16, true)));
 }
 
 /// The release profile leaves only cold shards unoptimized; the dev profile
@@ -4237,7 +4337,7 @@ fn build_backend_artifact_with_native_library(
         // memory unchanged at about 2.8 GB). The release profile stays
         // non-incremental, as its manifest profile says.
         .env("JET_CARGO_INCREMENTAL", if profile.is_some() { "0" } else { "1" })
-        .env("CARGO_BUILD_JOBS", if profile.is_some() { BACKEND_RELEASE_BUILD_JOBS } else { BACKEND_BUILD_JOBS })
+        .env("CARGO_BUILD_JOBS", backend_build_jobs(profile.is_some()))
         .env("RUST_MIN_STACK", BACKEND_RUSTC_STACK)
         .env("JET_NO_SCCACHE", "1")
         .env_remove("RUSTC_WRAPPER")
