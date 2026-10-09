@@ -3847,7 +3847,7 @@ fn run() { print(summarize(4)) }
         "TIR print was not emitted:\n{wasm}"
     );
     assert!(
-        wasm.contains("__jet_text: &String") || wasm.contains("__jet_text: String"),
+        wasm.contains("__jet_text: &str") || wasm.contains("__jet_text: String"),
         "internal String parameter was rejected:\n{wasm}"
     );
 }

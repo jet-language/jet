@@ -5934,7 +5934,8 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("all plain parameters are read borrows");
-    assert!(out.rust.contains("__jet_text: &String"), "{}", out.rust);
+    // Read-only concrete String parameters lend `&str` (Docs/spec/tir.md).
+    assert!(out.rust.contains("__jet_text: &str"), "{}", out.rust);
     assert!(out.rust.contains("__jet_values: &Vec<i64>"), "{}", out.rust);
     assert!(
         out.rust.contains("__jet_parcel: &__jet_Parcel"),
@@ -5986,14 +5987,15 @@ fn run() {
     // clone them; `Box` was the container, never the property. The property is
     // the `&`: the callback crosses this call as a read borrow, so the caller
     // still owns its function value afterwards. Pin the whole prefix — the
-    // parameter's own borrow AND the callback's read-borrowed `&String`
-    // argument — so neither half can drift into an owned slot unnoticed.
+    // parameter's own borrow AND the callback's read-borrowed `&str`
+    // argument (the concrete String read ABI) — so neither half can drift
+    // into an owned slot unnoticed.
     assert!(
-        out.rust.contains("__jet_f: &std::rc::Rc<dyn Fn(&String)"),
+        out.rust.contains("__jet_f: &std::rc::Rc<dyn Fn(&str)"),
         "the function value must arrive as a read borrow: {}",
         out.rust
     );
-    assert!(out.rust.contains("__jet_value: &String"), "{}", out.rust);
+    assert!(out.rust.contains("__jet_value: &str"), "{}", out.rust);
     assert!(
         out.rust.contains("((*__jet_f))(&((*__jet_value)))"),
         "{}",

@@ -9973,6 +9973,9 @@ impl<'a> RustEmitter<'a> {
                 return format!("&{ty}");
             }
         }
+        if self.read_text_parameter(ty, access) {
+            return "&str".to_string();
+        }
         let rendered = self.rust_type(ty);
         match access {
             MirAccess::Write => format!("&mut {rendered}"),
@@ -10112,6 +10115,9 @@ impl<'a> RustEmitter<'a> {
             if let Some(ty) = self.read_trait_type(&param.ty) {
                 return format!("&{ty}");
             }
+        }
+        if self.read_text_parameter(&param.ty, param.access) {
+            return "&str".to_string();
         }
         let ty = self.rust_parameter_type(&param.ty);
         match param.access {
@@ -10297,6 +10303,9 @@ impl<'a> RustEmitter<'a> {
             if let Some(ty) = self.read_trait_type(&capture.ty) {
                 return format!("&{ty}");
             }
+        }
+        if self.read_text_parameter(&capture.ty, capture.access) {
+            return "&str".to_string();
         }
         match capture.access {
             MirAccess::Read => format!("&{ty}"),
@@ -22638,9 +22647,9 @@ impl<'a> RustEmitter<'a> {
                 MirOperation::Semantic(MirSemanticOp::Print { value: printed, .. }) => {
                     *printed == value && !self.print_consumes_value()
                 }
-                // A literal lent to a user read parameter is the static
-                // String `call_arg_for_function` names
-                // (`static_string_literal_reference`).
+                // A literal lent to a user read parameter is its static text
+                // at a concrete `&str` formal (`call_arg_for_formal`), else
+                // the static String (`static_string_literal_reference`).
                 MirOperation::Call {
                     callee: callee @ MirCallee::User(_),
                     args,
@@ -24672,7 +24681,9 @@ impl<'a> RustEmitter<'a> {
             } else {
                 // A reference binding holds the payload it binds in place.
                 let reference_binding = self.ref_binding_local(function, local.id);
-                let ty = if reference_binding {
+                let ty = if reference_binding && self.read_text_parameter(&local.ty, MirAccess::Read) {
+                    "str".to_string()
+                } else if reference_binding {
                     self.read_trait_type(&local.ty).unwrap_or_else(|| self.rust_local_type(&local.ty))
                 } else {
                     self.rust_local_type(&local.ty)
@@ -26259,7 +26270,11 @@ impl<'a> RustEmitter<'a> {
 
     fn capture_expression(&self, function: &MirFunction, slot: usize) -> String {
         let name = self.capture_param_name(slot);
-        match self.capture_binding_access(function, slot) {
+        let access = self.capture_binding_access(function, slot);
+        if self.read_text_parameter(&self.capture_param(function, slot).ty, access) {
+            return format!("{name}.to_owned()");
+        }
+        match access {
             MirAccess::Read | MirAccess::Write => format!("(*{name}).clone()"),
             MirAccess::Move => name,
         }
@@ -33063,6 +33078,24 @@ impl<'a> RustEmitter<'a> {
         formal: &MirType,
         borrowed: bool,
     ) -> String {
+        // A concrete Read String formal is `&str`: a literal whose String is
+        // never built lends its static text. An abstract `&T` formal keeps the
+        // String owner (`static_string_literal_reference`).
+        if borrowed
+            && arg.access == MirAccess::Read
+            && arg.place.is_none()
+            && !arg.authority_boundary
+            && !arg.implicit_clone
+            && !arg.shared_auto_clone
+            && arg.widen_to_union.is_none()
+            && arg.fn_coercion.is_none()
+            && self.read_text_parameter(formal, MirAccess::Read)
+            && self.literal_borrow_only(function, arg.value)
+        {
+            if let Some(text) = self.literal_string_value(function, arg.value) {
+                return format!("{text:?}");
+            }
+        }
         let view_argument = self.string_view_argument(function, arg);
         if !borrowed || arg.access != MirAccess::Read
             || !self.read_text_parameter(self.value_type(function, arg.value), MirAccess::Read) && view_argument.is_none()
@@ -38222,6 +38255,8 @@ impl<'a> RustEmitter<'a> {
         let tag = if copy_tags_enabled() { format!("/*copy:{tag}*/") } else { String::new() };
         if ty.is_some_and(|ty| self.rust_copy_carrier(ty)) {
             format!("(*{borrow})")
+        } else if ty.is_some_and(|ty| self.read_text_parameter(ty, MirAccess::Read)) {
+            format!("({borrow}).to_owned(){tag}")
         } else if ty.is_some_and(|ty| self.int_bulk_type(ty)) {
             format!("{}jet_std::JetIntBulk::jet_int_bulk_clone({borrow}){tag}", self.config.root_prefix)
         } else {

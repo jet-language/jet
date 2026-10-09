@@ -5850,7 +5850,7 @@ fn read_only_bindings_borrow_their_payload() {
     let rust = emitted_rust("ref_bindings", src);
     let label = emitted_body(&rust, "label_ulen");
     assert!(
-        label.contains("Option<&String>"),
+        label.contains("Option<&str>"),
         "an or-pattern binding of a read parameter's payload must hold a reference:\n{label}"
     );
     assert!(

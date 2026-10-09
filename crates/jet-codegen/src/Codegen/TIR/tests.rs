@@ -2129,6 +2129,65 @@ fn emitted_rust(src: &str) -> (jet_foundation::MIR::MirProgram, String) {
     (mir, rust)
 }
 
+/// The `filter_map` over owned text of `Examples/features/collections/
+/// builtin_routes.jet`, with a default-`Err` failure in its callee.
+const OWNED_TEXT_FILTER_MAP: &str = r#"
+fn parse_int(s: String) -> Int Err! {
+    n :: Int.parse(s) ?? return Err("not a number: {s}")
+    return Ok(n)
+}
+
+fn run() {
+    words :: [String]{"1", "two", "3"}
+    print("filter_map: {words.filter_map((w: String) -> parse_int(w)).to_list()}")
+}
+"#;
+
+/// A Read String callback input is `&str` in its callable carrier, in the
+/// closure that fills the carrier, and in the executable callable body.
+#[test]
+fn owned_text_filter_map_callback_agrees_on_the_read_text_abi() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust(OWNED_TEXT_FILTER_MAP);
+        assert!(
+            rust.contains("dyn FnMut(&str) -> JetOutcome<"),
+            "the callable carrier takes the read text view:\n{rust}"
+        );
+        assert!(
+            rust.contains("move |__jet_w: &str|"),
+            "the closure filling the carrier declares the carrier's input:\n{rust}"
+        );
+        assert!(
+            !rust.contains("__jet_w: &String") && !rust.contains("__jet_s: &String"),
+            "a concrete Read String formal never takes `&String`:\n{rust}"
+        );
+        assert!(
+            rust.contains("(__jet_w: &str) -> JetOutcome<")
+                && rust.contains("(__jet_s: &str) -> JetOutcome<"),
+            "the callable body and its callee take the read text view:\n{rust}"
+        );
+    });
+}
+
+/// Every default `Err` construction fills the declared private metadata
+/// field from its checked Prelude default; none is a shortened record.
+#[test]
+fn default_err_construction_retains_memoized_error_metadata() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust(OWNED_TEXT_FILTER_MAP);
+        let mut constructions = 0;
+        for (at, _) in rust.match_indices("cErr { __jet_message:") {
+            let line = rust[at..].lines().next().expect("constructor line");
+            assert!(
+                line.contains("__jet___memo_error_metadata:"),
+                "default Err construction dropped its metadata field: {line}\n{rust}"
+            );
+            constructions += 1;
+        }
+        assert!(constructions > 0, "`Err(\"…\")` constructs the default error:\n{rust}");
+    });
+}
+
 #[test]
 fn native_owned_core_argument_materializes_a_read_parameter() {
     // Compiler worker required; see `covers`.

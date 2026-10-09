@@ -4387,17 +4387,15 @@ fn lower_raw_err_call(call: &Call, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr>
             None => value,
         });
     }
-    let payload = call
-        .args
-        .first()
-        .map(|arg| lower_expr(&arg.expr, cx, env))
-        .unwrap_or_else(|| TExpr {
-            ty: Type::Named(Syntax::TYPE_ERR.to_string()),
-            kind: TExprKind::StructLit {
-                fields: Vec::new(),
-                extra: None,
-            },
-        });
+    // A typed failure carries its checked payload; an unchecked fragment that
+    // spells none has no carrier to build, so the fold declines.
+    let Some(payload) = call.args.first() else {
+        return Some(invariant_violation_expr(
+            call.name_span,
+            "raw typed `Err` without a failure payload",
+        ));
+    };
+    let payload = lower_expr(&payload.expr, cx, env);
     let payload = match target_error.as_ref() {
         Some(error) => crate::Codegen::TIR::maybe_widen_expr_to_union(payload, error, cx),
         None => payload,
