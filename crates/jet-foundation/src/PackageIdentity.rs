@@ -573,16 +573,16 @@ fn interface_item(item: &Item) -> Option<Item> {
             }
             exported(module.is_pub, module.is_package_pub)
         }
-        Item::Distinct(def) => exported(def.is_pub, def.is_package_pub, pub_file),
-        Item::TypeAlias(def) => exported(def.is_pub, def.is_package_pub, pub_file),
-        Item::UnitFamily(def) => exported(def.is_pub, def.is_package_pub, pub_file),
-        Item::Trait(def) => exported(def.is_pub, def.is_package_pub, pub_file),
-        Item::Tag(def) => exported(def.is_pub, def.is_package_pub, pub_file),
-        Item::Const(def) => exported(def.is_pub, def.is_package_pub, pub_file),
-        Item::ProtocolDecl(def) => exported(def.is_pub, def.is_package_pub, pub_file),
-        Item::GenericModule(def) => exported(def.is_pub, def.is_package_pub, pub_file),
-        Item::ModuleAlias(def) => exported(def.is_pub, def.is_package_pub, pub_file),
-        Item::MarkerDecl(def) => exported(def.is_pub, def.is_package_pub, pub_file),
+        Item::Distinct(def) => exported(def.is_pub, def.is_package_pub),
+        Item::TypeAlias(def) => exported(def.is_pub, def.is_package_pub),
+        Item::UnitFamily(def) => exported(def.is_pub, def.is_package_pub),
+        Item::Trait(def) => exported(def.is_pub, def.is_package_pub),
+        Item::Tag(def) => exported(def.is_pub, def.is_package_pub),
+        Item::Const(def) => exported(def.is_pub, def.is_package_pub),
+        Item::ProtocolDecl(def) => exported(def.is_pub, def.is_package_pub),
+        Item::GenericModule(def) => exported(def.is_pub, def.is_package_pub),
+        Item::ModuleAlias(def) => exported(def.is_pub, def.is_package_pub),
+        Item::MarkerDecl(def) => exported(def.is_pub, def.is_package_pub),
         Item::Test(_) => false,
         // Declarations without a visibility flag register package-wide facts
         // (effects, markers, facts, derives, migrations, conversions, foreign
