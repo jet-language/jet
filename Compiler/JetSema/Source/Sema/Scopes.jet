@@ -393,16 +393,21 @@ enum SemaComptimeBodyWorkOperation {
     OwnedRowReturned
 }
 
-// The scope half of a check's environment: the module and function being
-// checked. The program half (SemaProgramTables) is passed beside it, so a
-// copied or per-thread environment never copies the graph.
+// Scope-local facts serve the program-table callers; retained-graph checks
+// also keep their owning graph and its checked-type indexes here.
 struct SemaScopeEnvironment {
+    registration_graph: SemaRegistrationGraph?{None}
     module_identity: String
     package_identity: String
     module_name: String
     source_file: String
     source_origin: SemaSourceOrigin
     source_segments: [SemaSourceSegment]
+    checked_types: [TTypeDef]{[TTypeDef]{}}
+    checked_type_rows: [String:Int]{[String:Int]{}}
+    checked_type_name_slots: [String:Int]{[String:Int]{}}
+    checked_type_name_rows: [[Int]]{[[Int]]{}}
+    boxed_edges: [String:[String]]{[String:[String]]{}}
     declarations: [SemaScopeDeclaration]
     generic_params: [TGenericParam]
     // One publication survives probe retargets. The selected view may be empty
@@ -693,12 +698,18 @@ fn sema_program_tables_init(graph: ^SemaRegistrationGraph?, checked_types: [TTyp
 
 fn sema_scope_environment_init(module_identity: String, package_identity: String, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], declarations: [SemaScopeDeclaration]) -> SemaScopeEnvironment Never! {
     SemaScopeEnvironment{
+        registration_graph: None,
         module_identity: module_identity,
         package_identity: package_identity,
         module_name: module_name,
         source_file: source_file,
         source_origin: source_origin,
         source_segments: source_segments,
+        checked_types: [TTypeDef]{},
+        checked_type_rows: [String:Int]{},
+        checked_type_name_slots: [String:Int]{},
+        checked_type_name_rows: [[Int]]{},
+        boxed_edges: [String:[String]]{},
         declarations: declarations,
         generic_params: [TGenericParam]{},
         comptime_body_values: SemaComptimeBodyValues{},
@@ -865,24 +876,24 @@ fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Nev
         allow_fixed_constructor: source.allow_fixed_constructor,
         generic_params: source.generic_params.copy(),
         lambda_escapes: source.lambda_escapes,
-        lambda_statement_tails: ~source.lambda_statement_tails,
-        call_facts: ~source.call_facts,
-        http_routes: ~source.http_routes,
+        lambda_statement_tails: source.lambda_statement_tails.copy(),
+        call_facts: source.call_facts.copy(),
+        http_routes: source.http_routes.copy(),
         hardware_use: sema_hardware_use_snapshot(source.hardware_use),
         call_return_views: source.call_return_views.copy(),
         local_view_provenance: source.local_view_provenance.copy(),
         return_view_receiver_key: source.return_view_receiver_key,
-        return_view_parameter_keys: ~source.return_view_parameter_keys,
-        return_view_provenance: ~source.return_view_provenance,
-        name_references: ~source.name_references,
-        comptime_requests: ~source.comptime_requests,
-        comptime_body_sources: ~source.comptime_body_sources,
+        return_view_parameter_keys: source.return_view_parameter_keys.copy(),
+        return_view_provenance: source.return_view_provenance.copy(),
+        name_references: source.name_references.copy(),
+        comptime_requests: source.comptime_requests.copy(),
+        comptime_body_sources: source.comptime_body_sources.copy(),
         // Sharing the publication does not visit, copy, or reindex its rows.
-        comptime_body_values: ~source.comptime_body_values,
+        comptime_body_values: source.comptime_body_values.copy(),
         comptime_body_source_modules: [String:Int]{},
         comptime_body_source_rows: [[String:Int]]{},
-        compute_calls: ~source.compute_calls,
-        autodiff_obligations: ~source.autodiff_obligations,
+        compute_calls: source.compute_calls.copy(),
+        autodiff_obligations: source.autodiff_obligations.copy(),
         autodiff_safe_panic: source.autodiff_safe_panic,
         autodiff_unsafe_panic: source.autodiff_unsafe_panic,
         autodiff_safe_panic_context: source.autodiff_safe_panic_context,
@@ -991,7 +1002,7 @@ fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Ne
             lambda_escapes: context.lambda_escapes,
             lambda_statement_tails: context.lambda_statement_tails.copy(),
             call_facts: [SemaCallSiteFact]{},
-            http_routes: ~context.http_routes,
+            http_routes: context.http_routes.copy(),
             hardware_use: sema_hardware_use_snapshot(context.hardware_use),
             call_return_views: [SemaCallReturnView]{},
             local_view_provenance: [SemaLocalViewProvenance]{},
@@ -1084,7 +1095,7 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
     context.lambda_escapes = saved.lambda_escapes
     context.lambda_statement_tails = saved.lambda_statement_tails.copy()
     context.hardware_use = sema_hardware_use_snapshot(saved.hardware_use)
-    context.http_routes = ~saved.http_routes
+    context.http_routes = saved.http_routes.copy()
     context.return_view_receiver_key = saved.return_view_receiver_key
     context.return_view_parameter_keys = saved.return_view_parameter_keys.copy()
     context.return_view_provenance = saved.return_view_provenance

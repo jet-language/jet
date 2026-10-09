@@ -3154,7 +3154,14 @@ fn sema_check_item_kind_label(item: Item) -> String Never! {
 // Compute the borrowed graph facts before the handoff, never from a copied graph.
 fn sema_check_pass_environment(graph: ^SemaRegistrationGraph, checked_types: [TTypeDef], body_values: ^SemaComptimeBodyValues) -> SemaScopeEnvironment Never! {
     fixed_length_write_params := sema_fixed_length_write_params_in_graph(graph)
-    environment := sema_scope_environment_init(Val(^graph), "", "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, checked_types, [SemaScopeDeclaration]{})
+    tables := sema_program_tables_init(Val(^graph), checked_types)
+    environment := sema_scope_environment_init("", "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
+    environment.registration_graph = ^tables.registration_graph
+    environment.checked_types = ^tables.checked_types
+    environment.checked_type_rows = ^tables.checked_type_rows
+    environment.checked_type_name_slots = ^tables.checked_type_name_slots
+    environment.checked_type_name_rows = ^tables.checked_type_name_rows
+    environment.boxed_edges = ^tables.boxed_edges
     // D-SHAPE-PLACE1=A: every module's functions, so the length-preserving
     // fact covers calls into other modules like the Rust bundle-wide fact.
     environment.fixed_length_write_params = ^fixed_length_write_params
@@ -5327,8 +5334,16 @@ fn sema_comptime_staged_constant_rows(resolved_graph: SemaRegistrationGraph, val
 // place.
 fn sema_comptime_environment(graph: ^SemaRegistrationGraph, values: [SemaComptimeItemValue], trace_sink: CompilerTraceSink?) -> SemaScopeEnvironment Never! {
     resolved := ^graph
-    sema_comptime_graph_apply_values(&resolved, values)
-    environment := sema_scope_environment_init(Val(^resolved), "", "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [TTypeDef]{}, [SemaScopeDeclaration]{})
+    trail := sema_graph_trail_init()
+    sema_comptime_graph_apply_values(&resolved, values, &trail)
+    tables := sema_program_tables_init(Val(^resolved), [TTypeDef]{})
+    environment := sema_scope_environment_init("", "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
+    environment.registration_graph = ^tables.registration_graph
+    environment.checked_types = ^tables.checked_types
+    environment.checked_type_rows = ^tables.checked_type_rows
+    environment.checked_type_name_slots = ^tables.checked_type_name_slots
+    environment.checked_type_name_rows = ^tables.checked_type_name_rows
+    environment.boxed_edges = ^tables.boxed_edges
     work := sema_comptime_body_work_new(trace_sink)
     count_key_bytes :: if work == .Val(_) -> true else -> false
     environment.comptime_body_publication = sema_comptime_body_values_freeze(sema_comptime_body_values_from_items(values), work, count_key_bytes)
