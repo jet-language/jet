@@ -1,5 +1,7 @@
 // Compiler-private encoding stream policy shared by JSON and JSONL.
 // The public wrappers preserve the shipped text/file return shapes.
+// Write leaves take borrowed View<U8> windows; EOF remains an optional success,
+// distinct from typed EncodingError failures propagated by the stream policy.
 use core.encoding.[DataEvent, Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
 use core.encoding as encoding
 use core.files.[FileReader, FileWriter]
@@ -83,7 +85,7 @@ fn reserve<T>(allocation: AllocationBudget, values: &[T], additional: Int) -> Bo
     true
 }
 
-fn __reserve_checked<T>(allocation: AllocationBudget, values: &[T], additional: Int) __ReserveFailure! {
+fn __reserve_checked<T>(allocation: AllocationBudget, values: &[T], additional: Int) -> () __ReserveFailure! {
     old :: mem.__list_capacity<T>(values) * mem.__type_size<T>()
     requested :: (values.len() + additional) * mem.__type_size<T>()
     if additional == 0 || requested <= old -> return
@@ -114,7 +116,7 @@ struct FoldBudget {
     tracked: Int
 }
 
-fn validate_limits(limits: EncodingLimits) EncodingError! {
+fn validate_limits(limits: EncodingLimits) -> () EncodingError! {
     reason := ""
     if limits.buffer_bytes < 4096 || limits.buffer_bytes > 16777216 -> reason = "buffer_bytes {limits.buffer_bytes} is outside 4096..16777216"
     else if limits.max_depth < 1 || limits.max_depth > 4096 -> reason = "max_depth {limits.max_depth} is outside 1..4096"
@@ -238,7 +240,7 @@ struct JSONPull {
         Ok(Val(byte))
     }
 
-    fn skip_ws(&self) EncodingError! -[IO, Time.Wait]> {
+    fn skip_ws(&self) -[IO, Time.Wait]> () EncodingError! {
         loop {
             byte :: &self.fill()
             if byte == (Val(U8{32})) || byte == (Val(U8{9})) || (!self.record_mode && (byte == (Val(U8{10})) || byte == (Val(U8{13})))) {
@@ -249,7 +251,7 @@ struct JSONPull {
         }
     }
 
-    fn expect(&self, want: U8, context: String) EncodingError! -[IO, Time.Wait]> {
+    fn expect(&self, want: U8, context: String) -[IO, Time.Wait]> () EncodingError! {
         byte :: &self.consume()
         if byte == .Val(got) {
             if got == want -> return
@@ -259,7 +261,7 @@ struct JSONPull {
         return Err(self.error(.Truncated, "expected {context} before end of input"))
     }
 
-    fn append(&self, bytes: &[U8], byte: U8, item: String) EncodingError! {
+    fn append(&self, bytes: &[U8], byte: U8, item: String) -> () EncodingError! {
         needed :: bytes.len() + 1
         if needed > self.limits.max_item_bytes -> return Err(self.error(.Limit, "max_item_bytes {self.limits.max_item_bytes} exceeded"))
         capacity :: mem.__list_capacity<U8>(bytes)
@@ -275,7 +277,7 @@ struct JSONPull {
     fn hex4(&self) -[IO, Time.Wait]> Int EncodingError! {
         value := 0
         loop _ in 0..<4 {
-            byte :: &self.consume() ?? return Err(err)
+            byte :: &self.consume()
             if byte == None -> return Err(self.error(.Truncated, "incomplete Unicode escape"))
             got :: byte
             digit :: encoding.hex_value(got) ?? return Err(stream_error(.Syntax, self.offset - 1, self.line, self.column - 1, "Unicode escape contains a non-hex digit"))
@@ -304,7 +306,7 @@ struct JSONPull {
         Ok(text)
     }
 
-    fn read_string_bytes(&self, bytes: &[U8]) EncodingError! -[IO, Time.Wait]> {
+    fn read_string_bytes(&self, bytes: &[U8]) -[IO, Time.Wait]> () EncodingError! {
         loop {
             byte :: &self.consume()
             if byte == None -> return Err(self.error(.Truncated, "unterminated JSON string"))
@@ -390,7 +392,7 @@ struct JSONPull {
         Ok(DataEvent.Float(value))
     }
 
-    fn number_bytes(&self, bytes: &[U8], first: U8) EncodingError! -[IO, Time.Wait]> {
+    fn number_bytes(&self, bytes: &[U8], first: U8) -[IO, Time.Wait]> () EncodingError! {
         &self.append(&bytes, first, "number")
         loop {
             byte :: &self.fill()
@@ -408,7 +410,7 @@ struct JSONPull {
         Ok(value)
     }
 
-    fn push_frame(&self, frame: ReadFrame) EncodingError! {
+    fn push_frame(&self, frame: ReadFrame) -> () EncodingError! {
         count :: self.frames.len()
         if count >= mem.__list_capacity<ReadFrame>(self.frames) {
             capacity :: mem.__list_capacity<ReadFrame>(self.frames)
@@ -545,7 +547,7 @@ struct JSONPull {
         }
     }
 
-    fn fold_charge(self, bytes: Int, heap: &FoldBudget) EncodingError! {
+    fn fold_charge(self, bytes: Int, heap: &FoldBudget) -> () EncodingError! {
         if heap.decoded + bytes > self.limits.max_item_bytes -> return Err(self.item_error("record"))
         heap.decoded += bytes
     }
@@ -612,7 +614,7 @@ struct JSONPull {
     }
 }
 
-fn fold_reserve<T>(parser: JSONPull, values: &[T], heap: &FoldBudget) EncodingError! {
+fn fold_reserve<T>(parser: JSONPull, values: &[T], heap: &FoldBudget) -> () EncodingError! {
     old :: mem.__list_capacity<T>(values) * mem.__type_size<T>()
     additional :: if values.len() == mem.__list_capacity<T>(values) -> if values.len() == 0 -> 1 else -> values.len() else -> 0
     if additional == 0 -> return
@@ -891,36 +893,36 @@ struct JSONPush {
         self.canonical_retained = 0
     }
 
-    fn ensure_total(self, additional: Int) EncodingError! {
+    fn ensure_total(self, additional: Int) -> () EncodingError! {
         if self.limits.max_total_bytes == .Val(max) {
             if self.total + additional > max -> return Err(self.error(.Limit, "max_total_bytes {max} exceeded"))
         }
     }
 
-    fn write_bytes(&self, bytes: [U8]) EncodingError! -[IO]> {
+    fn write_bytes(&self, bytes: View<U8>) -[IO]> () EncodingError! {
         self.ensure_total(bytes.len())
         encoding.__write_bytes(&self.output, bytes) ?? return Err(io_error(self.total, 1, self.total + 1, err))
         self.total += bytes.len()
     }
 
-    fn write_byte(&self, value: U8) EncodingError! -[IO]> {
+    fn write_byte(&self, value: U8) -[IO]> () EncodingError! {
         buffer :: [U8#1]{value}
         window :: buffer[0..<1]
         &self.write_bytes(window)
     }
 
-    fn write_literal(&self, bytes: [U8#5], count: Int) EncodingError! -[IO]> {
+    fn write_literal(&self, bytes: [U8#5], count: Int) -[IO]> () EncodingError! {
         window :: bytes[0..<count]
         &self.write_bytes(window)
     }
 
-    fn canonical_byte(&self, value: U8) EncodingError! -[IO]> {
+    fn canonical_byte(&self, value: U8) -[IO]> () EncodingError! {
         buffer :: [U8#1]{value}
         window :: buffer[0..<1]
         &self.canonical_emit(window)
     }
 
-    fn write_text(&self, text: String) EncodingError! -[IO]> {
+    fn write_text(&self, text: String) -[IO]> () EncodingError! {
         self.ensure_total(text.count_bytes())
         encoding.__write_text(&self.output, text) ?? return Err(io_error(self.total, 1, self.total + 1, err))
         self.total += text.count_bytes()
@@ -948,7 +950,7 @@ struct JSONPush {
         &out.push(U8{34})
     }
 
-    fn write_quoted(&self, text: String) EncodingError! -[IO]> {
+    fn write_quoted(&self, text: String) -[IO]> () EncodingError! {
         _ :: self.quoted_len(text)
         &self.write_byte(U8{34})
         i := 0
@@ -974,7 +976,7 @@ struct JSONPush {
         }
     }
 
-    fn before_value(&self) EncodingError! -[IO]> {
+    fn before_value(&self) -[IO]> () EncodingError! {
         if self.frames.len() == 0 {
             if self.root_written -> return Err(self.state_error("JSON writer accepts exactly one root"))
             self.root_written = true
@@ -991,7 +993,7 @@ struct JSONPush {
         }
     }
 
-    fn write(&self, event: ^DataEvent) EncodingError! -[IO]> {
+    fn write(&self, event: ^DataEvent) -[IO]> () EncodingError! {
         if self.terminal == .Val(error) -> return Err(error)
         if self.canonical {
             &self.write_canonical(^event) ?? {
@@ -1008,7 +1010,7 @@ struct JSONPush {
         }
     }
 
-    fn write_normal(&self, event: ^DataEvent) EncodingError! -[IO]> {
+    fn write_normal(&self, event: ^DataEvent) -[IO]> () EncodingError! {
         if self.finished -> return Err(self.state_error("write called after finish"))
         if event == {
             .Key(key) -> {
@@ -1090,7 +1092,7 @@ struct JSONPush {
         }
     }
 
-    fn canonical_charge(&self, at: Int, bytes: Int) EncodingError! {
+    fn canonical_charge(&self, at: Int, bytes: Int) -> () EncodingError! {
         updated :: self.canonical_retained + bytes
         ceiling :: self.limits.max_item_bytes * 2 + self.limits.buffer_bytes + self.limits.max_depth * 128
         if updated > ceiling -> return Err(self.error(.Limit, "canonical JSON workspace exceeded bounded max_item_bytes {self.limits.max_item_bytes}"))
@@ -1107,7 +1109,7 @@ struct JSONPush {
         None
     }
 
-    fn canonical_emit(&self, bytes: [U8]) EncodingError! -[IO]> {
+    fn canonical_emit(&self, bytes: View<U8>) -[IO]> () EncodingError! {
         if self.canonical_sink() == .Val(at) {
             needed :: self.canonical_frames[at].value.len() + bytes.len()
             if needed > self.limits.max_item_bytes -> return Err(self.error(.Limit, "max_item_bytes {self.limits.max_item_bytes} exceeded by canonical object"))
@@ -1127,7 +1129,7 @@ struct JSONPush {
         Ok(out)
     }
 
-    fn canonical_before_value(&self) EncodingError! -[IO]> {
+    fn canonical_before_value(&self) -[IO]> () EncodingError! {
         if self.canonical_frames.len() == 0 {
             if self.root_written -> return Err(self.state_error("JSON writer accepts exactly one root"))
             self.root_written = true
@@ -1143,7 +1145,7 @@ struct JSONPush {
         }
     }
 
-    fn canonical_complete_value(&self) EncodingError! {
+    fn canonical_complete_value(&self) -> () EncodingError! {
         if self.canonical_frames.len() == 0 -> return
         at :: self.canonical_frames.len() - 1
         if !self.canonical_frames[at].is_object || self.canonical_frames[at].key == None -> return
@@ -1204,7 +1206,7 @@ struct JSONPush {
         Ok(out)
     }
 
-    fn write_canonical(&self, event: ^DataEvent) EncodingError! -[IO]> {
+    fn write_canonical(&self, event: ^DataEvent) -[IO]> () EncodingError! {
         if self.finished -> return Err(self.state_error("write called after finish"))
         if event == {
             .Key(key) -> {
@@ -1273,7 +1275,7 @@ struct JSONPush {
         }
     }
 
-    fn flush(&self) EncodingError! -[IO]> {
+    fn flush(&self) -[IO]> () EncodingError! {
         if self.terminal == .Val(error) -> return Err(error)
         encoding.__flush(&self.output) ?? {
             error :: io_error(self.total, 1, self.total + 1, err)
@@ -1283,7 +1285,7 @@ struct JSONPush {
         }
     }
 
-    fn finish(&self) EncodingError! -[IO]> {
+    fn finish(&self) -[IO]> () EncodingError! {
         if self.terminal == .Val(error) -> return Err(error)
         if self.finished -> return
         open :: if self.canonical -> self.canonical_frames.len() != 0 else -> self.frames.len() != 0
@@ -1536,7 +1538,7 @@ fn jsonl_reader(input: ^FileReader, limits: EncodingLimits, typed_numbers: Bool)
     Ok(JSONLinesPull{parser: parser, record_index: 0, terminal: None})
 }
 
-fn write_tree(writer: &JSONPush, value: Dyn) EncodingError! -[IO]> {
+fn write_tree(writer: &JSONPush, value: Dyn) -[IO]> () EncodingError! {
     if value == {
         .Null -> &writer.write(DataEvent.Null)
         .Bool(v) -> &writer.write(DataEvent.Bool(v))
@@ -1600,8 +1602,14 @@ fn jsonl_tree_size(value: Dyn, depth: Int, limits: EncodingLimits) -> Int Encodi
             }
         }
         else -> {
-            reason :: if value == .Bytes(_) -> "JSON cannot encode Bytes; encode bytes as Text explicitly" else -> "internal JSON carrier escaped typed decode"
-            kind :: if value == .Bytes(_) -> EncodingErrorKind.Unsupported else -> EncodingErrorKind.State
+            reason := "internal JSON carrier escaped typed decode"
+            kind := EncodingErrorKind.State
+            #Unsafe("classify the private Bytes carrier without borrowing or exposing its payload") {
+                if value == .Bytes(_) {
+                    reason = "JSON cannot encode Bytes; encode bytes as Text explicitly"
+                    kind = EncodingErrorKind.Unsupported
+                }
+            }
             out := stream_error(kind, 0, 1, 1, reason)
             out.path = "$"
             return Err(out)
@@ -1663,7 +1671,7 @@ struct JSONLinesPush {
     record_index: Int
     pending_lf: Bool
 
-    fn write(&self, value: ^Dyn) EncodingError! -[IO]> {
+    fn write(&self, value: ^Dyn) -[IO]> () EncodingError! {
         if self.terminal == .Val(error) -> return Err(error)
         if self.finished -> return &self.fail(self.writer.state_error("write called after finish"))
         if self.pending_lf {
@@ -1690,7 +1698,7 @@ struct JSONLinesPush {
         self.record_index += 1
     }
 
-    fn fail(&self, error: EncodingError) EncodingError! {
+    fn fail(&self, error: EncodingError) -> () EncodingError! {
         first := jsonl_under(error, "$[{self.record_index}]")
         first.format = .JSONL
         if self.terminal == None -> &self.writer.discard()
@@ -1699,12 +1707,12 @@ struct JSONLinesPush {
         return Err(first)
     }
 
-    fn flush(&self) EncodingError! -[IO]> {
+    fn flush(&self) -[IO]> () EncodingError! {
         if self.terminal == .Val(error) -> return Err(error)
         &self.writer.flush() ?? return &self.fail(err)
     }
 
-    fn finish(&self) EncodingError! -[IO]> {
+    fn finish(&self) -[IO]> () EncodingError! {
         if self.terminal == .Val(error) -> return Err(error)
         if self.finished -> return
         if self.pending_lf {
@@ -1773,4 +1781,18 @@ fn jsonl_writer(output: ^FileWriter, limits: EncodingLimits) -> JSONLinesPush En
     }
     projected :: jsonl_under(stream_error(.State, 0, 1, 1, "state"), "$[2]")
     assert_eq(projected.path, "$[2]")
+}
+
+#Test("JSONL preflight classifies private Bytes without exposing its payload") {
+    #Unsafe("exercise the typed Encode byte carrier at the JSON preflight boundary") {
+        value :: Dyn.Bytes([U8]{1, 2})
+        if jsonl_tree_size(value, 0, EncodingLimits.safe()) == {
+            .Err(error) -> {
+                assert_eq(error.kind, EncodingErrorKind.Unsupported)
+                assert_eq(error.reason, "JSON cannot encode Bytes; encode bytes as Text explicitly")
+                assert_eq(error.path, "$")
+            }
+            else -> panic("JSON must reject byte carriers before output")
+        }
+    }
 }
