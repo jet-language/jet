@@ -690,6 +690,7 @@ struct JetTestingFailure {
 thread_local! {
     pub static JET_IN_SCHEDULER_TASK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static JET_INTERRUPT_HANDLER_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    static JET_RUNTIME_PROCESS_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     static JET_TEST_EXPECT_FAIL: std::cell::RefCell<Vec<JetTestExpectFrame>> = const { std::cell::RefCell::new(Vec::new()) };
     static JET_TEST_EXPECT_COMPLETED: std::cell::RefCell<Vec<(u64, String)>> = const { std::cell::RefCell::new(Vec::new()) };
     static JET_TEST_EXPECT_UNMET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -910,10 +911,48 @@ pub fn jet_interrupt_handler_panic_leave() {
     JET_INTERRUPT_HANDLER_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
 }
 
+// Only a real catcher enables process-root unwinding. Restore the previous
+// depth on every return/unwind, including nested boundaries and host faults.
+struct JetRuntimeProcessBoundary {
+    previous_depth: u32,
+}
+
+impl JetRuntimeProcessBoundary {
+    fn enter() -> Self {
+        let previous_depth = JET_RUNTIME_PROCESS_DEPTH.with(|depth| {
+            let previous = depth.get();
+            depth.set(previous.saturating_add(1));
+            previous
+        });
+        Self { previous_depth }
+    }
+}
+
+impl Drop for JetRuntimeProcessBoundary {
+    fn drop(&mut self) {
+        JET_RUNTIME_PROCESS_DEPTH.with(|depth| depth.set(self.previous_depth));
+    }
+}
+
 fn jet_runtime_should_unwind() -> bool {
     jet_scheduler_in_task()
+        || jet_scheduler_native_task_body_active()
         || jet_interrupt_handler_should_unwind()
         || JET_TEST_EXPECT_FAIL.with(|frames| !frames.borrow().is_empty())
+}
+
+fn jet_runtime_process_should_unwind() -> bool {
+    #[cfg(jet_native_pack)]
+    if jet_c_abi::stop_domain() == 1 {
+        return true;
+    }
+    JET_RUNTIME_PROCESS_DEPTH.with(|depth| depth.get() != 0)
+}
+
+// Program faults may unwind to the real process catcher. Cancellation never
+// uses this query: an ordinary root keeps its cooperative wait sentinel.
+fn jet_runtime_fault_should_unwind() -> bool {
+    jet_runtime_should_unwind() || jet_runtime_process_should_unwind()
 }
 
 fn jet_interrupt_handler_should_unwind() -> bool {
@@ -1008,7 +1047,7 @@ pub(crate) fn jet_native_comptime_fail(status: u32, message: &str) -> ! {
         loop { std::thread::park(); }
     }
     if let Some(fatal) = JET_NATIVE_COMPTIME_FATAL.get() { fatal(status, message) }
-    std::process::exit(if status == 4 { 101 } else { 80 + status as i32 })
+    jet_runtime_finalized_exit(if status == 4 { 101 } else { 80 + status as i32 })
 }
 
 // Spends `units` of fuel; true when the request's fuel ran out (the caller
@@ -1083,12 +1122,10 @@ struct JetRenderedRuntimeStop {
 /// (`Codegen/TIR/eval/exprs.rs` `eval_require_failure`).
 ///
 /// Every intentional unwinding frame keeps the typed report: an `#Interrupt`
-/// handler and `jet test`'s expect-fail region catch the rendered stop, while
-/// scheduler tasks receive the program's message above. The ordinary process
-/// path may cross a boundary that cannot carry an unwind. This matters for
-/// debug native dispatch: its `extern "C"` trampoline is a non-unwinding ABI,
-/// so resuming a panic there aborts before `jet_runtime_boundary` can observe
-/// the report. End that path at the shared process boundary instead.
+/// handler, an expect-fail region, and the ordinary process root catch the
+/// rendered stop, while scheduler tasks receive the program's message above.
+/// Debug dispatch catches inside its non-unwinding C trampoline and transports
+/// the payload back to the Rust caller before resuming lexical cleanup.
 fn jet_runtime_stop_unwind(rendered: String, exit_code: i32, message: &str) -> ! {
     if jet_native_comptime_active() { jet_native_comptime_fail(1, message); }
     if jet_scheduler_native_task_body_active() {
@@ -1097,7 +1134,7 @@ fn jet_runtime_stop_unwind(rendered: String, exit_code: i32, message: &str) -> !
     if jet_scheduler_in_task() {
         std::panic::resume_unwind(Box::new(message.to_string()));
     }
-    if !jet_runtime_should_unwind() {
+    if !jet_runtime_fault_should_unwind() {
         jet_runtime_process_exit(exit_code, Some(&rendered));
     }
     std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
@@ -1113,31 +1150,135 @@ struct JetExplicitExit {
     code: i32,
 }
 
+// The debug callable's caller owns this channel. Only std carrier types cross
+// the candidate shared-object boundary: private report TypeIds belong to the
+// producing artifact. Reports keep their already-rendered bytes and exit code;
+// all other payloads (task/cancellation/host faults) keep their original box.
+type JetNativeDispatchUnwind =
+    Option<Result<(Option<String>, i32), Box<dyn std::any::Any + Send>>>;
+
+fn jet_native_dispatch_boundary<T: Default>(
+    stop: &mut JetNativeDispatchUnwind,
+    run: impl FnOnce() -> T,
+) -> T {
+    let _boundary = JetRuntimeProcessBoundary::enter();
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
+        Ok(value) => value,
+        Err(payload) => {
+            let payload = match payload.downcast::<JetRuntimeDiagnostic>() {
+                Ok(report) => {
+                    *stop = Some(Ok((Some(report.rendered), report.exit_code)));
+                    return T::default();
+                }
+                Err(payload) => payload,
+            };
+            let payload = match payload.downcast::<JetRenderedRuntimeStop>() {
+                Ok(report) => {
+                    *stop = Some(Ok((Some(report.rendered), report.exit_code)));
+                    return T::default();
+                }
+                Err(payload) => payload,
+            };
+            *stop = Some(match payload.downcast::<JetExplicitExit>() {
+                Ok(exit) => Ok((None, exit.code)),
+                Err(payload) if payload.is::<JetRuntimeExit>() => Ok((None, 70)),
+                Err(payload) => Err(payload),
+            });
+            // This scalar is transport only. The Rust caller must consume the
+            // stop channel before observing it; no foreign callback uses this.
+            T::default()
+        }
+    }
+}
+
+fn jet_native_dispatch_finish<T>(stop: JetNativeDispatchUnwind, value: T) -> T {
+    match stop {
+        None => value,
+        Some(Ok((Some(rendered), exit_code))) => {
+            std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop { rendered, exit_code }))
+        }
+        Some(Ok((None, code))) => {
+            std::panic::resume_unwind(Box::new(JetExplicitExit { code }))
+        }
+        Some(Err(payload)) => std::panic::resume_unwind(payload),
+    }
+}
+
 // Process-edge callbacks live beside the one boundary so a program that does
 // not import core.sys still has a complete entry wrapper. The OS adapter only
 // registers callbacks; it never installs a second native exit path.
 mod jet_runtime_atexit {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
 
     thread_local! {
         static HANDLERS: RefCell<Vec<Box<dyn Fn() + 'static>>> = const { RefCell::new(Vec::new()) };
+        // Nonpack process-owned finalization only. Native packs use the Jet
+        // Root's pending record and never use this cell to impersonate a Task.
+        static STOPPING: Cell<bool> = const { Cell::new(false) };
+    }
+
+    pub(super) struct FinalizationScope(bool);
+    impl FinalizationScope {
+        pub(super) fn enter(stopping: bool) -> Self {
+            Self(STOPPING.with(|phase| {
+                let previous = phase.get();
+                phase.set(previous || stopping);
+                previous
+            }))
+        }
+    }
+    impl Drop for FinalizationScope {
+        fn drop(&mut self) {
+            STOPPING.with(|phase| phase.set(self.0));
+        }
     }
 
     pub(super) fn register<F>(handler: F)
     where
         F: Fn() + 'static,
     {
+        if STOPPING.with(Cell::get) || std::thread::panicking() {
+            // The callback body is new work after the stop, but its adopted
+            // captures still belong to this real stopped-cleanup scope.
+            drop(handler);
+            return;
+        }
         HANDLERS.with(|handlers| {
-            let mut handlers = handlers.borrow_mut();
-            super::jet_runtime_register_atexit(&mut handlers, Box::new(handler));
+            super::jet_runtime_register_atexit(&mut handlers.borrow_mut(), Box::new(handler));
         });
     }
 
-    pub(super) fn run() {
-        HANDLERS.with(|handlers| {
-            let mut handlers = handlers.borrow_mut();
-            super::jet_runtime_drain_atexit(&mut handlers, |handler| handler());
-        });
+    pub(super) fn run() -> Option<Box<dyn std::any::Any + Send>> {
+        let mut first_stop = None;
+        loop {
+            // Never retain a RefCell borrow over a callback or capture Drop.
+            let mut pending = HANDLERS.with(|handlers| std::mem::take(&mut *handlers.borrow_mut()));
+            if pending.is_empty() {
+                break;
+            }
+            super::jet_runtime_drain_atexit(&mut pending, |handler| {
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler())) {
+                    Ok(()) => {}
+                    Err(payload) => {
+                        if STOPPING.with(|phase| phase.replace(true)) {
+                            super::jet_runtime_abort_stopped_cleanup();
+                        }
+                        first_stop = Some(payload);
+                    }
+                }
+                // Explicit Drop stays inside the same actual finalization
+                // phase, including a first stop raised by this callback.
+                if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(handler))) {
+                    if STOPPING.with(|phase| phase.replace(true)) {
+                        super::jet_runtime_abort_stopped_cleanup();
+                    }
+                    first_stop = Some(payload);
+                }
+            });
+            // Callbacks accepted before a first stop may have appended a later
+            // batch; they remain owed, after the earlier registered handlers.
+        }
+        first_stop
     }
 }
 
@@ -1148,94 +1289,149 @@ where
     jet_runtime_atexit::register(move || handler());
 }
 
-fn jet_std_os_run_atexit() {
+fn jet_std_os_run_atexit() -> Option<Box<dyn std::any::Any + Send>> {
     #[cfg(not(jet_native_pack))]
-    jet_runtime_atexit::run();
+    { jet_runtime_atexit::run() }
     #[cfg(jet_native_pack)]
     {
         unsafe extern "C" { fn jet_rt_task_exit_handlers(); }
+        // SAFETY: the canonical Jet queue owns callback invocation, capture
+        // cleanup, late-registration gating and its retained pending Root stop.
         unsafe { jet_rt_task_exit_handlers() };
+        None
     }
 }
 
 fn jet_runtime_report_parked_tasks() -> Option<i32> {
     let report = jet_observe_parked_tasks_report()?;
-    eprint!("{}", report.rendered);
+    jet_runtime_process_report(Some(&report.rendered));
     Some(report.exit_code)
 }
 
-/// The only native process-exit boundary for generated programs. Lexical
-/// cleanup has already happened while the stop unwound to this point; process
-/// callbacks run here before the final native exit.
-fn jet_runtime_process_exit(code: i32, report: Option<&str>) -> ! {
-    jet_std_os_run_atexit();
-    jet_runtime_report_parked_tasks();
-    jet_observe_drain_after_exit();
+/// A second stop during genuine stopped cleanup retains the standard native
+/// destructor double-panic boundary, not a replacement report or success.
+fn jet_runtime_abort_stopped_cleanup() -> ! {
+    eprint!("panic in a destructor during cleanup\n");
+    std::process::abort()
+}
+
+fn jet_runtime_finalize_process(stopping: bool) -> (Option<i32>, Option<Box<dyn std::any::Any + Send>>) {
+    #[cfg(not(jet_native_pack))]
+    let _phase = jet_runtime_atexit::FinalizationScope::enter(stopping);
+    #[cfg(jet_native_pack)]
+    let _ = stopping;
+    let stop = {
+        #[cfg(jet_native_pack)]
+        let _cleanup = jet_c_abi::NativeCleanupScope::enter();
+        jet_std_os_run_atexit()
+    };
+    let parked_exit = {
+        #[cfg(jet_native_pack)]
+        let _cleanup = jet_c_abi::NativeCleanupScope::enter();
+        jet_runtime_report_parked_tasks()
+    };
+    {
+        #[cfg(jet_native_pack)]
+        let _cleanup = jet_c_abi::NativeCleanupScope::enter();
+        jet_observe_drain_after_exit();
+    }
+    (parked_exit, stop)
+}
+
+fn jet_runtime_flush_stdout() {
+    #[cfg(jet_native_pack)]
+    {
+        unsafe extern "C" { fn jet_rt_stdout_flush(); }
+        // SAFETY: the canonical process buffer owns its lock and lifetime.
+        // Before host init the export is a no-op; failed writes retain their
+        // pending suffix, never publish a Stop or enter language callbacks.
+        unsafe { jet_rt_stdout_flush() };
+    }
+}
+
+fn jet_runtime_process_report(report: Option<&str>) {
+    jet_runtime_flush_stdout();
     if let Some(report) = report {
         eprint!("{report}");
     }
+}
+
+// Report paths have already flushed the Jet buffer. Keep the final Rust sink
+// flush/exit tail private so native E4 report ownership can end before exit
+// without flushing the Jet buffer twice.
+fn jet_runtime_terminal_tail(code: i32) -> ! {
     let _ = std::io::Write::flush(&mut std::io::stdout());
     let _ = std::io::Write::flush(&mut std::io::stderr());
     std::process::exit(code)
+}
+
+fn jet_runtime_finalized_exit(code: i32) -> ! {
+    jet_runtime_flush_stdout();
+    jet_runtime_terminal_tail(code)
+}
+
+fn jet_runtime_finalized_stop_exit(code: i32, report: Option<&str>) -> ! {
+    jet_runtime_process_report(report);
+    jet_runtime_terminal_tail(code)
+}
+
+/// Lexical cleanup precedes this one process boundary. Process finalizers run
+/// exactly once before the retained report and the requested native exit.
+fn jet_runtime_process_exit(code: i32, report: Option<&str>) -> ! {
+    let (_, stop) = jet_runtime_finalize_process(true);
+    if let Some(payload) = stop {
+        jet_runtime_deliver_stop(payload, jet_runtime_finalized_stop_exit);
+    }
+    jet_runtime_finalized_stop_exit(code, report)
 }
 
 fn jet_runtime_boundary<F, T>(run: F) -> T
 where
     F: FnOnce() -> T,
 {
+    let _boundary = JetRuntimeProcessBoundary::enter();
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
         Ok(value) => {
-            jet_std_os_run_atexit();
-            let parked_exit = jet_runtime_report_parked_tasks();
-            jet_observe_drain_after_exit();
-            if let Some(code) = parked_exit {
-                std::process::exit(code);
+            let (parked_exit, stop) = jet_runtime_finalize_process(false);
+            if let Some(payload) = stop {
+                jet_runtime_deliver_stop(payload, jet_runtime_finalized_stop_exit);
             }
+            if let Some(code) = parked_exit {
+                jet_runtime_finalized_exit(code);
+            }
+            jet_runtime_flush_stdout();
             value
         }
-        Err(payload) => {
-            // Only the private foreign-boundary marker below converts a String
-            // payload into a user stop. A rendered runtime report crosses this
-            // boundary as a typed report or private envelope; arbitrary panic
-            // text remains a host/compiler fault.
-            //
-            // This is the one place the marker is read, and it is the only E3001
-            // renderer a shared Prelude source can reach without naming a
-            // registered-row adapter. Its producers are boundaries whose source
-            // is embedded into crates that carry no such adapter: the generated
-            // bridge crate's `ffi_panic` (jet-pkg-model/src/FFI.rs) and the
-            // fail-closed OS entropy shim (Prelude/CoreLib/Top/CryptoEntropy.rs,
-            // which is also embedded verbatim into that bridge). Those sources
-            // must not build a report themselves: the bridge strips Foundation's
-            // `jet_render_runtime_stop` wrapper and never regenerates it, so a
-            // report built there is a call with no definition (I2 — rustc E0425
-            // inside Jet's own generated crate, reported as E0705 against the
-            // user's `extern rust` line).
-            if let Some(message) = payload
-                .downcast_ref::<String>()
-                .and_then(|message| message.strip_prefix("__jet_ffi_runtime__: "))
-            {
-                let report = jet_runtime_stop_report(
-                    "E3001", "", 0, "", "", 1, 1, message, "",
-                );
-                jet_runtime_process_exit(report.exit_code, Some(&report.rendered));
-            }
-            match payload.downcast::<JetRuntimeDiagnostic>() {
-                Ok(report) => {
-                    jet_runtime_process_exit(report.exit_code, Some(&report.rendered));
-                }
-                Err(payload) => match payload.downcast::<JetRenderedRuntimeStop>() {
-                    Ok(report) => {
-                        jet_runtime_process_exit(report.exit_code, Some(&report.rendered));
-                    }
-                    Err(payload) => match payload.downcast::<JetExplicitExit>() {
-                        Ok(exit) => jet_runtime_process_exit(exit.code, None),
-                        Err(payload) if payload.is::<JetRuntimeExit>() => jet_runtime_panic_exit(),
-                        Err(payload) => std::panic::resume_unwind(payload),
-                    },
-                },
-            }
-        }
+        Err(payload) => jet_runtime_deliver_stop(payload, jet_runtime_process_exit),
+    }
+}
+
+/// The generated foreign bridge and entropy shim cannot name registered-row
+/// adapters. Their private marker is converted only by this shared producer;
+/// arbitrary Rust String panics remain host faults.
+fn jet_runtime_foreign_stop_report(payload: &(dyn std::any::Any + Send)) -> Option<JetRuntimeDiagnostic> {
+    let message = payload.downcast_ref::<String>()?
+        .strip_prefix("__jet_ffi_runtime__: ")?;
+    Some(jet_runtime_stop_report("E3001", "", 0, "", "", 1, 1, message, ""))
+}
+
+fn jet_runtime_deliver_stop(
+    payload: Box<dyn std::any::Any + Send>,
+    exit: fn(i32, Option<&str>) -> !,
+) -> ! {
+    if let Some(report) = jet_runtime_foreign_stop_report(&*payload) {
+        exit(report.exit_code, Some(&report.rendered));
+    }
+    match payload.downcast::<JetRuntimeDiagnostic>() {
+        Ok(report) => exit(report.exit_code, Some(&report.rendered)),
+        Err(payload) => match payload.downcast::<JetRenderedRuntimeStop>() {
+            Ok(report) => exit(report.exit_code, Some(&report.rendered)),
+            Err(payload) => match payload.downcast::<JetExplicitExit>() {
+                Ok(request) => exit(request.code, None),
+                Err(payload) if payload.is::<JetRuntimeExit>() => exit(70, None),
+                Err(payload) => std::panic::resume_unwind(payload),
+            },
+        },
     }
 }
 
@@ -1392,7 +1588,7 @@ fn jet_entry_report(error: String) -> String {
 
 fn jet_entry_error_exit(error: String) -> ! {
     let report = jet_entry_report(error);
-    eprint!("{report}");
+    jet_runtime_process_report(Some(&report));
     jet_runtime_explicit_exit(1)
 }
 
@@ -1401,7 +1597,7 @@ fn jet_entry_error_exit(error: String) -> ! {
 /// context, conversions, and the source journey cannot be recovered from
 /// `Display` text after the fact.
 fn jet_entry_error_exit_jet(error: JetErr) -> ! {
-    eprint!("{}", jet_error_report(&error).render());
+    jet_runtime_process_report(Some(&jet_error_report(&error).render()));
     jet_runtime_explicit_exit(1)
 }
 
@@ -1431,6 +1627,7 @@ fn jet_service_edge_report_rendered(report: String) -> ! {
         }
     }
     quoted.push('"');
+    jet_runtime_flush_stdout();
     eprintln!("{{\"target\":\"service\",\"report\":{quoted}}}");
     jet_runtime_explicit_exit(1)
 }
@@ -1450,9 +1647,6 @@ fn jet_runtime_panic_exit() -> ! {
 }
 
 fn jet_runtime_stop(code: &'static str, file: &str, line: u32, msg: &str) -> ! {
-    if code == JET_C_INT_RANGE_CODE {
-        jet_entry_error_exit(jet_c_int_range_report());
-    }
     jet_runtime_stop_with_context(code, file, line, "", "", msg)
 }
 
@@ -1462,17 +1656,19 @@ fn jet_scheduler_runtime_stop(msg: &str) -> ! {
 
 fn jet_scheduler_runtime_stop_with_report(report: JetStreamFailure) -> ! {
     jet_test_record_stop(&report.code, &report.message);
-    if jet_runtime_should_unwind() {
+    if jet_runtime_fault_should_unwind() {
         std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
             rendered: report.rendered,
             exit_code: 70,
         }));
     }
+    jet_runtime_flush_stdout();
     eprint!("{}", report.rendered);
     jet_runtime_exit();
 }
 
 fn jet_runtime_caught_stop(message: &str) {
+    jet_runtime_flush_stdout();
     eprint!("{message}");
     if !message.ends_with('\n') {
         eprintln!();
@@ -1510,7 +1706,7 @@ fn jet_sentry_runtime_stop(
         foreign_component,
         foreign_fenced,
     );
-    if jet_runtime_should_unwind() {
+    if jet_runtime_fault_should_unwind() {
         jet_stream_record_failure_report(code, detail, report.rendered.clone());
     }
     jet_runtime_stop_unwind(report.rendered, report.exit_code, detail)
@@ -1539,7 +1735,7 @@ fn jet_runtime_stop_with_context(
     let _ = jet_production_failure_receipt_write(code, file, line, fn_name);
     let report =
         jet_runtime_stop_report(code, file, line, fn_name, src_line, 1, 1, msg, "");
-    if jet_runtime_should_unwind() {
+    if jet_runtime_fault_should_unwind() {
         jet_stream_record_failure_report(code, msg, report.rendered.clone());
     }
     jet_runtime_stop_unwind(report.rendered, report.exit_code, msg)
@@ -1566,12 +1762,15 @@ fn jet_runtime_diagnostic(rendered: String) -> ! {
     if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
         std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Diagnostic { rendered }));
     }
-    if jet_interrupt_handler_should_unwind() {
+    if jet_interrupt_handler_should_unwind()
+        || (!jet_scheduler_in_task() && jet_runtime_process_should_unwind())
+    {
         std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
             rendered,
             exit_code: 70,
         }));
     }
+    jet_runtime_flush_stdout();
     eprintln!("{}", rendered);
     jet_runtime_exit();
 }
@@ -2311,7 +2510,7 @@ fn jet_panic_rich_code(
     let report = jet_runtime_stop_report(
         code, file, line, fn_name, src_line, col, caret_len, msg, locals,
     );
-    if jet_runtime_should_unwind() {
+    if jet_runtime_fault_should_unwind() {
         jet_stream_record_failure_report(code, msg, report.rendered.clone());
     }
     jet_runtime_stop_unwind(report.rendered, report.exit_code, msg)

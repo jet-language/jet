@@ -766,7 +766,7 @@ fn jet_rust_prefix_template_holes(templates: [String]) -> [String] Never! {
 fn jet_rust_prefix_diagnostic_projection() -> String Never! {
     out := [String]{"\nfn jet_runtime_diagnostic_row(code: &str) -> Option<JetRuntimeDiagnosticRow> {{\n\n    match code {{\n"}
     loop row in diagnostic_registry_rows() {
-        if row.stage != "runtime" || row.status != DiagnosticRegistryStatus.Active -> next
+        if !row.has_stage("runtime") || row.status != DiagnosticRegistryStatus.Active -> next
         templates :: [String]{row.what, row.why, row.fix}
         holes := [String]{}
         loop hole in jet_rust_prefix_template_holes(templates) -> &holes.push(jet_rust_emit_quote(hole))

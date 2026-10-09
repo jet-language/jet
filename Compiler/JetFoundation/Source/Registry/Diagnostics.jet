@@ -37,6 +37,15 @@ pub struct DiagnosticRegistryRow {
     pub no_fix_reason: DiagnosticNoFixReason?
 }
 
+impl DiagnosticRegistryRow {
+    pub fn has_stage(self, stage: String) -> Bool Never! {
+        loop component in self.stage.split("/") {
+            if component == stage -> return true
+        }
+        false
+    }
+}
+
 fn diagnostic_byte_at(source: [U8], index: Int) -> Int Never! {
     if index < 0 || index >= source.len() -> return -1
     Int.from_u8(source[index])

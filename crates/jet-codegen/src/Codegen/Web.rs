@@ -566,7 +566,7 @@ fn js_runtime_stop_metadata() -> String {
     for row in jet_foundation::Registry::diagnostic_rows()
         .iter()
         .filter(|row| {
-            row.stage == "runtime"
+            row.has_stage("runtime")
                 && row.status == jet_foundation::Registry::DiagnosticStatus::Active
         })
     {

@@ -18,8 +18,8 @@
 // - A cursor handle is an owned `Box<JetLoopRangeCursor>`.
 //
 // Generated code has no unwind tables, so no unwind may leave an export.
-// Canonical cancellation/deadline transfers become the current task's MIR stop
-// rail. Panics and traps still render/terminate and invalidate the session.
+// Intentional stops return through the canonical Task or process Root rail;
+// the caller's generated Poll runs lexical cleanup before observing a result.
 #[cfg(not(target_arch = "wasm32"))]
 mod jet_c_abi {
     #![allow(non_snake_case)]
@@ -38,6 +38,106 @@ mod jet_c_abi {
     }
 
     pub(crate) type JetCString = *mut JetCText;
+
+    #[cfg(jet_native_pack)]
+    unsafe extern "C" {
+        fn jet_rt_stop_domain() -> i64;
+        fn jet_rt_root_begin(save: *mut i64) -> i64;
+        fn jet_rt_root_publish_rendered(bytes: *const u8, len: usize, code: i64) -> bool;
+        fn jet_rt_root_take_stop(control: i64, code: *mut i64) -> i64;
+        fn jet_rt_root_leave(control: i64, save: *const i64);
+        fn jet_rt_session_status() -> i64;
+        fn jet_rt_session_cleanup_enter(delivered_at_entry: i64) -> i64;
+        fn jet_rt_session_cleanup_leave(saved_flags: i64);
+        fn jet_rt_stop_take_message(record: i64) -> JetCString;
+        fn jet_rt_stop_drop(record: i64);
+        fn jet_rt_control_publish_stop(kind: i64, jct: i64, owner: i64, start: i64, end: i64, bytes: *const u8, len: usize, form: i64) -> bool;
+    }
+
+    /// Read the Jet-owned domain; never synthesize a Task or inspect its flags.
+    #[cfg(jet_native_pack)]
+    pub(crate) fn stop_domain() -> i64 {
+        // SAFETY: the native pack initializer attaches this thread's TCB.
+        unsafe { jet_rt_stop_domain() }
+    }
+
+    /// One actual process-finalizer scope. Its zero token is also owned and
+    /// must be restored; Rust never reads or changes the Control's flags.
+    #[cfg(jet_native_pack)]
+    pub(crate) struct NativeCleanupScope(i64);
+
+    #[cfg(jet_native_pack)]
+    impl NativeCleanupScope {
+        pub(crate) fn enter() -> Self {
+            // SAFETY: the raw status is sampled at this real cleanup entry.
+            // Enter borrows the current control and returns its opaque token.
+            unsafe { Self(jet_rt_session_cleanup_enter(jet_rt_session_status())) }
+        }
+    }
+
+    #[cfg(jet_native_pack)]
+    impl Drop for NativeCleanupScope {
+        fn drop(&mut self) {
+            // SAFETY: nested Root/control scopes restore their parent before
+            // this lexical scope ends. Restore this owned token exactly once.
+            unsafe { jet_rt_session_cleanup_leave(self.0) };
+        }
+    }
+
+    /// Publish only typed program transfers. Unknown payloads keep the fatal
+    /// host boundary; no manufactured message or success value is observable.
+    #[cfg(jet_native_pack)]
+    fn native_record_unwind(
+        payload: Box<dyn std::any::Any + Send>,
+    ) -> Result<(), Box<dyn std::any::Any + Send>> {
+        if super::jet_native_comptime_active() {
+            return Err(payload);
+        }
+        let accepted = match stop_domain() {
+            2 => {
+                let Some(panic) = payload.downcast_ref::<super::JetNativeTaskPanic>() else {
+                    return Err(payload);
+                };
+                // SAFETY: checked publication copies these borrowed bytes into
+                // the current Jet Task's owned raw-reason record.
+                unsafe {
+                    jet_rt_control_publish_stop(
+                        5, -1, -1, -1, -1, panic.0.as_ptr(), panic.0.len(), 0,
+                    )
+                }
+            }
+            1 => {
+                let (report, code) =
+                    if let Some(report) = payload.downcast_ref::<super::JetRuntimeDiagnostic>() {
+                        (Some(report.rendered.as_str()), report.exit_code)
+                    } else if let Some(report) = payload.downcast_ref::<super::JetRenderedRuntimeStop>() {
+                        (Some(report.rendered.as_str()), report.exit_code)
+                    } else if let Some(exit) = payload.downcast_ref::<super::JetExplicitExit>() {
+                        (None, exit.code)
+                    } else if payload.is::<super::JetRuntimeExit>() {
+                        (None, 70)
+                    } else if let Some(report) = super::jet_runtime_foreign_stop_report(&*payload) {
+                        // SAFETY: Root publication copies the rendered frame
+                        // before this Rust-owned report is dropped.
+                        return if unsafe {
+                            jet_rt_root_publish_rendered(
+                                report.rendered.as_ptr(), report.rendered.len(),
+                                i64::from(report.exit_code),
+                            )
+                        } { Ok(()) } else { Err(payload) };
+                    } else {
+                        return Err(payload);
+                    };
+                let (bytes, len) = report
+                    .map_or((std::ptr::null(), 0), |report| (report.as_ptr(), report.len()));
+                // SAFETY: Root publication copies borrowed bytes, preserving
+                // requested code and an owned non-null token even for exit0.
+                unsafe { jet_rt_root_publish_rendered(bytes, len, i64::from(code)) }
+            }
+            _ => return Err(payload),
+        };
+        if accepted { Ok(()) } else { Err(payload) }
+    }
 
     /// The word is unused after a typed transfer: MIR requires a Poll before
     /// any read or drop of a can-stop call result. This is not a constructed
@@ -65,25 +165,30 @@ mod jet_c_abi {
         fn stopped() -> Self { std::ptr::null() }
     }
 
-    /// No Rust unwind may leave an export. Reuse the scheduler's foreign
-    /// boundary; this catch itself is not a new task cancellation wait point.
-    /// Canonical cancellation/deadline transfers become the task's stop rail
-    /// (a comptime request's too); any other payload inside a comptime request
-    /// is a fatal host fault.
+    /// No Rust unwind may leave an export. The canonical native domain owns
+    /// program transfers; the existing scheduler owns seed and comptime
+    /// cancellation/deadline transfers. Unknown host payloads remain fatal.
     #[inline(always)]
     pub(crate) fn guard<T: StoppedCarrier>(run: impl FnOnce() -> T) -> T {
         match super::jet_scheduler_catch_foreign_boundary(run) {
             Ok(value) => value,
-            Err(payload) => match super::jet_scheduler_native_record_unwind(payload) {
-                Ok(()) => T::stopped(),
-                Err(payload) if super::jet_native_comptime_active() => {
-                    let message = payload.downcast_ref::<String>().map(String::as_str)
-                        .or_else(|| payload.downcast_ref::<&str>().copied())
-                        .unwrap_or("native compiler runtime carried an unknown panic payload");
-                    super::jet_native_comptime_fail(4, message)
+            Err(payload) => {
+                #[cfg(jet_native_pack)]
+                let payload = match native_record_unwind(payload) {
+                    Ok(()) => return T::stopped(),
+                    Err(payload) => payload,
+                };
+                match super::jet_scheduler_native_record_unwind(payload) {
+                    Ok(()) => T::stopped(),
+                    Err(payload) if super::jet_native_comptime_active() => {
+                        let message = payload.downcast_ref::<String>().map(String::as_str)
+                            .or_else(|| payload.downcast_ref::<&str>().copied())
+                            .unwrap_or("native compiler runtime carried an unknown panic payload");
+                        super::jet_native_comptime_fail(4, message)
+                    }
+                    Err(payload) => stop(payload),
                 }
-                Err(payload) => stop(payload),
-            },
+            }
         }
     }
 
@@ -95,7 +200,7 @@ mod jet_c_abi {
         let _ = catch_unwind(AssertUnwindSafe(move || {
             super::jet_runtime_boundary(move || -> () { resume_unwind(payload) })
         }));
-        std::process::exit(101)
+        super::jet_runtime_finalized_exit(101)
     }
 
     fn bytes<'a>(ptr: *const u8, len: usize) -> &'a [u8] {
@@ -178,9 +283,60 @@ mod jet_c_abi {
     pub extern "C" fn jet_rt_main(entry: extern "C" fn()) -> i32 {
         guard(|| {
             super::jet_std_env_init();
-            super::jet_runtime_boundary(|| entry());
-            0
+            #[cfg(jet_native_pack)]
+            { native_main(entry) }
+            #[cfg(not(jet_native_pack))]
+            {
+                super::jet_runtime_boundary(|| entry());
+                0
+            }
         })
+    }
+
+    #[cfg(jet_native_pack)]
+    fn native_main(entry: extern "C" fn()) -> i32 {
+        // Four borrowed TCB words, with their exact native 32B/8-byte layout.
+        let mut save = [0_i64; 4];
+        // SAFETY: begin owns the fresh Root and writes only this live save slot.
+        let control = unsafe { jet_rt_root_begin(save.as_mut_ptr()) };
+        entry();
+
+        let mut parked_exit = None;
+        guard(|| {
+            let (parked, stop) = super::jet_runtime_finalize_process(false);
+            parked_exit = parked;
+            if let Some(payload) = stop {
+                // A Rust frame catches this before the C ABI can return; native
+                // machine frames have already returned through lexical cleanup.
+                resume_unwind(payload);
+            }
+        });
+
+        let mut code = 0_i64;
+        // SAFETY: all owed finalizers have completed. Take transfers ownership
+        // and writes code only for a nonzero record, including explicit exit0.
+        let record = unsafe { jet_rt_root_take_stop(control, &mut code) };
+        // SAFETY: leave consumes this Root and restores the paired four words;
+        // the taken record and message outlive the control independently.
+        unsafe { jet_rt_root_leave(control, save.as_ptr()) };
+        if record != 0 {
+            // SAFETY: take_message transfers the owned E4 carrier; drop consumes
+            // only the remaining record. No raw Stop layout or policy is read.
+            let message = unsafe { jet_rt_stop_take_message(record) };
+            unsafe { jet_rt_stop_drop(record) };
+            super::jet_runtime_process_report(
+                (!message.is_null()).then(|| view(message)),
+            );
+            if !message.is_null() { release(message); }
+            // The canonical Root producer supplies the requested native i32
+            // exit carrier. Release all owned bytes before process::exit.
+            super::jet_runtime_terminal_tail(code as i32);
+        }
+        if let Some(code) = parked_exit {
+            super::jet_runtime_finalized_exit(code);
+        }
+        super::jet_runtime_flush_stdout();
+        0
     }
 
     // A native comptime request (unified host/stop contract, #4720). begin
@@ -238,7 +394,7 @@ mod jet_c_abi {
     fn comptime_fatal(status: u32, message: &str) -> ! {
         let kind = if status == 4 { super::JetStopKind::HostFault } else { super::JetStopKind::Panic };
         super::jet_native_comptime_channel_write(&comptime_site(kind, status, message.to_string()).encode());
-        std::process::exit(if status == 4 { 101 } else { 80 + status as i32 })
+        super::jet_runtime_finalized_exit(if status == 4 { 101 } else { 80 + status as i32 })
     }
 
     // The request's budget stop: the first one wins (from any thread, at that
@@ -315,24 +471,29 @@ mod jet_c_abi {
 
     /// Plain internal runtime imports for MIR Poll and Stopped. Neither
     /// consumes the status nor alters Task.cancel's wait-point delivery.
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_session_poll() -> u64 {
         super::jet_scheduler_native_poll()
     }
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_session_propagate() -> u64 {
         super::jet_scheduler_native_propagate()
     }
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_session_status() -> u64 {
         super::jet_scheduler_native_status()
     }
 
     // These are the canonical nesting Shield operations, not a second mask.
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_session_shield_enter() {
         guard(super::jet_scheduler_shield_enter)
     }
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_session_shield_leave() {
         guard(super::jet_scheduler_shield_leave)
@@ -452,6 +613,7 @@ mod jet_c_abi {
         }
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_record_new_IOContext(operation: i64, resource: *const JetCString, os_code: *const i64, cause: *const JetCString) -> *mut crate::jet_std::IOContext {
         guard(|| {
@@ -464,18 +626,21 @@ mod jet_c_abi {
         })
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_record_get_IOContext_operation(context: *mut crate::jet_std::IOContext) -> i64 {
         // SAFETY: `context` is a live handle the caller lends for this call.
         guard(|| unsafe { &*context }.operation as i64)
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_record_get_IOContext_resource(context: *mut crate::jet_std::IOContext, some: *mut JetCString) -> i64 {
         // SAFETY: `context` is a live handle the caller lends for this call.
         guard(|| some_text(some, &unsafe { &*context }.resource))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_record_get_IOContext_os_code(context: *mut crate::jet_std::IOContext, some: *mut i64) -> i64 {
         // SAFETY: `context` is a live handle the caller lends; `some` is its zeroed out slot.
@@ -485,12 +650,14 @@ mod jet_c_abi {
         })
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_record_get_IOContext_cause(context: *mut crate::jet_std::IOContext, some: *mut JetCString) -> i64 {
         // SAFETY: `context` is a live handle the caller lends for this call.
         guard(|| some_text(some, &unsafe { &*context }.cause))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_record_tag_IOError(error: *mut crate::jet_std::IOError) -> i64 {
         use crate::jet_std::IOError::*;
@@ -530,6 +697,7 @@ mod jet_c_abi {
         )*};
     }
 
+    #[cfg(not(jet_native_pack))]
     io_error_context_variants! {
         InvalidInput: jet_rt_record_get_IOError_InvalidInput, jet_rt_record_new_IOError_InvalidInput;
         NotFound: jet_rt_record_get_IOError_NotFound, jet_rt_record_new_IOError_NotFound;
@@ -543,6 +711,7 @@ mod jet_c_abi {
         Unsupported: jet_rt_record_get_IOError_Unsupported, jet_rt_record_new_IOError_Unsupported;
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_record_get_IOError_ResourceLimit(error: *mut crate::jet_std::IOError) -> i64 {
         // SAFETY: `error` is a live handle the caller lends for this call.
@@ -552,6 +721,7 @@ mod jet_c_abi {
         })
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_record_new_IOError_ResourceLimit(limit: i64) -> *mut crate::jet_std::IOError {
         guard(|| record(crate::jet_std::IOError::ResourceLimit(resource_limit(limit))))
@@ -559,12 +729,14 @@ mod jet_c_abi {
 
     // TaskFailure through the canonical task-failure ABI (TaskGroup.rs
     // jet_task_failure_abi: Cancelled 0, DeadlineBlown 1, Panicked(reason) 2).
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_record_tag_JetTaskFailure(failure: *mut super::JetTaskFailure) -> i64 {
         // SAFETY: `failure` is a live handle the caller lends for this call.
         guard(|| crate::jet_std::jet_task_failure_abi(unsafe { &*failure }.clone()).0)
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_record_get_JetTaskFailure_Panicked(failure: *mut super::JetTaskFailure) -> JetCString {
         // SAFETY: `failure` is a live handle the caller lends for this call.
@@ -574,16 +746,19 @@ mod jet_c_abi {
         })
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_record_new_JetTaskFailure_Cancelled() -> *mut super::JetTaskFailure {
         guard(|| record(crate::jet_std::jet_task_failure_from_code("TASK_CANCELLED", String::new())))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_record_new_JetTaskFailure_DeadlineBlown() -> *mut super::JetTaskFailure {
         guard(|| record(crate::jet_std::jet_task_failure_from_code("E3003", String::new())))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_record_new_JetTaskFailure_Panicked(reason: JetCString) -> *mut super::JetTaskFailure {
         guard(|| record(super::JetTaskFailure::Panicked(view(reason).to_owned())))

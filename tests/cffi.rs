@@ -1624,11 +1624,14 @@ fn run() {
 
     let run = Command::new(binary).output().unwrap();
     let stderr = String::from_utf8_lossy(&run.stderr);
-    assert_eq!(run.status.code(), Some(1), "{stderr}");
+    assert_eq!(run.status.code(), Some(70), "{stderr}");
     assert!(
-        stderr.contains("Error [E1003]: A default Int value does not fit in the C i64 range"),
+        stderr.contains("Stop [E1003]: Integer value is outside destination width"),
         "{stderr}"
     );
+    assert_eq!(stderr.matches("Stop [E1003]").count(), 1, "{stderr}");
+    assert!(stderr.contains("Why: "), "{stderr}");
+    assert!(stderr.contains("Fix: "), "{stderr}");
     assert!(!stderr.contains("panicked at"), "{stderr}");
     let _ = fs::remove_dir_all(root);
 }

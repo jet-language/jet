@@ -10,7 +10,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'audit', 'compile', 'link', 'run'].includes(mode)) throw Error('usage: run-host-fixtures.mjs OUT assemble|lower|audit|compile|link|run');
 const out = resolve(output), dir = join(out, 'unit');
-const fixtures = [['files', 'HostFilesTests.c', 'files raw: ok\n'], ['process', 'HostSpawnTests.c', 'process raw: ok\n']];
+const fixtures = [['files', 'HostFilesTests.c', 'files raw: ok\n'], ['process', 'HostSpawnTests.c', 'process raw: ok\n'], ['root-stdio', 'RootStdioWitness.c', 'root stdio: ok\n']];
 function command(bin, args, options = {}) {
   const result = spawnSync(bin, args, { encoding: 'utf8', maxBuffer: 1 << 27, cwd: root, ...options });
   if (result.error || result.status !== 0) throw Error(`${bin}: ${result.error?.message ?? result.status}\n${result.stdout ?? ''}${result.stderr ?? ''}`);

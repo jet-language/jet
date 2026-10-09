@@ -1624,6 +1624,272 @@ fn dap_cli_projects_raw_frames_only_when_requested_through_production_wire() {
     assert!(status.success(), "DAP command failed:\nstdout:\n{stdout}");
 }
 
+/// #4881: exercise the production root and the debug C stop channel, not a
+/// scheduler/interrupt flag injected into generated code. The Jet input is the
+/// exact fixed-width witness already used by the remainder parity test.
+#[test]
+fn ordinary_root_and_debug_dispatch_stop_after_lifo_cleanup() {
+    assert!(have("rustc"), "root/debug stop proof requires rustc");
+    let source = r#"
+fn remainder(value: I8, divisor: I8) -> I8 {
+    return value % divisor
+}
+
+fn run() {
+    print(remainder(I8{7}, I8{0}))
+}
+"#;
+    assert!(include_str!("dev_parts/routine.rs").contains(source));
+    let file = native_fixture("root_stop_cleanup", source);
+    let compiled = jet::compile_for_debug(&file).expect("fixed-width witness compiles for debug");
+    let callable = compiled
+        .rust
+        .lines()
+        .find(|line| {
+            line.starts_with("// jet-native-callable:")
+                && line.split_whitespace().any(|field| field == "jet=remainder")
+        })
+        .and_then(|line| {
+            line.split_whitespace()
+                .find_map(|field| field.strip_prefix("name="))
+        })
+        .expect("the trap witness must use actual native debug dispatch");
+    let probes = r#"
+#[cfg(test)]
+mod root_stop_regression {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn ordinary_root() {
+        jet_runtime_boundary(|| {
+            let _first = JetDeferredClose::new(|| println!("close-first"));
+            let _second = JetDeferredClose::new(|| println!("close-second"));
+            println!("body");
+            jet_panic("<root-stop>", 1, "root-stop");
+        });
+        panic!("a stopped root returned");
+    }
+
+    #[test]
+    #[ignore]
+    fn rendered_diagnostic_root() {
+        jet_runtime_boundary(|| {
+            let _first = JetDeferredClose::new(|| println!("close-first"));
+            let _second = JetDeferredClose::new(|| println!("close-second"));
+            println!("body");
+            let report = jet_runtime_stop_report(
+                "E3010", "<root-stop>", 1, "", "", 1, 1, "diagnostic-stop", "",
+            );
+            jet_runtime_diagnostic(report.rendered);
+        });
+        panic!("a diagnostic root returned");
+    }
+
+    #[test]
+    #[ignore]
+    fn debug_dispatch() {
+        jet_runtime_boundary(|| {
+            let _first = JetDeferredClose::new(|| println!("close-first"));
+            let _second = JetDeferredClose::new(|| println!("close-second"));
+            println!("body");
+            let value = @REMAINDER@(7i8, 0i8);
+            println!("unexpected-value {value}");
+        });
+        panic!("a stopped debug call returned");
+    }
+
+    #[test]
+    #[ignore]
+    fn callback_registration_timing() {
+        jet_runtime_boundary(|| {
+            let _body = JetDeferredClose::new(|| println!("close-body"));
+            println!("body");
+            jet_runtime_atexit::register(|| {
+                let _callback = JetDeferredClose::new(|| println!("close-callback"));
+                println!("atexit-first");
+                jet_runtime_atexit::register(|| println!("late-before-stop"));
+                jet_panic("<callback-stop>", 1, "callback-stop");
+            });
+            jet_runtime_atexit::register(|| {
+                println!("atexit-second");
+                let capture = JetDeferredClose::new(|| println!("drop-after-stop"));
+                jet_runtime_atexit::register(move || {
+                    let _borrowed = &capture;
+                    println!("unexpected-after-stop-body");
+                });
+            });
+        });
+        panic!("a stopped callback returned");
+    }
+
+    #[test]
+    #[ignore]
+    fn lexical_registration_after_stop() {
+        jet_runtime_boundary(|| {
+            let _body = JetDeferredClose::new(|| {
+                println!("close-body");
+                let capture = JetDeferredClose::new(|| println!("drop-after-stop"));
+                jet_runtime_atexit::register(move || {
+                    let _borrowed = &capture;
+                    println!("unexpected-after-stop-body");
+                });
+            });
+            println!("body");
+            jet_panic("<lexical-stop>", 1, "lexical-stop");
+        });
+        panic!("a stopped root returned");
+    }
+
+    #[test]
+    #[ignore]
+    fn stopped_callback_double_panic() {
+        jet_runtime_boundary(|| {
+            jet_runtime_atexit::register(|| jet_panic("<second-stop>", 1, "second-stop"));
+            jet_panic("<first-stop>", 1, "first-stop");
+        });
+        panic!("stopped cleanup returned");
+    }
+
+    #[test]
+    fn carrier_roundtrip() {
+        assert!(!jet_runtime_process_should_unwind());
+        let mut stop = None;
+        let value = jet_native_dispatch_boundary(&mut stop, || {
+            assert!(jet_runtime_process_should_unwind());
+            assert!(jet_runtime_fault_should_unwind());
+            assert!(!jet_scheduler_panic_should_unwind(), "an ordinary Root is not a cancellation catch frame");
+            let nested = JetRuntimeProcessBoundary::enter();
+            drop(nested);
+            assert!(jet_runtime_process_should_unwind());
+            7u8
+        });
+        assert!(!jet_runtime_process_should_unwind());
+        assert!(stop.is_none());
+        assert_eq!(jet_native_dispatch_finish(stop, value), 7);
+
+        let mut stop = None;
+        let value: u8 = jet_native_dispatch_boundary(&mut stop, || {
+            jet_panic("<debug-stop>", 1, "channel-stop")
+        });
+        assert!(!jet_runtime_process_should_unwind());
+        assert!(stop.is_some());
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| jet_native_dispatch_finish(stop, value)))
+            .expect_err("the transport scalar must not escape as a result");
+        let report = caught.downcast::<JetRenderedRuntimeStop>().expect("typed report");
+        assert_eq!(report.exit_code, 70);
+        assert!(report.rendered.contains("channel-stop"));
+
+        let mut stop = None;
+        let value: u8 = jet_native_dispatch_boundary(&mut stop, || {
+            std::panic::resume_unwind(Box::new(123usize))
+        });
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| jet_native_dispatch_finish(stop, value)))
+            .expect_err("an opaque host payload must not become a scalar");
+        assert_eq!(*caught.downcast::<usize>().expect("original host payload"), 123);
+        assert!(!jet_runtime_process_should_unwind());
+
+        let mut stop = None;
+        let value: u8 = jet_native_dispatch_boundary(&mut stop, || jet_runtime_explicit_exit(0));
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| jet_native_dispatch_finish(stop, value)))
+            .expect_err("explicit exit zero is still a stop, not successful return");
+        assert_eq!(caught.downcast::<JetExplicitExit>().expect("explicit exit").code, 0);
+    }
+}
+"#
+    .replace("@REMAINDER@", callable);
+    let scratch = common::Scratch::new("jet_root_debug_stop_probe");
+    let rust_file = scratch.path.join("probe.rs");
+    let binary = scratch.path.join("probe");
+    std::fs::write(&rust_file, format!("{}\n{probes}", compiled.rust)).unwrap();
+    let built = Command::new("rustc")
+        .args(["--edition", "2021", "--test"])
+        .arg(&rust_file)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "rustc rejected production root/debug probes:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let carrier = Command::new(&binary)
+        .args(["--exact", "root_stop_regression::carrier_roundtrip", "--nocapture"])
+        .output()
+        .unwrap();
+    assert!(
+        carrier.status.success(),
+        "carrier regression failed: {carrier:?}"
+    );
+    for (probe, code, cleanup) in [
+        ("ordinary_root", "E3001", "body\nclose-second\nclose-first\n"),
+        ("rendered_diagnostic_root", "E3010", "body\nclose-second\nclose-first\n"),
+        ("debug_dispatch", "E3010", "body\nclose-second\nclose-first\n"),
+        (
+            "callback_registration_timing",
+            "E3001",
+            "body\nclose-body\natexit-first\nclose-callback\natexit-second\ndrop-after-stop\nlate-before-stop\n",
+        ),
+        (
+            "lexical_registration_after_stop",
+            "E3001",
+            "body\nclose-body\ndrop-after-stop\n",
+        ),
+    ] {
+        // Share the same file description for both streams so the assertion
+        // observes report-vs-cleanup order, not two independently captured logs.
+        let path = scratch.path.join(format!("{probe}.log"));
+        let log = std::fs::File::create(&path).unwrap();
+        let status = Command::new(&binary)
+            .args([
+                "--exact",
+                &format!("root_stop_regression::{probe}"),
+                "--ignored",
+                "--nocapture",
+            ])
+            .stdout(Stdio::from(log.try_clone().unwrap()))
+            .stderr(Stdio::from(log))
+            .status()
+            .unwrap();
+        let transcript = std::fs::read_to_string(path).unwrap();
+        assert_eq!(status.code(), Some(70), "{probe}: {transcript}");
+        assert!(transcript.contains(cleanup), "{probe}: {transcript}");
+        let report = format!("Stop [{code}]");
+        assert_eq!(transcript.matches(&report).count(), 1, "{probe}: {transcript}");
+        let last_cleanup = cleanup.trim_end().rsplit('\n').next().unwrap();
+        assert!(
+            transcript.find(last_cleanup).unwrap() < transcript.find(&report).unwrap(),
+            "{probe}: report preceded owed cleanup: {transcript}"
+        );
+        assert!(!transcript.contains("unexpected-value"), "{probe}: {transcript}");
+        assert!(!transcript.contains("unexpected-after-stop-body"), "{probe}: {transcript}");
+    }
+    let path = scratch.path.join("stopped_callback_double_panic.log");
+    let log = std::fs::File::create(&path).unwrap();
+    let status = Command::new(&binary)
+        .args([
+            "--exact",
+            "root_stop_regression::stopped_callback_double_panic",
+            "--ignored",
+            "--nocapture",
+        ])
+        .stdout(Stdio::from(log.try_clone().unwrap()))
+        .stderr(Stdio::from(log))
+        .status()
+        .unwrap();
+    let transcript = std::fs::read_to_string(path).unwrap();
+    assert!(!status.success(), "{transcript}");
+    assert_ne!(status.code(), Some(70), "{transcript}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(status.signal(), Some(6), "{transcript}");
+    }
+    assert!(transcript.contains("panic in a destructor during cleanup\n"), "{transcript}");
+    assert!(!transcript.contains("Stop [E3001]"), "{transcript}");
+}
+
 #[test]
 fn debug_build_carries_line_markers_a_normal_build_does_not() {
     let file = native_fixture("markers", LOOPS);
