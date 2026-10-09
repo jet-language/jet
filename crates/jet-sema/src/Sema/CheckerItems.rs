@@ -2072,10 +2072,10 @@ impl<'a> Checker<'a> {
             })
         };
         for (_, ty) in &mut sig.params {
-            *ty = qualify(ty);
+            *ty = self.qualify_method_type(owner, ty, &generic_names);
         }
         if let Some(ret) = &mut sig.return_type {
-            *ret = qualify(ret);
+            *ret = self.qualify_method_type(owner, ret, &generic_names);
         }
     }
 
