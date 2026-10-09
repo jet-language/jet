@@ -11,6 +11,9 @@ a stale binary is not proof. Avoid per-worker copies or private builds unless
 the worker's unintegrated change is itself what must be measured. Serialize
 writers to shared artifacts.
 
+During consolidation repair, remove exact duplicate declarations while retaining
+the canonical regression scenarios; compilation fixes must not narrow coverage.
+
 Admit the shared host/release build as soon as the workspace/all-target bootstrap
 check is green; do not delay the fresh verifier behind an older verifier's grammar
 or memory failures. Pin it to an immutable export of that checked commit. Publish
