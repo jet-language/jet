@@ -250,8 +250,7 @@ fn checked_text_contract_is_rendered_in_generated_docs() {
     let entry = scratch.0.join("checked_text.jet");
     fs::write(
         &entry,
-        r#"#PubFile
-#Error
+        r#"#Error
 enum PatternError { Bad }
 
 /// A checked pattern.

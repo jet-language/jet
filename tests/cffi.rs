@@ -2226,7 +2226,7 @@ fn cffi_string_returns_are_borrowed_non_null_utf8_and_copied() {
         });
         let wrapper = out
             .rust
-            .split_once("pub fn __jet_get() -> String {\n")
+            .split_once("fn __jet_get() -> String {\n")
             .unwrap_or_else(|| panic!("missing generated C wrapper for {name}"))
             .1
             .split_once("\n}\n")

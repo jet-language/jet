@@ -595,7 +595,7 @@ fn local_cell_runtime_releases_original_loans_on_drop_and_unwind() {
     let carrier = "pub type JetOutcome<T, E> = Result<T, E>;";
     let absent_derive =
         "#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Debug)]";
-    let absent = "pub struct JetAbsent;";
+    let absent = "struct JetAbsent;";
     for line in [carrier, absent_derive, absent] {
         assert!(
             outcome.contains(line),
@@ -5862,7 +5862,7 @@ fn run() {
         jet::compile(src).expect("a cloneable read parameter materializes at an owned return");
     assert!(
         out.rust
-            .contains("pub fn __jet_identity<T: Clone>(__jet_value: &T) -> JetOutcome<T, JetErr> {"),
+            .contains("fn __jet_identity<T: Clone>(__jet_value: &T) -> JetOutcome<T, JetErr> {"),
         "the escape must be paid for in the signature, not laundered: {}",
         out.rust
     );

@@ -165,7 +165,7 @@ const WITNESSES: &[Witness] = &[
     Witness { name: "place-mark-statements", source: "fn run() {\n    buf := [1]\n    total := 3\n    &buf.push(2)\n    ^buf.len()\n    &self.items.push(1)\n    mask := total\n        & 1\n    power := total\n        ^ 2\n    &(total)\n}\n", parses: false },
     Witness { name: "end-token-families", source: "true\nfalse\nself\nnull\nbreak\nreturn\na?\na++\na--\nT>\nT>>", parses: false },
     Witness { name: "invalid-raw-source", source: "fn run() {\n    value :: \"unfinished\n", parses: false },
-    Witness { name: "keyword-and-assignment-transport", source: "fn pub priv if else in mutate move copy struct enum impl trait tag effect derive it const comptime loop yield use extern module\n: :: := , ; .. ..< ... @ ~ ~|= ~~ += -= *= /= /%= %= %%= &= |= ^= <<= >>= # $", parses: false },
+    Witness { name: "keyword-and-assignment-transport", source: "fn if else in mutate move copy struct enum impl trait tag effect derive it const comptime loop yield use extern module\n: :: := , ; .. ..< ... @ ~ ~|= ~~ += -= *= /= /%= %= %%= &= |= ^= <<= >>= # $", parses: false },
 ];
 
 fn float_bits(tokens: &[Token], output: &mut Vec<u64>) {

@@ -1432,7 +1432,7 @@ pub fn mir_shared_site_getter_symbol(initializer: MIRFunctionID) -> String Never
     String.from_bytes(bytes) ?? panic("Shared site symbol is not ASCII")
 }
 
-pub enum MIRConstant {
+enum MIRConstant {
     Int(value: Int, width: MIRIntegerWidth?, spelling: String?)
     Float(value: Float, f32: Bool, spelling: String?)
     Bool(value: Bool)
@@ -1493,7 +1493,7 @@ pub fn mir_integer_value(payload: Int, width: MIRIntegerWidth?) -> Int Never! {
     payload
 }
 
-pub struct MIRConstMapEntry { pub key: MIRConstKey, pub value: MIRConstant }
+struct MIRConstMapEntry { key: MIRConstKey, value: MIRConstant }
 
 struct MIRPanicLoc { file: MIRSourceFileID, line: Int, column: Int }
 
@@ -1717,7 +1717,7 @@ pub fn mir_binary_can_trap(op: MIRBinaryOp, overflow: MIRBinaryOverflow) -> Bool
     }
 }
 
-pub enum MIRConversion { Transparent NumericCast SendFn Prelude(call: MIRPreludeCallID, location: MIRPanicLoc, fallibility: MIRCallFallibility) }
+enum MIRConversion { Transparent NumericCast SendFn Prelude(call: MIRPreludeCallID, location: MIRPanicLoc, fallibility: MIRCallFallibility) }
 
 struct MIREnumArg { field: MIRFieldID?, value: MIRValueID, boxed: Bool }
 
@@ -2503,7 +2503,7 @@ struct MIRSwitchArm { condition: MIRValueID, target: MIRBlockID, span: Span }
 // function with the stop still delivered and no result written.
 pub enum MIRPollKind { Check Propagate }
 
-pub enum MIRTerminator {
+enum MIRTerminator {
     Jump(target: MIRBlockID)
     Branch(condition: MIRValueID, then_target: MIRBlockID, else_target: MIRBlockID)
     Switch(subject: MIRValueID, arms: [MIRSwitchArm], otherwise: MIRBlockID)
@@ -3936,15 +3936,15 @@ pub fn mir_component_export_signature(types: [MIRTypeDef], codable_keys: [String
     Val(MIRComponentSignatureDescriptor{params: params, result: result_descriptor})
 }
 
-pub struct MIREntrySpec {
-    pub kind: MIREntryKind
-    pub function: MIRFunctionID?
-    pub cli: MIRCLIEntry?
-    pub output: MIREntryOutput
-    pub initialize_environment: Bool
-    pub initialize_gc: Bool
-    pub serves_until_stopped: Bool
-    pub package_version: String
+struct MIREntrySpec {
+    kind: MIREntryKind
+    function: MIRFunctionID?
+    cli: MIRCLIEntry?
+    output: MIREntryOutput
+    initialize_environment: Bool
+    initialize_gc: Bool
+    serves_until_stopped: Bool
+    package_version: String
 }
 
 struct MIRArtifactPlan {

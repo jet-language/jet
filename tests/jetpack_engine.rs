@@ -7754,7 +7754,7 @@ fn core_cargo_build_requires_exact_trust_before_running_build_script() {
     )
     .unwrap();
     fs::write(repo.join("escape.jet"), "module escape { }\n").unwrap();
-    fs::write(repo.join("lib.rs"), "pub fn value() -> u8 { 1 }\n").unwrap();
+    fs::write(repo.join("lib.rs"), "fn value() -> u8 { 1 }\n").unwrap();
     fs::write(
         repo.join("Cargo.toml"),
         "[package]\nname = \"escape\"\nversion = \"0.1.0\"\nbuild = \"build.rs\"\n[lib]\npath = \"lib.rs\"\n",
