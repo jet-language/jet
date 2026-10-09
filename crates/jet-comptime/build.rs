@@ -127,6 +127,9 @@ fn write_native_scheduler(manifest: &Path) {
             .unwrap_or_else(|error| panic!("read {}: {error}", runtime_control_src.display())),
     ));
     body.push_str("\n\n");
+    // This crate borrows the scheduler's Rust implementation, not its C ABI.
+    // Seed exports belong to jet-codegen; the native pack has its own owners.
+    let body = body.replace("#[no_mangle]", "");
 
     let out =
         PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("web_kernel_native_scheduler.rs");
