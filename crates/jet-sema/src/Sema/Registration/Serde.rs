@@ -733,12 +733,12 @@ fn struct_migration_decode(
                     let old = method_with_type_args(
                         or_fallback(
                             method(
-                                data_tree_object_expr(copy(ident(ENTRIES, span), span), span),
+                                dyn_object_expr(copy(ident(ENTRIES, span), span), span),
                                 "field",
                                 vec![string_expr(&key, span)],
                                 span,
                             ),
-                            data_tree_null(span),
+                            dyn_null(span),
                             span,
                         ),
                         "decode",
@@ -779,7 +779,7 @@ fn struct_migration_decode(
     let mut walker = vec![
         binding(
             ENTRIES,
-            Some(map_type(data_tree_type(), span)),
+            Some(map_type(dyn_type(), span)),
             map_literal(Vec::new(), span),
             true,
             span,
@@ -831,7 +831,7 @@ fn struct_migration_decode(
         });
         let mut body = steps[index..].iter().flatten().cloned().collect::<Vec<_>>();
         body.push(ret(
-            Expr::Present(Box::new(data_tree_object_expr(ident(ENTRIES, span), span)), span),
+            Expr::Present(Box::new(dyn_object_expr(ident(ENTRIES, span), span)), span),
             span,
         ));
         walker.push(if_stmt(matches, body, span));
@@ -845,7 +845,7 @@ fn struct_migration_decode(
         Item::Func(serde_method(
             &current,
             Vec::new(),
-            vec![named_param("tree", data_tree_type(), span)],
+            vec![named_param("tree", dyn_type(), span)],
             Some(result_type(target, span)),
             struct_decode_body(s, items, span),
             span,
@@ -853,8 +853,8 @@ fn struct_migration_decode(
         Item::Func(serde_method(
             &migrate,
             Vec::new(),
-            vec![named_param("tree", data_tree_type(), span)],
-            Some(Type::Option(Box::new(data_tree_type()))),
+            vec![named_param("tree", dyn_type(), span)],
+            Some(Type::Option(Box::new(dyn_type()))),
             walker,
             span,
         )),
@@ -926,7 +926,7 @@ fn migration_rekey(entries: &str, key: &str, to: Option<&str>, span: Span) -> St
         vec![
             binding(
                 "jet_serde_next",
-                Some(map_type(data_tree_type(), span)),
+                Some(map_type(dyn_type(), span)),
                 map_literal(Vec::new(), span),
                 true,
                 span,

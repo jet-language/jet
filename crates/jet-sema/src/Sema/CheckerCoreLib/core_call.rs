@@ -2573,9 +2573,9 @@ impl<'a> Checker<'a> {
         }
         if module == "core.plugin" && name == "__authority_to_wire" {
             self.diags.push(Diagnostic::error(
-                "E0510", "Authority wire conversion is compiler-private",
-                "only the checked plugin boundary inserts this conversion",
-                "use core.plugin.load with tightened Authority", Some(span),
+                "E0510", "Authority wire conversion is compiler-private".to_string(),
+                "only the checked plugin boundary inserts this conversion".to_string(),
+                "use core.plugin.load with tightened Authority".to_string(), Some(span),
             ));
             return None;
         }
@@ -2590,21 +2590,6 @@ impl<'a> Checker<'a> {
                     "E0510", "JSON coercion host leaves are compiler-private".to_string(),
                     "the existing hidden Time/IO boundary is restricted to audited Core JSON source".to_string(),
                     "use the public JSON decoder".to_string(), Some(span),
-                ));
-                return None;
-            }
-        }
-        if module == "core.encoding"
-            && matches!(name, "__coerce_now" | "__coerce_emit")
-        {
-            let vetted = source_alias
-                .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
-                .is_some_and(|source| source.module == "core.encoding.json");
-            if !vetted || !self.in_unsafe {
-                self.diags.push(Diagnostic::error(
-                    "E0510", "JSON coercion host leaves are compiler-private",
-                    "the existing hidden Time/IO boundary is restricted to audited Core JSON source",
-                    "use the public JSON decoder", Some(span),
                 ));
                 return None;
             }
@@ -7762,7 +7747,7 @@ impl<'a> Checker<'a> {
             }
             if encoding_backing_leaf {
                 // Backing calls borrow native owners even when their nominal
-                // type is not a built-in String/List/Map (DataTree, file IO).
+                // type is not a built-in String/List/Map (Dyn, file IO).
                 self.borrow_ctx = true;
             }
             self.expect_core_arg(name, i, param_ty, arg);

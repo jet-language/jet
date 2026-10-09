@@ -49,9 +49,9 @@ impl<'a> Checker<'a> {
             "Array" => vec![Type::List(Box::new(json.clone()))],
             // D-DATATREE-ORDER1=A: an object keeps its fields in arrival
             // order. A key-value literal keeps the written order, a
-            // `[String: DataTree]` Map hands over its sorted order, and a
-            // `[(key: String, value: DataTree)]` pair list keeps list order.
-            "Object" if self.is_object_pairs_arg(args) => vec![data_tree_object_pairs_ty()],
+            // `[String: Dyn]` Map hands over its sorted order, and a
+            // `[(key: String, value: Dyn)]` pair list keeps list order.
+            "Object" if self.is_object_pairs_arg(args) => vec![dyn_object_pairs_ty()],
             "Object" => vec![Type::Map {
                 key: Box::new(Type::String),
                 key_span: None,
@@ -94,7 +94,7 @@ impl<'a> Checker<'a> {
                         if expected.len() == 1 { "" } else { "s" },
                         args.len()
                     ),
-                    "each `DataTree` variant has a fixed payload (Bool/Int/Float→scalar, Text→String, Array→[DataTree], Object→[(key: String, value: DataTree)] or [String: DataTree])".to_string(),
+                    "each `Dyn` variant has a fixed payload (Bool/Int/Float→scalar, Text→String, Array→[Dyn], Object→[(key: String, value: Dyn)] or [String: Dyn])".to_string(),
                     "check the variant payload".to_string(),
                     Some(span),
                 ));
@@ -109,8 +109,8 @@ impl<'a> Checker<'a> {
         Some(json)
     }
 
-    /// D-DATATREE-ORDER1=A: `DataTree.Object` takes the ordered
-    /// `[(key: String, value: DataTree)]` pair list when its argument is a
+    /// D-DATATREE-ORDER1=A: `Dyn.Object` takes the ordered
+    /// `[(key: String, value: Dyn)]` pair list when its argument is a
     /// local of that type or a list literal; anything else is read as a Map.
     fn is_object_pairs_arg(&self, args: &[crate::AST::CallArg]) -> bool {
         let [arg] = args else {
@@ -120,7 +120,7 @@ impl<'a> Checker<'a> {
             crate::AST::Expr::ListLit(..) => true,
             crate::AST::Expr::Ident(name, _) => self
                 .lookup(name)
-                .is_some_and(|local| local.ty == data_tree_object_pairs_ty()),
+                .is_some_and(|local| local.ty == dyn_object_pairs_ty()),
             _ => false,
         }
     }

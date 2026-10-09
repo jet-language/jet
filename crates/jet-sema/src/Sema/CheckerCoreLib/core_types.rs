@@ -2754,12 +2754,11 @@ pub fn core_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
         "DateTime" => Some(vec![Type::Named("ZonedDateTime".to_string())]),
         "Array" => Some(vec![Type::List(Box::new(json.clone()))]),
         // D-DATATREE-ORDER1=A: an object is its fields in arrival order.
-        "Object" => Some(vec![data_tree_object_pairs_ty()]),
+        "Object" => Some(vec![dyn_object_pairs_ty()]),
         // `Number` is the compiler-only lexical carrier used by typed JSON
         // parsing. It is accepted in generated union decoder patterns, but
-        // has no public `DataTree.Number(...)` constructor.
+        // has no public `Dyn.Number(...)` constructor.
         "Number" | "TypedText" => Some(vec![Type::String]),
-        "Bytes" => Some(vec![Type::List(Box::new(u8_ty()))]),
         _ => None,
     }
 }
