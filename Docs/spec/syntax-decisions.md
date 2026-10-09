@@ -2706,6 +2706,10 @@ receiver that names a type (`Recipe.copy()`) it stays an associated call. It
 chains without parentheses (`input.copy().rotate()`). The prefix `~x` is a
 retired mark: E0941 teaches it and its Safe fix writes `x.copy()`. The
 entries below keep their historical `~x` text.
+The Jet checker routes the zero-argument, non-generic value call through its
+copy classifier before receiver-method lookup. Its `ExplicitCopy`, `Clone`
+and materialized-view TIR products use the existing MIR copy lowering; there
+is no separate runtime `.copy()` method-dispatch path.
 
 **D-SHAPE-COPY1=A — the one copy sigil, `~x`** *(ratified 2026-07-15,
 card #535)*: supersedes D-CAP2/S4's `copy x` word. `~x` is a prefix-verb
