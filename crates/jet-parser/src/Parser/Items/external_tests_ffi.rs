@@ -30,11 +30,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-VISDEFAULT2=A: is the cursor at `#PubFile`?
-    pub(super) fn at_pub_file(&self) -> bool {
-        self.unqualified_marker_name_at(self.pos) == Some(Syntax::MARKER_PUB_FILE)
-    }
-
     /// D-PRELUDEX1=A: is the cursor at `#NoPrelude`?
     pub(super) fn at_no_prelude(&self) -> bool {
         self.unqualified_marker_name_at(self.pos) == Some(Syntax::MARKER_NO_PRELUDE)
