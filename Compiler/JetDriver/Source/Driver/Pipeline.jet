@@ -2181,7 +2181,9 @@ fn jet_driver_comptime_apply_landed(environment: &SemaScopeEnvironment, availabl
     landed := [SemaComptimeItemValue]{}
     body_values_changed := false
     loop value_index in from..<values.len() {
-        &landed.push(values[value_index])
+        // Graph projection consumes only Constants. Do not duplicate body
+        // payloads into a temporary list that it immediately discards.
+        if values[value_index].kind == SemaComptimeItemKind.Constant -> &landed.push(values[value_index])
         if values[value_index].kind == SemaComptimeItemKind.BodyExpression -> body_values_changed = true
     }
     if &environment.registration_graph == {
@@ -2332,6 +2334,7 @@ fn jet_driver_comptime_stage(
     checked_functions: [SemaComptimeFunctionResult],
     trace: JetDriverCompileTrace,
     environment: &SemaScopeEnvironment,
+    available: &SemaComptimeAvailableConstants,
     staging: &JetDriverComptimeStaging,
     diagnostics: &[Diagnostic],
 ) -> JetDriverComptimeRunResult? {
@@ -2353,13 +2356,17 @@ fn jet_driver_comptime_stage(
         }
         staging.session = Val(jet_codegen_comptime_session(^staged_modules, load.source_files, jet_driver_resolved_package_edition(load)))
     } else {
+        // Plain rows can land inside this flush before graph application.
+        // Advance the same run index before its first-position consumer;
+        // later apply_landed sees an already-counted prefix, never reindexes it.
+        sema_comptime_available_constants_add(&available, values)
         added := [MIRConstantDef]{}
         if &environment.registration_graph == {
             None -> return Val(jet_driver_comptime_lost_graph(values, checked_functions, trace))
             .Val(staged_graph) -> {
                 if &staging.session == {
                     None -> return Val(jet_driver_comptime_lost_session(values, checked_functions, trace))
-                    .Val(staged_session) -> added = jet_codegen_comptime_session_add_constants(&staged_session, sema_comptime_staged_constant_rows(staged_graph, values, staged_count))
+                    .Val(staged_session) -> added = jet_codegen_comptime_session_add_constants(&staged_session, sema_comptime_staged_constant_rows(staged_graph, values, staged_count, available))
                 }
             }
         }
@@ -2753,6 +2760,7 @@ fn jet_driver_comptime_flush(
     checked_functions: [SemaComptimeFunctionResult],
     trace: &JetDriverCompileTrace,
     environment: &SemaScopeEnvironment,
+    available: &SemaComptimeAvailableConstants,
     staging: &JetDriverComptimeStaging,
     counters: &JetDriverComptimeCounters,
     diagnostics: &[Diagnostic],
@@ -2774,7 +2782,7 @@ fn jet_driver_comptime_flush(
     // entry's check and closure name only constants that landed before the
     // batch (naming a batch constant makes a check wait on it), and rows of
     // constants an item does not name never change its value.
-    staged :: jet_driver_comptime_stage(graph, load, batch.entries[start].request, batch.needs_rows, values, checked_functions, trace, &environment, &staging, &diagnostics)
+    staged :: jet_driver_comptime_stage(graph, load, batch.entries[start].request, batch.needs_rows, values, checked_functions, trace, &environment, &available, &staging, &diagnostics)
     if staged == .Val(stopped) {
         flushed.stop = Val(stopped)
         return flushed
@@ -2831,7 +2839,7 @@ fn jet_driver_comptime_flush(
                 _ := &diagnostics.pop()
             }
             loop index in start..<batch.entries.len() {
-                single := jet_driver_comptime_flush(graph, names, load, request, jet_driver_comptime_batch_single(batch, index), &values, checked_functions, &trace, &environment, &staging, &counters, &diagnostics)
+                single := jet_driver_comptime_flush(graph, names, load, request, jet_driver_comptime_batch_single(batch, index), &values, checked_functions, &trace, &environment, &available, &staging, &counters, &diagnostics)
                 if single.progressed -> flushed.progressed = true
                 if single.stop == .Val(stopped) {
                     flushed.stop = Val(stopped)
@@ -3097,7 +3105,7 @@ fn jet_driver_comptime_run(
                 checked_item := sema_check_comptime_item(&environment, &probe, available, source, values)
                 counters.items_checked += 1
                 if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, checked_item.waiting_dependencies, checked_item.diagnostics.len() > 0 || !checked_item.complete) {
-                    flushed := jet_driver_comptime_flush(graph, names, load, request, batch, &values, checked_functions, &trace, &environment, &staging, &counters, &diagnostics)
+                    flushed := jet_driver_comptime_flush(graph, names, load, request, batch, &values, checked_functions, &trace, &environment, &available, &staging, &counters, &diagnostics)
                     batch = jet_driver_comptime_batch_new()
                     if flushed.progressed -> made_progress = true
                     if flushed.stop == .Val(stopped) {
@@ -3179,7 +3187,7 @@ fn jet_driver_comptime_run(
                         _ := &diagnostics.pop()
                     }
                     jet_driver_comptime_forget_functions(&checked_functions, &run_index, checked_mark)
-                    flushed := jet_driver_comptime_flush(graph, names, load, request, batch, &values, checked_functions, &trace, &environment, &staging, &counters, &diagnostics)
+                    flushed := jet_driver_comptime_flush(graph, names, load, request, batch, &values, checked_functions, &trace, &environment, &available, &staging, &counters, &diagnostics)
                     batch = jet_driver_comptime_batch_new()
                     if flushed.progressed -> made_progress = true
                     if flushed.stop == .Val(stopped) {
@@ -3242,7 +3250,7 @@ fn jet_driver_comptime_run(
                     next
                 }
                 if batch.entries.len() > 0 {
-                    flushed := jet_driver_comptime_flush(graph, names, load, request, batch, &values, checked_functions, &trace, &environment, &staging, &counters, &diagnostics)
+                    flushed := jet_driver_comptime_flush(graph, names, load, request, batch, &values, checked_functions, &trace, &environment, &available, &staging, &counters, &diagnostics)
                     batch = jet_driver_comptime_batch_new()
                     if flushed.progressed -> made_progress = true
                     if flushed.stop == .Val(stopped) {
@@ -3253,7 +3261,7 @@ fn jet_driver_comptime_run(
                 alone := jet_driver_comptime_batch_new()
                 alone.shareable = false
                 jet_driver_comptime_batch_add(&alone, source, comptime_request, &closure.functions, None)
-                flushed := jet_driver_comptime_flush(graph, names, load, request, alone, &values, checked_functions, &trace, &environment, &staging, &counters, &diagnostics)
+                flushed := jet_driver_comptime_flush(graph, names, load, request, alone, &values, checked_functions, &trace, &environment, &available, &staging, &counters, &diagnostics)
                 if flushed.progressed -> made_progress = true
                 if flushed.stop == .Val(stopped) {
                     sema_comptime_body_work_flush(environment.comptime_body_publication, request.trace_sink, "sema.comptime")
@@ -3262,7 +3270,7 @@ fn jet_driver_comptime_run(
             }
         }
         if batch.entries.len() > 0 {
-            flushed := jet_driver_comptime_flush(graph, names, load, request, batch, &values, checked_functions, &trace, &environment, &staging, &counters, &diagnostics)
+            flushed := jet_driver_comptime_flush(graph, names, load, request, batch, &values, checked_functions, &trace, &environment, &available, &staging, &counters, &diagnostics)
             batch = jet_driver_comptime_batch_new()
             if flushed.progressed -> made_progress = true
             if flushed.stop == .Val(stopped) {

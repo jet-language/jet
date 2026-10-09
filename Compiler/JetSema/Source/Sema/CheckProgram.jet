@@ -4144,6 +4144,7 @@ pub fn sema_comptime_graph_with_values(graph: SemaRegistrationGraph, values: [Se
 pub fn sema_comptime_graph_apply_values(graph: &SemaRegistrationGraph, values: [SemaComptimeItemValue]) Never! {
     if values.len() == 0 -> return
     constants :: sema_comptime_constant_values(values)
+    if constants.len() == 0 -> return
     loop module_index in 0..<graph.modules.len() {
         if !sema_comptime_module_takes_values(graph.modules[module_index], constants) -> next
         sema_comptime_module_apply_values(&graph.modules[module_index], constants)
@@ -4516,13 +4517,34 @@ pub struct SemaComptimeAvailableConstants {
     pub keys: [String:Bool]
     // How many of the run's append-only values `keys` already covers.
     pub counted_values: Int
+    // Canonical first Constant position, with module/key kept separate.
+    // The same append-only frontier indexes these once for staged lowering.
+    pub constant_modules: [String:Int]{[String:Int]{}}
+    pub constant_rows: [[String:Int]]{[[String:Int]]{}}
+    pub indexed_constants: Int{0}
+    // Fixed declaration topology of this run's graph: heads by key and
+    // integer next links retain ALL matching declarations in original order.
+    pub declaration_heads: [[String:Int]]{[[String:Int]]{}}
+    pub declaration_next: [[Int]]{[[Int]]{}}
+    pub indexed_declarations: Int{0}
 }
 
 pub fn sema_comptime_available_constants(graph: SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> SemaComptimeAvailableConstants Never! {
     available := SemaComptimeAvailableConstants{keys: [String:Bool]{}, counted_values: 0}
-    loop graph_module in graph.modules {
-        loop constant in graph_module.constants {
-            if constant.declaration.ct != None -> available.keys[constant.symbol.id.key] = true
+    loop module_index in 0..<graph.modules.len() {
+        &available.declaration_heads.push([String:Int]{})
+        &available.declaration_next.push([Int]{})
+        loop constant_index in 0..<graph.modules[module_index].constants.len() {
+            if graph.modules[module_index].constants[constant_index].declaration.ct != None -> available.keys[graph.modules[module_index].constants[constant_index].symbol.id.key] = true
+            &available.declaration_next[module_index].push(-1)
+        }
+        constant_index := graph.modules[module_index].constants.len()
+        loop constant_index > 0 {
+            constant_index -= 1
+            key :: graph.modules[module_index].constants[constant_index].symbol.id.key
+            available.declaration_next[module_index][constant_index] = available.declaration_heads[module_index].get(key) ?? -1
+            available.declaration_heads[module_index][key] = constant_index
+            available.indexed_declarations += 1
         }
     }
     sema_comptime_available_constants_add(&available, values)
@@ -4532,7 +4554,12 @@ pub fn sema_comptime_available_constants(graph: SemaRegistrationGraph, values: [
 // Counts the values that landed since the last call.
 pub fn sema_comptime_available_constants_add(available: &SemaComptimeAvailableConstants, values: [SemaComptimeItemValue]) Never! {
     loop index in available.counted_values..<values.len() {
-        if values[index].kind == SemaComptimeItemKind.Constant -> available.keys[values[index].key] = true
+        if values[index].kind == SemaComptimeItemKind.Constant {
+            available.keys[values[index].key] = true
+            slot :: sema_comptime_index_module_slot(&available.constant_modules, &available.constant_rows, values[index].module_identity)
+            if available.constant_rows[slot].get(values[index].key) == None -> available.constant_rows[slot][values[index].key] = index
+            available.indexed_constants += 1
+        }
     }
     if values.len() > available.counted_values -> available.counted_values = values.len()
 }
@@ -4864,25 +4891,28 @@ pub fn sema_comptime_modules_with_values(resolved_graph: SemaRegistrationGraph, 
 // constant rows of the graph, which no other declaration reads), so a run
 // joins these rows to its staged modules instead of rechecking every module.
 // As there, the first value of a constant key wins.
-pub fn sema_comptime_staged_constant_rows(resolved_graph: SemaRegistrationGraph, values: [SemaComptimeItemValue], from: Int) -> [TConstantDef] {
+pub fn sema_comptime_staged_constant_rows(resolved_graph: SemaRegistrationGraph, values: [SemaComptimeItemValue], from: Int, available: SemaComptimeAvailableConstants) -> [TConstantDef] {
+    if available.counted_values != values.len() -> panic("staged constants lost their authenticated value frontier")
+    if available.declaration_heads.len() != resolved_graph.modules.len() -> panic("staged constants lost their graph generation")
     rows := [TConstantDef]{}
     // Staging diagnostics are never reported (as for the module rechecks).
     diagnostics := [Diagnostic]{}
     loop index in from..<values.len() {
         value :: values[index]
         if value.kind != SemaComptimeItemKind.Constant -> next
-        earlier := false
-        loop previous in 0..<index {
-            if values[previous].kind == SemaComptimeItemKind.Constant && values[previous].module_identity == value.module_identity && values[previous].key == value.key -> earlier = true
-        }
-        if earlier -> next
+        slot :: available.constant_modules.get(value.module_identity) ?? panic("a staged constant lost its indexed module")
+        first :: available.constant_rows[slot].get(value.key) ?? panic("a staged constant lost its canonical first position")
+        if first != index -> next
         module_index :: sema_registration_module_index(resolved_graph, value.module_identity) ?? next
-        module_row :: resolved_graph.modules[module_index]
+        if available.declaration_next[module_index].len() != resolved_graph.modules[module_index].constants.len() -> panic("constant declaration topology changed inside a staging generation")
+        constant_index := available.declaration_heads[module_index].get(value.key) ?? next
         staged_values := [String:SemaComptimeItemValue]{}
         staged_values[value.key] = value
-        loop constant in module_row.constants {
-            if constant.symbol.id.key != value.key -> next
-            row :: sema_checked_constant_with_values(resolved_graph, module_row, constant, staged_values, &diagnostics) ?? next
+        loop constant_index >= 0 {
+            matched_index :: constant_index
+            constant_index = available.declaration_next[module_index][matched_index]
+            if resolved_graph.modules[module_index].constants[matched_index].symbol.id.key != value.key -> panic("constant declaration order changed inside a staging generation")
+            row :: sema_checked_constant_with_values(resolved_graph, resolved_graph.modules[module_index], resolved_graph.modules[module_index].constants[matched_index], staged_values, &diagnostics) ?? next
             &rows.push(row)
         }
     }

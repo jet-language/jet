@@ -18,7 +18,7 @@ pub fn sema_comptime_body_source_key(module_identity: String, function_key: Stri
 
 // Module slots keep both identity components separate. Map reads return only
 // Int rows; no lookup materializes an owning map, expression, or staged value.
-fn sema_comptime_body_module_slot(modules: &[String:Int], rows: &[[String:Int]], module_identity: String) -> Int Never! {
+fn sema_comptime_index_module_slot(modules: &[String:Int], rows: &[[String:Int]], module_identity: String) -> Int Never! {
     if modules.get(module_identity) == .Val(slot) -> return slot
     slot :: rows.len()
     modules[module_identity] = slot
@@ -27,7 +27,7 @@ fn sema_comptime_body_module_slot(modules: &[String:Int], rows: &[[String:Int]],
 }
 
 fn sema_comptime_body_source_index(context: &SemaCheckContext, row: Int) Never! {
-    slot :: sema_comptime_body_module_slot(&context.comptime_body_source_modules, &context.comptime_body_source_rows, context.comptime_body_sources[row].module_identity)
+    slot :: sema_comptime_index_module_slot(&context.comptime_body_source_modules, &context.comptime_body_source_rows, context.comptime_body_sources[row].module_identity)
     if context.comptime_body_source_rows[slot].get(context.comptime_body_sources[row].key) == None -> context.comptime_body_source_rows[slot][context.comptime_body_sources[row].key] = row
 }
 
@@ -55,7 +55,7 @@ fn sema_comptime_body_sources_truncate(context: &SemaCheckContext, length: Int) 
 }
 
 fn sema_comptime_body_value_index_row(modules: &[String:Int], first_rows: &[[String:Int]], second_rows: &[[String:Int]], module_identity: String, key: String, row: Int) Never! {
-    slot :: sema_comptime_body_module_slot(&modules, &first_rows, module_identity)
+    slot :: sema_comptime_index_module_slot(&modules, &first_rows, module_identity)
     if second_rows.len() < first_rows.len() -> &second_rows.push([String:Int]{})
     if first_rows[slot].get(key) == None -> first_rows[slot][key] = row
     else if second_rows[slot].get(key) == None -> second_rows[slot][key] = row
