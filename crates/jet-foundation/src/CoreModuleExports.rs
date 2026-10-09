@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 1c9a98c0ce259b6b4f43858a54da909403ad4c18f15f666e553b30b40c207cba
+// Source SHA-256: a49114d2ba4c52a050ee09647544b5384bc2318e1090f5e3b332d01182090d98
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -791,7 +791,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.data.sketch.reservoir", alias: "core_core_data_sketch_reservoir", path: "Core/data/sketch/reservoir.jet", owned_members: &["new"], impl_types: &[] },
     CoreSourceModule { module: "core.data.sketch.tdigest", alias: "core_core_data_sketch_tdigest", path: "Core/data/sketch/tdigest.jet", owned_members: &["new"], impl_types: &[] },
     CoreSourceModule { module: "core.db", alias: "core_core_db", path: "Core/db/db.jet", owned_members: &["open", "open_memory", "pool", "policy", "policy_audit", "transaction", "migrate", "row_bool", "row_float", "row_int", "row_text", "row_value", "__queue_open", "__queue_begin", "__queue_commit", "__queue_rollback", "__queue_execute", "__queue_query"], impl_types: &[] },
-    CoreSourceModule { module: "core.db.sql", alias: "core_core_db_sql", path: "Core/db/sql.jet", owned_members: &["sql_tokens", "unquote", "identifier", "parse_sql_query", "compare_sql_cell", "sql_aggregate_value", "sql_output_value", "execute_sql_rows"], impl_types: &[] },
+    CoreSourceModule { module: "core.db.sql", alias: "core_core_db_sql", path: "Core/db/sql.jet", owned_members: &["sql_tokens", "unquote", "identifier", "parse_sql_query", "compare_sql_cell", "sql_aggregate_value", "sql_output_value", "execute_sql_rows"], impl_types: &["JetSQLSelectItem", "JetSQLValue"] },
     CoreSourceModule { module: "core.email", alias: "core_core_email", path: "Core/email/email.jet", owned_members: &["address", "attachment", "envelope", "message", "serialize", "smtp_from_env"], impl_types: &[] },
     CoreSourceModule { module: "core.encoding", alias: "core_encoding", path: "Core/encoding/encoding.jet", owned_members: &["hex_nibble", "hex_value", "bytes_to_hex", "hex_to_bytes", "wrap32"], impl_types: &[] },
     CoreSourceModule { module: "core.encoding.base32", alias: "core_core_encoding_base32", path: "Core/encoding/base32.jet", owned_members: &["b32decode", "b32encode", "b32hexdecode", "b32hexencode", "decode", "encode", "is_base32"], impl_types: &[] },
@@ -901,8 +901,12 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/db/db.jet", name: "DBPoolReceipt" },
     CoreSourceOwnedType { path: "Core/db/db.jet", name: "__PoolLifecycle" },
     CoreSourceOwnedType { path: "Core/db/db.jet", name: "__QueueDb" },
+    CoreSourceOwnedType { path: "Core/db/sql.jet", name: "JetSQLAggregate" },
     CoreSourceOwnedType { path: "Core/db/sql.jet", name: "JetSQLSelectItem" },
+    CoreSourceOwnedType { path: "Core/db/sql.jet", name: "JetSQLGroupKey" },
+    CoreSourceOwnedType { path: "Core/db/sql.jet", name: "JetSQLQuery" },
     CoreSourceOwnedType { path: "Core/db/sql.jet", name: "JetSQLValue" },
+    CoreSourceOwnedType { path: "Core/db/sql.jet", name: "JetSQLResultRow" },
     CoreSourceOwnedType { path: "Core/encoding/encoding.jet", name: "DataEvent" },
     CoreSourceOwnedType { path: "Core/encoding/encoding.jet", name: "EncodingFormat" },
     CoreSourceOwnedType { path: "Core/encoding/encoding.jet", name: "EncodingErrorKind" },

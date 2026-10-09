@@ -1616,7 +1616,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 1c9a98c0ce259b6b4f43858a54da909403ad4c18f15f666e553b30b40c207cba
+// Source SHA-256: a49114d2ba4c52a050ee09647544b5384bc2318e1090f5e3b332d01182090d98
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.crypto", "__jetc_open_directory"),
@@ -2904,7 +2904,6 @@ pub static CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.text", "word_views", "jet_text_word_views", true, &[true]),
     CoreCallRecord::new( "core.text", "sentences", "jet_text_sentences", true, &[true], ),
     CoreCallRecord::new("core.text", "line_views", "jet_text_line_views", true, &[true]),
-    CoreCallRecord::new("core.text", "byte_views", "jet_text_byte_views", true, &[true]),
     CoreCallRecord::new( "core.text", "scalar_count", "jet_text_unicode_scalar_count", true, &[true], ) .with_native_int_result(),
     CoreCallRecord::new( "core.text", "byte_count", "jet_text_unicode_byte_count", true, &[true], ) .with_native_int_result(),
     CoreCallRecord::new( "core.text", "is_alphabetic", "jet_text_is_alphabetic", true, &[true], ),
@@ -2916,7 +2915,6 @@ pub static CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.text", "rsplitn", "jet_text_rsplitn", true, &[true, true, false], ),
     CoreCallRecord::new("core.text", "trim", "jet_text_trim", true, &[true]),
     CoreCallRecord::new( "core.text", "trim_start", "jet_text_trim_start", true, &[true], ),
-    CoreCallRecord::new("core.text", "trim_end", "jet_text_trim_end", true, &[true]),
     CoreCallRecord::new( "core.text", "pad_start", "jet_text_pad_start_i64", true, &[true, false, true], ),
     CoreCallRecord::new( "core.text", "pad_end", "jet_text_pad_end_i64", true, &[true, false, true], ),
     CoreCallRecord::new( "core.text", "center", "jet_text_center_i64", true, &[true, false, true], ),

@@ -52,5 +52,12 @@ foreign bodies, and deliberate retired-syntax diagnostic inputs unchanged.
 Fix stale output at its template, regenerate canonically, and run the read-only
 checks; editing a generated Jet file alone is not a generator repair.
 
+Core metadata distinguishes source-owned nominals (`source_module … types { … }`)
+from owner-only implementation admission (`impls { … }`); list both explicitly
+when a public Core boundary owns its types and implements only some of them.
+When an owned wrapper calls a private runtime kernel, remove its obsolete public
+dispatcher and any unused Rust leaf. A provider still used by a separate bootstrap
+builtin remains live; never replace the source boundary with a compatibility shim.
+
 Use fresh artifacts for runtime claims. A source check, worker receipt, or stale
 binary cannot establish runtime, tier, snapshot, golden, or I9 evidence.

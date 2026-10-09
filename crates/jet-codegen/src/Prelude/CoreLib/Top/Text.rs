@@ -37,9 +37,6 @@ where
     JetViewIter(Box::new(iter))
 }
 
-fn jet_bytes_view_iter<'a>(bytes: &'a [u8]) -> JetViewIter<'a, &'a [u8]> {
-    jet_view_iter_from_iter(bytes.iter().map(std::slice::from_ref))
-}
 
 fn jet_text_unicode_scalar_count(s: &str) -> i64 {
     s.chars().count() as i64
@@ -776,11 +773,6 @@ pub(crate) fn jet_text_line_views<'a>(s: &'a str) -> JetViewIter<'a, &'a str> {
     jet_view_iter_from_iter(s.lines())
 }
 
-/// Text bytes are exposed as one-byte windows over the original UTF-8 buffer.
-/// The byte API is intentionally independent of scalar/grapheme boundaries.
-pub(crate) fn jet_text_byte_views<'a>(s: &'a str) -> JetViewIter<'a, &'a [u8]> {
-    jet_bytes_view_iter(s.as_bytes())
-}
 
 
 // ---- SB1-SB11 sentence boundaries -------------------------------------------
