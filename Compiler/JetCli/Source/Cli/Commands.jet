@@ -8,47 +8,6 @@
 // CLI replaces it; `node Compiler/Bootstrap/check-command-table.mjs` fails when
 // the two differ.
 
-// One flag. A `With <cmd>[/<cmd>…]: ` help prefix scopes it to those commands;
-// `--json`, `--quiet`, and `--color` apply to every command.
-struct JetCLIFlagSpec {
-    long: String
-    help: String
-}
-
-// One dispatcher seam a nested action reaches. `key` names the Rust host's
-// `HandlerKey` variant; `dispatch_word` is the handler word a grouped argv
-// is normalized to unless `keeps_group` keeps the group word in front.
-struct JetCLIHandlerSpec {
-    key: String
-    dispatch_word: String
-    keeps_group: Bool
-}
-
-// One canonical nested spelling under a group (`jet registry publish`).
-// `usage` holds one form per line; `handler` is a `JetCLIHandlerSpec.key`.
-struct JetCLIActionSpec {
-    name: String
-    usage: String
-    summary: String
-    handler: String
-    also_canonical_top_level: Bool
-}
-
-// One top-level command: a bare leaf (`build`) or a group with nested
-// actions (`registry`). `headline` rows are the greeting's commands.
-// `exhaustive` (groups only) means every subword is modeled by `actions`;
-// `os`, `env`, and `db` expose a wider downstream verb surface.
-// `usage` is the positional shape; None renders the generic `[args]`.
-struct JetCLICommandSpec {
-    name: String
-    summary: String
-    headline: Bool
-    frequency_rank: Int
-    exhaustive: Bool
-    usage: String?
-    actions: [JetCLIActionSpec]
-}
-
 JET_CLI_HANDLERS :: prep { [JetCLIHandlerSpec]{
     JetCLIHandlerSpec{key: "Publish", dispatch_word: "publish", keeps_group: false},
     JetCLIHandlerSpec{key: "Yank", dispatch_word: "yank", keeps_group: false},
