@@ -6,6 +6,8 @@
 // UTF-8 widths and wire byte offsets remain independent.
 // Failure helpers construct XMLFault values; each caller wraps the fault in Err
 // for its own success type rather than introducing an unconstrained generic.
+// Rendering bindings distinguish element names, namespace prefixes, attributes,
+// and child node kinds; nested scopes do not redeclare an enclosing binding.
 use core.encoding.[Dyn]
 use core.encoding as encoding
 use core.text as unicode
@@ -936,12 +938,12 @@ fn deterministic_leaf(value: Dyn, kind: String) -> String XMLFault! {
             name :: required_text(value, "name") ?? return Err(err)
             output := "<!DOCTYPE {name}"
             public :: if optional_text_field(value, "public_id") == {
-                .Val(name) -> Val(^name)
+                .Val(public_name) -> Val(^public_name)
                 .None -> String?{None}
                 .Err(error) -> { return Err(^error) }
             }
             system :: if optional_text_field(value, "system_id") == {
-                .Val(name) -> Val(^name)
+                .Val(system_name) -> Val(^system_name)
                 .None -> String?{None}
                 .Err(error) -> { return Err(^error) }
             }
@@ -996,11 +998,11 @@ fn render_element_open(value: Dyn, output: &String) XMLFault! {
     loop namespace in namespaces {
         output += " xmlns"
         prefix :: if optional_text_field(namespace, "prefix") == {
-            .Val(name) -> Val(^name)
+            .Val(prefix_text) -> Val(^prefix_text)
             .None -> String?{None}
             .Err(error) -> { return Err(^error) }
         }
-        if prefix == .Val(name) -> output += ":{name}"
+        if prefix == .Val(prefix_text) -> output += ":{prefix_text}"
         style :: required_text(namespace, "quote") ?? return Err(err)
         quote :: if style == "single" -> "'" else -> "\""
         uri :: required_text(namespace, "namespace_uri") ?? return Err(err)
@@ -1010,10 +1012,10 @@ fn render_element_open(value: Dyn, output: &String) XMLFault! {
     attributes :: array_value(field(value, "attributes")) ?? return Err(XMLFault.shape("XML attributes must be an array"))
     loop attribute in attributes {
         attribute_name :: field(attribute, "name") ?? return Err(XMLFault.shape("XML attribute lacks name"))
-        raw_name :: required_text(attribute_name, "raw") ?? return Err(err)
+        raw_attribute_name :: required_text(attribute_name, "raw") ?? return Err(err)
         style :: required_text(attribute, "quote") ?? return Err(err)
         quote :: if style == "single" -> "'" else -> "\""
-        output += " {raw_name}={quote}"
+        output += " {raw_attribute_name}={quote}"
         normalized :: if optional_text_field(attribute, "normalized_value") == {
             .Val(body) -> Val(^body)
             .None -> String?{None}
@@ -1301,7 +1303,7 @@ fn validate_start(event: Dyn, name: Name, inherited: ^NamespaceScope) -> Namespa
         kind :: required_text(namespace, "$xml") ?? return Err(err)
         if kind != "namespace" -> return Err(XMLFault.shape("namespaces contains a non-namespace node"))
         prefix :: if optional_text_field(namespace, "prefix") == {
-            .Val(name) -> Val(^name)
+            .Val(prefix_text) -> Val(^prefix_text)
             .None -> String?{None}
             .Err(error) -> { return Err(^error) }
         }
@@ -1321,15 +1323,15 @@ fn validate_start(event: Dyn, name: Name, inherited: ^NamespaceScope) -> Namespa
         kind :: required_text(attribute, "$xml") ?? return Err(err)
         if kind != "attribute" -> return Err(XMLFault.shape("attributes contains a non-attribute node"))
         attr :: parse_name(field(attribute, "name") ?? return Err(XMLFault.shape("attribute lacks name"))) ?? return Err(err)
-        resolved :: if attr.prefix == .Val(prefix) -> context.get(Val(prefix)) else -> None
-        if resolved != attr.namespace_uri -> return Err(XMLFault.at_kind(0, Reason.Namespace, "attribute expanded name disagrees with namespace bindings"))
+        attribute_uri :: if attr.prefix == .Val(prefix) -> context.get(Val(prefix)) else -> None
+        if attribute_uri != attr.namespace_uri -> return Err(XMLFault.at_kind(0, Reason.Namespace, "attribute expanded name disagrees with namespace bindings"))
         if &expanded.insert(attr.namespace_uri, attr.local) -> return Err(XMLFault.at_kind(0, Reason.DuplicateAttribute, "duplicate expanded attribute name"))
         quote :: required_text(attribute, "quote") ?? return Err(err)
         if quote != "single" && quote != "double" -> return Err(XMLFault.shape("attribute quote must be single or double"))
         parts :: array_value(field(attribute, "parts")) ?? return Err(XMLFault.shape("attribute parts must be an Array"))
         loop part in parts {
-            kind :: required_text(part, "$xml") ?? return Err(err)
-            if kind != "text" && kind != "entity_ref" -> return Err(XMLFault.shape("attribute parts contains an illegal node"))
+            part_kind :: required_text(part, "$xml") ?? return Err(err)
+            if part_kind != "text" && part_kind != "entity_ref" -> return Err(XMLFault.shape("attribute parts contains an illegal node"))
         }
     }
     ^context
@@ -1459,17 +1461,17 @@ fn canonical_document(value: Dyn, options: CanonicalOptions) -> String XMLFault!
     base :: base_namespaces()
     rendered :: NamespaceScope.new()
     loop child in children {
-        kind :: required_text(child, "$xml") ?? return Err(err)
-        if kind == {
+        child_kind :: required_text(child, "$xml") ?? return Err(err)
+        if child_kind == {
             "declaration" | "doctype" | "document_whitespace" -> {}
             "element" -> {
                 root_seen = true
                 canonical_node(child, options, base, rendered, &output) ?? return Err(err)
             }
             "comment" | "processing_instruction" -> {
-                if kind == "comment" && !options.comments -> next
+                if child_kind == "comment" && !options.comments -> next
                 if root_seen -> output += "\n"
-                canonical_leaf(child, kind, &output) ?? return Err(err)
+                canonical_leaf(child, child_kind, &output) ?? return Err(err)
                 if !root_seen -> output += "\n"
             }
             else -> return Err(XMLFault.shape("illegal node outside XML root element"))
@@ -1486,7 +1488,7 @@ fn canonical_node(value: Dyn, options: CanonicalOptions, parent_scope: Namespace
     namespaces :: array_value(field(value, "namespaces")) ?? return Err(XMLFault.shape("element namespaces must be an array"))
     loop namespace in namespaces {
         prefix :: if optional_text_field(namespace, "prefix") == {
-            .Val(name) -> Val(^name)
+            .Val(prefix_text) -> Val(^prefix_text)
             .None -> String?{None}
             .Err(error) -> { return Err(^error) }
         }
@@ -1533,8 +1535,8 @@ fn canonical_node(value: Dyn, options: CanonicalOptions, parent_scope: Namespace
     output += ">"
     children :: array_value(field(value, "children")) ?? return Err(XMLFault.shape("element children must be an array"))
     loop child in children {
-        kind :: required_text(child, "$xml") ?? return Err(err)
-        if kind == "comment" && !options.comments -> next
+        child_kind :: required_text(child, "$xml") ?? return Err(err)
+        if child_kind == "comment" && !options.comments -> next
         canonical_node(child, options, scope, rendered, output) ?? return Err(err)
     }
     output += "</{name.raw}>"
@@ -1722,11 +1724,11 @@ fn lookup_attribute(element: Dyn, name: String) -> String? XMLFault! {
         parts :: read_name_parts(attr_name, "$") ?? return Err(err)
         if !selector_matches(parts.local, parts.namespace_uri, name) -> next
         normalized :: if optional_text_field(attribute, "normalized_value") == {
-            .Val(content) -> Val(^content)
+            .Val(attribute_text) -> Val(^attribute_text)
             .None -> String?{None}
             .Err(error) -> { return Err(projection_err("$", error.reason)) }
         }
-        if normalized == .Val(content) -> return Val(content)
+        if normalized == .Val(attribute_text) -> return Val(attribute_text)
         return Err(entity_err("@{clark_key(parts.local, parts.namespace_uri)}", "attribute has an unresolved entity"))
     }
     None
