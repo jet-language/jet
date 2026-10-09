@@ -4808,10 +4808,8 @@ fn core_fixed_sig_raw(
         )),
         // #3593: policy-free provider leaves behind Core/files/files.jet. Only
         // embedded Core sources may spell the reserved `__` names.
-        ("core.files", "__create_dir_all_raw") => Some((
-            vec![(read, Type::String)],
-            Some(result_ty(unit_ty(), io.clone())),
-        )),
+        ("core.files", "__create_dir_all_raw") => Some((vec![(read, string.clone())],
+            Some(result_ty(unit_ty(), io.clone())))),
         ("core.files", "__open_reader") => Some((
             vec![(read, Type::Int), (read, Type::String), (read, Type::Int)],
             Some(result_ty(Type::Named("FileReader".to_string()), io.clone())),
