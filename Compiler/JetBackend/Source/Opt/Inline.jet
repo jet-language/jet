@@ -39,7 +39,7 @@ fn inline_direct(program: LIRModule, original: LIRFunction) -> LIRFunction Never
             }
             &insts.push(rewritten)
         }
-        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: block.terminator})
+        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: block.terminator, lines: block.lines})
     }
     function.blocks = blocks
     function
@@ -155,7 +155,8 @@ fn inline_caller(program: LIRModule, original: LIRFunction, recursive: [Bool], s
         current := block.id
         params := block.params
         insts := [LIRInst]{}
-        loop inst in block.insts {
+        lines := [Int]{}
+        loop (index, inst) in block.insts {
             selected := -1
             result := inline_no_result()
             args := [LIRValueID]{}
@@ -176,6 +177,7 @@ fn inline_caller(program: LIRModule, original: LIRFunction, recursive: [Bool], s
             }
             if selected < 0 {
                 &insts.push(inst)
+                &lines.push(opt_debug_line(block, index))
                 next
             }
             callee :: program.functions[selected]
@@ -201,21 +203,29 @@ fn inline_caller(program: LIRModule, original: LIRFunction, recursive: [Bool], s
             continuation :: LIRBlockID{value: fresh_block}
             fresh_block += 1
             entry :: LIRBlockID{value: block_map.get(callee.blocks[0].id.value) ?? -1}
-            &blocks.push(LIRBlock{id: current, params: params, insts: insts, terminator: LIRTerminator.Jump{target: LIRJumpTarget{block: entry, args: [LIRValueID]{}}}})
+            &lines.push(opt_debug_line(block, index))
+            &blocks.push(LIRBlock{id: current, params: params, insts: insts, terminator: LIRTerminator.Jump{target: LIRJumpTarget{block: entry, args: [LIRValueID]{}}}, lines: lines})
             loop (position, copied) in callee.blocks {
                 copied_params :: if position == 0 -> [LIRValueID]{} else -> opt_ns(map, copied.params)
                 copied_insts := [LIRInst]{}
                 // A StackSlot stays an instruction at each site, with a new
                 // dst, so selection allocates distinct storage for each copy.
                 loop copied_inst in copied.insts -> &copied_insts.push(opt_renumber_inst(map, copied_inst))
-                &blocks.push(LIRBlock{id: LIRBlockID{value: block_map.get(copied.id.value) ?? -1}, params: copied_params, insts: copied_insts, terminator: inline_terminator(map, block_map, continuation, copied.terminator)})
+                copied_lines := [Int]{}
+                loop at in 0..<(copied.insts.len() + 1) {
+                    line :: if callee.debug.file == function.debug.file -> opt_debug_line(copied, at) else -> opt_debug_line(block, index)
+                    &copied_lines.push(line)
+                }
+                &blocks.push(LIRBlock{id: LIRBlockID{value: block_map.get(copied.id.value) ?? -1}, params: copied_params, insts: copied_insts, terminator: inline_terminator(map, block_map, continuation, copied.terminator), lines: copied_lines})
             }
             current = continuation
             params = [LIRValueID]{}
             if result == .Val(dst) -> &params.push(dst)
             insts = [LIRInst]{}
+            lines = [Int]{}
         }
-        &blocks.push(LIRBlock{id: current, params: params, insts: insts, terminator: block.terminator})
+        &lines.push(opt_debug_line(block, block.insts.len()))
+        &blocks.push(LIRBlock{id: current, params: params, insts: insts, terminator: block.terminator, lines: lines})
     }
     if !changed -> return function
     function.blocks = blocks
@@ -228,7 +238,7 @@ fn inline_caller(program: LIRModule, original: LIRFunction, recursive: [Bool], s
 fn lir_inline_module(program: LIRModule) -> LIRModule Never! {
     direct := [LIRFunction]{}
     loop function in program.functions -> &direct.push(inline_direct(program, function))
-    exposed :: LIRModule{signatures: program.signatures, functions: direct, data: program.data}
+    exposed :: LIRModule{signatures: program.signatures, functions: direct, data: program.data, debug: program.debug}
     graph :: inline_graph(exposed)
     sizes := [Int]{}
     consumed := [[Bool]]{}
@@ -247,5 +257,5 @@ fn lir_inline_module(program: LIRModule) -> LIRModule Never! {
     }
     functions := [LIRFunction]{}
     loop function in exposed.functions -> &functions.push(inline_caller(exposed, function, graph.recursive, sizes, consumed))
-    LIRModule{signatures: program.signatures, functions: functions, data: program.data}
+    LIRModule{signatures: program.signatures, functions: functions, data: program.data, debug: program.debug}
 }

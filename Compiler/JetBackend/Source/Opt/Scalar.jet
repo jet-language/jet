@@ -189,7 +189,9 @@ fn opt_scalar_slot(original: LIRFunction, slot: LIRValueID, fields: [OptScalarFi
         saved[row] = current
         loop (field, phi) in phis[row] { if phi >= 0 -> current[field] = phi }
         insts := [LIRInst]{}
-        loop inst in function.blocks[row].insts {
+        block :: function.blocks[row]
+        lines := [Int]{}
+        loop (index, inst) in block.insts {
             removed := false
             if inst == {
                 .StackSlot(dst, _, _) -> { if dst == slot -> removed = true }
@@ -226,7 +228,10 @@ fn opt_scalar_slot(original: LIRFunction, slot: LIRValueID, fields: [OptScalarFi
                 else -> {}
             }
             if !removed -> &insts.push(inst)
+            loop lines.len() < insts.len() -> &lines.push(opt_debug_line(block, index))
         }
+        &lines.push(opt_debug_line(block, block.insts.len()))
+        function.blocks[row].lines = lines
         function.blocks[row].insts = insts
         terminator :: function.blocks[row].terminator
         function.blocks[row].terminator = if terminator == {

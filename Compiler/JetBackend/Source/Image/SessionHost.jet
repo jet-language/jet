@@ -402,23 +402,24 @@ fn x64_execution_request_locked(host: X64ExecutionHost, request: X64ExecutionReq
     X64ExecutionResponse{body: "{{\"kind\":\"{kind}\",\"jct_status\":null,\"owner\":null,\"start\":null,\"end\":null,\"message\":{message}}}", stopped: true, invalidated: true, generation: generation, stdout: stdout, stderr: stderr, errors: errors}
 }
 
-fn x64_execution_string(tree: DataTree) -> String? Never! {
+fn x64_execution_string(tree: Dyn) -> String? Never! {
     if tree == .Text(text) -> return Val(text)
     None
 }
-fn x64_execution_int(tree: DataTree) -> Int? Never! {
+fn x64_execution_int(tree: Dyn) -> Int? Never! {
     if tree == .Int(number) -> return Val(number)
+    if tree == .Number(text) -> return Val(Int.parse(text) ?? return None)
     None
 }
-fn x64_execution_array(tree: DataTree) -> [DataTree]? Never! {
+fn x64_execution_array(tree: Dyn) -> [Dyn]? Never! {
     if tree == .Array(rows) -> return Val(rows)
     None
 }
-fn x64_execution_bool(tree: DataTree) -> Bool? Never! {
+fn x64_execution_bool(tree: Dyn) -> Bool? Never! {
     if tree == .Bool(flag) -> return Val(flag)
     None
 }
-fn x64_execution_decode(tree: DataTree, runtime_identity: String) -> X64ExecutionEnvelope? {
+fn x64_execution_decode(tree: Dyn, runtime_identity: String) -> X64ExecutionEnvelope? {
     fields :: x64_execution_array(tree) ?? return None
     if fields.len() != 20 -> return None
     if x64_execution_string(fields[14]) != Val(runtime_identity) -> return None
@@ -764,4 +765,11 @@ fn x64_execution_service(runtime_path: String, runtime_identity: String) -> Int 
         if !x64_unload_image(pinned.image) -> return 101
     }
     0
+}
+
+#Test("native execution JSON integers retain exact Dyn numbers") {
+    assert_eq(x64_execution_int(Dyn.Number("18446744073709551615")), Val(18446744073709551615))
+    assert_eq(x64_execution_int(Dyn.Number("-42")), Val(-42))
+    assert_eq(x64_execution_int(Dyn.Number("1.5")), None)
+    assert_eq(x64_execution_int(Dyn.Text("42")), None)
 }

@@ -36,9 +36,9 @@ struct CoreSharedParentRuntime {
 }
 // These are actual library-feed layouts sealed in the embedded receipt, not
 // signatures inferred from a symbol name or rebuilt by the receiving factory.
-fn core_shared_abi_field(tree: DataTree, name: String) -> DataTree? Never! {
+fn core_shared_abi_field(tree: Dyn, name: String) -> Dyn? Never! {
     if tree == .Object(fields) {
-        selected := DataTree?{None}
+        selected := Dyn?{None}
         loop field in fields {
             if field.key != name -> next
             if selected != None -> return None
@@ -48,7 +48,7 @@ fn core_shared_abi_field(tree: DataTree, name: String) -> DataTree? Never! {
     }
     None
 }
-fn core_shared_runtime_layout_decode(tree: DataTree) -> LIRLayout? Never! {
+fn core_shared_runtime_layout_decode(tree: Dyn) -> LIRLayout? Never! {
     if tree == .Object(fields) && fields.len() != 3 -> return None
     size :: x64_execution_int(core_shared_abi_field(tree, "size") ?? return None) ?? return None
     align :: x64_execution_int(core_shared_abi_field(tree, "align") ?? return None) ?? return None
@@ -63,7 +63,7 @@ fn core_shared_runtime_layout_decode(tree: DataTree) -> LIRLayout? Never! {
     }
     Val(LIRLayout{size: size, align: align, class: class})
 }
-fn core_shared_runtime_export_abis_decode(tree: DataTree) -> [String:CoreSharedRuntimeExportABI]? Never! {
+fn core_shared_runtime_export_abis_decode(tree: Dyn) -> [String:CoreSharedRuntimeExportABI]? Never! {
     rows :: x64_execution_array(tree) ?? return None
     result := [String:CoreSharedRuntimeExportABI]{}
     previous := ""
@@ -371,7 +371,7 @@ fn core_shared_parent_payload_callable(parent: CoreSharedParent, attachment: Cor
     decoded :: core_shared_runtime_export_abis_decode(tree) ?? panic("actual ABI rows did not decode")
     assert_eq(decoded.get(first.symbol), Val(first))
     assert_eq(decoded.get(second.symbol), Val(second))
-    assert(core_shared_runtime_export_abis_decode(DataTree.Null) == None)
+    assert(core_shared_runtime_export_abis_decode(Dyn.Null) == None)
     invalid_rows :: [[CoreSharedRuntimeExportABI]]{
         [CoreSharedRuntimeExportABI]{second, first},
         [CoreSharedRuntimeExportABI]{first, first},

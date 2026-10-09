@@ -115,7 +115,7 @@ fn sh_skips() -> [String:Bool] {
 }
 
 fn sh_placeholder(id: LIRFunctionID, name: String, signature: LIRSignatureID) -> LIRFunction {
-    LIRFunction{id: id, name: name, signature: signature, values: [LIRValue]{}, blocks: [LIRBlock]{}}
+    LIRFunction{id: id, name: name, signature: signature, values: [LIRValue]{}, blocks: [LIRBlock]{}, debug: lir_function_debug_none()}
 }
 
 fn sh_glue_name(glue: LowerGlue) -> String {
@@ -277,7 +277,7 @@ fn run() {
     }
     sh_note(out, "stats", "glue_ms\t{glue_watch.elapsed_millis()}")
     sh_note(out, "stats", "glue_functions\t{m.glue.len()}")
-    lowered :: LIRModule{signatures: ~m.signatures, functions: functions, data: ~m.data}
+    lowered :: LIRModule{signatures: ~m.signatures, functions: functions, data: ~m.data, debug: LIRModuleDebug{directory: "", files: ~m.debug_files, types: ~m.debug_types}}
     loop issue in m.issues -> &issues.push("{issue.function}\t{issue.message}")
     if issues.len() == 0 {
         loop issue in lir_lint_module(lowered) -> &issues.push("{issue.function}\tLIR lint b{issue.block}: {issue.message}")

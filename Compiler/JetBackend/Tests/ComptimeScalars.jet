@@ -17,7 +17,7 @@ fn ci_scalar(kind: MIRTypeKind, value: TComptimeValue, layout: LIRLayout, runtim
     block :: lir_builder_block_id(&builder)
     parameter :: lir_builder_value(&builder, layout, LIRDrop.Trivial, None)
     lir_builder_seal(&builder, block, [LIRValueID]{parameter}, LIRTerminator.Return{value: Val(parameter)})
-    program :: LIRModule{signatures: [LIRSignature]{LIRSignature{id: signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{layout}, result: Val(layout)}}, functions: [LIRFunction]{lir_builder_finish(builder)}, data: [LIRData]{}}
+    program :: LIRModule{signatures: [LIRSignature]{LIRSignature{id: signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{layout}, result: Val(layout)}}, functions: [LIRFunction]{lir_builder_finish(builder)}, data: [LIRData]{}, debug: lir_module_debug_none()}
     call :: x64_call_image(program, LIRFunctionID{value: 0}, None)
     loaded :: x64_load_image(call.image, runtime)
     answer :: x64_call_loaded(loaded, call, [Int]{encoded.word})

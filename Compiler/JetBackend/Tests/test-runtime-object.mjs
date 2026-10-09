@@ -30,6 +30,7 @@ const witness = `fn run() {
             program.data = [LIRData]{}
             program.functions[0].values = [LIRValue]{}
             program.functions[0].blocks[0].insts = [LIRInst]{}
+            program.functions[0].blocks[0].lines = [Int]{0}
         }
         current :: x64_relocatable_object(program, entry)
         before :: runtime_reference_object(program, entry)

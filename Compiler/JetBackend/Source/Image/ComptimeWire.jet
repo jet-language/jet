@@ -17,7 +17,7 @@ fn x64_closure_registration_json(row: X64ClosureRegistration) -> String Never! {
     captures :: loop member in row.layout.captures -> x64_value_member_json(member)
     "[{row.offset},{foundation_json_quote(row.layout.snapshot)},{foundation_json_quote(row.layout.function)},{x64_value_boundary_json(row.layout.boundary)},[{captures.join(",")}]]"
 }
-fn x64_closure_registration_decode(tree: DataTree, code_size: Int) -> X64ClosureRegistration? Never! {
+fn x64_closure_registration_decode(tree: Dyn, code_size: Int) -> X64ClosureRegistration? Never! {
     rows :: x64_execution_array(tree) ?? return None
     if rows.len() != 5 -> return None
     offset :: x64_execution_int(rows[0]) ?? return None
@@ -208,7 +208,7 @@ fn x64_value_boundary_json(boundary: X64ValueBoundary) -> String Never! {
     }
     "[{boundary.root},[{rows.join(",")}]]"
 }
-fn x64_value_member_decode(tree: DataTree, count: Int) -> X64ValueMember? Never! {
+fn x64_value_member_decode(tree: Dyn, count: Int) -> X64ValueMember? Never! {
     rows :: x64_execution_array(tree) ?? return None
     if rows.len() != 4 -> return None
     name :: x64_execution_string(rows[0]) ?? return None
@@ -218,7 +218,7 @@ fn x64_value_member_decode(tree: DataTree, count: Int) -> X64ValueMember? Never!
     if offset < 0 || descriptor < 0 || descriptor >= count -> return None
     Val(X64ValueMember{name: name, offset: offset, descriptor: descriptor, boxed: boxed})
 }
-fn x64_value_boundary_decode(tree: DataTree) -> X64ValueBoundary? Never! {
+fn x64_value_boundary_decode(tree: Dyn) -> X64ValueBoundary? Never! {
     fields :: x64_execution_array(tree) ?? return None
     if fields.len() != 2 -> return None
     root :: x64_execution_int(fields[0]) ?? return None

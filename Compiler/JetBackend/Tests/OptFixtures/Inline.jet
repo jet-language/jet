@@ -16,7 +16,7 @@ fn ofxi_module(functions: [LIRFunction]) -> LIRModule Never! {
         ofxi_sig(5, [LIRLayout]{p}, None),
         ofxi_sig(6, [LIRLayout]{p}, Val(p)),
         ofxi_sig(7, [LIRLayout]{w}, None)
-    }, functions: functions, data: [LIRData]{}}
+    }, functions: functions, data: [LIRData]{}, debug: lir_module_debug_none()}
 }
 
 fn ofxi_builder(id: Int, name: String, signature: Int) -> LIRFunctionBuilder Never! {
@@ -39,10 +39,10 @@ fn ofxi_leaf() -> LIRFunction Never! {
 
 fn ofxi_check(before: LIRModule, caller_body: String) -> Bool Never! {
     after :: lir_inline_module(before)
-    header :: lir_print_module(LIRModule{signatures: before.signatures, functions: [LIRFunction]{}, data: before.data})
+    header :: lir_print_module(LIRModule{signatures: before.signatures, functions: [LIRFunction]{}, data: before.data, debug: before.debug})
     expected := "{header}{caller_body}\n"
     loop (index, function) in before.functions {
-        if index > 0 -> expected = "{expected}{lir_print_module(LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{function}, data: [LIRData]{}})}"
+        if index > 0 -> expected = "{expected}{lir_print_module(LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{function}, data: [LIRData]{}, debug: before.debug})}"
     }
     print("=== {before.functions[0].name} before ===\n{lir_print_module(before)}=== {before.functions[0].name} after ===\n{lir_print_module(after)}")
     passed := true

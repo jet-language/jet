@@ -13,8 +13,8 @@
 // (D-FFI-ASM1, D-FFI-ASMOPS1): sema checks their operand contract and every
 // call needs an audited `#Unsafe` gate. A system call returns its result, or
 // `-errno` in -4095..-1; `os_failed` tells the two apart. Runtime symbols
-// resolve through the dynamic linker while the runtime is the compiled Rust
-// runtime's C library. See "Jet OS layer" in
+// resolve through the dynamic linker for hosted C platform imports. Jet
+// runtime leaves and OS boundaries are compiled from this source tree. See
 // Docs/research/jet-backend-design-2026-10-01.md.
 use core.mem
 
@@ -236,15 +236,6 @@ fn os_call_address_three_unit(address: Int, first: Int, second: Int, third: Int)
     """
 }
 
-#[Unsafe("calls machine code; the caller holds the mapping and its checked zero-argument Unit System V signature"), FFI(asm)]
-fn os_call_address_unit(address: Int) {
-    """
-    push {address}
-    pop r11
-    call r11
-    ; clobbers rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
-    """
-}
 
 #[Unsafe("calls machine code; the caller holds the mapping and its checked one-word Unit System V signature"), FFI(asm)]
 fn os_call_address_one_unit(address: Int, first: Int) {
@@ -272,73 +263,6 @@ fn os_call_address_two_unit(address: Int, first: Int, second: Int) {
     """
 }
 
-#[Unsafe("calls machine code; the caller holds the mapping and its checked three-word Unit System V signature"), FFI(asm)]
-fn os_call_address_three_unit(address: Int, first: Int, second: Int, third: Int) {
-    """
-    push {address}
-    push {first}
-    push {second}
-    push {third}
-    pop rdx
-    pop rsi
-    pop rdi
-    pop r11
-    call r11
-    ; clobbers rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
-    """
-}
-
-#[Unsafe("calls machine code; the caller holds the mapping and its checked zero-argument Unit System V signature"), FFI(asm)]
-fn os_call_address_unit(address: Int) {
-    """
-    push {address}
-    pop r11
-    call r11
-    ; clobbers rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
-    """
-}
-
-#[Unsafe("calls machine code; the caller holds the mapping and its checked one-word Unit System V signature"), FFI(asm)]
-fn os_call_address_one_unit(address: Int, first: Int) {
-    """
-    push {address}
-    push {first}
-    pop rdi
-    pop r11
-    call r11
-    ; clobbers rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
-    """
-}
-
-#[Unsafe("calls machine code; the caller holds the mapping and its checked two-word Unit System V signature"), FFI(asm)]
-fn os_call_address_two_unit(address: Int, first: Int, second: Int) {
-    """
-    push {address}
-    push {first}
-    push {second}
-    pop rsi
-    pop rdi
-    pop r11
-    call r11
-    ; clobbers rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
-    """
-}
-
-#[Unsafe("calls machine code; the caller holds the mapping and its checked three-word Unit System V signature"), FFI(asm)]
-fn os_call_address_three_unit(address: Int, first: Int, second: Int, third: Int) {
-    """
-    push {address}
-    push {first}
-    push {second}
-    push {third}
-    pop rdx
-    pop rsi
-    pop rdi
-    pop r11
-    call r11
-    ; clobbers rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
-    """
-}
 
 #[Unsafe("dlopen reads the NUL-terminated path at `path`"), FFI(c)]
 fn os_dl_open(path: Int) -> Int {
@@ -556,7 +480,7 @@ fn os_syscall_stack4_i64(number: I64, a1: I64, w0: I64, w1: I64, w2: I64, w3: I6
     """
 }
 
-// GS is reserved for Jet; musl/Rust keep their independent TLS on FS. Every
+// GS is reserved for Jet; musl keeps its independent TLS on FS. Every
 // attached TCB stores its own address at offset zero. No lazy attachment probe.
 #[Unsafe("the calling thread is attached and GS points at its live Jet TCB"), FFI(asm)]
 fn os_tls_base_i64() -> I64 {
@@ -786,84 +710,6 @@ fn os_call4_i64(address: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
     """
 }
 
-// Translate Linux stat144 to the portable 128-byte scalar StatFacts row.
-// Offsets: dev0 ino8 mode16 nlink24 uid32 gid40 rdev48 size56;
-// atime64/72 mtime80/88 ctime96/104 blocks112 blockSize120.
-// Failed syscalls still copy initialized zeros; callers must inspect errno.
-#[Unsafe("object is a live fd for fstat or a terminated path for stat/lstat; output lends 128 writable bytes; the initialized stack stat frame never escapes"), FFI(asm)]
-fn os_stat_facts_i64(number: I64, object: I64, output: I64) -> I64 {
-    """
-    push {number}
-    push {object}
-    push {output}
-    pop r8
-    pop rdi
-    pop rax
-    push r8
-    sub rsp, 144
-    mov rdx, 0
-    mov qword ptr [rsp], rdx
-    mov qword ptr [rsp + 8], rdx
-    mov qword ptr [rsp + 16], rdx
-    mov qword ptr [rsp + 24], rdx
-    mov qword ptr [rsp + 32], rdx
-    mov qword ptr [rsp + 40], rdx
-    mov qword ptr [rsp + 48], rdx
-    mov qword ptr [rsp + 56], rdx
-    mov qword ptr [rsp + 64], rdx
-    mov qword ptr [rsp + 72], rdx
-    mov qword ptr [rsp + 80], rdx
-    mov qword ptr [rsp + 88], rdx
-    mov qword ptr [rsp + 96], rdx
-    mov qword ptr [rsp + 104], rdx
-    mov qword ptr [rsp + 112], rdx
-    mov qword ptr [rsp + 120], rdx
-    mov qword ptr [rsp + 128], rdx
-    mov qword ptr [rsp + 136], rdx
-    mov rsi, rsp
-    syscall
-    mov r8, qword ptr [rsp + 144]
-    mov rcx, 4294967295
-    mov rdx, qword ptr [rsp]
-    mov qword ptr [r8], rdx
-    mov rdx, qword ptr [rsp + 8]
-    mov qword ptr [r8 + 8], rdx
-    mov rdx, qword ptr [rsp + 24]
-    and rdx, rcx
-    mov qword ptr [r8 + 16], rdx
-    mov rdx, qword ptr [rsp + 16]
-    mov qword ptr [r8 + 24], rdx
-    mov rdx, qword ptr [rsp + 24]
-    shr rdx, 32
-    mov qword ptr [r8 + 32], rdx
-    mov rdx, qword ptr [rsp + 32]
-    and rdx, rcx
-    mov qword ptr [r8 + 40], rdx
-    mov rdx, qword ptr [rsp + 40]
-    mov qword ptr [r8 + 48], rdx
-    mov rdx, qword ptr [rsp + 48]
-    mov qword ptr [r8 + 56], rdx
-    mov rdx, qword ptr [rsp + 72]
-    mov qword ptr [r8 + 64], rdx
-    mov rdx, qword ptr [rsp + 80]
-    mov qword ptr [r8 + 72], rdx
-    mov rdx, qword ptr [rsp + 88]
-    mov qword ptr [r8 + 80], rdx
-    mov rdx, qword ptr [rsp + 96]
-    mov qword ptr [r8 + 88], rdx
-    mov rdx, qword ptr [rsp + 104]
-    mov qword ptr [r8 + 96], rdx
-    mov rdx, qword ptr [rsp + 112]
-    mov qword ptr [r8 + 104], rdx
-    mov rdx, qword ptr [rsp + 64]
-    mov qword ptr [r8 + 112], rdx
-    mov rdx, qword ptr [rsp + 56]
-    mov qword ptr [r8 + 120], rdx
-    add rsp, 152
-    mov rax, rax ; -> return
-    ; clobbers rcx, r11, rdi, rsi, rdx, r8
-    """
-}
 
 // Linux AT_EMPTY_PATH refers to the held source inode (FileHandles.rs), never
 // reopens an old pathname. The borrowed empty path is one stack-local zero.
@@ -888,99 +734,6 @@ fn os_link_fd_i64(source: I64, directory: I64, name: I64) -> I64 {
     """
 }
 
-#[Unsafe("directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes"), FFI(asm)]
-fn os_statx_created_i64(directory: I64, path: I64, flags: I64, output: I64) -> I64 {
-    """
-    push {directory}
-    push {path}
-    push {flags}
-    push {output}
-    pop r9
-    pop rdx
-    pop rsi
-    pop rdi
-    push r9
-    mov rax, 0
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    push rax
-    mov r8, rsp
-    mov r10, 2048
-    mov rax, 332
-    syscall
-    mov r9, qword ptr [rsp + 256]
-    mov rdx, qword ptr [rsp]
-    mov qword ptr [r9], rdx
-    mov rdx, qword ptr [rsp + 80]
-    mov qword ptr [r9 + 8], rdx
-    mov rdx, qword ptr [rsp + 88]
-    mov qword ptr [r9 + 16], rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    mov rax, rax ; -> return
-    ; clobbers rcx, r11
-    """
-}
 
 #[Unsafe("ioctl reads one stack-local machine word with the supplied audited request and live fd; it retains no pointer and all pushes are balanced"), FFI(asm)]
 fn os_ioctl_word_i64(fd: I64, request: I64, word: I64) -> I64 {
@@ -1001,69 +754,6 @@ fn os_ioctl_word_i64(fd: I64, request: I64, word: I64) -> I64 {
     """
 }
 
-#[Unsafe("calls a checked native runtime callback with one machine-word argument"), FFI(asm)]
-fn os_call1_i64(address: I64, a: I64) -> I64 {
-    """
-    push {address}
-    push {a}
-    pop rdi
-    pop r11
-    call r11
-    mov rax, rax ; -> return
-    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
-    """
-}
-
-#[Unsafe("calls a checked native runtime callback with two machine-word arguments"), FFI(asm)]
-fn os_call2_i64(address: I64, a: I64, b: I64) -> I64 {
-    """
-    push {address}
-    push {a}
-    push {b}
-    pop rsi
-    pop rdi
-    pop r11
-    call r11
-    mov rax, rax ; -> return
-    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
-    """
-}
-
-#[Unsafe("calls a checked native runtime callback with three machine-word arguments"), FFI(asm)]
-fn os_call3_i64(address: I64, a: I64, b: I64, c: I64) -> I64 {
-    """
-    push {address}
-    push {a}
-    push {b}
-    push {c}
-    pop rdx
-    pop rsi
-    pop rdi
-    pop r11
-    call r11
-    mov rax, rax ; -> return
-    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
-    """
-}
-
-#[Unsafe("calls a checked native runtime callback with four machine-word arguments"), FFI(asm)]
-fn os_call4_i64(address: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
-    """
-    push {address}
-    push {a}
-    push {b}
-    push {c}
-    push {d}
-    pop rcx
-    pop rdx
-    pop rsi
-    pop rdi
-    pop r11
-    call r11
-    mov rax, rax ; -> return
-    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
-    """
-}
 
 // Translate Linux stat144 to the portable 128-byte scalar StatFacts row.
 // Offsets: dev0 ino8 mode16 nlink24 uid32 gid40 rdev48 size56;
@@ -1169,135 +859,6 @@ fn os_stat_facts_i64(number: I64, object: I64, output: I64) -> I64 {
     }
 }
 
-// Linux AT_EMPTY_PATH refers to the held source inode (FileHandles.rs), never
-// reopens an old pathname. The borrowed empty path is one stack-local zero.
-#[Unsafe("source and directory are live owned descriptors, name is terminated; linkat borrows a stack-local empty path and retains no pointer"), FFI(asm)]
-fn os_link_fd_i64(source: I64, directory: I64, name: I64) -> I64 {
-    """
-    push {source}
-    push {directory}
-    push {name}
-    pop r10
-    pop rdx
-    pop rdi
-    mov rax, 0
-    push rax
-    mov rsi, rsp
-    mov r8, 4096
-    mov rax, 265
-    syscall
-    pop rdx
-    mov rax, rax ; -> return
-    ; clobbers rcx, r11, rdi, rsi, rdx, r8, r10
-    """
-}
-
-// GS is reserved for Jet; musl/Rust keep their independent TLS on FS. Every
-// attached TCB stores its own address at offset zero. No lazy attachment probe.
-#[Unsafe("the calling thread is attached and GS points at its live Jet TCB"), FFI(asm)]
-fn os_tls_base_i64() -> I64 {
-    """
-    mov rax, qword ptr gs:[0] ; -> return
-    """
-}
-
-#[Unsafe("atomically adds to one aligned live word and returns its previous value"), FFI(asm)]
-fn os_fetch_add_i64(address: I64, delta: I64) -> I64 {
-    """
-    push {address}
-    push {delta}
-    pop rax
-    pop rcx
-    lock xadd qword ptr [rcx], rax
-    mov rax, rax ; -> return
-    ; clobbers rcx
-    """
-}
-
-#[Unsafe("atomically exchanges one aligned live word; xchg has an implicit full barrier"), FFI(asm)]
-fn os_swap_i64(address: I64, value: I64) -> I64 {
-    """
-    push {address}
-    push {value}
-    pop rax
-    pop rcx
-    xchg qword ptr [rcx], rax
-    mov rax, rax ; -> return
-    ; clobbers rcx
-    """
-}
-
-#[Unsafe("calls executable System V code with one raw word argument"), FFI(asm)]
-fn os_call_address_i64(address: I64, argument: I64) -> I64 {
-    """
-    push {address}
-    push {argument}
-    pop rdi
-    pop r11
-    call r11
-    mov rax, rax ; -> return
-    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
-    """
-}
-
-#[Unsafe("calls a Jet closure's code with the live closure header and one raw word argument"), FFI(asm)]
-fn os_call_address_two_i64(address: I64, first: I64, second: I64) -> I64 {
-    """
-    push {address}
-    push {first}
-    push {second}
-    pop rsi
-    pop rdi
-    pop r11
-    call r11
-    mov rax, rax ; -> return
-    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
-    """
-}
-
-// Fixture-only until libc leaves the pack: raw clone does not construct musl's
-// FS TLS or set __libc.threaded. Child stack is [entry,arg] and has a guard page;
-// parent/child TID words live until the kernel's CHILD_CLEARTID and join finish.
-#[Unsafe("raw clone child runs only Jet/syscall code, never Rust or musl; supplied stack contains entry and argument"), FFI(asm)]
-fn os_clone_i64(flags: I64, stack: I64, parent_tid: I64, child_tid: I64) -> I64 {
-    """
-    push rdi
-    push rsi
-    push rdx
-    push r10
-    push r8
-    push r9
-    push {flags}
-    push {stack}
-    push {parent_tid}
-    push {child_tid}
-    pop r10
-    pop rdx
-    pop rsi
-    pop rdi
-    mov r8, 0
-    mov rax, 56
-    syscall
-    test rax, rax
-    jnz 1f
-    pop rax
-    pop rdi
-    and rsp, -16
-    call rax
-    xor edi, edi
-    mov eax, 60
-    syscall
-    1:
-    pop r9
-    pop r8
-    pop r10
-    pop rdx
-    pop rsi
-    pop rdi
-    mov rax, rax ; -> return
-    ; clobbers rcx, r11
-    """
-}
 
 // Lower/Closures.jet:291-315 indirect calls require a closure header and pass
 // it as argument zero; a C void(void) entry address is not that representation.
@@ -1311,303 +872,6 @@ fn os_call0_unit(address: I64) {
     """
 }
 
-#[Unsafe("calls a checked native runtime callback with one machine-word argument"), FFI(asm)]
-fn os_call1_i64(address: I64, a: I64) -> I64 {
-    """
-    push {address}
-    push {a}
-    pop rdi
-    pop r11
-    call r11
-    mov rax, rax ; -> return
-    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
-    """
-}
-
-#[Unsafe("calls a checked native runtime callback with two machine-word arguments"), FFI(asm)]
-fn os_call2_i64(address: I64, a: I64, b: I64) -> I64 {
-    """
-    push {address}
-    push {a}
-    push {b}
-    pop rsi
-    pop rdi
-    pop r11
-    call r11
-    mov rax, rax ; -> return
-    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
-    """
-}
-
-#[Unsafe("calls a checked native runtime callback with three machine-word arguments"), FFI(asm)]
-fn os_call3_i64(address: I64, a: I64, b: I64, c: I64) -> I64 {
-    """
-    push {address}
-    push {a}
-    push {b}
-    push {c}
-    pop rdx
-    pop rsi
-    pop rdi
-    pop r11
-    call r11
-    mov rax, rax ; -> return
-    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
-    """
-}
-
-#[Unsafe("calls a checked native runtime callback with four machine-word arguments"), FFI(asm)]
-fn os_call4_i64(address: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
-    """
-    push {address}
-    push {a}
-    push {b}
-    push {c}
-    push {d}
-    pop rcx
-    pop rdx
-    pop rsi
-    pop rdi
-    pop r11
-    call r11
-    mov rax, rax ; -> return
-    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
-    """
-}
-
-// Translate Linux stat144 to the portable 128-byte scalar StatFacts row.
-// Offsets: dev0 ino8 mode16 nlink24 uid32 gid40 rdev48 size56;
-// atime64/72 mtime80/88 ctime96/104 blocks112 blockSize120.
-// Failed syscalls still copy initialized zeros; callers must inspect errno.
-#[Unsafe("object is a live fd for fstat or a terminated path for stat/lstat; output lends 128 writable bytes; the initialized stack stat frame never escapes"), FFI(asm)]
-fn os_stat_packed_i64(number: I64, object: I64, output: I64) -> I64 {
-    """
-    push {number}
-    push {object}
-    push {output}
-    pop r8
-    pop rdi
-    pop rax
-    push r8
-    mov rdx, 0
-    push rdx
-    push rdx
-    push rdx
-    push rdx
-    push rdx
-    push rdx
-    push rdx
-    push rdx
-    push rdx
-    push rdx
-    push rdx
-    push rdx
-    push rdx
-    push rdx
-    push rdx
-    push rdx
-    push rdx
-    push rdx
-    mov qword ptr [rsp + 136], rdx
-    mov rsi, rsp
-    syscall
-    mov r8, qword ptr [rsp + 144]
-    mov rdx, qword ptr [rsp]
-    mov qword ptr [r8], rdx
-    mov rdx, qword ptr [rsp + 8]
-    mov qword ptr [r8 + 8], rdx
-    mov rdx, qword ptr [rsp + 24]
-    mov qword ptr [r8 + 16], rdx
-    mov rdx, qword ptr [rsp + 16]
-    mov qword ptr [r8 + 24], rdx
-    mov rdx, qword ptr [rsp + 24]
-    mov qword ptr [r8 + 32], rdx
-    mov rdx, qword ptr [rsp + 32]
-    mov qword ptr [r8 + 40], rdx
-    mov rdx, qword ptr [rsp + 40]
-    mov qword ptr [r8 + 48], rdx
-    mov rdx, qword ptr [rsp + 48]
-    mov qword ptr [r8 + 56], rdx
-    mov rdx, qword ptr [rsp + 72]
-    mov qword ptr [r8 + 64], rdx
-    mov rdx, qword ptr [rsp + 80]
-    mov qword ptr [r8 + 72], rdx
-    mov rdx, qword ptr [rsp + 88]
-    mov qword ptr [r8 + 80], rdx
-    mov rdx, qword ptr [rsp + 96]
-    mov qword ptr [r8 + 88], rdx
-    mov rdx, qword ptr [rsp + 104]
-    mov qword ptr [r8 + 96], rdx
-    mov rdx, qword ptr [rsp + 112]
-    mov qword ptr [r8 + 104], rdx
-    mov rdx, qword ptr [rsp + 64]
-    mov qword ptr [r8 + 112], rdx
-    mov rdx, qword ptr [rsp + 56]
-    mov qword ptr [r8 + 120], rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    pop rdx
-    mov rax, rax ; -> return
-    ; clobbers rcx, r11, rdi, rsi, rdx, r8
-    """
-}
-
-#[Unsafe("the audited caller lends the stat scalar row and valid syscall object")]
-fn os_stat_facts_i64(number: I64, object: I64, output: I64) -> I64 {
-    #Unsafe("packed Linux 32-bit fields become independent portable machine words without any allocation") {
-        result :: os_stat_packed_i64(number, object, output)
-        os_store_i64(wrapping(output + I64{16}), os_load_i64(wrapping(output + I64{16})) & I64{4294967295})
-        os_store_i64(wrapping(output + I64{32}), (os_load_i64(wrapping(output + I64{32})) >> I64{32}) & I64{4294967295})
-        os_store_i64(wrapping(output + I64{40}), os_load_i64(wrapping(output + I64{40})) & I64{4294967295})
-        return result
-    }
-}
-
-// Linux AT_EMPTY_PATH refers to the held source inode (FileHandles.rs), never
-// reopens an old pathname. The borrowed empty path is one stack-local zero.
-#[Unsafe("source and directory are live owned descriptors, name is terminated; linkat borrows a stack-local empty path and retains no pointer"), FFI(asm)]
-fn os_link_fd_i64(source: I64, directory: I64, name: I64) -> I64 {
-    """
-    push {source}
-    push {directory}
-    push {name}
-    pop r10
-    pop rdx
-    pop rdi
-    mov rax, 0
-    push rax
-    mov rsi, rsp
-    mov r8, 4096
-    mov rax, 265
-    syscall
-    pop rdx
-    mov rax, rax ; -> return
-    ; clobbers rcx, r11, rdi, rsi, rdx, r8, r10
-    """
-}
-
-// GS is reserved for Jet; musl/Rust keep their independent TLS on FS. Every
-// attached TCB stores its own address at offset zero. No lazy attachment probe.
-#[Unsafe("the calling thread is attached and GS points at its live Jet TCB"), FFI(asm)]
-fn os_tls_base_i64() -> I64 {
-    """
-    mov rax, qword ptr gs:[0] ; -> return
-    """
-}
-
-#[Unsafe("atomically adds to one aligned live word and returns its previous value"), FFI(asm)]
-fn os_fetch_add_i64(address: I64, delta: I64) -> I64 {
-    """
-    push {address}
-    push {delta}
-    pop rax
-    pop rcx
-    lock xadd qword ptr [rcx], rax
-    mov rax, rax ; -> return
-    ; clobbers rcx
-    """
-}
-
-#[Unsafe("atomically exchanges one aligned live word; xchg has an implicit full barrier"), FFI(asm)]
-fn os_swap_i64(address: I64, value: I64) -> I64 {
-    """
-    push {address}
-    push {value}
-    pop rax
-    pop rcx
-    xchg qword ptr [rcx], rax
-    mov rax, rax ; -> return
-    ; clobbers rcx
-    """
-}
-
-#[Unsafe("calls executable System V code with one raw word argument"), FFI(asm)]
-fn os_call_address_i64(address: I64, argument: I64) -> I64 {
-    """
-    push {address}
-    push {argument}
-    pop rdi
-    pop r11
-    call r11
-    mov rax, rax ; -> return
-    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
-    """
-}
-
-#[Unsafe("calls a Jet closure's code with the live closure header and one raw word argument"), FFI(asm)]
-fn os_call_address_two_i64(address: I64, first: I64, second: I64) -> I64 {
-    """
-    push {address}
-    push {first}
-    push {second}
-    pop rsi
-    pop rdi
-    pop r11
-    call r11
-    mov rax, rax ; -> return
-    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
-    """
-}
-
-// Fixture-only until libc leaves the pack: raw clone does not construct musl's
-// FS TLS or set __libc.threaded. Child stack is [entry,arg] and has a guard page;
-// parent/child TID words live until the kernel's CHILD_CLEARTID and join finish.
-#[Unsafe("raw clone child runs only Jet/syscall code, never Rust or musl; supplied stack contains entry and argument"), FFI(asm)]
-fn os_clone_i64(flags: I64, stack: I64, parent_tid: I64, child_tid: I64) -> I64 {
-    """
-    push rdi
-    push rsi
-    push rdx
-    push r10
-    push r8
-    push r9
-    push {flags}
-    push {stack}
-    push {parent_tid}
-    push {child_tid}
-    pop r10
-    pop rdx
-    pop rsi
-    pop rdi
-    mov r8, 0
-    mov rax, 56
-    syscall
-    test rax, rax
-    jnz 1f
-    pop rax
-    pop rdi
-    and rsp, -16
-    call rax
-    xor edi, edi
-    mov eax, 60
-    syscall
-    1:
-    pop r9
-    pop r8
-    pop r10
-    pop rdx
-    pop rsi
-    pop rdi
-    mov rax, rax ; -> return
-    ; clobbers rcx, r11
-    """
-}
 
 #[Unsafe("directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes"), FFI(asm)]
 fn os_statx_created_i64(directory: I64, path: I64, flags: I64, output: I64) -> I64 {
@@ -1703,21 +967,123 @@ fn os_statx_created_i64(directory: I64, path: I64, flags: I64, output: I64) -> I
     """
 }
 
-#[Unsafe("ioctl reads one stack-local machine word with the supplied audited request and live fd; it retains no pointer and all pushes are balanced"), FFI(asm)]
-fn os_ioctl_word_i64(fd: I64, request: I64, word: I64) -> I64 {
+fn x64_value_word(address: Int) -> Int {
+    error :: x64_native_slot_error(address, 8)
+    if error != "" -> panic(error)
+    word := 0
+    #Unsafe("address names an initialized canonical native word owned by the pinned request or retained slot") { word = os_load_word(address) }
+    word
+}
+fn x64_value_byte(address: Int) -> Int {
+    error :: x64_native_slot_error(address, 1)
+    if error != "" -> panic(error)
+    byte := 0
+    #Unsafe("address names an initialized canonical native byte owned by the pinned request or retained slot") { byte = os_load_byte(address) }
+    byte
+}
+fn x64_value_unsigned_bytes(address: Int, size: Int) -> Int {
+    error :: x64_native_slot_error(address, size)
+    if error != "" -> panic(error)
+    value := 0
+    #Unsafe("width and address range are checked; the caller retains the initialized slot's physical permit") {
+        loop index in 0..<size -> value |= os_load_byte(address + index) << (8 * index)
+    }
+    value
+}
+struct X64NativeAllocation {
+    pointer: Int
+    size: Int
+    align: Int
+    release: Int
+    refusal_key: String
+}
+
+fn x64_native_slot_error(address: Int, size: Int) -> String Never! {
+    if size != 1 && size != 2 && size != 4 && size != 8 -> return "NativeSlotWidthInvalid: {size}"
+    if address <= 0 || address > 9223372036854775807 - size -> return "NativeSlotAddressInvalid"
+    ""
+}
+fn x64_native_slot_write_error(address: Int, size: Int, value: Int) -> String Never! {
+    error :: x64_native_slot_error(address, size)
+    if error != "" -> return error
+    x64_native_word_range_error(size, value)
+}
+fn x64_native_word_range_error(size: Int, value: Int) -> String Never! {
+    if size != 1 && size != 2 && size != 4 && size != 8 -> return "NativeSlotWidthInvalid: {size}"
+    if size == 8 {
+        if value < -9223372036854775808 || value > 18446744073709551615 -> return "NativeSlotValueOutOfRange: {size}"
+    } else if value < 0 || value >= (1 << (size * 8)) -> return "NativeSlotValueOutOfRange: {size}"
+    ""
+}
+// Only initialized slots under their original physical permit reach these
+// helpers. Byte stores never write beyond a Bool/Char/narrow integer payload.
+fn x64_native_slot_write(address: Int, size: Int, value: Int) -> String {
+    error :: x64_native_slot_write_error(address, size, value)
+    if error != "" -> return error
+    bits :: if value >= 9223372036854775808 -> value - 18446744073709551616 else -> value
+    #Unsafe("the caller owns exactly size writable bytes under the native payload permit; width and value were checked above") {
+        if size == 8 -> os_store_word(address, bits)
+        else -> loop index in 0..<size -> os_store_byte(address + index, (bits >> (8 * index)) & 255)
+    }
+    ""
+}
+fn x64_native_allocation_error(size: Int, align: Int) -> String Never! {
+    if size <= 0 || size > 9223372036854775807 -> return "NativeAllocationSizeInvalid: {size}"
+    if align <= 0 || align > 9223372036854775807 || (align & (align - 1)) != 0 -> return "NativeAllocationAlignmentInvalid: {align}"
+    ""
+}
+// Allocate and release addresses are resolved by the caller's one admitted
+// runtime inventory. The receipt, not dlsym or a symbol spelling, selects them.
+fn x64_execution_alloc(allocate: Int, release: Int, size: Int, align: Int) -> X64NativeAllocation {
+    error := x64_native_allocation_error(size, align)
+    pointer := 0
+    if error == "" && (allocate == 0 || release == 0) -> error = "NativeAllocationProviderMissing"
+    if error == "" {
+        #Unsafe("both addresses have the checked canonical alloc(size,align) / free(pointer,size,align) ABI") { pointer = os_call_address_two(allocate, size, align) }
+        if pointer == 0 -> error = "NativeAllocationFailed"
+    }
+    X64NativeAllocation{pointer: pointer, size: size, align: align, release: release, refusal_key: error}
+}
+fn x64_native_free_error(allocation: X64NativeAllocation, size: Int, align: Int) -> String Never! {
+    if allocation.refusal_key != "" -> return allocation.refusal_key
+    error :: x64_native_allocation_error(size, align)
+    if error != "" -> return error
+    if allocation.pointer == 0 || allocation.release == 0 -> return "NativeAllocationProviderMissing"
+    if allocation.size != size || allocation.align != align -> return "NativeAllocationFreeLayoutMismatch"
+    ""
+}
+fn x64_execution_free(allocation: X64NativeAllocation, size: Int, align: Int) -> String {
+    error :: x64_native_free_error(allocation, size, align)
+    if error != "" -> return error
+    #Unsafe("the allocation receipt pairs this owner with its original free address and exact size/alignment") { _ := os_call_address_three(allocation.release, allocation.pointer, size, align) }
+    ""
+}
+// The caller checks the sealed runtime signature or parent-pinned callable
+// role first. No raw-address operation escapes this vetted OS module.
+fn x64_native_call(address: Int, arity: Int, first: Int, second: Int, third: Int) -> Int {
+    if address == 0 || arity < 0 || arity > 3 -> panic("NativeCallSignatureInvalid")
+    result := 0
+    #Unsafe("the admitted runtime signature or pinned clone/drop role was checked before invoking its fixed word ABI") {
+        if arity <= 1 -> result = os_call_address(address, if arity == 0 -> 0 else -> first)
+        else if arity == 2 -> result = os_call_address_two(address, first, second)
+        else -> result = os_call_address_three(address, first, second, third)
+    }
+    result
+}
+
+#[Unsafe("calls machine code; the caller vouches for its three-word System V signature"), FFI(asm)]
+fn os_call_address_three(address: Int, first: Int, second: Int, third: Int) -> Int {
     """
-    push {fd}
-    push {request}
-    push {word}
+    push {address}
+    push {first}
+    push {second}
+    push {third}
     pop rdx
     pop rsi
     pop rdi
-    push rdx
-    mov rdx, rsp
-    mov rax, 16
-    syscall
-    pop rdx
+    pop r11
+    call r11
     mov rax, rax ; -> return
-    ; clobbers rcx, r11, rdi, rsi, rdx
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
     """
 }

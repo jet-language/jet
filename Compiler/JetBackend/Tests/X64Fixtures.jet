@@ -79,7 +79,7 @@ fn x64_fx_encoder() -> Bool Never! {
 }
 
 fn x64_fx_builder() -> LIRFunctionBuilder Never! {
-    LIRFunctionBuilder{id: LIRFunctionID{value: 0}, name: "xmm", signature: LIRSignatureID{value: 0}, values: [LIRValue]{}, blocks: [LIRBlock]{}, open: [LIRInst]{}, next_block: 0}
+    lir_builder(LIRFunctionID{value: 0}, "xmm", LIRSignatureID{value: 0})
 }
 
 fn x64_fx_allocation() -> Bool Never! {
@@ -115,7 +115,7 @@ fn x64_fx_allocation() -> Bool Never! {
 }
 
 fn x64_fx_emitter() -> X64Emitter Never! {
-    X64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, fixups: [X64BlockFixup]{}, saved: [Int]{}, stack: [Int]{}}
+    X64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, fixups: [X64BlockFixup]{}, saved: [Int]{}, stack: [Int]{}, returns: [Int]{}}
 }
 
 // Export a standalone Linux machine witness for the runner to execute. It
@@ -181,7 +181,7 @@ fn x64_fx_scalar() Never! {
     dst :: lir_builder_value(&b, lir_layout_float(), .Trivial, None)
     single :: lir_builder_value(&b, lir_layout_float32(), .Trivial, None)
     f :: lir_builder_finish(b)
-    a :: X64Allocation{locations: [X64Loc]{.Xmm{reg: 10, single: false}, .Xmm{reg: 11, single: false}, .Xmm{reg: 11, single: false}, .Xmm{reg: 12, single: true}}, spill_slots: 0, callee_saved: [Int]{}, folds: x64_address_folds(f)}
+    a :: X64Allocation{locations: [X64Loc]{.Xmm{reg: 10, single: false}, .Xmm{reg: 11, single: false}, .Xmm{reg: 11, single: false}, .Xmm{reg: 12, single: true}}, spill_slots: 0, callee_saved: [Int]{}, starts: [Int]{-1, -1, -1, -1}, ends: [Int]{-1, -1, -1, -1}, folds: x64_address_folds(f)}
     x64_emit_move(&e, .Imm{value: 0x3ff0000000000000}, a.locations[left.value])
     x64_emit_move(&e, .Imm{value: 0x4000000000000000}, a.locations[right.value])
     x64_select_inst(&e, f, a, .Binary{dst: dst, op: .Add, left: left, right: right})
@@ -278,7 +278,7 @@ fn x64_fx_abi(single: Bool) -> Bool Never! {
     program :: LIRModule{signatures: [LIRSignature]{
         LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())},
         LIRSignature{id: LIRSignatureID{value: 1}, convention: .SystemV, params: layouts, result: Val(layout)}
-    }, functions: [LIRFunction]{lir_builder_finish(caller), lir_builder_finish(callee)}, data: [LIRData]{}}
+    }, functions: [LIRFunction]{lir_builder_finish(caller), lir_builder_finish(callee)}, data: [LIRData]{}, debug: lir_module_debug_none()}
     x64_fx_executable(if single -> "abi-f32" else -> "abi-f64", program, None, 46)
 }
 
@@ -402,7 +402,7 @@ fn x64_fx_address_lint(function: LIRFunction) -> Bool Never! {
             LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: x64_value_layouts(function, function.blocks[0].params), result: Val(lir_layout_word())},
             LIRSignature{id: LIRSignatureID{value: 1}, convention: .SystemV, params: [LIRLayout]{}, result: None}
         },
-        functions: [LIRFunction]{function}, data: [LIRData]{}
+        functions: [LIRFunction]{function}, data: [LIRData]{}, debug: lir_module_debug_none()
     }
     issues :: lir_lint_module(program)
     loop issue in issues -> print("X64 FAIL address LIR: {issue.message}")
@@ -449,14 +449,16 @@ fn x64_fx_address_plan() -> Bool Never! {
     extra_value :: LIRValueID{value: extra.values.len()}
     &extra.values.push(LIRValue{id: extra_value, layout: lir_layout_word(), drop: .Trivial, jet_type: None})
     &extra.blocks[0].insts.push(.Copy{dst: extra_value, src: off})
+    &extra.blocks[0].lines.push(0)
     extra_plan :: x64_address_folds(extra)
     if extra_plan.skipped[off.value] -> ok = false
     if !x64_fx_address_lint(extra) -> ok = false
     // A pointer used outside its defining block must not be eliminated.
     escaped := function
     escaped.blocks[0].insts = escaped.blocks[0].insts.slice(0, 4)
+    escaped.blocks[0].lines = [Int]{0, 0, 0, 0, 0}
     escaped.blocks[0].terminator = .Jump{target: LIRJumpTarget{block: LIRBlockID{value: 1}, args: [LIRValueID]{}}}
-    &escaped.blocks.push(LIRBlock{id: LIRBlockID{value: 1}, params: [LIRValueID]{}, insts: [LIRInst]{.Load{dst: result, base: pointer, offset: 0}}, terminator: .Return{value: Val(result)}})
+    &escaped.blocks.push(LIRBlock{id: LIRBlockID{value: 1}, params: [LIRValueID]{}, insts: [LIRInst]{.Load{dst: result, base: pointer, offset: 0}}, terminator: .Return{value: Val(result)}, lines: [Int]{0, 0}})
     if x64_address_folds(escaped).skipped[pointer.value] -> ok = false
     if !x64_fx_address_lint(escaped) -> ok = false
     // A non-memory use retains the pointer and its shift.
@@ -464,6 +466,7 @@ fn x64_fx_address_plan() -> Bool Never! {
     copied_value :: LIRValueID{value: copied.values.len()}
     &copied.values.push(LIRValue{id: copied_value, layout: lir_layout_pointer(), drop: .Trivial, jet_type: None})
     &copied.blocks[0].insts.push(.Copy{dst: copied_value, src: pointer})
+    &copied.blocks[0].lines.push(0)
     copied_plan :: x64_address_folds(copied)
     if copied_plan.skipped[pointer.value] || copied_plan.skipped[off.value] -> ok = false
     if !x64_fx_address_lint(copied) -> ok = false
@@ -564,7 +567,7 @@ fn x64_fx_memory() -> Bool Never! {
         print("X64 FAIL address memory pressure plan")
         return false
     }
-    program :: LIRModule{signatures: [LIRSignature]{LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())}}, functions: [LIRFunction]{function}, data: [LIRData]{}}
+    program :: LIRModule{signatures: [LIRSignature]{LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())}}, functions: [LIRFunction]{function}, data: [LIRData]{}, debug: lir_module_debug_none()}
     x64_fx_executable("memory-address", program, Val(1), 223)
 }
 
@@ -594,6 +597,6 @@ fn x64_fx_address_arithmetic() -> Bool Never! {
         print("X64 FAIL distinct-destination LEA plan")
         return false
     }
-    program :: LIRModule{signatures: [LIRSignature]{LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())}}, functions: [LIRFunction]{function}, data: [LIRData]{}}
+    program :: LIRModule{signatures: [LIRSignature]{LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())}}, functions: [LIRFunction]{function}, data: [LIRData]{}, debug: lir_module_debug_none()}
     x64_fx_executable("address-arithmetic", program, Val(5), 80)
 }

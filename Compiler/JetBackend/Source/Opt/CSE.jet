@@ -76,7 +76,9 @@ fn lir_cse_function(original: LIRFunction) -> LIRFunction Never! {
         marks[row] = count
         loads := [LIRInst]{}
         insts := [LIRInst]{}
-        loop original_inst in function.blocks[row].insts {
+        block :: function.blocks[row]
+        lines := [Int]{}
+        loop (index, original_inst) in block.insts {
             inst :: opt_rename_inst(aliases, original_inst)
             pure :: opt_cse_pure(inst)
             load := false
@@ -109,7 +111,10 @@ fn lir_cse_function(original: LIRFunction) -> LIRFunction Never! {
                     }
                 }
             }
-            if !replaced -> &insts.push(inst)
+            if !replaced {
+                &insts.push(inst)
+                &lines.push(opt_debug_line(block, index))
+            }
             // New effectful variants must join this barrier (as well as the
             // exhaustive LIR helper matches).
             if inst == {
@@ -117,6 +122,8 @@ fn lir_cse_function(original: LIRFunction) -> LIRFunction Never! {
                 else -> {}
             }
         }
+        &lines.push(opt_debug_line(block, block.insts.len()))
+        function.blocks[row].lines = lines
         function.blocks[row].insts = insts
         function.blocks[row].terminator = opt_rename_terminator(aliases, function.blocks[row].terminator)
     }

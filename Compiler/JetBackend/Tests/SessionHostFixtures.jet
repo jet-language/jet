@@ -4,7 +4,7 @@ use core.sys as session_test_sys
 use core.process as session_test_process
 
 fn session_test_module(mode: String) -> X64CallImage {
-    lir := LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}
+    lir := LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}, debug: lir_module_debug_none()}
     params := [LIRLayout]{}
     if mode == "store" || mode == "load" -> &params.push(lir_layout_word())
     &lir.signatures.push(LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: params, result: Val(lir_layout_word())})
@@ -85,7 +85,7 @@ fn session_test_request(mode: String) -> X64ExecutionRequest {
 }
 
 fn session_test_typed_text(kind: String, text: String) -> X64ExecutionRequest {
-    lir := LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{LIRData{id: LIRDataID{value: 0}, bytes: text.bytes(), align: 8, relocs: [LIRDataReloc]{}}}}
+    lir := LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{LIRData{id: LIRDataID{value: 0}, bytes: text.bytes(), align: 8, relocs: [LIRDataReloc]{}}}, debug: lir_module_debug_none()}
     boundary_signature :: LIRSignatureID{value: 0}
     constructor_signature :: LIRSignatureID{value: 1}
     drop_signature :: LIRSignatureID{value: 2}
@@ -187,7 +187,7 @@ fn session_test_logical_close(host: X64ExecutionHost) -> Int {
 // These are loader/registry witnesses, not replacement Shared semantics:
 // the export is an actual emitted callable and the dynamic image imports it.
 fn session_test_core_zero_image() -> X64MemoryImage {
-    lir := LIRModule{signatures: [LIRSignature]{LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: None}}, functions: [LIRFunction]{}, data: [LIRData]{}}
+    lir := LIRModule{signatures: [LIRSignature]{LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: None}}, functions: [LIRFunction]{}, data: [LIRData]{}, debug: lir_module_debug_none()}
     startup := lir_builder(LIRFunctionID{value: 0}, "host.fixture.core.zero.init", LIRSignatureID{value: 0})
     lir_builder_term(&startup, LIRTerminator.Return{value: None})
     &lir.functions.push(lir_builder_finish(startup))
@@ -198,7 +198,7 @@ fn session_test_core_image() -> X64MemoryImage {
     lir := LIRModule{signatures: [LIRSignature]{
         LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())},
         LIRSignature{id: LIRSignatureID{value: 1}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: None},
-    }, functions: [LIRFunction]{}, data: [LIRData]{LIRData{id: LIRDataID{value: 0}, bytes: [U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}}, align: 8, relocs: [LIRDataReloc]{}}}}
+    }, functions: [LIRFunction]{}, data: [LIRData]{LIRData{id: LIRDataID{value: 0}, bytes: [U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}}, align: 8, relocs: [LIRDataReloc]{}}}, debug: lir_module_debug_none()}
     getter := lir_builder(LIRFunctionID{value: 0}, "host.fixture.core.getter", LIRSignatureID{value: 0})
     getter_entry :: lir_builder_block_id(&getter)
     cell :: lir_builder_value(&getter, lir_layout_pointer(), LIRDrop.Trivial, None)
@@ -225,7 +225,7 @@ fn session_test_core_image() -> X64MemoryImage {
     image
 }
 fn session_test_core_import() -> X64ExecutionRequest {
-    lir := LIRModule{signatures: [LIRSignature]{LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())}}, functions: [LIRFunction]{}, data: [LIRData]{}}
+    lir := LIRModule{signatures: [LIRSignature]{LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())}}, functions: [LIRFunction]{}, data: [LIRData]{}, debug: lir_module_debug_none()}
     builder := lir_builder(LIRFunctionID{value: 0}, "host.fixture.core.import", LIRSignatureID{value: 0})
     entry :: lir_builder_block_id(&builder)
     value :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)
@@ -274,7 +274,7 @@ fn session_test_pinned_core(host: X64ExecutionHost) {
     assert(x64_execution_request(host, request).body == first.body)
 }
 fn session_test_bound_mapper() {
-    lir := LIRModule{signatures: [LIRSignature]{LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())}}, functions: [LIRFunction]{}, data: [LIRData]{}}
+    lir := LIRModule{signatures: [LIRSignature]{LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())}}, functions: [LIRFunction]{}, data: [LIRData]{}, debug: lir_module_debug_none()}
     builder := lir_builder(LIRFunctionID{value: 0}, "parent.bound.mapper.fixture", LIRSignatureID{value: 0})
     block :: lir_builder_block_id(&builder)
     value :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)

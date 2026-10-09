@@ -49,7 +49,8 @@ fn lir_strength_function(function: LIRFunction) -> LIRFunction Never! {
     blocks := [LIRBlock]{}
     loop block in function.blocks {
         insts := [LIRInst]{}
-        loop inst in block.insts {
+        lines := [Int]{}
+        loop (index, inst) in block.insts {
             if inst == .Binary(dst, op, left, right) {
                 if strength_word(function, dst) && strength_word(function, left) && strength_word(function, right) {
                     k := powers[right.value]
@@ -63,6 +64,7 @@ fn lir_strength_function(function: LIRFunction) -> LIRFunction Never! {
                             operand :: strength_const(&values, &insts, if op == .URem -> (1 << k) - 1 else -> k)
                             reduced :: if op == .UDiv -> LIRBinaryOp.UShr else if op == .URem -> LIRBinaryOp.And else -> LIRBinaryOp.Shl
                             &insts.push(LIRInst.Binary{dst: dst, op: reduced, left: x, right: operand})
+                            loop lines.len() < insts.len() -> &lines.push(opt_debug_line(block, index))
                             next
                         }
                         if op == .Div || op == .Rem {
@@ -79,14 +81,17 @@ fn lir_strength_function(function: LIRFunction) -> LIRFunction Never! {
                                 multiple :: strength_binary(&values, &insts, LIRBinaryOp.Shl, quotient, count)
                                 &insts.push(LIRInst.Binary{dst: dst, op: LIRBinaryOp.Sub, left: x, right: multiple})
                             }
+                            loop lines.len() < insts.len() -> &lines.push(opt_debug_line(block, index))
                             next
                         }
                     }
                 }
             }
             &insts.push(inst)
+            &lines.push(opt_debug_line(block, index))
         }
-        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: block.terminator})
+        &lines.push(opt_debug_line(block, block.insts.len()))
+        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: block.terminator, lines: lines})
     }
-    LIRFunction{id: function.id, name: function.name, signature: function.signature, values: values, blocks: blocks}
+    LIRFunction{id: function.id, name: function.name, signature: function.signature, values: values, blocks: blocks, debug: function.debug}
 }

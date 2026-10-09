@@ -118,11 +118,14 @@ enum LIRTerminator {
     Unreachable
 }
 
+// `lines[i]` is the source line of `insts[i]` and the last entry that of the
+// terminator (lines.len() == insts.len() + 1); 0 means no source line.
 struct LIRBlock {
     id: LIRBlockID
     params: [LIRValueID]
     insts: [LIRInst]
     terminator: LIRTerminator
+    lines: [Int]
 }
 
 enum LIRCallConv { SystemV }
@@ -149,6 +152,72 @@ struct LIRFunction {
     signature: LIRSignatureID
     values: [LIRValue]
     blocks: [LIRBlock]
+    debug: LIRFunctionDebug
+}
+
+// Debug facts for the object writer's DWARF (Image/Dwarf.jet): which source
+// line every instruction comes from (LIRBlock.lines), which source
+// variables LIR values carry, and the source types those variables have,
+// described by their machine layout. Lowering records them; code generation
+// never reads them.
+enum LIRDebugEncoding { Signed Unsigned Float Bool Char }
+
+struct LIRDebugMember { name: String, offset: Int, ty: Int }
+
+struct LIRDebugEnumerator { name: String, value: Int }
+
+// Type references are rows of LIRModuleDebug.types; -1 is no type (an
+// untyped pointer). `Opaque` has a name and size but no known contents.
+enum LIRDebugTypeKind {
+    Base(encoding: LIRDebugEncoding)
+    Pointer(target: Int)
+    Struct(members: [LIRDebugMember])
+    Union(members: [LIRDebugMember])
+    Enum(enumerators: [LIRDebugEnumerator])
+    Typedef(target: Int)
+    Opaque
+}
+
+struct LIRDebugType { name: String, size: Int, kind: LIRDebugTypeKind }
+
+// A source variable: a parameter or a named local. `indirect` when the
+// carried value is the address of the variable's bytes (an inline aggregate)
+// rather than the variable itself.
+struct LIRDebugVariable {
+    name: String
+    ty: Int
+    line: Int
+    parameter: Bool
+    indirect: Bool
+}
+
+// From its definition on, `value` carries `variable` while it is live.
+struct LIRDebugBinding { variable: Int, value: LIRValueID }
+
+// `file` is a row of LIRModuleDebug.files, -1 for generated code (glue,
+// helpers, the generated entry), which has no source name or variables.
+struct LIRFunctionDebug {
+    name: String
+    file: Int
+    line: Int
+    variables: [LIRDebugVariable]
+    bindings: [LIRDebugBinding]
+}
+
+// `directory` is the compilation directory relative `files` resolve
+// against; "" leaves that to the debugger (its working directory).
+struct LIRModuleDebug {
+    directory: String
+    files: [String]
+    types: [LIRDebugType]
+}
+
+fn lir_function_debug_none() -> LIRFunctionDebug Never! {
+    LIRFunctionDebug{name: "", file: -1, line: 0, variables: [LIRDebugVariable]{}, bindings: [LIRDebugBinding]{}}
+}
+
+fn lir_module_debug_none() -> LIRModuleDebug Never! {
+    LIRModuleDebug{directory: "", files: [String]{}, types: [LIRDebugType]{}}
 }
 
 // Read-only module objects, including immutable aggregate constant trees.
@@ -171,6 +240,7 @@ struct LIRModule {
     signatures: [LIRSignature]
     functions: [LIRFunction]
     data: [LIRData]
+    debug: LIRModuleDebug
 }
 
 fn lir_layout_word() -> LIRLayout Never! {
@@ -291,7 +361,8 @@ fn lir_signature(program: LIRModule, id: LIRSignatureID) -> LIRSignature? {
 
 // Builder used by MIR->LIR lowering and by hand-written LIR: values are
 // allocated first, instructions go into the open block, and `lir_builder_seal`
-// closes it with its parameters and terminator.
+// closes it with its parameters and terminator. Every instruction and
+// terminator records the builder's current source `line`.
 struct LIRFunctionBuilder {
     id: LIRFunctionID
     name: String
@@ -299,11 +370,14 @@ struct LIRFunctionBuilder {
     values: [LIRValue]
     blocks: [LIRBlock]
     open: [LIRInst]
+    open_lines: [Int]
     next_block: Int
+    line: Int
+    debug: LIRFunctionDebug
 }
 
 fn lir_builder(id: LIRFunctionID, name: String, signature: LIRSignatureID) -> LIRFunctionBuilder Never! {
-    LIRFunctionBuilder{id: id, name: name, signature: signature, values: [LIRValue]{}, blocks: [LIRBlock]{}, open: [LIRInst]{}, next_block: 0}
+    LIRFunctionBuilder{id: id, name: name, signature: signature, values: [LIRValue]{}, blocks: [LIRBlock]{}, open: [LIRInst]{}, open_lines: [Int]{}, next_block: 0, line: 0, debug: lir_function_debug_none()}
 }
 
 fn lir_builder_value(builder: &LIRFunctionBuilder, layout: LIRLayout, drop: LIRDrop, jet_type: MIRTypeID?) -> LIRValueID Never! {
@@ -332,11 +406,13 @@ fn lir_builder_push(builder: &LIRFunctionBuilder, inst: LIRInst) Never! {
 }
 
 fn lir_builder_seal(builder: &LIRFunctionBuilder, id: LIRBlockID, params: [LIRValueID], terminator: LIRTerminator) Never! {
-    &builder.blocks.push(LIRBlock{id: id, params: params, insts: builder.open, terminator: terminator})
+    lines := builder.open_lines
+    &lines.push(builder.line)
+    &builder.blocks.push(LIRBlock{id: id, params: params, insts: builder.open, terminator: terminator, lines: lines})
     builder.open = [LIRInst]{}
     builder.open_lines = [Int]{}
 }
 
 fn lir_builder_finish(builder: LIRFunctionBuilder) -> LIRFunction Never! {
-    LIRFunction{id: builder.id, name: builder.name, signature: builder.signature, values: builder.values, blocks: builder.blocks}
+    LIRFunction{id: builder.id, name: builder.name, signature: builder.signature, values: builder.values, blocks: builder.blocks, debug: builder.debug}
 }

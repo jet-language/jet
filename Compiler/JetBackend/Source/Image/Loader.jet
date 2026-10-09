@@ -182,6 +182,25 @@ fn x64_load_image_bound(image: X64MemoryImage, addresses: [Int]) -> X64LoadedIma
     X64LoadedImage{base: base, size: mapping_size, code_size: code_size, entry: base + image.entry, finalizer: finalizer, imports: image.imports, slots: slots, errors: [String]{}}
 }
 
+// The same no-argument Unit startup boundary serves parent and child Core
+// images. Callers pin the image before calling and never retry a stopped one.
+fn x64_core_startup_bound(loaded: X64LoadedImage, begin: Int, status: Int, end: Int) -> String Never! {
+    if begin == 0 || status == 0 || end == 0 -> return "pinned Core initialization lacks its canonical execution control"
+    started := 0
+    stopped := 0
+    #Unsafe("the admitted control uses begin(fuel,depth,session), status(), end(); startup is the producer's checked no-argument Unit static-fixup boundary") {
+        started = os_call_address_three(begin, -1, -1, 0)
+        if (started & 255) != 0 {
+            _ := os_call_address(loaded.entry, 0)
+            stopped = os_call_address(status, 0)
+            _ := os_call_address(end, 0)
+        }
+    }
+    if (started & 255) == 0 -> return "pinned Core initialization could not begin its execution scope"
+    if stopped != 0 -> return "pinned Core initialization stopped before publishing its getters (status {stopped})"
+    ""
+}
+
 // Run the loaded entry through `jet_rt_main`, which sets up the runtime,
 // calls the entry and returns the exit status. A runtime stop ends the
 // process from inside the runtime instead.

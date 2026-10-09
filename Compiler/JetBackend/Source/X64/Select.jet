@@ -38,13 +38,38 @@ struct X64CompiledFunction {
     relocs: [X64Reloc]
 }
 
+// Debug facts of one compiled function for Image/Dwarf.jet: a line row
+// where each run of code from one source line starts, the end of the
+// prologue, the call frame instructions of its FDE, and where each debug
+// variable lives over which code range.
+struct X64LineRow { at: Int, line: Int }
+
+// A register (hardware number) or a frame slot at `offset` from rbp.
+enum X64DebugLocation {
+    Register(reg: Int)
+    Frame(offset: Int)
+}
+
+// LIRFunctionDebug.variables[variable] is at `location` for code offsets
+// start..<end.
+struct X64VariableRange { variable: Int, start: Int, end: Int, location: X64DebugLocation }
+
+struct X64FunctionDebug {
+    lines: [X64LineRow]
+    body: Int
+    cfi: [U8]
+    ranges: [X64VariableRange]
+}
+
 struct X64CompileResult {
     function: X64CompiledFunction?
+    debug: X64FunctionDebug?
     errors: [String]
 }
 
 struct X64ModuleResult {
     functions: [X64CompiledFunction]
+    debug: [X64FunctionDebug]
     errors: [String]
 }
 
@@ -61,6 +86,8 @@ struct X64Emitter {
     saved: [Int]
     // LIR value -> rbp displacement of its StackSlot storage (0 for none).
     stack: [Int]
+    // Offset of every `ret`, for the CFI of the epilogues.
+    returns: [Int]
 }
 
 struct X64Frame { stack: [Int], bytes: Int }
@@ -587,6 +614,35 @@ fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Compile
         debug: Val(debug),
         errors: [String]{},
     }
+}
+
+// Where each debug binding's value lives: its location over the code of its
+// interval, from after its definition (or its block's start, for a block
+// parameter) through its last position. A value bound twice to one
+// variable yields one range.
+fn x64_variable_ranges(function: LIRFunction, allocation: X64Allocation, positions: [Int], defining: [Bool]) -> [X64VariableRange] Never! {
+    ranges := [X64VariableRange]{}
+    seen := [Int:Bool]{}
+    count :: function.values.len()
+    loop binding in function.debug.bindings {
+        value :: binding.value.value
+        first :: allocation.starts[value]
+        if first < 0 -> next
+        key :: binding.variable * count + value
+        if seen.get(key) != None -> next
+        &seen.add(key, true).drop("checked absent above")
+        start :: if defining[first] -> positions[first + 1] else -> positions[first]
+        end :: positions[allocation.ends[value] + 1]
+        if start >= end -> next
+        location :: if allocation.locations[value] == {
+            .Reg(reg) -> X64DebugLocation.Register{reg: reg}
+            .Xmm(reg, _) -> X64DebugLocation.Register{reg: 16 + reg}
+            .Stack(slot) | .FloatStack(slot, _) -> X64DebugLocation.Frame{offset: x64_slot_disp(allocation.callee_saved.len(), slot)}
+            .Imm(_) | .Folded -> next
+        }
+        &ranges.push(X64VariableRange{variable: binding.variable, start: start, end: end, location: location})
+    }
+    ranges
 }
 
 // Ordered IEEE comparison of Float (or, `single`, Float32) xmm operands into

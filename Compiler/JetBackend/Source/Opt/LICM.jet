@@ -125,6 +125,7 @@ fn opt_licm_loop(function: &LIRFunction, header: Int) Never! {
         }
     }
     hoisted := [LIRInst]{}
+    hoisted_lines := [Int]{}
     changed := true
     // Storage order need not be dominance order. Revisit earlier rows once
     // their invariant inputs move, emitting each definition exactly once.
@@ -133,7 +134,9 @@ fn opt_licm_loop(function: &LIRFunction, header: Int) Never! {
         loop (row, member) in body {
             if !member -> next
             kept := [LIRInst]{}
-            loop inst in function.blocks[row].insts {
+            block :: function.blocks[row]
+            kept_lines := [Int]{}
+            loop (index, inst) in block.insts {
                 movable := opt_licm_candidate(function, defs, inst, row == header, clobbered)
                 if lir_inst_def(inst) == .Val(dst) {
                     if consumed[dst.value] || function.values[dst.value].drop != .Trivial -> movable = false
@@ -144,11 +147,15 @@ fn opt_licm_loop(function: &LIRFunction, header: Int) Never! {
                 if movable {
                     if lir_inst_def(inst) == .Val(dst) -> available[dst.value] = true
                     &hoisted.push(inst)
+                    &hoisted_lines.push(opt_debug_line(block, index))
                     changed = true
                 } else {
                     &kept.push(inst)
+                    &kept_lines.push(opt_debug_line(block, index))
                 }
             }
+            &kept_lines.push(opt_debug_line(block, block.insts.len()))
+            function.blocks[row].lines = kept_lines
             function.blocks[row].insts = kept
         }
     }
@@ -158,6 +165,12 @@ fn opt_licm_loop(function: &LIRFunction, header: Int) Never! {
         predecessor :: ~outside[0]
         if function.blocks[predecessor].terminator == .Jump(target) {
             if target.block == header_id {
+                block :: function.blocks[predecessor]
+                lines := [Int]{}
+                loop at in 0..<block.insts.len() -> &lines.push(opt_debug_line(block, at))
+                loop line in hoisted_lines -> &lines.push(line)
+                &lines.push(opt_debug_line(block, block.insts.len()))
+                function.blocks[predecessor].lines = lines
                 loop inst in hoisted -> &function.blocks[predecessor].insts.push(inst)
                 return
             }
@@ -176,7 +189,8 @@ fn opt_licm_loop(function: &LIRFunction, header: Int) Never! {
     loop (row, member) in body {
         if !member -> function.blocks[row].terminator = opt_licm_redirect(function.blocks[row].terminator, header_id, preheader)
     }
-    &function.blocks.push(LIRBlock{id: preheader, params: params, insts: hoisted, terminator: LIRTerminator.Jump{target: LIRJumpTarget{block: header_id, args: params}}})
+    &hoisted_lines.push(opt_debug_line(function.blocks[header], function.blocks[header].insts.len()))
+    &function.blocks.push(LIRBlock{id: preheader, params: params, insts: hoisted, terminator: LIRTerminator.Jump{target: LIRJumpTarget{block: header_id, args: params}}, lines: hoisted_lines})
 }
 
 fn lir_licm_function(original: LIRFunction) -> LIRFunction Never! {

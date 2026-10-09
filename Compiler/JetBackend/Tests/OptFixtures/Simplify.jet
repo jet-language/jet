@@ -35,12 +35,12 @@ fn ofx_module(function: LIRFunction) -> LIRModule Never! {
     LIRModule{signatures: [LIRSignature]{
         LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: params, result: result},
         LIRSignature{id: LIRSignatureID{value: 1}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: None}
-    }, functions: [LIRFunction]{function}, data: [LIRData]{}}
+    }, functions: [LIRFunction]{function}, data: [LIRData]{}, debug: lir_module_debug_none()}
 }
 
 fn ofx_check(before: LIRFunction, after: LIRFunction, expected: String) -> Bool Never! {
     input :: ofx_module(before)
-    output :: LIRModule{signatures: input.signatures, functions: [LIRFunction]{after}, data: input.data}
+    output :: LIRModule{signatures: input.signatures, functions: [LIRFunction]{after}, data: input.data, debug: input.debug}
     print("=== {before.name} before ===\n{lir_print_module(input)}=== {before.name} after ===\n{lir_print_module(output)}")
     passed := true
     loop issue in lir_lint_module(input) {
@@ -63,7 +63,7 @@ fn ofx_expected(before: LIRFunction, body: String) -> String Never! {
     // Print only the unchanged signature declarations; the function and body
     // below are independent literal expectations.
     program :: ofx_module(before)
-    header :: lir_print_module(LIRModule{signatures: program.signatures, functions: [LIRFunction]{}, data: [LIRData]{}})
+    header :: lir_print_module(LIRModule{signatures: program.signatures, functions: [LIRFunction]{}, data: [LIRData]{}, debug: program.debug})
     "{header}fn f0 {before.name}: s0\n{body}\n"
 }
 

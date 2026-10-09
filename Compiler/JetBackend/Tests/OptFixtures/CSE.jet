@@ -89,9 +89,9 @@ fn ocse_data_address() -> Bool Never! {
     function :: ofx_finish(&b, [LIRValueID]{}, c)
     input := ofx_module(function)
     input.data = [LIRData]{LIRData{id: LIRDataID{value: 0}, bytes: [U8]{U8{42}}, align: 1, relocs: [LIRDataReloc]{}}}
-    output :: LIRModule{signatures: input.signatures, functions: [LIRFunction]{lir_cse_function(function)}, data: input.data}
+    output :: LIRModule{signatures: input.signatures, functions: [LIRFunction]{lir_cse_function(function)}, data: input.data, debug: input.debug}
     print("=== {function.name} before ===\n{lir_print_module(input)}=== {function.name} after ===\n{lir_print_module(output)}")
-    header :: lir_print_module(LIRModule{signatures: input.signatures, functions: [LIRFunction]{}, data: input.data})
+    header :: lir_print_module(LIRModule{signatures: input.signatures, functions: [LIRFunction]{}, data: input.data, debug: input.debug})
     passed := lir_print_module(output) == ("{header}fn f0 cse-data-address: s0\n  b0():\n    v0: ptr = data d0\n    ret v0\n")
     loop issue in lir_lint_module(input) {
         print("FAIL input {issue.message}")

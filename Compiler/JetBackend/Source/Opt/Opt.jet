@@ -26,5 +26,11 @@ fn lir_optimize_module(program: LIRModule, level: Int) -> LIRModule Never! {
         promoted :: lir_simplify_function(lir_scalar_replace_function(simplified))
         &functions.push(lir_simplify_function(lir_licm_function(lir_cse_function(promoted))))
     }
-    LIRModule{signatures: program.signatures, functions: functions, data: program.data}
+    LIRModule{signatures: program.signatures, functions: functions, data: program.data, debug: program.debug}
+}
+
+// Unknown source positions stay zero, including generated instructions.
+fn opt_debug_line(block: LIRBlock, index: Int) -> Int Never! {
+    if block.lines.len() != block.insts.len() + 1 -> return 0
+    block.lines[index]
 }
