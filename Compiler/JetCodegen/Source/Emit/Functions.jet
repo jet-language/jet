@@ -109,21 +109,18 @@ struct JetRustEmitSlotMention {
 
 fn jet_rust_emit_value_mentions(line: String) -> [JetRustEmitSlotMention] Never! {
     mentions := [JetRustEmitSlotMention]{}
-    parts :: line.split("__jet_v_").to_list()
+    if !line.contains("__jet_v_") -> return mentions
     column := 0
-    loop (index, part) in parts {
+    // Empty parts between prefixes continue the preceding identifier.
+    joined := false
+    loop (index, part) in line.split("__jet_v_").to_list() {
         bytes :: part.bytes()
         if index > 0 {
-            previous :: parts[index - 1].bytes()
-            joined :: if previous.len() > 0 -> jet_rust_emit_identifier_byte(previous[previous.len() - 1]) else -> index > 1
-            digits := [U8]{}
-            loop byte in bytes {
-                code :: Int.from_u8(byte)
-                if code < 48 || code > 57 -> break
-                &digits.push(byte)
-            }
-            if digits.len() > 0 && !joined -> &mentions.push(JetRustEmitSlotMention{id: String.from_bytes(digits) ?? "", column: column - 8})
+            digits := 0
+            loop digits < bytes.len() && bytes[digits] >= (U8{48}) && bytes[digits] <= (U8{57}) -> digits += 1
+            if digits > 0 && !joined -> &mentions.push(JetRustEmitSlotMention{id: String.from_bytes(~(bytes[0..<digits])) ?? "", column: column - 8})
         }
+        joined = if bytes.len() > 0 -> jet_rust_emit_identifier_byte(bytes[bytes.len() - 1]) else -> index > 0
         column += bytes.len() + 8
     }
     mentions
@@ -175,7 +172,9 @@ fn jet_rust_emit_localize_value_slots(ctx: &JetRustEmitContext, function: MIRFun
         bytes :: line.bytes()
         indent := 0
         loop indent < bytes.len() && bytes[indent] == (U8{32}) -> indent += 1
-        &indents.push(if jet_rust_emit_blank_line(bytes) -> blank else -> indent)
+        // Past the indent, only a control whitespace byte can keep the line blank.
+        blank_line :: indent == bytes.len() || (bytes[indent] >= (U8{9}) && bytes[indent] <= (U8{13}) && jet_rust_emit_blank_line(bytes))
+        &indents.push(if blank_line -> blank else -> indent)
         loop mention in jet_rust_emit_value_mentions(line) {
             if types.get(mention.id) == None -> next
             if first_line.get(mention.id) == None {
@@ -326,31 +325,17 @@ fn jet_rust_emit_fold_parameter(text: String) -> Bool Never! {
 
 // First offset at or after `from` where `pattern` occurs in `bytes`, or -1.
 fn jet_rust_emit_fold_find(bytes: [U8], pattern: [U8], from: Int) -> Int Never! {
+    if pattern.len() == 0 -> return if from <= bytes.len() -> from else -> -1
+    first :: pattern[0]
+    last :: bytes.len() - pattern.len()
     index := from
-    loop index + pattern.len() <= bytes.len() {
-        matched := true
-        loop offset in 0..<pattern.len() {
-            if bytes[index + offset] != pattern[offset] {
-                matched = false
-                break
-            }
-        }
-        if matched -> return index
+    loop index <= last {
+        if bytes[index] == first && jet_rust_emit_bytes_at(bytes, pattern, index) -> return index
         index += 1
     }
     -1
 }
 
-// Every non-overlapping occurrence of `pattern` (str::matches).
-fn jet_rust_emit_fold_occurrences(bytes: [U8], pattern: [U8]) -> [Int] Never! {
-    found := [Int]{}
-    at := jet_rust_emit_fold_find(bytes, pattern, 0)
-    loop at >= 0 {
-        &found.push(at)
-        at = jet_rust_emit_fold_find(bytes, pattern, at + pattern.len())
-    }
-    found
-}
 
 // MIRRust field_read_place: `*binding` or `*local`, under any chain of
 // `(..).__jet_field` reads.
@@ -526,6 +511,8 @@ fn jet_rust_emit_fold_indent(bytes: [U8]) -> Int Never! {
 }
 
 fn jet_rust_emit_fold_definition(line: String) -> JetRustEmitSlotDefinition? Never! {
+    // Both definition forms name a value slot; most lines name none.
+    if !line.contains("__jet_v_") -> return None
     bytes :: line.bytes()
     indent :: jet_rust_emit_fold_indent(bytes)
     statement :: String.from_bytes(~(bytes[indent..<bytes.len()])) ?? ""
@@ -578,46 +565,70 @@ struct JetRustEmitFoldIdentifiers {
 }
 
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::variable_mentions
-fn jet_rust_emit_fold_identifiers(bytes: [U8]) -> JetRustEmitFoldIdentifiers Never! {
+fn jet_rust_emit_fold_identifiers(text: String) -> JetRustEmitFoldIdentifiers Never! {
     names := [String]{}
     counts := [String:Int]{}
-    at := 0
-    loop at < bytes.len() {
-        if !jet_rust_emit_identifier_byte(bytes[at]) {
-            at += 1
-            next
+    if !text.contains("__jet_") -> return JetRustEmitFoldIdentifiers{names: names, counts: counts}
+    parts :: text.split("__jet_").to_list()
+    first :: parts[0].bytes()
+    // An identifier starts only after a non-identifier byte other than '.'.
+    opens := first.len() == 0 || !(jet_rust_emit_identifier_byte(first[first.len() - 1]) || first[first.len() - 1] == (U8{46}))
+    index := 1
+    loop index < parts.len() {
+        starts :: opens
+        name := "__jet_"
+        running := true
+        loop running {
+            bytes :: parts[index].bytes()
+            length := 0
+            loop length < bytes.len() && ((bytes[length] >= (U8{48}) && bytes[length] <= (U8{57})) || (bytes[length] >= (U8{65}) && bytes[length] <= (U8{90})) || (bytes[length] >= (U8{97}) && bytes[length] <= (U8{122})) || bytes[length] == (U8{95})) -> length += 1
+            if length > 0 -> name = "{name}{String.from_bytes(~(bytes[0..<length])) ?? ""}"
+            if length < bytes.len() || index + 1 >= parts.len() {
+                last :: if bytes.len() > 0 -> bytes[bytes.len() - 1] else -> U8{95}
+                opens = !(jet_rust_emit_identifier_byte(last) || last == (U8{46}))
+                running = false
+            } else {
+                name = "{name}__jet_"
+                index += 1
+            }
         }
-        end := at + 1
-        loop end < bytes.len() && jet_rust_emit_identifier_byte(bytes[end]) -> end += 1
-        if (at == 0 || Int.from_u8(bytes[at - 1]) != 46) && end - at >= 6 && bytes[at] == (U8{95}) && bytes[at + 1] == (U8{95}) && bytes[at + 2] == (U8{106}) && bytes[at + 3] == (U8{101}) && bytes[at + 4] == (U8{116}) && bytes[at + 5] == (U8{95}) {
-            name :: String.from_bytes(~(bytes[at..<end])) ?? ""
+        if starts {
             if counts.get(name) == None -> &names.push(name)
             &counts.add(name, (counts.get(name) ?? 0) + 1).drop("replace identifier count")
         }
-        at = end
+        index += 1
     }
     JetRustEmitFoldIdentifiers{names: names, counts: counts}
 }
 
-// Sparse Fenwick rows, keyed by identifier (or indent) and tree position.
+// Sparse Fenwick rows use row * (size + 1) + tree position, not text keys.
 // Removed lines remain indexed: the reference still examines their text.
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::fold_value_slots
-fn jet_rust_emit_fold_index_add(tree: &[String:Int], name: String, line: Int, count: Int, size: Int) Never! {
+fn jet_rust_emit_fold_index_add(tree: &[Int:Int], row: Int, line: Int, count: Int, size: Int) Never! {
+    base :: row * (size + 1)
     at := line + 1
     loop at <= size {
-        key :: "{name}:{at}"
-        &tree.add(key, (tree.get(key) ?? 0) + count).drop("replace prefix count")
+        &tree.add(base + at, (tree.get(base + at) ?? 0) + count).drop("replace prefix count")
         at += at & (0 - at)
     }
 }
 
+// Identifiers take one integer row number on first use.
+fn jet_rust_emit_fold_row(rows: &[String:Int], name: String) -> Int Never! {
+    if rows.get(name) == .Val(row) -> return row
+    row :: rows.len()
+    &rows.add(name, row).drop("a new identifier takes the next row")
+    row
+}
+
 // Count mentions in lines [0, end).
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::fold_value_slots
-fn jet_rust_emit_fold_index_prefix(tree: [String:Int], name: String, end: Int) -> Int Never! {
+fn jet_rust_emit_fold_index_prefix(tree: [Int:Int], row: Int, end: Int, size: Int) -> Int Never! {
+    base :: row * (size + 1)
     count := 0
     at := end
     loop at > 0 {
-        count += tree.get("{name}:{at}") ?? 0
+        count += tree.get(base + at) ?? 0
         at -= at & (0 - at)
     }
     count
@@ -626,8 +637,9 @@ fn jet_rust_emit_fold_index_prefix(tree: [String:Int], name: String, end: Int) -
 // First indexed line >= from; inverse selects a non-skippable line from a
 // row whose counts are 0/1. Binary lifting avoids searching later statements.
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::fold_value_slots
-fn jet_rust_emit_fold_index_next(tree: [String:Int], name: String, from: Int, size: Int, inverse: Bool) -> Int Never! {
-    before :: jet_rust_emit_fold_index_prefix(tree, name, from)
+fn jet_rust_emit_fold_index_next(tree: [Int:Int], row: Int, from: Int, size: Int, inverse: Bool) -> Int Never! {
+    base :: row * (size + 1)
+    before :: jet_rust_emit_fold_index_prefix(tree, row, from, size)
     wanted := (if inverse -> from - before else -> before) + 1
     step := 1
     loop step <= size /% 2 -> step *= 2
@@ -635,7 +647,7 @@ fn jet_rust_emit_fold_index_next(tree: [String:Int], name: String, from: Int, si
     loop step > 0 {
         candidate :: at + step
         if candidate <= size {
-            stored :: tree.get("{name}:{candidate}") ?? 0
+            stored :: tree.get(base + candidate) ?? 0
             count :: if inverse -> (candidate & (0 - candidate)) - stored else -> stored
             if count < wanted {
                 at = candidate
@@ -659,7 +671,106 @@ fn jet_rust_emit_fold_line(lines: [String], index: Int) -> JetRustEmitFoldLine N
     definition :: jet_rust_emit_fold_definition(lines[index])
     pure := false
     if definition == .Val(row) -> pure = jet_rust_emit_fold_pure(row.payload)
-    JetRustEmitFoldLine{definition: definition, pure: pure, skippable: pure && !jet_rust_emit_fold_attributed(lines, index), identifiers: jet_rust_emit_fold_identifiers(lines[index].bytes())}
+    JetRustEmitFoldLine{definition: definition, pure: pure, skippable: pure && !jet_rust_emit_fold_attributed(lines, index), identifiers: jet_rust_emit_fold_identifiers(lines[index])}
+}
+
+struct JetRustEmitFoldRead {
+    pub column: Int
+    pub start: Int
+    pub end: Int
+    pub count: Int
+    pub joined: Bool
+}
+
+struct JetRustEmitFoldReads {
+    pub ready: Bool
+    pub batchable: Bool
+    pub indent: Int
+    pub mentions: [JetRustEmitSlotMention]
+    pub matches: [String:JetRustEmitFoldRead]
+}
+
+struct JetRustEmitFoldEdit {
+    pub start: Int
+    pub end: Int
+    pub text: String
+}
+
+// Only an opaque, non-pure outer expression may retain its read positions.
+// Every pure_slot_expression spelling starts with punctuation, __jet_, or
+// JetInt::from_i64, or ends with .clone(). Substituting a balanced pure
+// expression into an interior read cannot change this alphabetic head or
+// fixed tail. All other consumers take the original eager rewrite below.
+fn jet_rust_emit_fold_batchable(line: String) -> Bool Never! {
+    if line.contains("|") -> return false
+    definition :: jet_rust_emit_fold_definition(line) ?? return false
+    text :: definition.payload
+    bytes :: text.bytes()
+    if bytes.len() == 0 -> return false
+    first :: bytes[0]
+    alphabetic :: (first >= (U8{65}) && first <= (U8{90})) || (first >= (U8{97}) && first <= (U8{122}))
+    alphabetic && !jet_rust_emit_fold_pure(text) && !text.starts_with("jet_foundation::Numeric::JetInt::from_i64(") && !text.ends_with(".clone()")
+}
+
+// Index all three read spellings in one pass, including occurrences in quoted
+// text and joined identifiers: the eager str::count path counts those too.
+fn jet_rust_emit_fold_reads(line: String) -> JetRustEmitFoldReads Never! {
+    bytes :: line.bytes()
+    mentions := [JetRustEmitSlotMention]{}
+    matches := [String:JetRustEmitFoldRead]{}
+    parts :: line.split("__jet_v_").to_list()
+    column := 0
+    loop (index, part) in parts {
+        part_bytes :: part.bytes()
+        if index > 0 {
+            digits := 0
+            loop digits < part_bytes.len() && part_bytes[digits] >= (U8{48}) && part_bytes[digits] <= (U8{57}) -> digits += 1
+            if digits > 0 {
+                id :: String.from_bytes(~(part_bytes[0..<digits])) ?? ""
+                at :: column - 8
+                name :: "__jet_v_{id}"
+                &mentions.push(JetRustEmitSlotMention{id: id, column: at})
+                forms :: [String]{"({name}.as_ref().expect(\"MIR value\")).clone()", "(*{name}.as_ref().expect(\"MIR value\"))", "{name}.take().expect(\"MIR value\")"}
+                loop (kind, form) in forms {
+                    start :: at - (if kind == 0 -> 1 else -> if kind == 1 -> 2 else -> 0)
+                    if !jet_rust_emit_bytes_at(bytes, form.bytes(), start) -> next
+                    key :: "{id}:{kind}"
+                    count :: if matches.get(key) == .Val(prior) -> prior.count + 1 else -> 1
+                    joined :: start == at && at > 0 && (jet_rust_emit_identifier_byte(bytes[at - 1]) || bytes[at - 1] == (U8{46}))
+                    matches[key] = JetRustEmitFoldRead{column: at, start: start, end: start + form.bytes().len(), count: count, joined: joined}
+                }
+            }
+        }
+        column += part_bytes.len() + 8
+    }
+    JetRustEmitFoldReads{ready: true, batchable: jet_rust_emit_fold_batchable(line), indent: jet_rust_emit_fold_indent(bytes), mentions: mentions, matches: matches}
+}
+
+// Read positions remain in the original coordinate system until this one
+// rebuild. Source-order iteration avoids sorting or repeatedly copying the
+// growing consumer. Edits cannot overlap: each consumes one distinct slot.
+fn jet_rust_emit_fold_apply(line: String, reads: JetRustEmitFoldReads, edits: [Int:JetRustEmitFoldEdit]) -> String Never! {
+    bytes :: line.bytes()
+    pieces := [String]{}
+    from := 0
+    loop mention in reads.mentions {
+        edit :: edits.get(mention.column) ?? next
+        if edit.start < from -> panic("overlapping Rust emitter slot folds")
+        &pieces.push(String.from_bytes(~(bytes[from..<edit.start])) ?? "")
+        &pieces.push(edit.text)
+        from = edit.end
+    }
+    &pieces.push(String.from_bytes(~(bytes[from..<bytes.len()])) ?? "")
+    pieces.join("")
+}
+
+// A batch removes exactly the read identifier and inserts the payload's
+// identifiers. Keep the same Fenwick counts as an eager full-line reindex;
+// definition/declaration removals still leave their old rows indexed.
+fn jet_rust_emit_fold_identifier_delta(indexed: &JetRustEmitFoldLine, tree: &[Int:Int], rows: &[String:Int], name: String, line: Int, count: Int, size: Int) Never! {
+    if indexed.identifiers.counts.get(name) == None -> &indexed.identifiers.names.push(name)
+    indexed.identifiers.counts[name] = (indexed.identifiers.counts.get(name) ?? 0) + count
+    jet_rust_emit_fold_index_add(&tree, jet_rust_emit_fold_row(&rows, name), line, count, size)
 }
 
 struct JetRustEmitFoldRead {
@@ -785,17 +896,19 @@ fn jet_rust_emit_fold_value_slots(lines: [String], values_start: Int, body_start
     loop line in body {
         loop mention in jet_rust_emit_value_mentions(line) -> &mentions.add(mention.id, (mentions.get(mention.id) ?? 0) + 1).drop("the count replaces the prior count")
     }
+    size :: body.len()
     indexed := [JetRustEmitFoldLine]{}
-    mention_index := [String:Int]{}
-    skippable := [String:Int]{}
-    loop index in 0..<body.len() {
+    rows := [String:Int]{}
+    mention_index := [Int:Int]{}
+    skippable := [Int:Int]{}
+    loop index in 0..<size {
         &indexed.push(jet_rust_emit_fold_line(body, index))
         loop name in indexed[index].identifiers.names {
-            jet_rust_emit_fold_index_add(&mention_index, name, index, indexed[index].identifiers.counts.get(name) ?? 0, body.len())
+            jet_rust_emit_fold_index_add(&mention_index, jet_rust_emit_fold_row(&rows, name), index, indexed[index].identifiers.counts.get(name) ?? 0, size)
         }
         if indexed[index].skippable {
             definition :: indexed[index].definition ?? next
-            jet_rust_emit_fold_index_add(&skippable, "{definition.indent}", index, 1, body.len())
+            jet_rust_emit_fold_index_add(&skippable, definition.indent, index, 1, size)
         }
     }
     declarations := [String:Int]{}
@@ -829,8 +942,8 @@ fn jet_rust_emit_fold_value_slots(lines: [String], values_start: Int, body_start
         if definition.hoisted && declarations.get(definition.id) == None -> next
         if !(indexed[index].pure || (definition.hoisted && jet_rust_emit_fold_borrowing_closure(definition.payload))) || jet_rust_emit_fold_attributed(body, index) -> next
         name :: "__jet_v_{definition.id}"
-        mention :: jet_rust_emit_fold_index_next(mention_index, name, index + 1, body.len(), false)
-        barrier :: jet_rust_emit_fold_index_next(skippable, "{definition.indent}", index + 1, body.len(), true)
+        mention :: jet_rust_emit_fold_index_next(mention_index, jet_rust_emit_fold_row(&rows, name), index + 1, size, false)
+        barrier :: jet_rust_emit_fold_index_next(skippable, definition.indent, index + 1, size, true)
         consumer :: if mention < barrier -> mention else -> barrier
         if consumer >= body.len() -> next
         // Batch only variable-free pure payloads into a proven opaque outer
@@ -879,14 +992,14 @@ fn jet_rust_emit_fold_value_slots(lines: [String], values_start: Int, body_start
         at := -1
         forms :: [String]{"({name}.as_ref().expect(\"MIR value\")).clone()", "(*{name}.as_ref().expect(\"MIR value\"))", "{name}.take().expect(\"MIR value\")"}
         loop candidate in forms {
-            positions :: jet_rust_emit_fold_occurrences(bytes, candidate.bytes())
-            if positions.len() == 1 {
+            if body[consumer].count(candidate) == 1 {
                 form = candidate
-                at = positions[0]
+                at = jet_rust_emit_fold_find(bytes, candidate.bytes(), 0)
                 break
             }
         }
-        if at < 0 || jet_rust_emit_fold_inside_closure(bytes, at) -> next
+        // Only a '|' can open a closure.
+        if at < 0 || (body[consumer].contains("|") && jet_rust_emit_fold_inside_closure(bytes, at)) -> next
         before :: String.from_bytes(~(bytes[0..<at])) ?? ""
         after :: String.from_bytes(~(bytes[at + form.bytes().len()..<bytes.len()])) ?? ""
         rest :: "{before}{after}"
@@ -897,12 +1010,13 @@ fn jet_rust_emit_fold_value_slots(lines: [String], values_start: Int, body_start
             lhs :: String.from_bytes(~(rest_bytes[indent..<assign])) ?? ""
             if jet_rust_emit_fold_numbered(lhs, "__jet_l_", "") -> target = lhs
         }
-        rest_identifiers :: jet_rust_emit_fold_identifiers(rest_bytes)
+        rest_identifiers :: jet_rust_emit_fold_identifiers(rest)
         conflict := false
         loop variable in jet_rust_emit_fold_variables(definition.payload) {
             allowed :: if variable == target -> 1 else -> 0
             if (rest_identifiers.counts.get(variable) ?? 0) > allowed -> conflict = true
-            between :: jet_rust_emit_fold_index_prefix(mention_index, variable, consumer) - jet_rust_emit_fold_index_prefix(mention_index, variable, index + 1)
+            row :: jet_rust_emit_fold_row(&rows, variable)
+            between :: jet_rust_emit_fold_index_prefix(mention_index, row, consumer, size) - jet_rust_emit_fold_index_prefix(mention_index, row, index + 1, size)
             if between > 0 -> conflict = true
         }
         if conflict -> next
@@ -922,19 +1036,19 @@ fn jet_rust_emit_fold_value_slots(lines: [String], values_start: Int, body_start
         // Only a rewritten consumer changes its indexed text. Definition
         // and declaration removals deliberately leave their old rows present.
         loop variable in indexed[consumer].identifiers.names {
-            jet_rust_emit_fold_index_add(&mention_index, variable, consumer, 0 - (indexed[consumer].identifiers.counts.get(variable) ?? 0), body.len())
+            jet_rust_emit_fold_index_add(&mention_index, jet_rust_emit_fold_row(&rows, variable), consumer, 0 - (indexed[consumer].identifiers.counts.get(variable) ?? 0), size)
         }
         if indexed[consumer].skippable {
             prior :: indexed[consumer].definition ?? next
-            jet_rust_emit_fold_index_add(&skippable, "{prior.indent}", consumer, -1, body.len())
+            jet_rust_emit_fold_index_add(&skippable, prior.indent, consumer, -1, size)
         }
         indexed[consumer] = jet_rust_emit_fold_line(body, consumer)
         loop variable in indexed[consumer].identifiers.names {
-            jet_rust_emit_fold_index_add(&mention_index, variable, consumer, indexed[consumer].identifiers.counts.get(variable) ?? 0, body.len())
+            jet_rust_emit_fold_index_add(&mention_index, jet_rust_emit_fold_row(&rows, variable), consumer, indexed[consumer].identifiers.counts.get(variable) ?? 0, size)
         }
         if indexed[consumer].skippable {
             updated :: indexed[consumer].definition ?? next
-            jet_rust_emit_fold_index_add(&skippable, "{updated.indent}", consumer, 1, body.len())
+            jet_rust_emit_fold_index_add(&skippable, updated.indent, consumer, 1, size)
         }
         reads[consumer].ready = false
         removed[index] = true
@@ -962,8 +1076,10 @@ fn jet_rust_emit_copy_scalar_type(ty: String) -> Bool Never! {
 // Whether `pattern` occurs in `bytes` starting exactly at `at`.
 fn jet_rust_emit_bytes_at(bytes: [U8], pattern: [U8], at: Int) -> Bool Never! {
     if at < 0 || at + pattern.len() > bytes.len() -> return false
-    loop offset in 0..<pattern.len() {
+    offset := 0
+    loop offset < pattern.len() {
         if bytes[at + offset] != pattern[offset] -> return false
+        offset += 1
     }
     true
 }
@@ -988,9 +1104,16 @@ fn jet_rust_emit_unwrap_value_slots(lines: [String], start: Int) -> [String] Nev
     borrows := [String:Int]{}
     definitions := [String]{}
     types := [String:String]{}
+    // Retain each line's IDs so lines without a plain slot skip rewriting.
+    line_mentions := [[String]]{}
     loop line in body {
+        found :: jet_rust_emit_value_mentions(line)
+        ids := [String]{}
+        loop mention in found -> &ids.push(mention.id)
+        &line_mentions.push(ids)
+        if found.len() == 0 -> next
         bytes :: line.bytes()
-        loop mention in jet_rust_emit_value_mentions(line) {
+        loop mention in found {
             &mentions.add(mention.id, (mentions.get(mention.id) ?? 0) + 1).drop("the count replaces the prior count")
             if jet_rust_emit_bytes_at(bytes, borrow, mention.column + 8 + mention.id.bytes().len()) -> &borrows.add(mention.id, (borrows.get(mention.id) ?? 0) + 1).drop("the count replaces the prior count")
         }
@@ -1015,7 +1138,18 @@ fn jet_rust_emit_unwrap_value_slots(lines: [String], start: Int) -> [String] Nev
         if index >= start -> break
         &rebuilt.push(entry)
     }
-    loop line in body {
+    loop (position, line) in body {
+        touched := false
+        loop id in line_mentions[position] {
+            if plain.get(id) != None {
+                touched = true
+                break
+            }
+        }
+        if !touched {
+            &rebuilt.push(line)
+            next
+        }
         // A plain slot's definition becomes a plain `let`; its expression can
         // itself read other plain slots, so the rewritten line still gets the
         // read replacements below.
@@ -1084,7 +1218,7 @@ fn jet_rust_emit_compact_function_text(lines: [String], start: Int) -> [String] 
     text := [U8]{}
     loop (position, entry) in lines {
         if position < start -> next
-        loop byte in entry.bytes() -> &text.push(byte)
+        &text.extend(entry.bytes())
         &text.push(U8{10})
     }
     prefixes :: [String]{"__jet_v_", "__jet_l_", "__jet_pm_", "'jet_block_", "'jet_loop_"}
@@ -1094,7 +1228,8 @@ fn jet_rust_emit_compact_function_text(lines: [String], start: Int) -> [String] 
     payload_prefix :: prefixes[2].bytes()
     block_prefix :: prefixes[3].bytes()
     loop_prefix :: prefixes[4].bytes()
-    names := [String:Int]{}
+    // Include digit count so distinct IDs with leading zeroes remain distinct.
+    names := [Int:Int]{}
     counts := [Int]{0, 0, 0, 0, 0}
     out := [U8]{}
     // 0 code, 1 string, 2 raw string closed by `"` and `hashes` #s, 3 block comment.
@@ -1105,7 +1240,7 @@ fn jet_rust_emit_compact_function_text(lines: [String], start: Int) -> [String] 
     loop index < text.len() {
         if line_start && state == 0 {
             spaces := 0
-            loop index + spaces < text.len() && Int.from_u8(text[index + spaces]) == 32 -> spaces += 1
+            loop index + spaces < text.len() && text[index + spaces] == (U8{32}) -> spaces += 1
             level := spaces /% 4
             if level > 8 -> level = 8
             loop level > 0 {
@@ -1117,6 +1252,37 @@ fn jet_rust_emit_compact_function_text(lines: [String], start: Int) -> [String] 
             next
         }
         line_start = false
+        // Copy inert ASCII runs without per-byte helper calls. Code runs stop
+        // after a newline so the next line still compacts its indentation.
+        run_start :: index
+        if state == 0 {
+            loop index < text.len() {
+                byte :: text[index]
+                if byte >= (U8{128}) || byte == (U8{47}) || byte == (U8{34}) || byte == (U8{39}) -> break
+                if byte == (U8{114}) || byte == (U8{95}) {
+                    if index == 0 -> break
+                    prior :: text[index - 1]
+                    joined :: (prior >= (U8{48}) && prior <= (U8{57})) || (prior >= (U8{65}) && prior <= (U8{90})) || (prior >= (U8{97}) && prior <= (U8{122})) || prior == (U8{95})
+                    if !joined || (byte == (U8{114}) && prior == (U8{98})) -> break
+                }
+                &out.push(byte)
+                index += 1
+                if byte == (U8{10}) {
+                    line_start = true
+                    break
+                }
+            }
+        } else {
+            stop :: if state == 3 -> U8{42} else -> U8{34}
+            escape :: if state == 1 -> U8{92} else -> U8{34}
+            loop index < text.len() {
+                byte :: text[index]
+                if byte >= (U8{128}) || byte == stop || byte == escape -> break
+                &out.push(byte)
+                index += 1
+            }
+        }
+        if index > run_start -> next
         code :: Int.from_u8(text[index])
         following :: if index + 1 < text.len() -> Int.from_u8(text[index + 1]) else -> -1
         kind := -1
@@ -1227,14 +1393,20 @@ fn jet_rust_emit_compact_function_text(lines: [String], start: Int) -> [String] 
         }
         if kind >= 0 {
             id_start :: index + prefix_width
-            key :: "{kind}:{String.from_bytes(~(text[id_start..<id_start + digits])) ?? ""}"
+            value := 0
+            at := id_start
+            loop at < id_start + digits {
+                value = value * 10 + (Int.from_u8(text[at]) - 48)
+                at += 1
+            }
+            key :: (value * 1000000 + digits) * 5 + kind
             number := names.get(key) ?? -1
             if number < 0 {
                 number = counts[kind]
                 counts[kind] = number + 1
                 &names.add(key, number).drop("first mention numbers the id")
             }
-            loop byte in "{shorts[kind]}{number}".bytes() -> &out.push(byte)
+            &out.extend("{shorts[kind]}{number}".bytes())
             index = id_start + digits
             next
         }

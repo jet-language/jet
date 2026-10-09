@@ -206,6 +206,10 @@ decision.
   already have flushed. Canonical and noncanonical JSON use this same
   rejection rule. Canonical JSON buffers and sorts each object within
   `max_item_bytes`.
+  JSON projections of compile-time values obey the same non-finite rejection
+  rule. Their object keys must be text; non-text map keys are `Unsupported`,
+  never stringified. Characters use JSON string quoting, including lowercase
+  `\u00xx` escapes for C0 controls without a short JSON escape.
 - JSONL readers return `?DataTree`, writers accept `DataTree`, and each
   non-empty record contains one complete value.
 - CSV readers return `?CSVRow`, writers accept `[String]`, and each record

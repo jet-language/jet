@@ -3,6 +3,7 @@
 
 use crate::Comptime::Builtins::exact_int_value;
 use crate::AST::{CtFloat, CtKey, CtValue};
+use jet_foundation::EncodingJson::{json_unsupported, EncodingError};
 
 fn from_json_int(value: i64) -> CtValue {
     exact_int_value(crate::Numeric::CtBigInt::from_int(value))
@@ -206,8 +207,8 @@ pub(super) fn encoding_error_value_at_line(
 /// Render the ordered `DataTree` representation used by typed codecs. Dynamic
 /// values use the same canonical tree; published-schema output retains the
 /// wire order stored in `JSONObject`.
-pub(super) fn render_ordered_datatree(v: &CtValue, pretty: bool, depth: usize) -> String {
-    match v {
+pub(super) fn render_ordered_datatree(v: &CtValue, pretty: bool, depth: usize) -> Result<String, EncodingError> {
+    Ok(match v {
         CtValue::Enum {
             type_name,
             variant,
@@ -227,44 +228,44 @@ pub(super) fn render_ordered_datatree(v: &CtValue, pretty: bool, depth: usize) -
                     .unwrap_or_else(|| "null".to_string()),
                 "Object" => args
                     .first()
-                    .map(|(_, payload)| render_ordered_object_payload(payload, pretty, depth))
+                    .map(|(_, payload)| render_ordered_object_payload(payload, pretty, depth)).transpose()?
                     .unwrap_or_else(|| "{}".to_string()),
                 _ => args
                     .first()
-                    .map(|(_, payload)| render_ordered_datatree(payload, pretty, depth))
+                    .map(|(_, payload)| render_ordered_datatree(payload, pretty, depth)).transpose()?
                     .unwrap_or_else(|| "null".to_string()),
             }
         }
         CtValue::List(items) => {
             if items.is_empty() {
-                return "[]".to_string();
+                return Ok("[]".to_string());
             }
             if !pretty {
-                return format!(
+                return Ok(format!(
                     "[{}]",
                     items
                         .iter()
                         .map(|item| render_ordered_datatree(item, false, depth))
-                        .collect::<Vec<_>>()
+                        .collect::<Result<Vec<_>, _>>()?
                         .join(",")
-                );
+                ));
             }
             let pad = "  ".repeat(depth + 1);
             let end = "  ".repeat(depth);
             let parts = items
                 .iter()
-                .map(|item| format!("{}{}", pad, render_ordered_datatree(item, true, depth + 1)))
-                .collect::<Vec<_>>();
+                .map(|item| Ok(format!("{}{}", pad, render_ordered_datatree(item, true, depth + 1)?)))
+                .collect::<Result<Vec<_>, EncodingError>>()?;
             format!("[\n{}\n{}]", parts.join(",\n"), end)
         }
         CtValue::Struct { type_name, fields } if type_name == "JSONObject" => {
-            render_ordered_object(fields, pretty, depth)
+            render_ordered_object(fields, pretty, depth)?
         }
-        _ => render_json_pretty(v, pretty, depth),
-    }
+        _ => render_json_pretty(v, pretty, depth)?,
+    })
 }
 
-fn render_ordered_object_payload(payload: &CtValue, pretty: bool, depth: usize) -> String {
+fn render_ordered_object_payload(payload: &CtValue, pretty: bool, depth: usize) -> Result<String, EncodingError> {
     let fields = match payload {
         CtValue::Map(entries) => entries
             .iter()
@@ -298,49 +299,50 @@ fn render_ordered_object_payload(payload: &CtValue, pretty: bool, depth: usize) 
             .collect::<Option<Vec<_>>>(),
         _ => None,
     };
-    fields
-        .map(|fields| render_ordered_object(&fields, pretty, depth))
-        .unwrap_or_else(|| render_json_pretty(payload, pretty, depth))
+    match fields {
+        Some(fields) => render_ordered_object(&fields, pretty, depth),
+        None => render_json_pretty(payload, pretty, depth),
+    }
 }
 
-fn render_ordered_object(fields: &[(String, CtValue)], pretty: bool, depth: usize) -> String {
+fn render_ordered_object(fields: &[(String, CtValue)], pretty: bool, depth: usize) -> Result<String, EncodingError> {
     if fields.is_empty() {
-        return "{}".to_string();
+        return Ok("{}".to_string());
     }
     if !pretty {
-        return format!(
+        return Ok(format!(
             "{{{}}}",
             fields
                 .iter()
                 .map(|(key, value)| {
-                    format!(
+                    Ok(format!(
                         "{}:{}",
                         quote_json(key),
-                        render_ordered_datatree(value, false, depth)
-                    )
+                        render_ordered_datatree(value, false, depth)?
+                    ))
                 })
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, EncodingError>>()?
                 .join(",")
-        );
+        ));
     }
     let pad = "  ".repeat(depth + 1);
     let end = "  ".repeat(depth);
     let parts = fields
         .iter()
         .map(|(key, value)| {
-            format!(
+            Ok(format!(
                 "{}{}: {}",
                 pad,
                 quote_json(key),
-                render_ordered_datatree(value, true, depth + 1)
-            )
+                render_ordered_datatree(value, true, depth + 1)?
+            ))
         })
-        .collect::<Vec<_>>();
-    format!("{{\n{}\n{}}}", parts.join(",\n"), end)
+        .collect::<Result<Vec<_>, EncodingError>>()?;
+    Ok(format!("{{\n{}\n{}}}", parts.join(",\n"), end))
 }
 
-pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> String {
-    match v {
+pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> Result<String, EncodingError> {
+    Ok(match v {
         // D-SERDE-ACCESS=B: a `DataTree` value (from `.parse()`, or built by
         // hand with `DataTree.Text(…)`/`DataTree.Object(…)`) — unwrap the tag
         // and render its payload the same way the untagged shapes below do.
@@ -353,7 +355,7 @@ pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> Str
             match variant.as_str() {
                 "Null" => "null".to_string(),
                 _ => match args.first() {
-                    Some((_, payload)) => render_json_pretty(payload, pretty, depth),
+                    Some((_, payload)) => render_json_pretty(payload, pretty, depth)?,
                     None => "null".to_string(),
                 },
             }
@@ -361,121 +363,95 @@ pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> Str
         CtValue::Unit => "null".to_string(),
         CtValue::Bool(b) => b.to_string(),
         CtValue::Int(n) => n.to_string(),
-        CtValue::Float(f) => {
-            assert!(
-                f.as_f64().is_finite(),
-                "JSON cannot encode a non-finite Float"
-            );
-            format!("{:?}", f)
-        }
+        CtValue::Float(f) => f.to_json()?,
         CtValue::BigInt(value) => value.to_string_rep(),
         CtValue::Str(s) => quote_json(s),
         CtValue::List(xs) => {
             if xs.is_empty() {
-                return "[]".to_string();
+                return Ok("[]".to_string());
             }
             if !pretty {
                 let parts: Vec<String> = xs
                     .iter()
                     .map(|x| render_json_pretty(x, false, depth))
-                    .collect();
-                return format!("[{}]", parts.join(","));
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(format!("[{}]", parts.join(",")));
             }
             let pad = "  ".repeat(depth + 1);
             let end = "  ".repeat(depth);
             let parts: Vec<String> = xs
                 .iter()
-                .map(|x| format!("{}{}", pad, render_json_pretty(x, true, depth + 1)))
-                .collect();
+                .map(|x| Ok(format!("{}{}", pad, render_json_pretty(x, true, depth + 1)?)))
+                .collect::<Result<Vec<_>, EncodingError>>()?;
             format!("[\n{}\n{}]", parts.join(",\n"), end)
         }
         CtValue::Map(m) => {
             if m.is_empty() {
-                return "{}".to_string();
+                return Ok("{}".to_string());
             }
             if !pretty {
                 let parts: Vec<String> = m
                     .iter()
                     .map(|(k, v)| {
-                        format!(
-                            "{}:{}",
-                            quote_json(&match k {
-                                CtKey::Str(s) => s.clone(),
-                                other => other.to_value().jet_show(),
-                            }),
-                            render_json_pretty(v, false, depth)
-                        )
+                        let CtKey::Str(key) = k else {
+                            return Err(json_unsupported("JSON cannot encode non-text map keys"));
+                        };
+                        Ok(format!("{}:{}", quote_json(key), render_json_pretty(v, false, depth)?))
                     })
-                    .collect();
-                return format!("{{{}}}", parts.join(","));
+                    .collect::<Result<Vec<_>, EncodingError>>()?;
+                return Ok(format!("{{{}}}", parts.join(",")));
             }
             let pad = "  ".repeat(depth + 1);
             let end = "  ".repeat(depth);
             let parts: Vec<String> = m
                 .iter()
                 .map(|(k, v)| {
-                    let key = match k {
-                        CtKey::Str(s) => quote_json(s),
-                        other => quote_json(&other.to_value().jet_show()),
+                    let CtKey::Str(key) = k else {
+                        return Err(json_unsupported("JSON cannot encode non-text map keys"));
                     };
-                    format!("{}{}: {}", pad, key, render_json_pretty(v, true, depth + 1))
+                    Ok(format!("{}{}: {}", pad, quote_json(key), render_json_pretty(v, true, depth + 1)?))
                 })
-                .collect();
+                .collect::<Result<Vec<_>, EncodingError>>()?;
             format!("{{\n{}\n{}}}", parts.join(",\n"), end)
         }
         // EncodingLite Object payload: insertion-ordered `Struct` (AOT DataTree).
         // Sort keys so `json.canonical` matches BTreeMap / AOT sorted form.
         CtValue::Struct { type_name, fields } if type_name == "JSONObject" => {
-            let mut fields = fields.clone();
+            let mut fields = fields.iter().collect::<Vec<_>>();
             fields.sort_by(|a, b| a.0.cmp(&b.0));
             if fields.is_empty() {
-                return "{}".to_string();
+                return Ok("{}".to_string());
             }
             if !pretty {
                 let parts: Vec<String> = fields
                     .iter()
                     .map(|(k, v)| {
-                        format!("{}:{}", quote_json(k), render_json_pretty(v, false, depth))
+                        Ok(format!("{}:{}", quote_json(k), render_json_pretty(v, false, depth)?))
                     })
-                    .collect();
-                return format!("{{{}}}", parts.join(","));
+                    .collect::<Result<Vec<_>, EncodingError>>()?;
+                return Ok(format!("{{{}}}", parts.join(",")));
             }
             let pad = "  ".repeat(depth + 1);
             let end = "  ".repeat(depth);
             let parts: Vec<String> = fields
                 .iter()
                 .map(|(k, v)| {
-                    format!(
+                    Ok(format!(
                         "{}{}: {}",
                         pad,
                         quote_json(k),
-                        render_json_pretty(v, true, depth + 1)
-                    )
+                        render_json_pretty(v, true, depth + 1)?
+                    ))
                 })
-                .collect();
+                .collect::<Result<Vec<_>, EncodingError>>()?;
             format!("{{\n{}\n{}}}", parts.join(",\n"), end)
         }
-        other => other.to_json(),
-    }
+        other => other.to_json()?,
+    })
 }
 
 fn quote_json(s: &str) -> String {
-    let mut out = String::from("\"");
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\u{0008}' => out.push_str("\\b"),
-            '\u{000c}' => out.push_str("\\f"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            _ => out.push(c),
-        }
-    }
-    out.push('"');
-    out
+    jet_foundation::JSON::quote(s)
 }
 #[cfg(test)]
 mod tests {
