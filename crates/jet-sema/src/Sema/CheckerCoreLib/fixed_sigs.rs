@@ -1475,7 +1475,27 @@ fn core_fixed_sig_raw(
         ("core.files", "__read_at_os") => Some((vec![(read, Type::String), (read, Type::Int), (read, Type::Int)], Some(result_ty(Type::List(Box::new(u8_ty())), io.clone())))),
         ("core.files", "__write_at_os") => Some((vec![(read, Type::String), (read, Type::Int), (read, Type::List(Box::new(u8_ty())))], Some(io_unit.clone()))),
         ("core.files", "__read_link_os") => Some((vec![(read, Type::String)], Some(result_ty(Type::String, io.clone())))),
+        ("core.files", "__host_path_is_absolute") => Some((vec![(read, Type::String)], Some(Type::Bool))),
+        ("core.files", "__host_path_join") => Some((vec![(read, Type::String), (read, Type::String)], Some(Type::String))),
+        ("core.files", "__temp_path_sample") => Some((vec![], Some(Type::Tuple(vec![
+            ("clock_available".into(), Box::new(Type::Bool)),
+            ("nanos".into(), Box::new(Type::String)),
+        ])))),
+        ("core.files", "__temp_directory") => Some((vec![], Some(Type::String))),
         ("core.testing", "__fault_should_fail") => Some((vec![(read, Type::String)], Some(Type::Bool))),
+        ("core.testing", "__evidence_read") => Some((vec![(read, Type::String)], Some(Type::Named("__EvidenceRead".into())))),
+        ("core.testing", "__record_failure") => Some((vec![(read, Type::String), (read, Type::String)], Some(unit_ty()))),
+        ("core.testing", "__clear_failure") => Some((vec![], Some(unit_ty()))),
+        ("core.testing", "__temp_facts") => Some((vec![], Some(Type::Named("__TempFacts".into())))),
+        ("core.testing", "__temp_join") => Some((vec![(read, Type::String)], Some(Type::Named("__TempPath".into())))),
+        ("core.testing", "__temp_remove") => Some((vec![(read, list_u8.clone())], Some(Type::Named("__TempRemove".into())))),
+        ("core.testing", "__temp_create") => Some((vec![(read, list_u8.clone())], Some(Type::Named("__TempCreate".into())))),
+        ("core.testing", "__text_window") => Some((vec![
+            (read, Type::String),
+            (read, Type::IntN { signed: false, bits: 64 }),
+            (read, Type::IntN { signed: false, bits: 64 }),
+        ], Some(Type::String))),
+        ("core.testing", "__suite_snapshot") => Some((vec![], Some(Type::Named("TestSuite".into())))),
         ("core.sys", "__env_value") => Some((vec![(read, Type::String)], Some(Type::Option(Box::new(Type::List(Box::new(u8_ty()))))))),
         ("core.sys", "__env_set") => Some((vec![(read, Type::String), (read, Type::String)], Some(result_ty(unit_ty(), Type::Named("EnvError".into()))))),
         ("core.sys", "__env_remove") => Some((vec![(read, Type::String)], Some(result_ty(Type::Bool, Type::Named("EnvError".into()))))),
@@ -8196,5 +8216,30 @@ mod tests {
             ("errno".into(), Box::new(Type::Int)),
             ("spec".into(), Box::new(Type::Named("ProcessSpec".into()))),
         ]);
+    }
+
+    #[test]
+    fn private_file_and_testing_host_rows_have_typed_signatures() {
+        for (module, member) in [
+            ("core.files", "__host_path_is_absolute"),
+            ("core.files", "__host_path_join"),
+            ("core.files", "__temp_path_sample"),
+            ("core.files", "__temp_directory"),
+            ("core.testing", "__evidence_read"),
+            ("core.testing", "__record_failure"),
+            ("core.testing", "__clear_failure"),
+            ("core.testing", "__temp_facts"),
+            ("core.testing", "__temp_join"),
+            ("core.testing", "__temp_remove"),
+            ("core.testing", "__temp_create"),
+            ("core.testing", "__text_window"),
+            ("core.testing", "__suite_snapshot"),
+        ] {
+            let row = super::Syntax::core_call(module, member).expect("registered native row");
+            let (parameters, result) = super::core_fixed_sig_for_row(row)
+                .unwrap_or_else(|| panic!("{module}.{member} needs its Jet registry signature"));
+            assert_eq!(parameters.len(), row.arity());
+            assert!(result.is_some(), "{module}.{member} has an explicit result type");
+        }
     }
 }

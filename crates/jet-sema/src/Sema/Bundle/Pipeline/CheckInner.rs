@@ -2160,9 +2160,20 @@ pub(super) fn check_bundle_opts_for_output_inner(
                         }
                     }
                 }
-            } else if states[idx].imports.contains_key(module_alias.as_str()) {
+            } else if let Some(imported_idx) = states[idx].imports.get(module_alias.as_str()).copied()
+                .or_else(|| {
+                    // A sealed catalog path can select members directly; it
+                    // does not depend on a separately written module alias.
+                    if !module.path.to_string_lossy().starts_with(crate::Diagnostics::CORE_SOURCE_ROOT) {
+                        return None;
+                    }
+                    let part = jet_foundation::CoreSourceParts::core_private_source_part_by_alias(module_alias)?;
+                    bundle.modules.iter().position(|candidate|
+                        candidate.alias == part.source.alias
+                            && candidate.path.to_string_lossy().starts_with(crate::Diagnostics::CORE_SOURCE_ROOT))
+                })
+            {
                 // File module: look up items in the target module's state.
-                let imported_idx = states[idx].imports[module_alias.as_str()];
                 let is_reexport = imp.is_pub;
                 for binding in &bindings {
                     let orig = binding

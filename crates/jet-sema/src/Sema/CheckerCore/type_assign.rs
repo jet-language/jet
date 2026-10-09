@@ -403,6 +403,17 @@ impl<'a> Checker<'a> {
                 {
                     return;
                 }
+                // Native private carriers can be named only in the cataloged
+                // Core module that owns them, without adding a public export.
+                if self.module_is_core_source(self.module_idx)
+                    && n.starts_with("__")
+                    && self.modules.and_then(|modules| modules.get(self.module_idx))
+                        .is_some_and(|state| jet_foundation::CoreModuleExports::core_source_modules()
+                            .iter().any(|source| source.alias == state.module_alias
+                                && jet_foundation::CoreModuleExports::core_leaf_kind(source.module, n).is_some()))
+                {
+                    return;
+                }
                 if self.type_param_scope.iter().any(|p| p.name == *n) {
                     return;
                 }

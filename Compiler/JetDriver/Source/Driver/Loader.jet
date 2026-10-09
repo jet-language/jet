@@ -3521,6 +3521,23 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
                     // members; semantic preparation resolves `use x.[f]`.
                     if jet_driver_program_has_inline_module(loaded_program, module_alias) -> next
                     target_index := jet_driver_scoped_alias(aliases, module_alias, scoped.scope)
+                    if target_index == None && is_core {
+                        loop (row_index, row) in request.core_sources {
+                            if row.owner == "" || row.alias != module_alias -> next
+                            loop (index, candidate) in source_units {
+                                if jet_driver_unit_is_core(candidate) && candidate.module_name == row.module_name {
+                                    target_index = Val(index)
+                                    break
+                                }
+                            }
+                            if target_index == None -> target_index = Val(jet_driver_add_core_unit(&source_units, &queued, &core_generated, row.module_name, row.path, row_index, row.source))
+                            if target_index == .Val(core_index) && !queued[core_index] {
+                                queued[core_index] = true
+                                &pending.push(core_index)
+                            }
+                            break
+                        }
+                    }
                     // `use core.perf.[PerfError]` selects from the Core module itself.
                     core_module :: jet_driver_core_import_module(declaration)
                     if target_index == None {

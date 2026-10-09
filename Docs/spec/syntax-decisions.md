@@ -191,6 +191,11 @@ the enum's declaring registry before module-item lookup.
 Within compiler-owned Core source, an import of a sealed part's catalog
 alias also joins the transitive source closure, even if that part's public
 owner was not imported. This does not expose private aliases to user code.
+Grouped selection of a sealed catalog part also resolves directly through its
+catalog identity, independently of any renamed module import. Qualified types
+inside imported signatures and fields resolve in the declaring module's import
+scope. Native private carriers remain nameable only in their owning Core scope;
+this admission does not create a source declaration or a public export.
 
 **D-SOLVER-LIB1 — Explicit solver library**: `core.compute.solve` ships a finite
 solver API with explicit `Solver` state, deterministic insertion-order

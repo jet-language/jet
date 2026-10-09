@@ -1510,7 +1510,7 @@ impl<'a> Checker<'a> {
                             .as_ref()
                             .is_some_and(|declared| declared.unwrap_result().is_some()) =>
                     {
-                        let carrier = self.declared_return_type.clone();
+                        let carrier = self.declared_return_type.clone().map(|ty| self.resolve_type(ty));
                         let saved = self.expected_type.clone();
                         self.expected_type = carrier.clone();
                         let et = self.infer(e);
