@@ -205,7 +205,7 @@ fn body_index_size(size: Int) {
 // context cannot mutate that publication or another task's visible prefix.
 fn body_index_shared_read(values: SemaComptimeBodyValues, size: Int) -> Int {
     context := sema_check_context_init()
-    context.comptime_body_values = values
+    context.comptime_body_values = ~values
     checked := 0
     loop index in 0..<size {
         source :: Span{start: index * 4, end: index * 4 + 2}
@@ -224,8 +224,9 @@ fn body_index_shared_size(size: Int) {
         &rows.push(body_index_value("shared::module", "shared::function", Span{start: index * 4, end: index * 4 + 2}, Span{start: index * 4 + 2, end: index * 4 + 3}, index))
     }
     context := sema_check_context_init()
-    sema_comptime_body_values_replace(&context, ^rows)
-    publication :: context.comptime_body_values
+    work :: shared SemaComptimeBodyWork{}
+    context.comptime_body_values = sema_comptime_body_values_freeze(^rows, Val(~work), true)
+    publication :: ~context.comptime_body_values
     child := sema_check_context_snapshot(context)
     sema_comptime_body_values_truncate(&child, 0)
     body_index_require(context.comptime_body_values.length == size && child.comptime_body_values.length == 0, "fork truncation changes only its own visible prefix")
@@ -249,11 +250,71 @@ fn body_index_shared_size(size: Int) {
         body_index_require(main_reads == size && first_reads == size && second_reads == size, "three readers complete every indexed query")
     }
     body_index_require(body_index_shared_read(context.comptime_body_values, size) == size, "parallel readers leave the parent publication unchanged")
+    permit :: work.guard_read()
+    body_index_require(permit.value.publications == 1 && permit.value.index_builds == 1 && permit.value.indexed_rows == size, "actual N/2N/4N index work is one publication and one row visit per input")
+    body_index_require(permit.value.queries == size * 4 && permit.value.module_probes == size * 4 && permit.value.first_row_probes == size * 4 && permit.value.second_row_probes == size * 4 && permit.value.owned_rows_returned == size * 4, "numeric work counters include every concurrent/parent read without per-query filesystem writes")
+    body_index_require(permit.value.context_value_snapshots == 1, "fork work is counted once without copying or indexing the publication")
+}
+
+fn body_index_duplicate_prefixes() {
+    source :: Span{start: 10, end: 20}
+    site :: Span{start: 3, end: 7}
+    repeated :: body_index_value("prefix::module", "prefix::function", source, site, 7)
+    context := sema_check_context_init()
+    sema_comptime_body_values_replace(&context, [SemaComptimeBodyValue]{repeated, repeated, repeated})
+    loop length in 0..<4 {
+        child := sema_check_context_snapshot(context)
+        sema_comptime_body_values_truncate(&child, length)
+        actual :: sema_comptime_body_value_find(child, "prefix::module", "prefix::function", source, site)
+        expected :: if length == 1 -> Val(repeated) else -> None
+        body_index_require(actual == expected, "duplicate prefix 0/1/2/3 is absent/unique/ambiguous/ambiguous")
+        body_index_query(child, "prefix::module", "prefix::function", source, site)
+    }
+    body_index_require(context.comptime_body_values.length == 3, "prefix forks leave the parent publication visible")
+}
+
+fn body_index_publication_lifecycle() {
+    source :: "fn staged() -> Int Never! {{ 1 }}\n"
+    parsed := parse_source(source.bytes())
+    body_index_require(parsed.diagnostics.len() == 0, "the real publication-lifecycle module parses")
+    canonical := jet_driver_canonical_effect_module("effect IO\n") ?? panic("the canonical effect module does not parse")
+    bytes :: source.bytes()
+    input :: SemaRegistrationModuleInput{package_identity: "body-index", module_identity: "mod::one", module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "lifecycle.jet", source_segments: [SemaSourceSegment]{SemaSourceSegment{generated: Span{start: 0, end: bytes.len()}, source_file: "lifecycle.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
+    facts :: SemaBuildFacts{package_name: "body-index", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
+    canonical_identity :: ~canonical.module_identity
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "body-index", "mod::one", canonical_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false)
+    body_index_require(graph.complete && graph.internal_problem == None, "the real publication-lifecycle graph registers")
+    span :: Span{start: 10, end: 20}
+    site :: Span{start: 3, end: 7}
+    first :: body_index_value("mod::one", "function::one", span, site, 7)
+    initial :: SemaComptimeItemValue{module_identity: first.module_identity, key: first.key, destination_key: first.destination_key, kind: SemaComptimeItemKind.BodyExpression, value: first.value, ty: first.ty}
+    environment := sema_comptime_environment(^graph, [SemaComptimeItemValue]{initial}, None)
+    empty := sema_comptime_body_values_prefix(environment.comptime_body_publication, 0)
+    body_index_require(sema_scope_environment_enter_probe_module(&environment, "mod::one", ^empty), "an item probe retargets the registered module")
+    context := sema_check_context_init()
+    context.comptime_body_values = ~environment.comptime_body_values
+    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", span, site) == None, "the item probe intentionally sees no body values")
+    full := ~environment.comptime_body_publication
+    body_index_require(sema_scope_environment_enter_probe_module(&environment, "mod::one", ^full), "the next function restores the publication")
+    context.comptime_body_values = ~environment.comptime_body_values
+    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", span, site) == Val(first), "empty item reset cannot erase a published function value")
+    prior :: ~environment.comptime_body_publication
+    next_site :: Span{start: 30, end: 31}
+    second :: body_index_value("mod::one", "function::one", span, next_site, 9)
+    landed :: SemaComptimeItemValue{module_identity: second.module_identity, key: second.key, destination_key: second.destination_key, kind: SemaComptimeItemKind.BodyExpression, value: second.value, ty: second.ty}
+    sema_comptime_environment_publish_body_values(&environment, [SemaComptimeItemValue]{initial, landed})
+    body_index_require(environment.comptime_body_values.length == 1 && environment.comptime_body_publication.length == 2 && prior.length == 1, "publication replacement leaves the old selected view and old owner intact")
+    next_full := ~environment.comptime_body_publication
+    body_index_require(sema_scope_environment_enter_probe_module(&environment, "mod::one", ^next_full), "the next function selects the new publication")
+    context.comptime_body_values = ~environment.comptime_body_values
+    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", span, site) == Val(first) && sema_comptime_body_value_find(context, "mod::one", "function::one", span, next_site) == Val(second), "the new function sees the entire ordered updated publication")
 }
 
 fn run() {
     body_index_source_identity()
     body_index_identity_and_lifecycle()
+    body_index_duplicate_prefixes()
+    body_index_publication_lifecycle()
     body_index_size(64)
     body_index_size(128)
     body_index_size(256)

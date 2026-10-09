@@ -203,7 +203,7 @@ fn sema_schema_unknown(name: String, field: String, verb: String, span: Span) ->
 
 fn sema_schema_enter_registered_module(environment: &SemaScopeEnvironment?, module_index: Int) Never! {
     if &environment == .Val(scope) {
-        sema_scope_environment_enter_module(&scope, module_index, [SemaComptimeBodyValue]{})
+        sema_scope_environment_enter_module(&scope, module_index, SemaComptimeBodyValues{})
         return
     }
     panic("an owning schema pass lost its scope environment")
@@ -230,7 +230,7 @@ pub fn sema_check_schema_migration_graph(registration: ^SemaRegistrationGraph, c
     loop module_row in checked.modules {
         loop definition in module_row.declarations.type_defs -> &types.push(definition)
     }
-    environment := Val(sema_check_pass_environment(^registration, types))
+    environment := Val(sema_check_pass_environment(^registration, types, SemaComptimeBodyValues{}))
     diagnostics := [Diagnostic]{}
     loop module_index in 0..<module_count {
         sema_schema_enter_registered_module(&environment, module_index)

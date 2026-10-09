@@ -58,52 +58,97 @@ fn sema_comptime_body_sources_truncate(context: &SemaCheckContext, length: Int) 
 // second match at or beyond the visible length is not yet ambiguous; a third
 // match can never change that answer. The row payloads themselves stay owned
 // by the published immutable facts, including equal-key/different-value rows.
-fn sema_comptime_body_values_freeze(values: ^[SemaComptimeBodyValue], trace_sink: CompilerTraceSink?, trace_phase: String) -> SemaComptimeBodyValues Never! {
+fn sema_comptime_body_values_freeze(values: ^[SemaComptimeBodyValue], work: Shared<SemaComptimeBodyWork>?, count_key_bytes: Bool) -> SemaComptimeBodyValues Never! {
     length :: values.len()
-    if trace_sink == .Val(sink) {
-        sink.progress("counters.{trace_phase}.ct_value_publication_rows", length, -1)
-        // Serialized UTF-8 row volume, not a claimed heap allocation size.
-        // This deliberately diagnostic-only work is absent without tracing.
-        rendered :: "{values:Debug}"
-        sink.progress("counters.{trace_phase}.ct_value_row_debug_utf8_bytes", rendered.count_bytes(), -1)
-    }
-    if length == 0 -> return SemaComptimeBodyValues{trace_sink: trace_sink, trace_phase: trace_phase}
     modules := [String:Int]{}
     first_rows := [[String:Int]]{}
     second_rows := [[String:Int]]{}
     indexed_rows := 0
+    index_key_utf8_bytes := 0
     loop row in 0..<length {
         slot :: sema_comptime_body_module_slot(&modules, &first_rows, values[row].module_identity)
         if second_rows.len() < first_rows.len() -> &second_rows.push([String:Int]{})
         if first_rows[slot].get(values[row].key) == None -> first_rows[slot][values[row].key] = row
         else if second_rows[slot].get(values[row].key) == None -> second_rows[slot][values[row].key] = row
         indexed_rows += 1
+        if count_key_bytes -> index_key_utf8_bytes += values[row].module_identity.count_bytes() + values[row].key.count_bytes()
     }
-    if trace_sink == .Val(sink) {
-        sink.progress("counters.{trace_phase}.ct_value_index_builds", 1, -1)
-        sink.progress("counters.{trace_phase}.ct_value_index_rows_visited", indexed_rows, -1)
+    if work == .Val(cell) {
+        permit := cell.guard_edit()
+        permit.value.publications += 1
+        permit.value.publication_rows += length
+        if length > 0 -> permit.value.index_builds += 1
+        permit.value.indexed_rows += indexed_rows
+        permit.value.index_key_utf8_bytes += index_key_utf8_bytes
     }
+    if length == 0 -> return SemaComptimeBodyValues{work: ~work}
     SemaComptimeBodyValues{
         facts: Val(shared SemaComptimeBodyFacts{values: ^values, modules: ^modules, first_rows: ^first_rows, second_rows: ^second_rows, indexed_rows: indexed_rows}),
         length: length,
-        trace_sink: trace_sink,
-        trace_phase: trace_phase,
+        work: ~work,
     }
 }
 
 fn sema_comptime_body_values_replace(context: &SemaCheckContext, values: ^[SemaComptimeBodyValue]) Never! {
-    context.comptime_body_values = sema_comptime_body_values_freeze(^values, None, "")
+    context.comptime_body_values = sema_comptime_body_values_freeze(^values, context.comptime_body_values.work, false)
 }
 
 fn sema_comptime_body_values_truncate(context: &SemaCheckContext, length: Int) Never! {
     if context.comptime_body_values.length > length -> context.comptime_body_values.length = length
 }
 
-// Operation events use the existing trace producer. Consumers sum repeated
-// progress events for these names; each event is an executed operation, not a
-// hardwired estimate of a clone or a cache hit.
-fn sema_comptime_body_values_trace(values: SemaComptimeBodyValues, operation: String) {
-    if values.trace_sink == .Val(sink) -> sink.progress("counters.{values.trace_phase}.ct_value_{operation}", 1, -1)
+fn sema_comptime_body_values_prefix(values: SemaComptimeBodyValues, length: Int) -> SemaComptimeBodyValues Never! {
+    prefix := ~values
+    if prefix.length > length -> prefix.length = length
+    ^prefix
+}
+
+// Only the existing function-detail mode owns a diagnostic slot. The slot is
+// distinct from immutable facts and is not a global/cache/semantic mechanism.
+fn sema_comptime_body_work_new(trace_sink: CompilerTraceSink?) -> Shared<SemaComptimeBodyWork>? {
+    if trace_sink == .Val(sink) {
+        if sink.functions() -> return Val(shared SemaComptimeBodyWork{})
+    }
+    None
+}
+
+fn sema_comptime_body_work_count(values: SemaComptimeBodyValues, operation: SemaComptimeBodyWorkOperation) {
+    cell :: values.work ?? return
+    permit := cell.guard_edit()
+    if operation == {
+        .FunctionsStarted -> permit.value.functions_started += 1
+        .CheckPassStarted -> permit.value.check_passes_started += 1
+        .ContextAttached -> permit.value.context_value_carriers_attached += 1
+        .ContextSnapshot -> permit.value.context_value_snapshots += 1
+        .Query -> permit.value.queries += 1
+        .ModuleProbe -> permit.value.module_probes += 1
+        .FirstRowProbe -> permit.value.first_row_probes += 1
+        .SecondRowProbe -> permit.value.second_row_probes += 1
+        .OwnedRowReturned -> permit.value.owned_rows_returned += 1
+    }
+}
+
+// Called after tasks join, by the existing phase owner holding the real sink.
+// One aggregate event per numeric field, never one filesystem write per query.
+pub fn sema_comptime_body_work_flush(values: SemaComptimeBodyValues, trace_sink: CompilerTraceSink?, phase: String) {
+    cell :: values.work ?? return
+    if trace_sink == .Val(sink) {
+        permit :: cell.guard_read()
+        sink.progress("counters.{phase}.ct_value_publications", permit.value.publications, -1)
+        sink.progress("counters.{phase}.ct_value_publication_rows", permit.value.publication_rows, -1)
+        sink.progress("counters.{phase}.ct_value_index_builds", permit.value.index_builds, -1)
+        sink.progress("counters.{phase}.ct_value_index_rows_visited", permit.value.indexed_rows, -1)
+        sink.progress("counters.{phase}.ct_value_index_key_utf8_bytes", permit.value.index_key_utf8_bytes, -1)
+        sink.progress("counters.{phase}.ct_value_functions_started", permit.value.functions_started, -1)
+        sink.progress("counters.{phase}.ct_value_check_passes_started", permit.value.check_passes_started, -1)
+        sink.progress("counters.{phase}.ct_value_context_value_carriers_attached", permit.value.context_value_carriers_attached, -1)
+        sink.progress("counters.{phase}.ct_value_context_value_snapshots", permit.value.context_value_snapshots, -1)
+        sink.progress("counters.{phase}.ct_value_queries", permit.value.queries, -1)
+        sink.progress("counters.{phase}.ct_value_module_probes", permit.value.module_probes, -1)
+        sink.progress("counters.{phase}.ct_value_first_row_probes", permit.value.first_row_probes, -1)
+        sink.progress("counters.{phase}.ct_value_second_row_probes", permit.value.second_row_probes, -1)
+        sink.progress("counters.{phase}.ct_value_owned_rows_returned", permit.value.owned_rows_returned, -1)
+    }
 }
 
 // The module memo observes published row contents, never Shared identity.
@@ -154,21 +199,22 @@ pub fn sema_comptime_body_value_find(
     source_span: Span,
     site_span: Span,
 ) -> SemaComptimeBodyValue? {
-    key := sema_comptime_body_source_key(module_identity, function_key, source_span, site_span)
-    sema_comptime_body_values_trace(context.comptime_body_values, "queries")
+    sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.Query)
+    if context.comptime_body_values.length == 0 -> return None
     facts :: context.comptime_body_values.facts ?? return None
     permit :: facts.guard_read()
-    sema_comptime_body_values_trace(context.comptime_body_values, "module_probes")
+    sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.ModuleProbe)
     slot :: permit.value.modules.get(module_identity) ?? return None
-    sema_comptime_body_values_trace(context.comptime_body_values, "first_row_probes")
+    key := sema_comptime_body_source_key(module_identity, function_key, source_span, site_span)
+    sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.FirstRowProbe)
     row :: permit.value.first_rows[slot].get(key) ?? return None
     if row >= context.comptime_body_values.length -> return None
-    sema_comptime_body_values_trace(context.comptime_body_values, "second_row_probes")
+    sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.SecondRowProbe)
     if permit.value.second_rows[slot].get(key) == .Val(second) {
         if second < context.comptime_body_values.length -> return None
     }
-    sema_comptime_body_values_trace(context.comptime_body_values, "owned_rows_returned")
-    Val(permit.value.values[row])
+    sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.OwnedRowReturned)
+    Val(~permit.value.values[row])
 }
 
 pub fn sema_comptime_body_item_source(source: SemaComptimeBodySource) -> SemaComptimeItemSource Never! {

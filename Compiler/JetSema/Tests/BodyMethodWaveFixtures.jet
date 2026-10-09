@@ -38,7 +38,7 @@ fn method_wave_registration(source: String, keep_going: Bool, effects_source: St
 
 fn method_wave_comptime_rows(graph: SemaRegistrationGraph, hooks: Shared<SemaRegistrationHostHooks>, negative: Bool) -> [SemaComptimeFunctionResult] {
     memory_plan :: sema_function_memory_plan_from_graph(graph)
-    environment := sema_comptime_environment(~graph, [SemaComptimeItemValue]{})
+    environment := sema_comptime_environment(~graph, [SemaComptimeItemValue]{}, None)
     probe := sema_comptime_probe_init(sema_host_hook_access(hooks))
     available :: sema_comptime_available_constants(graph, [SemaComptimeItemValue]{})
     name :: if negative -> "method_2" else -> "method_0"
@@ -141,9 +141,9 @@ fn method_wave_product_witnesses(graph: SemaRegistrationGraph, checked: SemaGrap
     loop module_result in checked.modules {
         loop type_definition in module_result.declarations.type_defs -> &types.push(type_definition)
     }
-    environment := sema_check_pass_environment(~graph, types)
+    environment := sema_check_pass_environment(~graph, types, SemaComptimeBodyValues{})
     hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
-    scopes := sema_check_module_summary_scopes(&environment, sema_host_hook_access(hooks), memory_plan, 0, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, [String:Int]{}, "fixture", None)
+    scopes := sema_check_module_summary_scopes(&environment, sema_host_hook_access(hooks), memory_plan, 0, [SemaComptimeFunctionResult]{}, [String:Int]{}, "fixture", None)
     jobs := [SemaBodyJob]{}
     loop nominal_index in 0..<graph.modules[0].nominals.len() {
         nominal :: graph.modules[0].nominals[nominal_index]

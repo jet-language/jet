@@ -37,8 +37,8 @@ pub fn sema_repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphM
     loop module_row in modules {
         loop definition in module_row.declarations.type_defs -> &checked_types.push(definition)
     }
-    environment := sema_check_pass_environment(~graph, checked_types)
-    if !sema_scope_environment_enter_probe_module(&environment, root.module_identity, [SemaComptimeBodyValue]{}) {
+    environment := sema_check_pass_environment(~graph, checked_types, SemaComptimeBodyValues{})
+    if !sema_scope_environment_enter_probe_module(&environment, root.module_identity, SemaComptimeBodyValues{}) {
         return Err(ReplSetupError{message: "REPL root is not in the canonical registration graph"})
     }
     scopes := sema_scope_init(root.module_identity)
@@ -56,7 +56,7 @@ pub fn sema_repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphM
     scopes.failure_carrier = Val(sema_failure_carrier(Val(return_type)))
     context := sema_check_context_init()
     context.function_name = root.name
-    context.comptime_body_values = environment.comptime_body_values
+    context.comptime_body_values = ~environment.comptime_body_values
     environment.function_name = root.name
     Ok(SemaReplSession{environment: ^environment, scopes: ^scopes, ownership: ^ownership, tails: sema_statement_tail_store_init(), context: ^context, modules: ^modules, source: source, root: root})
 }

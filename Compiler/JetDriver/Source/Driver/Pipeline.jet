@@ -155,9 +155,11 @@ use jet_sema.[
     sema_comptime_append_checked_function_to_module,
     sema_comptime_available_constants,
     sema_comptime_available_constants_add,
+    sema_comptime_body_work_flush,
     sema_comptime_checked_text_source,
     sema_comptime_dependency_cycle_diagnostic,
     sema_comptime_environment,
+    sema_comptime_environment_publish_body_values,
     sema_comptime_find_function_source,
     sema_comptime_graph_apply_values,
     sema_comptime_graph_with_values,
@@ -2177,12 +2179,17 @@ fn jet_driver_comptime_lost_session(values: [SemaComptimeItemValue], functions: 
 // environment lost its graph.
 fn jet_driver_comptime_apply_landed(environment: &SemaScopeEnvironment, available: &SemaComptimeAvailableConstants, values: [SemaComptimeItemValue], from: Int) -> Bool {
     landed := [SemaComptimeItemValue]{}
-    loop value_index in from..<values.len() -> &landed.push(values[value_index])
+    body_values_changed := false
+    loop value_index in from..<values.len() {
+        &landed.push(values[value_index])
+        if values[value_index].kind == SemaComptimeItemKind.BodyExpression -> body_values_changed = true
+    }
     if &environment.registration_graph == {
         None -> return false
         .Val(resolved_graph) -> sema_comptime_graph_apply_values(&resolved_graph, landed)
     }
     sema_comptime_available_constants_add(&available, values)
+    if body_values_changed -> sema_comptime_environment_publish_body_values(&environment, values)
     true
 }
 
@@ -3022,7 +3029,7 @@ fn jet_driver_comptime_run(
     // are applied to that graph in place rather than rebuilding it per item,
     // and counted into the run's available constant keys.
     owned := ^staged
-    environment := sema_comptime_environment(^owned ?? ~graph, values)
+    environment := sema_comptime_environment(^owned ?? ~graph, values, request.trace_sink)
     // The module scope every item and function check of the run checks in.
     probe := sema_comptime_probe_init(sema_host_hook_access(request.eval_config.host_hooks))
     available := sema_comptime_available_constants(graph, values)
@@ -3067,7 +3074,10 @@ fn jet_driver_comptime_run(
             loop retry {
                 retry = false
                 if values.len() > resolved_count {
-                    if !jet_driver_comptime_apply_landed(&environment, &available, values, resolved_count) -> return jet_driver_comptime_lost_graph(values, checked_functions, trace)
+                    if !jet_driver_comptime_apply_landed(&environment, &available, values, resolved_count) {
+                        sema_comptime_body_work_flush(environment.comptime_body_publication, request.trace_sink, "sema.comptime")
+                        return jet_driver_comptime_lost_graph(values, checked_functions, trace)
+                    }
                     resolved_count = values.len()
                 }
                 source_key :: "{source.module_identity}\n{source.key}"
@@ -3091,10 +3101,14 @@ fn jet_driver_comptime_run(
                     batch = jet_driver_comptime_batch_new()
                     if flushed.progressed -> made_progress = true
                     if flushed.stop == .Val(stopped) {
+                        sema_comptime_body_work_flush(environment.comptime_body_publication, request.trace_sink, "sema.comptime")
                         return stopped
                     }
                     if values.len() > resolved_count {
-                        if !jet_driver_comptime_apply_landed(&environment, &available, values, resolved_count) -> return jet_driver_comptime_lost_graph(values, checked_functions, trace)
+                        if !jet_driver_comptime_apply_landed(&environment, &available, values, resolved_count) {
+                            sema_comptime_body_work_flush(environment.comptime_body_publication, request.trace_sink, "sema.comptime")
+                            return jet_driver_comptime_lost_graph(values, checked_functions, trace)
+                        }
                         resolved_count = values.len()
                         checked_item = sema_check_comptime_item(&environment, &probe, available, source, values)
                         counters.items_checked += 1
@@ -3109,6 +3123,7 @@ fn jet_driver_comptime_run(
                 if graph.keep_going {
                     if jet_driver_has_errors_since(diagnostics, item_diagnostic_start) -> next
                 } else if jet_driver_has_errors(diagnostics) {
+                    sema_comptime_body_work_flush(environment.comptime_body_publication, request.trace_sink, "sema.comptime")
                     return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                 }
                 if checked_item.waiting_dependencies.len() > 0 {
@@ -3136,10 +3151,12 @@ fn jet_driver_comptime_run(
                     if !jet_driver_has_errors(diagnostics) {
                         result.internal_problem = Val("comptime item checking did not return a complete typed value or dependency wait set")
                     }
+                    sema_comptime_body_work_flush(environment.comptime_body_publication, request.trace_sink, "sema.comptime")
                     return result
                 }
                 comptime_request :: checked_item.request ?? {
                     &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, "E0003", source.span, "a complete comptime item check returned no typed evaluation request", "each staged value is evaluated only from its complete checked TIR expression", "retain the canonical Sema comptime request"))
+                    sema_comptime_body_work_flush(environment.comptime_body_publication, request.trace_sink, "sema.comptime")
                     return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                 }
                 if source.kind == SemaComptimeItemKind.Constant && comptime_request.calls.len() == 0 {
@@ -3166,6 +3183,7 @@ fn jet_driver_comptime_run(
                     batch = jet_driver_comptime_batch_new()
                     if flushed.progressed -> made_progress = true
                     if flushed.stop == .Val(stopped) {
+                        sema_comptime_body_work_flush(environment.comptime_body_publication, request.trace_sink, "sema.comptime")
                         return stopped
                     }
                     retry = true
@@ -3174,6 +3192,7 @@ fn jet_driver_comptime_run(
                 if graph.keep_going {
                     if jet_driver_has_errors_since(diagnostics, item_diagnostic_start) -> next
                 } else if jet_driver_has_errors(diagnostics) {
+                    sema_comptime_body_work_flush(environment.comptime_body_publication, request.trace_sink, "sema.comptime")
                     return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                 }
                 if !closure.complete && closure.waiting_dependencies.len() == 0 && graph.keep_going {
@@ -3187,6 +3206,7 @@ fn jet_driver_comptime_run(
                         loop reason in closure.incomplete_reasons -> problem = "{problem}\n  {reason}"
                         result.internal_problem = Val(problem)
                     }
+                    sema_comptime_body_work_flush(environment.comptime_body_publication, request.trace_sink, "sema.comptime")
                     return result
                 }
                 if closure.waiting_dependencies.len() > 0 {
@@ -3226,6 +3246,7 @@ fn jet_driver_comptime_run(
                     batch = jet_driver_comptime_batch_new()
                     if flushed.progressed -> made_progress = true
                     if flushed.stop == .Val(stopped) {
+                        sema_comptime_body_work_flush(environment.comptime_body_publication, request.trace_sink, "sema.comptime")
                         return stopped
                     }
                 }
@@ -3235,6 +3256,7 @@ fn jet_driver_comptime_run(
                 flushed := jet_driver_comptime_flush(graph, names, load, request, alone, &values, checked_functions, &trace, &environment, &staging, &counters, &diagnostics)
                 if flushed.progressed -> made_progress = true
                 if flushed.stop == .Val(stopped) {
+                    sema_comptime_body_work_flush(environment.comptime_body_publication, request.trace_sink, "sema.comptime")
                     return stopped
                 }
             }
@@ -3244,6 +3266,7 @@ fn jet_driver_comptime_run(
             batch = jet_driver_comptime_batch_new()
             if flushed.progressed -> made_progress = true
             if flushed.stop == .Val(stopped) {
+                sema_comptime_body_work_flush(environment.comptime_body_publication, request.trace_sink, "sema.comptime")
                 return stopped
             }
         }
@@ -3251,7 +3274,10 @@ fn jet_driver_comptime_run(
             cycle := jet_driver_comptime_dependency_cycle(wait_rows)
             if {
                 cycle != None -> {
-                    cycle_row :: cycle ?? return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
+                    cycle_row :: cycle ?? {
+                        sema_comptime_body_work_flush(environment.comptime_body_publication, request.trace_sink, "sema.comptime")
+                        return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
+                    }
                     cycle_diagnostic := sema_comptime_dependency_cycle_diagnostic(cycle_row.name, cycle_row.span)
                     &diagnostics.push(jet_driver_attach_registration_source_location(cycle_diagnostic, graph, cycle_row.module_identity))
                 }
@@ -3263,6 +3289,7 @@ fn jet_driver_comptime_run(
                     &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the staged comptime dependency graph is stalled without a proven cycle", "only an actual cycle among unresolved canonical dependencies is reported as a cycle", "preserve the dependency owner or complete the missing staged value"))
                 }
             }
+            sema_comptime_body_work_flush(environment.comptime_body_publication, request.trace_sink, "sema.comptime")
             return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
         }
         pending = next_pending
@@ -3270,9 +3297,13 @@ fn jet_driver_comptime_run(
     // Values that landed in the last pass join the environment's graph, which
     // then leaves with the result.
     if values.len() > resolved_count {
-        if !jet_driver_comptime_apply_landed(&environment, &available, values, resolved_count) -> return jet_driver_comptime_lost_graph(values, checked_functions, trace)
+        if !jet_driver_comptime_apply_landed(&environment, &available, values, resolved_count) {
+            sema_comptime_body_work_flush(environment.comptime_body_publication, request.trace_sink, "sema.comptime")
+            return jet_driver_comptime_lost_graph(values, checked_functions, trace)
+        }
     }
     finished := jet_driver_comptime_run_result(values, checked_functions, trace, true, false)
+    sema_comptime_body_work_flush(environment.comptime_body_publication, request.trace_sink, "sema.comptime")
     finished.graph = ^environment.registration_graph
     environment.registration_graph = None
     finished

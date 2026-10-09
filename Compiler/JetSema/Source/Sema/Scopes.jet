@@ -4,7 +4,6 @@
 use jet_foundation.[
     AccessConvention,
     CoreMarkerApplication,
-    CompilerTraceSink,
     Diagnostic,
     DebugTraceSite,
     DistinctDef,
@@ -353,8 +352,38 @@ pub struct SemaComptimeBodyFacts {
 pub struct SemaComptimeBodyValues {
     pub facts: Shared<SemaComptimeBodyFacts>?{None}
     pub length: Int{0}
-    pub trace_sink: CompilerTraceSink?{None}
-    pub trace_phase: String{""}
+    // Numeric diagnosis is a separate phase-owned slot, never a fact mutation
+    // or a retained CompilerTraceSink. None on every ordinary/cold trace path.
+    pub work: Shared<SemaComptimeBodyWork>?{None}
+}
+
+pub struct SemaComptimeBodyWork {
+    pub publications: Int{0}
+    pub publication_rows: Int{0}
+    pub index_builds: Int{0}
+    pub indexed_rows: Int{0}
+    pub index_key_utf8_bytes: Int{0}
+    pub functions_started: Int{0}
+    pub check_passes_started: Int{0}
+    pub context_value_carriers_attached: Int{0}
+    pub context_value_snapshots: Int{0}
+    pub queries: Int{0}
+    pub module_probes: Int{0}
+    pub first_row_probes: Int{0}
+    pub second_row_probes: Int{0}
+    pub owned_rows_returned: Int{0}
+}
+
+pub enum SemaComptimeBodyWorkOperation {
+    FunctionsStarted
+    CheckPassStarted
+    ContextAttached
+    ContextSnapshot
+    Query
+    ModuleProbe
+    FirstRowProbe
+    SecondRowProbe
+    OwnedRowReturned
 }
 
 pub struct SemaScopeEnvironment {
@@ -377,10 +406,11 @@ pub struct SemaScopeEnvironment {
     pub boxed_edges: [String:[String]]{[String:[String]]{}}
     pub declarations: [SemaScopeDeclaration]
     pub generic_params: [TGenericParam]
+    // One publication survives probe retargets. The selected view may be empty
+    // for an item check; the next function restores the publication, not a
+    // reconstructed/copy-indexed list. Both carriers name the same fact cell.
+    pub comptime_body_publication: SemaComptimeBodyValues{SemaComptimeBodyValues{}}
     pub comptime_body_values: SemaComptimeBodyValues
-    // Diagnostic work attribution only; no trace means no row serialization.
-    pub comptime_trace_sink: CompilerTraceSink?{None}
-    pub comptime_trace_phase: String{""}
     // L0303 (#3716): the module's dispatch-table `else` arms, from the parser.
     pub else_arms: [ElseArmSpan]{[ElseArmSpan]{}}
     // D-SHAPE-PLACE1=A: the module's proven length-preserving list write
@@ -666,7 +696,7 @@ pub fn sema_scope_checked_type_name_rows(environment: SemaScopeEnvironment, name
 // One environment serves every module of a graph pass: the registration
 // graph, checked types and write-parameter facts stay, and the module's own
 // source facts replace the previous module's.
-pub fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, module_index: Int, comptime_body_values: ^[SemaComptimeBodyValue]) Never! {
+pub fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, module_index: Int, comptime_body_values: ^SemaComptimeBodyValues) Never! {
     // The graph payload loan permits only disjoint module-fact writes.
     if &environment.registration_graph == .Val(graph) {
         environment.module_identity = graph.modules[module_index].module_identity
@@ -677,7 +707,7 @@ pub fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, m
         environment.source_segments = graph.modules[module_index].source_segments
         environment.declarations = [SemaScopeDeclaration]{}
         environment.generic_params = [TGenericParam]{}
-        environment.comptime_body_values = sema_comptime_body_values_freeze(^comptime_body_values, environment.comptime_trace_sink, environment.comptime_trace_phase)
+        environment.comptime_body_values = ^comptime_body_values
         environment.else_arms = graph.modules[module_index].program.else_arms
         environment.debug_sites = graph.modules[module_index].program.debug_sites
         environment.function_name = ""
@@ -692,7 +722,7 @@ pub fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, m
 // and source facts replace the previous target's; every other per-module or
 // per-function fact starts empty, as in a newly built probe environment.
 // False when the graph has no such module.
-pub fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironment, module_identity: String, comptime_body_values: ^[SemaComptimeBodyValue]) -> Bool Never! {
+pub fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironment, module_identity: String, comptime_body_values: ^SemaComptimeBodyValues) -> Bool Never! {
     // Pin the payload window, not an owning Option match of the whole graph.
     // Only disjoint context fields are written before this loan closes.
     if &environment.registration_graph == .Val(graph) {
@@ -705,7 +735,7 @@ pub fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironm
         environment.source_segments = graph.modules[module_index].source_segments
         environment.declarations = [SemaScopeDeclaration]{}
         environment.generic_params = [TGenericParam]{}
-        environment.comptime_body_values = sema_comptime_body_values_freeze(^comptime_body_values, environment.comptime_trace_sink, environment.comptime_trace_phase)
+        environment.comptime_body_values = ^comptime_body_values
         environment.else_arms = [ElseArmSpan]{}
         environment.debug_sites = [DebugTraceSite]{}
         environment.function_name = ""
@@ -817,7 +847,7 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         comptime_requests: ~source.comptime_requests,
         comptime_body_sources: ~source.comptime_body_sources,
         // Sharing the publication does not visit, copy, or reindex its rows.
-        comptime_body_values: source.comptime_body_values,
+        comptime_body_values: ~source.comptime_body_values,
         comptime_body_source_modules: [String:Int]{},
         comptime_body_source_rows: [[String:Int]]{},
         compute_calls: ~source.compute_calls,
@@ -859,7 +889,7 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         host_hooks: source.host_hooks,
     }
     sema_comptime_body_sources_index(&snapshot)
-    sema_comptime_body_values_trace(source.comptime_body_values, "context_value_snapshots")
+    sema_comptime_body_work_count(source.comptime_body_values, SemaComptimeBodyWorkOperation.ContextSnapshot)
     snapshot
 }
 
