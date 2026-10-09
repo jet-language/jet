@@ -7,7 +7,7 @@ enum SemaUnitDimensionLookup {
     Ambiguous(name: String)
 }
 struct SemaUnitDimensionDeclaration {
-    module: Int
+    module_index: Int
     item: Int
     family: String
     span: Span
@@ -123,8 +123,8 @@ fn sema_units_dimension_reads(expression: Expr, visible: SemaUnitDimensionVisibi
 // Rust stable_unit_owner: the owning package identity, and that package's
 // identity joined with the package-root-relative module path. Never derive
 // package identity from cwd, display labels or root text.
-fn sema_units_owner(input: SemaRegistrationModuleInput) -> (package: String, module: String) Never! {
-    (package: input.package_identity, module: "{input.package_identity}::{input.module_path}")
+fn sema_units_owner(input: SemaRegistrationModuleInput) -> (package: String, module_identity: String) Never! {
+    (package: input.package_identity, module_identity: "{input.package_identity}::{input.module_path}")
 }
 fn sema_units_resolve_standard(prelude: &[UnitFamilyDef]) Never! {
     local := [String:Int]{}
@@ -165,8 +165,8 @@ fn sema_units_resolve(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegist
     module_rows := [String:Int]{}
     locals := [[String:Int]]{}
     exports := [[String:Int]]{}
-    loop (module, input) in inputs {
-        module_rows[input.module_identity] = module
+    loop (module_index, input) in inputs {
+        module_rows[input.module_identity] = module_index
         local := [String:Int]{}
         public := [String:Int]{}
         loop (item, value) in input.program.items {
@@ -175,7 +175,7 @@ fn sema_units_resolve(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegist
                     index :: declarations.len()
                     local[family.family] = index
                     if family.is_pub -> public[family.family] = index
-                    &declarations.push(SemaUnitDimensionDeclaration{module: module, item: item, family: family.family, span: family.family_span, claim: claim, preset: family.resolved_dimension})
+                    &declarations.push(SemaUnitDimensionDeclaration{module_index: module_index, item: item, family: family.family, span: family.family_span, claim: claim, preset: family.resolved_dimension})
                 }
             }
         }
@@ -202,26 +202,29 @@ fn sema_units_resolve(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegist
     dependents := [[Int]]{}
     waits := [Int]{}
     queue := [Int]{}
-    loop _ in declarations { &dependents.push([Int]{}); &waits.push(0) }
+    loop _ in declarations {
+        &dependents.push([Int]{})
+        &waits.push(0)
+    }
     loop (index, declaration) in declarations {
         if declaration.preset == .Val(value) {
             known[index] = value
         } else if declaration.claim == .Base(_) {
-            known[index] = dimension_base("{sema_units_owner(inputs[declaration.module]).module}::{declaration.family}")
+            known[index] = dimension_base("{sema_units_owner(inputs[declaration.module_index]).module_identity}::{declaration.family}")
         }
     }
     loop (index, declaration) in declarations {
         if declaration.claim == .Derived(expression) {
             dependencies := [Int:Bool]{}
             aliases := [String:Bool]{}
-            sema_units_dimension_reads(expression, visibility[declaration.module], &dependencies, &aliases)
+            sema_units_dimension_reads(expression, visibility[declaration.module_index], &dependencies, &aliases)
             sema_units_dimension_aliases(expression, &aliases)
             loop (alias, _) in aliases {
-                if visibility[declaration.module].aliases.get(alias) != None {
+                if visibility[declaration.module_index].aliases.get(alias) != None {
                     // The same source ledger used by L0103 and MIRNameFacts.
                     used := false
-                    loop name in inputs[declaration.module].program.used_import_names { if name == alias -> used = true }
-                    if !used -> &inputs[declaration.module].program.used_import_names.push(alias)
+                    loop name in inputs[declaration.module_index].program.used_import_names { if name == alias -> used = true }
+                    if !used -> &inputs[declaration.module_index].program.used_import_names.push(alias)
                 }
             }
             loop (dependency, _) in dependencies {
@@ -239,7 +242,7 @@ fn sema_units_resolve(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegist
         at += 1
         declaration :: declarations[index]
         if declaration.claim == .Derived(expression) {
-            if sema_units_dimension_expression(expression, visibility[declaration.module], known, false) == .Found(value) {
+            if sema_units_dimension_expression(expression, visibility[declaration.module_index], known, false) == .Found(value) {
                 known[index] = value
                 loop dependent in dependents[index] {
                     waits[dependent] -= 1
@@ -253,29 +256,29 @@ fn sema_units_resolve(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegist
         if resolved == None {
             diagnostic := sema_error("E0905", declaration.span, "dimension `{declaration.family}` cannot be resolved", "derived dimensions can use visible declared dimensions and cannot form a cycle", "import or declare every base dimension and remove any dimension cycle")
             if declaration.claim == .Derived(expression) {
-                if sema_units_dimension_expression(expression, visibility[declaration.module], known, true) == .Ambiguous(name) -> diagnostic = sema_error("E0905", declaration.span, "dimension name `{name}` is ambiguous", "more than one imported module exports that dimension", "qualify it with the intended module alias, such as `dep.{name}`")
+                if sema_units_dimension_expression(expression, visibility[declaration.module_index], known, true) == .Ambiguous(name) -> diagnostic = sema_error("E0905", declaration.span, "dimension name `{name}` is ambiguous", "more than one imported module exports that dimension", "qualify it with the intended module alias, such as `dep.{name}`")
             }
             start :: diagnostics.len()
             &diagnostics.push(diagnostic)
-            sema_attach_diagnostic_source_locations(&diagnostics, start, inputs[declaration.module].source_segments)
+            sema_attach_diagnostic_source_locations(&diagnostics, start, inputs[declaration.module_index].source_segments)
         }
-        if inputs[declaration.module].program.items[declaration.item] == .UnitFamily(definition) {
+        if inputs[declaration.module_index].program.items[declaration.item] == .UnitFamily(definition) {
             updated := definition
             updated.resolved_dimension = resolved
-            if updated.resolved_owner == None -> updated.resolved_owner = Val(sema_units_owner(inputs[declaration.module]).package)
-            inputs[declaration.module].program.items[declaration.item] = Item.UnitFamily{value: updated}
+            if updated.resolved_owner == None -> updated.resolved_owner = Val(sema_units_owner(inputs[declaration.module_index]).package)
+            inputs[declaration.module_index].program.items[declaration.item] = Item.UnitFamily{value: updated}
         }
     }
     // Open families still carry owner/scale/offset/kind provenance, even
     // without a dimension claim; conversion requires an explicit base.
-    loop module in 0..<inputs.len() {
-        owner :: sema_units_owner(inputs[module]).package
-        loop item in 0..<inputs[module].program.items.len() {
-            if inputs[module].program.items[item] == .UnitFamily(definition) {
+    loop module_index in 0..<inputs.len() {
+        owner :: sema_units_owner(inputs[module_index]).package
+        loop item in 0..<inputs[module_index].program.items.len() {
+            if inputs[module_index].program.items[item] == .UnitFamily(definition) {
                 if definition.resolved_owner == None {
                     updated := definition
                     updated.resolved_owner = Val(owner)
-                    inputs[module].program.items[item] = Item.UnitFamily{value: updated}
+                    inputs[module_index].program.items[item] = Item.UnitFamily{value: updated}
                 }
             }
         }
