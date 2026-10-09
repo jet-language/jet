@@ -1498,8 +1498,8 @@ The same exclusion applies to inferred purity: an explicit empty effect row
 `-[]>` admits allocation, heap copies, and panic facts without requesting a
 positive right. Ambient effects such as `IO` still violate that empty ceiling.
 `Mem.Alloc(above: N)` is the parameterized memory-denial spelling. An explicit
-memory or panic denial still rejects a reachable operation (D-EFFTREE1,
-D-PANICROOT1, D-AUTHORITY-MEM1).
+memory, waiting, or panic denial still rejects a reachable operation
+(D-EFFTREE1, D-PANICROOT1, D-AUTHORITY-MEM1, D-AUTH-AMBIENT2).
 
 Core operations contribute the following broad categories. More precise leaves
 are retained when the operation supplies them.
@@ -2312,7 +2312,9 @@ A second sender is made with `tx.copy()`; there is no combined channel value fro
 which to fetch one. `send` moves its value into the channel, and
 `receive() -> T !Closed` waits until a value arrives or all senders close.
 Channel payloads must be sendable (**E1102**). `channel<T>(capacity: N)` adds a
-bounded buffer. Seed a channel with `N` tokens when at most `N` workers may be
+bounded buffer of `N >= 1` values; a literal capacity below 1 is **E0395** and a
+run-time capacity below 1 stops the program, never clamping. Seed a channel with
+`N` tokens when at most `N` workers may be
 active; `Examples/features/concurrency/bounded_workers.jet` demonstrates the
 pattern (D-CONC-CHAN1).
 
@@ -3258,7 +3260,7 @@ fn run() {
     clicked :: event.new<Int>()
     clicked.on(scope, n -> print("clicked {n}"))
     clicked.once(scope, n -> print("once {n}"))
-    print(&clicked.emit(1).summary())
+    print(clicked.emit(1).summary())
     scope.cancel()
 }
 ```

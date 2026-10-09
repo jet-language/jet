@@ -4475,6 +4475,53 @@ fn invariant_violation_expr(span: Span, construct: impl Into<String>) -> TExpr {
     }
 }
 
+/// D-META-USER1=A: lower `reject(code:, what:, why:, fix:)` to the registered
+/// `core.compiler.__reject` row with its four fields in that order. The
+/// compile-time evaluator owns the diagnostic (`Comptime::project_rejection`).
+fn lower_reject_call(call: &Call, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+    const FIELDS: [&str; 4] = ["code", "what", "why", "fix"];
+    let record = match crate::Syntax::core_call_projection(
+        "core.compiler",
+        "__reject",
+        crate::Syntax::CoreCallCoverage::TIR_SUBSET,
+        FIELDS.len(),
+    ) {
+        Ok(record) => record,
+        Err(error) => {
+            return invariant_violation_expr(
+                call.name_span,
+                format!("`reject` has no canonical Core row ({error:?})"),
+            )
+        }
+    };
+    let mut args = Vec::with_capacity(FIELDS.len());
+    for field in FIELDS {
+        let Some(arg) = call
+            .args
+            .iter()
+            .find(|arg| arg.label.as_ref().is_some_and(|(label, _)| label == field))
+        else {
+            return invariant_violation_expr(
+                call.name_span,
+                format!("`reject` requires code, what, why, and fix labels; `{field}` is missing"),
+            );
+        };
+        args.push(lower_expr(&arg.expr, cx, env));
+    }
+    TExpr {
+        ty: unit_type(),
+        kind: TExprKind::CoreCall {
+            record,
+            args,
+            source_span: call.name_span,
+            type_args: Vec::new(),
+            widen_to_vec: vec![false; FIELDS.len()],
+            data_plan: None,
+            fallibility: TFailureCarrier::Infallible,
+        },
+    }
+}
+
 fn checked_const_ref_name(name: &str, cx: &Cx) -> String {
     cx.fact_const_ref_keys(name)
         .cloned()
@@ -6232,6 +6279,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             };
                         });
                     }
+                    // D-META-USER1=A: a checked rule's `reject(code:, what:,
+                    // why:, fix:)` is the registered `core.compiler.__reject`
+                    // row; the compile-time evaluator turns it into the
+                    // project diagnostic (card #4696).
+                    if call.name == Syntax::BUILTIN_REJECT {
+                        return in_own_frame(|| lower_reject_call(call, cx, env));
+                    }
                 }
                 // c109 Phase 25: the ambient prelude `input(...)` (D-PRELUDE1 = B). Same
                 // lowering as `io.input(...)` (CoreCall would also work, but the bare-call
@@ -6762,6 +6816,34 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             ),
                             None => lowered,
                         };
+                    });
+                }
+                // D-CALLPOLICY1=E: the declared `#Policy` chain is the default
+                // for every direct call of its target, so the call runs through
+                // the same policy value `apply` builds.
+                if let Some((wrapper, policy)) = declared_user_policy(call, cx, env) {
+                    return in_own_frame(|| {
+                        let policy = bind_declared_policy_args(policy, &wrapper, &call.name, cx);
+                        let target = Expr::Ident(call.name.clone(), call.name_span);
+                        let value = lower_user_policy_value(&target, &policy, wrapper, cx, env);
+                        let lowered = lower_fn_value_call(
+                            None,
+                            value,
+                            &call.args,
+                            call.name_span.start as u32,
+                            cx,
+                            env,
+                        );
+                        let resolved_ret = call.resolved_ret.clone().or_else(|| {
+                            crate::Codegen::TIR::mir::never_carrier_success(&lowered.ty).cloned()
+                        });
+                        consume_plain_helper_route(
+                            resolved_ret.as_ref(),
+                            call.name_span,
+                            lowered,
+                            cx,
+                            env,
+                        )
                     });
                 }
                 // Resolve the callee's signature so each arg's borrow/clone/fn-coercion is

@@ -1,0 +1,18 @@
+// @run_cli
+// #4622 / D-AUTH-AMBIENT2=A: sharing a value between tasks infers `Mem.Rc`
+// and joining a task infers `Time.Wait`. Both are deny-only rows, so the
+// E1803 refusal names only the file write and its fix row never lists them.
+use core.files as files
+
+struct Counter {
+    hits: Int
+}
+
+fn run() {
+    count :: shared Counter{hits: 0}
+    t1 :: task { count.hits += 1 }
+    t2 :: task { count.hits += 1 }
+    t1.join() ?? panic("t1")
+    t2.join() ?? panic("t2")
+    files.write("e1803-shared-must-not-exist.txt", "{count.hits}") ?? panic("write failed")
+}

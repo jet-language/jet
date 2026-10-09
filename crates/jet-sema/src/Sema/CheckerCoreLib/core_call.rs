@@ -448,7 +448,7 @@ fn exactly_one_type_arg(
     Some(type_args[0].clone())
 }
 
-fn literal_int(expr: &crate::AST::Expr) -> Option<i64> {
+pub(crate) fn literal_int(expr: &crate::AST::Expr) -> Option<i64> {
     match expr {
         crate::AST::Expr::Int(value, ..) => Some(*value),
         crate::AST::Expr::Paren(inner, _) => literal_int(inner),

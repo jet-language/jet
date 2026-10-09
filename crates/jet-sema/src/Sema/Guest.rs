@@ -167,6 +167,15 @@ fn scalar_shape(
     }
     Some(next)
 }
+/// The value an export hands across the boundary. Sema's failure inference
+/// records a callable that cannot fail as `T Never!`; its guest value is `T`.
+fn guest_export_value_type(ty: &Type) -> Type {
+    match ty {
+        Type::Result { ok, err } if err.is_never() && !ok.is_never() => (**ok).clone(),
+        other => other.clone(),
+    }
+}
+
 fn export_signature(function: &Func) -> GuestFunction {
     let params = function
         .params

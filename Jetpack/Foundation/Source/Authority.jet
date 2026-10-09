@@ -24,6 +24,17 @@ AUTHORITY_APPLICATION_DEFAULT :: prep { "application default" }
 AUTHORITY_PACKAGE_DEFAULT :: prep { "package.jet default" }
 // The deny-only stop root (D-PANICROOT1).
 AUTHORITY_PANIC_ROOT :: prep { "Panic" }
+// jet_foundation::Syntax::EFFECT_LEAF_TIME_WAIT: waiting on the program's own
+// work, a deny-only leaf (D-AUTH-AMBIENT2=A).
+AUTHORITY_TIME_WAIT_LEAF :: prep { "Time.Wait" }
+
+// jet_foundation::Authority::is_deny_only: `Panic`, the `Mem` root and the
+// `Time.Wait` leaf may be refused but never have to be granted, so the
+// application policy never asks for them or writes them into `allow:`.
+pub fn authority_is_deny_only(right: String) -> Bool Never! {
+    root :: authority_root(right)
+    root == AUTHORITY_PANIC_ROOT || root == "Mem" || right == AUTHORITY_TIME_WAIT_LEAF
+}
 
 pub fn authority_is_deny_only(right: String) -> Bool Never! {
     root :: authority_root(right)

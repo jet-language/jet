@@ -1,0 +1,35 @@
+// #4644: core.regex is one Thompson/Pike VM on every tier. A 100,000-scalar
+// repetition and nested-quantifier patterns finish in linear time with the
+// right answer: no recursion per repetition and no step budget.
+use core.regex as rx
+
+fn run() {
+    long :: "a".repeat(100000)
+    plus :: rx.compile("a+") ?? panic("a+ compiles")
+    print("100k a+ full match: {rx.full_match(plus, long)}")
+    // The scan reuses one set of thread rows: repeated long scans keep a flat
+    // footprint.
+    rounds := 0
+    loop _ in 0..<8 -> rounds = rounds + rx.find_all(plus, long).len()
+    print("8 x 100k a+ find_all: {rounds}")
+    print("100k a+ find_all: {rx.find_all(plus, long).len()}")
+    group :: rx.compile("(a|aa)*b") ?? panic("(a|aa)*b compiles")
+    print("100k (a|aa)*b: {rx.is_match(group, long)}")
+    tail := long
+    tail += "b"
+    print("100k (a|aa)*b with b: {rx.is_match(group, tail)}")
+
+    hostile := ""
+    loop _ in 0..<64 -> hostile += "a"
+    hostile += "c"
+    nested :: rx.compile("(a*)*b") ?? panic("(a*)*b compiles")
+    print("(a*)*b on 64 a + c: {rx.is_match(nested, hostile)}")
+    alt :: rx.compile("(a|a)*b") ?? panic("(a|a)*b compiles")
+    print("(a|a)*b on 64 a + c: {rx.is_match(alt, hostile)}")
+    blowup :: rx.compile("(a+)+$") ?? panic("(a+)+$ compiles")
+    print("(a+)+$ on 64 a + c: {rx.is_match(blowup, hostile)}")
+    if rx.compile("(a)\\1") == {
+        .Ok(_) -> print("backreference compiled")
+        .Err(_) -> print("backreference rejected: captures stay linear")
+    }
+}

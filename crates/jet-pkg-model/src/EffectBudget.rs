@@ -1205,6 +1205,32 @@ mod tests {
     }
 
     #[test]
+    fn time_wait_budget_ignores_allow_omission_but_honors_denial() {
+        // D-AUTH-AMBIENT2=A: waiting is deny-only, like Mem and Panic.
+        let mut manifest = PackageFacts::default();
+        manifest.effects_enabled = true;
+        manifest.authority.holds.allow = Some(vec!["IO".to_string()]);
+        let entries = [PackageEffects {
+            name: "waitdep".to_string(),
+            effects: EffectSet::from([
+                "IO".to_string(),
+                "Mem.Rc".to_string(),
+                "Time.Wait".to_string(),
+            ]),
+            effect_sites: BTreeMap::from([("Time.Wait".to_string(), "waitdep::join".to_string())]),
+            panic_sites: Vec::new(),
+            boundary_span: None,
+        }];
+        assert!(enforce(&entries, &manifest).is_empty());
+
+        manifest.authority.holds.deny = Some(vec!["Time.Wait".to_string()]);
+        let diagnostics = enforce(&entries, &manifest);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "E1220");
+        assert!(diagnostics[0].what.contains("Time.Wait"), "{}", diagnostics[0].what);
+    }
+
+    #[test]
     fn entry_summary_ignores_open_callback_possibilities() {
         let mut summaries = HashMap::new();
         summaries.insert(
@@ -1344,7 +1370,8 @@ mod tests {
         };
 
         let diagnostic = application_policy_diagnostic(&projection, &EffectSet::new(), None);
-        assert!(diagnostic.fix.contains("allow: [Exec, IO, Mem.Alloc]"));
+        // `Mem.Alloc` is deny-only (D-AUTHORITY-MEM1), never a requested grant.
+        assert!(diagnostic.fix.contains("allow: [Exec, IO]"), "{}", diagnostic.fix);
     }
 
     #[test]

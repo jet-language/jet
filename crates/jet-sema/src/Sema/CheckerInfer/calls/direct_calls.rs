@@ -2,8 +2,8 @@ use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Generics::{e0904, e0905, substitute_type, unify_types};
 use crate::Sema::Bundle::fn_types_compatible;
 use crate::Sema::CheckerCoreLib::{
-    io_error_ty, is_simd_lane_type, math_constructor_arg_types, overflow_opt_in_error, result_ty,
-    wrong_core_arity,
+    io_error_ty, is_simd_lane_type, literal_int, math_constructor_arg_types,
+    overflow_opt_in_error, result_ty, wrong_core_arity,
 };
 use crate::Sema::CheckerOwnership::{e0142_aliased, e0143_drop_unaudited};
 use crate::Sema::Diagnostics::{

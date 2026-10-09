@@ -6398,6 +6398,23 @@ pub(crate) fn build_cx_items(
                     f.name.clone(),
                     f.params.iter().map(|param| param.name.clone()).collect(),
                 );
+                let policy_calls = f
+                    .markers
+                    .iter()
+                    .filter(|marker| marker.name == crate::Syntax::MARKER_POLICY)
+                    .flat_map(|marker| marker.expr_args_owned())
+                    .filter_map(|argument| match argument {
+                        crate::AST::Expr::Call(policy)
+                            if !crate::AST::CallablePolicyChain::is_builtin(&policy.name) =>
+                        {
+                            Some(policy)
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                if !policy_calls.is_empty() {
+                    cx.fn_policy_calls.insert(f.name.clone(), policy_calls);
+                }
                 cx.fn_type_params.insert(
                     f.name.clone(),
                     f.type_params.iter().map(|param| param.name.clone()).collect(),

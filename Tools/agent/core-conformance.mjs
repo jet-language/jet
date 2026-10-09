@@ -371,7 +371,6 @@ const UNIT_RESULT_KEYS = new Set([
   "core.sys.sync",
   "core.sys.set",
   "core.sys.stop",
-  "core.tasks.run",
   "core.tasks.yield_now",
 ]);
 // Never-returning Core effects terminate the witness instead of yielding a

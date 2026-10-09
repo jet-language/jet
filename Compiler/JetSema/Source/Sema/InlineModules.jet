@@ -1008,6 +1008,8 @@ fn sema_inline_hoist_module(code_module: CodeModule, source_path: String, hoist:
         // module's compiler-owned spelling; normalize it to this identity.
         direct_types[sema_inline_type_name(display_alias, name)] = resolved
         &direct_names.push(name)
+        // The file reaches a public member only by its full module path; a
+        // nested module's own name is a relative spelling inside its parent.
         if is_pub {
             hoist.exported["{source_path}.{name}"] = resolved
             hoist.has_exported = true

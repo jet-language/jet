@@ -1,0 +1,13 @@
+// `task.timeout(delay)` installs a task deadline: the next wait point past it
+// stops with E3003 instead of sleeping on (the retired core.tasks.timeout only
+// slept).
+use core.time.[sleep]
+
+fn run() {
+    #FX(authority: Time) {
+        task.timeout(10ms)
+        print("deadline installed")
+        sleep(2s)
+        print("unreachable: the sleep outlived the deadline")
+    }
+}

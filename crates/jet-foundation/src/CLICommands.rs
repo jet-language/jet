@@ -1174,7 +1174,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         usage: None,
     },
     CommandSpec {
-        name: "Fold",
+        name: "fold",
         summary: "Reverse a recorded Package source transition",
         headline: false,
         frequency_rank: 62,

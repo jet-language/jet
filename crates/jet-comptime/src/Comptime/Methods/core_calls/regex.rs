@@ -393,7 +393,7 @@ fn regex_replace_impl(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnos
 }
 
 pub(super) fn regex_replace(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-    regex_replace_impl(args, span)
+    regex_replace_call(args, "replace", span)
 }
 
 pub(super) fn regex_replace_first(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {

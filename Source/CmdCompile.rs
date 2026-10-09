@@ -3346,7 +3346,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                 &projection.bundle, &projection.checked_nominals, &mut all_diags,
             )
             {
-                crate::CmdDevTools::exit_cost_projection_error(file, &error);
+                crate::CmdDevTools::exit_cost_projection_fault(&error);
             }
         }
         let has_errors = all_diags

@@ -1109,7 +1109,7 @@ fn script_to_system_continuity_preserves_one_source() {
         &scratch.path,
         &cache,
         "fold-env-check",
-        &["Fold", "package/env.jet", "--check"],
+        &["fold", "package/env.jet", "--check"],
     );
     assert!(String::from_utf8_lossy(&fold_check.stdout).contains("No files changed."));
     assert_eq!(
@@ -1148,7 +1148,7 @@ fn script_to_system_continuity_preserves_one_source() {
         &scratch.path,
         &cache,
         "fold-env",
-        &["Fold", "package/env.jet"],
+        &["fold", "package/env.jet"],
     );
     assert_eq!(
         transition_graph(&fold), graph_before_fold.fingerprint,

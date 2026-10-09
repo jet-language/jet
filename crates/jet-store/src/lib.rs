@@ -2196,6 +2196,16 @@ fn ensure_dir(path: &Path) -> Result<(), StoreError> {
     }
 }
 
+fn existing_store_dir(path: &Path, metadata: &fs::Metadata) -> Result<(), StoreError> {
+    if metadata.file_type().is_symlink() {
+        Err(StoreError::Config(format!("store directory is a symlink: {}", path.display())))
+    } else if metadata.is_dir() {
+        Ok(())
+    } else {
+        Err(StoreError::Config(format!("store path is not a directory: {}", path.display())))
+    }
+}
+
 fn sync_dir(path: &Path) -> Result<(), StoreError> {
     match File::open(path).and_then(|file| file.sync_all()) {
         Ok(()) => Ok(()),
@@ -2506,6 +2516,67 @@ mod tests {
         let right = right.join().expect("right publisher thread");
         assert!(left.is_ok(), "left publish failed: {left:?}");
         assert!(right.is_ok(), "right publish failed: {right:?}");
+        cleanup(&root);
+    }
+
+    /// Child half of `concurrent_processes_open_one_fresh_store`: a no-op
+    /// unless the parent names the shared root.
+    #[test]
+    fn fresh_store_open_child() {
+        let Some(root) = std::env::var_os("JET_STORE_RACE_ROOT") else {
+            return;
+        };
+        let config = StoreConfig::new(PathBuf::from(root))
+            .with_cap_bytes(1024 * 1024)
+            .with_reserve_bytes(0);
+        if let Err(error) = Store::open(config) {
+            panic!("open fresh store: {error}");
+        }
+    }
+
+    #[test]
+    fn concurrent_processes_open_one_fresh_store() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-store-fresh-race-{}-{}",
+            std::process::id(),
+            next_counter()
+        ));
+        let exe = std::env::current_exe().expect("test executable");
+        for round in 0..4 {
+            cleanup(&root);
+            let children: Vec<_> = (0..8)
+                .map(|_| {
+                    std::process::Command::new(&exe)
+                        .args(["--exact", "tests::fresh_store_open_child", "--test-threads=1"])
+                        .env("JET_STORE_RACE_ROOT", &root)
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::piped())
+                        .spawn()
+                        .expect("spawn store child")
+                })
+                .collect();
+            for child in children {
+                let output = child.wait_with_output().expect("store child exits");
+                assert!(
+                    output.status.success(),
+                    "round {round}: a concurrent open of a fresh store failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            for name in ["cas", "ac", "lto", "locks", "leases", "quarantine", "build-records/records"] {
+                assert!(root.join(name).is_dir(), "round {round}: missing {name}");
+            }
+        }
+        cleanup(&root);
+    }
+
+    #[test]
+    fn ensure_dir_rejects_a_file_in_place_of_a_directory() {
+        let root = std::env::temp_dir().join(format!("jet-store-not-dir-{}-{}", std::process::id(), next_counter()));
+        fs::create_dir_all(&root).expect("root");
+        let path = root.join("cas");
+        fs::write(&path, b"not a directory").expect("file");
+        assert!(matches!(ensure_dir(&path), Err(StoreError::Config(_))));
         cleanup(&root);
     }
 

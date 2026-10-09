@@ -3345,13 +3345,13 @@ the sink, rather than each caller, owns the redaction decision.
 `fatal` emits, flushes, and terminates the process with status 1; `disable`
 suppresses later emission until process end.
 
-### `core.tasks` — cooperative tasks, channels, and timers
+### `core.tasks` — timers and scheduler identity
 
-`core.tasks` supplies cooperative scheduling primitives. A task yields at
-explicit suspension points; the scheduler does not turn a blocking computation
-into preemptive parallelism. Mutable task-owned values stay with their task;
-values crossing a task or channel boundary must satisfy Jet's sendability
-rules. The implementation and exported helper surface are in
+`core.tasks` supplies the scheduler's timers and task identity. A task yields
+at explicit suspension points; the scheduler does not turn a blocking
+computation into preemptive parallelism. Mutable task-owned values stay with
+their task; values crossing a task or channel boundary must satisfy Jet's
+sendability rules. The implementation is in
 [`Core/tasks/tasks.jet`](../../../Core/tasks/tasks.jet).
 
 | Signature | Result | Description |
@@ -3360,22 +3360,7 @@ rules. The implementation and exported helper surface are in
 | `interval(period: Duration) -[Time]> Receiver<Int>` | receiver | Deliver successive tick counts starting at one. |
 | `yield_now() -[Time]>` | — | Yield to another runnable task. |
 | `current_task() -> String` | text | Identify the running task. |
-| `sleep(milliseconds: Int) -[Time]>` | — | Suspend for a nonnegative duration. |
 | `timeout(delay: Duration) -[Time]>` | — | Wait for a duration before returning. |
-| `try_recv(rx: Receiver<Int>) -> ?Int` | option | Poll a scheduler receiver without waiting. |
-| `cancel(rx: Receiver<Int>) -[Time]> Receiver<Int>` | receiver | Close a receiver and wake blocked consumers. |
-| `is_timer(rx)`, `is_interval(rx)`, `is_cancelled(rx)`, `is_ready(rx)` | `Bool` | Inspect scheduler-receiver state. |
-| `delay_ms(rx) -> Int` | integer | Report a timer delay. |
-| `channel(capacity: Int) -> TaskState` | state | Create a pure integer queue with explicit capacity. |
-| `put(state: TaskState, value: Int) -> TaskState` | state | Enqueue unless the state is closed or full. |
-| `clear(state: TaskState)`, `shutdown(state: TaskState)`, `stop(state)` | state | Clear values or close the pure queue. |
-| `reset(state: TaskState) -> TaskState` | state | Clear values and reopen the pure queue. |
-| `lock() -> TaskState` / `acquire(state)` / `release(state)` / `notify(state)` | state | Coordinate the pure queue's lock fields. |
-| `start(rx: Receiver<Int>) -> Receiver<Int>` / `run() -[Time]>` | receiver/— | Start a receiver or yield through the scheduler. |
-| `recv(rx: Receiver<Int>) -[Time]> Int`, `get(rx) -[Time]> Int`, `result(rx) -[Time]> Int`, `wait(rx) -[Time]> Int` | integer | Receive an integer, using `-1` for a closed receiver. |
-| `waitall(receivers: [Receiver<Int>]) -[Time]> [Int]` / `waitany(receivers: [Receiver<Int>]) -[Time]> Int` | values | Wait for all or the first convenience receiver. |
-| `is_closed(state)`, `is_locked(state)`, `size(state)`, `capacity(state)`, `generation(state)` | scalar | Inspect `TaskState`. |
-| `spawn_name(name: String) -> String` | text | Preserve a task name for the scheduler boundary. |
 
 `TaskState` is the pure integer convenience queue; generic task and channel
 handles are compiler-owned scheduler surfaces. A capacity of zero means that
