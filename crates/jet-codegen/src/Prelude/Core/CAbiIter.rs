@@ -218,6 +218,37 @@ pub(crate) mod jet_c_abi_iter {
             unsafe { NativeValue::moved((&raw as *const *mut String).cast(), meta.clone()) }
         }))))
     }
+    // CollectionIoSources supplies the owned lazy source or the borrowed
+    // snapshot. Only the String slot representation changes at this boundary.
+    fn line_source(source: Box<dyn Iterator<Item = JetLoopAny>>, meta: Arc<Meta>) -> *mut NativeIter {
+        handle(JetIter(Box::new(source.map(move |value| {
+            let text = value.downcast::<String>().expect("checked line source yields String");
+            let raw = Box::into_raw(text);
+            unsafe { NativeValue::moved((&raw as *const *mut String).cast(), meta.clone()) }
+        }))))
+    }
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_iter_file_lines(source: *mut JetFileReader, by_value: u8, meta: *const NativeMeta) -> *mut NativeIter {
+        guard(|| {
+            let source = if by_value != 0 {
+                (*Box::from_raw(source)).jet_loop_source(JetLoopSourceKind::LinesFile, true)
+            } else {
+                (&mut *source).jet_loop_source(JetLoopSourceKind::LinesFile, false)
+            };
+            line_source(source, Meta::copy(meta))
+        })
+    }
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_iter_stdin_lines(source: *mut JetStdinReader, by_value: u8, meta: *const NativeMeta) -> *mut NativeIter {
+        guard(|| {
+            let source = if by_value != 0 {
+                (*Box::from_raw(source)).jet_loop_source(JetLoopSourceKind::LinesStdin, true)
+            } else {
+                (&mut *source).jet_loop_source(JetLoopSourceKind::LinesStdin, false)
+            };
+            line_source(source, Meta::copy(meta))
+        })
+    }
     #[no_mangle]
     pub unsafe extern "C" fn jet_rt_native_iter_file_lines(source: *mut JetFileReader, by_value: u8, meta: *const NativeMeta) -> *mut NativeIter {
         guard(|| {
@@ -374,6 +405,106 @@ pub(crate) mod jet_c_abi_iter {
                 super::jet_c_abi::take(result)
             }).collect::<Vec<String>>();
             super::jet_c_abi::handle(parts.join(view(separator)))
+        })
+    }
+
+    type NativeQueue = std::collections::VecDeque<NativeValue>;
+    #[no_mangle]
+    pub extern "C" fn jet_rt_native_queue_new(capacity: i64) -> *mut NativeQueue {
+        guard(|| Box::into_raw(Box::new(NativeQueue::with_capacity(
+            usize::try_from(capacity).unwrap_or_else(|_| jet_panic("<core.prelude>", 0, "invalid queue capacity")),
+        ))))
+    }
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_queue_from(source: *mut Header, meta: *const NativeMeta, by_value: u8) -> *mut NativeQueue {
+        guard(|| Box::into_raw(Box::new(jet_deque_from(list_from(source, Meta::copy(meta), by_value).collect()))))
+    }
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_queue_drop(queue: *mut NativeQueue) {
+        guard(|| { if !queue.is_null() { drop(Box::from_raw(queue)); } })
+    }
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_queue_clone(queue: *const NativeQueue) -> *mut NativeQueue {
+        guard(|| Box::into_raw(Box::new((*queue).clone())))
+    }
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_deque_len(queue: *const NativeQueue) -> i64 {
+        guard(|| jet_deque_len(&*queue))
+    }
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_deque_capacity(queue: *const NativeQueue) -> i64 {
+        guard(|| jet_deque_capacity(&*queue))
+    }
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_deque_is_empty(queue: *const NativeQueue) -> u8 {
+        guard(|| u8::from(jet_deque_is_empty(&*queue)))
+    }
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_deque_reverse(queue: *mut NativeQueue) {
+        guard(|| jet_deque_reverse(&mut *queue))
+    }
+    macro_rules! queue_optional {
+        ($($export:ident => $kernel:ident),* $(,)?) => {$(
+            #[no_mangle]
+            pub unsafe extern "C" fn $export(queue: *mut NativeQueue) -> *mut u8 {
+                guard(|| option($kernel(&mut *queue)))
+            }
+        )*};
+    }
+    queue_optional! {
+        jet_rt_native_deque_pop_front_kernel => jet_deque_pop_front_kernel,
+        jet_rt_native_deque_pop_back_kernel => jet_deque_pop_back_kernel,
+        jet_rt_native_deque_peek_front => jet_deque_peek_front,
+        jet_rt_native_deque_peek_back => jet_deque_peek_back,
+    }
+    macro_rules! queue_element {
+        ($($export:ident => $kernel:ident),* $(,)?) => {$(
+            #[no_mangle]
+            pub unsafe extern "C" fn $export(queue: *mut NativeQueue, source: *const u8, meta: *const NativeMeta, by_value: u8) {
+                guard(|| {
+                    let meta = Meta::copy(meta);
+                    let value = if by_value != 0 { NativeValue::moved(source, meta) } else { NativeValue::cloned(source, meta) };
+                    $kernel(&mut *queue, value)
+                })
+            }
+        )*};
+    }
+    queue_element! {
+        jet_rt_native_deque_push_front => jet_deque_push_front,
+        jet_rt_native_deque_push_back => jet_deque_push_back,
+        jet_rt_native_deque_delete => jet_deque_delete,
+    }
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_deque_contains(queue: *const NativeQueue, source: *const u8, meta: *const NativeMeta, _by_value: u8) -> u8 {
+        guard(|| {
+            let mut value = NativeValue::moved(source, Meta::copy(meta));
+            value.owned = false; // a borrowed needle never consumes the caller's slot
+            u8::from(jet_deque_contains(&*queue, &value))
+        })
+    }
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_deque_get(queue: *const NativeQueue, index: i64) -> *mut u8 {
+        guard(|| option(jet_deque_get(&*queue, index)))
+    }
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_deque_split(queue: *mut NativeQueue, index: i64) -> *mut NativeQueue {
+        guard(|| {
+            let index = std::mem::ManuallyDrop::new(jet_foundation::Numeric::JetInt::from_raw_owned(index));
+            Box::into_raw(Box::new(jet_deque_split_native(&mut *queue, jet_int_saturating_word(&index))))
+        })
+    }
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_deque_to_list(queue: *const NativeQueue, out: *mut Header) {
+        guard(|| list_into(jet_deque_to_list(&*queue), out))
+    }
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_deque_join(queue: *const NativeQueue, separator: JetCString, meta: *const NativeMeta) -> JetCString {
+        guard(|| {
+            let meta = Meta::copy(meta);
+            let show: unsafe extern "C" fn(*const u8) -> JetCString = std::mem::transmute(meta.show);
+            Box::into_raw(Box::new(jet_deque_join_by(&*queue, &*separator, |value| {
+                *Box::from_raw(show(value.slot()))
+            })))
         })
     }
 }
