@@ -279,10 +279,10 @@ fn parse_inspect_pid(value: &str) -> Result<u32, String> {
     Ok(pid)
 }
 
+// Only bare flags consume the next token; joined values must leave TARGET intact.
 fn inspect_flag_takes_value(argument: &str) -> bool {
-    let name = argument.split('=').next().unwrap_or(argument);
     matches!(
-        name,
+        argument,
         "--before"
             | "--color"
             | "--facts"
@@ -294,6 +294,7 @@ fn inspect_flag_takes_value(argument: &str) -> bool {
             | "--set"
             | "--target"
             | "--topic"
+            | "--threads"
     )
 }
 
