@@ -12,7 +12,7 @@
 // an edge never passes it; the entry still starts every slot as its
 // placeholder (Lower.jet lower_clear_slot).
 use jet_foundation.[
-    MIRCallArg, MIRFunction, MIROperation, MIRPlaceID, MIRSemanticOp, mir_operation_place_uses,
+    MIRCallArg, MIRFunction, MIROperation, MIRPlaceID, MIRScopeKind, MIRSemanticOp, mir_operation_place_uses,
 ]
 
 LOWER_LIVE_BITS :: prep { 48 }
@@ -96,6 +96,17 @@ fn lower_live_slots(function: MIRFunction, slots: [LowerSlot], place_slots: [U64
             loop place in lower_instruction_places(instruction.operation) {
                 slot :: place_slots.get(place.value) ?? next
                 if slot != killed -> &touched.push(slot)
+            }
+            // ScopeExit implicitly consumes only the generated Stm local.
+            // Its owner must survive the transaction body's block edges.
+            if instruction.operation == .ScopeExit(scope) {
+                loop row in function.scopes {
+                    if row.id == scope && row.kind == .Transaction && row.name != None {
+                        if lower_stm_local(function, row) == .Val(local) {
+                            if local_slots.get(local.id.value) == .Val(slot) -> &touched.push(slot)
+                        }
+                    }
+                }
             }
             if instruction.operation == .Semantic(semantic) {
                 if semantic == .RequireStop(_, _, _, _, context, _, _) {

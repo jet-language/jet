@@ -691,6 +691,8 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             if args.len() == 0 && name.name == "ScopeGuard" -> return LowerRepr.Boxed{ty: ty}
             // A #Transact handle is a native box (Transaction.jet), not the runtime's JetTransaction.
             if lower_is_transaction(ty) -> return LowerRepr.Boxed{ty: ty}
+            if lower_is_stm(ty) -> return LowerRepr.Handle{drop: "jet_rt_native_stm_rollback", clone: ""}
+            if lower_is_condition(ty) && lower_type_def(p, ty) == None -> return LowerRepr.Handle{drop: "jet_rt_native_condition_drop", clone: "jet_rt_native_condition_clone"}
             if lower_lazy_element(ty) == .Val(elem) -> return lower_lazy_repr(p, ty, elem)
             if lower_task_handle_repr(ty) == .Val(handle) -> return handle
             // Ptr<T>: a raw word address (Pointers.jet).
@@ -2184,11 +2186,15 @@ fn lower_scope(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
         if row.id == scope {
             label :: row.name ?? "{scope.value}"
             if row.kind == .Context && row.deadline == None -> return
+            if row.kind == .Transaction {
+                if !enter && row.name != None -> lower_stm_scope_exit(p, c, &m, &f, row)
+                return
+            }
             if row.kind == {
                 .ScopeMember -> return lower_test_scope(p, c, &m, &f, instruction, scope, enter)
                 .Context -> return lower_deadline_scope(c, &m, &f, row, enter)
                 .Unsafe | .Policy -> return lower_sentry_scope(c, &m, &f, row, enter)
-                .Impure | .AssumeDeterministic | .Layout | .DebugOnly | .Live | .Region | .Authority | .Reactive | .TaskGroup | .Transaction -> return
+                .Impure | .AssumeDeterministic | .Layout | .DebugOnly | .Live | .Region | .Authority | .Reactive | .TaskGroup -> return
                 .Shield -> return lower_call_runtime(&m, &f, if enter -> "jet_rt_session_shield_enter" else -> "jet_rt_session_shield_leave", [LIRValueID]{}, None)
                 .StopCleanup -> {
                     if enter {
@@ -3769,6 +3775,10 @@ fn lower_write_arg(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
         lower_fail(&m, &f, "Write argument {arg.value.value} has no checked place")
         return None
     }
+    lower_write_place_arg(p, c, &m, &f, place)
+}
+
+fn lower_write_place_arg(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, place: MIRPlaceID) -> LowerWriteBack? {
     row :: lower_place_row(c.mir, place) ?? {
         lower_fail(&m, &f, "place {place.value} is missing")
         return None
@@ -3816,18 +3826,22 @@ fn lower_write_arg(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
 
 fn lower_write_arg_place(c: LowerContext, arg: MIRCallArg) -> MIRPlaceID? {
     if arg.place == .Val(place) -> return Val(place)
+    lower_value_place(c, arg.value)
+}
+
+fn lower_value_place(c: LowerContext, value: MIRValueID) -> MIRPlaceID? {
     loop block in c.mir.blocks {
         loop instruction in block.instructions {
             if instruction.result == .Val(result) {
-                if result == arg.value {
-                    if instruction.operation == .ReadPlace(place) -> return Val(place)
+                if result == value {
+                    if instruction.operation == .ReadPlace(place) | .AddressOf(place, _) -> return Val(place)
                 }
             }
         }
     }
     loop row in c.mir.places {
-        if row.base == .Parameter(value) {
-            if value == arg.value && row.projections.len() == 0 -> return Val(row.id)
+        if row.base == .Parameter(parameter) {
+            if parameter == value && row.projections.len() == 0 -> return Val(row.id)
         }
     }
     None
@@ -3835,22 +3849,31 @@ fn lower_write_arg_place(c: LowerContext, arg: MIRCallArg) -> MIRPlaceID? {
 
 // After the call: the place takes the value the callee left in the cell (the
 // callee already dropped a replaced value).
-fn lower_write_back(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, writeback: LowerWriteBack) Never! {
+fn lower_write_back(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, writeback: LowerWriteBack, rebound: MIRValueID?) Never! {
     row :: lower_place_row(c.mir, writeback.place) ?? return
     repr :: lower_repr(p, row.ty)
-    if repr == .Inline(_) || c.slots[writeback.slot].cell -> return
+    if repr == .Inline(_) -> return
+    if c.slots[writeback.slot].cell {
+        if rebound == .Val(value) {
+            updated :: lower_read_at(p, &f, writeback.cell, 0, row.ty) ?? return
+            lower_define(c, &f, value, updated)
+        }
+        return
+    }
     layout :: lower_repr_layout(repr) ?? return
     if row.projections.len() == 0 {
         holder :: c.slots[writeback.slot]
         updated :: lower_new_value(&f, layout, lower_drop(&m, f, lower_repr(p, holder.ty), lower_is_owned(holder.ownership)), row.ty.identity)
         lower_read_into(p, &f, updated, writeback.cell, 0, row.ty)
         lower_set_slot(&f, writeback.slot, Val(updated))
+        if rebound == .Val(value) -> lower_define(c, &f, value, updated)
     } else {
         root :: (~f.current[writeback.slot]) ?? return lower_fail(&m, &f, "place {writeback.place.value} has no value")
         walk :: lower_walk_projections(p, c, &m, &f, root, c.slots[writeback.slot].ty, row.projections) ?? return
         updated :: lower_new_value(&f, layout, LIRDrop.Trivial, row.ty.identity)
         lower_read_into(p, &f, updated, writeback.cell, 0, row.ty)
         lower_write_at(p, &f, walk.base, walk.offset, updated, row.ty)
+        if rebound == .Val(value) -> lower_define(c, &f, value, updated)
     }
 }
 
