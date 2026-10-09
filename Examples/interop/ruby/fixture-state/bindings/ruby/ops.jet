@@ -51,19 +51,19 @@ fn decode_response(raw: String, code: Int) -> Dyn RubyError! {
     return Ok(&response.field("value") ?? Dyn.Null)
 }
 
-fn transform(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RubyError! {
+fn transform(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RubyError! {
     raw :: abi.transform(session.value, json.to_string(input) ?? return Err(RubyError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
-fn fail_call(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RubyError! {
+fn fail_call(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RubyError! {
     raw :: abi.fail_call(session.value, json.to_string(input) ?? return Err(RubyError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
-fn sleep_call(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RubyError! {
+fn sleep_call(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RubyError! {
     raw :: abi.sleep_call(session.value, json.to_string(input) ?? return Err(RubyError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)

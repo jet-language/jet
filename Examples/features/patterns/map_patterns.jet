@@ -16,7 +16,7 @@ fn exact(user: [String: String]) -> String {
     }
 }
 
-fn route(event: DataTree) -> String {
+fn route(event: Dyn) -> String {
     if event == {
         .Object(["type": .Text("push"), "ref": .Text(ref), ..]) -> "deploy {ref}"
         .Object(["type": .Text("push"), ..]) -> "push without ref"
@@ -41,10 +41,10 @@ fn run() {
     print(exact(["name": "Ana", "extra": "yes"]))
     print(optional([:]))
     print(optional(["nick": "Annie"]))
-    print(route(DataTree.Object(["type": DataTree.Text("push"), "ref": DataTree.Text("main")])) )
-    print(route(DataTree.Object(["type": DataTree.Text("push")])) )
-    print(route(DataTree.Object(["type": DataTree.Text("star"), "by": DataTree.Text("ana")])) )
-    print(route(DataTree.Array([DataTree.Int(1)])))
+    print(route(Dyn.Object(["type": Dyn.Text("push"), "ref": Dyn.Text("main")])) )
+    print(route(Dyn.Object(["type": Dyn.Text("push")])) )
+    print(route(Dyn.Object(["type": Dyn.Text("star"), "by": Dyn.Text("ana")])) )
+    print(route(Dyn.Array([Dyn.Int(1)])))
     map :: [1: "one", 2: "two"]
     if map == [0x1: one, 2: two] -> print("{one}/{two}")
     print(map.len())

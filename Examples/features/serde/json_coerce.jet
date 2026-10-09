@@ -11,9 +11,9 @@ fn run() EncodingError! {
     raw :: "{{\"port\":\"8080\",\"enabled\":\"true\",\"name\":\"api\"}}"
     data :: json.decode(raw)
     if data == .Object(_) {
-        port :: &data.field("port") ?? DataTree.Null
-        name :: &data.field("name") ?? DataTree.Null
-        enabled :: &data.field("enabled") ?? DataTree.Null
+        port :: &data.field("port") ?? Dyn.Null
+        name :: &data.field("name") ?? Dyn.Null
+        enabled :: &data.field("enabled") ?? Dyn.Null
         if port == .Float(n) {
             // Lenient JSON's canonical numeric coercion uses Float; project
             // this integral test value back to Int before adding one.

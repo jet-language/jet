@@ -51,19 +51,19 @@ fn decode_response(raw: String, code: Int) -> Dyn PerlError! {
     return Ok(&response.field("value") ?? Dyn.Null)
 }
 
-fn fail(session: Session, input: DataTree, deadline_ms: Int) -> DataTree PerlError! {
+fn fail(session: Session, input: Dyn, deadline_ms: Int) -> Dyn PerlError! {
     raw :: abi.fail(session.value, json.to_string(input) ?? return Err(PerlError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
-fn sleep(session: Session, input: DataTree, deadline_ms: Int) -> DataTree PerlError! {
+fn sleep(session: Session, input: Dyn, deadline_ms: Int) -> Dyn PerlError! {
     raw :: abi.sleep(session.value, json.to_string(input) ?? return Err(PerlError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
-fn transform(session: Session, input: DataTree, deadline_ms: Int) -> DataTree PerlError! {
+fn transform(session: Session, input: Dyn, deadline_ms: Int) -> Dyn PerlError! {
     raw :: abi.transform(session.value, json.to_string(input) ?? return Err(PerlError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)

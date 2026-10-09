@@ -52,25 +52,25 @@ fn decode_response(raw: String, code: Int) -> Dyn PhpError! {
     return Ok(&response.field("value") ?? Dyn.Null)
 }
 
-fn transform(pool: PhpPool, input: DataTree, deadline_ms: Int) -> DataTree PhpError! {
+fn transform(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {
     raw :: abi.transform(pool.value, json.to_string(input) ?? return Err(PhpError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
-fn fail_call(pool: PhpPool, input: DataTree, deadline_ms: Int) -> DataTree PhpError! {
+fn fail_call(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {
     raw :: abi.fail_call(pool.value, json.to_string(input) ?? return Err(PhpError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
-fn sleep_call(pool: PhpPool, input: DataTree, deadline_ms: Int) -> DataTree PhpError! {
+fn sleep_call(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {
     raw :: abi.sleep_call(pool.value, json.to_string(input) ?? return Err(PhpError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
-fn pooled_sleep(pool: PhpPool, input: DataTree, deadline_ms: Int) -> DataTree PhpError! {
+fn pooled_sleep(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {
     raw :: abi.pooled_sleep(pool.value, json.to_string(input) ?? return Err(PhpError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)

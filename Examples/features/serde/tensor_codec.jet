@@ -15,16 +15,16 @@ fn describe(label: String, t: compute.Tensor) {
 }
 
 // The explicit wire form: {"shape": [...], "data": [...], "profile": "..."}.
-fn to_tree(t: compute.Tensor) -> DataTree {
-    shape := [DataTree]{}
-    loop dim in compute.shape(t) -> &shape.push(DataTree.Int(dim))
-    data := [DataTree]{}
-    loop value in compute.to_list(t) -> &data.push(DataTree.Float(value))
-    fields := [String:DataTree]{}
-    fields["shape"] = DataTree.Array(shape)
-    fields["data"] = DataTree.Array(data)
-    fields["profile"] = DataTree.Text(profile(t))
-    DataTree.Object(fields)
+fn to_tree(t: compute.Tensor) -> Dyn {
+    shape := [Dyn]{}
+    loop dim in compute.shape(t) -> &shape.push(Dyn.Int(dim))
+    data := [Dyn]{}
+    loop value in compute.to_list(t) -> &data.push(Dyn.Float(value))
+    fields := [String:Dyn]{}
+    fields["shape"] = Dyn.Array(shape)
+    fields["data"] = Dyn.Array(data)
+    fields["profile"] = Dyn.Text(profile(t))
+    Dyn.Object(fields)
 }
 
 fn elements(tree: Dyn, key: String) -> [Dyn] {
