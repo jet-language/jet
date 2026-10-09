@@ -374,11 +374,9 @@ fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MIRFun
         return "({reference}) as &{ty}"
     }
     if borrowed && arg.access == MIRAccess.Read {
-        // MIRRust call_arg_for_function: a string view (`&str`) lent to a
-        // `String` read parameter. The parameter's Rust type is `&String`, so
-        // the view is copied into a String the call borrows; a `&str` host
-        // parameter accepts the `&String` through deref coercion.
-        if jet_rust_emit_string_view_argument(&ctx, function, arg) == .Val(view) -> return "&{mir_view_copy_symbol(MIRViewCopyKind.String)}({view})"
+        // Concrete read text borrows the view directly; an abstract `&T`
+        // formal materializes an owner in call_arg_for_formal instead.
+        if jet_rust_emit_string_view_argument(&ctx, function, arg) == .Val(view) -> return view
     }
     // D-MEMPROVENANCE2 (#4707): a `ViewMut<T>` crosses by value as the
     // `&mut [T]` reborrow its read produced; it moves, it never clones
@@ -402,7 +400,11 @@ fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MIRFun
                     // argument place borrows the place its definition reads;
                     // a String literal lends its static String.
                     partial :: if jet_rust_emit_partial_projection_only(&ctx, function, arg.value) -> jet_rust_emit_partial_value_reference(&ctx, function, arg.value) else -> String?{None}
-                    if partial == .Val(reference) -> reference else -> jet_rust_emit_static_string_literal_reference(&ctx, function, arg.value) ?? jet_rust_emit_borrowed_value_reference(&ctx, function, arg.value, MIRAccess.Read)
+                    if {
+                        partial == .Val(reference) -> reference
+                        jet_rust_emit_literal_borrow_only(&ctx, function, arg.value) -> jet_rust_emit_static_string_literal_reference(&ctx, function, arg.value) ?? jet_rust_emit_borrowed_value_reference(&ctx, function, arg.value, MIRAccess.Read)
+                        else -> jet_rust_emit_borrowed_value_reference(&ctx, function, arg.value, MIRAccess.Read)
+                    }
                 }
             }
         }
@@ -441,6 +443,9 @@ fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MIRFun
 // Abstract Read formals retain `&T`; concrete text formals lend `&str`.
 // A text view has no String owner, so only that boundary materializes one.
 fn jet_rust_emit_call_arg_for_formal(ctx: &JetRustEmitContext, function: MIRFunction, arg: MIRCallArg, formal: MIRType, borrowed: Bool) -> String Never! {
+    if borrowed && arg.access == MIRAccess.Read && arg.place == None && !arg.authority_boundary && !arg.implicit_clone && !arg.shared_auto_clone && arg.widen_to_union == None && arg.fn_coercion == None && jet_rust_emit_read_text_parameter(&ctx, formal, MIRAccess.Read) && jet_rust_emit_literal_borrow_only(&ctx, function, arg.value) {
+        if jet_rust_emit_literal_string_value(ctx, function, arg.value) == .Val(text) -> return jet_rust_emit_quote(text)
+    }
     actual :: jet_rust_emit_value_type(ctx, function, arg.value)
     actual_view :: jet_rust_emit_string_view_type(actual)
     if !borrowed || arg.access != MIRAccess.Read || (!jet_rust_emit_read_text_parameter(&ctx, actual, MIRAccess.Read) && !actual_view) || jet_rust_emit_read_text_parameter(&ctx, formal, MIRAccess.Read) -> return jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, borrowed)

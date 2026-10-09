@@ -246,6 +246,9 @@ Bootstrap Dyn operations use the helpers embedded in `jet_std`; generated
 calls retain that namespace and the helpers' checked text-borrow contracts.
 A callback's declared parameter ABI must agree with both its generated closure
 and the callable body, including borrowed String parameters.
+Concrete read String formals lend `&str`, so literal text and views need no
+owner allocation. Abstract `&T` formals retain their String owner; both compiler
+emitters distinguish these boundaries before selecting a literal borrow.
 Default `Err` construction retains every source-declared field and its checked
 default, including the private memoized error metadata. The native projection
 must not reconstruct a shortened error record from only message, code, and cause.

@@ -2399,12 +2399,13 @@ fn jet_rust_emit_literal_string_value(ctx: JetRustEmitContext, function: MIRFunc
     }
 }
 
-// Read String parameters borrow static literal text without an owner allocation.
+// An abstract borrowed formal needs a String owner; concrete text formals
+// bypass this helper and lend the literal text without allocating.
 fn jet_rust_emit_static_string_literal_reference(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String? Never! {
     if jet_rust_emit_is_no_os(&ctx) -> return None
     if jet_rust_emit_value_type(ctx, function, value).kind != MIRTypeKind.String -> return None
     text :: jet_rust_emit_literal_string_value(ctx, function, value) ?? return None
-    Val(jet_rust_emit_quote(text))
+    Val("{{ static __JET_LITERAL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {jet_rust_emit_quote(text)}.to_owned()); &*__JET_LITERAL }}")
 }
 
 // MIRRust literal_borrow_only: every use of a String literal is a borrowed
