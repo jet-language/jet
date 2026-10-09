@@ -91,7 +91,7 @@ fn task_outcome_new(kind: I64, owned_reason: I64) -> I64 {
     task_outcome_new(kind, reason)
 }
 #Export(c) fn jet_rt_handle_drop_JetTaskOutcome(outcome: I64) {
-    if outcome == I64{0} -> return
+    if (outcome == I64{0}) -> return
     if sync_load(outcome + TASK_OUTCOME_TAG) == TASK_OUTCOME_PANICKED -> jet_rt_string_drop(sync_load(outcome + TASK_OUTCOME_REASON))
     jet_rt_free(outcome, TASK_OUTCOME_BYTES, I64{8})
 }

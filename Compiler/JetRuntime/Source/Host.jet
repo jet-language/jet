@@ -182,7 +182,7 @@ fn host_is_tty(fd: I64) -> Bool {
 // runtime-fini: 1
 #Export(c) fn jet_rt_stdout_flush() {
     // A terminal host fault may precede the runtime's init array.
-    if host_root == I64{0} -> return
+    if (host_root == I64{0}) -> return
     host_lock()
     _ := host_stdout_flush_locked()
     host_unlock()
