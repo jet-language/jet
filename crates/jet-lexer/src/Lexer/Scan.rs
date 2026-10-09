@@ -258,103 +258,86 @@ impl<'a> Lexer<'a> {
         let Some(fn_pos) = toks.iter().rposition(|t| matches!(t.kind, TokKind::KwFn)) else {
             return false;
         };
-        let significant = toks[..fn_pos]
-            .iter()
-            .filter(|token| {
-                !matches!(
-                    token.kind,
-                    TokKind::LineComment(_)
-                        | TokKind::BlockComment(_)
-                        | TokKind::KwPub
-                        | TokKind::Semi
-                )
-            })
-            .collect::<Vec<_>>();
-        let is_marker_name = |token: &&Token| matches!(token.kind, TokKind::Ident(_));
-        let is_ffi = |token: &&Token| matches!(&token.kind, TokKind::Ident(name) if jet_foundation::Registry::is_inline_foreign_marker(name));
-        let mut cursor = significant.len();
+        // Only the adjacent marker list matters. Walking it backwards avoids
+        // rebuilding a vector of the entire file prefix for every string.
+        let mut significant = toks[..fn_pos].iter().rev().filter(|token| {
+            !matches!(
+                token.kind,
+                TokKind::LineComment(_)
+                    | TokKind::BlockComment(_)
+                    | TokKind::KwPub
+                    | TokKind::Semi
+            )
+        }).peekable();
+        let is_ffi = |token: &Token| matches!(&token.kind, TokKind::Ident(name) if jet_foundation::Registry::is_inline_foreign_marker(name));
         let mut saw_ffi = false;
-        loop {
-            if cursor >= 2
-                && matches!(significant[cursor - 2].kind, TokKind::Hash)
-                && is_marker_name(&significant[cursor - 1])
-            {
-                saw_ffi |= is_ffi(&significant[cursor - 1]);
-                cursor -= 2;
-                continue;
-            }
-            if cursor > 0 && matches!(significant[cursor - 1].kind, TokKind::RParen) {
-                let mut depth = 0usize;
-                let mut open = None;
-                for index in (0..cursor).rev() {
-                    match significant[index].kind {
-                        TokKind::RParen => depth += 1,
-                        TokKind::LParen => {
-                            depth -= 1;
-                            if depth == 0 {
-                                open = Some(index);
-                                break;
-                            }
-                        }
-                        _ => {}
+        while let Some(last) = significant.next() {
+            match last.kind {
+                TokKind::Ident(_) => {
+                    if !significant.next().is_some_and(|token| matches!(token.kind, TokKind::Hash)) {
+                        break;
                     }
+                    saw_ffi |= is_ffi(last);
                 }
-                if let Some(open) = open {
-                    if open >= 2
-                        && matches!(significant[open - 2].kind, TokKind::Hash)
-                        && is_marker_name(&significant[open - 1])
+                TokKind::RParen => {
+                    let mut depth = 1usize;
+                    for token in significant.by_ref() {
+                        match token.kind {
+                            TokKind::RParen => depth += 1,
+                            TokKind::LParen => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    if depth != 0 {
+                        break;
+                    }
+                    let Some(name) = significant.next() else { break };
+                    if !matches!(name.kind, TokKind::Ident(_))
+                        || !significant.next().is_some_and(|token| matches!(token.kind, TokKind::Hash))
                     {
-                        saw_ffi |= is_ffi(&significant[open - 1]);
-                        cursor = open - 2;
-                        continue;
+                        break;
                     }
+                    saw_ffi |= is_ffi(name);
                 }
-            }
-            if cursor > 0 && matches!(significant[cursor - 1].kind, TokKind::RBracket) {
-                let mut depth = 0usize;
-                let mut open = None;
-                for index in (0..cursor).rev() {
-                    match significant[index].kind {
-                        TokKind::RBracket => depth += 1,
-                        TokKind::LBracket => {
-                            depth -= 1;
-                            if depth == 0 {
-                                open = Some(index);
-                                break;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                if let Some(open) = open {
-                    if open > 0 && matches!(significant[open - 1].kind, TokKind::Hash) {
-                        let mut paren_depth = 0usize;
-                        let mut bracket_depth = 0usize;
-                        let mut expects_name = true;
-                        for token in &significant[open + 1..cursor - 1] {
-                            if expects_name && paren_depth == 0 && bracket_depth == 0 {
-                                saw_ffi |= is_ffi(token);
-                                expects_name = false;
-                            }
-                            match token.kind {
-                                TokKind::LParen => paren_depth += 1,
-                                TokKind::RParen => paren_depth = paren_depth.saturating_sub(1),
-                                TokKind::LBracket => bracket_depth += 1,
-                                TokKind::RBracket => {
-                                    bracket_depth = bracket_depth.saturating_sub(1);
+                TokKind::RBracket => {
+                    let mut bracket_depth = 1usize;
+                    let mut paren_depth = 0usize;
+                    let mut group_ffi = false;
+                    while let Some(token) = significant.next() {
+                        match token.kind {
+                            TokKind::RBracket => bracket_depth += 1,
+                            TokKind::LBracket => {
+                                bracket_depth -= 1;
+                                if bracket_depth == 0 {
+                                    break;
                                 }
-                                TokKind::Comma if paren_depth == 0 && bracket_depth == 0 => {
-                                    expects_name = true;
-                                }
-                                _ => {}
                             }
+                            TokKind::RParen => paren_depth += 1,
+                            TokKind::LParen => paren_depth = paren_depth.saturating_sub(1),
+                            _ => {}
                         }
-                        cursor = open - 1;
-                        continue;
+                        if bracket_depth == 1 && paren_depth == 0 && is_ffi(token)
+                            && significant.peek().is_some_and(|previous| {
+                                matches!(previous.kind, TokKind::LBracket | TokKind::Comma)
+                            })
+                        {
+                            group_ffi = true;
+                        }
                     }
+                    if bracket_depth != 0
+                        || !significant.next().is_some_and(|token| matches!(token.kind, TokKind::Hash))
+                    {
+                        break;
+                    }
+                    saw_ffi |= group_ffi;
                 }
+                _ => break,
             }
-            break;
         }
         saw_ffi
     }

@@ -1781,7 +1781,7 @@ fn assemble_loaded(
 #[derive(Debug, Clone)]
 pub struct CffiDiagnostic {
     pub file: String,
-    pub source: String,
+    pub source: std::sync::Arc<str>,
     pub diagnostic: Diagnostic,
 }
 
@@ -2087,6 +2087,7 @@ fn cache_diagnostic_origins(bundle: &ProgramBundle) -> Vec<CffiDiagnostic> {
                     Err(parse_diags) => parse_diags,
                 }
             };
+            let source: std::sync::Arc<str> = source.into();
             Some(
                 diagnostics
                     .into_iter()

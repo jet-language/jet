@@ -41,6 +41,28 @@ mod raw_head_tests {
     }
 
     #[test]
+    fn foreign_body_markers_only_walk_the_adjacent_marker_list() {
+        let prefix = "fn ordinary() { \"\"\"ordinary\"\"\" }\n".repeat(2_000);
+        for markers in [
+            "#FFI(c)",
+            "#FFI(c) #Unsafe(\"reason\")",
+            "#[Unsafe(\"reason\"), FFI(c), Test]",
+            "#[FFI(c), Unsafe(\"reason\")] #Test",
+            "#FFI(c) // marker comment\npub",
+        ] {
+            let source = format!("{prefix}{markers} fn foreign() {{ \"\"\"raw \\q {{ }}\"\"\" }}");
+            let (tokens, diagnostics) = Lexer::lex(&source);
+            assert!(diagnostics.is_empty(), "{markers}: {diagnostics:?}");
+            assert!(tokens.iter().any(|token| matches!(&token.kind,
+                TokKind::Str(parts) if matches!(parts.as_slice(), [StrTokPart::Lit(text)] if text == "raw \\q { }")
+            )));
+        }
+        let source = format!("{prefix}#[Unsafe(\"FFI\"), Test] fn ordinary_tail() {{ \"\"\"not raw \\q\"\"\" }}");
+        let (_, diagnostics) = Lexer::lex(&source);
+        assert!(!diagnostics.is_empty(), "a marker argument is not an FFI marker");
+    }
+
+    #[test]
     fn typed_head_keeps_backslash_literal() {
         assert_eq!(first_string_lit(r#"Regex.{"\d+"}"#), r"\d+");
         assert_eq!(first_string_lit(r#"Regex.{"a\nb"}"#), r"a\nb");

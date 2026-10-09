@@ -525,7 +525,7 @@ pub(crate) fn prepare_frontend_sources(sources: Vec<(PathBuf, String)>) -> Prepa
 #[derive(Debug, Clone)]
 pub struct LoaderDiagnostic {
     pub file: String,
-    pub source: String,
+    pub source: std::sync::Arc<str>,
     pub diagnostic: Diagnostic,
     pub structure_fact: Option<jet_foundation::Names::StructureFact>,
 }
@@ -537,12 +537,15 @@ struct LoaderError {
 
 impl LoaderError {
     fn at(file: &str, source: &str, diagnostics: Vec<Diagnostic>) -> Self {
+        // A rejected large unit can have thousands of diagnostics. Retain its
+        // bytes once, not once per diagnostic (including advisory reports).
+        let source: std::sync::Arc<str> = source.into();
         Self {
             diagnostics: diagnostics
                 .into_iter()
                 .map(|diagnostic| LoaderDiagnostic {
                     file: file.to_string(),
-                    source: source.to_string(),
+                    source: source.clone(),
                     diagnostic,
                     structure_fact: None,
                 })
@@ -576,7 +579,7 @@ impl LoaderError {
                     std::sync::Arc::new(crate::Diagnostics::DiagnosticOrigin::new(
                         display,
                         path.to_string_lossy().into_owned(),
-                        entry.source.clone(),
+                        entry.source.to_string(),
                     ))
                 })
                 .clone();
@@ -690,7 +693,7 @@ fn project_parts_loader_error(
                 .unwrap_or_else(|| (project_root.display().to_string(), String::new()));
             LoaderDiagnostic {
                 file,
-                source,
+                source: source.into(),
                 diagnostic: conflict.diagnostic(project_root, None),
                 structure_fact: None,
             }
@@ -1089,9 +1092,9 @@ pub fn load_entry_with_diagnostics(
         Ok(bundle) => Ok(bundle),
         Err(fallback) => {
             if diagnostics.is_empty() {
-                let source = checked_source_file(Path::new(entry_path), entry_path)
+                let source: std::sync::Arc<str> = checked_source_file(Path::new(entry_path), entry_path)
                     .ok()
-                    .map(|(_, _, source)| source)
+                    .map(|(_, _, source)| source.into())
                     .unwrap_or_default();
                 diagnostics.extend(fallback.into_iter().map(|diagnostic| LoaderDiagnostic {
                     file: entry_path.to_string(),
@@ -2830,7 +2833,7 @@ fn load_entry_with_overlays_mode_on_stack(
                     .into_iter()
                     .map(|entry| LoaderDiagnostic {
                         file: entry.file,
-                        source: entry.source,
+                        source: entry.source.into(),
                         diagnostic: entry.diagnostic,
                         // Namespace assembly reports a name clash, not a
                         // structure observation; the fact plane stays empty.
@@ -2850,7 +2853,7 @@ fn load_entry_with_overlays_mode_on_stack(
                         .into_iter()
                         .map(|entry| LoaderDiagnostic {
                             file: entry.file,
-                            source: entry.source,
+                            source: entry.source.into(),
                             diagnostic: entry.diagnostic,
                             // Same as above: a CFFI provenance failure carries
                             // no structure fact.
@@ -6016,6 +6019,24 @@ pub fn is_physically_within(root: &Path, path: &Path) -> bool {
 #[cfg(test)]
 mod stale_manifest_name_tests {
     use super::*;
+
+    #[test]
+    fn loader_error_shares_source_across_reports_and_provenance_sink() {
+        let source = "source line\n".repeat(100_000);
+        let diagnostics = (0..1_000).map(|_| Diagnostic::error(
+            "E0003", "invalid item".into(), "source error".into(),
+            "repair the item".into(), Some(Span::new(0, 6)),
+        )).collect();
+        let error = LoaderError::at("large.jet", &source, diagnostics);
+        let shared = error.diagnostics[0].source.clone();
+        assert_eq!(shared.as_ref(), source);
+        assert!(error.diagnostics.iter().all(|entry| std::sync::Arc::ptr_eq(&shared, &entry.source)));
+        let mut recorded = Vec::new();
+        let plain = record_loader_error(&mut Some(&mut recorded), error);
+        assert_eq!(plain.len(), 1_000);
+        assert_eq!(recorded.len(), 1_000);
+        assert!(recorded.iter().all(|entry| std::sync::Arc::ptr_eq(&shared, &entry.source)));
+    }
 
     /// Keep fixtures outside enclosing project roots; system temp can itself
     /// live inside a repository, workspace, or package.

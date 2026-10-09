@@ -300,7 +300,7 @@ pub fn is_active_namespace_import(
 #[derive(Debug, Clone)]
 pub struct ForeignDiagnostic {
     pub file: String,
-    pub source: String,
+    pub source: std::sync::Arc<str>,
     pub diagnostic: Diagnostic,
 }
 
@@ -327,7 +327,7 @@ pub fn assemble_active_namespaces_with_provenance(
                 Err(error) => {
                     return Err(vec![ForeignDiagnostic {
                         file: bundle.modules[idx].display.clone(),
-                        source: bundle.modules[idx].source.clone(),
+                        source: bundle.modules[idx].source.as_str().into(),
                         diagnostic: error.diagnostic(),
                     }]);
                 }
@@ -347,7 +347,7 @@ pub fn assemble_active_namespaces_with_provenance(
                 if ns.language == ForeignLanguage::Com && !cfg!(target_os = "windows") {
                     return Err(vec![ForeignDiagnostic {
                         file: bundle.modules[idx].display.clone(),
-                        source: bundle.modules[idx].source.clone(),
+                        source: bundle.modules[idx].source.as_str().into(),
                         diagnostic: Diagnostic::error(
                             "E3260",
                             "`com.*` needs a Windows host".to_string(),
@@ -369,7 +369,7 @@ pub fn assemble_active_namespaces_with_provenance(
                         Err(diagnostics) => {
                             let path =
                                 binding_cache_file(&bundle.project_root, ns.language, &ns.lib);
-                            let source = std::fs::read_to_string(&path).unwrap_or_default();
+                            let source: std::sync::Arc<str> = std::fs::read_to_string(&path).unwrap_or_default().into();
                             return Err(diagnostics
                                 .into_iter()
                                 .map(|diagnostic| ForeignDiagnostic {
