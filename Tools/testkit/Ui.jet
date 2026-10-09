@@ -33,9 +33,9 @@ fn kit_ui_arg(source: String, name: String) -> String? {
     found := ""
     present := false
     loop raw in source.split("\n") {
-        line :: ~raw.trim()
+        line :: raw.trim().copy()
         if !line.starts_with("//") -> next
-        directive :: ~kit_steps_byte_slice(line, 2, line.count_bytes()).trim()
+        directive :: kit_steps_byte_slice(line, 2, line.count_bytes()).trim().copy()
         prefix :: "@{name}"
         if {
             directive == prefix -> {
@@ -56,9 +56,9 @@ fn kit_ui_invocation(source: String, file: String, lint: Bool) -> KitUICall {
     call := KitUICall{argv: if lint -> ["check", "--verbose", file] else -> ["check", file], parent: false, exit: "any", streams: if lint -> "lint" else -> "rendered", stdin: "", extension: kit_ui_arg(source, "compiler_extension") ?? "", refused: ""}
     rows :: kit_ui_directives()
     loop raw in source.split("\n") {
-        line :: ~raw.trim()
+        line :: raw.trim().copy()
         if !line.starts_with("//") -> next
-        body :: ~kit_steps_byte_slice(line, 2, line.count_bytes()).trim()
+        body :: kit_steps_byte_slice(line, 2, line.count_bytes()).trim().copy()
         if !body.starts_with("@") -> next
         name :: kit_steps_byte_slice(body, 1, body.count_bytes()).replace("\t", " ").split(" ").to_list()[0]
         known := false
@@ -85,7 +85,7 @@ fn kit_ui_invocation(source: String, file: String, lint: Bool) -> KitUICall {
         call.streams = if lint -> "lint" else -> row.streams
         if row.name == "repl_deny" {
             loop line in source.split("\n") {
-                trimmed :: ~line.trim()
+                trimmed :: line.trim().copy()
                 if trimmed != "" && !trimmed.starts_with("//") -> call.stdin = "{call.stdin}{line}\n"
             }
             call.stdin = "{call.stdin}:quit"
@@ -135,12 +135,12 @@ fn kit_ui_discover(ctx: KitCtx) -> [KitEntry] {
 fn kit_ui_rendered_only(text: String) -> String {
     lines :: text.split("\n").to_list()
     n :: lines.len()
-    if n < 5 || lines[n - 1] != "" || !lines[n - 2].starts_with("run `jet explain ") || !lines[n - 2].ends_with("` to learn more") || lines[n - 4] != "" -> return ~text
+    if n < 5 || lines[n - 1] != "" || !lines[n - 2].starts_with("run `jet explain ") || !lines[n - 2].ends_with("` to learn more") || lines[n - 4] != "" -> return text.copy()
     summary :: lines[n - 3]
     problem :: summary.split(" ").to_list()
     counted :: problem.len() == 3 && (Int.parse(problem[0]) ?? -1) >= 0 && (problem[1] == "problem" || problem[1] == "problems") && problem[2] == "found"
     warnings :: summary.starts_with("ok: `") && summary.contains("` has no errors (") && (summary.ends_with(" warning)") || summary.ends_with(" warnings)"))
-    if !counted && !warnings -> return ~text
+    if !counted && !warnings -> return text.copy()
     "{lines.slice(0, n - 4).join("\n")}\n"
 }
 
@@ -247,7 +247,7 @@ fn kit_ui_run(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
 
 fn kit_ui_field(body: String, key: String) -> String {
     loop raw in body.split("\n") {
-        line :: ~raw.trim()
+        line :: raw.trim().copy()
         if line.starts_with("{key}: ") -> return kit_steps_byte_slice(line, key.count_bytes() + 2, line.count_bytes())
     }
     ""
@@ -369,7 +369,7 @@ fn kit_ui_set_coverage(rows: [KitUIRegistryRow], emitted: [String], rendered: [S
     seen := [String]{}
     errors := [String]{}
     loop raw in allowance_text.split("\n") {
-        line :: ~raw.trim()
+        line :: raw.trim().copy()
         if line == "" || line.starts_with("#") -> next
         fields :: line.split("\t").to_list()
         if fields.len() != 3 {
@@ -419,7 +419,7 @@ fn kit_ui_plane_coverage(rows: [KitUIRegistryRow], baseline: String) -> KitVerdi
     expected := [String]{}
     names := [String]{}
     loop raw in baseline.split("\n") {
-        line :: ~raw.trim()
+        line :: raw.trim().copy()
         if line == "" || line.starts_with("#") -> next
         fields :: line.replace("\t", " ").split(" ").filter(word -> word != "").to_list()
         if fields.len() != 4 -> return kit_expect_verdict("FAIL", "invalid coverage baseline row: {line}")

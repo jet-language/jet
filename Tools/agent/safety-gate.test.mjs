@@ -51,7 +51,7 @@ test("seed-4 model cannot exceed String bounds; Core API programs deterministic 
   assert.notDeepEqual(c, generateCoreCase(5, 0));
   assert.match(c.source, /String\.from_bytes/u);
   assert.match(c.source, /m\.pop/u);
-  assert.match(c.source, /saved\d+ :: ~xs/u);
+  assert.match(c.source, /saved\d+ :: xs\.copy\(\)/u);
   assert.equal(c.stdout.split("\n").filter((line) => line === "invalid").length, 6);
 });
 

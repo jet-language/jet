@@ -156,7 +156,7 @@ fn kit_steps_parallel_start(group: Group, steps: [KitStep], index: Int, context:
         kit_steps_parallel_start(group, steps, index + 1, context, state, sender)
         return
     }
-    reporter :: ~sender
+    reporter :: sender.copy()
     worker :: task kit_steps_send_report(step, context, state, reporter)
     // Start all remaining sends before joining this one, preserving concurrency.
     kit_steps_parallel_start(group, steps, index + 1, context, state, sender)

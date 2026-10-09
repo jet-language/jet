@@ -289,7 +289,7 @@ fn kit_steps_capture_value(words: [String], context: KitStepCtx, state: KitStepS
         line :: kit_steps_first_line(source, marker) ?? return kit_steps_capture_failure("FAIL", "capture marker line missing")
         at :: kit_steps_byte_index(line, marker) ?? return kit_steps_capture_failure("FAIL", "capture marker missing")
         value :: kit_steps_byte_slice(line, at + marker.count_bytes(), line.count_bytes())
-        return kit_steps_capture_result(if words.len() == 5 + offset -> ~value.trim() else -> value)
+        return kit_steps_capture_result(if words.len() == 5 + offset -> value.trim().copy() else -> value)
     }
     kit_steps_capture_result(kit_steps_json_scalar(source, kind, words[3 + offset]) ?? return kit_steps_capture_failure("FAIL", "capture JSON path missing or not scalar"))
 }

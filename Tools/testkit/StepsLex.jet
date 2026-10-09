@@ -134,7 +134,7 @@ fn kit_steps_reason(text: String) -> Bool {
 }
 
 fn kit_steps_body(text: String) -> String {
-    ~kit_steps_byte_slice(text, 0, kit_steps_comment(text)).trim()
+    kit_steps_byte_slice(text, 0, kit_steps_comment(text)).trim().copy()
 }
 
 fn kit_steps_scalar_word(text: String) -> String? {
@@ -175,7 +175,7 @@ fn kit_steps_exit_codes(text: String) -> [String]? {
     if !text.starts_with("[") || !text.ends_with("]") -> return None
     result := [String]{}
     loop raw in kit_steps_byte_slice(text, 1, text.count_bytes() - 1).split(",") {
-        code :: ~raw.trim()
+        code :: raw.trim().copy()
         if kit_steps_integer(code) == None -> return None
         &result.push(code)
     }

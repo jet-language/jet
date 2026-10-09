@@ -261,7 +261,7 @@ fn kit_golden_gated(root: String, path: String) -> Bool {
     if pieces.len() != 2 -> panic("missing unsafe-ratchet baseline")
     data :: pieces[1].slice(0, pieces[1].index("\n-->") ?? pieces[1].len())
     loop line in data.split("\n") {
-        trimmed :: ~line.trim()
+        trimmed :: line.trim().copy()
         if !trimmed.starts_with("\"file\":") -> next
         quoted :: trimmed.split("\"").to_list()
         if quoted.len() >= 4 && quoted[3] == path -> return true

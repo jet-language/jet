@@ -773,7 +773,7 @@ export function generateCoreCase(seed, index) {
         map.delete(key);
         break;
       case 3:
-        statements.push(`saved${step} :: ~xs`, `&xs.push(${value})`, `print(saved${step}.len())`, "print(xs.len())");
+        statements.push(`saved${step} :: xs.copy()`, `&xs.push(${value})`, `print(saved${step}.len())`, "print(xs.len())");
         output.push(list.length, list.length + 1);
         list.push(value);
         break;

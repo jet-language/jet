@@ -15,7 +15,7 @@ fn kit_steps_loop_words(text: String) -> [String]? {
         label = tokens[binding - 1].text
     }
     if end <= 2 -> return None
-    selector :: ~kit_steps_byte_slice(text, tokens[2].start, tokens[end - 1].end).trim()
+    selector :: kit_steps_byte_slice(text, tokens[2].start, tokens[end - 1].end).trim().copy()
     if label == "" -> return Val(["for", "line", selector, "as", tokens[binding + 1].text])
     Val(["for", "line", selector, "of", label, "as", tokens[binding + 1].text])
 }

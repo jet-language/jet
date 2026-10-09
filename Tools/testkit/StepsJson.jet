@@ -383,7 +383,7 @@ fn kit_steps_json_assertion(value: String) -> KitAssertion? {
         if !bound.ends_with(":") || kit_steps_json_path(kit_steps_json_preview(rows)) == None -> return None
         name :: kit_steps_byte_slice(bound, 0, bound.count_bytes() - 1)
         if !kit_steps_env_name(name) -> return None
-        inner :: ~kit_steps_byte_slice(value, tokens[6 + offset].start, value.count_bytes()).trim()
+        inner :: kit_steps_byte_slice(value, tokens[6 + offset].start, value.count_bytes()).trim().copy()
         preview :: kit_steps_json_row_expand(inner.replace("{{{name}}}", "$"), name, None, true) ?? return None
         _ :: kit_steps_json_assertion("stdout {mode} {preview}") ?? return None
         return Val(KitAssertion{stream: stream, path: if offset == 1 -> tokens[1].text else -> "", mode: "json", value: inner, json_mode: mode, json_path: rows, json_op: "each", extra: name, transform: transform})
@@ -396,7 +396,7 @@ fn kit_steps_json_assertion(value: String) -> KitAssertion? {
         return Val(KitAssertion{stream: stream, path: source, mode: "json", value: "", json_mode: mode, json_path: path, json_op: op, optional_file: subject == "file?", transform: transform})
     }
     if tokens.len() == needed -> return None
-    literal := ~kit_steps_byte_slice(body, tokens[needed].start, body.count_bytes()).trim()
+    literal := kit_steps_byte_slice(body, tokens[needed].start, body.count_bytes()).trim().copy()
     if op == "any" {
         if tokens.len() != needed + 2 || tokens[needed].text != "~" || !kit_steps_reason(value) -> return None
         return Val(KitAssertion{stream: stream, path: source, mode: "json", value: tokens[needed + 1].text, json_mode: mode, json_path: path, json_op: "any~", optional_file: subject == "file?", transform: transform})
@@ -409,7 +409,7 @@ fn kit_steps_json_assertion(value: String) -> KitAssertion? {
         _ :: json.parse(kit_steps_json_preview(literal)) ?? return None
     } else if op == "keys" {
         if !literal.starts_with("= ") -> return None
-        literal = ~kit_steps_byte_slice(literal, 2, literal.count_bytes()).trim()
+        literal = kit_steps_byte_slice(literal, 2, literal.count_bytes()).trim().copy()
         if kit_steps_string_array(literal) == None -> return None
     } else {
         if tokens.len() != needed + 1 -> return None

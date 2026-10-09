@@ -5,7 +5,7 @@ fn kit_steps_json_projection_valid(part: String) -> Bool {
     if !part.starts_with("{{") || !part.ends_with("}}") -> return false
     names := [String]{}
     loop raw in kit_steps_byte_slice(part, 1, part.count_bytes() - 1).split(",") {
-        name :: ~raw.trim()
+        name :: raw.trim().copy()
         if name == "" || name.contains(".") || name.contains("[") || name.contains(" ") || kit_expect_named(names, name) -> return false
         &names.push(name)
     }
@@ -47,9 +47,9 @@ fn kit_steps_json_filter(part: String) -> KitJSONFilter? {
             width = 4
         }
         if operator == "" -> next
-        key :: ~kit_steps_byte_slice(part, 1, index).trim()
+        key :: kit_steps_byte_slice(part, 1, index).trim().copy()
         if kit_steps_json_path("$.{key}") == None -> return None
-        literal :: ~kit_steps_byte_slice(rest, width, rest.count_bytes()).trim()
+        literal :: kit_steps_byte_slice(rest, width, rest.count_bytes()).trim().copy()
         if literal.starts_with("@.") -> return Val(KitJSONFilter{key: key, op: operator, expected: Dyn.Null, reference: kit_steps_byte_slice(literal, 1, literal.count_bytes())})
         expected :: json.parse(literal) ?? return None
         if operator == "in" && kit_steps_json_type(expected) != "array" -> return None
@@ -97,7 +97,7 @@ fn kit_steps_json_select(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
             .Object(fields) -> {
                 projected := [String: Dyn]{}
                 loop raw in kit_steps_byte_slice(part, 1, part.count_bytes() - 1).split(",") {
-                    name :: ~raw.trim()
+                    name :: raw.trim().copy()
                     child :: fields.get(name) ?? return None
                     _ :: &projected.add(name, child)
                 }
@@ -143,7 +143,7 @@ fn kit_steps_json_values(text: String, mode: String, path: String) -> [Dyn]? {
     else if mode == "ndjson" {
         records := [Dyn]{}
         loop raw in text.split("\n") {
-            line :: ~raw.trim()
+            line :: raw.trim().copy()
             if line == "" -> next
             record :: json.parse(line) ?? return None
             if kit_steps_json_type(record) != "object" -> return None

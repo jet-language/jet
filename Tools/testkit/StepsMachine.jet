@@ -103,7 +103,7 @@ fn kit_steps_machine_status(object: [String: Dyn]) -> String? {
 }
 
 fn kit_steps_machine_line(text: String) -> String Err! {
-    value :: json.parse(~text.trim()) ?? return Err("machine JSON: {err}")
+    value :: json.parse(text.trim().copy()) ?? return Err("machine JSON: {err}")
     object :: kit_steps_machine_object(value) ?? return Err("machine record is not an object")
     schema :: kit_steps_machine_string(object, "schema") ?? return Err("machine record is missing `schema`")
     if schema == "jet.report/v3" {

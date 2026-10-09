@@ -14,7 +14,7 @@ fn kit_exec_select_ids(all_ids: [String], options: KitOptions) -> KitSelection {
     if options.cases != "" {
         text :: files.read(options.cases) ?? return KitSelection{ids: [], error: "read cases file: {err}"}
         loop raw in text.split("\n") {
-            id :: ~raw.trim()
+            id :: raw.trim().copy()
             if id == "" || id.starts_with("#") -> next
             if kit_expect_named(requested, id) -> return KitSelection{ids: [], error: "duplicate case ID: {id}"}
             if !kit_expect_named(all_ids, id) -> return KitSelection{ids: [], error: "unknown case ID: {id}"}

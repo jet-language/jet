@@ -29,7 +29,7 @@ fn kit_steps_median_labels(text: String, plan: KitPlan, before: Int) -> [String]
     if !text.starts_with("[") || !text.ends_with("]") -> return None
     labels := [String]{}
     loop raw in kit_steps_byte_slice(text, 1, text.count_bytes() - 1).split(",") {
-        label :: ~raw.trim()
+        label :: raw.trim().copy()
         if !kit_steps_known_label(plan, label, before) -> return None
         &labels.push(label)
     }

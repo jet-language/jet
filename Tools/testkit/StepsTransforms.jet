@@ -152,7 +152,7 @@ fn kit_steps_terminal_transform(text: String, name: String) -> String? {
 }
 
 fn kit_steps_transform_one(text: String, part: String) -> String? {
-    if part == "trim" -> return Val(~text.trim())
+    if part == "trim" -> return Val(text.trim().copy())
     if part == "trim_start" -> return Val(strtext.trim_start(text))
     if part == "trim_end" -> return Val(strtext.trim_end(text))
     if part == "strip_sgr" -> return Val(kit_steps_strip_sgr(text))
@@ -205,7 +205,7 @@ fn kit_steps_transform_one(text: String, part: String) -> String? {
         lines := [String]{}
         loop line in kit_steps_rust_lines(text) {
             if part == "until_blank" && line == "" -> break
-            if part == "trim_lines" -> &lines.push(~line.trim())
+            if part == "trim_lines" -> &lines.push(line.trim().copy())
             else if part == "first_words" {
                 words :: kit_steps_whitespace_words(line)
                 if words.len() > 0 -> &lines.push(words[0])

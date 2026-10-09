@@ -54,7 +54,7 @@ fn kit_steps_env_value(name: String, env: KitEnv, scratch: String, overlay: [Kit
 fn kit_steps_env_fallback(body: String, env: KitEnv, scratch: String, overlay: [KitEnvVar]) -> String {
     choices :: body.split("|").to_list()
     loop (index, choice) in choices {
-        if index > 0 && !choice.starts_with("env:") -> return ~choice
+        if index > 0 && !choice.starts_with("env:") -> return choice.copy()
         name :: if index == 0 -> choice else -> kit_steps_byte_slice(choice, 4, choice.count_bytes())
         value :: kit_steps_env_value(name, env, scratch, overlay) ?? ""
         if value != "" -> return value

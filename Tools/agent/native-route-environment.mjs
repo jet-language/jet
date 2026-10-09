@@ -41,7 +41,7 @@ export function emitNativeEnvironmentRoutes(rows) {
     ...rows.map(row => `    LowerEnvironmentRoute{symbol: "${row.symbol}", export: "${row.name}", op: LowerEnvironmentOp.${row.op}, arity: ${row.arity}},`),
     '} }',
     'fn lower_environment_route(symbol: String) -> LowerEnvironmentRoute? {',
-    '    loop route in LOWER_ENVIRONMENT_ROUTES { if route.symbol == symbol -> return Val(~route) }',
+    '    loop route in LOWER_ENVIRONMENT_ROUTES { if route.symbol == symbol -> return Val(route.copy()) }',
     '    None',
     '}',
   ];

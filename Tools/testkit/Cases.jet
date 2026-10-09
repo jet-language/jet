@@ -60,12 +60,12 @@ fn kit_cases_run(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
 fn kit_cases_known_failure(entry: KitEntry, root: String, source: String) -> String {
     prefix :: "# KNOWN-FAILING "
     loop raw in source.split("\n") {
-        line :: ~raw.trim()
+        line :: raw.trim().copy()
         if line.starts_with(prefix) -> return kit_steps_byte_slice(line, prefix.count_bytes(), line.count_bytes()).trim()
     }
     ledger :: kit_exec_optional(files.join(root, "Tools/testkit/known-failing.tsv")) ?? ""
     loop raw in ledger.split("\n") {
-        line :: ~raw.trim()
+        line :: raw.trim().copy()
         if line == "" || line.starts_with("#") -> next
         fields :: line.split("\t").to_list()
         if fields.len() != 3 -> next

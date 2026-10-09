@@ -42,7 +42,7 @@ fn kit_steps_batch_assertion(stream: String, path: String, transform: String, or
     }
     if mode == "any-line" {
         if words.len() < 3 || words[1].text != "words-prefix" -> return None
-        assertion.value = ~kit_steps_byte_slice(body, words[2].start, body.count_bytes()).trim()
+        assertion.value = kit_steps_byte_slice(body, words[2].start, body.count_bytes()).trim().copy()
         if kit_steps_string_array(assertion.value) == None -> return None
         return Val(assertion)
     }
@@ -95,11 +95,11 @@ fn kit_steps_batch_assertion(stream: String, path: String, transform: String, or
     }
     if words.len() < 3 -> return None
     assertion.extra = words[1].text
-    assertion.value = ~kit_steps_byte_slice(body, words[2].start, body.count_bytes()).trim()
+    assertion.value = kit_steps_byte_slice(body, words[2].start, body.count_bytes()).trim().copy()
     if mode == "machine-output" {
         if assertion.extra != "=" || !assertion.value.starts_with("[") || !assertion.value.ends_with("]") -> return None
         loop raw in kit_steps_byte_slice(assertion.value, 1, assertion.value.count_bytes() - 1).split(",") {
-            name :: ~raw.trim()
+            name :: raw.trim().copy()
             if !kit_expect_named(["status", "report", "browser-relay"], name) -> return None
             &assertion.alternatives.push(name)
         }
@@ -149,7 +149,7 @@ fn kit_steps_i64(text: String) -> Bool {
 
 fn kit_steps_float_lines(text: String) -> [Float]? {
     result := [Float]{}
-    loop line in kit_steps_rust_lines(text) -> &result.push(Float.parse(~line.trim()) ?? return None)
+    loop line in kit_steps_rust_lines(text) -> &result.push(Float.parse(line.trim().copy()) ?? return None)
     Val(result)
 }
 

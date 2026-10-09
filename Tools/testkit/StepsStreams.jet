@@ -3,13 +3,13 @@ use core.encoding.json as json
 
 fn kit_steps_relation_label(reference: String) -> String {
     if reference.ends_with(".stdout") || reference.ends_with(".stderr") -> return kit_steps_byte_slice(reference, 0, reference.count_bytes() - 7)
-    ~reference
+    reference.copy()
 }
 
 fn kit_steps_relation_stream(reference: String, fallback: String) -> String {
     if reference.ends_with(".stdout") -> return "stdout"
     if reference.ends_with(".stderr") -> return "stderr"
-    ~fallback
+    fallback.copy()
 }
 
 fn kit_steps_known_relation(plan: KitPlan, reference: String, before: Int) -> Bool {
@@ -67,7 +67,7 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
     if stream == "file" && mode == "names" {
         if arity < 3 || (tokens[offset + 1].text != "=" && tokens[offset + 1].text != "==") -> return None
         extra = tokens[offset + 1].text
-        data = if extra == "==" -> tokens[offset + 2].text else -> ~kit_steps_byte_slice(value, tokens[offset + 2].start, value.count_bytes()).trim()
+        data = if extra == "==" -> tokens[offset + 2].text else -> kit_steps_byte_slice(value, tokens[offset + 2].start, value.count_bytes()).trim().copy()
         if extra == "==" {
             if arity != 3 || !kit_steps_relative_path(data) -> return None
         } else if kit_steps_string_array(data) == None -> return None
@@ -92,7 +92,7 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
         if arity < 2 || !kit_steps_reason(original) -> return None
         if arity == 2 -> data = tokens[offset + 1].text
         else {
-            raw :: ~kit_steps_byte_slice(value, tokens[offset + 1].start, value.count_bytes()).trim()
+            raw :: kit_steps_byte_slice(value, tokens[offset + 1].start, value.count_bytes()).trim().copy()
             if raw.starts_with("\"") || raw.starts_with("'") -> return None
             data = raw
         }
@@ -101,7 +101,7 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
         loop token in tokens.slice(offset + 1, tokens.len()) -> &alternatives.push(token.text)
     } else if mode == "one-of" {
         if arity < 3 || !kit_steps_reason(original) -> return None
-        data = ~kit_steps_byte_slice(value, tokens[offset + 1].start, value.count_bytes()).trim()
+        data = kit_steps_byte_slice(value, tokens[offset + 1].start, value.count_bytes()).trim().copy()
     } else if mode == "line" {
         if (arity != 3 && arity != 5) || tokens[offset + 1].text != "^=" || !kit_steps_reason(original) -> return None
         data = tokens[offset + 2].text
@@ -185,7 +185,7 @@ fn kit_steps_line_value(text: String, prefix: String, substring: String, tail: B
         loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
         content_end :: if end < bytes.len() && end > start && bytes[end - 1] == (U8{13}) -> end - 1 else -> end
         line :: String.from_bytes(bytes.slice(start, content_end)) ?? panic("line span is not UTF-8")
-        if line.starts_with(prefix) && line.contains(substring) -> return Val(if tail -> kit_steps_byte_slice(line, prefix.count_bytes(), line.count_bytes()) else -> ~line)
+        if line.starts_with(prefix) && line.contains(substring) -> return Val(if tail -> kit_steps_byte_slice(line, prefix.count_bytes(), line.count_bytes()) else -> line.copy())
         start = end + 1
     }
     None
@@ -211,11 +211,11 @@ fn kit_steps_lines(text: String) -> Int {
 }
 
 fn kit_steps_select_stream(stdout: String, stderr: String, subject: String) -> String {
-    if subject == "stderr" -> return ~stderr
+    if subject == "stderr" -> return stderr.copy()
     if subject == "stdout+stderr" -> return "{stdout}{stderr}"
     if subject == "stderr+stdout" -> return "{stderr}{stdout}"
-    if subject == "machine" -> return if stdout.trim_start().starts_with("{{") -> ~stdout.trim() else -> ~stderr.trim()
-    ~stdout
+    if subject == "machine" -> return if stdout.trim_start().starts_with("{{") -> stdout.trim().copy() else -> stderr.trim().copy()
+    stdout.copy()
 }
 
 fn kit_steps_bytes_search(bytes: [U8], needle: [U8], start: Int, end: Int, insensitive: Bool) -> Int? {

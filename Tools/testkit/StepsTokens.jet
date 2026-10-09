@@ -166,7 +166,7 @@ fn kit_steps_free_port(context: KitStepCtx) -> Int Err! {
     probe :: files.join(context.env.root, "Tools/testkit/probes/free_port.jet")
     result :: kit_exec_invoke(context.env, [context.env.jet, "run", probe], context.work, context.scratch, "") ?? return Err("free-port probe: {err}")
     if result.code != 0 || kit_exec_process_failure(result) != None -> return Err("free-port probe failed: {result.error} {result.stderr}")
-    port :: Int.parse(~result.stdout.trim()) ?? return Err("free-port probe did not print a port")
+    port :: Int.parse(result.stdout.trim().copy()) ?? return Err("free-port probe did not print a port")
     if port < 1 || port > 65535 -> return Err("free-port probe returned an invalid port")
     Ok(port)
 }
