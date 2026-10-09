@@ -156,12 +156,12 @@ struct XMLReader {
     allocation: stream.AllocationBudget
 
     fn fail<T>(&self, error: EncodingError) -> T EncodingError! {
-        self.terminal = Val(~error)
+        self.terminal = Val(error.copy())
         Err(error)
     }
 
     fn next(&self) -[IO, Time.Wait]> Dyn? EncodingError! {
-        if self.terminal == .Val(error) -> return Err(~error)
+        if self.terminal == .Val(error) -> return Err(error.copy())
         loop {
             candidate :: &self.scanner.next() ?? return &self.fail(stream_error(err))
             if candidate == .Val(event) {

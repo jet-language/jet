@@ -52,7 +52,7 @@ fn decode_argv(argv: [String]) -> Dyn Never! {
             i = i + 1
             loop {
                 if i >= argv.len() -> break
-                &positionals.push(Dyn.Text(~argv[i]))
+                &positionals.push(Dyn.Text(argv[i].copy()))
                 i = i + 1
             }
             break
@@ -99,10 +99,10 @@ fn decode_argv(argv: [String]) -> Dyn Never! {
             i = i + 1
             next
         }
-        &positionals.push(Dyn.Text(~a))
+        &positionals.push(Dyn.Text(a.copy()))
         i = i + 1
     }
-    if argv.len() > 0 -> put_entry(&entries, "0", Dyn.Text(~argv[0]))
+    if argv.len() > 0 -> put_entry(&entries, "0", Dyn.Text(argv[0].copy()))
     &entries.push((key: "_", value: Dyn.Array(positionals)))
     Dyn.Object(entries)
 }
@@ -124,11 +124,11 @@ fn parse_atom(text: String) -> Dyn {
         sign = -1
         i = 1
     }
-    if i >= raw.len() -> Dyn.Text(~text)
+    if i >= raw.len() -> Dyn.Text(text.copy())
     loop {
         if i >= raw.len() -> return Dyn.Int(sign * n)
         d :: raw[i]
-        if d < 48 || d > 57 -> return Dyn.Text(~text)
+        if d < 48 || d > 57 -> return Dyn.Text(text.copy())
         n = n * 10 + (d - 48)
         i = i + 1
     }
@@ -408,7 +408,7 @@ fn apply_defaults(tree: Dyn, defs: [ArgDef]) -> Dyn Never! {
         if out.copy() == {
             .Object(entries) -> {
                 if object_get(entries, d.dest) == .None && object_get(entries, d.name) == .None {
-                    next_entries := ~entries
+                    next_entries := entries.copy()
                     &next_entries.push((key: d.dest, value: parse_atom(d.default_text)))
                     out = Dyn.Object(next_entries)
                 }

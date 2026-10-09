@@ -286,7 +286,7 @@ fn fake_city(state: &U64, locale: Int) -> String Never! {
 
 #Test("Fake copies keep independent streams and locale selection does not draw") {
     original := fake_data(-1)
-    duplicate := ~original
+    duplicate := original.copy()
     english := original.locale("en")
     assert_eq(&original.name(), &duplicate.name())
     fresh := fake_data(-1)
@@ -310,9 +310,9 @@ fn histories<T>(
 ) -> TestComparison String! {
     // TestingHistory.rs:426-443: fresh command copies precede model/actual,
     // and observation receives its own copy. The engine owns execution only.
-    model_copy :: (commands: [T]) -> model(~commands)
-    actual_copy :: (commands: [T]) -> actual(~commands)
-    observe_copy :: (value: Dyn) -> observe(~value)
+    model_copy :: (commands: [T]) -> model(commands.copy())
+    actual_copy :: (commands: [T]) -> actual(commands.copy())
+    observe_copy :: (value: Dyn) -> observe(value.copy())
     core.testing.__histories_with_provenance<T>(seed, cases, strategy, model_copy, actual_copy, observe_copy)
 }
 

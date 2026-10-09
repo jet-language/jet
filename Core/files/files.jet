@@ -283,7 +283,7 @@ fn append(path: String | Path, mode: Int?{None}, links: LinkPolicy{.Follow}) -[F
 /// `core.files` path operation.
 fn path_text(path: String | Path) -> String Never! {
     if path == {
-        .String(text) -> ~text
+        .String(text) -> text.copy()
         .Path(held) -> held.to_string()
     }
 }
@@ -515,7 +515,7 @@ impl Directory.Close {
 /// real directory, not a link.
 fn open_directory(path: String) -[FS.Read]> Directory IOError! {
     key :: core.files.__open_directory(-1, path)
-    Ok(Directory{path: ~path, handle: key})
+    Ok(Directory{path: path.copy(), handle: key})
 }
 
 
@@ -539,15 +539,15 @@ fn held_name_error(shown: String, write: Bool, why: String) -> IOError Never! {
 
 // D-CORE-FILEDIR1=A: a held-directory name is plain parts separated by `/`.
 fn held_name(base: String, name: String, write: Bool) IOError! {
-    shown :: join(~base, ~name)
-    raw :: (~name).bytes()
+    shown :: join(base.copy(), name.copy())
+    raw :: (name.copy()).bytes()
     if raw.len() == 0 -> return Err(held_name_error(shown, write, "the name is empty; pass a relative name such as `pkg/data`"))
-    if is_abs_impl(~name) -> return Err(held_name_error(shown, write, "the name is absolute; a held directory takes a relative name"))
+    if is_abs_impl(name.copy()) -> return Err(held_name_error(shown, write, "the name is absolute; a held directory takes a relative name"))
     start := 0
     i := 0
     loop i <= raw.len() {
         if i == raw.len() || raw[i] == (U8{47}) || raw[i] == (U8{92}) {
-            part :: slice_path(~name, start, i)
+            part :: slice_path(name.copy(), start, i)
             if part == "" -> return Err(held_name_error(shown, write, "the name has an empty part; remove the doubled or trailing `/`"))
             if part == "." || part == ".." -> return Err(held_name_error(shown, write, "the part `{part}` is refused; a held directory takes only plain names, so open the parent directory instead"))
             start = i + 1
@@ -642,7 +642,7 @@ fn io_err(operation: String, path: String, message: String) -> IOError Never! {
 fn file_fault(operation_path: String, operation: IOOperation, path: String) IOError! {
     if core.testing.__fault_should_fail(operation_path) {
         return Err(IOError.Other(IOContext{
-            operation: ~operation, resource: Val(path), os_code: None,
+            operation: operation.copy(), resource: Val(path), os_code: None,
             cause: Val("fault injected: {operation_path}"),
         }))
     }
@@ -707,7 +707,7 @@ fn write_atomic(path: String, bytes: [U8]) IOError! -[FS.Write]> {
     parent_text :: String.from_bytes(parent.encoded) ?? panic("UTF-8 path span")
     pid :: core.files.__atomic_pid()
     loop sequence in 0..<128 {
-        candidate := ~parent
+        candidate := parent.copy()
         host_path.push(&candidate, host_path.from_text(".jet_tmp_{pid}_{sequence}", platform))
         candidate_text :: String.from_bytes(candidate.encoded) ?? panic("UTF-8 temporary path")
         reservation :: core.files.__atomic_reserve(path, candidate_text)
@@ -825,7 +825,7 @@ fn is_fifo(path: String | Path) -[FS.Read]> Bool IOError! {
 fn files8_u32(value: Int) -> Bool Never! { value >= 0 && value <= 4294967295 }
 
 fn files8_other(operation: IOOperation, resource: String?, cause: String) -> IOError Never! {
-    IOError.Other(IOContext{operation: ~operation, resource: resource, os_code: None, cause: Val(cause)})
+    IOError.Other(IOContext{operation: operation.copy(), resource: resource, os_code: None, cause: Val(cause)})
 }
 
 fn files8_preflight(probe: String, operation: IOOperation, path: String) IOError! {
@@ -981,7 +981,7 @@ fn join(a: String, b: String) -> String Never! { join_impl(a, b) }
 
 fn absolute(path: String | Path) -[FS, Env]> String IOError! {
     text :: path_text(path)
-    if core.files.__host_path_is_absolute(~text) -> return Ok(text)
+    if core.files.__host_path_is_absolute(text.copy()) -> return Ok(text)
     cwd :: sys.current_dir()
     Ok(core.files.__host_path_join(cwd, text))
 }
@@ -1373,7 +1373,7 @@ fn relative(path: String, start: String) -> String Never! { relative_impl(path, 
 
 
 fn walk_error(operation: IOOperation, kind: Int, code: Int?, cause: String?, resource: String) -> IOError Never! {
-    context :: IOContext{operation: ~operation, resource: Val(resource), os_code: code, cause: cause}
+    context :: IOContext{operation: operation.copy(), resource: Val(resource), os_code: code, cause: cause}
     if kind == {
         1 -> IOError.InvalidInput(context)
         2 -> IOError.NotFound(context)

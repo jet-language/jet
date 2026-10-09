@@ -80,7 +80,7 @@ fn decode<T: Decode>(text: String) -> [T] [FieldError]! {
         entries := [(key: String, value: Dyn)]{}
         loop column in 0..<header.len() {
             cell :: if column < row.len() -> row[column] else -> ""
-            &entries.push((key: ~header[column], value: Dyn.Text(cell)))
+            &entries.push((key: header[column].copy(), value: Dyn.Text(cell)))
         }
         tree :: stream.object_from_entries(^entries)
         if tree.decode<T>() == {

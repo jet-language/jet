@@ -105,7 +105,7 @@ fn parse_options(options: XMLParseOptions) -> xml.ParseOptions Never! {
     entities :: if options.entities == {
         .Preserve -> xml.EntityPolicy.Preserve
         .Reject -> xml.EntityPolicy.Reject
-        .Resolve(values) -> xml.EntityPolicy.Resolve(~values)
+        .Resolve(values) -> xml.EntityPolicy.Resolve(values.copy())
     }
     limits :: options.limits
     xml.ParseOptions{entities: entities, limits: xml.Limits{
@@ -138,7 +138,7 @@ fn canonical_options(value: XMLCanonical) -> xml.CanonicalOptions Never! {
         .Inclusive11 -> xml.CanonicalMode.Inclusive11
         .Exclusive10 -> xml.CanonicalMode.Exclusive10
     }
-    xml.CanonicalOptions{mode: mode, comments: value.comments, inclusive_prefixes: ~value.inclusive_prefixes}
+    xml.CanonicalOptions{mode: mode, comments: value.comments, inclusive_prefixes: value.inclusive_prefixes.copy()}
 }
 
 fn field_error(error: XMLError) -> [FieldError] Never! {

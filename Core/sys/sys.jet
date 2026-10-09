@@ -96,7 +96,7 @@ fn env_columns(columns: [[U8]]) -> [(name: [U8], value: [U8])] Never! {
 fn __env_compose(snapshot: [(name: [U8], value: [U8])], clear: Bool,
     names: [String], values: [String], removals: [String]) -> [(name: [U8], value: [U8])] IOError! {
     assert(names.len() == values.len())
-    entries := if clear -> [(name: [U8], value: [U8])]{} else -> ~snapshot
+    entries := if clear -> [(name: [U8], value: [U8])]{} else -> snapshot.copy()
     loop index in 0..<names.len() {
         name :: names[index]
         if validate_env_name(name) == {
@@ -681,7 +681,7 @@ fn syscall_error(operation: IOOperation, resource: String?, errno: Int) -> IOErr
 fn syscall_input(operation: IOOperation, resource: String?, cause: String) -> IOError {
     // Preserve the existing Other context: the host's cause string includes
     // errno, while the public os_code field was historically absent.
-    IOError.Other(IOContext{operation: ~operation, resource: resource, os_code: None, cause: Val(cause)})
+    IOError.Other(IOContext{operation: operation.copy(), resource: resource, os_code: None, cause: Val(cause)})
 }
 
 fn has_nul(value: String) -> Bool {

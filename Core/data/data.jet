@@ -689,7 +689,7 @@ fn value<T: Encode>(value: T, limits: DataLimits) -> DataLoader<T> DataError! {
     member := ""
     parameters := [String]{}
     format := DataFormat.JSON
-    owned_limits := ~limits
+    owned_limits := limits.copy()
     authority := DataAuthority{scope: "local", revision: ""}
     loader := core.mem.__loader_new<T>(^kind, ^locator, ^member, ^parameters, ^format, ^owned_limits, ^authority) ?? return Err(err)
     loader.payload = Val(payload)
@@ -720,7 +720,7 @@ fn load_format_error(error: DataError, format: String) -> DataError Never! {
     if error.kind == .InvalidArgument && error.reason == "unknown data format" {
         return data_error(DataErrorKind.Bridge, "format `{format}` is provider-owned; import its package", "data.loader")
     }
-    ~error
+    error.copy()
 }
 
 fn locator_format(locator: String) -> String DataError! {

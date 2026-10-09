@@ -964,7 +964,7 @@ fn jetc_verify_output(input: JetcFd, writer: jetc.Writer, length: Int) FileCrypt
     // Exact equality also verifies every original recipient stanza, ephemeral
     // key and header tag, without retaining writer ephemeral private material.
     if !constant_time_equal_bytes(prefix.bytes, writer.prefix) -> return Err(.OpenFailed)
-    reader := jetc.Reader{header_hash: writer.header_hash, key: Secret{bytes: ~writer.key.bytes},
+    reader := jetc.Reader{header_hash: writer.header_hash, key: Secret{bytes: writer.key.bytes.copy()},
         nonce_prefix: writer.nonce_prefix, remaining: metadata.len - writer.prefix.len(), index: 1, final: false}
     loop reader.remaining > 0 {
         jetc_cancel_checkpoint()
@@ -2541,7 +2541,7 @@ fn g(s: &[Int], a: Int, b: Int, c: Int, d: Int, mx: Int, my: Int) {
                 else -> false
             })
             assert((core.files.read_bytes(opened.to_string()) ?? panic("read existing output")) == ([U8]{9, 8, 7}))
-            corrupt := ~before
+            corrupt := before.copy()
             corrupt[corrupt.len() - 1] = corrupt[corrupt.len() - 1] ~| U8{1}
             sealed.write_atomic(corrupt) ?? panic("tamper")
             assert(if file_open(identity, sealed, failed) == {

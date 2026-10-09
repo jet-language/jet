@@ -119,7 +119,7 @@ impl Clock {
         self.now()
     }
     fn __observer(self) -> __ClockObserver Never! {
-        __ClockObserver{state: ~self.state}
+        __ClockObserver{state: self.state.copy()}
     }
     // Borrow, do not semantically copy, the input to its own copy route.
     // System rebase order is fresh start then original-state snapshot.
@@ -159,7 +159,7 @@ impl ExpiringValue {
 
     fn get(self, clock: Clock) -> T Expired! {
         if clock.now() > self.deadline_ms -> return Err(Expired{})
-        Ok(~self.value)
+        Ok(self.value.copy())
     }
 
     fn is_valid(self, clock: Clock) -> Bool Never! { clock.now() <= self.deadline_ms }
@@ -229,11 +229,11 @@ impl Clock.Equatable {
 
 #Test("Clock ordinary and nested aggregate copies fork the timeline") {
     original :: Clock.new(0)
-    duplicate :: ~original
+    duplicate :: original.copy()
     assert_eq(&duplicate.tick(1), 1)
     assert_eq(original.now(), 0)
     clocks :: [Clock]{original}
-    copied :: ~clocks
+    copied :: clocks.copy()
     assert_eq(&copied[0].advance(2), 2)
     assert_eq(clocks[0].now(), 0)
 }
@@ -614,7 +614,7 @@ impl LocalDate {
     fn truncate(self, unit: String) -> LocalDate Never! {
         if unit == "year" -> return new(self.date_y, 1, 1)
         if unit == "month" -> return new(self.date_y, self.date_m, 1)
-        ~self
+        self.copy()
     }
     fn with(self, year: Int, month: Int, day: Int, overflow: String{"constrain"}) -> LocalDate TimeError! {
         if overflow == "constrain" || overflow == "clamp" -> return Ok(new(year, month, day))
@@ -825,7 +825,7 @@ impl DateTime {
     fn format(self, pattern: String) -> String Never! { civil_format(pattern, self.date(), self.time(), None) }
     fn format_checked(self, pattern: String) -> String TextError! { civil_format_checked(pattern, self.date(), self.time(), None) }
     fn add_nanoseconds(self, value: Int) -> DateTime Never! {
-        if value == 0 -> return ~self
+        if value == 0 -> return self.copy()
         civil_datetime_from_ns(civil_datetime_ns(self) + value)
     }
     fn plus_duration(self, value: Duration) -> DateTime Never! { self.add_nanoseconds(value.ns) }
@@ -1038,7 +1038,7 @@ fn utc() -> Zone Never! {
 fn zone(name: String) -[Env, FS.Read]> Zone TimeError! {
     if name == "UTC" || name == "Etc/UTC" || name == "Z" -> return Ok(utc())
     if name.contains("..") || name.starts_with("/") || name.starts_with("\\") -> return Err(TimeError{reason: "invalid time zone name: {name}"})
-    rel := ~name
+    rel := name.copy()
     loop rel.starts_with("posix/") -> rel = civil_slice(rel.bytes(), 6, rel.bytes().len())
     loop rel.starts_with("right/") -> rel = civil_slice(rel.bytes(), 6, rel.bytes().len())
     if core.time.__embedded_zone_bytes(rel) == .Val(bytes) -> return civil_tzif(name, bytes)
@@ -1179,7 +1179,7 @@ fn civil_local_compatible(value: Zone, date: LocalDate, t: LocalTime) -> Int Nev
 }
 impl Zone {
     fn name(self) -> String Never! {
-        ~self.name_value
+        self.name_value.copy()
     }
     fn to_string(self) -> String Never! { self.name() }
     fn next_transition(self, utc_seconds: Int) -> Int? Never! {
@@ -1330,7 +1330,7 @@ fn civil_format(pattern: String, date: LocalDate, t: LocalTime, zone: (name: Str
         (token: "mm", value: minute), (token: "ss", value: second), (token: "SSSSSSSSS", value: nanos),
         (token: "SSSSSS", value: micros), (token: "SSS", value: millis)
     }
-    out := ~pattern
+    out := pattern.copy()
     loop pair in pairs -> out = out.replace(pair.token, pair.value)
     if zone != None -> out = out.replace("VV", name).replace("XXX", offset)
     out
@@ -1483,7 +1483,7 @@ fn civil_codec_datetime(value: String) -> DateTime TimeError! {
     if zone_pos < 0 -> return Err(TimeError{reason: "RFC3339 datetime needs Z or an offset: {value}"})
     time_text :: civil_slice(raw, 0, zone_pos)
     zone_text :: civil_slice(raw, zone_pos, raw.len())
-    clean := ~time_text
+    clean := time_text.copy()
     nanos := 0
     if civil_split(time_text, ".") == .Val(fraction) {
         clean = fraction.head

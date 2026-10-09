@@ -516,7 +516,7 @@ struct JSONPull {
                     key :: &self.read_string()
                     heap :: key.count_bytes()
                     if !self.allocation.charge(heap) -> return Err(self.item_error("string"))
-                    self.frames[count - 1] = .ObjectColonValue{key: ~key, key_heap: U64{heap}}
+                    self.frames[count - 1] = .ObjectColonValue{key: key.copy(), key_heap: U64{heap}}
                     return Ok(Val(DataEvent.Key(key)))
                 }
                 .ObjectColonValue(key, heap) -> {

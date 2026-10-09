@@ -125,7 +125,7 @@ fn coerce_tree(value: Dyn, path: String, emit: fn(String)) -> Dyn Never! {
                     return Dyn.Float(number)
                 }
             }
-            return ~value
+            return value.copy()
         }
         .Array(items) -> {
             out := [Dyn]{}
@@ -136,11 +136,11 @@ fn coerce_tree(value: Dyn, path: String, emit: fn(String)) -> Dyn Never! {
             out := [(key: String, value: Dyn)]{}
             loop entry in stream.object_entries(value) {
                 child_path :: if path == "" -> entry.key else -> "{path}.{entry.key}"
-                &out.push((key: ~entry.key, value: coerce_tree(entry.value, child_path, emit)))
+                &out.push((key: entry.key.copy(), value: coerce_tree(entry.value, child_path, emit)))
             }
             return stream.object_from_entries(^out)
         }
-        else -> return ~value
+        else -> return value.copy()
     }
 }
 

@@ -27,21 +27,21 @@ impl NamespaceScope {
     }
     fn get(self: NamespaceScope, prefix: String?) -> String? Never! {
         if prefix == {
-            .None -> ~self.default_uri
+            .None -> self.default_uri.copy()
             .Val(key) -> self.named.get(key)
         }
     }
     fn insert(self: &NamespaceScope, prefix: String?, uri: ^String) Never! {
         if prefix == {
             .None -> self.default_uri = Val(^uri)
-            .Val(key) -> self.named[~key] = ^uri
+            .Val(key) -> self.named[key.copy()] = ^uri
         }
     }
     fn keys(self: NamespaceScope) -> [String?] Never! {
         prefixes := [String?]{}
         &prefixes.reserve(self.named.len() + if self.default_uri == .None -> 0 else -> 1)
         if self.default_uri != .None -> &prefixes.push(None)
-        loop (key, _) in self.named -> &prefixes.push(Val(~key))
+        loop (key, _) in self.named -> &prefixes.push(Val(key.copy()))
         &prefixes.sort_by((a: String?, b: String?) -> compare_prefixes(a, b))
         ^prefixes
     }
@@ -61,7 +61,7 @@ impl NamespaceSet {
         prior :: self.contains(prefix)
         if prefix == {
             .None -> self.default_present = true
-            .Val(key) -> self.named[~key] = true
+            .Val(key) -> self.named[key.copy()] = true
         }
         prior
     }
@@ -75,13 +75,13 @@ impl ExpandedNames {
         if namespace_uri == {
             .None -> {
                 prior :: self.no_namespace.get(local) != .None
-                self.no_namespace[~local] = true
+                self.no_namespace[local.copy()] = true
                 prior
             }
             .Val(uri) -> {
-                if self.namespaced.get(uri) == .None -> self.namespaced[~uri] = [String:Bool]{}
+                if self.namespaced.get(uri) == .None -> self.namespaced[uri.copy()] = [String:Bool]{}
                 prior :: self.namespaced[uri].get(local) != .None
-                self.namespaced[uri][~local] = true
+                self.namespaced[uri][local.copy()] = true
                 prior
             }
         }
@@ -213,7 +213,7 @@ fn scalar_count(bytes: View<U8>, end: Int) -> Int Never! {
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:251
 
-fn text(value: String) -> Dyn Never! { Dyn.Text(~value) }
+fn text(value: String) -> Dyn Never! { Dyn.Text(value.copy()) }
 // Rust: crates/jet-foundation/src/XmlPull.rs:264
 fn optional_text(value: String?) -> Dyn Never! {
     if value == {
@@ -226,7 +226,7 @@ fn object(entries: ^[(key: String, value: Dyn)]) -> Dyn Never! { stream.object_f
 // Rust: crates/jet-foundation/src/XmlPull.rs:277
 fn field(value: Dyn, key: String) -> Dyn? Never! {
     if value == .Object(_) {
-        loop entry in stream.object_entries(value) { if entry.key == key -> return Val(~entry.value) }
+        loop entry in stream.object_entries(value) { if entry.key == key -> return Val(entry.value.copy()) }
     }
     None
 }
@@ -250,11 +250,11 @@ fn strip_lexical(value: Dyn) -> Dyn Never! {
         .Object(_) -> {
             out := [(key: String, value: Dyn)]{}
             loop entry in stream.object_entries(value) {
-                if entry.key != "lexical" && entry.key != "open_lexical" && entry.key != "close_lexical" -> &out.push((key: ~entry.key, value: strip_lexical(entry.value)))
+                if entry.key != "lexical" && entry.key != "open_lexical" && entry.key != "close_lexical" -> &out.push((key: entry.key.copy(), value: strip_lexical(entry.value)))
             }
             object(^out)
         }
-        else -> ~value
+        else -> value.copy()
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:320
@@ -269,20 +269,20 @@ fn has_exact_xml_keys(entries: View<(key: String, value: Dyn)>, keys: [String]) 
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:327
 fn xml_entry(entries: View<(key: String, value: Dyn)>, key: String) -> Dyn? Never! {
-    loop entry in entries { if entry.key == key -> return Val(~entry.value) }
+    loop entry in entries { if entry.key == key -> return Val(entry.value.copy()) }
     None
 }
 fn text_value(value: Dyn?) -> String? Never! {
     item :: value ?? return None
     if item == {
-        .Text(body) -> Val(~body)
+        .Text(body) -> Val(body.copy())
         else -> None
     }
 }
 fn array_value(value: Dyn?) -> [Dyn]? Never! {
     item :: value ?? return None
     if item == {
-        .Array(items) -> Val(~items)
+        .Array(items) -> Val(items.copy())
         else -> None
     }
 }
@@ -336,7 +336,7 @@ fn xml_schema_order(entries: View<(key: String, value: Dyn)>) -> [String]? Never
         found := false
         loop keys in [["raw", "prefix", "local", "namespace_uri"], ["raw_text", "raw_bytes", "semantic"], ["name", "namespaces", "attributes", "empty_style"], ["encoding", "bom"], ["version", "encoding", "standalone"], ["name", "public_id", "system_id", "internal_subset"], ["name", "resolved_value"], ["target", "value"], ["value"], ["name"]] {
             if has_exact_xml_keys(entries, keys) {
-                order = ~keys
+                order = keys.copy()
                 found = true
                 break
             }
@@ -393,7 +393,7 @@ fn xml_schema_types_are_valid(entries: View<(key: String, value: Dyn)>) -> Bool 
         }
     }
     keys := [String]{}
-    loop entry in entries -> &keys.push(~entry.key)
+    loop entry in entries -> &keys.push(entry.key.copy())
     if keys == {
         ["raw", "prefix", "local", "namespace_uri"] -> text("raw") && optional_text("prefix") && text("local") && optional_text("namespace_uri")
         ["raw_text", "raw_bytes", "semantic"] -> true
@@ -468,7 +468,7 @@ fn lexical_semantic(value: Dyn, key: String) -> Dyn? Never! {
         if kind != "namespace" && kind != "attribute" && field_kind(field(field(value, key) ?? return None, "raw_bytes")) == "array" {
             fields := [(key: String, value: Dyn)]{}
             loop entry in stream.object_entries(semantic) {
-                if entry.key != "$xml" -> &fields.push((key: ~entry.key, value: ~entry.value))
+                if entry.key != "$xml" -> &fields.push((key: entry.key.copy(), value: entry.value.copy()))
             }
             semantic = object(^fields)
         }
@@ -478,7 +478,7 @@ fn lexical_semantic(value: Dyn, key: String) -> Dyn? Never! {
     if kind == "namespace" || kind == "attribute" || !legal.contains(kind) -> return None
     out := [(key: String, value: Dyn)]{}
     loop entry in stream.object_entries(value) {
-        if entry.key != "$xml_event" && entry.key != "lexical" && entry.key != "open_lexical" && entry.key != "close_lexical" -> &out.push((key: ~entry.key, value: strip_lexical(entry.value)))
+        if entry.key != "$xml_event" && entry.key != "lexical" && entry.key != "open_lexical" && entry.key != "close_lexical" -> &out.push((key: entry.key.copy(), value: strip_lexical(entry.value)))
     }
     Val(object(^out))
 }
@@ -504,22 +504,22 @@ fn clean(value: Dyn) -> Dyn Never! {
                 if !trusted && item == .Object(_) {
                     fields := [(key: String, value: Dyn)]{}
                     loop slot in stream.object_entries(item) {
-                        body :: if slot.key == "raw_text" || slot.key == "raw_bytes" -> Dyn.Null else -> ~slot.value
-                        &fields.push((key: ~slot.key, value: body))
+                        body :: if slot.key == "raw_text" || slot.key == "raw_bytes" -> Dyn.Null else -> slot.value.copy()
+                        &fields.push((key: slot.key.copy(), value: body))
                     }
                     item = object(^fields)
                 }
-                &out.push((key: ~entry.key, value: item))
+                &out.push((key: entry.key.copy(), value: item))
             }
             object(^out)
         }
-        else -> ~value
+        else -> value.copy()
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:777
 fn leaf(kind: String, fields: ^[(key: String, value: Dyn)], raw: String) -> Dyn Never! {
     semantic_fields := [(key: String, value: Dyn)]{(key: "$xml", value: text(kind))}
-    loop entry in fields -> &semantic_fields.push(~entry)
+    loop entry in fields -> &semantic_fields.push(entry.copy())
     semantic :: strip_lexical(object(^semantic_fields))
     node_fields := [(key: String, value: Dyn)]{(key: "$xml", value: text(kind))}
     loop entry in fields -> &node_fields.push(^entry)
@@ -564,7 +564,7 @@ fn lexical_value_to_wire(value: ^Dyn, encoding: WireEncoding) -> Dyn Never! {
     if value == .Object(_) {} else { return ^value }
     output := [(key: String, value: Dyn)]{}
     loop entry in stream.object_entries(value) {
-        item := ~entry.value
+        item := entry.value.copy()
         if entry.key == "lexical" && item == .Object(_) {
             raw :: field(item, "raw_text") ?? Dyn.Null
             if raw == .Text(text) {
@@ -573,13 +573,13 @@ fn lexical_value_to_wire(value: ^Dyn, encoding: WireEncoding) -> Dyn Never! {
                 loop byte in bytes -> &payload.push(Dyn.Int(Int{byte}))
                 lexical := [(key: String, value: Dyn)]{}
                 loop slot in stream.object_entries(item) {
-                    body :: if slot.key == "raw_text" -> Dyn.Null else if slot.key == "raw_bytes" -> Dyn.Array(~payload) else -> ~slot.value
-                    &lexical.push((key: ~slot.key, value: body))
+                    body :: if slot.key == "raw_text" -> Dyn.Null else if slot.key == "raw_bytes" -> Dyn.Array(payload.copy()) else -> slot.value.copy()
+                    &lexical.push((key: slot.key.copy(), value: body))
                 }
                 item = object(^lexical)
             }
         }
-        &output.push((key: ~entry.key, value: item))
+        &output.push((key: entry.key.copy(), value: item))
     }
     object(^output)
 }
@@ -605,20 +605,20 @@ fn stream_event_value(item: StreamEvent) -> Dyn Never! {
             }
             fields := [(key: String, value: Dyn)]{(key: "version", value: text(version)), (key: "encoding", value: optional_text(declared)), (key: "standalone", value: standalone_value)}
             out := [(key: String, value: Dyn)]{(key: "$xml_event", value: text("declaration"))}
-            loop entry in fields -> &out.push(~entry)
-            &out.push((key: "lexical", value: byte_lexical(~item.raw_bytes, strip_lexical(object(^fields)))))
+            loop entry in fields -> &out.push(entry.copy())
+            &out.push((key: "lexical", value: byte_lexical(item.raw_bytes.copy(), strip_lexical(object(^fields)))))
             object(^out)
         }
-        .DocumentWhitespace(value, _) -> leaf_event("document_whitespace", [(key: "value", value: text(value))], ~item.raw_bytes)
-        .Text(value, _) -> leaf_event("text", [(key: "value", value: text(value))], ~item.raw_bytes)
-        .Cdata(value, _) -> leaf_event("cdata", [(key: "value", value: text(value))], ~item.raw_bytes)
-        .Comment(value, _) -> leaf_event("comment", [(key: "value", value: text(value))], ~item.raw_bytes)
-        .EntityRef(name, resolved, _) -> leaf_event("entity_ref", [(key: "name", value: text(name)), (key: "resolved_value", value: optional_text(resolved))], ~item.raw_bytes)
-        .ProcessingInstruction(target, value, _) -> leaf_event("processing_instruction", [(key: "target", value: text(target)), (key: "value", value: text(value))], ~item.raw_bytes)
-        .Doctype(name, public_id, system_id, internal_subset, _) -> leaf_event("doctype", [(key: "name", value: text(name)), (key: "public_id", value: optional_text(public_id)), (key: "system_id", value: optional_text(system_id)), (key: "internal_subset", value: optional_text(internal_subset))], ~item.raw_bytes)
+        .DocumentWhitespace(value, _) -> leaf_event("document_whitespace", [(key: "value", value: text(value))], item.raw_bytes.copy())
+        .Text(value, _) -> leaf_event("text", [(key: "value", value: text(value))], item.raw_bytes.copy())
+        .Cdata(value, _) -> leaf_event("cdata", [(key: "value", value: text(value))], item.raw_bytes.copy())
+        .Comment(value, _) -> leaf_event("comment", [(key: "value", value: text(value))], item.raw_bytes.copy())
+        .EntityRef(name, resolved, _) -> leaf_event("entity_ref", [(key: "name", value: text(name)), (key: "resolved_value", value: optional_text(resolved))], item.raw_bytes.copy())
+        .ProcessingInstruction(target, value, _) -> leaf_event("processing_instruction", [(key: "target", value: text(target)), (key: "value", value: text(value))], item.raw_bytes.copy())
+        .Doctype(name, public_id, system_id, internal_subset, _) -> leaf_event("doctype", [(key: "name", value: text(name)), (key: "public_id", value: optional_text(public_id)), (key: "system_id", value: optional_text(system_id)), (key: "internal_subset", value: optional_text(internal_subset))], item.raw_bytes.copy())
         .ElementEnd(name, _) -> {
             semantic :: object([(key: "name", value: name_value(name))])
-            object([(key: "$xml_event", value: text("element_end")), (key: "name", value: name_value(name)), (key: "close_lexical", value: byte_lexical(~item.raw_bytes, ^semantic))])
+            object([(key: "$xml_event", value: text("element_end")), (key: "name", value: name_value(name)), (key: "close_lexical", value: byte_lexical(item.raw_bytes.copy(), ^semantic))])
         }
         .ElementStart(name, namespaces, attributes, empty, _) -> {
             ns_values := [Dyn]{}
@@ -628,14 +628,14 @@ fn stream_event_value(item: StreamEvent) -> Dyn Never! {
             ns :: Dyn.Array(^ns_values)
             attrs :: Dyn.Array(^attr_values)
             style :: text(if empty -> "empty" else -> "explicit")
-            semantic :: strip_lexical(object([(key: "name", value: name_value(name)), (key: "namespaces", value: ~ns), (key: "attributes", value: ~attrs), (key: "empty_style", value: ~style)]))
-            object([(key: "$xml_event", value: text("element_start")), (key: "name", value: name_value(name)), (key: "namespaces", value: ^ns), (key: "attributes", value: ^attrs), (key: "empty_style", value: ^style), (key: "open_lexical", value: byte_lexical(~item.raw_bytes, ^semantic))])
+            semantic :: strip_lexical(object([(key: "name", value: name_value(name)), (key: "namespaces", value: ns.copy()), (key: "attributes", value: attrs.copy()), (key: "empty_style", value: style.copy())]))
+            object([(key: "$xml_event", value: text("element_start")), (key: "name", value: name_value(name)), (key: "namespaces", value: ^ns), (key: "attributes", value: ^attrs), (key: "empty_style", value: ^style), (key: "open_lexical", value: byte_lexical(item.raw_bytes.copy(), ^semantic))])
         }
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1032
 fn leaf_event(kind: String, fields: ^[(key: String, value: Dyn)], raw: ^[U8]) -> Dyn Never! {
-    semantic :: strip_lexical(object(~fields))
+    semantic :: strip_lexical(object(fields.copy()))
     out := [(key: String, value: Dyn)]{(key: "$xml_event", value: text(kind))}
     loop entry in fields -> &out.push(^entry)
     &out.push((key: "lexical", value: byte_lexical(^raw, ^semantic)))
@@ -650,7 +650,7 @@ fn finish_element(frame: ^ElementFrame, close_raw: String?) -> Dyn Never! {
     empty :: close_raw == None
     name :: name_value(frame.name)
     style :: text(if empty -> "empty" else -> "explicit")
-    semantic :: strip_lexical(object([(key: "name", value: ~name), (key: "namespaces", value: Dyn.Array(~frame.namespaces)), (key: "attributes", value: Dyn.Array(~frame.attributes)), (key: "empty_style", value: ~style)]))
+    semantic :: strip_lexical(object([(key: "name", value: name.copy()), (key: "namespaces", value: Dyn.Array(frame.namespaces.copy())), (key: "attributes", value: Dyn.Array(frame.attributes.copy())), (key: "empty_style", value: style.copy())]))
     close :: if close_raw == {
         .Val(raw) -> lexical(raw, object([(key: "name", value: name_value(frame.name))]))
         .None -> Dyn.Null
@@ -744,7 +744,7 @@ fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> Dyn XMLFault
                 if document_start != None -> return Err(XMLFault.shape("duplicate XML document_start"))
                 encoding :: field(event, "encoding") ?? return Err(XMLFault.shape("document_start lacks encoding"))
                 bom :: field(event, "bom") ?? return Err(XMLFault.shape("document_start lacks bom"))
-                document_start = Val(DocumentStart{encoding: ~encoding, bom: ~bom})
+                document_start = Val(DocumentStart{encoding: encoding.copy(), bom: bom.copy()})
                 None
             }
             "document_end" -> {
@@ -789,12 +789,12 @@ fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> Dyn XMLFault
                 found := false
                 entries := [(key: String, value: Dyn)]{}
                 loop entry in stream.object_entries(event) {
-                    key := ~entry.key
+                    key := entry.key.copy()
                     if key == "$xml_event" {
                         key = "$xml"
                         found = true
                     }
-                    &entries.push((key: key, value: ~entry.value))
+                    &entries.push((key: key, value: entry.value.copy()))
                 }
                 if !found -> return Err(XMLFault.shape("XML event lacks $xml_event"))
                 Val(object(^entries))
@@ -820,12 +820,12 @@ fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> Dyn XMLFault
         found := false
         entries := [(key: String, value: Dyn)]{}
         loop entry in stream.object_entries(value) {
-            key := ~entry.key
+            key := entry.key.copy()
             if key == "$xml" {
                 key = "$xml_event"
                 found = true
             }
-            &entries.push((key: key, value: ~entry.value))
+            &entries.push((key: key, value: entry.value.copy()))
         }
         if !found -> return Err(XMLFault.shape("XML node lacks $xml"))
         object(^entries)
@@ -887,7 +887,7 @@ fn lexical_raw(value: Dyn, key: String, semantic: Dyn) -> String? Never! {
 fn required_text(value: Dyn, key: String) -> String String! {
     item :: field(value, key) ?? return Err("XML {key} must be text")
     if item == {
-        .Text(s) -> ~s
+        .Text(s) -> s.copy()
         else -> Err("XML {key} must be text")
     }
 }
@@ -895,7 +895,7 @@ fn required_text(value: Dyn, key: String) -> String String! {
 fn optional_text_field(value: Dyn, key: String) -> String? String! {
     item :: field(value, key) ?? return Err("XML {key} must be text or null")
     if item == {
-        .Text(s) -> Val(~s)
+        .Text(s) -> Val(s.copy())
         .Null -> None
         else -> Err("XML {key} must be text or null")
     }
@@ -1019,12 +1019,12 @@ fn render_element_open(value: Dyn, output: &String) String! {
             namespaces :: field(value, "namespaces") ?? return Err("XML element lacks namespaces")
             attributes :: field(value, "attributes") ?? return Err("XML element lacks attributes")
             style :: field(value, "empty_style") ?? return Err("XML element lacks empty_style")
-            open_semantic :: strip_lexical(object([(key: "name", value: ~name), (key: "namespaces", value: ~namespaces), (key: "attributes", value: ~attributes), (key: "empty_style", value: ~style)]))
+            open_semantic :: strip_lexical(object([(key: "name", value: name.copy()), (key: "namespaces", value: namespaces.copy()), (key: "attributes", value: attributes.copy()), (key: "empty_style", value: style.copy())]))
             if lexical_raw(value, "open_lexical", open_semantic) == .Val(raw) -> output += raw
             else -> render_element_open(value, &output) ?? return Err(err)
             children :: array_value(field(value, "children")) ?? return Err("XML element children must be an array")
             loop child in children -> render_node(child, &output) ?? return Err(err)
-            close_semantic :: object([(key: "name", value: ~name)])
+            close_semantic :: object([(key: "name", value: name.copy())])
             if lexical_raw(value, "close_lexical", close_semantic) == .Val(raw) -> output += raw
             else if style == (Dyn.Text("explicit")) {
                 raw_name :: required_text(name, "raw") ?? return Err(err)
@@ -1077,7 +1077,7 @@ impl StreamWriter {
     // Rust: crates/jet-foundation/src/XmlPull.rs:1831
      fn write(self: &StreamWriter, event: Dyn) -> [U8] XMLFault! {
         if self.ended -> return Err(XMLFault.state("XML writer received an event after document_end"))
-        next := ~self
+        next := self.copy()
         bytes :: &next.write_inner(event) ?? return Err(err)
         self = ^next
         bytes
@@ -1139,7 +1139,7 @@ impl StreamWriter {
                     "explicit" -> false
                     else -> { return Err(XMLFault.shape("empty_style must be empty or explicit")) }
                 }
-                parent :: self.namespaces.last().map(context -> ~context) ?? base_namespaces()
+                parent :: self.namespaces.last().map(context -> context.copy()) ?? base_namespaces()
                 context :: validate_start(event, name, ^parent) ?? return Err(err)
                 if self.stack.is_empty() -> self.root_seen = true
                 node :: event_element_node(event) ?? return Err(err)
@@ -1268,7 +1268,7 @@ fn validate_start(event: Dyn, name: Name, inherited: ^NamespaceScope) -> Namespa
         quote :: required_text(namespace, "quote") ?? return Err(XMLFault.shape(err))
         if quote != "single" && quote != "double" -> return Err(XMLFault.shape("namespace quote must be single or double"))
         if &declared.insert(prefix) -> return Err(XMLFault.at_kind(0, Reason.Namespace, "duplicate namespace prefix declaration"))
-        &context.insert(prefix, ~uri)
+        &context.insert(prefix, uri.copy())
         if (prefix ?? "") == "xmlns" || ((prefix ?? "") == "xml" && uri != "http://www.w3.org/XML/1998/namespace") -> return Err(XMLFault.at_kind(0, Reason.Namespace, "reserved XML namespace binding"))
     }
     resolved :: context.get(name.prefix)
@@ -1308,7 +1308,7 @@ fn deterministic_event_node(event: Dyn, kind: String) -> String XMLFault! {
     if event == .Object(_) {} else { return Err(XMLFault.shape("XML event must be an Object")) }
     fields := [(key: String, value: Dyn)]{(key: "$xml", value: text(kind))}
     loop entry in stream.object_entries(event) {
-        if entry.key != "$xml_event" && entry.key != "lexical" && entry.key != "open_lexical" && entry.key != "close_lexical" -> &fields.push((key: ~entry.key, value: ~entry.value))
+        if entry.key != "$xml_event" && entry.key != "lexical" && entry.key != "open_lexical" && entry.key != "close_lexical" -> &fields.push((key: entry.key.copy(), value: entry.value.copy()))
     }
     deterministic_leaf(object(^fields), kind) ?? return Err(XMLFault.shape(err))
 }
@@ -1437,7 +1437,7 @@ fn canonical_node(value: Dyn, options: CanonicalOptions, parent_scope: Namespace
     kind :: required_text(value, "$xml") ?? return Err(XMLFault.shape(err))
     if kind != "element" -> return canonical_leaf(value, kind, output)
     name :: parse_name(field(value, "name") ?? return Err(XMLFault.shape("element lacks name"))) ?? return Err(err)
-    scope := ~parent_scope
+    scope := parent_scope.copy()
     namespaces :: array_value(field(value, "namespaces")) ?? return Err(XMLFault.shape("element namespaces must be an array"))
     loop namespace in namespaces {
         prefix :: optional_text_field(namespace, "prefix") ?? return Err(XMLFault.shape(err))
@@ -1473,12 +1473,12 @@ fn canonical_node(value: Dyn, options: CanonicalOptions, parent_scope: Namespace
     }
     &attrs.sort_by((a: CanonicalAttribute, b: CanonicalAttribute) -> if a.namespace_uri == b.namespace_uri -> a.local <=> b.local else -> a.namespace_uri <=> b.namespace_uri)
     output += "<{name.raw}"
-    rendered := ~parent_rendered
+    rendered := parent_rendered.copy()
     loop declaration in declarations {
         output += " xmlns"
         if declaration.prefix == .Val(p) -> output += ":{p}"
         output += "=\"{canonical_attr_escape(declaration.uri)}\""
-        &rendered.insert(declaration.prefix, ~declaration.uri)
+        &rendered.insert(declaration.prefix, declaration.uri.copy())
     }
     loop attribute in attrs -> output += " {attribute.raw}=\"{canonical_attr_escape(attribute.value)}\""
     output += ">"
@@ -1619,7 +1619,7 @@ fn document_root(document: Dyn) -> Dyn XMLFault! {
     loop child in children {
         if (xml_tag_of(child) ?? "") == "element" {
             if root != None -> return Err(projection_err("$", "XML document must contain exactly one root element"))
-            root = Val(~child)
+            root = Val(child.copy())
         }
     }
     root ?? return Err(projection_err("$", "XML document must contain exactly one root element"))
@@ -1698,7 +1698,7 @@ fn project_element_value(element: Dyn, path: String) -> Dyn XMLFault! {
     key_index := [String:Int]{}
     content := [Dyn]{}
     loop child in children {
-        &content.push(~child)
+        &content.push(child.copy())
         if xml_tag_of(child) != Val("element") -> next
         name :: field(child, "name") ?? return Err(projection_err(path, "XML child element name missing"))
         parts :: read_name_parts(name, path)
@@ -1850,7 +1850,7 @@ impl ByteLexer {
     // Rust: crates/jet-foundation/src/XmlPull.rs:4937
     fn fail<T>(self: &ByteLexer, kind: Reason, reason: String) -> T XMLFault! {
         error :: XMLFault.at_kind(self.wire_offset, kind, ^reason)
-        self.terminal = Val(~error)
+        self.terminal = Val(error.copy())
         Err(^error)
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4942
@@ -1880,7 +1880,7 @@ impl ByteLexer {
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4974
     fn push(self: &ByteLexer, bytes: View<U8>) XMLFault! {
-        if self.terminal == .Val(error) -> return Err(~error)
+        if self.terminal == .Val(error) -> return Err(error.copy())
         if self.eof -> return &self.fail(Reason.Malformed, "XML bytes arrived after end of input")
         if self.encoding == None {
             loop byte in bytes -> &self.undecided.push(byte)
@@ -1892,7 +1892,7 @@ impl ByteLexer {
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4989
     fn finish_input(self: &ByteLexer) XMLFault! {
-        if self.terminal == .Val(error) -> return Err(~error)
+        if self.terminal == .Val(error) -> return Err(error.copy())
         self.eof = true
         &self.choose_encoding(true) ?? return Err(err)
         &self.decode(true)
@@ -1987,7 +1987,7 @@ impl ByteLexer {
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:5154
     fn next_token(self: &ByteLexer) -> ByteToken? XMLFault! {
-        if self.terminal == .Val(error) -> return Err(~error)
+        if self.terminal == .Val(error) -> return Err(error.copy())
         &self.decode(self.eof) ?? return Err(err)
         boundary :: self.boundary() ?? {
             if self.eof && !self.units.is_empty() -> return &self.fail(Reason.Malformed, "unterminated XML token at end of input")
@@ -2063,17 +2063,17 @@ impl StreamScanner {
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:5233
     fn push(self: &StreamScanner, bytes: View<U8>) XMLFault! {
-        if self.terminal == .Val(error) -> return Err(~error)
+        if self.terminal == .Val(error) -> return Err(error.copy())
         &self.lexer.push(bytes) ?? {
-            self.terminal = Val(~err)
+            self.terminal = Val(err.copy())
             return Err(^err)
         }
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:5242
     fn finish_input(self: &StreamScanner) XMLFault! {
-        if self.terminal == .Val(error) -> return Err(~error)
+        if self.terminal == .Val(error) -> return Err(error.copy())
         &self.lexer.finish_input() ?? {
-            self.terminal = Val(~err)
+            self.terminal = Val(err.copy())
             return Err(^err)
         }
     }
@@ -2083,21 +2083,21 @@ impl StreamScanner {
             error.line = Val(self.line)
             error.column = Val(self.column)
         }
-        self.terminal = Val(~error)
+        self.terminal = Val(error.copy())
         Err(^error)
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:5259
     fn next(self: &StreamScanner) -> StreamEvent? XMLFault! {
-        if self.terminal == .Val(error) -> return Err(~error)
+        if self.terminal == .Val(error) -> return Err(error.copy())
         encoding :: self.lexer.encoding() ?? return None
         if !self.started {
             self.started = true
             self.nodes = 1
             self.wire_consumed = self.lexer.bom().len()
-            return Val(StreamEvent{event: Event.DocumentStart, raw_bytes: [], encoding: encoding, bom: ~self.lexer.bom})
+            return Val(StreamEvent{event: Event.DocumentStart, raw_bytes: [], encoding: encoding, bom: self.lexer.bom.copy()})
         }
         candidate :: &self.lexer.next_token() ?? {
-            self.terminal = Val(~err)
+            self.terminal = Val(err.copy())
             return Err(^err)
         }
         token :: if candidate == {
@@ -2107,11 +2107,11 @@ impl StreamScanner {
                 if !self.stack.is_empty() { return &self.fail(XMLFault.at_kind(self.wire_consumed, Reason.Malformed, "XML document ended before closing element")) }
                 if !self.root_seen { return &self.fail(XMLFault.at_kind(self.wire_consumed, Reason.Malformed, "empty XML document")) }
                 self.ended = true
-                return Val(StreamEvent{event: Event.DocumentEnd, raw_bytes: [], encoding: encoding, bom: ~self.lexer.bom})
+                return Val(StreamEvent{event: Event.DocumentEnd, raw_bytes: [], encoding: encoding, bom: self.lexer.bom.copy()})
             }
         }
         if token.text.starts_with("<?xml") && self.wire_consumed != self.lexer.bom().len() { return &self.fail(XMLFault.at_kind(self.wire_consumed, Reason.Malformed, "XML declaration is out of order")) }
-        scanner := Scanner{source: token.text.bytes(), wire_encoding: Val(encoding), offset: 0, started: true, ended: false, root_seen: self.root_seen, root_closed: self.root_closed, declaration_seen: self.declaration_seen, doctype_seen: self.doctype_seen, declared_entities: ~self.declared_entities, stack: ~self.stack, options: ~self.options, nodes: self.nodes, text_bytes: self.text_bytes, entity_replacement_bytes: self.entity_replacement_bytes}
+        scanner := Scanner{source: token.text.bytes(), wire_encoding: Val(encoding), offset: 0, started: true, ended: false, root_seen: self.root_seen, root_closed: self.root_closed, declaration_seen: self.declaration_seen, doctype_seen: self.doctype_seen, declared_entities: self.declared_entities.copy(), stack: self.stack.copy(), options: self.options.copy(), nodes: self.nodes, text_bytes: self.text_bytes, entity_replacement_bytes: self.entity_replacement_bytes}
         candidate :: &scanner.next() ?? {
             error := ^err
             local_scalars :: scalar_count(scanner.source[0..<scanner.source.len()], error.offset.min(scanner.source.len()))
@@ -2140,7 +2140,7 @@ impl StreamScanner {
                 self.column = 1
             } else { self.column += 1 }
         }
-        Val(StreamEvent{event: ^event, raw_bytes: ^token.raw_bytes, encoding: encoding, bom: ~self.lexer.bom})
+        Val(StreamEvent{event: ^event, raw_bytes: ^token.raw_bytes, encoding: encoding, bom: self.lexer.bom.copy()})
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:5387
@@ -2222,8 +2222,8 @@ fn normalize_attribute_text(raw: String) -> String Never! {
 // Rust: crates/jet-foundation/src/XmlPull.rs:5446
 fn split_name(raw: String) -> SplitName Never! {
     if raw.split_once(":") == {
-        .Val(parts) -> SplitName{prefix: Val(~parts.before), local: ~parts.after}
-        .None -> SplitName{prefix: None, local: ~raw}
+        .Val(parts) -> SplitName{prefix: Val(parts.before.copy()), local: parts.after.copy()}
+        .None -> SplitName{prefix: None, local: raw.copy()}
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:5452
@@ -2410,7 +2410,7 @@ fn general_entity_refs(value: String) -> [String] Never! {
         start :: at + rel
         end :: byte_find(bytes[0..<bytes.len()], start, [U8]{59}[0..<1]) ?? break
         name :: byte_text(bytes[0..<bytes.len()], start + 1, start + end)
-        if !name.is_empty() && !name.starts_with("#") && predefined(name) == None && valid_name(name) -> &refs.push(~name)
+        if !name.is_empty() && !name.starts_with("#") && predefined(name) == None && valid_name(name) -> &refs.push(name.copy())
         at = start + end + 1
     }
     ^refs
@@ -2419,7 +2419,7 @@ fn general_entity_refs(value: String) -> [String] Never! {
 enum Color { White Gray Black }
 // Rust: crates/jet-foundation/src/XmlPull.rs:5673
 fn visit(node: String, edges: &[String:[String]], color: &[String:Color]) -> Bool Never! {
-    color[~node] = Color.Gray
+    color[node.copy()] = Color.Gray
     if edges.get(node) == .Val(targets) {
         loop target in targets {
             state :: color.get(target) ?? Color.White
@@ -2430,7 +2430,7 @@ fn visit(node: String, edges: &[String:[String]], color: &[String:Color]) -> Boo
             }
         }
     }
-    color[~node] = Color.Black
+    color[node.copy()] = Color.Black
     false
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:5662
@@ -2438,7 +2438,7 @@ fn entity_reference_graph_has_cycle(edges: &[String:[String]]) -> Bool Never! {
     color := [String:Color]{}
     names := edges.keys()
     &names.sort()
-    loop name in names -> color[~name] = Color.White
+    loop name in names -> color[name.copy()] = Color.White
     loop name in names {
         if (color.get(name) ?? Color.White) == Color.White && visit(name, &edges, &color) -> return true
     }
@@ -2484,10 +2484,10 @@ fn declared_entity_table(subset: String?) -> DeclaredEntityTable XMLFault! {
             kind = DeclaredEntityKind.External
         } else if cursor < bytes.len() && (bytes[cursor] == (U8{39}) || bytes[cursor] == (U8{34})) {
             value :: take_entity_literal(bytes[0..<bytes.len()], &cursor) ?? return Err(err)
-            replacements[~name] = ^value
+            replacements[name.copy()] = ^value
         } else { return Err(XMLFault.at(start, "ENTITY declaration lacks value")) }
         if names.get(name) != None -> return Err(XMLFault.at(start, "duplicate ENTITY declaration"))
-        names[~name] = kind
+        names[name.copy()] = kind
         search_from = start + 8
     }
     edges := [String:[String]]{}
@@ -2498,7 +2498,7 @@ fn declared_entity_table(subset: String?) -> DeclaredEntityTable XMLFault! {
         loop target in general_entity_refs(replacements[name]) {
             if replacements.get(target) != None -> &targets.push(^target)
         }
-        edges[~name] = ^targets
+        edges[name.copy()] = ^targets
     }
     if entity_reference_graph_has_cycle(&edges) -> return Err(XMLFault.at_kind(0, Reason.EntityCycle, "XML entity declarations form a replacement cycle"))
     DeclaredEntityTable{names: ^names, count: count}
@@ -2518,10 +2518,10 @@ fn declaration_fields(data: String) -> DeclarationFields XMLFault! {
         if cursor >= bytes.len() || bytes[cursor] != (U8{61}) -> return Err(XMLFault.at(cursor, "XML declaration field needs ="))
         cursor += 1
         value :: take_doctype_literal(bytes[0..<bytes.len()], &cursor) ?? return Err(err)
-        &fields.push(StringField{key: ~key, value: ^value})
+        &fields.push(StringField{key: key.copy(), value: ^value})
     }
     if fields.is_empty() || fields[0].key != "version" -> return Err(XMLFault.at(0, "XML declaration must start with version"))
-    version :: ~fields[0].value
+    version :: fields[0].value.copy()
     if version != "1.0" -> return Err(XMLFault.at(0, "only XML version 1.0 is supported"))
     encoding := String?{None}
     standalone := Bool?{None}
@@ -2530,7 +2530,7 @@ fn declaration_fields(data: String) -> DeclarationFields XMLFault! {
         value :: fields[index].value
         if key == "encoding" && encoding == None && standalone == None {
             if !ascii_equal(value, "UTF-8") && !ascii_equal(value, "UTF-16") && !ascii_equal(value, "UTF-16LE") && !ascii_equal(value, "UTF-16BE") -> return Err(XMLFault.at_kind(0, Reason.InvalidEncoding, "unsupported XML declaration encoding"))
-            encoding = Val(~value)
+            encoding = Val(value.copy())
         } else if key == "standalone" && standalone == None {
             if value == {
                 "yes" -> standalone = Val(true)
@@ -2561,7 +2561,7 @@ impl Scanner {
      fn with_options(source: [U8], options: ParseOptions) -> Scanner XMLFault! {
         options.limits.validate() ?? return Err(err)
         scanner := Scanner.new(source)
-        scanner.options = ~options
+        scanner.options = options.copy()
         ^scanner
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:5919
@@ -2619,7 +2619,7 @@ impl Scanner {
                 if bytes > self.options.limits.max_entity_replacement_bytes || total > self.options.limits.max_entity_replacement_bytes -> return self.limit("XML entity replacement exceeds max_entity_replacement_bytes ({self.options.limits.max_entity_replacement_bytes})")
                 self.entity_replacement_bytes = total
                 &self.charge_text(bytes, "entity replacement") ?? return Err(err)
-                Val(~value)
+                Val(value.copy())
             }
         }
     }
@@ -2655,7 +2655,7 @@ impl Scanner {
         loop index > 0 {
             index -= 1
             binding :: local[index]
-            if binding.prefix == prefix -> return Val(~binding.uri)
+            if binding.prefix == prefix -> return Val(binding.uri.copy())
         }
         frame_index := self.stack.len()
         loop frame_index > 0 {
@@ -2665,7 +2665,7 @@ impl Scanner {
             loop namespace_index > 0 {
                 namespace_index -= 1
                 binding :: namespaces[namespace_index]
-                if binding.prefix == prefix -> return Val(~binding.uri)
+                if binding.prefix == prefix -> return Val(binding.uri.copy())
             }
         }
         if prefix == (Val("xml")) -> Val("http://www.w3.org/XML/1998/namespace") else -> None
@@ -2706,7 +2706,7 @@ impl Scanner {
                     literal :: byte_text(bytes[0..<bytes.len()], at, at + rel)
                     value :: normalize_attribute_text(literal)
                     normalized += value
-                    &parts.push(Part.Text(value: ^value, raw: ~literal))
+                    &parts.push(Part.Text(value: ^value, raw: literal.copy()))
                 }
                 start :: at + rel
                 end :: byte_find(bytes[0..<bytes.len()], start, [U8]{59}[0..<1]) ?? return Err(XMLFault.at(source_base + start, "unterminated entity reference"))
@@ -2724,13 +2724,13 @@ impl Scanner {
                     normalized = ""
                     all = false
                 }
-                &parts.push(Part.Entity(name: ~name, resolved: ^resolved, raw: byte_text(bytes[0..<bytes.len()], start, start + end + 1)))
+                &parts.push(Part.Entity(name: name.copy(), resolved: ^resolved, raw: byte_text(bytes[0..<bytes.len()], start, start + end + 1)))
                 at = start + end + 1
             } else {
                 literal :: byte_text(bytes[0..<bytes.len()], at, bytes.len())
                 value :: normalize_attribute_text(literal)
                 normalized += value
-                &parts.push(Part.Text(value: ^value, raw: ~literal))
+                &parts.push(Part.Text(value: ^value, raw: literal.copy()))
                 break
             }
         }
@@ -2801,11 +2801,11 @@ impl Scanner {
                 }
                 parsed :: &self.parse_parts(value, value_source_base) ?? return Err(err)
                 namespace_uri :: parsed.normalized ?? return self.fail("namespace URI contains unresolved entity reference")
-                &declarations.push(DeclaredNamespace{prefix: ^prefix, uri: ^namespace_uri, quote: q, raw: ~raw})
+                &declarations.push(DeclaredNamespace{prefix: ^prefix, uri: ^namespace_uri, quote: q, raw: raw.copy()})
             }
         }
         local := [NamespaceBinding]{}
-        loop declaration in declarations -> &local.push(NamespaceBinding{prefix: ~declaration.prefix, uri: ~declaration.uri})
+        loop declaration in declarations -> &local.push(NamespaceBinding{prefix: declaration.prefix.copy(), uri: declaration.uri.copy()})
         name :: self.resolved_name(raw_name, local[0..<local.len()], false) ?? return Err(err)
         namespaces := [Namespace]{}
         loop declaration in declarations {
@@ -2831,7 +2831,7 @@ impl Scanner {
         raw :: byte_text(self.source[0..<self.source.len()], start, self.offset)
         self.root_seen = true
         if !empty {
-            &self.stack.push(Frame{name: ~name, namespaces: ^local})
+            &self.stack.push(Frame{name: name.copy(), namespaces: ^local})
         } else if self.stack.is_empty() { self.root_closed = true }
         Event.ElementStart(name: ^name, namespaces: ^namespaces, attributes: ^attributes, empty: empty, raw: ^raw)
     }
@@ -2983,7 +2983,7 @@ impl Scanner {
             internal_subset :: ^doctype.internal_subset
             table :: declared_entity_table(internal_subset) ?? {
                 error :: ^err
-                mapped := XMLFault.at_kind(start + 9 + error.offset, error.kind, ~error.reason)
+                mapped := XMLFault.at_kind(start + 9 + error.offset, error.kind, error.reason.copy())
                 mapped.path = ^error.path
                 return Err(^mapped)
             }
@@ -3035,10 +3035,10 @@ impl Scanner {
             if !raw.chars().all(character -> character == ' ' || character == '\t' || character == (Char{13}) || character == '\n') {
                 return self.fail("character data outside root element")
             }
-            Val(Event.DocumentWhitespace(value: ~raw, raw: ^raw))
+            Val(Event.DocumentWhitespace(value: raw.copy(), raw: ^raw))
         } else -> {
             if raw.contains("]]>") { return self.fail("character data contains forbidden ]]>") }
-            Val(Event.Text(value: ~raw, raw: ^raw))
+            Val(Event.Text(value: raw.copy(), raw: ^raw))
         }
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:6686

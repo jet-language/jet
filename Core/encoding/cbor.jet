@@ -192,7 +192,7 @@ fn encode_value(value: Dyn, out: &[U8], canonical: Bool) CBORError! {
                         loop j > 0 && key_before(entries[order[j]].key, entries[order[j - 1]].key) {
                             // Snapshot the indexed value before mutating its owner.
                             // A read binding here retains a borrow of order[j - 1].
-                            old :: ~order[j - 1]
+                            old :: order[j - 1].copy()
                             order[j - 1] = order[j]
                             order[j] = old
                             j -= 1
