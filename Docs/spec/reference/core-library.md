@@ -4329,6 +4329,11 @@ Core's SQL tests also use `sql_tokens`, `unquote`, `identifier`,
 Schema traversal, alternate index selection, parser cursors, numeric helpers,
 fixed-wide accumulation, grouping-key encoding, and sorting carriers remain
 in its `priv module internal`, rather than enlarging the public surface.
+The enclosing SQL file can call those helpers and name the sorting carrier as
+`internal.SQLOrderedRow`; this is ordinary enclosing-module access, not a
+Core-runtime privilege. Inline-module function imports use `use internal.[…]`;
+member types use their qualified names instead of that function import list.
+The lifted declarations retain their private visibility for other files.
 
 ### `core.compute` — checked tensors and explicit devices
 

@@ -27,7 +27,7 @@ use core.text.runtime.assets.unicode_white_space as sql_whitespace
 use core.math as sql_math
 use core.sys as sql_sys
 use core.prelude.runtime.kernel_fixed_arithmetic as sql_fixed
-use internal.[sql_error, push_token, ascii_alpha, keyword, clause_keyword, token_at, token_is, parse_alias, parse_select_item, projection_shape_error, decimal_magnitude, parse_usize, parse_i64, parse_float, group_field, query_shape_error, float_compare, sql_number, sql_escape, sql_group_key, sum_add, sum_i64, count_increment, count_cast, sql_project_group, SQLOrderedRow, source_indices_compare, reverse_order, validate_sql_query_schema, sql_compare, aggregate_name, has_aggregate, value_number]
+use internal.[sql_error, push_token, ascii_alpha, keyword, clause_keyword, token_at, token_is, parse_alias, parse_select_item, projection_shape_error, decimal_magnitude, parse_usize, parse_i64, parse_float, group_field, query_shape_error, float_compare, sql_number, sql_escape, sql_group_key, sum_add, sum_i64, count_increment, count_cast, sql_project_group, source_indices_compare, reverse_order, validate_sql_query_schema, sql_compare, sql_compare_values, aggregate_name, has_aggregate, value_number]
 
 // Rust JetSqlAggregate:8–28.
 #Equatable
@@ -468,7 +468,7 @@ fn execute_sql_rows(fields: [String], row_count: U64, query: JetSQLQuery, cell: 
     } else {
         loop index in selected -> &grouped.push([U64]{index})
     }
-    projected := [SQLOrderedRow]{}
+    projected := [internal.SQLOrderedRow]{}
     loop at in 0..<grouped.len() {
         row :: sql_project_group(fields, query, ^grouped[at], cell)
         order := JetSQLValue?{None}
@@ -476,7 +476,7 @@ fn execute_sql_rows(fields: [String], row_count: U64, query: JetSQLQuery, cell: 
             order = sql_output_value(row, clause.field)
             if order == None && row.source_indices.len() != 0 -> order = cell(row.source_indices[0], clause.field)
         }
-        &projected.push(SQLOrderedRow{row: row, order: order})
+        &projected.push(internal.SQLOrderedRow{row: row, order: order})
     }
     // Rust performs this pass AFTER every row and ORDER fallback is evaluated.
     loop entry in projected {
@@ -485,7 +485,7 @@ fn execute_sql_rows(fields: [String], row_count: U64, query: JetSQLQuery, cell: 
         }
     }
     if query.order == .Val(clause) {
-        &projected.sort_by((left: SQLOrderedRow, right: SQLOrderedRow) -> {
+        &projected.sort_by((left: internal.SQLOrderedRow, right: internal.SQLOrderedRow) -> {
             order := sql_compare_values(left.order ?? JetSQLValue.Null, right.order ?? JetSQLValue.Null)
             if clause.descending -> order = reverse_order(order)
             if order == Ordering.Equal -> return source_indices_compare(left.row.source_indices, right.row.source_indices)

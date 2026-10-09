@@ -42,3 +42,17 @@ use core.db.sql as sql_kernel
     assert_eq(sql_kernel.sql_output_value(row, "0"), None)
     assert_eq(sql_kernel.sql_output_value(row, "3"), None)
 }
+#Test("SQL public parsing and ordered projection resolve private helpers and carriers") {
+    query :: sql_kernel.parse_sql_query("SELECT value FROM source ORDER BY value DESC") ?? panic("query")
+    cell :: (index: U64, field: String) -> sql_kernel.JetSQLValue? {
+        if {
+            field != "value" -> None
+            else -> Val(sql_kernel.JetSQLValue.Int(if index == (U64{0}) -> I64{1} else -> I64{2}))
+        }
+    }
+    rows :: sql_kernel.execute_sql_rows([String]{"value"}, U64{2}, query, cell) ?? panic("rows")
+    assert_eq(rows.len(), 2)
+    assert_eq(rows[0].source_indices, [U64]{U64{1}})
+    assert_eq(rows[1].source_indices, [U64]{U64{0}})
+    assert_eq(sql_kernel.sql_output_value(rows[0], "value") ?? panic("value"), sql_kernel.JetSQLValue.Int(I64{2}))
+}
