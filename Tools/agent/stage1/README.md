@@ -19,6 +19,16 @@ They require the matching `host3.path`/`host4.path` cache file and overlay check
 `goldens.sh` stages fixtures from `fixtures.list`; reports and gates are sibling tools.
 Linux systemd user scopes, flock, Node, Python runners and the project devshell are required.
 
+`ladder.mjs rungs SOURCE_TREE RUNGS_DIR` assembles the selected tree's manifest
+sources without rewriting their bodies. Each subset keeps the manifest-listed
+shared sources outside `Compiler/`, including Jetpack's canonical syntax names,
+in manifest order. Keep its entry anchors aligned with the package APIs; the
+lowering anchor borrows the checked rows and uses a single
+compiler thread. `Compiler/JetCodegen/Tests/run-field-owner-fixtures.mjs OUTDIR`
+adds the field-owner contracts to the freshly assembled L4 unit and generates
+their package budget, including the compiler's `Time.Wait` effect. Fix source or
+generator inputs and regenerate; never patch the emitted fixture unit.
+
 The private assemble HOME intentionally still uses `.cache/jet-luna/compiler-bootstrap`.
 It must match the running host4's embedded `Compiler/Bootstrap/Tests.rs` constants.
 Change the compiler bootstrap files, both copies of `lib.sh`, `ladder.mjs` and
