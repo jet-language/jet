@@ -372,9 +372,9 @@ fn sql_aggregate_value(group: [U64], function: JetSQLAggregate, field: String?, 
                     integer_sum = sum_add(integer_sum, integer)
                     float_sum += Float.from_i64(integer)
                 }
-                .Float(number) -> {
+                .Float(real) -> {
                     all_int = false
-                    float_sum += number
+                    float_sum += real
                 }
                 else -> {}
             }
@@ -466,7 +466,7 @@ fn execute_sql_rows(fields: [String], row_count: U64, query: JetSQLQuery, cell: 
             }
         }
     } else {
-        loop index in selected -> &grouped.push([U64]{index})
+        loop selected_index in selected -> &grouped.push([U64]{selected_index})
     }
     projected := [internal.SQLOrderedRow]{}
     loop at in 0..<grouped.len() {
@@ -892,7 +892,7 @@ fn sum_add(sum: sql_fixed.JetFixedWide, value: I64) -> sql_fixed.JetFixedWide Ne
     sql_fixed.JetFixedWide{high: high, low: low}
 }
 fn sum_i64(sum: sql_fixed.JetFixedWide) -> I64? Never! {
-    if sum.high == (I64{0}) -> return I64.from_u64(sum.low)
+    if sum.high == (I64{0}) -> return Val(I64.from_u64(sum.low) ?? return None)
     if sum.high != (I64{-1}) || sum.low < (U64{9223372036854775808}) -> return None
     magnitude :: I64.from_u64(sum.low - U64{9223372036854775808}) ?? panic("SQL signed sum word")
     Val((I64{-9223372036854775807} - I64{1}) + magnitude)
