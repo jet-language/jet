@@ -362,6 +362,12 @@ pub fn json_u32(v: &DataTree) -> Option<u32> {
 
 pub fn json_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
+    append_escape(&mut out, s);
+    out
+}
+
+fn append_escape(out: &mut String, s: &str) {
+    use std::fmt::Write as _;
     for c in s.chars() {
         match c {
             '"' => out.push_str("\\\""),
@@ -369,15 +375,22 @@ pub fn json_escape(s: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c if c.is_control() => write!(out, "\\u{:04x}", c as u32).unwrap(),
             c => out.push(c),
         }
     }
-    out
+}
+
+pub(crate) fn append_quote(out: &mut String, s: &str) {
+    out.push('"');
+    append_escape(out, s);
+    out.push('"');
 }
 
 pub fn quote(s: &str) -> String {
-    format!("\"{}\"", json_escape(s))
+    let mut out = String::with_capacity(s.len() + 2);
+    append_quote(&mut out, s);
+    out
 }
 
 pub fn object_of(pairs: &[(&str, &str)]) -> String {

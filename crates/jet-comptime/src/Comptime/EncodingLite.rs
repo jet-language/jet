@@ -2923,16 +2923,16 @@ pub(super) fn jsonl_parse(text: &str) -> Result<Vec<CtValue>, CtValue> {
     }
     Ok(out)
 }
-pub(super) fn jsonl_render(rows: &[CtValue]) -> String {
+pub(super) fn jsonl_render(rows: &[CtValue]) -> Result<String, jet_foundation::EncodingJson::EncodingError> {
     let mut out = rows
         .iter()
         .map(|v| super::JSONInterp::render_json_pretty(v, false, 0))
-        .collect::<Vec<_>>()
+        .collect::<Result<Vec<_>, _>>()?
         .join("\n");
     if !out.is_empty() {
         out.push('\n');
     }
-    out
+    Ok(out)
 }
 
 // ── core.encoding.json: canonical / events ─────────────────────────────────
@@ -3020,7 +3020,7 @@ fn encoding_error_value(kind: &str, reason: impl Into<String>) -> CtValue {
     encoding_error_value_at("JSON", kind, 1, 1, reason)
 }
 
-fn encoding_error_value_fields(
+pub(super) fn encoding_error_value_fields(
     format: &str,
     kind: &str,
     byte_offset: i64,
@@ -3518,11 +3518,11 @@ pub(super) fn json_canonical_jcs(
         .map_err(|_| encoding_error_value("Unsupported", "canonical JSON output is not UTF-8"))
 }
 
-pub(super) fn json_canonical(v: &CtValue) -> String {
+pub(super) fn json_canonical(v: &CtValue) -> Result<String, jet_foundation::EncodingJson::EncodingError> {
     super::JSONInterp::render_json_pretty(v, false, 0)
 }
-pub(super) fn json_events(v: &CtValue) -> String {
-    fn walk(path: String, t: &CtValue, out: &mut Vec<String>) {
+pub(super) fn json_events(v: &CtValue) -> Result<String, jet_foundation::EncodingJson::EncodingError> {
+    fn walk(path: String, t: &CtValue, out: &mut Vec<String>) -> Result<(), jet_foundation::EncodingJson::EncodingError> {
         let here = if path.is_empty() {
             "$".to_string()
         } else {
@@ -3531,24 +3531,25 @@ pub(super) fn json_events(v: &CtValue) -> String {
         if let Some(entries) = json_object_entries(t) {
             out.push(format!("object_start {here}"));
             for (k, v) in &entries {
-                walk(format!("{}.{}", here, k), v, out);
+                walk(format!("{}.{}", here, k), v, out)?;
             }
             out.push(format!("object_end {here}"));
-            return;
+            return Ok(());
         }
         if let Some(items) = json_array_items(t) {
             out.push(format!("array_start {here}"));
             for (i, v) in items.iter().enumerate() {
-                walk(format!("{}[{}]", here, i), v, out);
+                walk(format!("{}[{}]", here, i), v, out)?;
             }
             out.push(format!("array_end {here}"));
-            return;
+            return Ok(());
         }
-        out.push(format!("value {here} {}", json_canonical(t)));
+        out.push(format!("value {here} {}", json_canonical(t)?));
+        Ok(())
     }
     let mut out = Vec::new();
-    walk(String::new(), v, &mut out);
-    out.join("\n")
+    walk(String::new(), v, &mut out)?;
+    Ok(out.join("\n"))
 }
 
 #[cfg(test)]

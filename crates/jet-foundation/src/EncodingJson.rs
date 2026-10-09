@@ -1,5 +1,38 @@
 use crate::DataTree::DataTree;
 
+// The same handle-free EncodingError ABI used by the emitted Prelude.
+#[allow(dead_code)]
+mod encoding_types {
+    use crate::Outcome::{JetAbsent, JetOutcome};
+    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs");
+    include!("../../jet-codegen/src/Prelude/Core/EncodingError.rs");
+}
+pub use encoding_types::{EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat};
+
+pub fn json_unsupported(reason: impl Into<String>) -> EncodingError {
+    EncodingError::new(
+        EncodingFormat::JSON,
+        EncodingErrorKind::Unsupported,
+        0,
+        Err(crate::Outcome::JetAbsent),
+        Err(crate::Outcome::JetAbsent),
+        "$",
+        reason,
+    )
+}
+
+pub fn encoding_error_show(error: &EncodingError) -> String {
+    encoding_types::jet_encoding_error_kernel_show(
+        error.format.as_str(),
+        &format!("{:?}", error.kind),
+        error.byte_offset,
+        error.line.as_ref().ok().copied(),
+        error.column.as_ref().ok().copied(),
+        &error.path,
+        &error.reason,
+    )
+}
+
 // One JSON parser for the embedded Prelude and comptime adapters.
 
 pub const MAX_JSON_DEPTH: usize = 64;
