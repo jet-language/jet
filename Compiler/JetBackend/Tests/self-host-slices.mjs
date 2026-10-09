@@ -22,8 +22,10 @@ for (const row of lines("self-all.functions.tsv")) {
     else if (start >= segment.generated.end) lo = mid + 1;
     else { found = segment; break; }
   }
-  if (!found || !found.source_file.startsWith("Compiler/")) continue;
-  const pkg = found.source_file.split("/")[1];
+  // Every package of the assembled unit is a slice: Compiler/<Pkg> and Jetpack/<Pkg> (as Jetpack-<Pkg>).
+  if (!found || !/^(Compiler|Jetpack)\//.test(found.source_file)) continue;
+  const [top, name] = found.source_file.split("/");
+  const pkg = top === "Compiler" ? name : `${top}-${name}`;
   if (!packages.has(pkg)) packages.set(pkg, []);
   packages.get(pkg).push(id);
 }
