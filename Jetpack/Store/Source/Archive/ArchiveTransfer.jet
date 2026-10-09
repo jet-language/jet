@@ -926,7 +926,7 @@ fn store_archive_decode_secret(bytes: [U8]) -> [U8] StoreError! {
     loop index < trimmed.len() {
         high :: store_archive_hex_value(trimmed[index]) ?? return Err(StoreError.InvalidData("archive key has invalid hex"))
         low :: store_archive_hex_value(trimmed[index + 1]) ?? return Err(StoreError.InvalidData("archive key has invalid hex"))
-        &out.push(U8{(high << 4) | low})
+        &out.push(U8{(high << 4).bit_or(low)})
         index += 2
     }
     Ok(out)
@@ -998,7 +998,7 @@ fn store_archive_publish_partial(partial: String, path: String, bytes: [U8], mod
     if mode == {
         .Val(private) -> {
             out.set_mode(private)
-            if (out.stat().mode & STORE_MODE_PERMISSION_BITS) != private {
+            if (out.stat().mode.bit_and(STORE_MODE_PERMISSION_BITS)) != private {
                 return Err(StoreError.InvalidData("archive signer key could not be made private before writing"))
             }
         }
@@ -1063,7 +1063,7 @@ fn store_archive_make_tree_writable(path: String) StoreError! {
     if metadata.is_dir {
         loop child in files.list_dir(path) -> store_archive_make_tree_writable(child.path)
     }
-    files.set_mode(path, metadata.mode | STORE_MODE_OWNER_WRITE)
+    files.set_mode(path, metadata.mode.bit_or(STORE_MODE_OWNER_WRITE))
 }
 
 // Clear every write bit through a tree. Symlink permissions are not
@@ -1074,11 +1074,11 @@ fn store_archive_seal_tree(path: String) StoreError! {
     if metadata.is_dir {
         loop child in files.list_dir(path) -> store_archive_seal_tree(child.path)
     }
-    files.set_mode(path, metadata.mode - (metadata.mode & STORE_MODE_WRITE_BITS))
+    files.set_mode(path, metadata.mode - (metadata.mode.bit_and(STORE_MODE_WRITE_BITS)))
 }
 
 fn store_archive_set_mode(path: String, mode: Int) StoreError! {
-    files.set_mode(path, mode & STORE_MODE_PERMISSION_BITS)
+    files.set_mode(path, mode.bit_and(STORE_MODE_PERMISSION_BITS))
 }
 
 // No-follow metadata, or None when the path does not exist.

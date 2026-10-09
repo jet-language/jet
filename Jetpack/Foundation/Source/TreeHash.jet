@@ -860,7 +860,7 @@ fn foundation_stage_and_rename(directories: [FoundationPublicationDirectory], pa
     writer.fsync() ?? return Err(FoundationPublicationError{phase: .SyncStage, error: err})
     staged :: writer.stat() ?? return Err(FoundationPublicationError{phase: .InspectStage, error: err})
     if staged.links != 1 -> return Err(FoundationPublicationError{phase: .InspectStage, error: IOError.PermissionDenied(foundation_io_context(.Write, temporary, "file authority temporary has multiple hard links"))})
-    if staged.mode & 4095 != policy.mode -> return Err(FoundationPublicationError{phase: .InspectStage, error: IOError.PermissionDenied(foundation_io_context(.Write, temporary, "file authority temporary has incorrect permissions"))})
+    if staged.mode.bit_and(4095) != policy.mode -> return Err(FoundationPublicationError{phase: .InspectStage, error: IOError.PermissionDenied(foundation_io_context(.Write, temporary, "file authority temporary has incorrect permissions"))})
     if before_rename == .Val(validate) -> validate() ?? return Err(FoundationPublicationError{phase: .ValidateSource, error: err})
     foundation_ensure_directories_current(directories) ?? return Err(FoundationPublicationError{phase: .ValidateAuthority, error: err})
     destination :: foundation_inspect_destination(parent, final_name, policy.destination_links) ?? return Err(FoundationPublicationError{phase: .InspectDestination, error: err})

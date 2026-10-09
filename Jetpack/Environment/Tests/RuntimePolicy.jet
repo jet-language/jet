@@ -75,7 +75,7 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
     before :: files.stat(owner_path) ?? panic("owner metadata")
     assert(before.is_file)
     assert(!before.is_symlink)
-    if !sys.is_windows() -> assert_eq(before.mode & 0o777, 0o600)
+    if !sys.is_windows() -> assert_eq(before.mode.bit_and(0o777), 0o600)
     assert((env_try_acquire_lock(root, "hangar") ?? panic("same-scope try")) == None)
     assert((env_try_acquire_lock(root, "other") ?? panic("other-scope try")) == None)
     assert(env_lock_state(env_lock_path_for_scope(root, "other")) ?? panic("probe other") == RuntimeLockState.Held)

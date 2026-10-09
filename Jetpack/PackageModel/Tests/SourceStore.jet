@@ -34,7 +34,7 @@ fn pkg_source_store_test_root(label: String) -[FS, Env]> String Never! {
     actual :: target.tree_hash() ?? panic("copied hash")
     assert_eq(actual, expected)
     assert_eq(actual, foundation_tree_hash(target_path))
-    assert_eq((files.stat(files.join(target_path, "nested/main.jet")) ?? panic("copied stat")).mode & 511, 384)
+    assert_eq((files.stat(files.join(target_path, "nested/main.jet")) ?? panic("copied stat")).mode.bit_and(511), 384)
     files.remove_all(root) ?? panic("fixture cleanup")
 }
 

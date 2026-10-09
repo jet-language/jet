@@ -3,7 +3,7 @@
 fn engine_cache_nar_string(out: &[U8], value: String) {
     bytes :: value.bytes()
     length :: bytes.len()
-    loop shift in 0..<8 -> &out.push(U8{(length >> (8 * shift)) & 255})
+    loop shift in 0..<8 -> &out.push(U8{(length >> (8 * shift)).bit_and(255)})
     loop byte in bytes -> &out.push(byte)
     padding :: (8 - length % 8) % 8
     loop _ in 0..<padding -> &out.push(U8{0})

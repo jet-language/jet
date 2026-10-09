@@ -40,7 +40,7 @@ fn store_platform_setup() {
     output :: files.join(files.join(roots.hangar_dir(), "objects"), digest)
     files.create_dir_all(files.dirname(output)) ?? panic("objects dir")
     mode_before :: (files.stat(staging) ?? panic("staging permissions")).mode
-    files.chmod(staging, mode_before | 0o200) ?? panic("writable staging root")
+    files.chmod(staging, mode_before.bit_or(0o200)) ?? panic("writable staging root")
     files.rename(staging, output) ?? panic("publish native object")
     store_seal_local_output(output) ?? panic("seal published output")
     assert_eq(pkg_try_output_hash_of(output) ?? panic("published digest"), digest, "published fixture must retain its content-addressed identity")

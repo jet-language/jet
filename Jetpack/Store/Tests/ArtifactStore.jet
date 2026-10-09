@@ -489,7 +489,7 @@ STORE_ARTIFACT_TEST_BUILD_RECORD_V0 :: prep { `{"schema":"jet.build-record/v0","
     assert(store_build_last_run_decode(bytes, "src/run.jet") == Val("record-key"))
     assert(store_build_last_run_decode(bytes, "other.jet") == None)
     damaged := bytes
-    damaged[damaged.len() - 1] = damaged[damaged.len() - 1] ^ U8{1}
+    damaged[damaged.len() - 1] = damaged[damaged.len() - 1].bit_xor(U8{1})
     assert(store_build_last_run_decode(damaged, "src/run.jet") == None)
     assert(store_build_last_run_decode([U8]{}, "src/run.jet") == None)
 }
