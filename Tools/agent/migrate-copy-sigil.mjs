@@ -14,8 +14,9 @@
 // postfix calls/fields/indexes/optional fields/?; ! is NOT a postfix operator.
 // Single TOKEN_TILDE has no type, pattern, effect-row or binary meaning in the
 // current parser. Distinct ~~ (retired trait attachment), ~| and ~|= are kept.
-// Strings (including interpolation payloads), chars, comments and prep template
-// bodies are intentionally opaque. E0941 UI fixtures are recognized by their
+// Interpolation holes in ordinary strings are migrated as expressions; plain
+// string text, raw strings (URL{"…"}), chars, comments, prep template bodies and
+// template holes (\${…}) are opaque. E0941 UI fixtures are recognized by their
 // adjacent .stderr snapshot or their explicit E0941 fixture name.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -59,8 +60,8 @@ function charEnd(s, i) {
   while (i < s.length && s[i] !== "'") i++;
   return Math.min(i + 1, s.length);
 }
-function holeEnd(s, i, triple, template = false) {
-  let depth = 1; i++;
+function holeEnd(s, i, triple, template = false, spans) {
+  const open = i; let depth = 1; i++;
   while (i < s.length && depth) {
     if (!triple && s[i] === '\n') return i;
     if (!template && (s.startsWith('//', i) || s.startsWith('/*', i))) i = commentEnd(s, i);
@@ -68,19 +69,19 @@ function holeEnd(s, i, triple, template = false) {
     else if (!template && s[i] === "'") i = charEnd(s, i);
     else if (!template && s[i] === '`') i = fenceEnd(s, i);
     else if (s[i] === '{') { depth++; i++; }
-    else if (s[i] === '}') { depth--; i++; }
+    else if (s[i] === '}') { depth--; i++; if (!depth) spans?.push({ open, close: i - 1, template }); }
     else i++;
   }
   return i;
 }
-function stringEnd(s, start, raw) {
+function stringEnd(s, start, raw, spans) {
   const triple = s.startsWith('"""', start), quote = triple ? '"""' : '"';
   let i = start + quote.length;
   while (i < s.length) {
     if (!triple && s[i] === '\n') return i;
     if (s.startsWith(quote, i)) return i + quote.length;
     if (s.startsWith('{{', i) || s.startsWith('}}', i)) { i += 2; continue; }
-    if (s[i] === '{') { i = holeEnd(s, i, triple, s.slice(i - 2, i) === '\\$'); continue; }
+    if (s[i] === '{') { i = holeEnd(s, i, triple, s.slice(i - 2, i) === '\\$', spans); continue; }
     if (s[i] === '\\' && (!raw || s[i + 1] === '"')) i += 2;
     else i++;
   }
@@ -209,17 +210,31 @@ function operand(ts, n) {
   if (ts[n]?.text === '^' && !ts[n].beforeTerminator) { n = operand(ts, n + 1).next; simple = false; }
   return { next: n, end: ts[n - 1].end, simple, start: ts[start].start };
 }
-export function migrate(source) {
-  const ts = tokenize(source), sites = [];
+function collect(text, base, source, sites) {
+  const ts = tokenize(text);
   for (let n = 0; n < ts.length; n++) {
-    if (ts[n].text !== '~' || ts[n].template || !isPrefix(source, ts, n)) continue;
+    const t = ts[n];
+    if (t.kind === 'literal' && t.text.startsWith('"') && !t.template) {
+      // Interpolation holes are ordinary expressions; raw strings stay opaque.
+      const raw = ts[n - 1]?.text === '{' && (ts[n - 2]?.text === '.' || /^[A-Z]/.test(ts[n - 2]?.text ?? ''));
+      if (raw) continue;
+      const spans = [];
+      stringEnd(text, t.start, false, spans);
+      for (const hole of spans) if (!hole.template) collect(text.slice(hole.open + 1, hole.close), base + hole.open + 1, source, sites);
+      continue;
+    }
+    if (t.text !== '~' || t.template || !isPrefix(text, ts, n)) continue;
+    const start = base + t.start, line = source.slice(0, start).split('\n').length;
     let value;
     try { value = operand(ts, n + 1); }
-    catch (error) { throw new Error(`line ${source.slice(0, ts[n].start).split('\n').length}: ${error.message}`); }
-    const line = source.slice(0, ts[n].start).split('\n').length;
-    const column = ts[n].start - source.lastIndexOf('\n', ts[n].start - 1);
-    sites.push({ start: ts[n].start, operandStart: value.start, end: value.end, simple: value.simple, line, column });
+    catch (error) { throw new Error(`line ${line}: ${error.message}`); }
+    sites.push({ start, operandStart: base + value.start, end: base + value.end, simple: value.simple, line, column: start - source.lastIndexOf('\n', start - 1) });
   }
+}
+export function migrate(source) {
+  const sites = [];
+  collect(source, 0, source, sites);
+  sites.sort((a, b) => a.start - b.start);
   // Insertion events handle nested copies without overlapping replacements.
   const events = new Map();
   const add = (at, text) => events.set(at, (events.get(at) ?? '') + text);
@@ -296,6 +311,13 @@ function selfTest() {
     ['x :: ~options\n^scanner', 'x :: options.copy()\n^scanner'],
     ['x :: ~foo\n  .bar()[i]', 'x :: foo\n  .bar()[i].copy()'],
     ['x :: ~error.message\n[String]{}', 'x :: error.message.copy()\n[String]{}'],
+    ['"v={~x} ~y {a}"', '"v={x.copy()} ~y {a}"'],
+    ['"{~(a[1..<n])}"', '"{(a[1..<n]).copy()}"'],
+    ['"{~a.b(c)}"', '"{a.b(c).copy()}"'],
+    ['"{~f("x{~y}")}"', '"{f("x{y.copy()}").copy()}"'],
+    ['"{~Point{x: 1}} {{~x}}"', '"{Point{x: 1}.copy()} {{~x}}"'],
+    ['"""a {~x}\n~plain"""', '"""a {x.copy()}\n~plain"""'],
+    ['URL{"a/{~x}"}', 'URL{"a/{~x}"}'],
   ];
   for (const [input, expected] of cases) {
     assert.equal(migrate(input).source, expected, input);

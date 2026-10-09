@@ -365,7 +365,7 @@ fn jet_cli_bundle_report(artifact: &BundleArtifact, plan: &BundlePlan, output: b
 }
 // Rust run_package's parse/build/store error branches (CmdPackage.rs:87-142).
 fn jet_cli_bundle_error_output(message: String, machine: Bool) -> JetDriverVerbOutput Never! {
-    if machine -> return JetDriverVerbOutput{stdout: "{jet_cli_status_render("package", false, [JetCLIStatusField]{jet_cli_status_field("error", jet_cli_status_text(~message))})}\n", stderr: "", exit_code: 1}
+    if machine -> return JetDriverVerbOutput{stdout: "{jet_cli_status_render("package", false, [JetCLIStatusField]{jet_cli_status_field("error", jet_cli_status_text(message.copy()))})}\n", stderr: "", exit_code: 1}
     JetDriverVerbOutput{stdout: "", stderr: "jet package: {message}\n", exit_code: 1}
 }
 // Rust run_package (CmdPackage.rs:103-142). Front parses once and routes Game
