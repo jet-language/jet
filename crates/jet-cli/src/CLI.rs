@@ -727,7 +727,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--lang", help: "With fmt: Delegate non-Jet files to the environment formatter for this language" },
     FlagSpec { long: "--restore-role-files", help: "With init: Restore the exact pre-package.jet role files" },
     FlagSpec { long: "--diff", help: "With fmt --check: Also print unified diffs for each changed file" },
-    FlagSpec { long: "--simplify", help: "With fmt: Rewrite to the simplest ratified spelling" },
+    FlagSpec { long: "--simplify", help: "With fmt: Rewrite to the simplest canonical spelling" },
     FlagSpec { long: "--changed", help: "With fmt: Format only VCS-changed .jet files (requires git)" },
     FlagSpec { long: "--explicit-copies", help: "With fmt: Materialize implicit read-view copies as `~`" },
     FlagSpec { long: "--skipped", help: "With project parts: Show modules omitted from automatic discovery" },

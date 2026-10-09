@@ -100,6 +100,15 @@ fn cli_registry_completions() Never! {
     }
 }
 
+// Help.rs palette law: flag help is user-facing copy, never planning vocabulary.
+fn cli_registry_flag_copy() Never! {
+    words :: [String]{"milestone", "requirement", "epoch", "ratified"}
+    loop flag in JET_CLI_FLAGS {
+        lower :: flag.help.to_lower()
+        loop word in words -> cli_registry_require(!lower.contains(word), "help for {flag.long} exposes planning term {word}")
+    }
+}
+
 // Prelude/Markers.jet rows (verbatim) through the one rule explanation.
 fn cli_registry_explain_markers() Never! {
     rules :: marker_source_read("marker Pure($sites: [.Function, .Method], $retired: \"-[]>\")\nmarker Inline(mode: InlineMode{{.Hint}}, $sites: [.Function, .Method, .Constant])\n")
@@ -127,5 +136,6 @@ fn run() Never! {
     cli_registry_moved_commands()
     cli_registry_typo_suggestions()
     cli_registry_completions()
+    cli_registry_flag_copy()
     cli_registry_explain_markers()
 }
