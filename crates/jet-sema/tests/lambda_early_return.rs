@@ -1,4 +1,5 @@
 //! D-TAIL-RETURN1: early returns belong to their lambda's callable interface.
+//! The fixture carries lexer-owned Core demand and current public-default module facts.
 
 use jet_sema::Diagnostics::{Diagnostic, Severity};
 use jet_sema::Lexer;
@@ -25,8 +26,8 @@ fn errors(src: &str) -> Vec<Diagnostic> {
             script_body: std::mem::take(&mut prog.script_body),
             block_spans: std::mem::take(&mut prog.block_spans),
             source: src.to_string(),
+            core_identifier_demand: Lexer::core_identifier_demand(&toks),
             web_target_ceiling: prog.web_target_ceiling,
-            pub_file: prog.pub_file,
             no_prelude: prog.no_prelude,
             default_target: prog.default_target,
             html_path: prog.html_path.clone(),
