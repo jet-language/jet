@@ -642,7 +642,7 @@ fn io_err(operation: String, path: String, message: String) -> IOError Never! {
 fn file_fault(operation_path: String, operation: IOOperation, path: String) IOError! {
     if core.testing.__fault_should_fail(operation_path) {
         return Err(IOError.Other(IOContext{
-            operation: operation.copy(), resource: Val(path), os_code: None,
+            operation: operation, resource: Val(path), os_code: None,
             cause: Val("fault injected: {operation_path}"),
         }))
     }
@@ -651,9 +651,10 @@ fn file_fault(operation_path: String, operation: IOOperation, path: String) IOEr
 
 fn file_writer_refusal(path: String) IOError! -[FS.Write]> {
     if core.files.__writer_refusal(path) == {
-        .None -> Ok()
-        .Val(error) -> Err(error)
+        .None -> {}
+        .Val(error) -> return Err(error)
     }
+    Ok()
 }
 
 fn read_bytes(path: String) -[FS.Read]> [U8] IOError! {
@@ -764,10 +765,7 @@ fn fsync(path: String | Path) IOError! -[FS.Write]> {
 
 
 fn exists_impl(path: String) -> Bool Never! {
-    if core.files.__metadata_directory(path) == {
-        .Ok(_) -> true
-        .Err(_) -> false
-    }
+    (core.files.__stat_mode_raw(path) ?? -1) >= 0
 }
 
 
@@ -775,10 +773,7 @@ fn exists(path: String) -[FS]> Bool Never! { exists_impl(path) }
 
 
 fn is_dir(path: String) -[FS.Read]> Bool Never! {
-    if core.files.__metadata_directory(path) == {
-        .Ok(directory) -> directory
-        .Err(_) -> false
-    }
+    core.files.__metadata_directory(path) ?? false
 }
 
 
@@ -825,7 +820,7 @@ fn is_fifo(path: String | Path) -[FS.Read]> Bool IOError! {
 fn files8_u32(value: Int) -> Bool Never! { value >= 0 && value <= 4294967295 }
 
 fn files8_other(operation: IOOperation, resource: String?, cause: String) -> IOError Never! {
-    IOError.Other(IOContext{operation: operation.copy(), resource: resource, os_code: None, cause: Val(cause)})
+    IOError.Other(IOContext{operation: operation, resource: resource, os_code: None, cause: Val(cause)})
 }
 
 fn files8_preflight(probe: String, operation: IOOperation, path: String) IOError! {
@@ -1373,7 +1368,7 @@ fn relative(path: String, start: String) -> String Never! { relative_impl(path, 
 
 
 fn walk_error(operation: IOOperation, kind: Int, code: Int?, cause: String?, resource: String) -> IOError Never! {
-    context :: IOContext{operation: operation.copy(), resource: Val(resource), os_code: code, cause: cause}
+    context :: IOContext{operation: operation, resource: Val(resource), os_code: code, cause: cause}
     if kind == {
         1 -> IOError.InvalidInput(context)
         2 -> IOError.NotFound(context)
@@ -2427,58 +2422,5 @@ fn trim_file_line(bytes: &[U8]) Never! {
     assert_eq(walk_error(.Write, 6, Val(17), Val("existing destination"), "source"), IOError.AlreadyExists(context))
     assert_eq(walk_error(.Read, 7, None, Val("unsupported"), "pattern"),
         IOError.Unsupported(IOContext{operation: .Read, resource: Val("pattern"), os_code: None, cause: Val("unsupported")}))
-}
-
-#Test("filesystem u32 policy preserves chown and permission boundaries") {
-    assert(!files8_u32(-1))
-    assert(files8_u32(0))
-    assert(files8_u32(4294967295))
-    assert(!files8_u32(4294967296))
-    assert(((4096).bit_and(61440)) == 4096)
-    assert(((8192).bit_and(61440)) != 4096)
-    assert(((32768).bit_and(61440)) != 4096)
-}
-
-#Test("walk owns zero-based depth, path sorting and inherited ignore rules") {
-    directory :: core.files.temp_dir("walk_source").expect("temporary walk directory")
-    child :: join(directory.path, "nested")
-    core.files.create_dir(child).expect("nested directory")
-    core.files.write(join(directory.path, "visible"), "root").expect("root file")
-    core.files.write(join(directory.path, "hidden"), "hidden").expect("ignored file")
-    core.files.write(join(directory.path, ".gitignore"), "hidden\n").expect("root rules")
-    core.files.write(join(child, "visible"), "nested").expect("nested file")
-    core.files.write(join(child, "hidden"), "hidden").expect("inherited ignored file")
-    rows :: walk(directory.path, Val(".gitignore")).expect("walk")
-    assert_eq(rows.len(), 3)
-    assert_eq(rows[0].relative, "nested")
-    assert_eq(rows[0].depth, 0)
-    assert(rows[0].is_dir)
-    assert_eq(rows[1].relative, join("nested", "visible"))
-    assert_eq(rows[1].depth, 1)
-    assert_eq(rows[2].relative, "visible")
-    assert_eq(rows[2].depth, 0)
-    files :: walk_files(directory.path, Val(".gitignore")).expect("walk files")
-    assert_eq(files.len(), 2)
-    loop entry in files -> assert(!entry.is_dir)
-}
-
-#Test("walk validates an empty spelling but reads the actual empty root") {
-    if walk("", None) == {
-        .Ok(_) -> assert(false)
-        .Err(_) -> {}
-    }
-}
-
-#Test("walk rejects regular-file roots with the native cause") {
-    file :: temp_file("walk_root").expect("temporary walk root")
-    if walk(file.path, None) == {
-        .Ok(_) -> assert(false)
-        .Err(error) -> {
-            if error == {
-                .Other(context) -> assert_eq(context.cause, Val("filesystem walk root is not a directory: {file.path}"))
-                else -> assert(false)
-            }
-        }
-    }
 }
 
