@@ -262,7 +262,10 @@ fn prepare(path: &Path, receipt_bytes: &[u8]) -> Result<Prepared, Refusal> {
             let name =
                 text(row, "name").map_err(|_| Refusal::RuntimeLibraryInitializerSealMismatch)?;
             let priority = match row.get("priority") {
-                Ok(Dyn::Int(value)) if (0..=65535).contains(value) => *value,
+                Ok(Dyn::Int(value)) => value
+                    .to_i64()
+                    .filter(|value| (0..=65535).contains(value))
+                    .ok_or(Refusal::RuntimeLibraryInitializerSealMismatch)?,
                 _ => return Err(Refusal::RuntimeLibraryInitializerSealMismatch),
             };
             if last_priority.is_some_and(|(previous, previous_name)| {

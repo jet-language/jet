@@ -271,6 +271,7 @@ impl<F: FnMut(&TExpr) -> bool> TirExprWalk<'_, F> {
             | TExprKind::Uninit
             | TExprKind::CtLit(_)
             | TExprKind::ConstRef(_)
+            | TExprKind::GlobalShared { .. }
             | TExprKind::ResourceTake(_)
             | TExprKind::Todo { .. }
             | TExprKind::InvariantViolation { .. }
