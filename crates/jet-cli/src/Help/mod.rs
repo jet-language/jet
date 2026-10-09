@@ -450,6 +450,9 @@ mod tests {
                 "Error Codes",
             ]
         );
+        // Planning vocabulary only. "decision" is product vocabulary now: the
+        // ratified `inspect decisions` plane shows compiler decisions, and
+        // `explain --verbose` names a token's owning decision (cli.md).
         let forbidden = [
             "D-",
             "U19",
@@ -458,7 +461,6 @@ mod tests {
             "milestone",
             "requirement",
             "epoch",
-            "decision",
             "ratified",
         ];
         for entry in build_index() {
@@ -523,8 +525,10 @@ mod tests {
         assert!(search(&index, "--release").iter().any(|hit| {
             matches!(hit, Hit::Command { entry, .. } if entry.symbol.name == "run")
         }));
+        // `jet run` documents its project default (`jet run`); the file example
+        // lives on `check` and `build`.
         assert!(search(&index, "hello.jet").iter().any(|hit| {
-            matches!(hit, Hit::Command { entry, .. } if entry.symbol.name == "run")
+            matches!(hit, Hit::Command { entry, .. } if entry.symbol.name == "check")
         }));
     }
 
