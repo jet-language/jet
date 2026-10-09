@@ -42,6 +42,13 @@ process.exit(0);
 const fs=require('node:fs');const args=process.argv.slice(2),text=args.join(' '),mode=process.env.FIXTURE_MODE;fs.appendFileSync(process.env.FIXTURE_COMMANDS,'cargo '+text+'\\n');
 if(args[0]==='metadata'){console.log(JSON.stringify({workspace_members:['fixture'],packages:[{id:'fixture',name:'fixture',targets:[{kind:['lib'],doctest:mode!=='disabled-docs'}]},{id:'unselected-dependency',name:'unselected-dependency',targets:[{kind:['lib'],doctest:true}]}]}));process.exit(0);}
 if(args.includes('--keep-going')||!args.includes('--no-fail-fast'))process.exit(93);
+if(['masked-signal','masked-exit','ordinary-101'].includes(mode)&&args.includes('alpha')&&!args.includes('--no-run')){
+ const child=require('node:child_process').spawnSync(process.execPath,['-e',mode==='masked-signal'?'process.kill(process.pid,\"SIGSEGV\")':mode==='masked-exit'?'process.exit(137)':'process.exit(101)'],{stdio:'pipe'});
+ if(mode==='masked-signal'&&child.signal!=='SIGSEGV')process.exit(94);
+ if(mode!=='masked-signal'&&child.status!==(mode==='masked-exit'?137:101))process.exit(95);
+ console.error(\"  process didn't exit successfully: fixture-test-child (\"+(child.signal?'signal: 11, SIGSEGV: invalid memory reference':'exit status: '+child.status)+')');
+ process.exit(101);
+}
 if(args.includes('alpha')&&args.includes('--no-run')){
  if(mode==='unsafe')process.kill(process.pid,'SIGKILL');
  if(mode==='segv')process.kill(process.pid,'SIGSEGV');
@@ -53,7 +60,7 @@ if(mode==='lib-failure'&&args.includes('--lib')&&args.includes('--no-run')){cons
 console.log('fixture child PASS');process.exit(0);
 `);
  for(const [name,version] of [['chromium','Chromium 123'],['firefox','Firefox 123'],['geckodriver','geckodriver 0.35'],['cc','fixture cc'],['ar','fixture ar'],['rustc','fixture rustc']])put(`bin/${name}`,`#!/usr/bin/env bash\nprintf '%s\\n' '${version}'\n`);
- for(const mode of ['ordinary','preflights','unsafe','segv','abort','integrity','missing','lib-failure','authority','disabled-docs']){
+ for(const mode of ['ordinary','preflights','unsafe','segv','abort','integrity','missing','lib-failure','authority','disabled-docs','masked-signal','masked-exit','ordinary-101']){
   const evidence=path.join(sandbox,`evidence-${mode}`),commands=path.join(sandbox,`commands-${mode}.log`);fs.writeFileSync(commands,'');
   const env={...process.env,PATH:`${sandbox}/bin:${process.env.PATH}`,FIXTURE_MODE:mode,FIXTURE_COMMANDS:commands,JET_VERIFY_TMPDIR:path.join(sandbox,'temporary'),JET_CI_EVIDENCE_DIR:evidence,JET_CANVAS_CHROMIUM:path.join(sandbox,'bin/chromium'),JET_CANVAS_FIREFOX:path.join(sandbox,'bin/firefox'),JET_CANVAS_GECKODRIVER:path.join(sandbox,'bin/geckodriver'),JET_CANVAS_NODE:node,JET_CFFI_CC:path.join(sandbox,'bin/cc'),JET_CFFI_AR:path.join(sandbox,'bin/ar'),JET_CFFI_RUSTC:path.join(sandbox,'bin/rustc'),JETPACK_DOGFOOD_ROOT:path.join(sandbox,'dogfood'),JETPACK_DOGFOOD_TARGET_DIR:path.join(sandbox,'dogfood-target'),JET_CANDIDATE_COMPILER:'fixture-candidate'};
   for(const name of ['JET_TEST_SHARD','JET_TEST_SHARD_COUNT','JET_VERIFY_CANVAS_PREREQUISITES_ONLY','JET_VERIFY_TEMP_PROBE_ONLY'])delete env[name];
@@ -68,6 +75,13 @@ console.log('fixture child PASS');process.exit(0);
    for(const scope of ['agent-doc-flags','shell-parity','comparator-canary','comparator-corpus'])assert.equal(byScope[scope][0],'FAIL');assert.equal(byScope['run-2'][0],'PASS');assert.equal(rows.filter(row=>row[0]==='FAIL').length,4);
   }else if(['unsafe','segv','abort'].includes(mode)){
    assert.equal(byScope['compile-1'][0],'FAIL');assert.equal(byScope['compile-1'][2],String({unsafe:137,segv:139,abort:134}[mode]));for(const scope of ['compile-2','compile-3','compile-4','run-1','run-2','run-3','run-4','doc-4'])assert.equal(byScope[scope][0],'BLOCKED');assert(!logged.includes('cargo test -p fixture --test beta'));
+  }else if(['masked-signal','masked-exit'].includes(mode)){
+   assert.equal(byScope['run-1'][0],'FAIL');assert.equal(byScope['run-1'][2],'101');assert(byScope['run-1'][3].includes(mode==='masked-signal'?'unsafe Cargo child signal 11':'unsafe Cargo child exit 137'));
+   for(const scope of ['run-2','run-3','run-4','doc-4'])assert.equal(byScope[scope][0],'BLOCKED');assert.equal(byScope['compile-2'][0],'PASS');assert(!logged.includes('cargo test -p fixture --test beta --no-fail-fast\n'));
+   assert(fs.readFileSync(byScope['run-1'][4],'utf8').includes(mode==='masked-signal'?'signal: 11, SIGSEGV':'exit status: 137'));
+  }else if(mode==='ordinary-101'){
+   assert.equal(byScope['run-1'][0],'FAIL');assert.equal(byScope['run-1'][2],'101');assert.equal(byScope['run-1'][3],'-');
+   for(const scope of ['run-2','run-3','run-4','doc-4'])assert.equal(byScope[scope][0],'PASS');assert(logged.includes('cargo test -p fixture --test beta --no-fail-fast\n'));
   }else if(mode==='integrity'){
    assert(!logged.includes('cargo '));assert.equal(rows.length,0);
   }else if(mode==='lib-failure'){
@@ -84,5 +98,5 @@ console.log('fixture child PASS');process.exit(0);
   outcomes.push({mode,actualRc:result.status,counts:Object.fromEntries(['PASS','FAIL','BLOCKED'].map(status=>[status,rows.filter(row=>row[0]===status).length])),regression:'PASS'});
  }
  console.log(JSON.stringify({scope:'Actual production shell with real fixture children; NOT compiler/full-suite/Gate proof',sourceSha256:crypto.createHash('sha256').update(source).digest('hex'),outcomes,green:true},null,2));
- console.log('CHECK OK: durable verify-full collect-all runner (10 scenarios)');
+ console.log(`CHECK OK: durable verify-full collect-all runner (${outcomes.length} scenarios)`);
 }finally{fs.rmSync(sandbox,{recursive:true,force:true});}

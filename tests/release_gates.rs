@@ -739,7 +739,7 @@ fn verify_full_collects_independent_failures_without_executing_invalid_artifacts
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(String::from_utf8_lossy(&out.stdout)
-        .contains("CHECK OK: durable verify-full collect-all runner (10 scenarios)"));
+        .contains("CHECK OK: durable verify-full collect-all runner (13 scenarios)"));
 }
 
 #[test]

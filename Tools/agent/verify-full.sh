@@ -93,6 +93,32 @@ verify_record() {
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" "$verify_target" >> "$verify_summary"
   if [ "$1" != PASS ]; then verify_status=1; fi
 }
+# Cargo reports its own exit101 even when rustc/test children died by signal.
+# Inspect its actual diagnostic, retaining the complete fatal line in the log;
+# an ordinary assertion exit101 remains collectable.
+verify_cargo_fatal() {
+  local scope=$1 log=$2 line child_rc
+  local process_pattern="^[[:space:]]*(error:[[:space:]]*)?process didn't exit successfully:"
+  local signal_pattern='\(signal:[[:space:]]*([0-9]{1,3})(,|\))'
+  local status_pattern='\(exit status:[[:space:]]*([0-9]{1,3})\)'
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" =~ $process_pattern ]] || continue
+    if [[ "$line" =~ $signal_pattern ]]; then
+      child_rc=$((10#${BASH_REMATCH[1]}))
+      if [ "$child_rc" -gt 0 ] && [ "$child_rc" -le 128 ]; then
+        verify_unsafe="unsafe Cargo child signal $child_rc in $scope"
+        return
+      fi
+    elif [[ "$line" =~ $status_pattern ]]; then
+      child_rc=$((10#${BASH_REMATCH[1]}))
+      if [ "$child_rc" -eq 124 ] || { [ "$child_rc" -ge 128 ] && [ "$child_rc" -le 255 ]; }; then
+        verify_unsafe="unsafe Cargo child exit $child_rc in $scope"
+        return
+      fi
+    fi
+  done < "$log"
+}
+
 verify_run() {
   local scope=$1 rc log
   shift
@@ -106,12 +132,14 @@ verify_run() {
     return 0
   else
     rc=$?
-    verify_record FAIL "$scope" "$rc" - "$log"
+    # Cargo's wrapper rc must not mask a fatal nested process.
+    verify_cargo_fatal "$scope" "$log"
     # A killed/timed-out command is not an ordinary assertion failure. Do not
     # launch more children without a trustworthy resource/cleanup boundary.
     if [ "$rc" -eq 124 ] || [ "$rc" -ge 128 ]; then
       verify_unsafe="unsafe child exit $rc in $scope"
     fi
+    verify_record FAIL "$scope" "$rc" "${verify_unsafe:--}" "$log"
     return "$rc"
   fi
 }
