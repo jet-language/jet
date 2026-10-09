@@ -4213,6 +4213,7 @@ const CORE_EMBEDDED_HARDWARE_HOST_BEGIN: &str =
 const CORE_FIXED_ARITHMETIC_PRELUDE_RAW: &str =
     include_str!("../Prelude/Core/FixedArithmetic.rs");
 const CORE_POWER_PRELUDE_RAW: &str = include_str!("../Prelude/Core/Power.rs");
+const INLINE_LIST_PRELUDE: &str = include_str!("../Prelude/InlineList.rs");
 const CORE_DIVISION_PRELUDE_RAW: &str = include_str!("../Prelude/Core/Division.rs");
 const PORTABLE_CORE_PRELUDE_RAW: &str = include_str!("../Prelude/PortableCore.rs");
 const TARGET_ADAPTERS_PRELUDE_RAW: &str = include_str!("../Prelude/TargetAdapters.rs");

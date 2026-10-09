@@ -768,7 +768,7 @@ fn jet_browser_connect_profile(
         .filter(|value| matches!(value, jet_std::Dyn::Object(_)))
         .ok_or_else(|| JetBrowserError::new("protocol"))?;
     let cdp = jet_browser_get(capabilities, "goog:cdp")
-        .is_some_and(|value| matches!(value, jet_std::DataTree::Bool(true)));
+        .is_some_and(|value| matches!(value, jet_std::Dyn::Bool(true)));
     jet_browser_cdp_raw(&browser, cdp);
     Ok(browser)
 }

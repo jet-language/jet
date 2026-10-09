@@ -276,7 +276,7 @@ fn compiler_fact_pattern_fold_does_not_claim_user_enums() {
 /// (S57/M9.5) — are present before gating. Builds a single-module bundle the
 /// same way `lib.rs::check_for_eval` does, asserts sema accepted the program,
 /// then runs `tir_covers` on the sema-enriched function.
-fn checked_bundle(src: &str) -> (
+pub(in crate::Codegen) fn checked_bundle(src: &str) -> (
     crate::AST::ProgramBundle,
     std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
@@ -353,7 +353,7 @@ fn generated_comparable_calls_keep_exact_owners_when_template_spans_overlap() {
             "fn used(a: First, b: First) -> Bool Never! { a < b }\n",
             "fn run() {}\n",
         );
-        let bundle = checked_bundle(source);
+        let (bundle, _nominals) = checked_bundle(source);
         let first_identity = bundle.name_ledger
             .declared_identity(bundle.entry, "First.compare")
             .expect("First's executable compare declaration");
@@ -2317,7 +2317,7 @@ fn run() {
             Part::Process, Part::Crypto, Part::Math, Part::Encoding,
             Part::Data, Part::Fmt, Part::DataFmt, Part::Compute, Part::Http,
             Part::WebSocket, Part::Browser, Part::Args, Part::Reflect,
-            Part::AuthTokens, Part::AuthSession, Part::Sync, Part::Services,
+            Part::AuthSession, Part::Sync, Part::Services,
             Part::Mod,
         ]);
         let execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact.id);
@@ -2404,14 +2404,14 @@ fn borrowed_core_provider_arguments_are_never_copied() {
 #[test]
 fn single_module_entry_qualified_calls_resolve() {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let bundle = checked_bundle("fn helper() {}\nfn run() { helper()\nreturn\n}\n");
+        let (bundle, nominals) = checked_bundle("fn helper() {}\nfn run() { helper()\nreturn\n}\n");
         assert!(bundle.name_ledger.namespace_siblings(bundle.entry).next().is_none());
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let mut program = super::lower_checked_tir_program_for(&bundle, request)
+        let mut program = super::lower_checked_tir_program_for(&bundle, &nominals, request)
             .expect("lower single-module entry");
         let prefix = program.entry_call_alias.as_ref().expect("recorded entry alias").1.clone();
         let run = program.funcs.iter_mut().find(|function| function.name == "run")
@@ -2434,14 +2434,14 @@ fn single_module_entry_qualified_calls_resolve() {
 #[test]
 fn mir_lowering_invariant_reports_file_module_and_original_span() {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let bundle = checked_bundle("fn run() {}\n");
+        let (bundle, nominals) = checked_bundle("fn run() {}\n");
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
         for expression_failure in [false, true] {
-            let mut program = super::lower_checked_tir_program_for(&bundle, request.clone())
+            let mut program = super::lower_checked_tir_program_for(&bundle, &nominals, request.clone())
                 .expect("lower checked fixture");
             let function = program.funcs.iter_mut().find(|function| function.name == "run")
                 .expect("fixture run");
@@ -4883,7 +4883,7 @@ fn run() {
     }
 }
 "#;
-    let bundle = checked_bundle(source);
+    let (bundle, _nominals) = checked_bundle(source);
     let run = bundle.modules[bundle.entry].items.iter().find_map(|item| match item {
         Item::Func(function) if function.name == "run" => Some(function),
         _ => None,

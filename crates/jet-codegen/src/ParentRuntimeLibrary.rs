@@ -1,7 +1,7 @@
 //! Private compiler-host admission for the Jet-authored parent runtime.
 //! This bootstrap transport dies at cutover; it supplies no runtime semantics.
 use crate::NativeLibraryImage::Image;
-use jet_foundation::{DataTree::DataTree, JSON, SHA256};
+use jet_foundation::{Dyn::Dyn, JSON, SHA256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::CString;
 use std::io::Read;
@@ -154,10 +154,10 @@ pub fn admit(
     resident.result.as_ref().map_err(|error| *error)
 }
 
-fn text<'a>(value: &'a DataTree, key: &str) -> Result<&'a str, Refusal> {
+fn text<'a>(value: &'a Dyn, key: &str) -> Result<&'a str, Refusal> {
     value
         .get(key)
-        .and_then(DataTree::as_str)
+        .and_then(Dyn::as_str)
         .map_err(|_| Refusal::RuntimeLibraryReceiptHashMismatch)
 }
 
@@ -193,7 +193,7 @@ fn prepare(path: &Path, receipt_bytes: &[u8]) -> Result<Prepared, Refusal> {
     }
     let expected = receipt
         .get("exports")
-        .and_then(DataTree::as_array)
+        .and_then(Dyn::as_array)
         .map_err(|_| Refusal::RuntimeLibraryExportSealMismatch)?;
     let mut exports = BTreeSet::new();
     for row in expected {
@@ -216,13 +216,13 @@ fn prepare(path: &Path, receipt_bytes: &[u8]) -> Result<Prepared, Refusal> {
     // Bind the mandatory ABI rows to this same sealed symbol inventory.
     let abi = receipt
         .get("exportABI")
-        .and_then(DataTree::as_array)
+        .and_then(Dyn::as_array)
         .map_err(|_| Refusal::RuntimeLibraryExportSealMismatch)?;
     if abi.len() != exports.len() {
         return Err(Refusal::RuntimeLibraryExportSealMismatch);
     }
     for (row, name) in abi.iter().zip(exports.iter()) {
-        if row.get("symbol").and_then(DataTree::as_str)
+        if row.get("symbol").and_then(Dyn::as_str)
             .map_err(|_| Refusal::RuntimeLibraryExportSealMismatch)? != name.as_str()
         {
             return Err(Refusal::RuntimeLibraryExportSealMismatch);
@@ -253,7 +253,7 @@ fn prepare(path: &Path, receipt_bytes: &[u8]) -> Result<Prepared, Refusal> {
     for (kind, section_type) in [("init", 14), ("fini", 15)] {
         let entries = lifecycle
             .get(kind)
-            .and_then(DataTree::as_array)
+            .and_then(Dyn::as_array)
             .map_err(|_| Refusal::RuntimeLibraryInitializerSealMismatch)?;
         let mut names = BTreeSet::new();
         let mut addresses = Vec::with_capacity(entries.len());
@@ -262,7 +262,7 @@ fn prepare(path: &Path, receipt_bytes: &[u8]) -> Result<Prepared, Refusal> {
             let name =
                 text(row, "name").map_err(|_| Refusal::RuntimeLibraryInitializerSealMismatch)?;
             let priority = match row.get("priority") {
-                Ok(DataTree::Int(value)) if (0..=65535).contains(value) => *value,
+                Ok(Dyn::Int(value)) if (0..=65535).contains(value) => *value,
                 _ => return Err(Refusal::RuntimeLibraryInitializerSealMismatch),
             };
             if last_priority.is_some_and(|(previous, previous_name)| {
@@ -297,10 +297,10 @@ fn prepare(path: &Path, receipt_bytes: &[u8]) -> Result<Prepared, Refusal> {
     })
 }
 
-fn exact_names(receipt: &DataTree, key: &str, actual: &[&str]) -> Result<(), Refusal> {
+fn exact_names(receipt: &Dyn, key: &str, actual: &[&str]) -> Result<(), Refusal> {
     let expected = receipt
         .get(key)
-        .and_then(DataTree::as_array)
+        .and_then(Dyn::as_array)
         .map_err(|_| Refusal::RuntimeLibraryExportSealMismatch)?;
     if expected.len() != actual.len()
         || expected
