@@ -49,16 +49,16 @@ fn fx_map_lookup_cache() -> MIRProgram Never! {
     missed_again :: fx_owned(&b, lookup_ty, MIROperation.MapLookup{map: map, key: key, cache: miss_cache})
     fx_print(&b, fx_copy(&b, fx_bool(), MIROperation.OptionIsSome{subject: missed_again}))
     optional_ty :: mir_type_from_kind(MIRTypeKind.Option{inner: value_ty})
-    loop lookup in [MIRValueID]{hit, miss} {
+    loop lookup in ([MIRValueID]{hit, miss}) {
         place :: fx_lookup_projection(&b, map, lookup, true, optional_ty)
         option :: fx_owned(&b, optional_ty, MIROperation.ReadPlace{place: place})
         fx_print(&b, fx_copy(&b, fx_bool(), MIROperation.OptionIsSome{subject: option}))
         fx_do(&b, MIROperation.Drop{value: option, kind: MIRDropKind.Value})
     }
-    loop lookup in [MIRValueID]{hit, again, miss, missed_again} {
+    loop lookup in ([MIRValueID]{hit, again, miss, missed_again}) {
         fx_do(&b, MIROperation.Drop{value: lookup, kind: MIRDropKind.Value})
     }
-    loop cache in [MIRPlaceID]{hit_cache, miss_cache} {
+    loop cache in ([MIRPlaceID]{hit_cache, miss_cache}) {
         owned :: fx_owned(&b, cache_ty, MIROperation.MovePlace{place: cache})
         fx_do(&b, MIROperation.Drop{value: owned, kind: MIRDropKind.Value})
     }
@@ -77,7 +77,7 @@ fn fx_range_values() -> MIRProgram Never! {
     first :: fx_int_const(&b, 2)
     last :: fx_int_const(&b, 4)
     at := U64{0}
-    loop exclusive in [Bool]{true, false} {
+    loop exclusive in ([Bool]{true, false}) {
         range :: fx_owned(&b, range_ty, MIROperation.Range{start: first, end: last, exclusive: exclusive})
         at = fx_iter_loop(&b, range, fx_int(), false, None, None, at)
         fx_do(&b, MIROperation.Drop{value: range, kind: MIRDropKind.Value})
