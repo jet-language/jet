@@ -74,7 +74,7 @@ fn transform(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RError! {
 }
 
 fn transform_table<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {
-    raw :: abi.transform_table(session.value, json.to_string(~rows) ?? return Err(RError.Protocol), deadline_ms)
+    raw :: abi.transform_table(session.value, json.to_string(rows.copy()) ?? return Err(RError.Protocol), deadline_ms)
     code :: abi.take_error()
     value := decode_response(raw, code)
     return Ok(json.decode<[T]>(json.to_string(value) ?? return Err(RError.Protocol)) ?? return Err(RError.Protocol))
@@ -94,7 +94,7 @@ fn double_values(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RError! 
 }
 
 fn double_values_table<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {
-    raw :: abi.double_values_table(session.value, json.to_string(~rows) ?? return Err(RError.Protocol), deadline_ms)
+    raw :: abi.double_values_table(session.value, json.to_string(rows.copy()) ?? return Err(RError.Protocol), deadline_ms)
     code :: abi.take_error()
     value := decode_response(raw, code)
     return Ok(json.decode<[T]>(json.to_string(value) ?? return Err(RError.Protocol)) ?? return Err(RError.Protocol))
@@ -114,7 +114,7 @@ fn scale_table(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RError! {
 }
 
 fn scale_table_table<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {
-    raw :: abi.scale_table_table(session.value, json.to_string(~rows) ?? return Err(RError.Protocol), deadline_ms)
+    raw :: abi.scale_table_table(session.value, json.to_string(rows.copy()) ?? return Err(RError.Protocol), deadline_ms)
     code :: abi.take_error()
     value := decode_response(raw, code)
     return Ok(json.decode<[T]>(json.to_string(value) ?? return Err(RError.Protocol)) ?? return Err(RError.Protocol))
@@ -134,7 +134,7 @@ fn plot_scores(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RError! {
 }
 
 fn plot_scores_table<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {
-    raw :: abi.plot_scores_table(session.value, json.to_string(~rows) ?? return Err(RError.Protocol), deadline_ms)
+    raw :: abi.plot_scores_table(session.value, json.to_string(rows.copy()) ?? return Err(RError.Protocol), deadline_ms)
     code :: abi.take_error()
     value := decode_response(raw, code)
     return Ok(json.decode<[T]>(json.to_string(value) ?? return Err(RError.Protocol)) ?? return Err(RError.Protocol))
@@ -154,7 +154,7 @@ fn fail_call(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RError! {
 }
 
 fn fail_call_table<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {
-    raw :: abi.fail_call_table(session.value, json.to_string(~rows) ?? return Err(RError.Protocol), deadline_ms)
+    raw :: abi.fail_call_table(session.value, json.to_string(rows.copy()) ?? return Err(RError.Protocol), deadline_ms)
     code :: abi.take_error()
     value := decode_response(raw, code)
     return Ok(json.decode<[T]>(json.to_string(value) ?? return Err(RError.Protocol)) ?? return Err(RError.Protocol))
