@@ -72,3 +72,23 @@ fn raylib_and_font_host_policies_parse_as_trusted_core() {
         Parser::parse(&tokens).unwrap_or_else(|diagnostics| panic!("{name} trusted parsing: {diagnostics:#?}"));
     }
 }
+
+#[test]
+fn terminal_policy_internals_parse_as_trusted_core() {
+    let source = include_str!("../../../Core/term/term.jet");
+    let (tokens, diagnostics) = Lexer::lex_generated(source);
+    assert!(diagnostics.is_empty(), "terminal trusted lexing: {diagnostics:#?}");
+    Parser::parse(&tokens).expect("terminal policy must parse");
+}
+
+#[test]
+fn raylib_and_font_host_policies_parse_as_trusted_core() {
+    for (name, source) in [
+        ("raylib", include_str!("../../../Core/game/raylib.jet")),
+        ("font", include_str!("../../../Core/font/font.jet")),
+    ] {
+        let (tokens, diagnostics) = Lexer::lex_generated(source);
+        assert!(diagnostics.is_empty(), "{name} trusted lexing: {diagnostics:#?}");
+        Parser::parse(&tokens).unwrap_or_else(|diagnostics| panic!("{name} trusted parsing: {diagnostics:#?}"));
+    }
+}
