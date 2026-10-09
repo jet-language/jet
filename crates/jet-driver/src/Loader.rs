@@ -2754,7 +2754,20 @@ fn load_entry_with_overlays_mode_on_stack(
         // Source Core packages can call other source-owned Core members.
         // Include their transitive import closure so lowering has each private
         // module alias available, rather than falling back to a Core ABI call.
-        for dependency in program.imports.iter().filter_map(core_source_import_module) {
+        for import in &program.imports {
+            let private_alias = match &import.kind {
+                ImportKind::Module(alias, _) => Some(alias.as_str()),
+                ImportKind::Unqualified { module_alias, .. } => Some(module_alias.as_str()),
+                _ => None,
+            };
+            if let Some(part) = private_alias.and_then(
+                jet_foundation::CoreSourceParts::core_private_source_part_by_alias,
+            ) {
+                if scheduled_core_source_modules.insert(part.source.module) {
+                    core_source_modules.push(part.source);
+                }
+            }
+            let Some(dependency) = core_source_import_module(import) else { continue };
             if let Some(dependency) =
                 jet_foundation::CoreModuleExports::core_source_module(&dependency)
             {
@@ -6255,6 +6268,25 @@ mod stale_manifest_name_tests {
                     && matches!(&import.kind, ImportKind::Module(name, _) if name == part.alias)
             }), "{owner} must retain {alias} as an ordinary module binding");
         }
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn core_private_alias_import_loads_its_part_without_public_owner_import() {
+        let root = tempdir("core-private-alias-closure");
+        let entry = root.join("main.jet");
+        fs::write(&entry, "use core.encoding as encoding\nfn run() {}\n").unwrap();
+        let bundle = load_entry(entry.to_str().unwrap()).expect("Core encoding closure loads");
+        let part = jet_foundation::CoreSourceParts::core_private_source_part_by_alias(
+            "__core_encoding_cbor_parse",
+        ).expect("CBOR parse part is cataloged");
+        assert_eq!(bundle.modules.iter().filter(|module| module.alias == part.source.alias).count(), 1);
+        let stream = bundle.modules.iter()
+            .find(|module| module.display == "Core/encoding/cbor_stream.jet")
+            .expect("encoding owns the CBOR stream part");
+        assert!(stream.imports.iter().any(|import|
+            import.alias == "parser"
+                && matches!(&import.kind, ImportKind::Module(name, _) if name == part.source.alias)));
         let _ = fs::remove_dir_all(root);
     }
 

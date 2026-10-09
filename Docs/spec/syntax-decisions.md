@@ -185,6 +185,9 @@ Imported Core record types retain their source-owned associated methods:
 `EncodingError.new(...)` through a grouped import, or
 `encoding.EncodingError.new(...)`, resolves the record's method rather
 than a module member called `new`.
+Within compiler-owned Core source, an import of a sealed part's catalog
+alias also joins the transitive source closure, even if that part's public
+owner was not imported. This does not expose private aliases to user code.
 
 **D-SOLVER-LIB1 — Explicit solver library**: `core.compute.solve` ships a finite
 solver API with explicit `Solver` state, deterministic insertion-order
