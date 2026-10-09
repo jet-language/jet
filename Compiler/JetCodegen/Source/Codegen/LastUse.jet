@@ -59,6 +59,15 @@ struct JetCodegenLastUseGroup {
     pub payloads: [Int]
 }
 
+// The control-flow facts move_last_uses reads: each block's predecessors,
+// whether the entry reaches it along explicit edges, and the candidate whose
+// drop flag guards it as a cleanup block (-1 for none).
+struct JetCodegenLastUseCfg {
+    pub predecessors: [[Int]]
+    pub reachable: [Bool]
+    pub guarded: [Int]
+}
+
 // How one operation treats one of its operand values: takes it (stores,
 // wraps or passes it owned), carries it onward in its result, or only
 // inspects it.
@@ -587,62 +596,11 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
     }
     if candidates.len() == 0 -> return
 
-    // CFG: successors, predecessors, blocks reachable from the entry along
-    // explicit edges, and cleanup blocks guarded by one local's drop flag.
-    successors := [[Int]]{}
-    predecessors := [[Int]]{}
-    loop filler in 0..<block_count -> &predecessors.push([Int]{})
-    loop (block, row) in builder.blocks {
-        targets := [Int]{}
-        loop target in mir_terminator_targets(row.terminator) {
-            if block_index.get(target.value) == .Val(target_index) {
-                &targets.push(target_index)
-                &predecessors[target_index].push(block)
-            }
-        }
-        &successors.push(targets)
-    }
-    reachable := [Bool]{}
-    loop filler in 0..<block_count -> &reachable.push(false)
-    if block_index.get(builder.entry.value) == .Val(entry) {
-        pending := [Int]{entry}
-        reachable[entry] = true
-        loop pending.len() > 0 {
-            block :: &pending.pop() ?? { break }
-            loop target in successors[block] {
-                if !reachable[target] {
-                    reachable[target] = true
-                    &pending.push(target)
-                }
-            }
-        }
-    }
-    guard_of := [Int]{}
-    loop (block, row) in builder.blocks {
-        flag_guard := -1
-        if row.terminator == .Branch(condition, then_target, else_target) && then_target != else_target {
-            if def_block.get(condition.value) == .Val(flag_block) {
-                flag_index :: def_index.get(condition.value) ?? -1
-                if builder.blocks[flag_block].instructions[flag_index].operation == .ReadPlace(flag) {
-                    flag_guard = flag_candidate.get(flag.value) ?? -1
-                }
-            }
-        }
-        &guard_of.push(flag_guard)
-    }
-    guarded := [Int]{}
-    loop (block, preds) in predecessors {
-        shared_guard := -1
-        if preds.len() > 0 {
-            shared_guard = guard_of[preds[0]]
-            loop pred in preds {
-                then_index := -1
-                if builder.blocks[pred].terminator == .Branch(_, then_target, _) -> then_index = block_index.get(then_target.value) ?? -1
-                if guard_of[pred] != shared_guard || then_index != block -> shared_guard = -1
-            }
-        }
-        &guarded.push(shared_guard)
-    }
+    // CFG: predecessors, reachable blocks and guarded cleanup blocks.
+    cfg := jet_codegen_last_use_cfg(builder, block_count, block_index, def_block, def_index, flag_candidate)
+    predecessors := ^cfg.predecessors
+    reachable := ^cfg.reachable
+    guarded := ^cfg.guarded
 
     // Borrows and views of candidate places, by origin. An origin is a copy
     // (its own ReadPlace value, observing its place's candidates) or a
@@ -873,53 +831,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
         }
     }
 
-    // Each live-in candidate propagates to predecessors once. Sparse rows
-    // and candidate deltas reach the same least fixed point without rescans.
-    killed := [[Int:Bool]]{}
-    live_in := [[Int:Bool]]{}
-    live_out := [[Int:Bool]]{}
-    live_delta := [[Int]]{}
-    delta_cursor := [Int]{}
-    pending := [Int]{}
-    queued := [Bool]{}
-    loop block in 0..<block_count {
-        &killed.push([Int:Bool]{})
-        &live_in.push([Int:Bool]{})
-        &live_out.push([Int:Bool]{})
-        &live_delta.push([Int]{})
-        &delta_cursor.push(0)
-        // Pop the initial blocks in reverse physical order.
-        &pending.push(block)
-        &queued.push(true)
-        loop event_index in event_start[block]..<event_start[block + 1] {
-            event :: events[event_index]
-            if event.kill {
-                _ := &killed[block].add(event.candidate, true)
-            } else if killed[block].get(event.candidate) == None && live_in[block].get(event.candidate) == None {
-                _ := &live_in[block].add(event.candidate, true)
-                &live_delta[block].push(event.candidate)
-            }
-        }
-    }
-    loop pending.len() > 0 {
-        block :: &pending.pop() ?? { break }
-        queued[block] = false
-        loop delta_cursor[block] < live_delta[block].len() {
-            candidate := live_delta[block][delta_cursor[block]]
-            delta_cursor[block] = delta_cursor[block] + 1
-            loop pred in predecessors[block] {
-                if live_out[pred].get(candidate) != None -> next
-                _ := &live_out[pred].add(candidate, true)
-                if killed[pred].get(candidate) != None || live_in[pred].get(candidate) != None -> next
-                _ := &live_in[pred].add(candidate, true)
-                &live_delta[pred].push(candidate)
-                if !queued[pred] {
-                    queued[pred] = true
-                    &pending.push(pred)
-                }
-            }
-        }
-    }
+    live_out :: jet_codegen_last_use_live_out(block_count, events, event_start, predecessors)
 
     // Each value's uses, as parallel (block, index) rows with the terminator
     // at the block's instruction count, to decide whether a read is consumed.
@@ -1083,4 +995,119 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
         }
         builder.blocks[block].instructions = rewritten
     }
+}
+
+// move_last_uses's CFG: successors, predecessors, blocks reachable from the
+// entry along explicit edges, and cleanup blocks guarded by one local's drop
+// flag (every predecessor branches to the block on that flag's then edge).
+// A separate function keeps move_last_uses within what one backend codegen
+// unit compiles quickly.
+fn jet_codegen_last_use_cfg(builder: JetCodegenBuilder, block_count: Int, block_index: [U64:Int], def_block: [U64:Int], def_index: [U64:Int], flag_candidate: [U64:Int]) -> JetCodegenLastUseCfg Never! {
+    successors := [[Int]]{}
+    predecessors := [[Int]]{}
+    loop filler in 0..<block_count -> &predecessors.push([Int]{})
+    loop (block, row) in builder.blocks {
+        targets := [Int]{}
+        loop target in mir_terminator_targets(row.terminator) {
+            if block_index.get(target.value) == .Val(target_index) {
+                &targets.push(target_index)
+                &predecessors[target_index].push(block)
+            }
+        }
+        &successors.push(targets)
+    }
+    reachable := [Bool]{}
+    loop filler in 0..<block_count -> &reachable.push(false)
+    if block_index.get(builder.entry.value) == .Val(entry) {
+        pending := [Int]{entry}
+        reachable[entry] = true
+        loop pending.len() > 0 {
+            block :: &pending.pop() ?? { break }
+            loop target in successors[block] {
+                if !reachable[target] {
+                    reachable[target] = true
+                    &pending.push(target)
+                }
+            }
+        }
+    }
+    guard_of := [Int]{}
+    loop (block, row) in builder.blocks {
+        flag_guard := -1
+        if row.terminator == .Branch(condition, then_target, else_target) && then_target != else_target {
+            if def_block.get(condition.value) == .Val(flag_block) {
+                flag_index :: def_index.get(condition.value) ?? -1
+                if builder.blocks[flag_block].instructions[flag_index].operation == .ReadPlace(flag) {
+                    flag_guard = flag_candidate.get(flag.value) ?? -1
+                }
+            }
+        }
+        &guard_of.push(flag_guard)
+    }
+    guarded := [Int]{}
+    loop (block, preds) in predecessors {
+        shared_guard := -1
+        if preds.len() > 0 {
+            shared_guard = guard_of[preds[0]]
+            loop pred in preds {
+                then_index := -1
+                if builder.blocks[pred].terminator == .Branch(_, then_target, _) -> then_index = block_index.get(then_target.value) ?? -1
+                if guard_of[pred] != shared_guard || then_index != block -> shared_guard = -1
+            }
+        }
+        &guarded.push(shared_guard)
+    }
+    JetCodegenLastUseCfg{predecessors: ^predecessors, reachable: ^reachable, guarded: ^guarded}
+}
+
+// move_last_uses's backward liveness: the candidates live out of each block.
+// Each live-in candidate propagates to predecessors once. Sparse rows and
+// candidate deltas reach the same least fixed point without rescans.
+fn jet_codegen_last_use_live_out(block_count: Int, events: [JetCodegenLastUseEvent], event_start: [Int], predecessors: [[Int]]) -> [[Int:Bool]] Never! {
+    killed := [[Int:Bool]]{}
+    live_in := [[Int:Bool]]{}
+    live_out := [[Int:Bool]]{}
+    live_delta := [[Int]]{}
+    delta_cursor := [Int]{}
+    pending := [Int]{}
+    queued := [Bool]{}
+    loop block in 0..<block_count {
+        &killed.push([Int:Bool]{})
+        &live_in.push([Int:Bool]{})
+        &live_out.push([Int:Bool]{})
+        &live_delta.push([Int]{})
+        &delta_cursor.push(0)
+        // Pop the initial blocks in reverse physical order.
+        &pending.push(block)
+        &queued.push(true)
+        loop event_index in event_start[block]..<event_start[block + 1] {
+            event :: events[event_index]
+            if event.kill {
+                _ := &killed[block].add(event.candidate, true)
+            } else if killed[block].get(event.candidate) == None && live_in[block].get(event.candidate) == None {
+                _ := &live_in[block].add(event.candidate, true)
+                &live_delta[block].push(event.candidate)
+            }
+        }
+    }
+    loop pending.len() > 0 {
+        block :: &pending.pop() ?? { break }
+        queued[block] = false
+        loop delta_cursor[block] < live_delta[block].len() {
+            candidate := live_delta[block][delta_cursor[block]]
+            delta_cursor[block] = delta_cursor[block] + 1
+            loop pred in predecessors[block] {
+                if live_out[pred].get(candidate) != None -> next
+                _ := &live_out[pred].add(candidate, true)
+                if killed[pred].get(candidate) != None || live_in[pred].get(candidate) != None -> next
+                _ := &live_in[pred].add(candidate, true)
+                &live_delta[pred].push(candidate)
+                if !queued[pred] {
+                    queued[pred] = true
+                    &pending.push(pred)
+                }
+            }
+        }
+    }
+    live_out
 }
