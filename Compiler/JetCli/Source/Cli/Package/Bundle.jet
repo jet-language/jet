@@ -292,7 +292,9 @@ fn jet_cli_bundle_canonical_status_integer(text: String) -> Int? Never! {
     if raw.len() == 0 -> return None
     start :: if raw[0] == (U8{45}) || raw[0] == (U8{43}) -> 1 else -> 0
     if start == raw.len() -> return None
-    loop index in start..<raw.len() -> if raw[index] < (U8{48}) || raw[index] > (U8{57}) -> return None
+    loop index in start..<raw.len() {
+        if raw[index] < (U8{48}) || raw[index] > (U8{57}) -> return None
+    }
     number :: Int.parse(text) ?? return None
     if number < -170141183460469231731687303715884105728 || number > 170141183460469231731687303715884105727 -> return None
     Val(number)

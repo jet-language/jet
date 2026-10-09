@@ -45,13 +45,15 @@ fn jet_cli_flash_execute(plan: JetCLIFlashPlan) -[FS, Env, Exec, Time.Wait]> Jet
     cli_files.remove_all(output) ?? ()
     if executed == {
         .Err(error) -> {
-            detail :: if error == { .Unsupported(text) -> text .IO(text) -> text }
+            detail :: if error == {
+                .Unsupported(text) -> text
+                .IO(text) -> text
+            }
             jet_cli_flash_execution_failed("authority_spawn", detail, status.mechanism, status.policy)
         }
         .Ok(result) -> {
             code :: if result.receipt.code == .Val(value) -> "Some({value})" else -> "None"
-            failure :: if result.receipt.success -> JetCLIFlashFailure?{None}
-                else -> Val(JetCLIFlashFailure{kind: if result.receipt.code == None -> "tool_signal" else -> "tool_exit", detail: "declared flash tool exited with status {code}"})
+            failure :: if result.receipt.success -> JetCLIFlashFailure?{None} else -> Val(JetCLIFlashFailure{kind: if result.receipt.code == None -> "tool_signal" else -> "tool_exit", detail: "declared flash tool exited with status {code}"})
             JetCLIFlashExecution{status: result.receipt.code, stdout: result.receipt.stdout, stderr: result.receipt.stderr, mechanism: result.mechanism, policy: result.policy, failure: failure}
         }
     }
