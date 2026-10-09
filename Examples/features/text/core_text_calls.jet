@@ -13,6 +13,20 @@ fn run() {
     print(fmt.oct(10))
     print(fmt.pad("x", 3, "."))
     print(fmt.sci(Float{123.4}, 2))
+    if fmt.quantity(Float{-0.0}) != "-0" -> panic("quantity signed zero")
+    if fmt.quantity(Float{0.1}) != "0.1" -> panic("quantity fraction")
+    if fmt.fixed_int(-123456789012345678901234567890, 2) != "-123456789012345678901234567890.00" {
+        panic("fixed exact Int")
+    }
+    if fmt.grouped_int_fixed(123456789012345678901234567890, 1) != "123,456,789,012,345,678,901,234,567,890.0" {
+        panic("grouped exact Int")
+    }
+    if fmt.hex_decimal(" +000255 ", 4) != "00ff" -> panic("hex decimal sign/zeros")
+    if fmt.bin_decimal("-00010") != "-1010" -> panic("bin decimal sign/zeros")
+    if fmt.oct_decimal(" 10 ") != "12" -> panic("oct decimal trim")
+    if fmt.hex_decimal("-0000", 0) != "0" -> panic("radix negative zero")
+    if fmt.bin_decimal(" 1_0 ") != "1_0" -> panic("radix malformed digits")
+    if fmt.oct_decimal("+") != "+" -> panic("radix malformed sign")
     loop grapheme in text.grapheme_views("áb") -> print(grapheme)
     print(text.graphemes("áb").len())
     print(text.is_whitespace(" "))

@@ -18,6 +18,30 @@ fn jet_codegen_core_reach_is_top_level(kind: TFuncKind) -> Bool Never! {
     }
 }
 
+// Source-owned selector policy. Both reachability and expression lowering
+// use this map, so the exact helper emitted by a selector is rooted.
+fn jet_codegen_string_format_member(ty: Type, format: TStrFormat) -> String? Never! {
+    integer :: jet_codegen_string_format_integer(ty)
+    if format == {
+        .Display | .Debug -> None
+        .Pretty -> Val("pretty")
+        .Fixed(_) -> Val(if integer -> "fixed_int" else -> "decimal")
+        .Grouped(_) -> Val(if integer -> "grouped_int_fixed" else -> "grouped")
+        .Hex(_) -> Val(if integer -> "hex" else -> "hex_decimal")
+        .Bin -> Val(if integer -> "bin" else -> "bin_decimal")
+        .Oct -> Val(if integer -> "oct" else -> "oct_decimal")
+        .Sci(_) -> Val("sci")
+        .Percent(_) -> Val("percent")
+        .Pad(_, _) -> Val("pad")
+        .PadLeft(_, _) -> Val("pad_left")
+        .Unit(_) -> Val("quantity")
+    }
+}
+
+fn jet_codegen_string_format_source(function: TFunc) -> Bool Never! {
+    function.module_identity.starts_with("<corelib>/") && (function.source_file == "Core/text/fmt.jet" || function.source_file.ends_with("/Core/text/fmt.jet")) && jet_codegen_core_reach_is_top_level(function.kind)
+}
+
 fn jet_codegen_core_reach_add(keys: &[String], key: String) Never! {
     if key != "" -> &keys.push(key)
 }
@@ -182,6 +206,7 @@ pub fn jet_codegen_reachable_core_rows(functions: [TFunc], candidates: ^[Bool], 
     precise_helpers := [String:String]{}
     reachable := [Bool]{}
     pending := [Int]{}
+    fmt_keys := [String:String]{}
     loop (index, function) in functions {
         if !candidates[index] {
             &reachable.push(false)

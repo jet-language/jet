@@ -29,6 +29,7 @@ const from = stages.indexOf(first), until = stages.indexOf(last);
 if (from < 0 || until < from) throw new Error(`bad stage range ${first}..${last}`);
 const library = join(out, "library");
 mkdirSync(library, { recursive: true });
+const exportList = test !== null ? join(out, "runtime.exports") : join(repo, "Compiler/JetRuntime/exports.list");
 const read = (path) => readFileSync(join(repo, path), "utf8");
 const sorted = (dir) => readdirSync(join(repo, dir)).filter((name) => name.endsWith(".jet")).sort().map((name) => `${dir}/${name}`);
 const coreUses = new Set(["use core.math as math"]);
