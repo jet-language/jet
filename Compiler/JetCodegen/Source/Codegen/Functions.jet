@@ -4359,7 +4359,7 @@ fn lower_foreign_artifacts(modules: [SemaGraphModuleResult], package_facts: MIRP
 fn jet_codegen_lower_asm_leaf(row: SemaCheckedForeignFunction, modules: [SemaGraphModuleResult], applicability: MIRTargetApplicability) -> MIRFunction Never! {
     unit :: Type.Named{name: "Unit"}
     return_type :: jet_codegen_lower_type_with_modules(row.return_type ?? unit, modules, row.module_identity, [String]{})
-    entry :: MIRBlockID{value: U64{0}}
+    entry :: MIRBlockID{value: stable_id("mir-block", "{row.key}|{row.source_file}|{row.span.start}|{row.span.end}|asm-entry")}
     declared_return := MIRType?{None}
     if row.return_type != None -> declared_return = Val(return_type)
     MIRFunction{
