@@ -1944,6 +1944,7 @@ fn check_program(input: Program, module_name: String, source_file: String, sourc
         loop diagnostic in job_diagnostics -> &diagnostics.push(diagnostic)
         complete = false
     }
+    loop diagnostic in sema_scope_members_check(source_program.items) -> &diagnostics.push(diagnostic)
     environment := sema_scope_environment_init(module_name, "", module_name, source_file, SemaSourceOrigin.Snapshot, source_segments, local_declarations)
     // One program, no registration graph and no checked types.
     program := sema_program_tables_init(None, [TTypeDef]{})
@@ -2732,6 +2733,8 @@ fn sema_check_registration_module_program(environment: SemaScopeEnvironment, pro
             module_result.complete = false
             &module_result.incomplete_reasons.push("invalid job names")
         }
+        // Rust ScopeMembers.rs `check`: structural `.member { … }` checks in every mode.
+        loop diagnostic in sema_scope_members_check(graph.modules[module_index].program.items) -> &module_result.diagnostics.push(diagnostic)
         item_index := 0
         loop item_index < graph.modules[module_index].program.items.len() {
             if count_work -> items_scanned += 1
