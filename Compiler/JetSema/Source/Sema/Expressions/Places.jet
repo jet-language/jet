@@ -434,9 +434,15 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
 // D-SWIZZLE1 (Rust `infer_field`, `parse_swizzle_member`): `v.xy` names up to
 // four x/y/z/w lanes of a vector or swizzleable SIMD lane type. One lane reads
 // the scalar; several build a VecN, or the same lane type when all are named.
-fn sema_expression_math_swizzle(receiver: TExpr, type_name_value: String, member: String, span: Span, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+enum SemaMathSwizzleParse {
+    NotSwizzle
+    InvalidLane
+    Lanes([Int])
+}
+
+fn sema_expression_math_swizzle_parse(type_name_value: String, member: String, span: Span, diagnostics: &[Diagnostic]) -> SemaMathSwizzleParse {
     swizzleable :: type_name_value == "F32x4" || type_name_value == "F64x2" || type_name_value == "Vec2" || type_name_value == "Vec3" || type_name_value == "Vec4"
-    if !swizzleable || member.len() == 0 || member.len() > 4 -> return SemaDirectSpecialCheck{handled: false, value: None}
+    if !swizzleable || member.len() == 0 || member.len() > 4 -> return .NotSwizzle
     arity :: sema_call_math_arity(type_name_value)
     lanes := [Int]{}
     loop byte in member.bytes() {
@@ -447,7 +453,7 @@ fn sema_expression_math_swizzle(receiver: TExpr, type_name_value: String, member
             122 -> 2
             119 -> 3
             else -> {
-                return SemaDirectSpecialCheck{handled: false, value: None}
+                return .NotSwizzle
             }
         }
         letter :: if lane == {
@@ -464,10 +470,20 @@ fn sema_expression_math_swizzle(receiver: TExpr, type_name_value: String, member
                 else -> "x/y/z/w"
             }
             &diagnostics.push(sema_error("E3110", span, "lane `{letter}` isn't valid on `{type_name_value}`", "swizzle members name lanes with x/y/z/w — `{type_name_value}` only has {valid}", "use only the lanes defined for `{type_name_value}`"))
-            return SemaDirectSpecialCheck{handled: true, value: None}
+            return .InvalidLane
         }
         &lanes.push(lane)
     }
+    .Lanes(lanes)
+}
+
+fn sema_expression_math_swizzle(receiver: TExpr, type_name_value: String, member: String, span: Span, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    lanes :: if sema_expression_math_swizzle_parse(type_name_value, member, span, &diagnostics) == {
+        .NotSwizzle -> { return SemaDirectSpecialCheck{handled: false, value: None} }
+        .InvalidLane -> { return SemaDirectSpecialCheck{handled: true, value: None} }
+        .Lanes(parsed) -> parsed
+    }
+    arity :: sema_call_math_arity(type_name_value)
     result_ty :: if {
         lanes.len() == 1 -> sema_call_math_scalar_type(type_name_value)
         lanes.len() == arity && !type_name_value.starts_with("Vec") -> Type.Named{name: type_name_value}
