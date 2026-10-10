@@ -53,6 +53,7 @@ fn fc_nominal_owners() {
 fn fc_embedded_integer_constants() {
     span :: Span{start: 0, end: 1}
     environment :: sema_scope_environment_init("fixture", "fixture", "fixture", "fixture.jet", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
+    program :: sema_program_tables_init(None, [TTypeDef]{})
     scopes := sema_scope_init("fixture")
     state := sema_ownership_state_init()
     context := sema_check_context_init()
@@ -71,11 +72,11 @@ fn fc_embedded_integer_constants() {
         map_value :: TComptimeValue.Map{entries: [TComptimeMapEntry]{TComptimeMapEntry{key: typed_key, value: TComptimeValue.String{value: "found"}}}}
         lowered_map :: jet_codegen_lower_comptime_value(map_value, [SemaGraphModuleResult]{}, "", [String]{}) ?? panic("exact map was not lowered")
         fc_require(lowered_map == (MIRConstant.Map{entries: [MIRConstMapEntry]{MIRConstMapEntry{key: lowered_key, value: MIRConstant.String{value: "found"}}}}), "map retains exact key")
-        checked :: sema_expr_check_comptime_name("EXACT", span, Val(CtValue.Int{value: number}), None, environment, &scopes, &state, &context, &diagnostics) ?? panic("embedded integer was not checked")
+        checked :: sema_expr_check_comptime_name("EXACT", span, Val(CtValue.Int{value: number}), None, environment, program, &scopes, &state, &context, &diagnostics) ?? panic("embedded integer was not checked")
         expected :: TExprKind.CtLit{value: TComptimeValue.BigInt{decimal: decimal}}
         fc_require(checked.ty == Type.Int && checked.kind == expected, "embedded exact integer uses BigInt")
         fc_require(checked.integer_bounds == (Val(integer_bounds_exact(number))), "embedded exact bounds")
-        prepared :: sema_fact_prepared_expr(TComptimeValue.Int{value: number}, Type.Int, span, environment) ?? panic("prepared integer was not checked")
+        prepared :: sema_fact_prepared_expr(TComptimeValue.Int{value: number}, Type.Int, span, environment, program) ?? panic("prepared integer was not checked")
         fc_require(prepared.kind == expected && prepared.integer_bounds == checked.integer_bounds, "prepared exact integer uses BigInt")
         if checked.kind == .CtLit(value) {
             lowered :: jet_codegen_lower_comptime_value(value, [SemaGraphModuleResult]{}, "", [String]{}) ?? panic("exact integer was not lowered")
@@ -93,7 +94,7 @@ fn fc_embedded_integer_constants() {
     low :: mir_integer_constant(0, unsigned_width, None)
     fc_require(mir_pass_fold_binary(MIRBinaryOp.Gt, high, low, mir_type_from_kind(MIRTypeKind.Bool)) == (Val(MIRConstant.Bool{value: true})), "unsigned optimizer comparison decodes the high bit")
     fixed_ty :: Type.IntN{signed: false, bits: 64}
-    fixed :: sema_fact_prepared_expr(TComptimeValue.Int{value: maximum}, fixed_ty, span, environment) ?? panic("fixed prepared integer was not checked")
+    fixed :: sema_fact_prepared_expr(TComptimeValue.Int{value: maximum}, fixed_ty, span, environment, program) ?? panic("fixed prepared integer was not checked")
     fc_require(fixed.ty == fixed_ty, "prepared fixed destination type")
     converted := false
     if fixed.kind == .NumericMethod(receiver, operation) {
@@ -109,7 +110,7 @@ fn fc_embedded_integer_constants() {
         typed_key :: sema_checked_comptime_key(ast_key) ?? panic("native key was not checked")
         fc_require(typed_key == (TComptimeKey.Int{value: number}), "checked native key")
         fc_require(jet_codegen_lower_comptime_key(typed_key) == (Val(MIRConstKey.Int{value: number})), "native key has one MIR carrier")
-        checked :: sema_expr_check_comptime_name("NATIVE", span, Val(CtValue.Int{value: number}), None, environment, &scopes, &state, &context, &diagnostics) ?? panic("native integer was not checked")
+        checked :: sema_expr_check_comptime_name("NATIVE", span, Val(CtValue.Int{value: number}), None, environment, program, &scopes, &state, &context, &diagnostics) ?? panic("native integer was not checked")
         fc_require(checked.kind == (TExprKind.IntLit{value: number, width: None}), "native integer keeps IntLit")
     }
     fc_require(diagnostics.len() == 0, "exact integer diagnostics")

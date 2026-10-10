@@ -3453,7 +3453,7 @@ fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], sourc
     weights :: jet_codegen_lower_weights(program)
     // Capture follows the real per-function lowering order, never thread
     // completion order. Ordinary compiles keep the existing parallel waves.
-    capture_passes :: if program.canonical_journal == { .Val(_) -> true .None -> false }
+    capture_passes :: if program.canonical_journal == { .Val(_) -> true None -> false }
     workers :: if capture_passes -> 1 else -> jet_codegen_lower_threads(weights, threads, trace_sink)
     if workers > 1 {
         bounds :: compiler_threads_partition(weights, workers)
