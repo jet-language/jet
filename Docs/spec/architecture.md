@@ -392,6 +392,9 @@ Module retargeting reads that graph in place and replaces only module-local
 scope facts. It neither extracts fields from borrowed owners nor copies the
 graph or rebuilds the checked-type indexes. Staging and speculative landed
 values use the graph mutation trail rather than registration-graph copies.
+Inference unification and assignability read their context in place; only the
+separate binding and conflict outputs mutate. Expected type trees do not need
+copies merely to pass through those read-only helpers.
 
 Output finalization publishes each callable's settled return type, failure
 contract, and sorted solved effects into checked constants, retained source

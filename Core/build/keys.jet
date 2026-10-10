@@ -7,8 +7,8 @@ use jet_foundation.JET_RUST_DEBUG_ESCAPED_RANGES
 fn build_key_number(bytes: &[U8], value: Int) Never! {
     divisor := 72057594037927936
     loop _ in 0..<8 {
-        &bytes.push(U8{(value / divisor) % 256})
-        divisor /= 256
+        &bytes.push(U8{(value /% divisor) % 256})
+        divisor = divisor /% 256
     }
 }
 fn build_key_text(bytes: &[U8], value: String) Never! {
@@ -22,12 +22,12 @@ fn build_key_texts(bytes: &[U8], values: [String]) Never! {
     loop value in values -> build_key_text(&bytes, value)
 }
 fn build_key_map(bytes: &[U8], values: [String:String]) Never! {
-    keys := values.keys()
+    keys := values.keys().collect()
     &keys.sort()
     build_key_number(&bytes, keys.len())
     loop key in keys {
         build_key_text(&bytes, key)
-        build_key_text(&bytes, values[key] ?? panic("checked map lost a key"))
+        build_key_text(&bytes, values[key])
     }
 }
 fn build_key_declared_provenance(bytes: &[U8]) Never! {
@@ -135,9 +135,9 @@ fn build_key_debug_text(value: String) -> String Never! {
                 escaped := scalar < 32 || scalar == 127
                 if scalar >= 128 {
                     low := 0
-                    high := JET_RUST_DEBUG_ESCAPED_RANGES.len() / 2
+                    high := JET_RUST_DEBUG_ESCAPED_RANGES.len() /% 2
                     loop low < high {
-                        middle :: low + (high - low) / 2
+                        middle :: low + (high - low) /% 2
                         if scalar < JET_RUST_DEBUG_ESCAPED_RANGES[middle * 2] -> high = middle
                         else if scalar > JET_RUST_DEBUG_ESCAPED_RANGES[middle * 2 + 1] -> low = middle + 1
                         else {
@@ -152,7 +152,7 @@ fn build_key_debug_text(value: String) -> String Never! {
                     number := scalar
                     loop {
                         &digits.push(alphabet[number % 16])
-                        number /= 16
+                        number = number /% 16
                         if number == 0 -> break
                     }
                     &digits.reverse()
@@ -205,7 +205,7 @@ fn build_session_action_key(state: BuildSessionState, id: Int) -> String Never! 
     build_key_texts(&bytes, action.argv)
     build_key_text(&bytes, "env-allowlist")
     env := [String:String]{}
-    loop key in action.env.keys() { if action.env_allowlist.len() == 0 || build_session_contains_string(action.env_allowlist, key) -> env[key] = action.env[key] ?? panic("checked env key missing") }
+    loop key in action.env.keys() { if action.env_allowlist.len() == 0 || build_session_contains_string(action.env_allowlist, key) -> env[key] = action.env[key] }
     build_key_map(&bytes, env)
     build_key_text(&bytes, "inputs")
     build_key_texts(&bytes, action.inputs)

@@ -21,7 +21,7 @@ fn build_session_cycle(edges: [[Int]], names: [String]) -> [String]? Never! {
         colors[root] = 1
         loop stack.len() > 0 {
             last :: stack.len() - 1
-            node :: stack[last]
+            node :: stack[last].copy()
             if positions[last] >= edges[node].len() {
                 colors[node] = 2
                 _ := &stack.pop()
@@ -29,7 +29,7 @@ fn build_session_cycle(edges: [[Int]], names: [String]) -> [String]? Never! {
                 next
             }
             child :: edges[node][positions[last]]
-            positions[last] += 1
+            positions[last] = positions[last] + 1
             if colors[child] == 2 -> next
             if colors[child] == 1 {
                 chain := [String]{}
@@ -78,26 +78,26 @@ fn build_session_prerequisites(state: BuildSessionState) -> [[Int]] Never! {
     edges
 }
 fn build_session_validate(state: BuildSessionState, default: Int) -> BuildSessionDiagnostic? Never! {
-    if default < -1 || default >= state.targets.len() -> return Val(build_session_error_diag(state, .UnknownTarget(default)))
+    if default < -1 || default >= state.targets.len() -> return Val(build_session_error_diag(state, BuildSessionError.UnknownTarget{id: default}))
     target_edges := [[Int]]{}
     target_names := [String]{}
     action_names := [String]{}
     owners := [String:Int]{}
     loop target in state.targets {
-        loop id in target.actions { if id < 0 || id >= state.actions.len() -> return Val(build_session_error_diag(state, .UnknownAction(id))) }
-        loop id in target.deps { if id < 0 || id >= state.targets.len() -> return Val(build_session_error_diag(state, .UnknownTarget(id))) }
+        loop id in target.actions { if id < 0 || id >= state.actions.len() -> return Val(build_session_error_diag(state, BuildSessionError.UnknownAction{id: id})) }
+        loop id in target.deps { if id < 0 || id >= state.targets.len() -> return Val(build_session_error_diag(state, BuildSessionError.UnknownTarget{id: id})) }
         &target_edges.push(target.deps)
         &target_names.push(target.name)
     }
     loop (id, action) in state.actions {
         &action_names.push(action.name)
         loop output in action.outputs {
-            if owners.get(output) == .Val(first) -> return Val(build_session_error_diag(state, .DuplicateBuildOutput(output, state.actions[first].name, action.name)))
+            if owners.get(output) == .Val(first) -> return Val(build_session_error_diag(state, BuildSessionError.DuplicateBuildOutput{output: output, first_action: state.actions[first].name, second_action: action.name}))
             owners[output] = id
         }
     }
-    if build_session_cycle(target_edges, target_names) == .Val(nodes) -> return Val(build_session_error_diag(state, .TargetDependencyCycle(nodes)))
-    if build_session_cycle(build_session_prerequisites(state), action_names) == .Val(nodes) -> return Val(build_session_error_diag(state, .ActionDependencyCycle(nodes)))
+    if build_session_cycle(target_edges, target_names) == .Val(nodes) -> return Val(build_session_error_diag(state, BuildSessionError.TargetDependencyCycle{nodes: nodes}))
+    if build_session_cycle(build_session_prerequisites(state), action_names) == .Val(nodes) -> return Val(build_session_error_diag(state, BuildSessionError.ActionDependencyCycle{nodes: nodes}))
     None
 }
 fn build_session_project(state: BuildSessionState) -> BuildGraph Never! {
@@ -140,16 +140,16 @@ fn build_session_project(state: BuildSessionState) -> BuildGraph Never! {
         loop action_id in target.actions {
             action :: state.actions[action_id]
             owner :: build_session_action_target(state, action_id) ?? panic("checked target action lost its owner")
-            paths := action.inputs
-            loop path in action.outputs -> &paths.push(path)
-            loop path in paths {
+            action_paths := action.inputs
+            loop path in action.outputs -> &action_paths.push(path)
+            loop path in action_paths {
                 row := file_rows.get(path) ?? BuildGraphFile{path: path, owner: None, consumers: [Int]{}, targets: [Int]{}}
                 build_session_append_int(&row.targets, owner)
                 file_rows[path] = ^row
             }
         }
     }
-    paths := file_rows.keys()
+    paths := file_rows.keys().collect()
     &paths.sort()
     files := [BuildGraphFile]{}
     loop path in paths -> &files.push(file_rows.get(path) ?? panic("checked file index lost a path"))
@@ -196,7 +196,7 @@ fn build_plan_selected_generated(plan: BuildSessionPlan) -> [BuildSessionGenerat
     prerequisites :: build_session_prerequisites(state)
     cursor := 0
     loop cursor < selected_actions.len() {
-        current :: selected_actions[cursor]
+        current :: selected_actions[cursor].copy()
         cursor += 1
         loop dep in prerequisites[current] -> build_session_append_int(&selected_actions, dep)
     }
