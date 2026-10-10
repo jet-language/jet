@@ -222,6 +222,10 @@ automatic propagation consumes that carrier to produce `T`, including inside
 prepared enum payloads. Lowering may omit propagation only when the operand
 is already the plain success value, not merely when it cannot fail.
 
+Bootstrap Rust's final slot-name compaction covers native `Int` shadow
+declarations and their uses together. Shadow storage stays outside the ordinary
+slot-localization passes, but not outside the final function-wide renaming.
+
 Close lowering distinguishes boxed/handle pointer identity from scalar presence
 with an ordered representation arm table. Non-inline scalar receivers use a
 presence sentinel; pointer receivers retain their actual identity. The
@@ -423,6 +427,10 @@ own source manifest. The
 checks that boundary; the
 [`MIR schema grammar guard`](../../Compiler/JetBackend/Tests/mir-schema.test.mjs)
 keeps observation aligned with public-by-default declarations and private fields.
+The compiler's private `Core/build` kernel uses the same declared enum payload
+labels and write-access calls as ordinary Jet. Stable plan keys use integer
+quotients and sorted, collected map keys. Legacy declaration validation copies
+its transactional trial before opening the final state write window.
 
 Core's declaration twin distinguishes exported names from source-owned bodies.
 A source-module `owns` row names an actual Jet implementation, not an intrinsic,

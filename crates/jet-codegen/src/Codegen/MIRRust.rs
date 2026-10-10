@@ -18366,7 +18366,7 @@ impl<'a> RustEmitter<'a> {
             localize_slots(out, slots_start, declarations_end, "__jet_l_", &localizable);
         }
         let debug_locals = self.debug_local_names(function, &out[slots_start..]);
-        compact_function_text(out, slots_start, &debug_locals);
+        compact_function_text(out, shadows_start, &debug_locals);
         if generator {
             let _ = writeln!(out, "    }})");
         }

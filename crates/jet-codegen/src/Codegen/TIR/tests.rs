@@ -5579,3 +5579,56 @@ fn run() Never! {}
 "#);
     });
 }
+
+#[test]
+fn finite_value_loop_native_shadows_compile_and_run_on_empty_range() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (bundle, nominals) = checked_bundle(r#"
+fn run() Never! {
+    absent :: loop value in 0..<0 { break value } ?? -1
+    if absent != -1 -> panic("finite loop exhaustion changed")
+    present :: loop value in 3..<4 { break value } ?? -1
+    if present != 3 -> panic("finite loop break value changed")
+}
+"#);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("finite value loops lower to MIR");
+        mir.validate().expect("finite value loops have valid MIR");
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("finite-value-loop-proof"))
+            .join(format!("native-shadows-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("finite_value_loop.rs");
+        let executable = directory.join(format!("finite_value_loop{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, &rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=finite_value_loop", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("finite value-loop codegen proof requires rustc");
+        assert!(compiled.status.success(),
+            "finite value-loop native shadows must be declared under their emitted names:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("finite value-loop codegen proof must run");
+        assert!(executed.status.success(),
+            "empty-range fallback and nonempty break must preserve their values:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
