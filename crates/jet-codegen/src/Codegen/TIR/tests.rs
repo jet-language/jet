@@ -6017,3 +6017,64 @@ fn taking_result_subject_coverage_checks_and_runs_the_call_once() {
         std::fs::remove_dir_all(directory).unwrap();
     });
 }
+
+#[test]
+fn compiler_hash_string_builder_binds_and_reuses_its_return_slot() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let hash_source = include_str!("../../../../../Compiler/JetFoundation/Source/Hash/SHA256.jet");
+        let start = hash_source.find("fn mir_sha256_hex_digit(").unwrap();
+        let end = hash_source.find("fn mir_sha256_hex(value:").unwrap();
+        let source_text = format!("{}\n{}", &hash_source[start..end], r#"
+fn run() Never! {
+    output := mir_sha256_hex_bytes([U8{0}, U8{255}, U8{16}])
+    if output != "00ff10" -> panic("initial return slot result is wrong")
+    output = mir_sha256_hex_bytes([U8]{})
+    if output != "" -> panic("empty refill retained old bytes")
+    output = mir_sha256_hex_bytes([U8{1}])
+    if output != "01" -> panic("refill after empty result is wrong")
+    print("return slot ok")
+}
+"#);
+        let (bundle, nominals) = checked_bundle(&source_text);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("compiler hash string builder lowers to MIR");
+        mir.validate().expect("compiler hash string builder has valid MIR");
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        assert!(rust.contains("__jet_into"), "proof must exercise caller-owned return storage");
+        assert!(!rust.contains("__jet_return_reuse"), "return reuse markers must be bound before compaction");
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("compiler-return-slot-proof"))
+            .join(format!("hash-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("compiler_return_slot.rs");
+        let executable = directory.join(format!("compiler_return_slot{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, &rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=compiler_return_slot", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("compiler return-slot proof requires rustc");
+        assert!(compiled.status.success(), "compiler return slots must compile:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("compiler return-slot proof must run");
+        assert!(executed.status.success(), "compiler return-slot refills must run:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        assert_eq!(String::from_utf8_lossy(&executed.stdout), "return slot ok\n");
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}

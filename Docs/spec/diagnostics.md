@@ -311,3 +311,11 @@ The same runtime regression exercises both outer and branch-local single-use
 owners in deferred Err arms before the new taking dispatch.
 When lowering such a value-if, the Err literal's absent success slot takes the
 live sibling's checked carrier type, not the enclosing function's return type.
+
+Hosted Rust emission binds caller-owned return storage before compacting local
+names. A return place is not an ordinary owned local that declaration folding
+may initialize with an internal reuse marker. Its preserved declaration and
+writes pass through the existing return-slot binder, which clears and refills
+the caller's buffer without an undeclared `__jet_return_reuse` reference.
+The compiler SHA256 hex-builder regression executes populated, empty and
+populated-again refills through the generated return-slot entry points.

@@ -18362,8 +18362,16 @@ impl<'a> RustEmitter<'a> {
             let values_end = localize_slots(out, slots_start, slots_end, "__jet_v_", &localizable);
             let declarations_end = fold_value_slots(out, slots_start, values_end);
             unwrap_value_slots(out, slots_start);
-            let localizable = self.localizable_local_slots(function);
+            let mut localizable = self.localizable_local_slots(function);
+            // The return place borrows caller-owned storage. Leave its
+            // declaration and writes intact for the binding pass below.
+            if let Some(slot) = return_slot {
+                localizable.remove(&slot.local.0);
+            }
             localize_slots(out, slots_start, declarations_end, "__jet_l_", &localizable);
+        }
+        if let Some(slot) = return_slot {
+            bind_return_slot(out, slots_start, &local_slot(slot.local));
         }
         let debug_locals = self.debug_local_names(function, &out[slots_start..]);
         compact_function_text(out, shadows_start, &debug_locals);
