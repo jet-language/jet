@@ -232,8 +232,16 @@ fn pkg_inline_deps_best_match(selector: String, candidates: [(version: String, d
     Val(matches[matches.len() - 1])
 }
 
+// The same numeric matching law for one admitted version, without a
+// temporary candidate list or sorting at the driver's import seam.
+fn pkg_inline_deps_version_matches(selector: String, version: String) -> Bool Never! {
+    selector_parts :: pkg_inline_deps_numeric_version(selector) ?? return false
+    version_parts :: pkg_inline_deps_numeric_version(version) ?? return false
+    if selector_parts.len() == 3 -> version_parts == selector_parts else -> version_parts.len() == 3 && pkg_inline_deps_has_prefix(version_parts, selector_parts)
+}
+
 // Whether `parts` begins with every element of `prefix`.
-fn pkg_inline_deps_has_prefix(parts: [Int], prefix: [Int]) -> Bool Never! {
+fn pkg_inline_deps_has_prefix(parts: [U64], prefix: [U64]) -> Bool Never! {
     loop index in 0..<prefix.len() {
         if index >= parts.len() || parts[index] != prefix[index] -> return false
     }
@@ -241,21 +249,29 @@ fn pkg_inline_deps_has_prefix(parts: [Int], prefix: [Int]) -> Bool Never! {
 }
 
 // One numeric component of a version key, 0 when absent or malformed.
-fn pkg_inline_deps_version_part(version: String, index: Int) -> Int Never! {
-    parts :: pkg_inline_deps_numeric_version(version) ?? return 0
-    if index >= parts.len() -> return 0
+fn pkg_inline_deps_version_part(version: String, index: Int) -> U64 Never! {
+    parts :: pkg_inline_deps_numeric_version(version) ?? return U64{0}
+    if index >= parts.len() -> return U64{0}
     parts[index]
 }
 
-// A dotted numeric version of one to three parts without leading zeros.
-fn pkg_inline_deps_numeric_version(value: String) -> [Int]? Never! {
+// Rust ScriptDeps::numeric_version uses the full unsigned 64-bit domain.
+fn pkg_inline_deps_numeric_version(value: String) -> [U64]? Never! {
     parts :: value.split(".").to_list()
     if parts.len() < 1 || parts.len() > 3 -> return None
-    out := [Int]{}
+    out := [U64]{}
     loop part in parts {
         if part == "" || (part.bytes().len() > 1 && part.starts_with("0")) -> return None
-        if part.starts_with("+") -> return None
-        &out.push(pkg_lock_parse_unsigned(part, 9223372036854775807) ?? return None)
+        digits :: if part.starts_with("+") -> part.slice(1..<part.len()) else -> part
+        if digits == "" -> return None
+        number := U64{0}
+        loop byte in digits.bytes() {
+            if byte < (U8{48}) || byte > (U8{57}) -> return None
+            digit :: U64.from_u8(byte - U8{48})
+            if number > (U64{1844674407370955161}) || (number == (U64{1844674407370955161}) && digit > (U64{5})) -> return None
+            number = number * U64{10} + digit
+        }
+        &out.push(number)
     }
     Val(out)
 }

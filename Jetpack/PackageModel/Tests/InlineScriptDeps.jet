@@ -30,6 +30,15 @@ fn pkg_inline_deps_test_unresolved(dep: InlineDep, script_dir: String) -[FS, Env
     assert(!pkg_inline_deps_is_pinned("1.4.999999999999999999999999"))
 }
 
+#Test("numeric selectors retain Rust unsigned parsing semantics") {
+    assert(pkg_inline_deps_is_pinned("18446744073709551615.1.2"))
+    assert(!pkg_inline_deps_is_pinned("18446744073709551616.1.2"))
+    assert(pkg_inline_deps_is_pinned("+1.4.2"))
+    assert(!pkg_inline_deps_is_pinned("01.4.2"))
+    selected :: pkg_inline_deps_best_match("18446744073709551615", [(version: String, dir: String)]{(version: "18446744073709551615.0.1", dir: "older"), (version: "18446744073709551615.0.2", dir: "newer")}) ?? panic("full unsigned selector")
+    assert_eq(selected.dir, "newer")
+}
+
 #Test("exact match does not accept incompatible or malformed versions") {
     candidates :: pkg_inline_deps_test_candidates([String]{"1.4.2", "exact", "1.4.3", "newer", "1.4.2.1", "malformed"})
     chosen :: pkg_inline_deps_best_match("1.4.2", candidates) ?? panic("exact version matches")

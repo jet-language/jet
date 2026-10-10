@@ -98,6 +98,24 @@ Config files. Comment placement is fail-closed until that formatter owns it;
 Jet does not report a comment-bearing file clean after silently leaving it
 unchanged. Ordinary Jet source uses the compiler formatter.
 
+### Manifestless script dependencies
+
+A script without a Package carrier or `package.jet` may declare a top-level
+single-package import such as `use textkit#1.4.2`. The native CLI admits its
+sources from `<script-directory>/.jet/inline-deps/textkit/<version>/`, then
+`JET_INLINE_DEPS_FIXTURES/textkit/<version>/` when that override is set. A local
+package is authoritative even if none of its versions matches; admission never
+fetches a registry package or runs Cargo or another compiler.
+
+One- and two-component numeric selectors choose the highest matching
+three-component version. Exact three-component selectors are pinned; looser
+selectors retain the import-span L0203 teaching diagnostic. Invalid selectors,
+unknown packages, unmatched versions, and hostile source trees produce E1253.
+Root ancestors and source files must remain no-follow authorized objects.
+The imported package alias binds to the opened root in the driver snapshot,
+without fabricating a manifest. The selector, selected version, and full source
+tree content hash participate in receipt and package-check identities.
+
 ## Sources, providers, and the lock
 
 The project lock is one file at `.jet/lock`. `jetpack add`, `jetpack remove`,

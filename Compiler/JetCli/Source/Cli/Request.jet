@@ -1010,11 +1010,14 @@ fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLIOver
     if !current_root.is_dir || current_root.is_symlink || current_root.id != root_stat.id -> return jet_cli_prepare_refused("source root `{root}` changed while it was held", "retry with a stable source tree", color)
     root_identity :: jet_cli_identity_key("directory", root_stat)
     roots := [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: root, identity: root_identity, allow_hardlinks: false, files: files, foreign_cache_files: caches, directories: directories}}
+    script_dependencies := [JetDriverScriptDependency]{}
+    if jet_cli_script_dependency_roots(&roots, entry_path, &script_dependencies, color) == .Val(refusal) -> return JetCLIPrepared.Refused{output: refusal}
     if jet_cli_path_dependency_roots(&roots, color) == .Val(refusal) -> return JetCLIPrepared.Refused{output: refusal}
     snapshot :: JetDriverAuthorizedSourceSnapshot{
         roots: roots,
         entry_root_identity: root_identity,
         entry_path: entry_path,
+        script_dependencies: script_dependencies,
     }
     JetCLIPrepared.Prepared{request: jet_cli_driver_request(snapshot, core_sources, threads, mode), snapshot: snapshot}
 }

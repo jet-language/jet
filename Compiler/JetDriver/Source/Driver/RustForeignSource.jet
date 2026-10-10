@@ -1,0 +1,283 @@
+// User-Rust helper source: the safe edge and slot trampoline mirror FFI.rs.
+use jet_foundation.[AccessConvention, Type, ast_comptime_generated_path, measure_expression]
+
+fn jet_driver_rust_foreign_rust_type(ty: Type, user_types: [String]) -> String Never! {
+    if ty == {
+        .Int -> "i64"
+        .Float -> "f64"
+        .IntN(signed, bits) -> "{if signed -> "i" else -> "u"}{bits}"
+        .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> jet_driver_rust_foreign_rust_type(base, user_types)
+        .Float32 -> "f32"
+        .Bool -> "bool"
+        .String -> "String"
+        .Char -> "char"
+        .List(inner) -> "Vec<{jet_driver_rust_foreign_rust_type(inner, user_types)}>"
+        .Map(key, _, value) -> "std::collections::BTreeMap<{jet_driver_rust_foreign_rust_type(key, user_types)}, {jet_driver_rust_foreign_rust_type(value, user_types)}>"
+        .Shared(inner) -> "std::sync::Arc<{jet_driver_rust_foreign_rust_type(inner, user_types)}>"
+        .Option(inner) -> "Option<{jet_driver_rust_foreign_rust_type(inner, user_types)}>"
+        .Result(ok, err) -> "Result<{jet_driver_rust_foreign_rust_type(ok, user_types)}, {jet_driver_rust_foreign_rust_type(err, user_types)}>"
+        .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) -> "Box<dyn std::any::Any>"
+        .Named(name) -> {
+            if name == "Error" -> return "String"
+            if user_types.contains(name) -> return ast_comptime_generated_path(name)
+            name
+        }
+        .Apply(name, args) -> {
+            if !user_types.contains(name) -> return "Box<dyn std::any::Any>"
+            types := [String]{}
+            loop arg in args -> &types.push(jet_driver_rust_foreign_rust_type(arg, user_types))
+            "{ast_comptime_generated_path(name)}<{types.join(", ")}>"
+        }
+        .FixedList(elem, len) -> "[{jet_driver_rust_foreign_rust_type(elem, user_types)}; {measure_expression(len)}]"
+        .Union(_) -> panic("anonymous unions are rejected by FFI sema")
+        .Measure(_) -> panic("type measure is not a C-FFI surface type")
+    }
+}
+
+fn jet_driver_rust_foreign_param_type(convention: AccessConvention, ty: Type, user_types: [String]) -> String Never! {
+    base :: jet_driver_rust_foreign_rust_type(ty, user_types)
+    if convention == AccessConvention.Write -> "&mut {base}" else -> base
+}
+
+fn jet_driver_rust_foreign_wrapper(function: JetDriverRustForeignFunction, user_types: [String]) -> String Never! {
+    params := [String]{}
+    args := [String]{}
+    loop index in 0..<function.params.len() {
+        param :: function.params[index]
+        &params.push("p{index}: {jet_driver_rust_foreign_param_type(param.convention, param.ty, user_types)}")
+        &args.push("p{index}")
+    }
+    ret :: if function.return_type == .Val(ty) -> jet_driver_rust_foreign_rust_type(ty, user_types) else -> "()"
+    call :: "{function.rust_path}({args.join(", ")})"
+    if ret == "()" -> return "pub fn jet_ffi_{function.name}({params.join(", ")}) {{\n    match ffi_catch_unwind(|| {{\n        {call};\n    }}) {{\n        Ok(()) => (),\n        Err(_) => ffi_panic(),\n    }}\n}}\n"
+    "pub fn jet_ffi_{function.name}({params.join(", ")}) -> {ret} {{\n    match ffi_catch_unwind(|| {call}) {{\n        Ok(v) => v,\n        Err(_) => ffi_panic(),\n    }}\n}}\n"
+}
+
+fn jet_driver_rust_foreign_scalar_type(ty: Type) -> String? Never! {
+    if ty == {
+        .Int -> Val("i64")
+        .IntN(signed, bits) -> if bits == 8 || bits == 16 || bits == 32 || bits == 64 -> Val("{if signed -> "i" else -> "u"}{bits}") else -> None
+        .Float -> Val("f64")
+        .Float32 -> Val("f32")
+        .Bool -> Val("bool")
+        .Char -> Val("u32")
+        .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> jet_driver_rust_foreign_scalar_type(base)
+        else -> None
+    }
+}
+
+fn jet_driver_rust_foreign_cabi_record_type(ty: Type, record_names: [String:String]) -> String? Never! {
+    if ty == .Named(name) -> return record_names.get(name)
+    None
+}
+
+// Native descriptor admission is deliberately narrower than the safe wrapper.
+// No ownership-changing slot protocol is invented for WRITE, MOVE or lists.
+fn jet_driver_rust_foreign_trampoline(function: JetDriverRustForeignFunction, record_names: [String:String]) -> String? Never! {
+    loop param in function.params {
+        if param.convention != AccessConvention.Read -> return None
+        if param.ty != Type.String && jet_driver_rust_foreign_scalar_type(param.ty) == None && jet_driver_rust_foreign_cabi_record_type(param.ty, record_names) == None -> return None
+    }
+    if function.return_type == .Val(ty) {
+        if ty != Type.String && jet_driver_rust_foreign_scalar_type(ty) == None && jet_driver_rust_foreign_cabi_record_type(ty, record_names) == None -> return None
+    }
+    body := [String]{
+        "    if argc != {function.params.len()} || args.is_null() || out.is_null() {{",
+        "        ffi_host_fault();",
+        "        return 1;",
+        "    }}",
+        "    let args = unsafe {{ std::slice::from_raw_parts(args, argc) }};",
+        "    let out = unsafe {{ &mut *out }};",
+        "    out.value = 0;",
+        "    out.ptr = std::ptr::null_mut();",
+        "    out.len = 0;",
+    }
+    args := [String]{}
+    loop index in 0..<function.params.len() {
+        ty :: function.params[index].ty
+        expr := ""
+        if ty == {
+            .String -> {
+                &body.push("    let p{index}_ptr = args[{index}].ptr;")
+                &body.push("    let p{index}_bytes = if args[{index}].len == 0 {{ Vec::new() }} else if p{index}_ptr.is_null() {{ ffi_panic(); }} else {{ unsafe {{ std::slice::from_raw_parts(p{index}_ptr, args[{index}].len).to_vec() }} }};")
+                &body.push("    let p{index} = String::from_utf8(p{index}_bytes).unwrap_or_else(|_| ffi_panic());")
+                expr = "p{index}"
+            }
+            .Named(_) -> {
+                record_ty :: jet_driver_rust_foreign_cabi_record_type(ty, record_names) ?? return None
+                &body.push("    let p{index}_ptr = args[{index}].ptr;")
+                &body.push("    if p{index}_ptr.is_null() {{ ffi_panic(); }}")
+                expr = "unsafe {{ std::ptr::read(p{index}_ptr as *const {record_ty}) }}"
+            }
+            .Float -> expr = "f64::from_bits(args[{index}].value)"
+            .Float32 -> expr = "f32::from_bits(args[{index}].value as u32)"
+            .Bool -> expr = "args[{index}].value != 0"
+            .Char -> expr = "char::from_u32(args[{index}].value as u32).unwrap_or_else(|| ffi_panic())"
+            else -> expr = "args[{index}].value as {jet_driver_rust_foreign_rust_type(ty, [String]{})}"
+        }
+        &args.push(expr)
+    }
+    call :: "jet_ffi_{function.name}({args.join(", ")})"
+    if function.return_type == {
+        .None -> &body.push("    let _ = {call};")
+        .Val(ty) -> if ty == {
+            .String -> {
+                &body.push("    let result = {call};")
+                &body.push("    let bytes = result.into_bytes();")
+                &body.push("    let boxed = bytes.into_boxed_slice();")
+                &body.push("    out.len = boxed.len();")
+                &body.push("    out.ptr = Box::into_raw(boxed) as *mut u8;")
+            }
+            .Float -> &body.push("    out.value = ({call}).to_bits();")
+            .Float32 -> &body.push("    out.value = ({call}).to_bits() as u64;")
+            .Bool -> &body.push("    out.value = u64::from({call});")
+            .Char -> &body.push("    out.value = ({call}) as u32 as u64;")
+            .Named(_) -> {
+                record_ty :: jet_driver_rust_foreign_cabi_record_type(ty, record_names) ?? return None
+                &body.push("    let result = {call};")
+                &body.push("    let bytes = unsafe {{ std::slice::from_raw_parts(")
+                &body.push("        (&result as *const {record_ty}).cast::<u8>(),")
+                &body.push("        std::mem::size_of::<{record_ty}>(),")
+                &body.push("    ) }}.to_vec().into_boxed_slice();")
+                &body.push("    out.len = bytes.len();")
+                &body.push("    out.ptr = Box::into_raw(bytes) as *mut u8;")
+            }
+            .Int | .IntN(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Quantity(_, _) -> &body.push("    out.value = ({call}) as u64;")
+            else -> return None
+        }
+    }
+    &body.push("    0")
+    Val("#[no_mangle]\npub unsafe extern \"C\" fn jet_ffi_{function.name}_cabi(args: *const JetFfiSlot, argc: usize, out: *mut JetFfiSlot) -> i32 {{\n    match ffi_catch_unwind(|| {{\n{body.join("\n")}\n    }}) {{\n        Ok(code) => code,\n        Err(_) => {{ ffi_host_fault(); 1 }},\n    }}\n}}\n")
+}
+
+fn jet_driver_rust_foreign_source(facts: JetDriverRustForeignFacts) -> String Never! {
+    out := [String]{jet_driver_rust_foreign_preamble(), facts.record_source, "// jet-ffi-descriptor={JET_DRIVER_RUST_FOREIGN_DESCRIPTOR}\n"}
+    names := [String]{}
+    loop entry in facts.entries -> &names.push(entry.declaration.name)
+    trampolines := [String?]{}
+    has_trampoline := false
+    loop entry in facts.entries {
+        source :: jet_driver_rust_foreign_trampoline(entry.declaration, facts.record_names)
+        if source != None -> has_trampoline = true
+        &trampolines.push(source)
+    }
+    if has_trampoline -> &out.push("#[no_mangle]\npub unsafe extern \"C\" fn jet_ffi_cabi_free(ptr: *mut u8, len: usize) {{\n    if ptr.is_null() {{ return; }}\n    let _ = Vec::from_raw_parts(ptr, len, len);\n}}\n")
+    loop index in 0..<facts.entries.len() {
+        &out.push(jet_driver_rust_foreign_wrapper(facts.entries[index].declaration, names))
+        if trampolines[index] == .Val(source) -> &out.push(source)
+        &out.push("\n")
+    }
+    out.join("\n")
+}
+
+fn jet_driver_rust_foreign_preamble() -> String Never! {
+    [String]{
+        "// Auto-generated FFI wrappers — do not edit.",
+        "#![allow(warnings)]",
+        "",
+        "type JetFfiReporter = extern \"C\" fn(*const u8, usize);",
+        "static JET_FFI_REPORTER: std::sync::Mutex<Option<JetFfiReporter>> = std::sync::Mutex::new(None);",
+        "",
+        "type JetFfiPanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Send + Sync + 'static>;",
+        "type JetFfiSharedPanicHook = std::sync::Arc<JetFfiPanicHook>;",
+        "static JET_FFI_PREVIOUS_PANIC_HOOK: std::sync::Mutex<Option<JetFfiSharedPanicHook>> =",
+        "    std::sync::Mutex::new(None);",
+        "",
+        "thread_local! {{",
+        "    static JET_FFI_FAILURE: std::cell::Cell<u8> = const {{ std::cell::Cell::new(0) }};",
+        "    // The hook is process-global, but suppression is per calling thread.",
+        "    static JET_FFI_PANIC_BOUNDARY_DEPTH: std::cell::Cell<u32> =",
+        "        const {{ std::cell::Cell::new(0) }};",
+        "}}",
+        "",
+        "// `catch_unwind` runs the panic hook before it returns the payload. Keep the",
+        "// bridge's private conversion quiet without mutating the hook around each",
+        "// call; FFI calls may run concurrently on unrelated threads.",
+        "static JET_FFI_PANIC_HOOK: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| {{",
+        "    let previous = std::sync::Arc::new(std::panic::take_hook());",
+        "    *JET_FFI_PREVIOUS_PANIC_HOOK",
+        "        .lock()",
+        "        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(previous.clone());",
+        "    std::panic::set_hook(Box::new(move |info| {{",
+        "        let private_marker = info",
+        "            .payload()",
+        "            .downcast_ref::<String>()",
+        "            .is_some_and(|message| message.starts_with(\"__jet_ffi_runtime__: \"));",
+        "        let quiet = private_marker",
+        "            || JET_FFI_PANIC_BOUNDARY_DEPTH",
+        "                .try_with(|depth| depth.get() != 0)",
+        "                .unwrap_or(false);",
+        "        if !quiet {{",
+        "            previous(info);",
+        "        }}",
+        "    }}));",
+        "}});",
+        "",
+        "#[no_mangle]",
+        "pub extern \"C\" fn jet_ffi_clear_panic_hook() {{",
+        "    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{",
+        "        let previous = JET_FFI_PREVIOUS_PANIC_HOOK",
+        "            .lock()",
+        "            .unwrap_or_else(|poisoned| poisoned.into_inner())",
+        "            .take();",
+        "        let Some(previous) = previous else {{ return; }};",
+        "        let current = std::panic::take_hook();",
+        "        drop(current);",
+        "        if let Ok(previous) = std::sync::Arc::try_unwrap(previous) {{",
+        "            std::panic::set_hook(previous);",
+        "        }}",
+        "    }}));",
+        "}}",
+        "",
+        "fn ffi_catch_unwind<F, T>(f: F) -> Result<T, Box<dyn std::any::Any + Send>>",
+        "where",
+        "    F: FnOnce() -> T,",
+        "{{",
+        "    let result = JET_FFI_PANIC_BOUNDARY_DEPTH.with(|depth| {{",
+        "        let previous = depth.replace(depth.get().saturating_add(1));",
+        "        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{",
+        "            std::sync::LazyLock::force(&JET_FFI_PANIC_HOOK);",
+        "            std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))",
+        "        }}));",
+        "        depth.set(previous);",
+        "        result",
+        "    }});",
+        "    match result {{",
+        "        Ok(result) => result,",
+        "        Err(payload) => Err(payload),",
+        "    }}",
+        "}}",
+        "",
+        "#[no_mangle]",
+        "pub extern \"C\" fn jet_ffi_set_reporter(reporter: JetFfiReporter) {{",
+        "    *JET_FFI_REPORTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(reporter);",
+        "}}",
+        "",
+        "#[no_mangle]",
+        "pub extern \"C\" fn jet_ffi_take_failure() -> i8 {{",
+        "    JET_FFI_FAILURE.with(|failure| failure.replace(0) as i8)",
+        "}}",
+        "",
+        "fn ffi_host_fault() {{",
+        "    JET_FFI_FAILURE.with(|failure| {{",
+        "        if failure.get() == 0 {{ failure.set(2); }}",
+        "    }});",
+        "}}",
+        "",
+        "fn ffi_panic() -> ! {{",
+        "    JET_FFI_FAILURE.with(|failure| failure.set(1));",
+        "    const MESSAGE: &str = \"panic: a foreign function panicked\";",
+        "    let reporter = *JET_FFI_REPORTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner());",
+        "    if let Some(reporter) = reporter {{ reporter(MESSAGE.as_ptr(), MESSAGE.len()); }}",
+        "    std::panic::resume_unwind(Box::new(format!(\"__jet_ffi_runtime__: {{MESSAGE}}\")));",
+        "}}",
+        "",
+        "#[repr(C)]",
+        "pub struct JetFfiSlot {{",
+        "    pub value: u64,",
+        "    pub ptr: *mut u8,",
+        "    pub len: usize,",
+        "}}",
+        "",
+    }.join("\n")
+}

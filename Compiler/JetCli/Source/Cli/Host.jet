@@ -107,6 +107,11 @@ fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool,
         .Compiled(result, snapshot) -> {
             diagnostics := jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             if requires_run -> &diagnostics.push(jet_cli_no_run_diagnostic())
+            if jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None && result.rust_foreign.entries.len() > 0 {
+                if result.mir == .Val(program) {
+                    if jet_cli_rust_foreign_realize(result.rust_foreign, program) == .Err(error) -> &diagnostics.push(jet_cli_rust_foreign_diagnostic(error))
+                } else { return jet_cli_ice("the checked Rust foreign declarations finished without their MIR link facts") }
+            }
             output = if json -> jet_cli_check_json_outcome(file, source, diagnostics, watch.elapsed_millis()) else -> jet_driver_check_outcome(file, source, diagnostics, color, quiet)
             if jet_cli_errors(diagnostics).len() == 0 {
                 if result.internal_problem == .Val(problem) -> output = jet_cli_ice(problem)
@@ -315,7 +320,8 @@ fn jet_cli_runtime_key(runtime_dir: String) -[FS]> String? Never! {
 // pack into a static x86-64 executable (D-EXEC1: the one compiled runtime).
 // Report all native findings without switching to a different backend.
 fn jet_cli_build_native(file: String, command: String, release: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, binary: String, color: Bool) -[FS, Env, Exec, Time.Wait]> JetDriverVerbOutput Never! {
-    unpruned :: result.mir ?? return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
+    raw_program :: result.mir ?? return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
+    unpruned :: jet_cli_rust_foreign_prepare(result.rust_foreign, ^raw_program) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_rust_foreign_report(err, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     entry_id :: result.entry_function ?? return jet_cli_build_failed("`{file}` has no `fn run` to build", "an executable starts at the program's `fn run`", "add `fn run()` to the file, or check it with `jet check {file}`", color)
     // Only functions the entry reaches are lowered, generic ones per instance.
     fix :: "correct the reported native backend problems, then retry `jet {command} {file}`"

@@ -1253,6 +1253,56 @@ fn jet_driver_default_module_alias(relative_path: String) -> String Never! {
     alias
 }
 
+// Script admissions are host-opened roots, not invented package manifests.
+// Only the manifestless entry's top-level refs may introduce these bindings.
+fn jet_driver_bind_script_dependencies(packages: &[JetDriverPackageInfo], snapshot: JetDriverAuthorizedSourceSnapshot, diagnostics: &[Diagnostic]) {
+    if snapshot.script_dependencies.len() == 0 -> return
+    entry_index :: loop (index, root) in snapshot.roots {
+        if root.identity == snapshot.entry_root_identity -> break index
+    } ?? return
+    package := packages[entry_index]
+    if package.manifest_path != None {
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "script dependencies were supplied for a package entry", "inline dependency admission applies only to manifestless scripts", "use the package's declared dependency graph"))
+        return
+    }
+    entry :: loop file in snapshot.roots[entry_index].files {
+        if file.path == snapshot.entry_path -> break file
+    } ?? return
+    parsed :: jet_driver_parse_user_source(entry.source)
+    if jet_driver_has_errors(parsed.diagnostics) -> return
+    refs :: pkg_inline_deps_collect(parsed.program)
+    source_path :: jet_driver_display_path(jet_driver_entry_root_path(snapshot), entry.path)
+    loop admitted in snapshot.script_dependencies {
+        reference :: loop dependency_ref in refs {
+            if dependency_ref.name == admitted.name && dependency_ref.selector == admitted.selector && dependency_ref.span == admitted.span -> break dependency_ref
+        } ?? {
+            &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a script dependency has no matching top-level import", "admission must preserve the exact entry import and selector span", "supply only dependencies collected from the entry script"))
+            next
+        }
+        target :: loop (index, root) in snapshot.roots {
+            if root.identity == admitted.root_identity -> break index
+        } ?? -1
+        selected :: pkg_inline_deps_version_matches(admitted.selector, admitted.resolved_version)
+        hash_bytes :: admitted.content_hash.bytes()
+        valid_hash := admitted.content_hash.starts_with("sha256-") && hash_bytes.len() == 71
+        if hash_bytes.len() >= 7 {
+            loop byte in hash_bytes[7..<hash_bytes.len()] {
+                if !(byte >= (U8{48}) && byte <= (U8{57})) && !(byte >= (U8{97}) && byte <= (U8{102})) -> valid_hash = false
+            }
+        }
+        if target < 0 || target == entry_index || !pkg_inline_deps_valid_package_name(admitted.name) || !selected || !valid_hash {
+            &diagnostics.push(jet_driver_diagnostic_at_source("E0003", Val(admitted.span), source_path, 0, "a script dependency admission is not bound to a checked root and content identity", "offline admission retains a supported selector, selected version, tree hash, and distinct root identity", "provide the resolver's exact admitted dependency and authorized source root"))
+            next
+        }
+        if !pkg_inline_deps_is_pinned(reference.selector) {
+            &diagnostics.push(diagnostic_with_source_path(pkg_inline_deps_l0203_unpinned(reference), source_path, 0))
+        }
+        if jet_driver_find_dependency(package, admitted.name) != None -> next
+        &package.dependencies.push(JetDriverPackageDependency{name: admitted.name, source: "inline:{admitted.name}#{admitted.selector}", source_path: source_path, span: Val(admitted.span), target_root_index: target, script_version: Val(admitted.resolved_version)})
+    }
+    packages[entry_index] = package
+}
+
 fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDriverSourceCatalogResult {
     snapshot :: request.authorized_sources
     diagnostics := [Diagnostic]{}
@@ -1268,6 +1318,7 @@ fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDrive
         &packages.push(package)
     }
     jet_driver_resolve_package_dependencies(&packages, snapshot, &diagnostics)
+    jet_driver_bind_script_dependencies(&packages, snapshot, &diagnostics)
 
     entry_root :: jet_driver_entry_root_path(snapshot)
     source_units := [JetDriverSourceUnit]{}
@@ -1750,10 +1801,12 @@ fn jet_driver_find_module_import_target(
         }
         target_package_index :: jet_driver_find_package_by_root(packages, selected_dependency.target_root_index) ?? return None
         target_package := packages[target_package_index]
-        selected_version :: inline_version ?? InlineVersion{text: "", span: span}
-        if inline_version != None && !jet_driver_version_selector_matches(selected_version.text, target_package.version ?? "") {
-            &diagnostics.push(jet_driver_diagnostic("E0603", selected_version.span, "the imported package version does not match its declared package root", "inline import versions must agree with the checked direct dependency version", "select a source root with the requested package version"))
-            return None
+        if inline_version == .Val(selected_version) {
+            matches_version :: if selected_dependency.script_version == .Val(version) -> pkg_inline_deps_version_matches(selected_version.text, version) else -> jet_driver_version_selector_matches(selected_version.text, target_package.version ?? "")
+            if !matches_version {
+                &diagnostics.push(jet_driver_diagnostic("E0603", selected_version.span, "the imported package version does not match its declared package root", "inline import versions must agree with the checked direct dependency version", "select a source root with the requested package version"))
+                return None
+            }
         }
         module_path := ""
         loop path_index in 1..<path_parts.len() {

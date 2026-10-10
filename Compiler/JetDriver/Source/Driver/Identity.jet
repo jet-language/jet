@@ -85,10 +85,22 @@ struct JetDriverAuthorizedSourceRoot {
     directories: [AppAuthorizedDirectory]{[AppAuthorizedDirectory]{}}
 }
 
+// An offline script admission binds an import to an already opened root.
+// The selector and full tree hash remain distinct from package manifests.
+struct JetDriverScriptDependency {
+    name: String
+    selector: String
+    resolved_version: String
+    content_hash: String
+    root_identity: String
+    span: Span
+}
+
 struct JetDriverAuthorizedSourceSnapshot {
     roots: [JetDriverAuthorizedSourceRoot]
     entry_root_identity: String
     entry_path: String
+    script_dependencies: [JetDriverScriptDependency]{[JetDriverScriptDependency]{}}
 }
 
 struct JetDriverHostFacts {
@@ -408,6 +420,7 @@ struct JetDriverPackageDependency {
     source_path: String
     span: Span?
     target_root_index: Int
+    script_version: String?{None}
 }
 
 struct JetDriverPackageEntry {
@@ -598,6 +611,9 @@ struct JetDriverCompileResult {
     build_nodes: [BuildGraphNode]?{None}
     cost_report: TCostReport?{None}
     cost_gaps: [String]{[String]{}}
+    // Checked signature facts retain helper identity order. Realization for
+    // check/run/build is a CLI host action, never a compiler process probe.
+    rust_foreign: JetDriverRustForeignFacts{jet_driver_rust_foreign_empty()}
 }
 
 struct JetDriverSandboxOutput {
@@ -787,6 +803,9 @@ fn jet_driver_receipt_closure(verb: String, request: JetDriverCompileRequest, op
             closure = "{closure}{path_field}{digest_field}"
         }
     }
+    loop dependency in request.authorized_sources.script_dependencies {
+        closure = "{closure}{jet_driver_script_dependency_identity(dependency)}"
+    }
     mir_sha256_hex(closure)
 }
 
@@ -794,6 +813,10 @@ fn jet_driver_receipt_closure(verb: String, request: JetDriverCompileRequest, op
 // request's closure; anything else checks fresh.
 fn jet_driver_receipt_answers(receipt: JetDriverReceipt, verb: String, request: JetDriverCompileRequest, options: [String]) -> Bool Never! {
     receipt.closure == jet_driver_receipt_closure(verb, request, options)
+}
+
+fn jet_driver_script_dependency_identity(dependency: JetDriverScriptDependency) -> String Never! {
+    "{jet_driver_receipt_field("inline_name", dependency.name)}{jet_driver_receipt_field("inline_selector", dependency.selector)}{jet_driver_receipt_field("inline_version", dependency.resolved_version)}{jet_driver_receipt_field("inline_hash", dependency.content_hash)}"
 }
 
 // #2517 package keys for the self-hosted driver, framed by
@@ -806,12 +829,19 @@ fn jet_driver_package_target_facts(request: JetDriverCompileRequest, package: Je
         .Web(_, _, _) -> "true"
         .Native | .Sandbox(_, _, _) -> "false"
     }
-    [PackageKeyTargetFact]{
+    facts := [PackageKeyTargetFact]{
         PackageKeyTargetFact{name: "active_os", value: request.host_facts.active_os ?? ""},
         PackageKeyTargetFact{name: "edition", value: package.edition},
         PackageKeyTargetFact{name: "target_triple", value: request.host_facts.target_triple ?? ""},
         PackageKeyTargetFact{name: "web", value: web},
     }
+    loop dependency in request.authorized_sources.script_dependencies {
+        root :: request.authorized_sources.roots[package.root_index]
+        if root.identity == request.authorized_sources.entry_root_identity || root.identity == dependency.root_identity {
+            &facts.push(PackageKeyTargetFact{name: "inline:{dependency.name}", value: jet_driver_script_dependency_identity(dependency)})
+        }
+    }
+    facts
 }
 
 // The package.jet source of a package that has a manifest.

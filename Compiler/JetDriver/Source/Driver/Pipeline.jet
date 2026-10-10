@@ -5473,8 +5473,11 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         return result
     }
 
+    rust_foreign :: jet_driver_rust_foreign_facts(registration_graph)
     if !emit_rust {
-        return jet_driver_compile_result(load, load.diagnostics, entry_function, Val(^optimized_program), None, None, None, true, trace)
+        result := jet_driver_compile_result(load, load.diagnostics, entry_function, Val(^optimized_program), None, None, None, true, trace)
+        result.rust_foreign = rust_foreign
+        return result
     }
 
     if request.trace_sink == .Val(sink) -> sink.begin("emit", "", -1, -1)
@@ -5535,7 +5538,9 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
             }
         }
     }
-    jet_driver_compile_result(load, load.diagnostics, entry_function, Val(^optimized_program), emitted_source, emit_manifest, None, true, trace)
+    result := jet_driver_compile_result(load, load.diagnostics, entry_function, Val(^optimized_program), emitted_source, emit_manifest, None, true, trace)
+    result.rust_foreign = rust_foreign
+    result
 }
 
 fn jet_driver_core_source_alias(unit: JetDriverSourceUnit, loaded_module: JetDriverLoadedModule, core_sources: [JetDriverCoreSource]) -> String Never! {

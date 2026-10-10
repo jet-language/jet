@@ -1022,7 +1022,8 @@ only a declared user-Rust helper build selects them. A native helper is a musl
 `staticlib`, with its explicit artifact mode included in the content key, never
 a GNU Rust archive mixed into Jet's static-musl executable.
 
-The Jet Driver retains the checked user-Rust declarations in source order.
+The Jet Driver retains checked user-Rust signature facts in source order,
+without retaining default-expression ASTs in helper realization.
 Its pure planner emits the manifest, safe wrappers, descriptor slot adapters,
 and ordered length-delimited bridge key; the CLI realizes that helper before
 native lowering and attaches its exact static archive to the checked MIR link
@@ -1034,8 +1035,11 @@ sandbox, never an unsandboxed fallback. Input manifests/source, descriptor,
 toolchain, target, artifact mode, native tools/link inputs, artifact digest,
 and provenance govern cache reuse. A per-key OS lock outside the key directory
 and a shared-output publication lock retain one helper build under concurrency.
-`run` and `build` share this realization and its `E0703`/`E0704`/`E0705` errors;
-programs without Rust declarations perform no helper or toolchain probes.
+`check`, `run` and `build` share this realization and its
+`E0703`/`E0704`/`E0705` errors, including canonical declaration hints and separate
+Cargo detail. Cargo is resolved only from `PATH`; the selected musl rustc,
+linker and archiver belong only to its helper child. Programs without Rust
+declarations perform no helper or toolchain probes.
 
 Manifest-less `use package#version` admission reuses the package model's local,
 offline inline-dependency resolver: `.jet/inline-deps` is authoritative, with
