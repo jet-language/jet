@@ -319,8 +319,9 @@ fn pkg_ffi_close_name(close: NamedSpan?) -> String? Never! {
     Val(value.name)
 }
 
-// Gather every foreign function across all modules.
-fn pkg_ffi_collect_externs(program: RustBridgeProgram) -> [ExternEntry] Never! {
+// Gather every foreign function across all modules. Inline assembly carries
+// its operand contract checked for `target`, the bridge's selected triple.
+fn pkg_ffi_collect_externs(program: RustBridgeProgram, target: String) -> [ExternEntry] Never! {
     out := [ExternEntry]{}
     loop program_module in program.modules {
         items :: program_module.items
@@ -330,7 +331,7 @@ fn pkg_ffi_collect_externs(program: RustBridgeProgram) -> [ExternEntry] Never! {
                     functions :: block.functions
                     loop function in functions -> &out.push(pkg_ffi_extern_entry(function, block))
                 }
-                .Func(function) -> pkg_ffi_collect_function(function, program_module.alias, &out)
+                .Func(function) -> pkg_ffi_collect_function(function, program_module.alias, target, &out)
                 .CModule(c_module) -> pkg_ffi_collect_c_module(c_module, &out)
                 else -> {}
             }
@@ -340,7 +341,7 @@ fn pkg_ffi_collect_externs(program: RustBridgeProgram) -> [ExternEntry] Never! {
 }
 
 // A per-callable `#Import(c)` guest import or an inline `#FFI` body.
-fn pkg_ffi_collect_function(function: Func, owner: String, out: &[ExternEntry]) Never! {
+fn pkg_ffi_collect_function(function: Func, owner: String, target: String, out: &[ExternEntry]) Never! {
     if sema_guest_import_function_signature(function) == .Val(import) {
         names := [String]{}
         loop index in 0..<import.params.len() -> &names.push("arg{index}")
@@ -371,12 +372,21 @@ fn pkg_ffi_collect_function(function: Func, owner: String, out: &[ExternEntry]) 
         return_type: function.return_type,
         crate_spec: "std",
         line_hint: "`#FFI({inline.lang}) fn {function.name}`",
-        inline: Val(InlineEntry{lang: inline.lang, source: inline.source, param_names: pkg_ffi_param_names(function.params), asm_contract: inline.asm_contract}),
+        inline: Val(InlineEntry{lang: inline.lang, source: inline.source, param_names: pkg_ffi_param_names(function.params), asm_contract: pkg_ffi_inline_asm_contract(function, target)}),
         c_abi: false,
         generated: false,
         c_module: false,
         close: None
     })
+}
+
+// The Foundation-checked operand contract (one implementation with sema); an
+// incomplete contract stays None, which the target diagnostic refuses.
+fn pkg_ffi_inline_asm_contract(function: Func, target: String) -> InlineAsmContract? Never! {
+    if inline_assembly_contract(function, target) == {
+        .Checked(contract) -> return Val(contract)
+        else -> return None
+    }
 }
 
 // The hidden crate carries every checked C row. Primitive and handle rows use

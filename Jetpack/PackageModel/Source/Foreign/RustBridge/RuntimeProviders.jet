@@ -207,7 +207,8 @@ fn pkg_ffi_is_crypto_usage(usage: String) -> Bool Never! {
 // this program. FFI and C-linked programs stay on the ordinary path because
 // their artifacts depend on bridge and link inputs outside the AST key.
 fn pkg_ffi_native_cacheable(program: RustBridgeProgram) -> Bool Never! {
-    if program.cffi.links_c() || pkg_ffi_collect_externs(program).len() > 0 -> return false
+    // Whether a program has foreign rows does not depend on the target triple.
+    if program.cffi.links_c() || pkg_ffi_collect_externs(program, "").len() > 0 -> return false
     loop usage in program.used_core {
         if usage == "core.db" || usage.starts_with("core.db::") || pkg_ffi_needs_parquet_provider(usage) || pkg_ffi_is_http_client_usage(usage) || usage == "core.http.server::tls" || pkg_ffi_needs_net_tls_provider(usage) -> return false
         if usage == "core.crypto" || usage.starts_with("core.crypto::") || usage == "core.crypto.expert" || usage.starts_with("core.crypto.expert::") || usage == "core.auth" || usage.starts_with("core.auth::") -> return false
