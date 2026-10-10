@@ -44,6 +44,7 @@ function specification(id) {
         if (crypto.has(name)) return { type: 'suite', runner: rt + 'run-crypto-fixtures.mjs', modes: ['assemble', 'lower', 'link', 'run'], crypto: true };
         if (plain[name]) return { type: 'plain', name, call: plain[name][0], expected: plain[name][1], runner: rt + 'check-runtime.mjs' };
         if (['CodecCSV', 'CodecEnv', 'DynCodec', 'CompilerFileLeaves'].includes(name)) return { type: 'codec-fixture', name, runner: rt + 'run-native-codec-file-leaves.mjs' };
+        if (['FilesWalk', 'HostParallelism'].includes(name)) return { type: 'native-suite', name, runner: rt + (name === 'FilesWalk' ? 'run-files-walk-fixtures.mjs' : 'run-host-parallelism-fixtures.mjs'), witness: rt + name + 'Witness.c', modes: ['assemble', 'lower', 'audit', 'link', 'run'] };
         if (suites[name]) return { type: 'suite', runner: rt + suites[name][0], modes: suites[name][1], name };
         if (['EnvironmentLeaves', 'FaultSchedule', 'IterCharge', 'ProgressState', 'HostFault', 'FloatBits', 'TerminalColor', 'TrapReport', 'VaultHooks', 'VaultProvider', 'Thread', 'HostSpawn', 'CompilerEnv', 'CompilerRoutes', 'CompilerNeededJSON', 'CompilerNeededURL', 'CompilerNeededMathText', 'DynNative'].includes(name)) return { type: 'c', name, runner: be + 'run-runtime.mjs' };
         if (name === 'GenericRouteSchema') return { type: 'direct', runner: 'Compiler/JetRuntime/Tests/GenericRouteSchema.jet', expected: '' };
@@ -86,6 +87,7 @@ export function prepareTransport(row, { repo, out }) {
         cwd: join(out, id), sha256: digest(readFileSync(adapter)), testCount: 1,
         stdout: `JET_COMPILER_REGISTRY PASS ${id} tests=1\n`, sources: [row.source], sourceManifests: ['Compiler/Bootstrap/sources.list', 'Compiler/JetRuntime/sources.list'] };
     const witness = row.source.replace(/\.jet$/, '.c');
+    if (spec.witness) entry.sources.push(spec.witness);
     if (spec.type === 'c' && existsSync(join(repo, witness))) entry.sources.push(witness);
     if (spec.blocked) return { ...entry, status: 'BLOCKED', reason: spec.blocked };
     if (spec.type === 'golden-lower' || spec.type === 'corpus') entry.corpus = nativeCorpus(repo, entry.cwd);
@@ -109,6 +111,8 @@ export function planTransport(entry, { jet, repo, runtimePack }) {
     };
     if (spec.type === 'codec-fixture') {
         node(spec.runner, out, jet, runtimePack, '--test', spec.name);
+    } else if (spec.type === 'native-suite') {
+        for (const mode of spec.modes) run(process.execPath, [join(repo, spec.runner), out, mode], null, { JET_FRONT_JETC0: jet });
     } else
     if (spec.type === 'suite') {
         node(spec.runner, out, spec.modes[0]);
@@ -256,6 +260,10 @@ export async function runTransport(entry, { jet, repo, logDir, runtimePack, runt
             node(spec.runner, out, nativeJet, runtimePack, '--test', spec.name);
             const result = JSON.parse(readFileSync(join(out, 'fixture-result.json'), 'utf8'));
             if (result.status !== 0 || result.test !== spec.name || result.stdout !== '' || result.stderr !== '') throw Error('named native codec/file fixture receipt differs');
+        } else if (spec.type === 'native-suite') {
+            for (const mode of spec.modes) execute(process.execPath, [join(repo, spec.runner), out, mode], { env: { ...env, JET_FRONT_JETC0: nativeJet } });
+            const result = JSON.parse(readFileSync(join(out, 'run.receipt.json'), 'utf8'));
+            if (result.status !== 0 || result.signal || result.error || result.stdout !== '' || result.stderr !== '') throw Error('native files/host fixture receipt differs');
         } else
         if (spec.type === 'suite') {
             node(spec.runner, out, spec.modes[0]);

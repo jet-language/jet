@@ -161,6 +161,10 @@ lowers a fresh native library, and calls its exported fixture inside
 receipts preserve its actual compiler, object, driver and executable identities.
 The default admitted-pack C witness remains separate and does not replace
 the compiler-file fixture's write/read/refill assertions.
+Files-walk and host-parallelism recipes use their existing five-stage runners:
+assembly, native lowering, import/export ABI audit, C witness link and execution.
+Both require the canonical zero-status, empty-output `run.receipt.json`; merely
+producing an object or running an ABI audit is not a test pass.
 
 Evidence goes into a unique `census-*` directory below
 `~/.cache/jet-dev/scratch/GoldensCensus` (or `--scratch DIR`). `census.tsv` records
