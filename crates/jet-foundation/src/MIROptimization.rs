@@ -5207,6 +5207,60 @@ fn record_canonical_transition(
     );
 }
 
+// Measurement-only transactions: keep at most one owning snapshot, discard a
+// rejected pass's entire output, and never publish/seal a partially run pipeline.
+struct MirPassCensus {
+    enabled: bool,
+    first_failure: Option<MirOptimizationError>,
+}
+
+impl MirPassCensus {
+    fn checkpoint(&self, program: &MirProgram) -> Option<MirProgram> {
+        self.enabled.then(|| program.clone())
+    }
+
+    fn validate_or_rollback(
+        &mut self,
+        program: &mut MirProgram,
+        checkpoint: Option<MirProgram>,
+        pass: MirOptimizationPassId,
+        operation: &str,
+    ) -> Result<(), MirOptimizationError> {
+        if !self.enabled {
+            return validate_after(program, pass);
+        }
+        if let Err(first) = verify_mir_legality_first(program) {
+            let errors = collect_mir_legality_errors(program, &first);
+            for error in &errors {
+                eprintln!("JET_DEBUG_LOWER_ALL optimization: operation={operation} pass={} violation={error:?}", pass.as_str());
+            }
+            eprintln!("JET_DEBUG_LOWER_ALL optimization summary: operation={operation} pass={} violations={} output=discarded", pass.as_str(), errors.len());
+            *program = checkpoint.expect("collect-all pass verification requires its valid input snapshot");
+            // Track traversal only so later fact checks see a valid pass-order
+            // prefix. This measurement result is never sealed or emitted.
+            let through = MIR_OPTIMIZATION_PASS_ORDER.iter().position(|id| *id == pass)
+                .expect("a verified optimization phase has a canonical pass identity");
+            for function in &mut program.functions {
+                function.optimization.pass_ids.clear();
+                function.optimization.pass_ids.extend_from_slice(&MIR_OPTIMIZATION_PASS_ORDER[..=through]);
+            }
+            if self.first_failure.is_none() {
+                self.first_failure = Some(MirOptimizationError::Legality { pass, error: first });
+            }
+        } else {
+            eprintln!("JET_DEBUG_LOWER_ALL optimization summary: operation={operation} pass={} violations=0 output=accepted", pass.as_str());
+        }
+        Ok(())
+    }
+
+    fn complete(self) -> Result<(), MirOptimizationError> {
+        match self.first_failure {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+}
+
 /// Optimize `program` in place of a copy: the canonical program is the
 /// largest compile-time structure, so the pipeline consumes its input.
 pub fn optimize_mir_program(
@@ -5214,6 +5268,10 @@ pub fn optimize_mir_program(
     policy: &MirOptimizationPolicy,
 ) -> Result<MirProgram, MirOptimizationError> {
     let _ = policy;
+    let mut pass_census = MirPassCensus {
+        enabled: std::env::var_os("JET_DEBUG_LOWER_ALL").is_some_and(|value| value != "0"),
+        first_failure: None,
+    };
     let pipeline_before_payload = CanonicalPass::enabled()
         .then(|| crate::MIR::canonical_payload(&program));
     let pipeline_before_identity = CanonicalPass::enabled()
@@ -5235,6 +5293,7 @@ pub fn optimize_mir_program(
     }) && optimized_pass_order_complete(&program, &mir_program_digest(&program));
     if already_optimized {
         let mut optimized = program;
+        let checkpoint = pass_census.checkpoint(&optimized);
         run_canonical_pass(
             "mir.fixed-reduction-normalization",
             "crates/jet-foundation/src/MIROptimization.rs",
@@ -5247,7 +5306,9 @@ pub fn optimize_mir_program(
             &mut optimized,
             refresh_acceleration_facts,
         );
-        validate_after(&optimized, MirOptimizationPassId::CanonicalLoopFacts)?;
+        pass_census.validate_or_rollback(&mut optimized, checkpoint, MirOptimizationPassId::CanonicalLoopFacts,
+            "mir.fixed-reduction-normalization+mir.acceleration-facts")?;
+        pass_census.complete()?;
         seal_derived_facts(&mut optimized);
         record_canonical_transition(
             "mir.optimize-pipeline",
@@ -5264,6 +5325,7 @@ pub fn optimize_mir_program(
         .iter()
         .map(|function| function.optimization.loop_facts.clone())
         .collect::<Vec<_>>();
+    let checkpoint = pass_census.checkpoint(&optimized);
     clear_derived_facts(&mut optimized);
     // Checked #Inline(Always) is expanded here, before any target-neutral
     // proof pass. Keeping it in this one MIR pipeline means every execution
@@ -5276,8 +5338,9 @@ pub fn optimize_mir_program(
         expand_inline_always,
     );
     mark_pass(&mut optimized, MirOptimizationPassId::LegalityVerification);
-    validate_after(&optimized, MirOptimizationPassId::LegalityVerification)?;
+    pass_census.validate_or_rollback(&mut optimized, checkpoint, MirOptimizationPassId::LegalityVerification, "mir.inline-always")?;
 
+    let checkpoint = pass_census.checkpoint(&optimized);
     run_canonical_pass(
         "mir.unreachable-block-elimination",
         "crates/jet-foundation/src/MIROptimization.rs",
@@ -5285,8 +5348,9 @@ pub fn optimize_mir_program(
         eliminate_unreachable_blocks,
     );
     mark_pass(&mut optimized, MirOptimizationPassId::UnreachableBlockElimination);
-    validate_after(&optimized, MirOptimizationPassId::UnreachableBlockElimination)?;
+    pass_census.validate_or_rollback(&mut optimized, checkpoint, MirOptimizationPassId::UnreachableBlockElimination, "mir.unreachable-block-elimination")?;
 
+    let checkpoint = pass_census.checkpoint(&optimized);
     run_canonical_pass(
         "mir.cfg-simplification",
         "crates/jet-foundation/src/MIROptimization.rs",
@@ -5294,8 +5358,9 @@ pub fn optimize_mir_program(
         simplify_cfg,
     );
     mark_pass(&mut optimized, MirOptimizationPassId::CfgSimplification);
-    validate_after(&optimized, MirOptimizationPassId::CfgSimplification)?;
+    pass_census.validate_or_rollback(&mut optimized, checkpoint, MirOptimizationPassId::CfgSimplification, "mir.cfg-simplification")?;
 
+    let checkpoint = pass_census.checkpoint(&optimized);
     run_canonical_pass(
         "mir.exact-constant-folding",
         "crates/jet-foundation/src/MIROptimization.rs",
@@ -5303,8 +5368,9 @@ pub fn optimize_mir_program(
         fold_exact_constants,
     );
     mark_pass(&mut optimized, MirOptimizationPassId::ExactConstantFolding);
-    validate_after(&optimized, MirOptimizationPassId::ExactConstantFolding)?;
+    pass_census.validate_or_rollback(&mut optimized, checkpoint, MirOptimizationPassId::ExactConstantFolding, "mir.exact-constant-folding")?;
 
+    let checkpoint = pass_census.checkpoint(&optimized);
     run_canonical_pass(
         "mir.bounds-check-elimination",
         "crates/jet-foundation/src/MIROptimization.rs",
@@ -5312,8 +5378,9 @@ pub fn optimize_mir_program(
         derive_bounds_facts,
     );
     mark_pass(&mut optimized, MirOptimizationPassId::BoundsCheckElimination);
-    validate_after(&optimized, MirOptimizationPassId::BoundsCheckElimination)?;
+    pass_census.validate_or_rollback(&mut optimized, checkpoint, MirOptimizationPassId::BoundsCheckElimination, "mir.bounds-check-elimination")?;
 
+    let checkpoint = pass_census.checkpoint(&optimized);
     run_canonical_pass(
         "mir.dead-pure-value-elimination",
         "crates/jet-foundation/src/MIROptimization.rs",
@@ -5321,8 +5388,9 @@ pub fn optimize_mir_program(
         eliminate_dead_pure_values,
     );
     mark_pass(&mut optimized, MirOptimizationPassId::DeadPureValueElimination);
-    validate_after(&optimized, MirOptimizationPassId::DeadPureValueElimination)?;
+    pass_census.validate_or_rollback(&mut optimized, checkpoint, MirOptimizationPassId::DeadPureValueElimination, "mir.dead-pure-value-elimination")?;
 
+    let checkpoint = pass_census.checkpoint(&optimized);
     run_canonical_pass(
         "mir.canonical-loop-facts",
         "crates/jet-foundation/src/MIROptimization.rs",
@@ -5349,22 +5417,26 @@ pub fn optimize_mir_program(
     derive_loop_and_vector_facts(&mut optimized, &post_reduction_loop_facts);
     normalize_fixed_reduction_loops(&mut optimized);
     mark_pass(&mut optimized, MirOptimizationPassId::CanonicalLoopFacts);
-    validate_after(&optimized, MirOptimizationPassId::CanonicalLoopFacts)?;
+    pass_census.validate_or_rollback(&mut optimized, checkpoint, MirOptimizationPassId::CanonicalLoopFacts,
+        "mir.canonical-loop-facts+mir.fixed-reduction-normalization")?;
 
+    let checkpoint = pass_census.checkpoint(&optimized);
     run_canonical_pass(
         "mir.acceleration-facts",
         "crates/jet-foundation/src/MIROptimization.rs",
         &mut optimized,
         refresh_acceleration_facts,
     );
-    validate_after(&optimized, MirOptimizationPassId::CanonicalLoopFacts)?;
+    pass_census.validate_or_rollback(&mut optimized, checkpoint, MirOptimizationPassId::CanonicalLoopFacts, "mir.acceleration-facts")?;
+    let checkpoint = pass_census.checkpoint(&optimized);
     run_canonical_pass(
         "mir.canonical-program-order",
         "crates/jet-foundation/src/MIROptimization.rs",
         &mut optimized,
         canonicalize_program_order,
     );
-    validate_after(&optimized, MirOptimizationPassId::CanonicalLoopFacts)?;
+    pass_census.validate_or_rollback(&mut optimized, checkpoint, MirOptimizationPassId::CanonicalLoopFacts, "mir.canonical-program-order")?;
+    pass_census.complete()?;
     seal_derived_facts(&mut optimized);
     record_canonical_transition(
         "mir.optimize-pipeline",
@@ -8519,6 +8591,32 @@ fn eliminate_unreachable_blocks(program: &mut MirProgram) {
             .iter()
             .flat_map(|block| block.instructions.iter().filter_map(|instruction| instruction.result))
             .collect();
+        // Places are metadata, not CFG roots. A removed block can own an
+        // indexed/ranged/temporary place whose SSA operands died with it.
+        // Keep storage declarations and executable/drop references even if
+        // malformed: legality must still reject a genuinely live dangling use.
+        let mut referenced_places: HashSet<_> = function.locals.iter().map(|local| local.place).collect();
+        referenced_places.extend(function.drops.iter().map(|action| action.place));
+        for block in &function.blocks {
+            for instruction in &block.instructions {
+                referenced_places.extend(operation_place_refs(&instruction.operation));
+            }
+        }
+        function.places.retain(|place| {
+            if referenced_places.contains(&place.id) {
+                return true;
+            }
+            let base_live = match place.base {
+                MirPlaceBase::Parameter(value) | MirPlaceBase::Capture(value) | MirPlaceBase::Temporary(value) => live_values.contains(&value),
+                MirPlaceBase::Local(_) | MirPlaceBase::Static(_) => true,
+            };
+            base_live && place.projections.iter().all(|projection| match projection {
+                MirProjection::Index { index, .. } => live_values.contains(index),
+                MirProjection::Range { range, .. } => live_values.contains(range),
+                MirProjection::MapLookup { lookup, .. } => live_values.contains(lookup),
+                MirProjection::Field { .. } | MirProjection::Deref { .. } | MirProjection::Payload { .. } => true,
+            })
+        });
         function.values.retain(|(value, _, _, _)| live_values.contains(value));
         let predecessors = predecessor_map(function);
         for block in &mut function.blocks {
@@ -16403,6 +16501,87 @@ fn encode_mir_const_key(writer: &mut CanonicalWriter, key: &MirConstKey) {
             writer.str(type_name);
             writer.str(variant);
         }
+    }
+}
+
+#[cfg(test)]
+mod pass_census_tests {
+    use super::*;
+
+    fn valid_program() -> MirProgram {
+        MirProgram {
+            cffi: crate::MIR::MirCffiFacts::default(), native_pack: false,
+            schema_version: crate::MIR::MIR_SCHEMA_VERSION, package_identity: "pass-census".into(),
+            facts: crate::MIR::MirPackageFacts::default(), names: crate::MIR::MirNameFacts::default(),
+            modules: Vec::new(), imports: Vec::new(), types: Vec::new(), traits: Vec::new(),
+            core_owners: Vec::new(), impls: Vec::new(), constants: Vec::new(),
+            fields: Vec::new(), source_files: Vec::new(), functions: Vec::new(),
+            foreign: Vec::new(), links: Vec::new(), callbacks: Vec::new(),
+            handles: Vec::new(), jobs: Vec::new(), tests: Vec::new(), harnesses: Vec::new(),
+            artifacts: Vec::new(), core_calls: Vec::new(), prelude_calls: Vec::new(),
+            type_instances: Vec::new(), codec_migrations: HashMap::new(), unreachable: Vec::new(),
+        }
+    }
+
+    fn run_rejected_outputs(
+        program: &mut MirProgram,
+        census: &mut MirPassCensus,
+        visited: &mut Vec<MirOptimizationPassId>,
+    ) -> Result<(), MirOptimizationError> {
+        for (pass, id) in [
+            (MirOptimizationPassId::CfgSimplification, 7),
+            (MirOptimizationPassId::ExactConstantFolding, 9),
+        ] {
+            // Every following pass must start from the last valid program,
+            // never from a preceding rejected output.
+            assert!(program.constants.is_empty());
+            verify_mir_legality_first(program).unwrap();
+            let checkpoint = census.checkpoint(program);
+            visited.push(pass);
+            let constant = MirConstantDef {
+                id: crate::MIR::MirConstantId(id), module: crate::MIR::MirModuleId(1),
+                key: format!("rejected-{id}"), name: format!("rejected-{id}"),
+                span: Span::new(23, 31), visibility: crate::MIR::MirVisibility::Private,
+                ty: MirType::from_kind(MirTypeKind::Bool), is_storage: false,
+                value: MirConstant::Bool(false),
+            };
+            program.constants = vec![constant.clone(), constant];
+            census.validate_or_rollback(program, checkpoint, pass, pass.as_str())?;
+        }
+        let checkpoint = census.checkpoint(program);
+        visited.push(MirOptimizationPassId::DeadPureValueElimination);
+        eliminate_dead_pure_values(program);
+        census.validate_or_rollback(program, checkpoint, MirOptimizationPassId::DeadPureValueElimination,
+            "mir.dead-pure-value-elimination")?;
+        Ok(())
+    }
+
+    #[test]
+    fn debug_pass_census_rolls_back_and_continues_without_publishing() {
+        let mut program = valid_program();
+        let mut census = MirPassCensus { enabled: true, first_failure: None };
+        let mut visited = Vec::new();
+        run_rejected_outputs(&mut program, &mut census, &mut visited).unwrap();
+        assert_eq!(visited, [MirOptimizationPassId::CfgSimplification,
+            MirOptimizationPassId::ExactConstantFolding, MirOptimizationPassId::DeadPureValueElimination]);
+        assert!(program.constants.is_empty(), "both invalid outputs must be discarded");
+        verify_mir_legality_first(&program).unwrap();
+        assert!(matches!(census.complete(), Err(MirOptimizationError::Legality {
+            pass: MirOptimizationPassId::CfgSimplification,
+            error: MirLegalityError::Validation(MirValidationError::DuplicateId { kind: "constant", id: 7 }),
+        })), "the complete census must still reject the pipeline with its original first failure");
+    }
+
+    #[test]
+    fn normal_pass_verification_stops_at_the_first_rejected_output() {
+        let mut program = valid_program();
+        let mut census = MirPassCensus { enabled: false, first_failure: None };
+        assert!(census.checkpoint(&program).is_none(), "normal mode must not clone MIR");
+        let mut visited = Vec::new();
+        assert!(matches!(run_rejected_outputs(&mut program, &mut census, &mut visited),
+            Err(MirOptimizationError::Legality { pass: MirOptimizationPassId::CfgSimplification, .. })));
+        assert_eq!(visited, [MirOptimizationPassId::CfgSimplification]);
+        assert_eq!(program.constants.len(), 2, "normal mode must not install a measurement rollback");
     }
 }
 

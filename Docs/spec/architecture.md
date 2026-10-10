@@ -31,10 +31,14 @@ O0 comptime lands. Both are removed with the rest of Rust (owner directive 19).
 
 Bootstrap MIR optimization verifies legality in both development and release
 builds. `JET_DEBUG_LOWER_ALL=1` additionally reports all global identity
-collisions and independent legality checks for each function before returning
-the original first failure; it neither accepts invalid MIR nor continues
-optimization. Checks that require valid component prerequisites still reject
-that component rather than reading invalid references. With `JET_DUMP_MIR`
+collisions and independent legality checks for each function. An invalid input
+still stops the pipeline. If a pass introduces invalid MIR, measurement mode
+reports its operation/pass and structured violations, discards its entire
+output, and runs the following passes from the last valid program. It retains
+only one snapshot at a time and ultimately returns the original first failure;
+no rejected pipeline is sealed or emitted. Normal mode remains fail-fast and
+takes no snapshots. Checks that require valid component prerequisites still
+reject that component rather than reading invalid references. With `JET_DUMP_MIR`
 also set, the checked lowering pipeline saves the pre-verification program at
 `<dump-path>.before-legality`; the usual post-optimization dump remains unchanged.
 
