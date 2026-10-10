@@ -83,6 +83,40 @@ fn fx_values_inline() -> MIRProgram Never! {
     fx_program([MIRFunction]{fx_function("make", make, wrap), fx_function("total", total, fx_int()), fx_function("run", r, fx_unit())}, ^types)
 }
 
+// Stored exact Int fields use word carriers even when their value owns bigint
+// storage. Their drop glue must test the Int tag, not compare against a pointer.
+// expect-stdout values-int-field-drop: "37\n"
+// expect-runtime-only values-int-field-drop
+fn fx_values_int_field_drop() -> MIRProgram Never! {
+    definition :: fx_type_def("IntDropHolder", MIRTypeDefKind.Struct{
+        fields: [MIRField]{fx_field("IntDropHolder", "value", fx_int())},
+        methods: [MIRFunctionID]{},
+    })
+    b := fx_builder()
+    loop number in ([Int]{0, -37, 9223372036854775808}) {
+        value :: fx_int_const(&b, number)
+        holder :: fx_values_struct(&b, "IntDropHolder", [MIRFieldValue]{fx_values_set("IntDropHolder", "value", value)})
+        fx_do(&b, MIROperation.Drop{value: holder, kind: MIRDropKind.Value})
+    }
+    marker :: fx_int_const(&b, 37)
+    fx_print(&b, marker)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{definition})
+}
+
+fn fx_values_int_field_drop_checks() -> Bool Never! {
+    lowered :: lir_lower_entry(fx_values_int_field_drop(), mir_function_id("run"))
+    if lowered.issues.len() != 0 || lir_lint_module(lowered.lir).len() != 0 -> return false
+    loop function in lowered.lir.functions {
+        loop block in function.blocks {
+            loop instruction in block.insts {
+                if instruction == .Call(_, _, .Runtime(symbol), _) && symbol == "jet_rt_int_drop" -> return true
+            }
+        }
+    }
+    false
+}
+
 // struct Acc { sum: Int, last: Int }
 // fn run() {
 //     acc := Acc{sum: 0, last: 0}

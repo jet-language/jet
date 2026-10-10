@@ -439,7 +439,7 @@ fn lower_glue_drop_int(m: &LowerModule, f: &LowerFunction, value: LIRValueID) Ne
 fn lower_drop_stored(p: MIRProgram, m: &LowerModule, f: &LowerFunction, base: LIRValueID, offset: Int, ty: MIRType) Never! {
     repr :: lower_repr(p, ty)
     if repr == .Unsupported(reason) -> return lower_fail(&m, &f, "drop glue field of {reason} is not lowered at O0 yet")
-    if repr == .Word && lower_is_exact_int(ty) {
+    if repr == .ExactInt && lower_is_exact_int(ty) {
         value :: lower_word(&f)
         lower_emit(&f, LIRInst.Load{dst: value, base: base, offset: offset})
         return lower_glue_drop_int(&m, &f, value)
