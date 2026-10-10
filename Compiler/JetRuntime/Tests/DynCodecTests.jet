@@ -74,5 +74,72 @@ fn codec_fixture_number(tree: I64, expected: I64) -> Bool {
     jet_rt_handle_drop_field_error(error)
     jet_rt_free(errors, I64{8}, I64{8})
     jet_rt_free(slots, I64{32}, I64{8})
+    codec_fixture_decode()
+}
+
+// One adapter failure: status 0, exactly one FieldError at the empty path
+// with `reason`; releases it.
+fn codec_fixture_rejects(status: I64, slots: I64, reason: I64) -> Bool {
+    if (status != I64{0} || text_glue_word(slots + I64{8}) != I64{1}) -> return false
+    errors :: text_glue_word(slots)
+    error :: text_glue_word(errors)
+    same :: jet_rt_string_eq(text_glue_word(error + TEXT_FIELD_PATH), rt_static_text("")) && jet_rt_string_eq(text_glue_word(error + TEXT_FIELD_REASON), reason)
+    jet_rt_handle_drop_field_error(error)
+    jet_rt_free(errors, I64{8}, I64{8})
+    same
+}
+
+// Scalar Decode adapters (JetStd/Dyn.rs decode_* and EncodingTraits.rs):
+// value carriers, exact-number projection, and the Rust failure texts.
+fn codec_fixture_decode() -> I64 {
+    slots :: jet_rt_alloc(I64{16}, I64{8})
+    number :: jet_rt_record_new_dyn_number(rt_static_text("1.50e1"))
+    if (jet_rt_codec_decode_i64(number, slots, slots, slots + I64{8}) != I64{1} || text_glue_word(slots) != I64{15}) -> return I64{30}
+    exact :: jet_rt_record_new_dyn_number(rt_static_text("-2e20"))
+    if (jet_rt_codec_decode_int(exact, slots, slots, slots + I64{8}) != I64{1}) -> return I64{31}
+    big :: text_glue_word(slots)
+    shown :: jet_rt_int_to_string(big)
+    if !jet_rt_string_eq(shown, rt_static_text("-200000000000000000000")) -> return I64{32}
+    jet_rt_string_drop(shown)
+    jet_rt_int_drop(big)
+    if !codec_fixture_rejects(jet_rt_codec_decode_i64(exact, slots, slots, slots + I64{8}), slots, rt_static_text("expected I64, found out-of-range Int")) -> return I64{33}
+    jet_rt_handle_drop_dyn(exact)
+    jet_rt_handle_drop_dyn(number)
+    half :: jet_rt_record_new_dyn_number(rt_static_text("1.5"))
+    if !codec_fixture_rejects(jet_rt_codec_decode_u8(half, slots, slots, slots + I64{8}), slots, rt_static_text("JSON number `1.5` is not an exact integer")) -> return I64{34}
+    jet_rt_handle_drop_dyn(half)
+    huge :: jet_rt_record_new_dyn_number(rt_static_text("1e400"))
+    if !codec_fixture_rejects(jet_rt_codec_decode_float(huge, slots, slots, slots + I64{8}), slots, rt_static_text("expected Float, found out-of-range number 1e400")) -> return I64{35}
+    if !codec_fixture_rejects(jet_rt_codec_decode_string(huge, slots, slots, slots + I64{8}), slots, rt_static_text("expected Text, found number 1e400")) -> return I64{36}
+    if !codec_fixture_rejects(jet_rt_codec_decode_bool(huge, slots, slots, slots + I64{8}), slots, rt_static_text("expected Bool, found number")) -> return I64{37}
+    jet_rt_handle_drop_dyn(huge)
+    word :: jet_rt_record_new_dyn_int(I64{256})
+    if !codec_fixture_rejects(jet_rt_codec_decode_u8(word, slots, slots, slots + I64{8}), slots, rt_static_text("expected U8, found out-of-range Int")) -> return I64{38}
+    if (jet_rt_codec_decode_u16(word, slots, slots, slots + I64{8}) != I64{1} || text_glue_word(slots) != I64{256}) -> return I64{39}
+    jet_rt_handle_drop_dyn(word)
+    real :: jet_rt_record_new_dyn_float(Float{-3.0})
+    if (jet_rt_codec_decode_i8(real, slots, slots, slots + I64{8}) != I64{1} || text_glue_word(slots) != I64{-3}) -> return I64{40}
+    jet_rt_handle_drop_dyn(real)
+    fraction :: jet_rt_record_new_dyn_float(Float{0.5})
+    if !codec_fixture_rejects(jet_rt_codec_decode_int(fraction, slots, slots, slots + I64{8}), slots, rt_static_text("expected Int, found Float")) -> return I64{41}
+    jet_rt_handle_drop_dyn(fraction)
+    quoted :: jet_rt_record_new_dyn_text(rt_static_text("4\"2"))
+    if !codec_fixture_rejects(jet_rt_codec_decode_int(quoted, slots, slots, slots + I64{8}), slots, rt_static_text("expected Int, found text \"4\\\"2\"")) -> return I64{42}
+    if !codec_fixture_rejects(jet_rt_codec_decode_char(quoted, slots, slots, slots + I64{8}), slots, rt_static_text("expected a single Char, found \"4\\\"2\"")) -> return I64{43}
+    jet_rt_handle_drop_dyn(quoted)
+    clef :: jet_rt_record_new_dyn_text(rt_static_text("𝄞"))
+    if (jet_rt_codec_decode_char(clef, slots, slots, slots + I64{8}) != I64{1} || text_glue_word(slots) != I64{119070}) -> return I64{44}
+    if (jet_rt_codec_decode_string(clef, slots, slots, slots + I64{8}) != I64{1} || !jet_rt_string_eq(text_glue_word(slots), rt_static_text("𝄞"))) -> return I64{45}
+    jet_rt_string_drop(text_glue_word(slots))
+    jet_rt_handle_drop_dyn(clef)
+    truth :: jet_rt_record_new_dyn_bool(true)
+    text_glue_store(slots, I64{0})
+    if (jet_rt_codec_decode_bool(truth, slots, slots, slots + I64{8}) != I64{1} || text_glue_word(slots) != I64{1}) -> return I64{46}
+    if !codec_fixture_rejects(jet_rt_codec_decode_float(truth, slots, slots, slots + I64{8}), slots, rt_static_text("expected Float, found Bool")) -> return I64{47}
+    jet_rt_handle_drop_dyn(truth)
+    absent :: jet_rt_record_new_dyn_null()
+    if !codec_fixture_rejects(jet_rt_codec_decode_string(absent, slots, slots, slots + I64{8}), slots, rt_static_text("expected Text, found null")) -> return I64{48}
+    jet_rt_handle_drop_dyn(absent)
+    jet_rt_free(slots, I64{16}, I64{8})
     I64{0}
 }
