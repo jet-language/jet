@@ -2926,6 +2926,12 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
         }
         return sema_expr_check_method_call(Expr.Ident{name: owner_name, span: receiver_span}, method, method_span, inferred_args, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
+    // D-SERDE13=B (Rust method_calls.rs `data_renamed_to_dyn`): the retired
+    // `Data.Variant(...)` spelling points at `Dyn` and checks as the Dyn case.
+    if receiver == .Ident(data_name, data_span) && data_name == "Data" && sema_expression_type_symbol(&scopes, environment, program, data_name) == None {
+        &diagnostics.push(sema_data_renamed_to_dyn(data_span))
+        return sema_call_try_data_literal(Type.Named{name: "Dyn"}, method, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics).value
+    }
     checked_text := sema_expression_checked_text_static_method_call(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if checked_text.handled -> return checked_text.value
     explicit_unit := sema_expr_try_explicit_unit_method(receiver, method, method_span, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -3888,6 +3894,11 @@ fn sema_expr_check_method_call_expr(receiver: Expr, method: String, method_span:
     }
     sema_receiver_mark_finish(&state, unmarked, scopes, receiver_last_use, &diagnostics)
     checked
+}
+
+// Rust core_types.rs `data_renamed_to_dyn` (D-SERDE13=B).
+fn sema_data_renamed_to_dyn(span: Span) -> Diagnostic {
+    sema_error("E0351", span, "the value tree is named `Dyn`, not `Data`", "`Dyn` is the one name a hand codec constructs and returns and every format's `parse` yields — its variants are `.Null`/`.Bool`/`.Int`/`.Float`/`.Number`/`.Text`/`.Bytes`/`.DateTime`/`.Array`/`.Object`", "write `Dyn` instead of `Data`")
 }
 
 fn sema_expr_check_list_literal(elements: [Expr], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
