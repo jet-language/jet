@@ -3633,6 +3633,11 @@ impl<'a> Checker<'a> {
             .flatten();
 
         for (name, span, source_prefix) in bound_slots {
+            // Read patterns copy scalar payloads; they do not retain a place
+            // loan. Explicit `&place` pattern windows were handled above.
+            if self.lookup(&name).is_some_and(|info| info.ty.is_scalar()) {
+                continue;
+            }
             let binding_span = self.lookup(&name).map(|info| info.def_span).unwrap_or(span);
             let binding_has_view = self
                 .lookup(&name)

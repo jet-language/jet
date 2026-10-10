@@ -347,3 +347,62 @@ fn run() {}
 "#);
     assert!(found.is_empty(), "{found:?}");
 }
+
+#[test]
+fn scalar_read_pattern_payloads_do_not_lend_the_owner() {
+    let found = errors(r#"
+enum Frame { Array(first: Bool, index: U64) Key(heap: U64) Empty }
+struct Pull { frames: [Frame], lookahead: U8? }
+impl Pull {
+    fn consume(&self) -> U8 Never! { U8{0} }
+    fn next(&self) -> U64 Never! {
+        frame :: self.frames[0]
+        if frame == {
+            .Array(first, index) -> {
+                _ :: &self.consume()
+                _ :: &self.frames.pop()
+                return if first -> index else -> index + U64{1}
+            }
+            .Key(heap) -> {
+                &self.frames.clear()
+                return heap
+            }
+            .Empty -> { return U64{0} }
+        }
+    }
+    fn byte(&self) -> U8? Never! {
+        if self.lookahead == .Val(byte) {
+            self.lookahead = None
+            return Val(byte)
+        }
+        None
+    }
+}
+fn run() {}
+"#);
+    assert!(found.is_empty(), "scalar payloads must be values: {found:?}");
+    let found = errors(r#"
+enum Frame { Text(String) Empty }
+struct Pull { frames: [Frame] }
+fn invalid(pull: &Pull) {
+    frame :: pull.frames[0]
+    if frame == .Text(text) {
+        &pull.frames.clear()
+        _ :: text.len()
+    }
+}
+fn run() {}
+"#);
+    assert!(found.iter().any(|d| d.code == "E0212"), "text must keep its loan: {found:?}");
+    let found = errors(r#"
+struct Pull { lookahead: U8? }
+fn invalid(pull: &Pull) {
+    if &pull.lookahead == .Val(byte) {
+        pull.lookahead = None
+        _ :: byte
+    }
+}
+fn run() {}
+"#);
+    assert!(found.iter().any(|d| d.code == "E0212"), "write windows must keep their loan: {found:?}");
+}
