@@ -603,12 +603,19 @@ foreign item, callback/export provider, C-ABI physical type or signature
 discovery, or synthesized support batch is an attempted item. A failure
 records its kind, stable ID, name, source byte span,
 and original reason; absent source spans are `0..0`. Names and reasons use
-JSON string escaping. The failed item's text is discarded and later items
-are attempted. Failed traits and impls also own their skipped method bodies.
+JSON string escaping. Failed item text becomes a clearly marked, escaped
+line comment rather than invented code, and later items are attempted.
+Failed traits and impls also own their skipped method bodies.
 The final `emission failures N of M` counts failed and attempted items,
-independently of MIR's function census. Any failure discards the entire new
-Rust fragment and propagates the first original panic through the existing
-ICE/exit-101 path; normal emission remains fail-fast.
+independently of MIR's function census. Collect mode also writes a separate
+diagnostic-only partial Rust monolith: `JET_DUMP_RUST` selects its path,
+otherwise a process/sequence-named file in the temporary directory is used.
+The log announces its JSON-quoted path. Its banner says it is not an admitted
+build artifact; it lets the same failing emission run type-check all surviving
+items with `rustc --emit=metadata` without claiming complete emission proof.
+Any emission failure still discards the normal returned Rust fragment and
+propagates the first original panic through the existing ICE/exit-101 path.
+Normal emission remains fail-fast and never writes that diagnostic file.
 
 A bare registered Core-carrier trait reference resolves through that carrier's
 one source-module owner and the exact trait/method identity. It cannot match an

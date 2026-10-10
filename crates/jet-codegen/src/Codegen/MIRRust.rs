@@ -1538,12 +1538,19 @@ impl EmissionCensus {
                 out.truncate(start);
                 self.failures += 1;
                 let message = emission_panic_message(payload.as_ref());
+                let quoted_name = jet_foundation::JSON::json_escape(name);
+                let quoted_message = jet_foundation::JSON::json_escape(message);
                 eprintln!(
                     "JET_DEBUG_LOWER_ALL emission: kind={kind} id={id} name=\"{}\" span={}..{} message=\"{}\"",
-                    jet_foundation::JSON::json_escape(name),
+                    quoted_name,
                     span.start,
                     span.end,
-                    jet_foundation::JSON::json_escape(message),
+                    quoted_message,
+                );
+                let _ = writeln!(
+                    out,
+                    "// JET_DEBUG_LOWER_ALL FAILED EMISSION: kind={kind} id={id} name=\"{quoted_name}\" span={}..{} message=\"{quoted_message}\"",
+                    span.start, span.end,
                 );
                 if self.first_panic.is_none() {
                     self.first_panic = Some(payload);
@@ -1559,6 +1566,19 @@ impl EmissionCensus {
                 "JET_DEBUG_LOWER_ALL emission failures {} of {}",
                 self.failures, self.attempted,
             );
+            match dump_partial_rust(&out.as_bytes()[program_start..], self.failures, self.attempted) {
+                Ok(path) => eprintln!(
+                    "JET_DEBUG_LOWER_ALL emission partial Rust: path=\"{}\" failures={} items={}",
+                    jet_foundation::JSON::json_escape(&path.to_string_lossy()),
+                    self.failures, self.attempted,
+                ),
+                Err(error) => {
+                    eprintln!("JET_DEBUG_LOWER_ALL emission partial Rust failed: {error}");
+                    if self.first_panic.is_none() {
+                        panic!("cannot write partial Rust emission census: {error}");
+                    }
+                }
+            }
         }
         if let Some(payload) = self.first_panic {
             out.truncate(program_start);
@@ -1579,6 +1599,31 @@ fn emission_panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
     }
 }
 
+fn dump_partial_rust(
+    rust: &[u8],
+    failures: usize,
+    attempted: usize,
+) -> std::io::Result<std::path::PathBuf> {
+    use std::io::Write;
+    let path = match std::env::var_os("JET_DUMP_RUST") {
+        Some(path) => std::path::PathBuf::from(path),
+        None => {
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let sequence = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            std::env::temp_dir().join(format!(
+                "jet-emission-{}-{sequence}.partial.rs", std::process::id(),
+            ))
+        }
+    };
+    let mut file = std::fs::File::create(&path)?;
+    writeln!(
+        file,
+        "// DEBUG PARTIAL RUST: NOT AN ADMITTED BUILD ARTIFACT; emission failures {failures} of {attempted}"
+    )?;
+    file.write_all(rust)?;
+    Ok(path)
+}
+
 #[cfg(test)]
 mod emission_census_tests {
     use super::{emission_panic_message, EmissionCensus};
@@ -1592,23 +1637,29 @@ mod emission_census_tests {
             let mut reached_last = false;
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 census.item("type", 11, "bad \"type\"", 3..7, &mut out, |out| {
-                    out.push_str("partial-type");
+                    out.push_str("struct GoodType;\n");
                     if mode != "success" {
+                        out.push_str("partial-type");
                         std::panic::panic_any(String::from("bad type\n\"first\""));
                     }
                 });
                 census.item("impl", 12, "bad impl", 7..9, &mut out, |out| {
-                    out.push_str("partial-impl");
+                    out.push_str("impl GoodType {}\n");
                     if mode != "success" {
+                        out.push_str("partial-impl");
                         panic!("bad impl second");
                     }
                 });
                 census.item("function", 13, "good", 9..10, &mut out, |out| {
-                    out.push_str("good");
+                    out.push_str("fn main() {}\n");
+                    if mode == "rustc-errors" {
+                        out.push_str("fn first_bad() -> u8 { false }\nfn second_bad() -> u8 { \"bad\" }\n");
+                    }
                     reached_last = true;
                 });
-                if mode == "collect" {
-                    assert_eq!(out, "prefixgood", "failed item fragments must be discarded");
+                if mode != "success" {
+                    assert!(!out.contains("partial-type") && !out.contains("partial-impl"));
+                    assert_eq!(out.matches("// JET_DEBUG_LOWER_ALL FAILED EMISSION:").count(), 2);
                 }
                 census.finish(&mut out, "prefix".len());
             }));
@@ -1619,8 +1670,8 @@ mod emission_census_tests {
                 let payload = result.expect_err("an emission failure must remain an ICE");
                 assert!(payload.downcast_ref::<String>().is_some());
                 assert_eq!(emission_panic_message(payload.as_ref()), "bad type\n\"first\"");
-                assert_eq!(reached_last, mode == "collect");
-                if mode == "collect" {
+                assert_eq!(reached_last, mode != "normal");
+                if mode != "normal" {
                     assert_eq!(out, "prefix", "a failed program must not publish partial Rust");
                 }
             }
@@ -1631,9 +1682,17 @@ mod emission_census_tests {
         // process-global environment or panic hooks beside sibling tests.
         let module = module_path!().split_once("::").unwrap().1;
         let test = format!("{module}::reports_all_bad_items_only_in_collect_mode");
-        for mode in ["collect", "normal", "success"] {
+        let directory = std::env::temp_dir().join(format!(
+            "jet-emission-census-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        for mode in ["collect", "normal", "success", "rustc-errors"] {
+            let dump = directory.join(format!("{mode}.partial.rs"));
             let mut command = std::process::Command::new(std::env::current_exe().unwrap());
-            command.args(["--exact", &test, "--nocapture"]).env(CHILD, mode);
+            command.args(["--exact", &test, "--nocapture"])
+                .env(CHILD, mode).env("JET_DUMP_RUST", &dump);
             if mode == "normal" {
                 command.env_remove("JET_DEBUG_LOWER_ALL");
             } else {
@@ -1648,7 +1707,7 @@ mod emission_census_tests {
                 .filter(|line| line.starts_with("JET_DEBUG_LOWER_ALL emission:"))
                 .collect::<Vec<_>>();
             match mode {
-                "collect" => {
+                "collect" | "rustc-errors" => {
                     assert_eq!(rows.len(), 2, "{stderr}");
                     assert!(rows[0].contains(
                         "kind=type id=11 name=\"bad \\\"type\\\"\" span=3..7 message=\"bad type\\n\\\"first\\\"\""
@@ -1662,6 +1721,8 @@ mod emission_census_tests {
                     assert!(rows.is_empty(), "{stderr}");
                     assert!(!stderr.contains("bad impl second"), "{stderr}");
                     assert!(!stderr.contains("emission failures"), "{stderr}");
+                    assert!(!dump.exists(), "normal mode must ignore the diagnostic dump path");
+                    continue;
                 }
                 "success" => {
                     assert!(rows.is_empty(), "{stderr}");
@@ -1669,7 +1730,27 @@ mod emission_census_tests {
                 }
                 _ => unreachable!(),
             }
+            assert!(stderr.contains("JET_DEBUG_LOWER_ALL emission partial Rust: path="));
+            let rust = std::fs::read_to_string(&dump).unwrap();
+            assert!(rust.starts_with("// DEBUG PARTIAL RUST: NOT AN ADMITTED BUILD ARTIFACT;"));
+            assert!(!rust.contains("prefix") && !rust.contains("partial-type") && !rust.contains("partial-impl"));
+            assert!(rust.contains("fn main() {}"));
+            assert_eq!(rust.matches("// JET_DEBUG_LOWER_ALL FAILED EMISSION:").count(),
+                if mode == "success" { 0 } else { 2 });
+            let rustc = std::process::Command::new(
+                std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into()),
+            ).args(["--emit=metadata", "--crate-type=lib", "--crate-name=census_partial"])
+                .arg(&dump).arg("-o").arg(directory.join(format!("{mode}.rmeta")))
+                .output().unwrap();
+            let diagnostics = String::from_utf8_lossy(&rustc.stderr);
+            if mode == "rustc-errors" {
+                assert!(!rustc.status.success());
+                assert_eq!(diagnostics.matches("error[E0308]").count(), 2, "{diagnostics}");
+            } else {
+                assert!(rustc.status.success(), "{diagnostics}");
+            }
         }
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }
 
