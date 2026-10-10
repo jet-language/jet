@@ -4163,54 +4163,6 @@ mod jet_c_abi_routes {
 
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_jet_net_dns_error(value: *mut crate::JetNetDNSError) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_jet_net_dns_error(value: *mut crate::JetNetDNSError) -> *mut crate::JetNetDNSError {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_jet_net_error(value: *mut crate::JetNetError) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_jet_net_error(value: *mut crate::JetNetError) -> *mut crate::JetNetError {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_jet_net_error_detail(value: *mut crate::JetNetErrorDetail) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_jet_net_error_detail(value: *mut crate::JetNetErrorDetail) -> *mut crate::JetNetErrorDetail {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_jet_null_backend(value: *mut crate::JetNullBackend) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
@@ -5298,22 +5250,6 @@ mod jet_c_abi_routes {
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_clone_jet_ui_host_error(value: *mut crate::JetUiHostError) -> *mut crate::JetUiHostError {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_jet_ui_node(value: *mut crate::JetUiNode) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_jet_ui_node(value: *mut crate::JetUiNode) -> *mut crate::JetUiNode {
         // SAFETY: `value` is a live handle the caller owns for this call.
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
@@ -7278,34 +7214,6 @@ mod jet_c_abi_routes {
 
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_show_jet_ip_addr(value: *mut super::jet_c_abi_host::JetCIpAddr) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::JetIpAddr as crate::JetShow>::jet_show(&super::jet_c_abi_host::ip_view(value))))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_display_jet_net_error(value: *mut crate::JetNetError) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::JetNetError as crate::JetDisplay>::jet_display(unsafe { &*value })))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_show_jet_net_error(value: *mut crate::JetNetError) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::JetNetError as crate::JetShow>::jet_show(unsafe { &*value })))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_debug_jet_net_error(value: *mut crate::JetNetError) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::JetNetError as crate::JetDebug>::jet_debug(unsafe { &*value })))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_show_jet_point(value: *mut crate::JetPoint) -> JetCString {
         // SAFETY: `value` is a live handle the caller lends for this call.
         guard(|| handle(<crate::JetPoint as crate::JetShow>::jet_show(unsafe { &*value })))
@@ -8622,27 +8530,6 @@ mod jet_c_abi_routes {
 
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_jet_net_dns_error(left: *mut crate::JetNetDNSError, right: *mut crate::JetNetDNSError) -> bool {
-        // SAFETY: both are live handles the caller lends for this call.
-        guard(|| unsafe { &*left } == unsafe { &*right })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_jet_net_error(left: *mut crate::JetNetError, right: *mut crate::JetNetError) -> bool {
-        // SAFETY: both are live handles the caller lends for this call.
-        guard(|| unsafe { &*left } == unsafe { &*right })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_jet_net_error_detail(left: *mut crate::JetNetErrorDetail, right: *mut crate::JetNetErrorDetail) -> bool {
-        // SAFETY: both are live handles the caller lends for this call.
-        guard(|| unsafe { &*left } == unsafe { &*right })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_jet_pattern_capture(left: *mut crate::JetPatternCapture, right: *mut crate::JetPatternCapture) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
@@ -8896,13 +8783,6 @@ mod jet_c_abi_routes {
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_jet_ui_host_error(left: *mut crate::JetUiHostError, right: *mut crate::JetUiHostError) -> bool {
-        // SAFETY: both are live handles the caller lends for this call.
-        guard(|| unsafe { &*left } == unsafe { &*right })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_jet_ui_node(left: *mut crate::JetUiNode, right: *mut crate::JetUiNode) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
     }

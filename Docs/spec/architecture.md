@@ -202,6 +202,14 @@ digests, the checked export inventory, the content-addressed identity and the
 existing no-Rust-symbol check. Native compiler staging uses the same receipt
 reader. This cache does not bypass semantic checks on user programs.
 
+Runtime route regeneration consumes the raw all-parts Rust emission plus the
+current provider manifest and route registries. Generated `CAbiRoutes.rs` is
+not part of that emission; native runtime preparation appends it afterward.
+`RuntimeRoutes.jet` is the generated native lowering table, not a generator
+input. Therefore an unchanged runtime ABI and registry need one regeneration,
+not a table-feedback loop. After provider admission changes, regenerate both
+outputs together and run `Tools/agent/gen-runtime.mjs <allparts.rs> --check`.
+
 Native C consumers and pack/link drivers invoke the shared
 `Tools/packaging/native-c-compiler.mjs` policy. It appends
 `-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0` and removes only Nix's `fortify` and
