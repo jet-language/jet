@@ -1,6 +1,6 @@
 // Rust MIROptimization::decision_ledger and MIR::MirDecisionLedger. Projections
 // consume checked MIR facts; absent runtime observations remain absent.
-use jet_foundation.[MIRProgram, MIRArtifactID, MIRArtifactPlan, MIRArtifactTarget, MIRArtifactBuildMode, MIRRuntimePartID, MIRDecisionIdentity, MIRDecisionRow, MIRDecisionKind, MIRDecisionDisposition, MIRDerivationMethod, MIRDerivationDisposition, MIRDerivationRef, MIRDecisionEdit, MIRFunctionID, MIRVectorRule, MIROptimizationRejection, Span, DerivationRecord, DerivationIdentity, derivation_identity, derivation_record, derivation_record_reference, mir_sha256_hex, jet_ring_layer_name, foundation_json_quote, foundation_parse_protocol_json, stable_id]
+use jet_foundation.[MIRProgram, MIRArtifactID, MIRArtifactPlan, MIRArtifactTarget, MIRArtifactBuildMode, MIRRuntimePartID, MIRDecisionIdentity, MIRDecisionRow, MIRDecisionKind, MIRDecisionDisposition, MIRDerivationMethod, MIRDerivationDisposition, MIRDerivationRef, MIRDecisionEdit, MIRFunctionID, MIRVectorRule, MIROptimizationRejection, Span, DerivationRecord, DerivationIdentity, derivation_identity, derivation_record, derivation_record_reference, mir_sha256_hex, mir_sha256_hex_bytes, mir_sha256_bytes, foundation_json_quote, foundation_parse_protocol_json, stable_id]
 
 struct MIRDecisionLedger {
     identity: MIRDecisionIdentity
@@ -78,7 +78,7 @@ fn mir_decision_identity(program: MIRProgram, artifact: MIRArtifactID?, profile:
     source_material := [U8]{}
     loop file in files {
         mir_decision_frame(&source_material, file.path)
-        mir_decision_frame(&source_material, mir_sha256_hex(file.source.bytes()))
+        mir_decision_frame(&source_material, mir_sha256_hex(file.source))
     }
     if source_material.len() == 0 -> mir_decision_frame(&source_material, program.package_identity)
     runtime := program.facts.runtime_parts.map(part -> mir_decision_runtime_name(part))
@@ -93,8 +93,8 @@ fn mir_decision_identity(program: MIRProgram, artifact: MIRArtifactID?, profile:
     closure :: if plan == .Val(value) -> value.closure_identity else -> dossier.closure_identity
     artifact_identity :: if plan == .Val(value) -> if value.artifact_identity != "" -> value.artifact_identity else -> "artifact:{value.id.value}" else -> if artifact == .Val(id) -> "artifact:{id.value}" else -> "unavailable"
     MIRDecisionIdentity{
-        source: mir_sha256_hex(source_material),
-        configuration: "package={program.package_identity};edition={facts.edition};os={facts.active_os};layer={jet_ring_layer_name(facts.inferred_layer)};allocator={facts.allocator};runtime={runtime.join(",")};arrow={if facts.uses_arrow -> "true" else -> "false"};hardware={facts.hardware_profile_id}",
+        source: mir_sha256_hex_bytes(mir_sha256_bytes(source_material)),
+        configuration: "package={program.package_identity};edition={facts.edition};os={facts.active_os};layer={facts.inferred_layer};allocator={facts.allocator};runtime={runtime.join(",")};arrow={if facts.uses_arrow -> "true" else -> "false"};hardware={facts.hardware_profile_id}",
         profile: selected_profile,
         target: "triple={machine_triple};artifact={target};machine={machine_name}",
         implementation: "compiler={dossier.compiler_identity};provider={provider};closure={closure};linker={dossier.linker_identity};tier={dossier.tier_identity};environment={dossier.environment_identity};dependencies={dossier.dependency_identity}",
@@ -104,7 +104,7 @@ fn mir_decision_identity(program: MIRProgram, artifact: MIRArtifactID?, profile:
 fn mir_decision_derivation_identity(identity: MIRDecisionIdentity) -> DerivationIdentity Never! {
     build := [U8]{}
     loop value in [identity.configuration, identity.profile, identity.implementation, identity.artifact] -> mir_decision_frame(&build, value)
-    derivation_identity(identity.source, mir_sha256_hex(build), identity.run, identity.target)
+    derivation_identity(identity.source, mir_sha256_hex_bytes(mir_sha256_bytes(build)), identity.run, identity.target)
 }
 fn mir_decision_ledger_from_rows(identity: MIRDecisionIdentity, rows: [MIRDecisionRow]) -> MIRDecisionLedger Never! {
     canonical := [MIRDecisionRow]{}

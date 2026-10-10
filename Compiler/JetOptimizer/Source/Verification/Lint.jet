@@ -233,6 +233,7 @@ struct MIRLintIndex {
     parallel_routes: [String:Bool]
     channel_sends: [String:Bool]
     task_joins: [String:Bool]
+    borrow_masks: [String:[Bool]]
 }
 
 // Rust: none (Jet-only pass)
@@ -281,13 +282,15 @@ fn mir_lint_index(program: MIRProgram) -> MIRLintIndex Never! {
     parallel_routes := [String:Bool]{}
     channel_sends := [String:Bool]{}
     task_joins := [String:Bool]{}
+    borrow_masks := [String:[Bool]]{}
     loop call in program.prelude_calls {
         key :: mir_lint_key(call.id.value)
+        _ := &borrow_masks.add(key, call.signature.borrow_mask.copy())
         if call.member.starts_with("para_") -> _ := &parallel_routes.add(key, true)
         if call.module_name == "core.channels" && call.member == "sender.send" -> _ := &channel_sends.add(key, true)
         if call.module_name == "core.tasks" && call.member == "join" -> _ := &task_joins.add(key, true)
     }
-    MIRLintIndex{functions: functions, signatures: signatures, types: types, type_rows: type_rows, fields: fields, type_vars: type_vars, transparent: transparent, parallel_routes: parallel_routes, channel_sends: channel_sends, task_joins: task_joins}
+    MIRLintIndex{functions: functions, signatures: signatures, types: types, type_rows: type_rows, fields: fields, type_vars: type_vars, transparent: transparent, parallel_routes: parallel_routes, channel_sends: channel_sends, task_joins: task_joins, borrow_masks: borrow_masks}
 }
 
 // Table key of a stable MIR ID (a U64 word), as its decimal text.
@@ -1410,6 +1413,12 @@ fn mir_lint_terminator(ctx: MIRLintContext, block: MIRBasicBlock) -> MIRLintProb
 
 
 
+// This only resolves checked route metadata; Foundation owns consumption.
+fn mir_lint_consumption_borrow_mask(ctx: MIRLintContext, operation: MIROperation) -> [Bool] Never! {
+    if mir_operation_consumption_route(operation) == Val(call) -> return ctx.index.borrow_masks.get(mir_lint_key(call.value)) ?? [Bool]{}
+    [Bool]{}
+}
+
 fn mir_lint_consumption_tracked(ctx: MIRLintContext, value: MIRValueID, consumption: MIRValueConsumption) -> Bool Never! {
     if !mir_value_consumption_transfers(consumption) -> return false
     row :: ctx.values.get(value.value) ?? return false
@@ -1450,7 +1459,7 @@ fn mir_lint_place_uses(ctx: MIRLintContext, defs: MIRLintDefs, operation: MIROpe
     }
     loop arg in mir_operation_call_args(operation) {
         if arg.place == .Val(place) {
-            if mir_lint_arg_consumes(arg) {
+            if mir_call_arg_consumes(arg) {
                 definition :: mir_lint_def_at(defs, arg.value)
                 if definition >= 0 {
                     if ctx.function.blocks[defs.blocks[definition]].instructions[defs.positions[definition]].operation == .MovePlace(moved) {
@@ -1554,7 +1563,10 @@ fn mir_lint_ownership_layout(ctx: MIRLintContext, defs: ^MIRLintDefs) -> MIRLint
     borrowed := [U64:Bool]{}
     loop block in function.blocks {
         loop instruction in block.instructions {
-            loop value in mir_lint_consumed(instruction.operation) {
+            mask :: mir_lint_consumption_borrow_mask(ctx, instruction.operation)
+            loop value in mir_operation_value_uses(instruction.operation) {
+                consumption :: mir_operation_value_consumption(instruction.operation, value, mask)
+                if !mir_lint_consumption_tracked(ctx, value, consumption) -> next
                 if value_bits.get(value.value) == None {
                     _ := &value_bits.add(value.value, value_count)
                     value_count += 1
@@ -1929,13 +1941,12 @@ fn mir_lint_transfer(ctx: MIRLintContext, layout: MIRLintOwnership, block: MIRBa
         if instruction.result == .Val(defined) {
             if layout.value_bits.get(defined.value) == .Val(bit) -> mir_lint_state_set(&state, bit, false)
         }
-        loop value in mir_lint_consumed(operation) {
-            bit :: layout.value_bits.get(value.value) ?? next
-            if check {
-                row :: ctx.values.get(value.value) ?? next
-                mode :: ctx.function.values[row].ownership.mode
-                if mode == .Copy || mode == .ReadBorrow || mode == .WriteBorrow -> return MIRLintStep{successors: [MIRBlockID]{}, failure: mir_lint_fail(ctx, rule, span, "value {value.value} is consumed but not owned")}
-                if mir_lint_state_has(state, bit) -> return MIRLintStep{successors: [MIRBlockID]{}, failure: mir_lint_fail(ctx, rule, span, "value {value.value} is consumed twice")}
+        if !mir_lint_is_phi(operation) {
+            mask :: mir_lint_consumption_borrow_mask(ctx, operation)
+            loop value in mir_operation_value_uses(operation) {
+                consumption :: mir_operation_value_consumption(operation, value, mask)
+                failure :: mir_lint_consume_value(ctx, layout, &state, value, consumption, span, check)
+                if failure != None -> return MIRLintStep{successors: [MIRBlockID]{}, failure: failure}
             }
         }
         loop row in place_rows {
