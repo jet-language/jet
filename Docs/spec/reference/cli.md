@@ -242,7 +242,10 @@ jet fold [args]                      Reverse a recorded Package source transitio
 ```
 
 `jet try` reports compiler-query and checked-index failures through its existing
-typed output error boundary before publishing a speculative verdict.
+typed output error boundary before publishing a speculative verdict. Disk and
+text query branches each translate their own query failure before joining the
+checked result; only a complete disk baseline retains the rename index and
+original source ownership.
 
 The `bind` shorthand accepts the explicit binding-plan form shown by help:
 `bind <name> --update --preview` or
