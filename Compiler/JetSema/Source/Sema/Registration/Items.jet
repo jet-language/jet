@@ -3,6 +3,7 @@
 // This layer owns declaration identity and graph edges only. Type and TIR remain
 // Foundation-owned; callable signatures are projected by Declarations.jet and
 // defaults remain AST references keyed by FunctionDefaultRef.
+use core.text as unicode
 use jet_foundation.[
     AccessConvention,
     CORE_SOURCE_OWNED_ROWS,
@@ -74,6 +75,7 @@ use jet_foundation.[
     symbol_id,
     type_identity,
     type_identity_key,
+    type_name,
     type_with_effective_fn_returns,
 ]
 use jet_parser.[
@@ -2049,9 +2051,10 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
         }
     }
     module_row.program.items = ^items
-    // D-CLI-FIELD-MARKERS1 (E1318): checked on the registered items, as the
-    // Rust reference's `validate_cli_items` runs after struct registration.
-    sema_registration_cli_short_names(module_row.program.items, &diagnostics)
+    // D-CLIFLAG1 / D-CLI-GLOBAL1=E / D-CLI-POS1 / D-CLI-FIELD-MARKERS1: checked
+    // on the registered items, as the Rust reference's `validate_cli_items`
+    // runs after struct registration.
+    sema_registration_cli_items(module_row.program.items, &diagnostics)
     // Only foreign-handle rows change; every other row is read in place (a
     // copied row would carry its whole source declaration).
     loop nominal_index in 0..<module_row.nominals.len() {
@@ -2085,46 +2088,239 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     module_row
 }
 
-// D-CLI-FIELD-MARKERS1 (Rust `validate_cli_items`, E1318): each `#Short`
-// spelling of a `#CLI` program struct is one ASCII letter and selects only
-// one field. `#CLI(Standard)` reserves `-v` and `-q`. A field with no CLI
-// mapping (Rust E1305) is skipped before its short name is read, and only the
-// first `#Short` marker with one literal string argument is read.
-fn sema_registration_cli_short_names(items: [Item], diagnostics: &[Diagnostic]) {
+// The CLI shape of one `#CLI` field (Rust `CLIFieldKind`).
+enum SemaRegistrationCLIFieldKind {
+    Flag
+    OptionalOption
+    DefaultedOption
+    RequiredOption
+}
+
+// Rust `validate_cli_items` (CheckerCli.rs): every `#CLI` program struct of the
+// module, in item order. A struct that is not `#CLI` may carry neither a
+// callable member (E1345) nor `#Short`/`#Env` (E1319). A `#CLI` struct's
+// fields each map to one flag (E1305), keep `#Flag` meaningful (E1309), derive
+// distinct flags beside the reserved `--help`/`--allow`/`--deny` (E1306), use
+// one-letter distinct short names (E1318), and keep `#Env` off presence flags
+// (E1319). Its methods and bound members are commands with one namespace
+// (E1344), read-only receivers (E1347), and callable shapes (E1345), and are
+// not allowed on a Codable struct (E1346).
+fn sema_registration_cli_items(items: [Item], diagnostics: &[Diagnostic]) {
     loop item in items {
         if item == .Struct(definition) {
             cli := false
             loop derive_item in definition.derives {
                 if derive_item.name == "CLI" -> cli = true
             }
-            if !cli -> next
-            seen := [String:String]{}
+            if !cli {
+                loop binding in definition.cli_bindings -> &diagnostics.push(sema_registration_e1345(binding.name, binding.name_span, "a callable member is only valid inside a `#CLI` program struct"))
+                loop field in definition.fields {
+                    loop marker in field.serde_markers {
+                        if marker.name == "Short" || marker.name == "Env" -> &diagnostics.push(sema_registration_e1319(marker.name, field.name, "`#Short` and `#Env` describe generated command inputs, but this struct is not `#CLI`.", "remove the marker, or mark the command-input struct `#CLI`", marker.name_span))
+                    }
+                }
+                next
+            }
+            seen_flags := [String:Bool]{"help": true, "allow": true, "deny": true}
+            seen_shorts := [String:String]{}
             if sema_registration_cli_standard(definition.type_markers) {
-                seen["v"] = "standard --verbose"
-                seen["q"] = "standard --quiet"
+                loop name in ([String]{"verbose", "quiet", "color", "version"}) -> seen_flags[name] = true
+                seen_shorts["v"] = "standard --verbose"
+                seen_shorts["q"] = "standard --quiet"
             }
             loop field in definition.fields {
-                if !sema_registration_cli_field_mapped(field.ty) -> next
-                marker :: loop candidate in field.serde_markers {
-                    if candidate.name == "Short" -> break candidate
-                } ?? next
-                short :: sema_registration_cli_marker_string(marker) ?? next
-                bytes :: short.bytes()
-                letter := false
-                if bytes.len() == 1 {
-                    code :: Int.from_u8(bytes[0])
-                    letter = (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
-                }
-                if !letter {
-                    &diagnostics.push(sema_error("E1318", marker.name_span, "`#Short(\"{short}\")` is not a one-letter option", "the shared command parser treats a short option as one ASCII letter.", "use one letter, such as `#Short(\"p\")`"))
+                kind :: sema_registration_cli_field_kind(field) ?? {
+                    &diagnostics.push(sema_error("E1305", field.name_span, "field `{field.name}` has no CLI flag mapping ({type_name(field.ty)})", "a `#[CLI]` field becomes one `--flag` (and a positional when required); only `Int` (including inline ranges), `Float`, `Bool`, `String`, `Path`, and `T?` of those have a defined shape (nested `#[CLI]` structs and other collection/closure types don't).", "change the field to a supported type, or drop it from the `#[CLI]` struct"))
                     next
                 }
-                previous :: seen.get(short)
-                seen[short] = field.name
-                if previous == .Val(first) -> &diagnostics.push(sema_error("E1318", marker.name_span, "`#Short(\"{short}\")` is used by both `{first}` and `{field.name}`", "each short option must select only one `#CLI` field.", "give `{first}` or `{field.name}` a different `#Short` value"))
+                flag_marker :: loop candidate in field.serde_markers {
+                    if candidate.name == "Flag" -> break candidate
+                }
+                if flag_marker == .Val(marker) && kind != SemaRegistrationCLIFieldKind.RequiredOption {
+                    &diagnostics.push(sema_error("E1309", marker.name_span, "`#[Flag]` on `{field.name}` has nothing to opt out of", "`#[Flag]` keeps a required value field flag-only. Bool fields, optional fields (`T?`), and fields with a `{{expr}}` default already stay flag-only.", "remove `#[Flag]`, or make the field a required scalar without a `{{expr}}` default"))
+                }
+                flag :: sema_checked_field_shape_names(definition, field).args
+                if seen_flags.get(flag) != None {
+                    &diagnostics.push(sema_error("E1306", field.name_span, "two `#[CLI]` fields both derive the flag `--{flag}`", "every field needs a distinct `--flag`; generated commands reserve `--help`, `--allow`, and `--deny`.", "rename the colliding field or choose a non-reserved flag name"))
+                }
+                seen_flags[flag] = true
+                sema_registration_cli_short_name(field, &seen_shorts, &diagnostics)
+                if kind == SemaRegistrationCLIFieldKind.Flag {
+                    env_marker :: loop candidate in field.serde_markers {
+                        if candidate.name == "Env" -> break candidate
+                    }
+                    if env_marker == .Val(marker) && sema_registration_cli_marker_string(marker) != None {
+                        &diagnostics.push(sema_registration_e1319("Env", field.name, "a `Bool` command field is a presence flag, while `#Env` lowers to a value option.", "remove `#Env`, or use it on an `Int`, `Float`, `String`, `Path`, or optional value field", marker.name_span))
+                    }
+                }
+            }
+            seen_commands := [String:Bool]{}
+            command_count := 0
+            loop function in definition.methods {
+                computed := false
+                loop field in definition.fields {
+                    if field.computed != None && field.name == function.name -> computed = true
+                }
+                if computed -> next
+                command_count += 1
+                command :: unicode.lower(function.name)
+                sema_registration_cli_command_word(command, function.name_span, seen_flags, &seen_commands, &diagnostics)
+                receiver :: loop param in function.params {
+                    if param.name == "self" -> break param
+                }
+                if receiver == .Val(self_param) && self_param.convention != AccessConvention.Read {
+                    &diagnostics.push(sema_error("E1347", self_param.name_span, "a CLI method receiver must be read-only", "shared root flags are parsed into one program value and command dispatch must not mutate that value.", "change the receiver to read-only `self`"))
+                }
+                sema_registration_cli_callable_params(function, command, None, &diagnostics)
+            }
+            loop binding in definition.cli_bindings {
+                command_count += 1
+                sema_registration_cli_command_word(unicode.lower(binding.name), binding.name_span, seen_flags, &seen_commands, &diagnostics)
+                foreign_marker := false
+                loop marker in binding.markers {
+                    if marker.name != "Doc" -> foreign_marker = true
+                }
+                if foreign_marker -> &diagnostics.push(sema_registration_e1345(binding.name, binding.name_span, "a callable member accepts `#Doc`, but field-only CLI markers do not apply to bindings"))
+                target :: sema_registration_cli_binding_target(items, binding.target) ?? {
+                    &diagnostics.push(sema_registration_e1345(binding.name, expr_span(binding.target), "the binding target must be a function declared in the same program module"))
+                    next
+                }
+                sema_registration_cli_callable_params(target, binding.name, Val(definition.name), &diagnostics)
+            }
+            codable := false
+            loop derive_item in definition.derives {
+                if derive_item.name == "Codable" || derive_item.name == "Encode" || derive_item.name == "Decode" -> codable = true
+            }
+            if command_count > 0 && codable {
+                &diagnostics.push(sema_error("E1346", definition.name_span, "callable CLI members cannot be declared on a Codable struct", "CLI commands are behavior, while Codable structs contain only serializable data fields.", "split the command program struct from the Codable data struct"))
             }
         }
     }
+}
+
+// E1318: the field's first `#Short` marker, when its argument is one literal
+// string, is one ASCII letter that no earlier field (or the standard pack)
+// already selects.
+fn sema_registration_cli_short_name(field: Field, seen: &[String:String], diagnostics: &[Diagnostic]) {
+    marker :: loop candidate in field.serde_markers {
+        if candidate.name == "Short" -> break candidate
+    } ?? return
+    short :: sema_registration_cli_marker_string(marker) ?? return
+    bytes :: short.bytes()
+    letter := false
+    if bytes.len() == 1 {
+        code :: Int.from_u8(bytes[0])
+        letter = (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+    }
+    if !letter {
+        &diagnostics.push(sema_error("E1318", marker.name_span, "`#Short(\"{short}\")` is not a one-letter option", "the shared command parser treats a short option as one ASCII letter.", "use one letter, such as `#Short(\"p\")`"))
+        return
+    }
+    previous :: seen.get(short)
+    seen[short] = field.name
+    if previous == .Val(first) -> &diagnostics.push(sema_error("E1318", marker.name_span, "`#Short(\"{short}\")` is used by both `{first}` and `{field.name}`", "each short option must select only one `#CLI` field.", "give `{first}` or `{field.name}` a different `#Short` value"))
+}
+
+// E1344: a command word may name neither a root flag nor another command. A
+// word that names a root flag is not recorded as a command.
+fn sema_registration_cli_command_word(command: String, span: Span, seen_flags: [String:Bool], seen_commands: &[String:Bool], diagnostics: &[Diagnostic]) {
+    collides := seen_flags.get(command) != None
+    if !collides {
+        collides = seen_commands.get(command) != None
+        seen_commands[command] = true
+    }
+    if collides -> &diagnostics.push(sema_error("E1344", span, "CLI command `{command}` collides with another command or root flag", "a program struct has one command namespace and one root flag namespace; a word cannot name both.", "rename the command or the root field so every command word is unique"))
+}
+
+// Rust `validate_callable_params`: a command takes the shared program struct
+// at most once, first and read-only (bound members only), and otherwise only
+// scalar or optional scalar, non-variadic parameters with literal defaults.
+fn sema_registration_cli_callable_params(function: Func, command: String, shared_type: String?, diagnostics: &[Diagnostic]) {
+    shared := [Int]{}
+    if shared_type == .Val(shared_name) {
+        loop (index, param) in function.params {
+            if sema_registration_cli_named_leaf(param.ty) == .Val(shared_name) -> &shared.push(index)
+        }
+        if shared.len() > 1 || (shared.len() == 1 && shared[0] != 0) {
+            &diagnostics.push(sema_registration_e1345(command, function.name_span, "a bound function may receive the shared program struct only once, as its first parameter"))
+        }
+    }
+    loop (index, param) in function.params {
+        if param.name == "self" {
+            if shared_type != None -> &diagnostics.push(sema_registration_e1345(command, param.name_span, "a bound function receives shared state as an ordinary first program-struct parameter, not as a method receiver"))
+            next
+        }
+        if shared.contains(index) {
+            if param.convention != AccessConvention.Read -> &diagnostics.push(sema_registration_e1345(command, param.name_span, "the shared program-struct parameter must be read-only"))
+            next
+        }
+        if param.variadic || param.variadic_bound_list != None {
+            &diagnostics.push(sema_registration_e1345(command, param.name_span, "command parameters cannot be variadic; use one scalar or optional scalar parameter per input"))
+            next
+        }
+        if !sema_registration_cli_field_mapped(param.ty) {
+            &diagnostics.push(sema_registration_e1345(command, param.ty_span, "every command parameter must be a CLI scalar or optional scalar"))
+        }
+        if param.default == .Val(default) && !sema_registration_cli_literal_default(default) {
+            &diagnostics.push(sema_registration_e1345(command, param.name_span, "a command default must be a CLI compile-time scalar value"))
+        }
+    }
+}
+
+// Rust `Expr::without_parens` matched against a literal Int, Float, Bool or String.
+fn sema_registration_cli_literal_default(expr: Expr) -> Bool Never! {
+    current := expr
+    loop current == .Paren(inner, _) -> current = inner
+    if current == {
+        .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) | .Str(_, _) -> true
+        else -> false
+    }
+}
+
+// Rust `named_leaf`: the last `.` segment of a named type.
+fn sema_registration_cli_named_leaf(ty: Type) -> String? {
+    if ty == .Named(name) {
+        parts :: name.split(".").to_list()
+        return Val(parts[parts.len() - 1])
+    }
+    None
+}
+
+// Rust `binding_target`: the module function a bound CLI member names.
+fn sema_registration_cli_binding_target(items: [Item], target: Expr) -> Func? {
+    current := target
+    loop current == .Paren(inner, _) -> current = inner
+    if current == .Ident(name, _) {
+        loop item in items {
+            if item == .Func(function) && function.name == name -> return Val(function)
+        }
+    }
+    None
+}
+
+// Rust `classify_cli_field`: `Bool` is a flag; `T?` of a CLI scalar is an
+// optional option; any other CLI scalar is a defaulted or required option.
+fn sema_registration_cli_field_kind(field: Field) -> SemaRegistrationCLIFieldKind? {
+    if field.ty == .Bool -> return Val(SemaRegistrationCLIFieldKind.Flag)
+    if field.ty == .Option(inner) {
+        if sema_registration_cli_scalar(inner) -> return Val(SemaRegistrationCLIFieldKind.OptionalOption)
+        return None
+    }
+    if !sema_registration_cli_scalar(field.ty) -> return None
+    defaulted := field.default != None
+    loop marker in field.serde_markers {
+        if marker.name == "Default" -> defaulted = true
+    }
+    if defaulted -> return Val(SemaRegistrationCLIFieldKind.DefaultedOption)
+    Val(SemaRegistrationCLIFieldKind.RequiredOption)
+}
+
+fn sema_registration_e1319(marker: String, field: String, why: String, fix: String, span: Span) -> Diagnostic {
+    sema_error("E1319", span, "`#{marker}` has no CLI mapping for field `{field}`", why, fix)
+}
+
+fn sema_registration_e1345(name: String, span: Span, why: String) -> Diagnostic {
+    sema_error("E1345", span, "CLI command member `{name}` has no callable shape", why, "bind a visible function with scalar parameters and, at most, one first read-only parameter of the program-struct type")
 }
 
 // Rust `validate_cli_items` standard-pack test: `#CLI(Standard)`.
@@ -2138,7 +2334,7 @@ fn sema_registration_cli_standard(markers: [Marker]) -> Bool Never! {
     false
 }
 
-// Rust `classify_cli_field(..).is_some()`: a CLI scalar or an optional one.
+// Rust `is_cli_scalar` or an optional one (`callable_param_shape`).
 fn sema_registration_cli_field_mapped(ty: Type) -> Bool Never! {
     if ty == .Option(inner) -> return sema_registration_cli_scalar(inner)
     sema_registration_cli_scalar(ty)
