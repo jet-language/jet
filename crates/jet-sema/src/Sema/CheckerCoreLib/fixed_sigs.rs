@@ -2463,7 +2463,7 @@ fn core_fixed_sig_raw(
             Some((vec![(read, float.clone())], Some(float)))
         }
         ("core.math", "round") => Some((vec![(read, float.clone())], Some(int.clone()))),
-        ("core.math", "pow" | "hypot") => Some((
+        ("core.math", "hypot") => Some((
             vec![(read, Type::Float), (read, Type::Float)],
             Some(Type::Float),
         )),

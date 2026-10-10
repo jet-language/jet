@@ -20,7 +20,6 @@ UNARY_ROUTES(DECLARE)
 #undef DECLARE
 extern double jet_std_math_atan2(double, double);
 extern double jet_std_math_hypot(double, double);
-extern double jet_std_math_pow(double, double);
 extern double jet_std_math_fmod(double, double);
 extern double jet_std_math_fma(double, double, double);
 extern double jet_std_math_abs_f64(double);
@@ -73,7 +72,6 @@ int main(void) {
             double y = from_bits(words[j]);
             same(jet_std_math_atan2(x, y), atan2(x, y));
             same(jet_std_math_hypot(x, y), hypot(x, y));
-            same(jet_std_math_pow(x, y), pow(x, y));
             same(jet_std_math_fmod(x, y), fmod(x, y));
             int64_t cmp = x < y ? -1 : x == y ? 0 : x > y ? 1 : isnan(x) ? (isnan(y) ? 0 : 1) : -1;
             assert(jet_std_math_cmp(x, y) == cmp);

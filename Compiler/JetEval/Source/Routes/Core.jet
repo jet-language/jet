@@ -104,13 +104,12 @@ fn jet_eval_route_core_math(row: MIRCoreCall, data: [TComptimeValue], args: [Jet
             third :: jet_eval_route_core_float(data, 2, &machine, span) ?? return None
             jet_eval_route_core_float_result(math.fma(first, second, third))
         }
-        "jet_std_math_atan2" | "jet_std_math_hypot" | "jet_std_math_pow" | "jet_std_math_fmod" -> {
+        "jet_std_math_atan2" | "jet_std_math_hypot" | "jet_std_math_fmod" -> {
             left :: jet_eval_route_core_float(data, 0, &machine, span) ?? return None
             right :: jet_eval_route_core_float(data, 1, &machine, span) ?? return None
             result :: if symbol == {
                 "jet_std_math_atan2" -> math.atan2(left, right)
                 "jet_std_math_hypot" -> math.hypot(left, right)
-                "jet_std_math_pow" -> math.pow(left, right)
                 else -> math.fmod(left, right)
             }
             jet_eval_route_core_float_result(result)

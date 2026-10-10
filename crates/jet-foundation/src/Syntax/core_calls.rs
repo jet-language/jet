@@ -1638,7 +1638,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: e39442870d3ab415b44912769a75590ace55a377f3d6dee71a78fcfa708b3930
+// Source SHA-256: 80ba120468a022a46fa645efbddcd1c4339221586e1cbdecb9bc35e07bdf600c
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.crypto", "__jetc_open_directory"),
@@ -2366,7 +2366,6 @@ pub static CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.math", "atan2", "jet_std_math_atan2", true, &[false, false]) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "ceil", "jet_std_math_ceil", true, &[false]) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "hypot", "jet_std_math_hypot", true, &[false, false]) .with_pure_route(CoreCallPureRoute::Math),
-    CoreCallRecord::new("core.math", "pow", "jet_std_math_pow", true, &[false, false]) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "sqrt", "jet_std_math_sqrt", true, &[false]) .with_pure_route(CoreCallPureRoute::Math) .without_direct_aot(),
     CoreCallRecord::new( "core.math", "fabs", "jet_std_math_abs_f64", true, &[false], ) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new( "core.math", "to_bits", "jet_std_math_to_bits", true, &[false], ) .with_pure_route(CoreCallPureRoute::Math) .with_native_int_result(),

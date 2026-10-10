@@ -57,6 +57,10 @@ and `.copy()` forms in their emitted bodies. Keep JavaScript bit operations,
 foreign bodies, and deliberate retired-syntax diagnostic inputs unchanged.
 Fix stale output at its template, regenerate canonically, and run the read-only
 checks; editing a generated Jet file alone is not a generator repair.
+The D-SIGIL-ALGEBRA1=B cutover removes `core.math.pow` and `core.math.xor`,
+including catalog/signature rows, dispatcher exports, evaluator aliases and
+runtime C wrappers. Numeric `.pow()` and `.bit_xor()` remain the single routes;
+do not restore retired wrappers to make a fresh ABI census pass.
 
 Core metadata distinguishes source-owned nominals (`source_module … types { … }`)
 from owner-only implementation admission (`impls { … }`); list both explicitly
