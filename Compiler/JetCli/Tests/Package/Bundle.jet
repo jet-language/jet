@@ -430,7 +430,8 @@ fn bundle_test_wire_report(materialized: Bool, explain: Bool) -> String Never! {
     null :: CanonicalJSON.Null
     boolean :: CanonicalJSON.Bool(true)
     integer :: CanonicalJSON.Integer("0")
-    string :: CanonicalJSON.String("é\r\n\t\"\\")
+    carriage_return :: String.from_bytes([U8]{U8{13}}) ?? panic("carriage return")
+    string :: CanonicalJSON.String("é{carriage_return}\n\t\"\\")
     array :: CanonicalJSON.Array([CanonicalJSON]{})
     object :: CanonicalJSON.Object([CanonicalJSONField]{})
     assert_eq(jet_cli_status_json(jet_cli_bundle_status(null)), "null")
