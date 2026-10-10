@@ -194,10 +194,10 @@ fn jet_driver_native_comptime_stop(program: MIRProgram, graph: SemaRegistrationG
     jet_driver_native_comptime_failure(span, "E0953", JetEvalErrorKind.ComptimePanic, "your comptime code stopped the build", "native comptime stopped with {kind}: {message}", location)
 }
 fn jet_driver_native_comptime_eval(program: MIRProgram, graph: SemaRegistrationGraph, function_id: MIRFunctionID, config: JetEvalConfig, host: JetDriverExecutionHost?, sources: [JetCodegenClosureSource]) -> JetEvalResult {
-    row := -1
-    loop (index, function) in program.functions { if function.id == function_id -> row = index }
-    if row < 0 -> return jet_driver_native_comptime_failure(Span{start: 0, end: 0}, "E0956", JetEvalErrorKind.Compiler, "native comptime selected a missing function", "the checked MIR function identity must remain in its program")
-    function :: program.functions[row]
+    function_index := -1
+    loop (index, function) in program.functions { if function.id == function_id -> function_index = index }
+    if function_index < 0 -> return jet_driver_native_comptime_failure(Span{start: 0, end: 0}, "E0956", JetEvalErrorKind.Compiler, "native comptime selected a missing function", "the checked MIR function identity must remain in its program")
+    function :: program.functions[function_index]
     executor :: host ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Unsupported, "native comptime has no execution host", "the compiler host must own the one shared native child and admitted runtime")
     boundary :: x64_value_boundary(program, function.return_type)
     if boundary.errors.len() > 0 -> return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Unsupported, "native comptime result has no canonical layout", boundary.errors.join("\n"))
