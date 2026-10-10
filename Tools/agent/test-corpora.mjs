@@ -5,9 +5,8 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdir
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { collectGoldenEntries, loadExampleStdin } from './compiler-diff.mjs';
+import { collectGoldenEntries, goldenFailureExit, loadExampleStdin } from './compiler-diff.mjs';
 import { copyFeatureProject, featureProjectRoot } from './run-feature-examples.mjs';
-import { safeGolden } from './golden-safety.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const EXPECTED = join(ROOT, 'Examples/features/expected');
@@ -18,7 +17,10 @@ const verdict = (status, detail = '') => ({ status, detail });
 // compares exact UTF-8 streams and only accepts 1/70 for an expected failure.
 export function goldenVerdict(entry, run, expected, binary) {
   if (expected.err !== null) {
-    if (![1, 70].includes(run.code)) return verdict('FAIL', `exit ${run.code}; expected 1 or 70`);
+    const want = goldenFailureExit(entry.stem, expected.err);
+    if (want === null) return verdict('FAIL', 'expected failure exit is ambiguous');
+    if (run.code !== want) return verdict('FAIL', `exit ${run.code}; expected ${want}`);
+    if (run.stdout !== (expected.out ?? '')) return verdict('FAIL', 'stdout mismatch');
     return run.stderr === expected.err ? verdict('PASS') : verdict('FAIL', 'stderr mismatch');
   }
   if (run.code !== 0) return verdict('FAIL', `exit ${run.code}`);
@@ -57,7 +59,7 @@ export function uiInvocation(source, file, suite = 'ui') {
   const internal = ['lint_policy_config', 'env_facet_missing', 'workspace_lock_e1202', 'jetlib_version_mismatch', 'jetlib_effect_refused', 'library_invalid_binding', 'command_override_conflict', 'parent_control_cancel', 'ambiguous_call', 'generated_source', 'no-os', 'gate', 'build_grants', 'build_locked', 'sandbox_missing_wasm_tools', 'jetpack_hangar_digest_mismatch', 'jetpack_e1250', 'jetpack_retired_environment_flag', 'jetpack_retired_store_verbs', 'programmable_build', 'plugin_target', 'web_target', 'target', 'cost_cli'];
   const unavailable = internal.filter(has);
   if (unavailable.length) return { refused: `missing CLI fixture API: ${unavailable.join(', ')}` };
-  let args = ['emit', '--rust', file], cwdParent = false, command = 'jet', stdin = '';
+  let args = ['check', file], cwdParent = false, command = 'jet', stdin = '';
   if (has('check_cli')) { args = ['check', basename(file)]; cwdParent = true; }
   else if (has('all_diags') || basename(file) === 'workspace.jet') args = ['check', file];
   else if (has('typed_settings_cli')) args = ['check', file, '--set', 'cli_only=true'];
@@ -142,16 +144,7 @@ async function runEntry(entry, options, scratch, baseEnv) {
     if (entry.stem === 'devloop/job_runner' || entry.stem.startsWith('lowlevel/polyglot_')) return verdict('REFUSED', 'named job/foreign binder fixture setup still owned by Rust harness');
     const base = join(EXPECTED, entry.stem), expected = { out: optional(`${base}.out`), err: optional(`${base}.err.out`), stderrOut: optional(`${base}.stderr.out`) };
     if (expected.out === null && expected.err === null) return verdict('REFUSED', 'missing semantic service/browser compile-only fact API');
-    if (options.rustAudit) {
-      if (/#Unsafe\b/u.test(readFileSync(entry.path, 'utf8'))) return verdict('REFUSED', 'source-region audit needs the Jet lexer/typed sentry evidence API');
-      const emitted = await call(options.jet, ['emit', '--rust', entry.shown]);
-      const failure = processFailure(emitted);
-      if (failure) return failure;
-      if (emitted.code !== 0 || /^Warning \[L0507\]/mu.test(emitted.stderr)) return verdict('FAIL', 'front end failed or L0507');
-      const unsafe = safeGolden(emitted.stdout, entry.stem);
-      if (unsafe) return verdict('FAIL', unsafe);
-    }
-    const built = await call(options.jet, ['build', entry.shown, '--profile=debug']);
+    const built = await call(options.jet, ['build', entry.shown]);
     const failure = processFailure(built);
     if (failure) return failure;
     if (built.code !== 0 || /^Warning \[L0507\]/mu.test(built.stderr)) return { ...verdict('FAIL', 'front end/build failed or L0507'), stdout: built.stdout, stderr: built.stderr };
@@ -187,14 +180,19 @@ async function runEntry(entry, options, scratch, baseEnv) {
 }
 
 export async function main(argv) {
-  const options = { suite: 'all', timeout: 600, stdin: loadExampleStdin() };
+  const options = { suite: 'all', timeout: 600, stdin: loadExampleStdin(), jet: process.env.JET };
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--help') { console.log('test-corpora.mjs --jet BINARY --suite golden|ui|lint|all [--cases FILE] [--filter SUBSTRING] [--results JSON] [--scratch DIR] [--timeout SECONDS] [--rust-audit] [--list]\nNo Cargo invocation. --rust-audit checks the reference emitter I1 contract during migration; native safety is a separate S12 gate. Nonportable internal fixture APIs are REFUSED, never PASS. Expected files are read-only.'); return; }
+    if (argv[i] === '--help') { console.log('test-corpora.mjs --jet BINARY --suite golden|ui|lint|all [--cases FILE] [--filter SUBSTRING] [--results JSON] [--scratch DIR] [--timeout SECONDS] [--rust-audit] [--list]\nNo Cargo or Rust emit invocation. --rust-audit is retired and prints UNCOVERED (exit 2). Nonportable internal fixture APIs are REFUSED, never PASS. Expected files are read-only.'); return; }
     if (argv[i] === '--list') { options.list = true; continue; }
     if (argv[i] === '--rust-audit') { options.rustAudit = true; continue; }
     const key = ({ '--jet': 'jet', '--jetpack': 'jetpack', '--suite': 'suite', '--cases': 'cases', '--filter': 'filter', '--results': 'results', '--scratch': 'scratch', '--timeout': 'timeout' })[argv[i]];
     if (!key || !argv[i + 1]) throw new Error(`unknown or incomplete option ${argv[i]}`);
     options[key] = argv[++i];
+  }
+  if (options.rustAudit) {
+    console.log(JSON.stringify({ status: 'UNCOVERED', cardRequired: true, reason: 'retired generated-Rust I1 audit; native safety is the S12 gate' }));
+    process.exitCode = 2;
+    return;
   }
   if (!['all', 'golden', 'ui', 'lint'].includes(options.suite)) throw new Error('invalid suite');
   options.timeout = Number(options.timeout); if (!Number.isFinite(options.timeout) || options.timeout <= 0) throw new Error('timeout must be positive');

@@ -17,10 +17,13 @@ test('goldens preserve every byte, including trailing newline and CR', () => {
 test('a warning cannot turn a failed process into success', () => {
   assert.equal(goldenVerdict(entry, { ...run, code: 1, stderr: 'Warning [L0507]: warning\n' }, expected, '/bin/hello').status, 'FAIL');
 });
-test('expected failure accepts only exit 1/70 and compares stderr, not stdout', () => {
-  const want = { out: null, err: 'failure\n', stderrOut: null };
-  for (const code of [1, 70]) assert.equal(goldenVerdict(entry, { code, stdout: 'ignored', stderr: want.err }, want, '/bin/hello').status, 'PASS');
-  for (const code of [0, 2, 101, null]) assert.equal(goldenVerdict(entry, { code, stdout: '', stderr: want.err }, want, '/bin/hello').status, 'FAIL');
+test('expected failure requires the compiler-diff exit code and exact stdout/stderr', () => {
+  const want = { out: null, err: 'Stop [E3001]: panic\n', stderrOut: null };
+  assert.equal(goldenVerdict(entry, { code: 70, stdout: '', stderr: want.err }, want, '/bin/hello').status, 'PASS');
+  for (const code of [0, 1, 2, 101, null]) assert.equal(goldenVerdict(entry, { code, stdout: '', stderr: want.err }, want, '/bin/hello').status, 'FAIL');
+  assert.equal(goldenVerdict(entry, { code: 70, stdout: 'ignored', stderr: want.err }, want, '/bin/hello').status, 'FAIL');
+  assert.equal(goldenVerdict(entry, { code: 70, stdout: '', stderr: 'Stop [E3001]: other\n' }, want, '/bin/hello').status, 'FAIL');
+  assert.equal(goldenVerdict(entry, { code: 1, stdout: '', stderr: 'unknown report\n' }, { out: null, err: 'unknown report\n', stderrOut: null }, '/bin/hello').status, 'FAIL');
 });
 test('success auxiliary stderr is exact and mandatory when pinned', () => {
   assert.equal(goldenVerdict(entry, run, { ...expected, stderrOut: 'note\n' }, '/bin/hello').status, 'FAIL');
@@ -36,7 +39,7 @@ test('compute availability compares the Rust portable contract', () => {
 test('API-only and unknown UI directives fail closed', () => {
   assert.match(uiInvocation('// @jetlib_effect_refused\n', 'tests/ui/a.jet').refused, /jetlib_effect_refused/u);
   assert.match(uiInvocation('// @new_internal_mode\n', 'tests/ui/a.jet').refused, /new_internal_mode/u);
-  assert.equal(uiInvocation('// ordinary comment\n', 'tests/ui/a.jet').args[0], 'emit');
+  assert.deepEqual(uiInvocation('// ordinary comment\n', 'tests/ui/a.jet').args, ['check', 'tests/ui/a.jet']);
 });
 test('real check CLI fixtures preserve their basename/cwd contract', () => {
   const plan = uiInvocation('// @check_cli\n', 'tests/ui/project/run.jet');
