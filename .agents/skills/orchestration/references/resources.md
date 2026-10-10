@@ -39,6 +39,13 @@ per-function MIR failure before another bootstrap rebuild. Require its final
 as separate gates. Earlier `__comptime` probe summaries are not the main-program
 census. A completed per-function sweep does not establish final program assembly
 or Rust type correctness. Native stages still require their empty all-phases TSV.
+Also retain the optimizer's per-pass accepted/discarded census and full Debug
+violations after the final function-sweep marker. Debug discovery rolls back an
+invalid pass output and examines later passes, but any discarded main-program
+pass still fails the preflight; later accepted passes cannot turn it green.
+Earlier comptime-probe rejections stay visible separately. Budget for one
+additional owning MIR snapshot in this debug-only collector; normal mode does
+not allocate snapshots or publish a partially optimized program.
 
 ## Keep build output separate and bounded
 

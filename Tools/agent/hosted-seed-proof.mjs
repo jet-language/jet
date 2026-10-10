@@ -31,3 +31,23 @@ export function hostedLowerSweepCensus(log) {
         boundary: 'Final hosted per-function MIR sweep only; build rc, emission and metadata remain separate gates',
     };
 }
+
+// Keep every rejected pass output visible, including checked comptime probes.
+// Only rows after the last whole-function sweep belong to the main program.
+// An accepted later pass cannot erase an earlier discarded main-program pass.
+export function hostedOptimizationPassCensus(log) {
+    const main = [...log.matchAll(/^JET_DEBUG_LOWER_ALL summary: (\d+) of (\d+) functions failed to lower$/gm)].at(-1);
+    const summaries = [...log.matchAll(/^JET_DEBUG_LOWER_ALL optimization summary: operation=(\S+) pass=(\S+) violations=(\d+) output=(accepted|discarded)$/gm)]
+        .map(row => ({operation: row[1], pass: row[2], violations: Number(row[3]), output: row[4], offset: row.index}));
+    const violations = [...log.matchAll(/^JET_DEBUG_LOWER_ALL optimization: operation=(\S+) pass=(\S+) violation=(.*)$/gm)]
+        .map(row => ({operation: row[1], pass: row[2], violation: row[3], offset: row.index}));
+    const mainSummaries = summaries.filter(row => main && row.offset > main.index);
+    const mainViolations = violations.filter(row => main && row.offset > main.index);
+    return {
+        schema: 'jet-hosted-optimization-pass-census/v1',
+        summaries, violations, main_summaries: mainSummaries, main_violations: mainViolations,
+        clean: mainSummaries.length > 0 && mainViolations.length === 0
+            && mainSummaries.every(row => row.output === 'accepted' && row.violations === 0),
+        boundary: 'Main-program verified optimization boundaries; every rejection stays a failure despite rollback and later accepted passes. Build rc, emission and metadata remain separate gates.',
+    };
+}

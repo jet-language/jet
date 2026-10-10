@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {hostedSeedCensus, hostedLowerSweepCensus} from './hosted-seed-proof.mjs';
+import {hostedSeedCensus, hostedLowerSweepCensus, hostedOptimizationPassCensus} from './hosted-seed-proof.mjs';
 
 test('hosted seed accepts only a real successful build without error diagnostics', () => {
     const proof = hostedSeedCensus(0, 'warning: unused import\nFinished release profile\n');
@@ -28,5 +28,46 @@ test('hosted MIR gate rejects missing, empty and failed final sweeps', () => {
     for (const log of ['', 'warning: unused import\n', 'JET_DEBUG_LOWER_ALL summary: 0 of 0 functions failed to lower\n',
         'JET_DEBUG_LOWER_ALL summary: 0 of 1 functions failed to lower\nJET_DEBUG_LOWER_ALL summary: 18 of 28409 functions failed to lower\n']) {
         assert.throws(() => hostedLowerSweepCensus(log), /hosted MIR sweep is not clean/);
+    }
+});
+
+test('optimizer census retains incidental probes without rejecting a clean main pipeline', () => {
+    const proof = hostedOptimizationPassCensus([
+        'JET_DEBUG_LOWER_ALL summary: 0 of 1 functions failed to lower',
+        'JET_DEBUG_LOWER_ALL optimization: operation=mir.optimize pass=probe violation=ProbeFailure',
+        'JET_DEBUG_LOWER_ALL optimization summary: operation=mir.optimize pass=probe violations=1 output=discarded',
+        'JET_DEBUG_LOWER_ALL summary: 0 of 28532 functions failed to lower',
+        'JET_DEBUG_LOWER_ALL optimization summary: operation=mir.optimize pass=cfg-simplification violations=0 output=accepted',
+        'JET_DEBUG_LOWER_ALL optimization summary: operation=mir.optimize pass=effect-ordering violations=0 output=accepted',
+    ].join('\n'));
+    assert.equal(proof.clean, true);
+    assert.equal(proof.summaries.length, 3);
+    assert.equal(proof.violations.length, 1);
+    assert.equal(proof.main_summaries.length, 2);
+    assert.deepEqual(proof.main_violations, []);
+});
+
+test('optimizer rollback never hides multiple rejected main passes or their full identities', () => {
+    const first = 'Validation(InvalidReferenceIndex { function: MirFunctionId(13129819222604582527), value: MirValueId(12024045181009992773), span: Span { start: 21839604, end: 21839608 } })';
+    const second = 'Validation(MovedPlace { function: MirFunctionId(22), place: MirPlaceId(33), span: Span { start: 44, end: 55 } })';
+    const proof = hostedOptimizationPassCensus([
+        'JET_DEBUG_LOWER_ALL summary: 0 of 28532 functions failed to lower',
+        `JET_DEBUG_LOWER_ALL optimization: operation=mir.optimize pass=cfg-simplification violation=${first}`,
+        'JET_DEBUG_LOWER_ALL optimization summary: operation=mir.optimize pass=cfg-simplification violations=1 output=discarded',
+        `JET_DEBUG_LOWER_ALL optimization: operation=mir.optimize pass=borrow-insertion violation=${second}`,
+        'JET_DEBUG_LOWER_ALL optimization summary: operation=mir.optimize pass=borrow-insertion violations=1 output=discarded',
+        'JET_DEBUG_LOWER_ALL optimization summary: operation=mir.optimize pass=effect-ordering violations=0 output=accepted',
+    ].join('\n'));
+    assert.equal(proof.clean, false);
+    assert.equal(proof.main_summaries.length, 3);
+    assert.deepEqual(proof.main_violations.map(row => row.violation), [first, second]);
+});
+
+test('optimizer gate requires main boundary evidence and rejects inconsistent accepted output', () => {
+    const main = 'JET_DEBUG_LOWER_ALL summary: 0 of 10 functions failed to lower\n';
+    const accepted = 'JET_DEBUG_LOWER_ALL optimization summary: operation=mir.optimize pass=cfg-simplification violations=0 output=accepted\n';
+    for (const log of ['', accepted, main, main + accepted.replace('violations=0', 'violations=1'),
+        main + 'JET_DEBUG_LOWER_ALL optimization: operation=mir.optimize pass=cfg-simplification violation=InvalidReference\n' + accepted]) {
+        assert.equal(hostedOptimizationPassCensus(log).clean, false);
     }
 });
