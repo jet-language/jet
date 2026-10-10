@@ -1607,25 +1607,31 @@ the linker supplies the few glibc-only names below. What the linker does:
 
 ### Runtime packs
 
-Linking against the archive set reads ~100 MB and ~1M section headers per
-link. `Image/RuntimePack.jet` (`x64_link_runtime_pack(names, bufs,
-extra_roots)`) does everything that does not depend on the program once per
-toolchain and writes the result as one self-contained ELF relocatable
-object, the runtime pack, shipped beside the runtime archive; a program link
-is `x64_link_executable([program.o, pack])` and reads nothing else.
-`Tools/packaging/prebuild-runtime.sh` writes it as
-`jet-runtime/<key>/jet_runtime.pack.o` beside `jet`, in the directory of the
-release-profile runtime rlib it was linked from (the runtime cache's prebuilt
-layout), and records that key in `jet-runtime/native.key`. The key covers the
-runtime's Rust text and `rustc -vV`, neither of which the native build has, so
-the Jet-hosted `jet build` reads the key from that file in one place
-(`jet_cli_runtime_key`) and refuses the build with E2105 when it is missing.
+`Image/RuntimePack.jet` (`x64_link_runtime_pack(names, bufs, extra_roots)`)
+packages the checked Jet runtime object and its permitted C platform archives
+as one self-contained ELF relocatable object. A program link reads its own
+objects plus that pack; no Rust runtime object or standard-library archive
+participates.
 
-- Resolution is finished: members are pulled for the roots (the C ABI the
-  runtime archive defines, `_start`, `__jet_link_main`, `__tls_get_addr`,
-  and the caller's extra names such as `memcpy`), COMDATs, weak and common
-  symbols, the allocator shim, the LFS64 aliases and the libc shims are
-  settled, and the startup object is included. Only the roots stay global;
+`Tools/packaging/prebuild-runtime.sh` delegates to `prebuild-runtime.mjs`.
+The producer assembles `Compiler/JetRuntime/sources.list`, invokes the Jet CLI's
+library-object hook, and links its object with static musl `libc.a` and the
+selected C toolchain's `libgcc_eh.a`/`libgcc.a`. The hook explicitly disables
+Rust emission and uses `x64_runtime_library` followed by the in-process pack
+linker; it never invokes rustc or a system linker. Missing Jet exports or
+unresolved platform imports are failures, not a Rust fallback.
+
+The published `jet-runtime/<key>/jet_runtime.pack.o` has matching ABI, export
+and provenance records. The key covers checked runtime source, ABI, backend,
+lifecycle and C platform identities; `native.key` selects it for the CLI.
+The producer and linker reject Rust-mangled/allocator symbols. Historical
+`prepare-call-runtime.mjs` seed-Rust adapter assembly is a separate bootstrap
+test path and is not the native pack producer.
+
+- Resolution pulls archive members for the checked Jet C exports, platform
+  startup and explicit extra roots such as `memcpy`. COMDATs and weak/common
+  symbols are settled, and the startup object is included. Rust allocator
+  shims are not admissible pack dependencies. Only the roots stay global;
   every other definition becomes a local symbol, so the pack's symbol table
   is its export table plus its imports (`main`, the linker-defined names,
   weak references).
@@ -1647,11 +1653,11 @@ The program link recognizes the startup object by the pack's
 `__jet_link_main` export. Because the pack is plain ELF, GNU ld links it too
 (`ld -static -e _start program.o pack.o` plus `--defsym` for the
 `__jet_*`/`__EH_FRAME_BEGIN__` names), which is how the relaxations above
-were compared. For the current runtime the pack is 3.0 MB (8998 section
-headers, 66 exports); hello-world keeps 3136 of its sections.
+were compared. The historical mixed-runtime sample had a 3.0 MB pack
+(8998 section headers, 66 exports); hello-world kept 3136 of its sections.
 
-Link time, measured with the linker compiled by `jet build --release` (the
-Rust-emitting tier; not yet measured as Jet-backend output), inputs
+Historical mixed-runtime link time, measured with the linker compiled by
+`jet build --release` (the Rust-emitting tier, not Jet-backend output), inputs
 already in memory: hello-world 67 ms, the runtime-stop probe 89 ms, against
 13.5 s for hello-world linked from the archive set in the `jet run` tier
 (~0.5 s from the pack there). Building the pack takes 0.55 s in the release
@@ -2871,12 +2877,12 @@ only orders their init/fini hooks.
 The runtime's private allocator root uses the shared MIR `.Global` lowering.
 `jet_rt_alloc_init` is a void/no-argument constructor in `.init_array.00000`.
 
-`prebuild-runtime.sh` keeps the Rust-tier seed/verification rlib separate from
-`libjet_runtime_native.rlib`, built from fresh all-parts source with
-`--cfg jet_native_pack`. The latter imports the Jet allocator and is packed
-after `jet_runtime_jet.o`; the strong-definition check rejects any replaced
-Rust export. Rust-tier allocator bodies are seed/verification inputs only,
-recorded for deletion at cutover, not a second native-pack implementation.
+The canonical pack producer is `Tools/packaging/prebuild-runtime.mjs`.
+It accepts only the checked Jet runtime object and explicit C platform
+archives. It verifies the object/pack symbol inventories and records
+`rustObjects: 0` and `llvmObjects: 0` only after successful production.
+These records still require the admitted producer execution and its trace;
+generator ownership metadata alone is not a Rust-free runtime proof.
 
 `Source/Main.jet` provides the native normal-entry `jet_rt_main` boundary;
 the seed CAbi copy is excluded by `cfg(not(jet_native_pack))`. The host must
