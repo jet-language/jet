@@ -546,6 +546,10 @@ impl<'a> Checker<'a> {
         transfer_from: Option<&str>,
         enum_variants: Option<&HashSet<String>>,
     ) {
+        let reborrow_parent = transfer_from
+            .and_then(|source| self.view_fact(source))
+            .filter(|fact| fact.access == ViewAccess::Write && place.extends(&fact.place))
+            .map(|fact| fact.seq);
         let conflicts = self
             .flow
             .views
@@ -556,6 +560,9 @@ impl<'a> Checker<'a> {
                     return false;
                 }
                 if transfer_from == Some(existing_name) {
+                    return false;
+                }
+                if reborrow_parent.is_some_and(|parent| self.view_loan_contains(parent, fact.seq)) {
                     return false;
                 }
                 // Several candidates for one logical output slot are alternatives,
@@ -614,9 +621,25 @@ impl<'a> Checker<'a> {
             access,
             scope_len: self.scope_depth(),
             seq: 0,
+            reborrow_parent,
             invalidated: None,
         };
         crate::Sema::push_view_fact(&mut self.flow.views, name, fact);
+    }
+
+    /// A descendant may use its suspended parent loan, never a sibling loan.
+    fn view_loan_contains(&self, mut descendant: usize, ancestor: usize) -> bool {
+        loop {
+            if descendant == ancestor {
+                return true;
+            }
+            let parent = self.flow.views.all()
+                .flat_map(|(_, facts)| facts)
+                .find(|fact| fact.seq == descendant)
+                .and_then(|fact| fact.reborrow_parent);
+            let Some(parent) = parent else { return false; };
+            descendant = parent;
+        }
     }
 
     fn view_paths_are_enum_alternatives(
@@ -2393,7 +2416,15 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn check_expr_change(&mut self, expr: &Expr, action: &str, span: Span) {
-        self.check_expr_change_with_view_exemption(expr, action, span, None);
+        let through_view = expr_root_ident(expr).and_then(|root| {
+            self.view_fact(root)
+                .filter(|fact| fact.access == ViewAccess::Write)
+                .map(|fact| (root.to_string(), fact.binding_span, fact.seq))
+        });
+        self.check_expr_change_with_view_exemption(
+            expr, action, span,
+            through_view.as_ref().map(|(name, definition, seq)| (name.as_str(), *definition, *seq)),
+        );
     }
 
     fn check_expr_change_with_view_exemption(
@@ -2536,15 +2567,14 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn check_lvalue_change(&mut self, target: &LValue, action: &str) {
-        let through_write_view = match target {
-            LValue::Index { base, .. } | LValue::Field { base, .. } => expr_root_ident(base)
-                .and_then(|name| self.view_fact(name))
-                .is_some_and(|fact| fact.access == ViewAccess::Write),
-            LValue::Local { name, .. } => self.is_write_view(name),
+        let view_root = match target {
+            LValue::Index { base, .. } | LValue::Field { base, .. } => expr_root_ident(base),
+            LValue::Local { name, .. } => Some(name.as_str()),
         };
-        if through_write_view {
-            return;
-        }
+        let through_write_view = view_root.and_then(|name| {
+            self.view_fact(name).filter(|fact| fact.access == ViewAccess::Write)
+                .map(|fact| (name.to_string(), fact.binding_span, fact.seq))
+        });
         let frozen_base = match target {
             LValue::Index { base, .. } | LValue::Field { base, .. } => Some(base.as_ref()),
             LValue::Local { .. } => None,
@@ -2576,7 +2606,11 @@ impl<'a> Checker<'a> {
             }),
         };
         if let Some(place) = place {
-            self.check_place_change(&place, action, target.span());
+            self.check_place_change_with_view_exemption(
+                &place, action, target.span(),
+                through_write_view.as_ref()
+                    .map(|(name, definition, seq)| (name.as_str(), *definition, *seq)),
+            );
         }
     }
 
@@ -2611,11 +2645,10 @@ impl<'a> Checker<'a> {
         let Some(place) = self.place_from_expr(expr) else {
             return;
         };
-        if let Some(root) = crate::Sema::Diagnostics::expr_root_ident(expr) {
-            if self.is_write_view(root) {
-                return;
-            }
-        }
+        let through_view = expr_root_ident(expr)
+            .and_then(|root| self.view_fact(root))
+            .filter(|fact| fact.access == ViewAccess::Write)
+            .map(|fact| fact.seq);
         // `suppress_partial_move_root_read` means this expression is only the
         // base of a deeper projection whose complete place the caller checks
         // (`adjacent.values` in `&adjacent.values[2..3]`, `Expr::Place` in
@@ -2633,6 +2666,7 @@ impl<'a> Checker<'a> {
                     && fact.access == ViewAccess::Write
                     && fact.place.overlaps(&place)
                     && fact.invalidated.is_none()
+                    && !through_view.is_some_and(|seq| self.view_loan_contains(seq, fact.seq))
                     && !(base_of_deeper_projection
                         && place.projections.len() < fact.place.projections.len())
             })
@@ -2692,9 +2726,8 @@ impl<'a> Checker<'a> {
                     self.view_is_live_now(name)
                         && !ignored_view.is_some_and(
                             |(ignored_name, binding_span, seq)| {
-                                name == ignored_name
-                                    && fact.binding_span == binding_span
-                                    && fact.seq == seq
+                                (name == ignored_name && fact.binding_span == binding_span
+                                    && fact.seq == seq) || self.view_loan_contains(seq, fact.seq)
                             },
                         )
                         && fact.place.overlaps(changed)
@@ -3481,7 +3514,88 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn collect_pattern_view_slots(
+        &self, pattern: &Pattern, ty: Option<&Type>, prefix: &[String],
+        slots: &mut Vec<(String, Span, Vec<String>)>,
+    ) {
+        match pattern {
+            Pattern::Present { binding, binding_span, inner, .. }
+            | Pattern::Ok { binding, binding_span, inner, .. }
+            | Pattern::Err { binding, binding_span, inner, .. } => {
+                if let Some(inner) = inner {
+                    let payload = match (pattern, ty) {
+                        (Pattern::Present { .. }, Some(Type::Option(payload))) => Some(payload.as_ref()),
+                        (Pattern::Ok { .. }, Some(Type::Result { ok, .. })) => Some(ok.as_ref()),
+                        (Pattern::Err { .. }, Some(Type::Result { err, .. })) => Some(err.as_ref()),
+                        _ => None,
+                    };
+                    self.collect_pattern_view_slots(inner, payload, prefix, slots);
+                } else if binding != "_" {
+                    slots.push((binding.clone(), *binding_span, prefix.to_vec()));
+                }
+            }
+            Pattern::Variant { variant, bindings, .. } => {
+                let payload = ty.map(|ty| self.pattern_payload_types(ty, variant)).unwrap_or_default();
+                let names = ty.and_then(|ty| match ty {
+                    Type::Named(name) | Type::Apply { name, .. } => self.resolve_enum_variants_cloned(name),
+                    _ => None,
+                }).and_then(|variants| variants.get(variant).cloned())
+                    .and_then(|(_, payload)| match payload {
+                        VariantPayload::Named(fields) => Some(fields.into_iter().map(|field| field.name).collect::<Vec<_>>()),
+                        _ => None,
+                    });
+                for (index, slot) in bindings.iter().enumerate() {
+                    let mut path = prefix.to_vec();
+                    path.push(variant.clone());
+                    path.push(names.as_ref().and_then(|names| names.get(index)).cloned()
+                        .unwrap_or_else(|| index.to_string()));
+                    match slot {
+                        crate::AST::PatSlot::Bind { name, span } => slots.push((name.clone(), *span, path)),
+                        crate::AST::PatSlot::Nested(inner) => self.collect_pattern_view_slots(inner, payload.get(index), &path, slots),
+                        _ => {}
+                    }
+                }
+            }
+            Pattern::Struct { fields, .. } => {
+                for field in fields {
+                    match field {
+                        crate::AST::StructPatField::Bind { field, local, local_span, .. } => {
+                            let mut path = prefix.to_vec();
+                            path.push(field.clone());
+                            slots.push((local.clone(), *local_span, path));
+                        }
+                        crate::AST::StructPatField::Nested { field, pattern, .. } => {
+                            let mut path = prefix.to_vec();
+                            path.push(field.clone());
+                            let field_ty = ty.cloned().and_then(|ty| self.projected_field_type(ty, field));
+                            self.collect_pattern_view_slots(pattern, field_ty.as_ref(), &path, slots);
+                        }
+                        crate::AST::StructPatField::Value { .. } => {}
+                    }
+                }
+            }
+            Pattern::List { .. } | Pattern::Map { .. } => {
+                for name in pattern.binding_names() {
+                    slots.push((name.local_name().to_string(), name.span, prefix.to_vec()));
+                }
+            }
+            Pattern::Or(alternatives, _) => {
+                for alternative in alternatives {
+                    self.collect_pattern_view_slots(alternative, ty, prefix, slots);
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub(crate) fn record_pattern_view_bindings(&mut self, subject: &Expr, pattern: &Pattern) {
+        let mut bound_slots = Vec::new();
+        let mut typed_subject = subject;
+        while let Expr::Place(inner, _, _) | Expr::Paren(inner, _) | Expr::Copy(inner, _) = typed_subject {
+            typed_subject = inner;
+        }
+        let subject_ty = self.compound_expr_type(typed_subject);
+        self.collect_pattern_view_slots(pattern, subject_ty.as_ref(), &[], &mut bound_slots);
         // D-OPT-WRITE1 (#3974): each payload binding under a `&place` subject
         // is a live write window into that place. Distinct bindings get
         // disjoint slots; any other view of or write to the place overlaps.
@@ -3491,16 +3605,20 @@ impl<'a> Checker<'a> {
             };
             let mut names = HashSet::new();
             crate::Sema::CheckerCore::collect_window_names(pattern, &mut names);
-            let mut names = names.into_iter().collect::<Vec<_>>();
-            names.sort();
-            for name in names {
+            for (name, _, path) in bound_slots {
+                if !names.contains(&name) {
+                    continue;
+                }
                 let Some(binding_span) = self.lookup(&name).map(|info| info.def_span) else {
                     continue;
                 };
                 let mut place = base.clone();
-                place.projections.push(ViewProjection::Field(format!("{{{name}}}")));
+                place.projections.extend(path.into_iter().map(ViewProjection::Field));
                 let kind = self.view_kind_for_place(&place);
-                self.record_view(&name, Vec::new(), place, kind, ViewAccess::Write, binding_span);
+                self.record_view_with_exemptions(
+                    &name, Vec::new(), place, kind, ViewAccess::Write, binding_span,
+                    expr_root_ident(inner), None,
+                );
             }
             return;
         }
@@ -3513,84 +3631,6 @@ impl<'a> Checker<'a> {
                 _ => None,
             })
             .flatten();
-        let mut bound_slots = Vec::new();
-
-        match pattern {
-            Pattern::Present {
-                binding,
-                binding_span,
-                ..
-            }
-            | Pattern::Ok {
-                binding,
-                binding_span,
-                ..
-            }
-            | Pattern::Err {
-                binding,
-                binding_span,
-                ..
-            } => {
-                bound_slots.push((binding.clone(), *binding_span, Vec::new()));
-            }
-            Pattern::Variant {
-                variant,
-                bindings: slots,
-                ..
-            } => {
-                let slot_names = self.pattern_variant_slot_names(subject, variant, slots.len());
-                for (index, slot) in slots.iter().enumerate() {
-                    if let crate::AST::PatSlot::Bind { name, span } = slot {
-                        let slot_name = slot_names
-                            .get(index)
-                            .cloned()
-                            .unwrap_or_else(|| index.to_string());
-                        bound_slots.push((name.clone(), *span, vec![variant.clone(), slot_name]));
-                    }
-                }
-            }
-            Pattern::Struct { fields, .. } => {
-                for field in fields {
-                    match field {
-                        crate::AST::StructPatField::Bind {
-                            field,
-                            local,
-                            local_span,
-                            ..
-                        } => {
-                            bound_slots.push((local.clone(), *local_span, vec![field.clone()]));
-                        }
-                        crate::AST::StructPatField::Nested { field, pattern, .. } => {
-                            for name in pattern.binding_names() {
-                                bound_slots.push((
-                                    name.local_name().to_string(),
-                                    name.span,
-                                    vec![field.clone()],
-                                ));
-                            }
-                        }
-                        crate::AST::StructPatField::Value { .. } => {}
-                    }
-                }
-            }
-            // D-PAT-RECORD1 / D-PAT-MAP1: list items, a `..rest` window and
-            // map values view into the whole subject.
-            Pattern::List { .. } | Pattern::Map { .. } => {
-                for name in pattern.binding_names() {
-                    bound_slots.push((name.local_name().to_string(), name.span, Vec::new()));
-                }
-            }
-            Pattern::Or(alternatives, _) => {
-                for alternative in alternatives {
-                    self.record_pattern_view_bindings(subject, alternative);
-                }
-                return;
-            }
-            Pattern::Absent(_)
-            | Pattern::Range { .. }
-            | Pattern::StrMatch { .. }
-            | Pattern::BinMatch { .. } => {}
-        }
 
         for (name, span, source_prefix) in bound_slots {
             let binding_span = self.lookup(&name).map(|info| info.def_span).unwrap_or(span);
@@ -3598,6 +3638,15 @@ impl<'a> Checker<'a> {
                 .lookup(&name)
                 .is_some_and(|info| self.type_contains_view_boundary(&info.ty));
             if !binding_has_view {
+                // Ordinary payloads are projections too: slicing a borrowed
+                // list payload must keep the matched parameter as its owner.
+                if !self.frame_owns_place(subject) {
+                    if let Some(mut place) = self.place_from_expr(subject) {
+                        place.projections.extend(source_prefix.into_iter().map(ViewProjection::Field));
+                        let kind = self.view_kind_for_place(&place);
+                        self.record_view(&name, Vec::new(), place, kind, ViewAccess::Read, binding_span);
+                    }
+                }
                 continue;
             }
             let mut matched = false;
@@ -3850,37 +3899,6 @@ impl<'a> Checker<'a> {
                 )
             })
             .collect()
-    }
-
-    fn pattern_variant_slot_names(
-        &self,
-        subject: &Expr,
-        variant: &str,
-        slot_count: usize,
-    ) -> Vec<String> {
-        fn subject_type(checker: &Checker<'_>, subject: &Expr) -> Option<Type> {
-            match subject {
-                Expr::Ident(name, _) => checker.lookup(name).map(|info| info.ty.clone()),
-                Expr::Copy(inner, _) | Expr::Paren(inner, _) => subject_type(checker, inner),
-                _ => None,
-            }
-        }
-
-        let named = subject_type(self, subject)
-            .and_then(|ty| match ty {
-                Type::Named(name) | Type::Apply { name, .. } => Some(name),
-                _ => None,
-            })
-            .and_then(|name| self.resolve_enum_variants_cloned(&name))
-            .and_then(|variants| variants.get(variant).cloned())
-            .and_then(|(_, payload)| match payload {
-                VariantPayload::Named(fields) => {
-                    Some(fields.into_iter().map(|field| field.name).collect())
-                }
-                _ => None,
-            });
-
-        named.unwrap_or_else(|| (0..slot_count).map(|index| index.to_string()).collect())
     }
 
     pub(crate) fn transfer_named_view(&mut self, target: &str, source: &str, span: Span) -> bool {
@@ -4804,13 +4822,12 @@ impl<'a> Checker<'a> {
         };
         let place_name = Self::place_name(&place);
         let moved: Vec<(String, crate::Sema::FlowFacts::MoveOrigin)> =
-            if matches!(expr, Expr::Ident(..)) && self.suppress_partial_move_root_read {
-                self.flow
-                    .moved
-                    .get(&place_name)
-                    .cloned()
-                    .map(|at| (place_name.clone(), at))
-                    .into_iter()
+            if self.suppress_partial_move_root_read {
+                // Forming a projected assignment place does not read its
+                // moved descendants, but a moved ancestor is still unusable.
+                self.flow.moved.iter()
+                    .filter(|(moved, _)| Self::contains_place(moved, &place_name))
+                    .map(|(moved, at)| (moved.to_string(), at.clone()))
                     .collect()
             } else {
                 self.flow

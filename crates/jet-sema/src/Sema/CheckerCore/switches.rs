@@ -2707,12 +2707,6 @@ impl<'a> Checker<'a> {
         }
         let subj_name = match &*subject {
             Expr::Ident(n, _) => Some(n.clone()),
-            Expr::Place(inner, crate::AST::PlaceAccess::Take, _)
-                if matches!(inner.without_parens(), Expr::Ident(..)) =>
-            {
-                let Expr::Ident(name, _) = inner.without_parens() else { unreachable!() };
-                Some(name.clone())
-            }
             _ if !subjectless_guard && !matches!(&*subject, Expr::PatternTest { .. }) => {
                 Some(Syntax::KW_IT.to_string())
             }

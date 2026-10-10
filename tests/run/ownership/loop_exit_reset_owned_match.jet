@@ -1,12 +1,12 @@
 use core.encoding.[Dyn]
 
 // A move ends only the current path; a reset restores the next iteration.
-fn take(value: ^[Int]) -[]> Int { value.len() }
+fn consume(value: ^[Int]) -[]> Int { value.len() }
 
 fn move_then_return() -[]> Int {
     out := [1, 2]
     loop {
-        count :: take(^out)
+        count :: consume(^out)
         return count
     }
 }
@@ -15,7 +15,7 @@ fn move_then_break() -[]> Int {
     out := [1, 2, 3]
     count := 0
     loop {
-        count = take(^out)
+        count = consume(^out)
         break
     }
     count
@@ -25,7 +25,7 @@ fn move_then_reset() -[]> Int {
     current := [1]
     total := 0
     loop i in 0..<3 {
-        total += take(^current)
+        total += consume(^current)
         current = [1, 2]
         next
     }
@@ -40,7 +40,7 @@ enum Tree {
 fn owned_payload(tree: ^Tree) -[]> Int {
     owned := ^tree
     if ^owned == {
-        .Object(entries) -> return take(^entries)
+        .Object(entries) -> return consume(^entries)
         .Text(text) -> return text.count_bytes()
     }
 }

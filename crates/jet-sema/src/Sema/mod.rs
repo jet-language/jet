@@ -1543,6 +1543,8 @@ pub(crate) struct ViewFact {
     /// Order the window was opened in. The prover reports the newest window
     /// that matches, so the order has to survive the store, not the container.
     seq: usize,
+    /// Exclusive pattern payload reborrows its parent loan, not a second owner.
+    reborrow_parent: Option<usize>,
     /// Owner operation that invalidated storage, when invalidation is allowed
     /// to happen (arena reset). Ordinary owner writes/moves are rejected.
     invalidated: Option<(String, Span)>,
@@ -1674,6 +1676,7 @@ mod view_fact_graph_tests {
     fn fact(owner_span: usize, scope_len: usize, kind: ViewKind) -> ViewFact {
         ViewFact {
             seq: 0,
+            reborrow_parent: None,
             binding_span: Span::new(owner_span + 10, owner_span + 11),
             output_path: Vec::new(),
             place: ViewPlace {
