@@ -29,6 +29,9 @@ const sources = readFileSync(join(root, 'Compiler/JetRuntime/sources.list'), 'ut
   .split('\n').map(line => line.trim()).filter(line => line && !line.startsWith('#'));
 for (const path of sources) {
   const source = readFileSync(join(root, path), 'utf8');
+  assert.doesNotMatch(source,
+    /\b(?:scheduler_observe_(?:register|enter|finish|control|wait|identity|parked|pool|quiescent)|main_(?:env_seed|stdout_flush|stderr_flush|stderr_write|observe_init|observe_start|observe_report)|observe_(?:mem_resources|env_get|env_get_os)|process_errno_location)\s*\(/,
+    `${path}: every retired C alias caller must use its actual provider`);
   for (const match of source.matchAll(/^#Import\(c\)\s+(?:pub\s+)?fn\s+([A-Za-z_]\w*)\s*[^=]*=\s*"([^"]+)"/gm)) {
     const [, name, symbol] = match;
     assert.ok(!exports.has(symbol),

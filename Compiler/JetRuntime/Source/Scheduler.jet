@@ -917,7 +917,7 @@ fn scheduler_completion_order(out: I64) {
         sync_mutex_lock(root)
         idle :: sync_load(root + I64{8}) == I64{0} && sync_load(root + I64{40}) == I64{0}
         sync_mutex_unlock(root)
-        if idle && scheduler_observe_quiescent() -> break
+        if idle && jet_rt_observe_io_quiescent() -> break
         sync_park(slot, I64{1000000})
         at += I64{1}
     }
@@ -930,7 +930,7 @@ fn scheduler_completion_order(out: I64) {
         sync_mutex_lock(root)
         idle :: sync_load(root + I64{8}) == I64{0} && sync_load(root + I64{40}) == I64{0}
         sync_mutex_unlock(root)
-        if idle && scheduler_observe_quiescent() -> return
+        if idle && jet_rt_observe_io_quiescent() -> return
         #Unsafe("sched_yield retains no memory and yields this OS worker") {
             _ := os_syscall_i64(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
         }
