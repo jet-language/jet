@@ -283,21 +283,6 @@ fn jet_codegen_lower_string_format_value(builder: &JetCodegenBuilder, program: J
         }
         else -> {}
     }
-    borrow_mask := [Bool]{}
-    args := [MIRCallArg]{jet_codegen_numeric_call_arg(value, span)}
-    if digits == .Val(count) {
-        borrow_mask = [Bool]{integer, false}
-        constant := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: mir_integer_constant(count, None, None)})
-        &args.push(jet_codegen_numeric_call_arg(constant, span))
-    } else if pad_width == .Val(width_value) {
-        borrow_mask = [Bool]{true, false, true}
-        width := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: mir_integer_constant(width_value, None, None)})
-        fill := jet_codegen_emit_value(&builder, program, span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: pad_fill}})
-        &args.push(jet_codegen_numeric_call_arg(width, span))
-        &args.push(jet_codegen_numeric_call_arg(fill, span))
-    } else {
-        borrow_mask = [Bool]{true}
-    }
     jet_codegen_emit_value(&builder, program, span, Type.String, MIROperation.Call{callee: MIRCallee.User{function: jet_codegen_function_id(function)}, args: args, type_args: [MIRType]{}})
 }
 
@@ -2614,7 +2599,7 @@ fn jet_codegen_lower_instance_args(builder: &JetCodegenBuilder, program: JetCode
     conventions := [AccessConvention]{}
     loop index in 1..<params.len() {
         &variadic.push(params[index].variadic)
-        &conventions.push(params[index].access)
+        &conventions.push(params[index].convention)
     }
     lowered := jet_codegen_lower_call_args_for_signature(&builder, program, args, variadic, conventions)
     loop index in 0..<lowered.len() -> lowered[index].binder_slot = Val(index + 1)
@@ -3976,7 +3961,9 @@ fn jet_codegen_lower_try(builder: &JetCodegenBuilder, program: JetCodegenProgram
     input_type := jet_codegen_expression_call_return_type(builder, program, inner) ?? inner.ty
     // The solved callable may have erased an inferred failure carrier after
     // the automatic Try was installed. No failure route remains to consume.
-    if inner.ty != .Result(_, _) && inner.ty != .Option(_) && input_type != .Result(_, _) && input_type != .Option(_) -> return input
+    inner_carrier :: if inner.ty == { .Result(_, _) | .Option(_) -> true else -> false }
+    input_carrier :: if input_type == { .Result(_, _) | .Option(_) -> true else -> false }
+    if !inner_carrier && !input_carrier -> return input
     jet_codegen_lower_try_value(&builder, program, expression, input, input_type, inner.span, note, conversion, file, line, function, jet_codegen_try_operand_starts_failure(inner))
 }
 
@@ -6310,7 +6297,7 @@ fn jet_codegen_lower_pattern_shape_test(builder: &JetCodegenBuilder, program: Je
                         &tests.push(jet_codegen_emit_value(&builder, program, field_span, Type.Bool, MIROperation.Binary{op: jet_codegen_lower_binary(TBinaryOp.Eq), dispatch: dispatch, overflow: MIRBinaryOverflow.Unchecked, left: projected, right: expected}))
                     }
                     .Nested(name, nested, field_span) -> {
-                        field_id :: jet_codegen_pattern_field_id(builder, program, subject.ty, name)
+                        field_id :: jet_codegen_host_field_id(builder, program, subject.ty, name)
                         field_ty :: jet_codegen_checked_host_field_type(builder, program, subject.ty, name)
                         projected :: jet_codegen_emit_value(&builder, program, field_span, field_ty, MIROperation.Field{base: subject_value, field: field_id})
                         &tests.push(jet_codegen_lower_pattern_shape_condition(&builder, program, jet_codegen_nested_pattern(pattern, nested), jet_codegen_nested_subject(field_ty, field_span), projected, nested.shape, false, false))
@@ -6452,7 +6439,7 @@ fn jet_codegen_bind_pattern_shape(builder: &JetCodegenBuilder, program: JetCodeg
                     }
                     .Value(_, _, _) -> {}
                     .Nested(name, nested, field_span) -> {
-                        field_id :: jet_codegen_pattern_field_id(builder, program, subject.ty, name)
+                        field_id :: jet_codegen_host_field_id(builder, program, subject.ty, name)
                         field_ty :: jet_codegen_checked_host_field_type(builder, program, subject.ty, name)
                         nested_window := if window == .Val(base) -> Val(jet_codegen_project_window_place(&builder, program, base, MIRProjection.Field{field: field_id, span: field_span}, field_ty, field_span)) else -> MIRPlaceID?{None}
                         jet_codegen_bind_nested_pattern(&builder, program, pattern, field_ty, nested, field_span, MIROperation.Field{base: subject_value, field: field_id}, reuse, nested_window)
@@ -6546,7 +6533,7 @@ fn jet_codegen_pattern_equal(builder: &JetCodegenBuilder, program: JetCodegenPro
 
 fn jet_codegen_pattern_read_window(builder: &JetCodegenBuilder, program: JetCodegenProgram, subject: TExpr, value: MIRValueID) -> MIRPlaceID Never! {
     if jet_codegen_pattern_window(builder, program, value) == .Val(place) -> return place
-    local :: tir_generated_local("pattern_subject_{value.value}", false)
+    local :: tir_generated_local("pattern_subject_{value.value}", subject.span)
     place :: jet_codegen_bind_local(&builder, program, local, subject.ty, false, None, None, false)
     _ := jet_codegen_emit(&builder, program, subject.span, None, MIROperation.WritePlace{place: place, value: value})
     _ := &builder.read_windows.add(place.value, true)
@@ -6562,7 +6549,10 @@ fn jet_codegen_lower_collection_slot(builder: &JetCodegenBuilder, program: JetCo
             if window == .Val(place) -> jet_codegen_bind_window_binding(&builder, program, fact, place)
             else -> jet_codegen_write_pattern_binding(&builder, program, fact, value, reuse)
         }
-        .Value(expected) -> return jet_codegen_pattern_equal(&builder, program, value, jet_codegen_lower_expr(&builder, program, expected), ty, span)
+        .Value(expected) -> {
+            expected_value :: jet_codegen_lower_expr(&builder, program, expected)
+            return jet_codegen_pattern_equal(&builder, program, value, expected_value, ty, span)
+        }
         .Range(lo, hi) -> return jet_codegen_lower_numeric_pattern_range(&builder, program, value, ty, lo, hi, span)
         .Nested(nested) -> {
             if window == .Val(place) -> &builder.pattern_windows.push(JetCodegenPatternWindow{value: value, place: place})
@@ -6606,11 +6596,11 @@ fn jet_codegen_lower_list_pattern(builder: &JetCodegenBuilder, program: JetCodeg
         place :: jet_codegen_project_window_place(&builder, program, root, MIRProjection.Range{range: range, location: location, span: span}, fact.ty, span)
         jet_codegen_bind_window_binding(&builder, program, fact, place)
     }
-    selected_predecessor :: builder.current
+    selected_predecessor := builder.current
     jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join})
     jet_codegen_switch_block(&builder, program, missed)
     absent :: jet_codegen_numeric_constant_bool(&builder, program, span, false)
-    missed_predecessor :: builder.current
+    missed_predecessor := builder.current
     jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join})
     jet_codegen_switch_block(&builder, program, join)
     jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: selected_predecessor, value: result}, MIRPhiIncoming{block: missed_predecessor, value: absent}}})
@@ -6683,12 +6673,11 @@ fn jet_codegen_pattern_lookup_cache(builder: &JetCodegenBuilder, program: JetCod
     identity = "{identity}/key:{key_identity}"
     if builder.pattern_lookup_caches.get(identity) == .Val(cache) -> return cache
     cache_ty :: Type.Option{inner: lookup_ty}
-    local :: tir_generated_local("pattern_lookup_cache_{builder.locals.len()}", true)
+    local :: tir_generated_local("pattern_lookup_cache_{builder.locals.len()}", span)
     cache :: jet_codegen_bind_local(&builder, program, local, cache_ty, true, None, None, false)
-    current :: builder.current
+    current := builder.current
     if builder.pattern_lookup_head == .Val(head) -> jet_codegen_switch_block(&builder, program, head)
-    element :: jet_codegen_lower_type_for_function(lookup_ty, builder, program)
-    absent :: jet_codegen_emit_value(&builder, program, span, cache_ty, MIROperation.Absent{element: element})
+    absent :: jet_codegen_emit_value(&builder, program, span, cache_ty, MIROperation.Absent)
     _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: cache, value: absent})
     jet_codegen_switch_block(&builder, program, current)
     _ := &builder.pattern_lookup_caches.add(identity, cache)
@@ -6730,11 +6719,11 @@ fn jet_codegen_lower_map_pattern(builder: &JetCodegenBuilder, program: JetCodege
             place :: jet_codegen_project_window_place(&builder, program, root, MIRProjection.MapLookup{lookup: lookup, optional: false, span: span}, value_ty, span)
             value :: jet_codegen_emit_value(&builder, program, span, value_ty, MIROperation.ReadPlace{place: place})
             test :: jet_codegen_lower_collection_slot(&builder, program, pattern, entry.slot, value_ty, value, span, bind, reuse, Val(place))
-            selected_predecessor :: builder.current
+            selected_predecessor := builder.current
             jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join})
             jet_codegen_switch_block(&builder, program, missed)
             absent :: jet_codegen_numeric_constant_bool(&builder, program, span, false)
-            missed_predecessor :: builder.current
+            missed_predecessor := builder.current
             jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join})
             jet_codegen_switch_block(&builder, program, join)
             entry_test :: jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: selected_predecessor, value: test}, MIRPhiIncoming{block: missed_predecessor, value: absent}}})

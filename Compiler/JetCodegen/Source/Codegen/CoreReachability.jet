@@ -111,7 +111,7 @@ fn jet_codegen_core_reach_stmt_keys(statements: [TStmt], functions: [TFunc], key
 
 // The function keys one checked expression names directly. Children are
 // walked by the caller.
-fn jet_codegen_core_reach_expr_keys(expression: TExpr, keys: &[String], precise_helpers: [String:String]) Never! {
+fn jet_codegen_core_reach_expr_keys(expression: TExpr, functions: [TFunc], keys: &[String], precise_helpers: [String:String]) Never! {
     if expression.kind == {
         .Call(callee, _, args) -> {
             jet_codegen_core_reach_add(&keys, callee.key)
@@ -168,7 +168,7 @@ fn jet_codegen_core_reach_expr_keys(expression: TExpr, keys: &[String], precise_
 
 // Every function key one checked function body names, including its
 // parameter defaults, which call sites lower from the callee.
-fn jet_codegen_core_reach_function_keys(function: TFunc, precise_helpers: [String:String]) -> [String] Never! {
+fn jet_codegen_core_reach_function_keys(function: TFunc, functions: [TFunc], precise_helpers: [String:String]) -> [String] Never! {
     keys := [String]{}
     jet_codegen_core_reach_stmt_keys(function.body, functions, &keys)
     pending := [TExpr]{}
@@ -180,7 +180,7 @@ fn jet_codegen_core_reach_function_keys(function: TFunc, precise_helpers: [Strin
     }
     loop pending.len() > 0 {
         expression :: &pending.pop() ?? return keys
-        jet_codegen_core_reach_expr_keys(expression, &keys, precise_helpers)
+        jet_codegen_core_reach_expr_keys(expression, functions, &keys, precise_helpers)
         loop child in tir_expr_children(expression) -> &pending.push(child)
     }
     keys
@@ -190,7 +190,7 @@ fn jet_codegen_core_reach_function_keys(function: TFunc, precise_helpers: [Strin
 // target keeps its declaration, without stripping the owner's own arguments.
 fn jet_codegen_core_reach_template_key(key: String) -> String Never! {
     bytes :: key.bytes()
-    if bytes.len() == 0 || Int.from_u8(bytes[bytes.len() - 1]) != 62 -> return key
+    if bytes.len() == 0 || Int.from_u8(bytes[bytes.len() - 1]) != 62 -> return key.copy()
     depth := 0
     position := bytes.len() - 1
     loop position >= 0 {
@@ -202,7 +202,7 @@ fn jet_codegen_core_reach_template_key(key: String) -> String Never! {
         }
         position -= 1
     }
-    key
+    key.copy()
 }
 
 // Which checked functions to lower: one flag per row of `functions`, read in
@@ -243,7 +243,7 @@ fn jet_codegen_reachable_core_rows(functions: [TFunc], candidates: ^[Bool], core
     }
     loop pending.len() > 0 {
         caller :: &pending.pop() ?? { break }
-        loop key in jet_codegen_core_reach_function_keys(functions[caller], precise_helpers) {
+        loop key in jet_codegen_core_reach_function_keys(functions[caller], functions, precise_helpers) {
             target :: by_key.get(key) ?? next
             if !reachable[target] {
                 reachable[target] = true
@@ -267,7 +267,7 @@ fn jet_codegen_reachable_core_rows(functions: [TFunc], candidates: ^[Bool], core
         cost: None,
     }
     keys := [String]{}
-    jet_codegen_core_reach_expr_keys(expression, &keys, helpers)
+    jet_codegen_core_reach_expr_keys(expression, [TFunc]{}, &keys, helpers)
     assert_eq(keys.len(), 1)
     assert_eq(keys[0], "checked-math::__fraction_mul")
 }

@@ -173,6 +173,8 @@ use jet_foundation.[
     core_call_key,
     core_call_symbol_name,
     compiler_apply_order,
+    compiler_take_rows,
+    compiler_transfer_rows,
     mir_empty_optimization_facts,
     mir_field_id,
     mir_module_id,
@@ -1892,14 +1894,17 @@ fn jet_codegen_pack_function(builder: &JetCodegenBuilder, program: JetCodegenPro
         drops: [MIRDropAction]{},
         foreign_language: foreign_language,
     }
+    nested_functions := compiler_take_rows<MIRFunction>(&builder.nested_functions)
     fields := [MIRFieldRow]{}
     field_ids := [U64:Bool]{}
     jet_codegen_append_function_field_rows(mir_function, &fields, &field_ids)
-    loop nested in builder.nested_functions -> jet_codegen_append_function_field_rows(nested, &fields, &field_ids)
+    loop nested in nested_functions -> jet_codegen_append_function_field_rows(nested, &fields, &field_ids)
     jet_codegen_sort_field_rows(&fields)
     return JetCodegenLoweredFunction{
         function: mir_function,
         nested_functions: nested_functions,
+        shared_sites: compiler_take_rows<MIRConstantDef>(&builder.shared_sites),
+        closure_sources: compiler_take_rows<JetCodegenClosureSource>(&builder.closure_sources),
         callbacks: compiler_take_rows<MIRCallbackAdapter>(&builder.callbacks),
         fields: fields,
         prelude_calls: compiler_take_rows<MIRPreludeCall>(&builder.prelude_calls),
@@ -2354,7 +2359,7 @@ struct JetCodegenComptimeSession {
     row_keys: [String:Bool]
 }
 
-fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_files: [MIRSourceFile], stop_points: Bool) -> JetCodegenComptimeSession {
+fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_files: [MIRSourceFile], stop_points: Bool, edition: String) -> JetCodegenComptimeSession {
     field_symbols := jet_codegen_field_symbol_index(modules)
     source_index := jet_codegen_source_index(source_files)
     function_index := jet_codegen_function_index([TFunc]{})
@@ -2403,7 +2408,7 @@ fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_files:
     }
     // Every lowering replaces this first function (jet_codegen_begin_function).
     first := jet_codegen_comptime_item_tfunc("", "", "", "", Span{start: 0, end: 0}, Type.Named{name: "Unit"})
-    program := jet_codegen_new_program(^function_index, ^modules, ^field_symbols, source_files, ^source_index)
+    program := jet_codegen_new_program(^function_index, ^modules, ^field_symbols, source_files, ^source_index, edition)
     // A native-host comptime session lowers compiler callables: stop points
     // plus the budget can-stop operations.
     program.stop_points = stop_points
@@ -3426,7 +3431,7 @@ fn jet_codegen_lower_core_builtin_owner(owner: TCoreBuiltinOwner, module_info: S
 // keeps them and the checked program is never resident twice. With more than
 // one admitted thread (jet_codegen_lower_threads) the program moves into the
 // threads' shared slot for the lowering and back out after it.
-fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], source_files: [MIRSourceFile], threads: CompilerThreads, trace_sink: CompilerTraceSink?, native_stop_points: Bool) -> JetCodegenFunctions {
+fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], source_files: [MIRSourceFile], threads: CompilerThreads, trace_sink: CompilerTraceSink?, native_stop_points: Bool, edition: String) -> JetCodegenFunctions {
     if functions.len() == 0 {
         constants := jet_codegen_lower_constant_rows(modules)
         empty_index := jet_codegen_function_index([TFunc]{})
@@ -3441,14 +3446,15 @@ fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], sourc
     function_index := jet_codegen_function_index(^rows)
     field_symbols := jet_codegen_field_symbol_index(program_modules)
     source_index := jet_codegen_source_index(source_files)
-    program := jet_codegen_new_program(^function_index, ^program_modules, ^field_symbols, source_files, ^source_index)
+    program := jet_codegen_new_program(^function_index, ^program_modules, ^field_symbols, source_files, ^source_index, edition)
     // Select before threaded and closure lowering share this program.
     program.stop_points = native_stop_points
     lowered_rows := [JetCodegenLoweredFunction]{}
     weights :: jet_codegen_lower_weights(program)
     // Capture follows the real per-function lowering order, never thread
     // completion order. Ordinary compiles keep the existing parallel waves.
-    workers :: if program.canonical_journal != None -> 1 else -> jet_codegen_lower_threads(weights, threads, trace_sink)
+    capture_passes :: if program.canonical_journal == { .Val(_) -> true .None -> false }
+    workers :: if capture_passes -> 1 else -> jet_codegen_lower_threads(weights, threads, trace_sink)
     if workers > 1 {
         bounds :: compiler_threads_partition(weights, workers)
         slot :: shared JetCodegenProgramSlot{programs: [JetCodegenProgram]{}}
@@ -3748,6 +3754,24 @@ fn jet_codegen_declared_type_rows(function_index: JetCodegenFunctionIndex, modul
     types
 }
 
+// Intern Core publication constants by their canonical initializer identity.
+fn jet_codegen_merge_shared_sites(rows: &[MIRConstantDef], incoming: [MIRConstantDef]) Never! {
+    loop site in incoming {
+        found := false
+        loop existing in rows {
+            if existing.id != site.id -> next
+            if existing.ty != site.ty -> panic("one Core initializer has conflicting Shared payload types")
+            if existing.value == .SharedSite(left) && site.value == .SharedSite(right) {
+                if left.initializer != right.initializer || left.lifetime != right.lifetime -> panic("one Core initializer has conflicting publication lifetimes")
+            } else {
+                panic("Core publication site collides with ordinary constant")
+            }
+            found = true
+        }
+        if !found -> &rows.push(site)
+    }
+}
+
 // The program rows of `functions`, lowered as `lowered_rows`: their merged
 // function, callback and call rows, plus every module's trait and impl rows,
 // with `declared_types` (jet_codegen_declared_type_rows of `modules`, or a
@@ -3779,6 +3803,7 @@ fn jet_codegen_functions_from_rows(lowered_rows: ^[JetCodegenLoweredFunction], f
     &pending.reverse()
     loop {
         lowered := &pending.pop() ?? break
+        jet_codegen_merge_shared_sites(&constants, lowered.shared_sites)
         id_key :: lowered.function.id.value
         module_key :: "{lowered.function.module_id.value}:{lowered.function.key}"
         if top_ids.get(id_key) != None || top_keys.get(module_key) != None -> panic("duplicate top-level MIR function identity")

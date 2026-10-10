@@ -8,7 +8,7 @@ struct TCostSite {
     kind: TCostKind
     state: TCostState
 }
-struct TCostReport { sites: [TCostSite]{[]} }
+struct TCostReport { sites: [TCostSite]{[TCostSite]{}} }
 
 fn jet_codegen_cost_lambda(value: TLambda, function: String, depth: Int, sites: &[TCostSite]) {
     if value.executable == {
@@ -33,15 +33,15 @@ fn jet_codegen_cost_expr(value: TExpr, function: String, depth: Int, sites: &[TC
         }
         .TryWithContext(inner, note, _, _, _, _) -> {
             jet_codegen_cost_expr(inner, function, depth, &sites, true)
-            if note == .Val(value) -> jet_codegen_cost_expr(value, function, depth, &sites)
+            if note == .Val(note_value) -> jet_codegen_cost_expr(note_value, function, depth, &sites)
             return
         }
         .OrFallback(inner, fallback, _) -> {
             jet_codegen_cost_expr(inner, function, depth, &sites, true, Val(TCostState.OptimizerRemoved))
             if fallback == {
-                .Value(value) | .Panic(value, _) -> jet_codegen_cost_expr(value, function, depth, &sites)
-                .Return(value) -> {
-                    if value == .Val(nested) -> jet_codegen_cost_expr(nested, function, depth, &sites)
+                .Value(fallback_value) | .Panic(fallback_value, _) -> jet_codegen_cost_expr(fallback_value, function, depth, &sites)
+                .Return(return_value) -> {
+                    if return_value == .Val(nested) -> jet_codegen_cost_expr(nested, function, depth, &sites)
                 }
                 else -> {}
             }
@@ -115,15 +115,6 @@ fn jet_codegen_cost_expr(value: TExpr, function: String, depth: Int, sites: &[TC
         }
         .HostCall(call) -> {
             if call == {
-                .Helper(_, _, args) -> {
-                    loop argument in args {
-                        if argument == {
-                            .Expr(child) | .Borrow(child) -> jet_codegen_cost_expr(child, function, depth, &sites)
-                            .Lambda(lambda) -> jet_codegen_cost_lambda(lambda, function, depth, &sites)
-                        }
-                    }
-                    return
-                }
                 .CarrierFact(inner, _, _) | .OptionProbe(inner, _) -> {
                     jet_codegen_cost_expr(inner, function, depth, &sites, true)
                     return
@@ -148,11 +139,6 @@ fn jet_codegen_cost_expr(value: TExpr, function: String, depth: Int, sites: &[TC
                 .EnvSet(name, child, _) -> {
                     jet_codegen_cost_expr(name, function, depth, &sites)
                     jet_codegen_cost_expr(child, function, depth, &sites)
-                }
-                .ExpiringSecretNew(child, duration, clock, _) | .ExpiringValueNew(child, duration, clock) -> {
-                    jet_codegen_cost_expr(child, function, depth, &sites)
-                    jet_codegen_cost_expr(duration, function, depth, &sites)
-                    jet_codegen_cost_expr(clock, function, depth, &sites)
                 }
                 else -> {}
             }
@@ -200,7 +186,7 @@ fn jet_codegen_cost_expr(value: TExpr, function: String, depth: Int, sites: &[TC
         .MathBuiltin(_, _, children) | .PreciseBuiltin(_, _, children) | .CompareChain(children, _, _)
         | .Tuple(children) | .List(children, _) | .ListLit(children) | .ColumnarListLit(_, children)
         | .CoreCall(_, children, _, _, _, _, _) -> loop child in children -> jet_codegen_cost_expr(child, function, depth, &sites)
-        .StructLit(fields, _, _) -> loop field in fields -> jet_codegen_cost_expr(field.value, function, depth, &sites)
+        .StructLit(fields, _) -> loop field in fields -> jet_codegen_cost_expr(field.value, function, depth, &sites)
         .TupleLit(_, fields) -> loop field in fields -> jet_codegen_cost_expr(field.value, function, depth, &sites)
         .Map(entries) | .MapLit(entries) -> loop entry in entries {
             jet_codegen_cost_expr(entry.key, function, depth, &sites)

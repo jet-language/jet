@@ -4,6 +4,7 @@ use jet_foundation.[
     MIREnumArg,
     MIRIndexKind,
     MIRMapEntry,
+    MIROwnershipMode,
     MIROperation,
     MIRPanicContext,
     MIRPanicLoc,
@@ -90,7 +91,8 @@ fn jet_codegen_collection_trait_box_value(builder: &JetCodegenBuilder, program: 
 }
 
 fn jet_codegen_collection_owned_temporary(value: TExpr) -> Bool Never! {
-    if jet_codegen_ownership(value.ty).borrowed -> return false
+    ownership :: jet_codegen_ownership(value.ty)
+    if ownership.mode == MIROwnershipMode.ReadBorrow || ownership.mode == MIROwnershipMode.WriteBorrow -> return false
     if jet_codegen_is_move_kind(value.kind) -> return true
     if value.kind == {
         .List(_, _) | .ListSpread(_) | .ListLit(_) | .ColumnarListLit(_, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) -> true

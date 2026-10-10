@@ -25,7 +25,7 @@ fn jet_codegen_record_retained_instruction(builder: &JetCodegenBuilder, instruct
     // The emitter calls this immediately after the actual instruction push,
     // before live-flag writes or Stop polling can recursively emit cleanup.
     // Producer annotations belong to this ONE instruction, never that cleanup.
-    annotation :: builder.retained_grant_context
+    annotation := builder.retained_grant_context
     builder.retained_grant_context = None
     site := JetCodegenRetainedGrantContext?{None}
     if instruction.operation == {
@@ -68,7 +68,7 @@ fn jet_codegen_record_retained_instruction(builder: &JetCodegenBuilder, instruct
 // only the actual complete checked value write; the ordinary emitter publishes
 // the SAME live flag after that instruction.
 fn jet_codegen_initialize_retained_place(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, place: MIRPlaceID, value: MIRValueID) Never! {
-    previous :: builder.retained_grant_context
+    previous := builder.retained_grant_context
     if jet_codegen_retained_cell_index(builder, place) >= 0 -> builder.retained_grant_context = Val(JetCodegenRetainedGrantContext{place: place, action: MIRRetainedRootCellAction.Initialize})
     _ :: jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: place, value: value})
     builder.retained_grant_context = previous
@@ -87,9 +87,10 @@ fn jet_codegen_retained_capture(builder: &JetCodegenBuilder, program: JetCodegen
     slot :: builder.capture_params.len()
     borrowed :: mir_ownership_from_access(access)
     &builder.capture_params.push(MIRCaptureParam{slot: slot, name: name, span: builder.current_span, ty: ty, access: access, ownership: borrowed, place_only: true})
-    resume :: builder.current
+    resume := builder.current
+    span := builder.current_span
     builder.current = builder.entry
-    value :: jet_codegen_emit_mir_type(&builder, program, builder.current_span, ty, borrowed, MIROperation.Capture{slot: slot})
+    value :: jet_codegen_emit_mir_type(&builder, program, span, ty, borrowed, MIROperation.Capture{slot: slot})
     builder.current = resume
     JetCodegenRetainedCapture{value: value, slot: slot}
 }
@@ -113,7 +114,7 @@ fn jet_codegen_attach_retained_live(builder: &JetCodegenBuilder, program: JetCod
     index :: jet_codegen_retained_cell_index(builder, record.place)
     if index < 0 -> return
     row :: builder.place_positions.get(record.live.value) ?? panic("retained root live flag has no canonical place")
-    flag_type :: builder.places[row].ty
+    flag_type := builder.places[row].ty
     capture :: jet_codegen_retained_capture(&builder, program, flag_type, "$root-live.{record.live.value}", MIRAccess.Write)
     builder.places[row].base = MIRPlaceBase.Capture{value: capture.value}
     value_type :: jet_codegen_lower_type_for_function(record.ty, builder, program)
@@ -125,7 +126,8 @@ fn jet_codegen_retain_deferred_call(builder: &JetCodegenBuilder, program: JetCod
     declaration :: SymbolID{key: "{builder.function.key}|retained-defer|{thunk.value}"}
     local :: tir_symbol_local("$root-defer.{thunk.value}", builder.current_span, declaration)
     place :: jet_codegen_bind_retained_root(&builder, program, local, ty, false)
-    jet_codegen_initialize_retained_place(&builder, program, builder.current_span, place, thunk)
+    span := builder.current_span
+    jet_codegen_initialize_retained_place(&builder, program, span, place, thunk)
     &builder.retained_deferred.push(JetCodegenRetainedDeferred{thunk: thunk, place: place, ty: ty})
 }
 
@@ -137,7 +139,7 @@ fn jet_codegen_emit_retained_deferred(builder: &JetCodegenBuilder, program: JetC
             if live.place == deferred.place -> record = Val(live)
         }
         owner :: record ?? panic("retained defer has no canonical live flag")
-        span :: builder.current_span
+        span := builder.current_span
         live :: jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.ReadPlace{place: owner.live})
         run :: jet_codegen_new_block(&builder, program, span, "retained-defer-live")
         next_block :: jet_codegen_new_block(&builder, program, span, "retained-defer-next")
@@ -148,7 +150,7 @@ fn jet_codegen_emit_retained_deferred(builder: &JetCodegenBuilder, program: JetC
         // flag clear. Ordinary scoped ownership covers callback Stop as well
         // as normal return, without re-registering a root cleanup.
         jet_codegen_enter_lexical(&builder, program)
-        previous :: builder.retained_grant_context
+        previous := builder.retained_grant_context
         builder.retained_grant_context = Val(JetCodegenRetainedGrantContext{place: deferred.place, action: MIRRetainedRootCellAction.Cleanup})
         moved :: jet_codegen_emit_value(&builder, program, span, deferred.ty, MIROperation.MovePlace{place: deferred.place})
         declaration :: SymbolID{key: "{builder.function.key}|retained-defer-invoke|{deferred.thunk.value}"}
