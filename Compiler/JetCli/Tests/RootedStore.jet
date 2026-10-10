@@ -1,12 +1,20 @@
 // Held-root closure: no intermediate symlink, no escaped name, no path reopen.
+struct JetCLIRootedFixtureRoot { path: String }
+impl JetCLIRootedFixtureRoot.Close {
+    fn close(^self) -[FS]> {
+        cli_files.remove_all(self.path).drop("test root cleanup")
+    }
+}
 fn run() {
-    loop name in [String]{"", ".", "..", "a/b", "a\\b", "a\0b"} {
+    nul_name :: String.from_bytes([U8]{U8{97}, U8{0}, U8{98}}) ?? panic("NUL name fixture")
+    loop name in ([String]{"", ".", "..", "a/b", "a\\b", nul_name}) {
         rejected :: jet_cli_rooted_validate_name(name) == .Err(_)
         assert(rejected)
     }
     root :: "{cli_sys.temp_dir()}/jet-rooted-{cli_process.current_pid()}"
     cli_files.create_dir_all(root) ?? panic("test root")
-    defer cli_files.remove_all(root).drop("test root cleanup")
+    owner :: JetCLIRootedFixtureRoot{path: root}
+    defer close(^owner)
     held :: JetCLIRootedDirectory.open(root, [String]{"original"}, true) ?? panic("hold original")
     _ :: held.publish_immutable("record", "original".bytes(), Val(0o600), 1024) ?? panic("publish original")
     cli_files.rename("{root}/original", "{root}/moved", if_exists: .Refuse) ?? panic("move ancestor")

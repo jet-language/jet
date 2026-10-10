@@ -10,7 +10,7 @@ fn run() Never! {
  if nested.path != "Examples/features/topic/nested/name.jet" || nested.directory != "Examples/features/topic" -> panic("only topic directory is created")
  absolute :: jet_cli_devtools_example("topic//tmp/example") ?? panic("Rust join semantics")
  if absolute.path != "/tmp/example.jet" || absolute.expected_path != "/tmp/example.out" -> panic("absolute second component resets the path")
- loop invalid in [String]{"", "name", "/name", "topic/"} {
+ loop invalid in ([String]{"", "name", "/name", "topic/"}) {
  if jet_cli_devtools_example(invalid) == .Ok(_) -> panic("requires two nonempty components")
  }
 }

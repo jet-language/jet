@@ -2,10 +2,10 @@
 use jet_foundation.[PolicyDeclaration, PolicyKey, PolicyValue, PolicyScope, Span]
 fn run() Never! {
  site :: jet_cli_explain_marker_site("C:/project/source.jet:+0005") ?? panic("usize grammar")
- if site.file != "C:/project/source.jet" || site.line != U64{5} -> panic("split the last colon without narrowing usize")
+ if site.file != "C:/project/source.jet" || site.line != (U64{5}) -> panic("split the last colon without narrowing usize")
  max :: jet_cli_explain_marker_site("source.jet:18446744073709551615") ?? panic("maximum usize")
  if max.line != U64.MAX -> panic("retain maximum line")
- loop text in [String]{"source.jet", "source.jet:", "source.jet:0", "source.jet:-1", "source.jet:1_0", "source.jet:18446744073709551616"} {
+ loop text in ([String]{"source.jet", "source.jet:", "source.jet:0", "source.jet:-1", "source.jet:1_0", "source.jet:18446744073709551616"}) {
  if jet_cli_explain_marker_site(text) == .Ok(_) -> panic("invalid marker-site grammar")
  }
  source :: "é\nsecond\nthird"
