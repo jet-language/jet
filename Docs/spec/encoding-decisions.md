@@ -47,6 +47,11 @@ and byte alphabets.
 constructs a byte payload, and `.Bytes(bytes)` binds that payload as `[U8]`.
 Both checkers enforce the same element type and single-payload arity.
 
+`Dyn.DateTime(value)` owns a `ZonedDateTime` payload, as in the original
+D-DATATREE-RULES1 constructor contract. `Number` construction remains confined
+to the audited private stream helper; TOML transfers validated numeric spelling
+through that existing helper instead of exposing a constructor or copying text.
+
 The native carrier retains exact `Number` lexemes for target-directed decoding.
 Text-cell decoding is scoped to the typed read; strings use the ordinary `Text`
 payload, not a separate `TypedText` variant. Vetted Core internals may borrow

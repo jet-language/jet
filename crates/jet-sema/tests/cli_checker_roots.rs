@@ -135,3 +135,68 @@ fn run() {
 "#)]);
     assert_no_errors(&diagnostics);
 }
+
+#[test]
+fn dyn_datetime_constructor_accepts_owned_zoned_payload() {
+    let (_, diagnostics) = check(&[("pkg/main.jet", "main", include_str!(
+        "../../../Compiler/JetSema/Tests/DynDateTimeFixtures.jet"
+    ))]);
+    assert_no_errors(&diagnostics);
+}
+
+#[test]
+fn dyn_datetime_constructor_rejects_wrong_payload() {
+    let (_, diagnostics) = check(&[("pkg/main.jet", "main",
+        "fn run() { _ := Dyn.DateTime(3) }\n")]);
+    assert!(diagnostics.iter().any(|diag|
+        diag.code == "E0112" && diag.what.contains("ZonedDateTime")
+    ), "{diagnostics:?}");
+}
+
+#[test]
+fn dyn_datetime_restore_does_not_expose_number_constructor() {
+    let (_, diagnostics) = check(&[("pkg/main.jet", "main",
+        "fn run() { _ := Dyn.Number(\"1\") }\n")]);
+    assert!(diagnostics.iter().any(|diag| diag.code == "E0304"), "{diagnostics:?}");
+}
+
+#[test]
+fn dyn_datetime_toml_number_helpers_transfer_validated_text() {
+    let stream = include_str!("../../../Core/encoding/stream.jet");
+    let typed_number = stream.split_once("fn typed_number(").unwrap().1
+        .split_once("\nfn typed_string(").unwrap().0;
+    let stream_source = format!("fn typed_number({typed_number}");
+    let toml = include_str!("../../../Core/encoding/toml.jet");
+    let numeric_helpers = toml.split_once("fn number_tree(").unwrap().1;
+    let toml_source = format!(
+        "use __core_encoding_stream as stream\nfn number_tree({numeric_helpers}\n\
+         fn check_integer() -> Dyn Never! {{ stream.typed_number(\"2\") }}\n\
+         fn check_timestamp(token: ^String) -> Dyn Never! {{\n\
+             stamp :: Dyn.Text(^token)\n\
+             if stamp.decode<ZonedDateTime>() == {{\n\
+                 .Ok(z) -> {{ return Dyn.DateTime(z) }}\n\
+                 .Err(_) -> {{}}\n\
+             }}\n\
+             ^stamp\n\
+         }}\n"
+    );
+    let (_, diagnostics) = check(&[
+        ("<corelib>/Core/encoding/stream.jet", "__core_encoding_stream", &stream_source),
+        ("<corelib>/Core/encoding/toml.jet", "__core_encoding_toml", &toml_source),
+        ("pkg/main.jet", "main", "fn run() {}\n"),
+    ]);
+    assert_no_errors(&diagnostics);
+}
+
+#[test]
+fn core_auth_store_replacement_transfers_owned_bytes() {
+    let auth = include_str!("../../../Core/auth/auth.jet");
+    let store_replace = auth.split_once("fn __store_replace(").unwrap().1
+        .split_once("\n/// Register").unwrap().0;
+    let auth_source = format!("use core as core\nfn __store_replace({store_replace}");
+    let (_, diagnostics) = check(&[
+        ("<corelib>/Core/auth/auth.jet", "core_core_auth", &auth_source),
+        ("pkg/main.jet", "main", "fn run() {}\n"),
+    ]);
+    assert_no_errors(&diagnostics);
+}

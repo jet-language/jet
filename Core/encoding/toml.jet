@@ -372,28 +372,27 @@ impl TOMLParser {
             return Err(error)
         }
         if parse_radix_int(clean) == {
-            .Val(n) -> return Ok(Dyn.Number("{n}"))
+            .Val(n) -> return Ok(stream.typed_number("{n}"))
             else -> { _ := 0 }
         }
         if Int.parse(clean) == {
-            .Ok(n) -> return Ok(Dyn.Number("{n}"))
+            .Ok(n) -> return Ok(stream.typed_number("{n}"))
             else -> { _ := 0 }
         }
         if Float.parse(clean) == {
-            .Ok(n) -> return Ok(number_tree(clean, n))
+            .Ok(n) -> return Ok(number_tree(^clean, n))
             else -> { _ := 0 }
         }
         if looks_toml_datetime(token) {
-            stamp :: Dyn.Text(token)
+            stamp :: Dyn.Text(^token)
             if stamp.decode<ZonedDateTime>() == {
                 .Ok(z) -> return Ok(Dyn.DateTime(z))
                 .Err(_) -> { _ := 0 }
             }
-            raw :: token.bytes()
             if raw.len() > 19 && (raw[raw.len() - 1] == (U8{90}) || raw[raw.len() - 1] == (U8{122}) || (raw.len() >= 25 && raw[raw.len() - 3] == (U8{58}))) {
                 return Err(self.fail("invalid TOML offset date-time"))
             }
-            return Ok(Dyn.Text(token))
+            return Ok(^stamp)
         }
         return Err(self.fail("unsupported TOML bare value; quote text or use a TOML number, boolean, or datetime"))
     }
@@ -746,7 +745,7 @@ fn toml_leaf(value: Dyn) -> String Never! {
     tree :: parse("title = \"root\"\nmeta.count = 2\n[[items]]\nname = \"first\"\n[items.detail]\nactive = true\n[[items]]\nname = \"second\"") ?? panic("TOML document")
     assert_eq(tree.keys(), [String]{"title", "meta", "items"})
     meta :: tree.get("meta") ?? panic("dotted table")
-    assert_eq(meta.get("count"), Val(Dyn.Number("2")))
+    assert_eq(meta.get("count"), Val(stream.typed_number("2")))
     rows :: tree.get("items") ?? panic("array of tables")
     if rows == {
         .Array(items) -> {
@@ -781,12 +780,15 @@ fn toml_leaf(value: Dyn) -> String Never! {
 // A float keeps its own spelling when it is a JSON number token (`+`
 // dropped), else its shortest decimal spelling; `inf` and `nan` have no
 // lexeme and stay `Float`. Rust twin: jet-foundation JSONNumber.rs.
-fn number_tree(clean: String, value: Float) -> Dyn Never! {
-    raw :: clean.bytes()
-    unsigned :: if raw.len() > 0 && raw[0] == (U8{43}) -> String.from_bytes(raw[1..<raw.len()]) ?? clean else -> clean
-    if is_json_number_token(unsigned) -> return Dyn.Number(unsigned)
-    shown :: "{value}"
-    if is_json_number_token(shown) -> return Dyn.Number(shown)
+fn number_tree(clean: ^String, value: Float) -> Dyn Never! {
+    unsigned := ^clean
+    raw :: unsigned.bytes()
+    if raw.len() > 0 && raw[0] == (U8{43}) {
+        unsigned = String.from_bytes(raw[1..<raw.len()]) ?? panic("removing an ASCII prefix preserves UTF-8")
+    }
+    if is_json_number_token(unsigned) -> return stream.typed_number(^unsigned)
+    shown := "{value}"
+    if is_json_number_token(shown) -> return stream.typed_number(^shown)
     Dyn.Float(value)
 }
 

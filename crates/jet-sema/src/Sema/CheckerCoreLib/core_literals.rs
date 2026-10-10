@@ -44,6 +44,7 @@ impl<'a> Checker<'a> {
             "Float" => vec![Type::Float],
             "Text" => vec![Type::String],
             "Bytes" => vec![Type::List(Box::new(u8_ty()))],
+            "DateTime" => vec![Type::Named("ZonedDateTime".to_string())],
             "Number" if self.in_unsafe
                 && self.name_ledger.module_alias(self.module_idx)
                     == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_STREAM_ALIAS) => vec![Type::String],

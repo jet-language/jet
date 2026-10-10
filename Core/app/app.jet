@@ -31,7 +31,7 @@ struct Session {
     expires_at: Int
 }
 
-use app.[LiveQuery]
+use provider.[LiveQuery]
 fn auth(users_table: String) -> Auth Never! {
     Auth{users_table: canonical_table(users_table), providers: [String]{}}
 }
@@ -101,7 +101,7 @@ fn transact_invalidate(write_set: String) -> Int Never! { provider.transact_inva
 
 fn signal_push(q: LiveQuery, payload: String) -> LiveQuery Never! { provider.signal_push(q, payload) }
 
-fn sync(doc_show: String, over: String) -> String Never! { provider.sync(doc_show, over) }
+fn sync(doc_show: String, over: String) -> String Never! { provider.sync(doc_show, over: over) }
 
 fn valid_provider(value: String) -> Bool {
     if value == "" || value.len() > 64 -> return false
