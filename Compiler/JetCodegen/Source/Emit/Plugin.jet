@@ -7,6 +7,7 @@
 // emitter already produced. It never reads source AST or reconstructs
 // visibility from public functions.
 use jet_foundation.[
+    name_mangle,
     MIRArtifactID,
     MIRArtifactKind,
     MIRArtifactPlan,
@@ -90,11 +91,11 @@ fn jet_plugin_sanitize_package_name(name: String) -> String Never! {
 
 // A generated helper's name; the helpers live in the guest crate itself.
 fn jet_plugin_generated(stem: String) -> String Never! {
-    jet_rust_emit_mangle("__plugin_{stem}")
+    name_mangle("__plugin_{stem}")
 }
 
 fn jet_plugin_merge_slot(left: JetPluginCoreSlot, right: JetPluginCoreSlot) -> JetPluginCoreSlot Never! {
-    if left == right -> return left
+    if left == right -> return left.copy()
     JetPluginCoreSlot.I64
 }
 
@@ -138,7 +139,7 @@ fn jet_plugin_flat_slots(ty: MIRComponentTypeDescriptor) -> [JetPluginCoreSlot] 
 }
 
 fn jet_plugin_align_to(value: Int, align: Int) -> Int Never! {
-    ((value + align - 1) / align) * align
+    ((value + align - 1) /% align) * align
 }
 
 fn jet_plugin_max(left: Int, right: Int) -> Int Never! {
@@ -260,7 +261,7 @@ fn jet_plugin_list_carrier(ctx: &JetRustEmitContext, source: MIRType, output: St
         }
         else -> {}
     }
-    output
+    output.copy()
 }
 
 // The element sequence of a list carrier, borrowed for lowering.
@@ -355,7 +356,10 @@ fn jet_plugin_flat_lift(ctx: &JetRustEmitContext, source: MIRType, descriptor: M
         }
         .Record(_, fields) -> {
             values := [String]{}
-            loop field in fields -> &values.push(jet_plugin_flat_lift(&ctx, jet_plugin_record_field_type(&ctx, ty, field), field.ty, args, slots, &cursor, &counter, read_text))
+            loop field in fields {
+                field_type :: jet_plugin_record_field_type(&ctx, ty, field)
+                &values.push(jet_plugin_flat_lift(&ctx, field_type, field.ty, args, slots, &cursor, &counter, read_text))
+            }
             return jet_plugin_record_value(&ctx, ty, fields, values)
         }
     }
@@ -397,7 +401,8 @@ fn jet_plugin_memory_lift(ctx: &JetRustEmitContext, source: MIRType, descriptor:
             values := [String]{}
             loop position in 0..<fields.len() {
                 field :: fields[position]
-                &values.push(jet_plugin_memory_lift(&ctx, jet_plugin_record_field_type(&ctx, ty, field), field.ty, jet_plugin_offset_ptr(ptr, offsets[position]), &counter, read_text))
+                field_type :: jet_plugin_record_field_type(&ctx, ty, field)
+                &values.push(jet_plugin_memory_lift(&ctx, field_type, field.ty, jet_plugin_offset_ptr(ptr, offsets[position]), &counter, read_text))
             }
             return jet_plugin_record_value(&ctx, ty, fields, values)
         }
@@ -414,7 +419,9 @@ fn jet_plugin_flat_lower(ctx: &JetRustEmitContext, source: MIRType, descriptor: 
         .Record(_, fields) -> {
             if fields.len() == 0 -> panic("a zero-slot Component record has no flat result")
             field :: fields[0]
-            return jet_plugin_flat_lower(&ctx, jet_plugin_record_field_type(&ctx, ty, field), field.ty, "&{jet_plugin_record_field_value(&ctx, ty, field, value)}")
+            field_type :: jet_plugin_record_field_type(&ctx, ty, field)
+            field_value :: jet_plugin_record_field_value(&ctx, ty, field, value)
+            return jet_plugin_flat_lower(&ctx, field_type, field.ty, "&{field_value}")
         }
         .Option(inner) -> {
             if jet_plugin_flat_slots(inner).len() != 0 -> panic("a multi-slot Component option has no flat result")
@@ -478,7 +485,8 @@ fn jet_plugin_memory_lower(ctx: &JetRustEmitContext, source: MIRType, descriptor
             loop position in 0..<fields.len() {
                 field :: fields[position]
                 field_value :: jet_plugin_record_field_value(&ctx, ty, field, value)
-                &statements.push(jet_plugin_memory_lower(&ctx, jet_plugin_record_field_type(&ctx, ty, field), field.ty, "&{field_value}", jet_plugin_offset_ptr(ptr, offsets[position]), &counter, allocator))
+                field_type :: jet_plugin_record_field_type(&ctx, ty, field)
+                &statements.push(jet_plugin_memory_lower(&ctx, field_type, field.ty, "&{field_value}", jet_plugin_offset_ptr(ptr, offsets[position]), &counter, allocator))
             }
             return statements.join(" ")
         }
@@ -627,7 +635,7 @@ fn jet_plugin_component_wrapper(ctx: &JetRustEmitContext, function: MIRFunction,
     allocator :: jet_plugin_generated("cabi_realloc_impl")
     read_text :: jet_plugin_generated("read_component_text")
     kebab :: jet_plugin_kebab(symbol)
-    wrapper_name :: jet_rust_emit_mangle("plugin_export_{function.name}")
+    wrapper_name :: name_mangle("plugin_export_{function.name}")
     result_source :: mir_c_export_result(function) ?? panic("a checked sandbox export has no published result")
     parameter_slots := [JetPluginCoreSlot]{}
     loop ty in descriptor.params {
@@ -696,7 +704,7 @@ fn jet_plugin_component_wrapper(ctx: &JetRustEmitContext, function: MIRFunction,
     if result_slots.len() > 1 && jet_plugin_needs_post_return(descriptor.result) {
         layout :: jet_plugin_memory_layout(descriptor.result)
         freed :: jet_plugin_memory_free(descriptor.result, "ret_ptr", &counter, allocator)
-        post_name :: jet_rust_emit_mangle("plugin_post_{function.name}")
+        post_name :: name_mangle("plugin_post_{function.name}")
         body = "{body}#[export_name = {jet_rust_emit_quote("cabi_post_{kebab}")}]\npub extern \"C\" fn {post_name}(ret_ptr: i32) {{ if ret_ptr != 0 {{ {freed} {allocator}(ret_ptr, {layout.size}i32, {layout.align}, 0); }} }}\n"
     }
     body
@@ -708,7 +716,7 @@ fn jet_plugin_text_helpers() -> String Never! {
     realloc :: jet_plugin_generated("cabi_realloc")
     read_component_text :: jet_plugin_generated("read_component_text")
     lines :: [String]{
-        "fn {jet_rust_emit_mangle("__plugin_cabi_realloc_impl")}(old_ptr: i32, old_len: i32, align: i32, new_len: i32) -> i32 {{",
+        "fn {name_mangle("__plugin_cabi_realloc_impl")}(old_ptr: i32, old_len: i32, align: i32, new_len: i32) -> i32 {{",
         "    let old_len = old_len as usize;",
         "    let new_len = new_len as usize;",
         "    let align = align as usize;",
@@ -770,7 +778,7 @@ fn jet_plugin_io_error_helpers(root: String) -> String Never! {
     operations :: [String]{"Read", "Write", "Flush", "Connect", "Accept", "Close", "Resolve", "Codec"}
     limits :: [String]{"WallTime", "CpuTime", "Memory", "OpenFiles", "Output"}
     lines := [String]{
-        "fn {jet_rust_emit_mangle("__plugin_read_io_error")}(ptr: i32) -> {io}::IOError {{",
+        "fn {name_mangle("__plugin_read_io_error")}(ptr: i32) -> {io}::IOError {{",
         "    let tag = unsafe {{ std::ptr::read_unaligned(ptr as *const u8) }};",
         "    if tag <= 7 || tag == 9 || tag == 10 {{",
         "        let context_ptr = (ptr as usize + 8) as i32;",
@@ -817,7 +825,7 @@ fn jet_plugin_io_error_helpers(root: String) -> String Never! {
         "    }}",
         "}}",
         "",
-        "fn {jet_rust_emit_mangle("__plugin_free_io_error")}(ptr: i32) {{",
+        "fn {name_mangle("__plugin_free_io_error")}(ptr: i32) {{",
         "    let tag = unsafe {{ std::ptr::read_unaligned(ptr as *const u8) }};",
         "    if tag <= 7 || tag == 9 || tag == 10 {{",
         "        let context_ptr = (ptr as usize + 8) as i32;",
@@ -890,7 +898,7 @@ fn jet_plugin_host_import_bridge(root: String, imports: [String]) -> String Neve
     error_arm :: "        1 => {{ let value = {read_io_error}((ret_ptr as usize + 8) as i32); {free_io_error}((ret_ptr as usize + 8) as i32); Err(value) }}"
     if imports.contains("FS.Read") {
         jet_plugin_push_all(&lines, [String]{
-            "fn {jet_rust_emit_mangle("__plugin_import_fs_read")}(path: &String) -> Result<String, {io}::IOError> {{",
+            "fn {name_mangle("__plugin_import_fs_read")}(path: &String) -> Result<String, {io}::IOError> {{",
             "    let ret_ptr = {allocator}(0, 0, 8, 64);",
             "    if ret_ptr == 0 {{ panic!(\"canonical host read return allocation failed\") }}",
             "    unsafe {{ __jet_plugin_import_read(path.as_ptr() as i32, path.len() as i32, ret_ptr); }}",
@@ -907,7 +915,7 @@ fn jet_plugin_host_import_bridge(root: String, imports: [String]) -> String Neve
     }
     if imports.contains("FS.Write") {
         jet_plugin_push_all(&lines, [String]{
-            "fn {jet_rust_emit_mangle("__plugin_import_fs_write")}(path: &String, text: &String) -> Result<(), {io}::IOError> {{",
+            "fn {name_mangle("__plugin_import_fs_write")}(path: &String, text: &String) -> Result<(), {io}::IOError> {{",
             "    let ret_ptr = {allocator}(0, 0, 8, 64);",
             "    if ret_ptr == 0 {{ panic!(\"canonical host write return allocation failed\") }}",
             "    unsafe {{ __jet_plugin_import_write(path.as_ptr() as i32, path.len() as i32, text.as_ptr() as i32, text.len() as i32, ret_ptr); }}",
@@ -924,7 +932,7 @@ fn jet_plugin_host_import_bridge(root: String, imports: [String]) -> String Neve
     }
     if imports.contains("Net.Connect") {
         jet_plugin_push_all(&lines, [String]{
-            "fn {jet_rust_emit_mangle("__plugin_import_net_connect")}(endpoint: &String) -> Result<bool, {io}::IOError> {{",
+            "fn {name_mangle("__plugin_import_net_connect")}(endpoint: &String) -> Result<bool, {io}::IOError> {{",
             "    let connected = unsafe {{ __jet_plugin_import_connect(endpoint.as_ptr() as i32, endpoint.len() as i32) != 0 }};",
             "    Ok(connected)",
             "}}",
@@ -932,7 +940,7 @@ fn jet_plugin_host_import_bridge(root: String, imports: [String]) -> String Neve
     }
     if imports.contains("Exec") {
         jet_plugin_push_all(&lines, [String]{
-            "fn {jet_rust_emit_mangle("__plugin_import_exec")}(program: &String, args: &Vec<String>) -> Result<String, {io}::IOError> {{",
+            "fn {name_mangle("__plugin_import_exec")}(program: &String, args: &Vec<String>) -> Result<String, {io}::IOError> {{",
             "    let ret_ptr = {allocator}(0, 0, 4, 8);",
             "    if ret_ptr == 0 {{ panic!(\"canonical host exec return allocation failed\") }}",
             "    let args_bytes = args.len().checked_mul(8).expect(\"canonical host exec argument list is too large\");",
@@ -979,7 +987,7 @@ fn jet_plugin_time_zones(timezone_data: [JetWebTimezoneAsset]) -> String Never! 
             value :: Int.from_u8(byte)
             &escaped.push(92)
             &escaped.push(120)
-            &escaped.push(digits[value / 16])
+            &escaped.push(digits[value /% 16])
             &escaped.push(digits[value % 16])
         }
         &lines.push("        {jet_rust_emit_quote(zone.name)} => Some(b\"{String.from_bytes(escaped) ?? ""}\"),")

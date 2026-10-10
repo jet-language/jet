@@ -2201,7 +2201,7 @@ fn jet_rust_emit_used_carrierless_core_records(ctx: &JetRustEmitContext) -> [U64
 
 fn jet_rust_emit_source_hook_symbol(ctx: &JetRustEmitContext, definition: MIRTypeDef, operation: String) -> String? Never! {
     _ := core_source_value_hook(definition.key, operation) ?? return None
-    instance :: ctx.type_instance_first.get(jet_rust_emit_id_key(definition.id.value)) ?? {
+    instance :: ctx.type_instance_first.get(definition.id.value) ?? {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "source value hook has no checked type instance", definition.key, Val(definition.span))
         return None
     }

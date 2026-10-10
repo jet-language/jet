@@ -185,7 +185,7 @@ fn jet_rust_emit_mutable_receiver_reference(ctx: &JetRustEmitContext, function: 
     }
     if instruction.operation == {
         .AddressOf(place, _) | .ReadPlace(place) -> return jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Write)
-        .Parameter(_, _) | .Capture(_) -> return "&mut ({jet_rust_emit_parameter_place(ctx, function, value, true)})"
+        .Parameter(_, _) | .Capture(_) -> return "&mut ({jet_rust_emit_parameter_place(&ctx, function, value, true)})"
         else -> {}
     }
     jet_rust_emit_value_reference(ctx, value, true)
@@ -203,7 +203,7 @@ fn jet_rust_emit_borrowed_value_reference(ctx: &JetRustEmitContext, function: MI
         .AddressOf(place, _) | .ReadPlace(place) -> return jet_rust_emit_place_reference(&ctx, function, place, access)
         .Parameter(_, _) | .Capture(_) -> {
             borrow :: if mutable -> "&mut " else -> "&"
-            return "{borrow}({jet_rust_emit_parameter_place(ctx, function, value, mutable)})"
+            return "{borrow}({jet_rust_emit_parameter_place(&ctx, function, value, mutable)})"
         }
         else -> {}
     }
@@ -272,10 +272,7 @@ fn jet_rust_emit_require_locals(ctx: &JetRustEmitContext, function: MIRFunction,
     values := [String]{}
     loop local in context.locals {
         &names.push("{local.name} = {{}}")
-        // MIRRust place_read (#4566 slice 1b): a native local without its
-        // exact slot reads its shadow.
-        shadowed :: ctx.native_ints.locals.get(local.local.value) != None && ctx.native_ints.dual.get(local.local.value) == None
-        read :: if shadowed -> "jet_foundation::Numeric::JetInt::from_i64({jet_rust_emit_native_local_slot(local.local)})" else -> jet_rust_emit_place_local(&ctx, local.local, false)
+        read :: jet_rust_emit_place_local(&ctx, local.local, false)
         if portable -> &values.push("({read})") else -> &values.push("({read}).jet_debug()")
     }
     format_string :: jet_rust_emit_quote(names.join(", "))

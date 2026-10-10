@@ -3,7 +3,6 @@
 use jet_foundation.[
     name_mangle,
     CompilerThreads,
-    name_mangle,
     JET_RUST_DEBUG_ESCAPED_RANGES,
     MIRAccess,
     MIRCompilerBuiltin,
@@ -15,7 +14,6 @@ use jet_foundation.[
     MIRFieldRow,
     MIRFunctionID,
     MIRGenericParam,
-    MIRLocalID,
     MIRNominalRef,
     MIRPlaceID,
     MIRPreludeCall,
@@ -312,17 +310,6 @@ struct JetRustEmitMoveFacts {
     // #4566 loop capacity hints (jet_rust_emit_plan_loop_reserves):
     // "block:index" of the preheader instruction they follow -> the hints.
     loop_reserves: [String:[JetRustEmitLoopReserve]]
-    // #4566 slice 8 inline storage (jet_rust_emit_plan_inline_lists): list
-    // locals that never leave the function, stored as `JetInlineList<T, N>`
-    // (local id value -> inline capacity N); their empty-literal writes and
-    // their drops (op id value -> local); and the literals those writes
-    // replace and the moves into those drops (op id values), which emit
-    // nothing, with their results (value id values), which get no slot.
-    inline_lists: [U64:Int]
-    inline_writes: [U64:MIRLocalID]
-    inline_drops: [U64:MIRLocalID]
-    inline_skipped: [U64:Bool]
-    inline_values: [U64:Bool]
 }
 
 struct JetRustEmitStringAppend {
@@ -339,7 +326,7 @@ struct JetRustEmitLoopReserve {
 }
 
 fn jet_rust_emit_empty_move_facts() -> JetRustEmitMoveFacts Never! {
-    JetRustEmitMoveFacts{single_use: [String:Bool]{}, payload_groups: [String:[JetRustEmitPayloadMember]]{}, payload_subjects: [String:String]{}, appends: [String:JetRustEmitStringAppend]{}, append_parts: [String:Bool]{}, static_literals: [String:String]{}, clears: [String:MIRPlaceID]{}, loop_reserves: [String:[JetRustEmitLoopReserve]]{}, inline_lists: [U64:Int]{}, inline_writes: [U64:MIRLocalID]{}, inline_drops: [U64:MIRLocalID]{}, inline_skipped: [U64:Bool]{}, inline_values: [U64:Bool]{}}
+    JetRustEmitMoveFacts{single_use: [String:Bool]{}, payload_groups: [String:[JetRustEmitPayloadMember]]{}, payload_subjects: [String:String]{}, appends: [String:JetRustEmitStringAppend]{}, append_parts: [String:Bool]{}, static_literals: [String:String]{}, clears: [String:MIRPlaceID]{}, loop_reserves: [String:[JetRustEmitLoopReserve]]{}}
 }
 
 // MIRRust RefBindings (#4318): binding locals stored as a shared reference to
@@ -358,30 +345,6 @@ fn jet_rust_emit_empty_ref_bindings() -> JetRustEmitRefBindings Never! {
     JetRustEmitRefBindings{locals: [U64:Bool]{}, payloads: [U64:Bool]{}}
 }
 
-// MIRRust NativeInts (#4566 slice 1b, function-boundary research
-// `MIRIntRangeFact`): the Int values and whole Int locals of one function
-// whose every value is proven to fit i64, keyed by id value. Each has a native
-// shadow (`__jet_vi_N`, `__jet_li_N`) that native consumers read; the exact
-// `JetInt` slot stays only for a native value some consumer reads exactly
-// (`materialized`) and a native local whose exact slot is read (`dual`).
-struct JetRustEmitNativeInts {
-    values: [U64:Bool]
-    materialized: [U64:Bool]
-    locals: [U64:Bool]
-    dual: [U64:Bool]
-    // Loop versioning (jet_rust_emit_plan_native_version): the Read parameters
-    // (by index) the version's entry check admitted, with their ranges. Each
-    // has a native shadow `__jet_pi_N` set from the parameter.
-    params: [Int:JetRustEmitIntRange]{[Int:JetRustEmitIntRange]{}}
-    // MIRRust native_int_inline: the native values whose every value is an
-    // inline JetInt word (an element write of one into inline-word storage
-    // releases nothing, jet_rust_emit_inline_int_storage).
-    inline_values: [U64:Bool]{[U64:Bool]{}}
-}
-
-fn jet_rust_emit_empty_native_ints() -> JetRustEmitNativeInts Never! {
-    JetRustEmitNativeInts{values: [U64:Bool]{}, materialized: [U64:Bool]{}, locals: [U64:Bool]{}, dual: [U64:Bool]{}}
-}
 
 // MIRRust borrowed_loop_candidates: one read loop that may walk its list in
 // place: its cursor, the collection it walks, the list place, and the
@@ -420,6 +383,8 @@ struct JetRustEmitBodyIndex {
     // MIRRust shared_capture_locals: locals held in one shared cell because a
     // non-Send closure writes them (jet_rust_emit_shared_capture_locals).
     shared_locals: [U64:Bool]
+    // SSA-bound locals name the existing value slot, including partial moves.
+    bound_local_values: [U64:MIRValueID]{[U64:MIRValueID]{}}
     // Every use of each value in body order, one row per user (MIRRust
     // FunctionIndex::uses): `use_slots` maps a value to its row list.
     use_slots: [U64:Int]{[U64:Int]{}}
@@ -716,7 +681,7 @@ fn jet_rust_emit_field_name(ctx: &JetRustEmitContext, id: MIRFieldID) -> String 
 
 // MIRRust collect_type_fields: a native carrier keeps the Prelude field name.
 fn jet_rust_emit_register_field(ctx: &JetRustEmitContext, id: MIRFieldID, raw: String, native: Bool, span: Span) Never! {
-    key :: jet_rust_emit_id_key(id.value)
+    key :: id.value
     symbol :: if native -> raw else -> name_mangle(raw)
     prior :: ctx.field_names.get(key)
     if prior == .Val(existing) {
@@ -1169,7 +1134,6 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         ref_bindings: jet_rust_emit_empty_ref_bindings(),
         body_index: jet_rust_emit_empty_body_index(),
         expected_test_exits: [U64:U64]{},
-        native_ints: jet_rust_emit_empty_native_ints(),
         unit_ratio_function: None,
         unit_ratio_parameters: [U64:Bool]{},
         selected_modules: [U64:Bool]{},
@@ -1198,7 +1162,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         &ctx.function_names.add(key, jet_rust_emit_generated_path(function.key)).drop("the prior lookup proved this function key is new")
     }
     native_type_keys := [U64:Bool]{}
-    loop definition in ctx.program.types {
+    loop (definition_index, definition) in ctx.program.types {
         key :: definition.id.value
         if ctx.type_names.get(key) != None {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR type identity is duplicated", "each nominal type must have one stable source-emission symbol", Val(definition.span))
@@ -1292,34 +1256,6 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
     ctx.view_carriers = jet_rust_emit_collect_view_carriers(&ctx)
     ctx.plain_drop_types = jet_rust_emit_collect_plain_drop_types(&ctx)
     ctx.clone_bounds = jet_rust_emit_collect_clone_bounds(&ctx)
-    // MIRRust RustEmitter::new: destinations read every callee's return slot,
-    // so all are planned first.
-    loop function_index in 0..<ctx.program.functions.len() {
-        function := ctx.program.functions[function_index]
-        slot :: jet_rust_emit_plan_return_slot(&ctx, function) ?? next
-        ctx.return_slots[function.id.value] = slot
-    }
-    if ctx.return_slots.len() > 0 {
-        loop function_index in 0..<ctx.program.functions.len() {
-            function := ctx.program.functions[function_index]
-            destinations :: jet_rust_emit_plan_call_destinations(&ctx, function)
-            if destinations.targets.len() > 0 -> ctx.call_destinations[function.id.value] = destinations
-        }
-    }
-    // MIRRust RustEmitter::new: destinations read every callee's return slot,
-    // so all are planned first.
-    loop function_index in 0..<ctx.program.functions.len() {
-        function := ctx.program.functions[function_index]
-        slot :: jet_rust_emit_plan_return_slot(&ctx, function) ?? next
-        ctx.return_slots[function.id.value] = slot
-    }
-    if ctx.return_slots.len() > 0 {
-        loop function_index in 0..<ctx.program.functions.len() {
-            function := ctx.program.functions[function_index]
-            destinations :: jet_rust_emit_plan_call_destinations(&ctx, function)
-            if destinations.targets.len() > 0 -> ctx.call_destinations[function.id.value] = destinations
-        }
-    }
     ctx
 }
 

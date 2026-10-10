@@ -598,13 +598,10 @@ fn jet_rust_emit_local_is_allocator_view(function: MIRFunction, local: MIRLocalI
     false
 }
 
-// MIRRust local_storage: a shared-cell local is reached through its cell.
+// MIRRust local_storage: SSA-bound locals reuse their value slot; a shared-cell
+// local is reached through its cell.
 fn jet_rust_emit_local_storage(ctx: &JetRustEmitContext, local: MIRLocalID) -> String Never! {
-    if ctx.body_index.function == .Val(function_id) {
-        if ctx.return_slots.get(function_id.value) == .Val(slot) {
-            if slot.exit == (Val(local)) -> return jet_rust_emit_local_slot(slot.local)
-        }
-    }
+    if ctx.body_index.bound_local_values.get(local.value) == .Val(value) -> return jet_rust_emit_value_slot(value)
     if jet_rust_emit_local_is_shared(&ctx, local) -> return "(*{jet_rust_emit_local_slot(local)}.borrow_mut())"
     jet_rust_emit_local_slot(local)
 }
@@ -759,7 +756,6 @@ fn jet_rust_emit_int_bulk_type(ctx: JetRustEmitContext, source: MIRType) -> Bool
 // JetInt word: an Int constant of inline magnitude or a native value of
 // inline range.
 fn jet_rust_emit_inline_int_value(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
-    if ctx.native_ints.inline_values.get(value.value) != None -> return true
     definition :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return false
     if definition.operation == .Constant(constant) {
         if constant == .Int(number, width, _) -> return width == None && number >= -4611686018427387904 && number <= 4611686018427387903
@@ -870,7 +866,7 @@ fn jet_rust_emit_place_local(ctx: &JetRustEmitContext, local: MIRLocalID, mutabl
 
 // MIRRust binding_uses_move_slot: a non-scalar Move parameter or capture is
 // owned by its SSA Option slot once the Parameter/Capture result moves it in.
-fn jet_rust_emit_binding_uses_move_slot(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
+fn jet_rust_emit_binding_uses_move_slot(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
     instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return false
     access := MIRAccess.Read
     if instruction.operation == {
@@ -931,7 +927,7 @@ fn jet_rust_emit_unread_binding(ctx: &JetRustEmitContext, function: MIRFunction,
 // when a temporary place projects it (a write through that place needs a
 // writable copy), and in a generator, whose `move` stream task owns everything
 // its body reads.
-fn jet_rust_emit_place_bindings(ctx: JetRustEmitContext, function: MIRFunction) -> [U64:JetRustEmitPlaceBinding] Never! {
+fn jet_rust_emit_place_bindings(ctx: &JetRustEmitContext, function: MIRFunction) -> [U64:JetRustEmitPlaceBinding] Never! {
     bindings := [U64:JetRustEmitPlaceBinding]{}
     if function.generator != None -> return bindings
     kept := [U64:Bool]{}
@@ -961,8 +957,8 @@ fn jet_rust_emit_place_bindings(ctx: JetRustEmitContext, function: MIRFunction) 
             }
             if access == MIRAccess.Move || kept.get(value.value) != None || bindings.get(value.value) != None -> next
             write := String?{None}
-            if access == MIRAccess.Write -> write = Val(jet_rust_emit_parameter_place(ctx, function, value, true))
-            bindings[value.value] = JetRustEmitPlaceBinding{read: jet_rust_emit_parameter_place(ctx, function, value, false), write: write, bitwise: jet_rust_emit_copy_carrier(ctx, jet_rust_emit_value_type(ctx, function, value))}
+            if access == MIRAccess.Write -> write = Val(jet_rust_emit_parameter_place(&ctx, function, value, true))
+            bindings[value.value] = JetRustEmitPlaceBinding{read: jet_rust_emit_parameter_place(&ctx, function, value, false), write: write, bitwise: jet_rust_emit_copy_carrier(ctx, jet_rust_emit_value_type(ctx, function, value))}
         }
     }
     bindings
@@ -1093,9 +1089,9 @@ fn jet_rust_emit_place_read_use(ctx: &JetRustEmitContext, function: MIRFunction,
     jet_rust_emit_builtin_place_receiver(operation, value) || jet_rust_emit_place_borrowing_use(&ctx, function, operation, value)
 }
 
-fn jet_rust_emit_parameter_place(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID, mutable: Bool) -> String Never! {
+fn jet_rust_emit_parameter_place(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID, mutable: Bool) -> String Never! {
     instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? panic("MIR parameter place has no producer")
-    if jet_rust_emit_binding_uses_move_slot(ctx, function, value) {
+    if jet_rust_emit_binding_uses_move_slot(&ctx, function, value) {
         accessor :: if mutable -> "as_mut" else -> "as_ref"
         what :: if instruction.operation == .Capture(_) -> "capture" else -> "parameter"
         return "*{jet_rust_emit_value_slot(value)}.{accessor}().expect(\"MIR {what}\")"
@@ -1475,8 +1471,7 @@ fn jet_rust_emit_inspected_transfer(ctx: &JetRustEmitContext, function: MIRFunct
             .OptionValue(subject) -> subject == value
             .ResultIsOk(subject) -> subject == value
             .ResultValue(subject, _) -> subject == value
-            // Exact Int arithmetic and comparisons read their operands in place.
-            .Binary(op, dispatch, _, left, right) -> (dispatch == .Primitive && jet_rust_emit_comparison_by_reference(&ctx, function, op, left)) || (jet_rust_emit_native_int_exact_dispatch(&ctx, dispatch) && jet_rust_emit_exact_int_arithmetic(&ctx, function, op, left, right))
+            .Binary(op, dispatch, _, left, _) -> dispatch == .Primitive && jet_rust_emit_comparison_by_reference(&ctx, function, op, left)
             .Semantic(semantic) -> jet_rust_emit_print_reads(&ctx, function, semantic, value)
             // A transfer that was never made owns nothing to release.
             .Drop(operand, kind) -> operand == value && kind != MIRDropKind.ForeignHandle && !jet_rust_emit_is_stm_type(jet_rust_emit_value_type(ctx, function, value))
@@ -2120,24 +2115,7 @@ fn jet_rust_emit_unused_place_read(ctx: &JetRustEmitContext, function: MIRFuncti
     loop place in function.places {
         if place.id == id -> return place.projections.len() == 0
     }
-    loop candidate in candidates {
-        if active.get(candidate.cursor.value) != (Val(true)) -> next
-        _ := &bindings.cursors.add(candidate.cursor.value, candidate.place)
-        _ := &bindings.collections.add(candidate.collection.value, true)
-    }
-    loop local in order {
-        if live.get(local.value) != (Val(true)) -> next
-        _ := &bindings.locals.add(local.value, true)
-        sources :: writes.get(local.value) ?? [JetRustEmitRefSource]{}
-        loop source in sources {
-            // A moved payload (`x :: p ?? return`) has no slot either.
-            if jet_rust_emit_find_value_instruction(ctx, function, source.value) == .Val(written) {
-                if written.operation == .Move(payload) -> _ := &bindings.payloads.add(payload.value, true)
-            }
-            _ := &bindings.payloads.add(source.value.value, true)
-        }
-    }
-    bindings
+    false
 }
 
 
@@ -2364,7 +2342,7 @@ fn jet_rust_emit_inspected_only(ctx: &JetRustEmitContext, function: MIRFunction,
             .OptionValue(subject) -> subject == value
             .ResultIsOk(subject) -> subject == value
             .ResultValue(subject, _) -> subject == value
-            .Binary(op, dispatch, _, left, right) -> (dispatch == .Primitive && jet_rust_emit_comparison_by_reference(&ctx, function, op, left)) || (jet_rust_emit_native_int_exact_dispatch(&ctx, dispatch) && jet_rust_emit_exact_int_arithmetic(&ctx, function, op, left, right))
+            .Binary(op, dispatch, _, left, _) -> dispatch == .Primitive && jet_rust_emit_comparison_by_reference(&ctx, function, op, left)
             .Semantic(semantic) -> jet_rust_emit_print_reads(&ctx, function, semantic, value)
             .Slice(call, base, start, end, range, _) -> base == value && start != value && end != value && range != (Val(value)) && jet_rust_emit_slice_borrows_base(&ctx, call)
             else -> false
@@ -3063,8 +3041,8 @@ fn jet_rust_emit_place_base(ctx: &JetRustEmitContext, function: MIRFunction, bas
                     else -> jet_rust_emit_place_local(&ctx, local, mutable)
                 }
             }
-            .Parameter(value) -> jet_rust_emit_parameter_place(ctx, function, value, mutable)
-            .Capture(value) -> jet_rust_emit_parameter_place(ctx, function, value, mutable)
+            .Parameter(value) -> jet_rust_emit_parameter_place(&ctx, function, value, mutable)
+            .Capture(value) -> jet_rust_emit_parameter_place(&ctx, function, value, mutable)
             .Temporary(value) -> "*({jet_rust_emit_value_reference(ctx, value, mutable)})"
             .Static(name) -> {
                 // MIRRust place_base: a persistent cell lends no mutable projection.
@@ -3074,6 +3052,7 @@ fn jet_rust_emit_place_base(ctx: &JetRustEmitContext, function: MIRFunction, bas
         }
     }
     native_option := false
+    skip_option_payload := false
     loop projection in remaining {
         if skip_option_payload {
             payload_option := false
@@ -3196,9 +3175,6 @@ fn jet_rust_emit_place_read(ctx: &JetRustEmitContext, function: MIRFunction, id:
         }
         if row.projections.len() == 0 {
             if row.base == .Local(local) {
-                // MIRRust place_read (#4566 slice 1b): a native local without
-                // its exact slot (a panic context's locals) reads its shadow.
-                if ctx.native_ints.locals.get(local.value) != None && ctx.native_ints.dual.get(local.value) == None -> return "jet_foundation::Numeric::JetInt::from_i64({jet_rust_emit_native_local_slot(local)})"
                 if jet_rust_emit_local_is_allocator_view(function, local) -> return "&mut **{jet_rust_emit_local_storage(&ctx, local)}.as_mut().expect(\"MIR local\")"
             }
         }
@@ -3376,7 +3352,7 @@ fn jet_rust_emit_place_write(ctx: &JetRustEmitContext, function: MIRFunction, id
                 .Temporary(temp) -> return "{jet_rust_emit_value_slot(temp)} = Some({value})"
                 .Static(name) -> return "({jet_rust_emit_static_path(&ctx, name)}).set({value})"
                 .Parameter(binding) | .Capture(binding) -> {
-                    if jet_rust_emit_binding_uses_move_slot(ctx, function, binding) -> return "{jet_rust_emit_value_slot(binding)} = Some({value})"
+                    if jet_rust_emit_binding_uses_move_slot(&ctx, function, binding) -> return "{jet_rust_emit_value_slot(binding)} = Some({value})"
                 }
             }
         }
