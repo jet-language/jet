@@ -1,0 +1,21 @@
+// A value `if` whose condition compares a parenthesized method call on a call
+// result keeps the receiver's integer type in every value position.
+fn word(value: I64) -> I64 { value }
+
+fn low_byte_clear(value: I64) -> I64 { if (word(value).bit_and(I64{255})) == (I64{0}) -> { I64{0} } else -> { I64{1} } }
+
+fn low_byte_clear_bool(value: I64) -> Bool { if (word(value).bit_and(I64{255})) == (I64{0}) -> true else -> false }
+
+fn ones_clear(value: I64) -> I64 { if (word(value).count_ones()) == (I64{0}) -> I64{0} else -> I64{1} }
+
+fn matches_word(value: I64) -> I64 { if (word(value).bit_and(I64{255})) == word(value) -> I64{0} else -> I64{1} }
+
+fn low_byte_clear_and(value: I64, enabled: Bool) -> I64 { if (word(value).bit_and(I64{255})) == (I64{0}) && enabled -> I64{0} else -> I64{1} }
+
+fn run() {
+    print(low_byte_clear(I64{256}))
+    print(low_byte_clear_bool(I64{257}))
+    print(ones_clear(I64{0}))
+    print(matches_word(I64{17}))
+    print(low_byte_clear_and(I64{512}, true))
+}
