@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import {spawnSync} from 'node:child_process';
 import {finalizeDriver, phaseSchema, readPrerequisite, writePhaseReceipt} from './receipts.mjs';
 import {consumePrepared, preparedFiles} from './prepared.mjs';
 import {readSharedPack} from './shared-publications.mjs';
@@ -121,4 +122,26 @@ test('malformed and failed producer receipts cannot become published runtime inp
   fs.writeFileSync(fixture.file, JSON.stringify(fixture.receipt));
   fs.writeFileSync(path.join(fixture.directory, 'driver.rc'), '1\n');
   assert.throws(() => readSharedPack(options), /real driver/);
+});
+
+test('all six generated S5 holds have scheduler-valid kinds and shell syntax', t => {
+  const dir = temporary(t);
+  const generator = fs.readFileSync(new URL('./make-jobs.sh', import.meta.url), 'utf8');
+  const start = generator.indexOf('\njob() {');
+  assert.ok(start >= 0, 'job generator function must exist');
+  const env = {...process.env, Q: dir, C: dir, P: 'Main-RuntimeLead12-s5',
+    HOST: 'Main-test-host', PACK: 'Main-test-pack', SHA: head};
+  const generated = spawnSync('bash', ['-euo', 'pipefail'], {
+    input: generator.slice(start), env, encoding: 'utf8',
+  });
+  assert.equal(generated.status, 0, generated.stderr);
+  for (const phase of ['build', 'gates', 'runtime', 'boundary', 'goldens', 'fixtures']) {
+    const file = path.join(dir, `Main-RuntimeLead12-s5-${phase}-r4.sh.mainhold`);
+    const text = fs.readFileSync(file, 'utf8');
+    const header = text.split('\n')[1];
+    assert.match(header, /^# proofq: mem=\d+G time=\d+M kind=(build|test|measure) after=/);
+    assert.ok(header.includes(`kind=${phase === 'build' ? 'build' : 'test'} `));
+    const syntax = spawnSync('bash', ['-n', file], {encoding: 'utf8'});
+    assert.equal(syntax.status, 0, syntax.stderr);
+  }
 });

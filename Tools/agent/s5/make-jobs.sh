@@ -16,10 +16,12 @@ if [[ -n "$SHA" ]]; then
 fi
 job() {
   local phase=$1 memory=$2 minutes=$3 dependencies=$4 extra=$5
+  local kind=test
+  if [[ "$phase" == build ]]; then kind=build; fi
   local file="$Q/$P-$phase-r4.sh.mainhold"
   {
     printf '#!/usr/bin/env bash\n'
-    printf '# proofq: mem=%sG time=%sM kind=run after=%s,%s%s\n' "$memory" "$minutes" "$HOST" "$PACK" "${dependencies:+,$dependencies}"
+    printf '# proofq: mem=%sG time=%sM kind=%s after=%s,%s%s\n' "$memory" "$minutes" "$kind" "$HOST" "$PACK" "${dependencies:+,$dependencies}"
     printf '# queue rc = completed, NOT pass; inspect driver.rc and steps.json/verdict.txt\n'
     printf '# PQ-OUTPUT: %s\n' "$C"
     printf "export JET_SHARED_SOURCE_SHA='%s'\n" "$SHA"

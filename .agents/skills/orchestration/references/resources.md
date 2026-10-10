@@ -117,6 +117,10 @@ directories exist. Queue completion is not a pass: consumers require the real
 driver verdict and same-source artifact hashes. Retry a failed shared proof
 under a fresh queue name while preserving its earlier receipts; a completed
 same-source GREEN may be reused only after verifying its artifacts.
+Validate every generated proofq header as well as `bash -n` before release:
+the scheduler accepts only `kind=build`, `kind=test`, or `kind=measure`.
+Pack/native compiler producers are builds; smoke and S5 validation phases are
+tests. Shell syntax alone does not prove scheduler admission.
 Before every build release, run all 18 active generator `--check` gates against
 the immutable export, not the shared worktree, and require 18/18 before moving
 the hold into the runnable queue. A worktree check can consume uncommitted
