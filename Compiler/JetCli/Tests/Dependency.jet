@@ -59,7 +59,7 @@ fn run() {
     cli_files.write(path, concurrent) ?? panic("concurrent fixture edit")
     if jet_cli_dependency_publish(second, removed) == {
         .Ok(_) -> panic("must not overwrite concurrent writer")
-        .Err(message) -> assert_eq(message, "{path} changed while the package edit was prepared")
+        .Err(error) -> assert_eq(error.message, "{path} changed while the package edit was prepared")
     }
     assert_eq(cli_files.read(path) ?? panic("read concurrent carrier"), concurrent)
     absent :: jet_cli_package_dependency(root, "remove", [String]{"remove", "absent"}, [String]{"remove", "absent"}, false, false)

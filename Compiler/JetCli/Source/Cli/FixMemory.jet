@@ -29,22 +29,25 @@ fn jet_cli_memory_repair_path(root: String, source: String) -[FS]> String? Never
     None
 }
 
-fn jet_cli_memory_write_atomic(path: String, source: String) String! -[FS, Env, Time.Wait]> {
-    parent :: jet_cli_parent(path) ?? return Err("source has no parent directory")
+fn jet_cli_memory_write_atomic(path: String, source: String) JetCLIReadError! -[FS, Env, Time.Wait]> {
+    parent :: jet_cli_parent(path) ?? return Err(jet_cli_read_error("source has no parent directory"))
     name :: jet_cli_file_name(path)
-    canonical :: cli_files.realpath(parent) ?? return Err("cannot inspect source directory: {jet_cli_io_error_text(err)}")
-    held :: JetCLIRootedDirectory.open(canonical, [String]{}, false) ?? return Err(err.message)
-    mode :: held.file_mode(name) ?? return Err(err.message)
-    held.replace(name, source.bytes(), Val(mode)) ?? return Err(err.message)
+    canonical :: cli_files.realpath(parent) ?? return Err(jet_cli_read_error("cannot inspect source directory: {jet_cli_io_error_text(err)}"))
+    held :: JetCLIRootedDirectory.open(canonical, [String]{}, false)
+    mode :: held.file_mode(name)
+    held.replace(name, source.bytes(), Val(mode))
 }
 
-fn jet_cli_memory_read_source(path: String) -[FS, Time.Wait]> String String! {
-    parent :: jet_cli_parent(path) ?? return Err("source has no parent directory")
+fn jet_cli_memory_read_source(path: String) -[FS, Time.Wait]> String JetCLIReadError! {
+    parent :: jet_cli_parent(path) ?? return Err(jet_cli_read_error("source has no parent directory"))
     name :: jet_cli_file_name(path)
-    held :: JetCLIRootedDirectory.open(parent, [String]{}, false) ?? return Err(err.message)
-    bytes :: held.read(name, Int.MAX) ?? return Err(err.message)
-    raw :: bytes ?? return Err("source disappeared")
-    Ok(String.from_bytes(raw) ?? return Err("source is not UTF-8"))
+    held :: JetCLIRootedDirectory.open(parent, [String]{}, false)
+    bytes :: if held.read(name, Int.MAX) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(error) }
+    }
+    raw :: bytes ?? return Err(jet_cli_read_error("source disappeared"))
+    Ok(String.from_bytes(raw) ?? return Err(jet_cli_read_error("source is not UTF-8")))
 }
 
 fn jet_cli_fix_memory_at(root: String, args: [String], color: Bool, json: Bool) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
@@ -54,17 +57,17 @@ fn jet_cli_fix_memory_at(root: String, args: [String], color: Bool, json: Bool) 
         }
     }
     dry_run :: args.contains("--dry-run")
-    path :: cli_sys.get("JET_MEMORY_LEDGER") ?? "{root}/.jet/memory/ledger-v1.jsonl"
-    rows :: jet_cli_memory_read(path) ?? return jet_cli_memory_fail(err.message, color, json)
+    ledger_path :: cli_sys.get("JET_MEMORY_LEDGER") ?? "{root}/.jet/memory/ledger-v1.jsonl"
+    rows :: jet_cli_memory_read(ledger_path) ?? return jet_cli_memory_fail(err.message, color, json)
     candidates := [String:[JetCLIMemoryRow]]{}
     options := [JetCLIMemoryRow]{}
     loop row in rows {
         if row.byte_spans && row.expected != None && row.repairs.len() == 1 {
-            if jet_cli_memory_repair_path(root, row.source) == .Val(path) {
-                previous :: candidates.get(path) ?? [JetCLIMemoryRow]{}
+            if jet_cli_memory_repair_path(root, row.source) == .Val(candidate_path) {
+                previous :: candidates.get(candidate_path) ?? [JetCLIMemoryRow]{}
                 edits := previous
                 &edits.push(row)
-                candidates[path] = edits
+                candidates[candidate_path] = edits
             } else { &options.push(row) }
         } else { &options.push(row) }
     }
@@ -86,8 +89,8 @@ fn jet_cli_fix_memory_at(root: String, args: [String], color: Bool, json: Bool) 
             merged := [Int]{}
             start := 0
             loop start < order.len() {
-                middle :: min(start + width, order.len())
-                end :: min(start + width * 2, order.len())
+                middle :: if start + width < order.len() -> start + width else -> order.len()
+                end :: if start + width * 2 < order.len() -> start + width * 2 else -> order.len()
                 left := start
                 right := middle
                 loop left < middle || right < end {
@@ -147,7 +150,7 @@ fn jet_cli_fix_memory_at(root: String, args: [String], color: Bool, json: Bool) 
             last_start = Val(start)
         }
         if changed && !dry_run {
-            jet_cli_memory_write_atomic(path, source) ?? return jet_cli_memory_fail("cannot apply memory repair to `{path}`: {err}", color, json)
+            jet_cli_memory_write_atomic(path, source) ?? return jet_cli_memory_fail("cannot apply memory repair to `{path}`: {err.message}", color, json)
         }
     }
     if json {

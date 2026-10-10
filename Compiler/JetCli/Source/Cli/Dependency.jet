@@ -88,9 +88,15 @@ fn jet_cli_dependency_input(root: String, color: Bool, json: Bool) -[FS, Env]> J
 
 fn jet_cli_dependency_input_at_entry(root: String, entry: String, color: Bool, json: Bool) -[FS, Env]> JetCLIPackageInput JetCLIDependencyError! {
     source :: jet_cli_dependency_read(entry, color, json)
-    inline :: pkg_extract_inline_package(source.raw) ?? return Err(jet_cli_dependency_source_error(entry, source.raw, err.diagnostic()))
+    inline :: if pkg_extract_inline_package(source.raw) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(jet_cli_dependency_source_error(entry, source.raw, error.diagnostic())) }
+    }
     cache := WorkspaceDeclarationCache.new()
-    found :: pkg_package_facts_for_entry(&cache, entry) ?? return Err(jet_cli_dependency_source_error(entry, source.raw, err.diagnostic))
+    found :: if pkg_package_facts_for_entry(&cache, entry) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(jet_cli_dependency_source_error(entry, source.raw, error.diagnostic)) }
+    }
     facts :: found ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't resolve package facts for {entry}", None, color, json))
     if inline == .Val(block) {
         manifest :: pkg_to_manifest(facts, block.body(source.raw)) ?? return Err(jet_cli_dependency_source_error(entry, block.body(source.raw), err.diagnostic))
@@ -100,7 +106,11 @@ fn jet_cli_dependency_input_at_entry(root: String, entry: String, color: Bool, j
 }
 
 fn jet_cli_package_input_from_facts(root: String, facts: PackageFacts, color: Bool, json: Bool) -[FS, Env]> JetCLIPackageInput JetCLIDependencyError! {
-    path :: (pkg_manifest_path_checked(root) ?? return Err(jet_cli_dependency_source_error(JET_CLI_PACKAGE_FILE, "", err.diagnostic))) ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't locate {JET_CLI_PACKAGE_FILE}", None, color, json))
+    located :: if pkg_manifest_path_checked(root) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(jet_cli_dependency_source_error(JET_CLI_PACKAGE_FILE, "", error.diagnostic)) }
+    }
+    path :: located ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't locate {JET_CLI_PACKAGE_FILE}", None, color, json))
     carrier :: jet_cli_dependency_read(path, color, json)
     manifest :: pkg_to_manifest(facts, carrier.raw) ?? return Err(jet_cli_dependency_source_error(path, carrier.raw, err.diagnostic))
     Ok(JetCLIPackageInput{path: path, raw: carrier.raw, inline: None, manifest: manifest, authority: carrier.authority})
@@ -114,16 +124,16 @@ fn jet_cli_dependency_edit(input: JetCLIPackageInput, name: String, spec: DepSpe
 }
 // Retain the ORIGINAL source authority through stage/fsync/rename. Re-read the
 // source before staging, as CmdPkg does; a concurrent edit is never overwritten.
-fn jet_cli_dependency_publish(input: JetCLIPackageInput, updated: String) String! -[FS, Env, Time]> {
+fn jet_cli_dependency_publish(input: JetCLIPackageInput, updated: String) JetCLIReadError! -[FS, Env, Time]> {
     parent :: cli_files.dirname(input.path)
     name :: cli_files.basename(input.path)
-    resolver :: AuthorityResolver.open(parent) ?? return Err("could not open package source authority: {err.message()}")
-    current :: resolver.checked_file(name) ?? return Err("could not check {input.path}: {err.message()}")
-    raw :: current.text() ?? return Err("could not read {input.path}: {err.message()}")
-    if raw != input.raw -> return Err("{input.path} changed while the package edit was prepared")
-    resolver.revalidate_file(current) ?? return Err("package source changed before writing: {err.message()}")
-    input.authority.revalidate() ?? return Err("package source changed before writing: {jet_cli_io_error_text(err)}")
-    foundation_write_file_nofollow_at_root(parent, name, updated.bytes(), Val(() -> input.authority.revalidate())) ?? return Err(jet_cli_dependency_publication_error(input.path, err))
+    resolver :: AuthorityResolver.open(parent) ?? return Err(jet_cli_read_error("could not open package source authority: {err.message()}"))
+    current :: resolver.checked_file(name) ?? return Err(jet_cli_read_error("could not check {input.path}: {err.message()}"))
+    raw :: current.text() ?? return Err(jet_cli_read_error("could not read {input.path}: {err.message()}"))
+    if raw != input.raw -> return Err(jet_cli_read_error("{input.path} changed while the package edit was prepared"))
+    resolver.revalidate_file(current) ?? return Err(jet_cli_read_error("package source changed before writing: {err.message()}"))
+    input.authority.revalidate() ?? return Err(jet_cli_read_error("package source changed before writing: {jet_cli_io_error_text(err)}"))
+    foundation_write_file_nofollow_at_root(parent, name, updated.bytes(), Val(() -> input.authority.revalidate())) ?? return Err(jet_cli_read_error(jet_cli_dependency_publication_error(input.path, err)))
 }
 
 fn jet_cli_dependency_publication_error(path: String, failure: FoundationPublicationError) -> String Never! {
@@ -183,7 +193,7 @@ fn jet_cli_package_dependency(root: String, command: String, args: [String], raw
         input :: jet_cli_dependency_input(root, color, json) ?? return err.output
         if command == "remove" && input.manifest.dependencies.get(name) == None -> return jet_cli_dependency_with_notice(jet_cli_dependency_cli_error("E2104", "dependency `{name}` is not present in {JET_CLI_PACKAGE_FILE}", Val("remove a dependency listed in {JET_CLI_PACKAGE_FILE}, or add `{name}` first"), color, json), input.notice).output
         updated :: jet_cli_dependency_edit(input, name, spec)
-        jet_cli_dependency_publish(input, updated) ?? return jet_cli_dependency_with_notice(jet_cli_dependency_cli_error("E2105", "couldn't write {input.path}: {err}", None, color, json), input.notice).output
+        jet_cli_dependency_publish(input, updated) ?? return jet_cli_dependency_with_notice(jet_cli_dependency_cli_error("E2105", "couldn't write {input.path}: {err.message}", None, color, json), input.notice).output
         notice = input.notice
         prefix = jet_cli_dependency_edit_success(command, name, input.path)
     }
