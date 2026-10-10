@@ -180,62 +180,12 @@ fn jet_codegen_last_use_covers(projections: [MIRProjection], path: [MIRFieldID])
 }
 
 
-// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_last_use.rs::consumes
-fn jet_codegen_last_use_consumes(builder: JetCodegenBuilder, program: JetCodegenProgram, operation: MIROperation, value: MIRValueID) -> JetCodegenLastUseConsume Never! {
-    if operation == {
-        .WritePlace(_, stored) -> {
-            if stored == value -> return JetCodegenLastUseConsume.Yes
-            JetCodegenLastUseConsume.No
-        }
-        .ReplacePlace(_, stored) -> {
-            if stored == value -> return JetCodegenLastUseConsume.Yes
-            JetCodegenLastUseConsume.No
-        }
-        .Move(_) | .TraitBox(_, _) | .Present(_) | .ResultOk(_) | .ResultErr(_) | .BuildList(_, _) | .BuildMap(_) | .Struct(_, _) | .Tuple(_, _) | .Enum(_, _, _) -> JetCodegenLastUseConsume.Yes
-        .Copy(_, fact) -> {
-            if fact == {
-                .Explicit | .ViewMaterialize -> JetCodegenLastUseConsume.No
-                else -> JetCodegenLastUseConsume.Through
-            }
-        }
-        .Phi(_) | .OptionValue(_) | .ResultValue(_, _) | .EnumPayload(_, _, _, _) -> JetCodegenLastUseConsume.Through
-        .Call(_, args, _) -> jet_codegen_last_use_owned_arg(args, value)
-        .IndirectCall(_, args, _) -> jet_codegen_last_use_owned_arg(args, value)
-        .CoreCall(_, _, args, _, _, _) -> jet_codegen_last_use_owned_arg(args, value)
-        .LoopIterInit(_, _, _, by_value, _) -> {
-            if by_value -> return JetCodegenLastUseConsume.Yes
-            JetCodegenLastUseConsume.No
-        }
-        .Closure(_, captures, _) -> {
-            loop capture in captures {
-                if capture == .Value(captured) {
-                    if captured == value -> return JetCodegenLastUseConsume.Yes
-                }
-            }
-            JetCodegenLastUseConsume.No
-        }
-        .Semantic(semantic) -> {
-            if semantic == {
-                .StructLiteral(_, _, _, _) -> JetCodegenLastUseConsume.Yes
-                .StaticPreludeCall(_, args, _, _) -> jet_codegen_last_use_owned_arg(args, value)
-                .HostCall(_, args) -> jet_codegen_last_use_owned_arg(args, value)
-                .ClosureMethod(_, args, _) -> jet_codegen_last_use_owned_arg(args, value)
-                // A builtin method borrows its receiver; an argument is passed
-                // owned exactly when the route's borrow mask (receiver first)
-                // says so.
-                .BuiltinMethod(call, receiver, _, args, _) -> {
-                    if receiver == value -> return JetCodegenLastUseConsume.No
-                    if builder.prelude_call_positions.get(call.value) == None -> return JetCodegenLastUseConsume.No
-                    row :: builder.prelude_call_positions.get(call.value) ?? panic("checked last-use row is missing")
-                    loop (index, arg) in args {
-                        if arg == value && index + 1 < builder.prelude_calls[row].signature.borrow_mask.len() && !builder.prelude_calls[row].signature.borrow_mask[index + 1] -> return JetCodegenLastUseConsume.Yes
-                    }
-                    JetCodegenLastUseConsume.No
-                }
-                else -> JetCodegenLastUseConsume.No
-            }
-        }
-        else -> JetCodegenLastUseConsume.No
+// Resolve checked access metadata once; consumption itself is Foundation's
+// shared MIR classifier, also used by legality, lint and SSA retirement.
+fn jet_codegen_operation_borrow_mask(builder: JetCodegenBuilder, operation: MIROperation) -> [Bool] Never! {
+    if mir_operation_consumption_route(operation) == Val(call) {
+        row :: builder.prelude_call_positions.get(call.value) ?? return [Bool]{}
+        return builder.prelude_calls[row].signature.borrow_mask
     }
     [Bool]{}
 }
