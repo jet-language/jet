@@ -23,17 +23,17 @@ extern void __real_jet_rt_free(void *,int64_t,int64_t);
 extern Text *jet_rt_string_from_static(const void *,int64_t);
 extern Text *jet_rt_string_clone(const Text *);
 extern void jet_rt_string_drop(Text *);
-extern Sequence *jet_rt_bytes_unpack(const uint64_t *,int64_t);
+extern Sequence *jet_rt_bytes_unpack(const unsigned char *,int64_t);
 #define RENDER_DECL(T,N) \
 extern Text *jet_rt_handle_show_##N(T *); \
 extern Text *jet_rt_handle_display_##N(T *); \
 extern Text *jet_rt_handle_debug_##N(T *);
 extern Buffer *jet_rt_handle_clone_jet_byte_buffer(Buffer *);
 extern void jet_rt_handle_drop_jet_byte_buffer(Buffer *);
-RENDER_DECL(Buffer,JetByteBuffer)
+RENDER_DECL(Buffer,jet_byte_buffer)
 extern Path *jet_rt_handle_clone_jet_path(Path *);
 extern void jet_rt_handle_drop_jet_path(Path *);
-RENDER_DECL(Path,JetPath)
+RENDER_DECL(Path,jet_path)
 extern Policy *jet_rt_handle_clone_jet_row_policy(Policy *);
 extern void jet_rt_handle_drop_jet_row_policy(Policy *);
 extern void jet_rt_handle_field_jet_row_policy_table(Policy *,Text *);
@@ -44,15 +44,15 @@ extern void jet_rt_handle_drop_jet_bit_set(Sequence *);
 extern bool jet_bitset_add(Sequence *,int64_t);
 extern void jet_bitset_remove(Sequence *,int64_t);
 extern int64_t jet_int_owned_from_i64(int64_t);
-RENDER_DECL(Sequence,JetBitSet)
+RENDER_DECL(Sequence,jet_bit_set)
 #define ENUM_DECL(N) \
 extern int64_t *jet_rt_handle_clone_##N(int64_t *); \
 extern void jet_rt_handle_drop_##N(int64_t *); \
 extern bool jet_rt_handle_eq_##N(int64_t *,int64_t *);
-ENUM_DECL(JetFailurePolicy)
-ENUM_DECL(JetDispatchState)
-ENUM_DECL(JetEventConfigError)
-ENUM_DECL(JetLateEventDisposition)
+ENUM_DECL(jet_failure_policy)
+ENUM_DECL(jet_dispatch_state)
+ENUM_DECL(jet_event_config_error)
+ENUM_DECL(jet_late_event_disposition)
 static struct { void *pointer; int64_t size,align; unsigned frees; } watched[32];
 static size_t count;
 static unsigned intercepted;
@@ -79,7 +79,7 @@ static void put_byte(Sequence *s,int64_t at,unsigned byte) {
     else { uint64_t word=byte;memcpy(s->data+at*BYTE_HANDLE_U8_STRIDE,&word,sizeof word); }
 }
 static void buffer_cases(void) {
-    uint64_t values[256];char golden[1200];size_t used=0;
+    unsigned char values[256];char golden[1200];size_t used=0;
     golden[used++]='[';
     for(unsigned i=0;i<256;++i) { values[i]=i;int n=snprintf(golden+used,sizeof golden-used,"%s%u",i?", ":"",i);assert(n>0 && (size_t)n<sizeof golden-used);used+=(size_t)n; }
     golden[used++]=']';
@@ -103,7 +103,7 @@ static void buffer_cases(void) {
     }
     jet_rt_handle_drop_jet_byte_buffer(NULL);
 }
-static void path_case(const uint64_t *input,int64_t n,const void *golden,size_t length) {
+static void path_case(const unsigned char *input,int64_t n,const void *golden,size_t length) {
     Path *a=jet_rt_alloc(8,8);a->bytes=jet_rt_bytes_unpack(input,n);
     Path *b=jet_rt_handle_clone_jet_path(a);assert(a!=b && a->bytes!=b->bytes && b->bytes->length==n);
     for(int64_t i=0;i<n;++i) assert(byte_at(a->bytes,i)==byte_at(b->bytes,i));
@@ -116,11 +116,11 @@ static void path_case(const uint64_t *input,int64_t n,const void *golden,size_t 
     unsigned before=intercepted;jet_rt_handle_drop_jet_path(a);jet_rt_handle_drop_jet_path(b);freed(before);
 }
 static void path_cases(void) {
-    uint64_t empty[1]={0};path_case(empty,0,"",0);
-    uint64_t valid[]={'/','"','\t',0,0xc3,0xa9};
+    unsigned char empty[1]={0};path_case(empty,0,"",0);
+    unsigned char valid[]={'/','"','\t',0,0xc3,0xa9};
     static const char valid_text[]={'/','"','\t',0,(char)0xc3,(char)0xa9};
     path_case(valid,6,valid_text,sizeof valid_text);
-    uint64_t malformed[]={'a',0xff,0xe2,0x82,0x7f,0xed,0xa0,0x80,0xe2,0x82};
+    unsigned char malformed[]={'a',0xff,0xe2,0x82,0x7f,0xed,0xa0,0x80,0xe2,0x82};
     static const char lossy[]="a\xef\xbf\xbd\xef\xbf\xbd\x7f\xef\xbf\xbd\xef\xbf\xbd\xef\xbf\xbd\xef\xbf\xbd";
     path_case(malformed,10,lossy,sizeof lossy-1);
     jet_rt_handle_drop_jet_path(NULL);

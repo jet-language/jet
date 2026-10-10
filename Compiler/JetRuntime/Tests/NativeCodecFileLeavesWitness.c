@@ -16,6 +16,17 @@
 #endif
 typedef int64_t W;
 typedef struct { unsigned char *data; W len, cap; } Text;
+typedef struct { W len, cap; unsigned char *data; } Bytes;
+_Static_assert(RT_HOST_U8_STRIDE == 1, "native List<U8> must match packed C u8 storage");
+extern unsigned char *jet_rt_bytes_pack(const Bytes *);
+extern Bytes *jet_rt_bytes_unpack(const unsigned char *, W);
+extern void jet_rt_bytes_free(unsigned char *, W);
+extern void *jet_rt_http_body_from_payload(Bytes *, W, Text *);
+extern W jet_rt_http_body_take(void *, W, void **);
+extern W jet_rt_http_body_next(void *, Bytes **);
+extern void jet_rt_http_body_list_drop(Bytes *);
+extern W jet_rt_http_body_chunks_drop(void *);
+extern W jet_rt_http_body_drop(void *);
 extern int32_t jet_rt_main(void (*body)(void));
 extern Text *jet_rt_string_from_static(const void *, W);
 extern void jet_rt_string_drop(Text *);
@@ -143,7 +154,37 @@ static void line(void *reader, const unsigned char *expected, W size) {
     for (W i = 0; i < size; ++i) assert(bytes[i * RT_HOST_U8_STRIDE] == expected[i]);
     if (size) jet_rt_free(bytes, size * RT_HOST_U8_STRIDE, 8); else assert(bytes == NULL);
 }
+static void packed_boundary(void) {
+    unsigned char input[256];
+    for (size_t i = 0; i < sizeof input; ++i) input[i] = (unsigned char)i;
+    Bytes borrowed = {256, 256, input};
+    unsigned char *packed = jet_rt_bytes_pack(&borrowed);
+    assert(packed != input && memcmp(packed, input, sizeof input) == 0);
+    Bytes *returned = jet_rt_bytes_unpack(packed, 256);
+    assert(returned->len == 256 && returned->cap == 256 && returned->data != packed);
+    assert(memcmp(returned->data, input, sizeof input) == 0);
+    packed[0] = 99; /* The result owns an independent packed allocation. */
+    assert(returned->data[0] == 0 && input[0] == 0);
+    jet_rt_bytes_free(packed, 256);
+    void *body = jet_rt_http_body_from_payload(returned, 0, text("application/octet-stream"));
+    void *chunks = NULL;
+    assert(jet_rt_http_body_take(body, 17, &chunks) == 0 && chunks != NULL);
+    W offset = 0;
+    for (;;) {
+        Bytes *chunk = NULL;
+        W status = jet_rt_http_body_next(chunks, &chunk);
+        if (status == 0) { assert(chunk == NULL); break; }
+        assert(status == 1 && chunk != NULL && chunk->len > 0 && chunk->len <= 17);
+        assert(chunk->cap == chunk->len && offset + chunk->len <= 256);
+        assert(memcmp(chunk->data, input + offset, (size_t)chunk->len) == 0);
+        offset += chunk->len;
+        jet_rt_http_body_list_drop(chunk);
+    }
+    assert(offset == 256 && jet_rt_http_body_chunks_drop(chunks) == 0);
+    assert(jet_rt_http_body_drop(body) == 0);
+}
 static void exercise(void) {
+    packed_boundary();
     codecs();
     Text *name = text(path); void *reader = NULL, *error = NULL;
     assert(jet_std_files_open_reader_nonblocking(name, &reader, &error) == 1 && error == NULL);

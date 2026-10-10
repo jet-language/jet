@@ -53,8 +53,8 @@ static W text(const char *s) {
 }
 static W list(const char *s) {
     W n = (W)strlen(s), h = allocate(24);
-    W b = n ? allocate(n * 8) : 0;
-    for (W i = 0; i < n; ++i) words(b)[i] = (unsigned char)s[i];
+    W b = n ? allocate(n) : 0;
+    if (n) memcpy((void *)(uintptr_t)b, s, (size_t)n);
     words(h)[0] = n; words(h)[1] = n; words(h)[2] = b;
     return h;
 }
@@ -69,7 +69,7 @@ static void chunk(W chunks, const char *s) {
     assert(jet_rt_http_body_next(chunks, ptr(&result)) == 1);
     assert(words(result)[0] == (W)strlen(s));
     for (W i = 0; i < words(result)[0]; ++i)
-        assert(words(words(result)[2])[i] == (unsigned char)s[i]);
+        assert(((unsigned char *)(uintptr_t)words(result)[2])[i] == (unsigned char)s[i]);
     jet_rt_http_body_list_drop(result);
 }
 static void eof(W chunks) {
@@ -248,8 +248,8 @@ static void errors_and_stops(void) {
     assert(jet_rt_http_body_drop(body) == 0);
     pending = 0;
 }
-// Same 1GiB bounded File Take and byte-to-word output carrier as the Rust
-// reference. Consume every output word so neither side can elide widening.
+// Same 1GiB bounded File Take as the Rust reference, with packed native U8
+// output. Consume every byte so neither side can elide the body transfer.
 static void stream_perf(const char *path) {
     int fd = open(path, O_RDONLY);
     assert(fd >= 0);
@@ -259,7 +259,8 @@ static void stream_perf(const char *path) {
     W body = jet_rt_http_body_from_reader(read_closure, close_closure, 1, info.st_size, 1, 0);
     W chunks = take(body, 65536), output = 0, bytes = 0, checksum = 0, status;
     while ((status = jet_rt_http_body_next(chunks, ptr(&output))) == 1) {
-        W count = words(output)[0], *data = words(words(output)[2]);
+        W count = words(output)[0];
+        unsigned char *data = (unsigned char *)(uintptr_t)words(output)[2];
         bytes += count;
         for (W at = 0; at < count; ++at) checksum += data[at];
         jet_rt_http_body_list_drop(output);

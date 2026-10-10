@@ -57,7 +57,7 @@ const macros = ['BOOL', 'INT', 'FLOAT', 'NUMBER', 'TEXT'].map(kind => {
   return `-D${name}=${literal(dataAbi, name)}`;
 });
 const stride = literal(collections, 'RT_HOST_U8_STRIDE');
-if (![1, 8].includes(stride)) throw Error(`unsupported canonical U8 stride ${stride}`);
+if (stride !== 1) throw Error(`native C U8 elements require packed stride 1, got ${stride}`);
 macros.push(`-DRT_HOST_U8_STRIDE=${stride}`);
 const source = join(root, 'Compiler/JetRuntime/Tests/NativeCodecFileLeavesWitness.c');
 const sourceHandle = fileObject(source), compilerHandle = fileObject(jet);

@@ -122,7 +122,7 @@ fn http_body_text_drop(text: I64) {
     }
     capacity :: http_body_word(wrapping(list + I64{8}))
     if (capacity != I64{0}) {
-        jet_rt_free(http_body_word(wrapping(list + I64{16})), wrapping(capacity * I64{8}), I64{8})
+        jet_rt_free(http_body_word(wrapping(list + I64{16})), wrapping(capacity * RT_HOST_U8_STRIDE), I64{8})
     }
     jet_rt_free(list, I64{24}, I64{8})
 }
@@ -287,7 +287,7 @@ fn http_body_drained(body: I64) {
 
 fn http_body_list(count: I64) -> I64 {
     list :: http_body_zero(I64{24})
-    data :: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(wrapping(count * I64{8}), I64{8})
+    data :: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(wrapping(count * RT_HOST_U8_STRIDE), I64{8})
     http_body_store(list, count)
     http_body_store(wrapping(list + I64{8}), count)
     http_body_store(wrapping(list + I64{16}), data)
@@ -369,7 +369,7 @@ fn http_body_list(count: I64) -> I64 {
     source :: if {
         (kind == I64{-1}) -> raw
         (kind == I64{1}) -> wrapping(http_body_word(payload) + cursor)
-        else -> wrapping(http_body_word(wrapping(payload + I64{16})) + wrapping(cursor * I64{8}))
+        else -> wrapping(http_body_word(wrapping(payload + I64{16})) + wrapping(cursor * RT_HOST_U8_STRIDE))
     }
     at := I64{0}
     loop at < count {
@@ -380,9 +380,9 @@ fn http_body_list(count: I64) -> I64 {
                     byte = os_load_u8(wrapping(source + at))
                 }
             }
-            else -> byte = http_body_word(wrapping(source + wrapping(at * I64{8})))
+            else -> byte = host_u8_get(source, at)
         }
-        http_body_store(wrapping(destination + wrapping(at * I64{8})), byte)
+        host_u8_put(destination, at, byte)
         at = wrapping(at + I64{1})
     }
     http_body_store(out, list)

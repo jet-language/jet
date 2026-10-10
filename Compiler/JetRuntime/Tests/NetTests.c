@@ -1,5 +1,5 @@
 // Link once against the complete composed L4/L7/L8 runtime object.
-// Address byte-list baseline is word stride8; packed epoch flips this fixture.
+// Address and socket byte-list carriers are packed C uint8_t elements.
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -67,17 +67,17 @@ extern FD *jet_udp_socket_fd_raw(UDP *);
 extern void jet_udp_socket_timeout_set_raw(UDP *, int64_t);
 extern int64_t jet_udp_socket_timeout_get_raw(UDP *, int64_t *);
 extern void jet_udp_socket_mark_closed_raw(UDP *);
-extern int64_t jet_socket_read_raw(FD *, uint64_t *, int64_t, ErrorOut *);
-extern int64_t jet_socket_write_raw(FD *, uint64_t *, int64_t, ErrorOut *);
-extern int64_t jet_socket_send_to_raw(FD *, uint64_t *, int64_t, Address *, ErrorOut *);
-extern int64_t jet_socket_receive_from_raw(FD *, uint64_t *, int64_t, Address *, ErrorOut *);
+extern int64_t jet_socket_read_raw(FD *, uint8_t *, int64_t, ErrorOut *);
+extern int64_t jet_socket_write_raw(FD *, uint8_t *, int64_t, ErrorOut *);
+extern int64_t jet_socket_send_to_raw(FD *, uint8_t *, int64_t, Address *, ErrorOut *);
+extern int64_t jet_socket_receive_from_raw(FD *, uint8_t *, int64_t, Address *, ErrorOut *);
 extern int64_t jet_socket_unix_bind_raw(FD *, Text *, ErrorOut *);
 extern int64_t jet_socket_unix_connect_raw(FD *, Text *, ErrorOut *);
 extern void *jet_rt_alloc(int64_t, int64_t);
 extern void jet_rt_free(void *, int64_t, int64_t);
 extern void jet_rt_host_arguments(int64_t, char **, char **);
-extern IP *jet_net_raw_ip_from_bytes(uint64_t *, int64_t);
-extern int64_t jet_net_raw_ip_bytes(IP *, uint64_t **);
+extern IP *jet_net_raw_ip_from_bytes(uint8_t *, int64_t);
+extern int64_t jet_net_raw_ip_bytes(IP *, uint8_t **);
 extern Address *jet_net_raw_socket_from_parts(IP *, int64_t, int64_t, int64_t);
 extern int64_t jet_net_raw_socket_scope(Address *, int64_t *);
 extern Address *jet_rt_handle_clone_jet_socket_addr(Address *);
@@ -99,16 +99,16 @@ extern void jet_rt_int_drop(int64_t);
 int main(void) {
     static char *argv[] = {"net-fixture", NULL}, *env[] = {NULL};
     jet_rt_host_arguments(1, argv, env);
-    uint64_t *octets = jet_rt_alloc(16 * 8, 8);
+    uint8_t *octets = jet_rt_alloc(16, 8);
     for (int i = 0; i < 16; ++i) octets[i] = i;
     IP *ip = jet_net_raw_ip_from_bytes(octets, 16);
-    jet_rt_free(octets, 16 * 8, 8);
+    jet_rt_free(octets, 16, 8);
     assert(ip->family == 6);
     for (int i = 0; i < 16; ++i) assert(ip->octets[i] == i);
-    uint64_t *copy_bytes = NULL;
+    uint8_t *copy_bytes = NULL;
     assert(jet_net_raw_ip_bytes(ip, &copy_bytes) == 16);
-    for (int i = 0; i < 16; ++i) assert(copy_bytes[i] == (uint64_t)i);
-    jet_rt_free(copy_bytes, 16 * 8, 8);
+    for (int i = 0; i < 16; ++i) assert(copy_bytes[i] == (uint8_t)i);
+    jet_rt_free(copy_bytes, 16, 8);
     Address *address = jet_net_raw_socket_from_parts(ip, INT64_C(0x12340000ffff), INT64_C(0x123412345678), INT64_C(0x5678ffffffff));
     jet_rt_handle_drop_jet_ip_addr(ip);
     assert(address->port == 65535 && address->flow == UINT32_C(0x12345678) && address->scope == UINT32_MAX && address->reserved == 0);
@@ -190,7 +190,7 @@ int main(void) {
     assert((fcntl(accepted->number, F_GETFD) & FD_CLOEXEC) != 0);
     assert(jet_socket_option_set_raw(client, IPPROTO_TCP, 1, 1, &facts) == 0);
     assert(jet_socket_option_get_raw(client, IPPROTO_TCP, 1, &option, &facts) == 0 && option == 1);
-    uint64_t payload[] = {1, 0, 255, 2}, incoming[4] = {0};
+    uint8_t payload[] = {1, 0, 255, 2}, incoming[4] = {0};
     assert(jet_socket_write_raw(client, payload, 4, &facts) == 4);
     int64_t received = jet_socket_read_raw(accepted, incoming, 4, &facts);
     if (received < 0) {

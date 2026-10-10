@@ -210,6 +210,15 @@ input. Therefore an unchanged runtime ABI and registry need one regeneration,
 not a table-feedback loop. After provider admission changes, regenerate both
 outputs together and run `Tools/agent/gen-runtime.mjs <allparts.rs> --check`.
 
+Native `List<U8>` payloads are packed one-byte elements, matching checked
+`StorageLayout(U8)` and the C ABI's `u8` buffer. The runtime's
+`RT_HOST_U8_STRIDE` is 1; byte-list allocation, indexing, copying and freeing
+share that fact across Dyn, files, networking, text, crypto and codecs.
+HTTP Body chunk buffers use the same layout, including borrowed input windows.
+`run-native-codec-file-leaves.mjs` gates the admitted RC object with a C client
+that checks all 256 byte values through List pack/unpack and multi-chunk HTTP
+Body transfer; it rejects an object whose pinned source declares another stride.
+
 Native C consumers and pack/link drivers invoke the shared
 `Tools/packaging/native-c-compiler.mjs` policy. It appends
 `-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0` and removes only Nix's `fortify` and
