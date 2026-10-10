@@ -341,7 +341,7 @@ fn comptime_stop_frame_write(status: I64, owner: I64, start: I64, end: I64) -> U
     fd :: trap_syscall(I64{72}, I64{3}, I64{1030}, I64{0}, I64{0}, I64{0}, I64{0})
     if (fd >= I64{0}) {
         comptime_channel_write(fd, header, digits + I64{1})
-        comptime_channel_write(fd, frame + I64{16}, length)
+        comptime_channel_write(fd, scratch, at)
         _ := trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     alloc_release_valid(scratch, I64{192}, I64{8})

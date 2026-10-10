@@ -132,9 +132,9 @@ fn progress_substitute(template: I64, key: I64, value: I64) -> I64 {
 }
 
 fn progress_render(description: I64, format: I64, count: I64, total: I64, elapsed: Float, color: Bool) -> I64 {
-    template :: if (rt_text_len(format) == I64{0}) -> rt_static_text("{description} {percent}% {count}/{total} elapsed {elapsed} remaining {remaining} rate {rate}") else -> format
+    template :: if (rt_text_len(format) == I64{0}) -> rt_static_text("{{description}} {{percent}}% {{count}}/{{total}} elapsed {{elapsed}} remaining {{remaining}} rate {{rate}}") else -> format
     rendered := progress_bound(template)
-    rendered = progress_substitute(rendered, rt_static_text("{description}"), progress_bound(description))
+    rendered = progress_substitute(rendered, rt_static_text("{{description}}"), progress_bound(description))
     percent := jet_rt_string_clone(rt_static_text("?"))
     if (total >= I64{0}) {
         jet_rt_string_drop(percent)
@@ -151,18 +151,18 @@ fn progress_render(description: I64, format: I64, count: I64, total: I64, elapse
             jet_rt_int_drop(count_int)
         }
     }
-    rendered = progress_substitute(rendered, rt_static_text("{percent}"), percent)
-    rendered = progress_substitute(rendered, rt_static_text("{count}"), progress_unsigned_text(count))
-    rendered = progress_substitute(rendered, rt_static_text("{total}"), if (total < I64{0}) -> jet_rt_string_clone(rt_static_text("?")) else -> jet_rt_i64_to_string(total))
-    rendered = progress_substitute(rendered, rt_static_text("{elapsed}"), progress_fixed2(elapsed, rt_static_text("s")))
+    rendered = progress_substitute(rendered, rt_static_text("{{percent}}"), percent)
+    rendered = progress_substitute(rendered, rt_static_text("{{count}}"), progress_unsigned_text(count))
+    rendered = progress_substitute(rendered, rt_static_text("{{total}}"), if (total < I64{0}) -> jet_rt_string_clone(rt_static_text("?")) else -> jet_rt_i64_to_string(total))
+    rendered = progress_substitute(rendered, rt_static_text("{{elapsed}}"), progress_fixed2(elapsed, rt_static_text("s")))
     remaining :: if {
         (total >= I64{0} && count >= total) -> jet_rt_string_clone(rt_static_text("0.00s"))
         (total >= I64{0} && count > I64{0}) -> progress_fixed2(elapsed * Float{total - count} / Float{count}, rt_static_text("s"))
         else -> jet_rt_string_clone(rt_static_text("?"))
     }
-    rendered = progress_substitute(rendered, rt_static_text("{remaining}"), remaining)
+    rendered = progress_substitute(rendered, rt_static_text("{{remaining}}"), remaining)
     rate :: if (elapsed > Float{0.0}) -> progress_fixed2(progress_unsigned_float(count) / elapsed, rt_static_text("/s")) else -> jet_rt_string_clone(rt_static_text("?/s"))
-    rendered = progress_substitute(rendered, rt_static_text("{rate}"), rate)
+    rendered = progress_substitute(rendered, rt_static_text("{{rate}}"), rate)
     bounded :: progress_bound(rendered)
     jet_rt_string_drop(rendered)
     if color -> return bounded

@@ -10,9 +10,9 @@ fn progress_fixture_render(description: I64, template: I64, count: I64, total: I
     if progress_enabled() -> return I64{1}
     if !progress_fixture_render(rt_static_text("work"), rt_static_text(""), I64{1}, I64{2}, Float{0.25}, false,
         rt_static_text("work 50% 1/2 elapsed 0.25s remaining 0.25s rate 4.00/s")) -> return I64{2}
-    if !progress_fixture_render(rt_static_text("x"), rt_static_text("{count}/{total}:{percent}:{remaining}:{rate}"), I64{-1}, I64{-1}, Float{0.0}, false,
+    if !progress_fixture_render(rt_static_text("x"), rt_static_text("{{count}}/{{total}}:{{percent}}:{{remaining}}:{{rate}}"), I64{-1}, I64{-1}, Float{0.0}, false,
         rt_static_text("18446744073709551615/?:?:?:?/s")) -> return I64{3}
-    if !progress_fixture_render(rt_static_text("{count}"), rt_static_text("{description}|{percent}|{remaining}"), I64{0}, I64{0}, Float{1.0}, false,
+    if !progress_fixture_render(rt_static_text("{{count}}"), rt_static_text("{{description}}|{{percent}}|{{remaining}}"), I64{0}, I64{0}, Float{1.0}, false,
         rt_static_text("0|100|0.00s")) -> return I64{4}
     // Exact binary ties-to-even: 0.125 => .12, 0.375 => .38.
     first :: progress_fixed2(Float{0.125}, rt_static_text("s"))
@@ -22,7 +22,7 @@ fn progress_fixture_render(description: I64, template: I64, count: I64, total: I
     jet_rt_string_drop(second)
     if !correct -> return I64{5}
     description :: jet_rt_string_clone(rt_static_text("work"))
-    template :: jet_rt_string_clone(rt_static_text("{count}"))
+    template :: jet_rt_string_clone(rt_static_text("{{count}}"))
     state :: jet_rt_progress_state_new(description, template, I64{2})
     jet_rt_string_drop(description)
     jet_rt_string_drop(template)
@@ -47,8 +47,8 @@ fn progress_fixture_render(description: I64, template: I64, count: I64, total: I
     rt_text_append(ansi, rt_text_data(rt_static_text("[31mx")), I64{5})
     rt_text_push_word(ansi, I64{27}, I64{1})
     rt_text_append(ansi, rt_text_data(rt_static_text("[0m")), I64{3})
-    if !progress_fixture_render(ansi, rt_static_text("{description}"), I64{1}, I64{-1}, Float{0.0}, false, rt_static_text("x")) -> return I64{10}
-    if !progress_fixture_render(ansi, rt_static_text("{description}"), I64{1}, I64{-1}, Float{0.0}, true, ansi) -> return I64{11}
+    if !progress_fixture_render(ansi, rt_static_text("{{description}}"), I64{1}, I64{-1}, Float{0.0}, false, rt_static_text("x")) -> return I64{10}
+    if !progress_fixture_render(ansi, rt_static_text("{{description}}"), I64{1}, I64{-1}, Float{0.0}, true, ansi) -> return I64{11}
     jet_rt_string_drop(ansi)
     long :: jet_rt_string_builder_new()
     at := I64{0}
