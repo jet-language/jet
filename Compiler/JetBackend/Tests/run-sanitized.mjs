@@ -10,12 +10,9 @@
 // by the native pack. Its own internals are not instrumented by rustc.
 // Native load/store instrumentation is recorded separately in sanitize.tsv.
 //
-//   1. runtime: <runtime.rs> (the prepared runtime text the corpus's runtime
-//      pack was linked from, prepare-call-runtime.mjs output) is compiled once
-//      with `rustc --cfg jet_native_pack --crate-type staticlib -Zsanitizer=address -Zub-checks=yes`
-//      (RUSTC_BOOTSTRAP=1; the nightly-only flags are confined to this proof
-//      build) into <out>/sanitize/libjet_runtime_asan.a, reused while the
-//      text, rustc and flags are unchanged.
+//   1. runtime: --runtime-library <instrumented native archive>, the prebuilt
+//      runtime pack built with ASan/LSan. The Rust-source build mode
+//      (--runtime <runtime.rs>) is retired and reports UNCOVERED with exit 2.
 //   2. link:    clang -fsanitize=address <case>.o jet_runtime_jet.o libjet_runtime_asan.a
 //      -lpthread -ldl -lm (the hosted leg of run-goldens.mjs, plus the ASan
 //      runtime).
@@ -30,14 +27,13 @@
 // Gate: exit 1 on every non-clean result (leaks included unless --no-leaks,
 // which the summary records); exit 2 means a harness/infrastructure failure.
 //
-// usage: JET_RUNTIME_JET_OBJECT=<fresh jet_runtime_jet.o> [RUSTC=rustc] [SANITIZE_CC=clang]
+// usage: JET_RUNTIME_JET_OBJECT=<fresh jet_runtime_jet.o> [SANITIZE_CC=clang]
 //        [JET_GOLDEN_FEATURES=<checkout>/Examples/features] (the corpus run-goldens.mjs ran)
 //        node Compiler/JetBackend/Tests/run-sanitized.mjs <outdir>
-//        (--runtime <runtime.rs> | --runtime-library <instrumented native archive>)
+//        --runtime-library <instrumented native archive>
 //        [--case-list FILE] [--no-leaks]
 // Writes <outdir>/sanitize.tsv and <outdir>/sanitize-summary.txt.
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -49,7 +45,7 @@ process.on("uncaughtException", (error) => {
 });
 const args = process.argv.slice(2);
 const outDir = args.shift();
-const usage = "usage: run-sanitized.mjs <outdir> (--runtime <runtime.rs> | --runtime-library <instrumented native archive>) [--case-list FILE] [--no-leaks]";
+const usage = "usage: run-sanitized.mjs <outdir> --runtime-library <instrumented native archive> [--case-list FILE] [--no-leaks]";
 if (!outDir) {
   console.error(usage);
   process.exit(64);
@@ -67,6 +63,10 @@ for (let i = 0; i < args.length; i++) {
   else throw new Error(`unknown option ${args[i]}\n${usage}`);
 }
 if (!runtimeSource && !suppliedRuntime || runtimeSource && suppliedRuntime) throw new Error(usage);
+if (runtimeSource) {
+  console.log(JSON.stringify({ status: "UNCOVERED", cardRequired: true, reason: "--runtime <runtime.rs> Rust-source sanitizer oracle retired (owner #38/#59; Tower #4923): no rustc/cargo invoked; supply --runtime-library <instrumented native archive> from the native pack (JET_RUNTIME_JET_OBJECT also required)" }));
+  process.exit(2);
+}
 const jetObject = process.env.JET_RUNTIME_JET_OBJECT ? resolve(process.env.JET_RUNTIME_JET_OBJECT) : null;
 if (!jetObject || !existsSync(jetObject)) throw new Error("JET_RUNTIME_JET_OBJECT must name the native pack's Jet runtime object");
 
@@ -78,33 +78,10 @@ const dirs = { lower: join(outDir, "lower"), run: join(outDir, "run"), work: joi
 const reportsDir = join(dirs.sanitize, "reports");
 mkdirSync(reportsDir, { recursive: true });
 
-// 1. The sanitized runtime.
-const rustc = process.env.RUSTC ?? "rustc";
+// 1. The sanitized runtime: the prebuilt instrumented native archive named by
+//    --runtime-library. The Rust-source build is retired (gate above).
 const cc = process.env.SANITIZE_CC ?? "clang";
-const RUSTC_FLAGS = [
-  "--edition", "2021", "--crate-name", "jet_runtime", "--crate-type", "staticlib", "--cfg", "jet_native_pack", "-Awarnings",
-  "-Zsanitizer=address", "-Zub-checks=yes",
-  "-C", "opt-level=1", "-C", "codegen-units=16", "-C", "debuginfo=line-tables-only", "-C", "force-frame-pointers=yes",
-];
-const runtimeLib = suppliedRuntime ?? join(dirs.sanitize, "libjet_runtime_asan.a");
-const stampPath = join(dirs.sanitize, "libjet_runtime_asan.stamp");
-let stamp;
-if (!suppliedRuntime) {
-  const rustcVersion = spawnSync(rustc, ["-vV"], { encoding: "utf8" });
-  if (rustcVersion.status !== 0) throw new Error(`${rustc} -vV failed: ${rustcVersion.stderr}`);
-  stamp = createHash("sha256").update(readFileSync(runtimeSource)).update(rustcVersion.stdout).update(RUSTC_FLAGS.join(" ")).digest("hex");
-}
-if (!suppliedRuntime && (!existsSync(runtimeLib) || !existsSync(stampPath) || readFileSync(stampPath, "utf8").trim() !== stamp)) {
-  rmSync(runtimeLib, { force: true });
-  const started = Date.now();
-  const build = spawnSync(rustc, [...RUSTC_FLAGS, runtimeSource, "-o", runtimeLib], {
-    encoding: "utf8", env: { ...process.env, RUSTC_BOOTSTRAP: "1" }, maxBuffer: 1 << 28,
-  });
-  writeFileSync(join(dirs.sanitize, "runtime-build.log"), `${rustc} ${RUSTC_FLAGS.join(" ")} ${runtimeSource}\n${build.stderr ?? ""}`);
-  if (build.status !== 0) throw new Error(`sanitized runtime build failed (exit ${build.status}); see ${join(dirs.sanitize, "runtime-build.log")}`);
-  writeFileSync(stampPath, `${stamp}\n`);
-  console.log(`sanitized runtime: built in ${Math.round((Date.now() - started) / 1000)} s`);
-}
+const runtimeLib = suppliedRuntime;
 const duplicateCheck = spawnSync(process.execPath, [join(repo, "Tools/packaging/check-runtime-exports.mjs"), jetObject, runtimeLib], { encoding: "utf8" });
 if (duplicateCheck.error || duplicateCheck.status !== 0) throw new Error(`sanitized runtime export check failed: ${duplicateCheck.error ?? duplicateCheck.stderr}`);
 
@@ -220,7 +197,7 @@ for (const c of reported) {
 }
 const summary = [
   `cases: ${cases.length}`,
-  `runtime: ${suppliedRuntime ? "prebuilt native archive (producer must attest instrumentation)" : "Rust address+ub-checks build"}; leaks ${leaks ? "on" : "off"}; native code checked in ${cases.filter((c) => c.instrumented).length} of ${cases.length} cases`,
+  `runtime: prebuilt native archive (producer must attest instrumentation); leaks ${leaks ? "on" : "off"}; native code checked in ${cases.filter((c) => c.instrumented).length} of ${cases.length} cases`,
   ...[...counts].map(([verdict, count]) => `${verdict}: ${count}`),
   "",
   "reports by kind:",

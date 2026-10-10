@@ -1,15 +1,12 @@
 #!/usr/bin/env node
-// This historical witness requires a Rust harness; no native C mode exists here.
-console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
-process.exit(0);
-// A narrow seed-oracle/native witness. The producer must supply this exact
-// tree's freshly emitted Jet object and same-tree post-E2 runtime pack.
+// Native pack symbol proof for the UTF-8 validator, then the Rust utf8-corpus.rs
+// acceptance witness. That witness is retired: this runner reports UNCOVERED
+// with cardRequired:true and exits 2 without invoking rustc. The producer must
+// supply this exact tree's freshly emitted Jet object and same-tree runtime pack.
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, resolve } from 'node:path';
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output] = process.argv.slice(2);
 if (!output || process.argv.length !== 3) throw new Error('usage: run-utf8-corpus.mjs OUT');
 const object = process.env.JET_RUNTIME_JET_OBJECT;
@@ -28,29 +25,8 @@ for (const [label, path] of [['object', object], ['pack', pack]]) {
   const count = definitions.filter(([name, kind]) => name === 'jet_string_validate_utf8' && kind === 'T').length;
   if (count !== 1) failures.push(`${label}: validator has ${count} strong definitions`);
 }
-const executable = join(out, 'utf8-corpus');
-let compile;
-let run;
-if (!failures.length) {
-  compile = spawnSync(process.env.RUSTC ?? 'rustc', [
-    '--edition=2024', join(root, 'Compiler/JetRuntime/Tests/utf8-corpus.rs'),
-    '-C', 'panic=abort', '-C', `link-arg=${resolve(pack)}`,
-    '-C', 'link-arg=-lpthread', '-C', 'link-arg=-ldl', '-C', 'link-arg=-lm',
-    '-o', executable,
-  ], { encoding: 'utf8', maxBuffer: 1 << 28 });
-  writeFileSync(join(out, 'compile.log'), `${compile.stdout ?? ''}${compile.stderr ?? ''}`);
-  if (compile.error || compile.status !== 0) failures.push(`compile: ${compile.error?.message ?? `rc=${compile.status}`}`);
-  else {
-    run = spawnSync(executable, [], { encoding: 'utf8', timeout: 60000 });
-    writeFileSync(join(out, 'run.stdout'), run.stdout ?? '');
-    writeFileSync(join(out, 'run.stderr'), run.stderr ?? '');
-    if (run.error || run.status !== 0 || run.signal || run.stderr ||
-        run.stdout !== 'UTF-8 Jet/native acceptance and exact errors: passed\n') {
-      failures.push(`run: ${run.error?.message ?? `rc=${run.status}, signal=${run.signal}`}`);
-    }
-  }
-}
-const receipt = { object, pack, compileStatus: compile?.status ?? null, runStatus: run?.status ?? null, failures };
+const reason = 'utf8-corpus.rs Rust acceptance witness retired (owner #38/#59; Tower #4923): exact UTF-8 acceptance and error run not executed; no rustc invoked';
+const receipt = { status: 'UNCOVERED', cardRequired: true, reason, object, pack, symbolFailures: failures };
 writeFileSync(join(out, 'receipt.json'), `${JSON.stringify(receipt, null, 2)}\n`);
 console.log(JSON.stringify(receipt));
-if (failures.length) process.exitCode = 1;
+process.exit(2);

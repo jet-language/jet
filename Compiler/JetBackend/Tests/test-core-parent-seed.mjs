@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// Light seed-only transport proof: execute the actual Jet text generator twice,
-// then exercise all three build-splice cases using its emitted text and the
-// actual Native.rs splice helper. No cargo, runtime library or native claim.
+// Light seed-only transport proof: execute the actual Jet text generator, then
+// check the assembled aggregate's canonical source offsets. The Rust Native.rs
+// build-splice witness is retired: it reports UNCOVERED and exits 2. No cargo,
+// rustc, runtime library or native claim.
 import {spawnSync} from 'node:child_process';
 import {readFileSync, writeFileSync, mkdirSync} from 'node:fs';
 import {resolve, dirname, join} from 'node:path';
@@ -35,26 +36,6 @@ console.log(summary);
 const provenance = generated.stdout.split('\n').find(line => line.startsWith('Core parent private provenance: PASS;'));
 if (!provenance) throw new Error('Jet fixture returned no private provenance receipt');
 console.log(provenance);
-
-const nativePath = join(root, 'Compiler/Bootstrap/Host/Native.rs');
-const native = readFileSync(nativePath, 'utf8');
-const start = native.lastIndexOf('fn bootstrap_core_seed_splice(');
-if (start < 0) throw new Error('actual seed splice helper is absent');
-const helper = native.slice(start).trim();
-const testSource = helper + `\nfn main() {
-    let ingress = include_str!(${JSON.stringify(ingressPath)});
-    let stage0 = include_str!(${JSON.stringify(seedPath)});
-    assert_eq!(bootstrap_core_seed_splice(ingress, true), Ok("__jet_bootstrap_core_ingress(&__jet_request, __jet_runtime_admission)?;"));
-    assert_eq!(bootstrap_core_seed_splice(stage0, true), Err("CoreSharedSeedIngressMissing"));
-    assert_eq!(bootstrap_core_seed_splice(stage0, false), Ok(""));
-    println!("Core parent seed splice: PASS; ingress present, missing-requested refusal, stage0 unchanged (3/3)");
-}\n`;
-const rustPath = resolve(out, 'splice-fixture.rs');
-const executable = resolve(out, 'splice-fixture');
-writeFileSync(rustPath, testSource);
-run('rustc', ['--edition=2021', rustPath, '-o', executable]);
-const cases = run(executable, []);
-process.stdout.write(cases.stdout);
 
 // Run the real assembler in an isolated disk-backed HOME. The exact prefix
 // must shift every mapped range while preserving original diagnostic locations.
@@ -93,3 +74,5 @@ const generatedOffset = diagnostic.generated.start + originalOffset;
 assert.equal(aggregate.subarray(generatedOffset, generatedOffset + token.length).toString('utf8'), token.toString('utf8'));
 assert.equal(diagnostic.line_starts[3], originalOffset);
 console.log(`Core parent aggregate offsets: PASS; ${sourceMap.files.length} canonical ranges; mapped diagnostic ${diagnosticPath}:4:1 unchanged`);
+console.log(JSON.stringify({status: 'UNCOVERED', cardRequired: true, reason: 'Core parent build-splice witness (Native.rs bootstrap_core_seed_splice compiled and run by rustc) retired (owner #38/#59; Tower #4923): ingress-present, missing-requested refusal and stage0-unchanged cases are not exercised; no rustc invoked'}));
+process.exit(2);
