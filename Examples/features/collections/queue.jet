@@ -37,7 +37,11 @@ fn run() {
     assert(words.contains("alpha"))
     &words.delete("alpha")
     assert(words.to_list() == ["beta"])
-    assert(&words.pop_front() == .Val("beta"))
+    popped :: &words.pop_front()
+    if popped == {
+        .Val(value) -> assert(value == "beta")
+        .None -> assert(false)
+    }
     assert(words.is_empty())
 
     // Split clamps exact Int bounds, including values beyond machine words.

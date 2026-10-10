@@ -1001,10 +1001,10 @@ fn run() {
     assert_eq!(stdout, "kind:user\ntag:design\n");
 }
 
-/// D-SHAPE3b: Result spellings stay contextual identifiers, and dotted
-/// Optional-looking names remain ordinary variants on user enums.
+/// D-SHAPE3b: Ok remains an ordinary function name and dotted Result/Optional
+/// names remain user variants; S80 owns the global Err type and constructor.
 #[test]
-fn result_names_do_not_reserve_user_functions_or_variants() {
+fn result_variants_and_user_ok_function_remain_ordinary() {
     if !have_rustc() {
         return;
     }
@@ -1019,13 +1019,13 @@ fn Ok(value: Int) -> Int {
     return (value + 10)
 }
 
-fn Err(value: Int) -> Int {
+fn user_err(value: Int) -> Int {
     return (value + 20)
 }
 
 fn run() {
     print(Ok(1))
-    print(Err(2))
+    print(user_err(2))
     wrapped :: Wrapped.Val(7)
     if wrapped == {
         .Val(value) -> { print(value) }
