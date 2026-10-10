@@ -2049,6 +2049,9 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
         }
     }
     module_row.program.items = ^items
+    // D-CLI-FIELD-MARKERS1 (E1318): checked on the registered items, as the
+    // Rust reference's `validate_cli_items` runs after struct registration.
+    sema_registration_cli_short_names(module_row.program.items, &diagnostics)
     // Only foreign-handle rows change; every other row is read in place (a
     // copied row would carry its whole source declaration).
     loop nominal_index in 0..<module_row.nominals.len() {
@@ -2080,6 +2083,81 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     sema_attach_diagnostic_source_locations(&diagnostics, 0, module_row.source_segments)
     loop diagnostic in diagnostics -> &reported.push(diagnostic)
     module_row
+}
+
+// D-CLI-FIELD-MARKERS1 (Rust `validate_cli_items`, E1318): each `#Short`
+// spelling of a `#CLI` program struct is one ASCII letter and selects only
+// one field. `#CLI(Standard)` reserves `-v` and `-q`. A field with no CLI
+// mapping (Rust E1305) is skipped before its short name is read, and only the
+// first `#Short` marker with one literal string argument is read.
+fn sema_registration_cli_short_names(items: [Item], diagnostics: &[Diagnostic]) {
+    loop item in items {
+        if item == .Struct(definition) {
+            cli := false
+            loop derive_item in definition.derives {
+                if derive_item.name == "CLI" -> cli = true
+            }
+            if !cli -> next
+            seen := [String:String]{}
+            if sema_registration_cli_standard(definition.type_markers) {
+                seen["v"] = "standard --verbose"
+                seen["q"] = "standard --quiet"
+            }
+            loop field in definition.fields {
+                if !sema_registration_cli_field_mapped(field.ty) -> next
+                marker :: loop candidate in field.serde_markers {
+                    if candidate.name == "Short" -> break candidate
+                } ?? next
+                short :: sema_registration_cli_marker_string(marker) ?? next
+                bytes :: short.bytes()
+                letter := false
+                if bytes.len() == 1 {
+                    code :: Int.from_u8(bytes[0])
+                    letter = (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+                }
+                if !letter {
+                    &diagnostics.push(sema_error("E1318", marker.name_span, "`#Short(\"{short}\")` is not a one-letter option", "the shared command parser treats a short option as one ASCII letter.", "use one letter, such as `#Short(\"p\")`"))
+                    next
+                }
+                previous :: seen.get(short)
+                seen[short] = field.name
+                if previous == .Val(first) -> &diagnostics.push(sema_error("E1318", marker.name_span, "`#Short(\"{short}\")` is used by both `{first}` and `{field.name}`", "each short option must select only one `#CLI` field.", "give `{first}` or `{field.name}` a different `#Short` value"))
+            }
+        }
+    }
+}
+
+// Rust `validate_cli_items` standard-pack test: `#CLI(Standard)`.
+fn sema_registration_cli_standard(markers: [Marker]) -> Bool Never! {
+    loop marker in markers {
+        if marker.name != "CLI" -> next
+        loop argument in marker.args {
+            if argument == .Expr(value) && value == .Ident(name, _) && name == "Standard" -> return true
+        }
+    }
+    false
+}
+
+// Rust `classify_cli_field(..).is_some()`: a CLI scalar or an optional one.
+fn sema_registration_cli_field_mapped(ty: Type) -> Bool Never! {
+    if ty == .Option(inner) -> return sema_registration_cli_scalar(inner)
+    sema_registration_cli_scalar(ty)
+}
+
+// Rust `is_cli_scalar`: `Int` (and an inline range), `Float`, `Bool`, `String`, `Path`.
+fn sema_registration_cli_scalar(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int | .InlineRange(_, _, _) | .Float | .Bool | .String -> true
+        .Named(name) -> name == "Path"
+        else -> false
+    }
+}
+
+// Rust `marker_string`: the marker's first argument when it is one literal string.
+fn sema_registration_cli_marker_string(marker: Marker) -> String? {
+    if marker.args.len() == 0 -> return None
+    if marker.args[0] == .Expr(value) && value == .Str(parts, _) && parts.len() == 1 && parts[0] == .Lit(text) -> return Val(text)
+    None
 }
 
 fn sema_registration_import_is_unqualified(declaration: ImportDecl) -> Bool Never! {
