@@ -324,3 +324,11 @@ writes pass through the existing return-slot binder, which clears and refills
 the caller's buffer without an undeclared `__jet_return_reuse` reference.
 The compiler SHA256 hex-builder regression executes populated, empty and
 populated-again refills through the generated return-slot entry points.
+
+Hosted Rust derives follow the actual native carrier's capabilities: owned
+FileReader and FileWriter streams provide neither Rust Clone nor Debug, even
+when their opaque checked type has no generic arguments. Enclosing records
+must not gain those structural derives from an empty argument list. Checked
+source value hooks, such as Clock's semantic fork and Debug, remain available.
+Retained native config and Encode helpers use the canonical Dyn carrier; the
+retired DataTree Rust type is not restored as an alias.

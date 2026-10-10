@@ -884,9 +884,9 @@ fn jet_sys_dotenv_read_raw(path: &str) -> Result<String, (bool, String)> {
     ))
 }
 
-// Existing DataTree::Object projection only: unlike source maps, this carrier
+// Existing Dyn::Object projection only: unlike source maps, this carrier
 // preserves the native config tree's ordered duplicate keys on scalar/object
 // prefix collisions. No sorting, deduplication, parsing, or codec validation.
-fn jet_sys_config_object_raw(pairs: Vec<(String, jet_std::DataTree)>) -> jet_std::DataTree {
-    jet_std::DataTree::Object(pairs)
+fn jet_sys_config_object_raw(pairs: Vec<(String, jet_std::Dyn)>) -> jet_std::Dyn {
+    jet_std::Dyn::Object(pairs)
 }

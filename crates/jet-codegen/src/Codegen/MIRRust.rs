@@ -12054,6 +12054,15 @@ impl<'a> RustEmitter<'a> {
                             )
                         });
                 }
+                // These owned native streams implement neither Clone nor
+                // Debug; an opaque row with no type arguments is not evidence
+                // that its Rust representation supports a structural derive.
+                if matches!(
+                    crate::Codegen::file_handle_rust_type(&name.name),
+                    Some("JetFileReader" | "JetFileWriter")
+                ) {
+                    return false;
+                }
                 if self.selected_user_capability_impl(ty, trait_name) {
                     return true;
                 }
@@ -27649,9 +27658,9 @@ impl<'a> RustEmitter<'a> {
                     arms.push(match &variant.payload {
                         MirVariantPayload::Unit => {
                             if core_native_probe_name(&definition.key) == "ComputeError" {
-                                format!("{head}(_) => {root}jet_std::DataTree::Text({wire:?}.to_string()),")
+                                format!("{head}(_) => {root}jet_std::Dyn::Text({wire:?}.to_string()),")
                             } else {
-                                format!("{head} => {root}jet_std::DataTree::Text({wire:?}.to_string()),")
+                                format!("{head} => {root}jet_std::Dyn::Text({wire:?}.to_string()),")
                             }
                         }
                         MirVariantPayload::Single(_) => format!(

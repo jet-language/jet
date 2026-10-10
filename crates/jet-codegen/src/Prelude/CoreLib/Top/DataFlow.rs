@@ -4382,7 +4382,7 @@ mod jet_data_web {
             _ => jet_data_loader_canonical_tree(value),
         }
     }
-    fn status(value: &jet_std::DataLoaderStatus) -> jet_std::DataTree {
+    fn status(value: &jet_std::DataLoaderStatus) -> jet_std::Dyn {
         result_tree(vec![
             ("identity", text_tree(value.identity.clone())),
             ("freshness", text_tree(format!("{:?}", value.freshness))),

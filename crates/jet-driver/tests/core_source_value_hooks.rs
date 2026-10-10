@@ -95,6 +95,8 @@ fn run() {
                 execution: Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
             },
         );
+        assert!(!rust.contains("jet_std::DataTree"),
+            "retained native helpers and Encode producers must use the canonical Dyn carrier");
         let source = directory.join("clock_hooks.rs");
         let executable = directory.join(format!("clock_hooks{}", std::env::consts::EXE_SUFFIX));
         std::fs::write(&source, rust).unwrap();
