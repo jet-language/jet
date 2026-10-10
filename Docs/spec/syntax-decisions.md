@@ -1230,6 +1230,9 @@ one concept on every type. `#Comparable` and `#Printable` derive from fields
 on structs and enums, and re-expose the base capability on distinct types.
 Distinct-only `#Numeric` exposes `+ - * /` and ordering for the same type
 (E0138); `#CodableAsBase` exposes base coding.
+A marker-led declaration such as `#Numeric Meters :: distinct Float` attaches
+the marker to the distinct type, not to a module constant; an intervening
+newline does not change that attachment.
 `Usd + Eur` stays a type error; `.raw()` strips to the declaring type's base,
 including when the distinct type is imported. Nominal names in that base keep
 their declaring-module identity. **D-RANGETYPE1 — range-constrained

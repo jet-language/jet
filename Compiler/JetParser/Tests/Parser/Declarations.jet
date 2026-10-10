@@ -198,3 +198,14 @@ fn run() {}
     finish :: start + parser_test_find(source.slice(start, source.len()), "}}") + 1
     assert_eq(diagnostic.span, Val(Span{start: start, end: finish}))
 }
+
+// Rust: crates/jet-parser/tests/sigil_algebra.rs
+#Test("distinct_markers_select_the_type_site_before_module_bindings") {
+    loop source in ([String]{"#Numeric Meters :: distinct Float", "#Numeric\nMeters :: distinct Float"}) {
+        program :: parser_test_program(source)
+        program.items[0] == .Distinct(declaration) ?? panic("marked distinct type")
+        assert_eq(declaration.name, "Meters")
+        assert_eq(declaration.type_markers.len(), 1)
+        assert_eq(declaration.type_markers[0].name, "Numeric")
+    }
+}

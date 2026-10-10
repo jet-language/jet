@@ -1101,7 +1101,12 @@ impl<'a> Parser<'a> {
                 // their surface begins with `fn`.
                 TokKind::Hash if self.at_test_def() => self.test_def().map(Item::Test),
                 TokKind::Hash if self.at_bench_def() => self.retired_bench_marker(),
-                TokKind::Hash if self.marker_sequence_leads_to_constant() => {
+                // `Name :: distinct Base` owns a Type marker site, not the
+                // Constant site shared by ordinary module `::` bindings.
+                TokKind::Hash
+                    if !self.at_bundle_distinct_def()
+                        && self.marker_sequence_leads_to_constant() =>
+                {
                     self.constant_with_marker_list().map(Item::Const)
                 }
                 TokKind::Hash if self.marker_sequence_leads_to_function() => {
