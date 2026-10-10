@@ -25,6 +25,8 @@ test("function source proof requires every registry label and a current body", (
   assert.equal(sourceOwnedAdapterProofs([adapter], ledger, "", () => source).get("parse").kind, "source-function");
   assert.equal(sourceOwnedAdapterProofs([{...adapter, rows: [...adapter.rows, "core.example.__parse_raw"]}], ledger, "", () => source).size, 0);
   assert.equal(sourceOwnedAdapterProofs([adapter], ledger, "", () => "").size, 0);
+  assert.equal(sourceOwnedAdapterProofs([adapter], ledger, "", () => "// fn parse(text: String) { }\n").size, 0);
+  assert.equal(sourceOwnedAdapterProofs([adapter], ledger, "", () => "fn parse(text: String)\nfn other() { }\n").size, 0);
 });
 test("method proof requires the exact TIR arm and an owned declaration", () => {
   const adapter = {name: "legacy_inspect", symbol: "LegacyValue::inspect", rows: ["TIR/routes.rs"], params: []};

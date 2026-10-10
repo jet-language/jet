@@ -16,6 +16,23 @@ function block(source, start) {
   }
   return null;
 }
+function hasFunctionBody(source, name) {
+  const declaration = new RegExp(`\\bfn\\s+${escape(name)}\\s*\\(`, "g");
+  for (const match of source.matchAll(declaration)) {
+    const line = source.slice(source.lastIndexOf("\n", match.index) + 1, match.index);
+    if (line.trimStart().startsWith("//")) continue;
+    let end = match.index + match[0].length, depth = 1;
+    for (; end < source.length && depth; end++) {
+      if (source[end] === "(") depth++;
+      if (source[end] === ")") depth--;
+    }
+    if (depth) continue;
+    const open = source.indexOf("{", end);
+    if (open < 0 || /[;}]|\bfn\b/.test(source.slice(end, open))) continue;
+    if (block(source, open) !== null) return true;
+  }
+  return false;
+}
 export function sourceOwnedAdapterProofs(adapters, ledger, tirRoutes, readSource) {
   const modules = [...ledger.matchAll(/CoreSourceModule \{ module: "([^"]+)", alias: "[^"]+", path: "([^"]+)", owned_members: &\[([^\]]*)\]/g)]
     .map((row) => ({ module: row[1], path: row[2], members: new Set([...row[3].matchAll(/"([^"]+)"/g)].map((match) => match[1])) }));
@@ -24,13 +41,18 @@ export function sourceOwnedAdapterProofs(adapters, ledger, tirRoutes, readSource
     const paths = types.get(row[2]) ?? [];
     paths.push(row[1]); types.set(row[2], paths);
   }
+  const sources = new Map();
+  const sourceAt = (path) => {
+    if (!sources.has(path)) sources.set(path, readSource(path));
+    return sources.get(path);
+  };
   const method = (type, member) => {
     for (const path of types.get(type) ?? []) {
-      const source = readSource(path);
+      const source = sourceAt(path);
       for (const declaration of source.matchAll(/\b(?:struct|enum|impl)\s+(\w+)(?:<[^\n{]*>)?\s*\{/g)) {
         if (declaration[1] !== type) continue;
         const body = block(source, declaration.index + declaration[0].length - 1);
-        if (body && new RegExp(`\\bfn\\s+${escape(member)}\\s*\\(`).test(body)) return { path, type, member };
+        if (body && hasFunctionBody(body, member)) return { path, type, member };
       }
     }
     return null;
@@ -44,7 +66,7 @@ export function sourceOwnedAdapterProofs(adapters, ledger, tirRoutes, readSource
       for (const owner of modules) {
         if (!label.startsWith(owner.module + ".")) continue;
         const member = label.slice(owner.module.length + 1);
-        if (owner.members.has(member) && new RegExp(`\\bfn\\s+${escape(member)}\\s*\\(`).test(readSource(owner.path))) return { path: owner.path, module: owner.module, member };
+        if (owner.members.has(member) && hasFunctionBody(sourceAt(owner.path), member)) return { path: owner.path, module: owner.module, member };
       }
       return null;
     });

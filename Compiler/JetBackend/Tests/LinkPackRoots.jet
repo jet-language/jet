@@ -20,7 +20,8 @@ fn pack_roots_defined(c: LinkContext, name: String, binding: Int) Never! {
 }
 
 fn run() {
-    loop name in [String]{"_RNvRustSymbol", "_ZN3old", "__rust_alloc", "__rdl_alloc"} {
+    rust_symbols :: [String]{"_RNvRustSymbol", "_ZN3old", "__rust_alloc", "__rdl_alloc"}
+    loop name in rust_symbols {
         if !link_pack_rust_symbol(name) -> panic("Rust runtime dependency was not rejected: {name}")
     }
     if link_pack_rust_symbol("jet_rt_alloc") || link_pack_rust_symbol("_Rpack_private_helper") -> panic("ordinary fixture/runtime name mistaken for Rust")
@@ -69,8 +70,8 @@ fn run() {
     broken :: x64_link_runtime_pack([String]{"runtime.o", "missing.o", "runtime.a"}, ^[[U8]]{object, missing, archive}, [String]{})
     found_missing := false
     loop error in broken.errors {
-        if error.contains("undefined symbol `jet_pack_missing_dependency`") -> found_missing = true
+        if error.contains("undefined symbol `jet_ws_connect`") -> found_missing = true
     }
-    if !found_missing || broken.bytes.len() != 0 -> panic("pack accepted an unresolved strong import")
+    if !found_missing || broken.bytes.len() != 0 -> panic("pack accepted a non-native WebSocket member without its provider")
     print("runtime pack object roots: pass")
 }
