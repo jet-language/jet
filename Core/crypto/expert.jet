@@ -165,36 +165,36 @@ fn pad16(n: Int) -> [U8] Never! {
 
 fn chacha_poly_seal(key: [U8], nonce: [U8], aad: [U8], plain: [U8]) -> [U8] Never! {
     otk :: chacha20_block(key, nonce, 0)
-    ct :: chacha20_xor(key, nonce, 1, plain)
+    ciphertext :: chacha20_xor(key, nonce, 1, plain)
     mac_data := [U8]{}
     loop b in aad -> &mac_data.push(b)
     loop b in pad16(aad.len()) -> &mac_data.push(b)
-    loop b in ct -> &mac_data.push(b)
-    loop b in pad16(ct.len()) -> &mac_data.push(b)
+    loop b in ciphertext -> &mac_data.push(b)
+    loop b in pad16(ciphertext.len()) -> &mac_data.push(b)
     loop b in le_bytes(aad.len(), 8) -> &mac_data.push(b)
-    loop b in le_bytes(ct.len(), 8) -> &mac_data.push(b)
+    loop b in le_bytes(ciphertext.len(), 8) -> &mac_data.push(b)
     auth_tag :: poly1305(otk, mac_data)
     out := [U8]{}
-    loop b in ct -> &out.push(b)
+    loop b in ciphertext -> &out.push(b)
     loop b in auth_tag -> &out.push(b)
     out
 }
 
 fn chacha_poly_open(key: [U8], nonce: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
     if cipher.len() < 16 -> return None
-    ct :: slice_u8(cipher, 0, cipher.len() - 16)
+    ciphertext :: slice_u8(cipher, 0, cipher.len() - 16)
     auth_tag :: slice_u8(cipher, cipher.len() - 16, cipher.len())
     otk :: chacha20_block(key, nonce, 0)
     mac_data := [U8]{}
     loop b in aad -> &mac_data.push(b)
     loop b in pad16(aad.len()) -> &mac_data.push(b)
-    loop b in ct -> &mac_data.push(b)
-    loop b in pad16(ct.len()) -> &mac_data.push(b)
+    loop b in ciphertext -> &mac_data.push(b)
+    loop b in pad16(ciphertext.len()) -> &mac_data.push(b)
     loop b in le_bytes(aad.len(), 8) -> &mac_data.push(b)
-    loop b in le_bytes(ct.len(), 8) -> &mac_data.push(b)
+    loop b in le_bytes(ciphertext.len(), 8) -> &mac_data.push(b)
     expect :: poly1305(otk, mac_data)
     equal :: constant_time_equal_bytes(auth_tag, expect) ?? return None
-    if equal -> return Val(chacha20_xor(key, nonce, 1, ct))
+    if equal -> return Val(chacha20_xor(key, nonce, 1, ciphertext))
     None
 }
 
@@ -461,7 +461,7 @@ fn aes_ctr(rk: [U8], j0: [U8], data: [U8], count: Int, state: &[U8], work: &[U64
     i := 0
     loop i < count {
         inc32(&ctr)
-        aes256_encrypt_block(rk, ctr, state, work)
+        aes256_encrypt_block(rk, ctr, &state, &work)
         j := 0
         loop j < 16 && i < count {
             &out.push(data[i].bit_xor(state[j]))
@@ -509,7 +509,7 @@ fn ghash_blocks(y: &[U64], high: U64, low: U64, data: [U8], count: Int) Never! {
         }
         y[0] = y[0].bit_xor(a)
         y[1] = y[1].bit_xor(b)
-        gf128_mul(y, high, low)
+        gf128_mul(&y, high, low)
         off = off + 16
     }
 }
@@ -559,13 +559,13 @@ fn aes256_expand(key: [U8], state: &[U8], work: &[U64]) -> [U8] Never! {
         loop j in 0..<4 -> state[j] = w[(i - 1) * 4 + j]
         loop j in 4..<16 -> state[j] = U8{0}
         if i %% 8 == 0 {
-            first :: state[0]
+            first :: state[0].copy()
             loop j in 0..<3 -> state[j] = state[j + 1]
             state[3] = first
-            sub_bytes(state, work)
+            sub_bytes(&state, &work)
             state[0] = state[0].bit_xor(C_AES_RCON[i /% 8 - 1])
         } else {
-            if i %% 8 == 4 -> sub_bytes(state, work)
+            if i %% 8 == 4 -> sub_bytes(&state, &work)
         }
         loop j in 0..<4 -> &w.push(w[(i - 8) * 4 + j].bit_xor(state[j]))
     }
@@ -574,16 +574,16 @@ fn aes256_expand(key: [U8], state: &[U8], work: &[U64]) -> [U8] Never! {
 
 fn aes256_encrypt_block(rk: [U8], block: [U8], s: &[U8], work: &[U64]) Never! {
     loop i in 0..<16 -> s[i] = block[i]
-    add_round(s, rk, 0)
+    add_round(&s, rk, 0)
     loop round in 1..<14 {
-        sub_bytes(s, work)
-        shift_rows(s)
-        mix_columns(s)
-        add_round(s, rk, round)
+        sub_bytes(&s, &work)
+        shift_rows(&s)
+        mix_columns(&s)
+        add_round(&s, rk, round)
     }
-    sub_bytes(s, work)
-    shift_rows(s)
-    add_round(s, rk, 14)
+    sub_bytes(&s, &work)
+    shift_rows(&s)
+    add_round(&s, rk, 14)
 }
 
 fn add_round(s: &[U8], rk: [U8], round: Int) Never! {
@@ -597,19 +597,19 @@ fn sub_bytes(s: &[U8], w: &[U64]) Never! {
         w[p] = U64{0}
         loop lane in 0..<16 -> w[p] = w[p].bit_or((((U64.from_u8(s[lane]) >> p).bit_and(U64{1})) << lane))
     }
-    aes_square(w, 0, 8)           // x^2
-    aes_multiply(w, 8, 0, 16)     // x^3
-    aes_square(w, 16, 24)         // x^6
-    aes_square(w, 24, 24)         // x^12
-    aes_multiply(w, 24, 16, 32)   // x^15
+    aes_square(&w, 0, 8)           // x^2
+    aes_multiply(&w, 8, 0, 16)     // x^3
+    aes_square(&w, 16, 24)         // x^6
+    aes_square(&w, 24, 24)         // x^12
+    aes_multiply(&w, 24, 16, 32)   // x^15
     loop p in 0..<8 -> w[16 + p] = w[32 + p]
-    aes_square(w, 16, 16)         // x^30
-    aes_square(w, 16, 16)         // x^60
-    aes_square(w, 16, 16)         // x^120
-    aes_square(w, 16, 16)         // x^240
-    aes_multiply(w, 16, 24, 32)   // x^252
+    aes_square(&w, 16, 16)         // x^30
+    aes_square(&w, 16, 16)         // x^60
+    aes_square(&w, 16, 16)         // x^120
+    aes_square(&w, 16, 16)         // x^240
+    aes_multiply(&w, 16, 24, 32)   // x^252
     loop p in 0..<8 -> w[16 + p] = w[32 + p]
-    aes_multiply(w, 16, 8, 32)    // x^254 (zero also follows this chain)
+    aes_multiply(&w, 16, 8, 32)    // x^254 (zero also follows this chain)
     loop p in 0..<8 {
         w[p] = w[32 + p].bit_xor(w[32 + ((p + 4) %% 8)]).bit_xor(w[32 + ((p + 5) %% 8)]).bit_xor(w[32 + ((p + 6) %% 8)]).bit_xor(w[32 + ((p + 7) %% 8)])
         if ((0x63 >> p).bit_and(1)) != 0 -> w[p] = w[p].bit_xor(U64{65535})
@@ -623,14 +623,14 @@ fn sub_bytes(s: &[U8], w: &[U64]) Never! {
 
 // Linear square modulo x^8+x^4+x^3+x+1, with locals permitting aliasing.
 fn aes_square(w: &[U64], src: Int, dst: Int) Never! {
-    a0 :: w[src]
-    a1 :: w[src + 1]
-    a2 :: w[src + 2]
-    a3 :: w[src + 3]
-    a4 :: w[src + 4]
-    a5 :: w[src + 5]
-    a6 :: w[src + 6]
-    a7 :: w[src + 7]
+    a0 :: w[src].copy()
+    a1 :: w[src + 1].copy()
+    a2 :: w[src + 2].copy()
+    a3 :: w[src + 3].copy()
+    a4 :: w[src + 4].copy()
+    a5 :: w[src + 5].copy()
+    a6 :: w[src + 6].copy()
+    a7 :: w[src + 7].copy()
     w[dst] = a0.bit_xor(a4).bit_xor(a6)
     w[dst + 1] = a4.bit_xor(a6).bit_xor(a7)
     w[dst + 2] = a1.bit_xor(a5)
@@ -649,7 +649,7 @@ fn aes_multiply(w: &[U64], a: Int, b: Int, dst: Int) Never! {
     }
     loop bit in 0..<8 {
         loop p in 0..<8 -> w[dst + p] = w[dst + p].bit_xor((w[40 + p].bit_and(w[b + bit])))
-        high :: w[47]
+        high :: w[47].copy()
         loop p in 0..<7 -> w[47 - p] = w[46 - p]
         w[40] = high
         w[41] = w[41].bit_xor(high)
@@ -688,10 +688,10 @@ fn shift_rows(s: &[U8]) Never! {
 fn mix_columns(s: &[U8]) Never! {
     loop c in 0..<4 {
         i :: 4 * c
-        a0 :: s[i]
-        a1 :: s[i + 1]
-        a2 :: s[i + 2]
-        a3 :: s[i + 3]
+        a0 :: s[i].copy()
+        a1 :: s[i + 1].copy()
+        a2 :: s[i + 2].copy()
+        a3 :: s[i + 3].copy()
         all :: a0.bit_xor(a1).bit_xor(a2).bit_xor(a3)
         s[i] = a0.bit_xor(all).bit_xor(xtime(a0.bit_xor(a1)))
         s[i + 1] = a1.bit_xor(all).bit_xor(xtime(a1.bit_xor(a2)))

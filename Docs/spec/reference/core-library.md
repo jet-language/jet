@@ -1562,6 +1562,19 @@ raw X25519 still rejects non-contributory peers. See
 [`crypto_suite.jet`](../../../Examples/features/crypto/crypto_suite.jet) and
 [`crypto_envelope.jet`](../../../Examples/features/crypto/crypto_envelope.jet).
 
+The expert secret-byte projections return owned copies, not transfers out of
+the original zeroizing owner. The private JETC v2 engine uses those projections
+only inside reasoned `#Unsafe` blocks and wipes each operation-scoped copy on
+both success and refusal before propagating the outcome. The original
+`Secret`, `SharedSecret`, and `X25519SecretKey` retain their ordinary `Close`
+duty; no raw secret-field access is required outside the expert boundary.
+
+Fixed-limb operations reserve their complete workspace before filling it,
+avoiding geometric regrowth that could leave stale secret bytes in freed
+allocations. Workspace reads are computed before lending the workspace for a
+store, and AES aliasing temporaries explicitly copy scalar lanes before
+mutating a bank.
+
 AES-256-GCM uses a 32-byte key, a 12-byte nonce, and a 16-byte appended tag.
 Its source substitution uses fixed bitplane operations rather than
 secret-indexed lookup tables; GHASH uses 128 masked fixed-width steps.

@@ -4,10 +4,13 @@
 // One packed I64 workspace per operation; no field/round allocations.
 use core
 use core.crypto as crypto
+use core.mem as mem
 
 fn arena(words: Int) -> [I64] Never! {
     w := [I64]{}
-    &w.reserve(words)
+    #Unsafe("Core fixed-limb workspace reserves its complete operation-owned word capacity before filling") {
+        if !mem.__list_reserve_exact<I64>(&w, words) -> panic("crypto workspace allocation failed")
+    }
     loop _ in 0..<words -> &w.push(I64{0})
     w
 }
@@ -31,7 +34,9 @@ fn load(w: &[I64], at: Int, data: [U8]) Never! {
 }
 fn extract(w: [I64], at: Int, count: Int) -> [U8] Never! {
     out := [U8]{}
-    &out.reserve(count)
+    #Unsafe("Core fixed-limb extraction reserves its exact public output width before filling") {
+        if !mem.__list_reserve_exact<U8>(&out, count) -> panic("crypto output allocation failed")
+    }
     loop i in 0..<count -> &out.push(U8{byte(w, at + i)})
     out
 }
@@ -41,7 +46,10 @@ fn equal(w: [I64], a: Int, b: Int, count: Int) -> Bool Never! {
     diff == I64{0}
 }
 fn copy_field(w: &[I64], out: Int, input: Int) Never! {
-    loop i in 0..<16 -> store(&w, out + i * 8, word(w, input + i * 8))
+    loop i in 0..<16 {
+        value :: word(w, input + i * 8)
+        store(&w, out + i * 8, value)
+    }
 }
 #Arithmetic(.Wrapping)
 fn carry(w: &[I64], a: Int) Never! {
@@ -49,8 +57,13 @@ fn carry(w: &[I64], a: Int) Never! {
         v :: word(w, a + i * 8) + I64{65536}
         c :: v >> 16
         store(&w, a + i * 8, v - (c << 16))
-        if i < 15 -> store(&w, a + (i + 1) * 8, word(w, a + (i + 1) * 8) + c - I64{1})
-        else -> store(&w, a, word(w, a) + I64{38} * (c - I64{1}))
+        if i < 15 {
+            value :: word(w, a + (i + 1) * 8) + c - I64{1}
+            store(&w, a + (i + 1) * 8, value)
+        } else {
+            value :: word(w, a) + I64{38} * (c - I64{1})
+            store(&w, a, value)
+        }
     }
 }
 #Arithmetic(.Wrapping)
@@ -66,11 +79,17 @@ fn swap(w: &[I64], a: Int, b: Int, bit: I64) Never! {
 }
 #Arithmetic(.Wrapping)
 fn add(w: &[I64], out: Int, a: Int, b: Int) Never! {
-    loop i in 0..<16 -> store(&w, out + i * 8, word(w, a + i * 8) + word(w, b + i * 8))
+    loop i in 0..<16 {
+        value :: word(w, a + i * 8) + word(w, b + i * 8)
+        store(&w, out + i * 8, value)
+    }
 }
 #Arithmetic(.Wrapping)
 fn sub(w: &[I64], out: Int, a: Int, b: Int) Never! {
-    loop i in 0..<16 -> store(&w, out + i * 8, word(w, a + i * 8) - word(w, b + i * 8))
+    loop i in 0..<16 {
+        value :: word(w, a + i * 8) - word(w, b + i * 8)
+        store(&w, out + i * 8, value)
+    }
 }
 #Arithmetic(.Wrapping)
 fn mul(w: &[I64], out: Int, a: Int, b: Int, work: Int) Never! {
@@ -78,10 +97,14 @@ fn mul(w: &[I64], out: Int, a: Int, b: Int, work: Int) Never! {
     loop i in 0..<16 {
         loop j in 0..<16 {
             at :: work + (i + j) * 8
-            store(&w, at, word(w, at) + word(w, a + i * 8) * word(w, b + j * 8))
+            value :: word(w, at) + word(w, a + i * 8) * word(w, b + j * 8)
+            store(&w, at, value)
         }
     }
-    loop i in 0..<15 -> store(&w, work + i * 8, word(w, work + i * 8) + I64{38} * word(w, work + (i + 16) * 8))
+    loop i in 0..<15 {
+        value :: word(w, work + i * 8) + I64{38} * word(w, work + (i + 16) * 8)
+        store(&w, work + i * 8, value)
+    }
     copy_field(&w, out, work)
     carry(&w, out)
     carry(&w, out)
@@ -92,10 +115,12 @@ fn pack(w: &[I64], out: Int, value: Int, reduced: Int) Never! {
     carry(&w, value)
     carry(&w, value)
     loop _ in 0..<2 {
-        store(&w, reduced, word(w, value) - I64{65517})
+        low :: word(w, value) - I64{65517}
+        store(&w, reduced, low)
         loop i in 1..<15 {
             previous :: word(w, reduced + (i - 1) * 8)
-            store(&w, reduced + i * 8, word(w, value + i * 8) - I64{65535} - ((previous >> 16).bit_and(I64{1})))
+            limb :: word(w, value + i * 8) - I64{65535} - ((previous >> 16).bit_and(I64{1}))
+            store(&w, reduced + i * 8, limb)
             store(&w, reduced + (i - 1) * 8, previous.bit_and(I64{65535}))
         }
         previous :: word(w, reduced + 112)
@@ -126,10 +151,16 @@ fn x25519(sk: [U8], point: [U8]) -> [U8] Never! {
     w := arena(204)
     load(&w, 1536, sk)
     load(&w, 1568, point)
-    put(&w, 1536, byte(w, 1536).bit_and(I64{248}))
-    put(&w, 1567, (byte(w, 1567).bit_and(I64{127})).bit_or(I64{64}))
-    loop i in 0..<16 -> store(&w, i * 8, byte(w, 1568 + i * 2).bit_or((byte(w, 1569 + i * 2) << 8)))
-    store(&w, 120, word(w, 120).bit_and(I64{32767}))
+    low :: byte(w, 1536).bit_and(I64{248})
+    put(&w, 1536, low)
+    high :: (byte(w, 1567).bit_and(I64{127})).bit_or(I64{64})
+    put(&w, 1567, high)
+    loop i in 0..<16 {
+        value :: byte(w, 1568 + i * 2).bit_or((byte(w, 1569 + i * 2) << 8))
+        store(&w, i * 8, value)
+    }
+    top :: word(w, 120).bit_and(I64{32767})
+    store(&w, 120, top)
     copy_field(&w, 256, 0)
     store(&w, 128, I64{1})
     store(&w, 512, I64{1})
@@ -237,7 +268,8 @@ fn point_pack(w: &[I64], out: Int, p: Int) Never! {
     mul(&w, p + 128, p + 128, 1792, 2816)
     pack(&w, 3328, p, 3200)
     pack(&w, out, p + 128, 3200)
-    put(&w, out + 31, byte(w, out + 31).bit_or(((byte(w, 3328).bit_and(I64{1})) << 7)))
+    value :: byte(w, out + 31).bit_or(((byte(w, 3328).bit_and(I64{1})) << 7))
+    put(&w, out + 31, value)
 }
 #Arithmetic(.Wrapping)
 fn mod_l(w: &[I64], out: Int, x: Int) Never! {
@@ -255,7 +287,8 @@ fn mod_l(w: &[I64], out: Int, x: Int) Never! {
             store(&w, x + j * 8, v - (c << 8))
             j += 1
         }
-        store(&w, x + j * 8, word(w, x + j * 8) + c)
+        value :: word(w, x + j * 8) + c
+        store(&w, x + j * 8, value)
         store(&w, x + i * 8, I64{0})
         i -= 1
     }
@@ -266,21 +299,30 @@ fn mod_l(w: &[I64], out: Int, x: Int) Never! {
         c = v >> 8
         store(&w, x + j * 8, v.bit_and(I64{255}))
     }
-    loop j in 0..<32 -> store(&w, x + j * 8, word(w, x + j * 8) - c * C_L[j])
+    loop j in 0..<32 {
+        value :: word(w, x + j * 8) - c * C_L[j]
+        store(&w, x + j * 8, value)
+    }
     loop j in 0..<32 {
         v :: word(w, x + j * 8)
-        store(&w, x + (j + 1) * 8, word(w, x + (j + 1) * 8) + (v >> 8))
+        next :: word(w, x + (j + 1) * 8) + (v >> 8)
+        store(&w, x + (j + 1) * 8, next)
         put(&w, out + j, v.bit_and(I64{255}))
     }
 }
 fn reduce(w: &[I64], hash: Int) Never! {
-    loop i in 0..<64 -> store(&w, 4960 + i * 8, byte(w, hash + i))
+    loop i in 0..<64 {
+        value :: byte(w, hash + i)
+        store(&w, 4960 + i * 8, value)
+    }
     clear(&w, hash, 64)
     mod_l(&w, hash, 4960)
 }
 fn hash_parts(w: &[I64], out: Int, a: Int, an: Int, b: Int, bn: Int, msg: [U8]) Never! {
     data := [U8]{}
-    &data.reserve(an + bn + msg.len())
+    #Unsafe("Core Ed25519 hashing reserves the exact combined public part lengths before filling") {
+        if !mem.__list_reserve_exact<U8>(&data, an + bn + msg.len()) -> panic("crypto hash input allocation failed")
+    }
     loop i in 0..<an -> &data.push(U8{byte(w, a + i)})
     loop i in 0..<bn -> &data.push(U8{byte(w, b + i)})
     loop v in msg -> &data.push(v)
@@ -293,8 +335,10 @@ fn expand(w: &[I64], seed: [U8]) Never! {
     digest := crypto.sha512(seed).bytes
     load(&w, 4096, digest)
     crypto.__zeroize(&digest)
-    put(&w, 4096, byte(w, 4096).bit_and(I64{248}))
-    put(&w, 4127, (byte(w, 4127).bit_and(I64{63})).bit_or(I64{64}))
+    low :: byte(w, 4096).bit_and(I64{248})
+    put(&w, 4096, low)
+    high :: (byte(w, 4127).bit_and(I64{63})).bit_or(I64{64})
+    put(&w, 4127, high)
     constants(&w)
 }
 fn ed_public(seed: [U8]) -> [U8] Never! {
@@ -322,12 +366,16 @@ fn ed_sign(seed: [U8], msg: [U8]) -> [U8] Never! {
     hash_parts(&w, 4224, 5504, 32, 4288, 32, msg)
     reduce(&w, 4224)
     clear(&w, 4960, 512)
-    loop i in 0..<32 -> store(&w, 4960 + i * 8, byte(w, 4160 + i))
+    loop i in 0..<32 {
+        value :: byte(w, 4160 + i)
+        store(&w, 4960 + i * 8, value)
+    }
     loop i in 0..<32 {
         ki :: byte(w, 4224 + i)
         loop j in 0..<32 {
             at :: 4960 + (i + j) * 8
-            store(&w, at, word(w, at) + ki * byte(w, 4096 + j))
+            value :: word(w, at) + ki * byte(w, 4096 + j)
+            store(&w, at, value)
         }
     }
     mod_l(&w, 5536, 4960)
@@ -369,8 +417,12 @@ fn decode(w: &[I64], p: Int, bytes: Int) -> Bool Never! {
     if !canonical_y(w, bytes) -> return false
     clear(&w, p, 512)
     store(&w, p + 256, I64{1})
-    loop i in 0..<16 -> store(&w, p + 128 + i * 8, byte(w, bytes + i * 2).bit_or((byte(w, bytes + i * 2 + 1) << 8)))
-    store(&w, p + 248, word(w, p + 248).bit_and(I64{32767}))
+    loop i in 0..<16 {
+        value :: byte(w, bytes + i * 2).bit_or((byte(w, bytes + i * 2 + 1) << 8))
+        store(&w, p + 128 + i * 8, value)
+    }
+    top :: word(w, p + 248).bit_and(I64{32767})
+    store(&w, p + 248, top)
     mul(&w, 1920, p + 128, p + 128, 2816)
     mul(&w, 2048, 1920, 4608, 2816)
     sub(&w, 1920, 1920, p + 256)
@@ -402,13 +454,19 @@ fn decode(w: &[I64], p: Int, bytes: Int) -> Bool Never! {
     pack(&w, 3328, p, 3200)
     // Return -P, as in the held port. Inputs are public.
     if (byte(w, 3328).bit_and(I64{1})) == (byte(w, bytes + 31) >> 7) {
-        loop j in 0..<16 -> store(&w, p + j * 8, I64{0} - word(w, p + j * 8))
+        loop j in 0..<16 {
+            value :: I64{0} - word(w, p + j * 8)
+            store(&w, p + j * 8, value)
+        }
     }
     mul(&w, p + 384, p, p + 128, 2816)
     true
 }
 fn small_order(w: &[I64], p: Int) -> Bool Never! {
-    loop i in 0..<64 -> store(&w, 4096 + i * 8, word(w, p + i * 8))
+    loop i in 0..<64 {
+        value :: word(w, p + i * 8)
+        store(&w, 4096 + i * 8, value)
+    }
     loop _ in 0..<3 -> point_add(&w, 4096, 4096)
     point_pack(&w, 4928, 4096)
     diff := byte(w, 4928).bit_xor(I64{1})
@@ -421,14 +479,18 @@ fn canonical_point(w: &[I64], p: Int, encoded: Int) -> Bool Never! {
     diff := I64{0}
     loop i in 0..<32 -> diff = diff.bit_or(byte(w, 3328 + i))
     sign :: if diff == (I64{0}) -> I64{0} else -> I64{128}
-    put(&w, 4959, byte(w, 4959).bit_xor(sign))
+    value :: byte(w, 4959).bit_xor(sign)
+    put(&w, 4959, value)
     equal(w, 4928, encoded, 32)
 }
 fn verify_equation(w: &[I64], msg: [U8]) -> Bool Never! {
     hash_parts(&w, 4864, 5472, 32, 5536, 32, msg)
     reduce(&w, 4864)
     point_mul(&w, 768, 1280, 4864)
-    loop i in 0..<64 -> store(&w, 4096 + i * 8, word(w, 768 + i * 8))
+    loop i in 0..<64 {
+        value :: word(w, 768 + i * 8)
+        store(&w, 4096 + i * 8, value)
+    }
     base(&w, 1280)
     point_mul(&w, 768, 1280, 5504)
     point_add(&w, 768, 4096)
@@ -491,18 +553,24 @@ fn poly_block(w: &[I64], length: Int) Never! {
     t1 :: le32(w, 100)
     t2 :: le32(w, 104)
     t3 :: le32(w, 108)
-    store(&w, 40, word(w, 40) + (t0.bit_and(I64{0x3ffffff})))
-    store(&w, 48, word(w, 48) + (((t0 >> 26).bit_or((t1 << 6))).bit_and(I64{0x3ffffff})))
-    store(&w, 56, word(w, 56) + (((t1 >> 20).bit_or((t2 << 12))).bit_and(I64{0x3ffffff})))
-    store(&w, 64, word(w, 64) + (((t2 >> 14).bit_or((t3 << 18))).bit_and(I64{0x3ffffff})))
-    store(&w, 72, word(w, 72) + (t3 >> 8) + (byte(w, 112) << 24))
+    h0 :: word(w, 40) + (t0.bit_and(I64{0x3ffffff}))
+    store(&w, 40, h0)
+    h1 :: word(w, 48) + (((t0 >> 26).bit_or((t1 << 6))).bit_and(I64{0x3ffffff}))
+    store(&w, 48, h1)
+    h2 :: word(w, 56) + (((t1 >> 20).bit_or((t2 << 12))).bit_and(I64{0x3ffffff}))
+    store(&w, 56, h2)
+    h3 :: word(w, 64) + (((t2 >> 14).bit_or((t3 << 18))).bit_and(I64{0x3ffffff}))
+    store(&w, 64, h3)
+    h4 :: word(w, 72) + (t3 >> 8) + (byte(w, 112) << 24)
+    store(&w, 72, h4)
     loop i in 0..<5 -> store(&w, 120 + i * 8, I64{0})
     loop i in 0..<5 {
         loop j in 0..<5 {
             sum :: i + j
             factor :: if sum >= 5 -> I64{5} else -> I64{1}
             at :: 120 + (sum %% 5) * 8
-            store(&w, at, word(w, at) + word(w, 40 + i * 8) * word(w, j * 8) * factor)
+            value :: word(w, at) + word(w, 40 + i * 8) * word(w, j * 8) * factor
+            store(&w, at, value)
         }
     }
     c := I64{0}
@@ -513,7 +581,8 @@ fn poly_block(w: &[I64], length: Int) Never! {
     }
     first :: word(w, 40) + c * I64{5}
     store(&w, 40, first.bit_and(I64{0x3ffffff}))
-    store(&w, 48, word(w, 48) + (first >> 26))
+    next :: word(w, 48) + (first >> 26)
+    store(&w, 48, next)
 }
 #Arithmetic(.Wrapping)
 fn poly_finish(w: &[I64]) Never! {
@@ -525,7 +594,8 @@ fn poly_finish(w: &[I64]) Never! {
     }
     first :: word(w, 40) + c * I64{5}
     store(&w, 40, first.bit_and(I64{0x3ffffff}))
-    store(&w, 48, word(w, 48) + (first >> 26))
+    next :: word(w, 48) + (first >> 26)
+    store(&w, 48, next)
     c = I64{5}
     loop i in 0..<5 {
         v :: word(w, 40 + i * 8) + c
@@ -533,7 +603,10 @@ fn poly_finish(w: &[I64]) Never! {
         c = v >> 26
     }
     mask :: I64{0} - c
-    loop i in 0..<5 -> store(&w, 40 + i * 8, (word(w, 120 + i * 8).bit_and(mask)).bit_or((word(w, 40 + i * 8).bit_and((mask.bit_xor(I64{-1}))))))
+    loop i in 0..<5 {
+        value :: (word(w, 120 + i * 8).bit_and(mask)).bit_or((word(w, 40 + i * 8).bit_and((mask.bit_xor(I64{-1})))))
+        store(&w, 40 + i * 8, value)
+    }
     h0 :: word(w, 40)
     h1 :: word(w, 48)
     h2 :: word(w, 56)
@@ -562,7 +635,10 @@ fn poly1305(key: [U8], data: [U8]) -> [U8] Never! {
     store(&w, 16, ((t1 >> 20).bit_or((t2 << 12))).bit_and(I64{0x3ffc0ff}))
     store(&w, 24, ((t2 >> 14).bit_or((t3 << 18))).bit_and(I64{0x3f03fff}))
     store(&w, 32, (t3 >> 8).bit_and(I64{0xfffff}))
-    loop i in 0..<16 -> put(&w, 80 + i, byte(w, 192 + i))
+    loop i in 0..<16 {
+        value :: byte(w, 192 + i)
+        put(&w, 80 + i, value)
+    }
     at := 0
     loop at < data.len() {
         count :: if data.len() - at < 16 -> data.len() - at else -> 16
