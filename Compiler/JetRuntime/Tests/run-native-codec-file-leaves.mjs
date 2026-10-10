@@ -15,15 +15,13 @@ const [output, compiler, runtime, ...extra] = process.argv.slice(2);
 const test = extra.length === 2 && extra[0] === '--test' ? extra[1] : null;
 const fixtures = { CodecCSV: 'jet_rt_codec_csv_fixture', CodecEnv: 'jet_rt_codec_env_fixture', DynCodec: 'jet_rt_dyn_codec_fixture', CompilerFileLeaves: 'jet_rt_compiler_file_leaves_fixture' };
 if (!output || !compiler || !runtime || (extra.length && (!test || !fixtures[test]))) throw Error('usage: run-native-codec-file-leaves.mjs OUT STAGE2_JET RC_RUNTIME_DIR [--test CodecCSV|CodecEnv|DynCodec|CompilerFileLeaves]');
-const musl = process.env.JET_PACK_MUSL_LIB;
-if (!musl) throw Error('JET_PACK_MUSL_LIB must name the admitted static musl directory');
 const out = resolve(output), jet = resolve(compiler), runtimeDirectory = resolve(runtime);
 mkdirSync(out);
 function receipt(name, value) {
   writeFileSync(join(out, name), JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
 }
 function command(name, bin, args, cwd = root) {
-  const result = spawnSync(bin, args, { cwd, env: process.env, encoding: 'utf8', maxBuffer: 1 << 27, timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 0) });
+  const result = spawnSync(bin, args, { cwd, env: process.env, encoding: 'utf8', maxBuffer: 1 << 27, timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? (test ? 120000 : 0)) });
   receipt(`${name}.receipt.json`, { bin, args, cwd, status: result.status, signal: result.signal, error: result.error?.message ?? null, stdout: result.stdout, stderr: result.stderr });
   if (result.error || result.status !== 0) throw Error(`${name}: ${result.error?.message ?? result.signal ?? result.status}\n${result.stdout ?? ''}${result.stderr ?? ''}`);
   return result;
@@ -36,6 +34,9 @@ const objectHandle = fileObject(object);
 if (objectHandle.split(':')[0] !== admitted.provenance.objectSha256) throw Error('standalone object snapshot differs from admitted provenance');
 const archives = admitted.provenance.cPlatformArchives;
 if (!Array.isArray(archives) || !archives.length || archives.some(row => row.language !== 'C' || row.role !== 'platform')) throw Error('runtime provenance lacks canonical C platform inputs');
+const admittedLibc = archives.find(row => basename(row.path) === 'libc.a');
+const musl = process.env.JET_PACK_MUSL_LIB ?? (test && admittedLibc ? dirname(admittedLibc.path) : null);
+if (!musl) throw Error('JET_PACK_MUSL_LIB must name the admitted static musl directory');
 const libc = resolve(musl, 'libc.a'), libcHandle = fileObject(libc);
 if (!archives.some(row => basename(row.path) === 'libc.a' && row.sha256 === libcHandle.split(':')[0])) throw Error('musl libc does not match runtime provenance');
 const archiveInputs = [];

@@ -77,6 +77,10 @@ extern void jet_rt_root_leave(int64_t, int64_t *);
 extern int64_t jet_rt_root_take_stop(int64_t, int64_t *);
 extern void jet_rt_stop_drop(int64_t);
 extern int64_t jet_scheduler_native_status(void);
+#ifdef JET_PROCESS_JET_FIXTURES
+// The fresh native library exports this Jet fixture; Spec is an opaque word.
+extern int64_t jet_rt_process_execution_controlled_fixture(Spec *);
+#else
 // Use the actual pack's public World/root and launch providers; no alternate
 // process implementation or separately rebuilt runtime object participates.
 static int64_t jet_rt_process_execution_controlled_fixture(Spec *spec) {
@@ -95,6 +99,7 @@ static int64_t jet_rt_process_execution_controlled_fixture(Spec *spec) {
     jet_rt_world_drop(world);
     return refused && stop!=0;
 }
+#endif
 
 static void check(bool ok, const char *what) {
     if (!ok) {

@@ -165,6 +165,11 @@ Files-walk and host-parallelism recipes use their existing five-stage runners:
 assembly, native lowering, import/export ABI audit, C witness link and execution.
 Both require the canonical zero-status, empty-output `run.receipt.json`; merely
 producing an object or running an ABI audit is not a test pass.
+Process/terminal `--test` recipes likewise compile their Jet fixtures into a
+fresh library. `JET_PROCESS_JET_FIXTURES` selects the real exported helpers
+instead of the admitted-pack witness's local C helpers; exact witness output
+and zero exit remain required. The default pack witness and its typed-field
+case are unchanged. An unexecuted recipe or missing pack is never a pass.
 
 Evidence goes into a unique `census-*` directory below
 `~/.cache/jet-dev/scratch/GoldensCensus` (or `--scratch DIR`). `census.tsv` records

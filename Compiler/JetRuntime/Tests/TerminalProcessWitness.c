@@ -27,6 +27,11 @@ extern int64_t jet_rt_world_new(void);
 extern void jet_rt_world_enter(int64_t, int64_t *);
 extern void jet_rt_world_leave(int64_t *);
 extern void jet_rt_world_drop(int64_t);
+#ifdef JET_PROCESS_JET_FIXTURES
+// Jet fixture arguments/results are pointer-sized opaque native handles.
+extern void *fixture_terminal_process_child(int64_t);
+extern int64_t fixture_terminal_process_refs(void *);
+#else
 // Test-only mechanical construction of the documented native Child72 owner.
 // It owns a genuine kernel PTY/pipe; every operation and release uses the pack.
 static void *fixture_terminal_process_child(int64_t master) {
@@ -38,12 +43,16 @@ static void *fixture_terminal_process_child(int64_t master) {
 static int64_t fixture_terminal_process_refs(void *child) {
     return ((const int64_t *)child)[8];
 }
+#endif
 extern Session *jet_terminal_session_from_child_raw(void *);
 extern void *jet_terminal_session_child_raw(const Session *);
 extern Session *jet_rt_handle_clone_terminal_session(const Session *);
 extern void jet_rt_handle_drop_terminal_session(Session *);
 extern bool jet_rt_handle_eq_terminal_session(const Session *, const Session *);
 extern int64_t jet_terminal_session_resize(Session *, const Size *, IOError **);
+#ifdef JET_PROCESS_JET_FIXTURES
+extern int64_t fixture_terminal_process_world_resize(Session *, const Size *, IOError **);
+#else
 static int64_t fixture_terminal_process_world_resize(Session *session, const Size *size, IOError **error) {
     int64_t world=jet_rt_world_new(), save[4]={0};
     jet_rt_world_enter(world,save);
@@ -52,6 +61,7 @@ static int64_t fixture_terminal_process_world_resize(Session *session, const Siz
     jet_rt_world_drop(world);
     return result;
 }
+#endif
 extern void jet_process_drop_raw(void *);
 extern void jet_process_close_stream_raw(void *, int64_t, int64_t *);
 extern Size *jet_rt_record_new_terminal_size(int64_t, int64_t);
