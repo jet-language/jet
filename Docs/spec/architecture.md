@@ -544,6 +544,12 @@ module-item snapshots concurrently. Checker rows initially contain metadata
 only; their item snapshots are materialized for every module after the
 comptime rows are released, before registration can inspect sibling nominals.
 
+Typed error propagation retains the canonical conversion symbol recorded by
+Sema. TIR materializes checked conversion bodies from imported modules as well
+as the entry module; repeated shipped conversions share one source/target
+definition. Dropping an imported conversion creates a missing checked MIR
+target, an internal compiler failure rather than a source diagnostic.
+
 The MIR interpreter indexes nominal declarations once per immutable program
 and memoizes source-value-hook reachability by operation and instantiated type.
 Shared nominal subgraphs are visited once within a query. Complete negative
@@ -1641,15 +1647,21 @@ deterministic, ANSI-free bytes — scripts never parse escape sequences.
 
 ## Testing strategy
 
-1. **diagnostic snapshots** (tests/diagnostic_snapshots.rs): every
-   diagnostic's exact text, pinned. The error messages are the product;
-   treat snapshot diffs like UI diffs.
-2. **golden examples** (tests/golden.rs): Examples/ must front-end-pass,
-   contain no `unsafe`, and — when rustc is present — build and print
-   exactly Examples/features/expected/*.out.
-3. While generated Rust still builds programs, golden tests assert rustc
-   accepts it, so a sema soundness hole becomes a loud test failure, not a
-   shipped bug.
+The canonical [Jet testkit](../../Tools/testkit/run.jet) owns diagnostic
+snapshots (`ui`), executable examples and runtime fixtures (`golden`), and CLI
+scenarios (`cases`). Run it with `JET=/absolute/path/to/jet node Tools/testkit/run.mjs`;
+the launcher builds testkit in disk-backed external scratch, never the checkout.
+`tests/golden.mjs` selects the golden suite. O0, O1 and O2 compare the real exit
+and exact streams; diagnostic text remains a product surface, not a blessable
+implementation accident.
+
+`JET=/absolute/path/to/jet Tools/agent/verify-full.sh` runs the complete native
+suite inventory and source-pinned compiler registries, collecting independent
+failures. Missing, refused, skipped and non-PASS verdicts do not close the gate.
+It uses an already-built compiler and neither Cargo nor a Rust MIR producer.
+Retired Rust oracle/witness modes report nonzero `UNCOVERED` with
+`cardRequired=true`; native witnesses remain mandatory. Rust performance peers
+and historical fixture provenance are not Jet implementation dependencies.
 
 ## Why Jet once transpiled to Rust (recorded rationale)
 

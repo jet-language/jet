@@ -271,19 +271,13 @@ fn compiler_fact_pattern_fold_does_not_claim_user_enums() {
     );
 }
 
-/// Like `covers`, but runs the FULL front end (sema) on `src` first, so
-/// sema-filled facts — notably a comptime LOCAL's evaluated `b.ct` value
-/// (S57/M9.5) — are present before gating. Builds a single-module bundle the
-/// same way `lib.rs::check_for_eval` does, asserts sema accepted the program,
-/// then runs `tir_covers` on the sema-enriched function.
-pub(in crate::Codegen) fn checked_bundle(src: &str) -> (
-    crate::AST::ProgramBundle,
-    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
-) {
+/// Parse a fixture before checking so multi-module probes can assemble their
+/// entire source graph before Sema synthesizes checked declarations.
+fn unchecked_bundle(src: &str) -> crate::AST::ProgramBundle {
     let (toks, lex_diags) = crate::Lexer::lex(src);
     assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
     let mut prog = crate::Parser::parse(&toks).expect("parse failed");
-    let mut bundle = crate::AST::ProgramBundle {
+    let bundle = crate::AST::ProgramBundle {
         entry: 0,
         project_root: std::path::PathBuf::from("."),
         modules: vec![crate::AST::LoadedModule {
@@ -323,6 +317,19 @@ pub(in crate::Codegen) fn checked_bundle(src: &str) -> (
         build_facts: Default::default(),
         edition: "2027".to_string(),
     };
+    bundle
+}
+
+/// Like `covers`, but runs the FULL front end (sema) on `src` first, so
+/// sema-filled facts — notably a comptime LOCAL's evaluated `b.ct` value
+/// (S57/M9.5) — are present before gating. Builds a single-module bundle the
+/// same way `lib.rs::check_for_eval` does, asserts sema accepted the program,
+/// then runs `tir_covers` on the sema-enriched function.
+pub(in crate::Codegen) fn checked_bundle(src: &str) -> (
+    crate::AST::ProgramBundle,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
+) {
+    let mut bundle = unchecked_bundle(src);
     // Full-front-end helpers reach comptime eval of `Val`/`None` and struct
     // literals. That path lives in TIR eval and is installed at the four
     // production funnels; a unit test that calls `check_bundle` directly is
@@ -1930,6 +1937,99 @@ fn mir_lowers_default_err_return() {
         );
         super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("default Err return failed to lower to MIR: {err:?}"));
+    });
+}
+
+#[test]
+fn imported_error_conversions_lower_once_with_checked_mir_targets() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let mut bundle = unchecked_bundle("fn run() {}\n");
+        // The same shipped IOError -> Err conversion is exercised independently
+        // by two imported modules, like Core destructor and ordinary helper paths.
+        for alias in ["first", "second"] {
+            let source = concat!(
+                "fn cleanup(error: IOError) IOError! { Err(error) }\n",
+                "fn close(error: IOError) { _ :: cleanup(error) }\n",
+            );
+            let (tokens, diagnostics) = crate::Lexer::lex(source);
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+            let mut program = crate::Parser::parse(&tokens).expect("imported fixture parses");
+            bundle.modules.push(crate::AST::LoadedModule {
+                path: std::path::PathBuf::from(format!("{alias}.jet")),
+                display: format!("{alias}.jet"),
+                alias: alias.to_string(),
+                source: source.to_string(),
+                imports: std::mem::take(&mut program.imports),
+                items: std::mem::take(&mut program.items),
+                script_body: std::mem::take(&mut program.script_body),
+                block_spans: std::mem::take(&mut program.block_spans),
+                core_identifier_demand: crate::Lexer::core_identifier_demand(&tokens),
+                web_target_ceiling: program.web_target_ceiling,
+                no_prelude: program.no_prelude,
+                default_target: program.default_target,
+                html_path: program.html_path,
+                policy_declarations: program.policy_declarations,
+                user_policy_declarations: program.user_policy_declarations,
+                rule_facts: std::mem::take(&mut program.rule_facts),
+            });
+        }
+        let source = concat!(
+            "use first\nuse second\n",
+            "fn first_case(error: IOError) { first.close(error) }\n",
+            "fn second_case(error: IOError) { second.close(error) }\n",
+            "fn run() {}\n",
+        );
+        let (tokens, diagnostics) = crate::Lexer::lex(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let mut program = crate::Parser::parse(&tokens).expect("entry fixture parses");
+        let entry = &mut bundle.modules[bundle.entry];
+        entry.source = source.to_string();
+        entry.imports = std::mem::take(&mut program.imports);
+        entry.items = std::mem::take(&mut program.items);
+        entry.block_spans = std::mem::take(&mut program.block_spans);
+        entry.core_identifier_demand = crate::Lexer::core_identifier_demand(&tokens);
+        for (index, module) in bundle.modules.iter().enumerate() {
+            bundle.name_ledger.set_module(
+                index, module.alias.clone(), module.display.clone(), "errconv-fixture".to_string(),
+            );
+        }
+        for (index, import) in bundle.modules[0].imports.iter().enumerate() {
+            bundle.name_ledger.record_import_target(0, import.span, index + 1);
+        }
+        crate::Codegen::MIREval::install_mir_bridge();
+        let (diagnostics, _, nominals) = crate::Sema::check_bundle_with_effect_facts(
+            &mut bundle, crate::Sema::CompileMode::Check,
+        );
+        assert!(
+            diagnostics.iter().all(|diagnostic| {
+                diagnostic.severity != crate::Diagnostics::Severity::Error
+            }),
+            "{diagnostics:?}",
+        );
+        let conversion = crate::Sema::error_conv_fn_name("IOError", "Err");
+        assert_eq!(
+            bundle.modules.iter().filter(|module| {
+                module.items.iter().any(|item| matches!(
+                    item, Item::ErrorConv(value)
+                        if crate::Sema::error_conv_fn_name(&value.from_ty, &value.to_ty) == conversion
+                ))
+            }).count(),
+            2,
+            "both modules must exercise the shipped conversion",
+        );
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("imported typed propagation must have a checked MIR target");
+        mir.validate().expect("imported conversion MIR is valid");
+        assert_eq!(
+            mir.functions.iter().filter(|function| function.name == conversion).count(),
+            1,
+            "one canonical conversion target serves both modules",
+        );
     });
 }
 

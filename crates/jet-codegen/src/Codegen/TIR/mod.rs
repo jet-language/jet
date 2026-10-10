@@ -5501,6 +5501,9 @@ fn lower_checked_tir_program_on_stack(
         crate::Codegen::Context::collect_iterable_hooks(&mut cx, &module.items);
         let type_shapes = collect_type_shapes(&module.items);
         let mut funcs = Vec::new();
+        // Prelude conversions are injected per checked module, but their
+        // canonical source/target symbol is shared by all of its callers.
+        let mut lowered_error_conversions = std::collections::HashSet::new();
         let include_tests = matches!(
             request.kind,
             jet_foundation::MIR::MirArtifactKind::TestExecutable
@@ -5632,7 +5635,11 @@ fn lower_checked_tir_program_on_stack(
                 // A checked error conversion always lowers, like a named fn or
                 // test: there is no AST fallback, so a subset gate here would
                 // drop a reachable `?` conversion body without a report.
-                Item::ErrorConv(ec) => funcs.push(lower_error_conv(ec, &cx)),
+                Item::ErrorConv(ec) => {
+                    if lowered_error_conversions.insert((ec.from_ty.as_str(), ec.to_ty.as_str())) {
+                        funcs.push(lower_error_conv(ec, &cx));
+                    }
+                }
                 Item::Struct(s) => {
                     if s.type_params.is_empty() {
                         for m in &s.methods {
@@ -6354,6 +6361,29 @@ fn lower_checked_tir_program_on_stack(
                                 funcs.push(lowered);
                             }
                         }
+                    }
+                    Item::ErrorConv(conversion) => {
+                        if !lowered_error_conversions
+                            .insert((conversion.from_ty.as_str(), conversion.to_ty.as_str()))
+                        {
+                            continue;
+                        }
+                        // Typed `?` calls retain this canonical conversion
+                        // name, not an imported-module alias. Materialize the
+                        // checked body under that same name exactly once.
+                        let mut lowered = lower_error_conv(conversion, &imported_cx);
+                        let binders = qualification_binders(&[], None);
+                        for (_, ty, _) in &mut lowered.params {
+                            *ty = qualify_imported_type(
+                                bundle, module_idx, &imported_owner, &binders, ty,
+                            );
+                        }
+                        lowered.ret = lowered.ret.as_ref().map(|ty| {
+                            qualify_imported_type(
+                                bundle, module_idx, &imported_owner, &binders, ty,
+                            )
+                        });
+                        funcs.push(lowered);
                     }
                     _ => {}
                 }
