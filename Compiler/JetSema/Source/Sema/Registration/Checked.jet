@@ -82,6 +82,8 @@ use jet_foundation.[
     Variant,
     VariantField,
     VariantPayload,
+    comptime_walk_calls,
+    comptime_walk_identifiers,
     expr_span,
     jet_target_layout_engine_with_registry,
     jet_target_layout_enum_c_tag,
@@ -1877,6 +1879,90 @@ fn sema_checked_validate_layout(definition: StructDef, diagnostics: &[Diagnostic
     }
 }
 
+// Rust CheckerFieldPolicy.rs `process_computed_fields`: E0382 for a field
+// `#Memo` without a bare formula, then E0338 for a computed-field cycle.
+fn sema_checked_validate_field_policy(definition: StructDef, diagnostics: &[Diagnostic]) {
+    loop field in definition.fields {
+        loop marker in field.serde_markers {
+            if marker.name != "Memo" -> next
+            if field.computed == None || marker.args.len() != 0 {
+                &diagnostics.push(sema_error("E0382", marker.span, "`#Memo` cannot mark `{field.name}`.", "A stored computed result needs a formula and its dependency set; field `#Memo` does not take cache arguments.", "Write `#Memo` before `{field.name}: T -> expr` without arguments."))
+            }
+            break
+        }
+    }
+    names := [String]{}
+    spans := [Span]{}
+    formulas := [Expr]{}
+    loop field in definition.fields {
+        if field.computed == .Val(formula) {
+            &names.push(field.name)
+            &spans.push(field.name_span)
+            &formulas.push(formula)
+        }
+    }
+    if names.len() == 0 -> return
+    // Rust Captures.rs `expr_refs_name`: an identifier read or a call name.
+    deps := [[Int]]{}
+    loop formula in formulas {
+        referenced := [String]{}
+        loop site in comptime_walk_identifiers(formula) -> &referenced.push(site.name)
+        loop site in comptime_walk_calls(formula) -> &referenced.push(site.name)
+        edges := [Int]{}
+        loop index in 0..<names.len() {
+            if referenced.contains(names[index]) -> &edges.push(index)
+        }
+        &deps.push(edges)
+    }
+    colors := [Int]{}
+    reported := [Bool]{}
+    loop _ in names {
+        &colors.push(0)
+        &reported.push(false)
+    }
+    loop index in 0..<names.len() {
+        if colors[index] == 0 -> sema_checked_computed_field_visit(definition.name, index, names, spans, deps, &colors, &reported, &diagnostics)
+    }
+}
+
+// Depth-first walk over computed-field dependencies; colors are 0 white,
+// 1 gray (on the current path) and 2 black (finished).
+fn sema_checked_computed_field_visit(struct_name: String, node: Int, names: [String], spans: [Span], deps: [[Int]], colors: &[Int], reported: &[Bool], diagnostics: &[Diagnostic]) {
+    colors[node] = 1
+    loop neighbor in deps[node] {
+        if {
+            colors[neighbor] == 1 && !reported[node] -> {
+                reported[node] = true
+                field :: names[node]
+                via :: names[neighbor]
+                what :: if field == via -> "computed field `{struct_name}.{field}` references itself" else -> "computed field `{struct_name}.{field}` forms a cycle through `{via}`"
+                &diagnostics.push(sema_error("E0338", spans[node], what, "a computed field's formula may only reference OTHER fields — the dependency graph among computed fields must have no cycle", "break the cycle: make `{field}` or `{via}` a plain stored field, or rework the formula"))
+            }
+            colors[neighbor] == 0 -> sema_checked_computed_field_visit(struct_name, neighbor, names, spans, deps, &colors, &reported, &diagnostics)
+        }
+    }
+    colors[node] = 2
+}
+
+// Rust CheckerPatchable.rs `validate_patchable_struct` (D-PATCH1).
+fn sema_checked_validate_patchable(definition: StructDef, diagnostics: &[Diagnostic]) {
+    patchable := false
+    loop derived in definition.derives {
+        if derived.name == "Patchable" -> patchable = true
+    }
+    if !patchable -> return
+    if definition.type_params.len() != 0 {
+        &diagnostics.push(sema_error("E0336", definition.name_span, "`#[Patchable]` on generic struct `{definition.name}` isn't supported yet", "`T.Patch` codegen needs a concrete field list — generic patches are a follow-on", "remove the type parameters, or drop `#[Patchable]` for now"))
+        return
+    }
+    loop field in definition.fields {
+        if field.ty == .Fn(_, _, _, _, _, _) {
+            &diagnostics.push(sema_error("E0337", field.name_span, "`#[Patchable]` struct `{definition.name}` field `{field.name}` has function type", "patches are data values — function-typed fields can't be patched", "store a callable handle type instead, or drop `#[Patchable]`"))
+            return
+        }
+    }
+}
+
 fn sema_checked_wire_style_valid(style: String?) -> Bool Never! {
     value :: style ?? return true
     if value == {
@@ -2251,6 +2337,8 @@ fn sema_checked_type_def(graph: SemaRegistrationGraph, boxed: [String:[String]],
             serde = sema_checked_serde_attributes(value.serde_markers)
             cli_bindings = sema_checked_cli_bindings(module_row, value)
             ownership = sema_checked_ownership(single_use)
+            sema_checked_validate_field_policy(value, &diagnostics)
+            sema_checked_validate_patchable(value, &diagnostics)
             sema_checked_validate_layout(value, &diagnostics)
             fields :: sema_checked_struct_fields(graph, module_row, value, generic_params, &diagnostics)
             kind = Val(TTypeDefKind.Struct{fields: fields, methods: sema_checked_nominal_methods(definition, nominal.methods)})
