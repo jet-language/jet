@@ -786,7 +786,7 @@ fn jet_target_layout_named_type(engine: TargetLayoutEngine, name: String, args: 
     if name == "String" || name == "List" -> return jet_target_layout_pointer_layout(engine.target)
     if name == "Unit" || name == "()" -> return Val(ByteLayout{size: 0, alignment: 1, stride: 0})
 
-    resolved_name :: jet_target_layout_resolved_name(engine, owner_qualified_name, name, query)
+    resolved_name :: jet_target_layout_resolved_name(engine, owner_qualified_name, name)
     if resolved_name != name {
         if jet_target_layout_numeric_type(resolved_name) == .Val(numeric_resolved) -> return jet_target_layout_type_inner(engine, numeric_resolved, owner_qualified_name, &query)
         position :: engine.qualified_positions.get(resolved_name) ?? return None

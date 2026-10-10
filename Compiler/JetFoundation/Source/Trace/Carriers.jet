@@ -19,7 +19,7 @@ struct TraceProfile {
 }
 fn trace_profile_unsupported(reason: String) -> TraceProfile Never! {
     TraceProfile{method: "sampling", status: "unsupported", coverage: "unsupported", rows: [TraceProfileRow]{}, row_limit: U64{4096}, rows_truncated: false,
-        overhead_ns: None, overhead_status: "not_applicable", overhead_reason: "source sampling was not available", reason: ^reason,
+        overhead_ns: None, overhead_status: "not_applicable", overhead_reason: "source sampling was not available", reason: reason.copy(),
         window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"}
 }
 struct TraceSample { domain: String, duration_ns: U64, symbol: JetSymbolRef }

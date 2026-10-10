@@ -163,7 +163,8 @@ fn parser_user_policy_ahead(state: &JetParserState) -> Bool Never! {
 fn parser_parse_user_policy(state: &JetParserState) -> ParsedUserPolicy {
     if parser_current_kind(&state) == TOKEN_KW_PUB {
         word :: parser_bump(&state)
-        parser_add_error_code_edit(&state, "E0411", word.span, "`pub` was removed: everything is public by default", "privacy belongs to a `priv module` (or `priv(package) module`) and to `priv` fields", "delete `pub`", parser_deletion_edit(state, word.span))
+        deletion :: parser_deletion_edit(state, word.span)
+        parser_add_error_code_edit(&state, "E0411", word.span, "`pub` was removed: everything is public by default", "privacy belongs to a `priv module` (or `priv(package) module`) and to `priv` fields", "delete `pub`", deletion)
     }
     start :: parser_expect_name(&state, "to start a policy declaration")
     name :: parser_expect_name(&state, "as the policy setting name")
@@ -391,13 +392,15 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
             }
             written :: parser_source_slice(state, removed.start, removed.end)
             shown :: if written == "" -> "pub" else -> written
-            parser_add_error_code_edit(&state, "E0411", removed, "`pub` was removed: everything is public by default", "privacy belongs to a `priv module` (or `priv(package) module`) and to `priv` fields", "delete `{shown}`", parser_deletion_edit(state, removed))
+            deletion :: parser_deletion_edit(state, removed)
+            parser_add_error_code_edit(&state, "E0411", removed, "`pub` was removed: everything is public by default", "privacy belongs to a `priv module` (or `priv(package) module`) and to `priv` fields", "delete `{shown}`", deletion)
             next
         }
         foreign_private :: item_visibility && kind == TOKEN_IDENT && parser_value_at(&state, 0) == "private" && parser_foreign_private_ahead(&state)
         if foreign_private {
             word :: parser_bump(&state)
-            parser_add_error_code_edit(&state, "E0412", word.span, "Jet has no `private`", "declarations are public by default; privacy belongs to a `priv module` or a `priv` field", "delete `private`; move the declaration into a `priv module` if it must stay internal", parser_deletion_edit(state, word.span))
+            deletion :: parser_deletion_edit(state, word.span)
+            parser_add_error_code_edit(&state, "E0412", word.span, "Jet has no `private`", "declarations are public by default; privacy belongs to a `priv module` or a `priv` field", "delete `private`; move the declaration into a `priv module` if it must stay internal", deletion)
             next
         }
         if kind == TOKEN_KW_PRIV {
@@ -414,7 +417,8 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
                 if !package -> parser_add_error_code_edit(&state, "E0414", written, "unknown `priv(…)` qualifier: only `priv(package)` exists", "`priv(package) module` is the only qualified module privacy", "delete the qualifier, or write `priv(package)`", TextEdit{span: written, new_text: ""})
             }
             if item_visibility && parser_current_kind(&state) != TOKEN_KW_MODULE {
-                parser_add_error_code_edit(&state, "E0413", marker_span, "`priv` marks only modules and fields", "declarations are public by default; privacy belongs to a `priv module` or a `priv` field", "delete `priv`; move the declaration into a `priv module` if it must stay internal", parser_deletion_edit(state, marker_span))
+                deletion :: parser_deletion_edit(state, marker_span)
+                parser_add_error_code_edit(&state, "E0413", marker_span, "`priv` marks only modules and fields", "declarations are public by default; privacy belongs to a `priv module` or a `priv` field", "delete `priv`; move the declaration into a `priv module` if it must stay internal", deletion)
                 next
             }
             if !item_visibility && package {
@@ -490,7 +494,8 @@ fn parser_expect_marker_path(state: &JetParserState, reason: String) -> Token {
     loop parser_current_kind(&state) == TOKEN_DOT {
         parser_bump(&state)
         member :: parser_expect_name(&state, "a library marker path segment")
-        name = parser_spelled_token(&state, TOKEN_IDENT, parser_cover(name.span, member.span), "{parser_value(state, name)}.{parser_value(state, member)}")
+        path :: "{parser_value(state, name)}.{parser_value(state, member)}"
+        name = parser_spelled_token(&state, TOKEN_IDENT, parser_cover(name.span, member.span), path)
     }
     name
 }
@@ -998,7 +1003,7 @@ fn parser_parse_param(state: &JetParserState, zone: ParamZone) -> Param {
         param_name :: parser_value(state, name)
         parser_add_error_code(&state, "E1310", name.span, "variadic parameter `{param_name}` can't have a default value", "a `...` rest parameter collects trailing arguments — it can't also be optional", "remove the `{{…}}` default from the variadic parameter")
     }
-    Param{convention: convention, root: root, name: parser_value(state, name), name_span: name.span, public_label: public_label, zone: zone, ty: ty, ty_span: ty_span, default: default, variadic: variadic, variadic_bound_list: variadic_bounds, declared_view_from_names: declared_from}
+    Param{convention: convention, root: root, name: parser_value(state, name), name_span: name.span, public_label: public_label, zone: zone, ty: ty, ty_span: ty_span, default: default, variadic: variadic, variadic_bound_list: variadic_bounds, declared_view_from_names: declared_from, declared_footprint: declared_footprint}
 }
 
 fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers, body_required: Bool) -> ParsedFunction {

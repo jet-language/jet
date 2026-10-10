@@ -2042,7 +2042,7 @@ fn mir_operation_value_consumption(operation: MIROperation, value: MIRValueID, b
         }
         .Semantic(semantic) -> {
             if semantic == {
-                .StructLiteral(_, fields, _, _, _) -> {
+                .StructLiteral(_, fields, _, _) -> {
                     loop field in fields {
                         if field.value == value -> return MIRValueConsumption.Yes{requires_owner: false}
                     }
@@ -2055,7 +2055,7 @@ fn mir_operation_value_consumption(operation: MIROperation, value: MIRValueID, b
                     }
                     MIRValueConsumption.No
                 }
-                .CoreClosureCall(_, .Spawn, _, closure, _, _) -> if closure == Val(value) -> MIRValueConsumption.Yes{requires_owner: true} else -> MIRValueConsumption.No
+                .CoreClosureCall(_, .Spawn, _, closure, _, _) -> if closure == Val(spawned_value) && spawned_value == value -> MIRValueConsumption.Yes{requires_owner: true} else -> MIRValueConsumption.No
                 .HandleMethod(_, receiver, args, _, _) -> {
                     if receiver == value && borrow_mask.len() > 0 && !borrow_mask[0] -> return MIRValueConsumption.Yes{requires_owner: true}
                     loop (index, arg) in args {
@@ -2079,9 +2079,9 @@ fn mir_operation_value_consumption(operation: MIROperation, value: MIRValueID, b
 
 fn mir_terminator_value_consumption(terminator: MIRTerminator, value: MIRValueID) -> MIRValueConsumption Never! {
     if terminator == {
-        .Return(returned) -> if returned == .Val(value) -> MIRValueConsumption.Yes{requires_owner: false} else -> MIRValueConsumption.No
+        .Return(returned) -> if returned == .Val(returned_value) && returned_value == value -> MIRValueConsumption.Yes{requires_owner: false} else -> MIRValueConsumption.No
         // Break's value is transferred by its destination phi, not twice.
-        .Break(_, returned) -> if returned == .Val(value) -> MIRValueConsumption.Through{transfers: false} else -> MIRValueConsumption.No
+        .Break(_, returned) -> if returned == .Val(break_value) && break_value == value -> MIRValueConsumption.Through{transfers: false} else -> MIRValueConsumption.No
         .Yield(yielded, _) -> if yielded == value -> MIRValueConsumption.Yes{requires_owner: false} else -> MIRValueConsumption.No
         else -> MIRValueConsumption.No
     }
@@ -2271,12 +2271,12 @@ fn mir_read_snapshot_unstable(function: MIRFunction, candidates: [U64:Bool], rou
     loop row in work -> _ := &members.add(row * function.values.len() + row, true)
     head := 0
     loop head < work.len() {
-        row :: work[head]
+        row :: work[head].copy()
         head += 1
         queued[row] = false
         loop cursors[row] < origins[row].len() {
-            origin :: origins[row][cursors[row]]
-            cursors[row] += 1
+            origin :: origins[row][cursors[row]].copy()
+            cursors[row] = cursors[row] + 1
             loop target in edges[row] {
                 key :: target * function.values.len() + origin
                 if members.get(key) != None -> next

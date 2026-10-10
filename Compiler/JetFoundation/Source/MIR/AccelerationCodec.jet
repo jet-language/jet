@@ -33,13 +33,13 @@ fn mir_acceleration_json_string(fields: [CanonicalJSONField], key: String) -> St
 }
 fn mir_acceleration_json_u64(fields: [CanonicalJSONField], key: String) -> U64 CanonicalJSONError! {
     value :: mir_acceleration_json_field(fields, key)
-    if value == .Integer(text) -> return Ok(U64.parse(text) ?? return Err(canonical_json_error("acceleration field `{key}` is out of range")))
+    if value == .Integer(text) -> return Ok(U64.from_int(text.parse() ?? return Err(canonical_json_error("acceleration field `{key}` is out of range"))) ?? return Err(canonical_json_error("acceleration field `{key}` is out of range")))
     Err(canonical_json_error("acceleration field `{key}` must be an integer"))
 }
 fn mir_acceleration_json_optional_u64(fields: [CanonicalJSONField], key: String) -> U64? CanonicalJSONError! {
     value :: mir_acceleration_json_field(fields, key)
     if value == .Null -> return Ok(None)
-    if value == .Integer(text) -> return Ok(Val(U64.parse(text) ?? return Err(canonical_json_error("acceleration field `{key}` is out of range"))))
+    if value == .Integer(text) -> return Ok(Val(U64.from_int(text.parse() ?? return Err(canonical_json_error("acceleration field `{key}` is out of range"))) ?? return Err(canonical_json_error("acceleration field `{key}` is out of range"))))
     Err(canonical_json_error("acceleration field `{key}` must be an integer or null"))
 }
 fn mir_acceleration_json_usize(fields: [CanonicalJSONField], key: String, usize_max: U64) -> U64 CanonicalJSONError! {

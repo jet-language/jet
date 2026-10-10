@@ -224,7 +224,11 @@ struct JetLibStamp {
         compiler_version :: &reader.take_string("compiler version") ?? return Err(err)
         compiler_build :: &reader.take_string("compiler build") ?? return Err(err)
         library_name :: &reader.take_string("library name") ?? return Err(err)
-        entry :: &reader.take_optional_string("output entry") ?? return Err(err)
+        entry :: if &reader.take_optional_string("output entry") == {
+            .Val(value) -> { Val(value) }
+            .None -> { None }
+            .Err(error) -> { return Err(error) }
+        }
         target :: &reader.take_string("target") ?? return Err(err)
         target_triple :: &reader.take_string("target triple") ?? return Err(err)
         linker_identity :: &reader.take_string("linker identity") ?? return Err(err)

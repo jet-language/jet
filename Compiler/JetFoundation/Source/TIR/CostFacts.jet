@@ -149,7 +149,11 @@ fn tir_cost_fact(expression: TExpr) -> TCostFact? Never! {
         }
         else -> {}
     }
-    if expression.ty != .Option(_) && expression.ty != .Result(_, _) -> return None
+    if {
+        expression.ty == .Option(_) -> {}
+        expression.ty == .Result(_, _) -> {}
+        else -> return None
+    }
     construction :: if expression.kind == {
         .Absent | .Present(_) | .Ok(_) | .Err(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _)
         | .MethodCall(_, _, _, _) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _)

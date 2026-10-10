@@ -56,8 +56,7 @@ fn canonical_pass_record(journal: &CanonicalPassJournal, stage: String, operatio
     })
 }
 fn canonical_pass_take(journal: &CanonicalPassJournal) -> [CanonicalPassRecord] Never! {
-    rows := ^journal.records
-    journal.records = [CanonicalPassRecord]{}
+    rows := compiler_take_rows(&journal.records)
     journal.occurrences = [String:Int]{}
     rows
 }

@@ -113,6 +113,9 @@ struct JobFact {
     }
 }
 
+#Error
+struct CLIJobGraphError { message: String }
+
 // The registry is an owned metadata projection, not evidence that a job was
 // checked or run. Driver callers must supply the actual successful entry
 // projection; importing a helper module never extends the job argv namespace.
@@ -157,7 +160,7 @@ struct JobRegistry {
         }
         None
     }
-    fn dependency_closure(self, root: String) -> [View<JobFact>] String! from self {
+    fn dependency_closure(self, root: String) -> [View<JobFact>] CLIJobGraphError! from self {
         index :: cli_schema_job_index(self.jobs)
         state := [Int]{}
         loop _ in 0..<self.jobs.len() -> &state.push(0)
@@ -171,7 +174,7 @@ struct JobRegistry {
         }
         Ok(^rows)
     }
-    fn validate_graph(self) String! {
+    fn validate_graph(self) CLIJobGraphError! {
         index :: cli_schema_job_index(self.jobs)
         names := index.keys().to_list()
         &names.sort()
@@ -208,9 +211,9 @@ fn cli_schema_job_index(jobs: [JobFact]) -> [String:Int] Never! {
     }
     ^index
 }
-fn cli_schema_job_enter(jobs: [JobFact], index: [String:Int], name: String, state: &[Int], stack: &[CLIJobVisit]) String! {
-    row :: index.get(name) ?? return Err("job graph references unknown job `{name}`")
-    if row < 0 -> return Err("job `{name}` has an ambiguous declaration")
+fn cli_schema_job_enter(jobs: [JobFact], index: [String:Int], name: String, state: &[Int], stack: &[CLIJobVisit]) CLIJobGraphError! {
+    row :: index.get(name) ?? return Err(CLIJobGraphError{message: "job graph references unknown job `{name}`"})
+    if row < 0 -> return Err(CLIJobGraphError{message: "job `{name}` has an ambiguous declaration"})
     if state[row] == 2 -> return Ok()
     if state[row] == 1 {
         cycle := [String]{}
@@ -220,21 +223,21 @@ fn cli_schema_job_enter(jobs: [JobFact], index: [String:Int], name: String, stat
             if started -> &cycle.push(jobs[visit.row].name)
         }
         &cycle.push(name)
-        return Err("job graph contains a cycle: {cycle.join(" -> ")}")
+        return Err(CLIJobGraphError{message: "job graph contains a cycle: {cycle.join(" -> ")}"})
     }
-    if jobs[row].parallel == 0 -> return Err("job `{name}` declares a zero parallel bound")
+    if jobs[row].parallel == 0 -> return Err(CLIJobGraphError{message: "job `{name}` declares a zero parallel bound"})
     state[row] = 1
     &stack.push(CLIJobVisit{row: row, dependency: 0})
     Ok()
 }
-fn cli_schema_job_finish(jobs: [JobFact], index: [String:Int], state: &[Int], stack: &[CLIJobVisit]) -> Int? String! {
+fn cli_schema_job_finish(jobs: [JobFact], index: [String:Int], state: &[Int], stack: &[CLIJobVisit]) -> Int? CLIJobGraphError! {
     loop stack.len() > 0 {
         last :: stack.len() - 1
         row :: stack[last].row
         dependency :: stack[last].dependency
         if {
             dependency < jobs[row].after.len() -> {
-                stack[last].dependency += 1
+                stack[last].dependency = dependency + 1
                 cli_schema_job_enter(jobs, index, jobs[row].after[dependency], &state, &stack)
             }
             else -> {
