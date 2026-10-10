@@ -1258,28 +1258,45 @@ fn jet_driver_default_module_alias(relative_path: String) -> String Never! {
 // Only the manifestless entry's top-level refs may introduce these bindings.
 fn jet_driver_bind_script_dependencies(packages: &[JetDriverPackageInfo], snapshot: JetDriverAuthorizedSourceSnapshot, diagnostics: &[Diagnostic]) {
     if snapshot.script_dependencies.len() == 0 -> return
-    entry_index :: loop (index, root) in snapshot.roots {
-        if root.identity == snapshot.entry_root_identity -> break index
-    } ?? return
+    entry_index := -1
+    loop (entry_root_index, entry_root) in snapshot.roots {
+        if entry_root.identity == snapshot.entry_root_identity {
+            entry_index = entry_root_index
+            break
+        }
+    }
+    if entry_index < 0 -> return
     package := packages[entry_index]
     if package.manifest_path != None {
         &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "script dependencies were supplied for a package entry", "inline dependency admission applies only to manifestless scripts", "use the package's declared dependency graph"))
         return
     }
-    entry :: loop file in snapshot.roots[entry_index].files {
-        if file.path == snapshot.entry_path -> break file
-    } ?? return
+    entry_file_index := -1
+    loop (file_index, file) in snapshot.roots[entry_index].files {
+        if file.path == snapshot.entry_path {
+            entry_file_index = file_index
+            break
+        }
+    }
+    if entry_file_index < 0 -> return
+    entry :: snapshot.roots[entry_index].files[entry_file_index]
     parsed :: jet_driver_parse_user_source(entry.source)
     if jet_driver_has_errors(parsed.diagnostics) -> return
     refs :: pkg_inline_deps_collect(parsed.program)
     source_path :: jet_driver_display_path(jet_driver_entry_root_path(snapshot), entry.path)
     loop admitted in snapshot.script_dependencies {
-        reference :: loop dependency_ref in refs {
-            if dependency_ref.name == admitted.name && dependency_ref.selector == admitted.selector && dependency_ref.span == admitted.span -> break dependency_ref
-        } ?? {
+        reference_index := -1
+        loop (ref_index, dependency_ref) in refs {
+            if dependency_ref.name == admitted.name && dependency_ref.selector == admitted.selector && dependency_ref.span == admitted.span {
+                reference_index = ref_index
+                break
+            }
+        }
+        if reference_index < 0 {
             &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a script dependency has no matching top-level import", "admission must preserve the exact entry import and selector span", "supply only dependencies collected from the entry script"))
             next
         }
+        reference :: refs[reference_index]
         target :: loop (index, root) in snapshot.roots {
             if root.identity == admitted.root_identity -> break index
         } ?? -1

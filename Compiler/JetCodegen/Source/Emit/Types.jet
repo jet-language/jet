@@ -1393,7 +1393,12 @@ fn jet_rust_emit_derive_capability_gate(ctx: &JetRustEmitContext, ty: MIRType, t
         trait_name == "JetShow" -> "show"
         else -> ""
     }
-    if operation != "" && jet_rust_emit_source_hook_function_index(&ctx, ctx.program.types[row], operation) != None -> return JET_RUST_EMIT_DERIVE_CAPABLE
+    if operation != "" {
+        hook_type_id :: ctx.program.types[row].id.value.copy()
+        hook_key :: ctx.program.types[row].key.copy()
+        hook_span :: ctx.program.types[row].span.copy()
+        if jet_rust_emit_source_hook_function_index(&ctx, hook_type_id, hook_key, hook_span, operation) != None -> return JET_RUST_EMIT_DERIVE_CAPABLE
+    }
     if trait_name == "Clone" && ctx.program.types[row].ownership == MIROwnershipMode.Move -> return JET_RUST_EMIT_DERIVE_INCAPABLE
     is_alias :: ctx.program.types[row].kind == .Alias(_)
     // MIRRust auto_derive_type_ready for the structural show impls:
@@ -1826,8 +1831,8 @@ fn jet_rust_emit_type_derive_names(ctx: &JetRustEmitContext, definition: MIRType
     debug_capable :: derives_allowed && jet_rust_emit_type_definition_derive_capability(&ctx, definition, "Debug")
     clone_user_impl :: jet_rust_emit_type_derive_user_impl(&ctx, definition, "Clone")
     debug_user_impl :: jet_rust_emit_type_derive_user_impl(&ctx, definition, "Debug")
-    clone_source_hook :: jet_rust_emit_source_hook_function_index(&ctx, definition, "clone") != None
-    debug_source_hook :: jet_rust_emit_source_hook_function_index(&ctx, definition, "debug") != None
+    clone_source_hook :: jet_rust_emit_source_hook_function_index(&ctx, definition.id.value, definition.key, definition.span, "clone") != None
+    debug_source_hook :: jet_rust_emit_source_hook_function_index(&ctx, definition.id.value, definition.key, definition.span, "debug") != None
     derives := [String]{}
     if clone_capable && !clone_user_impl && !clone_source_hook -> &derives.push("Clone")
     if debug_capable && !debug_user_impl && !debug_source_hook -> &derives.push("Debug")
@@ -2217,25 +2222,25 @@ fn jet_rust_emit_used_carrierless_core_records(ctx: &JetRustEmitContext) -> [U64
     used
 }
 
-fn jet_rust_emit_source_hook_function_index(ctx: &JetRustEmitContext, definition: MIRTypeDef, operation: String) -> Int? Never! {
-    _ := core_source_value_hook(definition.key, operation) ?? return None
-    instance :: ctx.type_instance_first.get(definition.id.value) ?? {
-        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "source value hook has no checked type instance", definition.key, Val(definition.span))
+fn jet_rust_emit_source_hook_function_index(ctx: &JetRustEmitContext, type_id: Int, key: String, span: Span, operation: String) -> Int? Never! {
+    _ := core_source_value_hook(key, operation) ?? return None
+    instance :: ctx.type_instance_first.get(type_id) ?? {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "source value hook has no checked type instance", key, Val(span))
         return None
     }
     id :: mir_source_value_hook(ctx.program, ctx.program.type_instances[instance], operation) ?? {
-        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "source value hook is missing or ambiguous", definition.key, Val(definition.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "source value hook is missing or ambiguous", key, Val(span))
         return None
     }
     row :: jet_rust_emit_function_index(ctx, id) ?? {
-        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "source value hook function is unavailable", definition.key, Val(definition.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "source value hook function is unavailable", key, Val(span))
         return None
     }
     Val(row)
 }
 
 fn jet_rust_emit_source_hook_invocation(ctx: &JetRustEmitContext, definition: MIRTypeDef, operation: String) -> String? Never! {
-    row :: jet_rust_emit_source_hook_function_index(&ctx, definition, operation) ?? return None
+    row :: jet_rust_emit_source_hook_function_index(&ctx, definition.id.value, definition.key, definition.span, operation) ?? return None
     function :: ctx.program.functions[row]
     symbol :: jet_rust_emit_inherent_method_symbol(function.name)
     invocation :: "self.{symbol}()"

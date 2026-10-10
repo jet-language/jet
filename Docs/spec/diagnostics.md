@@ -341,3 +341,18 @@ must not gain those structural derives from an empty argument list. Checked
 source value hooks, such as Clock's semantic fork and Debug, remain available.
 Retained native config and Encode helpers use the canonical Dyn carrier; the
 retired DataTree Rust type is not restored as an alias.
+
+Source-hook capability queries snapshot only the type identity, key and span
+before a write-access call on the owning emission context. The hook lookup does
+not require copying a full MIR type definition or its field/variant lists, and
+the checked program rows remain unchanged.
+
+Manifestless script binding searches keep first-match root, entry-file and
+import-reference indices. Missing roots or files return normally; missing
+references append the existing E0003 diagnostic and continue to the next
+admission. These statement exits are outside finite value-loop fallbacks, whose
+exhaustion route cannot carry a multi-statement diagnostic block.
+The standalone regression
+`tests/fixtures/r19_metadata_and_dependency_search.jet` exercises all three metadata
+snapshots, unchanged definition payloads, absent roots/files, duplicate
+first-match candidates and continuation after a missing reference.

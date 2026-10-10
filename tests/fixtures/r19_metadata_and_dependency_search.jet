@@ -1,0 +1,63 @@
+// r19: materialize only hook metadata before mutating its owning context;
+// dependency searches are ordinary first-match loops with statement exits.
+struct HookSpan { start: Int end: Int }
+struct HookRow { id: Int key: String span: HookSpan fields: [Int] }
+struct HookContext { rows: [HookRow] queries: Int }
+fn record_query(ctx: &HookContext, type_id: Int, key: String, span: HookSpan) -> Bool Never! {
+    ctx.queries += 1
+    type_id == 7 && key == "Clock" && span.start == 3 && span.end == 8
+}
+fn check_hook(ctx: &HookContext) -> Bool Never! {
+    hook_type_id :: ctx.rows[0].id.copy()
+    hook_key :: ctx.rows[0].key.copy()
+    hook_span :: ctx.rows[0].span.copy()
+    record_query(&ctx, hook_type_id, hook_key, hook_span)
+}
+fn bind_matches(roots: [String], entry: String, files: [String], file: String, refs: [String], admitted: [String], diagnostics: &[String], matches: &[String]) Never! {
+    entry_index := -1
+    loop (root_index, root_name) in roots {
+        if root_name == entry {
+            entry_index = root_index
+            break
+        }
+    }
+    if entry_index < 0 -> return
+    entry_file_index := -1
+    loop (file_index, file_name) in files {
+        if file_name == file {
+            entry_file_index = file_index
+            break
+        }
+    }
+    if entry_file_index < 0 -> return
+    loop admission in admitted {
+        reference_index := -1
+        loop (ref_index, reference) in refs {
+            if reference == admission {
+                reference_index = ref_index
+                break
+            }
+        }
+        if reference_index < 0 {
+            &diagnostics.push("missing:{admission}")
+            next
+        }
+        &matches.push("{entry_index}:{entry_file_index}:{reference_index}:{refs[reference_index]}")
+    }
+}
+fn run() Never! {
+    ctx := HookContext{rows: [HookRow]{HookRow{id: 7, key: "Clock", span: HookSpan{start: 3, end: 8}, fields: [Int]{1, 2, 3}}}, queries: 0}
+    assert(check_hook(&ctx))
+    assert_eq(ctx.queries, 1)
+    assert_eq(ctx.rows[0].fields, [Int]{1, 2, 3})
+    diagnostics := [String]{}
+    matches := [String]{}
+    bind_matches([String]{"entry", "entry"}, "absent", [String]{"run"}, "run", [String]{"a"}, [String]{"a"}, &diagnostics, &matches)
+    bind_matches([String]{"entry"}, "entry", [String]{"run"}, "absent", [String]{"a"}, [String]{"a"}, &diagnostics, &matches)
+    assert_eq(matches.len(), 0)
+    assert_eq(diagnostics.len(), 0)
+    bind_matches([String]{"entry", "entry"}, "entry", [String]{"run", "run"}, "run", [String]{"a", "a", "b"}, [String]{"missing", "a", "b"}, &diagnostics, &matches)
+    assert_eq(diagnostics, [String]{"missing:missing"})
+    assert_eq(matches, [String]{"0:0:0:a", "0:0:2:b"})
+    print("r19 metadata and dependency searches: ok")
+}
