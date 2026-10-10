@@ -1,0 +1,10 @@
+Error [E3401]: `draw` calls the impure function `core_core_math_random::__word`
+  --> tests/ui/effect_math_random_in_pure_fn.jet:3:36
+    |
+  3 | fn draw() -[]> Float Never! { math.random() }
+    |                                    ^^^^^^
+ Why: Draw → core_math::random calls `core_core_math_random::__word`, which is impure — the whole call chain must be pure inside `draw`
+ Fix: Remove the call to `core_core_math_random::__word`, or drop the `-[]>` bound from `draw` so its effects are inferred
+ Denial: pure
+ Call chain: draw → core_math::random → core_core_math_random::__word
+More: jet-lang.dev/e/E3401
