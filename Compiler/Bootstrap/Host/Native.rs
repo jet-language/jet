@@ -2471,8 +2471,29 @@ fn emit_bootstrap_host_factory(
         symbols.field_symbol("JetDriverCompileRequest", "gate_policies")?;
     let request_external_gate_entries =
         symbols.field_symbol("JetDriverCompileRequest", "external_gate_entries")?;
-    let request_evaluation_entry =
-        symbols.field_symbol("JetDriverCompileRequest", "evaluation_entry")?;
+    let request_selected_entry =
+        symbols.field_symbol("JetDriverCompileRequest", "selected_entry")?;
+    let request_profile = symbols.field_symbol("JetDriverCompileRequest", "profile")?;
+    let request_build_mode = symbols.field_symbol("JetDriverCompileRequest", "build_mode")?;
+    let build_mode_dev = symbols.variant_path("MIRArtifactBuildMode", "Dev")?;
+    let request_adapter_mode = symbols.field_symbol("JetDriverCompileRequest", "adapter_mode")?;
+    let request_adapter_operation_ids =
+        symbols.field_symbol("JetDriverCompileRequest", "adapter_operation_ids")?;
+    let request_capture_build_program =
+        symbols.field_symbol("JetDriverCompileRequest", "capture_build_program")?;
+    let request_capture_build_nodes =
+        symbols.field_symbol("JetDriverCompileRequest", "capture_build_nodes")?;
+    let request_build_output_names =
+        symbols.field_symbol("JetDriverCompileRequest", "build_output_names")?;
+    let request_capture_cost_report =
+        symbols.field_symbol("JetDriverCompileRequest", "capture_cost_report")?;
+    let request_generated_modules =
+        symbols.field_symbol("JetDriverCompileRequest", "generated_modules")?;
+    let request_build_inputs = symbols.field_symbol("JetDriverCompileRequest", "build_inputs")?;
+    let request_build_http_inputs =
+        symbols.field_symbol("JetDriverCompileRequest", "build_http_inputs")?;
+    let request_execution_host =
+        symbols.field_symbol("JetDriverCompileRequest", "execution_host")?;
     let file_type = symbols.type_symbol("JetDriverAuthorizedSourceFile")?;
     let file_path = symbols.field_symbol("JetDriverAuthorizedSourceFile", "path")?;
     let file_relative_path =
@@ -2564,11 +2585,23 @@ fn emit_bootstrap_host_factory(
             "        {request_mode}: {mode_program},\n",
             "        // The declared defaults of the request's gate and evaluation rows:\n",
             "        // the bootstrap host passes no invocation gates, package gate\n",
-            "        // policies, external gate rows, or evaluation entry.\n",
+            "        // policies, external gate rows, or selected entry.\n",
             "        {request_gate_set}: {gate_set_type} {{ {gate_set_allowed}: Vec::new(), {gate_set_build_flag}: false, {gate_set_session_flag}: false }},\n",
             "        {request_gate_policies}: Vec::new(),\n",
             "        {request_external_gate_entries}: Vec::new(),\n",
-            "        {request_evaluation_entry}: Err(Default::default()),\n",
+            "        {request_selected_entry}: Err(Default::default()),\n",
+            "        {request_profile}: \"dev\".to_string(),\n",
+            "        {request_build_mode}: {build_mode_dev},\n",
+            "        {request_adapter_mode}: String::new(),\n",
+            "        {request_adapter_operation_ids}: Vec::new(),\n",
+            "        {request_capture_build_program}: false,\n",
+            "        {request_capture_build_nodes}: false,\n",
+            "        {request_build_output_names}: Vec::new(),\n",
+            "        {request_capture_cost_report}: false,\n",
+            "        {request_generated_modules}: Vec::new(),\n",
+            "        {request_build_inputs}: Err(Default::default()),\n",
+            "        {request_build_http_inputs}: Err(Default::default()),\n",
+            "        {request_execution_host}: Err(Default::default()),\n",
             "        {request_comptime_stop_points}: false,\n",
             "        // D-JOBS1=A: the bootstrap host takes no `--threads` cap, so the\n",
             "        // compiler admits threads automatically up to the reported cores\n",
@@ -2609,7 +2642,20 @@ fn emit_bootstrap_host_factory(
         gate_set_session_flag = gate_set_session_flag,
         request_gate_policies = request_gate_policies,
         request_external_gate_entries = request_external_gate_entries,
-        request_evaluation_entry = request_evaluation_entry,
+        request_selected_entry = request_selected_entry,
+        request_profile = request_profile,
+        request_build_mode = request_build_mode,
+        build_mode_dev = build_mode_dev,
+        request_adapter_mode = request_adapter_mode,
+        request_adapter_operation_ids = request_adapter_operation_ids,
+        request_capture_build_program = request_capture_build_program,
+        request_capture_build_nodes = request_capture_build_nodes,
+        request_build_output_names = request_build_output_names,
+        request_capture_cost_report = request_capture_cost_report,
+        request_generated_modules = request_generated_modules,
+        request_build_inputs = request_build_inputs,
+        request_build_http_inputs = request_build_http_inputs,
+        request_execution_host = request_execution_host,
         file_type = file_type,
         file_path = file_path,
         file_relative_path = file_relative_path,

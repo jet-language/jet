@@ -77,6 +77,10 @@ is a security property for its arenas and outputs: geometric growth can leave
 freed secret-bearing copies. This admission does not grant capacity/type-size
 inspection or expose any private leaf to user code; keep the Jet and bootstrap
 checker boundaries in parity.
+Bootstrap request mirrors bind every declared field, including defaulted fields,
+through checked field symbols and explicit initializer rows. Keep the canonical
+`selected_entry` spelling and the declared Dev/build/adapter/transport defaults;
+source defaults alone do not initialize the host's generated Rust struct literal.
 
 Use fresh artifacts for runtime claims. A source check, worker receipt, or stale
 binary cannot establish runtime, tier, snapshot, golden, or I9 evidence.
