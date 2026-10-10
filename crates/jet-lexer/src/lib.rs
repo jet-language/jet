@@ -42,7 +42,9 @@ mod raw_head_tests {
 
     #[test]
     fn foreign_body_markers_only_walk_the_adjacent_marker_list() {
-        let prefix = "fn ordinary() { \"\"\"ordinary\"\"\" }\n".repeat(2_000);
+        // Ordinary multiline text follows the line-delimited grammar; only
+        // the adjacent FFI function below owns an opaque guest body.
+        let prefix = "fn ordinary() {\n\"\"\"\nordinary\n\"\"\"\n}\n".repeat(2_000);
         for markers in [
             "#FFI(c)",
             "#FFI(c) #Unsafe(\"reason\")",
@@ -57,7 +59,7 @@ mod raw_head_tests {
                 TokKind::Str(parts) if matches!(parts.as_slice(), [StrTokPart::Lit(text)] if text == "raw \\q { }")
             )));
         }
-        let source = format!("{prefix}#[Unsafe(\"FFI\"), Test] fn ordinary_tail() {{ \"\"\"not raw \\q\"\"\" }}");
+        let source = format!("{prefix}#[Unsafe(\"FFI\"), Test] fn ordinary_tail() {{\n\"\"\"\nnot raw \\q\n\"\"\"\n}}");
         let (_, diagnostics) = Lexer::lex(&source);
         assert!(!diagnostics.is_empty(), "a marker argument is not an FFI marker");
     }
