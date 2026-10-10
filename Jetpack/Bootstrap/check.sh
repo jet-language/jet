@@ -110,10 +110,11 @@ else
 fi
 receipt="$scratch/check.receipt"
 mkdir -p "$scratch" "$HOME/.cache/jet-dev/jetpack-bootstrap/slots"
-# Pin one compiler for every stage: a hard link keeps this exact binary even if
-# cargo replaces target/debug/jet mid-proof (no extra disk; removed at exit).
+# Pin one compiler for every stage: a private copy keeps this exact binary even
+# if cargo replaces target/debug/jet mid-proof. JETPACK_JET_BIN often lives on
+# another filesystem than the scratch, so a hard link is not possible (removed at exit).
 jet_pinned="$scratch/jet-pinned"
-ln -f "$jet" "$jet_pinned"
+cp --reflink=auto -f "$jet" "$jet_pinned"
 jet_source="$jet"
 jet="$jet_pinned"
 trap 'rm -f "$JETPACK_CHECK_SNAPSHOT" "$jet_pinned"' EXIT

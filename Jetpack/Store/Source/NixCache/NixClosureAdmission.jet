@@ -132,11 +132,10 @@ struct NixAdmission {
             objects := [String: FetchedObject]{}
             first_error := NixCacheError?{None}
             loop store_path in pending {
-                object :: self.fetch_pending(endpoint, planned_infos, store_path, store_dir, progress) ? value -> value ! error -> {
-                    if first_error == None -> first_error = Val(error)
-                    next
+                if self.fetch_pending(endpoint, planned_infos, store_path, store_dir, progress) == {
+                    .Ok(object) -> objects[store_path] = object
+                    .Err(error) -> if first_error == None -> first_error = Val(error)
                 }
-                objects[store_path] = object
             }
             names := objects.keys().to_list()
             &names.sort()

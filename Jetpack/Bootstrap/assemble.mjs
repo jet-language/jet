@@ -129,15 +129,16 @@ function mergedManifest(workingText, name) {
 // `embed_file("rel")` is written relative to its own source file, as in any
 // package. The assembled unit lives elsewhere and an embed may not leave its
 // project (E0957), so each embedded file is copied into the unit's project as
-// `src/embedded/<repository path>` and the call is rebased onto that copy; the
-// embedded file itself must stay inside the source root.
+// `src/embedded/<repository path>.embed` and the call is rebased onto that
+// copy. The suffix keeps an embedded `.jet` asset from becoming a package
+// source file; the embedded file itself must stay inside the source root.
 const embeddedFiles = new Map();
 function rebaseEmbeds(text, sourcePath, where) {
   return text.replace(/embed_file\("([^"\\{}]+)"\)/g, (whole, rel) => {
     if (isAbsolute(rel)) fail(`${where}: ${sourcePath}: embed_file paths are relative to their source file`);
     const target = resolve(sourceRootDir, dirname(sourcePath), rel);
     if (!containedPath(sourceRootDir, target)) fail(`${where}: ${sourcePath}: embed_file("${rel}") resolves outside the source root`);
-    const copy = `embedded/${relative(sourceRootDir, target).split(sep).join("/")}`;
+    const copy = `embedded/${relative(sourceRootDir, target).split(sep).join("/")}.embed`;
     embeddedFiles.set(copy, target);
     return `embed_file("${copy}")`;
   });
