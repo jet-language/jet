@@ -31,9 +31,10 @@
 // Indexes are `e % xs.len()` (floored, so in range) or literal 0, and divisors
 // are mostly `e % k + 1`, which keeps the discard rate low.
 //
-// With --sanitize-runtime <runtime.rs> (the prepared runtime text of the
-// runtime pack), Compiler/JetBackend/Tests/run-sanitized.mjs also runs over
-// the corpus (set JET_LOWER_SANITIZE=1 so native code is checked too).
+// With --sanitize-runtime-library <archive> (the instrumented native runtime
+// archive of the native runtime pack, built with ASan/LSan and named with
+// JET_RUNTIME_JET_OBJECT set), Compiler/JetBackend/Tests/run-sanitized.mjs also
+// runs over the corpus (set JET_LOWER_SANITIZE=1 so native code is checked too).
 //
 // Verdicts (fuzz.tsv): reference = the Rust path against the model
 // (model-agree, model-differs, rust-error, rust-absent); then the
@@ -46,7 +47,7 @@
 //
 // usage: [JET=<jet binary>] [JET_RUNTIME_PACK=... | JET_RUNTIME_C_LIB=...] [JET_LOWER_SANITIZE=1]
 //        node Tools/agent/safety-fuzz.mjs <outdir> [--seed N] [--count K]
-//        [--until generate|goldens|differential|lint] [--sanitize-runtime <runtime.rs>]
+//        [--until generate|goldens|differential|lint] [--sanitize-runtime-library <archive>]
 // Writes <out>/fuzz.tsv and <out>/fuzz-summary.txt (and each tool's receipt
 // under <out>/goldens).
 import { createHash } from "node:crypto";
@@ -805,23 +806,27 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const args = process.argv.slice(2);
   const outDir = args.length ? resolve(args.shift()) : null;
   if (!outDir) {
-    console.error("usage: safety-fuzz.mjs <outdir> [--seed N] [--count K] [--until generate|goldens|differential|lint] [--sanitize-runtime <runtime.rs>]");
+    console.error("usage: safety-fuzz.mjs <outdir> [--seed N] [--count K] [--until generate|goldens|differential|lint] [--sanitize-runtime-library <instrumented native archive>]");
     process.exit(64);
   }
   let seed = 1;
   let count = 50;
   let until = "lint";
-  let sanitizeRuntime = null;
+  let sanitizeRuntimeLibrary = null;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--seed") seed = Number(args[++i]);
     else if (args[i] === "--count") count = Number(args[++i]);
     else if (args[i] === "--until") until = args[++i];
-    else if (args[i] === "--sanitize-runtime") sanitizeRuntime = resolve(args[++i]);
+    else if (args[i] === "--sanitize-runtime-library") {
+      if (!args[i + 1]) throw new Error("--sanitize-runtime-library needs an archive path");
+      sanitizeRuntimeLibrary = resolve(args[++i]);
+    }
     else throw new Error(`unknown option ${args[i]}`);
   }
   const STAGES = ["generate", "goldens", "differential", "lint"];
   const last = STAGES.indexOf(until);
   if (last < 0 || !Number.isSafeInteger(seed) || !Number.isSafeInteger(count) || count < 1) throw new Error("bad --seed, --count or --until");
+  if (sanitizeRuntimeLibrary && !existsSync(sanitizeRuntimeLibrary)) throw new Error(`--sanitize-runtime-library not found: ${sanitizeRuntimeLibrary}`);
 
   // 1. Corpus.
   const features = join(outDir, "corpus/Examples/features");
@@ -857,7 +862,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   };
   if (tool("goldens", "Compiler/JetBackend/Tests/run-goldens.mjs", []) !== 0) throw new Error(`run-goldens failed: see ${outDir}/goldens.log`);
   if (last >= 2 && ![0, 1].includes(tool("differential", "Compiler/JetBackend/Tests/run-differential.mjs", []))) throw new Error("run-differential failed");
-  if (last >= 2 && sanitizeRuntime && ![0, 1].includes(tool("sanitize", "Compiler/JetBackend/Tests/run-sanitized.mjs", ["--runtime", sanitizeRuntime]))) throw new Error("run-sanitized failed");
+  if (last >= 2 && sanitizeRuntimeLibrary && ![0, 1].includes(tool("sanitize", "Compiler/JetBackend/Tests/run-sanitized.mjs", ["--runtime-library", sanitizeRuntimeLibrary]))) throw new Error("run-sanitized failed");
   if (last >= 3 && ![0, 1].includes(tool("lint", "Compiler/JetOptimizer/Tests/run-lint-corpus.mjs", []))) throw new Error("run-lint-corpus failed");
 
   // 5. Receipt.
@@ -905,7 +910,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     if (reference === "model-differs" || reference === "rust-error") failures.push(`${reference}\t${stem}\t${detail}`);
     if (native === "native-diverges") failures.push(`native-diverges\t${stem}\t${differential.get(stem).detail}`);
     if (sanitized === "report" || sanitized === "sanitized-diverges") failures.push(`sanitize-${sanitized}\t${stem}\t${sanitize.get(stem).detail}`);
-    if (last >= 2 && sanitizeRuntime && sanitized !== "clean" && sanitized !== "report" && sanitized !== "sanitized-diverges") failures.push(`sanitize-incomplete\t${stem}\t${sanitized}`);
+    if (last >= 2 && sanitizeRuntimeLibrary && sanitized !== "clean" && sanitized !== "report" && sanitized !== "sanitized-diverges") failures.push(`sanitize-incomplete\t${stem}\t${sanitized}`);
     if (linted === "findings" || linted === "lint-crash") failures.push(`lint-${linted}\t${stem}\t${lint.get(stem).detail}`);
     if (last >= 3 && linted !== "clean" && linted !== "findings" && linted !== "lint-crash") failures.push(`lint-incomplete\t${stem}\t${linted}`);
   }
