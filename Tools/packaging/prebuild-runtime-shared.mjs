@@ -8,6 +8,7 @@
 // Main supplies pins only after landing. An unset E2 FINAL or missing prerequisite
 // refuses before lowering. OUT must not exist. The receipt seals a CANDIDATE;
 // the consumer's private loader still checks the pinned receipt before symbol use.
+import { nativeCCompiler } from './native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
@@ -128,7 +129,7 @@ step('shared-link', () => {
   const script = join(out, 'exports.map');
   // An anonymous version map creates no extra version-node export.
   writeFileSync(script, `{ global:\n${expectedNames.map(name => `  ${name};`).join('\n')}\nlocal: *;\n};\n`);
-  command(process.env.CC ?? 'cc', ['-shared', '-nostartfiles', '-Wl,-Bsymbolic', '-Wl,-z,defs', '-Wl,-z,text', '-Wl,-z,now', '-Wl,-z,relro', `-Wl,--version-script=${script}`, '-Wl,-soname,jet_runtime.so', object, '-lpthread', '-ldl', '-lm', '-lc', '-o', candidate], config.source.root, process.env, join(out, 'link.log'));
+  command(nativeCCompiler, ['-shared', '-nostartfiles', '-Wl,-Bsymbolic', '-Wl,-z,defs', '-Wl,-z,text', '-Wl,-z,now', '-Wl,-z,relro', `-Wl,--version-script=${script}`, '-Wl,-soname,jet_runtime.so', object, '-lpthread', '-ldl', '-lm', '-lc', '-o', candidate], config.source.root, process.env, join(out, 'link.log'));
 });
 let seal;
 step('shared-seal', () => {

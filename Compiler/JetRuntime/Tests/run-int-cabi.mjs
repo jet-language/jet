@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Jet-only direct ABI witness, independent BigInt oracle, and stopped reports.
 // The retired Rust-provider comparison is parked at Tower #4923.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -91,7 +92,7 @@ if (mode !== "--corpus-only" && jetObject !== "--corpus-only") {
   const failures = [];
   for (const tier of ["jet"]) {
     const binary = join(out, `${tier}-int-cabi`);
-    const built = spawnSync(process.env.CC ?? "cc", ["-std=c11", "-O1", "-DJET_INT_NATIVE_FIXTURE", "-I", out, join(root, "Compiler/JetRuntime/Tests/int-cabi.c"), resolve(jetObject), "-ldl", "-lpthread", "-lm", "-o", binary], { encoding: "utf8" });
+    const built = spawnSync(nativeCCompiler, ["-std=c11", "-O1", "-DJET_INT_NATIVE_FIXTURE", "-I", out, join(root, "Compiler/JetRuntime/Tests/int-cabi.c"), resolve(jetObject), "-ldl", "-lpthread", "-lm", "-o", binary], { encoding: "utf8" });
     writeFileSync(join(out, `${tier}-build.log`), `${built.stdout ?? ""}${built.stderr ?? ""}`);
     if (built.error || built.status !== 0) { failures.push(`${tier}: link`); continue; }
     for (const name of ["values", "zero", "exponent", "shift-negative", "shift-wide", "fixed", "native"]) {

@@ -3,6 +3,7 @@
 // OUT --assemble only prepares units. --lower uses the composed Jet candidate;
 // --global/--initializer/--allocator execute separately so a proof keeps going.
 // Aggregate init/fixture.o supplies the Jet-only runtime; no additional pack.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -56,7 +57,7 @@ if (mode === '--assemble') {
     const exports = run('nm', ['-g', '--defined-only', '--format=posix', object]).stdout;
     for (const name of ['native_global_store', 'native_global_load', 'runtime_float_identity']) if (!exports.includes(`${name} T `)) throw Error(`missing export ${name}`);
     if (/native_global_word\s/.test(exports)) throw Error('private storage escaped as a global symbol');
-    run(process.env.CC ?? 'cc', [join(repo, 'Compiler/JetRuntime/Tests/global-word.c'), object, '-o', join(out, 'global/caller')]);
+    run(nativeCCompiler, [join(repo, 'Compiler/JetRuntime/Tests/global-word.c'), object, '-o', join(out, 'global/caller')]);
     run(join(out, 'global/caller'), []);
 } else {
     const object = join(out, 'init/fixture.o');
@@ -66,7 +67,7 @@ if (mode === '--assemble') {
         const result = run(executable, ['allocator']);
         if (result.stdout !== 'alloc tests: ok\n' || result.stderr !== '') throw Error('allocator stdout/stderr changed');
     } else {
-        const cc = process.env.CC ?? 'cc';
+        const cc = nativeCCompiler;
         run(cc, [source, object, '-lpthread', '-ldl', '-lm', '-o', executable]);
         run(executable, []);
         const shared = join(out, 'init/entryless.so');

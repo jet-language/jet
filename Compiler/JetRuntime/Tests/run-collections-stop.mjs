@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // A test-only library object, not runtime telemetry or an exported pack API.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -40,7 +41,7 @@ if (mode === '--assemble') {
     if (problem) throw Error(problem.detail);
 } else {
     const executable = join(out, 'caller');
-    const build = run(process.env.CC ?? 'cc', ['-Wall', '-Wextra', '-Werror', join(repo, 'Compiler/JetRuntime/Tests/collections-stop.c'), join(out, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', executable]);
+    const build = run(nativeCCompiler, ['-Wall', '-Wextra', '-Werror', join(repo, 'Compiler/JetRuntime/Tests/collections-stop.c'), join(out, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', executable]);
     writeFileSync(join(out, 'build.log'), `${build.stdout}${build.stderr}`);
     const result = run(executable, [], { timeout: 30000 });
     writeFileSync(join(out, 'run.stdout'), result.stdout);

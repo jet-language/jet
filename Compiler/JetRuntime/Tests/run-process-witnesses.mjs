@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Fresh C consumers of one admitted RC pack. Never rebuild a runtime object or
 // invoke rustc; the native Jet field case uses the supplied same-pin RC jet.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
 import {dirname,join,resolve} from 'node:path';
@@ -55,10 +56,10 @@ const fixtures=[['ProcessRoutesWitness','process routes: ok\n',false],
 for(const [name,expected,wrap]of fixtures){
  const object=join(out,name+'.o'),binary=join(out,name);
  const source=join(root,'Compiler/JetRuntime/Tests',name+'.c'),sourceHandle=fileObject(source);
- command(join(root,'Tools/agent/jet-env'),[process.env.CC??'cc','-std=c11','-O1','-fno-stack-protector','-fno-PIE','-fno-builtin','-Wall','-Wextra','-Werror','-c',source,'-o',object],name+'-compile');
+ command(join(root,'Tools/agent/jet-env'),[nativeCCompiler,'-std=c11','-O1','-fno-stack-protector','-fno-PIE','-fno-builtin','-Wall','-Wextra','-Werror','-c',source,'-o',object],name+'-compile');
  const cObjectHandle=fileObject(object);
  unchanged([...sharedInputs,{path:source,handle:sourceHandle}]);
- command(join(root,'Tools/agent/jet-env'),[process.env.CC??'cc','-nostdlib','-static','-no-pie',crt[0].path,crt[1].path,object,...(wrap?['-Wl,--wrap=jet_rt_free']:[]),'-Wl,--start-group',pack,...platform,'-Wl,--end-group',crt[2].path,'-o',binary],name+'-link');
+ command(join(root,'Tools/agent/jet-env'),[nativeCCompiler,'-nostdlib','-static','-no-pie',crt[0].path,crt[1].path,object,...(wrap?['-Wl,--wrap=jet_rt_free']:[]),'-Wl,--start-group',pack,...platform,'-Wl,--end-group',crt[2].path,'-o',binary],name+'-link');
  const executableHandle=fileObject(binary);
  unchanged([...sharedInputs,{path:source,handle:sourceHandle},{path:object,handle:cObjectHandle}]);
  const r=command(binary,[],name+'-execute');

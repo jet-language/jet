@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Explicit Jet-only pack-linked C-ABI test. Missing object/provider fails.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -12,7 +13,7 @@ mkdirSync(out, { recursive: true });
 const driver = join(out, 'driver');
 // Supply real Jet-only objects/archives (KEY/jet_runtime_jet.o, not the startup
 // pack jet_runtime.pack.o); unresolved exports fail, never use a Rust provider.
-const built = spawnSync(process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', '-pedantic',
+const built = spawnSync(nativeCCompiler, ['-std=c11', '-Wall', '-Wextra', '-Werror', '-pedantic',
     join(repo, 'Compiler/JetRuntime/Tests/CAbiDriver.c'),
     ...inputs.map(input => input.startsWith('-') ? input : resolve(input)), '-lpthread', '-ldl', '-lm', '-o', driver], { encoding: 'utf8' });
 writeFileSync(join(out, 'build.log'), `${built.stdout ?? ''}${built.stderr ?? ''}`);

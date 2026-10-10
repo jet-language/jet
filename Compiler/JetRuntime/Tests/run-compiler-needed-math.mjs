@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Real Jet-only object/archive input; no seed runtime or Rust oracle fallback.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -10,7 +11,7 @@ if (!output || !inputs.length) throw Error('usage: run-compiler-needed-math.mjs 
 const out = resolve(output);
 mkdirSync(out, { recursive: true });
 const binary = join(out, 'compiler-needed-math-fixture');
-const built = spawnSync(process.env.CC ?? 'cc', [
+const built = spawnSync(nativeCCompiler, [
   '-std=c11', '-Wall', '-Wextra', '-Werror', '-pedantic', '-fno-builtin',
   join(root, 'Compiler/JetRuntime/Tests/compiler-needed-math-fixture.c'),
   ...inputs.map(input => input.startsWith('-') ? input : resolve(input)),

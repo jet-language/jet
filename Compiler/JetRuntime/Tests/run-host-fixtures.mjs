@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Full composed Jet runtime, real kernel descriptors/processes, C ABI carriers.
 // The held proof supplies the FINAL E2 producer; fixture.o owns the full runtime.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -46,7 +47,7 @@ if (mode === 'assemble') {
   const collections = readFileSync(join(root, 'Compiler/JetRuntime/Source/Collections.jet'), 'utf8');
   const stride = /RT_HOST_U8_STRIDE\s*::\s*prep\s*\{\s*I64\{(1|8)\}\s*\}/.exec(collections)?.[1];
   if (!stride) throw Error('TCP witness requires the canonical native U8 epoch');
-  for (const [name, source] of fixtures) command(join(root, 'Tools/agent/jet-env'), [process.env.CC ?? 'cc', '-std=c11', '-O1', '-fno-stack-protector', '-fno-PIE', '-fno-builtin', '-Wall', '-Wextra', '-Werror', ...(name === 'tcp-routes' ? [`-DJET_TCP_U8_STRIDE=${stride}`] : []), '-c', join(root, 'Compiler/JetRuntime/Tests', source), '-o', join(out, `${name}.o`)]);
+  for (const [name, source] of fixtures) command(join(root, 'Tools/agent/jet-env'), [nativeCCompiler, '-std=c11', '-O1', '-fno-stack-protector', '-fno-PIE', '-fno-builtin', '-Wall', '-Wextra', '-Werror', ...(name === 'tcp-routes' ? [`-DJET_TCP_U8_STRIDE=${stride}`] : []), '-c', join(root, 'Compiler/JetRuntime/Tests', source), '-o', join(out, `${name}.o`)]);
 } else if (mode === 'link') {
   const musl = process.env.JET_PACK_MUSL_LIB, compiler = process.env.JET;
   if (!musl || !compiler) throw Error('JET_PACK_MUSL_LIB and matching FINAL E2 JET are required; fixture.o supplies the Jet-only runtime');

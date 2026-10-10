@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Jet-only pack-linked widening fixture; no Rust rebuild or seed execution.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -10,7 +11,7 @@ if (!output || !inputs.length) throw Error('usage: run-int-widen.mjs OUT OBJECT_
 const out = resolve(output);
 mkdirSync(out, { recursive: true });
 const binary = join(out, 'int-widen-fixture');
-const built = spawnSync(process.env.CC ?? 'cc', [
+const built = spawnSync(nativeCCompiler, [
     '-std=c11', '-Wall', '-Wextra', '-Werror', '-pedantic',
     join(root, 'Compiler/JetRuntime/Tests/int-widen-fixture.c'),
     ...inputs.map(input => input.startsWith('-') ? input : resolve(input)), '-o', binary,

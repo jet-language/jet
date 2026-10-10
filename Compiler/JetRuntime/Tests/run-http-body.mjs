@@ -3,6 +3,7 @@
 // object/archive (KEY/jet_runtime_jet.o, not startup-bearing jet_runtime.pack.o).
 // The delivered-only rail follows check-stop-points.c. This does not prove Core
 // head/transport integration; that belongs to the cutover.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
@@ -20,7 +21,7 @@ function record(name, result, ok) {
   if (!ok) failures.push(name);
 }
 const program = join(out, "http-body.hosted");
-const link = spawnSync(process.env.CC ?? "cc", [
+const link = spawnSync(nativeCCompiler, [
   "-std=c11", "-Wall", "-Wextra", "-Werror", join(root, "Compiler/JetRuntime/Tests/check-http-body.c"),
   object, "-Wl,--wrap=jet_rt_session_propagate", "-lpthread", "-ldl", "-lm", "-o", program,
 ], { cwd: root, encoding: "utf8", timeout: 120000, maxBuffer: 1 << 24 });

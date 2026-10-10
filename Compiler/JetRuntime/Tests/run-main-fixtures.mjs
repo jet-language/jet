@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Link/run only against an explicit fresh Jet-only runtime object/archive
 // (KEY/jet_runtime_jet.o, not startup-bearing jet_runtime.pack.o or a Rust provider).
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -22,7 +23,7 @@ if (mode === 'link') {
     const count = nm.stdout.split('\n').filter(line => line.startsWith(`${symbol} T `)).length;
     if (count !== 1) throw Error(`${symbol}: expected one strong native definition, got ${count}`);
   }
-  checked(process.env.CC ?? 'cc', ['-O2',join(root,'Compiler/JetRuntime/Tests/main-fixture.c'),resolve(pack),'-lpthread','-ldl','-lm','-o',executable]);
+  checked(nativeCCompiler, ['-O2',join(root,'Compiler/JetRuntime/Tests/main-fixture.c'),resolve(pack),'-lpthread','-ldl','-lm','-o',executable]);
 } else {
   // Byte goldens derive from the reference entry/atexit ordering and the
   // registered E3013 wire fragments (ObserveMessages/Channel.text(0)).

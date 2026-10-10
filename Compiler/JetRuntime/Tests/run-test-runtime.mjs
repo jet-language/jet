@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // T1 admission on fresh same-tree inputs. Independent checks keep going;
 // caller owns candidate/host/pack construction and gate-2 machine admission.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -30,7 +31,7 @@ if (nm.status === 0) {
   if (unexpected.length) results.push({ name: "unexpected-imports", status: 1, symbols: unexpected });
 }
 const fixture = join(out, "test-unit-runtime");
-const build = step("fixture-build", process.env.CC ?? "cc", [
+const build = step("fixture-build", nativeCCompiler, [
   "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-Wall", "-Wextra", "-Werror",
   join(repo, "Compiler/JetRuntime/Tests/test-unit-runtime.c"), resolve(jetObject),
   "-ldl", "-lpthread", "-lm", "-lrt", "-lutil", "-o", fixture,

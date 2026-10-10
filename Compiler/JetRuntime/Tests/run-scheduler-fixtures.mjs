@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Real runtime source + Jet fixture callbacks in one library object.
 // C only transports code pointers; no Rust provider or substitute scheduler.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -43,7 +44,7 @@ if (mode === 'assemble') {
   }
   writeFileSync(join(out, 'disassembly.txt'), command('objdump', ['-dr', object]).stdout);
 } else if (mode === 'link') {
-  command(process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/scheduler-fixture.c'), join(dir, 'fixture.o'),
+  command(nativeCCompiler, [join(root, 'Compiler/JetRuntime/Tests/scheduler-fixture.c'), join(dir, 'fixture.o'),
     '-lpthread', '-ldl', '-lm', '-o', join(out, 'scheduler-fixture')]);
 } else {
   const failures = [];

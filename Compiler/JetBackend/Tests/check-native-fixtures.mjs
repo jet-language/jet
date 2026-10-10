@@ -4,6 +4,7 @@
 // optionally exercises supplementary seed-only memory/C rails; it never
 // supplies the executable used for the primary fixture verdict.
 // usage: node Compiler/JetBackend/Tests/check-native-fixtures.mjs <outdir>
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -115,7 +116,7 @@ function checkMemoryImage(fixture) {
     .filter((line) => line.startsWith("import "))
     .map((line) => `-Wl,-u,${line.split(" ")[2]}`);
   const loader = `${outDir}/${fixture.name}.loader`;
-  const link = spawnSync(process.env.CC ?? "cc", [loaderSource, runtimeLib, "-rdynamic", ...keep, "-lpthread", "-ldl", "-lm", "-o", loader], { encoding: "utf8" });
+  const link = spawnSync(nativeCCompiler, [loaderSource, runtimeLib, "-rdynamic", ...keep, "-lpthread", "-ldl", "-lm", "-o", loader], { encoding: "utf8" });
   if (link.status !== 0) {
     console.log(`${fixture.name} (in-memory image): LOADER LINK FAILED\n${link.stderr}`);
     failures += 1;
@@ -129,7 +130,7 @@ function checkMemoryImage(fixture) {
 let sharedRuntime = null;
 if (runtimeLib && jetRun) {
   sharedRuntime = resolve(outDir, "libjet_runtime_c.so");
-  const link = spawnSync(process.env.CC ?? "cc", ["-shared", "-o", sharedRuntime, "-Wl,--whole-archive", runtimeLib, "-Wl,--no-whole-archive", "-lpthread", "-ldl", "-lm"], { encoding: "utf8" });
+  const link = spawnSync(nativeCCompiler, ["-shared", "-o", sharedRuntime, "-Wl,--whole-archive", runtimeLib, "-Wl,--no-whole-archive", "-lpthread", "-ldl", "-lm"], { encoding: "utf8" });
   if (link.status !== 0) {
     console.log(`shared runtime: LINK FAILED\n${link.stderr}`);
     failures += 1;
@@ -158,7 +159,7 @@ for (const fixture of process.argv.includes("--abi") ? [] : expected.filter(({ n
   const taskHost = fixture.nativeTask ? [`${dirname(fileURLToPath(import.meta.url))}/check-trap-task.c`, "-Wl,--wrap=jet_rt_main",
     ...(fixture.taskPass ? ["-DJET_FX_TASK_PASS"] : []),
     ...(fixture.taskMessage ? [`-DJET_FX_TASK_MESSAGE=${JSON.stringify(fixture.taskMessage)}`] : [])] : [];
-  const link = spawnSync(process.env.CC ?? "cc", [`${outDir}/${fixture.name}.o`, ...taskHost, runtimeLib, "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
+  const link = spawnSync(nativeCCompiler, [`${outDir}/${fixture.name}.o`, ...taskHost, runtimeLib, "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
   if (link.status !== 0) {
     console.log(`${fixture.name} (compiled runtime): LINK FAILED\n${link.stderr}`);
     failures += 1;
@@ -168,7 +169,7 @@ for (const fixture of process.argv.includes("--abi") ? [] : expected.filter(({ n
   if (fixture.name === "flat-map-owned" || fixture.name === "list-try-collect") {
     const rail = `${dirname(fileURLToPath(import.meta.url))}/check-collector-alloc.c`;
     const balanced = `${outDir}/${fixture.name}.balanced`;
-    const balanceLink = spawnSync(process.env.CC ?? "cc", [`${outDir}/${fixture.name}.o`, rail, runtimeLib, "-Wl,--wrap=main,--wrap=jet_rt_alloc,--wrap=jet_rt_free", "-lpthread", "-ldl", "-lm", "-o", balanced], { encoding: "utf8" });
+    const balanceLink = spawnSync(nativeCCompiler, [`${outDir}/${fixture.name}.o`, rail, runtimeLib, "-Wl,--wrap=main,--wrap=jet_rt_alloc,--wrap=jet_rt_free", "-lpthread", "-ldl", "-lm", "-o", balanced], { encoding: "utf8" });
     if (balanceLink.status !== 0) {
       console.log(`${fixture.name} (allocator balance): LINK FAILED\n${balanceLink.stderr}`);
       failures += 1;
@@ -184,7 +185,7 @@ for (const fixture of process.argv.includes("--abi") ? [] : expected.filter(({ n
 if (runtimeLib && !process.argv.includes("--abi") && (only.size === 0 || only.has("stop-points")) && existsSync(`${outDir}/stop-points.o`)) {
   const rail = `${dirname(fileURLToPath(import.meta.url))}/check-stop-points.c`;
   const program = `${outDir}/stop-points.rail`;
-  const link = spawnSync(process.env.CC ?? "cc", [`${outDir}/stop-points.o`, rail, runtimeLib, "-Wl,--wrap=jet_rt_string_from_static,--wrap=jet_rt_string_drop", "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
+  const link = spawnSync(nativeCCompiler, [`${outDir}/stop-points.o`, rail, runtimeLib, "-Wl,--wrap=jet_rt_string_from_static,--wrap=jet_rt_string_drop", "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
   if (link.status !== 0) {
     console.log(`stop-points (session rail): LINK FAILED\n${link.stderr}`);
     failures += 1;
@@ -211,7 +212,7 @@ if (runtimeLib && !process.argv.includes("--abi")) {
   ]) {
     const source = `${dirname(fileURLToPath(import.meta.url))}/check-${name}.c`;
     const program = `${outDir}/${name}.hosted`;
-    const link = spawnSync(process.env.CC ?? "cc", [source, runtimeLib, "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
+    const link = spawnSync(nativeCCompiler, [source, runtimeLib, "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
     if (link.status !== 0) {
       console.log(`${name}: LINK FAILED\n${link.stderr}`);
       failures += 1;
@@ -227,7 +228,7 @@ if (runtimeLib && !process.argv.includes("--abi")) {
 if (runtimeLib && !process.argv.includes("--abi") && existsSync(`${outDir}/stop-points.o`)) {
   const rail = `${dirname(fileURLToPath(import.meta.url))}/check-stop-points.c`;
   const program = `${outDir}/stop-points.rail`;
-  const link = spawnSync(process.env.CC ?? "cc", [`${outDir}/stop-points.o`, rail, runtimeLib, "-Wl,--wrap=jet_rt_string_from_static,--wrap=jet_rt_string_drop", "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
+  const link = spawnSync(nativeCCompiler, [`${outDir}/stop-points.o`, rail, runtimeLib, "-Wl,--wrap=jet_rt_string_from_static,--wrap=jet_rt_string_drop", "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
   if (link.status !== 0) {
     console.log(`stop-points (session rail): LINK FAILED\n${link.stderr}`);
     failures += 1;
@@ -257,7 +258,7 @@ if (existsSync(`${outDir}/lists-swap-oob.elf`)) {
 if (runtimeLib && !process.argv.includes("--abi")) {
   const source = `${dirname(fileURLToPath(import.meta.url))}/check-record-sequences.c`;
   const program = `${outDir}/record-sequences.hosted`;
-  const link = spawnSync(process.env.CC ?? "cc", [source, runtimeLib, "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
+  const link = spawnSync(nativeCCompiler, [source, runtimeLib, "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
   if (link.status !== 0) {
     console.log(`record-sequences: LINK FAILED\n${link.stderr}`);
     failures += 1;

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Focused in-process checked producer proof. Build the assembled unit through
 // the composed compiler-unit job, then run produce/link/run with that binary.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -35,7 +36,7 @@ if (mode === 'assemble') {
 } else if (mode === 'link') {
   const library = process.env.JET_RUNTIME_C_LIB;
   if (!library || !existsSync(library)) throw Error('fresh composed JET_RUNTIME_C_LIB required');
-  command('link', process.env.CC ?? 'cc', [prefix + '.o', join(root, 'Compiler/JetBackend/Tests/check-trap-task.c'), '-DJET_FX_TASK_PASS', '-Wl,--wrap=jet_rt_main', library, '-lpthread', '-ldl', '-lm', '-o', prefix + '.hosted']);
+  command('link', nativeCCompiler, [prefix + '.o', join(root, 'Compiler/JetBackend/Tests/check-trap-task.c'), '-DJET_FX_TASK_PASS', '-Wl,--wrap=jet_rt_main', library, '-lpthread', '-ldl', '-lm', '-o', prefix + '.hosted']);
 } else {
   const run = command('run', prefix + '.hosted', [], { timeout: 30000 });
   if (run.stdout !== 'close own\nproducer continued\nexpectation task passed\n' || run.stderr !== '') throw Error('actual producer expectation did not catch and close exactly once');

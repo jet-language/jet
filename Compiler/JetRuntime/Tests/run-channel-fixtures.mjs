@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // L8a-4 actual-runtime slot witnesses and paired 1M-message benchmark.
 // Each mode is independently reportable by the one held keep-going exit job.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -99,16 +100,16 @@ if (mode === 'assemble' || mode.startsWith('assemble-')) {
   command('node',[join(repo,'Compiler/JetBackend/Tests/prepare-call-runtime.mjs'),resolve(source),prepared,'--allparts'],{cwd:repo});
   writeFileSync(destination,readFileSync(prepared,'utf8')+bridge);
 } else if (mode === 'link' || mode === 'link-seed') {
-  command(process.env.CC??'cc',['-O2','-DJET_CHANNEL_INTERNAL',join(repo,'Compiler/JetRuntime/Tests/channel-fixture.c'),join(fixture,'fixture.o'),'-lpthread','-ldl','-lm','-o',join(out,'channel-native')]);
+  command(nativeCCompiler,['-O2','-DJET_CHANNEL_INTERNAL',join(repo,'Compiler/JetRuntime/Tests/channel-fixture.c'),join(fixture,'fixture.o'),'-lpthread','-ldl','-lm','-o',join(out,'channel-native')]);
 } else if (mode === 'link-publication') {
-  command(process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', join(repo, 'Compiler/JetRuntime/Tests/shared-publication-fixture.c'), join(fixture, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'shared-publication-native')]);
+  command(nativeCCompiler, ['-std=c11', '-Wall', '-Wextra', '-Werror', join(repo, 'Compiler/JetRuntime/Tests/shared-publication-fixture.c'), join(fixture, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'shared-publication-native')]);
 } else if (mode === 'run-publication') {
   const result = command(join(out, 'shared-publication-native'), [], {timeout:120000});
   writeFileSync(join(out, `${mode}.txt`), result.stdout + result.stderr);
   const expected = 'Shared World race/loser once/register once/reset owner only ok\nShared Process race/loser once/no World registration ok\n';
   if (result.stdout !== expected || result.stderr !== '') throw Error('invalid Shared publication fixture result');
 } else if (mode === 'link-weak') {
-  command(process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', join(repo, 'Compiler/JetRuntime/Tests/shared-weak-fixture.c'), join(fixture, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'shared-weak-native')]);
+  command(nativeCCompiler, ['-std=c11', '-Wall', '-Wextra', '-Werror', join(repo, 'Compiler/JetRuntime/Tests/shared-weak-fixture.c'), join(fixture, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'shared-weak-native')]);
 } else if (mode === 'run-weak') {
   const result = command(join(out, 'shared-weak-native'), [], {timeout:120000});
   writeFileSync(join(out, `${mode}.txt`), result.stdout + result.stderr);
@@ -117,7 +118,7 @@ if (mode === 'assemble' || mode.startsWith('assemble-')) {
 } else if (['link-stm', 'link-sync', 'link-observe'].includes(mode)) {
   const kind = mode.slice(5);
   const flags = kind === 'stm' ? [] : ['-DJET_CONDITION_FIXTURE', ...(kind === 'observe' ? ['-DJET_OBSERVE_FIXTURE'] : [])];
-  command(process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', ...flags, join(repo, 'Compiler/JetRuntime/Tests/sync-fixture.c'), join(fixture, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, `${kind}-native`)]);
+  command(nativeCCompiler, ['-std=c11', '-Wall', '-Wextra', '-Werror', ...flags, join(repo, 'Compiler/JetRuntime/Tests/sync-fixture.c'), join(fixture, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, `${kind}-native`)]);
 } else if (['run-stm', 'run-sync', 'run-observe'].includes(mode)) {
   const kind = mode.slice(4);
   const result = command(join(out, `${kind}-native`), [], {timeout:120000});

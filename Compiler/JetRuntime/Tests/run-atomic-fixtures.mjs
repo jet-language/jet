@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Real Jet inline-Atomic source object; link only its independent provider.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -36,7 +37,7 @@ if (mode === 'assemble') {
   for (const name of exports) if (symbols.split('\n').filter(line => line.startsWith(`${name} T `)).length !== 1) throw Error(`Atomic provider ${name} must have one strong Jet definition`);
   command('disassembly', 'objdump', ['-dr', object]);
 } else if (mode === 'link') {
-  command('link', join(root, 'Tools/agent/jet-env'), [process.env.CC ?? 'cc', '-std=c11', '-O1', '-Wall', '-Wextra', '-Werror', '-pthread', join(root, 'Compiler/JetRuntime/Tests/AtomicTests.c'), join(unit, 'fixture.o'), '-o', join(out, 'atomic-word-fixture')]);
+  command('link', join(root, 'Tools/agent/jet-env'), [nativeCCompiler, '-std=c11', '-O1', '-Wall', '-Wextra', '-Werror', '-pthread', join(root, 'Compiler/JetRuntime/Tests/AtomicTests.c'), join(unit, 'fixture.o'), '-o', join(out, 'atomic-word-fixture')]);
 } else {
   const result = command('run', join(out, 'atomic-word-fixture'), [], { timeout: 300000 });
   if (result.stdout !== 'Atomic word: five kinds, wrap/CAS, four writers, SeqCst store-buffering\n' || result.stderr !== '') throw Error('Atomic word witnesses changed exact output');

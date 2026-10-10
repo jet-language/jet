@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // First-RC witness: reuse the admitted standalone Jet object, never rebake a
 // runtime or link the startup-bearing pack into a C program with its own main.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -58,7 +59,7 @@ const crt = ['crt1.o', 'crti.o', 'crtn.o'].map(name => ({ path: resolve(musl, na
 receipt('admission.json', { runtimeDirectory, runtimeKey: admitted.key, provenance: admitted.provenance, publishedObject, linkedObject: object, object: objectHandle, compiler: { path: jet, object: compilerHandle }, witness: { path: source, object: sourceHandle }, u8Stride: Number(stride), archives: archiveInputs, crt });
 const cObject = join(out, 'tcp-routes.o');
 const link = join(out, 'link');
-command('compile', join(root, 'Tools/agent/jet-env'), [process.env.CC ?? 'cc', '-std=c11', '-O1', '-fno-stack-protector', '-fno-PIE', '-fno-builtin', '-Wall', '-Wextra', '-Werror', `-DJET_TCP_U8_STRIDE=${stride}`, '-c', source, '-o', cObject]);
+command('compile', join(root, 'Tools/agent/jet-env'), [nativeCCompiler, '-std=c11', '-O1', '-fno-stack-protector', '-fno-PIE', '-fno-builtin', '-Wall', '-Wextra', '-Werror', `-DJET_TCP_U8_STRIDE=${stride}`, '-c', source, '-o', cObject]);
 command('assemble-linker', process.execPath, [join(root, 'Compiler/JetBackend/Tests/run-link.mjs'), link]);
 const executable = join(out, 'tcp-routes');
 command('link', jet, ['run', join(link, 'unit.jet'), '--', executable, crt[0].path, crt[1].path, cObject, object, ...archiveInputs.map(row => row.path), crt[2].path], link);

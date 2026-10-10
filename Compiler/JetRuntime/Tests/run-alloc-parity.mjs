@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Jet-only allocator failure witness; the cross-tier reference is frozen.
 // Standalone C links the supplied Jet-authored runtime, never a Rust provider.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
@@ -25,7 +26,7 @@ for (const [tier, links] of groups) {
   const binary = join(out, `alloc-${tier}`);
   const args = ['-std=c11', '-Wall', '-Wextra', '-Werror', '-pedantic', '-DC_ABI_ALLOC_ONLY=1', fixture,
     ...links.map(input => input.startsWith('-') ? input : resolve(input)), '-lpthread', '-ldl', '-lm', '-o', binary];
-  const built = spawnSync(process.env.CC ?? 'cc', args);
+  const built = spawnSync(nativeCCompiler, args);
   writeFileSync(join(out, `${tier}.build.stdout`), built.stdout ?? Buffer.alloc(0));
   writeFileSync(join(out, `${tier}.build.stderr`), built.stderr ?? Buffer.alloc(0));
   if (built.error || built.signal || built.status !== 0) {

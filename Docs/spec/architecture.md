@@ -202,6 +202,15 @@ digests, the checked export inventory, the content-addressed identity and the
 existing no-Rust-symbol check. Native compiler staging uses the same receipt
 reader. This cache does not bypass semantic checks on user programs.
 
+Native C consumers and pack/link drivers invoke the shared
+`Tools/packaging/native-c-compiler.mjs` policy. It appends
+`-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0` and removes only Nix's `fortify` and
+`fortify3` features from the C compiler child's hardening environment; all
+other hardening and the parent environment remain unchanged. Glibc's fortified
+`*_chk` and `__*_2` entry points are not supplied by the admitted musl ABI.
+The archive-symbol census regression compiles the real process/TCP C witnesses
+and requires every platform import to resolve in the exact musl/libgcc archives.
+
 The Jet-hosted native CLI uses checked MIR directly for build, run and test in
 both profiles. Dev remains LIR O0, including the native compiler fixed-point
 chain; release uses the existing LIR O2 passes and the same runtime pack. Native

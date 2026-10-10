@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // One composed fixture: real World threads, all four MemSentry seed unit
 // witnesses, a Source inline raw-read stop, and canonical ledger byte parity.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -53,9 +54,9 @@ if (mode === 'assemble') {
 } else if (mode === 'link') {
   // Aggregated fixture.o already contains the complete Jet runtime.
   console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
-  command('link', process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/world-sentry-fixture.c'), join(unit, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'world-sentry-fixture')]);
-  command('logical-env-link', process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/LogicalEnvironmentTests.c'), join(unit, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'logical-env-fixture')]);
-  command('link-native-link', process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/LinkNativeTests.c'), join(unit, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'link-native-fixture')]);
+  command('link', nativeCCompiler, [join(root, 'Compiler/JetRuntime/Tests/world-sentry-fixture.c'), join(unit, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'world-sentry-fixture')]);
+  command('logical-env-link', nativeCCompiler, [join(root, 'Compiler/JetRuntime/Tests/LogicalEnvironmentTests.c'), join(unit, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'logical-env-fixture')]);
+  command('link-native-link', nativeCCompiler, [join(root, 'Compiler/JetRuntime/Tests/LinkNativeTests.c'), join(unit, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'link-native-fixture')]);
 } else {
   const failures = [];
   // Raw-check predicates now observe faults too. Never write to checkout/.jet,

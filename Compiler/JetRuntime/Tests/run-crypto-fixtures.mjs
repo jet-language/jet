@@ -2,6 +2,7 @@
 // Compose all private Jet crypto KAT exports into ONE candidate native object.
 // C files transport fixtures only. Explicit phases follow the runtime witness
 // harness convention; no fixture can fall back to a Rust crypto implementation.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -58,7 +59,7 @@ if (mode === 'assemble') {
     for (const name of fixtures) for (const match of readFileSync(join(root, `Compiler/JetRuntime/Tests/${name}Tests.jet`), 'utf8').matchAll(/#Export\(c\)\s+fn\s+(\w+)\(/gu)) if (!strong.has(match[1])) throw Error(`missing strong Jet fixture export ${match[1]}`);
     command('disassembly', 'objdump', ['-dr', object]);
 } else if (mode === 'link') {
-    for (const name of fixtures) command(`link-${name}`, process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', join(root, `Compiler/JetRuntime/Tests/${name}Witness.c`), join(unit, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, name)]);
+    for (const name of fixtures) command(`link-${name}`, nativeCCompiler, ['-std=c11', '-Wall', '-Wextra', '-Werror', join(root, `Compiler/JetRuntime/Tests/${name}Witness.c`), join(unit, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, name)]);
 } else {
     const digest = bytes => createHash('sha256').update(bytes).digest('hex');
     const fixtureFile = join(root, 'Compiler/JetRuntime/Tests/AgeV1Fixtures.json');

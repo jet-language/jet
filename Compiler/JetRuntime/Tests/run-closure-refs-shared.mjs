@@ -2,6 +2,7 @@
 // Actual Jet Shared-held closure with generated clone/drop glue. No C stand-in
 // closure, Rust runtime replacement, serial fallback, or simulated free count.
 // usage: run-closure-refs-shared.mjs OUT assemble|lower|link|run [JET_ONLY_RUNTIME_OBJECT_OR_ARCHIVE]
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
@@ -42,7 +43,7 @@ if (mode === 'assemble') {
         const object = resolve(objectArg);
         const lower = JSON.parse(readFileSync(join(out, 'lower.json'), 'utf8'));
         if (lower.sha !== process.env.COMPOSED_SHA || lower.objectSha256 !== hash(prefix + '.o')) throw Error('lowering pin changed');
-        command('link', ['cc', '-std=c11', '-O2', join(repo, 'Compiler/JetRuntime/Tests/closure-refs-shared.c'), prefix + '.o', object,
+        command('link', [nativeCCompiler, '-std=c11', '-O2', join(repo, 'Compiler/JetRuntime/Tests/closure-refs-shared.c'), prefix + '.o', object,
             '-Wl,--wrap=jet_rt_alloc', '-Wl,--wrap=jet_rt_free', '-lpthread', '-ldl', '-lm', '-o', binary]);
         writeFileSync(join(out, 'link.json'), JSON.stringify({sha: process.env.COMPOSED_SHA, lower, object, objectSha256: hash(object), driverSha256: hash(join(repo, 'Compiler/JetRuntime/Tests/closure-refs-shared.c')), binarySha256: hash(binary)}, null, 2) + '\n');
     } else {

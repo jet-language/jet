@@ -2,6 +2,7 @@
 // Heavy-lane proof: real Jet-object all-row NFC KATs against the frozen seed
 // oracle scalars. The Rust --seed oracle is retired: it reports UNCOVERED and
 // exits 2 before any rustc invocation.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -33,7 +34,7 @@ const oracle = process.env.JET_NFC_FROZEN_SCALARS ? resolve(process.env.JET_NFC_
 if (mode === "--native") {
   if (readFileSync(oracle, "utf8").split("\n").length !== 100171) throw new Error("missing complete frozen seed oracle scalars (JET_NFC_FROZEN_SCALARS or <out>/seed-nfc.scalars)");
   const executable = join(out, "native-nfc");
-  run("cc", ["-std=c11", "-Wall", "-Wextra", "-Werror", join(root,"Compiler/JetRuntime/Tests/NativeTextNormalizeWitness.c"), resolve(object), "-lm", "-pthread", "-o", executable], "native-link");
+  run(nativeCCompiler, ["-std=c11", "-Wall", "-Wextra", "-Werror", join(root,"Compiler/JetRuntime/Tests/NativeTextNormalizeWitness.c"), resolve(object), "-lm", "-pthread", "-o", executable], "native-link");
   run(executable, [kat, oracle], "native-execute");
   const actual = readFileSync(join(out,"native-execute.log"), "utf8");
   const expected = readFileSync(join(root,"Compiler/JetRuntime/Tests/NativeTextNormalizeWitness.stdout"), "utf8");

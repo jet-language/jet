@@ -2,6 +2,7 @@
 // Same full-object convention as run-scheduler-fixtures.mjs. Runtime and Jet
 // callbacks are lowered together; the C witness only transports code pointers.
 // Aggregate fixture.o supplies the Jet-only runtime; link platform libs only.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -48,7 +49,7 @@ if (mode === 'assemble') {
   }
   writeFileSync(join(out, 'disassembly.txt'), command('objdump', ['-dr', object]).stdout);
 } else if (mode === 'link') {
-  command(process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/test-suite-fixture.c'), join(dir, 'fixture.o'),
+  command(nativeCCompiler, [join(root, 'Compiler/JetRuntime/Tests/test-suite-fixture.c'), join(dir, 'fixture.o'),
     '-lpthread', '-ldl', '-lm', '-o', join(out, 'test-suite-fixture')]);
 } else {
   const result = spawnSync(join(out, 'test-suite-fixture'), [], { encoding: 'utf8', timeout: 300000 });

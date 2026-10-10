@@ -2,6 +2,7 @@
 // Registered-defer acceptance, compiled through the actual Source producer.
 // Native programs use jet_codegen_lower_native_program; library objects use
 // the unchanged plain producer. C transports entries into the real Task API.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -61,7 +62,7 @@ if (mode === 'assemble') {
   for (const c of cases) {
     const unit = join(out, c.name);
     const args = [join(unit, 'fixture.o'), host, ...(c.native ? [] : ['-DJET_FX_LIBRARY_ENTRY']), ...(c.task ? ['-Wl,--wrap=jet_rt_main'] : ['-DJET_FX_PLAIN_ROOT']), ...(c.cleanupCancel ? ['-DJET_FX_CANCEL_DURING_CLEANUP', '-Wl,--wrap=jet_rt_cleanup_enter'] : []), library, '-lpthread', '-ldl', '-lm', '-o', join(unit, 'hosted')];
-    command(c.name + '-link', process.env.CC ?? 'cc', args);
+    command(c.name + '-link', nativeCCompiler, args);
   }
 } else {
   const results = new Map();

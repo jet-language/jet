@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // First-RC witness: fresh C assertions against the admitted standalone Jet
 // object and its exact C platform. Never reassemble/rebake any runtime source.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -63,7 +64,7 @@ const sourceHandle = fileObject(source), compilerHandle = fileObject(jet);
 const crt = ['crt1.o', 'crti.o', 'crtn.o'].map(name => ({ path: resolve(musl, name), handle: fileObject(resolve(musl, name)) }));
 receipt('admission.json', { runtimeDirectory, runtimeKey: admitted.key, provenance: admitted.provenance, publishedObject, linkedObject: object, object: objectHandle, compiler: { path: jet, object: compilerHandle }, witness: { path: source, object: sourceHandle }, u8Stride: stride, abiSources: [dataAbi, collections].map(({ path, handle }) => ({ path, handle })), archives: archiveInputs, crt });
 const cObject = join(out, 'codec-file-leaves.o'), link = join(out, 'link');
-command('compile', join(root, 'Tools/agent/jet-env'), [process.env.CC ?? 'cc', '-std=c11', '-O1', '-fno-stack-protector', '-fno-PIE', '-fno-builtin', '-Wall', '-Wextra', '-Werror', '-pedantic', ...macros, '-c', source, '-o', cObject]);
+command('compile', join(root, 'Tools/agent/jet-env'), [nativeCCompiler, '-std=c11', '-O1', '-fno-stack-protector', '-fno-PIE', '-fno-builtin', '-Wall', '-Wextra', '-Werror', '-pedantic', ...macros, '-c', source, '-o', cObject]);
 command('assemble-linker', process.execPath, [join(root, 'Compiler/JetBackend/Tests/run-link.mjs'), link]);
 const executable = join(out, 'native-codec-file-leaves');
 command('link', jet, ['run', join(link, 'unit.jet'), '--', executable, crt[0].path, crt[1].path, cObject, object, ...archiveInputs.map(row => row.path), crt[2].path], link);

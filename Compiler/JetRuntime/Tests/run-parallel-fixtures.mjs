@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Full Jet source/object lane: fixture.o supplies the runtime, not another pack.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -38,7 +39,7 @@ if (mode === 'assemble') {
   for (const name of ['jet_rt_native_para_walk', 'jet_rt_native_para_worker']) if (symbols.split('\n').filter(line => line.startsWith(`${name} T `)).length !== 1) throw Error(`expected one strong Jet ${name}`);
   writeFileSync(join(out, 'symbols.nm'), symbols);
 } else if (mode === 'link') {
-  command(process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/parallel-fixture.c'), join(dir, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'parallel-fixture')]);
+  command(nativeCCompiler, [join(root, 'Compiler/JetRuntime/Tests/parallel-fixture.c'), join(dir, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'parallel-fixture')]);
 } else {
   const result = spawnSync(join(out, 'parallel-fixture'), [], { encoding: 'utf8', timeout: 300000 });
   writeFileSync(join(out, 'run.receipt.json'), JSON.stringify({ status: result.status, signal: result.signal, error: result.error?.message ?? null, stdout: result.stdout, stderr: result.stderr }, null, 2) + '\n');

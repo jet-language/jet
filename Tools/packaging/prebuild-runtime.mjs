@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Package checked Jet runtime MIR as one object, then resolve permitted C
 // platform dependencies with Jet's own linker. Never invoke a Rust compiler.
+import { nativeCCompiler } from './native-c-compiler.mjs';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -16,7 +17,7 @@ const jet = resolve(compiler);
 const out = resolve(destination ?? join(dirname(jet), 'jet-runtime'));
 const musl = process.env.JET_PACK_MUSL_LIB;
 if (!musl) throw Error('JET_PACK_MUSL_LIB must name the static musl libc.a directory');
-const cc = process.env.CC ?? 'cc';
+const cc = nativeCCompiler;
 const platform = [resolve(musl, 'libc.a'), ...['libgcc_eh.a', 'libgcc.a'].map(name => {
   const path = execFileSync(cc, [`-print-file-name=${name}`], { encoding: 'utf8' }).trim();
   if (!existsSync(path)) throw Error(`${cc} did not locate ${name}: ${path}`);

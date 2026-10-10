@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Actual Jet-only pack-linked Duration ABI fixture; no seed or Rust oracle.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -10,7 +11,7 @@ if (!output || !inputs.length) throw Error('usage: run-duration.mjs OUT JET_ONLY
 const out = resolve(output);
 mkdirSync(out, { recursive: true });
 const binary = join(out, 'duration-fixture');
-const built = spawnSync(process.env.CC ?? 'cc', [
+const built = spawnSync(nativeCCompiler, [
   '-std=c11', '-Wall', '-Wextra', '-Werror', '-pedantic',
   join(root, 'Compiler/JetRuntime/Tests/duration-fixture.c'),
   ...inputs.map(input => input.startsWith('-') ? input : resolve(input)), '-o', binary,

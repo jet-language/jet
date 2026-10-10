@@ -2,6 +2,7 @@
 // Actual canonical Jet provider acceptance. No seed descriptor implementation.
 // Run modes independently so an integrator can collect every failure in one pass.
 // Aggregate fixture.o owns the full Jet-only runtime; link platform libs only.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -39,7 +40,7 @@ if (mode === 'assemble') {
   const {problem} = runNativeLibrary({jet:candidateJetc0(),file:join(fixture,'Source/Fixture.jet'),prefix,exports:join(fixture,'exports.list'),env:{...process.env,JET_TOOLCHAIN_ROOT:repo,JET_STORE_DIR:join(out,'store')}});
   if (problem) throw Error(problem.detail);
 } else if (mode === 'link') {
-  command(process.env.CC??'cc',['-std=c11','-Wall','-Wextra','-Werror','-O2',join(repo,'Compiler/JetRuntime/Tests/shared-source-fixture.c'),join(fixture,'fixture.o'),'-lpthread','-ldl','-lm','-o',join(out,'shared-source-native')]);
+  command(nativeCCompiler,['-std=c11','-Wall','-Wextra','-Werror','-O2',join(repo,'Compiler/JetRuntime/Tests/shared-source-fixture.c'),join(fixture,'fixture.o'),'-lpthread','-ldl','-lm','-o',join(out,'shared-source-native')]);
 } else {
   const result = command(join(out,'shared-source-native'),[],{timeout:120000});
   writeFileSync(join(out,'shared-source.stdout'),result.stdout);

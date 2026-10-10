@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // --freeze is retired: the Rust seed oracle is reported UNCOVERED (exit 2) and never run.
 // --native accepts only a freshly composed Jet-only runtime object.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
@@ -42,7 +43,7 @@ literals();
 if(mode==='--native') {
   const frozen=JSON.parse(readFileSync(join(here,'LayoutSeed.json'),'utf8'));
   if(hash(vectors)!==frozen.vectors_sha256||hash(frozen.stdout)!==frozen.stdout_sha256) throw Error('frozen oracle/vector checksum mismatch');
-  run('cc',['-std=c11','-Wall','-Wextra','-Werror','-pedantic',join(here,'NativeLayoutWitness.c'),resolve(object),'-Wl,--wrap=jet_rt_free','-lm','-pthread','-o',join(out,'native-layout')],'native-link');
+  run(nativeCCompiler,['-std=c11','-Wall','-Wextra','-Werror','-pedantic',join(here,'NativeLayoutWitness.c'),resolve(object),'-Wl,--wrap=jet_rt_free','-lm','-pthread','-o',join(out,'native-layout')],'native-link');
   const actual=run(join(out,'native-layout'),[join(here,'LayoutVectors.txt')],'native-execute').trim().split('\n');
   if(actual.pop()!=='Layout6 ownership/registry/clone/drop OK') throw Error('ownership witness did not complete');
   const expected=frozen.stdout.trim().split('\n').filter(s=>!s.startsWith('p '));

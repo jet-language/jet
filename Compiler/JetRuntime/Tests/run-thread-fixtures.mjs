@@ -4,6 +4,7 @@
 // negative intrinsic witnesses), audit, link, run. Standalone uses no Rust;
 // shared-link/shared-run exercise the complete Jet-authored Shared runtime.
 // rust-link/rust-run are retired reference modes (Tower #4923): UNCOVERED, exit 2.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -117,10 +118,10 @@ if (mode === "assemble") {
 } else if (mode === "link") {
   const musl = process.env.JET_PACK_MUSL_LIB;
   if (!musl || !existsSync(join(musl, "libc.a"))) throw Error("JET_PACK_MUSL_LIB must name the pack's musl static library directory");
-  command(process.env.CC ?? "cc", ["-static", "-nostdlib", "-no-pie", join(musl, "crt1.o"), join(musl, "crti.o"),
+  command(nativeCCompiler, ["-static", "-nostdlib", "-no-pie", join(musl, "crt1.o"), join(musl, "crti.o"),
     join(repo, "Compiler/JetRuntime/Tests/thread-fixture.c"), join(out, "good/fixture.o"), join(musl, "libc.a"), "-lgcc", "-lgcc_eh", join(musl, "crtn.o"), "-o", join(out, "thread-fixture")]);
 } else if (mode === "shared-link") {
-  command(process.env.CC ?? "cc", ["-DJET_SHARED_TLS_FIXTURE", join(repo, "Compiler/JetRuntime/Tests/thread-fixture.c"),
+  command(nativeCCompiler, ["-DJET_SHARED_TLS_FIXTURE", join(repo, "Compiler/JetRuntime/Tests/thread-fixture.c"),
     join(out, "shared/fixture.o"), "-lpthread", "-ldl", "-lm", "-o", join(out, "shared-thread-fixture")]);
 } else if (mode === "shared-run") {
   const result = command(join(out, "shared-thread-fixture"), [], { timeout: 30000 });

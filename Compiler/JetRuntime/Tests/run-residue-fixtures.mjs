@@ -2,6 +2,7 @@
 // One aggregate Jet object supplies actual comptime, numeric and U32 kernels.
 // Link fixture.o only plus platform libraries, never another runtime pack.
 // Each mode can run under cheap.sh + jet-env.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -46,7 +47,7 @@ if (mode === 'assemble') {
 } else if (mode === 'link') {
   for (const [name, source] of cases) {
     const provider=name==='u32'?[]:['-DU32_KERNELS_ONLY',join(repo,'Compiler/JetBackend/Tests/u32-import.c')];
-    command(process.env.CC??'cc',['-O2',...provider,join(repo,source),join(fixture,'fixture.o'),'-lpthread','-ldl','-lm','-o',join(out,name)]);
+    command(nativeCCompiler,['-O2',...provider,join(repo,source),join(fixture,'fixture.o'),'-lpthread','-ldl','-lm','-o',join(out,name)]);
   }
 } else {
   for (const [name] of cases) {

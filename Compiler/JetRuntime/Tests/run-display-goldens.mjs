@@ -4,6 +4,7 @@
 // Prove: node run-display-goldens.mjs OUT --object JET.o --pack JET_ONLY.o --provenance RECEIPT [--frozen RECEIPT_DIR] [--results fresh-results.tsv]
 // The object/pack must include --test FloatBits. All selected native goldens
 // and the 1M-float native formatting cell remain live.
+import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
@@ -130,7 +131,7 @@ const unresolved = [...symbols(undefinedJet.text).keys()].filter((name) => !pack
 // No arithmetic recursion through a Rust exact-Int formatter is admissible.
 const exactImports = [...symbols(undefinedJet.text).keys()].filter((name) => name.startsWith("jet_int_"));
 if (missingExports.length || unresolved.length || exactImports.length) ++failures;
-const cc = command("witness-compile", process.env.CC ?? "cc", ["-std=c11", "-O2", "-ffreestanding", "-fno-builtin", "-fno-stack-protector", "-fno-pie", "-I", out, "-c", join(root, "Compiler/JetRuntime/Tests/DisplayWitness.c"), "-o", join(out, "witness.o")]);
+const cc = command("witness-compile", nativeCCompiler, ["-std=c11", "-O2", "-ffreestanding", "-fno-builtin", "-fno-stack-protector", "-fno-pie", "-I", out, "-c", join(root, "Compiler/JetRuntime/Tests/DisplayWitness.c"), "-o", join(out, "witness.o")]);
 const oracle = { ok: true, text: readFileSync(join(frozenOut, "rust.stdout"), "utf8") };
 const receipt = JSON.parse(readFileSync(provenance, "utf8"));
 const digest = file => createHash("sha256").update(readFileSync(file)).digest("hex");
