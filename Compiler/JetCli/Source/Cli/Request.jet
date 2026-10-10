@@ -643,6 +643,7 @@ impl JetCLIBuildInputs.JetDriverBuildInputs {
         if !opened.is_file || expected.id != opened.id || expected.size != opened.size || expected.modified != opened.modified || expected.changed != opened.changed -> return Err(JetDriverBuildInputError{message: "file changed before reading"})
         if expected.size > limit -> return Err(JetDriverBuildInputError{message: "file exceeds its read bound"})
         bytes := [U8]{}
+        &bytes.try_reserve(if expected.size < 65536 -> expected.size else -> 65536) ?? return Err(JetDriverBuildInputError{message: "cannot reserve file read buffer: {err}"})
         loop {
             remaining :: limit + 1 - bytes.len()
             chunk :: reader.read(if remaining < 65536 -> remaining else -> 65536) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
@@ -734,6 +735,7 @@ fn jet_cli_read_held_source(directory: cli_files.Directory, name: String, limit:
     if !jet_cli_build_read_same_file(expected, current) -> return Err(jet_cli_read_error("file authority input moved while it was held"))
     if expected.size > limit -> return Err(jet_cli_read_error("file exceeds its read bound"))
     bytes := [U8]{}
+    &bytes.try_reserve(if expected.size < 65536 -> expected.size else -> 65536) ?? return Err(jet_cli_read_error("cannot reserve file read buffer: {err}"))
     loop {
         remaining :: limit + 1 - bytes.len()
         chunk :: reader.read(if remaining < 65536 -> remaining else -> 65536) ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
@@ -882,6 +884,7 @@ fn jet_cli_outside_walk(root: String, relative: String) -[FS]> Bool Never! {
 // `files` with `added` placed at its root-relative position in walk order.
 fn jet_cli_insert_source(files: ^[JetDriverAuthorizedSourceFile], added: JetDriverAuthorizedSourceFile) -> [JetDriverAuthorizedSourceFile] Never! {
     ordered := [JetDriverAuthorizedSourceFile]{}
+    &ordered.try_reserve(files.len() + 1) ?? panic("cannot reserve the authorized source ordering: {err}")
     placed := false
     loop file in files {
         if !placed && jet_cli_relative_precedes(added.relative_path, file.relative_path) {
