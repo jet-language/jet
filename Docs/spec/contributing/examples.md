@@ -122,3 +122,8 @@ and `FileCryptoError -> Err` conversions (D-FAIL-CONV2=A, D-CRYPTO-ERRFAM1=A).
 Valid Core crypto calls in `fn run()` therefore do not expect E2402. Keep
 non-convertible user-error witnesses separate from crypto boundary misuse
 (E2702), and retain type, effect, and authority precedence diagnostics.
+
+For same-code snapshot refreshes, compare the diagnostic text with its current
+Jet emitter or active registry row, and source excerpts with the fixture.
+Do not bless different codes, lost diagnostics, or a Rust-host/native-tier
+discrepancy merely because one compiler printed it.
