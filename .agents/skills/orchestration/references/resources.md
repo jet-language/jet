@@ -115,6 +115,13 @@ the immutable export, not the shared worktree, and require 18/18 before moving
 the hold into the runnable queue. A worktree check can consume uncommitted
 hash refreshes that the export omits; commit the canonical generated outputs
 and re-export rather than bypassing the build-script stale-table guard.
+Before releasing a producer, pin every live compiler target and read-only
+snapshot in an active `proofq/*plan*` document: the disk guard reads these plans
+as live references. Historic receipts and `disk-protect.txt` are not live pins.
+Keep the current verifier pinned across idle gaps; include the coming release
+target before its build starts, and remove old pins only after their consumers
+have switched or stopped. Debug and RC producers use separate atomic plans so
+one concurrent producer cannot overwrite the other's input lifetime.
 Retired arithmetic entry points have no internal compatibility exemption:
 Core implementations and tests use numeric `.pow()` / `.bit_xor()` receivers,
 with explicit `Float` receivers for floating literal bases. Sweep both Core
