@@ -3703,7 +3703,7 @@ fn jet_data_loader_stream<R: __jet_Decode>(
         Err(error) => return Err(jet_data_loader_fail(loader, error)),
     };
     let input = JetFileReader {
-        inner: std::io::BufReader::new(file),
+        inner: std::sync::Mutex::new(std::io::BufReader::new(file)),
         path: raw_locator,
     };
     let stream = match loader.format {

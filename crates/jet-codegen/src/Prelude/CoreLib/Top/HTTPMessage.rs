@@ -572,13 +572,15 @@ impl JetHTTPBody {
     }
 
     fn from_reader(reader: JetFileReader) -> Result<Self, JetHTTPError> {
-        Ok(Self::reader(reader.inner, None))
+        let stream = reader.inner.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
+        Ok(Self::reader(stream, None))
     }
 
     fn from_reader_with_length(reader: JetFileReader, length: i64) -> Result<Self, JetHTTPError> {
         let length = usize::try_from(length).ok().filter(|length| *length <= 1024 * 1024 * 1024)
             .ok_or(JetHTTPError::BodyTooLarge { limit: length })?;
-        Ok(Self::reader(std::io::Read::take(reader.inner, length as u64), Some(length)))
+        let stream = reader.inner.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
+        Ok(Self::reader(std::io::Read::take(stream, length as u64), Some(length)))
     }
 
     fn bridge(
@@ -872,7 +874,12 @@ fn jet_http_body_copy_to(
         if total > limit {
             return Err(JetHTTPError::BodyTooLarge { limit: limit as i64 });
         }
-        writer.inner.write_all(&chunk).map_err(|_| JetHTTPError::IO { operation: "copy body".to_string() })?;
+        writer
+            .inner
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .write_all(&chunk)
+            .map_err(|_| JetHTTPError::IO { operation: "copy body".to_string() })?;
     }
     i64::try_from(total).map_err(|_| JetHTTPError::BodyTooLarge { limit: limit as i64 })
 }

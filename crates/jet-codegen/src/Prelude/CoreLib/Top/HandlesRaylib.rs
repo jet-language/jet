@@ -13,12 +13,20 @@
 // ── Streaming file handles (E2-M7, D-IO2) ────────────────────────────────────
 // FileReader / FileWriter are RAII: Drop closes (and flushes) them
 // on every exit path — including `?` early returns and panics.
+//
+// The stream sits behind the carrier's own lock (`interior_mutable_receiver`
+// in Context.rs `file_handle_carrier`): Core handle ops write the stream
+// through a handle reached from a read binding, so they take `&self`. An
+// exclusive holder uses `Mutex::get_mut` and never locks. A poisoned lock
+// still guards a valid stream (one panic interrupted one call), so every
+// access recovers it with `PoisonError::into_inner`, like the other Prelude
+// locks.
 struct JetFileReader {
-    inner: std::io::BufReader<std::fs::File>,
+    inner: std::sync::Mutex<std::io::BufReader<std::fs::File>>,
     path: String,
 }
 struct JetFileWriter {
-    inner: std::io::BufWriter<std::fs::File>,
+    inner: std::sync::Mutex<std::io::BufWriter<std::fs::File>>,
     path: String,
 }
 

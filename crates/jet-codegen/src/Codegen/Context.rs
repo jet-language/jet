@@ -1499,10 +1499,22 @@ pub(crate) fn layout_handle_rust_type(name: &str) -> Option<&'static str> {
     }
 }
 
+/// One native handle carrier row: the prelude Rust type and the carrier
+/// properties the emitter reads instead of matching type names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FileHandleCarrier {
+    pub(crate) rust: &'static str,
+    /// The carrier keeps its stream behind its own lock and every Core handle
+    /// op on it takes `&self`. Both checkers let such an op write through a
+    /// handle reached from a read binding, so a write borrow of a place
+    /// rooted at a Read parameter or capture lends `&T`.
+    pub(crate) interior_mutable_receiver: bool,
+}
+
 /// E2-M7: file handle types are top-level in the prelude (not in `jet_std`).
 /// The `core.files` and `core.term` source declarations of these handles are
 /// the checked names of the same native carriers.
-pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
+pub(crate) fn file_handle_carrier(name: &str) -> Option<FileHandleCarrier> {
     let name = if name.starts_with("<corelib>/Core/files::Core/files/files.jet::")
         || name.starts_with("<corelib>/Core/term::Core/term/term.jet::")
     {
@@ -1510,45 +1522,54 @@ pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
     } else {
         name
     };
-    match name {
-        "FileReader" => Some("JetFileReader"),
-        "FileWriter" => Some("JetFileWriter"),
+    let (rust, interior_mutable_receiver) = match name {
+        // HandlesRaylib.rs: the stream sits in a `Mutex`.
+        "FileReader" => ("JetFileReader", true),
+        "FileWriter" => ("JetFileWriter", true),
         // FileLines is an internal sema marker; it should never appear in emitted Rust.
-        "FileLines" => Some("()"),
+        "FileLines" => ("()", false),
         // D-STDIN1=A: stdin handle types; StdinLines is an internal sema marker.
-        "StdinHandle" => Some("JetStdinReader"),
-        "StdinLines" => Some("()"),
+        "StdinHandle" => ("JetStdinReader", false),
+        "StdinLines" => ("()", false),
         // D-PROCESS1=A: these markers project the concrete shared handles on
         // ProcessChild. Keep their native storage types in generated Rust so
         // method receivers match the process prelude helpers.
-        "ProcessStdin" => Some("jet_std::ProcessStdinHandle"),
-        "ProcessStdoutStream" => Some("jet_std::ProcessStdoutStreamHandle"),
-        "ProcessStderrStream" => Some("jet_std::ProcessStderrStreamHandle"),
+        "ProcessStdin" => ("jet_std::ProcessStdinHandle", false),
+        "ProcessStdoutStream" => ("jet_std::ProcessStdoutStreamHandle", false),
+        "ProcessStderrStream" => ("jet_std::ProcessStderrStreamHandle", false),
         // ProcessLines is the `.lines()` loop-only marker.
-        "ProcessLines" => Some("()"),
+        "ProcessLines" => ("()", false),
         // D-COREIO1=A: standard stream handles.
-        "Stdout" => Some("JetStdout"),
-        "Stderr" => Some("JetStderr"),
+        "Stdout" => ("JetStdout", false),
+        "Stderr" => ("JetStderr", false),
         // D-PATHFS1: typed path handle.
-        "Path" => Some("JetPath"),
+        "Path" => ("JetPath", false),
         // D-FILESCOPE1=A: scoped filesystem handles are top-level prelude
         // values and are borrowed by scope-bound file operations.
-        "FileScope" => Some("JetFileScope"),
+        "FileScope" => ("JetFileScope", false),
         // D-DBDRIVER1: the SQLite connection handle wrapper.
-        "DBConnection" => Some("JetDbConnection"),
-        "DBScope" => Some("JetDbScope"),
-        "DBPool" => Some("JetDbPool<JetDbConnection>"),
-        "DBLease" => Some("JetDbLease<JetDbConnection>"),
-        "DBPoolReceipt" => Some("JetDbPoolReceipt"),
-        "DBPoolLifecycle" => Some("JetDbPoolLifecycle"),
+        "DBConnection" => ("JetDbConnection", false),
+        "DBScope" => ("JetDbScope", false),
+        "DBPool" => ("JetDbPool<JetDbConnection>", false),
+        "DBLease" => ("JetDbLease<JetDbConnection>", false),
+        "DBPoolReceipt" => ("JetDbPoolReceipt", false),
+        "DBPoolLifecycle" => ("JetDbPoolLifecycle", false),
         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): the sandboxed WASM plugin handle.
-        "Plugin" => Some("JetPlugin"),
+        "Plugin" => ("JetPlugin", false),
         // D-LIB-CALLGRANT1=A: loaded libraries are opaque handles; the grant
         // is a small constructable prelude record.
-        "Mod" => Some("JetMod"),
-        "ModGrant" => Some("JetModGrant"),
-        _ => None,
-    }
+        "Mod" => ("JetMod", false),
+        "ModGrant" => ("JetModGrant", false),
+        _ => return None,
+    };
+    Some(FileHandleCarrier {
+        rust,
+        interior_mutable_receiver,
+    })
+}
+
+pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
+    file_handle_carrier(name).map(|carrier| carrier.rust)
 }
 
 /// D-RAYLIB1=A: raylib handle/value types are top-level prelude
@@ -8076,12 +8097,15 @@ mod tests {
     #[test]
     fn source_file_handles_use_the_native_owned_carriers() {
         let prefix = "<corelib>/Core/files::Core/files/files.jet::";
-        for (leaf, rust) in [
-            ("FileReader", "JetFileReader"),
-            ("FileWriter", "JetFileWriter"),
-            ("FileScope", "JetFileScope"),
+        for (leaf, rust, interior_mutable_receiver) in [
+            ("FileReader", "JetFileReader", true),
+            ("FileWriter", "JetFileWriter", true),
+            ("FileScope", "JetFileScope", false),
         ] {
-            assert_eq!(file_handle_rust_type(&format!("{prefix}{leaf}")), Some(rust));
+            assert_eq!(
+                file_handle_carrier(&format!("{prefix}{leaf}")),
+                Some(FileHandleCarrier { rust, interior_mutable_receiver })
+            );
         }
         assert_eq!(file_handle_rust_type("user::FileReader"), None);
     }

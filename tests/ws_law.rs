@@ -37,11 +37,11 @@ fn jet_enc_json_decode<T: __jet_Decode>(
 }
 
 struct JetFileReader {
-    inner: Box<dyn std::io::Read + Send>,
+    inner: std::sync::Mutex<Box<dyn std::io::Read + Send>>,
 }
 
 struct JetFileWriter {
-    inner: Box<dyn std::io::Write + Send>,
+    inner: std::sync::Mutex<Box<dyn std::io::Write + Send>>,
 }
 mod jet_encoding_json {
     pub use jet_foundation::EncodingJson::*;

@@ -22637,6 +22637,12 @@ impl<'a> RustEmitter<'a> {
                 self.place_reference(function, *place, access)
             }
             Some(MirOperation::Parameter { .. } | MirOperation::Capture { .. }) => {
+                let mutable = mutable
+                    && !self.shared_write_borrow(
+                        function,
+                        &MirPlaceBase::Parameter(value),
+                        self.value_type(function, value),
+                    );
                 let borrow = if mutable { "&mut " } else { "&" };
                 format!(
                     "{borrow}({})",
@@ -37776,7 +37782,7 @@ impl<'a> RustEmitter<'a> {
                 );
             if atomic_wire
                 || (row.module == "core.builtin"
-                    && matches!(row.member.as_str(), "string_slice" | "list_slice")
+                    && matches!(row.member.as_str(), "string_slice" | "list_slice" | "list_swap")
                     && index < 2
                     && matches!(
                         self.value_type(function, *value_id).kind(),
@@ -37907,7 +37913,12 @@ impl<'a> RustEmitter<'a> {
                 self.place_reference(function, *place, MirAccess::Write)
             }
             MirOperation::Parameter { .. } | MirOperation::Capture { .. } => {
-                format!("&mut ({})", self.parameter_place(function, value, true))
+                let base = MirPlaceBase::Parameter(value);
+                if self.shared_write_borrow(function, &base, self.value_type(function, value)) {
+                    format!("&({})", self.parameter_place(function, value, false))
+                } else {
+                    format!("&mut ({})", self.parameter_place(function, value, true))
+                }
             }
             _ => self.value_slot_reference(value, true),
         }
@@ -38657,7 +38668,8 @@ impl<'a> RustEmitter<'a> {
         let place = self
             .place_row(function, id)
             .unwrap_or_else(|| panic!("MIR place ID {:?} has no row", id));
-        let mutable = matches!(access, MirAccess::Write);
+        let mutable = matches!(access, MirAccess::Write)
+            && !self.shared_write_borrow(function, &place.base, &place.ty);
         if place.projections.is_empty() {
             match &place.base {
                 MirPlaceBase::Local(local) => {
@@ -38717,6 +38729,55 @@ impl<'a> RustEmitter<'a> {
             format!("&mut **{reference}")
         } else {
             reference
+        }
+    }
+    /// Root 2: a write borrow of an interior-mutable-receiver carrier rooted
+    /// at a Read parameter or capture lends `&T`. Both checkers let a Core
+    /// handle op write through a handle reached from a read binding, which
+    /// Rust holds as `&T`; the carrier's declared property
+    /// (`FileHandleCarrier::interior_mutable_receiver`) means its ops take
+    /// `&self`. Every other write borrow stays exclusive.
+    fn shared_write_borrow(&self, function: &MirFunction, base: &MirPlaceBase, ty: &MirType) -> bool {
+        let (value, capture_base) = match base {
+            MirPlaceBase::Parameter(value) => (*value, false),
+            MirPlaceBase::Capture(value) => (*value, true),
+            MirPlaceBase::Local(_) | MirPlaceBase::Temporary(_) | MirPlaceBase::Static(_) => {
+                return false;
+            }
+        };
+        if !self.interior_mutable_receiver(ty) || self.binding_uses_move_slot(function, value) {
+            return false;
+        }
+        // The same access `parameter_place`/`capture_place` read for the root.
+        let access = match self.value_definition(function, value) {
+            Some(MirOperation::Parameter { index, .. }) => function
+                .params
+                .iter()
+                .find(|param| param.index == *index)
+                .map(|param| param.access),
+            Some(MirOperation::Capture { slot }) if capture_base => {
+                Some(self.capture_param(function, *slot).access)
+            }
+            Some(MirOperation::Capture { slot }) => Some(self.capture_binding_access(function, *slot)),
+            _ => None,
+        };
+        access == Some(MirAccess::Read)
+    }
+
+    /// Whether the Rust carrier of `ty` declares an interior-mutable receiver.
+    fn interior_mutable_receiver(&self, ty: &MirType) -> bool {
+        let ty = if ty.identity.is_some() {
+            self.canonical_type(ty)
+        } else {
+            ty
+        };
+        match ty.kind() {
+            MirTypeKind::Apply { name, .. } => {
+                !self.is_active_generic_param(&name.name)
+                    && crate::Codegen::file_handle_carrier(&name.name)
+                        .is_some_and(|carrier| carrier.interior_mutable_receiver)
+            }
+            _ => false,
         }
     }
     fn parameter_place(&self, function: &MirFunction, value: MirValueId, mutable: bool) -> String {

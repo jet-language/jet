@@ -71,11 +71,11 @@ use crate::Web::web_rt::{
     jet_enc_json_to_string,
 };
 struct JetFileReader {
-    inner: std::io::BufReader<std::fs::File>,
+    inner: std::sync::Mutex<std::io::BufReader<std::fs::File>>,
     path: String
 }
 struct JetFileWriter {
-    inner: std::io::BufWriter<std::fs::File>,
+    inner: std::sync::Mutex<std::io::BufWriter<std::fs::File>>,
     path: String
 }
 fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {

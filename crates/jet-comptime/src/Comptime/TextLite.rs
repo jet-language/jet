@@ -164,11 +164,11 @@ mod text_kernel {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     pub(crate) struct JetFileReader {
-        pub(crate) inner: std::io::BufReader<std::fs::File>,
+        pub(crate) inner: std::sync::Mutex<std::io::BufReader<std::fs::File>>,
         pub(crate) path: String,
     }
     pub(crate) struct JetFileWriter {
-        pub(crate) inner: std::io::BufWriter<std::fs::File>,
+        pub(crate) inner: std::sync::Mutex<std::io::BufWriter<std::fs::File>>,
         pub(crate) path: String,
     }
     include!("../../../jet-codegen/src/Prelude/Core/StdinReader.rs");
@@ -1013,7 +1013,7 @@ pub(crate) fn apply_file_handle(
                 ))
             }
             "file_writer.fsync" | "fsync" if args.is_empty() => Ok(handle_result(
-                with_writer(handle, text_kernel::jet_std_file_writer_fsync),
+                with_writer(handle, |writer| text_kernel::jet_std_file_writer_fsync(writer)),
                 |()| crate::AST::CtValue::Unit,
             )),
             "file_writer.fsync" | "fsync" => Err(crate::Comptime::Diagnostics::unsupported(

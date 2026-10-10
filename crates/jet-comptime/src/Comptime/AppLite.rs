@@ -494,11 +494,11 @@ mod http_kernel {
     fn jet_log_emit(_level: &str, _message: &str, _fields: &[jet_std::LogField]) {}
 
     struct JetFileReader {
-        inner: std::io::BufReader<std::fs::File>,
+        inner: std::sync::Mutex<std::io::BufReader<std::fs::File>>,
         path: String,
     }
     struct JetFileWriter {
-        inner: std::io::BufWriter<std::fs::File>,
+        inner: std::sync::Mutex<std::io::BufWriter<std::fs::File>>,
         path: String,
     }
 

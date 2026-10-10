@@ -87,11 +87,11 @@ pub(crate) mod runtime {
     use crate::{JetDisplay, JetShow};
 
     pub struct JetFileReader {
-        pub(crate) inner: std::io::BufReader<std::fs::File>,
+        pub(crate) inner: std::sync::Mutex<std::io::BufReader<std::fs::File>>,
         pub(crate) path: String
     }
     pub struct JetFileWriter {
-        pub(crate) inner: std::io::BufWriter<std::fs::File>,
+        pub(crate) inner: std::sync::Mutex<std::io::BufWriter<std::fs::File>>,
         pub(crate) path: String
     }
 

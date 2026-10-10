@@ -3060,7 +3060,8 @@ fn jet_enc_xml_reader_scan(
         }
         let capacity = bytes.capacity();
         bytes.resize(read_bytes as usize, 0);
-        let count = match std::io::Read::read(&mut reader.input.inner, &mut bytes) {
+        let input = reader.input.inner.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let count = match std::io::Read::read(input, &mut bytes) {
             Ok(count) => count,
             Err(error) => {
                 reader.allocation.release(capacity);
@@ -3168,7 +3169,8 @@ impl jet_std::XMLWriter {
 
     fn flush_buffer(&mut self) -> Result<(), jet_std::EncodingError> {
         if self.buffer.is_empty() { return Ok(()); }
-        if let Err(error) = std::io::Write::write_all(&mut self.output.inner, &self.buffer) {
+        let output = self.output.inner.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Err(error) = std::io::Write::write_all(output, &self.buffer) {
             let error = self.io_error(error);
             return self.fail(error);
         }
@@ -3222,7 +3224,8 @@ impl jet_std::XMLWriter {
             }
         }
         if bytes.len() > capacity {
-            if let Err(error) = std::io::Write::write_all(&mut self.output.inner, &bytes) {
+            let output = self.output.inner.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Err(error) = std::io::Write::write_all(output, &bytes) {
                 self.allocation.release(rendered_capacity);
                 let error = self.io_error(error);
                 return self.fail(error);
@@ -3247,7 +3250,8 @@ impl jet_std::XMLWriter {
     fn flush_output(&mut self) -> Result<(), jet_std::EncodingError> {
         if let Some(error) = &self.terminal { return Err(error.clone()); }
         self.flush_buffer()?;
-        if let Err(error) = std::io::Write::flush(&mut self.output.inner) {
+        let output = self.output.inner.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Err(error) = std::io::Write::flush(output) {
             let error = self.io_error(error);
             return self.fail(error);
         }
@@ -4238,7 +4242,8 @@ fn jet_raw_encoding_read_into(reader: &mut JetFileReader, bytes: &mut Vec<u8>, m
     let capacity = bytes.capacity();
     bytes.resize(max, 0);
     assert_eq!(bytes.capacity(), capacity, "read_into must not reallocate");
-    match std::io::Read::read(&mut reader.inner, bytes.as_mut_slice()) {
+    let stream = reader.inner.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner);
+    match std::io::Read::read(stream, bytes.as_mut_slice()) {
         Ok(count) => {
             bytes.truncate(count);
             Ok(count as i64)

@@ -3,7 +3,8 @@
 // The surrounding engine supplies `JetFileReader`, `JetFileWriter`, `jet_std`,
 // `jet_fault_should_fail`, and the raw `jet_fs_*` kernels. This fragment owns
 // the operation policy and line trimming once, so a default-tier deopt calls
-// the same functions as generated AOT code.
+// the same functions as generated AOT code. Each handle keeps its stream
+// behind its own lock, so every operation takes the handle by `&`.
 
 pub(crate) fn jet_std_files_open(path: &str) -> Result<JetFileReader, jet_std::IOError> {
     jet_std_files_open_reader(-1, path, 0)
@@ -44,7 +45,7 @@ pub(crate) fn jet_std_files_open_reader(handle: i64, name: &str, links: i64,) ->
         }
     }
     Ok(JetFileReader {
-        inner: std::io::BufReader::new(file),
+        inner: std::sync::Mutex::new(std::io::BufReader::new(file)),
         path: name.to_owned(),
     })
 }
@@ -64,7 +65,7 @@ pub(crate) fn jet_std_files_open_reader_nonblocking(
     }
     let file = jet_std::jet_fs_open_nonblocking(path)?;
     Ok(JetFileReader {
-        inner: std::io::BufReader::new(file),
+        inner: std::sync::Mutex::new(std::io::BufReader::new(file)),
         path: path.to_owned(),
     })
 }
@@ -91,7 +92,7 @@ links: i64,) -> Result<JetFileWriter, jet_std::IOError> {
     let access = if append { 2 } else { 1 };
     let file = jet_std::jet_fs_open_at(handle, name, access, if_exists, mode, links)?;
     Ok(JetFileWriter {
-        inner: std::io::BufWriter::new(file),
+        inner: std::sync::Mutex::new(std::io::BufWriter::new(file)),
         path: name.to_owned(),
     })
 }
@@ -101,7 +102,7 @@ pub(crate) fn jet_std_file_reader_path(reader: &JetFileReader) -> String {
 }
 
 pub(crate) fn jet_std_file_reader_read_line(
-    reader: &mut JetFileReader,
+    reader: &JetFileReader,
 ) -> Result<Option<String>, jet_std::IOError> {
     use std::io::BufRead;
 
@@ -113,7 +114,12 @@ pub(crate) fn jet_std_file_reader_read_line(
         ));
     }
     let mut line = String::new();
-    match reader.inner.read_line(&mut line) {
+    let read = reader
+        .inner
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .read_line(&mut line);
+    match read {
         Ok(0) => Ok(None),
         Ok(_) => {
             while line.ends_with('\n') || line.ends_with('\r') {
@@ -129,7 +135,7 @@ pub(crate) fn jet_std_file_reader_read_line(
     }
 }
 
-pub(crate) fn jet_std_file_writer_write_line(writer: &mut JetFileWriter, line: &str, ) -> Result<(), jet_std::IOError> {
+pub(crate) fn jet_std_file_writer_write_line(writer: &JetFileWriter, line: &str, ) -> Result<(), jet_std::IOError> {
     use std::io::Write;
 
     if jet_fault_should_fail("FS.Write") {
@@ -139,17 +145,17 @@ pub(crate) fn jet_std_file_writer_write_line(writer: &mut JetFileWriter, line: &
             "fault injected: FS.Write",
         ));
     }
-    writer
-        .inner
+    let mut stream = writer.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    stream
         .write_all(line.as_bytes())
-        .and_then(|_| writer.inner.write_all(b"\n"))
+        .and_then(|_| stream.write_all(b"\n"))
         .map_err(|error| {
             jet_std::io_error_at(jet_std::IOOperation::Write, &writer.path, error)
         })
 }
 
 pub(crate) fn jet_std_file_writer_flush(
-    writer: &mut JetFileWriter,
+    writer: &JetFileWriter,
 ) -> Result<(), jet_std::IOError> {
     use std::io::Write;
 
@@ -162,6 +168,8 @@ pub(crate) fn jet_std_file_writer_flush(
     }
     writer
         .inner
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .flush()
         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Flush, &writer.path, error))
 }
@@ -178,7 +186,7 @@ const JET_FILE_READ_CHUNK_LIMIT: usize = 1 << 24;
 /// previous `read_line` buffered come first. An empty result is end of file.
 /// `max` is the checked exact Int; a count beyond the native word saturates.
 pub(crate) fn jet_std_file_reader_read(
-    reader: &mut JetFileReader,
+    reader: &JetFileReader,
     max: jet_foundation::Numeric::JetInt,
 ) -> Result<Vec<u8>, jet_std::IOError> {
     use std::io::Read;
@@ -205,8 +213,9 @@ pub(crate) fn jet_std_file_reader_read(
     }
     let want = usize::try_from(max).unwrap_or(usize::MAX).min(JET_FILE_READ_CHUNK_LIMIT);
     let mut bytes = vec![0u8; want];
+    let mut stream = reader.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     loop {
-        match reader.inner.read(&mut bytes) {
+        match stream.read(&mut bytes) {
             Ok(count) => {
                 bytes.truncate(count);
                 return Ok(bytes);
@@ -222,12 +231,13 @@ pub(crate) fn jet_std_file_reader_read(
 /// #3593 / D-CORE-FILESTAT1: metadata of the open file (fstat), as the row
 /// Core's `Stat` constructor reads.
 pub(crate) fn jet_std_file_reader_stat(reader: &JetFileReader) -> Result<Vec<i64>, jet_std::IOError> {
-    jet_std::jet_fs_stat_file(reader.inner.get_ref(), &reader.path)
+    let stream = reader.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    jet_std::jet_fs_stat_file(stream.get_ref(), &reader.path)
 }
 
 /// #3593: write every byte of `bytes` (buffered; `flush`/`fsync` push them out).
 pub(crate) fn jet_std_file_writer_write_all(
-    writer: &mut JetFileWriter,
+    writer: &JetFileWriter,
     bytes: &Vec<u8>,
 ) -> Result<(), jet_std::IOError> {
     use std::io::Write;
@@ -241,13 +251,15 @@ pub(crate) fn jet_std_file_writer_write_all(
     }
     writer
         .inner
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .write_all(bytes)
         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, &writer.path, error))
 }
 
 /// #3593: flush buffered bytes, then make the file's data and metadata durable
 /// (fsync).
-pub(crate) fn jet_std_file_writer_fsync(writer: &mut JetFileWriter) -> Result<(), jet_std::IOError> {
+pub(crate) fn jet_std_file_writer_fsync(writer: &JetFileWriter) -> Result<(), jet_std::IOError> {
     use std::io::Write;
 
     if jet_fault_should_fail("FS.Write") {
@@ -257,12 +269,11 @@ pub(crate) fn jet_std_file_writer_fsync(writer: &mut JetFileWriter) -> Result<()
             "fault injected: FS.Write",
         ));
     }
-    writer
-        .inner
+    let mut stream = writer.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    stream
         .flush()
         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Flush, &writer.path, error))?;
-    writer
-        .inner
+    stream
         .get_ref()
         .sync_all()
         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Flush, &writer.path, error))
@@ -271,7 +282,8 @@ pub(crate) fn jet_std_file_writer_fsync(writer: &mut JetFileWriter) -> Result<()
 /// #3593 / D-CORE-FILESTAT1: metadata of the open file (fstat). Bytes still
 /// buffered by `write_all`/`write_line` are not counted until a flush.
 pub(crate) fn jet_std_file_writer_stat(writer: &JetFileWriter) -> Result<Vec<i64>, jet_std::IOError> {
-    jet_std::jet_fs_stat_file(writer.inner.get_ref(), &writer.path)
+    let stream = writer.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    jet_std::jet_fs_stat_file(stream.get_ref(), &writer.path)
 }
 
 /// #3593: set the open file's permission bits (fchmod). Windows keeps only the
@@ -292,7 +304,8 @@ pub(crate) fn jet_std_file_writer_set_mode(writer: &JetFileWriter, mode: i64) ->
             Some(format!("mode {mode:#o} is outside 0o0..0o7777")),
         )));
     }
-    let file = writer.inner.get_ref();
+    let stream = writer.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let file = stream.get_ref();
     let mut permissions = file
         .metadata()
         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, &writer.path, error))?
@@ -309,15 +322,17 @@ pub(crate) fn jet_std_file_writer_set_mode(writer: &JetFileWriter, mode: i64) ->
 }
 
 pub(crate) fn jet_files_link_reader_at_raw(source: &JetFileReader, into: i64, name: &str, ) -> (bool, bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
-    jet_std::jet_fs_link_fd_at_raw(source.inner.get_ref(), into, name)
+    let stream = source.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    jet_std::jet_fs_link_fd_at_raw(stream.get_ref(), into, name)
 }
 
 // Temporary OS buffered-read leaf for source FileReader.read_line policy.
 // Existing BufReader state is reused; no fault, UTF8 or terminator policy.
 // Replaced by Jet runtime L7, dies at cutover (CoreFiles1-2 ledger).
-pub(crate) fn jet_file_reader_line_bytes_raw(reader: &mut JetFileReader) -> Result<Vec<u8>, jet_std::IOError> {
+pub(crate) fn jet_file_reader_line_bytes_raw(reader: &JetFileReader) -> Result<Vec<u8>, jet_std::IOError> {
     let mut bytes = Vec::new();
-    std::io::BufRead::read_until(&mut reader.inner, b'\n', &mut bytes)
+    let mut stream = reader.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    std::io::BufRead::read_until(&mut *stream, b'\n', &mut bytes)
         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, &reader.path, error))?;
     Ok(bytes)
 }

@@ -14596,6 +14596,7 @@ impl TBuiltinOp {
             | Self::MapPopFirst
             | Self::ExtendList
             | Self::Reverse
+            | Self::SwapList
             | Self::Sort
             | Self::SortDesc
             | Self::Clear

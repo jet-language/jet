@@ -544,3 +544,119 @@ fn run() -[Env]> {
 "#,
     );
 }
+
+/// Root 2: Core handle ops write through a FileReader/FileWriter reached from
+/// a read binding (a Read parameter, a field of a read `self`). The emitted
+/// Rust lends the interior-mutable carrier by `&`.
+#[test]
+fn read_bound_handles_write_through_interior_mutable_carriers() {
+    jet_driver::run_compiler_work(|| {
+        use jet_foundation::MIR::{MirAccess, MirPlace, MirPlaceBase, MirProjection};
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("core-value-hook-proof"))
+            .join(format!("jet-read-bound-handles-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("input.txt"), "AB").unwrap();
+        std::fs::write(directory.join("package.jet"),
+            "name: \"read_bound_handles_proof\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS.Read, FS.Write] } }\n").unwrap();
+        let entry = directory.join("run.jet");
+        std::fs::write(&entry, r#"
+use core.files.[FileReader, FileWriter, open, create]
+struct Held {
+    handle: FileReader
+    fn next_byte(self) -[FS]> U8 {
+        chunk :: self.handle.read(1) ?? panic("held read")
+        chunk[0]
+    }
+}
+fn read_byte(reader: FileReader) -[FS]> U8 {
+    chunk :: reader.read(1) ?? panic("parameter read")
+    chunk[0]
+}
+fn write_bytes(writer: FileWriter, bytes: [U8]) -[FS]> {
+    writer.write_all(bytes) ?? panic("parameter write")
+    writer.fsync() ?? panic("parameter fsync")
+}
+fn expect_ab(first: [U8], second: [U8]) {
+    assert_eq(first, [U8]{65})
+    assert_eq(second, [U8]{66})
+}
+fn run() -[FS]> {
+    reader :: open("input.txt") ?? panic("open")
+    first :: read_byte(reader)
+    second :: read_byte(reader)
+    expect_ab([U8]{first}, [U8]{second})
+    held :: Held{handle: open("input.txt") ?? panic("open held")}
+    held_first :: held.next_byte()
+    held_second :: held.next_byte()
+    expect_ab([U8]{held_first}, [U8]{held_second})
+    writer :: create("output.txt") ?? panic("create")
+    write_bytes(writer, [U8]{67, 68})
+}
+"#).unwrap();
+        let mut bundle = Loader::load_entry(entry.to_str().unwrap()).expect("read-bound handle source must load");
+        let (diagnostics, _, nominals) =
+            Sema::check_bundle_with_effect_facts(&mut bundle, Sema::CompileMode::Check);
+        assert!(diagnostics.iter().all(|diagnostic| {
+            diagnostic.severity != Diagnostics::Severity::Error
+        }), "handle ops through read bindings must pass the checker: {diagnostics:?}");
+        let request = MirArtifactRequest::new(
+            MirArtifactTarget::RustAot,
+            MirArtifactKind::NativeExecutable,
+            MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = Codegen::TIR::lower_checked_mir_program_for(
+            &bundle, &nominals, request,
+        ).expect("read-bound handle ops must lower");
+        mir.validate().expect("read-bound handle MIR is valid");
+        // Each shape is a Write place rooted at a binding the function holds
+        // only for reading.
+        let read_rooted_write = |handle: &str, shape: &dyn Fn(&MirPlace) -> bool| {
+            mir.functions.iter().any(|function| {
+                function.params.iter().all(|param| param.access != MirAccess::Write)
+                    && function.capture_params.iter().all(|capture| capture.access != MirAccess::Write)
+                    && function.places.iter().any(|place| {
+                        place.access == MirAccess::Write
+                            && place.ty.nominal_name().is_some_and(|name| name.ends_with(handle))
+                            && shape(place)
+                    })
+            })
+        };
+        let parameter = |place: &MirPlace| {
+            matches!(place.base, MirPlaceBase::Parameter(_)) && place.projections.is_empty()
+        };
+        assert!(read_rooted_write("::FileReader", &parameter), "a read FileReader parameter is written");
+        assert!(read_rooted_write("::FileWriter", &parameter), "a read FileWriter parameter is written");
+        assert!(read_rooted_write("::FileReader", &|place: &MirPlace| {
+            matches!(place.base, MirPlaceBase::Parameter(_))
+                && matches!(place.projections.as_slice(), [MirProjection::Field { .. }])
+        }), "a FileReader field of a read self is written");
+        let rust = Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let source = directory.join("read_bound_handles.rs");
+        let executable = directory.join(format!("read_bound_handles{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=read_bound_handles", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("read-bound handle regression requires rustc");
+        assert!(compiled.status.success(), "read-bound handle ops must compile:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable).current_dir(&directory)
+            .output().expect("read-bound handle regression must execute");
+        assert!(executed.status.success(), "every read-bound op must advance its one handle:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        assert_eq!(std::fs::read(directory.join("output.txt")).unwrap(), b"CD",
+            "the read-bound writer must write and sync through the held handle");
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}

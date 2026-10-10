@@ -45,11 +45,11 @@ fn jet_enc_json_decode<T: __jet_Decode>(
 }
 
 struct JetFileReader {
-    inner: Box<dyn std::io::Read + Send>,
+    inner: std::sync::Mutex<Box<dyn std::io::Read + Send>>,
 }
 
 struct JetFileWriter {
-    inner: Box<dyn std::io::Write + Send>,
+    inner: std::sync::Mutex<Box<dyn std::io::Write + Send>>,
 }
 mod jet_encoding_json {
     pub use jet_foundation::EncodingJson::*;
@@ -680,7 +680,7 @@ fn shared_http_body_streams_bytes_once_and_uses_closed_errors() {
     assert_eq!(observed, b"abcdef");
     let capped = JetHTTPBody::from_reader_with_length(
         JetFileReader {
-            inner: Box::new(std::io::Cursor::new(b"abcdef".to_vec())),
+            inner: std::sync::Mutex::new(Box::new(std::io::Cursor::new(b"abcdef".to_vec()))),
         },
         3,
     )
