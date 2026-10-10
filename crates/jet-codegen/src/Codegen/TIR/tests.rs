@@ -5558,3 +5558,24 @@ fn geometry_method_binders_are_the_checked_operand_facts() {
     let cross = TExpr { ty: held, kind: TExprKind::IntLit(0, None) };
     assert_eq!(binders(&stock, "then", &[cross]), None);
 }
+
+#[test]
+fn never_helper_recursive_enum_prep_consumes_payload_carrier() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        checked_bundle(r#"
+enum Ty {
+    Int
+    Named(name: String)
+    List(element: Ty)
+    Result(ok: Ty, err: Ty)
+}
+enum Op { ParseInt }
+enum Route { Builtin(operation: Op) }
+struct Row { ty: Ty, route: Route }
+fn named() -> Ty Never! { Ty.Named{name: "ParseError"} }
+fn row(ty: Ty, route: Route) -> Row Never! { Row{ty: ty, route: route} }
+ROWS :: prep { [Row]{row(Ty.Result{ok: Ty.Int, err: named()}, Route.Builtin{operation: Op.ParseInt})} }
+fn run() Never! {}
+"#);
+    });
+}

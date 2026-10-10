@@ -8647,9 +8647,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     inner_t
                 };
                 // The failure solve can erase an inferred carrier after sema
-                // installed this automatic propagation node. Its checked
-                // operand then already is the success value.
-                if !inner_t.ty.is_fallible() {
+                // installed this automatic propagation node. Only a genuinely
+                // plain operand is already the success value: `T Never!` has
+                // no failures, but its checked Result carrier still needs to
+                // be consumed by this Try.
+                if !inner_t.ty.is_fallible()
+                    && crate::Codegen::TIR::mir::never_carrier_success(&inner_t.ty).is_none()
+                {
                     return inner_t;
                 }
                 let note_t = note

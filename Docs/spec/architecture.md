@@ -153,6 +153,13 @@ digests, the checked export inventory, the content-addressed identity and the
 existing no-Rust-symbol check. Native compiler staging uses the same receipt
 reader. This cache does not bypass semantic checks on user programs.
 
+The Jet-hosted native CLI uses checked MIR directly for build, run and test in
+both profiles. Dev remains LIR O0, including the native compiler fixed-point
+chain; release uses the existing LIR O2 passes and the same runtime pack. Native
+release does not emit a Rust program, compile an inline runtime or invoke rustc.
+Release tests use the same selected native harness, framed outcome transport,
+fatal-child handling and capture policy as dev tests.
+
 The all-parts runtime includes `CAbiTest.rs` once through Codegen's canonical
 prelude; the compiler-call preparation step must not append a second copy.
 Test callbacks transfer owned E4 text errors through the shared carrier `take`
@@ -208,6 +215,13 @@ checked bundle and carries sema-approved types, access conventions and effects.
 canonical type, function, place and artifact identities. The resulting MIR is
 validated and optimized before execution or emission. Neither lowering infers
 new language permissions or falls back to an unchecked AST emitter.
+
+An empty failure set does not by itself erase a checked value carrier.
+`T Never!` calls can still name `Result<T, Never>` in checked expressions;
+automatic propagation consumes that carrier to produce `T`, including inside
+prepared enum payloads. Lowering may omit propagation only when the operand
+is already the plain success value, not merely when it cannot fail.
+
 Close lowering distinguishes boxed/handle pointer identity from scalar presence
 with an ordered representation arm table. Non-inline scalar receivers use a
 presence sentinel; pointer receivers retain their actual identity. The
@@ -349,6 +363,10 @@ dispatch maximal and cannot stand in for this checked boundary.
 
 Driver Core build carriers use the public module's member-import route, such as
 `use core.build.[BuildGraphNode]`; the carrier name is not a Core module path.
+The bootstrap aggregate keeps the first occurrence of each Core member binding,
+including overlapping grouped imports. Removed members and redundant separators
+are blanked in place; surviving members, newlines, and provenance byte offsets
+remain unchanged. Independently checked package sources retain their own imports.
 
 The Jet semantic checker separates read-only registration/program tables from
 mutable scope, ownership, and diagnostic state. Read-only graph probes match
