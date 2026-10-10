@@ -95,6 +95,11 @@ candidate S5 signal. Require the same-source complete suite receipt, registries,
 and hello/sample native runs at O0 and O2. Rust/LLVM execution is default-denied;
 only committed, source-proved user Rust FFI cases may admit their foreign crate
 builds, never a Rust fallback for compiling the Jet program.
+The cutover suite composes the same native runner commands as `verify-full`
+after its formal closeout prefix, without adding a skip-closeout option.
+Report qualified formal proof composition and milestone closeout separately
+as `NOT MET — deferred per owner #59`; stage equivalence and passing suites
+cannot fabricate Lean discharge/standing-safety-net qualification.
 The Rust-hosted `native-compiler --seed-build` does not execute Jet Host/Entry
 and cannot produce that TSV. Its proof instead requires the real host build
 exit zero, a seed log with no error/ICE/panic rows, and verified seed JSON and
