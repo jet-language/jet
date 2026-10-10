@@ -5612,9 +5612,8 @@ impl<'a> Checker<'a> {
                                 .unwrap_or(method_span.end)
                                 .max(method_span.end),
                         );
-                        let mut enum_args: Vec<EnumLitArg> = args
-                            .drain(..)
-                            .map(|a| EnumLitArg::Positional(a.expr))
+                        let mut enum_args: Vec<EnumLitArg> = args.iter_mut()
+                            .map(super::enum_literal_call_arg)
                             .collect();
                         let ty =
                             self.check_enum_lit(&type_name, &variant, &mut enum_args, span, None);

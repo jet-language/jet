@@ -2241,17 +2241,9 @@ impl<'a> Checker<'a> {
                                     // existing checked intrinsic type identity.
                                     type_name.clone()
                                 };
-                                let saved: Vec<Expr> = args
-                                    .iter_mut()
-                                    .map(|a| {
-                                        std::mem::replace(
-                                            &mut a.expr,
-                                            Expr::Int(0, a.span, None, None),
-                                        )
-                                    })
+                                let mut enum_args: Vec<EnumLitArg> = args.iter_mut()
+                                    .map(super::super::enum_literal_call_arg)
                                     .collect();
-                                let mut enum_args: Vec<EnumLitArg> =
-                                    saved.into_iter().map(EnumLitArg::Positional).collect();
                                 let ty = self.check_enum_lit(
                                     &enum_name,
                                     method,
@@ -2397,9 +2389,7 @@ impl<'a> Checker<'a> {
                 if let Some(identity) = enum_identity {
                     self.record_import_alias_reference(alias, *alias_span);
                     let mut enum_args: Vec<EnumLitArg> = args.iter_mut()
-                        .map(|arg| EnumLitArg::Positional(std::mem::replace(
-                            &mut arg.expr, Expr::Int(0, arg.span, None, None),
-                        ))).collect();
+                        .map(super::super::enum_literal_call_arg).collect();
                     let ty = self.check_enum_lit(
                         &identity,
                         method,
@@ -2867,12 +2857,9 @@ impl<'a> Checker<'a> {
                     .map(|v| v.contains_key(method))
                     .unwrap_or(false);
                 if has_variant {
-                    let saved: Vec<Expr> = args
-                        .iter_mut()
-                        .map(|a| std::mem::replace(&mut a.expr, Expr::Int(0, a.span, None, None)))
+                    let mut enum_args: Vec<EnumLitArg> = args.iter_mut()
+                        .map(super::super::enum_literal_call_arg)
                         .collect();
-                    let mut enum_args: Vec<EnumLitArg> =
-                        saved.into_iter().map(EnumLitArg::Positional).collect();
                     let ty =
                         self.check_enum_lit(type_name, method, &mut enum_args, span, Some(span));
                     for (a, ea) in args.iter_mut().zip(enum_args) {

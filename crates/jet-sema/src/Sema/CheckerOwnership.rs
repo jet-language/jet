@@ -182,13 +182,16 @@ fn cell_guard_projection_paths_overlap(first: &[String], second: &[String]) -> b
     first.starts_with(second) || second.starts_with(first)
 }
 
-fn named_view_field_path(expr: &Expr, fields: &mut Vec<String>) -> Option<String> {
+fn named_view_field_path<'a>(expr: &'a Expr, fields: &mut Vec<&'a str>) -> Option<&'a str> {
     match expr {
-        Expr::Ident(name, _) => Some(name.clone()),
+        Expr::Ident(name, _) => Some(name),
         Expr::Field(base, field, _) => {
             let name = named_view_field_path(base, fields)?;
-            fields.push(field.clone());
+            fields.push(field);
             Some(name)
+        }
+        Expr::Place(inner, _, _) | Expr::Paren(inner, _) => {
+            named_view_field_path(inner, fields)
         }
         _ => None,
     }
@@ -668,10 +671,20 @@ impl<'a> Checker<'a> {
         crate::Sema::view_facts_for_binding(&self.flow.views, name, binding.def_span)
     }
 
-    fn view_fact_at_path(&self, name: &str, output_path: &[String]) -> Option<&ViewFact> {
-        self.view_facts_at_path(name, output_path)
-            .into_iter()
-            .next()
+    fn view_fact_at_path(&self, name: &str, output_path: &[&str]) -> Option<&ViewFact> {
+        let binding_span = self.lookup(name)?.def_span;
+        let mut best: Option<&ViewFact> = None;
+        for fact in self.flow.views.facts_of(name).flatten() {
+            if fact.binding_span == binding_span
+                && fact.output_path.len() <= output_path.len()
+                && fact.output_path.iter().zip(output_path)
+                    .all(|(held, written)| held.as_str() == *written)
+                && best.map_or(true, |held| fact.output_path.len() > held.output_path.len())
+            {
+                best = Some(fact);
+            }
+        }
+        best
     }
 
     fn view_facts_at_path(&self, name: &str, output_path: &[String]) -> Vec<&ViewFact> {
@@ -687,6 +700,23 @@ impl<'a> Checker<'a> {
             .into_iter()
             .filter(|fact| fact.output_path.len() == longest)
             .collect()
+    }
+
+    /// Follow the projected carrier, not merely its root binding: an aggregate
+    /// may hold several disjoint windows, each with its own loan identity.
+    fn write_view_seq_for_expr(&self, expr: &Expr) -> Option<usize> {
+        let mut output_path = Vec::new();
+        if let Some(name) = named_view_field_path(expr, &mut output_path) {
+            return self.view_fact_at_path(&name, &output_path)
+                .filter(|fact| fact.access == ViewAccess::Write)
+                .map(|fact| fact.seq);
+        }
+        match expr {
+            Expr::Field(base, _, _) | Expr::Index { base, .. }
+            | Expr::Slice { base, .. } | Expr::Place(base, _, _)
+            | Expr::Paren(base, _) => self.write_view_seq_for_expr(base),
+            _ => None,
+        }
     }
 
     fn compose_view_source_places(
@@ -2139,8 +2169,7 @@ impl<'a> Checker<'a> {
                 place.projections.extend(
                     output_path[fact.output_path.len()..]
                         .iter()
-                        .cloned()
-                        .map(ViewProjection::Field),
+                        .map(|field| ViewProjection::Field((*field).to_string())),
                 );
                 return Some(place);
             }
@@ -2416,15 +2445,8 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn check_expr_change(&mut self, expr: &Expr, action: &str, span: Span) {
-        let through_view = expr_root_ident(expr).and_then(|root| {
-            self.view_fact(root)
-                .filter(|fact| fact.access == ViewAccess::Write)
-                .map(|fact| (root.to_string(), fact.binding_span, fact.seq))
-        });
-        self.check_expr_change_with_view_exemption(
-            expr, action, span,
-            through_view.as_ref().map(|(name, definition, seq)| (name.as_str(), *definition, *seq)),
-        );
+        let through_view = self.write_view_seq_for_expr(expr);
+        self.check_expr_change_with_view_exemption(expr, action, span, through_view);
     }
 
     fn check_expr_change_with_view_exemption(
@@ -2432,7 +2454,7 @@ impl<'a> Checker<'a> {
         expr: &Expr,
         action: &str,
         span: Span,
-        ignored_view: Option<(&str, Span, usize)>,
+        ignored_view: Option<usize>,
     ) {
         if let Some(freeze_site) = self.frozen_expr_site(expr) {
             let name = expr_root_ident(expr).unwrap_or("the frozen value");
@@ -2545,21 +2567,7 @@ impl<'a> Checker<'a> {
             // Passing a named write window with `&` reborrows its own
             // exclusive fact. The normal change checks still run so frozen
             // owners, scoped task loans, and other live views remain strict.
-            let write_view = expr_root_ident(&arg.expr).and_then(|root| {
-                self.view_fact(root)
-                    .filter(|fact| fact.access == ViewAccess::Write)
-                    .map(|fact| (root.to_string(), fact.binding_span, fact.seq))
-            });
-            if let Some((root, binding_span, seq)) = write_view {
-                self.check_expr_change_with_view_exemption(
-                    &arg.expr,
-                    "be passed with write access",
-                    arg.span,
-                    Some((&root, binding_span, seq)),
-                );
-            } else {
-                self.check_expr_change(&arg.expr, "be passed with write access", arg.span);
-            }
+            self.check_expr_change(&arg.expr, "be passed with write access", arg.span);
             if let Some(root) = expr_root_ident(&arg.expr) {
                 self.clear_origin(root);
             }
@@ -2567,14 +2575,14 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn check_lvalue_change(&mut self, target: &LValue, action: &str) {
-        let view_root = match target {
-            LValue::Index { base, .. } | LValue::Field { base, .. } => expr_root_ident(base),
-            LValue::Local { name, .. } => Some(name.as_str()),
+        let through_write_view = match target {
+            LValue::Index { base, .. } | LValue::Field { base, .. } => {
+                self.write_view_seq_for_expr(base)
+            }
+            LValue::Local { name, .. } => self.view_fact(name)
+                .filter(|fact| fact.access == ViewAccess::Write)
+                .map(|fact| fact.seq),
         };
-        let through_write_view = view_root.and_then(|name| {
-            self.view_fact(name).filter(|fact| fact.access == ViewAccess::Write)
-                .map(|fact| (name.to_string(), fact.binding_span, fact.seq))
-        });
         let frozen_base = match target {
             LValue::Index { base, .. } | LValue::Field { base, .. } => Some(base.as_ref()),
             LValue::Local { .. } => None,
@@ -2608,8 +2616,7 @@ impl<'a> Checker<'a> {
         if let Some(place) = place {
             self.check_place_change_with_view_exemption(
                 &place, action, target.span(),
-                through_write_view.as_ref()
-                    .map(|(name, definition, seq)| (name.as_str(), *definition, *seq)),
+                through_write_view,
             );
         }
     }
@@ -2645,10 +2652,7 @@ impl<'a> Checker<'a> {
         let Some(place) = self.place_from_expr(expr) else {
             return;
         };
-        let through_view = expr_root_ident(expr)
-            .and_then(|root| self.view_fact(root))
-            .filter(|fact| fact.access == ViewAccess::Write)
-            .map(|fact| fact.seq);
+        let through_view = self.write_view_seq_for_expr(expr);
         // `suppress_partial_move_root_read` means this expression is only the
         // base of a deeper projection whose complete place the caller checks
         // (`adjacent.values` in `&adjacent.values[2..3]`, `Expr::Place` in
@@ -2700,7 +2704,7 @@ impl<'a> Checker<'a> {
         changed: &ViewPlace,
         action: &str,
         span: Span,
-        ignored_view: Option<(&str, Span, usize)>,
+        ignored_view: Option<usize>,
     ) {
         // D-CONC-FREEZE1=A: a frozen snapshot may be moved, but no operation
         // may mutate its root or any projected place.
@@ -2725,10 +2729,7 @@ impl<'a> Checker<'a> {
                 .find(|&(name, fact)| {
                     self.view_is_live_now(name)
                         && !ignored_view.is_some_and(
-                            |(ignored_name, binding_span, seq)| {
-                                (name == ignored_name && fact.binding_span == binding_span
-                                    && fact.seq == seq) || self.view_loan_contains(seq, fact.seq)
-                            },
+                            |seq| self.view_loan_contains(seq, fact.seq),
                         )
                         && fact.place.overlaps(changed)
                         && fact.invalidated.is_none()

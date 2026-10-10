@@ -13,6 +13,7 @@ use jet_foundation.[
     MIRTargetHardwareUse,
     MIRTypedHeadKind,
     ParamZone,
+    PlaceAccess,
     Span,
     StrFormat,
     StrPart,
@@ -196,7 +197,12 @@ fn sema_expression_enum_variant_call(receiver: Expr, method: String, method_span
         if !declared_enum -> return sema_call_try_data_literal(Type.Named{name: path.enum_name}, path.variant, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     if !sema_expression_enum_declares_variant(path.enum_name, path.variant, environment, program, &scopes) -> return unhandled
-    enum_args :: loop argument in args -> EnumLitArg.Positional{value: argument.expr}
+    // Payload slots retain written access even though they have no CallArg.
+    enum_args :: loop argument in args -> EnumLitArg.Positional{value: if argument.convention == {
+        .Read -> argument.expr
+        .Write -> Expr.Place{value: argument.expr, access: PlaceAccess.Write, span: argument.span}
+        .Move -> Expr.Place{value: argument.expr, access: PlaceAccess.Take, span: argument.span}
+    }}
     end := method_span.end
     if args.len() > 0 && args[args.len() - 1].span.end > end -> end = args[args.len() - 1].span.end
     span :: Span{start: expr_span(receiver).start, end: end}

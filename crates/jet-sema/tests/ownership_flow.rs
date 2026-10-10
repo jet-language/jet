@@ -406,3 +406,60 @@ fn run() {}
 "#);
     assert!(found.iter().any(|d| d.code == "E0212"), "write windows must keep their loan: {found:?}");
 }
+
+#[test]
+fn mutable_view_constructor_payloads_preserve_access_marks() {
+    let found = errors(include_str!(
+        "../../../tests/run/ownership/mutable_view_extraction_transfers_struct_option_and_enum_loans.jet"
+    ));
+    assert!(found.is_empty(), "constructor payload marks must survive: {found:?}");
+    let found = errors(r#"
+enum Choice { First(ViewMut<Int>) }
+fn choose(values: [Int]) -> Choice { Choice.First(&values[0..1]) }
+fn run() {}
+"#);
+    assert!(found.iter().any(|d| d.code == "E0205"), "read parameter cannot grant a write view: {found:?}");
+    let found = errors(r#"
+enum Choice { First(ViewMut<Int>) }
+fn choose(values: &[Int]) -> Choice { Choice.First(values[0..1]) }
+fn run() {}
+"#);
+    assert!(found.iter().any(|d| d.code == "E0108"), "unmarked slices cannot become write views: {found:?}");
+}
+
+#[test]
+fn mutable_view_disjoint_carrier_fields_use_their_own_loans() {
+    let found = errors(include_str!(
+        "../../../tests/run/ownership/runtime_disjoint_views_match_aot_jit_dev_and_interpreter.jet"
+    ));
+    assert!(found.is_empty(), "disjoint carrier fields are writable: {found:?}");
+    let found = errors(r#"
+fn run() {
+    values := [1, 2, 3, 4]
+    parts :: &values.split_write(2) ?? panic("split failed")
+    (parts).left[0] = 10
+    parts.right[1] = (parts).left[0]
+    print(parts.right[1])
+}
+"#);
+    assert!(found.is_empty(), "parentheses preserve the projected carrier: {found:?}");
+    let found = errors(r#"
+fn run() {
+    values := [1, 2, 3, 4]
+    parts :: &values.split_write(2) ?? panic("split failed")
+    print(values[0])
+    print(parts.left[0])
+}
+"#);
+    assert!(found.iter().any(|d| d.code == "E0220"), "owner remains suspended beside its field view: {found:?}");
+    let found = errors(r#"
+fn run() {
+    values := [1, 2, 3, 4]
+    parts :: &values.split_write(2) ?? panic("split failed")
+    child :: &parts.left[0..1]
+    parts.left[0] = 10
+    print(child[0])
+}
+"#);
+    assert!(found.iter().any(|d| d.code == "E0212"), "a live descendant still suspends its parent field: {found:?}");
+}

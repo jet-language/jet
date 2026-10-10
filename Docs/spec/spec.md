@@ -1142,6 +1142,10 @@ Constructing a struct prefixes each contained view's output path with its field
 name, including nested structs and views already bound to local names. This
 does not turn a local owner into a caller-owned one: returning such an aggregate
 still rejects views into values made here or consumed by a `^` parameter.
+A positional enum constructor preserves the payload's written access:
+`Choice.First(&values[0..1])` fills a declared `ViewMut<Int>` payload with a
+write window. It cannot grant write access to a read-only parameter or turn an
+unmarked owned slice into a write view.
 At a string boundary, fill `View<str>` only from `.trim()`, `.after()`,
 `.before()`, or a tracked string-view binding; a plain owned `String` is not a
 borrowed window.
@@ -1218,6 +1222,10 @@ E0632. Facts end after the last use or at lexical scope, whichever comes first;
 control-flow joins and loops keep invalidation conservatively. Captures and field
 projections preserve the fact. A captured or returned view crossing a task or
 channel boundary is rejected once as E1102.
+Access through a stored field such as `parts.left[0]` uses that field's view
+fact, not another window stored in `parts.right`. Only its own loan and its
+reborrow ancestors are exempt; a live descendant still suspends overlapping
+accesses through the parent field.
 
 D-MEMPROVENANCE2 carries a view fact through public calls, returns, aggregate
 fields and elements, generic instantiations, methods, function values, lambdas,

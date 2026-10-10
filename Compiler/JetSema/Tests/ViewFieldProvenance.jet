@@ -133,6 +133,20 @@ fn view_pattern_reinitialization() {
     view_field_require(state.moved.len() == 1 && sema_ownership_place_exact(state.moved[0].place, place), "descendant assignment never clears its moved ancestor")
 }
 
+// Constructor marks and split carriers obey the same output-path relation.
+// These cases use the real parser and checker, including negative owner and
+// parent accesses; no prebuilt view facts grant the successful writes.
+fn view_constructor_and_split_fields() {
+    declaration :: "enum Choice {{ First(ViewMut<Int>) Second(ViewMut<Int>) }}\n"
+    view_pattern_case("marked-enum-payload", "{declaration}fn choose(values: &[Int], first: Bool) -> Choice {{ if first {{ return Choice.First(&values[0..1]) }} return Choice.Second(&values[0..1]) }}\nfn run() {{ values := [1, 2]\nselected :: choose(&values, false)\nif selected == {{ .First(part) -> {{ part[0] = 3 }} .Second(part) -> {{ part[0] = 4 }} }} }}", "")
+    view_pattern_case("marked-enum-read-owner-rejected", "{declaration}fn choose(values: [Int]) -> Choice {{ return Choice.First(&values[0..1]) }}", "E0205")
+    view_pattern_case("unmarked-enum-write-payload-rejected", "{declaration}fn choose(values: &[Int]) -> Choice {{ return Choice.First(values[0..1]) }}", "E0108")
+    split :: "values := [1, 2, 3, 4]\nparts :: &values.split_write(2) ?? panic(\"split failed\")\n"
+    view_pattern_case("split-write-field-access", "fn run() {{ {split}(parts).left[0] = 10\nparts.right[1] = (parts).left[0]\nprint(parts.right[1]) }}", "")
+    view_pattern_case("split-write-owner-suspended", "fn run() {{ {split}print(values[0])\nprint(parts.left[0]) }}", "E0220")
+    view_pattern_case("split-write-parent-suspended", "fn run() {{ {split}child :: &parts.left[0..1]\nparts.left[0] = 10\nprint(child[0]) }}", "E0212")
+}
+
 fn run() {
     view_field_case(true, AccessConvention.Read, "")
     view_field_case(false, AccessConvention.Read, "this view points into `values`, which this function owns")
@@ -140,4 +154,5 @@ fn run() {
     view_pattern_sources()
     view_pattern_reborrows()
     view_pattern_reinitialization()
+    view_constructor_and_split_fields()
 }
