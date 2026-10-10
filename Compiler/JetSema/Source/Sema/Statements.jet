@@ -4245,6 +4245,15 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
         }
     }
     place := sema_stmt_check_assignment_place(target, op != None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    // E0362 (Rust statements.rs `compound_nested_hook`): a compound operator
+    // hook on a field below a nested owner has no operator-place lowering.
+    if op != None && target == .Field(field_base, _, field_span) {
+        if sema_stmt_compound_nested_hook(op ?? BinOp.Add, field_base, place.ty, environment, program) {
+            &diagnostics.push(sema_error("E0362", field_span, "compound assignment can't target a nested operator field", "the current operator-place lowering supports one named owner and one field", "bind the inner value, update it, then assign the whole inner value back"))
+            _ := sema_check_expression(expr, Val(place.ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            return None
+        }
+    }
     if target == .Index(index_base, _, index_span, _) && place.kind == .Index(checked_base, _, _, _, _, _) {
         if sema_columnar_list_element(environment, program, checked_base.ty) == .Val(element) {
             &diagnostics.push(sema_error("E1108", index_span, "writing through `[ ]` isn't supported on a columnar list `{sema_type_show(sema_expr_unwrap_tag(checked_base.ty))}` yet", "`#Layout(columnar)` lists support reading in v1 (indexing, field access, `len`, `is_empty`, `push`, iteration); index-write is deferred", "drop `#Layout(columnar)` from `{element}` to assign through `[ ]`, or rebuild the list with `push`"))
@@ -4286,6 +4295,30 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
     }
     line :: sema_source_line_at(environment.source_segments, place.span) ?? return None
     Val(TStmt.Assign{place: TPlace.Expr{value: place}, op: tir_op, value: checked, clone_value: false, line: line, span: Span{start: place.span.start, end: expr_span(expr).end}})
+}
+
+fn sema_stmt_compound_nested_hook(op: BinOp, base: Expr, field_ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    trait_name :: if op == {
+        .Add -> "Add"
+        .Sub -> "Sub"
+        .Mul -> "Mul"
+        .Div -> "Div"
+        else -> ""
+    }
+    if trait_name == "" -> return false
+    if field_ty == {
+        .Int | .Float | .IntN(_, _) | .Float32 -> return false
+        else -> {}
+    }
+    if !sema_comparability_implements(environment, program, field_ty, trait_name) -> return false
+    if base == {
+        .Ident(_, _) -> false
+        .Index(_, _, _, _) -> if field_ty == {
+            .Named(_) | .Apply(_, _) -> true
+            else -> false
+        }
+        else -> true
+    }
 }
 
 fn sema_stmt_check_assignment(target: LValue, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {

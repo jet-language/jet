@@ -453,6 +453,23 @@ fn sema_expr_check_operator(op: BinOp, left: Expr, right: Expr, lhs: TExpr, rhs:
         }
     }
     resolved :: resolution ?? return None
+    // E0361 (Rust binary.rs operator hooks and relational chains): inside the
+    // hook itself, the operator on a value of the hook's own receiver type
+    // dispatches back to the same hook.
+    relational :: op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge
+    hook_method :: if relational -> "compare" else -> sema_expr_operator_method(op) ?? ""
+    if (relational || op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div) && environment.function_name == hook_method {
+        self_index :: sema_scope_resolve_index(scopes, "self")
+        if self_index == .Val(index) {
+            if scopes.bindings[index].symbol.ty == .Val(self_ty) {
+                if sema_expression_nominal_identity(self_ty, lhs.ty, environment, program) {
+                    fix :: if relational -> "compare the value's fields or call a different named helper inside the hook" else -> "combine the value's fields or call a different named helper inside the hook"
+                    &diagnostics.push(sema_error("E0361", span, "`{hook_method}` calls itself through `{sema_expr_binary_name(op)}`", "the operator symbol dispatches back to this same hook, so evaluation would recurse forever", fix))
+                    return None
+                }
+            }
+        }
+    }
     receiver_expr := left
     receiver_value := lhs
     argument_expr := right
