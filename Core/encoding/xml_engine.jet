@@ -211,7 +211,8 @@ fn scalar_count(bytes: View<U8>, end: Int) -> Int Never! {
 fn text(value: String) -> Dyn Never! { Dyn.Text(value.copy()) }
 // Rust: crates/jet-foundation/src/XmlPull.rs:264
 fn optional_text(value: String?) -> Dyn Never! {
-    if value == {
+    owned :: value.copy()
+    if ^owned == {
         .Val(s) -> Dyn.Text(^s)
         .None -> Dyn.Null
     }
@@ -2091,10 +2092,10 @@ impl ByteLexer {
         raw_bytes := [U8]{}
         &scalar_bytes.try_reserve(count) ?? return Err(XMLFault.limit("XML token scalar allocation failed"))
         loop index in 0..<count {
-            unit :: self.units[index]
-            &scalar_bytes.push(unit.raw.len())
-            text += unicode.encode_cp(unit.scalar) ?? return Err(&self.fail(Reason.InvalidEncoding, "invalid Unicode scalar in decoded XML token"))
-            loop byte in unit.raw -> &raw_bytes.push(byte)
+            scalar := self.units[index].scalar
+            &scalar_bytes.push(self.units[index].raw.len())
+            text += unicode.encode_cp(scalar) ?? return Err(&self.fail(Reason.InvalidEncoding, "invalid Unicode scalar in decoded XML token"))
+            loop byte in self.units[index].raw -> &raw_bytes.push(byte)
         }
         self.retained_bytes -= raw_bytes.len()
         drop_prefix(&self.units, count)
@@ -3304,4 +3305,15 @@ impl Scanner {
         }
     }
     assert_eq(text_value(field(projected, "y")), Val("other"))
+}
+
+#Test("XML optional text projection keeps borrowed input and preserves absence") {
+    source :: String?{Val("present")}
+    projected :: optional_text(source)
+    if projected == {
+        .Text(value) -> assert_eq(value, "present")
+        else -> panic("present optional text must project to Dyn.Text")
+    }
+    assert_eq(source, String?{Val("present")})
+    assert(optional_text(String?{None}) == .Null)
 }

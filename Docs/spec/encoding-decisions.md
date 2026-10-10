@@ -451,6 +451,10 @@ projected format is XML, and path and reason copy unchanged. A present
 `EncodingError.byte_offset` zero while line and column remain `None`; present
 line and column copy unchanged. (D-ENCXML1=A; D-ENCSTREAM-SURFACE1=A)
 
+XML optional-text projection makes one owned copy of a borrowed optional before
+moving its payload into `Dyn.Text`; an absent value remains `Dyn.Null`. Token
+encoding snapshots each scalar before an error can mutate the lexer, then
+reacquires that unit's raw bytes instead of retaining a view across the error.
 
 Public XML values use only `encoding.Dyn` variants `Null`, `Bool`, `Int`,
 `Text`, `Array`, and `Object`. Encode byte sequences inside the XML schema as

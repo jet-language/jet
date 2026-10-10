@@ -1834,20 +1834,19 @@ fn receive(tree: &ServiceTree, endpoint: ServiceEndpoint) -> String ServiceError
 
 fn pending_delivery_rollback(tree: &ServiceTree, endpoint: ServiceEndpoint, index: Int, remaining: ^[(id: String, message: String, store: String)], before: ^[String], draining: Bool, error: ServiceError) -> ServiceError Never! {
     #Unsafe("Services2693-2762: retain authority requeue then mailbox-restore ordering and both failure texts") {
-        if core.service.__requeue_pending(endpoint, ^remaining) == {
-            .Err(rollback_error) -> {
-                if core.service.__mailbox_restore(&tree, index, ^before, draining) == {
-                    .Err(mailbox_error) -> return pending_rollback_error(error, Val(rollback_error), Val(mailbox_error))
-                    .Ok(_) -> return pending_rollback_error(error, Val(rollback_error), None)
-                }
-            }
-            .Ok(_) -> {
-                if core.service.__mailbox_restore(&tree, index, ^before, draining) == {
-                    .Err(rollback_error) -> return pending_rollback_error(error, None, Val(rollback_error))
-                    .Ok(_) -> return pending_rollback_error(error, None, None)
-                }
-            }
+        // Each consuming transport runs once, even when the other fails.
+        // Mailbox restoration always follows authority requeue.
+        authority_error := ServiceError?{None}
+        core.service.__requeue_pending(endpoint, ^remaining) ?? {
+            authority_error = Val(err)
+            ()
         }
+        mailbox_error := ServiceError?{None}
+        core.service.__mailbox_restore(&tree, index, ^before, draining) ?? {
+            mailbox_error = Val(err)
+            ()
+        }
+        return pending_rollback_error(error, authority_error, mailbox_error)
     }
 }
 
