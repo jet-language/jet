@@ -75,19 +75,37 @@ export function hostedEmissionCensus(log) {
             raw: row[0], offset: row.index,
         });
     }
+    const partials = [], malformedPartials = [];
+    const partial = new RegExp(`^JET_DEBUG_LOWER_ALL emission partial Rust: path=(${quoted}) failures=(\\d+) items=(\\d+)$`);
+    for (const row of log.matchAll(/^JET_DEBUG_LOWER_ALL emission partial Rust: (.*)$/gm)) {
+        const fields = partial.exec(row[0]);
+        if (!fields) { malformedPartials.push({raw: row[0], offset: row.index}); continue; }
+        partials.push({path: decode(fields[1]), path_debug: fields[1],
+            failed: Number(fields[2]), total: Number(fields[3]),
+            admitted: false, role: 'diagnostic-partial', raw: row[0], offset: row.index});
+    }
     const afterMain = row => main && row.offset > main.index;
     const mainSummaries = summaries.filter(afterMain);
     const mainFailures = failures.filter(afterMain);
     const mainMalformed = malformed.filter(afterMain);
     const final = mainSummaries.at(-1) ?? null;
+    const mainPartials = partials.filter(afterMain);
+    const mainMalformedPartials = malformedPartials.filter(afterMain);
+    const lastPartial = mainPartials.at(-1) ?? null;
+    const partialConsistent = lastPartial !== null && lastPartial.path !== null && final !== null
+        && lastPartial.failed > 0 && lastPartial.failed === final.failed && lastPartial.total === final.total;
     return {
         schema: 'jet-hosted-emission-census/v1',
         summaries, failures, malformed,
         main_summaries: mainSummaries, main_failures: mainFailures, main_malformed_rows: mainMalformed,
+        partials, malformed_partials: malformedPartials, main_partials: mainPartials,
+        main_malformed_partials: mainMalformedPartials, latest_partial: lastPartial,
+        partial_consistent_with_final: partialConsistent,
         final_summary: final,
         clean: final !== null && final.total > 0 && final.failed === 0
             && mainSummaries.every(row => row.failed === 0)
-            && mainFailures.length === 0 && mainMalformed.length === 0,
+            && mainFailures.length === 0 && mainMalformed.length === 0
+            && mainPartials.length === 0 && mainMalformedPartials.length === 0,
         boundary: 'Final hosted Rust-emitter item sweep only; successful emission, complete Rust output and rustc metadata remain separate gates.',
     };
 }

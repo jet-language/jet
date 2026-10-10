@@ -122,3 +122,44 @@ test('Rust Debug-only escapes remain visible rather than inventing decoded diagn
     assert.equal(proof.main_failures[0].message, null);
     assert.equal(proof.main_failures[0].message_debug, '"control\\u{1b}"');
 });
+
+test('diagnostic partial Rust is preserved but never qualifies successful emission', () => {
+    const proof = hostedEmissionCensus([
+        'JET_DEBUG_LOWER_ALL summary: 0 of 28533 functions failed to lower',
+        'JET_DEBUG_LOWER_ALL emission: kind=impl id=3 name="Owner" span=1..2 message="failed owner"',
+        'JET_DEBUG_LOWER_ALL emission failures 1 of 32007',
+        'JET_DEBUG_LOWER_ALL emission partial Rust: path="/tmp/partial \\"name\\".rs" failures=1 items=32007',
+    ].join('\n'));
+    assert.equal(proof.clean, false);
+    assert.equal(proof.partial_consistent_with_final, true);
+    assert.equal(proof.latest_partial.path, '/tmp/partial "name".rs');
+    assert.equal(proof.latest_partial.admitted, false);
+    assert.equal(proof.latest_partial.role, 'diagnostic-partial');
+});
+
+test('partial announcements cannot override clean, missing or inconsistent emission evidence', () => {
+    const main = 'JET_DEBUG_LOWER_ALL summary: 0 of 28533 functions failed to lower\n';
+    for (const log of [
+        main + 'JET_DEBUG_LOWER_ALL emission failures 0 of 10\nJET_DEBUG_LOWER_ALL emission partial Rust: path="/tmp/partial.rs" failures=1 items=10',
+        main + 'JET_DEBUG_LOWER_ALL emission failures 1 of 10\nJET_DEBUG_LOWER_ALL emission partial Rust: path="/tmp/partial.rs" failures=2 items=10',
+        main + 'JET_DEBUG_LOWER_ALL emission partial Rust: path="/tmp/partial.rs" failures=1 items=10',
+        main + 'JET_DEBUG_LOWER_ALL emission failures 0 of 10\nJET_DEBUG_LOWER_ALL emission partial Rust: truncated',
+    ]) {
+        const proof = hostedEmissionCensus(log);
+        assert.equal(proof.clean, false);
+        assert.equal(proof.partial_consistent_with_final, false);
+    }
+});
+
+test('partial comptime diagnostics do not masquerade as the main program dump', () => {
+    const proof = hostedEmissionCensus([
+        'JET_DEBUG_LOWER_ALL summary: 0 of 1 functions failed to lower',
+        'JET_DEBUG_LOWER_ALL emission failures 1 of 1',
+        'JET_DEBUG_LOWER_ALL emission partial Rust: path="/tmp/probe.rs" failures=1 items=1',
+        'JET_DEBUG_LOWER_ALL summary: 0 of 28533 functions failed to lower',
+        'JET_DEBUG_LOWER_ALL emission failures 0 of 32007',
+    ].join('\n'));
+    assert.equal(proof.clean, true);
+    assert.equal(proof.partials.length, 1);
+    assert.equal(proof.latest_partial, null);
+});

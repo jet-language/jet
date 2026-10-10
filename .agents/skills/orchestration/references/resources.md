@@ -182,6 +182,11 @@ Require the hosted emitter's own final `0/<actual item count>` census in
 collect-all mode, preserving every failed item's kind, lossless identity,
 source span, and full diagnostic. A missing emitter census, any failed item,
 or later accepted output after an earlier emission failure is not a pass.
+When failed hosted emission retains a diagnostic-only `JET_DUMP_RUST` file,
+type-check its surviving real items in the same discovery cycle. Keep the
+partial dump, its failure/item counts, and metadata diagnostics separate from
+the full monolith proof: even a clean partial metadata check never admits the
+failed emission, a seed executable, or an RC. Failed-item comments are not code.
 The missing historical display comparator and AGE testkit generator are retired
 Rust-oracle modes (owner #38(b)/#59), not native-suite failures. Report their
 individual rows as `UNCOVERED`, print them, and require a Tower card; never label
