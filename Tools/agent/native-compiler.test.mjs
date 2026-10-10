@@ -33,10 +33,37 @@ function dryRun(extra, inspect) {
         const executeRow = '-[Exec, IO, FFI.C, FFI.Asm, Time.Wait]>';
         assert.equal(source.split(`fn execute(self, request: X64ExecutionRequest) ${executeRow} X64ExecutionResponse`).length - 1, 2,
             'the execution-host trait and implementation retain the same explicit transport bound');
-        assert.match(source, /^use core\.build\.\[BuildGraphNode\]$/m);
+        const groupedBindings = new Set();
+        for (const [, module, members] of source.matchAll(/^use (core(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\.\[([^\]]*)\]/gm)) {
+            for (const member of members.split(',')) {
+                if (!member.trim()) continue;
+                const binding = member.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?\s*$/);
+                assert.ok(binding, `unexpected grouped Core import member: ${member}`);
+                const key = `${module}.${binding[1]} as ${binding[2] ?? binding[1]}`;
+                assert.equal(groupedBindings.has(key), false, `duplicate assembled Core binding: ${key}`);
+                groupedBindings.add(key);
+            }
+        }
+        assert.ok(groupedBindings.has('core.build.BuildGraphNode as BuildGraphNode'));
         assert.doesNotMatch(source, /^use core\.build\.BuildGraphNode$/m,
             'a Core build type must use the member-import route, not a fictitious module path');
-        assert.equal(JSON.parse(readFileSync(join(out, 'compiler.map.json'))).source_segments.at(-1).source_file, 'Compiler/JetCli/run.jet');
+        const sourceMap = JSON.parse(readFileSync(join(out, 'compiler.map.json')));
+        assert.equal(sourceMap.source_segments.at(-1).source_file, 'Compiler/JetCli/run.jet');
+        const assembledBytes = Buffer.from(source);
+        for (const segment of sourceMap.source_segments) {
+            const original = readFileSync(join(repo, segment.source_file), 'utf8');
+            for (const match of original.matchAll(/^use core(?:\.[A-Za-z_][A-Za-z0-9_]*)*\.\[[^\]]*\]/gm)) {
+                const originalBytes = Buffer.from(match[0]);
+                const start = segment.generated.start + Buffer.byteLength(original.slice(0, match.index));
+                const generatedBytes = assembledBytes.subarray(start, start + originalBytes.length);
+                assert.equal(generatedBytes.length, originalBytes.length);
+                for (let index = 0; index < originalBytes.length; index++) {
+                    assert.ok(generatedBytes[index] === originalBytes[index] ||
+                        (generatedBytes[index] === 32 && originalBytes[index] !== 10),
+                        `${segment.source_file}: grouped import token or source-map offset shifted at byte ${index}`);
+                }
+            }
+        }
         assert.equal(existsSync(join(out, 'seed/jet')), false, 'dry-run must not manufacture a compiler');
         inspect(JSON.parse(readFileSync(join(out, 'plan.json'))));
     } finally { rmSync(root, { recursive: true, force: true }); }

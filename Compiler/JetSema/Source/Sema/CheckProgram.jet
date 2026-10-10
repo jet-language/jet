@@ -3897,11 +3897,12 @@ fn sema_name_symbol_index(graph: SemaRegistrationGraph) -> [String:SemaNameResol
 }
 
 fn sema_name_first_declarations(rows: ^[MIRNameDeclaration]) -> [MIRNameDeclaration] Never! {
+    owned_rows := ^rows
     seen := [String:Bool]{}
     kept := [MIRNameDeclaration]{}
-    &rows.reverse()
-    loop rows.len() > 0 {
-        row := &rows.pop() ?? break
+    &owned_rows.reverse()
+    loop owned_rows.len() > 0 {
+        row := &owned_rows.pop() ?? break
         key :: "{row.module_index}|{row.name}"
         if seen.get(key) != None -> next
         seen[key] = true
@@ -3911,11 +3912,12 @@ fn sema_name_first_declarations(rows: ^[MIRNameDeclaration]) -> [MIRNameDeclarat
 }
 
 fn sema_name_first_aliases(rows: ^[MIRNameAlias]) -> [MIRNameAlias] Never! {
+    owned_rows := ^rows
     seen := [String:Bool]{}
     kept := [MIRNameAlias]{}
-    &rows.reverse()
-    loop rows.len() > 0 {
-        row := &rows.pop() ?? break
+    &owned_rows.reverse()
+    loop owned_rows.len() > 0 {
+        row := &owned_rows.pop() ?? break
         key :: "{row.module_index}|{row.name}"
         if seen.get(key) != None -> next
         seen[key] = true

@@ -90,15 +90,41 @@ async function jetFilesUnder(directory) {
 // packages they depend on with `use <package>.[names]`. The aggregate unit is
 // one namespace, so those imports are blanked to spaces of the same length:
 // every byte offset and line in the source map still matches the original.
-// Files in different packages may also repeat one single-line Core import
-// (`use core.math as math`); inside one unit the repeat is a duplicate import
-// name (E0105), so every repeat after the first is blanked the same way.
+// Repeated Core imports share one binding inside the aggregate. Grouped
+// member imports are deduplicated per member, including overlapping groups,
+// without shifting any surviving token, byte offset, or source line.
 const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_optimizer|jet_sema|jet_codegen|jet_eval|jet_repl|jet_driver|jet_backend|jet_cli|compiler_bootstrap)\.(?:\[[^\]]*\]|[A-Za-z_][A-Za-z0-9_]*[ \t]*$)/gm;
 const CORE_IMPORT = /^use core\.[^\[\n]*$/gm;
+const CORE_MEMBER_IMPORT = /^use (core(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\.\[([^\]]*)\]/gm;
 const seenCoreImports = new Set();
+const seenCoreMembers = new Set();
 const blank = (block) => block.replace(/[^\n]/g, " ");
+function blankRepeatedCoreMembers(importText, module, members) {
+  const parts = members.split(",");
+  const bindings = parts.map((part) => part.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?\s*$/));
+  // Leave unsupported or commented forms to the parser; do not guess names.
+  if (bindings.some((binding, index) => !binding && parts[index].trim() !== "")) return importText;
+  let removed = false;
+  const kept = bindings.map((binding) => {
+    if (!binding) return false;
+    const key = `${module}.${binding[1]} as ${binding[2] ?? binding[1]}`;
+    if (seenCoreMembers.has(key)) { removed = true; return false; }
+    seenCoreMembers.add(key);
+    return true;
+  });
+  if (!removed) return importText;
+  const last = kept.lastIndexOf(true);
+  if (last < 0) return blank(importText);
+  const rewritten = parts.map((part, index) =>
+    (kept[index] ? part : blank(part)) +
+    (index === parts.length - 1 ? "" : kept[index] && index < last ? "," : " ")
+  ).join("");
+  return importText.slice(0, importText.indexOf("[") + 1) + rewritten + "]";
+}
 function blankPackageImports(text) {
-  return text.replace(PACKAGE_IMPORT, blank).replace(CORE_IMPORT, (line) => {
+  return text.replace(PACKAGE_IMPORT, blank)
+    .replace(CORE_MEMBER_IMPORT, blankRepeatedCoreMembers)
+    .replace(CORE_IMPORT, (line) => {
     const key = line.trimEnd();
     if (!seenCoreImports.has(key)) {
       seenCoreImports.add(key);
