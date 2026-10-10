@@ -734,12 +734,10 @@ fn sema_scope_checked_type_name_rows(environment: SemaScopeEnvironment, program:
     program.checked_type_name_rows[slot]
 }
 
-// One environment serves every module of a graph pass: the registration
-// graph, checked types and write-parameter facts stay, and the module's own
-// source facts replace the previous module's.
-fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, module_index: Int, comptime_body_values: ^SemaComptimeBodyValues) Never! {
-    // The graph payload loan permits only disjoint module-fact writes.
-    if &environment.registration_graph == .Val(graph) {
+// Retarget scope facts while the program tables retain their one graph owner.
+// No field is taken from a borrowed environment or program parameter.
+fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, comptime_body_values: ^SemaComptimeBodyValues) Never! {
+    if program.registration_graph == .Val(graph) {
         environment.module_identity = graph.modules[module_index].module_identity
         environment.package_identity = graph.modules[module_index].package_identity
         environment.module_name = graph.modules[module_index].module_name
@@ -757,16 +755,11 @@ fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, modul
     panic("an owning registered-module pass lost its registration graph")
 }
 
-// A comptime probe checks one expression or function of `module_identity`
-// against the environment's own graph, so one environment serves every
-// probe of a pass instead of a graph copy per probe. The module's identity
-// and source facts replace the previous target's; every other per-module or
-// per-function fact starts empty, as in a newly built probe environment.
+// A comptime probe borrows the program graph and replaces only scope facts.
+// Its else-arm/debug-site reset differs from real declaration/body entry.
 // False when the graph has no such module.
-fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironment, module_identity: String, comptime_body_values: ^SemaComptimeBodyValues) -> Bool Never! {
-    // Pin the payload window, not an owning Option match of the whole graph.
-    // Only disjoint context fields are written before this loan closes.
-    if &environment.registration_graph == .Val(graph) {
+fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, comptime_body_values: ^SemaComptimeBodyValues) -> Bool Never! {
+    if program.registration_graph == .Val(graph) {
         module_index :: sema_registration_module_index(graph, module_identity) ?? return false
         environment.module_identity = graph.modules[module_index].module_identity
         environment.package_identity = graph.modules[module_index].package_identity

@@ -347,18 +347,35 @@ proves it; freeze source sites remain available for diagnostics after the join.
 
 Semantic checking APIs thread `SemaProgramTables` explicitly alongside
 `SemaScopeEnvironment`; callers pass the tables rather than shifting mutable
-scope arguments into a missing table slot. Graph-owning staging and module
-retargeting corridors retain their owning transport: the graph moves into the
-program tables for checking, moves back only while a retained environment is
-retargeted, and returns to the tables afterward. These handoffs do not copy the
-registration graph or rebuild its checked-type indexes. Driver declaration,
-body, and compiler-query passes lend this single graph through staging and
-restore it on every run exit, including partial-graph exits; speculative landed
-values are rolled back through the graph mutation trail rather than graph copies.
+scope arguments into a missing table slot. An owned pass environment transfers
+its registration graph and checked-type indexes into the one program-table
+owner before checking; its moved fields are reinitialized before further use.
+Module retargeting reads that graph in place and replaces only module-local
+scope facts. It neither extracts fields from borrowed owners nor copies the
+graph or rebuilds the checked-type indexes. Staging and speculative landed
+values use the graph mutation trail rather than registration-graph copies.
+
+Output finalization publishes each callable's settled return type, failure
+contract, and sorted solved effects into checked constants, retained source
+programs, and the ordered graph-result Output rows. The shared publication
+walk lazily indexes only referenced modules; it does not clone function bodies.
 
 Dimension registration resolves its dependency worklist with explicit indexed
 read/write assignments for pending counts; indexed compound updates are not
 part of Jet's assignment contract (E0164).
+
+Semantic pattern validation passes program tables into list/map slots, and
+effect traversal visits nested payload patterns and map keys in place. Dynamic
+dispatch reachability is solved once across reverse call edges; bounded-call
+diagnostics reuse that reachability without copying expression children.
+Gate inspection visitors collect new facts in an owned ledger and merge them
+through the canonical deduplicating publication function. The expression
+visitor never consults pre-existing ledger rows when deciding which facts to emit.
+
+Generic collection static constructors preserve explicit owner type arguments;
+an omitted argument can be inferred from the expected success value, including
+through the constructor's failure rail. Context never replaces an explicitly
+written element type.
 
 The compiler and runtime aggregates have separate explicit source inventories:
 [`Compiler/Bootstrap/sources.list`](../../Compiler/Bootstrap/sources.list) and

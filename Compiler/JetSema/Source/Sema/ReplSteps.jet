@@ -30,7 +30,7 @@ struct ReplSetupError {
     message: String
 }
 
-fn sema_repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], source: Func, root: TFunc) -> SemaReplSession ReplSetupError! {
+fn sema_repl_session_new(graph: ^SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], source: Func, root: TFunc) -> SemaReplSession ReplSetupError! {
     if source.params.len() != 0 || source.body.len() != 0 || root.params.len() != 0 || root.body.len() != 0 {
         return Err(ReplSetupError{message: "REPL checking requires an empty checked zero-parameter root"})
     }
@@ -38,17 +38,7 @@ fn sema_repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModul
     loop module_row in modules {
         loop definition in module_row.declarations.type_defs -> &checked_types.push(definition)
     }
-    environment := sema_check_pass_environment(graph.copy(), checked_types, SemaComptimeBodyValues{})
-    if !sema_scope_environment_enter_probe_module(&environment, root.module_identity, SemaComptimeBodyValues{}) {
-        return Err(ReplSetupError{message: "REPL root is not in the canonical registration graph"})
-    }
-    scopes := sema_scope_init(root.module_identity)
-    diagnostics := [Diagnostic]{}
-    if !sema_registration_apply_graph_module(graph, root.module_identity, &scopes, &diagnostics) || sema_has_error_since(diagnostics, 0) {
-        return Err(ReplSetupError{message: "REPL declaration environment is not a successfully registered module"})
-    }
-    // The retained environment has already indexed the session's owned graph.
-    // Hand those same tables to the borrowed statement checker.
+    environment := sema_check_pass_environment(^graph, checked_types, SemaComptimeBodyValues{})
     program := SemaProgramTables{
         registration_graph: ^environment.registration_graph,
         checked_types: ^environment.checked_types,
@@ -56,6 +46,21 @@ fn sema_repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModul
         checked_type_name_slots: ^environment.checked_type_name_slots,
         checked_type_name_rows: ^environment.checked_type_name_rows,
         boxed_edges: ^environment.boxed_edges,
+    }
+    environment.registration_graph = None
+    environment.checked_types = [TTypeDef]{}
+    environment.checked_type_rows = [String:Int]{}
+    environment.checked_type_name_slots = [String:Int]{}
+    environment.checked_type_name_rows = [[Int]]{}
+    environment.boxed_edges = [String:[String]]{}
+    if !sema_scope_environment_enter_probe_module(&environment, program, root.module_identity, SemaComptimeBodyValues{}) {
+        return Err(ReplSetupError{message: "REPL root is not in the canonical registration graph"})
+    }
+    scopes := sema_scope_init(root.module_identity)
+    diagnostics := [Diagnostic]{}
+    applied :: if program.registration_graph == .Val(registered) -> sema_registration_apply_graph_module(registered, root.module_identity, &scopes, &diagnostics) else -> false
+    if !applied || sema_has_error_since(diagnostics, 0) {
+        return Err(ReplSetupError{message: "REPL declaration environment is not a successfully registered module"})
     }
     sema_function_apply_scope_policies(environment, program, &scopes, source.span, source.markers)
     ownership := sema_ownership_state_init()
@@ -120,23 +125,23 @@ fn sema_repl_type_check_stmts(session: &SemaReplSession, statements: [Stmt], sou
         loop module_row in session.modules {
             index :: sema_registration_module_index(graph, module_row.module_identity) ?? next
             source_module :: graph.modules[index]
-            checked := module_row
+            checked_module := module_row
             sources := sema_comptime_effect_sources(source_module)
             segments := source_module.source_segments
             if module_row.module_identity == candidate.module_identity {
-                loop position in 0..<checked.functions.len() {
-                    if checked.functions[position].key == candidate.key -> checked.functions[position] = candidate
+                loop position in 0..<checked_module.functions.len() {
+                    if checked_module.functions[position].key == candidate.key -> checked_module.functions[position] = candidate
                 }
                 loop position in 0..<sources.len() {
                     if sources[position].key == candidate.key {
                         sources[position] = sema_effect_source_from_function_key(source, candidate.module_identity, candidate.key)
                     }
                 }
-                loop fact in session.context.call_facts -> &checked.call_facts.push(fact)
+                loop fact in session.context.call_facts -> &checked_module.call_facts.push(fact)
                 segments = source_segments
             }
             &inputs.push(SemaEffectModuleInput{module_index: modules.len(), sources: ^sources, source_segments: segments, trait_bounds: sema_effect_trait_bounds(source_module.program.items)})
-            &modules.push(^checked)
+            &modules.push(^checked_module)
         }
         // The session holds no package policy, so no package memory denials.
         effects :: sema_effects_check_modules(&modules, inputs, [String]{})

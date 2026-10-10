@@ -53,19 +53,33 @@ fn output_fixture_solved_effects(effects_source: String, failures: &[String]) {
     }
     key :: symbol_id(SymbolKind.Function, "output-fixture::main", "", "launch").key
     solved := [String]?{None}
+    settled_return := Type?{None}
     loop function in checked.modules[0].functions {
-        if function.key == key -> solved = Val(function.effects.solved.copy())
+        if function.key == key {
+            solved = Val(function.effects.solved.copy())
+            settled_return = function.ret.copy()
+        }
     }
     expected :: solved ?? {
         &failures.push("solved effect publication: checked callable is missing")
         return
     }
     if expected.len() == 0 -> &failures.push("solved effect publication: genuine print/call chain has no solved effects")
+    declaration_span := Span?{None}
+    loop function in graph.modules[0].functions {
+        if function.symbol.id.key == key -> declaration_span = function.declaration.return_type_span
+    }
+    settled_contract :: failure_contract_of_function(settled_return, declaration_span)
+    if checked.outputs.len() != 1 -> &failures.push("solved output publication: the graph result lost its ordered Output row")
+    loop output in checked.outputs {
+        if output.effects != expected || output.return_type != settled_return || output.failure_contract != settled_contract -> &failures.push("solved output publication: the graph result differs from the settled callable contract")
+    }
     found := false
     loop constant in checked.modules[0].constants {
         if constant.declaration.resolved_output == .Val(output) {
             found = true
             if output.effects != expected -> &failures.push("solved effect publication: Output differs from the real checked callable")
+            if output.return_type != settled_return || output.failure_contract != settled_contract -> &failures.push("solved output publication: checked constant retains the declaration's unsolved contract")
         }
     }
     if !found -> &failures.push("solved effect publication: checked Output fact is missing")

@@ -28,7 +28,7 @@ enum ReplStepResult {
     InvalidSession(message: String)
 }
 
-fn repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], source: Func, root: TFunc, program: ^MIRProgram, config: ^JetEvalConfig) -> ReplSession ReplSetupError! {
+fn repl_session_new(graph: ^SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], source: Func, root: TFunc, program: ^MIRProgram, config: ^JetEvalConfig) -> ReplSession ReplSetupError! {
     module_index :: sema_registration_module_index(graph, root.module_identity) ?? return Err(ReplSetupError{message: "REPL root module is absent from registration"})
     functions := [TFunc]{}
     loop module_row in modules {
@@ -43,7 +43,8 @@ fn repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModuleResu
         if bytes[index] == (U8{10}) -> &lines.push(index + 1)
     }
     files :: program.source_files
-    checker :: sema_repl_session_new(graph, modules.copy(), source, root)
+    segments :: graph.modules[module_index].source_segments.copy()
+    checker :: sema_repl_session_new(^graph, modules.copy(), source, root)
     lowering :: jet_codegen_repl_session_new(root, ^functions, ^modules, ^program)
     initial :: jet_codegen_repl_initial_program(lowering)
     root_id := MIRFunctionID?{None}
@@ -53,7 +54,7 @@ fn repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModuleResu
     entry :: root_id ?? return Err(ReplSetupError{message: "REPL root has no canonical MIR identity"})
     runtime :: jet_eval_repl_session_new(^initial, ^config, entry)
     valid :: runtime.valid
-    Ok(ReplSession{checker: ^checker, lowering: ^lowering, runtime: ^runtime, source: ^bytes, line_starts: ^lines, source_files: files, segments: graph.modules[module_index].source_segments, root_source: root.source_file, step: 0, valid: valid})
+    Ok(ReplSession{checker: ^checker, lowering: ^lowering, runtime: ^runtime, source: ^bytes, line_starts: ^lines, source_files: files, segments: segments, root_source: root.source_file, step: 0, valid: valid})
 }
 
 fn repl_session_step(session: &ReplSession, text: String) -> ReplStepResult {

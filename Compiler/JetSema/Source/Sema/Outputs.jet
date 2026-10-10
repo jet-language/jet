@@ -511,8 +511,8 @@ fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputIntent, 
 
 // Completion.rs publishes the same solved callable row into every checked
 // Output. Index only modules actually referenced by an Output; keep functions
-// and their bodies borrowed, copying only the required owned effect row.
-fn sema_output_fact_with_solved_effects(output: ^ResolvedOutput, modules: [SemaGraphModuleResult], rows: &[[String:Int]], indexed: &[Bool]) -> ResolvedOutput {
+// and their bodies borrowed while publishing the settled callable contract.
+fn sema_output_fact_with_solved_effects(output: ^ResolvedOutput, graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], rows: &[[String:Int]], indexed: &[Bool]) -> ResolvedOutput {
     fact := ^output
     fact.effects = [String]{}
     if fact.module_id < 0 || fact.module_id >= modules.len() -> return fact
@@ -532,20 +532,32 @@ fn sema_output_fact_with_solved_effects(output: ^ResolvedOutput, modules: [SemaG
     }
     key :: symbol_id(SymbolKind.Function, modules[target].module_identity, "", fact.semantic_name).key
     function_index :: rows[target].get(key) ?? return fact
+    declaration_span := Span?{None}
+    loop function in graph.modules[target].functions {
+        if function.symbol.id.key == key {
+            declaration_span = function.declaration.return_type_span
+            break
+        }
+    }
+    fact.return_type = modules[target].functions[function_index].ret.copy()
+    fact.failure_contract = failure_contract_of_function(fact.return_type, declaration_span)
     fact.effects = modules[target].functions[function_index].effects.solved.copy()
+    &fact.effects.sort()
     fact
 }
 
-fn sema_output_publish_solved_effects(graph: &SemaRegistrationGraph, modules: &[SemaGraphModuleResult]) {
+fn sema_output_publish_solved_effects(graph: &SemaRegistrationGraph, modules: &[SemaGraphModuleResult]) -> [ResolvedOutput] {
     // Every published Output contributes its authenticated callable reference.
     // No Output means no function index or additional whole-AST projection.
-    if graph.output_name_references.len() == 0 -> return
+    if graph.output_name_references.len() == 0 -> return [ResolvedOutput]{}
     rows := [[String:Int]]{}
     indexed := [Bool]{}
+    outputs := [ResolvedOutput]{}
     loop module_index in 0..<modules.len() {
         loop constant_index in 0..<modules[module_index].constants.len() {
             if modules[module_index].constants[constant_index].declaration.resolved_output == .Val(output) {
-                updated := sema_output_fact_with_solved_effects(output.copy(), modules, &rows, &indexed)
+                updated := sema_output_fact_with_solved_effects(output.copy(), graph, modules, &rows, &indexed)
+                &outputs.push(updated.copy())
                 modules[module_index].constants[constant_index].declaration.resolved_output = Val(^updated)
             }
         }
@@ -553,7 +565,7 @@ fn sema_output_publish_solved_effects(graph: &SemaRegistrationGraph, modules: &[
     loop module_index in 0..<graph.modules.len() {
         loop constant_index in 0..<graph.modules[module_index].constants.len() {
             if graph.modules[module_index].constants[constant_index].declaration.resolved_output == .Val(output) {
-                updated := sema_output_fact_with_solved_effects(output.copy(), modules, &rows, &indexed)
+                updated := sema_output_fact_with_solved_effects(output.copy(), graph, modules, &rows, &indexed)
                 graph.modules[module_index].constants[constant_index].declaration.resolved_output = Val(^updated)
             }
         }
@@ -561,7 +573,7 @@ fn sema_output_publish_solved_effects(graph: &SemaRegistrationGraph, modules: &[
         loop item_index in 0..<graph.modules[module_index].program.items.len() {
             if graph.modules[module_index].program.items[item_index] == .Const(definition) {
                 if definition.resolved_output == .Val(output) {
-                    updated_output := sema_output_fact_with_solved_effects(output.copy(), modules, &rows, &indexed)
+                    updated_output := sema_output_fact_with_solved_effects(output.copy(), graph, modules, &rows, &indexed)
                     updated_definition := definition.copy()
                     updated_definition.resolved_output = Val(^updated_output)
                     graph.modules[module_index].program.items[item_index] = Item.Const{value: ^updated_definition}
@@ -569,4 +581,5 @@ fn sema_output_publish_solved_effects(graph: &SemaRegistrationGraph, modules: &[
             }
         }
     }
+    ^outputs
 }
