@@ -105,7 +105,11 @@ fn jet_cli_data_bind_finish(job: JetCLIDataBindJob, selected_root: String) -[FS,
         held :: JetCLIRootedDirectory.open(selected_root, [String]{".jet", "bindings"}, true) ?? return jet_cli_data_bind_io_error(format, output_path, "create", err.message, color)
         owner :: held.lock("binding output") ?? return jet_cli_data_bind_io_error(format, output_path, "write", err.message, color)
         name :: jet_cli_file_name(output_path)
-        prior :: held.read(name, Int.MAX) ?? return jet_cli_data_bind_io_error(format, output_path, "inspect", err.message, color)
+        prior :: if held.read(name, Int.MAX) == {
+            .Val(bytes) -> Val(bytes)
+            .None -> None
+            .Err(error) -> { return jet_cli_data_bind_io_error(format, output_path, "inspect", error.message, color) }
+        }
         if prior == .Val(bytes) {
             existing :: String.from_bytes(bytes) ?? return jet_cli_data_bind_io_error(format, output_path, "inspect", "the existing output is not UTF-8", color)
             if jet_cli_binding_generated_command(result.source) != jet_cli_binding_generated_command(existing) {

@@ -21,11 +21,11 @@ fn registry_names(rows: [View<JobFact>]) -> String Never! {
     names.join(" -> ")
 }
 fn registry_error(registry: JobRegistry, root: String) -> String Never! {
-    registry.dependency_closure(root) ?? return err
+    registry.dependency_closure(root) ?? return err.message
     panic("controlled graph must fail")
 }
 fn registry_validation_error(registry: JobRegistry) -> String Never! {
-    registry.validate_graph() ?? return err
+    registry.validate_graph() ?? return err.message
     panic("controlled graph must fail validation")
 }
 fn registry_param(name: String, ty: Type, default: Expr?, variadic: Bool) -> Param Never! {
@@ -43,10 +43,10 @@ fn run() {
         registry_function("leaf", .Internal, [String]{}, 1),
         registry_function("left", .Dev, [String]{"leaf"}, 1)
     }))
-    assert(registry_names(registry.dependency_closure("root") ?? panic(err)) == "leaf -> left -> right -> root")
+    assert(registry_names(registry.dependency_closure("root") ?? panic(err.message)) == "leaf -> left -> right -> root")
     assert(registry_names(registry.visible_jobs()) == "root -> right -> left")
     assert(registry.completion_words().join(" ") == "root right left")
-    registry.validate_graph() ?? panic(err)
+    registry.validate_graph() ?? panic(err.message)
     assert(registry_error(registry, "absent") == "job graph references unknown job `absent`")
 
     duplicate :: JobRegistry.from_items(registry_items([Func]{

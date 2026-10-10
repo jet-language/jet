@@ -192,9 +192,19 @@ fn jet_cli_watch_from_entry(cache: &WorkspaceDeclarationCache, entry: String, de
     observed :: comptime_inputs ?? return Err(JetCLIWatchInputError{message: "comptime inputs: #4736; canonical build session has not certified its input read closure", comptime_unavailable: true})
     canonical :: jet_cli_watch_canonical(entry)
     entry_dir :: jet_cli_parent(canonical) ?? "/"
-    project :: pkg_find_manifest_root_checked(&cache, entry_dir) ?? return Err(JetCLIWatchInputError{message: "could not resolve watch manifest root: {err.diagnostic}"})
+    // Missing manifest data is optional; malformed/inaccessible data refuses
+    // discovery rather than claiming that the project has no manifest.
+    project :: if pkg_find_manifest_root_checked(&cache, entry_dir) == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> { return Err(JetCLIWatchInputError{message: "could not resolve watch manifest root: {error.diagnostic}"}) }
+    }
     root :: project ?? entry_dir
-    manifest :: pkg_manifest_path_checked(root) ?? return Err(JetCLIWatchInputError{message: "could not resolve watch manifest: {err.diagnostic}"})
+    manifest :: if pkg_manifest_path_checked(root) == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> { return Err(JetCLIWatchInputError{message: "could not resolve watch manifest: {error.diagnostic}"}) }
+    }
     name :: jet_cli_stem(canonical)
     paths := [String]{canonical}
     html := [String]{jet_cli_entry_join(entry_dir, "{name}.html")}
@@ -229,7 +239,7 @@ fn jet_cli_watch_from_entry(cache: &WorkspaceDeclarationCache, entry: String, de
 }
 
 fn jet_cli_watch_discover(cache: &WorkspaceDeclarationCache, request: JetDriverCompileRequest) -[FS, Env]> JetCLIWatchGraph JetCLIWatchInputError! {
-    loaded :: jet_driver_query_loaded_input_paths(request)
+    loaded :: jet_driver_query_loaded_input_paths(request) ?? return Err(JetCLIWatchInputError{message: "could not discover loaded watch inputs: {err}"})
     observed_comptime :: if loaded.comptime_input_coverage_complete -> Val(loaded.comptime_input_paths) else -> None
     jet_cli_watch_from_entry(&cache, request.authorized_sources.entry_path, loaded.paths, observed_comptime)
 }

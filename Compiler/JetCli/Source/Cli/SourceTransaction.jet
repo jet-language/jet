@@ -333,7 +333,13 @@ fn jet_cli_commit_fix(file: String, before: [U8], staged: [U8], semantic_ops: [J
     path :: cli_files.realpath(file) ?? return Err(jet_cli_read_error("could not canonicalize fix target `{file}`: {jet_cli_io_error_text(err)}"))
     parent :: jet_cli_parent(path) ?? return Err(jet_cli_read_error("fix target has no parent directory"))
     cache := WorkspaceDeclarationCache.new()
-    found :: jet_cli_find_package_root_checked(&cache, parent) ?? return Err(jet_cli_read_error(err.diagnostic.what))
+    // Absence selects the standalone-file root; a failed manifest observation
+    // is distinct and must not be flattened into that fallback.
+    found :: if jet_cli_find_package_root_checked(&cache, parent) == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> { return Err(jet_cli_read_error(error.diagnostic.what)) }
+    }
     root := found ?? parent
     if found == None {
         ancestor := parent
@@ -352,7 +358,7 @@ fn jet_cli_commit_fix(file: String, before: [U8], staged: [U8], semantic_ops: [J
     jet_cli_transaction_recover(project, journal)
     filename :: jet_cli_file_name(path)
     dot :: filename.rfind(".")
-    stem :: if dot == .Val(index) && index > 0 -> filename.slice(0, index) else -> filename
+    stem :: if dot > 0 -> filename.slice(0, dot) else -> filename
     base :: "Fix-{jet_cli_fix_name(stem)}"
     suffix := 0
     name := base

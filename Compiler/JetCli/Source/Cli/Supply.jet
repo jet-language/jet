@@ -1,6 +1,8 @@
 // Source/CmdSupply.rs package_input and run_sbom. Supply commands may inspect
 // an extracted Package without an entry; dependency commands still require the
 // entry. Both use the SAME checked Package/facts reader and Publication model.
+use jetpack.[publication_emit_cyclonedx, publication_emit_spdx]
+
 fn jet_cli_supply_input(root: String, color: Bool, json: Bool) -[FS, Env]> JetCLIPackageInput JetCLIDependencyError! {
     entry :: jet_cli_package_input_entry(root, color, json)
     if cli_files.is_file(entry.path) {
@@ -9,7 +11,11 @@ fn jet_cli_supply_input(root: String, color: Bool, json: Bool) -[FS, Env]> JetCL
         return Ok(input)
     }
     cache := WorkspaceDeclarationCache.new()
-    loaded :: pkg_package_facts_for_root(&cache, root) ?? return Err(jet_cli_dependency_with_notice(jet_cli_dependency_source_error(JET_CLI_PACKAGE_FILE, "", err.diagnostic), entry.notice))
+    loaded :: if pkg_package_facts_for_root(&cache, root) == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> { return Err(jet_cli_dependency_with_notice(jet_cli_dependency_source_error(JET_CLI_PACKAGE_FILE, "", error.diagnostic), entry.notice)) }
+    }
     facts :: loaded ?? return Err(jet_cli_dependency_with_notice(jet_cli_dependency_cli_error("E2105", "couldn't resolve package facts for {root}", None, color, json), entry.notice))
     input := jet_cli_package_input_from_facts(root, facts, color, json) ?? return Err(jet_cli_dependency_with_notice(err, entry.notice))
     input.notice = entry.notice
