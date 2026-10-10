@@ -36,11 +36,12 @@
 // JET_RUNTIME_JET_OBJECT set), Compiler/JetBackend/Tests/run-sanitized.mjs also
 // runs over the corpus (set JET_LOWER_SANITIZE=1 so native code is checked too).
 //
-// Verdicts (fuzz.tsv): reference = the Rust path against the model
-// (model-agree, model-differs, rust-error, rust-absent); then the
+// Verdicts (fuzz.tsv): reference = uncovered for every case (the retired Rust
+// MIR oracle; no rustc is invoked and no mir/*.ref is read); then the
 // run-differential, run-sanitized and run-lint-corpus verdicts of the case.
-// The gate (exit 1) fails on model-differs, rust-error, native-diverges, a
-// sanitizer report or sanitized-diverges, lint findings and lint-crash. A
+// The gate (exit 1) fails on native-diverges, a sanitizer report or
+// sanitized-diverges, lint findings and lint-crash; a retired reference alone
+// exits 2 with UNCOVERED (cardRequired true). A
 // failing case reproduces from its seed; the .jet is the repro. Any harness
 // failure (a model error, a tool that did not run) exits 2 and writes no
 // receipt, so it can never read as a gate verdict.
@@ -880,34 +881,16 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const lint = table("lint.tsv");
   const rows = [];
   const failures = [];
+  const uncovered = [];
   for (const stem of stems) {
-    const slug = stem.replace(/[^A-Za-z0-9_-]+/gu, "_");
-    const refPath = join(goldens, "mir", `${slug}.ref`);
-    const ref = existsSync(refPath) ? JSON.parse(readFileSync(refPath, "utf8")) : null;
-    const refStdoutPath = join(goldens, "mir", `${slug}.stdout`);
-    const refStderrPath = join(goldens, "mir", `${slug}.stderr`);
-    const want = readFileSync(join(features, "expected", `${stem}.out`));
-    let reference = "rust-absent";
-    let detail = "";
-    if (ref && ref.mode === "run" && existsSync(refStdoutPath) && existsSync(refStderrPath)) {
-      const refStdout = readFileSync(refStdoutPath);
-      if (ref.status !== 0) {
-        reference = "rust-error";
-        detail = `exit ${ref.status}: ${readFileSync(refStderrPath, "utf8").split("\n").find((line) => line.trim()) ?? ""}`.slice(0, 200);
-      } else if (!refStdout.equals(want)) {
-        reference = "model-differs";
-        const got = refStdout.toString("utf8").split("\n");
-        const model = want.toString("utf8").split("\n");
-        const line = model.findIndex((text, i) => text !== got[i]);
-        detail = line < 0 ? "stdout bytes differ" : `line ${line + 1}: model ${JSON.stringify(model[line])} rust ${JSON.stringify(got[line])}`;
-      } else reference = "model-agree";
-    } else if (ref && ref.mode === "run") detail = "missing raw reference streams";
+    const reference = "uncovered";
+    const detail = "retired Rust MIR reference: cardRequired true; no rustc invoked";
     const native = differential.get(stem)?.verdict ?? harness.get(stem)?.verdict ?? "-";
     if (last >= 2 && native !== "agree") failures.push(`native-incomplete\t${stem}\t${native}`);
     const sanitized = sanitize.get(stem)?.verdict ?? "-";
     const linted = lint.get(stem)?.verdict ?? "-";
     rows.push([stem, reference, native, sanitized, linted, detail || differential.get(stem)?.detail || sanitize.get(stem)?.detail || lint.get(stem)?.detail || ""].join("\t"));
-    if (reference === "model-differs" || reference === "rust-error") failures.push(`${reference}\t${stem}\t${detail}`);
+    if (reference === "uncovered") uncovered.push(stem);
     if (native === "native-diverges") failures.push(`native-diverges\t${stem}\t${differential.get(stem).detail}`);
     if (sanitized === "report" || sanitized === "sanitized-diverges") failures.push(`sanitize-${sanitized}\t${stem}\t${sanitize.get(stem).detail}`);
     if (last >= 2 && sanitizeRuntimeLibrary && sanitized !== "clean" && sanitized !== "report" && sanitized !== "sanitized-diverges") failures.push(`sanitize-incomplete\t${stem}\t${sanitized}`);
@@ -930,10 +913,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     `sanitize: ${tally(3)}`,
     `lint: ${tally(4)}`,
     "",
-    `gate: ${failures.length ? `FAIL (${failures.length})` : "PASS"}`,
+    `gate: ${failures.length ? `FAIL (${failures.length})` : uncovered.length ? "UNCOVERED (cardRequired true)" : "PASS"}`,
+    ...(uncovered.length ? [`uncovered\treference\t${uncovered.length} cases\tretired Rust MIR reference; cardRequired true`] : []),
     ...failures,
   ];
   writeFileSync(join(outDir, "fuzz-summary.txt"), summary.join("\n") + "\n");
   console.log(summary.join("\n"));
-  process.exit(failures.length ? 1 : 0);
+  process.exit(failures.length ? 1 : uncovered.length ? 2 : 0);
 }
