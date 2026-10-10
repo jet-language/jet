@@ -103,6 +103,11 @@ directories exist. Queue completion is not a pass: consumers require the real
 driver verdict and same-source artifact hashes. Retry a failed shared proof
 under a fresh queue name while preserving its earlier receipts; a completed
 same-source GREEN may be reused only after verifying its artifacts.
+Before every build release, run all 18 active generator `--check` gates against
+the immutable export, not the shared worktree, and require 18/18 before moving
+the hold into the runnable queue. A worktree check can consume uncommitted
+hash refreshes that the export omits; commit the canonical generated outputs
+and re-export rather than bypassing the build-script stale-table guard.
 The native fixed point is stage1 (built by the candidate) compiling stage2.
 Require both objects and ELF executables to be byte-identical, and require each
 stage's own all-phases diagnostic report to exist and contain zero failures.
