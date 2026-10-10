@@ -30,9 +30,10 @@ fn runtime_abi_atom(name: String) -> String Never! {
 }
 
 // `HandleMut` lends the handle of the caller's Write place: the runtime
-// mutates the value in that box. A `Tuple` result writes item `i` through its
-// `i`-th out pointer (one zeroed eight-byte slot each) and returns nothing.
-enum LowerRouteCarrier { Word Flag Float Text Unit Handle(name: String) HandleMut(name: String) List(elem: LowerRouteCarrier) Tag(name: String, variants: String) }
+// mutates the value in that box. A Tuple writes its flattened carrier
+// slots through out pointers (zeroed eight-byte slots); an Option item
+// writes a 0/1 tag followed by its payload slots and returns nothing.
+enum LowerRouteCarrier { Word Flag Float Text Unit Handle(name: String) HandleMut(name: String) List(elem: LowerRouteCarrier) Option(some: LowerRouteCarrier) Tag(name: String, variants: String) }
 
 enum LowerRouteResult {
     Plain(carrier: LowerRouteCarrier)
@@ -222,7 +223,12 @@ LOWER_RUNTIME_ROUTES :: prep { [LowerRoute]{
     LowerRoute{symbol: "jet_enc_xml_writer_write", export: "jet_enc_xml_writer_write", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.HandleMut{name: "XMLWriter"}, LowerRouteCarrier.Handle{name: "Dyn"}}, result: LowerRouteResult.Result{ok: LowerRouteCarrier.Unit, err: LowerRouteCarrier.Handle{name: "EncodingError"}}},
     LowerRoute{symbol: "jet_entries8_before", export: "jet_entries8_before", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Word, LowerRouteCarrier.Word}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Flag}},
     LowerRoute{symbol: "jet_entries8_close", export: "jet_entries8_close", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Word}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Unit}},
+    LowerRoute{symbol: "jet_entries8_copy", export: "jet_entries8_copy", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Word}, result: LowerRouteResult.Tuple{items: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Option{some: LowerRouteCarrier.Word}, LowerRouteCarrier.Option{some: LowerRouteCarrier.Text}}}},
+    LowerRoute{symbol: "jet_entries8_file_type", export: "jet_entries8_file_type", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Word}, result: LowerRouteResult.Tuple{items: [LowerRouteCarrier]{LowerRouteCarrier.Flag, LowerRouteCarrier.Flag, LowerRouteCarrier.Word, LowerRouteCarrier.Option{some: LowerRouteCarrier.Word}, LowerRouteCarrier.Option{some: LowerRouteCarrier.Text}}}},
+    LowerRoute{symbol: "jet_entries8_mkdir", export: "jet_entries8_mkdir", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Word}, result: LowerRouteResult.Tuple{items: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Option{some: LowerRouteCarrier.Word}, LowerRouteCarrier.Option{some: LowerRouteCarrier.Text}}}},
+    LowerRoute{symbol: "jet_entries8_next", export: "jet_entries8_next", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Word}, result: LowerRouteResult.Tuple{items: [LowerRouteCarrier]{LowerRouteCarrier.Flag, LowerRouteCarrier.Word, LowerRouteCarrier.Word, LowerRouteCarrier.Option{some: LowerRouteCarrier.Word}, LowerRouteCarrier.Option{some: LowerRouteCarrier.Text}}}},
     LowerRoute{symbol: "jet_entries8_open", export: "jet_entries8_open", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Text, LowerRouteCarrier.Text, LowerRouteCarrier.Flag}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Word}},
+    LowerRoute{symbol: "jet_entries8_read_dir", export: "jet_entries8_read_dir", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Word}, result: LowerRouteResult.Tuple{items: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Option{some: LowerRouteCarrier.Word}, LowerRouteCarrier.Option{some: LowerRouteCarrier.Text}}}},
     LowerRoute{symbol: "jet_entries8_release", export: "jet_entries8_release", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Word}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Unit}},
     LowerRoute{symbol: "jet_entries8_shown", export: "jet_entries8_shown", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Word}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Text}},
     LowerRoute{symbol: "jet_entry_error_exit_jet", export: "jet_entry_error_exit_jet", native_lists: true, params: [LowerRouteCarrier]{LowerRouteCarrier.Handle{name: "JetErr"}}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Unit}},
@@ -842,6 +848,7 @@ LOWER_RUNTIME_ROUTES :: prep { [LowerRoute]{
     LowerRoute{symbol: "jet_services_raw_mailbox_restore", export: "jet_services_raw_mailbox_restore", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.HandleMut{name: "JetServiceTree"}, LowerRouteCarrier.Word, LowerRouteCarrier.List{elem: LowerRouteCarrier.Text}, LowerRouteCarrier.Flag}, result: LowerRouteResult.Result{ok: LowerRouteCarrier.Unit, err: LowerRouteCarrier.Handle{name: "JetServiceError"}}},
     LowerRoute{symbol: "jet_services_raw_mailbox_snapshot", export: "jet_services_raw_mailbox_snapshot", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Handle{name: "JetServiceTree"}, LowerRouteCarrier.Word}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.List{elem: LowerRouteCarrier.Text}}},
     LowerRoute{symbol: "jet_services_raw_mailbox_started", export: "jet_services_raw_mailbox_started", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Handle{name: "JetServiceEndpointMailbox"}}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Flag}},
+    LowerRoute{symbol: "jet_services_raw_mailbox_try_receive", export: "jet_services_raw_mailbox_try_receive", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.HandleMut{name: "JetServiceTree"}, LowerRouteCarrier.Word}, result: LowerRouteResult.Tuple{items: [LowerRouteCarrier]{LowerRouteCarrier.Option{some: LowerRouteCarrier.Text}, LowerRouteCarrier.Word}}},
     LowerRoute{symbol: "jet_services_raw_mailbox_try_send", export: "jet_services_raw_mailbox_try_send", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.HandleMut{name: "JetServiceTree"}, LowerRouteCarrier.Word, LowerRouteCarrier.Text}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Word}},
     LowerRoute{symbol: "jet_services_raw_snapshot_store_write", export: "jet_services_raw_snapshot_store_write", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.HandleMut{name: "JetServiceTree"}, LowerRouteCarrier.Text}, result: LowerRouteResult.Result{ok: LowerRouteCarrier.Unit, err: LowerRouteCarrier.Handle{name: "JetServiceError"}}},
     LowerRoute{symbol: "jet_services_raw_state_load", export: "jet_services_raw_state_load", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Handle{name: "JetServiceTree"}, LowerRouteCarrier.Flag}, result: LowerRouteResult.Result{ok: LowerRouteCarrier.List{elem: LowerRouteCarrier.Text}, err: LowerRouteCarrier.Handle{name: "JetServiceError"}}},
@@ -1294,6 +1301,9 @@ LOWER_RUNTIME_ROUTES :: prep { [LowerRoute]{
     LowerRoute{symbol: "jet_terminal8_env", export: "jet_terminal8_env", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Text}, result: LowerRouteResult.Option{some: LowerRouteCarrier.Text}},
     LowerRoute{symbol: "jet_terminal8_env_has", export: "jet_terminal8_env_has", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Text}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Flag}},
     LowerRoute{symbol: "jet_terminal8_fault", export: "jet_terminal8_fault", native_lists: true, params: [LowerRouteCarrier]{LowerRouteCarrier.Text}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Flag}},
+    LowerRoute{symbol: "jet_terminal8_line", export: "jet_terminal8_line", native_lists: false, params: [LowerRouteCarrier]{}, result: LowerRouteResult.Tuple{items: [LowerRouteCarrier]{LowerRouteCarrier.Flag, LowerRouteCarrier.Text, LowerRouteCarrier.Option{some: LowerRouteCarrier.Text}}}},
+    LowerRoute{symbol: "jet_terminal8_read_all", export: "jet_terminal8_read_all", native_lists: false, params: [LowerRouteCarrier]{}, result: LowerRouteResult.Tuple{items: [LowerRouteCarrier]{LowerRouteCarrier.Text, LowerRouteCarrier.Option{some: LowerRouteCarrier.Text}}}},
+    LowerRoute{symbol: "jet_terminal8_read_until", export: "jet_terminal8_read_until", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Text}, result: LowerRouteResult.Tuple{items: [LowerRouteCarrier]{LowerRouteCarrier.Text, LowerRouteCarrier.Option{some: LowerRouteCarrier.Text}}}},
     LowerRoute{symbol: "jet_terminal8_write_stderr", export: "jet_terminal8_write_stderr", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Text, LowerRouteCarrier.Flag}, result: LowerRouteResult.Option{some: LowerRouteCarrier.Text}},
     LowerRoute{symbol: "jet_terminal8_write_stdout", export: "jet_terminal8_write_stdout", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Text, LowerRouteCarrier.Flag}, result: LowerRouteResult.Option{some: LowerRouteCarrier.Text}},
     LowerRoute{symbol: "jet_test_suite_new", export: "jet_test_suite_new", native_lists: true, params: [LowerRouteCarrier]{}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Handle{name: "JetTestSuite"}}},
@@ -1486,7 +1496,11 @@ LOWER_RUNTIME_ROUTES :: prep { [LowerRoute]{
     LowerRoute{symbol: "jet_walk8_ignored", export: "jet_walk8_ignored", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Word, LowerRouteCarrier.Text, LowerRouteCarrier.Flag}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Flag}},
     LowerRoute{symbol: "jet_walk8_inherit", export: "jet_walk8_inherit", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Word, LowerRouteCarrier.Word}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Unit}},
     LowerRoute{symbol: "jet_walk8_matcher_new", export: "jet_walk8_matcher_new", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Word}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Unit}},
+    LowerRoute{symbol: "jet_walk8_metadata", export: "jet_walk8_metadata", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Word}, result: LowerRouteResult.Tuple{items: [LowerRouteCarrier]{LowerRouteCarrier.Flag, LowerRouteCarrier.Flag, LowerRouteCarrier.Word, LowerRouteCarrier.Option{some: LowerRouteCarrier.Word}, LowerRouteCarrier.Option{some: LowerRouteCarrier.Text}}}},
+    LowerRoute{symbol: "jet_walk8_next", export: "jet_walk8_next", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Word}, result: LowerRouteResult.Tuple{items: [LowerRouteCarrier]{LowerRouteCarrier.Flag, LowerRouteCarrier.Word, LowerRouteCarrier.Flag, LowerRouteCarrier.Flag, LowerRouteCarrier.Text, LowerRouteCarrier.Text, LowerRouteCarrier.Flag, LowerRouteCarrier.Word, LowerRouteCarrier.Option{some: LowerRouteCarrier.Word}, LowerRouteCarrier.Option{some: LowerRouteCarrier.Text}}}},
     LowerRoute{symbol: "jet_walk8_open", export: "jet_walk8_open", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Text, LowerRouteCarrier.Text, LowerRouteCarrier.Flag}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Word}},
+    LowerRoute{symbol: "jet_walk8_read_dir", export: "jet_walk8_read_dir", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Word}, result: LowerRouteResult.Tuple{items: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Option{some: LowerRouteCarrier.Word}, LowerRouteCarrier.Option{some: LowerRouteCarrier.Text}}}},
+    LowerRoute{symbol: "jet_walk8_rules", export: "jet_walk8_rules", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Word, LowerRouteCarrier.Text}, result: LowerRouteResult.Tuple{items: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Option{some: LowerRouteCarrier.Word}, LowerRouteCarrier.Option{some: LowerRouteCarrier.Text}}}},
     LowerRoute{symbol: "jet_walk8_shown", export: "jet_walk8_shown", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Word}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Text}},
     LowerRoute{symbol: "jet_walk8_validation_path", export: "jet_walk8_validation_path", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Word}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Word}},
     LowerRoute{symbol: "jet_watcher_files", export: "jet_watcher_files", native_lists: false, params: [LowerRouteCarrier]{LowerRouteCarrier.Text}, result: LowerRouteResult.Result{ok: LowerRouteCarrier.Handle{name: "WatchHandle"}, err: LowerRouteCarrier.Handle{name: "IOError"}}},
@@ -4042,7 +4056,12 @@ LOWER_NATIVE_IMPORTS :: prep { [String]{
     "jet_enc_xml_writer_write",
     "jet_entries8_before",
     "jet_entries8_close",
+    "jet_entries8_copy",
+    "jet_entries8_file_type",
+    "jet_entries8_mkdir",
+    "jet_entries8_next",
     "jet_entries8_open",
+    "jet_entries8_read_dir",
     "jet_entries8_release",
     "jet_entries8_shown",
     "jet_entry_error_exit_jet",
@@ -8435,6 +8454,7 @@ LOWER_NATIVE_IMPORTS :: prep { [String]{
     "jet_services_raw_mailbox_restore",
     "jet_services_raw_mailbox_snapshot",
     "jet_services_raw_mailbox_started",
+    "jet_services_raw_mailbox_try_receive",
     "jet_services_raw_mailbox_try_send",
     "jet_services_raw_snapshot_store_write",
     "jet_services_raw_state_load",
@@ -8855,6 +8875,9 @@ LOWER_NATIVE_IMPORTS :: prep { [String]{
     "jet_terminal8_env",
     "jet_terminal8_env_has",
     "jet_terminal8_fault",
+    "jet_terminal8_line",
+    "jet_terminal8_read_all",
+    "jet_terminal8_read_until",
     "jet_terminal8_write_stderr",
     "jet_terminal8_write_stdout",
     "jet_terminal_session_child_raw",
@@ -9059,7 +9082,11 @@ LOWER_NATIVE_IMPORTS :: prep { [String]{
     "jet_walk8_ignored",
     "jet_walk8_inherit",
     "jet_walk8_matcher_new",
+    "jet_walk8_metadata",
+    "jet_walk8_next",
     "jet_walk8_open",
+    "jet_walk8_read_dir",
+    "jet_walk8_rules",
     "jet_walk8_shown",
     "jet_walk8_validation_path",
     "jet_watcher_files",

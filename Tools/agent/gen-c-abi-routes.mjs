@@ -899,7 +899,7 @@ function tagCarrier(ty, path) {
 // its Unicode scalar value in a word.
 function elementCarrier(ty) {
   if (ty === "String") return { jet: "Text", read: "view(w as JetCString).to_owned()", write: "handle(e) as u64" };
-  if (ty === "i64") return { jet: "Word", read: "w as i64", write: "e as u64" };
+  if (ty === "i64") return { jet: "Word", read: "native(w as i64)", write: "e as u64" };
   if (fixedInts.has(ty)) return { jet: "Word", slot: ty, read: `w as ${ty}`, write: "e" };
   if (ty === "bool") return { jet: "Flag", read: "w != 0", write: "e as u64" };
   if (ty === "f64") return { jet: "Float", read: "f64::from_bits(w)", write: "e.to_bits()" };
@@ -928,11 +928,11 @@ function paramCarrier(ty, path, symbol) {
   if (ty === "&String") return one("Text", "JetCString", (a) => `&borrowed(${a})`);
   if (ty === "Option<&String>") return one("Text", "JetCString", (a) => `(!${a}.is_null()).then(|| borrowed(${a})).as_ref()`);
   if (ty === "String") return one("Text", "JetCString", (a) => `view(${a}).to_owned()`);
-  if (ty === "&i64") return one("Word", "i64", (a) => `&${a}`);
+  if (ty === "&i64") return one("Word", "i64", (a) => `&native(${a})`);
   // The prelude Ordering (by value or borrowed): the Jet enum's variant index.
   const ordering = /^(&?)__jet_Ordering$/.exec(ty);
   if (ordering) return one(`Tag{name: "Ordering", variants: "Less,Equal,Greater"}`, "i64", (a) => `${ordering[1]}match ${a} { 0 => crate::__jet_Ordering::__jet_Less, 1 => crate::__jet_Ordering::__jet_Equal, 2 => crate::__jet_Ordering::__jet_Greater, _ => range_stop() }`);
-  if (ty === "i64") return one("Word", "i64", (a) => a);
+  if (ty === "i64") return one("Word", "i64", (a) => `native(${a})`);
   if (fixedInts.has(ty)) return one("Word", "i64", (a) => `fixed::<${ty}>(${a})`);
   if (ty === "bool") return one("Flag", "u8", (a) => `${a} != 0`);
   if (ty === "f64") return one("Float", "f64", (a) => a);
@@ -1126,13 +1126,33 @@ function resultShape(ty, path, nativeInt, rawFixed = false) {
   }
   const tuple = /^\((.*)\)$/.exec(ty);
   if (tuple && ty !== "()") {
-    const items = splitTop(tuple[1]).map((item) => valueCarrier(item, path, nativeInt, rawFixed));
-    if (items.length < 2 || items.some((item) => !item || !item.cty)) return null;
+    const tupleCarrier = (type, name) => {
+      const option = /^Option<(.+)>$/.exec(type);
+      if (option) {
+        const some = tupleCarrier(option[1], `${name}_some`);
+        if (!some) return null;
+        return {
+          jet: `Option{some: LowerRouteCarrier.${some.jet}}`,
+          outs: [{ name: `${name}_tag`, cty: "i64" }, ...some.outs],
+          handles: some.handles,
+          write: (value) => `match ${value} { Some(value) => { ${some.write("value")} unsafe { ${name}_tag.write(1) }; }, None => { unsafe { ${name}_tag.write(0) }; } }`,
+        };
+      }
+      const value = valueCarrier(type, path, nativeInt, rawFixed);
+      if (!value?.cty) return null;
+      return {
+        jet: value.jet, outs: [{ name, cty: value.cty }],
+        handles: value.handle ? [value.handle] : [],
+        write: (expression) => `unsafe { ${name}.write(${value.wrap(expression)}) };`,
+      };
+    };
+    const items = splitTop(tuple[1]).map((item, index) => tupleCarrier(item, `item${index}`));
+    if (items.length < 2 || items.some((item) => !item)) return null;
     const names = items.map((_, i) => `e${i}`);
-    const writes = items.map((item, i) => `            unsafe { item${i}.write(${item.wrap(names[i])}) };`);
+    const writes = items.map((item, i) => `            ${item.write(names[i])}`);
     return {
       jet: `Tuple{items: [LowerRouteCarrier]{${items.map((item) => `LowerRouteCarrier.${item.jet}`).join(", ")}}}`, ret: null,
-      outs: items.map((item, i) => ({ name: `item${i}`, cty: item.cty })), handles: items.map((item) => item.handle).filter(Boolean),
+      outs: items.flatMap((item) => item.outs), handles: items.flatMap((item) => item.handles),
       body: (call) => `{\n            let (${names.join(", ")}) = ${call};\n${writes.join("\n")}\n        }`,
     };
   }
@@ -2177,9 +2197,10 @@ jet.push("// Prelude symbol; `export` is the adapter's C name (its last segment)
 jet.push("");
 jet.push(emitRuntimeAbiAtom());
 jet.push("// `HandleMut` lends the handle of the caller's Write place: the runtime");
-jet.push("// mutates the value in that box. A `Tuple` result writes item `i` through its");
-jet.push("// `i`-th out pointer (one zeroed eight-byte slot each) and returns nothing.");
-jet.push("enum LowerRouteCarrier { Word Flag Float Text Unit Handle(name: String) HandleMut(name: String) List(elem: LowerRouteCarrier) Tag(name: String, variants: String) }");
+jet.push("// mutates the value in that box. A Tuple writes its flattened carrier");
+jet.push("// slots through out pointers (zeroed eight-byte slots); an Option item");
+jet.push("// writes a 0/1 tag followed by its payload slots and returns nothing.");
+jet.push("enum LowerRouteCarrier { Word Flag Float Text Unit Handle(name: String) HandleMut(name: String) List(elem: LowerRouteCarrier) Option(some: LowerRouteCarrier) Tag(name: String, variants: String) }");
 jet.push("");
 jet.push("enum LowerRouteResult {");
 jet.push("    Plain(carrier: LowerRouteCarrier)");

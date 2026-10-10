@@ -1011,12 +1011,20 @@ explicit names in MIRRust `rust_apply_type`, using the same canonical-Core probe
 MIRRust. Each such type gets `jet_rt_handle_{drop,clone,display,show,debug,eq}_<snake(T)>`
 adapters where the runtime type supports the operation. A `&mut T` kernel parameter
 takes the caller's handle as `HandleMut`, and the kernel mutates the value inside that
-box. A tuple result is written item by item through one out pointer per item.
+box. A tuple result writes each logical item through its flattened carrier
+out pointers: a scalar needs one; an Option needs a presence tag followed
+by its payload slots. Nested Options retain each tag, preserving None,
+Some(None) and Some(false) as distinct values.
 Explicit MIR Write arguments must match `HandleMut`; ordinary read and move arguments
 must not. Canonical Core identities override a source layout only when the generated-Rust
 name rules replace that exact identity; source-owned enums and records retain their
 native constructors and matches. Tuple adapters write zeroed word slots, and lowering
 copies each item into the tuple's naturally aligned native field offset.
+The route generator's tuple/Option regression compiles and executes the
+production-generated adapter body and checks the walk/terminal route inventory.
+Parameters whose runtime signature is `i64`, including borrowed parameters and
+list elements, narrow the exact-Int carrier through the existing `native`
+conversion rather than interpreting a big-integer owner as a machine value.
 `IOError` is a C-carrier boundary, not a `Box` of the Rust enum. Its 56-byte,
 eight-aligned `JetCIOError` stores kind, operation, optional E4 resource text,
 OS-code presence and value, optional E4 cause text, and resource-limit tag.

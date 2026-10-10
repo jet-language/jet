@@ -197,6 +197,10 @@ fn lower_route_dyn(p: MIRProgram, ty: MIRType, carrier: LowerRouteCarrier) -> Bo
 
 fn lower_route_carrier_matches(p: MIRProgram, ty: MIRType, carrier: LowerRouteCarrier) -> Bool Never! {
     if lower_route_dyn(p, ty, carrier) -> return true
+    if carrier == .Option(some) {
+        if ty.kind == .Option(inner) -> return lower_route_carrier_matches(p, inner, some)
+        return false
+    }
     if carrier == .Tag(_, variants) -> return lower_route_tag_matches(p, ty, variants)
     if carrier == .Word && lower_route_word_field(p, ty) != None -> return lower_route_word_record(p, ty) != None || lower_route_word_getter(p, ty) != None
     if carrier == .HandleMut(name) {
@@ -666,11 +670,13 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
             dst :: lower_result(p, c, &m, &f, instruction)
             if f.failed -> return
             slot :: lower_pointer(&f)
-            lower_emit(&f, LIRInst.StackSlot{dst: slot, size: 8 * items.len(), align: 8})
+            slots := 0
+            loop item in items -> slots += lower_route_carrier_slots(item)
+            lower_emit(&f, LIRInst.StackSlot{dst: slot, size: 8 * slots, align: 8})
             zero :: lower_const(&f, 0)
             call_args := [LIRValueID]{}
             loop arg in lowered -> &call_args.push(arg)
-            loop index in 0..<items.len() {
+            loop index in 0..<slots {
                 lower_emit(&f, LIRInst.Store{base: slot, offset: 8 * index, value: zero})
                 &call_args.push(lower_address(&f, slot, 8 * index))
             }
@@ -678,9 +684,11 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
             box :: dst ?? lower_pointer(&f)
             lower_storage_into(p, &f, box, ty)
             members :: lower_inline_members(p, ty)
+            at := 0
             loop (index, item) in items {
-                address :: lower_address(&f, slot, 8 * index)
+                address :: lower_address(&f, slot, 8 * at)
                 lower_route_store_payload(p, &m, &f, box, members[index].offset, members[index].ty, item, address, route.native_lists)
+                at += lower_route_carrier_slots(item)
             }
             if dst == None && lower_needs_drop(p, m, ty) -> lower_inline_drop(p, &m, &f, box, ty)
         }
@@ -721,6 +729,13 @@ fn lower_route_result_matches(p: MIRProgram, ty: MIRType, carrier: LowerRouteCar
     lower_route_carrier_matches(p, ty, carrier)
 }
 
+// Out storage is flattened independently of the checked tuple's layout.
+fn lower_route_carrier_slots(carrier: LowerRouteCarrier) -> Int {
+    if carrier == .Option(some) -> return 1 + lower_route_carrier_slots(some)
+    if carrier == .List(_) -> return 2
+    1
+}
+
 // An adapter's tag word and the stack slot its payload was written to.
 struct LowerRouteOut {
     word: LIRValueID
@@ -752,6 +767,32 @@ fn lower_route_out_call(m: &LowerModule, f: &LowerFunction, export: String, args
 // Core record arrives as its runtime handle, converted and dropped here.
 fn lower_route_store_payload(p: MIRProgram, m: &LowerModule, f: &LowerFunction, box: LIRValueID, offset: Int, ty: MIRType, carrier: LowerRouteCarrier, slot: LIRValueID, native_lists: Bool) Never! {
     if carrier == .Unit -> return
+    if carrier == .Option(some) {
+        inner :: if ty.kind == .Option(payload) -> payload else -> panic("checked nested Option route shape")
+        selector :: lower_word(&f)
+        lower_emit(&f, LIRInst.Load{dst: selector, base: slot, offset: 0})
+        zero :: lower_const(&f, 0)
+        present :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: present, condition: LIRCondition.Ne, left: selector, right: zero})
+        some_block :: lower_new_block(&f)
+        none_block :: lower_new_block(&f)
+        merge :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: present, then_target: lower_target(some_block, [LIRValueID]{}), else_target: lower_target(none_block, [LIRValueID]{})})
+        lower_start(&f, some_block, [LIRValueID]{})
+        owned :: lower_pointer(&f)
+        lower_alloc(&m, &f, owned, lower_box_size(p, ty))
+        payload :: lower_address(&f, slot, 8)
+        lower_route_store_payload(p, &m, &f, owned, 0, inner, some, payload, native_lists)
+        lower_write_at(p, &f, box, offset, owned, ty)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
+        lower_start(&f, none_block, [LIRValueID]{})
+        null :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+        lower_write_at(p, &f, box, offset, null, ty)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
+        lower_start(&f, merge, [LIRValueID]{})
+        return
+    }
     if lower_route_record(p, ty, carrier) == .Val(runtime) -> return lower_record_store_from_slot(p, &m, &f, ty, runtime, slot, box, offset)
     if lower_route_dyn(p, ty, carrier) {
         tree :: lower_pointer(&f)
