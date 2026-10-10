@@ -25,15 +25,6 @@ struct WebStore<T> {
     history_limit: Int
     subs: Int
 
-    fn set(self, value: T) -> WebStoreTransaction<T> Never! {
-        set<T>(&self, value)
-    }
-    fn facts_json(self) -> String Never! {
-        facts_json<T>(self)
-    }
-}
-
-impl WebStore<T> {
     fn value(self) -> T Never! { value<T>(self) }
     fn get(self) -> T Never! { value<T>(self) }
     fn facts_json(self) -> String Never! { facts_json<T>(self) }
@@ -48,6 +39,7 @@ impl WebStore<T> {
     fn forward(&self) -> WebStore<T>? Never! { forward<T>(&self) }
     fn jump(&self, index: Int) -> WebStore<T>? Never! { jump<T>(&self, index) }
 }
+
 
 struct WebStoreEvent {
     kind: String
@@ -88,11 +80,9 @@ struct WebStoreInspection {
 
 struct Derived<T> {
     value: T
-}
-
-impl Derived<T> {
     fn get(self) -> T Never! { self.value }
 }
+
 
 fn new<T>(name: String, value: T) -> WebStore<T> Never! {
     WebStore<T>{name: name, state: reactive.signal(value), initial: value, history: [T]{}, transactions: [WebStoreTransaction<T>]{}, event_log: [WebStoreEvent]{}, cursor: 0, generation: 0, history_enabled: true, history_limit: 1000, subs: 0}

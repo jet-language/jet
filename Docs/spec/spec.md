@@ -480,6 +480,9 @@ D-SHAPE3a, D-SHAPE-OPAQUE-INFER1).
 Struct and enum bodies may declare methods with `fn` or `pub fn`; `pub`
 exports the method, while an unqualified method remains private. A build-time
 method places `prep` directly before `fn`, including `pub prep fn`.
+Methods declared inside a generic struct share that struct's type-parameter
+scope; Core's generic record methods use this form rather than generic `impl`
+heads.
 
 ```jet
 struct Circle {
@@ -2751,6 +2754,8 @@ header declaration that the generator cannot map is skipped and reported,
 not guessed. E3208 means the header cannot be read or contains no bindable
 prototype; write an explicit overlay for a declaration outside the generated
 subset. (S58, S59)
+Foreign-module head markers belong to that module's declaration and are parsed
+before ordinary item or file-rule replay; they are not unattached file rules.
 
 `#Bindgen` is compiler-generated and legal only in
 `.jet/bindings/c/<lib>.jet`; a user overlay uses `#Import module`.
