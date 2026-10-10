@@ -45,7 +45,7 @@ fn net_tcp_apply_deadlines(stream: I64, operation: I64, scratch: I64, error: I64
     net_put(scratch, I64{8}, remaining % I64{1000} * I64{1000})
     state :: jet_socket_stream_fd_raw(stream)
     option := I64{20}
-    loop option <= I64{21} {
+    loop option <= (I64{21}) {
         result :: net_socket_call(state, I64{54}, I64{1}, option, scratch, I64{16}, I64{0})
         if (result < I64{0}) {
             name :: net_route_message(operation, if (option == I64{20}) -> rt_static_text(" read timeout") else -> rt_static_text(" write timeout"))
@@ -173,13 +173,13 @@ fn net_tcp_write_result(stream: I64, data: I64, length: I64, all: Bool, output: 
     net_tcp_deadline(stream, false, scratch + I64{32})
     result := I64{1}
     offset := I64{0}
-    loop (!all || offset < length) {
+    loop !all || offset < length {
         count :: net_tcp_write_current(stream, data + offset * RT_HOST_U8_STRIDE, length - offset, scratch, error)
         if (count < I64{0}) {
             result = I64{0}
             break
         }
-        if !all {
+        if (!all) {
             net_put(output, I64{0}, count)
             break
         }
@@ -357,7 +357,7 @@ fn net_tcp_show(holder: I64, listener: Bool) -> I64 {
         // word-stride epoch, retaining the single reusable transfer buffer.
         if (RT_HOST_U8_STRIDE != I64{1}) {
             at := count
-            loop at > I64{0} {
+            loop at > (I64{0}) {
                 at -= I64{1}
                 host_u8_put(bytes, at, rt_text_byte(bytes + at))
             }
