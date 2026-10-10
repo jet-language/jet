@@ -150,7 +150,7 @@ fn fx_closures_owned_borrow() -> MIRProgram Never! {
     fx_print(&body, read)
     fx_block(&body, 0, MIRTerminator.Return{value: None})
     target := fx_function("show_capture", body, fx_unit())
-    target.capture_params = [MIRCaptureParam]{MIRCaptureParam{slot: 0, name: "text", span: fx_span(), ty: fx_string(), access: MIRAccess.Read, ownership: fx_borrow()}}
+    target.capture_params = [MIRCaptureParam]{MIRCaptureParam{slot: 0, name: "text", span: fx_span(), ty: fx_string(), access: MIRAccess.Read, ownership: fx_borrow(), place_only: false}}
     b := fx_builder()
     text :: fx_owned(&b, fx_string(), MIROperation.Constant{value: .String{value: "owned"}})
     owned :: fx_owned(&b, fn_ty, MIROperation.Closure{function: mir_function_id("show_capture"), captures: [MIRCaptureOperand]{MIRCaptureOperand.Value{value: text}}, facts: fx_capture_facts()})
@@ -186,7 +186,7 @@ fn fx_closures_owned_write() -> MIRProgram Never! {
     fx_do(&a, MIROperation.WritePlace{place: place, value: updated})
     fx_block(&a, 0, MIRTerminator.Return{value: Val(updated)})
     body := fx_function("owned_add", a, fx_int())
-    body.capture_params = [MIRCaptureParam]{MIRCaptureParam{slot: 0, name: "total", span: fx_span(), ty: fx_int(), access: MIRAccess.Write, ownership: mir_ownership_from_access(MIRAccess.Write)}}
+    body.capture_params = [MIRCaptureParam]{MIRCaptureParam{slot: 0, name: "total", span: fx_span(), ty: fx_int(), access: MIRAccess.Write, ownership: mir_ownership_from_access(MIRAccess.Write), place_only: false}}
     b := fx_builder()
     zero :: fx_int_const(&b, 0)
     callback :: fx_owned(&b, fx_fn_int_type(), MIROperation.Closure{function: body.id, captures: [MIRCaptureOperand]{MIRCaptureOperand.Value{value: zero}}, facts: fx_capture_facts()})

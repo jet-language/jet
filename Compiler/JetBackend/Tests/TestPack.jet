@@ -16,7 +16,7 @@ fn test_pack_entry(program: &LIRModule, entry: LIRFunctionID) -> LIRFunctionID N
     assert(entry.value >= 0 && entry.value < program.functions.len())
     signature :: lir_signature(program, program.functions[entry.value].signature) ?? panic("entry has no signature")
     assert(signature.params.len() == 0)
-    if signature.result == None -> return entry
+    if signature.result == None -> return entry.copy()
     result :: signature.result ?? panic("scalar entry has no result")
     assert(result.class == LIRABIClass.Integer && result.size <= 8)
     unit :: LIRSignatureID{value: program.signatures.len()}
@@ -37,14 +37,14 @@ fn test_pack_entry(program: &LIRModule, entry: LIRFunctionID) -> LIRFunctionID N
     adapter
 }
 
-fn test_pack_link(name: String, object: X64ExecutableResult) -> X64ExecutableResult {
+fn test_pack_link(name: String, object: ^X64ExecutableResult) -> X64ExecutableResult {
     if object.errors.len() > 0 -> return object
     files.write_bytes("{name}.o", object.bytes) ?? panic("cannot write {name}.o")
-    x64_link_executable([String]{"{name}.o", "explicit-runtime-pack"}, ^[[U8]]{object.bytes, test_pack_bytes()})
+    x64_link_executable([String]{"{name}.o", "explicit-runtime-pack"}, ^[[U8]]{^object.bytes, test_pack_bytes()})
 }
 
-fn test_pack_write(name: String, object: X64ExecutableResult) -> Bool {
-    linked :: test_pack_link(name, object)
+fn test_pack_write(name: String, object: ^X64ExecutableResult) -> Bool {
+    linked :: test_pack_link(name, ^object)
     loop error in linked.errors -> print("native {name}: {error}")
     if linked.errors.len() > 0 -> return false
     files.write_bytes("{name}.exe", linked.bytes) ?? panic("cannot write {name}.exe")

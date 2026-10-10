@@ -161,6 +161,7 @@ const parts = [
   ]),
   body("Compiler/JetBackend/Source/LIR/LIR.jet"),
   body("Compiler/JetBackend/Source/LIR/Lint.jet"),
+  body("Compiler/JetBackend/Source/UiABI.jet"),
   ...(sanitizeOnly ? [body("Compiler/JetBackend/Source/LIR/Sanitize.jet")] : []),
   ...(!small ? [
     ...(!listRoutes ? [body("Compiler/JetBackend/Source/LIR/Print.jet")] : []),

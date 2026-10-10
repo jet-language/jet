@@ -107,9 +107,12 @@ fn fx_numeric_u64_binary_division() -> MIRProgram Never! {
     b := fx_builder()
     // -1 carries U64.MAX's high-bit word, as in Unsigned.jet's fixtures.
     loop pair in ([(left: Int, right: Int)]{(left: 7, right: 3), (left: -1, right: 2)}) {
-        fx_print(&b, fx_numeric_u64_binary(&b, .Div, "div", pair.left, pair.right))
-        fx_print(&b, fx_numeric_u64_binary(&b, .FloorDiv, "floor_div", pair.left, pair.right))
-        fx_print(&b, fx_numeric_u64_binary(&b, .Rem, "rem", pair.left, pair.right))
+        quotient :: fx_numeric_u64_binary(&b, .Div, "div", pair.left, pair.right)
+        fx_print(&b, quotient)
+        floor_quotient :: fx_numeric_u64_binary(&b, .FloorDiv, "floor_div", pair.left, pair.right)
+        fx_print(&b, floor_quotient)
+        remainder :: fx_numeric_u64_binary(&b, .Rem, "rem", pair.left, pair.right)
+        fx_print(&b, remainder)
     }
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     fx_numeric_u64_binary_program(b)

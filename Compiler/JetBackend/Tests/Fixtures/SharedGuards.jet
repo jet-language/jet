@@ -41,7 +41,7 @@ fn fx_shared_guards() -> MIRProgram Never! {
     one :: fx_int_const(&b, 1)
     values :: fx_owned(&b, ints, MIROperation.BuildList{values: [MIRValueID]{one}, trait_coercion: None})
     state :: fx_values_struct(&b, "GuardState", [MIRFieldValue]{fx_values_set("GuardState", "count", seven), fx_values_set("GuardState", "values", values)})
-    cell :: fx_owned(&b, shared_ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("::JetShared", "new"), args: [MIRCallArg]{fx_arg(state, MIRAccess.Move)}, owner_type_args: [MIRType]{elem}, type_args: [MIRType]{}}})
+    cell :: fx_owned(&b, shared_ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("::JetShared", "new"), args: [MIRCallArg]{fx_arg(state, MIRAccess.Move)}, owner_type_args: [MIRPreludeTypeArg]{MIRPreludeTypeArg.Type{ty: elem}}, type_args: [MIRType]{}}})
     reader :: fx_shared_guard_acquire(&b, cell, elem, false)
     initial :: fx_value(&b, elem, fx_borrow(), MIROperation.Deref{value: reader})
     fx_values_show(&b, initial, "GuardState", "count", fx_int())

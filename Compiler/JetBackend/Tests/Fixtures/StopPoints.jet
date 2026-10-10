@@ -36,12 +36,12 @@ fn fx_can_stop_deref_check() -> Bool Never! {
     shared :: mir_type_from_kind(MIRTypeKind.Shared{inner: fx_i64()})
     guard :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("SharedGuard"), args: [MIRType]{fx_i64()}})
     malformed :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Ptr"), args: [MIRType]{}})
-    mir_operation_can_stop(deref, Val(raw)) &&
-        !mir_operation_can_stop(deref, Val(shared)) &&
-        !mir_operation_can_stop(deref, Val(guard)) &&
-        !mir_operation_can_stop(deref, Val(fx_i64())) &&
-        !mir_operation_can_stop(deref, Val(malformed)) &&
-        !mir_operation_can_stop(deref, None)
+    mir_operation_can_stop(deref, Val(raw), None, [MIRPreludeCall]{}, [U64:Int]{}) &&
+        !mir_operation_can_stop(deref, Val(shared), None, [MIRPreludeCall]{}, [U64:Int]{}) &&
+        !mir_operation_can_stop(deref, Val(guard), None, [MIRPreludeCall]{}, [U64:Int]{}) &&
+        !mir_operation_can_stop(deref, Val(fx_i64()), None, [MIRPreludeCall]{}, [U64:Int]{}) &&
+        !mir_operation_can_stop(deref, Val(malformed), None, [MIRPreludeCall]{}, [U64:Int]{}) &&
+        !mir_operation_can_stop(deref, None, None, [MIRPreludeCall]{}, [U64:Int]{})
 }
 
 // expect-stdout stop-points: "42\n0\n1\n6\n10\nkept\n"

@@ -73,7 +73,7 @@ fn fx_trait_values() -> MIRProgram Never! {
     p
 }
 
-fn fx_close_method(owner: MIRType, identity: String, label: String) -> MIRFunction Never! {
+fn fx_stored_close_method(owner: MIRType, identity: String, label: String) -> MIRFunction Never! {
     body := fx_builder()
     receiver :: fx_param(&body, "self", owner, mir_owned_ownership())
     body.params[0].access = MIRAccess.Move
@@ -106,8 +106,8 @@ fn fx_close_stored_owners(generic: Bool) -> MIRProgram Never! {
     empty :: fx_named("CloseEmpty")
     resource_definition := fx_type_def("CloseResource", .Struct{fields: [MIRField]{fx_field("CloseResource", "label", if generic -> fx_mono_parameter("T") else -> fx_string())}, methods: [MIRFunctionID]{}})
     if generic -> resource_definition.generic_params = fx_mono_binders("T")
-    close_resource :: fx_close_method(template, "CloseResource.close", "resource")
-    close_empty :: fx_close_method(empty, "CloseEmpty.close", "empty")
+    close_resource :: fx_stored_close_method(template, "CloseResource.close", "resource")
+    close_empty :: fx_stored_close_method(empty, "CloseEmpty.close", "empty")
     body := fx_builder()
     text :: fx_owned(&body, fx_string(), .Constant{value: .String{value: "owned child"}})
     first :: fx_owned(&body, resource, .Struct{type_id: mir_type_id("CloseResource"), fields: [MIRFieldValue]{fx_struct_literal_field("CloseResource.label", text)}})

@@ -614,7 +614,7 @@ fn fx_control_flow() -> MIRProgram Never! {
 // owning header. Expected counts: 0, 2, 0, 0, 1.
 fn fx_bits() -> MIRProgram Never! {
     r := fx_builder()
-    bits :: fx_owned(&r, fx_named("BitSet"), MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("::JetBitSet", "new"), args: [MIRCallArg]{}, owner_type_args: [MIRType]{}, type_args: [MIRType]{}}})
+    bits :: fx_owned(&r, fx_named("BitSet"), MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("::JetBitSet", "new"), args: [MIRCallArg]{}, owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
     empty :: fx_copy(&r, fx_int(), MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "bit_set_count"), receiver: bits, receiver_place: None, args: [MIRValueID]{}, aggregate_fields: None}})
     fx_print(&r, empty)
     indices :: [Int]{1, 65}
@@ -745,7 +745,7 @@ fn fx_report_runtime(name: String, program: MIRProgram) -> Bool {
 fn fx_report_lir(name: String, program: LIRModule) -> Bool {
     entry := -1
     loop function in program.functions { if function.name == "run" -> entry = function.id.value }
-    fx_report_image(name, program, entry, false)
+    fx_report_image(name, program, entry)
 }
 
 // Lints `program` and writes its images, started at function `entry` (a
@@ -763,7 +763,7 @@ fn fx_report_image(name: String, input: LIRModule, entry: Int) -> Bool {
     object_path :: "{name}.o"
     files.write_bytes(object_path, relocatable.bytes) ?? panic("cannot write {object_path}")
     print("{name}: object {object_path} ({relocatable.bytes.len()} bytes)")
-    if !test_pack_write(name, relocatable) -> return false
+    if !test_pack_write(name, ^relocatable) -> return false
     memory :: x64_memory_image(program, hosted_entry)
     loop error in memory.errors -> print("in-memory {name}: {error}")
     if memory.errors.len() > 0 -> return false
@@ -778,9 +778,9 @@ fn fx_report_image(name: String, input: LIRModule, entry: Int) -> Bool {
 }
 
 // Hand-compiled dirty ABI callers are relocatable objects, not static images.
-fn fx_report_executable(name: String, object: X64ExecutableResult) -> Bool {
+fn fx_report_executable(name: String, object: ^X64ExecutableResult) -> Bool {
     print("== {name}")
-    test_pack_write(name, object)
+    test_pack_write(name, ^object)
 }
 
 fn run() {

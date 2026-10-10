@@ -43,7 +43,7 @@ use jet_foundation.[MIRScopeID, MIRScopeKind, MIRScopeFact, MIRTestScopeMember]
 fn fx_expect_control(b: &FxBuilder, member: String, _symbol: String, ty: MIRType, args: [MIRValueID]) -> MIRValueID Never! {
     expected :: if member == "cleanup_enter" || member == "cleanup_leave" -> "jet_rt_{runtime_abi_atom(member)}" else -> "jet_rt_test_{runtime_abi_atom(member)}"
     if _symbol != expected -> panic("expectation fixture raw route identity mismatch")
-    fx_copy(&b, ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("core.testing", member), args: loop value in args -> fx_arg(value, MIRAccess.Read), owner_type_args: [MIRType]{}, type_args: [MIRType]{}}})
+    fx_copy(&b, ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("core.testing", member), args: loop value in args -> fx_arg(value, MIRAccess.Read), owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
 }
 
 fn fx_expect_scope(id: U64) -> MIRScope Never! {

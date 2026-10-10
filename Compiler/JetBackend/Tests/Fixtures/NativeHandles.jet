@@ -31,12 +31,17 @@ fn fx_native_handle_checks() -> Bool Never! {
         data_rows: [String:Int]{},
         static_rows: [String:Int]{},
         static_fixups: [LowerStaticFixup]{},
+        static_live: None,
+        shared_sites_dynamic: true,
+        shared_sites: [LIRSharedSiteExport]{},
         line_starts: [U64:[Int]]{},
         source_rows: [U64:Int]{},
+        prelude_positions: [U64:Int]{},
         asm_foreign: [U64:MIRFunctionID]{},
         foreign_rows: [U64:Int]{},
         mir_rows: [U64:Int]{},
         mir_sources: [Int]{},
+        comptime_budget: false,
         mir_signatures: [LIRSignatureID]{},
         mir_results: [Int]{},
         glue_base: 0,
@@ -44,6 +49,10 @@ fn fx_native_handle_checks() -> Bool Never! {
         close_methods: prepared.close_methods.copy(),
         glue_rows: [String:Int]{},
         issues: [LIRLoweringIssue]{},
+        debug_files: [String]{},
+        debug_file_rows: [U64:Int]{},
+        debug_types: [LIRDebugType]{},
+        debug_type_rows: [String:Int]{},
         stop_points: false,
         task_stop_points: false,
     }
@@ -121,8 +130,8 @@ fn fx_native_err_borrow_checks() -> Bool Never! {
     if lowered.issues.len() != 0 || lir_lint_module(lowered.lir).len() != 0 -> return false
     // A borrowed projection has no getter/clone/allocation calls. The C Err88
     // fixture checks LIVE BYTES across N owned getter+drop cycles separately.
-    loop function in lowered.lir.functions {
-        loop block in function.blocks {
+    loop lir_function in lowered.lir.functions {
+        loop block in lir_function.blocks {
             loop instruction in block.insts {
                 if instruction == .Call(_, _, _, _) -> return false
             }
