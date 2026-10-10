@@ -1769,6 +1769,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     if func.return_type != None -> context.failure_contract_source = sema_failure_contract_source(func.return_type)
     // A lifted inline-module member reports its own body under its source name.
     context.function_name = sema_inline_member_source_name(func.name)
+    context.arithmetic_policy = sema_function_arithmetic_policy(func.markers)
     if !complete -> sema_check_unsupported(&context, "the generic parameters of `{func.name}` could not be resolved against the registration graph")
     // D-FAILURE-FOUNDATION1=A / D-NEVER2=B: the declared signature's failure
     // domains and `Never` slots (E2417, E2422).

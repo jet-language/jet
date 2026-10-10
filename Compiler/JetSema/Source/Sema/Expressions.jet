@@ -4,6 +4,8 @@
 use core.math as math
 use jet_foundation.[
     AccessConvention,
+    ArithmeticOperation,
+    ArithmeticPolicyFact,
     BinOp,
     Call,
     CallArg,
@@ -71,6 +73,28 @@ use jet_foundation.[
 
 fn sema_tir_expr(ty: Type, kind: TExprKind, span: Span) -> TExpr Never! {
     TExpr{ty: ty, kind: kind, span: span, integer_bounds: None, cost: None}
+}
+
+// D-WRAP-SCOPE1=A (Rust `policy_call` and its TIR lowering): under the
+// function's `#Arithmetic(mode)` a fixed-width `+`, `-`, `*`, `**` or signed
+// negation lowers through that mode's overflow route; `Checked` is the
+// trapping policy route.
+fn sema_expr_arithmetic_policy_value(policy: ArithmeticPolicyFact, operation: ArithmeticOperation, ty: Type, span: Span, line: Int, lhs: TExpr, rhs: TExpr) -> TExpr Never! {
+    fact := policy
+    fact.operation_span = span
+    fact.operation = Val(operation)
+    prefix :: if policy.mode == {
+        .Checked -> "checked_policy"
+        .Wrapping -> "wrapping"
+        .Saturating -> "saturating"
+    }
+    name :: if operation == {
+        .Add -> "add"
+        .Sub | .Neg -> "sub"
+        .Mul -> "mul"
+        .Pow -> "pow"
+    }
+    sema_tir_expr(ty, TExprKind.OverflowOpt{prefix: prefix, operation: name, line: line, policy: Val(fact), lhs: lhs, rhs: rhs}, span)
 }
 
 fn sema_expr_unwrap_tag(ty: Type) -> Type Never! {
@@ -3199,10 +3223,16 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
     value :: sema_check_expression(operand, operand_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if op == UnOp.Neg {
         if value.ty == {
-            .IntN(signed, _) -> {
+            .IntN(signed, bits) -> {
                 if !signed {
                     &diagnostics.push(sema_error("E0109", span, "`-` can't negate {type_name(value.ty)}, which is unsigned", "unsigned numbers have no negative values", "use a signed integer type if this value needs a negative result"))
                     return None
+                }
+                if context.arithmetic_policy == .Val(policy) {
+                    line :: sema_source_line_at(environment.source_segments, span) ?? return None
+                    zero :: TExpr{ty: value.ty, kind: TExprKind.IntLit{value: 0, width: Val(TIntegerWidth{signed: true, bits: bits})}, span: span, integer_bounds: Val(integer_bounds_exact(0)), cost: None}
+                    negated :: sema_expr_arithmetic_policy_value(policy, ArithmeticOperation.Neg, value.ty, span, line, zero, value)
+                    return sema_expr_expected(negated, expected, environment, program, &diagnostics)
                 }
             }
             else -> {}
@@ -3577,6 +3607,17 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         return None
     }
     ty :: if op == BinOp.Pow && effective_lhs.ty == Type.Int && effective_rhs.ty == Type.Int && sema_expr_written_negative_integer(right) -> Type.Named{name: "Fraction"} else -> sema_expr_binary_type(op, effective_lhs.ty, effective_rhs.ty, span, &diagnostics) ?? return None
+    if (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Pow) && ty == .IntN(_, _) && context.arithmetic_policy == .Val(policy) {
+        operation :: if op == {
+            .Add -> ArithmeticOperation.Add
+            .Sub -> ArithmeticOperation.Sub
+            .Mul -> ArithmeticOperation.Mul
+            else -> ArithmeticOperation.Pow
+        }
+        policed :: sema_expr_arithmetic_policy_value(policy, operation, ty, span, line, effective_lhs, effective_rhs)
+        if sema_expr_expected_keeps(policed.ty, expected) -> return Val(policed)
+        return sema_expr_expected(policed, expected, environment, program, &diagnostics)
+    }
     overflow := false
     if (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div) && (sema_expr_is_integer(effective_lhs.ty) || sema_expr_is_integer(effective_rhs.ty)) -> overflow = true
     if op == BinOp.Pow && sema_expr_is_integer(effective_lhs.ty) -> overflow = true

@@ -3,6 +3,7 @@
 // vector positions are only local lookup accelerators.
 use jet_foundation.[
     AccessConvention,
+    ArithmeticPolicyFact,
     CoreMarkerApplication,
     Diagnostic,
     DebugTraceSite,
@@ -586,6 +587,10 @@ struct SemaCheckContext {
     // The host callbacks this check may call (SemaHostHookAccess); every
     // context derived from it reaches the same ones.
     host_hooks: SemaHostHookAccess?{None}
+    // D-WRAP-SCOPE1=A (Rust `arithmetic_policy_stack`): the active lexical
+    // fixed-width arithmetic mode of the function being checked, from its
+    // `#Arithmetic(mode)` marker. Closures checked inside the body keep it.
+    arithmetic_policy: ArithmeticPolicyFact?{None}
 }
 
  
@@ -936,6 +941,7 @@ fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Nev
         implicit_loop_subject_depth: source.implicit_loop_subject_depth,
         subject_shorthand_depth: source.subject_shorthand_depth,
         host_hooks: source.host_hooks,
+        arithmetic_policy: source.arithmetic_policy,
     }
     sema_comptime_body_sources_index(&snapshot)
     sema_comptime_body_work_count(source.comptime_body_values, SemaComptimeBodyWorkOperation.ContextSnapshot)
@@ -1062,6 +1068,7 @@ fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Ne
             source_nesting: context.source_nesting,
             implicit_loop_subject_depth: context.implicit_loop_subject_depth,
             subject_shorthand_depth: context.subject_shorthand_depth,
+            arithmetic_policy: context.arithmetic_policy,
         },
     }
 }
@@ -1140,6 +1147,7 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
     context.source_nesting = saved.source_nesting
     context.implicit_loop_subject_depth = saved.implicit_loop_subject_depth
     context.subject_shorthand_depth = saved.subject_shorthand_depth
+    context.arithmetic_policy = saved.arithmetic_policy
 }
 
 // Records why the body being checked is incomplete when no diagnostic says so.
