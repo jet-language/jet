@@ -234,24 +234,17 @@ fn jet_cli_remote_remove(args: [String]) JetCLIReadError! -[FS, Env]> {
 fn jet_cli_remote(args: [String], json: Bool, color: Bool) -[FS, Env, Time]> JetDriverVerbOutput Never! {
     action :: if args.len() > 1 -> args[1] else -> "help"
     if action == "help" -> return JetDriverVerbOutput{stdout: "jet remote — manage host-owned remote builders\n\n  jet remote bind <name> --root <path> --credential-file <path> --trust-domain <name> [--execute] [--cache-read] [--cache-write] [--fallback-local]\n  jet remote list\n  jet remote remove <name>\n", stderr: "", exit_code: 0}
-    result :: if action == {
-        "bind" -> {
-            if jet_cli_remote_bind(args) == {
-                .Ok(binding) -> { Ok(JetDriverVerbOutput{stdout: if json -> "{jet_cli_status_render("remote.bind", true, jet_cli_remote_binding_fields(binding, false))}\n" else -> "bound remote builder `{binding.builder}`\n", stderr: "", exit_code: 0}) }
-                .Err(error) -> { Err(error) }
-            }
-        }
-        "list" -> jet_cli_remote_list(json)
-        "remove" -> {
-            if jet_cli_remote_remove(args) == {
-                .Ok(_) -> { Ok(JetDriverVerbOutput{stdout: "removed remote builder `{args[2]}`\n", stderr: "", exit_code: 0}) }
-                .Err(error) -> { Err(error) }
-            }
-        }
-        else -> { Err(jet_cli_read_error("unknown remote subcommand `{action}`")) }
+    if action == "bind" {
+        binding :: jet_cli_remote_bind(args) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", err.message, "", "run `jet remote help`", color), exit_code: 2}
+        return JetDriverVerbOutput{stdout: if json -> "{jet_cli_status_render("remote.bind", true, jet_cli_remote_binding_fields(binding, false))}\n" else -> "bound remote builder `{binding.builder}`\n", stderr: "", exit_code: 0}
     }
-    if result == {
-        .Ok(output) -> { return output }
-        .Err(error) -> { return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", error.message, "", "run `jet remote help`", color), exit_code: 2} }
+    if action == "list" {
+        output :: jet_cli_remote_list(json) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", err.message, "", "run `jet remote help`", color), exit_code: 2}
+        return output
     }
+    if action == "remove" {
+        jet_cli_remote_remove(args) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", err.message, "", "run `jet remote help`", color), exit_code: 2}
+        return JetDriverVerbOutput{stdout: "removed remote builder `{args[2]}`\n", stderr: "", exit_code: 0}
+    }
+    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "unknown remote subcommand `{action}`", "", "run `jet remote help`", color), exit_code: 2}
 }

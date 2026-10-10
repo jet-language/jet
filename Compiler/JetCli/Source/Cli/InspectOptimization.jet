@@ -210,14 +210,14 @@ fn jet_cli_acceleration_report(query: JetDriverOptimizationQueryResult, scope: S
                 if U64.from_int(items) == .Ok(count) -> decision = Val(mir_acceleration_evaluate(gate, fact.transform, mir_acceleration_deferred(fact, count, query.release_build, parity)))
             }
             runtime_index := Int?{None}
-            source_start :: U64.from_int(fact.span.start)
-            source_end :: U64.from_int(fact.span.end)
-            if source_start == .Ok(start) && source_end == .Ok(end) {
-                loop (index, value) in runtime {
-                    if value.function != function.key || value.loop_header != fact.loop_header.value || start != value.source.start || end != value.source.end -> next
-                    runtime_index = Val(index)
-                    decision = Val(value.decision)
-                    break
+            if U64.from_int(fact.span.start) == .Ok(start) {
+                if U64.from_int(fact.span.end) == .Ok(end) {
+                    loop (index, value) in runtime {
+                        if value.function != function.key || value.loop_header != fact.loop_header.value || start != value.source.start || end != value.source.end -> next
+                        runtime_index = Val(index)
+                        decision = Val(value.decision)
+                        break
+                    }
                 }
             }
             status :: decision.map(value -> value.status)

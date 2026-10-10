@@ -40,7 +40,7 @@ fn jet_cli_live_read_at(pid: Int, path: String) -[FS, Env, Time]> JetCLILiveSnap
         if before.owner != Val(cli_sys.getuid()) -> return Err(jet_cli_read_error("live runtime snapshot belongs to another user"))
     }
     if before.size > 1048576 -> return Err(jet_cli_read_error("live runtime snapshot exceeds the 1 MiB safety limit"))
-    bytes := [U8].with_capacity(jet_cli_table_min(before.size, 65536))
+    bytes := List<U8>.try_with_capacity(jet_cli_table_min(before.size, 65536)) ?? panic("live snapshot allocation failed")
     loop {
         chunk :: reader.read(jet_cli_table_min(65536, 1048577 - bytes.len())) ?? return Err(jet_cli_read_error("cannot read live runtime snapshot: {jet_cli_io_error_text(err)}"))
         if chunk.len() == 0 -> break

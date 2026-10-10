@@ -141,7 +141,7 @@ fn jet_cli_comparison_canonical_data(value: Dyn) -> String Never! {
         .Number(number) -> number.copy()
         .Text(text) -> foundation_json_quote(text)
         .Bytes(bytes) -> "bytes:{bytes.len()}"
-        .DateTime(datetime) -> foundation_json_quote(datetime.format_rfc3339())
+        .DateTime(_) -> foundation_json_quote(value.to_text() ?? "")
         .Array(values) -> {
             items :: loop child in values -> jet_cli_comparison_canonical_data(child)
             "[{items.join(",")}]"

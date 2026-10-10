@@ -39,7 +39,7 @@ struct StreamingSHA256 {
         loop byte in data {
             &self.block.push(byte)
             if self.block.len() == 64 {
-                mir_sha256_compress(&self.state, &self.words, self.k, self.block.view(0..<64), 0)
+                mir_sha256_compress(&self.state, &self.words, self.k, self.block[0..<64], 0)
                 &self.block.clear()
             }
         }
@@ -55,13 +55,13 @@ struct StreamingSHA256 {
         &block.push(U8{128})
         if block.len() > 56 {
             loop block.len() < 64 -> &block.push(U8{0})
-            mir_sha256_compress(&state, &words, self.k, block.view(0..<64), 0)
+            mir_sha256_compress(&state, &words, self.k, block[0..<64], 0)
             &block.clear()
         }
         loop block.len() < 56 -> &block.push(U8{0})
         bit_length :: ((self.total * 8)).bit_and(MIR_SHA256_LENGTH_MASK)
         loop shift in FOUNDATION_U64_SHIFTS -> &block.push(U8{((bit_length >> shift)).bit_and(255)})
-        mir_sha256_compress(&state, &words, self.k, block.view(0..<64), 0)
+        mir_sha256_compress(&state, &words, self.k, block[0..<64], 0)
         digest := [U8]{}
         loop lane in state {
             word :: Int.from_u32(lane)

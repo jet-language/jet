@@ -17,7 +17,7 @@ impl JetCLIBuildHTTPInputs.JetDriverBuildHTTPInputs {
         if path == "" -> path = "/"
         query :: parsed.query()
         if query != "" -> path = "{path}?{query}"
-        wire := cli_build_http.jet_http_build_get(host, parsed.authority(), path, parsed.scheme() == "https", addresses, port, timeout_ms, limit)
+        wire := cli_build_http.jet_http_build_get(host, parsed.authority(), path, parsed.scheme() == "https", addresses, port, timeout_ms, limit) ?? return Err(JetDriverBuildHTTPError{message: "{err}"})
         if wire.len() < 2 -> return Err(JetDriverBuildHTTPError{message: "HTTP transport lost its response"})
         status_bytes := &wire.pop() ?? return Err(JetDriverBuildHTTPError{message: "HTTP transport lost its status"})
         body := &wire.pop() ?? return Err(JetDriverBuildHTTPError{message: "HTTP transport lost its body"})

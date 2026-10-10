@@ -128,6 +128,9 @@ Checked-build DNS and pinned byte transport likewise use the existing
 `jet_http_build_resolve` and `jet_http_build_get` raw spellings. Driver retains
 address authorization, bounds, digest verification, and error classification;
 these leaves do not supply a second public HTTP or generic host policy.
+The CLI maps a failed byte fetch into the driver's typed build-HTTP error before
+examining response bytes; it never lets the provider's failure carrier escape
+through that boundary.
 Held store linking keeps a distinct `compiler_link_held` source bridge: it
 extracts the private held-directory handle inside Core and calls the existing
 `jet_files_link_reader_at_raw` leaf. Compiler callers cannot substitute a path
@@ -141,6 +144,9 @@ does not acquire filesystem authority.
 Remote builder records accept LF or CRLF line endings, removing only the single
 carriage return immediately before a newline. Extra or interior control bytes
 remain malformed record data, not whitespace to silently normalize.
+The remote command handles typed bind/list/remove failures at its output boundary:
+each unsuccessful transport yields the existing E2104 report and exit code 2.
+Successful actions retain their existing human and machine output.
 
 Remote builder records accept LF or CRLF line endings, removing only the single
 carriage return immediately before a newline. Extra or interior control bytes
