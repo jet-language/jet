@@ -49,6 +49,13 @@ JET_CLI_RECEIPT_LINK_MAGIC :: prep { "jet-receipt-links-v1" }
 JET_CLI_RECEIPT_MAX_FIELD :: prep { 67108864 }
 
 JET_CLI_RECEIPT_MAX_BYTES :: prep { 138412032 }
+// Persistence failures use JetCLIReadError throughout; render text at CLI boundaries.
+priv fn jet_cli_receipt_section_marker(name: String) -> [U8] Never! {
+    bytes := name.bytes()
+    &bytes.push(U8{0})
+    bytes
+}
+
 
 fn jet_cli_receipt_is_digest(value: String) -> Bool Never! {
     if value.bytes().len() != 64 -> return false
@@ -59,7 +66,7 @@ fn jet_cli_receipt_is_digest(value: String) -> Bool Never! {
     true
 }
 
-fn jet_cli_receipt_section_new(name: String, type_name: String, bytes: [U8]) -> JetCLIReceiptSection String! {
+fn jet_cli_receipt_section_new(name: String, type_name: String, bytes: [U8]) -> JetCLIReceiptSection JetCLIReadError! {
     section :: JetCLIReceiptSection{name: name, type_name: type_name, schema_digest: mir_sha256_hex(type_name), payload_digest: receipt_crypto.sha256(bytes).hex(), bytes: bytes}
     jet_cli_receipt_section_validate(section)
     Ok(section)
@@ -96,13 +103,13 @@ fn jet_cli_receipt_section_validate(section: JetCLIReceiptSection) JetCLIReadErr
     if section.payload_digest != receipt_crypto.sha256(section.bytes).hex() {
         return Err(jet_cli_read_error("receipt section `{section.name}` payload digest does not match its bytes"))
     }
-    value :: canonical_json_parse(section.bytes) ?? return Err("receipt section `{section.name}` has an invalid schema: canonical JSON is invalid: {err.message}")
+    value :: canonical_json_parse(section.bytes) ?? return Err(jet_cli_read_error("receipt section `{section.name}` has an invalid schema: canonical JSON is invalid: {err.message}"))
     if value == .Object(_) -> return
-    Err("receipt section `{section.name}` has an invalid schema: typed section value must be a canonical JSON object")
+    Err(jet_cli_read_error("receipt section `{section.name}` has an invalid schema: typed section value must be a canonical JSON object"))
 }
 
-fn jet_cli_receipt_normalized_sections(sections: [JetCLIReceiptSection]) -> [JetCLIReceiptSection] String! {
-    if sections.len() > 256 -> return Err("receipt has too many sections (maximum 256)")
+fn jet_cli_receipt_normalized_sections(sections: [JetCLIReceiptSection]) -> [JetCLIReceiptSection] JetCLIReadError! {
+    if sections.len() > 256 -> return Err(jet_cli_read_error("receipt has too many sections (maximum 256)"))
     total := 0
     normalized := sections
     loop section in normalized {
@@ -150,8 +157,8 @@ fn jet_cli_receipt_link_order(left: JetCLIRecordLink, right: JetCLIRecordLink) -
     left.artifact_id <=> right.artifact_id
 }
 
-fn jet_cli_receipt_normalized_links(links: [JetCLIRecordLink], label: String) -> [JetCLIRecordLink] String! {
-    if links.len() > 100000 -> return Err("receipt has too many {label} links (maximum 100000)")
+fn jet_cli_receipt_normalized_links(links: [JetCLIRecordLink], label: String) -> [JetCLIRecordLink] JetCLIReadError! {
+    if links.len() > 100000 -> return Err(jet_cli_read_error("receipt has too many {label} links (maximum 100000)"))
     normalized := links
     loop link in normalized {
         jet_cli_record_link_validate(link) ?? return Err(jet_cli_read_error("receipt {label} link is invalid: {err.message}"))
@@ -236,9 +243,9 @@ fn jet_cli_receipt_decode_links(cursor: &JetCLIReceiptCursor, label: String) -> 
     jet_cli_receipt_normalized_links(links, label)
 }
 
-fn jet_cli_receipt_decode(bytes: [U8]) -> JetCLIReceipt String! {
-    if bytes.len() > JET_CLI_RECEIPT_MAX_BYTES -> return Err("receipt is too large")
-    magic :: JET_CLI_RECEIPT_MAGIC
+fn jet_cli_receipt_decode(bytes: [U8]) -> JetCLIReceipt JetCLIReadError! {
+    if bytes.len() > JET_CLI_RECEIPT_MAX_BYTES -> return Err(jet_cli_read_error("receipt is too large"))
+    magic :: jet_cli_receipt_section_marker(JET_CLI_RECEIPT_MAGIC)
     if bytes.len() < magic.len() || bytes.slice(0, magic.len()) != magic {
         return Err(jet_cli_read_error("receipt magic is invalid"))
     }
@@ -352,7 +359,7 @@ fn jet_cli_receipt_digest(receipt: JetCLIReceipt) -> String Never! {
     receipt_crypto.sha256(jet_cli_receipt_body(receipt)).hex()
 }
 
-fn jet_cli_receipt_encode(receipt: JetCLIReceipt) -> [U8] String! {
+fn jet_cli_receipt_encode(receipt: JetCLIReceipt) -> [U8] JetCLIReadError! {
     _ :: jet_cli_receipt_normalized_sections(receipt.sections)
     _ :: jet_cli_receipt_normalized_links(receipt.consumed, "consumed")
     _ :: jet_cli_receipt_normalized_links(receipt.produced, "produced")
@@ -364,7 +371,7 @@ fn jet_cli_receipt_encode(receipt: JetCLIReceipt) -> [U8] String! {
     Ok(out)
 }
 
-fn jet_cli_receipt_query_sections(sections: [JetCLIReceiptSection], names: [String]?) -> CanonicalJSON String! {
+fn jet_cli_receipt_query_sections(sections: [JetCLIReceiptSection], names: [String]?) -> CanonicalJSON JetCLIReadError! {
     normalized :: jet_cli_receipt_normalized_sections(sections)
     requested := [String:Bool]{}
     if names == .Val(selected) {

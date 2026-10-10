@@ -42,7 +42,7 @@ fn jet_cli_receipt_section_record_identity(record: JetCLIReceiptSectionRecord) -
     receipt_crypto.sha256(jet_cli_receipt_section_record_body(record, "jet-receipt-section-id-v1")).hex()
 }
 
-fn jet_cli_receipt_section_record_encode(record: JetCLIReceiptSectionRecord) -> [U8] String! {
+fn jet_cli_receipt_section_record_encode(record: JetCLIReceiptSectionRecord) -> [U8] JetCLIReadError! {
     jet_cli_receipt_section_record_validate(record)
     bytes := jet_cli_receipt_section_record_body(record, "jet-receipt-section-record-v1")
     jet_cli_receipt_frame(&bytes, record.section.bytes)
@@ -57,7 +57,7 @@ fn jet_cli_receipt_section_record_text(cursor: &JetCLIReceiptCursor, label: Stri
     Ok(String.from_bytes(bytes) ?? return Err(jet_cli_read_error("receipt section {label} is not UTF-8")))
 }
 
-fn jet_cli_receipt_section_record_decode(bytes: [U8]) -> JetCLIReceiptSectionRecord String! {
+fn jet_cli_receipt_section_record_decode(bytes: [U8]) -> JetCLIReceiptSectionRecord JetCLIReadError! {
     if bytes.len() > JET_CLI_RECEIPT_SECTION_RECORD_MAX {
         return Err(jet_cli_read_error("receipt section record is too large"))
     }
@@ -154,7 +154,7 @@ fn jet_cli_receipt_diff_fields(section: String, prefix: String, before: Canonica
     }
 }
 
-fn jet_cli_receipt_diff_sections(before: [JetCLIReceiptSection], after: [JetCLIReceiptSection]) -> [JetCLIReceiptFieldDiff] String! {
+fn jet_cli_receipt_diff_sections(before: [JetCLIReceiptSection], after: [JetCLIReceiptSection]) -> [JetCLIReceiptFieldDiff] JetCLIReadError! {
     before_sections :: jet_cli_receipt_normalized_sections(before)
     after_sections :: jet_cli_receipt_normalized_sections(after)
     diffs := [JetCLIReceiptFieldDiff]{}

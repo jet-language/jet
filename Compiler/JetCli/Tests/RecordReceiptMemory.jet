@@ -10,9 +10,13 @@ fn run() {
     record_receipt_memory_require(receipt.stdout == [U8]{255, 60, 114, 101, 100, 97, 99, 116, 101, 100, 62}, "redaction preserves non UTF8")
     bytes :: jet_cli_receipt_encode(receipt) ?? panic("encode")
     found :: jet_cli_receipt_lookup_bytes(Val(bytes), claim, [JetCLIReceiptInput]{}, [JetCLIReceiptSectionRecord]{}) ?? panic("lookup")
-    record_receipt_memory_require(found != None, "authenticated cache hit")
-    stale :: jet_cli_receipt_lookup_bytes(Val(bytes), claim, [JetCLIReceiptInput]{JetCLIReceiptInput{path: "changed", digest: digest}}, [JetCLIReceiptSectionRecord]{}) ?? panic("stale lookup")
-    record_receipt_memory_require(stale == .None, "changed input misses")
+    record_receipt_memory_require(found.digest == receipt.digest, "authenticated cache hit")
+    stale :: if jet_cli_receipt_lookup_bytes(Val(bytes), claim, [JetCLIReceiptInput]{JetCLIReceiptInput{path: "changed", digest: digest}}, [JetCLIReceiptSectionRecord]{}) == {
+        .Val(_) -> false
+        .None -> true
+        .Err(error) -> { panic(error.message) }
+    }
+    record_receipt_memory_require(stale, "changed input misses without a read failure")
     index := jet_cli_record_index_new() ?? panic("index")
     identity :: JetCLIRecordIdentity{target_inputs_sha256: digest, tool_version: "jet", engine: "interpreter"}
     entry :: JetCLIRecordIndexEntry{identity: identity, kind: "replay", artifact_id: digest, path: ".jet/replays/{digest}.jetreplay", recorded_sequence: U64{1}, size: U64{1}, capture: "safe", saved: false, consumed: [JetCLIRecordLink]{}, produced: [JetCLIRecordLink]{}}
@@ -26,13 +30,16 @@ fn run() {
     record_receipt_memory_require(sequence == U64{2}, "sequence increment")
     fresh :: jet_cli_record_index_fresh_sequence(restored, JetCLIRecordIndexEntry{identity: identity, kind: "replay", artifact_id: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", path: ".jet/replays/new.jetreplay", recorded_sequence: U64{1}, size: U64{1}, capture: "safe", saved: false, consumed: [JetCLIRecordLink]{}, produced: [JetCLIRecordLink]{}}) ?? panic("fresh sequence")
     record_receipt_memory_require(fresh.recorded_sequence == U64{2}, "new key receives a sequence after the latest disk snapshot")
-    same :: jet_cli_record_index_fresh_sequence(restored, entry) ?? panic("existing sequence")
+    sequence_entry := entry.copy()
+    same :: jet_cli_record_index_fresh_sequence(restored, ^sequence_entry) ?? panic("existing sequence")
     record_receipt_memory_require(same == entry, "existing identity preserves its sequence for idempotence")
     section :: jet_cli_receipt_section_new("test", "TestRecord", "{}".bytes()) ?? panic("section")
     appended :: JetCLIReceiptSectionRecord{claim_key: claim.key, parent_digest: receipt.digest, section: section}
-    projected :: jet_cli_receipt_merge_sections(receipt, claim, [JetCLIReceiptSectionRecord]{appended, appended}) ?? panic("merge")
+    original := receipt.copy()
+    projected :: jet_cli_receipt_merge_sections(^original, claim, [JetCLIReceiptSectionRecord]{appended, appended}) ?? panic("merge")
     record_receipt_memory_require(projected.sections.len() == 1 && projected.digest == receipt.digest, "append-only sections deduplicate and retain immutable parent identity")
     wrong :: JetCLIReceiptSectionRecord{claim_key: claim.key, parent_digest: digest, section: section}
-    rejected :: jet_cli_receipt_merge_sections(receipt, claim, [JetCLIReceiptSectionRecord]{wrong}) == .Err(_)
+    invalid_parent := receipt.copy()
+    rejected :: jet_cli_receipt_merge_sections(^invalid_parent, claim, [JetCLIReceiptSectionRecord]{wrong}) == .Err(_)
     record_receipt_memory_require(rejected, "section parent authentication is mandatory")
 }
