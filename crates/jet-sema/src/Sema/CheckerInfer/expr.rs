@@ -5776,7 +5776,7 @@ impl<'a> Checker<'a> {
                 // names are enum variants. Resolve the head here, where the
                 // registry is authoritative, and lower it to the same
                 // EnumLit node as `.Named.{ ... }`.
-                if !*inferred && type_args.is_empty() && import_ns.is_none() {
+                if !*inferred && import_ns.is_none() {
                     if let Some((enum_name, variant)) = type_name.split_once('.') {
                         let is_variant = self
                             .resolve_enum_variants_cloned(enum_name)
@@ -5797,7 +5797,18 @@ impl<'a> Checker<'a> {
                                 leading_dot: false,
                                 span: *span,
                             };
-                            *e = enum_lit;
+                            *e = if type_args.is_empty() {
+                                enum_lit
+                            } else {
+                                Expr::TypedLit {
+                                    head: Some(Type::Apply {
+                                        name: enum_name.to_string(),
+                                        args: std::mem::take(type_args),
+                                    }),
+                                    body: TypedLitBody::Value(Box::new(enum_lit)),
+                                    span: *span,
+                                }
+                            };
                             return self.infer(e);
                         }
                     }

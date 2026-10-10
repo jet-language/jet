@@ -3893,7 +3893,7 @@ impl<'a> Checker<'a> {
         // The result keeps the same checked owner as the constructor spelling.
         let ty = contextual_ty.clone().unwrap_or_else(|| Type::Named(identity));
         let display_type_name = self.display_type_name(type_name, None);
-        let Some(variants) = self.resolve_enum_variants_cloned(type_name) else {
+        let Some(mut variants) = self.resolve_enum_variants_cloned(type_name) else {
             self.diags.push(Diagnostic::error(
                 "E0119",
                 format!("there's no enum called `{}`", display_type_name),
@@ -3910,7 +3910,7 @@ impl<'a> Checker<'a> {
             }
             return ty;
         };
-        let Some((_, payload)) = variants.get(variant) else {
+        let Some((_, mut payload)) = variants.remove(variant) else {
             // D-TAG1: a group name in value position — a value is always a leaf.
             if let Some((_, leaves)) = self
                 .resolve_enum_groups_cloned(type_name)
@@ -3967,7 +3967,35 @@ impl<'a> Checker<'a> {
             }
             return ty;
         };
-        match payload {
+        if let Some(Type::Apply { name, args }) = &contextual_ty {
+            let (namespace, leaf) = self.struct_type_name_parts(name);
+            let params = self.struct_owner_module(leaf, namespace).and_then(|owner| {
+                if owner == self.module_idx {
+                    self.trait_reg.enum_params.get(leaf)
+                } else {
+                    self.modules
+                        .and_then(|modules| modules.get(owner))
+                        .and_then(|module| module.trait_reg.enum_params.get(leaf))
+                }
+            });
+            if let Some(params) = params.filter(|params| params.len() == args.len()) {
+                let subst: HashMap<String, Type> = params.iter().zip(args)
+                    .map(|(param, arg)| (param.name.clone(), arg.clone()))
+                    .collect();
+                match &mut payload {
+                    VariantPayload::Single(ty, _) => {
+                        *ty = crate::Generics::substitute_type(ty, &subst);
+                    }
+                    VariantPayload::Named(fields) => {
+                        for field in fields {
+                            field.ty = crate::Generics::substitute_type(&field.ty, &subst);
+                        }
+                    }
+                    VariantPayload::Unit => {}
+                }
+            }
+        }
+        match &payload {
             VariantPayload::Unit => {
                 if !args.is_empty() {
                     self.diags.push(Diagnostic::error(

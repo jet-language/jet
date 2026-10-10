@@ -1335,3 +1335,45 @@ fn run() { print(native.inspect([Feature{value: 7}])) }
         "nominal owners must remain distinct: {diagnostics:#?}"
     );
 }
+
+#[test]
+fn generic_owner_identity_calls_bind_nested_parameters() {
+    let (_, diagnostics) = check(r#"
+struct Boxed<T> { value: T }
+fn wrapped<T>(box: Boxed<T>) -> T Never! { box.value.copy() }
+fn relay<T>(box: Boxed<T>) -> T Never! { wrapped(box) }
+fn list_len<T>(values: [T]) -> Int Never! { values.len() }
+fn relay_list<T>(values: [T]) -> Int Never! { list_len(values) }
+fn run() { print(relay(Boxed<Int>{value: 7})) }
+"#);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
+}
+
+#[test]
+fn generic_owner_enum_constructors_preserve_arguments_and_payloads() {
+    let (_, diagnostics) = check(r#"
+enum Packet<T> {
+    Empty
+    Value(value: T)
+}
+fn packet<U>(value: U) -> Packet<U> Never! { Packet<U>.Value{value: value} }
+fn empty<U>() -> Packet<U> Never! { Packet<U>.Empty{} }
+fn contextual(value: Int) -> Packet<Int> Never! { .Value{value: value} }
+fn run() {
+    packet :: packet(7)
+    empty :: empty<Int>()
+    other :: contextual(8)
+}
+"#);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
+}
+
+#[test]
+fn generic_owner_enum_constructor_rejects_wrong_payload() {
+    let (_, diagnostics) = check(r#"
+enum Packet<T> { Value(value: T) }
+fn packet() -> Packet<Int> Never! { Packet<Int>.Value{value: "wrong"} }
+fn run() {}
+"#);
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0108"), "{diagnostics:#?}");
+}

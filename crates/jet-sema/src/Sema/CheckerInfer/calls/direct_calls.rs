@@ -115,9 +115,8 @@ fn seed_generic_type(
             return bind_inferred_type(param, found, source, type_params, subst, origins, conflict);
         }
     }
-    if expected == found {
-        return true;
-    }
+    // Equal composite types still contain parameters that must be bound:
+    // relaying Box<T> into another generic function is an instantiation too.
     if let Type::Named(param) = found {
         if type_params.contains(param) {
             return bind_inferred_type(

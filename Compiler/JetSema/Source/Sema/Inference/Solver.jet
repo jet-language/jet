@@ -78,12 +78,7 @@ fn sema_inference_unify_optional(context: &SemaInferenceContext, left: Type?, ri
 fn sema_inference_unify_inner(context: &SemaInferenceContext, expected: Type, found: Type, bindings: &[SemaInferenceBinding], source: String, conflict: &SemaInferenceConflict?) -> Bool Never! {
     left :: sema_inference_substitute_type_bindings(expected, bindings)
     right :: sema_inference_substitute_type_bindings(found, bindings)
-    if type_identity_equal(left, right) {
-        if left == .Named(name) {
-            if sema_inference_parameter_index(&context, name) != None -> return sema_inference_bind(&context, &bindings, name, right, source, &conflict)
-        }
-        return true
-    }
+    // Identical composite types still need their nested parameters bound.
     if left == .Named(name) {
         if sema_inference_parameter_index(&context, name) != None -> return sema_inference_bind(&context, &bindings, name, right, source, &conflict)
     }
@@ -175,7 +170,7 @@ fn sema_inference_unify_inner(context: &SemaInferenceContext, expected: Type, fo
             .Quantity(other, other_dimension) -> dimension_identity(dimension) == dimension_identity(other_dimension) && sema_inference_unify_inner(&context, base, other, &bindings, source, &conflict)
             else -> false
         }
-        else -> false
+        else -> type_identity_equal(left, right)
     }
 }
 
