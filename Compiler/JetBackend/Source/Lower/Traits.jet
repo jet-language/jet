@@ -230,7 +230,7 @@ fn lower_trait_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     if !inline_result && dst == .Val(value) -> &params.push(value)
     lower_start(&f, done, params)
     if dst == None && result_storage == .Val(storage) -> lower_map_drop_value(p, &m, &f, storage, result_ty)
-    loop writeback in writebacks -> lower_write_back(p, c, &m, &f, writeback)
+    loop writeback in writebacks -> lower_write_back(p, c, &m, &f, writeback, None)
     loop temporary in temporaries -> lower_emit(&f, LIRInst.Drop{value: temporary})
 }
 

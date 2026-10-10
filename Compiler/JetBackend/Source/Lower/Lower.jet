@@ -707,7 +707,6 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             if lower_is_stm(ty) -> return LowerRepr.Handle{drop: "jet_rt_native_stm_rollback", clone: ""}
             if lower_is_condition(ty) && lower_type_def(p, ty) == None -> return LowerRepr.Handle{drop: "jet_rt_native_condition_drop", clone: "jet_rt_native_condition_clone"}
             if lower_lazy_element(ty) == .Val(elem) -> return lower_lazy_repr(p, ty, elem)
-            if lower_queue_element(ty) == .Val(elem) -> return lower_queue_repr(p, elem)
             if lower_task_handle_repr(ty) == .Val(handle) -> return handle
             // Ptr<T>: a raw word address (Pointers.jet).
             if lower_ptr_element(ty) != None -> return LowerRepr.Word
@@ -1478,7 +1477,12 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         }
     }
     read_slots := [U64:Int]{}
+    sunk := [U64:Bool]{}
+    moves := [U64:U64]{}
     loop block in function.blocks {
+        if block.terminator == .Return(returned) {
+            if returned == .Val(value) -> _ := &sunk.add(value.value, true)
+        }
         loop instruction in block.instructions {
             if instruction.operation == .WritePlace(_, written) -> _ := &sunk.add(written.value, true)
             if instruction.operation == .ReplacePlace(_, replaced) -> _ := &sunk.add(replaced.value, true)
@@ -1497,6 +1501,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
                         }
                     }
                 }
+                .Move(inner) -> _ := &moves.add(result_value.value, inner.value)
                 else -> {}
             }
         }
@@ -1547,6 +1552,8 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         local_slots: local_slots,
         read_slots: read_slots,
         defined_slots: defined_slots,
+        sunk: sunk,
+        moves: moves,
         order: order,
         lir_blocks: lir_blocks,
         ranks: ranks,
@@ -2578,7 +2585,7 @@ fn lower_copy(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
     if repr == {
         .ExactInt | .Handle(_, _) | .Boxed(_) -> { if !lower_value_owned(c, instruction.result ?? value) -> return lower_alias(c, &f, instruction, source) }
         // Dropless inline by-value copies still snapshot their bytes.
-        .Inline(_) -> { if !lower_read_owns(p, c, instruction, ty) -> return lower_alias(c, &f, instruction, source) }
+        .Inline(_) -> { if !lower_read_owns(p, c, m, instruction, ty) -> return lower_alias(c, &f, instruction, source) }
         else -> return lower_alias(c, &f, instruction, source)
     }
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
@@ -3551,7 +3558,6 @@ fn lower_print_releases(c: LowerContext, f: LowerFunction, value: MIRValueID, lo
 }
 
 fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, semantic: MIRSemanticOp) Never! {
-    if semantic == .DataEntriesToMap(_, local) -> return lower_data_entries_to_map(p, c, &m, &f, instruction, local)
     if semantic == .Print(call, value) {
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "print names missing Prelude call {call.value}")
         text :: lower_show(p, c, &m, &f, value) ?? return
@@ -3565,7 +3571,6 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         }
         return lower_alias_absent(&f, instruction)
     }
-    if semantic == .DataEntriesToMap(_, local) -> return lower_data_entries_to_map(p, c, &m, &f, instruction, local)
     if semantic == .StructLiteral(type_id, fields, extra, boxed_fields) -> return lower_struct_literal(p, c, &m, &f, instruction, type_id, fields, extra, boxed_fields)
     if semantic == .RequireStop(call, kind, condition, location, context, values, always_stops) -> return lower_require_stop(p, c, &m, &f, instruction, call, kind, condition, location, context, values, always_stops)
     if semantic == .NumericMethod(call, receiver) -> return lower_numeric_method(p, c, &m, &f, instruction, call, receiver)
@@ -3909,7 +3914,7 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
         call_args := [LIRValueID]{storage}
         loop value in lowered -> &call_args.push(value)
         lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: call_args})
-        loop writeback in writebacks -> lower_write_back(p, c, &m, &f, writeback)
+        loop writeback in writebacks -> lower_write_back(p, c, &m, &f, writeback, None)
         loop temporary in temporaries -> lower_emit(&f, LIRInst.Drop{value: temporary})
         return
     }
@@ -3919,7 +3924,7 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
         if m.signatures[signature.value].result == .Val(layout) -> dst = Val(lower_new_value(&f, layout, LIRDrop.Trivial, None))
     }
     lower_emit(&f, LIRInst.Call{dst: dst, signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: lowered})
-    loop writeback in writebacks -> lower_write_back(p, c, &m, &f, writeback)
+    loop writeback in writebacks -> lower_write_back(p, c, &m, &f, writeback, None)
     loop temporary in temporaries -> lower_emit(&f, LIRInst.Drop{value: temporary})
 }
 

@@ -167,7 +167,7 @@ fn lower_c_import_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
         native :: lower_new_value(&f, native_layout, LIRDrop.Trivial, scalar.identity)
         lower_c_decode(&m, &f, scalar, raw_value, native)
         lower_emit(&f, LIRInst.Store{base: write.writeback.cell, offset: 0, value: native})
-        lower_write_back(p, c, &m, &f, write.writeback)
+        lower_write_back(p, c, &m, &f, write.writeback, None)
     }
     loop string in strings {
         lower_call_runtime(&m, &f, "jet_rt_c_string_free", [LIRValueID]{string.pointer, string.bytes}, None)

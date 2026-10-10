@@ -230,7 +230,7 @@ fn lower_shared_guard_deref(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
     layout :: lower_repr_layout(lower_repr(p, elem)) ?? return true
     held :: lower_new_value(&f, layout, LIRDrop.Trivial, elem.identity)
     lower_read_into(p, &f, held, payload, 0, elem)
-    if lower_read_owns(p, c, instruction, elem) {
+    if lower_read_owns(p, c, m, instruction, elem) {
         dst :: lower_result(p, c, &m, &f, instruction) ?? return true
         lower_clone_into(p, &m, &f, held, dst, elem)
     } else {
