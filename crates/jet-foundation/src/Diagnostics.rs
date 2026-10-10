@@ -2250,6 +2250,24 @@ mod crypto_diagnostic_contract_tests {
     }
 
     #[test]
+    fn wrong_arity_machine_next_action_does_not_leak_registry_example_names() {
+        for callee in ["List.pop", "String.split", "Map.get"] {
+            let diagnostic = Diagnostic::error(
+                "E0104",
+                format!("`{callee}` has the wrong number of arguments"),
+                "Every argument must match a parameter".into(),
+                "Match the accepted argument count".into(),
+                Some(Span::new(0, 1)),
+            );
+            let json = diagnostic.to_json(&ReportPath::from_process("main.jet"), "x");
+            assert!(json.contains(
+                "\"no_fix_reason\":{\"kind\":\"ambiguous\",\"next\":\"Check the called function or method's parameters and match its argument count.\"}"
+            ), "{json}");
+            assert!(!json.contains("show"), "{json}");
+        }
+    }
+
+    #[test]
     fn structured_edit_comes_from_the_row_not_fix_prose() {
         let diagnostic = Diagnostic::from_row("E0373", &[], Some(Span::new(3, 4)));
         assert!(diagnostic.edit.is_none());

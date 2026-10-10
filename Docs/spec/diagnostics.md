@@ -114,6 +114,12 @@ and never inherit the root diagnostic's location. If a source snapshot is
 unavailable, the projection must not invent a path, line, column, or `0:0`
 position. An explicitly supplied byte span remains unchanged.
 
+Registry-supplied machine next actions must apply to the actual diagnostic,
+not leak a registry example's names. E0104's `no_fix_reason.next` directs the
+learner to the called function or method's parameters and argument count;
+an arity error for `List.pop`, `String.split` or `Map.get` never points to an
+unrelated `show` definition.
+
 Bundle checks retain the owning source snapshot when a later phase reports
 against a module-local span. In particular, solved-effect boundary diagnostics
 belong to the function's declaring module, not the bundle entry file. The
