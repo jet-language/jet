@@ -12,6 +12,7 @@ use core
 use core.crypto.expert as rawcrypto
 use core.crypto.random as random
 use core.crypto.vault.[KeyUnlock, WrappedVaultKey]
+use core.files.[basename, dirname, join]
 use __core_crypto_ct as fixedcrypto
 
 // core.crypto - safe envelopes and expert primitives (D-ONCE-LAYER1=B).
@@ -745,9 +746,9 @@ fn jetc_parent(destination: String) -> JetcParent FileCryptoError! {
     loop byte in destination.bytes() {
         if byte == (U8{0}) -> return Err(.DestinationIO)
     }
-    name :: core.files.basename(destination)
+    name :: basename(destination)
     if name == "" || name == "." || name == ".." -> return Err(.DestinationIO)
-    parent_text :: core.files.dirname(destination)
+    parent_text :: dirname(destination)
     path :: if parent_text == "" -> "." else -> parent_text
     opened :: core.crypto.__jetc_open_directory(path)
     linux :: opened.linux
@@ -781,7 +782,7 @@ fn jetc_temp(parent: JetcParent, prefix: String) -> JetcTemp FileCryptoError! {
     loop attempt in 0..<128 {
         sequence :: parent.directory.fd * 128 + attempt
         name :: ".{prefix}-{pid}-{sequence}"
-        path :: core.files.join(parent.path, name)
+        path :: join(parent.path, name)
         result :: core.crypto.__jetc_create_named(path)
         if result.value >= 0 -> return Ok(JetcTemp{file: JetcFd{fd: result.value}, path: Val(path)})
         if !jetc_exists_errno(result.errno) -> return Err(.DestinationIO)

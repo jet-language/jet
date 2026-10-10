@@ -52,8 +52,7 @@ impl ExpiringSecret {
 
 impl ExpiringSecret.Close {
     fn close(^self) {
-        owner :: ^self
-        __close_secret_storage<T>(^owner.value)
+        __close_secret_storage<T>(^self.value)
     }
 }
 
@@ -98,8 +97,7 @@ impl ExpiryCloseProbe.Close {
 struct ExpiryCloseOwner { value: Shared<ExpiryCloseProbe?> }
 impl ExpiryCloseOwner.Close {
     fn close(^self) {
-        owner :: ^self
-        __close_secret_storage<ExpiryCloseProbe>(^owner.value)
+        __close_secret_storage<ExpiryCloseProbe>(^self.value)
     }
 }
 

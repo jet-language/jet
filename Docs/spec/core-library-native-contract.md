@@ -254,7 +254,8 @@ Core runtime source contracts use the ratified ownership and failure spellings:
   declared carrier. Their reason-only output and receiver ownership are unchanged.
 - Expiring-secret storage acquires its edit guard in the removal helper, moves
   the payload from that owned local, restores `None`, then drops the payload.
-  Close consumes the storage owner, and live callbacks retain a read guard.
+  Close consumes its own receiver's storage field directly, preserving the
+  destructor's field-take authority, and live callbacks retain a read guard.
   Callbacks are non-failing (`Never!`); expiry uses the canonical root `Expired`
   failure carrier, not a second `core.time` nominal.
   Shared handle operations never copy credential material.
