@@ -24,10 +24,10 @@ struct JetCLINativeBundleHost {
         fn record(&self, request: JetCLIBundleStoreRequest) -> String JetCLIBundleError! {
             paths := [String]{}
             loop path in request.input_paths -> &paths.push(path.raw)
-            claim :: jet_cli_receipt_claim(request.command, paths, request.args, self.terminal_identity) ?? return Err(jet_cli_bundle_error(err))
-            section :: jet_cli_receipt_section_new("package", "PackageBundleReceipt", canonical_json_bytes(request.receipt.to_json_tree())) ?? return Err(jet_cli_bundle_error(err))
-            receipt :: jet_cli_receipt_prepare(claim, 0, request.receipt.json().bytes(), [U8]{}, [JetCLIReceiptSection]{section}, [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, self.secret_values) ?? return Err(jet_cli_bundle_error(err))
-            published :: jet_cli_receipt_publish(self.receipt_root, receipt) ?? return Err(jet_cli_bundle_error(err))
+            claim :: jet_cli_receipt_claim(request.command, paths, request.args, self.terminal_identity) ?? return Err(jet_cli_bundle_error(err.message))
+            section :: jet_cli_receipt_section_new("package", "PackageBundleReceipt", canonical_json_bytes(request.receipt.to_json_tree())) ?? return Err(jet_cli_bundle_error(err.message))
+            receipt :: jet_cli_receipt_prepare(claim, 0, request.receipt.json().bytes(), [U8]{}, [JetCLIReceiptSection]{section}, [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, self.secret_values) ?? return Err(jet_cli_bundle_error(err.message))
+            published :: jet_cli_receipt_publish(self.receipt_root, receipt) ?? return Err(jet_cli_bundle_error(err.message))
             if !published -> return Err(jet_cli_bundle_error("package inputs changed before receipt publication"))
             Ok(receipt.digest)
         }

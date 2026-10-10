@@ -70,7 +70,7 @@ fn bundle_test_build_error(options: JetCLIBundleOptions, host: &BundleTestTransp
     panic("expected build refusal")
 }
 fn bundle_test_json_field(tree: Dyn, name: String) -> Dyn Never! {
-    if tree == .Object(fields) -> return fields[name]
+    if tree == .Object(_) -> return tree[name]
     panic("expected object")
 }
 fn bundle_test_tree_eq(actual: Dyn, expected: Dyn) Never! {
@@ -424,7 +424,7 @@ fn bundle_test_wire_report(materialized: Bool, explain: Bool) -> String Never! {
                 CanonicalJSONField{key: "a", value: CanonicalJSON.Array([CanonicalJSON]{})}})})},
         CanonicalJSONField{key: "a", value: CanonicalJSON.Integer("9007199254740993")}})
     expected :: "{{\"z\":[null,false,-7,\"é\\n\\\"\\\\\\t\",{{\"z\":true,\"a\":[]}}],\"a\":9007199254740993}}"
-    assert_eq(jet_cli_status_json(jet_cli_bundle_status(&tree)).bytes(), expected.bytes())
+    assert_eq(jet_cli_status_json(jet_cli_bundle_status(tree)).bytes(), expected.bytes())
 }
 #Test("package canonical status scalar variants retain exact Rust bytes") {
     null :: CanonicalJSON.Null
@@ -433,20 +433,20 @@ fn bundle_test_wire_report(materialized: Bool, explain: Bool) -> String Never! {
     string :: CanonicalJSON.String("é\r\n\t\"\\")
     array :: CanonicalJSON.Array([CanonicalJSON]{})
     object :: CanonicalJSON.Object([CanonicalJSONField]{})
-    assert_eq(jet_cli_status_json(jet_cli_bundle_status(&null)), "null")
-    assert_eq(jet_cli_status_json(jet_cli_bundle_status(&boolean)), "true")
-    assert_eq(jet_cli_status_json(jet_cli_bundle_status(&integer)), "0")
-    assert_eq(jet_cli_status_json(jet_cli_bundle_status(&string)), "\"é\\r\\n\\t\\\"\\\\\"")
-    assert_eq(jet_cli_status_json(jet_cli_bundle_status(&array)), "[]")
-    assert_eq(jet_cli_status_json(jet_cli_bundle_status(&object)), "{{}}")
+    assert_eq(jet_cli_status_json(jet_cli_bundle_status(null)), "null")
+    assert_eq(jet_cli_status_json(jet_cli_bundle_status(boolean)), "true")
+    assert_eq(jet_cli_status_json(jet_cli_bundle_status(integer)), "0")
+    assert_eq(jet_cli_status_json(jet_cli_bundle_status(string)), "\"é\\r\\n\\t\\\"\\\\\"")
+    assert_eq(jet_cli_status_json(jet_cli_bundle_status(array)), "[]")
+    assert_eq(jet_cli_status_json(jet_cli_bundle_status(object)), "{{}}")
 }
 #Test("package canonical integer projection retains original i128 parse bounds") {
     minimum :: "-170141183460469231731687303715884105728"
     maximum :: "170141183460469231731687303715884105727"
     lower :: canonical_json_integer(minimum) ?? panic(err.message)
     upper :: canonical_json_integer(maximum) ?? panic(err.message)
-    assert_eq(jet_cli_status_json(jet_cli_bundle_status(&lower)), minimum)
-    assert_eq(jet_cli_status_json(jet_cli_bundle_status(&upper)), maximum)
+    assert_eq(jet_cli_status_json(jet_cli_bundle_status(lower)), minimum)
+    assert_eq(jet_cli_status_json(jet_cli_bundle_status(upper)), maximum)
     // Test the very parse seam whose None becomes Rust's exact expect panic,
     // without replacing the infallible production projection with a fallback.
     rejected :: [String]{"-170141183460469231731687303715884105729", "170141183460469231731687303715884105728", "", "+", "-", " 1", "1 ", "1_0", "1.0", "1e0", "é"}

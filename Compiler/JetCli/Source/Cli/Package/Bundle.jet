@@ -265,7 +265,10 @@ fn jet_cli_bundle_build<H: JetCLIBundleHost>(options: JetCLIBundleOptions, host:
     input_paths := [bundle_paths.Path]{executable_path}
     if options.icon == .Val(icon_path) {
         icon_bytes :: jet_cli_bundle_read_regular<H>(&host, icon_path, "icon")
-        chosen :: if options.icon_format != None -> options.icon_format else -> IconFormat.parse(bundle_paths.suffix(icon_path))
+        chosen :: if options.icon_format == {
+            .Val(declared_format) -> Val(declared_format)
+            .None -> IconFormat.parse(bundle_paths.suffix(icon_path))
+        }
         format :: chosen ?? return Err(jet_cli_bundle_error("`jet package --icon` needs `--icon-format` when the extension is unknown"))
         &spec.icons.push(BundleIcon.new(package, format, options.icon_size, icon_bytes).with_source(icon_path.raw))
         &input_paths.push(icon_path)
@@ -299,8 +302,8 @@ fn jet_cli_bundle_canonical_status_integer(text: String) -> Int? Never! {
     if number < -170141183460469231731687303715884105728 || number > 170141183460469231731687303715884105727 -> return None
     Val(number)
 }
-// Report is projected into the single CLI status carrier; no legacy aliases.
-fn jet_cli_bundle_status(value: &CanonicalJSON) -> JetCLIStatusValue Never! {
+// Read-only projection into the single CLI status carrier; no legacy aliases.
+fn jet_cli_bundle_status(value: CanonicalJSON) -> JetCLIStatusValue Never! {
     if value == {
         .Null -> JetCLIStatusValue.Null
         .Bool(flag) -> jet_cli_status_bool(flag)
@@ -308,12 +311,12 @@ fn jet_cli_bundle_status(value: &CanonicalJSON) -> JetCLIStatusValue Never! {
         .String(text) -> jet_cli_status_text(text.copy())
         .Array(values) -> {
             rows := [JetCLIStatusValue]{}
-            loop value in values -> &rows.push(jet_cli_bundle_status(&value))
+            loop child in values -> &rows.push(jet_cli_bundle_status(child))
             jet_cli_status_array(rows)
         }
         .Object(values) -> {
             fields := [JetCLIStatusField]{}
-            loop field in values -> &fields.push(jet_cli_status_field(field.key.copy(), jet_cli_bundle_status(&field.value)))
+            loop field in values -> &fields.push(jet_cli_status_field(field.key.copy(), jet_cli_bundle_status(field.value)))
             jet_cli_status_object(fields)
         }
     }
@@ -341,13 +344,13 @@ fn jet_cli_bundle_report(artifact: &BundleArtifact, plan: &BundlePlan, output: b
         artifact_tree :: artifact.to_json_tree()
         receipt_tree :: artifact.receipt.to_json_tree()
         fields := [JetCLIStatusField]{
-            jet_cli_status_field("artifact", jet_cli_bundle_status(&artifact_tree)),
+            jet_cli_status_field("artifact", jet_cli_bundle_status(artifact_tree)),
             jet_cli_status_field("artifact_status", jet_cli_status_text(artifact.receipt.artifact_status().as_str())),
             jet_cli_status_field("execution", jet_cli_status_text(execution)),
             jet_cli_status_field("materialization", materialization),
             jet_cli_status_field("output", jet_cli_status_text(output.raw.copy())),
             jet_cli_status_field("plan_identity", jet_cli_status_text(plan.identity.copy())),
-            jet_cli_status_field("receipt", jet_cli_bundle_status(&receipt_tree)),
+            jet_cli_status_field("receipt", jet_cli_bundle_status(receipt_tree)),
             jet_cli_status_field("receipt_digest", jet_cli_status_text(receipt_digest))}
         if explain -> &fields.push(jet_cli_status_field("explain", jet_cli_status_object([JetCLIStatusField]{
             jet_cli_status_field("authority", jet_cli_status_text("checked package inputs")),
