@@ -69,7 +69,7 @@ fn pkg_manifest_path_checked(root: String) -[FS, Env]> String? ManifestError! {
 // None distinct from a workspace resolution error; `??` collapses both.
 fn pkg_entry_has_workspace(resolver: AuthorityResolver, cache: &WorkspaceDeclarationCache) -[FS, Env]> Bool ManifestError! {
     if resolver.resolve_workspace_source(&cache) == {
-        .Ok(source) -> Ok(source != None)
+        .Ok(source) -> Ok(if source == .Val(_) -> true else -> false)
         .Err(error) -> Err(pkg_entry_workspace_error(error))
     }
 }
@@ -166,10 +166,11 @@ fn pkg_find_inline_package_root_checked(cache: &WorkspaceDeclarationCache, start
             }
         }
         inline :: pkg_checked_inline_package_entry(resolver)
-        if authority == None && (has_manifest || inline != None) {
+        has_inline :: if inline == .Val(_) -> true else -> false
+        if authority == None && (has_manifest || has_inline) {
             _ :: pkg_entry_has_workspace(resolver, &cache)
         }
-        if inline != None -> return Ok(Val(dir))
+        if has_inline -> return Ok(Val(dir))
         if workspace || has_manifest -> return Ok(None)
         parent :: AuthorityResolver.authority_walk_parent(dir) ?? return Ok(None)
         dir = parent
@@ -194,7 +195,7 @@ fn pkg_entry_load_conventional(root: String) -[FS, Env]> PackageFacts? ManifestE
     resolver.revalidate_file(manifest.file) ?? return Err(pkg_entry_authority_error(err))
     if compose_error == .Val(error) {
         authority_error :: if error == {
-            .NestedMembers(root, member) -> AuthorityError.NestedMembers{root: root, member: member}
+            .NestedMembers(member_root, member) -> AuthorityError.NestedMembers{root: member_root, member: member}
             else -> AuthorityError.Invalid{path: manifest.file.path, detail: error.message()}
         }
         return Err(pkg_entry_authority_error(authority_error))

@@ -40,9 +40,11 @@ fn pkg_json_bool(value: Dyn) -> Bool? Never! {
     }
 }
 
-// Compact JSON with object keys in insertion order.
+// Compact JSON with object keys in insertion order. Parsed file trees and
+// Jetpack-owned facts exclude nonfinite numbers and unsupported native values;
+// an encoding failure here breaches that invariant, not a recoverable document.
 fn pkg_json_render(value: Dyn) -> String Never! {
-    pkg_json_tree_core.to_string(value)
+    pkg_json_tree_core.to_string(value) ?? panic("Jetpack rendered a value JSON can't encode: {err.kind:Debug}")
 }
 
 // A string array of `values`.

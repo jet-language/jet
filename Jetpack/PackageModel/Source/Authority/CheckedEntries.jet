@@ -258,25 +258,15 @@ fn pkg_authority_require_single_link(path: String, info: files.Stat) AuthorityEr
     return Err(AuthorityError.Invalid{path: path, detail: AUTHORITY_HARDLINK_DETAIL})
 }
 
-// The IOContext of a provider failure, when it carries one.
-fn pkg_io_error_context(error: IOError) -> IOContext? Never! {
-    if error == {
-        .InvalidInput(context) -> Val(context)
-        .NotFound(context) -> Val(context)
-        .PermissionDenied(context) -> Val(context)
-        .TimedOut(context) -> Val(context)
-        .Cancelled(context) -> Val(context)
-        .Closed(context) -> Val(context)
-        .Protocol(context) -> Val(context)
-        .Other(context) -> Val(context)
-        else -> None
-    }
-}
-
 // The OS error number behind a provider failure, when known.
 fn pkg_io_os_code(error: IOError) -> Int? Never! {
-    context :: pkg_io_error_context(error) ?? return None
-    context.os_code
+    if error == {
+        .InvalidInput(context) | .NotFound(context) | .PermissionDenied(context) |
+        .TimedOut(context) | .Cancelled(context) | .Closed(context) |
+        .Protocol(context) | .Other(context) | .AlreadyExists(context) |
+        .Unsupported(context) -> context.os_code
+        else -> None
+    }
 }
 
 // ELOOP: the final component was a link opened with no-follow.

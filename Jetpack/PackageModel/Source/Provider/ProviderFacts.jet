@@ -52,8 +52,6 @@ enum ProviderFactValue {
             .Int(number) -> ProviderFactValue.Number("{number}")
             .Float(number) -> ProviderFactValue.Number("{number}")
             .Text(text) -> ProviderFactValue.Text(text)
-            .Bytes(_) -> ProviderFactValue.Text(value.to_text() ?? "")
-            .DateTime(_) -> ProviderFactValue.Text(value.to_text() ?? "")
             .Array(items) -> {
                 values := [ProviderFactValue]{}
                 loop item in items -> &values.push(ProviderFactValue.from_json_tree(item))
@@ -64,6 +62,8 @@ enum ProviderFactValue {
                 loop pair in fields -> values[pair.key] = ProviderFactValue.from_json_tree(pair.value)
                 ProviderFactValue.Map(values)
             }
+            // Native byte/date carriers expose text through the public accessor.
+            else -> ProviderFactValue.Text(value.to_text() ?? "")
         }
     }
 }

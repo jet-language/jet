@@ -58,7 +58,7 @@ struct AuthorityWalkBudget {
 // Every entry of the held `directory` (displayed as `path`), sorted by name,
 // each observed with a no-follow Stat and counted against `budget`.
 fn pkg_authority_read_sorted_entries(directory: Directory, path: String, budget: &AuthorityWalkBudget) -[FS]> [AuthorityEntry] AuthorityError! {
-    listed :: &directory.list() ?? return Err(AuthorityError.IO{path: path, operation: "read", detail: "{err}"})
+    listed :: directory.list() ?? return Err(AuthorityError.IO{path: path, operation: "read", detail: "{err}"})
     entries := [AuthorityEntry]{}
     loop entry in listed {
         info :: directory.entry_stat(entry.name) ?? return Err(AuthorityError.IO{path: path, operation: "inspect", detail: "{err}"})
