@@ -28,6 +28,9 @@ extern Text *jet_rt_record_get_JetDelivery_store(Delivery *);
 extern bool jet_rt_record_get_JetDelivery_duplicate(Delivery *);
 extern Text *jet_rt_record_get_JetDelivery_authority(Delivery *);
 extern int64_t jet_rt_record_get_JetDelivery_generation(Delivery *);
+extern Delivery *jet_services_raw_delivery_allocate(Text *,Text *,uint8_t,Text *,int64_t);
+extern void jet_services_raw_delivery_identity(Delivery *,Text **,Text **,bool *,Text **,int64_t *);
+extern Text *jet_services_raw_delivery_store(Delivery *);
 struct Watched { void *ptr; int64_t size,align; unsigned freed; };
 static struct Watched watched[2048];
 static size_t count;
@@ -59,7 +62,7 @@ int main(int argc,char **argv) {
     for(size_t i=0;i<5;++i) for(size_t j=0;j<4;++j) {
         Text *text=jet_rt_string_clone(&input); text_watch(text);
         int64_t exact=jet_int_owned_from_i64(generations[i]);
-        Delivery *a=jet_rt_record_new_JetDelivery(text,text,bools[j],text,exact); delivery_watch(a);
+        Delivery *a=jet_services_raw_delivery_allocate(text,text,bools[j],text,exact); delivery_watch(a);
         assert(a->generation==generations[i] && a->duplicate==(bools[j]!=0)); different(text,a->id); different(text,a->store); different(text,a->authority);
         jet_rt_int_drop(exact); jet_rt_string_drop(text);
         Delivery *b=jet_rt_handle_clone_JetDelivery(a); delivery_watch(b); assert(a!=b && jet_rt_handle_eq_JetDelivery(a,b));
@@ -74,6 +77,16 @@ int main(int argc,char **argv) {
         Text *id=jet_rt_record_get_JetDelivery_id(a),*store=jet_rt_record_get_JetDelivery_store(a),*authority=jet_rt_record_get_JetDelivery_authority(a);
         text_watch(id); text_watch(store); text_watch(authority); different(a->id,id); different(a->store,store); different(a->authority,authority);
         int64_t got=jet_rt_record_get_JetDelivery_generation(a); assert(jet_int_owned_to_i64(got)==generations[i]); jet_rt_int_drop(got);
+        Text *raw_id,*raw_store,*raw_authority;
+        struct { bool value; unsigned char guard[7]; } raw_bool={false,{11,22,33,44,55,66,77}};
+        int64_t raw_generation;
+        jet_services_raw_delivery_identity(a,&raw_id,&raw_store,&raw_bool.value,&raw_authority,&raw_generation);
+        text_watch(raw_id); text_watch(raw_store); text_watch(raw_authority);
+        different(a->id,raw_id); different(a->store,raw_store); different(a->authority,raw_authority);
+        assert(raw_bool.value==(bools[j]!=0) && !memcmp(raw_bool.guard,(unsigned char[]){11,22,33,44,55,66,77},7));
+        assert(jet_int_owned_to_i64(raw_generation)==generations[i]); jet_rt_int_drop(raw_generation);
+        Text *raw_store_copy=jet_services_raw_delivery_store(a); text_watch(raw_store_copy); different(a->store,raw_store_copy);
+        jet_rt_string_drop(raw_id); jet_rt_string_drop(raw_store); jet_rt_string_drop(raw_authority); jet_rt_string_drop(raw_store_copy);
         Text *shown=jet_rt_handle_show_JetDelivery(a); text_watch(shown);
         unsigned char expected[14]={'D','e','l','i','v','e','r','y','(',0,0,0,0,')'}; memcpy(expected+9,binary,4);
         assert(shown->len==14 && !memcmp(shown->data,expected,14));

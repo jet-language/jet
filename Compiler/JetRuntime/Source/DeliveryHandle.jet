@@ -49,3 +49,21 @@ DELIVERY_HANDLE_BYTES :: prep { I64{40} }
     rt_text_push_word(target, I64{41}, I64{1})
     jet_rt_string_builder_finish(target)
 }
+
+// Services.rs:3371-3376 / ServiceAuthority.rs:2749. These transport leaves
+// borrow the canonical native Delivery40 carrier; no registry access occurs.
+#Export(c) fn jet_services_raw_delivery_allocate(id: I64, store: I64, duplicate: U8, authority: I64, generation: I64) -> I64 {
+    jet_rt_record_new_JetDelivery(id, store, duplicate, authority, generation)
+}
+#Export(c) fn jet_services_raw_delivery_identity(value: I64, id: I64, store: I64, duplicate: I64, authority: I64, generation: I64) {
+    rt_text_store(id, jet_rt_record_get_JetDelivery_id(value))
+    rt_text_store(store, jet_rt_record_get_JetDelivery_store(value))
+    #Unsafe("the C ABI lends exactly one writable bool byte; upper bytes are not part of this output") {
+        os_store_u8(duplicate, if jet_rt_record_get_JetDelivery_duplicate(value) -> I64{1} else -> I64{0})
+    }
+    rt_text_store(authority, jet_rt_record_get_JetDelivery_authority(value))
+    rt_text_store(generation, jet_rt_record_get_JetDelivery_generation(value))
+}
+#Export(c) fn jet_services_raw_delivery_store(value: I64) -> I64 {
+    jet_rt_record_get_JetDelivery_store(value)
+}
