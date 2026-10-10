@@ -3,7 +3,7 @@
 // The factory's Rust host is a bootstrap exception, never a native compiler.
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { accessSync, chmodSync, closeSync, constants, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { accessSync, chmodSync, closeSync, constants, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { invokeStageZeroFactory, readStageZeroFactory } from './native-factory.mjs';
@@ -65,21 +65,27 @@ try {
     copyFileSync(binary, join(directory, 'jet')); chmodSync(join(directory, 'jet'), 0o755);
     copyFileSync(object, join(directory, 'jet.o'));
     cpSync(options.runtime, join(directory, 'jet-runtime'), { recursive: true, dereference: true });
-    return { jet: join(directory, 'jet'), sha256: hash(bytes), objectSha256: hash(objects) };
+    return { binary: join(directory, 'jet'), sha256: hash(bytes), objectSha256: hash(objects) };
   }
   const first = publish(stage1, prefix + '.exe', prefix + '.o');
   steps.push({ name: 'factory-native-stage1', rc: 0, seconds: (Date.now() - start) / 1000, factoryReceipt: factory.receipt, keepGoingReport: factory.census, ...first });
   json(join(out, 'steps.json'), steps);
+  const artifactsFile = join(dirname(repo), 'ARTIFACTS.json');
+  const artifacts = existsSync(artifactsFile) ? JSON.parse(readFileSync(artifactsFile, 'utf8')) : { schema: 'jet-regression-artifacts/v1', regression_role: 'discovery', commit: record.commit, tree: record.tree, source: repo, target_dir: `/mnt/jetscratch/targets/source-${record.commit}`, artifacts: {} };
+  if (artifacts.schema !== 'jet-regression-artifacts/v1' || artifacts.commit !== record.commit || artifacts.tree !== record.tree || artifacts.source !== repo) throw Error('artifact publication source pin mismatch');
+  artifacts.artifacts.candidate_jetc0 = { path: first.binary, sha256: first.sha256, native: true, runtimeDir: join(stage1, 'jet-runtime'), sourceSha256: unit.sourceSha256 };
+  const temporaryArtifacts = `${artifactsFile}.${process.pid}.new`;
+  json(temporaryArtifacts, artifacts); renameSync(temporaryArtifacts, artifactsFile);
   const env = { ...process.env, JET_TOOLCHAIN_ROOT: repo, JET_KEEP_GOING: '1', JET_KEEP_GOING_REPORT: join(out, 'stage2-keep-going.tsv') };
   for (const key of Object.keys(env)) if (key.startsWith('JET_FRONT_') || key.startsWith('JET_BOOTSTRAP_') || key === 'JET_DUMP_MIR' || key === 'JET_DEBUG_LOWER_ALL' || key === 'JET_KEEP_GOING_SKIP') delete env[key];
-  execute('native-stage2', [join(repo, 'Tools/agent/jet-env'), first.jet, 'build', unit.source], env, unit.project);
+  execute('native-stage2', [join(repo, 'Tools/agent/jet-env'), first.binary, 'build', unit.source], env, unit.project);
   const census = readFileSync(env.JET_KEEP_GOING_REPORT, 'utf8').trim().split('\n');
   if (census.length !== 1 || census[0] !== 'phase\titem\tcode\tmessage\tspan') throw Error('stage2 all-phases census must exist and be empty');
   const second = publish(stage2, join(unit.project, '.jet/build/selfhost'), join(unit.project, '.jet/build/selfhost.o'));
   const comparisons = ['jet', 'jet.o'].map(name => ({ name, equal: readFileSync(join(stage1, name)).equals(readFileSync(join(stage2, name))) }));
-  json(join(out, 'comparisons.json'), comparisons);
+  json(join(out, 'comparisons.json'), { fixedPoint: comparisons.every(row => row.equal), stages: [1, 2], files: comparisons });
   if (comparisons.some(row => !row.equal)) throw Error('native stage1/stage2 object and ELF fixed point differ');
-  receipt = { schema: 'jet-native-compiler/v1', commit: record.commit, sourceRoot: repo, sourceSha256: unit.sourceSha256, factorySha256: record.factory.sha256, runtimePackSha256: hash(runtime.pack), backend: 'jet-native', optimization: 'O0', fixedPoint: true, stages: [{ stage: 1, ...first, keepGoingReport: factory.census }, { stage: 2, ...second, keepGoingReport: env.JET_KEEP_GOING_REPORT }], jet: second.jet, runtimeDir: join(stage2, 'jet-runtime'), steps, rc: 0, verdict: 'GREEN' };
+  receipt = { schema: 'jet-native-compiler/v1', commit: record.commit, sourceRoot: repo, sourceSha256: unit.sourceSha256, factorySha256: record.factory.sha256, runtimePackSha256: hash(runtime.pack), producerSha256: plan.producerSha256, harnessSha256: plan.harnessSha256, backend: 'jet-native', optimization: 'O0', fixedPoint: true, stages: [{ stage: 1, ...first, keepGoingReport: factory.census, keepGoingFailures: 0 }, { stage: 2, ...second, keepGoingReport: env.JET_KEEP_GOING_REPORT, keepGoingFailures: 0 }], jet: second.binary, runtimeDir: join(stage2, 'jet-runtime'), steps, rc: 0, verdict: 'GREEN' };
 } catch (error) {
   receipt = { schema: 'jet-native-feed-failure/v1', plan, steps, rc: 1, verdict: 'RED', error: error.stack, fixedPoint: false };
 }
