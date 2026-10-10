@@ -158,6 +158,15 @@ async function execute(file) {
   const definition=registry.get(file), names=[];executed.set(file,names);
   for(const [index,argv]of definition.commands.entries()) {
     const name=`${file.replace(/\.mjs$/,'')}-${index}`;names.push(name);
+    if(definition.missingOracle||definition.missingOracleSteps?.includes(index)) {
+      names.pop();
+      const evidence={mode:name,because:'Rust oracle retired; required historical capture not preserved (owner #38(b)/#59)',cardRequired:true};
+      P.receipt(name,'UNCOVERED',evidence);
+      console.log(JSON.stringify({name,verdict:'UNCOVERED',...evidence}));
+      if(!parked.has(file))parked.set(file,[]);
+      parked.get(file).push({verdict:'UNCOVERED',...evidence});
+      continue;
+    }
     if (argv.prepared) {
       try {
         if (!sharedResults) throw Error('successful same-pin golden receipt absent');
@@ -168,8 +177,7 @@ async function execute(file) {
     }
     const needs=definition.needsByStep?.[index]??definition.needs;
     const absent=needs.filter(file=>!fs.existsSync(file));
-    if(definition.missingOracle||definition.missingOracleSteps?.includes(index))blocked(name,'Rust-captured oracle not preserved');
-    else if(needs.includes(results)&&!sharedResults)blocked(name,'same-pin native golden union absent or unsealed');
+    if(needs.includes(results)&&!sharedResults)blocked(name,'same-pin native golden union absent or unsealed');
     else if((needs.includes(charOracle)||needs.includes(fmtExpected))&&!sealedInputs)blocked(name,'preserved frozen inputs absent or unsealed');
     else if(absent.length)blocked(name,`required inputs absent: ${absent.join(', ')}`);
     else await start(name,['timeout','--kill-after=10s','3000s',...argv],{...env,...definition.extra});

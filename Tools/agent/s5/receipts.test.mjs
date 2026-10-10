@@ -38,6 +38,23 @@ test('missing, malformed, incomplete and failed receipts are blocked inputs', t 
   assert.match(readPrerequisite(dir, head, ['union']).problem, /decisive/);
 });
 
+test('retired oracle rows stay UNCOVERED while native goldens and AGE remain decisive', t => {
+  const dir=temporary(t);
+  const receipt={...successful(),phase:'fixtures',steps:[
+    {name:'shared-native-results',verdict:'PASS'},
+    {name:'run-crypto-fixtures-4',verdict:'PASS'},
+    {name:'run-display-goldens-1',verdict:'UNCOVERED',cardRequired:true},
+    {name:'freeze-age-fixtures-0',verdict:'UNCOVERED',cardRequired:true},
+  ],runners:[{name:'freeze-age-fixtures.mjs',verdict:'UNCOVERED'}]};
+  publication(dir,receipt);
+  assert.equal(readPrerequisite(dir,head,['shared-native-results','run-crypto-fixtures-4'],'fixtures').problem,null);
+  assert.match(readPrerequisite(dir,head,['freeze-age-fixtures-0'],'fixtures').problem,/not PASS/);
+  for(const name of ['shared-native-results','run-crypto-fixtures-4']) {
+    publication(dir,{...receipt,steps:receipt.steps.map(row=>row.name===name?{...row,verdict:'FAIL'}:row)});
+    assert.match(readPrerequisite(dir,head,[],'fixtures').problem,/failed/);
+  }
+});
+
 test('timeout preserves partial evidence and publishes an explicit completed failure', t => {
   const dir = temporary(t), partial = {...successful(), complete: false, verdict: 'RUNNING'};
   writePhaseReceipt(dir, partial);

@@ -90,6 +90,11 @@ same-source GREEN may be reused only after verifying its artifacts.
 The native fixed point is stage1 (built by the candidate) compiling stage2.
 Require both objects and ELF executables to be byte-identical, and require each
 stage's own all-phases diagnostic report to exist and contain zero failures.
+The missing historical display comparator and AGE testkit generator are retired
+Rust-oracle modes (owner #38(b)/#59), not native-suite failures. Report their
+individual rows as `UNCOVERED`, print them, and require a Tower card; never label
+them PASS. The native golden union and `run-crypto-fixtures` AGE decoder/sealer
+tests remain mandatory and their failures still block the final native gate.
 
 Use fresh artifacts for runtime claims. A source check, worker receipt, or stale
 binary cannot establish runtime, tier, snapshot, golden, or I9 evidence.
