@@ -25,6 +25,7 @@
 //   crates/jet-codegen/src/Prelude/Core/UnicodeString.rs (string kernels)
 //   Compiler/JetRuntime/Source/UnicodeTables.jet (fixed-word runtime lookups)
 //   Compiler/JetRuntime/Source/UnicodeNormalizeTables.jet (NFC-only lookups)
+//   Compiler/JetRuntime/Source/UnicodeText_<n>.jet (native text-method lookups)
 //
 // Pinned Unicode release: 17.0.0. Pinned sha256 of each input file (verified
 // before generating — mismatch aborts):
@@ -788,6 +789,48 @@ const jetNormalizeTablesOut = jetNormalizeHeader
   + "fn unicode_normal_compose(a: I64, b: I64) -> I64 Never! {\n"
   + "    unicode_normal_compose_key((a << I64{21}).bit_or(b))\n}\n";
 
+// Native text-method lookups (title/capitalize/casefold, istitle, padding
+// width and its UAX #29 grapheme views). Same parsed rows as the Rust tables
+// above; tagged lookups return the Rust tag, unlisted scalars the Rust default.
+// Lookups are packed in order into UnicodeText_<n>.jet units, each within the
+// existing UnicodeTables.jet size (one lookup alone must also fit).
+function jetTagged(name, ranges, missing) {
+  return `fn unicode_${name}(cp: I64) -> I64 Never! {\n`
+    + jetLookupTree(ranges.filter((row) => row[2] !== missing), `I64{${missing}}`, (row) => `I64{${row[2]}}`)
+    + "}\n";
+}
+const jetTextHeader = HEADER_COMMENT.trimEnd() + "\n"
+  + "// Native text-method lookups; static I64 decisions, no allocation/Core indexing.\n"
+  + "// Mapping results contain three 21-bit scalar lanes (low lane first).\n";
+const jetTextLookups = [
+  jetMapping("title", simpleTitle),
+  jetMapping("fold", caseFold),
+  jetProperty("lowercase", lowercaseRanges),
+  jetProperty("uppercase", uppercaseRanges),
+  // General_Category Cc (gc tag 0): Rust char::is_control and jet_text_is_control.
+  jetProperty("control", gcRanges.filter((row) => row[2] === 0)),
+  // jet_text_is_zero_width_scalar: gc Mn/Me (tags 2, 3) or Default_Ignorable_Code_Point.
+  jetProperty("zero_width", [...gcRanges.filter((row) => row[2] === 2 || row[2] === 3), ...defaultIgnorableRanges]),
+  // jet_text_eaw_class == 2: East_Asian_Width W/F.
+  jetProperty("east_asian_wide", eawMerged.filter((row) => row[2] === 2)),
+  jetProperty("emoji", emoji),
+  jetProperty("emoji_presentation", emojiPresentation),
+  jetProperty("extended_pictographic", extPictographic),
+  jetTagged("incb_class", incbRanges, 0),
+  jetTagged("grapheme_class", graphemeRanges, 0),
+];
+const jetTextUnits = [];
+for (const lookup of jetTextLookups) {
+  const last = jetTextUnits.at(-1);
+  if (last && last[1].length + 1 + lookup.length <= jetTablesOut.length) {
+    last[1] += "\n" + lookup;
+    continue;
+  }
+  const text = jetTextHeader + lookup;
+  if (text.length > jetTablesOut.length) throw new Error(`text lookup exceeds existing UnicodeTables.jet size:\n${lookup.slice(0, 80)}`);
+  jetTextUnits.push([`Compiler/JetRuntime/Source/UnicodeText_${jetTextUnits.length}.jet`, text]);
+}
+
 const outPaths = [
   ["crates/jet-foundation/src/generated/UnicodeString.rs", stringModuleOut],
   ["crates/jet-codegen/src/Prelude/Core/UnicodeString.rs", stringFlatOut],
@@ -796,6 +839,7 @@ const outPaths = [
   ["Core/text/unicode_names.jet", jetNamesOut],
   ["Compiler/JetRuntime/Source/UnicodeNormalizeTables.jet", jetNormalizeTablesOut],
   ...jetNormalizeChunks,
+  ...jetTextUnits,
 ];
 // Reused JUCD schema-1 encoding from 7c42badbb. These five private Core data
 // tables use the very same parsed/pinned ranges as the Rust verification tier.
