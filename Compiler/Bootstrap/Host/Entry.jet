@@ -7,24 +7,21 @@
 // The host ABI is infallible: a failure escaping the driver becomes the
 // result's internal problem instead of a Result the host cannot decode.
 //
-// `JET_KEEP_GOING=1` selects the compiler-internal all-phases diagnostic mode
-// (jet_driver_compile_keep_going): every phase runs past earlier failures and
-// each failure is a TSV row, written to `JET_KEEP_GOING_REPORT` when it is
-// set. `JET_KEEP_GOING_SKIP` lists, comma-separated, the `<phase>:<name>@<n>`
-// functions an earlier run crashed in, which this run traps instead. The
+// Every feed delegates to jet_cli_compile_request, including the native and
+// library-object environment seams. `JET_KEEP_GOING=1` selects its shared
+// all-phases collector, `JET_KEEP_GOING_SKIP` traps previously crashing items,
+// and `JET_KEEP_GOING_REPORT` receives the CLI's TSV failure census. A failed
+// census is incomplete and cannot produce an artifact. The
 // Core imports use the unit's shared spellings (JetCli's), which the
 // assembler keeps once.
 use core.sys as cli_sys
 use core.files as cli_files
 use jet_backend.[CoreSharedParentGetterResult, CoreSharedParentRuntime, CoreSharedRuntimeExportABI, core_shared_runtime_export_abis_decode]
+use jet_cli.[jet_cli_compile_request]
 use jet_driver.[
     JetDriverCompileRequest,
     JetDriverCompileResult,
-    JetDriverKeepGoing,
-    jet_driver_compile,
-    jet_driver_compile_mir,
     jet_driver_compile_escaped_failure,
-    jet_driver_compile_keep_going,
     JetDriverCoreLibraryPreparation,
     jet_driver_prepare_core_library,
     JetDriverCoreSource,
@@ -38,7 +35,7 @@ use jet_backend.[lir_lower_entry, lir_print_module, x64_relocatable_object, x64_
 
 // Self-host inventories observe Jet's checked MIR without entering Rust emit.
 fn jet_bootstrap_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult Never! {
-    result := jet_driver_compile_mir(^request) ?? return jet_driver_compile_escaped_failure("the native front end failed outside every compile stage")
+    result := jet_cli_compile_request(^request, false) ?? return jet_driver_compile_escaped_failure("the native front end failed outside every compile stage")
     if cli_sys.get("JET_FRONT_MIR_OUTPUT") == .Val(path) {
         if !result.complete || result.internal_problem != None -> return result
         program :: result.mir ?? return jet_driver_compile_escaped_failure("the native front end finished without MIR")
@@ -55,7 +52,7 @@ fn jet_bootstrap_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResul
 // MIR conversion enters this path; exports are exactly the checked
 // NativeLibrary artifact's `#Export(c)` rows.
 fn jet_bootstrap_library_object(request: ^JetDriverCompileRequest, prefix: String) -> JetDriverCompileResult Never! {
-    result := jet_driver_compile_mir(^request) ?? return jet_driver_compile_escaped_failure("the native front end failed outside every compile stage")
+    result := jet_cli_compile_request(^request, false) ?? return jet_driver_compile_escaped_failure("the native front end failed outside every compile stage")
     if !result.complete || result.internal_problem != None -> return result
     program :: result.mir ?? return jet_driver_compile_escaped_failure("the native front end finished without MIR")
     lifecycle := [String]{}
@@ -111,20 +108,7 @@ fn jet_bootstrap_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileR
     if cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") == .Val(prefix) -> return jet_bootstrap_library_object(^request, prefix)
     if cli_sys.get("JET_FRONT_NATIVE_OUTPUT") == .Val(prefix) -> return jet_bootstrap_native(^request, prefix)
     if cli_sys.get("JET_FRONT_MIR_OUTPUT") != None -> return jet_bootstrap_mir(^request)
-    if cli_sys.get("JET_KEEP_GOING") != Val("1") {
-        return jet_driver_compile(^request) ?? jet_driver_compile_escaped_failure("the compiler driver failed outside every compile stage")
-    }
-    skip := [String]{}
-    loop entry in (cli_sys.get("JET_KEEP_GOING_SKIP") ?? "").split(",").to_list() {
-        if entry.trim().len() > 0 -> &skip.push(entry.trim())
-    }
-    result := jet_driver_compile_keep_going(^request, JetDriverKeepGoing{skip: skip}, true) ?? jet_driver_compile_escaped_failure("the compiler driver failed outside every compile stage")
-    report :: cli_sys.get("JET_KEEP_GOING_REPORT") ?? return result
-    lines := [String]{"phase\titem\tcode\tmessage\tspan"}
-    loop row in result.keep_going_rows -> &lines.push(row)
-    &lines.push("")
-    cli_files.write(report, lines.join("\n")) ?? return result
-    result
+    jet_cli_compile_request(^request, true) ?? jet_driver_compile_escaped_failure("the compiler driver failed outside every compile stage")
 }
 
 // Checked private accessor, invoked by the outer static host using this
