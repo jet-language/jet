@@ -252,6 +252,58 @@ fn sema_type_comparable(environment: SemaScopeEnvironment, program: SemaProgramT
     sema_types_comparable(environment, program, ty)
 }
 
+fn sema_comparability_stored_parameter(item: Item, name: String) -> Bool Never! {
+    if item == {
+        .Struct(definition) -> {
+            loop field in definition.fields {
+                if field.computed == None && sema_serde_mentions_parameter(field.ty, name) -> return true
+            }
+        }
+        .Enum(definition) -> {
+            loop variant in definition.variants {
+                if variant.payload == {
+                    .Single(ty, _) -> if sema_serde_mentions_parameter(ty, name) -> return true
+                    .Named(fields) -> {
+                        loop field in fields {
+                            if sema_serde_mentions_parameter(field.ty, name) -> return true
+                        }
+                    }
+                    .Unit -> {}
+                }
+            }
+        }
+        else -> {}
+    }
+    false
+}
+
+// Structural derives constrain stored generic parameters, not phantom names.
+// Rust records these indices in TraitRegistry.structural_params. Resolve the
+// same declaration-owned fields here; absent metadata keeps the strict rule.
+fn sema_comparability_equatable_arguments(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, args: [Type]) -> Bool Never! {
+    if program.registration_graph == .Val(graph) {
+        name :: sema_type_graph_base_name(ty) ?? ""
+        resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name)
+        if resolved == .Val(symbol) {
+            row :: sema_type_graph_nominal_row(graph, symbol.symbol.id.key)
+            if row == .Val(nominal_row) {
+                nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+                if nominal.source == .SourceAST(item) {
+                    if item == .Struct(_) || item == .Enum(_) {
+                        if nominal.generic_params.len() != args.len() -> return false
+                        loop (index, parameter) in nominal.generic_params {
+                            if sema_comparability_stored_parameter(item, parameter.name) && !sema_type_equatable(environment, program, args[index]) -> return false
+                        }
+                        return true
+                    }
+                }
+            }
+        }
+    }
+    loop arg in args { if !sema_type_equatable(environment, program, arg) -> return false }
+    true
+}
+
 // Rust `is_equatable_type`/`is_equatable`: value equality is structural over
 // the built-in shapes and registered (`Equatable`) for nominals.
 fn sema_type_equatable(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type) -> Bool Never! {
@@ -273,10 +325,7 @@ fn sema_type_equatable(environment: SemaScopeEnvironment, program: SemaProgramTa
             if leaf == "ID" -> return sema_comparability_implements(environment, program, ty, "Equatable")
             if sema_comparability_sealed_crypto_plan(leaf) -> return false
             if !sema_comparability_implements(environment, program, ty, "Equatable") -> return false
-            loop arg in args {
-                if !sema_type_equatable(environment, program, arg) -> return false
-            }
-            true
+            sema_comparability_equatable_arguments(environment, program, ty, args)
         }
         .Tuple(fields) -> {
             loop field in fields {

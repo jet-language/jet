@@ -722,6 +722,10 @@ no expected type, omitted annotations report **E0801** (S46).
 A locally inferred value lambda keeps the failure contract proved by its own
 body; a body with no failure has a `Never` failure rail. A same-named file
 function cannot supply the local binding's call or failure contract.
+Name resolution is lexical for calls as well as value reads: a non-callable
+local also shadows a same-named file function and calling it reports **E0803**.
+Use an explicit module-qualified call to select a declared function while
+keeping a same-named local value in scope.
 
 ```jet
 square :: (n: Int) -> n * n

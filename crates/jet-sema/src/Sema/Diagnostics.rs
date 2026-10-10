@@ -2009,9 +2009,11 @@ pub(crate) fn is_equatable(
         }
         Type::Apply { name, args } => {
             trait_reg.implements_trait(name, Generics::EQUATABLE)
-                && args
-                    .iter()
-                    .all(|arg| is_equatable(arg, registry, trait_reg))
+                && args.iter().enumerate().all(|(index, arg)| {
+                    trait_reg.structural_params.get(name)
+                        .is_some_and(|stored| !stored.contains(&index))
+                        || is_equatable(arg, registry, trait_reg)
+                })
         }
         Type::Tuple(fields) => fields
             .iter()
@@ -2441,6 +2443,41 @@ mod tests {
         core_crypto_nominal, is_secret_bearing_crypto_type, suggest_field, suggest_method,
     };
     use crate::AST::{InternalTag, TagMarker, Type};
+
+    #[test]
+    fn equatable_constrains_stored_arguments_not_registered_phantoms() {
+        let registry = crate::Sema::TypeRegistry {
+            types: Default::default(),
+            source_owned_types: Default::default(),
+            core_source_module: None,
+            opaque_methods: Default::default(),
+            operator_signatures: Default::default(),
+            error_types: Default::default(),
+            unit_types: Default::default(),
+            unit_facts: Default::default(),
+            literal_facts: Default::default(),
+            computed_fields: Default::default(),
+            field_defaults: Default::default(),
+            receipt_sections: Default::default(),
+            nominal_memo: Default::default(),
+        };
+        let mut traits = crate::Traits::TraitRegistry::default();
+        traits.trait_impls.insert(("Carrier".into(), "Equatable".into()));
+        traits.structural_params.insert("Carrier".into(), vec![1]);
+        let opaque = Type::Named("Opaque".into());
+        let carrier = |stored| Type::Apply {
+            name: "Carrier".into(),
+            args: vec![opaque.clone(), stored],
+        };
+        assert!(super::is_equatable(&carrier(Type::Int), &registry, &traits));
+        assert!(!super::is_equatable(&carrier(opaque.clone()), &registry, &traits));
+        traits.structural_params.remove("Carrier");
+        assert!(!super::is_equatable(&carrier(Type::Int), &registry, &traits));
+        traits.structural_params.insert("Carrier".into(), vec![]);
+        assert!(super::is_equatable(&carrier(opaque.clone()), &registry, &traits));
+        traits.trait_impls.clear();
+        assert!(!super::is_equatable(&carrier(Type::Int), &registry, &traits));
+    }
 
     fn count_core_crypto_markers(ty: &Type) -> usize {
         match ty {

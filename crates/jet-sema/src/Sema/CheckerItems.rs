@@ -2396,8 +2396,19 @@ impl<'a> Checker<'a> {
             | Type::Tagged { inner: elem, .. }
             | Type::InlineRange { base: elem, .. } => self.is_equatable_type(elem),
             Type::Union(members) => members.iter().all(|member| self.is_equatable_type(member)),
-            Type::Apply { args, .. } if !args.iter().all(|arg| self.is_equatable_type(arg)) => {
-                false
+            Type::Apply { args, .. } => {
+                let (normalized, registry, trait_reg) = self.capability_type_context(ty);
+                let stored = match &normalized {
+                    Type::Apply { name, .. } => trait_reg.structural_params.get(name),
+                    _ => None,
+                };
+                if args.iter().enumerate().any(|(index, arg)| {
+                    stored.is_none_or(|indices| indices.contains(&index))
+                        && !self.is_equatable_type(arg)
+                }) {
+                    return false;
+                }
+                crate::Sema::Diagnostics::is_equatable(&normalized, registry, trait_reg)
             }
             _ => {
                 let (normalized, registry, trait_reg) = self.capability_type_context(ty);

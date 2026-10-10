@@ -1,12 +1,14 @@
-// A call `describe(value)` names the declared function even when a local
-// value of the same name is in scope; the local is still read as a value.
-fn describe(value: Int) -> String {
-    "v{value}"
+// A local value wins an unqualified call name. Select the declared function
+// explicitly through its module while still reading the same-named local.
+module labels {
+    fn describe(value: Int) -> String {
+        "v{value}"
+    }
 }
 
 fn label(value: Int) -> String {
     describe :: "local"
-    "{describe}:{describe(value)}"
+    "{describe}:{labels.describe(value)}"
 }
 
 fn run() {

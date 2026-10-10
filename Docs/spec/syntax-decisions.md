@@ -2260,6 +2260,10 @@ A missing trait follows the package default. Positive markers generate only
 when fields qualify. Negative markers affect only compiler generation. A
 hand-written implementation wins over the package default and either sign.
 Traits that are not structurally derivable remain explicit-only.
+For structural equality, a generic argument is constrained by `Equatable`
+when it occurs in a stored field. A phantom parameter does not introduce
+a value to compare and does not itself require `Equatable`; computed fields
+do not contribute stored state.
 
 `Debug` remains the dev-facing lens; `#Redact` carries the secrets story.
 Explicit opt-in markers for the other derive families remain
