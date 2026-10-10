@@ -41,6 +41,9 @@ const sourceRoots = [
 const excludedSourceRoots = [
   // Native host glue remains a Rust/backend concern, not aggregate Jet input.
   "Compiler/Bootstrap/Host",
+  // The post-merge Publication dependency-command leaf has no CLI caller yet.
+  // Keep it in the repository without expanding the compiler assembly closure.
+  "Compiler/JetCli/Source/Cli/Dependency.jet",
 ];
 
 function fail(message) {
