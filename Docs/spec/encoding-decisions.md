@@ -451,7 +451,7 @@ line and column copy unchanged. (D-ENCXML1=A; D-ENCSTREAM-SURFACE1=A)
 
 Public XML values use only `encoding.Dyn` variants `Null`, `Bool`, `Int`,
 `Text`, `Array`, and `Object`. Encode byte sequences inside the XML schema as
-`Dyn.Array<Int>` with each integer in `0..255`; a `Dyn.Bytes` or
+`Dyn.Array<Int>` with each integer in `0..255`; a `Dyn.Float`, `Dyn.Bytes`, or
 `Dyn.DateTime` anywhere in an XML tree is outside the schema and rejects. Every
 object has exactly its listed keys, every listed key is required even when its
 value is `Null`, and unknown or missing keys reject. `XMLName` is

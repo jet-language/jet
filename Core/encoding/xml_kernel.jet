@@ -175,7 +175,7 @@ fn reason_name(value: XMLReason) -> String Never! {
 }
 
 #Test("XML validation rejects public floating point and byte tree carriers") {
-    loop value in [Dyn]{Dyn.Float(1.5), Dyn.Bytes([U8]{1})} {
+    loop value in ([Dyn]{Dyn.Float(1.5), Dyn.Bytes([U8]{1})}) {
         if validate_tree(value) == {
             .Err(error) -> assert(error.kind == xml.Reason.Shape)
             .Ok(_) -> panic("non-XML public carrier was accepted")
