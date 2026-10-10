@@ -53,6 +53,7 @@ use jet_lexer.[
     TOKEN_RBRACE,
     TOKEN_RBRACKET,
     TOKEN_RPAREN,
+    TOKEN_QUESTION_DOT,
     TOKEN_SEMI,
     TOKEN_STRING,
     Token,
@@ -2666,6 +2667,7 @@ fn jet_driver_inline_package_body(source: String, carrier: JetDriverInlinePackag
 struct JetDriverCoreIdentifierDemand {
     bare_names: [String]
     option_or_err: Bool
+    math_abs_receiver: Bool
 }
 
 struct JetDriverParsedUnit {
@@ -2674,7 +2676,7 @@ struct JetDriverParsedUnit {
 }
 
 fn jet_driver_empty_core_identifier_demand() -> JetDriverCoreIdentifierDemand Never! {
-    JetDriverCoreIdentifierDemand{bare_names: [String]{}, option_or_err: false}
+    JetDriverCoreIdentifierDemand{bare_names: [String]{}, option_or_err: false, math_abs_receiver: false}
 }
 
 // Interpolation tokens share the enclosing lexed source's spelling/literal table.
@@ -2683,6 +2685,13 @@ fn jet_driver_collect_core_identifier_demand(tokens: [Token], tables: TokenTable
         if tokens[index].kind == TOKEN_IDENT {
             name :: token_decoded(tables, tokens[index])
             if name == "or_err" -> demand.option_or_err = true
+            // Loading a potential source owner is syntactic; Sema alone
+            // decides whether this receiver is the canonical primitive Int.
+            if name == "abs" {
+                previous := index - 1
+                loop previous >= 0 && (tokens[previous].kind == TOKEN_LINE_COMMENT || tokens[previous].kind == TOKEN_BLOCK_COMMENT) -> previous -= 1
+                if previous >= 0 && (tokens[previous].kind == TOKEN_DOT || tokens[previous].kind == TOKEN_QUESTION_DOT) -> demand.math_abs_receiver = true
+            }
             if collect_bare {
                 loop bare in CORE_BARE_SOURCE_MODULES {
                     if name == bare.name || (bare.name == "URL" && name == "url") {
@@ -3401,6 +3410,16 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
                         queued[index] = true
                         &pending.push(index)
                     }
+                }
+            }
+        }
+        if demand.math_abs_receiver {
+            if !bare_modules.contains("core.math") -> &bare_modules.push("core.math")
+            owner_index :: jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, "core.math", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
+            if owner_index == .Val(index) {
+                if !queued[index] {
+                    queued[index] = true
+                    &pending.push(index)
                 }
             }
         }

@@ -2272,6 +2272,12 @@ floating-point constant-like values are functions, so use `math.pi()` and
 The numeric `/%` operator rounds division toward negative infinity for both
 exact `Int` and floating-point operands (`-7 /% 2` is `-4`). Its in-place
 form is `/%=`, and whole-number floor division pairs with floored `%`.
+`value.abs()` on the primitive `Int` loads and calls the canonical source
+`core.math.abs(value)` route even without an explicit math import. It keeps
+exact arbitrary-precision `Int -> Int Never!` behavior, without narrowing through
+`Float` or a machine-sized integer. User nominal receivers and `Complex` retain
+their own method namespaces; the source-backed primitive route grants neither
+an `abs` method nor a Core identity to a same-spelled user type.
 
 ```jet
 use core.math as math

@@ -365,10 +365,20 @@ pub fn core_identifier_demand(tokens: &[Token]) -> jet_foundation::AST::CoreIden
         prelude_entries: &[Prelude::Entry],
         demand: &mut jet_foundation::AST::CoreIdentifierDemand,
     ) {
-        for token in tokens {
+        for (index, token) in tokens.iter().enumerate() {
             match &token.kind {
                 TokKind::Ident(name) => {
                     demand.option_or_err |= name == "or_err";
+                    // Source-backed receiver candidates schedule their owner;
+                    // Sema still validates the canonical primitive identity.
+                    // Plain names and literal/comment payloads do not demand it.
+                    if name == "abs"
+                        && tokens[..index].iter().rev().find(|token| !is_comment(&token.kind))
+                            .is_some_and(|token| matches!(token.kind, TokKind::Dot | TokKind::QuestionDot))
+                        && !demand.bare_modules.contains(&"core.math")
+                    {
+                        demand.bare_modules.push("core.math");
+                    }
                     for (index, bare) in CoreModuleExports::CORE_BARE_SOURCE_MODULES.iter().enumerate() {
                         if name == bare.name || (name == "url" && bare.name == "URL") {
                             bare_names[index] = true;
@@ -428,6 +438,20 @@ mod core_identifier_demand_tests {
             assert!(demand.bare_modules.is_empty(), "{source:?}: {demand:?}");
             assert!(!demand.option_or_err, "{source:?}: {demand:?}");
             assert!(demand.prelude_modules.is_empty(), "{source:?}: {demand:?}");
+        }
+    }
+
+    #[test]
+    fn exact_int_abs_receiver_demands_source_without_importing_a_bare_name() {
+        for source in ["value.abs()", "value?.abs()", "value. /* source */ abs()", "\"{value.abs()}\""] {
+            let (tokens, diagnostics) = Lexer::lex(source);
+            assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
+            assert_eq!(Lexer::core_identifier_demand(&tokens).bare_modules, ["core.math"]);
+        }
+        for source in ["fn abs(value: Int) -> Int { value }", "\"value.abs()\"", "`value.abs()`", "// value.abs()\n"] {
+            let (tokens, diagnostics) = Lexer::lex(source);
+            assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
+            assert!(Lexer::core_identifier_demand(&tokens).bare_modules.is_empty(), "{source:?}");
         }
     }
 

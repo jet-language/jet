@@ -24,6 +24,7 @@ use jet_foundation.[
     TStmt,
     Type,
     TypeTupleField,
+    ast_empty_call_arg_flags,
     core_source_receiver_method,
     expr_span,
     symbol_id,
@@ -159,6 +160,29 @@ fn sema_call_try_builtin_host_route(receiver: Expr, receiver_value: TExpr, metho
     value :: sema_tir_expr(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: callback_name, args: [TExpr]{callback_value}}}, span)
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked}
+}
+
+// Only the canonical primitive selects this route. Nominal types named Int
+// and the Complex magnitude method retain their own method namespaces.
+fn sema_call_try_int_abs_source(receiver: Expr, receiver_value: TExpr, method: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if receiver_value.ty != Type.Int || method != "abs" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if args.len() != 0 {
+        &diagnostics.push(sema_error("E0104", span, "`Int.abs` expects 0 arguments, got {args.len()}", "the receiver is the exact Int input to core.math.abs", "call `value.abs()`"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    identity :: sema_call_core_module_identity(environment, program, "core.math") ?? {
+        &diagnostics.push(sema_error("E0003", span, "Int.abs source module is not loaded", "this receiver operation executes core.math.abs on exact Int values", "load the registered Core math source module"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    target :: sema_call_core_source_target(environment, program, identity, "abs", type_args, span, false, &diagnostics) ?? {
+        &diagnostics.push(sema_error("E0003", span, "Int.abs source function is not available", "this receiver operation requires the canonical core.math.abs declaration", "load the registered Core math source function"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    source_args :: [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: expr_span(receiver), flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+    scopes.ownership_call_depth += 1
+    value := sema_call_core_check_source_owned(target, "Int.abs", type_args, source_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    scopes.ownership_call_depth -= 1
+    SemaMethodSpecialCheck{handled: true, value: value}
 }
 
 // One pre-candidate seam for compiler-owned method routes. Callers must pass

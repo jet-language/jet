@@ -7888,6 +7888,52 @@ impl<'a> Checker<'a> {
                 return self.finish_option_zip(a_inner, args, span, resolved_ret_out);
             }
         }
+        // Int.abs is the canonical exact-Int source function, not the
+        // width-polymorphic math builtin (which can select a Float route).
+        if recv_ty == Type::Int && method == "abs" {
+            if !args.is_empty() {
+                self.diags.push(wrong_core_arity("Int.abs", 0, args.len(), span));
+                for arg in args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                return None;
+            }
+            let source = jet_foundation::CoreModuleExports::core_source_module("core.math")
+                .expect("canonical core.math source module");
+            let owner = self.name_ledger.module_by_alias(source.alias)
+                .filter(|&index| self.modules.is_some_and(|modules|
+                    modules[index].registry.core_source_module
+                        .is_some_and(|loaded| loaded.path == source.path)));
+            let Some(owner) = owner else {
+                self.diags.push(Diagnostic::error(
+                    "E0003",
+                    "Int.abs source module is not loaded".to_string(),
+                    "this receiver operation executes core.math.abs on exact Int values".to_string(),
+                    "load the registered Core math source module".to_string(),
+                    Some(span),
+                ));
+                return None;
+            };
+            let receiver_span = receiver.span();
+            let receiver_expr = std::mem::replace(receiver.as_mut(), Expr::Absent(receiver_span));
+            let mut source_args = vec![CallArg {
+                convention: AccessConvention::Read,
+                expr: receiver_expr,
+                span: receiver_span,
+                flags: CallArgFlags::default(),
+                label: None,
+                spread: false,
+            }];
+            let result = self.infer_import_call(
+                source.alias, owner, "abs", span, span, type_args,
+                &mut source_args, resolved_ret_out,
+            );
+            **receiver = source_args.remove(0).expr;
+            if result.is_some() {
+                *recv_type_out = Some("Int".to_string());
+            }
+            return result;
+        }
         // Compiler-private String source methods keep the existing primitive
         // contract and borrow/mutation checks, but mark the call for typed
         // source lowering. The source registry is intentionally consulted only
