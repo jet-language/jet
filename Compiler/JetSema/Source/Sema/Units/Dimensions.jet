@@ -229,7 +229,7 @@ fn sema_units_resolve(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegist
             }
             loop (dependency, _) in dependencies {
                 if known.get(dependency) == None {
-                    waits[index] += 1
+                    waits[index] = waits[index] + 1
                     &dependents[dependency].push(index)
                 }
             }
@@ -245,7 +245,7 @@ fn sema_units_resolve(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegist
             if sema_units_dimension_expression(expression, visibility[declaration.module_index], known, false) == .Found(value) {
                 known[index] = value
                 loop dependent in dependents[index] {
-                    waits[dependent] -= 1
+                    waits[dependent] = waits[dependent] - 1
                     if waits[dependent] == 0 -> &queue.push(dependent)
                 }
             }

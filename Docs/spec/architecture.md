@@ -356,6 +356,10 @@ body, and compiler-query passes lend this single graph through staging and
 restore it on every run exit, including partial-graph exits; speculative landed
 values are rolled back through the graph mutation trail rather than graph copies.
 
+Dimension registration resolves its dependency worklist with explicit indexed
+read/write assignments for pending counts; indexed compound updates are not
+part of Jet's assignment contract (E0164).
+
 The compiler and runtime aggregates have separate explicit source inventories:
 [`Compiler/Bootstrap/sources.list`](../../Compiler/Bootstrap/sources.list) and
 [`Compiler/JetRuntime/sources.list`](../../Compiler/JetRuntime/sources.list).
