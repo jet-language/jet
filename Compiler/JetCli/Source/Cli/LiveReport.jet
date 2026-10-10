@@ -5,7 +5,7 @@ use jet_optimizer.mir_decision_ledger_from_rows
 
 fn jet_cli_live_text(snapshot: JetCLILiveSnapshot) -> String Never! {
     event_lines := snapshot.events
-    if event_lines == None && snapshot.raw_events != None {
+    if event_lines == None && snapshot.raw_events == .Val(_) {
         event_lines = Val(jet_cli_live_event_render(snapshot.raw_events) ?? return "jet inspect live · invalid snapshot: {err.message}\n")
     }
     out := "jet inspect live · pid {snapshot.pid}\nprotocol={snapshot.protocol} session={snapshot.session_id} source={snapshot.source_id} build={snapshot.build_id} revision={snapshot.revision} world={snapshot.world_id}\n\ntask tree\n"

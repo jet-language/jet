@@ -25,10 +25,10 @@ fn run() {
     text :: live_inspect_fixture(events, "", "")
     snapshot :: jet_cli_live_decode(text) ?? panic("closed live snapshot")
     assert(snapshot.values[0].rendered_value == Val("7"))
-    assert(jet_cli_live_event_render(snapshot.raw_events) == Ok("sequence=1 source=AsyncEvent event=2 owner=3 subscription=4 dispatch=5 lifecycle=HandlerFailed queued=-1 blocked=0 running=1 capacity=8 overflow=DropNewest priority=-17 failure=Handler terminal=None"))
+    assert((jet_cli_live_event_render(snapshot.raw_events) ?? panic(err.message)) == "sequence=1 source=AsyncEvent event=2 owner=3 subscription=4 dispatch=5 lifecycle=HandlerFailed queued=-1 blocked=0 running=1 capacity=8 overflow=DropNewest priority=-17 failure=Handler terminal=None")
     expected :: "jet inspect live · pid 42\nprotocol=jet.live.v1 session=session source=app.jet build=build-1 revision=rev-1 world=world-1\n\ntask tree\n  task 2     parent 1     blocked  wait=channel send deadline=480 cancelled=false\n\nchannels\n  channel 1     depth 4/4 blocked send=1 recv=0 closed=false\n\neffects: compute=1 waiting=1 channel=1 time=0 io=0\nresources: workers=1 running=1 queued=0 cancelled=0 arenas=1 arena_allocations=2 arena_bytes=64\n\nvalues\n  app::counter type=Int kept value=7\n\nevents\n  sequence=1 source=AsyncEvent event=2 owner=3 subscription=4 dispatch=5 lifecycle=HandlerFailed queued=-1 blocked=0 running=1 capacity=8 overflow=DropNewest priority=-17 failure=Handler terminal=None\n"
     assert(jet_cli_live_text(snapshot) == expected)
-    loop plane in [String]{"types", "rights", "claims", "shapes", "structure", "build", "gates"} {
+    loop plane in ([String]{"types", "rights", "claims", "shapes", "structure", "build", "gates"}) {
         json :: jet_cli_live_json_report(snapshot, plane)
         assert(json.contains("\"action\":\"inspect.{plane}\""))
         assert(json.contains("\"rendered_value\":\"7\""))
@@ -51,7 +51,8 @@ fn run() {
     live_inspect_rejected(text.replace("\"schema_version\":1", "\"schema_version\":2"), "unsupported schema")
     live_inspect_rejected(text.replace("jet.live.v1", "jet.live.v2"), "protocol must be")
     live_inspect_rejected(text.replace("\"rendered_value\":\"7\"", "\"rendered_value\":false"), "invalid `rendered_value`")
-    live_inspect_rejected(text.replace("\"rendered_value\":\"7\"", "\"rendered_value\":\"{\"x\".repeat(16385)}\""), "Prelude limit")
+    oversized_value :: "x".repeat(16385)
+    live_inspect_rejected(text.replace("\"rendered_value\":\"7\"", "\"rendered_value\":\"{oversized_value}\""), "Prelude limit")
     live_inspect_rejected(text.replace("\"world_id\":\"world-1\"", "\"world_id\":\"world\\n1\""), "control characters")
     live_inspect_rejected(text.replace("\"depth\":4", "\"depth\":-1"), "negative `depth`")
     live_inspect_rejected(text.replace("\"disposition\":\"kept\"", "\"disposition\":\"invented\""), "unsupported disposition")
@@ -63,11 +64,20 @@ fn run() {
     repeated :: ",\"event_observations\":[{record},{record}]"
     live_inspect_rejected(live_inspect_fixture(repeated, "", ""), "not strictly increasing")
     records := [String]{}
-    loop sequence in 1..=257 -> &records.push(live_inspect_event(sequence))
+    loop sequence in 1..<258 -> &records.push(live_inspect_event(sequence))
     live_inspect_rejected(live_inspect_fixture(",\"event_observations\":[{records.join(",")} ]", "", ""), "256-record limit")
     // JSON::json_int casts Float for LiveInspect; EventObservation does not.
     floats :: jet_cli_live_decode(text.replace("\"depth\":4", "\"depth\":4.9")) ?? panic("reference Float integer cast")
     assert(floats.channels[0].depth == 4)
+    // Optional Dyn fields are discriminated after unwrapping, not compared.
+    null_value :: jet_cli_live_decode(text.replace("\"rendered_value\":\"7\"", "\"rendered_value\":null")) ?? panic("null rendered value")
+    assert(null_value.values[0].rendered_value == None)
+    missing_value :: jet_cli_live_decode(text.replace(",\"rendered_value\":\"7\"", "")) ?? panic("absent rendered value")
+    assert(missing_value.values[0].rendered_value == None)
+    null_deadline :: jet_cli_live_decode(text.replace("\"deadline_ms\":480", "\"deadline_ms\":null")) ?? panic("null deadline")
+    assert(null_deadline.tasks[0].deadline_ms == None)
+    ordered :: Dyn.Object([(key: String, value: Dyn)]{(key: "z", value: Dyn.Int(2)), (key: "a", value: Dyn.Text("first"))})
+    assert((jet_cli_live_json(ordered) ?? panic(err.message)) == "{{\"a\":\"first\",\"z\":2}}")
     wide :: jet_cli_live_decode(text.replace("\"arena_bytes\":64", "\"arena_bytes\":9223372036854775807")) ?? panic("i64 maximum retained exactly")
     assert(wide.resources.get("arena_bytes") == Val(9223372036854775807))
     live_inspect_rejected(text.replace("\"arena_bytes\":64", "\"arena_bytes\":9223372036854775808"), "not valid JSON")
@@ -84,7 +94,7 @@ fn run() {
     proc_fields := [String]{"S"}
     loop _ in 1..<19 -> &proc_fields.push("0")
     &proc_fields.push("1234")
-    assert(jet_cli_live_start_from_stat("42 (name ) with spaces) {proc_fields.join(" ")}\n") == Ok("1234"))
+    assert((jet_cli_live_start_from_stat("42 (name ) with spaces) {proc_fields.join(" ")}\n") ?? panic(err.message)) == "1234")
     saturating :: jet_cli_live_decode(text.replace("\"arena_bytes\":64", "\"arena_bytes\":1e30")) ?? panic("reference saturating i64 cast")
     assert(saturating.resources.get("arena_bytes") == Val(9223372036854775807))
     // Exact boundaries: permitted task labels are ignored by this consumer,
@@ -106,19 +116,19 @@ fn run() {
     live_inspect_rejected(text.replace("\"values\":[{value}]", "\"values\":[{many_values.join(",")}]"), "too many values")
     mixed :: jet_cli_live_decode(text.replace("\"values\":[{value}]", "\"values\":[{value},{value},{{\"value_id\":\"b\",\"type_identity\":\"Bool\",\"disposition\":\"reset\",\"reason\":\"\"}}]")) ?? panic("shape grouping")
     assert(jet_cli_live_json_report(mixed, "shapes").contains("\"shapes\":[{{\"type_identity\":\"Bool\",\"value_ids\":[\"b\"]}},{{\"type_identity\":\"Int\",\"value_ids\":[\"app::counter\",\"app::counter\"]}}]"))
-    loop source in [String]{"Event", "AsyncEvent", "DecisionHook"} {
+    loop source in ([String]{"Event", "AsyncEvent", "DecisionHook"}) {
         assert(jet_cli_live_text(jet_cli_live_decode(text.replace("\"source\":\"AsyncEvent\"", "\"source\":\"{source}\"")) ?? panic("closed source")).contains("source={source}"))
     }
-    loop lifecycle in [String]{"Subscribed", "Removed", "DispatchStarted", "Queued", "Backpressured", "Running", "HandlerStarted", "HandlerDelivered", "HandlerFailed", "HandlerContinue", "HandlerTransform", "HandlerCancel", "HandlerFail", "Terminal"} {
+    loop lifecycle in ([String]{"Subscribed", "Removed", "DispatchStarted", "Queued", "Backpressured", "Running", "HandlerStarted", "HandlerDelivered", "HandlerFailed", "HandlerContinue", "HandlerTransform", "HandlerCancel", "HandlerFail", "Terminal"}) {
         assert(jet_cli_live_text(jet_cli_live_decode(text.replace("\"lifecycle\":\"HandlerFailed\"", "\"lifecycle\":\"{lifecycle}\"")) ?? panic("closed lifecycle")).contains("lifecycle={lifecycle}"))
     }
-    loop overflow in [String]{"None", "Block", "DropNewest", "DropOldest"} {
+    loop overflow in ([String]{"None", "Block", "DropNewest", "DropOldest"}) {
         assert(jet_cli_live_text(jet_cli_live_decode(text.replace("\"overflow\":\"DropNewest\"", "\"overflow\":\"{overflow}\"")) ?? panic("closed overflow")).contains("overflow={overflow}"))
     }
-    loop failure in [String]{"None", "Handler", "Panic"} {
+    loop failure in ([String]{"None", "Handler", "Panic"}) {
         assert(jet_cli_live_text(jet_cli_live_decode(text.replace("\"failure\":\"Handler\"", "\"failure\":\"{failure}\"")) ?? panic("closed failure")).contains("failure={failure}"))
     }
-    loop terminal in [String]{"None", "Delivered", "HandlerFailed", "DroppedNewest", "DroppedOldest", "Closed", "Cancelled", "DeadlineExceeded", "Continue", "Cancel", "Fail"} {
+    loop terminal in ([String]{"None", "Delivered", "HandlerFailed", "DroppedNewest", "DroppedOldest", "Closed", "Cancelled", "DeadlineExceeded", "Continue", "Cancel", "Fail"}) {
         assert(jet_cli_live_text(jet_cli_live_decode(text.replace("\"terminal\":\"None\"", "\"terminal\":\"{terminal}\"")) ?? panic("closed terminal")).contains("terminal={terminal}"))
     }
     live_inspect_rejected("\"x\"".repeat(1048577), "not valid JSON")

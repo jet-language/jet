@@ -32,7 +32,7 @@ fn jet_cli_live_read_at(pid: Int, path: String) -[FS, Env, Time]> JetCLILiveSnap
     if pid <= 0 || pid > 4294967295 -> return Err(jet_cli_read_error("process id must be greater than zero and fit u32"))
     entry :: cli_files.stat(path) ?? return Err(jet_cli_read_error("no live Jet runtime is observable at process {pid}"))
     if !entry.is_file || entry.is_symlink -> return Err(jet_cli_read_error("live runtime snapshot is not a regular file"))
-    reader :: cli_files.open(path, cli_files.LinkPolicy.Refuse) ?? return Err(jet_cli_read_error("cannot securely open live runtime snapshot for process {pid}"))
+    reader :: cli_files.open(path, links: .Refuse) ?? return Err(jet_cli_read_error("cannot securely open live runtime snapshot for process {pid}"))
     before :: reader.stat() ?? return Err(jet_cli_read_error("cannot inspect live runtime snapshot: {jet_cli_io_error_text(err)}"))
     if !before.is_file -> return Err(jet_cli_read_error("live runtime snapshot is not a regular file"))
     if cli_sys.is_unix() {
@@ -40,9 +40,9 @@ fn jet_cli_live_read_at(pid: Int, path: String) -[FS, Env, Time]> JetCLILiveSnap
         if before.owner != Val(cli_sys.getuid()) -> return Err(jet_cli_read_error("live runtime snapshot belongs to another user"))
     }
     if before.size > 1048576 -> return Err(jet_cli_read_error("live runtime snapshot exceeds the 1 MiB safety limit"))
-    bytes := [U8].with_capacity(min(before.size, 65536))
+    bytes := [U8].with_capacity(jet_cli_table_min(before.size, 65536))
     loop {
-        chunk :: reader.read(min(65536, 1048577 - bytes.len())) ?? return Err(jet_cli_read_error("cannot read live runtime snapshot: {jet_cli_io_error_text(err)}"))
+        chunk :: reader.read(jet_cli_table_min(65536, 1048577 - bytes.len())) ?? return Err(jet_cli_read_error("cannot read live runtime snapshot: {jet_cli_io_error_text(err)}"))
         if chunk.len() == 0 -> break
         loop byte in chunk -> &bytes.push(byte)
         if bytes.len() > 1048576 -> return Err(jet_cli_read_error("live runtime snapshot exceeds the 1 MiB safety limit"))
@@ -51,7 +51,7 @@ fn jet_cli_live_read_at(pid: Int, path: String) -[FS, Env, Time]> JetCLILiveSnap
     parsed := jet_cli_live_decode(text) ?? return Err(jet_cli_read_error("live runtime snapshot has an invalid or unsafe schema: {err.message}"))
     if parsed.pid != pid -> return Err(jet_cli_read_error("live runtime snapshot does not belong to process {pid}"))
     parsed.events = Val(jet_cli_live_event_render(parsed.raw_events) ?? return Err(jet_cli_read_error("live runtime event observations are invalid: {err.message}")))
-    now :: max(0, live_time.unix_ns() /% 1000000)
+    now :: jet_cli_table_max(0, live_time.unix_ns() /% 1000000)
     if now > parsed.captured_ms && now - parsed.captured_ms > 2000 -> return Err(jet_cli_read_error("process {pid} is not publishing a live runtime snapshot"))
     platform :: cli_sys.name()
     if platform == "linux" || platform == "android" {

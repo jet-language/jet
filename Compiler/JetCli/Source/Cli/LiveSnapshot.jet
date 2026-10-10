@@ -19,21 +19,22 @@ struct JetCLILiveSnapshot {
 }
 
 fn jet_cli_live_field(value: Dyn, key: String) -> Dyn? Never! {
-    if value == .Object(fields) -> return fields.get(key)
+    // Dyn.Object is an ordered list of fields, not a String-keyed map.
+    if value == .Object(fields) { loop field in fields { if field.key == key -> return Val(field.value) } }
     None
 }
 // JSON.rs::json_int also accepts Float, using Rust's saturating i64 cast.
 // EventObservation's integer validator deliberately does NOT call this.
 fn jet_cli_live_json_int(value: Dyn) -> Int? Never! {
     if value == {
-        .Int(number) -> Val(number)
+        .Int(number) -> { return Val(number) }
         .Float(number) -> {
             if number != number -> return Val(0)
             if number >= 9223372036854775808.0 -> return Val(9223372036854775807)
             if number <= -9223372036854775808.0 -> return Val(-9223372036854775808)
-            return Int.from_float(status_math.trunc(number))
+            return Val(Int.from_float(status_math.trunc(number)) ?? return None)
         }
-        else -> None
+        else -> { return None }
     }
 }
 fn jet_cli_live_object(value: Dyn, required: [String], optional: [String], label: String) JetCLIReadError! {
@@ -57,10 +58,9 @@ fn jet_cli_live_int(value: Dyn, key: String, label: String, nonnegative: Bool) -
     Err(jet_cli_read_error("{label} has invalid `{key}`"))
 }
 fn jet_cli_live_optional_int(value: Dyn, key: String, label: String) -> Int? JetCLIReadError! {
-    if jet_cli_live_field(value, key) == {
-        None | .Val(.Null) -> Ok(None)
-        .Val(field) -> Ok(Val(jet_cli_live_json_int(field) ?? return Err(jet_cli_read_error("{label} has invalid `{key}`"))))
-    }
+    field :: jet_cli_live_field(value, key) ?? return Ok(None)
+    if field == Dyn.Null -> return Ok(None)
+    Ok(Val(jet_cli_live_json_int(field) ?? return Err(jet_cli_read_error("{label} has invalid `{key}`"))))
 }
 fn jet_cli_live_string(value: Dyn, key: String, label: String) -> String JetCLIReadError! {
     if jet_cli_live_field(value, key) == .Val(.Text(text)) {
@@ -84,14 +84,14 @@ fn jet_cli_live_array(value: Dyn, key: String) -> [Dyn] JetCLIReadError! {
 // transport to the existing canonical decision-ledger reader.
 fn jet_cli_live_json(value: Dyn) -> String JetCLIReadError! {
     if value == {
-        .Null -> Ok("null")
-        .Bool(flag) -> Ok("{flag}")
-        .Int(number) -> Ok("{number}")
+        .Null -> { return Ok("null") }
+        .Bool(flag) -> { return Ok("{flag}") }
+        .Int(number) -> { return Ok("{number}") }
         .Float(number) -> {
             if !status_math.is_finite(number) -> return Err(jet_cli_read_error("decision ledger contains a non-finite number"))
             return Ok("{number}")
         }
-        .Text(text) -> Ok(foundation_json_quote(text))
+        .Text(text) -> { return Ok(foundation_json_quote(text)) }
         .Array(items) -> {
             encoded := [String]{}
             loop item in items -> &encoded.push(jet_cli_live_json(item))
@@ -103,7 +103,7 @@ fn jet_cli_live_json(value: Dyn) -> String JetCLIReadError! {
             &names.sort()
             encoded := [String]{}
             loop name in names {
-                child :: fields.get(name) ?? return Err(jet_cli_read_error("decision ledger field disappeared"))
+                child :: jet_cli_live_field(value, name) ?? return Err(jet_cli_read_error("decision ledger field disappeared"))
                 &encoded.push("{foundation_json_quote(name)}:{jet_cli_live_json(child)}")
             }
             return Ok("{{{encoded.join(",")}}}")
@@ -122,7 +122,7 @@ fn jet_cli_live_counts(root: Dyn, key: String, keys: [String], label: String) ->
     value :: jet_cli_live_field(root, key) ?? return Err(jet_cli_read_error("live runtime snapshot has no {key}"))
     jet_cli_live_object(value, keys, [String]{}, label)
     counts := [String:Int]{}
-    loop key in keys -> counts[key] = jet_cli_live_int(value, key, label, true)
+    loop count_key in keys -> counts[count_key] = jet_cli_live_int(value, count_key, label, true)
     Ok(counts)
 }
 fn jet_cli_live_decode(text: String) -> JetCLILiveSnapshot JetCLIReadError! {
@@ -147,14 +147,16 @@ fn jet_cli_live_decode(text: String) -> JetCLILiveSnapshot JetCLIReadError! {
         disposition :: jet_cli_live_string(value, "disposition", "live value")
         if (![String]{"kept", "migrated", "reset", "rejected"}.contains(disposition)) -> return Err(jet_cli_read_error("live value has an unsupported disposition"))
         rendered := String?{None}
-        if jet_cli_live_field(value, "rendered_value") == {
-            None | .Val(.Null) -> {}
-            .Val(.Text(shown)) -> {
-                if shown.bytes().len() > 16384 -> return Err(jet_cli_read_error("live value `rendered_value` exceeds the Prelude limit"))
-                if live_text.has_control(shown) -> return Err(jet_cli_read_error("live value has control characters in `rendered_value`"))
-                rendered = Val(shown)
+        if jet_cli_live_field(value, "rendered_value") == .Val(rendered_field) {
+            if rendered_field == {
+                .Null -> {}
+                .Text(shown) -> {
+                    if shown.bytes().len() > 16384 -> return Err(jet_cli_read_error("live value `rendered_value` exceeds the Prelude limit"))
+                    if live_text.has_control(shown) -> return Err(jet_cli_read_error("live value has control characters in `rendered_value`"))
+                    rendered = Val(shown)
+                }
+                else -> { return Err(jet_cli_read_error("live value has invalid `rendered_value`")) }
             }
-            else -> return Err(jet_cli_read_error("live value has invalid `rendered_value`"))
         }
         &values.push(JetCLILiveValue{value_id: jet_cli_live_string(value, "value_id", "live value"), type_identity: jet_cli_live_string(value, "type_identity", "live value"), disposition: disposition, reason: jet_cli_live_string(value, "reason", "live value"), rendered_value: rendered})
     }

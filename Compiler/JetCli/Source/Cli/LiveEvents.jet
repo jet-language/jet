@@ -17,8 +17,8 @@ fn jet_cli_live_event_closed(event: Dyn, key: String, allowed: [String]) -> Stri
     }
     Err(jet_cli_read_error("runtime event observation has invalid `{key}`"))
 }
-fn jet_cli_live_event_render(sequence: Dyn?) -> String JetCLIReadError! {
-    events :: if sequence == .Val(.Array(rows)) -> rows else -> { return Err(jet_cli_read_error("runtime observation has no event sequence")) }
+fn jet_cli_live_event_render(raw_sequence: Dyn?) -> String JetCLIReadError! {
+    events :: if raw_sequence == .Val(.Array(rows)) -> rows else -> { return Err(jet_cli_read_error("runtime observation has no event sequence")) }
     if events.len() > 256 -> return Err(jet_cli_read_error("runtime event observation exceeds the 256-record limit"))
     keys :: [String]{"sequence", "source", "event_id", "owner_id", "subscription_id", "dispatch_id", "lifecycle", "queued", "blocked", "running", "capacity", "overflow", "priority", "failure", "terminal"}
     previous := 0
