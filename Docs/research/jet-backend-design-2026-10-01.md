@@ -4093,8 +4093,11 @@ port. Its retained regressions include
 No serial or all-relay substitute is supplied.
 
 `run-process-witnesses.mjs OUT RC-NATIVE-JET RC-RUNTIME-DIR` verifies the admitted
-pack inventories and links fresh C clients to that pack's standalone Jet object
-and admitted musl archives. It covers real-child capture, Inherit, nonzero exit,
+pack inventories and links fresh C clients to a held-byte snapshot of that
+pack's standalone Jet object and admitted musl archives. A fresh output directory
+is required; compiler, witness source, C object, executable, platform and CRT
+identities are recorded and checked across compilation, linking and execution.
+It covers real-child capture, Inherit, nonzero exit,
 timeout kill, output limits, strict UTF8 errors, last-alias cleanup, controlled
 World refusal, raw directory/env adapters and real PTY resize. It also runs the
 native typed-field regression through the supplied RC Jet. Parse/tiny/C compile
