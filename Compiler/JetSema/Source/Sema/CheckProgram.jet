@@ -1687,6 +1687,9 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     // D-FAILURE-FOUNDATION1=A (E2421): the public failure carrier, read from
     // the declared signature as the Rust reference's function registration does.
     sema_check_public_failure_carrier(func, updated, program, &diagnostics)
+    // D-MEMO1=A (E0939/E0940): the `#Memo` cache contract (Rust
+    // `check_memoized_function`), also proven from the declared signature.
+    sema_check_memoized_function(func, updated, program, generic_params, &diagnostics)
     if !sema_function_header_check_default_forward_refs(func, &diagnostics) -> complete = false
     if !sema_function_header_check_variadic_bound_shape(func, updated, program, &diagnostics) -> complete = false
     context.comptime_body_values = updated.comptime_body_values.copy()

@@ -25,6 +25,7 @@ use jet_foundation.[
     TAppliedRuleStatus,
     TComptimeValue,
     TExpr,
+    TGenericParam,
     TextEdit,
     Type,
     diagnostic_from_registry,
@@ -1885,4 +1886,32 @@ fn sema_marker_rules_no_prelude_call(call: Call, environment: SemaScopeEnvironme
     &diagnostics.push(sema_error("E0429", call.name_span, "`{name}` is not ambient here — this file opted out with `#NoPrelude`", "`#NoPrelude` disables the curated prelude auto-imports (`print` / `input`)", "write `use core.term as io` and call `io.{name}(…)`, or remove `#NoPrelude`"))
     loop argument in call.args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     true
+}
+
+// D-MEMO1=A (Rust `check_memoized_function`): the marker's result-cache
+// contract is proven from the declared signature before lowering. A lazy
+// `Iter`/`ViewIter` argument or result carries live computation state
+// (E0940); every other argument must be hashable and not a list (E0939).
+// The first refused parameter ends the check, as in the Rust reference.
+// Purity (E0938) is judged by the solved effect row, not here.
+fn sema_check_memoized_function(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam], diagnostics: &[Diagnostic]) {
+    marker :: loop candidate in func.markers {
+        if candidate.name == "Memo" -> break candidate
+    } ?? return
+    loop parameter in func.params {
+        declared :: if parameter.variadic -> Type.List{element: parameter.ty} else -> parameter.ty
+        ty :: sema_function_resolve_declared(environment, program, declared, environment.module_identity, generic_params)
+        if sema_expression_zip_is_iter(ty) {
+            &diagnostics.push(sema_error("E0940", marker.span, "`#Memo` cannot cache lazy `Iter` values", "a lazy iterator carries live computation state instead of one completed result", "materialize the iterator before the memoized boundary"))
+            return
+        }
+        if ty == .List(_) || !sema_type_hashable(environment, program, ty) {
+            &diagnostics.push(sema_error("E0939", marker.span, "`#Memo` parameter `{parameter.name}` is not hashable", "memoization keys are the function's argument tuple, so every argument must pass the existing hashability rule", "use an Int, Bool, Char, String, or named hashable value as the argument"))
+            return
+        }
+    }
+    declared_return :: func.return_type ?? return
+    if sema_expression_zip_is_iter(sema_function_resolve_declared(environment, program, declared_return, environment.module_identity, generic_params)) {
+        &diagnostics.push(sema_error("E0940", marker.span, "`#Memo` cannot cache a lazy `Iter` result", "a lazy iterator carries live computation state instead of one completed result", "materialize the iterator before returning from the memoized function"))
+    }
 }
