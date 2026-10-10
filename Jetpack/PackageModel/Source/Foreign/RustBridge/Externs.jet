@@ -292,13 +292,13 @@ fn pkg_ffi_mangle_path(name: String) -> String Never! {
 fn pkg_ffi_path_escape(code: Int) -> String Never! {
     digits :: "0123456789abcdef".bytes()
     if code == {
-        95 -> "u"
-        46 -> "d"
-        58 -> "c"
-        47 -> "s"
-        92 -> "b"
-        45 -> "h"
-        else -> "x{String.from_bytes([U8]{digits[code >> 4], digits[code & 15]}) ?? ""}"
+        95 -> { return "u" }
+        46 -> { return "d" }
+        58 -> { return "c" }
+        47 -> { return "s" }
+        92 -> { return "b" }
+        45 -> { return "h" }
+        else -> { return "x{String.from_bytes([U8]{digits[code >> 4], digits[code.bit_and(15)]}) ?? ""}" }
     }
 }
 
