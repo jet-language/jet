@@ -162,25 +162,6 @@ fn test_scope_state_drop(state: I64) {
     }
 }
 
-// Raw publication paths already own code/message bytes. Copy once into each
-// unstopped frame rather than constructing temporary text just to clone it.
-fn test_scope_record_raw_stop(code_word: I64, code_length: I64, message: I64, length: I64) {
-    state :: test_capture_state()
-    if (state == I64{0}) -> return
-    frames :: state + I64{32}
-    at := I64{0}
-    loop at < trap_word(frames) {
-        row :: trap_word(frames + I64{16}) + at * I64{8}
-        if (trap_word(row + I64{24}) == I64{0}) {
-            code :: jet_rt_string_builder_new()
-            rt_text_push_word(code, code_word, code_length)
-            trap_store(row + I64{24}, code)
-            trap_store(row + I64{32}, rt_text_copy(message, length))
-        }
-        at += I64{5}
-    }
-}
-
 fn test_scope_stopped_index(state: I64) -> I64 {
     frames :: state + I64{32}
     at := trap_word(frames)
