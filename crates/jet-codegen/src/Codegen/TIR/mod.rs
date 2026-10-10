@@ -11516,6 +11516,28 @@ fn is_core_source_value_hook(bundle: &ProgramBundle, module: usize, owner: &str,
         })
 }
 
+/// Synthesized precise operations have no authored call reference. Their
+/// source providers are a closed part of the existing operation registry,
+/// just like the implicit render/cleanup providers, not a prefix-wide grant.
+fn is_core_precise_source_target(bundle: &ProgramBundle, module: usize, name: &str) -> bool {
+    let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.math") else {
+        return false;
+    };
+    let data = &bundle.modules[module];
+    if data.alias != source.alias || data.display.as_str() != source.path {
+        return false;
+    }
+    if precise_source_helper("Int", "abs") == Some(name) {
+        return true;
+    }
+    [("Fraction", "__fraction_"), ("Decimal", "__decimal_"), ("Complex", "__complex_")]
+        .into_iter()
+        .any(|(owner, prefix)| {
+            name.strip_prefix(prefix)
+                .is_some_and(|operation| precise_source_helper(owner, operation) == Some(name))
+        })
+}
+
 fn reachable_core_source_callables(
     bundle: &ProgramBundle,
     callables: &[TCostCallable],
@@ -11566,12 +11588,17 @@ fn reachable_core_source_callables(
             let (owner, name) = cost_callable_owner_and_name(callable);
             is_core_source_value_hook(bundle, callable.module, owner, name)
         };
+        let precise_source_target = is_core && !callable.method
+            && is_core_precise_source_target(
+                bundle, callable.module, cost_callable_owner_and_name(callable).1,
+            );
         callable.root |= !is_core
             || artifact_export
             || selected_entry
             || ffi_callback
             || sampled_contract
-            || source_value_hook;
+            || source_value_hook
+            || precise_source_target;
     }
 
     for ((source, start, end), reference) in bundle.name_ledger.references() {

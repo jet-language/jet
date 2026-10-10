@@ -128,15 +128,17 @@ fn checked_core_fraction_display_reaches_implicit_trait_target() {
         let entry = directory.join("run.jet");
         std::fs::write(&entry, r#"
 use core.math.[gcd]
-fn exact_quotient(top: Int, bottom: Int) -> Fraction Never! { top / bottom }
 fn format_bounds(span: Int) -> String Never! { "{0 - span / 2} to {span / 2 - 1}" }
+fn timestamp_text(ticks: Int) -> String Never! { "{ticks / 1000000000}" }
 fn run() Never! {
     assert_eq(gcd(2, 4), 2)
-    quotient :: exact_quotient(1, 3)
+    quotient :: 1 / 3
     assert_eq("{quotient}", "1/3")
-    eighth :: exact_quotient(1, 8)
+    eighth :: 1 / 8
     assert_eq("{eighth}", "0.125")
     assert_eq(format_bounds(8), "-4 to 3")
+    assert_eq(timestamp_text(2000000000), "2")
+    assert_eq(timestamp_text(125000000), "0.125")
 }
 "#).unwrap();
         let mut bundle = Loader::load_entry(entry.to_str().unwrap())
@@ -163,6 +165,10 @@ fn run() Never! {
                             name.ends_with("::Core/math/math.jet::Fraction")
                         }))
         }), "Core Fraction Display must remain materialized");
+        for name in ["__fraction_sub", "__fraction_from_parts"] {
+            assert!(mir.functions.iter().any(|function| function.name.ends_with(name)),
+                "synthesized precise operation must retain its exact source provider: {name}");
+        }
         let rust = Codegen::MIRRust::emit_mir_program(
             &mir,
             &Codegen::MIRRust::MirRustConfig {
@@ -186,6 +192,71 @@ fn run() Never! {
             .output().expect("Fraction Display proof must execute");
         assert!(executed.status.success(),
             "fraction and compiler-range formatting must preserve exact text:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
+
+#[test]
+fn checked_never_comparators_sort_named_and_literal_callbacks() {
+    jet_driver::run_compiler_work(|| {
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("core-value-hook-proof"))
+            .join(format!("jet-never-comparator-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let entry = directory.join("run.jet");
+        std::fs::write(&entry, r#"
+struct SortRow { key: Int }
+fn row_order(left: SortRow, right: SortRow) -> Ordering Never! { left.key <=> right.key }
+fn run() Never! {
+    rows := [SortRow]{SortRow{key: 3}, SortRow{key: 1}, SortRow{key: 2}}
+    &rows.sort_by(row_order)
+    assert_eq(rows[0].key, 1)
+    assert_eq(rows[2].key, 3)
+    &rows.sort_by((left: SortRow, right: SortRow) -> right.key <=> left.key)
+    assert_eq(rows[0].key, 3)
+    assert_eq(rows[2].key, 1)
+}
+"#).unwrap();
+        let mut bundle = Loader::load_entry(entry.to_str().unwrap())
+            .expect("comparator fixture must load");
+        let (diagnostics, _, nominals) =
+            Sema::check_bundle_with_effect_facts(&mut bundle, Sema::CompileMode::Check);
+        assert!(diagnostics.iter().all(|diagnostic| {
+            diagnostic.severity != Diagnostics::Severity::Error
+        }), "Never comparators must pass the real checker: {diagnostics:?}");
+        let request = MirArtifactRequest::new(
+            MirArtifactTarget::RustAot,
+            MirArtifactKind::NativeExecutable,
+            MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = Codegen::TIR::lower_checked_mir_program_for(
+            &bundle, &nominals, request,
+        ).expect("Never is not a fallible comparator operation");
+        mir.validate().expect("comparator MIR must remain valid");
+        let rust = Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let source = directory.join("never_comparator.rs");
+        let executable = directory.join(format!("never_comparator{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=never_comparator", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("comparator proof requires rustc");
+        assert!(compiled.status.success(), "Never comparators must emit native code:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("comparator proof must execute");
+        assert!(executed.status.success(), "both checked comparator forms must sort correctly:\n{}",
             String::from_utf8_lossy(&executed.stderr));
         std::fs::remove_dir_all(directory).unwrap();
     });

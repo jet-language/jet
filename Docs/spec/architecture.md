@@ -248,6 +248,16 @@ new language permissions or falls back to an unchecked AST emitter.
 
 Registered source-owned record declarations are retained even when a native
 runtime carrier shares their leaf name.
+In particular, `core.term`'s `Stdout`, `Stderr`, and `StdinHandle` retain
+their qualified source identities and `fd` record fields; they are not
+aliases for the Prelude's opaque stream carriers. Compiler-owned Core-only
+record literals, such as `RangeError { reason }`, likewise retain owner rows
+whose fields come from the canonical Core record oracle.
+
+Qualified Core closure intrinsics and imported aliases enter the same
+checked closure lowering before ordinary Core-call record lookup. Thus
+`core.mem.scope.guard` retains its executable callback and lexical cleanup
+contract instead of being mistaken for a scalar Core call.
 
 An empty failure set does not by itself erase a checked value carrier.
 `T Never!` calls can still name `Result<T, Never>` in checked expressions;
@@ -513,6 +523,19 @@ subject to the same source-body reachability walk. The Jet lowerer already
 retains authored Core methods; bootstrap lowering preserves these implicit
 targets too, rather than losing a formatter merely because arithmetic produced
 its receiver.
+
+Precise operations may also be synthesized after authored-call reachability,
+including implicit `Int / Int` arithmetic inside a string interpolation.
+Bootstrap lowering roots the exact canonical Core/math helpers registered for
+those operations, and their checked callee closure, even without an explicit
+Fraction type in the caller. An arbitrary private helper sharing a prefix is
+not a provider. The Jet MIR reachability walk retains the same registered
+helpers from its checked `PreciseBuiltin` operations.
+
+Collection callbacks returning `T Never!` select the non-fallible operation:
+their empty failure carrier is normalized before invocation. In particular,
+two-argument sort comparators, whether named or literal, use the checked
+comparator route rather than attempting a fallible key-selector route.
 
 A bare registered Core-carrier trait reference resolves through that carrier's
 one source-module owner and the exact trait/method identity. It cannot match an

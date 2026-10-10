@@ -916,7 +916,7 @@ fn sema_collection_method_operation(contract: SemaCollectionMethodContract, argu
     is_float := element == Type.Float || element == Type.Float32
     is_f32 := element == Type.Float32
     callback :: callback_return ?? Type.Named{name: "Unit"}
-    fallible := if callback == {.Result(_, _) -> true else -> false}
+    fallible := if callback == {.Result(_, error) -> error != Type.Named{name: "Never"} else -> false}
     remove_mode := if argument_count == 1 -> TListRemoveMode.Value else -> literal_remove_mode ?? TListRemoveMode.Dynamic
     if contract.row.op == {
         .Builtin(op) -> SemaCollectionOperation.Builtin{operation: op}

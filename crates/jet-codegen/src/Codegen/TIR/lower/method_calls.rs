@@ -6656,6 +6656,11 @@ fn lower_method_call_impl(
                     ) {
                         return source_call;
                     }
+                    if let Some(closure_call) = lower_core_closure_call(
+                        &submodule, method, method_span, args, cx, env,
+                    ) {
+                        return closure_call;
+                    }
                     if submodule == "core.mem" && method == "address_of" {
                         if args.len() != 1 {
                             return invariant_method_expr(
@@ -9500,10 +9505,17 @@ fn lower_method_call_impl(
                             })
                         });
                 if method == "sort_by"
-                    && matches!(
-                        args.first().map(|arg| &arg.expr),
-                        Some(Expr::Lambda(lambda)) if lambda.params.len() == 2
-                    )
+                    && args.first().is_some_and(|arg| match &arg.expr {
+                        Expr::Lambda(lambda) => lambda.params.len() == 2,
+                        Expr::Ident(name, _) => {
+                            let ty = match env.locals.get(name) {
+                                Some((_, ty)) => ty.as_ref(),
+                                None => cx.fact_fn_source_types(name),
+                            };
+                            matches!(ty, Some(Type::Fn { params, .. }) if params.len() == 2)
+                        }
+                        _ => false,
+                    })
                 {
                     if let Type::List(inner) | Type::FixedList { elem: inner, .. } =
                         &callback_recv_ty
@@ -9719,7 +9731,7 @@ fn lower_method_call_impl(
                         &arg.ty,
                         Type::Fn {
                             ret: Some(ret), ..
-                        } if matches!(ret.as_ref(), Type::Result { .. })
+                        } if matches!(ret.as_ref(), Type::Result { err, .. } if !err.is_never())
                     )
                 }) || (matches!(method, "map" | "filter")
                     && matches!(&source_result_ty, Type::Result { .. })
