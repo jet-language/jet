@@ -11,7 +11,7 @@ const roots = [...assembler.match(/const sourceRoots = \[([\s\S]*?)\];/)[1].matc
 const observerModules = ["mir-debug.mjs", "front-feed-codec.mjs"].map((name) => [name,
   readFileSync(new URL(`../../Compiler/JetBackend/Tests/${name}`, import.meta.url), "utf8")]);
 
-function fixture(t, { unlisted = false, runtimeManifest = true, duplicate = false } = {}) {
+function fixture(t, { unlisted = false, unlistedCli = false, unwiredCli = false, runtimeManifest = true, duplicate = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "jet-bootstrap-inventory-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const put = (path, text) => {
@@ -33,6 +33,12 @@ function fixture(t, { unlisted = false, runtimeManifest = true, duplicate = fals
   put("Compiler/JetBackend/Source/ByteHandlesABI.jet", "RUNTIME_ONLY_MARKER :: prep { 3 }\n");
   if (runtimeManifest) put("Compiler/JetRuntime/sources.list", "# Runtime inventory\nCompiler/JetBackend/Source/OS/Linux.jet\nCompiler/JetBackend/Source/ByteHandlesABI.jet\n");
   if (unlisted) put("Compiler/JetFoundation/Source/Unlisted.jet", "UNLISTED_MARKER :: prep { 4 }\n");
+  if (unlistedCli) put("Compiler/JetCli/Source/Cli/Unlisted.jet", "UNLISTED_CLI_MARKER :: prep { 5 }\n");
+  if (unwiredCli) {
+    for (const path of ["Dependency.jet", "Jobs.jet", "Package/Bundle.jet", "Package/FlashAudit.jet", "Package/FlashPlan.jet", "Package/NativeBundle.jet", "Package/NativeFlash.jet", "Supply.jet", "ToolchainPin.jet"]) {
+      put(`Compiler/JetCli/Source/Cli/${path}`, "UNWIRED_CLI_MARKER :: prep { 6 }\n");
+    }
+  }
   const result = spawnSync(process.execPath, [join(root, "Compiler/Bootstrap/assemble.mjs")], {
     cwd: root, encoding: "utf8", env: { ...process.env, HOME: join(root, "home"), JET_BOOTSTRAP_SOURCE_ROOT: root },
   });
@@ -67,4 +73,18 @@ test("compiler inventory rejects duplicate manifest entries", (t) => {
   const { result } = fixture(t, { duplicate: true });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /duplicate source Compiler\/JetFoundation\/Source\/Compiler\.jet/);
+});
+
+test("compiler inventory retains the explicit pre-merge unwired CLI boundary", (t) => {
+  const { root, result } = fixture(t, { unwiredCli: true });
+  assert.equal(result.status, 0, result.stderr);
+  const unit = readFileSync(join(root, "home/.cache/jet-luna/compiler-bootstrap/project/src/compiler.jet"), "utf8");
+  assert.doesNotMatch(unit, /UNWIRED_CLI_MARKER/);
+});
+
+test("unwired CLI exclusions do not mask another unlisted CLI source", (t) => {
+  const { result } = fixture(t, { unwiredCli: true, unlistedCli: true });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Compiler\/JetCli\/Source\/Cli\/Unlisted\.jet/);
+  assert.doesNotMatch(result.stderr, /(?:Dependency|Jobs|Supply|ToolchainPin)\.jet/);
 });

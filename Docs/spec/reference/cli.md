@@ -132,6 +132,10 @@ Compiler-backed inspection and fix planning declare the execution host's actual
 `Exec`, `IO`, `FFI.C`, and `FFI.Asm` ceilings. Fix semantic checks also declare
 `Net` for the checked build-input HTTP provider already admitted by the CLI
 package; these ceilings do not change the package's authority grants.
+The compiler assembly retains the pre-merge command boundary: unwired
+post-merge `Jobs`, package bundle/flash ports, `Supply`, and `ToolchainPin`
+remain in the repository but are explicitly excluded from its source inventory.
+Other unlisted CLI sources still fail assembly.
 The CLI maps a failed byte fetch into the driver's typed build-HTTP error before
 examining response bytes; it never lets the provider's failure carrier escape
 through that boundary.

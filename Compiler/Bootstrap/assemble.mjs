@@ -44,6 +44,16 @@ const excludedSourceRoots = [
   // The post-merge Publication dependency-command leaf has no CLI caller yet.
   // Keep it in the repository without expanding the compiler assembly closure.
   "Compiler/JetCli/Source/Cli/Dependency.jet",
+  // These post-merge command ports likewise have no dispatch callers and were
+  // not in the pre-merge compiler inventory. Preserve that assembly boundary.
+  "Compiler/JetCli/Source/Cli/Jobs.jet",
+  "Compiler/JetCli/Source/Cli/Package/Bundle.jet",
+  "Compiler/JetCli/Source/Cli/Package/FlashAudit.jet",
+  "Compiler/JetCli/Source/Cli/Package/FlashPlan.jet",
+  "Compiler/JetCli/Source/Cli/Package/NativeBundle.jet",
+  "Compiler/JetCli/Source/Cli/Package/NativeFlash.jet",
+  "Compiler/JetCli/Source/Cli/Supply.jet",
+  "Compiler/JetCli/Source/Cli/ToolchainPin.jet",
 ];
 
 function fail(message) {
