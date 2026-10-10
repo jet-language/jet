@@ -503,6 +503,12 @@ fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, gener
     if ty == {
         .Named(name) -> {
             if name == "Any" -> &diagnostics.push(sema_no_any_type(span))
+            // D-SERDE13=B (Rust type_assign.rs `data_renamed_to_dyn`): the
+            // retired `Data` spelling points at `Dyn`.
+            if name == "Data" {
+                &diagnostics.push(sema_data_renamed_to_dyn(span))
+                return
+            }
             // D-LAYOUT-CTOR1 (Rust `layout_handle_renamed_to_layout`): the
             // retired `LayoutHandle` spelling points at `Layout`.
             if name == "LayoutHandle" {
