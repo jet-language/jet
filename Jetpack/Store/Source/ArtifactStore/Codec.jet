@@ -166,7 +166,7 @@ fn store_artifact_read_file(path: String) -[FS]> ArtifactRawRead ArtifactStoreEr
         if store_artifact_io_missing(err) -> return Ok(ArtifactRawRead.Corrupt("entry disappeared while opening"))
         return Err(ArtifactStoreError.IO(err))
     }
-    defer close(^reader)
+    // FileReader's lexical cleanup keeps the handle live through verification.
     held :: reader.stat()
     if !store_artifact_same_file(metadata, held) -> return Ok(ArtifactRawRead.Corrupt("entry changed while opening"))
     bytes := [U8]{}

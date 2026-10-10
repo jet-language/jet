@@ -182,7 +182,10 @@ fn store_build_last_run_directory(root: String, create: Bool) -[FS, Env]> files.
         if create && held.entry_stat(part) == .Err(error) {
             if error == .NotFound(_) {
                 if held.create_directory(part, mode: Val(0o700)) == .Err(failure) {
-                    if failure != .AlreadyExists(_) -> return Err(ArtifactStoreError.IO(failure))
+                    if failure == {
+                        .AlreadyExists(_) -> {}
+                        else -> { return Err(ArtifactStoreError.IO(failure)) }
+                    }
                 }
             } else { return Err(ArtifactStoreError.IO(error)) }
         }
