@@ -1,0 +1,113 @@
+// Raw host path, clock and positioned-read facts behind Core/files/files.jet
+// (FileHandles.rs:1105-1132, FSWriteOps.rs:158-169). Core owns every public
+// policy: false-on-error, current-directory joins, fallbacks and naming.
+
+fn fs_text_has_nul(path: I64) -> Bool {
+    at := I64{0}
+    loop at < rt_text_len(path) {
+        if (rt_text_byte(rt_text_data(path) + at) == I64{0}) -> return true
+        at += I64{1}
+    }
+    false
+}
+
+// std::fs::metadata(path).is_dir(), following links; the error is the
+// io::Error Display text ("<description> (os error N)").
+#Export(c) fn jet_fs_metadata_directory_raw(path: I64, ok: I64, error: I64) -> I64 {
+    if fs_text_has_nul(path) {
+        rt_text_store(error, jet_rt_string_clone(rt_static_text("file name contained an unexpected NUL byte")))
+        return I64{0}
+    }
+    scratch :: jet_rt_alloc(I64{160}, I64{8})
+    jet_fs_stat_raw(path, true, scratch, scratch + I64{128})
+    failed :: rt_text_word(scratch + I64{128}) != I64{0}
+    code :: rt_text_word(scratch + I64{136})
+    directory :: (rt_text_word(scratch + I64{16}).bit_and(I64{61440})) == I64{16384}
+    jet_rt_free(scratch, I64{160}, I64{8})
+    if failed {
+        rt_text_store(error, host_errno_cause(code))
+        return I64{0}
+    }
+    rt_text_put(ok, if directory -> I64{1} else -> I64{0})
+    I64{1}
+}
+
+// Unix Path::is_absolute: the path has a root.
+#Export(c) fn jet_fs_host_path_is_absolute_raw(path: I64) -> Bool {
+    rt_text_len(path) != I64{0} && rt_text_byte(rt_text_data(path)) == I64{47}
+}
+
+// Unix PathBuf::push: an absolute path replaces base; otherwise a separator
+// joins unless base is empty or already ends in one ("a" + "" is "a/").
+#Export(c) fn jet_fs_host_path_join_raw(base: I64, path: I64) -> I64 {
+    if jet_fs_host_path_is_absolute_raw(path) -> return jet_rt_string_clone(path)
+    result :: jet_rt_string_clone(base)
+    length :: rt_text_len(base)
+    if (length != I64{0} && rt_text_byte(rt_text_data(base) + length - I64{1}) != I64{47}) -> rt_text_push_word(result, I64{47}, I64{1})
+    jet_rt_string_builder_push(result, path)
+    result
+}
+
+// std::env::temp_dir on Unix: TMPDIR from the host process environment
+// (present, even empty, wins), else /tmp. Never the logical overlay.
+#Export(c) fn jet_fs_temp_directory_raw() -> I64 {
+    value :: rt_env_get_lossy(rt_static_text("TMPDIR"))
+    if (value != I64{0}) -> return value
+    jet_rt_string_clone(rt_static_text("/tmp"))
+}
+
+// SystemTime::now().duration_since(UNIX_EPOCH).as_nanos() as full decimal
+// text; a pre-epoch clock is unavailable with empty text.
+#Export(c) fn jet_fs_temp_path_sample_raw(available: I64, nanos_out: I64) {
+    sample :: time_clock_read(I64{0})
+    seconds :: sync_load(sample)
+    nanos :: sync_load(sample + I64{8})
+    text :: jet_rt_string_builder_new()
+    if (seconds >= I64{0}) {
+        if (seconds == I64{0}) {
+            rt_text_push_number(text, nanos)
+        } else {
+            rt_text_push_number(text, seconds)
+            divisor := I64{100000000}
+            loop divisor > (I64{0}) {
+                rt_text_push_word(text, I64{48} + (nanos /% divisor) %% I64{10}, I64{1})
+                divisor = divisor /% I64{10}
+            }
+        }
+    }
+    rt_text_put(available, if (seconds >= I64{0}) -> I64{1} else -> I64{0})
+    rt_text_store(nanos_out, jet_rt_string_builder_finish(text))
+}
+
+// File::open, seek(Start(offset)), then ONE read of up to count bytes; the
+// result is truncated to what that read returned. No EINTR retry on read.
+#Export(c) fn jet_files_read_at_os(path: I64, offset: I64, count: I64, output: I64, len: I64, error: I64) -> I64 {
+    start :: host_native_int(offset)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    limit :: host_native_int(count)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
+    name :: fd_c_path(path)
+    fd := I64{0}
+    loop {
+        fd = host_call(I64{2}, name, I64{524288}, I64{0})
+        if (fd != I64{-4}) -> break
+    }
+    fd_c_path_drop(name, path)
+    if (fd < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, path, -fd, error)
+    sought :: host_call(I64{8}, fd, start, I64{0})
+    if (sought < I64{0}) {
+        _ := host_call(I64{3}, fd, I64{0}, I64{0})
+        return compiler_fs_errno(HOST_IO_OP_READ, path, -sought, error)
+    }
+    capacity :: if (limit == I64{0}) -> I64{1} else -> limit
+    bytes :: jet_rt_alloc(capacity, I64{8})
+    got :: host_call(I64{0}, fd, bytes, limit)
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    if (got < I64{0}) {
+        jet_rt_free(bytes, capacity, I64{8})
+        return compiler_fs_errno(HOST_IO_OP_READ, path, -got, error)
+    }
+    compiler_fs_bytes_take(bytes, capacity, got, output, len)
+    I64{1}
+}
