@@ -300,7 +300,7 @@ fn jet_cli_flash_safe_openocd_image_name(name: String) -> Bool Never! {
     }
     true
 }
-// Rust status_value (CmdFlash.rs:1253-1272); Report uses Core Dyn.
+// Rust status_value (CmdFlash.rs:1253-1272); Dyn objects retain ordered pairs.
 fn jet_cli_flash_status_value(value: CanonicalJSON) -> Dyn Never! {
     if value == {
         .Null -> Dyn.Null
@@ -313,8 +313,8 @@ fn jet_cli_flash_status_value(value: CanonicalJSON) -> Dyn Never! {
             Dyn.Array(rows)
         }
         .Object(values) -> {
-            fields := [String:Dyn]{}
-            loop row in values -> fields[row.key] = jet_cli_flash_status_value(row.value)
+            fields := [(key: String, value: Dyn)]{}
+            loop row in values -> &fields.push((key: row.key.copy(), value: jet_cli_flash_status_value(row.value)))
             Dyn.Object(fields)
         }
     }

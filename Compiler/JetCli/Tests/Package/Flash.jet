@@ -495,8 +495,8 @@ fn flash_test_no_path() -> Path? Never! { None }
     assert_eq(success.status, Val(9))
     assert(!success.stdout_truncated)
     status :: jet_cli_flash_plan_value(plan)
-    if status == .Object(fields) {
-        cell :: fields.get("image_bytes") ?? panic("image bytes")
+    if status == .Object(_) {
+        cell :: status["image_bytes"]
         if cell == .Int(value) -> assert_eq(value, 17) else -> panic("integer status")
     } else {
         panic("plan status")
@@ -811,3 +811,26 @@ fn flash_test_host_for_machine(machine: MIRTargetMachine) -> FlashTestHost Never
     assert_eq(flash_paths.show(jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "a.é", flash_test_no_path()) ?? panic("sanitize")), "/out/a__.target.json")
 }
 // #4316 END
+
+#Test("flash canonical status projection retains ordered nested object pairs") {
+    tree :: CanonicalJSON.Object([CanonicalJSONField]{
+        CanonicalJSONField{key: "z", value: CanonicalJSON.Array([CanonicalJSON]{
+            CanonicalJSON.Object([CanonicalJSONField]{
+                CanonicalJSONField{key: "z", value: CanonicalJSON.Bool(true)},
+                CanonicalJSONField{key: "a", value: CanonicalJSON.Integer("17")}})})},
+        CanonicalJSONField{key: "a", value: CanonicalJSON.Null}})
+    projected :: jet_cli_flash_status_value(tree)
+    if projected == .Object(fields) {
+        assert_eq(fields.len(), 2)
+        assert_eq(fields[0].key, "z")
+        assert_eq(fields[1].key, "a")
+        if fields[0].value == .Array(rows) {
+            if rows[0] == .Object(nested) {
+                assert_eq(nested[0].key, "z")
+                assert_eq(nested[1].key, "a")
+                assert(nested[0].value == .Bool(true))
+                assert(nested[1].value == .Int(17))
+            } else { panic("nested object") }
+        } else { panic("array") }
+    } else { panic("object") }
+}
