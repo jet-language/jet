@@ -344,6 +344,9 @@ graph snapshot. Ownership branch forks retain indexed declaration/reference
 counts and small path facts. Their undo trail restores binding freeze
 provenance, and a joined binding is frozen only when every reaching path
 proves it; freeze source sites remain available for diagnostics after the join.
+Read-pattern scalar bindings copy their values rather than carrying an owner
+view; explicit write-pattern bindings and non-scalar reads retain their view
+origins and mutation restrictions.
 
 Semantic checking APIs thread `SemaProgramTables` explicitly alongside
 `SemaScopeEnvironment`; callers pass the tables rather than shifting mutable
