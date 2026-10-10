@@ -335,6 +335,7 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     }
     if route.params.len() != args.len() -> return lower_fail(&m, &f, "{what} {name} passes {args.len()} arguments; its runtime route takes {route.params.len()}")
     if route.symbol == "jet_dyn_field" && lower_dyn_field(p, c, &m, &f, instruction, route, args) -> return
+    if route.symbol == "jet_dyn_to_text" && lower_dyn_to_text(p, c, &m, &f, instruction, route, args) -> return
     lowered := [LIRValueID]{}
     temporaries := [LIRValueID]{}
     // Runtime Dyn trees built for the call (lower_route_dyn).
