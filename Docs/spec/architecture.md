@@ -55,6 +55,8 @@ Internal runtime C symbols use the acronym-aware snake projection owned by
 projection for Lower. For example, the `HTTPClient` symbol atom is
 `http_client`. Runtime type names, declaration keys, variant identities and
 layout metadata remain nominal: only the ABI symbol atoms are projected.
+Isolated runtime-generator fixtures copy that shared projection module alongside
+the real generator and registry inputs; they do not replace its module boundary.
 Providers, generated adapters and compiler callers use one spelling, with
 collision rejection before a symbol cutover.
 

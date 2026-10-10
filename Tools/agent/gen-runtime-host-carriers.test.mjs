@@ -13,7 +13,8 @@ const outputs = ['Compiler/JetRuntime/Source/HostEnums.jet', 'crates/jet-codegen
 function fixture(body) {
   const tree = mkdtempSync(join(tmpdir(), 'jet-host-carriers-'));
   try {
-    for (const path of [script, rows, ...outputs]) {
+    // Preserve the generator's real module boundary in the isolated tree.
+    for (const path of [script, 'Tools/agent/runtime-abi-symbols.mjs', rows, ...outputs]) {
       mkdirSync(dirname(join(tree, path)), { recursive: true });
       copyFileSync(join(root, path), join(tree, path));
     }
