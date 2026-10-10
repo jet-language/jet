@@ -68,6 +68,9 @@ when a public Core boundary owns its types and implements only some of them.
 When an owned wrapper calls a private runtime kernel, remove its obsolete public
 dispatcher and any unused Rust leaf. A provider still used by a separate bootstrap
 builtin remains live; never replace the source boundary with a compatibility shim.
+Source-owned URL parsing remains public in Core; its obsolete `parse`,
+`urlparse`, and `urlsplit` dispatcher rows must not reintroduce the deleted
+Rust `jet_url_parse` policy wrapper into native route classification.
 Closed native enum metadata must retain the current declaration's complete case
 list: `Dyn` has Null, Bool, Int, Float, Number, Text, Bytes, DateTime, Array, and
 Object. Restore a lost declaration row from history before regenerating; do not

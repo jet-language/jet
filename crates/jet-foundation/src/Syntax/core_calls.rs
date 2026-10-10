@@ -1638,7 +1638,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 80ba120468a022a46fa645efbddcd1c4339221586e1cbdecb9bc35e07bdf600c
+// Source SHA-256: 9224384f0b9793529742845c5096573b6f644c0c23748847bf946caac3afef5c
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.crypto", "__jetc_open_directory"),
@@ -2872,7 +2872,6 @@ pub static CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.files", "__writer_stat", "jet_std_file_writer_stat", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_native_int_result(),
     CoreCallRecord::new("core.files", "__writer_set_mode", "jet_std_file_writer_set_mode", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__flock", "jet_std::jet_fs_flock", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.net.url", "parse", "jet_url_parse", true, &[true]),
     CoreCallRecord::new( "core.net.url", "from_parts", "jet_url_from_parts", true, &[true, true, true, true, true], ),
     CoreCallRecord::new("core.net.url", "file", "jet_url_file", true, &[true]),
     CoreCallRecord::new("core.net.url", "data", "jet_url_data", true, &[true, true]),
@@ -2892,8 +2891,6 @@ pub static CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.net.url", "unquote", "jet_url_unquote", true, &[true],),
     CoreCallRecord::new("core.net.url", "unquote_to_bytes", "jet_url_unquote_to_bytes", true, &[true],),
     CoreCallRecord::new("core.net.url", "unquote_plus", "jet_url_unquote_plus", true, &[true],),
-    CoreCallRecord::new("core.net.url", "urlparse", "jet_url_parse", true, &[true],),
-    CoreCallRecord::new("core.net.url", "urlsplit", "jet_url_parse", true, &[true],),
     CoreCallRecord::new("core.net.url", "urlunparse", "jet_url_to_string", true, &[true],),
     CoreCallRecord::new("core.net.url", "urlunsplit", "jet_url_to_string", true, &[true],),
     CoreCallRecord::new("core.net.url", "urldefrag", "jet_url_urldefrag", true, &[true],),
