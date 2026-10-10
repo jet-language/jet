@@ -58,8 +58,10 @@ fn pc_module_markers() {
     pc_require(retired.diagnostics[0].fix.contains("#Import"), "Extern replacement agrees with registry")
     pc_require(retired.program.items.len() == 1, "Extern recovery keeps the module")
     pc_require(if retired.program.items[0] == .CModule(value) -> value.kind == CModuleKind.Extern else -> false, "Extern recovery is an import, not Bindgen")
-    active :: parse_source("#Import module c.sample {{ }}".bytes())
+    active :: parse_source("#Import module c.sqlite3 {{ fn close(database: U64) -> I32 = \"sqlite3_close\" }}\nfn run() {{}}\n".bytes())
     pc_require(active.diagnostics.len() == 0, "canonical module import is active")
+    pc_require(active.program.items.len() == 2, "C module heads precede unattached library file rules")
+    loop fact in active.program.rule_facts -> pc_require(fact.site != Val(RuleSite.File), "C import marker is not a file rule")
     bindgen :: parse_source("#Bindgen module c.sample.__bindgen__ {{ }}".bytes())
     // The marker is active; authored use of the generated-only namespace
     // still receives the independent lexical reserved-name diagnostic.

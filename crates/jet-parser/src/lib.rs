@@ -877,3 +877,24 @@ fn split_guard(c: Conn) -> String {
     }
 }
 
+#[cfg(test)]
+mod c_module_dispatch_tests {
+    use super::{Lexer, Parser};
+    use crate::AST::Item;
+
+    #[test]
+    fn c_module_item_heads_precede_unresolved_library_markers() {
+        for (source, generated) in [
+            ("#Import module c.sqlite3 { fn close(database: U64) -> I32 = \"sqlite3_close\" }\nfn run() {}\n", false),
+            ("#Bindgen module c.sqlite3.__bindgen__ {}\nfn run() {}\n", true),
+        ] {
+            let (tokens, diagnostics) = if generated { Lexer::lex_generated(source) } else { Lexer::lex(source) };
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+            let program = Parser::parse(&tokens).expect("C module is an item, not a file rule");
+            assert_eq!(program.items.len(), 2);
+            assert!(matches!(program.items[0], Item::CModule(_)));
+            assert!(program.rule_facts.iter().all(|fact| fact.site == Some(crate::Policy::RuleSite::Module)));
+        }
+    }
+}
+

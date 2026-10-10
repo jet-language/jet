@@ -792,6 +792,10 @@ impl<'a> Parser<'a> {
                         continue;
                     }
                 }
+                TokKind::Hash if self.at_c_module() => self.c_module().map(Item::CModule),
+                TokKind::Hash if self.at_retired_at_c_module() => {
+                    self.retired_at_c_module().map(Item::CModule)
+                }
                 TokKind::Hash if self.at_no_prelude() && !self.file_marker_stack_starts_here() => {
                     if no_prelude {
                         let span = self.peek().span;
@@ -1209,10 +1213,6 @@ impl<'a> Parser<'a> {
                 // `#Codable` type rules use the one applied-rule parser.
                 TokKind::Hash if self.at_marker_list() || self.at_single_type_marker() => {
                     self.type_def_with_any_markers()
-                }
-                TokKind::Hash if self.at_c_module() => self.c_module().map(Item::CModule),
-                TokKind::Hash if self.at_retired_at_c_module() => {
-                    self.retired_at_c_module().map(Item::CModule)
                 }
                 TokKind::Hash if self.at_unit_family_def() => {
                     let (is_pub, is_package_pub) = self.parse_item_visibility();
