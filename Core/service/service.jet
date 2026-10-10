@@ -10,6 +10,8 @@ package {
 }
 
 use core as core
+use core.sys as service_sys
+use core.encoding as service_encoding
 
 // Ordinary source values: construction, matching, equality and ownership use
 // the compiler's existing record/enum rails, not service-specific handles.
@@ -382,7 +384,7 @@ fn read_state_record(prefix: String, record: String) -> String ServiceError! {
     if digits_start < separator && raw[digits_start] == (U8{43}) -> digits_start = digits_start + 1
     if digits_start == separator -> return Err(ServiceError.Policy("state record length is invalid"))
     length := 0
-    maximum :: core.sys.usize_max()
+    maximum :: service_sys.usize_max()
     loop i in digits_start..<separator {
         digit :: Int.from_u8(raw[i]) - 48
         if digit < 0 || digit > 9 || length > (maximum - digit) /% 10 -> return Err(ServiceError.Policy("state record length is invalid"))
@@ -1519,7 +1521,7 @@ fn delivery_events(delivery: Delivery) -> [DeliveryEvent] ServiceError! {
                 }
                 signed_fields :: [String]{"jet-service-delivery-acceptance-v2", fields[0], fields[1], fields[2], fields[3], fields[4], "{generation}", fields[6], "{timestamp}", "{expires}"}
                 expected :: core.crypto.hmac_sha256(key, delivery_signature_payload(signed_fields))
-                supplied :: core.encoding.hex_to_bytes(fields[9]) ?? return Err(ServiceError.Unavailable("delivery acceptance signature is malformed"))
+                supplied :: service_encoding.hex_to_bytes(fields[9]) ?? return Err(ServiceError.Unavailable("delivery acceptance signature is malformed"))
                 if !core.crypto.constant_time_equal_bytes(expected, supplied) -> return Err(ServiceError.Unavailable("delivery acceptance history signature does not validate"))
             } else if record.op == 69 && fields.len() == 6 && fields[0] == facts.id {
                 sequence :: workflow_i64(fields[1]) ?? return Err(ServiceError.Unavailable("delivery event sequence is malformed"))
@@ -1536,7 +1538,7 @@ fn delivery_events(delivery: Delivery) -> [DeliveryEvent] ServiceError! {
                     .Ok(value) -> value
                     .Err(error) -> { return Err(error) }
                 }
-                supplied :: core.encoding.hex_to_bytes(fields[5]) ?? return Err(ServiceError.Unavailable("delivery event signature is malformed"))
+                supplied :: service_encoding.hex_to_bytes(fields[5]) ?? return Err(ServiceError.Unavailable("delivery event signature is malformed"))
                 if !core.crypto.constant_time_equal_bytes(expected, supplied) -> return Err(ServiceError.Unavailable("delivery event signature does not validate"))
                 &events.push(DeliveryEvent{sequence: sequence, state: state, attempts: attempts, timestamp: timestamp, signature: fields[5]})
             }
@@ -1584,7 +1586,7 @@ fn delivery_receipt_signature(facts: __DeliveryFacts) -> String ServiceError! {
         .Err(error) -> { return Err(error) }
     }
     fields :: [String]{"jet-service-delivery-receipt-v1", facts.id, facts.key, "{facts.duplicate}", facts.tree, facts.worker, facts.message, delivery_state_show(facts.state), "{facts.attempts}", "{facts.deadline}", "{facts.retention_until}", "{facts.generation}"}
-    Ok(core.encoding.bytes_to_hex(core.crypto.hmac_sha256(key, delivery_signature_payload(fields))))
+    Ok(service_encoding.bytes_to_hex(core.crypto.hmac_sha256(key, delivery_signature_payload(fields))))
 }
 
 fn delivery_event_signature(authority: String, generation: Int, id: String, sequence: Int, state: DeliveryState, attempts: Int, timestamp: Int) -> [U8] ServiceError! {
@@ -1628,7 +1630,7 @@ fn delivery_parse_state(text: String) -> DeliveryState? Never! {
 
 #Test("delivery signature fields retain big-endian byte counts and state spellings") {
     fields :: [String]{"λ", ""}
-    assert(core.encoding.bytes_to_hex(delivery_signature_payload(fields)) == "0000000000000002cebb0000000000000000")
+    assert(service_encoding.bytes_to_hex(delivery_signature_payload(fields)) == "0000000000000002cebb0000000000000000")
     assert(delivery_parse_state("Delivered") == (Val(DeliveryState.Delivered)))
     assert(delivery_parse_state("delivered") == None)
 }
@@ -1639,12 +1641,12 @@ fn delivery_parse_state(text: String) -> DeliveryState? Never! {
 #Test("delivery receipt and event signatures match observed fixed-key framing vectors") {
     authority :: "sa-000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
     generation_key :: delivery_generation_key(authority, 7) ?? panic("fixed key")
-    assert(core.encoding.bytes_to_hex(generation_key) == "0efa1cbc75008d741cc1cdfb5a9b4512112201437413147ff3a5bdaabc65699e")
+    assert(service_encoding.bytes_to_hex(generation_key) == "0efa1cbc75008d741cc1cdfb5a9b4512112201437413147ff3a5bdaabc65699e")
     facts :: __DeliveryFacts{id: "d1", key: "k1", tree: "tree", worker: "worker", message: "λ", authority: authority, generation: 7, state: DeliveryState.Delivered, attempts: 3, retention_until: 1700000010000, deadline: 1700000000999, event_sequence: 4, duplicate: true, records: [__DeliveryRecord]{}}
     receipt :: delivery_receipt_signature(facts) ?? panic("receipt vector")
     assert(receipt == "df0bd21f6f2307c792cfb3b56258a633200241a964aca0c5f669853f11883601")
     event :: delivery_event_signature(authority, 7, "d1", 4, DeliveryState.Delivered, 3, 1700000000123) ?? panic("event vector")
-    assert(core.encoding.bytes_to_hex(event) == "b26b530c1223a26a44476d6d44df66905c6cf02eaf51f440790b5ee153140aa6")
+    assert(service_encoding.bytes_to_hex(event) == "b26b530c1223a26a44476d6d44df66905c6cf02eaf51f440790b5ee153140aa6")
 }
 
 fn local_delivery_ids(tree: ServiceTree, endpoint: ServiceEndpoint, store: String) -> [String] Never! {

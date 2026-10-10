@@ -29,6 +29,12 @@ join the ordinary checked module queue before MIR nominal facts are frozen;
 emission must not substitute a native carrier, invent an alias declaration, or
 resolve an unrelated module merely because its type shares the leaf name.
 
+Service state framing and signature codecs explicitly import their source
+owners (`core.sys` and `core.encoding`). The selected-target `usize_max` and
+hex codecs remain the same public functions; these imports make the checked
+source dependency visible rather than treating it as a root-Core dispatcher
+leaf. Production calls and service signature-vector tests use those same owners.
+
 Native task-stop publication requires both a current task control and the
 compiler's scoped publication capability: only a checked operation immediately
 followed by MIR `Poll(Propagate)` may arm it. Plain calls and root bodies remain
