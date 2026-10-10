@@ -1,3 +1,5 @@
+use core.build.BuildGraphNode
+use jet_codegen.TCostReport
 use jet_backend.[X64ExecutionHost, X64ExecutionRequest, X64ExecutionResponse]
 // Source, module, and package identities remain separate at the driver boundary.
 use jet_sema.[SemaOutputIntent]
@@ -227,7 +229,21 @@ struct JetDriverCompileRequest {
     gate_policies: [JetDriverGatePolicy]{[JetDriverGatePolicy]{}}
     // External lock/trust/forced-build writers use the canonical gate row.
     external_gate_entries: [GateEntry]{[GateEntry]{}}
-    evaluation_entry: String?{None}
+    // Explicit callable shared by named jobs, generation and evaluation.
+    selected_entry: String?{None}
+    profile: String{"dev"}
+    build_mode: MIRArtifactBuildMode{MIRArtifactBuildMode.Dev}
+    adapter_mode: String{""}
+    adapter_operation_ids: [String]{[String]{}}
+    capture_build_program: Bool{false}
+    capture_build_nodes: Bool{false}
+    build_output_names: [String]{[String]{}}
+    capture_cost_report: Bool{false}
+    generated_modules: [JetDriverGeneratedModule]{[JetDriverGeneratedModule]{}}
+    // Raw transports remain distinct from ordinary comptime IO.
+    build_inputs: JetDriverBuildInputs?{None}
+    build_http_inputs: JetDriverBuildHTTPInputs?{None}
+    execution_host: JetDriverExecutionHost?{None}
     // Unified host/stop contract (#4720): the comptime lowering session
     // produces MIR stop points (Poll/Stopped and the budget can-stop rows)
     // for the native execution host. Only the native comptime selection sets
@@ -279,21 +295,31 @@ trait JetDriverExecutionHost {
 // that refuses a final link. Path law, glob matching, pin checks, decoding
 // and every diagnostic stay in the build adapter; an error is the host's
 // own text for the failed operation.
+#Error
+struct JetDriverBuildInputError {
+    message: String
+}
+
 trait JetDriverBuildInputs {
-    fn resolve(self, path: String) -[FS.Read]> JetDriverBuildPath String!
-    fn entries(self, directory: String) -[FS.Read]> [JetDriverBuildEntry] String!
-    fn read(self, path: String, limit: Int) -[FS.Read]> [U8] String!
+    fn resolve(self, path: String) -[FS.Read]> JetDriverBuildPath JetDriverBuildInputError!
+    fn entries(self, directory: String) -[FS.Read]> [JetDriverBuildEntry] JetDriverBuildInputError!
+    fn read(self, path: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError!
     // Open each component relative to one retained root with nofollow; read
     // the same opened regular file, bounded before and during the read.
-    fn read_rooted(self, root: String, relative: String, limit: Int) -[FS.Read]> [U8] String!
+    fn read_rooted(self, root: String, relative: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError!
 }
 
 // A single raw HTTP GET. No redirects, status interpretation, digest checks
 // or decoding occur here; Jet owns those rules. Timeout and body bound are
 // supplied by the checked-build consumer, not chosen by a provider.
+#Error
+struct JetDriverBuildHTTPError {
+    message: String
+}
+
 trait JetDriverBuildHTTPInputs {
-    fn resolve(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] String!
-    fn get(self, url: String, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> JetDriverBuildHTTPResponse String!
+    fn resolve(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] JetDriverBuildHTTPError!
+    fn get(self, url: String, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> JetDriverBuildHTTPResponse JetDriverBuildHTTPError!
 }
 struct JetDriverBuildHTTPResponse {
     status: Int
@@ -466,6 +492,7 @@ struct JetDriverLoadResult {
     diagnostics: [Diagnostic]
     failed_stage: JetDriverStage?
     complete: Bool
+    mode: JetDriverLoadMode{JetDriverLoadMode.Program}
     // Canonical parser/load facts, available without checking callable bodies.
     names: NameLedger?{None}
     // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
@@ -523,6 +550,11 @@ struct JetDriverCompileResult {
     // A complete `Sandbox` compile: the guest artifacts plus the interface
     // snapshot the host stores as the new frozen baseline.
     sandbox: JetDriverSandboxOutput?{None}
+    canonical_routes: [CanonicalPassRecord]{[CanonicalPassRecord]{}}
+    build_program: TComptimeValue?{None}
+    build_nodes: [BuildGraphNode]?{None}
+    cost_report: TCostReport?{None}
+    cost_gaps: [String]{[String]{}}
 }
 
 struct JetDriverSandboxOutput {
