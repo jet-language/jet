@@ -5,6 +5,9 @@ DELIVERY_HANDLE_BYTES :: prep { I64{40} }
 #Export(c) fn jet_rt_record_new_JetDelivery(id: I64, store: I64, duplicate: U8, authority: I64, generation: I64) -> I64 {
     raw :: jet_int_owned_to_i64(generation)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    delivery_allocate_raw(id, store, duplicate, authority, raw)
+}
+fn delivery_allocate_raw(id: I64, store: I64, duplicate: U8, authority: I64, raw: I64) -> I64 {
     value :: jet_rt_alloc(DELIVERY_HANDLE_BYTES, I64{8})
     rt_text_store(value, jet_rt_string_clone(id))
     rt_text_store(value + I64{8}, jet_rt_string_clone(store))
@@ -53,7 +56,8 @@ DELIVERY_HANDLE_BYTES :: prep { I64{40} }
 // Services.rs:3371-3376 / ServiceAuthority.rs:2749. These transport leaves
 // borrow the canonical native Delivery40 carrier; no registry access occurs.
 #Export(c) fn jet_services_raw_delivery_allocate(id: I64, store: I64, duplicate: U8, authority: I64, generation: I64) -> I64 {
-    jet_rt_record_new_JetDelivery(id, store, duplicate, authority, generation)
+    // Unlike the record constructor, this Rust i64 parameter is untagged.
+    delivery_allocate_raw(id, store, duplicate, authority, generation)
 }
 #Export(c) fn jet_services_raw_delivery_identity(value: I64, id: I64, store: I64, duplicate: I64, authority: I64, generation: I64) {
     rt_text_store(id, jet_rt_record_get_JetDelivery_id(value))

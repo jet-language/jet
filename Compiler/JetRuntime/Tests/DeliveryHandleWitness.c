@@ -62,8 +62,10 @@ int main(int argc,char **argv) {
     for(size_t i=0;i<5;++i) for(size_t j=0;j<4;++j) {
         Text *text=jet_rt_string_clone(&input); text_watch(text);
         int64_t exact=jet_int_owned_from_i64(generations[i]);
-        Delivery *a=jet_services_raw_delivery_allocate(text,text,bools[j],text,exact); delivery_watch(a);
+        Delivery *a=jet_services_raw_delivery_allocate(text,text,bools[j],text,generations[i]); delivery_watch(a);
         assert(a->generation==generations[i] && a->duplicate==(bools[j]!=0)); different(text,a->id); different(text,a->store); different(text,a->authority);
+        Delivery *constructed=jet_rt_record_new_JetDelivery(text,text,bools[j],text,exact); delivery_watch(constructed);
+        assert(jet_rt_handle_eq_JetDelivery(a,constructed)); jet_rt_handle_drop_JetDelivery(constructed);
         jet_rt_int_drop(exact); jet_rt_string_drop(text);
         Delivery *b=jet_rt_handle_clone_JetDelivery(a); delivery_watch(b); assert(a!=b && jet_rt_handle_eq_JetDelivery(a,b));
         different(a->id,b->id); different(a->store,b->store); different(a->authority,b->authority);
