@@ -286,6 +286,7 @@ fn e1220_keeps_dependency_and_effect_provenance_after_key_move() {
         name: "netdep".to_string(),
         effects: jet::Sema::EffectSet::from(["Net".to_string()]),
         effect_sites: std::collections::BTreeMap::new(),
+        effect_witnesses: std::collections::BTreeMap::new(),
         panic_sites: Vec::new(),
         boundary_span: Some(jet::Diagnostics::Span::new(4, 12)),
     }];

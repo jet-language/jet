@@ -18,15 +18,16 @@
 //! for both `deps:` (path/git/provider) entries and hangar-realized
 //! `use <pkg>` libraries (U17).
 
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{Diagnostic, DiagnosticOrigin, Span};
 use crate::Package::PackageFacts;
 use crate::Sema::{effect_covers, effect_set_has_root, Effect, EffectSet, EffectSummary};
-use crate::AST::{ImportKind, Item, ProgramBundle};
+use crate::AST::{ImportKind, Item, LoadedModule, ProgramBundle};
 use jet_foundation::Authority::{
     answer, is_deny_only, parse_right, root as effect_root, ApplicationAuthority, Holds, Verdict,
 };
 use jet_foundation::Report::{StatusEnvelope, StatusValue};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
 /// The application-boundary view of one checked program.
 ///
@@ -227,13 +228,16 @@ fn is_memory_right(name: &str) -> bool {
 
 /// One package's (root, or a dependency) aggregated effect set.
 #[derive(Debug, Clone)]
-pub struct PackageEffects {
+pub struct PackageEffects<'a> {
     /// `"root"` for the building package itself, else the dependency name.
     pub name: String,
     pub effects: EffectSet,
     /// One deterministic function identity that reaches each effect.
     /// This is the package-budget provenance used by E1220.
     pub effect_sites: BTreeMap<String, String>,
+    /// Authored locations of the selected effect witnesses, borrowed until
+    /// enforcement needs to materialize a diagnostic source.
+    pub effect_witnesses: BTreeMap<String, (&'a LoadedModule, Span)>,
     /// Function identities where a deniable Panic stop enters the graph.
     /// This is the package-budget provenance used by E1220.
     pub panic_sites: Vec<String>,
@@ -273,11 +277,11 @@ fn dependency_boundary_span(bundle: &ProgramBundle, dependency: &str) -> Option<
 /// loaded helpers that the selected driver never calls must not become
 /// application provenance. Functions with no entry in `solved` contribute
 /// nothing even when a reachable summary exists.
-pub fn compute_package_effects(
-    bundle: &ProgramBundle,
+pub fn compute_package_effects<'a>(
+    bundle: &'a ProgramBundle,
     solved: &HashMap<String, EffectSet>,
     summaries: &HashMap<String, EffectSummary>,
-) -> Vec<PackageEffects> {
+) -> Vec<PackageEffects<'a>> {
     let reachable = entry_reachable_keys(bundle, summaries, "run");
     let mut by_pkg: BTreeMap<String, PackageEffectAggregate> = BTreeMap::new();
 
@@ -316,11 +320,48 @@ pub fn compute_package_effects(
         .map(|(name, aggregate)| PackageEffects {
             name,
             effects: aggregate.effects,
+            effect_witnesses: aggregate
+                .effect_sites
+                .values()
+                .fold(BTreeMap::new(), |mut witnesses, site| {
+                    if !witnesses.contains_key(site) {
+                        if let Some(witness) = effect_witness(bundle, site) {
+                            witnesses.insert(site.clone(), witness);
+                        }
+                    }
+                    witnesses
+                }),
             effect_sites: aggregate.effect_sites,
             panic_sites: aggregate.panic_sites.into_iter().collect(),
             boundary_span: aggregate.boundary_span,
         })
         .collect()
+}
+
+fn effect_witness<'a>(bundle: &'a ProgramBundle, site: &str) -> Option<(&'a LoadedModule, Span)> {
+    for module in &bundle.modules {
+        let Some(key) = site.strip_prefix(&module.alias).and_then(|rest| rest.strip_prefix("::")) else {
+            continue;
+        };
+        let (owner, name) = key.split_once("::").map_or((None, key), |(owner, name)| (Some(owner), name));
+        for item in &module.items {
+            let span = match (owner, item) {
+                (None, Item::Func(function)) if function.name == name => Some(function.name_span),
+                (Some(owner), Item::Impl(block)) if block.type_name == owner =>
+                    block.methods.iter().find(|method| method.name == name).map(|method| method.name_span),
+                (Some(owner), Item::Struct(definition)) if definition.name == owner =>
+                    definition.methods.iter().chain(definition.trait_impls.iter().flat_map(|block| &block.methods))
+                        .find(|method| method.name == name).map(|method| method.name_span),
+                (Some(owner), Item::Enum(definition)) if definition.name == owner =>
+                    definition.methods.iter().find(|method| method.name == name).map(|method| method.name_span),
+                _ => None,
+            };
+            if let Some(span) = span {
+                return Some((module, span));
+            }
+        }
+    }
+    None
 }
 fn selected_output_identity(bundle: &ProgramBundle) -> Option<(String, String)> {
     let entry_module = bundle.modules.get(bundle.entry)?;
@@ -845,6 +886,7 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagn
 
     let empty = Holds::new();
     let mut diags = Vec::new();
+    let mut origins = HashMap::new();
     for pkg in entries {
         let granted = grants.get(pkg.name.as_str());
         for effect in &pkg.effects {
@@ -871,7 +913,15 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagn
                     diags.push(e1220_panic(&pkg.name, site, pkg.boundary_span));
                 } else {
                     let site = pkg.effect_sites.get(effect).map(String::as_str);
-                    diags.push(e1220_at(&pkg.name, effect, site));
+                    let mut diagnostic = e1220_at(&pkg.name, effect, site);
+                    if let Some((module, span)) = site.and_then(|site| pkg.effect_witnesses.get(site)) {
+                        diagnostic.span = Some(*span);
+                        let origin = origins.entry(&module.path).or_insert_with(|| Arc::new(
+                            DiagnosticOrigin::new(module.display.clone(), module.path.to_string_lossy().into_owned(), module.source.clone()),
+                        ));
+                        diagnostic = diagnostic.with_origin(Arc::clone(origin));
+                    }
+                    diags.push(diagnostic);
                 }
             }
         }
@@ -1077,13 +1127,38 @@ mod tests {
         (bundle, solved, summaries)
     }
 
-    fn package<'a>(entries: &'a [PackageEffects], name: &str) -> &'a PackageEffects {
+    fn package<'a, 'b>(entries: &'a [PackageEffects<'b>], name: &str) -> &'a PackageEffects<'b> {
         entries
             .iter()
             .find(|entry| entry.name == name)
             .expect("fixture package entry")
     }
 
+
+    #[test]
+    fn package_budget_keeps_effect_witness_source_and_shares_origins() {
+        let (bundle, mut solved, summaries) = effect_fixture(true);
+        solved.insert("run::run".to_string(), EffectSet::from(["Rand".to_string()]));
+        let entries = compute_package_effects(&bundle, &solved, &summaries);
+        let mut manifest = PackageFacts::default();
+        manifest.effects_enabled = true;
+        manifest.authority.holds.allow = Some(vec!["IO".to_string()]);
+        let diagnostics = enforce(&entries, &manifest);
+        assert_eq!(diagnostics.len(), 2);
+        let witness = &bundle.modules[1];
+        let Item::Func(seal) = &witness.items[1] else { panic!("seal function") };
+        for diagnostic in &diagnostics {
+            assert_eq!(diagnostic.span, Some(seal.name_span));
+            let origin = diagnostic.origin.as_ref().expect("effect witness source");
+            assert_eq!(origin.path, witness.path.to_string_lossy());
+            assert_eq!(origin.source, witness.source);
+        }
+        assert!(Arc::ptr_eq(diagnostics[0].origin.as_ref().unwrap(), diagnostics[1].origin.as_ref().unwrap()));
+        assert_eq!(
+            diagnostics[0].render("run.jet", "fn run() {}\n"),
+            include_str!("../../../tests/fixtures/effect_budget_origin.stderr"),
+        );
+    }
 
     #[test]
     fn package_budget_ignores_unreachable_loaded_rand_helper() {
@@ -1133,6 +1208,7 @@ mod tests {
             name: "dep".to_string(),
             effects: EffectSet::from(["Net".to_string()]),
             effect_sites: BTreeMap::new(),
+            effect_witnesses: BTreeMap::new(),
             panic_sites: Vec::new(),
             boundary_span: None,
         }];
@@ -1154,6 +1230,7 @@ mod tests {
             name: "root".to_string(),
             effects: EffectSet::from(["Net".to_string()]),
             effect_sites: BTreeMap::from([("Net".to_string(), "run::fetch".to_string())]),
+            effect_witnesses: BTreeMap::new(),
             panic_sites: Vec::new(),
             boundary_span: None,
         }];
@@ -1183,6 +1260,7 @@ mod tests {
             name: "panicdep".to_string(),
             effects: EffectSet::from(["Panic".to_string()]),
             effect_sites: BTreeMap::new(),
+            effect_witnesses: BTreeMap::new(),
             panic_sites: vec!["panicdep::parse_port".to_string()],
             boundary_span: Some(Span::new(4, 12)),
         }];
@@ -1218,6 +1296,7 @@ mod tests {
                 "Time.Wait".to_string(),
             ]),
             effect_sites: BTreeMap::from([("Time.Wait".to_string(), "waitdep::join".to_string())]),
+            effect_witnesses: BTreeMap::new(),
             panic_sites: Vec::new(),
             boundary_span: None,
         }];
@@ -1292,7 +1371,7 @@ mod tests {
         let required = EffectSet::from([
             "IO".to_string(),
             "Mem.Alloc".to_string(),
-            "Exec".to_string(),
+            "Exec.Args".to_string(),
         ]);
         let projection = project_application_effects(&required, None);
 
@@ -1302,7 +1381,7 @@ mod tests {
             EffectSet::from([
                 "IO".to_string(),
                 "Mem.Alloc".to_string(),
-                "Exec".to_string(),
+                "Exec.Args".to_string(),
             ])
         );
         assert!(projection.undecided().is_empty());

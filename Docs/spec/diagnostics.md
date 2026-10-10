@@ -57,6 +57,10 @@ a span omits that block. Every report keeps `Why:`, `Fix:`, and
 block compilation by default; a package may deny a named lint through its lint
 policy, but a diagnostic code is never a policy value.
 
+Package-budget reports retain the authored callable witness's span and source
+snapshot, including witnesses in dependency modules. A named witness must not
+be rendered against the entry file merely because enforcement runs there.
+
 A default-error entry report uses `Error [E3015]:` with the registry-owned
 What, Why, Fix, and More. The error value's own code remains report data rather
 than replacing the diagnostic identity. A handled `Err` printed as a value is

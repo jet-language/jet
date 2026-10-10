@@ -7,7 +7,7 @@
     package :: PackageFacts.parse(source, "package.jet") ?? panic("one-line FFI denial should parse")
     assert_eq(package.effects_deny, Val([String]{"FFI"}))
     leaves :: [String]{"FFI.Go", "FFI.Java", "FFI.DotNet", "FFI.Fortran", "FFI.Cobol", "FFI.Tcl", "FFI.Lua", "FFI.Ada", "FFI.Pascal", "FFI.Dart", "FFI.PowerShell", "FFI.Perl", "FFI.Ruby", "FFI.Php", "FFI.R", "FFI.Com", "FFI.Cpp", "FFI.Py", "FFI.Octave"}
-    entry :: PackageEffects{name: "foreign-dep", effects: leaves, effect_sites: [String: String]{}, panic_sites: [String]{}, boundary_span: None}
+    entry :: PackageEffects{name: "foreign-dep", effects: leaves, effect_sites: [String: String]{}, effect_witnesses: [String: EffectBudgetWitness]{}, panic_sites: [String]{}, boundary_span: None}
     diagnostics :: pkg_effect_enforce([PackageEffects]{entry}, package)
     assert_eq(diagnostics.len(), leaves.len())
     loop diagnostic in diagnostics -> assert_eq(diagnostic.code, "E1220")

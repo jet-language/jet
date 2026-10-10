@@ -51,6 +51,7 @@ authority: { holds: { deny: [FFI] } }
         name: "foreign-dep".to_string(),
         effects: EffectSet::from(leaves.map(str::to_string)),
         effect_sites: std::collections::BTreeMap::new(),
+        effect_witnesses: std::collections::BTreeMap::new(),
         panic_sites: Vec::new(),
         boundary_span: None,
     };

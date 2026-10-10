@@ -2112,6 +2112,7 @@ fn manifest_panic_budget_names_the_dependency_stop_site() {
         name: "panicdep".to_string(),
         effects: jet::Sema::EffectSet::from(["Panic".to_string()]),
         effect_sites: std::collections::BTreeMap::new(),
+        effect_witnesses: std::collections::BTreeMap::new(),
         panic_sites: vec!["panicdep::parse_port".to_string()],
         boundary_span: Some(jet::Diagnostics::Span::new(4, 12)),
     }];

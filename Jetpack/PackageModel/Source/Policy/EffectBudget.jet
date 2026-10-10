@@ -47,6 +47,7 @@ struct EffectBudgetModule {
     // `Sema::effect_key` of every function, method, and trait-impl method the
     // module defines, in item order.
     function_keys: [String]
+    function_spans: [String: Span]
     imports: [EffectBudgetImport]
     // Whether the module declares the `build(BuildContext)` entry.
     has_build_entry: Bool
@@ -61,6 +62,11 @@ struct EffectBudgetProgram {
     selected_output: EffectBudgetOutput?
 }
 
+struct EffectBudgetWitness {
+    path: String
+    span: Span
+}
+
 // One package's (root, or a dependency) aggregated effects.
 struct PackageEffects {
     // `root` for the building package itself, else the dependency name.
@@ -68,6 +74,7 @@ struct PackageEffects {
     effects: [String]
     // One deterministic function identity reaching each effect (E1220).
     effect_sites: [String: String]
+    effect_witnesses: [String: EffectBudgetWitness]
     // Function identities where a deniable Panic stop enters the graph.
     panic_sites: [String]
     // Root-side source location where a dependency crosses the boundary.
@@ -125,7 +132,7 @@ fn pkg_compute_package_effects(program: EffectBudgetProgram, solved: [String: [S
     by_package := [String: PackageEffects]{}
     loop loaded in program.modules {
         owner :: pkg_effect_module_owner(program, loaded.path)
-        aggregate := by_package.get(owner) ?? PackageEffects{name: owner, effects: [String]{}, effect_sites: [String: String]{}, panic_sites: [String]{}, boundary_span: None}
+        aggregate := by_package.get(owner) ?? PackageEffects{name: owner, effects: [String]{}, effect_sites: [String: String]{}, effect_witnesses: [String: EffectBudgetWitness]{}, panic_sites: [String]{}, boundary_span: None}
         if aggregate.boundary_span == None && owner != EFFECT_ROOT_PACKAGE {
             aggregate.boundary_span = pkg_dependency_boundary_span(program, owner)
         }
@@ -141,9 +148,25 @@ fn pkg_compute_package_effects(program: EffectBudgetProgram, solved: [String: [S
         entry := by_package[name]
         entry.effects = authority_holds(entry.effects)
         entry.panic_sites = authority_holds(entry.panic_sites)
+        loop site in entry.effect_sites.values() {
+            if entry.effect_witnesses.has_key(site) -> next
+            witness :: pkg_effect_witness(program, site) ?? next
+            entry.effect_witnesses[site] = witness
+        }
         &out.push(entry)
     }
     out
+}
+
+fn pkg_effect_witness(program: EffectBudgetProgram, site: String) -> EffectBudgetWitness? Never! {
+    loop loaded in program.modules {
+        prefix :: "{loaded.alias}::"
+        if !site.starts_with(prefix) -> next
+        key :: site.removeprefix(prefix)
+        span :: loaded.function_spans.get(key) ?? next
+        return Val(EffectBudgetWitness{path: loaded.path, span: span})
+    }
+    None
 }
 
 // The semantic roots the driver can select: a selected runnable output, else
@@ -318,7 +341,21 @@ fn pkg_effect_enforce(entries: [PackageEffects], manifest: PackageFacts) -> [Dia
                 site :: if package.panic_sites.len() > 0 -> package.panic_sites[0] else -> "a reachable dependency function"
                 &diagnostics.push(pkg_e1220_panic(package.name, site, package.boundary_span))
             } else {
-                &diagnostics.push(pkg_e1220_at(package.name, effect_name, package.effect_sites.get(effect_name)))
+                site :: package.effect_sites.get(effect_name)
+                diagnostic := pkg_e1220_at(package.name, effect_name, site)
+                if site == {
+                    .Val(function) -> {
+                        if package.effect_witnesses.get(function) == {
+                            .Val(witness) -> {
+                                diagnostic.span = Val(witness.span)
+                                diagnostic = diagnostic_with_source_path(diagnostic, witness.path, 0)
+                            }
+                            .None -> {}
+                        }
+                    }
+                    .None -> {}
+                }
+                &diagnostics.push(diagnostic)
             }
         }
     }

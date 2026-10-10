@@ -1,0 +1,8 @@
+Error [E1220]: `email` function `crypto::seal` uses the `Rand` effect, which this package's budget doesn't allow
+  --> /workspace/deps/email/src/crypto.jet:2:4
+    |
+  2 | fn seal() {}
+    |    ^^^^
+ Why: An `authority.holds` budget fails the build when package code or any dependency reaches an effect you didn't list — supply-chain review as a compile error
+ Fix: Add `Rand` to `authority.holds.allow`, grant it to `email` in `authority.grants`, or drop the dependency
+More: jet-lang.dev/e/E1220

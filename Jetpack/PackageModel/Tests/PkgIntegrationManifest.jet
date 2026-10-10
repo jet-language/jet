@@ -132,7 +132,7 @@ fn pkg_integration_package_error(raw: String) -> PackageParseError Never! {
 #Test("pkg integration manifest_panic_budget_names_the_dependency_stop_site") {
     raw :: pkg_integration_min_manifest("app", "0.1.0") + "\nauthority: {{ holds: {{ deny: [Panic] }} }}\n"
     manifest :: PackageFacts.parse(raw, "test") ?? panic("Panic should be a manifest effect root")
-    entries :: [PackageEffects]{PackageEffects{name: "panicdep", effects: [String]{"Panic"}, effect_sites: [String: String]{}, panic_sites: [String]{"panicdep::parse_port"}, boundary_span: Val(Span{start: 4, end: 12})}}
+    entries :: [PackageEffects]{PackageEffects{name: "panicdep", effects: [String]{"Panic"}, effect_sites: [String: String]{}, effect_witnesses: [String: EffectBudgetWitness]{}, panic_sites: [String]{"panicdep::parse_port"}, boundary_span: Val(Span{start: 4, end: 12})}}
     diagnostics :: pkg_effect_enforce(entries, manifest)
     assert_eq(diagnostics.len(), 1)
     assert_eq(diagnostics[0].code, "E1220")
