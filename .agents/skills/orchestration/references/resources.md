@@ -71,6 +71,12 @@ extend a source-owned enum merely because an older native projection listed it.
 Restore lost hidden dispatcher rows with their original authority: Clock's
 `__clock_mono_ns` retains its pure route and the host epoch; substituting the
 effectful `__host_monotonic_ns` route changes the existing public Clock contract.
+The private crypto arithmetic owner `__core_crypto_ct` may use only
+`core.mem.__list_reserve_exact` from the backing-leaf family. Exact preallocation
+is a security property for its arenas and outputs: geometric growth can leave
+freed secret-bearing copies. This admission does not grant capacity/type-size
+inspection or expose any private leaf to user code; keep the Jet and bootstrap
+checker boundaries in parity.
 
 Use fresh artifacts for runtime claims. A source check, worker receipt, or stale
 binary cannot establish runtime, tier, snapshot, golden, or I9 evidence.

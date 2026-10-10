@@ -339,16 +339,17 @@ fn core_sources_share_private_declarations_without_public_exports() {
         ("pkg/main.jet", "main", "fn run() {}\n", &[]),
     ]);
     assert!(errors.is_empty(), "{errors:?}");
+    let errors = check_sources(&[
+        ("<corelib>/Core/time/time.jet", "core_time", time, &[]),
+        ("pkg/main.jet", "main", "use core.time as time\nfn failure() -> Int time.Expired! { Err(time.Expired{}) }\nfn run() {}\n", &[]),
+    ]);
+    assert!(!errors.is_empty(), "Core-private native carrier leaked to user code");
     for source in [
-        "use core.time as time\nfn failure() -> Int time.Expired! { Err(time.Expired{}) }\nfn run() {}\n",
         "use core.time as time\nfn deadline(ttl: Duration) -> Int Never! { time.__expiry_deadline(1, ttl) }\nfn run() {}\n",
         "use core.time as time\nfn observe(value: time.__Observer) -> Int Never! { value.value }\nfn run() {}\n",
     ] {
-        let errors = check_sources(&[
-            ("<corelib>/Core/time/time.jet", "core_time", time, &[]),
-            ("pkg/main.jet", "main", source, &[]),
-        ]);
-        assert!(!errors.is_empty(), "Core-private declarations leaked to user code");
+        let (_, diagnostics) = Lexer::lex(source);
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0067"), "{diagnostics:?}");
     }
 }
 
@@ -360,4 +361,41 @@ fn loaded_core_source_functions_resolve_without_a_native_catalog_row() {
         ("pkg/main.jet", "main", "fn run() {}\n", &[]),
     ]);
     assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn private_crypto_preallocation_admits_only_exact_reserve() {
+    for element in ["I64", "U8"] {
+        let source = format!(
+            "use core.mem as mem\nfn reserve(&data: [{element}]) Never! {{\n\
+             #Unsafe(\"exact private crypto preallocation\") {{\n\
+             mem.__list_reserve_exact<{element}>(&data, 32)\n\
+             }}\n}}\n"
+        );
+        let errors = check_sources(&[
+            ("<corelib>/Core/crypto/expert_ct.jet", "__core_crypto_ct", &source, &[]),
+            ("pkg/main.jet", "main", "fn run() {}\n", &[]),
+        ]);
+        assert!(errors.is_empty(), "{errors:?}");
+        for (path, alias) in [
+            ("<corelib>/Core/crypto/jetc.jet", "__core_crypto_jetc"),
+            ("<corelib>/Core/crypto/vault.jet", "core_core_crypto_vault"),
+        ] {
+            let errors = check_sources(&[
+                (path, alias, &source, &[]),
+                ("pkg/main.jet", "main", "fn run() {}\n", &[]),
+            ]);
+            assert!(errors.iter().any(|error| error.starts_with("E0510:")), "{errors:?}");
+        }
+    }
+    for source in [
+        "use core.mem as mem\nfn capacity(data: [U8]) -> Int Never! { mem.__list_capacity<U8>(data) }\n",
+        "use core.mem as mem\nfn size() -> Int Never! { mem.__type_size<U8>() }\n",
+    ] {
+        let errors = check_sources(&[
+            ("<corelib>/Core/crypto/expert_ct.jet", "__core_crypto_ct", source, &[]),
+            ("pkg/main.jet", "main", "fn run() {}\n", &[]),
+        ]);
+        assert!(errors.iter().any(|error| error.starts_with("E0510:")), "{errors:?}");
+    }
 }
