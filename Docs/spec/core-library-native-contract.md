@@ -249,6 +249,9 @@ Core runtime source contracts use the ratified ownership and failure spellings:
 - The Path `walk()` convenience wrapper supplies `None` for the canonical
   filesystem walk's optional ignore-file argument, preserving an unfiltered
   traversal rather than inventing a second walk policy.
+- Base32 and Base64 error formatters implement the plain `String` result
+  required by `Display` and `Debug`; a `Never!` result is not the trait hook's
+  declared carrier. Their reason-only output and receiver ownership are unchanged.
 - Expiring-secret storage acquires its edit guard in the removal helper, moves
   the payload from that owned local, restores `None`, then drops the payload.
   Close consumes the storage owner, and live callbacks retain a read guard.
