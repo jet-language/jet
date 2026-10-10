@@ -103,13 +103,13 @@ fn view_pattern_sources() {
 }
 
 fn view_pattern_reborrows() {
-    declaration :: "enum Value {{ Struct(String, [Field]) List([Value]) Text(String) }}\nstruct Field {{ value: Value }}\n"
+    declaration :: "enum Value {{ Struct(name: String, fields: [Field]) List([Value]) Text(String) }}\nstruct Field {{ value: Value }}\n"
     nested :: "if &fields[i].value == .Struct(_, metadata_fields) {{ if &metadata_fields[j].value == .List(items) {{ &items.push(^item) }} }}"
     view_pattern_case("nested-write-payload", "{declaration}fn edit(result: &Value, item: ^Value, i: Int, j: Int) {{ if &result == .Struct(_, fields) {{ {nested}\ncount :: fields.len() }} }}", "")
     view_pattern_case("nested-write-payload-table", "{declaration}fn edit(result: &Value, item: ^Value, i: Int, j: Int) {{ if &result == {{ .Struct(_, fields) -> {{ {nested} }} else -> {{}} }} }}", "")
     view_pattern_case("nested-write-parent-suspended", "{declaration}fn edit(result: &Value, item: ^Value, i: Int, j: Int) {{ if &result == .Struct(_, fields) {{ if &fields[i].value == .Struct(_, metadata_fields) {{ count :: fields.len()\nif &metadata_fields[j].value == .List(items) {{ &items.push(^item) }} }} }} }}", "E0220")
     view_pattern_case("nested-write-unrelated-view-conflicts", "{declaration}fn edit(result: &Value, item: ^Value, i: Int, j: Int) {{ if &result == .Struct(_, fields) {{ unrelated :: fields[0..<fields.len()]\n{nested}\ncount :: unrelated.len() }} }}", "E0212")
-    view_pattern_case("inner-owned-match-subject-type", "enum Outer {{ Case(Int) }}\nenum Inner {{ Text(String) Empty }}\nfn inspect(value: Outer) -> Int {{ if value == {{ .Case(number) -> {{ inner :: Inner.Text(\"x\")\nif inner == {{ .Text(text) -> text.count_bytes() .Empty -> 0 }} }} }} }}", "")
+    view_pattern_case("inner-owned-match-subject-type", "enum Outer {{ Case(Int) }}\nenum Inner {{ Text(String) Empty }}\nfn inspect(value: Outer) -> Int {{ if value == {{ .Case(number) -> {{ inner :: Inner.Text(\"x\")\nif ^inner == {{ .Text(text) -> text.count_bytes() .Empty -> 0 }} }} }} }}", "")
 }
 
 fn view_pattern_reinitialization() {
