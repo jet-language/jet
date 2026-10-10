@@ -20,7 +20,19 @@ function dryRun(extra, inspect) {
         assert.equal((source.match(/^fn run\(/gm) ?? []).length, 1);
         assert.match(source, /process\.exit\(jet_cli_main\(process\.args\(\)\)\)/);
         assert.equal((source.match(/^use core\.process as process$/gm) ?? []).length, 1);
-        assert.doesNotMatch(readFileSync(join(out, 'compiler/package.jet'), 'utf8'), /^deps:/m);
+        const manifest = readFileSync(join(out, 'compiler/package.jet'), 'utf8');
+        assert.doesNotMatch(manifest, /^deps:/m);
+        const budget = manifest.match(/holds:\s*\{\s*allow:\s*\[([^\]]*)\]/)?.[1];
+        assert.ok(budget, 'the standalone compiler retains its declared authority budget');
+        const effects = budget.split(',').map(effect => effect.trim());
+        assert.ok(effects.includes('FFI.C'), 'the native child uses raw C transport');
+        assert.ok(effects.includes('FFI.Asm'), 'the native child uses raw assembly transport');
+        for (const effect of ['FFI', 'Browser', 'DB', 'GPU', 'Log', 'Secret']) {
+            assert.equal(effects.includes(effect), false, `native transport must not grant ${effect}`);
+        }
+        const executeRow = '-[Exec, IO, FFI.C, FFI.Asm, Time.Wait]>';
+        assert.equal(source.split(`fn execute(self, request: X64ExecutionRequest) ${executeRow} X64ExecutionResponse`).length - 1, 2,
+            'the execution-host trait and implementation retain the same explicit transport bound');
         assert.equal(JSON.parse(readFileSync(join(out, 'compiler.map.json'))).source_segments.at(-1).source_file, 'Compiler/JetCli/run.jet');
         assert.equal(existsSync(join(out, 'seed/jet')), false, 'dry-run must not manufacture a compiler');
         inspect(JSON.parse(readFileSync(join(out, 'plan.json'))));

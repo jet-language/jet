@@ -324,6 +324,16 @@ execution lens. The Rust host is a bootstrap seed: it is frozen once the Jet
 compiler ships with parity and removed once the native back end is complete
 (D-EXEC2, owner directive 19).
 
+The compiler-owned native child has a bounded transport contract:
+`JetDriverExecutionHost.execute` and its CLI implementation declare
+`-[Exec, IO, FFI.C, FFI.Asm, Time.Wait]>`. The row covers child lifecycle,
+private framed I/O, raw C/assembly host leaves, and shared-resource
+serialization, not the selected program's ambient authority. Program admission
+checks that authority separately. The CLI package grants only the two foreign
+language leaves its host uses, not the `FFI` root or unrelated Browser, DB, GPU,
+Log, or Secret authority. An omitted trait row would instead make dynamic
+dispatch maximal and cannot stand in for this checked boundary.
+
 The Jet semantic checker separates read-only registration/program tables from
 mutable scope, ownership, and diagnostic state. Read-only graph probes match
 the optional registration graph in place; they do not materialize an owning
