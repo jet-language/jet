@@ -13,6 +13,8 @@
 // --disjoint-lowering lowers and lints the production disjoint MIR witnesses
 // without linking; native execution still requires the admitted runtime pack.
 // --tls-refusal checks the canonical TLS transport refusal without a pack.
+// --list-routes lowers/lints the four stage1-required canonical List witnesses
+// without a pack; the ordinary fixture run executes their native images.
 // then:  cd <outdir> && jet run unit.jet        (writes <fixture>.elf files)
 // then:  node Compiler/JetBackend/Tests/check-native-fixtures.mjs <outdir>
 //        (with JET_RUNTIME_C_LIB, it also runs every image through load.jet)
@@ -32,7 +34,7 @@ if (!outDir) {
   process.exit(64);
 }
 const runtimePack = process.env.JET_RUNTIME_PACK;
-if (!sanitizeOnlyArgument() && !process.argv.includes("--foreign-descriptors") && !process.argv.includes("--disjoint-lowering") && !process.argv.includes("--tls-refusal") && !runtimePack) throw new Error("JET_RUNTIME_PACK must explicitly name an admitted fresh Jet pack");
+if (!sanitizeOnlyArgument() && !process.argv.includes("--foreign-descriptors") && !process.argv.includes("--disjoint-lowering") && !process.argv.includes("--tls-refusal") && !process.argv.includes("--list-routes") && !runtimePack) throw new Error("JET_RUNTIME_PACK must explicitly name an admitted fresh Jet pack");
 function sanitizeOnlyArgument() { return process.argv.includes("--sanitize"); }
 // While other edits are in flight: FX_HEAD (comma-separated repo paths) reads
 // those files as committed at HEAD, and FX_EXCLUDE (comma-separated file
@@ -112,6 +114,8 @@ const callableStatics = process.argv.includes("--callable-statics");
 const foreignDescriptors = process.argv.includes("--foreign-descriptors");
 const disjointLowering = process.argv.includes("--disjoint-lowering");
 const tlsRefusal = process.argv.includes("--tls-refusal");
+const listRoutes = process.argv.includes("--list-routes");
+if (listRoutes && (abiOnly || sanitizeOnly || callableStatics || foreignDescriptors || disjointLowering || tlsRefusal)) throw new Error("--list-routes cannot be combined with other focused modes");
 if (tlsRefusal && (abiOnly || sanitizeOnly || callableStatics || foreignDescriptors || disjointLowering)) throw new Error("--tls-refusal cannot be combined with other focused modes");
 if (disjointLowering && (abiOnly || sanitizeOnly || callableStatics || foreignDescriptors)) throw new Error("--disjoint-lowering cannot be combined with other focused modes");
 if (foreignDescriptors && (abiOnly || sanitizeOnly || callableStatics)) throw new Error("--foreign-descriptors cannot be combined with other focused modes");
@@ -137,6 +141,7 @@ const parts = [
     ].map((head) => item("Compiler/JetFoundation/Source/Registry/CoreCalls.jet", head)),
     item("Compiler/JetFoundation/Source/Types/Types.jet", "enum ParamZone {"),
     item("Compiler/JetFoundation/Source/Types/Types.jet", "fn param_zone_name("),
+    item("Compiler/JetFoundation/Source/Types/Types.jet", "struct SymbolID {"),
     item("Compiler/JetFoundation/Source/Registry/CoreModules.jet", "fn core_source_value_hook("),
     ...[
       "struct ByteLayout {",
@@ -152,14 +157,15 @@ const parts = [
   body("Compiler/JetBackend/Source/LIR/Lint.jet"),
   ...(sanitizeOnly ? [body("Compiler/JetBackend/Source/LIR/Sanitize.jet")] : []),
   ...(!small ? [
-    body("Compiler/JetBackend/Source/LIR/Print.jet"),
+    ...(!listRoutes ? [body("Compiler/JetBackend/Source/LIR/Print.jet")] : []),
     body("Compiler/JetBackend/Source/ErrLayout.jet"),
     ...sorted("Compiler/JetBackend/Source/Lower").map(body),
-    ...sorted("Compiler/JetBackend/Source/Opt").map(body),
+    ...(!listRoutes ? sorted("Compiler/JetBackend/Source/Opt").map(body) : []),
   ] : []),
-  ...(!small ? [asmWitnessSource] : []),
+  ...(!small && !listRoutes ? [asmWitnessSource] : []),
   body("Compiler/JetBackend/Source/X64/Encoder.jet"),
   body("Compiler/JetBackend/Source/X64/InlineAsm.jet"),
+  ...(!listRoutes ? [
   body("Compiler/JetBackend/Source/X64/RegAlloc.jet"),
   body("Compiler/JetBackend/Source/X64/Select.jet"),
   body("Compiler/JetBackend/Source/Image/Link.jet"),
@@ -174,11 +180,23 @@ const parts = [
   body("Compiler/JetBackend/Source/Image/Archive.jet"),
   body("Compiler/JetBackend/Source/Image/StaticLink.jet"),
   body("Compiler/JetBackend/Source/Image/RuntimePack.jet"),
-  ...(foreignDescriptors || disjointLowering || tlsRefusal ? [] : [
+  ] : []),
+  ...(foreignDescriptors || disjointLowering || tlsRefusal || listRoutes ? [] : [
     body("Compiler/JetBackend/Tests/TestPack.jet"),
     ...(sanitizeOnly ? [body("Compiler/JetBackend/Tests/SanitizeFixtures.jet"), "fn run() { sanitize_fixtures() }"] : [body("Compiler/JetBackend/Tests/AbiFixtures.jet")]),
   ]),
-  ...(abiOnly ? ["fn run() { abi_fixtures() }"] : sanitizeOnly ? [] : disjointLowering ? [
+  ...(listRoutes || disjointLowering ? [
+    ...["fn fx_capacity_raw_type(", "fn fx_capacity_raw(", "fn fx_capacity_foreign(", "fn fx_capacity_provider_call("].map((head) => item("Compiler/JetBackend/Tests/Fixtures/Builtins.jet", head)),
+  ] : []),
+  ...(abiOnly ? ["fn run() { abi_fixtures() }"] : sanitizeOnly ? [] : listRoutes ? [
+    // This mode selects the MIR builders, not the unrelated generic-runtime
+    // rejection probe. The general fixture mode still includes that probe.
+    body("Compiler/JetBackend/Tests/LowerFixtures.jet").split("fn fx_hello(")[0].replace(item("Compiler/JetBackend/Tests/LowerFixtures.jet", "fn fx_generic_runtime_rejection_checks("), ""),
+    item("Compiler/JetBackend/Tests/Fixtures/Tuple.jet", "fn fx_tuple_type("),
+    item("Compiler/JetBackend/Tests/Fixtures/Tuple.jet", "fn fx_tuple_field_id("),
+    body("Compiler/JetBackend/Tests/Fixtures/Lists.jet"),
+    'fn run() {\n    assert(fx_list_routes_lowering_checks())\n    print("List route lowering fixtures passed")\n}',
+  ] : disjointLowering ? [
     body("Compiler/JetBackend/Tests/LowerFixtures.jet").split("fn fx_hello(")[0],
     item("Compiler/JetBackend/Tests/Fixtures/Tuple.jet", "fn fx_tuple_type("),
     item("Compiler/JetBackend/Tests/Fixtures/Tuple.jet", "fn fx_tuple_field_id("),

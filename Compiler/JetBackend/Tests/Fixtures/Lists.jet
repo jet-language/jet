@@ -1,9 +1,9 @@
 use jet_foundation.[
-    MIRAccess, MIRConstant, MIRDropKind, MIRFieldValue, MIRFunction, MIRIndexKind, MIROperation,
+    MIRAccess, MIRConstant, MIRDropKind, MIRField, MIRFieldValue, MIRFunction, MIRFunctionID, MIRIndexKind, MIROperation,
     MIRPanicContext, MIRPanicLoc, MIRPanicLocal, MIRPlace, MIRPlaceID,
     MIRPreludeABI, MIRPreludeFamily, MIRProgram, MIRProjection, MIRTupleField,
-    MIRSemanticOp, MIRTerminator, MIRType, MIRTypeDef, MIRTypeKind, MIRValueID,
-    mir_owned_ownership, mir_ownership_from_access, mir_type_from_kind, mir_type_id,
+    MIRSemanticOp, MIRTerminator, MIRType, MIRTypeDef, MIRTypeDefKind, MIRTypeKind, MIRValueID,
+    mir_function_id, mir_owned_ownership, mir_ownership_from_access, mir_type_from_kind, mir_type_id,
 ]
 
 fn fx_list_type(elem: MIRType) -> MIRType Never! {
@@ -220,4 +220,209 @@ fn fx_data_entry_list() -> MIRProgram Never! {
     fx_do(&b, MIROperation.Drop{value: entries, kind: MIRDropKind.Value})
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     fx_list_program(b)
+}
+
+fn fx_list_routes_program(b: FxBuilder) -> MIRProgram Never! {
+    p := fx_list_program(b)
+    members :: [String]{"list_reverse", "list_extend", "last", "list_try_reserve"}
+    symbols :: [String]{"jet_list_reverse", "jet_list_extend", "jet_list_last", "jet_list_try_reserve"}
+    loop (index, member) in members {
+        row := fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", member, symbols[index], if index == 1 || index == 3 -> 2 else -> 1, MIRPreludeABI.Value)
+        row.signature.borrow_mask[0] = true
+        &p.prelude_calls.push(row)
+    }
+    &p.types.push(fx_type_def("AllocError", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("AllocError", "requested_bytes", fx_int()), fx_field("AllocError", "allocator", fx_string())}, methods: [MIRFunctionID]{}}))
+    p
+}
+
+fn fx_list_routes_bytes(b: &FxBuilder, values: [Int]) -> MIRValueID Never! {
+    byte :: mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8})
+    items := [MIRValueID]{}
+    loop value in values -> &items.push(fx_copy(&b, byte, MIROperation.Constant{value: .Int{value: value, width: None, spelling: None}}))
+    fx_owned(&b, fx_list_type(byte), MIROperation.BuildList{values: items, trait_coercion: None})
+}
+
+// Packed storage, zero/singleton/odd/even lengths, and an inline owning header.
+// expect-stdout lists-reverse: "[]\n[1]\n[3, 2, 1]\n[4, 3, 2, 1]\nblue\nred\n"
+fn fx_lists_reverse() -> MIRProgram Never! {
+    b := fx_builder()
+    byte :: mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8})
+    bytes :: fx_list_type(byte)
+    loop values in ([[Int]]{[Int]{}, [Int]{1}, [Int]{1, 2, 3}, [Int]{1, 2, 3, 4}}) {
+        name :: "bytes{b.places.len()}"
+        root :: fx_local(&b, name, bytes, mir_owned_ownership())
+        list :: fx_list_routes_bytes(&b, values)
+        fx_do(&b, MIROperation.WritePlace{place: root, value: list})
+        lent :: fx_value(&b, bytes, fx_borrow(), MIROperation.ReadPlace{place: root})
+        _ := fx_list_method(&b, "list_reverse", lent, Val(root), [MIRValueID]{}, fx_unit(), false)
+        fx_print(&b, lent)
+        fx_do(&b, MIROperation.Drop{value: list, kind: MIRDropKind.Value})
+    }
+    inner :: fx_list_type(fx_string())
+    outer :: fx_list_type(inner)
+    root :: fx_local(&b, "nested", outer, mir_owned_ownership())
+    rows := [MIRValueID]{}
+    loop label in ([String]{"red", "blue"}) {
+        text :: fx_owned(&b, fx_string(), MIROperation.Constant{value: .String{value: label}})
+        &rows.push(fx_owned(&b, inner, MIROperation.BuildList{values: [MIRValueID]{text}, trait_coercion: None}))
+    }
+    nested :: fx_owned(&b, outer, MIROperation.BuildList{values: rows, trait_coercion: None})
+    fx_do(&b, MIROperation.WritePlace{place: root, value: nested})
+    lent :: fx_value(&b, outer, fx_borrow(), MIROperation.ReadPlace{place: root})
+    _ := fx_list_method(&b, "list_reverse", lent, Val(root), [MIRValueID]{}, fx_unit(), false)
+    zero :: fx_int_const(&b, 0)
+    loop at in 0..<2 {
+        index :: fx_int_const(&b, at)
+        row :: fx_list_index(&b, lent, index, inner, false)
+        text :: fx_list_index(&b, row, zero, fx_string(), false)
+        fx_print(&b, text)
+    }
+    fx_do(&b, MIROperation.Drop{value: nested, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_list_routes_program(b)
+}
+
+// Empty-buffer adoption, growth, append within capacity, and empty source.
+// expect-stdout lists-extend: "[1, 2, 3, 4]\n[1, 2, 3, 4, 5]\n[1, 2, 3, 4, 5]\n"
+fn fx_lists_extend() -> MIRProgram Never! {
+    b := fx_builder()
+    byte :: mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8})
+    bytes :: fx_list_type(byte)
+    root :: fx_local(&b, "bytes", bytes, mir_owned_ownership())
+    initial :: fx_list_routes_bytes(&b, [Int]{})
+    fx_do(&b, MIROperation.WritePlace{place: root, value: initial})
+    lent :: fx_value(&b, bytes, fx_borrow(), MIROperation.ReadPlace{place: root})
+    loop values in ([[Int]]{[Int]{1}, [Int]{2, 3, 4}}) {
+        source :: fx_list_routes_bytes(&b, values)
+        _ := fx_list_method(&b, "list_extend", lent, Val(root), [MIRValueID]{source}, fx_unit(), false)
+    }
+    fx_print(&b, lent)
+    result_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: fx_unit(), err: fx_named("AllocError")})
+    additional :: fx_int_const(&b, 10)
+    reserved :: fx_list_method(&b, "list_try_reserve", lent, Val(root), [MIRValueID]{additional}, result_ty, true)
+    fx_do(&b, MIROperation.Drop{value: reserved, kind: MIRDropKind.Value})
+    loop values in ([[Int]]{[Int]{5}, [Int]{}}) {
+        source :: fx_list_routes_bytes(&b, values)
+        _ := fx_list_method(&b, "list_extend", lent, Val(root), [MIRValueID]{source}, fx_unit(), false)
+        fx_print(&b, lent)
+    }
+    fx_do(&b, MIROperation.Drop{value: initial, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_list_routes_program(b)
+}
+
+// Last returns None for empty and an independent clone of an inline owner.
+// Dropping the original list before reading its returned item proves retention.
+// expect-stdout lists-last: "false\nlast\n"
+fn fx_lists_last() -> MIRProgram Never! {
+    b := fx_builder()
+    empty :: fx_list_routes_bytes(&b, [Int]{})
+    byte :: mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8})
+    optional_byte :: mir_type_from_kind(MIRTypeKind.Option{inner: byte})
+    missing :: fx_list_method(&b, "last", empty, None, [MIRValueID]{}, optional_byte, true)
+    some :: fx_copy(&b, fx_bool(), MIROperation.OptionIsSome{subject: missing})
+    fx_print(&b, some)
+    fx_do(&b, MIROperation.Drop{value: missing, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: empty, kind: MIRDropKind.Value})
+    strings :: fx_list_type(fx_string())
+    lists :: fx_list_type(strings)
+    rows := [MIRValueID]{}
+    loop label in ([String]{"first", "last"}) {
+        text :: fx_owned(&b, fx_string(), MIROperation.Constant{value: .String{value: label}})
+        &rows.push(fx_owned(&b, strings, MIROperation.BuildList{values: [MIRValueID]{text}, trait_coercion: None}))
+    }
+    source :: fx_owned(&b, lists, MIROperation.BuildList{values: rows, trait_coercion: None})
+    optional :: mir_type_from_kind(MIRTypeKind.Option{inner: strings})
+    last :: fx_list_method(&b, "last", source, None, [MIRValueID]{}, optional, true)
+    fx_do(&b, MIROperation.Drop{value: source, kind: MIRDropKind.Value})
+    row :: fx_value(&b, strings, fx_borrow(), MIROperation.OptionValue{subject: last})
+    zero :: fx_int_const(&b, 0)
+    text :: fx_list_index(&b, row, zero, fx_string(), false)
+    fx_print(&b, text)
+    fx_do(&b, MIROperation.Drop{value: last, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_list_routes_program(b)
+}
+
+// Growth retains the old items; negative/overflow failures retain the buffer.
+// expect-stdout lists-try-reserve: "false\n[1, 2]\ntrue\n[1, 2]\ntrue\n[1, 2]\nfalse\n[1, 2]\n"
+fn fx_lists_try_reserve() -> MIRProgram Never! {
+    b := fx_builder()
+    byte :: mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8})
+    bytes :: fx_list_type(byte)
+    root :: fx_local(&b, "bytes", bytes, mir_owned_ownership())
+    source :: fx_list_routes_bytes(&b, [Int]{1, 2})
+    fx_do(&b, MIROperation.WritePlace{place: root, value: source})
+    lent :: fx_value(&b, bytes, fx_borrow(), MIROperation.ReadPlace{place: root})
+    result_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: fx_unit(), err: fx_named("AllocError")})
+    loop amount in ([Int]{-1, 0, 10, 9223372036854775807}) {
+        additional :: fx_int_const(&b, amount)
+        result :: fx_list_method(&b, "list_try_reserve", lent, Val(root), [MIRValueID]{additional}, result_ty, true)
+        ok :: fx_copy(&b, fx_bool(), MIROperation.ResultIsOk{subject: result})
+        fx_print(&b, ok)
+        fx_do(&b, MIROperation.Drop{value: result, kind: MIRDropKind.Value})
+        fx_print(&b, lent)
+    }
+    fx_do(&b, MIROperation.Drop{value: source, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_list_routes_program(b)
+}
+
+// Consult the fault rail even without growth, but not for a negative request;
+// both real allocation failure and rail failure retain the original owners.
+// expect-stdout lists-try-reserve-fault: "false\n0\nfalse\n1\n[1, 2]\nfalse\n1\n[1, 2]\n"
+fn fx_lists_try_reserve_fault() -> MIRProgram Never! {
+    b := fx_builder()
+    byte :: mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8})
+    bytes :: fx_list_type(byte)
+    root :: fx_local(&b, "bytes", bytes, mir_owned_ownership())
+    source :: fx_list_routes_bytes(&b, [Int]{1, 2})
+    fx_do(&b, MIROperation.WritePlace{place: root, value: source})
+    lent :: fx_value(&b, bytes, fx_borrow(), MIROperation.ReadPlace{place: root})
+    result_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: fx_unit(), err: fx_named("AllocError")})
+    raw :: fx_capacity_raw_type()
+    active :: fx_copy(&b, fx_bool(), MIROperation.Constant{value: .Bool{value: true}})
+    ordinal :: fx_capacity_raw(&b, 1)
+    counter_index :: fx_capacity_raw(&b, 0)
+    _ := fx_capacity_provider_call(&b, U64{9100}, [MIRValueID]{ordinal, active}, fx_unit())
+    loop amount in ([Int]{-1, 0, 20}) {
+        if amount == 20 -> fx_capacity_provider_call(&b, U64{9100}, [MIRValueID]{ordinal, active}, fx_unit()).drop("arm growth failure")
+        additional :: fx_int_const(&b, amount)
+        result :: fx_list_method(&b, "list_try_reserve", lent, Val(root), [MIRValueID]{additional}, result_ty, true)
+        ok :: fx_copy(&b, fx_bool(), MIROperation.ResultIsOk{subject: result})
+        fx_print(&b, ok)
+        fx_do(&b, MIROperation.Drop{value: result, kind: MIRDropKind.Value})
+        count :: fx_capacity_provider_call(&b, U64{9101}, [MIRValueID]{counter_index}, raw)
+        fx_print(&b, count)
+        if amount != -1 {
+            fx_print(&b, lent)
+            fx_capacity_provider_call(&b, U64{9102}, [MIRValueID]{}, fx_unit()).drop("retire fault")
+        }
+    }
+    fx_do(&b, MIROperation.Drop{value: source, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_list_routes_program(b)
+    p.foreign = [MIRForeign]{
+        fx_capacity_foreign(U64{9100}, "jet_rt_fault_allocation_arm", [MIRType]{raw, fx_bool()}, None),
+        fx_capacity_foreign(U64{9101}, "jet_rt_fault_allocation_fact", [MIRType]{raw}, Val(raw)),
+        fx_capacity_foreign(U64{9102}, "jet_rt_fault_allocation_clear", [MIRType]{}, None),
+    }
+    p
+}
+
+// Collect all four production lowerings before reporting failure. This gate
+// executes Jet lowering and LIR lint, not the linked native image or a mock.
+fn fx_list_routes_lowering_checks() -> Bool {
+    programs :: [MIRProgram]{fx_lists_reverse(), fx_lists_extend(), fx_lists_last(), fx_lists_try_reserve(), fx_lists_try_reserve_fault()}
+    names :: [String]{"reverse", "extend", "last", "try_reserve", "try_reserve_fault"}
+    clean := true
+    loop (index, program) in programs {
+        lowered :: lir_lower_entry(program, mir_function_id("run"))
+        loop issue in lowered.issues -> print("{names[index]}: {issue.message}")
+        if lowered.issues.len() != 0 -> clean = false
+        issues :: lir_lint_module(lowered.lir)
+        loop issue in issues -> print("{names[index]}: {issue.message}")
+        if issues.len() != 0 -> clean = false
+    }
+    clean
 }
