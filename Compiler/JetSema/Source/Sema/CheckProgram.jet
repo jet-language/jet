@@ -1684,6 +1684,9 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     // domains and `Never` slots (E2417, E2422).
     generic_names :: loop param in generic_params -> param.name
     if !sema_check_function_failure_contracts(func, updated, program, generic_names, &diagnostics) -> complete = false
+    // D-FAILURE-FOUNDATION1=A (E2421): the public failure carrier, read from
+    // the declared signature as the Rust reference's function registration does.
+    sema_check_public_failure_carrier(func, updated, program, &diagnostics)
     if !sema_function_header_check_default_forward_refs(func, &diagnostics) -> complete = false
     if !sema_function_header_check_variadic_bound_shape(func, updated, program, &diagnostics) -> complete = false
     context.comptime_body_values = updated.comptime_body_values.copy()

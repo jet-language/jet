@@ -9,6 +9,8 @@ use jet_foundation.[
     CORE_ENUM_PAYLOAD_ROWS,
     CORE_SOURCE_OWNED_ROWS,
     Diagnostic,
+    DiagnosticFixApplicability,
+    DiagnosticFixSafety,
     ErrorConvDef,
     Expr,
     Func,
@@ -24,9 +26,12 @@ use jet_foundation.[
     TFunc,
     TFuncKind,
     TStmt,
+    TextEdit,
     Type,
     ast_func,
     core_module_has_type,
+    diagnostic_registry_row,
+    diagnostic_with_edit_grade,
     expr_span,
     symbol_id,
     tir_expr_children,
@@ -601,6 +606,106 @@ fn sema_check_function_failure_contracts(func: Func, environment: SemaScopeEnvir
     loop param in func.params -> sema_check_failure_contract_type(param.ty, param.ty_span, false, generic_names, environment, program, &diagnostics)
     if func.return_type == .Val(return_type) -> sema_check_failure_contract_type(return_type, func.return_type_span ?? func.name_span, true, generic_names, environment, program, &diagnostics)
     diagnostics.len() == before
+}
+
+// Rust `validate_public_failure_carrier::collect_named`: every nominal name a
+// declared type mentions, in walk order.
+fn sema_public_failure_collect_named(ty: Type, out: &[String]) Never! {
+    if ty == {
+        .Named(name) -> &out.push(name)
+        .Apply(name, args) -> {
+            &out.push(name)
+            loop arg in args -> sema_public_failure_collect_named(arg, &out)
+        }
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_public_failure_collect_named(inner, &out)
+        .Map(key, _, value) -> {
+            sema_public_failure_collect_named(key, &out)
+            sema_public_failure_collect_named(value, &out)
+        }
+        .Result(ok, error) -> {
+            sema_public_failure_collect_named(ok, &out)
+            sema_public_failure_collect_named(error, &out)
+        }
+        .Tuple(fields) -> loop field in fields -> sema_public_failure_collect_named(field.ty, &out)
+        .Fn(params, ret, _, _, _, _) -> {
+            loop param in params -> sema_public_failure_collect_named(param, &out)
+            if ret == .Val(value) -> sema_public_failure_collect_named(value, &out)
+        }
+        .Union(members) -> loop member in members -> sema_public_failure_collect_named(member, &out)
+        else -> {}
+    }
+}
+
+// D-FAILURE-FOUNDATION1=A (Rust `validate_public_failure_carrier`, E2421): a
+// public fallible function exposes its declared failure carrier, so every
+// nominal the carrier names, and every field of a carrier struct, must be
+// public. Names resolve from the function's own module, as Rust's
+// `struct_owner_module` does; a spelling whose leaf the owner does not
+// declare (an import alias) is skipped, as Rust's ledger lookup misses it.
+fn sema_check_public_failure_carrier(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+    if !func.is_pub -> return
+    return_type :: func.return_type ?? return
+    if return_type == .Result(_, error_type) {
+        if program.registration_graph == .Val(graph) -> sema_check_public_failure_carrier_graph(func.name, error_type, graph, environment.module_identity, &diagnostics)
+    }
+}
+
+fn sema_check_public_failure_carrier_graph(function: String, error_type: Type, graph: SemaRegistrationGraph, module_identity: String, diagnostics: &[Diagnostic]) {
+    pending := [String]{}
+    sema_public_failure_collect_named(error_type, &pending)
+    checked := [String:Bool]{}
+    reported := [String:Bool]{}
+    loop pending.len() > 0 {
+        carrier := &pending.pop() ?? break
+        leaf :: sema_error_conversion_leaf(carrier)
+        row :: sema_type_resolve_nominal_row(graph, Type.Named{name: carrier}, module_identity) ?? next
+        key :: "{row.module_index}|{leaf}"
+        if checked.get(key) != None -> next
+        checked[key] = true
+        nominal :: graph.modules[row.module_index].nominals[row.row]
+        if nominal.symbol.name != leaf -> next
+        source :: graph.modules[row.module_index].source
+        if nominal.symbol.visibility < 2 {
+            if reported.get(leaf) == None {
+                reported[leaf] = true
+                &diagnostics.push(sema_public_failure_diagnostic(function, leaf, nominal.symbol.span, source))
+            }
+            next
+        }
+        loop field in nominal.fields {
+            sema_public_failure_collect_named(field.ty, &pending)
+            member :: "{leaf}.{field.symbol.name}"
+            if field.symbol.visibility >= 2 || reported.get(member) != None -> next
+            reported[member] = true
+            &diagnostics.push(sema_public_failure_diagnostic(function, member, field.symbol.span, source))
+        }
+    }
+}
+
+fn sema_public_failure_diagnostic(function: String, member: String, span: Span, source: String) -> Diagnostic {
+    row :: diagnostic_registry_row("E2421") ?? panic("E2421 has no registry row")
+    what :: row.what.replace("{{function}}", function).replace("{{member}}", member)
+    why :: row.why.replace("{{member}}", member)
+    fix :: row.fix.replace("{{function}}", function).replace("{{member}}", member)
+    diagnostic :: sema_error("E2421", span, what, why, fix)
+    edit :: sema_public_failure_visibility_edit(source, span) ?? return diagnostic
+    diagnostic_with_edit_grade(diagnostic, edit, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.APIChanging)
+}
+
+// Rust `public_failure_visibility_edit`: delete the `priv` marker written on
+// the member's line before its name. A type private because it sits in a
+// `priv module` has no marker of its own, so it gets no edit.
+fn sema_public_failure_visibility_edit(source: String, span: Span) -> TextEdit? {
+    bytes :: source.bytes()
+    end :: if span.start < bytes.len() -> span.start else -> bytes.len()
+    line_start := end
+    loop line_start > 0 && bytes[line_start - 1] != 10 -> line_start -= 1
+    position := end - 4
+    loop position >= line_start {
+        if bytes[position] == 112 && bytes[position + 1] == 114 && bytes[position + 2] == 105 && bytes[position + 3] == 118 -> return Val(TextEdit{span: Span{start: position, end: end}, new_text: ""})
+        position -= 1
+    }
+    None
 }
 
 // D-IGNORERET2=A (E0407): `.drop("reason")` discards a result on purpose. The
