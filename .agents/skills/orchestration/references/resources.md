@@ -71,6 +71,11 @@ builtin remains live; never replace the source boundary with a compatibility shi
 Source-owned URL parsing remains public in Core; its obsolete `parse`,
 `urlparse`, and `urlsplit` dispatcher rows must not reintroduce the deleted
 Rust `jet_url_parse` policy wrapper into native route classification.
+Borrowed runtime fields that use canonical C carriers must project into
+caller-owned stack storage, not lend a pointer to a different Rust layout.
+IP24/socket56 projections copy only the fixed carrier bytes; they allocate
+nothing and transfer no owner. Source-owned record fields require their exact
+native provider; never reinterpret a host/port record as a socket56 carrier.
 Closed native enum metadata must retain the current declaration's complete case
 list: `Dyn` has Null, Bool, Int, Float, Number, Text, Bytes, DateTime, Array, and
 Object. Restore a lost declaration row from history before regenerating; do not

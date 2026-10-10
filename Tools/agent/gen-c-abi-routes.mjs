@@ -672,7 +672,7 @@ const recordDecl = (full) => {
 // Canonical C carriers shared with Jet host kernels. Match resolved
 // declarations, never a leaf spelling that could name a user type.
 const handleBridges = new Map();
-for (const [rust, type, stem] of [
+for (const [rust, type, stem, borrowedBytes = 0] of [
   ["jet_std::IOError", "JetCIOError", "error"],
   ["jet_std::IOContext", "JetCIOContext", "context"],
   ...(jetRuntimeExports.has("jet_rt_handle_drop_JetTaskFailure")
@@ -680,12 +680,12 @@ for (const [rust, type, stem] of [
   ...(jetRuntimeExports.has("jet_rt_handle_drop_Jet__ResolveError")
     ? [["Jet__ResolveError", "JetCResolveError", "resolve_error"]] : []),
   ...(jetRuntimeExports.has("jet_rt_handle_drop_JetIpAddr")
-    ? [["JetIpAddr", "JetCIpAddr", "ip"]] : []),
+    ? [["JetIpAddr", "JetCIpAddr", "ip", 24]] : []),
   ...(jetRuntimeExports.has("jet_rt_handle_drop_JetSocketAddr")
-    ? [["JetSocketAddr", "JetCSocketAddr", "socket"]] : []),
+    ? [["JetSocketAddr", "JetCSocketAddr", "socket", 56]] : []),
 ]) {
   const key = declarationOf(rust)?.key;
-  if (key !== undefined) handleBridges.set(key, { type, stem });
+  if (key !== undefined) handleBridges.set(key, { type, stem, borrowedBytes });
 }
 const handleBridge = (full) => handleBridges.get(declarationOf(full.replace(/^crate::/, ""))?.key);
 const handleType = (full) => handleBridge(full) ? `super::jet_c_abi_host::${handleBridge(full).type}` : full;
@@ -1599,7 +1599,7 @@ const jetNames = new Map(); // Jet name -> runtime handle name
 const handleRows = [...handles].sort((a, b) => a[0].localeCompare(b[0]));
 for (const [name, full] of handleRows) {
   if (handleBridge(full) && (!jetRuntimeExports.has(`jet_rt_handle_drop_${name}`) || !jetRuntimeExports.has(`jet_rt_handle_clone_${name}`))) {
-    throw new Error(`${name} carrier requires Jet clone/drop exports in sources.list and exports.list before adapter cutover`);
+    throw new Error(`${name} carrier requires Jet clone/drop exports in sources.list before adapter cutover`);
   }
 }
 // One ownership gate for every generated handle helper. Carrier metadata
@@ -1911,10 +1911,9 @@ for (const [name, members] of [...recordMembers].sort((a, b) => a[0].localeCompa
     rs.push("    }");
   }
 }
-// Field places of runtime handle structs: scalar and nested-handle exports
-// lend the field address. String exports write a borrowed canonical text
-// header into caller storage, valid while the runtime handle lives and is not
-// mutated. The lowering clones it when an owning String value is read.
+// Field places of runtime handle structs lend addresses except String and
+// canonical IP/socket carriers, which write a borrowed header to caller stack
+// storage. The storage is read/clone-only: never freed, grown, moved or taken.
 const handleFields = [];
 for (const [name, full] of handleRows) {
   if (recordMembers.has(name)) continue;
@@ -1926,6 +1925,7 @@ for (const [name, full] of handleRows) {
     const ty = field[3].replace(/\s+/g, "");
     let kind = null;
     let pointee = null;
+    let borrowedBridge = null;
     if (ty === "String") { kind = "Text"; pointee = "super::jet_c_abi::JetCText"; }
     else if (ty === "f64") { kind = "Float"; pointee = "f64"; }
     else if (ty === "bool") { kind = "Flag"; pointee = "bool"; }
@@ -1933,18 +1933,28 @@ for (const [name, full] of handleRows) {
       const nested = opaqueName.exec(ty)[1];
       const held = handles.get(nested);
       if (held && declarationOf(held.replace(/^crate::/, ""))?.key === declarationOf(qualify(ty, decl.path).replace(/^crate::/, ""))?.key) {
-        if (handleBridge(held)) throw new Error(`field ${name}.${field[2]}: borrowed C-carrier address projections are unsupported`);
-        kind = `Handle.${nested}`; pointee = held;
+        const bridge = handleBridge(held);
+        if (bridge && (!bridge.borrowedBytes || full.startsWith("crate::__jet_"))) {
+          classificationFailure(new Error(`field ${name}.${field[2]}: borrowed C-carrier projection requires an exact source-owned provider`),
+            held, decl.path, { phase: "field place", handle: name, field: field[2] });
+          continue;
+        }
+        borrowedBridge = bridge ?? null;
+        kind = `Handle.${nested}`; pointee = handleType(held);
       }
     }
     if (!kind) continue;
-    handleFields.push({ name, field: field[2], kind });
+    handleFields.push({ name, field: field[2], kind, headerBytes: borrowedBridge?.borrowedBytes ?? 0 });
     rs.push("");
     rs.push("    #[no_mangle]");
     if (kind === "Text") {
       rs.push(`    pub extern "C" fn jet_rt_handle_field_${name}_${field[2]}(value: *mut ${full}, out: *mut ${pointee}) {`);
       rs.push("        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.");
       rs.push(`        unsafe { let text = &(*value).${field[2]}; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }`);
+    } else if (borrowedBridge) {
+      rs.push(`    pub extern "C" fn jet_rt_handle_field_${name}_${field[2]}(value: *mut ${full}, out: *mut ${pointee}) {`);
+      rs.push("        // SAFETY: caller owns read-only stack carrier storage; no owner clone or heap allocation.");
+      rs.push(`        unsafe { out.write(super::jet_c_abi_host::${borrowedBridge.stem}_borrow_carrier(&(*value).${field[2]})); }`);
     } else {
       rs.push(`    pub extern "C" fn jet_rt_handle_field_${name}_${field[2]}(value: *mut ${full}) -> *const ${pointee} {`);
       rs.push("        // SAFETY: value is a live handle the caller lends; the field outlives this read.");
@@ -2047,7 +2057,7 @@ for (const [runtime] of handleRows) {
     const members = recordMembers.get(runtime);
     const record = members && recordSchemas.some((schema) => schema.name === runtime)
       ? { kind: recordable.get(runtime).kind, members: members.map((member) => ({ name: member.name, kind: member.carrier?.kind ?? null })) } : undefined;
-    const fields = handleFields.filter((field) => field.name === runtime).map((field) => ({ name: field.field, kind: field.kind }));
+    const fields = handleFields.filter((field) => field.name === runtime).map((field) => ({ name: field.field, kind: field.kind, headerBytes: field.headerBytes }));
     nativeTypes.push({ runtime, jetNames: names, jetName: key, source: { path, key: base },
       arguments: argumentsText ?? "", clone: cloneable.has(runtime), eq: comparable.has(runtime), ...render, record, fields });
     break;
@@ -2069,7 +2079,8 @@ const ownedBoxTypes = handleRows.filter(([name, full]) => !handleBridge(full) &&
     symbol === `jet_rt_record_new_${name}` || symbol === `jet_rt_record_tag_${name}` ||
     symbol.startsWith(`jet_rt_record_new_${name}_`) || symbol.startsWith(`jet_rt_record_get_${name}_`)));
 const requireUnownedBox = (name, symbol) => {
-  throw new Error(`all-or-none ownership for ${name}: retained Rust Box-layout emission ${symbol} requires a complete Jet-owned type family`);
+  classificationFailure(new Error(`all-or-none ownership for ${name}: retained Rust Box-layout emission ${symbol} requires a complete Jet-owned type family`),
+    handles.get(name) ?? name, "", { phase: "type-family ownership", handle: name, symbol });
 };
 for (const [name, full] of ownedBoxTypes) {
   const escaped = full.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -2093,7 +2104,8 @@ if (nativeListOnly) {
     provenance: {
       runtime: resolve(runtimePath), runtimeSha256: digest(text),
       generatorSha256: digest(readFileSync(fileURLToPath(import.meta.url))),
-      providerManifestSha256: digest(readFileSync(`${repo}/Compiler/JetRuntime/exports.list`)),
+      providerManifest: "Compiler/JetRuntime/sources.list",
+      providerManifestSha256: digest(readFileSync(`${repo}/Compiler/JetRuntime/sources.list`)),
       sourceDeclarations: declarations.map((path) => ({ path, sha256: digest(readFileSync(`${repo}/${path}`)) })),
       borrowedCarriers: [...borrowedHandles.values()].sort((a, b) => a.runtime.localeCompare(b.runtime)),
     },
@@ -2224,12 +2236,12 @@ for (const [runtime, full] of handleRows) {
 jet.push("} }");
 jet.push("");
 jet.push("// Fields of runtime handle structs readable in place (Places.jet):");
-jet.push("// `jet_rt_handle_field_<runtime>_<field>(h)` lends the field's address; kind is");
-jet.push("// Text, Float, Flag or Handle.<runtime>.");
-jet.push("struct LowerHandleField { runtime: String, field: String, kind: String }");
+jet.push("// Scalar/native handle fields lend storage; Text and header_bytes carriers");
+jet.push("// write read-only caller stack headers, never owned/freeable field values.");
+jet.push("struct LowerHandleField { runtime: String, field: String, kind: String, header_bytes: I64 }");
 jet.push("");
 jet.push("LOWER_HANDLE_FIELDS :: prep { [LowerHandleField]{");
-for (const row of handleFields) jet.push(`    LowerHandleField{runtime: "${row.name}", field: "${row.field}", kind: "${row.kind}"},`);
+for (const row of handleFields) jet.push(`    LowerHandleField{runtime: "${row.name}", field: "${row.field}", kind: "${row.kind}", header_bytes: I64{${row.headerBytes}}},`);
 jet.push("} }");
 jet.push("");
 jet.push("fn lower_handle_field(runtime: String, field: String) -> LowerHandleField? {");
@@ -2272,7 +2284,7 @@ jet.push("// END GENERATED C-ABI ROUTES");
 
 // Lifecycle and record/field helpers obey the same ownership partition as
 // routes. Validate every replaced C signature before excluding its seed body
-// from the native pack. exports.list is the single provider ownership input.
+// from the native pack. sources.list is the canonical provider ownership input.
 const rustBody = rs.join("\n") + "\n";
 const rustParts = [];
 let copied = 0;

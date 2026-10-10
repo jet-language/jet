@@ -87,3 +87,44 @@ test('generated Rust retains the TaskFailure16 carrier and paired ownership help
     assert.equal([...source.matchAll(new RegExp(`fn ${helper}\\(`, 'g'))].length, 1);
   }
 }));
+
+test('borrowed IP and socket projections use allocation-free canonical value carriers', () => fixture((tree, run) => {
+  success(run());
+  success(run('--check'));
+  const source = readFileSync(join(tree, outputs[1]), 'utf8');
+  for (const [stem, type, carrier] of [
+    ['ip', 'JetIpAddr', 'JetCIpAddr'],
+    ['socket', 'JetSocketAddr', 'JetCSocketAddr'],
+  ]) {
+    const signature = new RegExp(`fn ${stem}_borrow_carrier\\(value: &crate::${type}\\) -> ${carrier} \\{`);
+    const start = source.search(signature);
+    assert.ok(start >= 0, `missing borrowed ${stem} conversion`);
+    let depth = 1;
+    let end = source.indexOf('{', start) + 1;
+    const begin = end;
+    for (; depth > 0 && end < source.length; end++) {
+      if (source[end] === '{') depth++;
+      if (source[end] === '}') depth--;
+    }
+    assert.equal(depth, 0);
+    const body = source.slice(begin, end - 1);
+    assert.doesNotMatch(body, /alloc|Box::|clone\(|drop\(|free\(|take\(|_handle\(/);
+  }
+  assert.match(source, /socket_carrier\(value: crate::JetSocketAddr\)[\s\S]*?socket_borrow_carrier\(&value\)/);
+}));
+
+test('borrowed C-field lowering supplies stack storage and retains its borrow flag', () => {
+  const generator = readFileSync(join(root, 'Tools/agent/gen-c-abi-routes.mjs'), 'utf8');
+  assert.match(generator, /\["JetIpAddr", "JetCIpAddr", "ip", 24\]/);
+  assert.match(generator, /\["JetSocketAddr", "JetCSocketAddr", "socket", 56\]/);
+  assert.match(generator, /borrowedBridge\.stem\}_borrow_carrier\(&\(\*value\)/);
+  assert.match(generator, /header_bytes: I64\{\$\{row\.headerBytes\}\}/);
+  assert.match(generator, /bridge && \(!bridge\.borrowedBytes \|\| full\.startsWith\("crate::__jet_"\)\)/);
+  const lower = readFileSync(join(root, 'Compiler/JetBackend/Source/Lower/Places.jet'), 'utf8');
+  const body = lower.slice(lower.indexOf('fn lower_handle_field_place('), lower.indexOf('fn lower_projected_move_supported('));
+  assert.match(body, /lent\.header_bytes > I64\{0\}/);
+  assert.match(body, /StackSlot\{dst: address, size: bytes, align: 8\}/);
+  assert.match(body, /\[LIRValueID\]\{handle, address\}, None/);
+  assert.match(body, /ty: field\.ty, borrowed: true/);
+  assert.doesNotMatch(body, /lower_alloc\(/);
+});

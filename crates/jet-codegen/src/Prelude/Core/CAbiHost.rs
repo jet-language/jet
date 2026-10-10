@@ -365,6 +365,9 @@ mod jet_c_abi_host {
         };
         JetCIpAddr { family, octets }
     }
+    pub(crate) fn ip_borrow_carrier(value: &crate::JetIpAddr) -> JetCIpAddr {
+        ip_carrier(value.inner)
+    }
     fn ip_inner(value: JetCIpAddr) -> std::net::IpAddr {
         match value.family {
             4 => std::net::IpAddr::V4(std::net::Ipv4Addr::new(value.octets[0], value.octets[1], value.octets[2], value.octets[3])),
@@ -391,12 +394,15 @@ mod jet_c_abi_host {
         ip_drop(pointer);
         value
     }
-    pub(crate) fn socket_carrier(value: crate::JetSocketAddr) -> JetCSocketAddr {
+    pub(crate) fn socket_borrow_carrier(value: &crate::JetSocketAddr) -> JetCSocketAddr {
         let (flow, scope) = match value.inner {
             std::net::SocketAddr::V4(_) => (0, 0),
             std::net::SocketAddr::V6(addr) => (i64::from(addr.flowinfo()), i64::from(addr.scope_id())),
         };
         JetCSocketAddr { ip: ip_carrier(value.inner.ip()), port: i64::from(value.inner.port()), flow, scope, reserved: 0 }
+    }
+    pub(crate) fn socket_carrier(value: crate::JetSocketAddr) -> JetCSocketAddr {
+        socket_borrow_carrier(&value)
     }
     pub(crate) fn socket_handle(value: crate::JetSocketAddr) -> *mut JetCSocketAddr {
         let pointer = unsafe { jet_rt_alloc(56, 8) }.cast::<JetCSocketAddr>();

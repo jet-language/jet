@@ -212,11 +212,10 @@ fn lower_walk_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 }
 
 // Field `id` of a runtime handle (RuntimeRoutes.jet LOWER_HANDLE_FIELDS):
-// Float/Bool and nested handles lend their storage; String writes a borrowed
-// canonical {ptr,len,cap} header into a stack slot. None when no export can
-// project the field as its Jet type. Owning reads clone the borrowed text.
-// Its stack header and Rust-owned bytes must never be released, grown, or
-// transferred to an ownership-taking export. Writes/moves fail before use.
+// Float/Bool and native-layout nested handles lend storage. String and
+// converted canonical carriers write read-only headers into caller stack slots.
+// Owning reads clone through the existing typed glue; a borrowed header must
+// never be released, grown, moved or passed to an ownership-taking export.
 fn lower_handle_field_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, handle: LIRValueID, ty: MIRType, id: MIRFieldID) -> LowerPlaceAddress? {
     if lower_repr(p, ty) == {
         .Handle(_, _) -> {}
@@ -239,8 +238,9 @@ fn lower_handle_field_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, h
         }
         if !matches -> return None
         address :: lower_pointer(&f)
-        if lent.kind == "Text" {
-            lower_emit(&f, LIRInst.StackSlot{dst: address, size: 24, align: 8})
+        if (lent.kind == "Text" || lent.header_bytes > I64{0}) {
+            bytes :: if lent.kind == "Text" -> I64{24} else -> lent.header_bytes
+            lower_emit(&f, LIRInst.StackSlot{dst: address, size: bytes, align: 8})
             lower_call_runtime(&m, &f, "jet_rt_handle_field_{runtime.runtime}_{field.name}", [LIRValueID]{handle, address}, None)
         } else {
             lower_call_runtime(&m, &f, "jet_rt_handle_field_{runtime.runtime}_{field.name}", [LIRValueID]{handle}, Val(address))
