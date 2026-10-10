@@ -124,6 +124,30 @@ fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
     files.remove_all(root) ?? panic("remove imported UI scratch: {err}")
 }
 
+#Test("UI public CLI directives stage the unlocked package and build the web target") {
+    root :: kit_ui_test_scratch("public-cli")
+    fixture :: "// @jetpack_e1250\nfn run() {{}}\n"
+    kit_exec_write(files.join(root, "tests/ui/unlocked.jet"), fixture)
+    kit_exec_write(files.join(root, "tests/ui/unlocked.stderr"), "Error [E1250]: unlocked toolchain\n")
+    context :: kit_ui_test_context(root, "case")
+    entries :: kit_ui_discover(context)
+    assert_eq(entries.len(), 1)
+    assert_eq(kit_ui_run(entries[0], context)[0].verdict.status, "PASS")
+    private_source :: files.join(context.scratch, "unlocked-toolchain")
+    assert_eq(files.read(files.join(private_source, "main.jet")) ?? panic("staged E1250"), fixture)
+    assert_eq(files.read(files.join(private_source, "package.jet")) ?? panic("staged manifest"), "name: \"e1250_fixture\"\nversion: \"1\"\njet: 0.9\n")
+    unlocked :: kit_ui_invocation(fixture, "tests/ui/unlocked.jet", false)
+    assert_eq(unlocked.argv, ["build", "main.jet", "--offline"])
+    assert(unlocked.parent && unlocked.unlocked_toolchain)
+    assert_eq(unlocked.exit, "nonzero")
+    assert_eq(unlocked.streams, "both")
+    web :: kit_ui_invocation("// @web_target\n", "tests/ui/web.jet", false)
+    assert_eq(web.argv, ["build", "tests/ui/web.jet", "--target=web"])
+    assert(!web.parent && !web.unlocked_toolchain)
+    assert_eq(web.streams, "rendered-both")
+    files.remove_all(root) ?? panic("remove public CLI scratch: {err}")
+}
+
 #Test("UI lint acceptance and diagnostic shrink guard cannot be blessed away") {
     root :: kit_ui_test_scratch("bless")
     entry :: KitEntry{path: "tests/ui_lint/lint.jet", expected: "tests/ui_lint/lint.warn", project: "tests/ui_lint", suite: "ui", mode: "lint"}

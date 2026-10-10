@@ -43,6 +43,11 @@ check)
     ;;
 build)
     if [ ! -f "$file" ]; then echo 'fixed was not staged' >&2; exit 9; fi
+    if [ "${2:-}" = --offline ]; then
+        if [ "$file" != main.jet ] || [ ! -f package.jet ]; then echo 'unlocked fixture was not staged' >&2; exit 9; fi
+        printf 'Error [E1250]: unlocked toolchain\n' >&2
+        exit 1
+    fi
     printf '#!/bin/sh\nexit 0\n' > fixture-artifact
     chmod +x fixture-artifact
     printf 'built: fixture-artifact\n'

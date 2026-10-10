@@ -14,6 +14,8 @@ fn kit_ui_directives() -> [KitUIDirective] {
         KitUIDirective{name: "cli_e1219", argv: ["build", "$file", "--profile=turbo"], parent: false, exit: "nonzero", streams: "both", capability: ""},
         KitUIDirective{name: "retired_gate_flag", argv: ["run", "$file", "--allow-impure"], parent: false, exit: "nonzero", streams: "both", capability: ""},
         KitUIDirective{name: "cli_build", argv: ["build", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
+        KitUIDirective{name: "jetpack_e1250", argv: ["build", "main.jet", "--offline"], parent: true, exit: "nonzero", streams: "both", capability: ""},
+        KitUIDirective{name: "web_target", argv: ["build", "$file", "--target=web"], parent: false, exit: "any", streams: "rendered-both", capability: ""},
         KitUIDirective{name: "sandbox_effect", argv: ["build", "$file", "--target=sandbox"], parent: false, exit: "any", streams: "both", capability: ""},
         KitUIDirective{name: "web_run", argv: ["run", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
         KitUIDirective{name: "run_cli", argv: ["run", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
@@ -23,7 +25,7 @@ fn kit_ui_directives() -> [KitUIDirective] {
         KitUIDirective{name: "compiler_extension", argv: [], parent: false, exit: "any", streams: "", capability: ""},
         KitUIDirective{name: "runtime_ffi", argv: [], parent: false, exit: "any", streams: "", capability: ""}
     }
-    loop name in ["lint_policy_config", "env_facet_missing", "workspace_lock_e1202", "jetlib_version_mismatch", "jetlib_effect_refused", "library_invalid_binding", "command_override_conflict", "parent_control_cancel", "ambiguous_call", "generated_source", "no-os", "gate", "build_grants", "build_locked", "sandbox_missing_wasm_tools", "jetpack_hangar_digest_mismatch", "jetpack_e1250", "jetpack_retired_environment_flag", "jetpack_retired_store_verbs", "programmable_build", "plugin_target", "web_target", "target", "cost_cli"] {
+    loop name in ["lint_policy_config", "env_facet_missing", "workspace_lock_e1202", "jetlib_version_mismatch", "jetlib_effect_refused", "library_invalid_binding", "command_override_conflict", "parent_control_cancel", "ambiguous_call", "generated_source", "no-os", "gate", "build_grants", "build_locked", "sandbox_missing_wasm_tools", "jetpack_hangar_digest_mismatch", "jetpack_retired_environment_flag", "jetpack_retired_store_verbs", "programmable_build", "plugin_target", "target", "cost_cli"] {
         &rows.push(KitUIDirective{name: name, argv: [], parent: false, exit: "any", streams: "", capability: "missing CLI fixture API: {name}"})
     }
     rows
@@ -84,6 +86,7 @@ fn kit_ui_invocation(source: String, file: String, lint: Bool) -> KitUICall {
         call.parent = row.parent
         call.exit = row.exit
         call.streams = if lint -> "lint" else -> row.streams
+        call.unlocked_toolchain = row.name == "jetpack_e1250"
         if row.name == "repl_deny" {
             loop line in source.split("\n") {
                 trimmed :: line.trim().copy()
@@ -223,8 +226,12 @@ fn kit_ui_run(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
     lint :: entry.mode.starts_with("lint")
     call :: kit_ui_invocation(text, entry.path, lint)
     if call.refused != "" -> return [KitOutcome{verdict: kit_expect_verdict("REFUSED", call.refused), run: kit_exec_failed(call.refused), tier: "-"}]
-    source :: files.join(ctx.env.scratch, "ui-source")
-    work :: files.join(source, entry.project)
+    source :: if call.unlocked_toolchain -> files.join(ctx.scratch, "unlocked-toolchain") else -> files.join(ctx.env.scratch, "ui-source")
+    work :: if call.unlocked_toolchain -> source else -> files.join(source, entry.project)
+    if call.unlocked_toolchain {
+        kit_exec_write(files.join(source, "package.jet"), "name: \"e1250_fixture\"\nversion: \"1\"\njet: 0.9\n")
+        kit_exec_copy_file(original, files.join(source, "main.jet"))
+    }
     overlay := [KitEnvVar]{KitEnvVar{name: "JET_SCHEMA_CACHE_DIR", value: None}}
     if entry.path == "tests/ui/ffi_no_cargo.jet" {
         // Invoke absolute Jet/trace executables with no Cargo or rustup shims.
