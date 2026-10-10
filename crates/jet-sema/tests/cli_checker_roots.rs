@@ -60,7 +60,8 @@ BYTES :: prep { [U8]{97, 117, 116, 111} }
 EMPTY :: prep { [U8]{} }
 fn same(value: [U8]) -> Bool Never! { value == BYTES }
 fn accept(value: [U8]) -> Int Never! { value.len() }
-fn run() -> Int Never! { accept(EMPTY) }
+fn empty_count() -> Int Never! { accept(EMPTY) }
+fn run() {}
 "#)]);
     assert_no_errors(&diagnostics);
     let bytes = Type::List(Box::new(Type::IntN { signed: false, bits: 8 }));
@@ -78,7 +79,8 @@ SYMBOLS :: prep { symbols() }
 ROWS :: prep { [Row]{row()} }
 OPTIONALS :: prep { [Row?]{Val(row()), None} }
 fn accept(rows: [Row]) -> Int Never! { rows.len() }
-fn run() -> Int Never! { accept(ROWS) + SYMBOLS.len() }
+fn row_and_symbol_count() -> Int Never! { accept(ROWS) + SYMBOLS.len() }
+fn run() {}
 "#)]);
     assert_no_errors(&diagnostics);
     assert_eq!(constant_type(&bundle, "SYMBOLS"), Type::List(Box::new(Type::String)));
@@ -112,7 +114,7 @@ fn run() {{}}
 #[test]
 fn module_alias_qualified_core_enum_variants_keep_the_source_owner() {
     let (_, diagnostics) = check(&[
-        ("<corelib>/Core/encoding/encoding.jet", "core_encoding", "#Equatable enum EncodingFormat { JSON, CSV }\n#Equatable enum EncodingErrorKind { Unsupported, Syntax }\n"),
+        ("<corelib>/Core/encoding/encoding.jet", "core_encoding", "#Equatable enum EncodingFormat { JSON CSV }\n#Equatable enum EncodingErrorKind { Unsupported Syntax }\n"),
         ("pkg/main.jet", "main", r#"
 use core.encoding as comptime_encoding
 fn format() -> comptime_encoding.EncodingFormat Never! { comptime_encoding.EncodingFormat.JSON }

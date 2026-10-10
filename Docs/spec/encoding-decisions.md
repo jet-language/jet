@@ -43,6 +43,10 @@ helpers, not `Dyn` adapters. This keeps one tree walker and one set of
 format adapters while preserving the distinction between text serialization
 and byte alphabets.
 
+`Bytes` is public in both constructors and patterns: `Dyn.Bytes([U8]{1})`
+constructs a byte payload, and `.Bytes(bytes)` binds that payload as `[U8]`.
+Both checkers enforce the same element type and single-payload arity.
+
 The native carrier retains exact `Number` lexemes for target-directed decoding.
 Text-cell decoding is scoped to the typed read; strings use the ordinary `Text`
 payload, not a separate `TypedText` variant. Vetted Core internals may borrow

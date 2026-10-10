@@ -43,6 +43,7 @@ impl<'a> Checker<'a> {
             "Int" => vec![Type::Int],
             "Float" => vec![Type::Float],
             "Text" => vec![Type::String],
+            "Bytes" => vec![Type::List(Box::new(u8_ty()))],
             "Number" if self.in_unsafe
                 && self.name_ledger.module_alias(self.module_idx)
                     == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_STREAM_ALIAS) => vec![Type::String],
@@ -94,7 +95,7 @@ impl<'a> Checker<'a> {
                         if expected.len() == 1 { "" } else { "s" },
                         args.len()
                     ),
-                    "each `Dyn` variant has a fixed payload (Bool/Int/Float→scalar, Text→String, Array→[Dyn], Object→[(key: String, value: Dyn)] or [String: Dyn])".to_string(),
+                    "each `Dyn` variant has a fixed payload (Bool/Int/Float→scalar, Text→String, Bytes→[U8], Array→[Dyn], Object→[(key: String, value: Dyn)] or [String: Dyn])".to_string(),
                     "check the variant payload".to_string(),
                     Some(span),
                 ));
