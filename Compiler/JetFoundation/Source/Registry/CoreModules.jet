@@ -185,10 +185,13 @@ struct CoreSourceOwnedType {
 
 // Rust `CoreModuleExports::core_source_owns_type`: whether a checked Core
 // identity (`<corelib>/Core/net::Core/net/url.jet::URL`) names a source-owned
-// Core nominal. An owned type is the Jet declaration on every tier: no tier
-// projects it onto a native carrier or routes its methods to an adapter.
+// Core nominal, including exact registered source value-hook owners. An owned
+// type remains the Jet declaration on every tier, never a native projection.
 fn core_source_owns_type(name: String) -> Bool Never! {
     core_source_owns_type_in(CORE_SOURCE_OWNED_TYPES, name)
+        || core_source_value_hook(name, "clone") != None
+        || core_source_value_hook(name, "show") != None
+        || core_source_value_hook(name, "debug") != None
 }
 
 // The table is a read parameter, so the scan reads its rows in place.

@@ -6186,18 +6186,16 @@ fn lower_checked_tir_program_on_stack(
                         let owner_module =
                             impl_owner_module(bundle, module_idx, &implementation.type_name);
                         let owner_items = &bundle.modules[owner_module].items;
-                        let owner_is_generic = owner_items.iter().any(|item| match item {
-                            Item::Struct(definition) => {
-                                definition.name == implementation.type_name
-                                    && !definition.type_params.is_empty()
+                        let owner_type_params = owner_items.iter().find_map(|item| match item {
+                            Item::Struct(definition) if definition.name == implementation.type_name => {
+                                Some(definition.type_params.as_slice())
                             }
-                            Item::Enum(definition) => {
-                                definition.name == implementation.type_name
-                                    && !definition.type_params.is_empty()
+                            Item::Enum(definition) if definition.name == implementation.type_name => {
+                                Some(definition.type_params.as_slice())
                             }
-                            _ => false,
-                        });
-                        if owner_is_generic || implementation.is_generated_serde {
+                            _ => None,
+                        }).unwrap_or_default();
+                        if implementation.is_generated_serde {
                             continue;
                         }
                         imported_cx.jit_local_call_prefix =
@@ -6205,6 +6203,18 @@ fn lower_checked_tir_program_on_stack(
                         for owner in imported_type_owners(bundle, owner_module) {
                             let qualified = imported_type_name(&owner, &implementation.type_name);
                             for method in &implementation.methods {
+                                // Generic public methods are materialized at
+                                // their checked instances. A registered private
+                                // value hook supplies the generic carrier's
+                                // native implementation itself, so keep its
+                                // checked owner binders rather than dropping it.
+                                if !owner_type_params.is_empty()
+                                    && !is_core_source_value_hook(
+                                        bundle, owner_module, &implementation.type_name, &method.name,
+                                    )
+                                {
+                                    continue;
+                                }
                                 if !should_lower_imported_core_body(
                                     &core_source_modules,
                                     &reachable_core_bodies,
@@ -6221,14 +6231,27 @@ fn lower_checked_tir_program_on_stack(
                                 if funcs.iter().any(|function| function.name == name) {
                                     continue;
                                 }
+                                let owner_type = if owner_type_params.is_empty() {
+                                    Type::Named(qualified.clone())
+                                } else {
+                                    Type::Apply {
+                                        name: qualified.clone(),
+                                        args: owner_type_params.iter()
+                                            .map(|param| Type::Named(param.name.clone())).collect(),
+                                    }
+                                };
                                 let mut lowered = lower_method_for_owner(
                                     method,
                                     &qualified,
-                                    Type::Named(qualified.clone()),
+                                    owner_type,
                                     &imported_cx,
                                     false,
                                 );
-                                let binders = qualification_binders(&[], Some(method));
+                                lowered.generic_params.extend(owner_type_params.iter().map(|param| TGenericParam {
+                                    name: param.name.clone(),
+                                    bounds: param.bounds.clone(),
+                                }));
+                                let binders = qualification_binders(owner_type_params, Some(method));
                                 lowered.ret = lowered.ret.as_ref().map(|ty| {
                                     qualify_imported_type(bundle, module_idx, &owner, &binders, ty)
                                 });
@@ -11472,6 +11495,17 @@ fn collect_core_close_callables(
     }
 }
 
+fn is_core_source_value_hook(bundle: &ProgramBundle, module: usize, owner: &str, name: &str) -> bool {
+    bundle.name_ledger.declared_identity(module, owner)
+        .is_some_and(|identity| {
+            ["clone", "show", "debug"].into_iter().any(|operation| {
+                jet_foundation::CoreModuleExports::core_source_value_hook(
+                    identity, operation,
+                ) == Some(name)
+            })
+        })
+}
+
 fn reachable_core_source_callables(
     bundle: &ProgramBundle,
     callables: &[TCostCallable],
@@ -11513,11 +11547,21 @@ fn reachable_core_source_callables(
             .is_some_and(|(function, _)| {
                 !function.pre.is_empty() && !function.params.is_empty()
             });
+        // Native implementations of source-owned value operations call private
+        // checked methods even when the caller's AST has no explicit call key
+        // (formatting, an aggregate Clone, or a transitive imported carrier).
+        // Root only the canonical hooks, then use the same callee closure as
+        // every other source body; do not retain the entire Core module.
+        let source_value_hook = is_core && callable.method && {
+            let (owner, name) = cost_callable_owner_and_name(callable);
+            is_core_source_value_hook(bundle, callable.module, owner, name)
+        };
         callable.root |= !is_core
             || artifact_export
             || selected_entry
             || ffi_callback
-            || sampled_contract;
+            || sampled_contract
+            || source_value_hook;
     }
 
     for ((source, start, end), reference) in bundle.name_ledger.references() {

@@ -216,6 +216,9 @@ canonical type, function, place and artifact identities. The resulting MIR is
 validated and optimized before execution or emission. Neither lowering infers
 new language permissions or falls back to an unchecked AST emitter.
 
+Registered source-owned record declarations are retained even when a native
+runtime carrier shares their leaf name.
+
 An empty failure set does not by itself erase a checked value carrier.
 `T Never!` calls can still name `Result<T, Never>` in checked expressions;
 automatic propagation consumes that carrier to produce `T`, including inside
@@ -454,9 +457,20 @@ preserves its nominal rendering. Show and Debug routes are independent; a
 Show-only hook does not grant Debug, and native bridges do not introduce public
 Jet trait implementations. A missing or ambiguous hook remains a schema failure,
 not a reason to fall back to a structural derive.
+Exact registered hook owners also participate in the existing source-ownership
+lookup, so fields and call signatures cannot silently project them onto a
+same-named Prelude carrier. Native bridges consume the checked `Result<_, Never>`
+carrier before returning the provider's success value. A checked Show provider
+also supplies the private native interpolation bridge unless a selected Display
+implementation already does; this adds no public Jet Display implementation.
 Executable reachability roots these exact registered private methods and retains
 their ordinary checked callee closure. It does not rely on an explicit formatting
 or aggregate-copy call in the user's AST, nor retain unrelated Core free functions.
+Registered hooks on generic Core carriers retain the checked owner's binders;
+their native bridges use those declared bounds, not invented Printable or Debug
+bounds. Method emission inherits owner binders from the impl instead of
+redeclaring them. ExpiringValue's Show-only hook can therefore render its
+deadline without requiring its untouched payload to implement Printable.
 
 The Jet Driver carries each installed Core row's runtime classification into
 its parse job. Runtime dependencies retain all functions but omit their test

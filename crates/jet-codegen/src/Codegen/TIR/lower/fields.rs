@@ -148,12 +148,39 @@ fn canonical_nominal_name(
             .map(|_| leaf.to_string());
     }
     if let Some(alias) = bundle.name_ledger.effective_alias(module_idx, name) {
-        if let Some(target) = alias.target_module {
-            let leaf = alias
-                .target
-                .rsplit_once('.')
+        let target = alias.target_module.or_else(|| {
+            // Selective Core bindings can be checked catalog aliases without a
+            // source module index in the ledger. Follow that exact authored
+            // owner rather than falling back to a globally unique leaf.
+            let (owner, _) = alias.target.rsplit_once('.')?;
+            let owner = bundle.name_ledger.effective_alias(module_idx, owner)
+                .map_or(owner, |owner_alias| owner_alias.target.as_str());
+            crate::Codegen::core_source_target(bundle, owner).map(|(_, target)| target)
+        });
+        if let Some(target) = target {
+            let leaf = alias.target.rsplit_once('.')
                 .map_or(alias.target.as_str(), |(_, leaf)| leaf);
             return canonical_nominal_name(bundle, target, leaf, &HashSet::new(), qualify_aliases, seen);
+        }
+    }
+    // Catalog-selected Core items are kept in Sema's Core import table, not
+    // as ordinary file-module aliases. Resolve the actual checked selection
+    // before the implicit unique-owner fallback (Clock has two Core owners).
+    for import in &bundle.modules[module_idx].imports {
+        for binding in import.walk_bindings() {
+            if binding.local != name {
+                continue;
+            }
+            let Some(original) = binding.original else {
+                continue;
+            };
+            let Some(crate::AST::CoreListPath::Item { module, item }) =
+                crate::AST::core_list_path(binding.module_alias, original)
+            else {
+                continue;
+            };
+            let (_, owner) = crate::Codegen::core_source_target(bundle, &module)?;
+            return canonical_nominal_name(bundle, owner, &item, &HashSet::new(), qualify_aliases, seen);
         }
     }
     // Implicit Core types (for example Stat.modified: DateTime) keep their

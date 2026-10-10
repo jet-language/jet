@@ -4759,6 +4759,10 @@ fn run() {
             "<corelib>/Core/time::Core/time/time.jet::ZonedDateTime",
             "<corelib>/Core/time::Core/time/time.jet::Instant",
             "<corelib>/Core/time::Core/time/time.jet::TimeError",
+            "<corelib>/Core/time::Core/time/time.jet::Clock",
+            "<corelib>/Core/time::Core/time/time.jet::ExpiringValue",
+            "<corelib>/Core/watcher::Core/watcher/watcher.jet::WatchEvent",
+            "<corelib>/Core/compute::Core/compute/solve.jet::Solver",
         ] {
             assert_eq!(core_native_probe_name(source_record), source_record);
             assert!(!is_canonical_core_native_type(source_record));
@@ -12073,6 +12077,20 @@ impl<'a> RustEmitter<'a> {
                         )
                     });
                 };
+                // Source-owned Core carriers publish checked semantic hooks:
+                // Clock's Debug reads its clock state; Clone forks its timeline.
+                // Those implementations, not the private stored representation,
+                // also provide the corresponding capability to enclosing rows.
+                let source_operation = match trait_name {
+                    "Clone" => Some("clone"),
+                    "Debug" => Some("debug"),
+                    _ => None,
+                };
+                if source_operation.is_some_and(|operation| {
+                    self.source_value_hook_function(def, operation).is_some()
+                }) {
+                    return true;
+                }
                 if !self.structural_derives_allowed(def) {
                     return false;
                 }
@@ -12394,20 +12412,47 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn emit_structural_show_impl(&self, def: &MirTypeDef, out: &mut String) {
-        if let Some(hook) = self.source_value_hook_symbol(def, "show") {
-            let name = self.type_name(def.id);
-            let _ = writeln!(out,
-                "impl JetShow for {name} {{ fn jet_show(&self) -> String {{ self.{hook}() }} }}\n\
-                 impl JetDebug for {name} {{ fn jet_debug(&self) -> String {{ self.{hook}() }} }}\n\
-                 impl std::fmt::Debug for {name} {{ fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{ f.write_str(&self.{hook}()) }} }}"
-            );
-            return;
-        }
-        let emit_show = def.auto_printable
-            && !self.selected_trait_impl_for_type(def, crate::Generics::PRINTABLE);
-        let emit_debug = self.derives_trait(def, crate::Generics::DEBUG)
-            && !self.selected_trait_impl_for_type(def, crate::Generics::DEBUG);
+        let source_show = self.source_value_hook_invocation(def, "show");
+        let source_debug = self.source_value_hook_invocation(def, "debug");
         let selected_display = self.selected_trait_impl_for_type(def, crate::Generics::DISPLAY);
+        if source_show.is_some() || source_debug.is_some() {
+            let name = self.type_name(def.id);
+            let generics = self.type_def_generics(def, &self.generic_params_from(&def.generic_params));
+            let mut args = String::new();
+            if !def.generic_params.is_empty() {
+                args.push('<');
+                for (index, param) in def.generic_params.iter().enumerate() {
+                    if index != 0 {
+                        args.push_str(", ");
+                    }
+                    args.push_str(&mangle(&param.name));
+                }
+                args.push('>');
+            }
+            let args = self.type_def_impl_args(def, &args);
+            if let Some(hook) = &source_show {
+                let _ = writeln!(out,
+                    "impl{generics} JetShow for {name}{args} {{ fn jet_show(&self) -> String {{ {hook} }} }}"
+                );
+                if !selected_display {
+                    let _ = writeln!(out,
+                        "impl{generics} JetDisplay for {name}{args} {{ fn jet_display(&self) -> String {{ {hook} }} }}"
+                    );
+                }
+            }
+            if let Some(hook) = &source_debug {
+                let _ = writeln!(out,
+                    "impl{generics} JetDebug for {name}{args} {{ fn jet_debug(&self) -> String {{ {hook} }} }}\n\
+                     impl{generics} std::fmt::Debug for {name}{args} {{ fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{ f.write_str(&({hook})) }} }}"
+                );
+            }
+        }
+        let emit_show = source_show.is_none()
+            && def.auto_printable
+            && !self.selected_trait_impl_for_type(def, crate::Generics::PRINTABLE);
+        let emit_debug = source_debug.is_none()
+            && self.derives_trait(def, crate::Generics::DEBUG)
+            && !self.selected_trait_impl_for_type(def, crate::Generics::DEBUG);
         if selected_display && !matches!(&def.kind, MirTypeDefKind::Alias { .. }) {
             self.emit_selected_display_impl(def, emit_show, out);
         }
@@ -12730,15 +12775,31 @@ impl<'a> RustEmitter<'a> {
             && self.history_native_type_name(&def.key).is_none()
     }
 
-    fn source_value_hook_symbol(&self, def: &MirTypeDef, operation: &str) -> Option<String> {
+    fn source_value_hook_function(
+        &self,
+        def: &MirTypeDef,
+        operation: &str,
+    ) -> Option<&MirFunction> {
         jet_foundation::CoreModuleExports::core_source_value_hook(&def.key, operation)?;
         let ty = self.type_instances.get(&def.id).copied()
             .unwrap_or_else(|| panic!("source value hook has no checked type instance"));
         let id = jet_foundation::MIR::mir_source_value_hook(self.program, ty, operation)
             .unwrap_or_else(|| panic!("source value hook for {} is missing or ambiguous", def.key));
-        let function = self.program.functions.iter().find(|function| function.id == id)
-            .unwrap_or_else(|| panic!("source value hook function is unavailable"));
-        Some(self.rust_method_symbol(function))
+        Some(self.function_row(id))
+    }
+
+    fn source_value_hook_invocation(&self, def: &MirTypeDef, operation: &str) -> Option<String> {
+        let function = self.source_value_hook_function(def, operation)?;
+        let invocation = format!("self.{}()", self.rust_method_symbol(function));
+        match function.return_type.result_parts() {
+            None => Some(invocation),
+            Some((_, error))
+                if error.nominal_name() == Some(jet_foundation::Syntax::TYPE_NEVER) =>
+            {
+                Some(format!("match {invocation} {{ Ok(value) => value, Err(never) => match never {{}} }}"))
+            }
+            _ => panic!("source value hook for {} has an unsupported checked failure carrier", def.key),
+        }
     }
 
     fn emit_type_def(&self, def: &'a MirTypeDef, out: &mut String) {
@@ -12821,11 +12882,13 @@ impl<'a> RustEmitter<'a> {
             );
         let clone_user_impl = self.selected_user_capability_impl(declared_ty, "Clone");
         let debug_user_impl = self.selected_user_capability_impl(declared_ty, "Debug");
+        let clone_source_hook = self.source_value_hook_function(def, "clone");
+        let debug_source_hook = self.source_value_hook_function(def, "debug");
         let mut derives = Vec::new();
-        if clone_capable && !clone_user_impl {
+        if clone_capable && !clone_user_impl && clone_source_hook.is_none() {
             derives.push("Clone");
         }
-        if debug_capable && !debug_user_impl {
+        if debug_capable && !debug_user_impl && debug_source_hook.is_none() {
             derives.push("Debug");
         }
         for trait_id in &def.derives {
@@ -12836,13 +12899,13 @@ impl<'a> RustEmitter<'a> {
                 .find(|trait_def| trait_def.id == *trait_id)
                 .map(|trait_def| trait_def.name.as_str())
                 .unwrap_or_else(|| panic!("MIR derive trait ID {:?} has no row", trait_id));
-            if trait_name == "Clone" && !clone_capable && !clone_user_impl {
+            if trait_name == "Clone" && !clone_capable && !clone_user_impl && clone_source_hook.is_none() {
                 panic!(
                     "MIR type {:?} derives Clone without a checked Rust Clone capability or user implementation",
                     def.id
                 );
             }
-            if trait_name == "Debug" && !debug_capable && !debug_user_impl {
+            if trait_name == "Debug" && !debug_capable && !debug_user_impl && debug_source_hook.is_none() {
                 panic!(
                     "MIR type {:?} derives Debug without a checked Rust Debug capability or user implementation",
                     def.id
@@ -12861,8 +12924,8 @@ impl<'a> RustEmitter<'a> {
                     | "PartialOrd"
             ) {
                 let capability = match trait_name {
-                    "Clone" => clone_capable && !clone_user_impl,
-                    "Debug" => debug_capable && !debug_user_impl,
+                    "Clone" => clone_capable && !clone_user_impl && clone_source_hook.is_none(),
+                    "Debug" => debug_capable && !debug_user_impl && debug_source_hook.is_none(),
                     _ => derives_allowed,
                 };
                 if capability && !derives.contains(&trait_name) {
@@ -12925,9 +12988,6 @@ impl<'a> RustEmitter<'a> {
                     derives.push(trait_name);
                 }
             }
-        }
-        if self.source_value_hook_symbol(def, "debug").is_some() {
-            derives.retain(|name| *name != "Debug");
         }
         if !derives.is_empty() && !matches!(&def.kind, MirTypeDefKind::Alias { .. }) {
             let _ = writeln!(out, "#[derive({})]", derives.join(", "));
@@ -13040,9 +13100,11 @@ impl<'a> RustEmitter<'a> {
                 }
             }
         }
-        if let Some(hook) = self.source_value_hook_symbol(def, "clone") {
+        if clone_source_hook.is_some() {
+            let invocation = self.source_value_hook_invocation(def, "clone")
+                .expect("checked source Clone hook");
             let _ = writeln!(out,
-                "impl Clone for {name} {{ fn clone(&self) -> Self {{ self.{hook}() }} }}"
+                "impl Clone for {name} {{ fn clone(&self) -> Self {{ {invocation} }} }}"
             );
         }
         self.pop_generic_scope();
@@ -21148,8 +21210,20 @@ impl<'a> RustEmitter<'a> {
                 }
             }
         }
+        // The MIR body names its owner's binders so generic field types stay
+        // checked. An inherent instance method inherits those binders from its
+        // impl header; redeclaring them on the Rust method would shadow them.
+        let owner_args: &[MirType] = match &function.form {
+            MirFunctionForm::Method { owner, self_access: Some(_) } => match owner.kind() {
+                MirTypeKind::Apply { args, .. } => args,
+                _ => &[],
+            },
+            _ => &[],
+        };
         let params = declared
             .iter()
+            .filter(|param| !owner_args.iter().any(|arg| matches!(arg.kind(),
+                MirTypeKind::Apply { name, args } if args.is_empty() && name.name == param.name)))
             .map(|param| {
                 let mut bounds = param
                     .bounds

@@ -1172,11 +1172,13 @@ pub fn core_source_owns_call(module: &str, member: &str, argc: usize, first_is_m
 
 /// Whether a checked Core nominal identity
 /// (`<corelib>/Core/net::Core/net/url.jet::URL`) names a source-owned Core type
-/// (`source_module … types { … }` in Prelude/Core.jet). An owned type is the
-/// Jet declaration on every tier: no tier projects it onto a native carrier
-/// or routes its methods to a compiler adapter.
+/// (`source_module … types { … }` in Prelude/Core.jet, or an exact registered
+/// source value-hook owner). An owned type is the Jet declaration on every
+/// tier: no tier projects it onto a native carrier or compiler adapter.
 pub fn core_source_owns_type(name: &str) -> bool {
     core_source_owns_type_in(CORE_SOURCE_OWNED_TYPES, name)
+        || ["clone", "show", "debug"].into_iter()
+            .any(|operation| core_source_value_hook(name, operation).is_some())
 }
 
 fn core_source_owns_type_in(rows: &[CoreSourceOwnedType], name: &str) -> bool {
