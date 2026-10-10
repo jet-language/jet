@@ -36,6 +36,7 @@ use jet_foundation.[
     PrepParam,
     RustConstKind,
     Span,
+    SemaNameCase,
     StateDecl,
     Stmt,
     StructDef,
@@ -276,7 +277,7 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
         // `@name ::`) in an inline module body is a module constant (Rust
         // `top_level_item_in_code_module`); file scope routes it as a module
         // binding before reaching here.
-        parser_comptime_const_ahead(&state, 0) || parser_marked_const_ahead(&state, 0) -> {
+        parser_comptime_const_ahead(&state, 0) || parser_marked_const_ahead(&state, 0) || parser_known_ahead_at(&state, 0) -> {
             value :: parser_parse_const(&state, modifiers)
             return ParsedItemOrImport{item: Val(Item.Const{value: value}), import: None, handled: true}
         }
@@ -440,7 +441,7 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
             next
         }
         if kind == TOKEN_HASH {
-            if parser_item_declaration_ahead_at(&state, 0) -> break
+            if parser_item_declaration_ahead_at(&state, 0) || parser_known_ahead_at(&state, 0) -> break
             if parser_kind_at(&state, 1) == TOKEN_LBRACKET {
                 group :: parser_parse_marker_group_list(&state)
                 if marker_chunks == 0 -> sequence.start = group.span.start
@@ -2085,7 +2086,17 @@ fn parser_parse_const(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     binding_name := ""
     retired_at := ""
     recovered_comptime := false
+    if parser_known_ahead_at(&state, 0) {
+        start = parser_take_retired_known(&state, SemaNameCase.Screaming)
+        recovered_comptime = true
+    }
     name_token := if {
+        recovered_comptime -> {
+            known_name :: parser_expect_name(&state, "for the compile-time binding")
+            parser_expect(&state, TOKEN_COLON_COLON, "`::` after a constant name")
+            binding_name = parser_value(state, known_name)
+            known_name
+        }
         start.kind == TOKEN_AT -> {
             parser_bump(&state)
             at_name :: parser_expect_name(&state, "after `@` in a constant")

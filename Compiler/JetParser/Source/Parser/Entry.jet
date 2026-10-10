@@ -706,6 +706,7 @@ fn parser_item_ahead(state: &JetParserState) -> Bool Never! {
     kind :: parser_current_kind(&state)
     token :: parser_current(&state)
     if {
+        parser_known_ahead_at(&state, 0) -> true
         parser_comptime_const_ahead(&state, 0) -> true
         parser_item_declaration_ahead_at(&state, 0) -> true
         parser_template_loop_ahead(&state) -> true
@@ -725,6 +726,14 @@ fn parser_is_item_keyword(kind: Int) -> Bool Never! {
 
 fn parser_comptime_const_ahead(state: &JetParserState, offset: Int) -> Bool Never! {
     parser_kind_at(&state, offset) == TOKEN_AT && parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_kind_at(&state, offset + 2) == TOKEN_COLON_COLON
+}
+
+// Rust `at_known_lead`: only the unqualified, non-negated retired marker.
+fn parser_known_ahead_at(state: &JetParserState, offset: Int) -> Bool Never! {
+    parser_kind_at(&state, offset) == TOKEN_HASH &&
+    parser_kind_at(&state, offset + 1) == TOKEN_IDENT &&
+    parser_value_at(&state, offset + 1) == "Known" &&
+    parser_kind_at(&state, offset + 2) != TOKEN_DOT
 }
 
 // D-PREP-SURFACE2=A + owner ruling (2026-09-30): an immutable module binding

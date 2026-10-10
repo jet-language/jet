@@ -19,6 +19,8 @@ use jet_foundation.[
     Pattern,
     RuleSite,
     Span,
+    SemaNameCase,
+    sema_casing_canonical,
     Stmt,
     SwitchArm,
     TextEdit,
@@ -1316,9 +1318,41 @@ fn parser_prep_verb_ahead(state: &JetParserState, offset: Int, verb: Int) -> Boo
     token.kind == TOKEN_IDENT && parser_value(state, token) == "prep" && parser_kind_at(&state, offset + 1) == verb
 }
 
+// Rust `retired_known_error` / `take_mark`: recover every former demand
+// form, retaining its compile-time meaning after the one teaching diagnostic.
+fn parser_take_retired_known(state: &JetParserState, case: SemaNameCase) -> Token {
+    head := parser_expect(&state, TOKEN_HASH, "`#` before `Known`")
+    name :: parser_expect_name(&state, "for the retired `Known` marker")
+    head.span = parser_cover(head.span, name.span)
+    next_token :: parser_current(&state)
+    fix :: if {
+        next_token.kind == TOKEN_KW_IF -> "write `prep if <condition> {{ … }}`"
+        next_token.kind == TOKEN_LBRACE -> "write `prep {{ … }}`"
+        next_token.kind == TOKEN_IDENT -> "write `{sema_casing_canonical(parser_value(state, next_token), case)} :: prep {{ … }}`"
+        case == SemaNameCase.Screaming -> "write a prepared constant: `NAME :: prep {{ … }}`"
+        else -> "write a prepared value: `name :: prep {{ … }}`"
+    }
+    parser_add_error_code(&state, "E0377", head.span, "`#Known` is retired", "compile-time work carries the word `prep`, and a compile-time constant is `NAME :: prep {{ value }}`", fix)
+    head
+}
+
+fn parser_parse_retired_known_statement(state: &JetParserState) -> Stmt {
+    if parser_kind_at(&state, 2) == TOKEN_KW_IF -> return parser_parse_prep_if(&state)
+    if parser_kind_at(&state, 2) == TOKEN_LBRACE -> return parser_parse_prep_block(&state)
+    parser_take_retired_known(&state, SemaNameCase.Snake)
+    name :: parser_expect_name(&state, "for the compile-time binding")
+    parser_expect(&state, TOKEN_COLON_COLON, "`::` after the compile-time binding name")
+    value :: parser_parse_expression(&state, 1, 0)
+    binding := ast_binding(parser_value(state, name), name.span, false, value.expr, None)
+    binding.is_comptime = true
+    parser_finish_statement(&state)
+    Stmt.Bind{binding: binding}
+}
+
 // Consume `prep` ahead of a build-time verb. The retired `@if`, `@loop` and
 // `@fn` heads teach E0388 once and recover as the `prep` form.
 fn parser_take_prep_head(state: &JetParserState, verb: String) -> Token {
+    if parser_known_ahead_at(&state, 0) -> return parser_take_retired_known(&state, SemaNameCase.Snake)
     head :: parser_current(&state)
     if head.kind == TOKEN_AT {
         verb_token :: parser_lookahead(&state, 1)
@@ -1331,12 +1365,16 @@ fn parser_take_prep_head(state: &JetParserState, verb: String) -> Token {
 // runs while building and emits no runtime code. The retired `@ { … }` head
 // teaches E0388 once and recovers as the `prep` block.
 fn parser_parse_prep_block(state: &JetParserState) -> Stmt {
-    start :: parser_current(&state)
-    if start.kind == TOKEN_AT {
-        brace :: parser_lookahead(&state, 1)
-        parser_add_error_code(&state, "E0388", parser_cover(start.span, brace.span), "`@ {{ … }}` is retired; write `prep {{ … }}`", "build-time blocks, branches, loops and functions carry the word `prep`, the same word Jet uses for every build-time step; the meaning and the checks are unchanged", "replace `@ {{ … }}` with `prep {{ … }}`")
+    start := parser_current(&state)
+    if parser_known_ahead_at(&state, 0) {
+        start = parser_take_retired_known(&state, SemaNameCase.Snake)
+    } else {
+        if start.kind == TOKEN_AT {
+            brace :: parser_lookahead(&state, 1)
+            parser_add_error_code(&state, "E0388", parser_cover(start.span, brace.span), "`@ {{ … }}` is retired; write `prep {{ … }}`", "build-time blocks, branches, loops and functions carry the word `prep`, the same word Jet uses for every build-time step; the meaning and the checks are unchanged", "replace `@ {{ … }}` with `prep {{ … }}`")
+        }
+        parser_bump(&state)
     }
-    parser_bump(&state)
     block :: parser_parse_block(&state)
     Stmt.ComptimeBlock{body: block.statements, is_template_loop: false, span: parser_cover(start.span, block.span)}
 }
@@ -1379,7 +1417,7 @@ fn parser_parse_prep_if(state: &JetParserState) -> Stmt {
     end := then_block.span
     if parser_current_kind(&state) == TOKEN_KW_ELSE {
         parser_bump(&state)
-        if parser_prep_verb_ahead(&state, 0, TOKEN_KW_IF) || (parser_current_kind(&state) == TOKEN_AT && parser_kind_at(&state, 1) == TOKEN_KW_IF) {
+        if parser_prep_verb_ahead(&state, 0, TOKEN_KW_IF) || (parser_current_kind(&state) == TOKEN_AT && parser_kind_at(&state, 1) == TOKEN_KW_IF) || (parser_known_ahead_at(&state, 0) && parser_kind_at(&state, 2) == TOKEN_KW_IF) {
             chained :: parser_parse_prep_if(&state)
             else_body = Val([Stmt]{chained})
             end = parser_lookahead(&state, -1).span
@@ -1872,6 +1910,7 @@ fn parser_finish_statement(state: &JetParserState) {
 }
 
 fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
+    if parser_known_ahead_at(&state, 0) -> return parser_parse_retired_known_statement(&state)
     hash :: parser_bump(&state)
     negated := false
     if parser_current_kind(&state) == TOKEN_BANG {

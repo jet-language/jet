@@ -257,6 +257,11 @@ rejected with E0621; Jet does not synthesize an implicit runtime function.
 The `const` keyword is retired and is recognized only to teach its replacement
 (E0146). A compile-time constant is an ordinary ALL_CAPS name, `NAME :: value`,
 described below.
+The retired `#Known` constant, branch, and block forms teach E0377 and recover
+their compile-time form. Their replacements use `NAME :: prep { value }`,
+`prep if condition { … }`, and `prep { … }` (D-META-STAGE1=B,
+D-PREP-SURFACE2=A). Constant and local-name repairs use the same canonical
+identifier-casing algorithm as semantic diagnostics.
 
 Names cannot shadow an existing name in the same scope (E0118), and definitions
 are unique (E0105). A name that would shadow a built-in is rejected with E0106,
