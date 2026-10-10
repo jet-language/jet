@@ -6011,7 +6011,9 @@ fn main() {{
     assert_eq!(cargo_target, TARGET, "Cargo TARGET differs from Jet's selected target");
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let mut objects = Vec::new();
-    for (index, (source, compiler, cpp, target_arg)) in [{files}].iter().enumerate() {{
+    let files = [{files}];
+    let mut linker = None;
+    for (index, (source, compiler, cpp, target_arg)) in files.iter().enumerate() {{
         println!("cargo:rerun-if-changed={{source}}");
         let object = out.join(format!("inline_{{index}}.o"));
         let mut compile = Command::new(compiler);
@@ -6019,12 +6021,17 @@ fn main() {{
         if *cpp {{ compile.arg("-std=c++17"); }}
         compile.args(["-fPIC", "-c", source, "-o"]).arg(&object);
         checked(&mut compile);
-        let proof = out.join(format!("inline_{{index}}.{{PROOF_SUFFIX}}"));
+        objects.push(object);
+        if linker.is_none() || *cpp {{ linker = Some((*compiler, *target_arg)); }}
+    }}
+    if let Some((compiler, target_arg)) = linker {{
+        let proof = out.join(format!("inline_bridge.{{PROOF_SUFFIX}}"));
         let mut link = Command::new(compiler);
         if !target_arg.is_empty() {{ link.arg(target_arg); }}
-        link.args(["-shared", UNDEFINED_SYMBOLS]).arg(&object).arg("-o").arg(&proof);
+        link.args(["-shared", UNDEFINED_SYMBOLS]);
+        for object in &objects {{ link.arg(object); }}
+        link.arg("-o").arg(&proof);
         checked(&mut link);
-        objects.push(object);
     }}
     let archive = out.join("libjet_inline_native.a");
     let mut ar = Command::new(ARCHIVER);

@@ -1213,6 +1213,16 @@ host proc-macro directory. Inline `#FFI(c|cpp|asm)` bodies use the same bridge
 and include their checked signature, target, raw body, and schema in the cache
 identity. C/C++ wrappers and asm lower only after sema proves their boundary
 contracts.
+Inline C/C++ bodies remain separate translation units. The generated build
+script compiles every selected body before proving the complete bridge with
+the target's strict undefined-symbol linker flag, using the C++ linker when
+the closure contains C++. Shared globals may resolve from a sibling body;
+references missing from the full closure still fail. Only a successful proof
+is archived. The cache identity includes the build script itself, so changing
+this proof invalidates stale bridge artifacts without changing the ABI schema.
+`Compiler/JetCodegen/Tests/run-inline-foreign-link.mjs` executes all three
+production build-script templates, including shared mutex state, mixed C/C++
+state and rejection of an actually missing definition.
 
 The Nix shell keeps ordinary Jet compilation and hosted runtime Rust on the
 existing nixpkgs compiler. Native user-Rust helpers have a separate pinned
