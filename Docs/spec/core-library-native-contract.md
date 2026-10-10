@@ -255,7 +255,8 @@ Core runtime source contracts use the ratified ownership and failure spellings:
 - Expiring-secret storage acquires its edit guard in the removal helper, moves
   the payload from that owned local, restores `None`, then drops the payload.
   Close consumes the storage owner, and live callbacks retain a read guard.
-  Callbacks are non-failing (`Never!`); expiry is the wrapper's typed failure.
+  Callbacks are non-failing (`Never!`); expiry uses the canonical root `Expired`
+  failure carrier, not a second `core.time` nominal.
   Shared handle operations never copy credential material.
 - XML CR normalization encodes U+000D through the canonical Unicode scalar
   encoder, since plain Jet text has no carriage-return escape. Code-point

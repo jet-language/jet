@@ -43,7 +43,7 @@ impl ExpiringSecret {
 
     fn expires_at_ms(self) -> Int Never! { self.deadline_ms }
 
-    fn with<R>(self, callback: fn(T) -> R Never!) -> R time.Expired! {
+    fn with<R>(self, callback: fn(T) -> R Never!) -> R Expired! {
         if self.observer.now() > self.deadline_ms -> __take_expired<T>(self.value)
         guard :: self.value.guard_read()
         __loan_secret<T, R>(guard.value, callback)
@@ -76,10 +76,10 @@ fn __take_expired<T>(storage: Shared<T?>) Never! {
 
 // A read parameter's pattern payload is an existing non-owning read window.
 // Keep the guard held in `with` until the source callback has returned.
-fn __loan_secret<T, R>(value: T?, callback: fn(T) -> R Never!) -> R time.Expired! {
+fn __loan_secret<T, R>(value: T?, callback: fn(T) -> R Never!) -> R Expired! {
     if value == {
         .Val(secret) -> Ok(callback(secret))
-        None -> Err(time.Expired{})
+        None -> Err(Expired{})
     }
 }
 
