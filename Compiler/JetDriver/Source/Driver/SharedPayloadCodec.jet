@@ -3,7 +3,7 @@
 use core.math as shared_payload_math
 use jet_backend.[CoreSharedManifest, CoreSharedNativeLayout, CoreSharedLayoutMember, CoreSharedLayoutVariant, CoreSharedParentCallableResult, X64NativeAllocation, core_shared_runtime_call, core_shared_runtime_allocate, x64_execution_free, x64_native_call, x64_native_slot_write, x64_value_word, x64_value_byte, x64_value_unsigned_bytes, lower_mono_fingerprint, lower_result_selector, lower_result_payload_offset]
 use jet_eval.[JetEvalHostTypeShape, JetEvalHostTypeNode]
-use jet_foundation.[MIRType, TComptimeValue, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeField, TComptimeEnumArg, TComptimeReport, Type]
+use jet_foundation.[MIRType, TComptimeValue, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeField, TComptimeEnumArg, TComptimeReport, Type, mir_big_integer_key_compare]
 
 struct JetDriverNativePayloadCodec {
     host: JetDriverCoreSourceParentHost
@@ -100,6 +100,7 @@ fn jet_driver_payload_shape_field(node: JetEvalHostTypeNode, name: String) -> In
 fn jet_driver_payload_key_value(key: TComptimeKey) -> TComptimeValue Never! {
     if key == {
         .Int(value) -> TComptimeValue.Int{value: value}
+        .BigInt(decimal) -> TComptimeValue.BigInt{decimal: decimal}
         .String(value) -> TComptimeValue.String{value: value}
         .Bool(value) -> TComptimeValue.Bool{value: value}
         .Char(value) -> TComptimeValue.Char{value: value}
@@ -130,7 +131,14 @@ fn jet_driver_payload_key_order(layouts: [CoreSharedNativeLayout], key: String, 
     if row.child_keys.len() == 1 && row.members.len() == 0 && row.variants.len() == 0 && row.representation != "Inline" -> return jet_driver_payload_key_order(layouts, row.child_keys[0], left, right)
     order := Int?{None}
     if left == {
-        .Int(a) -> if right == .Int(b) -> order = Val(if a < b -> -1 else if a > b -> 1 else -> 0)
+        .Int(a) -> {
+            if right == .Int(b) -> order = Val(if a < b -> -1 else if a > b -> 1 else -> 0)
+            if right == .BigInt(b) -> order = Val(mir_big_integer_key_compare("{a}", b))
+        }
+        .BigInt(a) -> {
+            if right == .BigInt(b) -> order = Val(mir_big_integer_key_compare(a, b))
+            if right == .Int(b) -> order = Val(mir_big_integer_key_compare(a, "{b}"))
+        }
         .String(a) -> if right == .String(b) -> order = Val(if a < b -> -1 else if a > b -> 1 else -> 0)
         .Char(a) -> if right == .Char(b) -> order = Val(if a < b -> -1 else if a > b -> 1 else -> 0)
         .Bool(a) -> if right == .Bool(b) -> order = Val(if a == b -> 0 else if a -> 1 else -> -1)
@@ -312,7 +320,10 @@ fn jet_driver_payload_encode_node(codec: JetDriverNativePayloadCodec, stage: &Je
         .Option(inner) -> {
             if row.child_keys.len() != 1 || row.representation != "Boxed" -> return "CoreSharedPayloadShapeMismatch: {key}"
             if value == .Failed(report) {
-                if report != .Clean(_) -> return "CoreSharedPayloadValueMismatch: {key}"
+                if report == {
+                    .Clean(_) -> {}
+                    else -> { return "CoreSharedPayloadValueMismatch: {key}" }
+                }
                 error = x64_native_slot_write(target, 8, 0)
             } else if value == .Present(child) {
                 box :: jet_driver_payload_allocate(codec, &stage, row.box_size, 8)
@@ -404,7 +415,7 @@ fn jet_driver_payload_encode_node(codec: JetDriverNativePayloadCodec, stage: &Je
                 if error == "" -> error = x64_native_slot_write(target + 16, 8, buffer)
             } else { return "CoreSharedPayloadValueMismatch: {key}" }
         }
-        .Struct(_, type_name, _, fields) | .Tuple(fields) -> {
+        .Struct(_, _, _, fields) | .Tuple(fields) -> {
             expected :: if node == {.Struct(_, name, _, _) -> name else -> "Tuple"}
             if row.representation != "Inline" || row.members.len() != fields.len() -> return "CoreSharedPayloadShapeMismatch: {key}"
             if value == .Struct(name, values) {
@@ -464,7 +475,8 @@ fn jet_driver_native_payload_stage(codec: JetDriverNativePayloadCodec, value: TC
     row :: jet_driver_payload_layout(codec, codec.type_key) ?? return JetDriverNativePayloadStage{pointer: 0, type_key: codec.type_key, initialized: false, refusal_key: "CoreSharedPayloadLayoutMissing: {codec.type_key}", owners: [JetDriverNativePayloadOwner]{}}
     stage.pointer = jet_driver_payload_allocate(codec, &stage, row.payload_size, row.align)
     if stage.pointer == 0 -> return stage
-    stage.refusal_key = jet_driver_payload_encode_node(codec, &stage, codec.type_key, codec.shape.root, value, stage.pointer)
+    pointer :: stage.pointer
+    stage.refusal_key = jet_driver_payload_encode_node(codec, &stage, codec.type_key, codec.shape.root, value, pointer)
     if stage.refusal_key != "" {
         cleanup :: jet_driver_native_payload_release(&stage)
         if cleanup != "" -> stage.refusal_key = "{stage.refusal_key};{cleanup}"
@@ -479,7 +491,7 @@ fn jet_driver_payload_read_text(codec: JetDriverNativePayloadCodec, word: Int) -
     if data.refusal_key != "" || length.refusal_key != "" || length.word < 0 -> return None
     bytes := [U8]{}
     loop index in 0..<length.word -> &bytes.push(U8{x64_value_byte(data.word + index)})
-    String.from_bytes(bytes)
+    String.from_bytes(bytes) ?? None
 }
 fn jet_driver_payload_decode_scalar(codec: JetDriverNativePayloadCodec, row: CoreSharedNativeLayout, source: Int) -> TComptimeValue? {
     kind :: row.kind.bit_and(4294967295)
@@ -688,7 +700,10 @@ fn jet_driver_native_payload_disown(stage: &JetDriverNativePayloadStage) -> Stri
     if !stage.initialized -> return "CoreSharedPayloadStageNotInitialized: {stage.type_key}"
     if stage.owners.len() > 1 {
         owner :: &stage.owners.pop() ?? panic("initialized payload journal lost its root owner")
-        if owner != .Value(_, _) -> panic("initialized payload journal is not collapsed")
+        if owner == {
+            .Value(_, _) -> {}
+            else -> panic("initialized payload journal is not collapsed")
+        }
     }
     jet_driver_native_payload_release(&stage)
 }

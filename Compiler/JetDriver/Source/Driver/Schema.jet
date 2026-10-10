@@ -1,8 +1,8 @@
 // Same-read published-schema inputs for the sema-owned canonical codec.
 use core.files as schema_files
 use core.sys as schema_sys
-use jet_sema.[SchemaSnapshot, SchemaSnapshotError, SemaRegistrationGraph, SemaGraphResult, check_schema_migrations, sema_check_schema_migration_graph, sema_schema_published]
-use jet_foundation.[Diagnostic, Item]
+use jet_sema.[SchemaSnapshot, SchemaSnapshotError, SemaRegistrationGraph, SemaGraphResult, check_schema_migrations, sema_check_schema_migration_graph, sema_schema_published, sema_program_tables_init]
+use jet_foundation.[Diagnostic, Item, TTypeDef]
 
 // Only the schema inputs the populated checker actually reads. An absent,
 // unreadable or malformed snapshot is still an input; it is not an empty cache.
@@ -109,8 +109,9 @@ fn save_snapshot(root: String, snapshot: SchemaSnapshot) SchemaSnapshotError! -[
 // full build's populated registry. The loader's failure is handled by caller.
 fn jet_driver_schema_pending_breaks(modules: [[Item]], snapshots: [String:SchemaSnapshot]) -> [String] Never! {
     names := [String]{}
+    program :: sema_program_tables_init(None, [TTypeDef]{})
     loop items in modules {
-        diagnostics :: check_schema_migrations(items, snapshots, None)
+        diagnostics :: check_schema_migrations(items, snapshots, None, program)
         if diagnostics.len() == 0 -> next
         loop item in items {
             if item == .Struct(definition) {

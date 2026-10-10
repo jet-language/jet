@@ -783,7 +783,7 @@ fn jet_driver_foreign_parse_cache(file: JetDriverAuthorizedSourceFile, diagnosti
     lexed :: lex_generated(file.source.bytes())
     loop diagnostic in lexed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(diagnostic.copy(), file.path, jet_driver_foreign_diagnostic_offset(diagnostic)))
     if jet_driver_has_errors(lexed.diagnostics) -> return None
-    parsed := parse_lexed(^lexed)
+    parsed := parse_lexed(lexed)
     loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(diagnostic.copy(), file.path, jet_driver_foreign_diagnostic_offset(diagnostic)))
     if jet_driver_has_errors(parsed.diagnostics) -> return None
     Val(^parsed.program)
@@ -821,7 +821,7 @@ fn jet_driver_foreign_make_adapter_function(handle: String, raw_function: String
     lexed :: lex_generated(source.bytes())
     loop diagnostic in lexed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(diagnostic.copy(), origin_path, jet_driver_foreign_diagnostic_offset(diagnostic)))
     if jet_driver_has_errors(lexed.diagnostics) -> return None
-    parsed :: parse_lexed(^lexed)
+    parsed :: parse_lexed(lexed)
     loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(diagnostic.copy(), origin_path, jet_driver_foreign_diagnostic_offset(diagnostic)))
     if jet_driver_has_errors(parsed.diagnostics) -> return None
     loop item in parsed.program.items {
@@ -1000,7 +1000,7 @@ fn jet_driver_foreign_parse_shifted(path: String, source: String, offset: Int, d
     }
     if jet_driver_has_errors(lexed.diagnostics) -> return None
     loop token_index in 0..<lexed.tokens.len() -> token_shift_spans(&lexed.tokens[token_index], offset, &lexed.tables.literals)
-    parsed := parse_lexed(^lexed)
+    parsed := parse_lexed(lexed)
     loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(diagnostic.copy(), path, offset))
     if jet_driver_has_errors(parsed.diagnostics) -> return None
     Val(^parsed.program)
@@ -1295,7 +1295,7 @@ fn jet_driver_assemble_foreign_providers(snapshot: JetDriverAuthorizedSourceSnap
                 break surface.module_library
             }
         } ?? request.library
-        if jet_driver_foreign_find_synthetic_module(&load, module_library, request.root_index) == .Val(target_index) {
+        if jet_driver_foreign_find_synthetic_module(load, module_library, request.root_index) == .Val(target_index) {
             target_identity := load.modules[target_index].module_identity
             target_package := load.modules[target_index].package_identity
             jet_driver_foreign_add_import_edge(&load, request, target_identity, target_package)

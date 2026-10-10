@@ -970,7 +970,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     if manifest_file_index == None && inline_carrier == None {
         root_display :: jet_driver_display_path(entry_root, root.canonical_path)
         identity :: "source-root:{root_display.len()}:{root_display}"
-        return JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: "", version: None, edition: JET_DRIVER_LATEST_EDITION, runtime_ceiling: None, allocator_policy: MIRAllocatorPolicy.HostedDefault, authority_allow: None, authority_deny: None, authority_needs: [String]{}, entry: None, manifest_path: None, inline_package: false, dependencies: [JetDriverPackageDependency]{}, outputs: jet_driver_no_package_outputs()}
+        return JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: "", version: None, edition: JET_DRIVER_LATEST_EDITION, runtime_ceiling: None, allocator_policy: MIRAllocatorPolicy.HostedDefault, authority_allow: None, authority_deny: None, authority_needs: [String]{}, entry: None, manifest_path: None, inline_package: false, configs: [String]{}, dependencies: [JetDriverPackageDependency]{}, outputs: jet_driver_no_package_outputs()}
     }
     if manifest_file_index != None && retired_manifest {
         &diagnostics.push(jet_driver_diagnostic_at_source("E0003", None, retired_manifest_path, 0, "the authority root contains both canonical and retired package manifests", "choosing either file would make package identity ambiguous", "remove jet.toml and keep package.jet"))
@@ -1211,7 +1211,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
         diagnostic_index += 1
     }
     identity :: jet_driver_package_identity(name, version ?? "")
-    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, entry: entry, manifest_path: Val(manifest_path), policy_declarations: ^policy_declarations, policy_unsafe_paths: ^policy_unsafe_paths, policy_expert: policy_expert, inline_package: inline_carrier != None, dependencies: dependencies, outputs: outputs}
+    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, entry: entry, manifest_path: Val(manifest_path), policy_declarations: ^policy_declarations, policy_unsafe_paths: ^policy_unsafe_paths, policy_expert: policy_expert, inline_package: inline_carrier != None, configs: ^configs, dependencies: dependencies, outputs: outputs}
 }
 
 fn jet_driver_default_module_alias(relative_path: String) -> String Never! {
@@ -3172,6 +3172,7 @@ fn jet_driver_core_library_catalog(core_sources: [JetDriverCoreSource]) -> JetDr
         allocator_policy: MIRAllocatorPolicy.HostedDefault,
         authority_allow: None, authority_deny: None, authority_needs: [String]{},
         entry: None, manifest_path: None, inline_package: false,
+        configs: [String]{},
         dependencies: [JetDriverPackageDependency]{},
         outputs: JetDriverPackageOutputs{library: true, executable: false, entry_modules: [String]{}},
     }
@@ -3273,6 +3274,7 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
     namespace_expanded := [Bool]{}
     loop root_index in 0..<request.authorized_sources.roots.len() -> &namespace_expanded.push(false)
     resolved_imports := [SemaRegistrationImportEdge]{}
+    module_edges := jet_driver_module_edges()
     // Exact virtual text records; these are never added to disk authorities.
     core_generated := [MIRSourceFile]{}
     bare_modules := [String]{}
@@ -3328,17 +3330,10 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
         if !policy_ok -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)
         jet_driver_bind_dependency_imports(&program, unit, catalog.packages)
         module_identity :: jet_driver_unit_module_identity(unit)
-        module_position :: modules.len()
-        &modules.push(JetDriverLoadedModule{
-            source_unit_index: source_unit_index,
-            source_identity: jet_driver_source_identity(unit.package_identity, unit.path),
-            package_identity: unit.package_identity,
-            module_identity: module_identity,
-            module_name: unit.module_name,
-            program: ^program,
-        })
-        loaded_program :: modules[module_position].program
-        if jet_driver_has_errors(parse_result.diagnostics) -> next
+        if jet_driver_has_errors(parse_result.diagnostics) {
+            &modules.push(jet_driver_loaded_module(source_unit_index, unit, module_identity, ^program))
+            next
+        }
         // Established bare names use the same declaring-owner table as Rust.
         // The lowercase URL typed head remains supported without adding a
         // lowercase nominal alias.
@@ -3370,7 +3365,7 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
         import_diagnostic_start :: diagnostics.len()
 
         scoped_imports := [JetDriverScopedImport]{}
-        jet_driver_scoped_imports(loaded_program.imports, loaded_program.items, "", true, &scoped_imports)
+        jet_driver_scoped_imports(program.imports, program.items, "", true, &scoped_imports)
         aliases := [String:Int]{}
         loop scoped in scoped_imports {
             declaration :: scoped.declaration
@@ -3475,7 +3470,7 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
         // own items and imports has finished, then append them to it.
         synthetic_imports := [ImportDecl]{}
         if !is_core {
-            loop item in loaded_program.items {
+            loop item in program.items {
                 if item == .CodeModule(definition) {
                     if definition.body != None -> next
                     target_unit_index :: jet_driver_code_module_file(source_units, unit, definition.name, definition.name_span, &diagnostics) ?? {
@@ -3519,7 +3514,7 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
                 .Unqualified(module_alias, module_alias_span, selected_items, _, _) -> {
                     // An inline `module x { ... }` of this file binds its own
                     // members; semantic preparation resolves `use x.[f]`.
-                    if jet_driver_program_has_inline_module(loaded_program, module_alias) -> next
+                    if jet_driver_program_has_inline_module(program, module_alias) -> next
                     target_index := jet_driver_scoped_alias(aliases, module_alias, scoped.scope)
                     if target_index == None && is_core {
                         loop (row_index, row) in request.core_sources {

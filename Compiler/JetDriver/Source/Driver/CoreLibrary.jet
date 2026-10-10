@@ -31,10 +31,10 @@ fn jet_driver_core_library_request(template: JetDriverCompileRequest, rows: [Jet
         canonical_effect_source: template.canonical_effect_source,
         core_sources: rows,
         host_facts: template.host_facts,
-        eval_config: template.eval_config,
+        eval_config: jet_eval.jet_eval_runtime_config(template.eval_config),
         target: JetDriverCompileTarget.Native,
-        record_store: template.record_store,
-        trace_sink: template.trace_sink,
+        record_store: template.record_store.copy(),
+        trace_sink: template.trace_sink.copy(),
         mir_lint_every_pass: template.mir_lint_every_pass,
         compiler_threads: template.compiler_threads,
     }

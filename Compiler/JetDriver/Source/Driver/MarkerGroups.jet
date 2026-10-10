@@ -242,7 +242,8 @@ fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], e
             loop index in 0..<prior_count {
                 previous :: diagnostics[index]
                 if previous.source_path == replayed.source_path && previous.severity == replayed.severity && previous.code == replayed.code && previous.span == replayed.span && previous.what == replayed.what && previous.why == replayed.why && previous.fix == replayed.fix && previous.edit == replayed.edit {
-                    _ := &diagnostics.remove(index)
+                    matched :: previous.copy()
+                    _ := &diagnostics.remove(matched)
                     prior_count -= 1
                     break
                 }

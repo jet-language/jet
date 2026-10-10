@@ -2,6 +2,7 @@
 // native operations keep their original adapter and ownership receipts.
 use jet_foundation.[MIRCallFallibility, MIRScopeKind, Span, TComptimeValue]
 use jet_eval.[JetEvalMachine, JetEvalBuildHostAdapter, JetEvalHostArgument, JetEvalHostCallTarget, JetEvalHostResult, JetEvalHostOutcome, JetEvalHostValue, JetEvalErrorKind, jet_eval_build_context_host_id, jet_eval_build_session_host_input, jet_eval_build_session_output, jet_eval_build_session_diagnostic, jet_eval_build_graph_value]
+use core.build.[BuildSession, BuildSessionValue, BuildSessionReply, BuildSessionDiagnostic, build_session_diag, build_session_graph, build_session_call]
 
 use core.crypto as build_input_crypto
 use core.net.url as build_input_url
@@ -17,15 +18,15 @@ struct JetDriverBuildAdapter {
     base_dir: String
 }
 
-fn jet_driver_build_host_result(outcome: JetEvalHostOutcome) -> JetEvalHostResult Never! {
-    {transfers: [], callback_transfers: [], fixed_backing_transfers: [], writebacks: [], outcome: outcome}
+fn jet_driver_build_host_result(outcome: ^JetEvalHostOutcome) -> JetEvalHostResult Never! {
+    {transfers: [], callback_transfers: [], fixed_backing_transfers: [], writebacks: [], outcome: ^outcome}
 }
 fn jet_driver_build_host_failure(session: BuildSession, span: Span, message: String) -> JetEvalHostResult Never! {
     permit :: session.storage.guard_read()
     error := build_session_diag(permit.value, message)
     error.start = span.start
     error.end = span.end
-    jet_driver_build_host_result(.Failure(JetEvalErrorKind.Source, jet_eval_build_session_diagnostic(error)))
+    jet_driver_build_host_result(JetEvalHostOutcome.Failure{kind: JetEvalErrorKind.Source, diagnostic: jet_eval_build_session_diagnostic(error)})
 }
 fn jet_driver_build_context_owned(session: BuildSession, owner: Int) -> Bool Never! {
     permit :: session.storage.guard_read()
@@ -49,9 +50,9 @@ fn jet_driver_build_host_call(session: &BuildSession, inputs: JetDriverBuildInpu
             if args.len() != 1 -> return Val(jet_driver_build_host_failure(session, span, "graph requires one checked BuildPlan"))
             returned :: jet_eval_build_session_host_input(args[0].host) ?? return Val(jet_driver_build_host_failure(session, span, "graph requires one checked BuildPlan"))
             projected :: build_session_graph(session, returned)
-            if projected.diagnostic == .Val(error) -> return Val(jet_driver_build_host_result(.Failure(JetEvalErrorKind.Source, jet_eval_build_session_diagnostic(error))))
+            if projected.diagnostic == .Val(error) -> return Val(jet_driver_build_host_result(JetEvalHostOutcome.Failure{kind: JetEvalErrorKind.Source, diagnostic: jet_eval_build_session_diagnostic(error)}))
             graph :: projected.graph ?? return Val(jet_driver_build_host_failure(session, span, "checked graph projection did not return a graph"))
-            return Val(jet_driver_build_host_result(.Value(JetEvalHostValue.Data{value: jet_eval_build_graph_value(graph)})))
+            return Val(jet_driver_build_host_result(JetEvalHostOutcome.Value{value: JetEvalHostValue.Data{value: jet_eval_build_graph_value(graph)}}))
         }
         if !row.member.starts_with("BuildContext.") -> return None
         if args.len() == 0 -> return Val(jet_driver_build_host_failure(session, span, "build method lost its context"))
@@ -63,7 +64,7 @@ fn jet_driver_build_host_call(session: &BuildSession, inputs: JetDriverBuildInpu
         loop index in 1..<args.len() {
             value :: jet_eval_build_session_host_input(args[index].host) ?? return Val(jet_driver_build_host_failure(session, span, "build method received a non-data argument"))
             if method == "generate" && index == 2 {
-                if value == .Text(source) -> generated = Val(source)
+                if value == .Text(source) -> generated = Val(source.copy())
                 else { return Val(jet_driver_build_host_failure(session, span, "generated items lost their checked source")) }
             } else { &values.push(value) }
         }
@@ -72,14 +73,14 @@ fn jet_driver_build_host_call(session: &BuildSession, inputs: JetDriverBuildInpu
         if reply == {
             .Value(value) -> {
                 data := jet_eval_build_session_output(value)
-                if row.fallibility != MIRCallFallibility.Infallible -> data = TComptimeValue.Present{value: data}
-                return Val(jet_driver_build_host_result(.Value(JetEvalHostValue.Data{value: data})))
+                if row.fallibility != MIRCallFallibility.Infallible -> data = TComptimeValue.Present{value: ^data}
+                return Val(jet_driver_build_host_result(JetEvalHostOutcome.Value{value: JetEvalHostValue.Data{value: ^data}}))
             }
             .Failure(error) -> {
                 if row.fallibility != MIRCallFallibility.Infallible && jet_eval_build_failed_value(error) == .Val(value) {
-                    return Val(jet_driver_build_host_result(.Value(JetEvalHostValue.Data{value: value})))
+                    return Val(jet_driver_build_host_result(JetEvalHostOutcome.Value{value: JetEvalHostValue.Data{value: value.copy()}}))
                 }
-                return Val(jet_driver_build_host_result(.Failure(JetEvalErrorKind.Source, jet_eval_build_session_diagnostic(error))))
+                return Val(jet_driver_build_host_result(JetEvalHostOutcome.Failure{kind: JetEvalErrorKind.Source, diagnostic: jet_eval_build_session_diagnostic(error)}))
             }
             .HostRequest(method, _) -> return Val(jet_driver_build_host_failure(session, span, "build input service `{method}` is unavailable"))
         }
@@ -88,8 +89,13 @@ fn jet_driver_build_host_call(session: &BuildSession, inputs: JetDriverBuildInpu
 }
 
 impl JetDriverBuildAdapter.JetEvalBuildHostAdapter {
+    // Fork the adapter without changing its invocation-owned session authority.
+    // Raw transports remain host-owned; build policy stays in this adapter.
+    fn clone_adapter(self) -[]> JetEvalBuildHostAdapter {
+        JetDriverBuildAdapter{session: self.session.copy(), inputs: self.inputs.copy(), http_inputs: self.http_inputs.copy(), network_declared: self.network_declared, base_dir: self.base_dir.copy()}
+    }
     fn build_call(self, machine: &JetEvalMachine, target: JetEvalHostCallTarget, args: ^[JetEvalHostArgument], span: Span) -[FS.Read, Net, Time.Wait]> JetEvalHostResult? {
-        session := self.session
+        session := self.session.copy()
         jet_driver_build_host_call(&session, self.inputs, self.http_inputs, self.network_declared, self.base_dir, &machine, target, args, span)
     }
 }
@@ -102,11 +108,11 @@ JET_DRIVER_BUILD_MAX_FETCH_BYTES :: 67108864
 JET_DRIVER_BUILD_NOT_FOUND :: "No such file or directory (os error 2)"
 
 fn jet_driver_build_input_fail(code: String, what: String, why: String, fix: String, span: Span) -> BuildSessionReply Never! {
-    .Failure(BuildSessionDiagnostic{code: code, what: what, why: why, fix: fix, start: span.start, end: span.end})
+    BuildSessionReply.Failure{error: BuildSessionDiagnostic{code: code.copy(), what: what.copy(), why: why.copy(), fix: fix.copy(), start: span.start, end: span.end}}
 }
 
 fn jet_driver_build_input_text(args: [BuildSessionValue], index: Int) -> String? Never! {
-    if index < args.len() && args[index] == .Text(value) -> return Val(value)
+    if index < args.len() && args[index] == .Text(value) -> return Val(value.copy())
     None
 }
 
@@ -116,13 +122,13 @@ fn jet_driver_build_input_text(args: [BuildSessionValue], index: Int) -> String?
 // importer services, keep the request: the caller refuses it.
 fn jet_driver_build_input_reply(inputs: JetDriverBuildInputs?, http_inputs: JetDriverBuildHTTPInputs?, network_declared: Bool, base_dir: String, method: String, args: [BuildSessionValue], span: Span) -[FS.Read, Net, Time.Wait]> BuildSessionReply {
     if method == "fetch" -> return jet_driver_build_fetch(inputs, http_inputs, network_declared, base_dir, args, span)
-    host :: inputs ?? return .HostRequest(method, args)
+    host :: inputs ?? return BuildSessionReply.HostRequest{method: method.copy(), args: args.copy()}
     if method == {
         "find" -> return jet_driver_build_find(host, base_dir, args, span)
         "embed" -> return jet_driver_build_embed(host, base_dir, args, span)
         else -> {}
     }
-    .HostRequest(method, args)
+    BuildSessionReply.HostRequest{method: method.copy(), args: args.copy()}
 }
 
 // dispatch.rs `split_rel`: the non-empty, non-`.` components.
@@ -135,7 +141,7 @@ fn jet_driver_build_split_rel(path: String) -> [String] Never! {
 }
 
 fn jet_driver_build_join(directory: String, name: String) -> String Never! {
-    if directory == "" -> return name
+    if directory == "" -> return name.copy()
     if directory.ends_with("/") -> return "{directory}{name}"
     "{directory}/{name}"
 }
@@ -148,13 +154,13 @@ fn jet_driver_build_within(path: String, root: String) -> Bool Never! {
 
 // dispatch.rs `checked_embed_path`: `relative` under `root`, every link
 // followed, still inside the real root. `None` when it names nothing.
-fn jet_driver_build_checked_path(host: JetDriverBuildInputs, root: String, relative: String) -[FS.Read]> JetDriverBuildPath? String! {
+fn jet_driver_build_checked_path(host: JetDriverBuildInputs, root: String, relative: String) -[FS.Read]> JetDriverBuildPath? JetDriverBuildInputError! {
     real_root :: host.resolve(root) ?? return Err(err)
-    if !real_root.exists -> return Err(JET_DRIVER_BUILD_NOT_FOUND)
+    if !real_root.exists -> return Err(JetDriverBuildInputError{message: JET_DRIVER_BUILD_NOT_FOUND})
     real :: host.resolve(jet_driver_build_join(real_root.path, relative)) ?? return Err(err)
     if !real.exists -> return Ok(None)
-    if !jet_driver_build_within(real.path, real_root.path) -> return Err("embedded path escapes the real source root")
-    Ok(Val(real))
+    if !jet_driver_build_within(real.path, real_root.path) -> return Err(JetDriverBuildInputError{message: "embedded path escapes the real source root"})
+    Ok(Val(^real))
 }
 
 // dispatch.rs `segment_match_chars` over one pattern segment's characters
@@ -165,7 +171,7 @@ fn jet_driver_build_segment_match(pattern: [String], pi: Int, text: [String], ti
     if head == "*" -> return jet_driver_build_segment_match(pattern, pi + 1, text, ti) || (ti < text.len() && jet_driver_build_segment_match(pattern, pi, text, ti + 1))
     if head == "?" -> return ti < text.len() && jet_driver_build_segment_match(pattern, pi + 1, text, ti + 1)
     if head == "{{" || head == "[" {
-        close :: if head == "{{" -> "}}" else -> "]"
+        close :: if head == "{{" -> { "}}" } else -> { "]" }
         end := -1
         loop index in pi + 1..<pattern.len() {
             if pattern[index] == close {
@@ -222,7 +228,7 @@ fn jet_driver_build_glob_match(pattern: [String], pi: Int, path: [String], qi: I
 
 // dispatch.rs `walk_find`: entries in name order, never through a link.
 fn jet_driver_build_walk(host: JetDriverBuildInputs, directory: String, logical: String, pattern: [String], depth: Int, max_depth: Int, out: &[String]) -[FS.Read]> String? {
-    entries := host.entries(directory) ?? return Val(err)
+    entries := host.entries(directory) ?? return Val(err.message)
     &entries.sort_by((left: JetDriverBuildEntry, right: JetDriverBuildEntry) -> left.name <=> right.name)
     loop entry in entries {
         path :: jet_driver_build_join(logical, entry.name)
@@ -264,28 +270,28 @@ fn jet_driver_build_find(host: JetDriverBuildInputs, base_dir: String, args: [Bu
         &prefix.push(segment)
     }
     recursive :: segments.contains("**")
-    base_root :: jet_driver_build_checked_path(host, base_dir, ".") ?? return jet_driver_build_input_fail("E0955", walk_what, err, walk_fix, span)
+    base_root :: jet_driver_build_checked_path(host, base_dir, ".") ?? return jet_driver_build_input_fail("E0955", walk_what, err.message, walk_fix, span)
     root_dir :: base_root ?? return jet_driver_build_input_fail("E0955", walk_what, JET_DRIVER_BUILD_NOT_FOUND, walk_fix, span)
     logical :: prefix.join("/")
-    root := root_dir
+    root := root_dir.copy()
     if prefix.len() > 0 {
-        found :: jet_driver_build_checked_path(host, root_dir.path, logical) ?? return jet_driver_build_input_fail("E0955", walk_what, err, walk_fix, span)
-        root = found ?? return .Value(.List([BuildSessionValue]{}))
+        found :: jet_driver_build_checked_path(host, root_dir.path, logical) ?? return jet_driver_build_input_fail("E0955", walk_what, err.message, walk_fix, span)
+        root = found ?? return BuildSessionReply.Value{value: BuildSessionValue.List{values: []}}
     }
     matches := [String]{}
     if root.file {
         if jet_driver_build_glob_match(segments, 0, jet_driver_build_split_rel(logical), 0) -> &matches.push(logical)
     } else {
-        max_depth :: if recursive -> 9223372036854775807 else -> segments.len()
+        max_depth :: if recursive -> { 9223372036854775807 } else -> { segments.len() }
         if jet_driver_build_walk(host, root.path, logical, segments, prefix.len(), max_depth, &matches) == .Val(problem) -> return jet_driver_build_input_fail("E0955", walk_what, problem, walk_fix, span)
     }
     &matches.sort()
     values := [BuildSessionValue]{}
     loop relative in matches {
-        _ := host.read_rooted(base_dir, relative, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return jet_driver_build_input_fail("E0955", "`find` can't open `{relative}`", "{err} (matched while expanding `{raw}`)", "check the path — it is relative to the file's own directory", span)
-        &values.push(.Text(relative))
+        _ := host.read_rooted(base_dir, relative, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return jet_driver_build_input_fail("E0955", "`find` can't open `{relative}`", "{err.message} (matched while expanding `{raw}`)", "check the path — it is relative to the file's own directory", span)
+        &values.push(BuildSessionValue.Text{value: relative.copy()})
     }
-    .Value(.List(values))
+    BuildSessionReply.Value{value: BuildSessionValue.List{values: ^values}}
 }
 
 // runtime_bridge.rs `b.embed` -> dispatch.rs `eval_build_embed`: one locked
@@ -297,9 +303,9 @@ fn jet_driver_build_embed(host: JetDriverBuildInputs, base_dir: String, args: [B
         if part == ".." -> escapes = true
     }
     if escapes -> return jet_driver_build_input_fail("E0957", "`b.embed` path `{relative}` escapes the build root", "locked build inputs must stay beneath the selected source directory", "use a relative path returned by `b.find`, without `..`", span)
-    bytes :: host.read_rooted(base_dir, relative, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return jet_driver_build_input_fail("E0955", "`b.embed` cannot open `{relative}`", err, "check the locked relative path", span)
+    bytes :: host.read_rooted(base_dir, relative, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return jet_driver_build_input_fail("E0955", "`b.embed` cannot open `{relative}`", err.message, "check the locked relative path", span)
     text :: String.from_bytes(bytes) ?? return jet_driver_build_input_fail("E0955", "`b.embed` cannot decode `{relative}` as text", "the embedded file is not valid UTF-8", "embed a UTF-8 text file", span)
-    .Value(.Text(text))
+    return BuildSessionReply.Value{value: BuildSessionValue.Text{value: ^text}}
 }
 
 // jet-net `FetchError::IO`/`Scheme` as eval_net_fetch reports it (E3414).
@@ -331,16 +337,16 @@ fn jet_driver_build_public_address(address: [U8]) -> Bool Never! {
     (first.bit_and(57344)) == 8192 && !(first == 8193 && second == 3512)
 }
 
-fn jet_driver_build_http_length(headers: [[U8]]) String! {
+fn jet_driver_build_http_length(headers: [[U8]]) JetDriverBuildHTTPError! {
     loop bytes in headers {
         line :: String.from_bytes(bytes) ?? next
         colon :: line.find(":")
         if colon < 0 -> next
         if line.slice(0..<colon).lower() != "content-length" -> next
         value :: line.slice(colon + 1..<line.len()).trim()
-        length :: Int.parse(value) ?? return Err("invalid Content-Length")
-        if length < 0 || length > 18446744073709551615 -> return Err("invalid Content-Length")
-        if length > JET_DRIVER_BUILD_MAX_FETCH_BYTES -> return Err("response exceeds its size bound")
+        length :: Int.parse(value) ?? return Err(JetDriverBuildHTTPError{message: "invalid Content-Length"})
+        if length < 0 || length > 18446744073709551615 -> return Err(JetDriverBuildHTTPError{message: "invalid Content-Length"})
+        if length > JET_DRIVER_BUILD_MAX_FETCH_BYTES -> return Err(JetDriverBuildHTTPError{message: "response exceeds its size bound"})
         // The reference reads the first header of this name.
         return Ok(())
     }
@@ -374,19 +380,19 @@ fn jet_driver_build_fetch(inputs: JetDriverBuildInputs?, http_inputs: JetDriverB
     bytes := [U8]{}
     if url.starts_with("http://") || url.starts_with("https://") {
         if !network_declared -> return jet_driver_build_input_fail("E3414", "HTTP build fetch requires declared Net and Time.Wait", "the selected fn build did not explicitly declare both transport effects", "declare `-[Net, Time.Wait]` on fn build before fetching an HTTP input", span)
-        transport :: http_inputs ?? return .HostRequest("fetch", args)
+        transport :: http_inputs ?? return BuildSessionReply.HostRequest{method: "fetch", args: args.copy()}
         parsed :: build_input_url.parse(url) ?? return jet_driver_build_fetch_error(url, "invalid URL", span)
         host :: parsed.host() ?? return jet_driver_build_fetch_error(url, "URL has no host", span)
         port :: parsed.port() ?? parsed.default_port() ?? return jet_driver_build_fetch_error(url, "URL has no port", span)
-        addresses :: transport.resolve(host, port) ?? return jet_driver_build_http_error(url, err, span)
+        addresses :: transport.resolve(host, port) ?? return jet_driver_build_http_error(url, err.message, span)
         if addresses.len() == 0 -> return jet_driver_build_http_error(url, "compile-time network destination is not public", span)
         loop address in addresses {
             if !jet_driver_build_public_address(address) -> return jet_driver_build_http_error(url, "compile-time network destination is not public", span)
         }
         // DNS is performed once. The leaf can connect ONLY to this exact
         // checked address set; the URL's host is retained for Host/SNI.
-        response := transport.get(url, addresses, port, 30000, JET_DRIVER_BUILD_MAX_FETCH_BYTES) ?? return jet_driver_build_http_error(url, err, span)
-        if jet_driver_build_http_length(response.headers) == .Err(detail) -> return jet_driver_build_http_error(url, detail, span)
+        response := transport.get(url, addresses, port, 30000, JET_DRIVER_BUILD_MAX_FETCH_BYTES) ?? return jet_driver_build_http_error(url, err.message, span)
+        if jet_driver_build_http_length(response.headers) == .Err(detail) -> return jet_driver_build_http_error(url, detail.message, span)
         if response.body.len() > JET_DRIVER_BUILD_MAX_FETCH_BYTES -> return jet_driver_build_http_error(url, "fetch response exceeds {JET_DRIVER_BUILD_MAX_FETCH_BYTES} bytes", span)
         bytes = ^response.body
     } else {
@@ -394,24 +400,24 @@ fn jet_driver_build_fetch(inputs: JetDriverBuildInputs?, http_inputs: JetDriverB
             scheme :: url.split("://").to_list()[0]
             return jet_driver_build_fetch_error(url, "unsupported URL scheme `{scheme}`; expected `file://`, `http://`, or `https://`", span)
         }
-        host :: inputs ?? return .HostRequest("fetch", args)
+        host :: inputs ?? return BuildSessionReply.HostRequest{method: "fetch", args: args.copy()}
         raw :: url.slice(7..<url.len())
         path := raw
         if raw != "/dev/null" {
-            root :: host.resolve(base_dir) ?? return jet_driver_build_fetch_error(url, err, span)
+            root :: host.resolve(base_dir) ?? return jet_driver_build_fetch_error(url, err.message, span)
             if !root.exists -> return jet_driver_build_fetch_error(url, JET_DRIVER_BUILD_NOT_FOUND, span)
             if root.file || root.path != base_dir -> return jet_driver_build_fetch_error(url, "compile-time source directory must be a real directory", span)
-            requested :: if raw.starts_with("/") -> raw else -> jet_driver_build_join(root.path, raw)
-            target :: host.resolve(requested) ?? return jet_driver_build_fetch_error(url, err, span)
+            requested :: if raw.starts_with("/") -> { raw.copy() } else -> { jet_driver_build_join(root.path, raw) }
+            target :: host.resolve(requested) ?? return jet_driver_build_fetch_error(url, err.message, span)
             if !target.exists -> return jet_driver_build_fetch_error(url, JET_DRIVER_BUILD_NOT_FOUND, span)
             if !jet_driver_build_within(target.path, root.path) -> return jet_driver_build_fetch_error(url, "file URL resolves outside the compile-time source directory", span)
             if !target.file || target.links != 1 -> return jet_driver_build_fetch_error(url, "file URL must name a regular, unshared file", span)
             path = target.path
         }
-        bytes = host.read(path, JET_DRIVER_BUILD_MAX_FETCH_BYTES) ?? return jet_driver_build_fetch_error(url, err, span)
+        bytes = host.read(path, JET_DRIVER_BUILD_MAX_FETCH_BYTES) ?? return jet_driver_build_fetch_error(url, err.message, span)
     }
     actual :: build_input_crypto.sha256(bytes).hex()
     if actual != expected -> return jet_driver_build_input_fail("E3413", "fetch: sha256 mismatch for `{url}`", "expected `{expected}` but content hashes to `{actual}`", "update the `sha256:` pin to match the content, or verify the URL is correct", span)
     text :: String.from_bytes(^bytes) ?? return jet_driver_build_input_fail("E3414", "fetch: content at `{url}` is not valid UTF-8", "the downloaded bytes could not be decoded as UTF-8 text", "binary content is not supported by comptime fetch; use `embed_bytes` for binary data", span)
-    .Value(.Text(text))
+    return BuildSessionReply.Value{value: BuildSessionValue.Text{value: ^text}}
 }

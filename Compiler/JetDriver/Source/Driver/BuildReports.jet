@@ -1,7 +1,7 @@
 // Canonical checked-plan representation shared by CLI and other consumers.
 // No cache observation or action execution is invented by these projections.
 use jet_foundation.foundation_json_quote
-use core.build.[BuildGraphFile]
+use core.build.[BuildGraphFile, BuildSessionState, BuildSessionAction, BuildSessionPlan, build_key_target_kind, build_key_debug_text, build_session_project]
 
 struct JetDriverBuildExplanation { label: String provenance: [String] }
 fn jet_driver_build_strings(values: [String]) -> String Never! {
@@ -13,7 +13,7 @@ fn jet_driver_build_ints(values: [Int]) -> String Never! {
     "[{rows.join(",")}]"
 }
 fn jet_driver_build_id(value: Int?) -> String Never! {
-    if value == .Val(id) -> "{id}" else -> "null"
+    if value == .Val(id) -> { "{id}" } else -> { "null" }
 }
 fn jet_driver_build_debug_ids(values: [Int], kind: String) -> String Never! {
     rows :: loop value in values -> "{kind}({value})"
@@ -23,7 +23,7 @@ fn jet_driver_build_file_json(file: BuildGraphFile) -> String Never! {
     "{{\"path\":{foundation_json_quote(file.path)},\"owner\":{jet_driver_build_id(file.owner)},\"consumers\":{jet_driver_build_ints(file.consumers)},\"targets\":{jet_driver_build_ints(file.targets)}}}"
 }
 fn jet_driver_build_action_provenance(state: BuildSessionState, action: BuildSessionAction) -> [String] Never! {
-    cache :: if action.cache == "cached" -> "Cached" else -> "UncachedPhony"
+    cache :: if action.cache == "cached" -> { "Cached" } else -> { "UncachedPhony" }
     facts := [String]{"argv={action.argv.join(" ")}", "inputs={action.inputs.len()}", "outputs={action.outputs.len()}", "cache={cache}"}
     if action.legacy == .Val(wrapper) -> &facts.push("legacy={wrapper}")
     if action.plugin == .Val(plugin) -> &facts.push("plugin={state.plugins[plugin].name}")
@@ -33,10 +33,10 @@ fn jet_driver_build_explanation(plan: BuildSessionPlan, subject: String) -> JetD
     permit :: plan.storage.guard_read()
     state :: permit.value
     loop target in state.targets {
-        if target.name == subject -> return {label: subject, provenance: [String]{"kind={build_key_target_kind(target.kind)}", "sources={target.sources.len()}", "deps={target.deps.len()}", "actions={target.actions.len()}"}}
+        if target.name == subject -> return {label: subject.copy(), provenance: [String]{"kind={build_key_target_kind(target.kind)}", "sources={target.sources.len()}", "deps={target.deps.len()}", "actions={target.actions.len()}"}}
     }
     loop action in state.actions {
-        if action.name == subject -> return {label: subject, provenance: jet_driver_build_action_provenance(state, action)}
+        if action.name == subject -> return {label: subject.copy(), provenance: jet_driver_build_action_provenance(state, action)}
     }
     graph :: build_session_project(state)
     owner := "None"
@@ -57,7 +57,7 @@ fn jet_driver_build_explanation(plan: BuildSessionPlan, subject: String) -> JetD
             break
         }
     }
-    {label: subject, provenance: facts}
+    {label: subject.copy(), provenance: ^facts}
 }
 fn jet_driver_build_plan_json(plan: BuildSessionPlan, vector_json: String) -> String Never! {
     permit :: plan.storage.guard_read()
@@ -70,9 +70,9 @@ fn jet_driver_build_plan_json(plan: BuildSessionPlan, vector_json: String) -> St
     actions := [String]{}
     loop action in graph.actions {
         real :: state.actions[action.id]
-        probes :: loop probe in real.probes -> state.probes[probe].name
-        cache :: if real.cache == "cached" -> "Cached" else -> "UncachedPhony"
-        hit :: if action.cache_hit == .Val(value) -> { if value -> "hit" else -> "miss" } else -> "unknown"
+        probes :: loop probe in real.probes -> { state.probes[probe].name.copy() }
+        cache :: if real.cache == "cached" -> { "Cached" } else -> { "UncachedPhony" }
+        hit :: if action.cache_hit == .Val(value) -> { if value -> { "hit" } else -> { "miss" } } else -> { "unknown" }
         provenance :: jet_driver_build_action_provenance(state, real)
         &actions.push("{{\"id\":{action.id},\"name\":{foundation_json_quote(action.name)},\"inputs\":{jet_driver_build_strings(action.inputs)},\"outputs\":{jet_driver_build_strings(action.outputs)},\"caps\":{jet_driver_build_strings(action.caps)},\"pools\":{jet_driver_build_strings(action.pools)},\"toolchain\":{foundation_json_quote(state.toolchains[real.toolchain].name)},\"probes\":{jet_driver_build_strings(probes)},\"cache\":{foundation_json_quote(cache)},\"cache_status\":{foundation_json_quote(hit)},\"key\":{foundation_json_quote(action.key)},\"compiler_owned\":{action.compiler_owned},\"provenance\":{jet_driver_build_strings(provenance)}}}")
     }
@@ -83,17 +83,17 @@ fn jet_driver_build_plan_json(plan: BuildSessionPlan, vector_json: String) -> St
     probes := [String]{}
     loop probe in state.probes {
         kind :: if probe.kind == {
-            "find_program" -> "FindProgram {{ program: {build_key_debug_text(probe.value)} }}"
-            "pkg_config" -> "PkgConfig {{ package: {build_key_debug_text(probe.value)}, min_version: None }}"
-            "header" -> "HeaderCheck {{ header: {build_key_debug_text(probe.value)} }}"
-            "compile_check" -> "CompileCheck {{ name: {build_key_debug_text(probe.value)}, includes: [], code: {build_key_debug_text(probe.code)} }}"
-            else -> panic("invalid checked probe kind")
+            "find_program" -> { "FindProgram {{ program: {build_key_debug_text(probe.value)} }}" }
+            "pkg_config" -> { "PkgConfig {{ package: {build_key_debug_text(probe.value)}, min_version: None }}" }
+            "header" -> { "HeaderCheck {{ header: {build_key_debug_text(probe.value)} }}" }
+            "compile_check" -> { "CompileCheck {{ name: {build_key_debug_text(probe.value)}, includes: [], code: {build_key_debug_text(probe.code)} }}" }
+            else -> { panic("invalid checked probe kind") }
         }
-        reproducibility :: if probe.reproducibility == "ambient" -> "Ambient" else -> "Reproducible"
+        reproducibility :: if probe.reproducibility == "ambient" -> { "Ambient" } else -> { "Reproducible" }
         &probes.push("{{\"name\":{foundation_json_quote(probe.name)},\"kind\":{foundation_json_quote(kind)},\"reproducibility\":{foundation_json_quote(reproducibility)}}}")
     }
     generated :: loop generated_row in state.generated -> "{{\"name\":{foundation_json_quote(generated_row.name)},\"path\":{foundation_json_quote(generated_row.path)},\"digest\":{foundation_json_quote(generated_row.source_digest)}}}"
-    default :: if plan.default >= 0 -> "{plan.default}" else -> "null"
+    default :: if plan.default >= 0 -> { "{plan.default}" } else -> { "null" }
     // Rust BuildGraph.affected_files() is the static file universe here,
     // not receipt_diff's rebuild-impact closure. Reuse the canonical rows.
     "{{\"schema_version\":1,\"default\":{default},\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{files.join(",")}],\"toolchains\":[{tools.join(",")}],\"probes\":[{probes.join(",")}],\"generated\":[{generated.join(",")}],\"vector\":{vector_json}}}"

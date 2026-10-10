@@ -11,8 +11,12 @@ fn jet_driver_cost_query(request: JetDriverCompileRequest) -> JetDriverCostQuery
     selected := request
     selected.mode = JetDriverCompileMode.Doc
     selected.capture_cost_report = true
-    compile :: jet_driver_compile_mir(^selected)
-    JetDriverCostQueryResult{compile: compile, report: compile.cost_report, gaps: compile.cost_gaps}
+    compile := jet_driver_compile_mir(^selected)
+    report :: ^compile.cost_report
+    compile.cost_report = None
+    gaps :: ^compile.cost_gaps
+    compile.cost_gaps = [String]{}
+    JetDriverCostQueryResult{compile: ^compile, report: ^report, gaps: ^gaps}
 }
 fn jet_driver_checked_cost_report(checked: SemaGraphResult) -> TCostReport {
     report := TCostReport{}

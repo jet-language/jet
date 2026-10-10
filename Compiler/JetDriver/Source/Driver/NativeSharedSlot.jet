@@ -49,7 +49,7 @@ fn jet_driver_native_shared_ingress_refused(key: String) -> JetDriverNativeShare
 // Getter ownership, Source-carrier alias ownership, and passive pin ownership
 // are distinct. Reserve both retained owners before releasing the getter's
 // logical owner; a passive pin alone may never resurrect a retired payload.
-fn jet_driver_native_shared_slot_ingress(host: JetDriverCoreSourceParentHost, site_key: String, payload_shape: JetEvalHostTypeShape) -> JetDriverNativeSharedIngress {
+fn jet_driver_native_shared_slot_ingress(host: &JetDriverCoreSourceParentHost, site_key: String, payload_shape: JetEvalHostTypeShape) -> JetDriverNativeSharedIngress {
     manifest :: jet_driver_core_source_payload_manifest(host) ?? return jet_driver_native_shared_ingress_refused("CoreSharedNotAdmitted")
     type_key := String?{None}
     loop site in manifest.sorted_sites {

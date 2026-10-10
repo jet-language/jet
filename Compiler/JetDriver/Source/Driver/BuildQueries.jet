@@ -1,9 +1,9 @@
 // Read-only fn-build staging: ordinary Driver checking and MIR execution,
 // followed by Core's checked finish. No action or generated-file write occurs.
 use jet_foundation.[Diagnostic, EffectRowEntry, Item, MIRFunctionID, Span, TComptimeValue, mir_sha256_hex]
-use jet_eval.[jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_diagnostic, jet_eval_comptime_value, jet_eval_function, jet_eval_retire_in_place]
+use jet_eval.[jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_diagnostic, jet_eval_comptime_value, jet_eval_function, jet_eval_retire_in_place, jet_eval_runtime_config]
 use jet_eval.jet_eval_build_failed_diagnostic
-use core.build.[BuildGraphNode, BuildGraphInputDigest]
+use core.build.[BuildGraph, BuildGraphNode, BuildGraphInputDigest, BuildSessionPlan, BuildSessionPolicy, BuildSessionGeneratedModule, build_session_compiler_node, build_session_append_unique, build_session_new, build_session_abort, build_session_finish, build_plan_selected_generated, build_plan_graph]
 use jet_sema.[SemaGraphResult, SemaSourceOrigin]
 
 // Rust Driver::compiler_nodes_for_bundle_with_outputs. These are static
@@ -27,16 +27,17 @@ fn jet_driver_build_compiler_nodes(request: JetDriverCompileRequest, load: JetDr
         if unit.source_origin == SemaSourceOrigin.Snapshot {
             source = jet_driver_source_unit_text(request, unit) ?? return None
             if unit.root_index < 0 || unit.root_index >= request.authorized_sources.roots.len() -> return None
-            files :: request.authorized_sources.roots[unit.root_index].files
-            if unit.file_index < 0 || unit.file_index >= files.len() -> return None
-            physical = files[unit.file_index].path
+            source_files :: request.authorized_sources.roots[unit.root_index].files
+            if unit.file_index < 0 || unit.file_index >= source_files.len() -> return None
+            physical = source_files[unit.file_index].path.copy()
         } else {
             // Only exact declared build outputs belong to the user's bundle.
             // Foreign adapter/Core/effect synthetic text is not a source node.
-            generated :: loop row in request.generated_modules {
+            generated_match :: loop row in request.generated_modules {
                 if row.package_identity == unit.package_identity && row.relative_path == unit.relative_path && jet_driver_generated_module_path(row.package_identity, row.relative_path) == unit.path -> break row
-            } ?? next
-            source = generated.source
+            }
+            generated :: generated_match ?? next
+            source = generated.source.copy()
             owner :: loop package in load.packages {
                 if package.identity == generated.package_identity -> break package.root_index
             } ?? return None
@@ -44,7 +45,7 @@ fn jet_driver_build_compiler_nodes(request: JetDriverCompileRequest, load: JetDr
             physical = jet_driver_physical_path(request.authorized_sources.roots[owner].canonical_path, generated.relative_path)
         }
         subject :: jet_driver_display_path(root, physical).replace("\\", "/")
-        &checks.push(build_session_compiler_node("check", subject, [BuildGraphInputDigest]{{name: subject, digest: mir_sha256_hex(source.bytes())}}))
+        &checks.push(build_session_compiler_node("check", subject, [BuildGraphInputDigest]{{name: subject.copy(), digest: mir_sha256_hex(source)}}))
     }
     &checks.sort_by((left: BuildGraphNode, right: BuildGraphNode) -> (left.subject <=> right.subject).then(left.key <=> right.key))
     outputs := [String]{}
@@ -53,20 +54,20 @@ fn jet_driver_build_compiler_nodes(request: JetDriverCompileRequest, load: JetDr
         parts :: request.authorized_sources.entry_path.split("/").to_list()
         file :: parts[parts.len() - 1]
         components := file.split(".").to_list()
-        output := file
+        output := file.copy()
         if components.len() > 1 && !(components.len() == 2 && components[0] == "") {
             _ := &components.pop()
             output = components.join(".")
         }
-        &outputs.push(if output == "" -> "program" else -> output)
+        &outputs.push(if output == "" -> { "program" } else -> { ^output })
     }
     &outputs.sort()
-    inputs :: loop node in checks -> BuildGraphInputDigest{name: "check:{node.subject}", digest: node.key}
+    inputs :: loop node in checks -> BuildGraphInputDigest{name: "check:{node.subject}", digest: node.key.copy()}
     compiles := [BuildGraphNode]{}
     links := [BuildGraphNode]{}
     loop output in outputs {
         compiled :: build_session_compiler_node("compile", output, inputs)
-        linked :: build_session_compiler_node("link", output, [BuildGraphInputDigest]{{name: "compile:{output}", digest: compiled.key}})
+        linked :: build_session_compiler_node("link", output, [BuildGraphInputDigest]{{name: "compile:{output}", digest: compiled.key.copy()}})
         &compiles.push(^compiled)
         &links.push(^linked)
     }
@@ -87,9 +88,9 @@ fn jet_driver_build_selected_output_names(plan: BuildSessionPlan) -> [String] Ne
     outputs
 }
 
-fn jet_driver_build_install_nodes(plan: BuildSessionPlan, nodes: [BuildGraphNode]) Never! {
+fn jet_driver_build_install_nodes(plan: BuildSessionPlan, nodes: ^[BuildGraphNode]) Never! {
     permit := plan.storage.guard_edit()
-    permit.value.nodes = nodes
+    permit.value.nodes = ^nodes
 }
 
 // This is the selected source declaration, not inferred/transitive effects
@@ -127,8 +128,8 @@ struct JetDriverBuildQueryResult {
     internal_problem: String?
     nodes: [BuildGraphNode]{[BuildGraphNode]{}}
 }
-fn jet_driver_build_query_empty(diagnostics: [Diagnostic], complete: Bool, problem: String?) -> JetDriverBuildQueryResult Never! {
-    {plan: None, graph: None, generated: [], diagnostics: diagnostics, complete: complete, internal_problem: problem}
+fn jet_driver_build_query_empty(diagnostics: ^[Diagnostic], complete: Bool, problem: ^String?) -> JetDriverBuildQueryResult Never! {
+    {plan: None, graph: None, generated: [], diagnostics: ^diagnostics, complete: complete, internal_problem: ^problem}
 }
 fn jet_driver_query_build_plan(request: JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResult {
     sources :: jet_driver_source_query(request)
@@ -147,7 +148,7 @@ fn jet_driver_query_build_plan(request: JetDriverCompileRequest, scope: &JetDriv
                     &errors.push(jet_driver_diagnostic_without_span("E3520", "two build entries for the package", "one package has exactly one checked build authority", "keep one fn build in the package"))
                     return jet_driver_build_query_empty(errors, false, None)
                 }
-                selected = Val(loaded_module.physical_path)
+                selected = Val(loaded_module.physical_path.copy())
                 span = function.span
                 network_declared = jet_driver_build_declared_network(function.declared_effects)
             }
@@ -156,20 +157,20 @@ fn jet_driver_query_build_plan(request: JetDriverCompileRequest, scope: &JetDriv
     path :: selected ?? {
         // No build entry still has an ordinary checked source projection.
         // Loader-only success must not hide type errors in the package.
-        checked_request := request
+        checked_request := request.copy()
         checked_request.mode = JetDriverCompileMode.Doc
         checked_request.capture_build_program = false
         checked_request.capture_build_nodes = true
         checked :: jet_driver_compile_mir(^checked_request)
         complete :: checked.complete && checked.internal_problem == None && !jet_driver_has_errors(checked.diagnostics)
-        result := jet_driver_build_query_empty(checked.diagnostics, complete, checked.internal_problem)
+        result := jet_driver_build_query_empty(checked.diagnostics.copy(), complete, checked.internal_problem.copy())
         if complete {
-            result.nodes = checked.build_nodes ?? return jet_driver_build_query_empty(checked.diagnostics, false, Val("completed build query lost its compiler node identities"))
+            result.nodes = checked.build_nodes.copy() ?? return jet_driver_build_query_empty(^checked.diagnostics, false, Val("completed build query lost its compiler node identities"))
         }
         return result
     }
-    staged := request
-    staged.authorized_sources.entry_path = path
+    staged := request.copy()
+    staged.authorized_sources.entry_path = path.copy()
     staged.mode = JetDriverCompileMode.Interpreter
     staged.selected_entry = Val("build")
     staged.capture_build_program = true
@@ -182,19 +183,20 @@ fn jet_driver_query_build_plan(request: JetDriverCompileRequest, scope: &JetDriv
     if request.eval_config.host_adapter == None -> return jet_driver_build_query_empty(compiled.diagnostics, false, Val("build evaluation requires the invocation's host adapter"))
     session_id :: jet_driver_build_next_session_id(&scope) ?? return jet_driver_build_query_empty(compiled.diagnostics, false, Val("build invocation identity space exhausted"))
     session := build_session_new(session_id, package, request.host_facts.compiler_identity ?? "", scope.policy)
-    config := request.eval_config
+    config := jet_eval_runtime_config(request.eval_config)
     // Input services resolve paths against the build file's own directory.
-    config.build_host_adapter = Val(JetDriverBuildAdapter{session: session, inputs: request.build_inputs, http_inputs: request.build_http_inputs, network_declared: network_declared, base_dir: jet_driver_parent_path(path)})
+    config.build_host_adapter = Val(JetDriverBuildAdapter{session: session.copy(), inputs: request.build_inputs.copy(), http_inputs: request.build_http_inputs.copy(), network_declared: network_declared, base_dir: jet_driver_parent_path(path)})
     evaluated := jet_eval_function(^mir, entry, [TComptimeValue]{jet_eval_build_context_value(session_id, program)}, ^config)
     returned := jet_eval_comptime_value(&evaluated, span)
     // The value converter retires a value-owning result. A failed invocation
     // can have no value, so still drain its actual machine before expiration.
     retired :: jet_eval_retire_in_place(&evaluated, span) ?? false
     errors := compiled.diagnostics
-    if evaluated.error == .Val(error) -> &errors.push(error.diagnostic)
+    if evaluated.error == .Val(error) -> &errors.push(error.diagnostic.copy())
     if evaluated.internal_problem != None || !evaluated.complete || !retired || returned == None {
         build_session_abort(&session)
-        return jet_driver_build_query_empty(errors, false, evaluated.internal_problem)
+        problem :: if evaluated.internal_problem == .Val(internal) -> { Val(internal.message.copy()) } else -> { None }
+        return jet_driver_build_query_empty(^errors, false, problem)
     }
     if returned == .Val(data) && jet_eval_build_failed_diagnostic(data, span) == .Val(diagnostic) {
         build_session_abort(&session)
@@ -213,20 +215,20 @@ fn jet_driver_query_build_plan(request: JetDriverCompileRequest, scope: &JetDriv
     generated :: build_plan_selected_generated(plan)
     // The final ordinary checked bundle, not the staging build callable,
     // owns all source/generated identities, even when no output was generated.
-    checked_request := request
+    checked_request := request.copy()
     checked_request.mode = JetDriverCompileMode.Doc
     checked_request.capture_build_program = false
     checked_request.capture_build_nodes = true
     if checked_request.build_output_names.len() == 0 -> checked_request.build_output_names = jet_driver_build_selected_output_names(plan)
     loop generated_row in generated {
-        &checked_request.generated_modules.push(JetDriverGeneratedModule{package_identity: package, name: generated_row.name, relative_path: generated_row.path, source: generated_row.source})
+        &checked_request.generated_modules.push(JetDriverGeneratedModule{package_identity: package.copy(), name: generated_row.name.copy(), relative_path: generated_row.path.copy(), source: generated_row.source.copy()})
     }
     checked :: jet_driver_compile_mir(^checked_request)
     loop error in checked.diagnostics -> &errors.push(error)
     if !checked.complete || checked.internal_problem != None || jet_driver_has_errors(errors) -> return jet_driver_build_query_empty(errors, false, checked.internal_problem)
     nodes :: checked.build_nodes ?? return jet_driver_build_query_empty(errors, false, Val("completed build query lost its compiler node identities"))
-    jet_driver_build_install_nodes(plan, nodes)
-    return JetDriverBuildQueryResult{plan: Val(plan), graph: Val(build_plan_graph(plan)), generated: generated, nodes: nodes, diagnostics: errors, complete: true, internal_problem: None}
+    jet_driver_build_install_nodes(plan, nodes.copy())
+    return JetDriverBuildQueryResult{plan: Val(plan.copy()), graph: Val(build_plan_graph(plan)), generated: ^generated, nodes: ^nodes, diagnostics: ^errors, complete: true, internal_problem: None}
 }
 fn jet_driver_query_build_nodes(request: JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResult {
     // Nodes are the checked graph's exact compiler facts, never a projection
