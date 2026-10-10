@@ -4488,3 +4488,11 @@ absent is `(0,0,0)`, present empty `(1,0,0)`, nonempty `(1,owned data,length)`;
 callers free nonempty data with exactly length bytes and alignment 1.
 Set returns 0 / -1 InvalidName / -2 InvalidValue; unset returns 0 absent /
 1 removed / -1 InvalidName. These are raw leaf statuses, not guessed enum tags.
+
+CFG reachability pruning removes orphaned place metadata as well as dead value
+facts: an index, range, lookup, or temporary base defined only in an eliminated
+block cannot remain in an unused place row. Dead local aliases (including loop
+bindings backed by an index) disappear with those rows; actual storage cells,
+surviving operations, and drop edges keep their places. Real dangling references
+still fail legality. Rust and Jet use the same rule; the dead-index regression
+verifies MIR before/after optimization and executes both surviving branch paths.

@@ -8585,38 +8585,58 @@ fn eliminate_unreachable_blocks(program: &mut MirProgram) {
     for function in &mut program.functions {
         let reachable = reachable_blocks(function);
         let kept: HashSet<_> = reachable.iter().copied().collect();
+        let old_block_count = function.blocks.len();
         function.blocks.retain(|block| kept.contains(&block.id));
         let live_values: HashSet<_> = function
             .blocks
             .iter()
             .flat_map(|block| block.instructions.iter().filter_map(|instruction| instruction.result))
             .collect();
-        // Places are metadata, not CFG roots. A removed block can own an
-        // indexed/ranged/temporary place whose SSA operands died with it.
-        // Keep storage declarations and executable/drop references even if
-        // malformed: legality must still reject a genuinely live dangling use.
-        let mut referenced_places: HashSet<_> = function.locals.iter().map(|local| local.place).collect();
-        referenced_places.extend(function.drops.iter().map(|action| action.place));
-        for block in &function.blocks {
-            for instruction in &block.instructions {
-                referenced_places.extend(operation_place_refs(&instruction.operation));
+        if function.blocks.len() != old_block_count {
+            // A loop binding may alias an indexed place rather than own a
+            // storage cell. Drop unused aliases with their orphaned places;
+            // live operations/drops still retain malformed references so
+            // legality can reject a genuinely live dangling operand.
+            let live_places: HashSet<_> = function.places.iter().filter(|place| {
+                let base_live = match place.base {
+                    MirPlaceBase::Parameter(value) | MirPlaceBase::Capture(value) | MirPlaceBase::Temporary(value) => live_values.contains(&value),
+                    MirPlaceBase::Local(_) | MirPlaceBase::Static(_) => true,
+                };
+                base_live && place.projections.iter().all(|projection| match projection {
+                    MirProjection::Index { index, .. } => live_values.contains(index),
+                    MirProjection::Range { range, .. } => live_values.contains(range),
+                    MirProjection::MapLookup { lookup, .. } => live_values.contains(lookup),
+                    MirProjection::Field { .. } | MirProjection::Deref { .. } | MirProjection::Payload { .. } => true,
+                })
+            }).map(|place| place.id).collect();
+            let mut referenced_places: HashSet<_> = function.drops.iter().map(|action| action.place).collect();
+            for block in &function.blocks {
+                for instruction in &block.instructions {
+                    referenced_places.extend(operation_place_refs(&instruction.operation));
+                }
             }
+            let referenced_locals: HashSet<_> = function.places.iter().filter_map(|place| {
+                if referenced_places.contains(&place.id) {
+                    if let MirPlaceBase::Local(local) = place.base {
+                        return Some(local);
+                    }
+                }
+                None
+            }).collect();
+            function.locals.retain(|local| {
+                live_places.contains(&local.place)
+                    || referenced_places.contains(&local.place)
+                    || referenced_locals.contains(&local.id)
+            });
+            referenced_places.extend(function.locals.iter().map(|local| local.place));
+            let live_locals: HashSet<_> = function.locals.iter().map(|local| local.id).collect();
+            function.places.retain(|place| {
+                referenced_places.contains(&place.id) || (live_places.contains(&place.id) && match place.base {
+                    MirPlaceBase::Local(local) => live_locals.contains(&local),
+                    _ => true,
+                })
+            });
         }
-        function.places.retain(|place| {
-            if referenced_places.contains(&place.id) {
-                return true;
-            }
-            let base_live = match place.base {
-                MirPlaceBase::Parameter(value) | MirPlaceBase::Capture(value) | MirPlaceBase::Temporary(value) => live_values.contains(&value),
-                MirPlaceBase::Local(_) | MirPlaceBase::Static(_) => true,
-            };
-            base_live && place.projections.iter().all(|projection| match projection {
-                MirProjection::Index { index, .. } => live_values.contains(index),
-                MirProjection::Range { range, .. } => live_values.contains(range),
-                MirProjection::MapLookup { lookup, .. } => live_values.contains(lookup),
-                MirProjection::Field { .. } | MirProjection::Deref { .. } | MirProjection::Payload { .. } => true,
-            })
-        });
         function.values.retain(|(value, _, _, _)| live_values.contains(value));
         let predecessors = predecessor_map(function);
         for block in &mut function.blocks {

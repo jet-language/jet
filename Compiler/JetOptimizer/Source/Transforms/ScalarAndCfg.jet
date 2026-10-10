@@ -13,6 +13,8 @@ use jet_foundation.[
     MIRProgram,
     MIRTerminator,
     MIRType,
+    MIRPlace,
+    MIRLocal,
     MIRUnaryOp,
     MIRValueFact,
     MIRValueID,
@@ -32,6 +34,7 @@ fn mir_pass_eliminate_unreachable(program: &MIRProgram) Never! {
 fn mir_pass_eliminate_unreachable_function(function: &MIRFunction) Never! {
     reachable :: mir_pass_reachable(function)
     reachable_rows := [U64:Bool]{}
+    old_block_count :: function.blocks.len()
     loop id in reachable -> &reachable_rows.add(id.value, true).drop("a block id may repeat")
     // Unreachable blocks are dropped by moving the kept ones out and back
     // (two pops keep their order); a block is never copied.
@@ -52,13 +55,56 @@ fn mir_pass_eliminate_unreachable_function(function: &MIRFunction) Never! {
             if instruction.result == .Val(result) -> &live_values.add(result.value, true).drop("a value id may repeat")
         }
     }
-    place_rows :: mir_pass_place_rows(function)
-    loop place in function.places {
-        loop value in mir_pass_place_value_uses(function.places, place_rows, place.id) -> &live_values.add(value.value, true).drop("a value id may repeat")
-    }
-    loop scope in function.scopes {
-        value :: scope.deadline ?? next
-        &live_values.add(value.value, true).drop("a value id may repeat")
+    if function.blocks.len() != old_block_count {
+        // Loop locals can alias indexed places rather than own storage.
+        // Remove dead aliases too; retain all real operation/drop roots.
+        live_places := [U64:Bool]{}
+        loop place in function.places {
+            if mir_pass_place_has_live_values(place, live_values) -> &live_places.add(place.id.value, true).drop("a place may repeat")
+        }
+        referenced_places := [U64:Bool]{}
+        loop action in function.drops -> &referenced_places.add(action.place.value, true).drop("a place may repeat")
+        loop block in function.blocks {
+            loop instruction in block.instructions {
+                loop place in mir_pass_operation_place_refs(instruction.operation) -> &referenced_places.add(place.value, true).drop("a place may repeat")
+            }
+        }
+        referenced_locals := [U64:Bool]{}
+        loop place in function.places {
+            if referenced_places.get(place.id.value) == None -> next
+            if place.base == {
+                .Local(local) -> &referenced_locals.add(local.value, true).drop("a local may repeat")
+                else -> {}
+            }
+        }
+        kept_locals := [MIRLocal]{}
+        loop {
+            local :: &function.locals.pop() ?? break
+            if live_places.get(local.place.value) != None || referenced_places.get(local.place.value) != None || referenced_locals.get(local.id.value) != None -> &kept_locals.push(^local)
+        }
+        live_locals := [U64:Bool]{}
+        loop {
+            local :: &kept_locals.pop() ?? break
+            &live_locals.add(local.id.value, true).drop("a local may repeat")
+            &referenced_places.add(local.place.value, true).drop("a place may repeat")
+            &function.locals.push(^local)
+        }
+        kept_places := [MIRPlace]{}
+        loop {
+            place :: &function.places.pop() ?? break
+            keep := referenced_places.get(place.id.value) != None
+            if !keep && live_places.get(place.id.value) != None {
+                if place.base == {
+                    .Local(local) -> keep = live_locals.get(local.value) != None
+                    else -> keep = true
+                }
+            }
+            if keep -> &kept_places.push(^place)
+        }
+        loop {
+            place :: &kept_places.pop() ?? break
+            &function.places.push(^place)
+        }
     }
     kept_values := [MIRValueFact]{}
     loop {
@@ -92,6 +138,30 @@ fn mir_pass_eliminate_unreachable_function(function: &MIRFunction) Never! {
         }
         block_index += 1
     }
+}
+
+fn mir_pass_place_has_live_values(place: MIRPlace, live_values: [U64:Bool]) -> Bool Never! {
+    if place.base == {
+        .Parameter(value) | .Capture(value) | .Temporary(value) -> {
+            if live_values.get(value.value) == None -> return false
+        }
+        else -> {}
+    }
+    loop projection in place.projections {
+        if projection == {
+            .Index(_, index, _, _, _, _, _) -> {
+                if live_values.get(index.value) == None -> return false
+            }
+            .Range(range, _, _) -> {
+                if live_values.get(range.value) == None -> return false
+            }
+            .MapLookup(lookup, _, _) -> {
+                if live_values.get(lookup.value) == None -> return false
+            }
+            else -> {}
+        }
+    }
+    true
 }
 
 fn mir_pass_simplify_cfg_function(function: &MIRFunction) Never! {
