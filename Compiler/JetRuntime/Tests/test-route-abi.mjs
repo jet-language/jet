@@ -52,11 +52,15 @@ check(socketWords, ["ip: I64", "port: I64", "flow: I64", "scope: I64"], "-> I64"
 reject({ ...socketWords, name: "jet_unlisted" }, ["ip: I64", "port: I64", "flow: I64", "scope: I64"], "-> I64");
 const resolverPort = { ...route([["JetCString"], ["u16"]], "i64", ["*mut u64", "i64", "JetCString"]), name: "jet_net_raw_resolve_ordered" };
 check(resolverPort, ["host: I64", "port: I64", "data: I64", "len: I64", "error: I64"], "-> I64");
-const maskedFlag = "#Export(c) fn jet_rt_record_new_Jet__ResolveError(kind: I64, flag: I64, os: I64, text: I64) -> I64 { if (flag & I64{255}) != I64{0} { return kind } kind }";
+const maskedFlag = "#Export(c) fn jet_rt_record_new_Jet__ResolveError(kind: I64, flag: I64, os: I64, text: I64) -> I64 { if (flag.bit_and(I64{255})) != I64{0} { return kind } kind }";
 assert.ok(parseRuntimeExports(maskedFlag, "Source/Test.jet").has("jet_rt_record_new_Jet__ResolveError"));
-assert.throws(() => parseRuntimeExports(maskedFlag.replace("flag & I64{255}", "flag"), "Source/Test.jet"), /low-8-bit mask/);
-assert.throws(() => parseRuntimeExports(maskedFlag.replace("flag & I64{255}", "flag /* flag & I64{255} */"), "Source/Test.jet"), /low-8-bit mask/);
-assert.throws(() => parseRuntimeExports(maskedFlag.replace("flag & I64{255}", "flag") + "\nfn unrelated(flag: I64) { flag & I64{255} }", "Source/Test.jet"), /low-8-bit mask/);
+assert.throws(() => parseRuntimeExports(maskedFlag.replace("flag.bit_and(I64{255})", "flag"), "Source/Test.jet"), /low-8-bit mask/);
+assert.throws(() => parseRuntimeExports(maskedFlag.replace("flag.bit_and(I64{255})", "flag /* flag.bit_and(I64{255}) */"), "Source/Test.jet"), /low-8-bit mask/);
+assert.throws(() => parseRuntimeExports(maskedFlag.replace("flag.bit_and(I64{255})", "flag") + "\nfn unrelated(flag: I64) { flag.bit_and(I64{255}) }", "Source/Test.jet"), /low-8-bit mask/);
+assert.throws(() => parseRuntimeExports(maskedFlag.replace("flag.bit_and(I64{255})", '"flag.bit_and(I64{255})"'), "Source/Test.jet"), /low-8-bit mask/);
+assert.throws(() => parseRuntimeExports(maskedFlag.replace("flag.bit_and(I64{255})", "flag.bit_and(I64{65535})"), "Source/Test.jet"), /low-8-bit mask/);
+const narrowFlag = maskedFlag.replace("flag: I64", "flag: U8").replace("(flag.bit_and(I64{255})) != I64{0}", "flag != U8{0}");
+validateRuntimeRoute(resolverFlag, parseRuntimeExports(narrowFlag, "Source/Test.jet").get(resolverFlag.name));
 
 // Canonical Float uses the f64 scalar ABI, never a word or an indirect out slot.
 const floating = route([["f64"]], "f64");

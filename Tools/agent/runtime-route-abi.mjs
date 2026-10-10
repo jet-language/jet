@@ -116,7 +116,30 @@ export function parseRuntimeExports(source, path) {
     if (!parsed) throw new Error(`unparsed runtime #Export(c) ${name} signature in ${path}`);
     if (exports.has(name)) throw new Error(`duplicate runtime #Export(c) ${name}`);
     const [, params, suffix] = parsed;
-    exports.set(name, { params: params.trim() ? params.split(",").map((param) => param.trim()).filter(Boolean) : [], suffix: suffix.trim(), path, lifecycle: lifecycleKind ? `${lifecycleKind} ${Number(lifecyclePriority)}` : "" });
+    const items = params.trim() ? params.split(",").map((param) => param.trim()).filter(Boolean) : [];
+    const widened = maskedWordParameters.get(name);
+    if (widened) {
+      // The reviewed allowance requires the actual parameter's mask in this
+      // export body. Comments, strings and another function are not evidence.
+      const begin = match.index + match[0].length;
+      const code = source.slice(begin).replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"/g, "");
+      let depth = 1, end = 0;
+      for (; end < code.length && depth > 0; end++) {
+        if (code[end] === "{") depth++;
+        else if (code[end] === "}") depth--;
+      }
+      if (depth !== 0) throw new Error(`${path}: unterminated masked export ${name}`);
+      const body = code.slice(0, end);
+      for (const [index, rust] of widened) {
+        const param = /^([A-Za-z_]\w*)\s*:\s*I64$/.exec(items[index]);
+        if (!param) continue; // An already-narrow primitive needs no widening.
+        const bits = { u8: 8, u16: 16, u32: 32 }[rust];
+        if (!new RegExp(`\\b${param[1]}\\s*\\.\\s*bit_and\\s*\\(\\s*I64\\s*\\{\\s*${2 ** bits - 1}\\s*\\}\\s*\\)`).test(body)) {
+          throw new Error(`${path}: ${name} parameter ${index} requires the reviewed low-${bits}-bit mask`);
+        }
+      }
+    }
+    exports.set(name, { params: items, suffix: suffix.trim(), path, lifecycle: lifecycleKind ? `${lifecycleKind} ${Number(lifecyclePriority)}` : "" });
   }
   return exports;
 }
@@ -143,11 +166,16 @@ const maskedWordParameters = new Map([
 ]);
 
 export function validateRuntimeRoute(adapter, definition) {
-  const expected = [...adapter.params.flatMap((param) => param.ctys), ...adapter.result.outs.map((out) => `*mut ${out.cty}`)];
+  const parameters = adapter.params.flatMap((param) => param.ctys);
+  const expected = [...parameters, ...adapter.result.outs.map((out) => `*mut ${out.cty}`)];
   const actual = definition.params.map((param) => /^[A-Za-z_]\w*\s*:\s*(I64|U64|Float|Bool|U8)$/.exec(param)?.[1]);
   const suffix = definition.suffix;
   const result = suffix === "" ? null : /^->\s*(I64|U64|Float|Bool|U8)$/.exec(suffix)?.[1];
-  const valid = actual.length === expected.length && actual.every((type, index) => accepts(expected[index], type)) && (adapter.result.ret ? accepts(adapter.result.ret, result) : suffix === "");
+  const unit = suffix === "" || /^->\s*\(\s*\)$/.test(suffix);
+  const allowed = maskedWordParameters.get(adapter.name);
+  const valid = actual.length === expected.length && actual.every((type, index) =>
+    accepts(expected[index], type) || (index < parameters.length && type === "I64" && allowed?.get(index) === expected[index]))
+    && (adapter.result.ret ? accepts(adapter.result.ret, result) : unit);
   if (!valid) {
     const wanted = `(${expected.join(", ")})${adapter.result.ret ? ` -> ${adapter.result.ret}` : ""}`;
     const found = `(${definition.params.join(", ")})${suffix ? ` ${suffix}` : ""}`;

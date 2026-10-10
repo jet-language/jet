@@ -76,6 +76,10 @@ caller-owned stack storage, not lend a pointer to a different Rust layout.
 IP24/socket56 projections copy only the fixed carrier bytes; they allocate
 nothing and transfer no owner. Source-owned record fields require their exact
 native provider; never reinterpret a host/port record as a socket56 carrier.
+Reviewed narrow-parameter widening in `runtime-route-abi.mjs` is symbol/position
+specific and requires that parameter's current `.bit_and` mask in the export
+body. Comments, strings and unrelated functions are not mask evidence. Return
+values, output slots and every unlisted symbol keep the strict physical ABI.
 Closed native enum metadata must retain the current declaration's complete case
 list: `Dyn` has Null, Bool, Int, Float, Number, Text, Bytes, DateTime, Array, and
 Object. Restore a lost declaration row from history before regenerating; do not
