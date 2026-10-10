@@ -64,6 +64,6 @@ fn terminal_process_invalid_size(cols: I64, rows: I64) -> I64 {
     if (result == I64{0}) -> return I64{1}
     cause :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(cause, rt_static_text("TIOCSWINSZ: "))
-    host_errno_cause_append(cause, wrapping(-result))
+    host_errno_cause_append(cause, wrapping(I64{0} - result))
     host_io_other_take(HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("process terminal")), jet_rt_string_builder_finish(cause), error)
 }

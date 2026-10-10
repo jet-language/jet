@@ -53,7 +53,7 @@ fn host_stdio_result(failure: I64, operation: I64, stderr: Bool, error: I64) -> 
     }
     cause :: if {
         failure == HOST_WRITE_ZERO -> host_write_zero_text()
-        else -> host_errno_cause(wrapping(-failure))
+        else -> host_errno_cause(wrapping(I64{0} - failure))
     }
     host_io_other_take(operation, resource, cause, error)
 }

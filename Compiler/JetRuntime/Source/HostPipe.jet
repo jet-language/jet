@@ -144,7 +144,7 @@ fn pipe_output_name() -> I64 {
     pipe_unborrow(pipe)
     if (failure != I64{0}) {
         jet_rt_string_drop(line)
-        cause :: if (failure == HOST_WRITE_ZERO) -> host_write_zero_text() else -> host_errno_cause(wrapping(-failure))
+        cause :: if (failure == HOST_WRITE_ZERO) -> host_write_zero_text() else -> host_errno_cause(wrapping(I64{0} - failure))
         return host_io_other_take(HOST_IO_OP_READ, pipe_output_name(), cause, error_out)
     }
     if (line != I64{0}) {

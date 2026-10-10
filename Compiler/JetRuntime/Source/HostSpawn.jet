@@ -350,7 +350,7 @@ fn spawn_exec_child(plan: I64, count: I64, child: I64, scratch: I64, err_read: I
         if (at == fd_word(candidates, I64{0}) && denied) { result = I64{-13} }
     }
     fd_put(scratch, I64{64}, stage)
-    fd_put(scratch, I64{72}, wrapping(-result))
+    fd_put(scratch, I64{72}, wrapping(I64{0} - result))
     at := I64{0}
     loop at < (I64{16}) {
         sent :: host_call(I64{1}, err_write, wrapping(scratch + I64{64} + at), wrapping(I64{16} - at))
@@ -527,7 +527,7 @@ fn spawn_exec_child(plan: I64, count: I64, child: I64, scratch: I64, err_read: I
             if (failure == I64{0} && got != I64{0}) {
                 if (got == I64{16}) {
                     stage = fd_word(scratch, I64{64})
-                    failure = wrapping(-fd_word(scratch, I64{72}))
+                    failure = wrapping(I64{0} - fd_word(scratch, I64{72}))
                 } else {
                     stage = I64{8}
                     failure = I64{-5}
@@ -634,7 +634,7 @@ fn spawn_exec_child(plan: I64, count: I64, child: I64, scratch: I64, err_read: I
     pid :: fd_word(child, I64{8})
     // std::process::Child::kill succeeds after its cached reap. Explicit
     // group signalling can still clean descendants after their leader exits.
-    result :: if (!group && fd_word(child, I64{16}) == I64{1}) -> I64{0} else -> host_call(I64{62}, if group -> wrapping(-pid) else -> pid, native_signal, I64{0})
+    result :: if (!group && fd_word(child, I64{16}) == I64{1}) -> I64{0} else -> host_call(I64{62}, if group -> wrapping(I64{0} - pid) else -> pid, native_signal, I64{0})
     sync_mutex_unlock(child)
     _ := fd_error(result, error)
 }
@@ -745,7 +745,7 @@ fn spawn_stream_io(child: I64, stream: I64, bytes: I64, length: I64, number: I64
         jet_rt_free(buffer, I64{4096}, I64{1})
         fd_put(length, I64{0}, I64{0})
         fd_put(capacity, I64{0}, I64{0})
-        host_error_out(wrapping(-errno), I64{0}, error)
+        host_error_out(wrapping(I64{0} - errno), I64{0}, error)
         return I64{0}
     }
     count := I64{0}

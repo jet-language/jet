@@ -59,7 +59,7 @@ fn host_i32(value: I64) -> I64 {
 // Raw tuples marshal into the generator's separate out slots, never a boxed
 // tuple. Bool is one byte; exact Int success/error facts fit inline words.
 fn host_sample_out(result: I64, available: I64, value: I64, errno: I64) {
-    host_sample_fields(if (result < I64{0}) -> I64{-1} else -> result, if (result < I64{0}) -> wrapping(-result) else -> I64{0}, available, value, errno)
+    host_sample_fields(if (result < I64{0}) -> I64{-1} else -> result, if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0}, available, value, errno)
 }
 
 fn host_sample_fields(result: I64, error: I64, available: I64, value: I64, errno: I64) {

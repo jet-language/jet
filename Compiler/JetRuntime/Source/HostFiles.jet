@@ -22,7 +22,7 @@ fn fd_unlock(state: I64) { sync_mutex_unlock(state) }
 
 fn host_error_out(result: I64, stage: I64, error: I64) {
     fd_put(error, I64{0}, if (result < I64{0}) -> (stage << I64{32}).bit_or(I64{1}) else -> I64{0})
-    fd_put(error, I64{8}, if (result < I64{0}) -> wrapping(-result) else -> I64{0})
+    fd_put(error, I64{8}, if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0})
     fd_put(error, I64{16}, I64{0})
     fd_put(error, I64{24}, I64{0})
 }

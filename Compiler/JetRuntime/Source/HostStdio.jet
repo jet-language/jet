@@ -69,7 +69,7 @@
 // leaves expose only the kernel errno and a separate WriteZero fact.
 fn host_stdio_facts(failure: I64, errno: I64, write_zero: I64) {
     #Unsafe("the caller lends the tuple's exact-Int word and Bool byte outputs") {
-        os_store_i64(errno, if (failure < I64{0} && failure != HOST_WRITE_ZERO) -> wrapping(-failure) else -> I64{0})
+        os_store_i64(errno, if (failure < I64{0} && failure != HOST_WRITE_ZERO) -> wrapping(I64{0} - failure) else -> I64{0})
         os_store_u8(write_zero, if (failure == HOST_WRITE_ZERO) -> I64{1} else -> I64{0})
     }
 }

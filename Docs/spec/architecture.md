@@ -331,6 +331,11 @@ priorities ordered by export symbol. The [object regression adapter](../../Compi
 emits current program/runtime objects and independently checks their ELF tables;
 it does not use a historical compiler as an oracle.
 
+Runtime fixed-width negation uses `wrapping(I64{0} - value)`: the per-operation
+overflow opt-in admits a binary integer operation (D-NUMOPS1), not unary
+`wrapping(-value)`. This preserves the two's-complement minimum word as well as
+ordinary errno and magnitude conversions without broadening arithmetic policy.
+
 Runtime representation is not the checked field type. In particular, default
 `Err.cause` value and place reads use the shared
 [cause projection](../../crates/jet-foundation/src/Outcome.rs) to expose

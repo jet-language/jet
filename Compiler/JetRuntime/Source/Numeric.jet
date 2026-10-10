@@ -21,7 +21,7 @@ fn numeric_widen_stop(file: I64, line: I64) {
 }
 
 #Export(c) fn jet_numeric_checked_widen_at(raw: I64, signed: Bool, target_f32: Bool, file: I64, line: I64) -> Float {
-    magnitude :: if (signed && raw < I64{0}) -> wrapping(-raw) else -> raw
+    magnitude :: if (signed && raw < I64{0}) -> wrapping(I64{0} - raw) else -> raw
     significant := I64{0}
     trailing := I64{0}
     remaining := magnitude
