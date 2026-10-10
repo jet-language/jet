@@ -95,6 +95,12 @@ candidate S5 signal. Require the same-source complete suite receipt, registries,
 and hello/sample native runs at O0 and O2. Rust/LLVM execution is default-denied;
 only committed, source-proved user Rust FFI cases may admit their foreign crate
 builds with the exact declared dependency manifest and foreign-build ancestry.
+The native suite includes the product interop cases and user-FFI examples.
+Freeze the source shell's opt-in `JET_RUST_MUSL_TOOLCHAIN`,
+`JET_RUST_MUSL_LINKER`, and `JET_RUST_MUSL_AR` values in the smoke job and
+receipt after checking that the toolchain, musl standard library, linker, and
+archiver exist. Only the declared helper child selects that toolchain; never
+replace global `PATH` or `RUSTC` or treat these cases as zero-Rust executions.
 The exact `rustc -vV` identity query is admitted only under direct Jet ancestry
 in that same allowlisted case/dependency cache namespace; report it separately
 as `allowedFfiQueries`, not a crate build. Never admit a Rust fallback for
