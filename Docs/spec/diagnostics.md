@@ -49,6 +49,11 @@ words for the learner who hit it:
   or stage names. That material belongs to `jet explain CODE --verbose` and
   `--json`.
 
+E0396 teaches `value.pow(exponent)` for the non-Jet `**` spelling, under
+D-SIGIL-ALGEBRA1=B. Its structured repair covers both operands and parenthesizes
+the receiver before calling `pow`, like E0398's precedence-preserving repairs;
+it never replaces `**` with the retired arithmetic `^` spelling.
+
 ## Human rendering
 
 The fixed headings are `Error [CODE]:` and `Warning [CODE] (lint_name):`. A

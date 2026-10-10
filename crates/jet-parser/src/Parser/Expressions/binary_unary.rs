@@ -778,16 +778,6 @@ impl<'a> Parser<'a> {
                 _ => break,
             };
             let op_span = self.bump().span;
-            if op == BinOp::Mul
-                && matches!(self.peek().kind, TokKind::Star)
-                && self.peek().span.start == op_span.end
-            {
-                return Err(Diagnostic::from_row(
-                    "E0396",
-                    &[],
-                    Some(Span::new(op_span.start, self.peek().span.end)),
-                ));
-            }
             let rhs = self.expr_unary(allow_struct_lit)?;
             let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
             lhs = Expr::Binary(op, Box::new(lhs), Box::new(rhs), span);
@@ -1189,6 +1179,34 @@ impl<'a> Parser<'a> {
     fn expr_pow(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
         let start = self.peek().span.start;
         let base = self.expr_postfix(allow_struct_lit)?;
+        if matches!(self.peek().kind, TokKind::Star)
+            && matches!(self.peek2().kind, TokKind::Star)
+            && self.peek2().span.start == self.peek().span.end
+        {
+            let base_span = Span::new(start, self.prev_end());
+            let first = self.bump().span;
+            let power_span = Span::new(first.start, self.bump().span.end);
+            let mut diagnostic = Diagnostic::from_row("E0396", &[], Some(power_span));
+            if self.source.is_some() {
+                match self.expr_unary(allow_struct_lit) {
+                    Ok(rhs) => {
+                        let rhs_span = rhs.span();
+                        let source = self.source.as_deref().expect("source-backed repair");
+                        if let (Some(left), Some(right)) = (
+                            source.get(base_span.start..base_span.end),
+                            source.get(rhs_span.start..rhs_span.end),
+                        ) {
+                            diagnostic = diagnostic.with_edit(crate::Diagnostics::TextEdit {
+                                span: Span::new(base_span.start, rhs_span.end),
+                                new_text: format!("({left}).pow({right})"),
+                            });
+                        }
+                    }
+                    Err(error) => self.diags.push(error),
+                }
+            }
+            return Err(diagnostic);
+        }
         if !matches!(self.peek().kind, TokKind::Caret) {
             return Ok(base);
         }
