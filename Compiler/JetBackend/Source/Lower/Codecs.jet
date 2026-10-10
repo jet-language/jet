@@ -320,7 +320,9 @@ fn lower_codec_csv(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
 }
 
 // OCB1 borrowed input: always returns consumed mask zero. The status/value
-// outs are written only after the masked delivered-stop gate succeeds.
+// outs are written only after the masked delivered-stop gate succeeds. CSV
+// cells are text-native: each row decodes inside the runtime's text-cell
+// scope (EncodingTraits.rs:741-742 jet_decode_text_cells).
 fn lower_helper_codec_csv_decode(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     target :: if glue.ty.kind == .Result(ok, _) -> ok else -> panic("CSV callback needs its checked Decode Result")
     errors :: if glue.ty.kind == .Result(_, err) -> err else -> panic("CSV callback needs its checked failures")
@@ -336,7 +338,10 @@ fn lower_helper_codec_csv_decode(p: MIRProgram, m: &LowerModule, glue: LowerGlue
     native :: lower_pointer(&f)
     lower_dyn_from_runtime(p, &m, &f, tree, owned, native)
     decoded :: lower_pointer(&f)
+    scope :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_codec_text_cells_enter", [LIRValueID]{}, Val(scope))
     lower_codec_decode_into(p, &m, &f, target, glue.ty, tree, native, decoded)
+    lower_call_runtime(&m, &f, "jet_rt_codec_text_cells_leave", [LIRValueID]{scope}, None)
     stopped :: lower_word(&f)
     lower_call_runtime(&m, &f, "jet_rt_session_propagate", [LIRValueID]{}, Val(stopped))
     delivered :: lower_flag(&f)
