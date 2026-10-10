@@ -121,7 +121,7 @@ struct JobQueueStatus {
 // enqueue/delay/receipt/inspect/events/claim/heartbeat/acknowledge/fail/cancel/
 // dead_letter/recover_expired/status/pause/resume/wait/prune methods retain
 // ServiceError failures; mutation is committed by the provider before return.
-fn queue() -[DB, FS.Read, FS.Write, Time]> JobQueue ServiceError! {
+fn queue() -[DB, Env, FS, Time]> JobQueue ServiceError! {
     endpoint :: core.service.__active_endpoint() ?? return Err(err)
     service.__authority_validate(endpoint) ?? return Err(err)
     parts :: core.service.__endpoint_authority_parts(endpoint) ?? return Err(err)
@@ -267,21 +267,21 @@ fn queue_enqueue_request(queue: JobQueue, request: EnqueueRequest) -[DB, Time]> 
 }
 
 impl JobQueue {
-    fn receipt(self, id: String) -[DB]> JobQueueReceipt ServiceError! {
+    fn receipt(self, id: String) -[DB, Time.Wait]> JobQueueReceipt ServiceError! {
         service.__authority_validate(self.endpoint) ?? return Err(err)
         queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
         guard := self.data.guard_edit()
         record :: queue_find(&guard.value.driver, self.authority, self.name, id) ?? return Err(err)
         Ok(queue_receipt(record, false))
     }
-    fn inspect(self, limit: Int, include_payload: Bool) -[DB]> [JobQueueRecord] ServiceError! {
+    fn inspect(self, limit: Int, include_payload: Bool) -[DB, Time.Wait]> [JobQueueRecord] ServiceError! {
         queue_validate_nonnegative_limit(limit, "inspection limit") ?? return Err(err)
         service.__authority_validate(self.endpoint) ?? return Err(err)
         if limit <= 0 || limit > 1024 -> return Err(ServiceError.Policy("queue inspection limit must be positive and bounded"))
         guard := self.data.guard_edit()
         queue_inspect_on_driver(&guard.value.driver, self.authority, self.name, limit, include_payload && false)
     }
-    fn events(self, id: String) -[DB]> [JobQueueEvent] ServiceError! {
+    fn events(self, id: String) -[DB, Time.Wait]> [JobQueueEvent] ServiceError! {
         service.__authority_validate(self.endpoint) ?? return Err(err)
         queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
         guard := self.data.guard_edit()
@@ -381,7 +381,7 @@ fn queue_set_paused(queue: JobQueue, paused: Bool) -[DB, Time]> JobQueueStatus S
 
 // Returning from these helpers releases the lexical SharedGuard before any
 // publication or subsequent acquisition of the same queue lock.
-fn queue_enqueue_transaction(queue: JobQueue, requests: [EnqueueRequest], now: Int) -[DB]> (receipts: [JobQueueReceipt], observations: [QueueTransition]) ServiceError! {
+fn queue_enqueue_transaction(queue: JobQueue, requests: [EnqueueRequest], now: Int) -[DB, Time.Wait]> (receipts: [JobQueueReceipt], observations: [QueueTransition]) ServiceError! {
     guard := queue.data.guard_edit()
     queue_begin(guard.value.driver) ?? return Err(err)
     result :: queue_enqueue_on_driver(&guard.value.driver, queue.authority, queue.name, 1024, false, requests, now) ?? {
@@ -457,7 +457,7 @@ fn queue_read_status(queue: JobQueue) -[DB, Time]> JobQueueStatus ServiceError! 
     guard := queue.data.guard_edit()
     queue_status_on_driver(&guard.value.driver, queue.authority, queue.name)
 }
-fn queue_pause_transaction(queue: JobQueue, paused: Bool, now: Int) ServiceError! -[DB]> {
+fn queue_pause_transaction(queue: JobQueue, paused: Bool, now: Int) ServiceError! -[DB, Time.Wait]> {
     guard := queue.data.guard_edit()
     queue_begin(guard.value.driver) ?? return Err(err)
     result :: queue_pause_on_driver(&guard.value.driver, queue.authority, queue.name, paused, now) ?? {
@@ -546,7 +546,7 @@ fn queue_publish_transitions(observations: [QueueTransition]) Never! {
 fn queue_publish_optional_transition(observation: QueueTransition?) Never! {
     if observation == .Val(value) -> queue_publish_transition(value)
 }
-fn queue_publish_status(status: JobQueueStatus) Never! -[Time]> {
+fn queue_publish_status(status: JobQueueStatus) Never! -[DB, Time]> {
     entity :: "{status.authority}:{status.queue}"
     fields :: "{{\"event\":\"status\",\"state\":\"status\",\"job_id\":{queue_json_text(entity)},\"name\":{queue_json_text(status.queue)},\"queue\":{queue_json_text(status.queue)},\"attempts\":0,\"duration_ms\":null,\"worker\":null,\"request_id\":null,\"failure\":null,\"reason\":null,\"sequence\":0,\"authority\":{queue_json_text(status.authority)},\"queued\":{status.queued},\"running\":{status.running},\"retrying\":{status.retrying},\"completed\":{status.completed},\"failed\":{status.failed},\"dead_lettered\":{status.dead_lettered},\"cancelled\":{status.cancelled},\"depth\":{status.depth},\"wait_ms\":{status.wait_ms},\"throughput\":{status.throughput},\"capacity\":{status.capacity},\"paused\":{status.paused},\"freshness_ms\":{status.freshness_ms},\"labels\":{{}}}}"
     now :: queue_now()

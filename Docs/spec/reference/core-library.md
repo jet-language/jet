@@ -3000,9 +3000,9 @@ stream retains its separate native callback carrier.
 | `csv.parse(text)` / `decode(text)` | `Dyn !EncodingError` | Parse rows as an array of arrays. |
 | `csv.to_string<T: Encode>(rows)` | `String` | Encode explicit row arrays or typed records; records use the first record's field order as the header. Rows are separated by LF, with no trailing LF. |
 | `csv.reader(^source, limits, delimiter, header, skip_blank)` / `csv.writer(^target, limits)` | `CSVReader !EncodingError -[FS]>` / `CSVWriter !EncodingError -[FS]>` | Construct incremental file-backed CSV objects. Reader defaults retain the header and blank records. |
-| `CSVReader.next()` | `?CSVRow !EncodingError -[IO]>` | Return the next physical row or stable end-of-input; errors retain their byte offset, physical location, and record/field path. |
+| `CSVReader.next()` | `?CSVRow !EncodingError -[IO, Time.Wait]>` | Return the next physical row or stable end-of-input; errors retain their byte offset, physical location, and record/field path. |
 | `CSVWriter.write(^fields)` / `flush()` / `finish()` | `Unit !EncodingError -[IO]>` | Write comma-delimited string fields; CRLF is deferred until the next record or finish. Flush does not finish a record. |
-| `csv.query<T>(path, sql)` | `Query<T> ![FieldError] -[FS]>` | Decode typed header-named records and apply the bounded query plan. |
+| `csv.query<T>(path, sql)` | `Query<T> ![FieldError] -[FS, Time.Wait]>` | Decode typed header-named records and apply the bounded query plan. |
 | `CSVRow` | type | Physical line number and parsed string fields. |
 
 ### `core.encoding.toml` — TOML values
@@ -4633,7 +4633,7 @@ API.
 
 ## `core.jobs` — durable receiver lifecycle
 
-`jobs.queue() -[DB, FS.Read, FS.Write, Time]> JobQueue ServiceError!` opens the
+`jobs.queue() -[DB, Env, FS, Time]> JobQueue ServiceError!` opens the
 durable SQLite provider under the package authority. `JobQueue` has private state,
 not an in-memory record collection passed between free functions. Queue
 identity, capacity, retry budget, leases, and retention come from the
@@ -4658,8 +4658,8 @@ The source-owned lifecycle exposes the effects it actually consumes:
 
 | Operation | Effects |
 | --- | --- |
-| `queue()` | `DB`, `FS.Read`, `FS.Write`, `Time` |
-| `receipt` / `inspect` / `events` | `DB` |
+| `queue()` | `DB`, `Env`, `FS`, `Time` |
+| `receipt` / `inspect` / `events` | `DB`, `Time.Wait` |
 | `claim` | `DB`, `Rand`, `Time` |
 | `enqueue` / `delay` / `heartbeat` / `acknowledge` / `fail` / `cancel` / `dead_letter` / `recover_expired` / `status` / `pause` / `resume` / `prune` | `DB`, `Time` |
 | `wait` | `DB`, `Time`, `Time.Wait` |
@@ -4668,6 +4668,11 @@ The source-owned lifecycle exposes the effects it actually consumes:
 startup value selects the database; otherwise `.jet/state/jobs.db` is used.
 Logical environment overlays do not redirect this provider. Set an isolated
 database path before launching examples or conformance programs.
+
+Lock acquisition and bounded file reads expose `Time.Wait` explicitly; helper
+effect rows retain it rather than concealing it behind an otherwise pure call.
+Queue status publication also retains `DB` alongside `Time`, matching the
+provider calls reached while obtaining its wall-clock sample.
 
 The state transitions, SQL, row projections, CBOR payloads, signed receipts,
 retry policy, event fields, and commit-before-publication ordering are Jet

@@ -294,7 +294,7 @@ fn csv_cell(value: Dyn) -> String Never! {
 
 
 /// Typed CSV query with the same SQL grammar and result carrier as rows.query.
-fn query<T: [Decode, Encode]>(path: String, sql: SQL) -[FS]> Query<T> [FieldError]! {
+fn query<T: [Decode, Encode]>(path: String, sql: SQL) -[FS, Time.Wait]> Query<T> [FieldError]! {
     text :: query_text(path) ?? return Err(err)
     physical :: typed_records(text) ?? return Err([FieldError]{FieldError{path: "", reason: err.reason}})
     header :: if physical.len() == 0 -> [String]{} else -> physical[0]
@@ -313,7 +313,7 @@ fn query_read_error(path: String, reason: String) -> [FieldError] Never! {
     [FieldError]{FieldError{path: "", reason: "could not read `{path}`: {reason}"}}
 }
 
-fn query_text(path: String) -[FS]> String [FieldError]! {
+fn query_text(path: String) -[FS, Time.Wait]> String [FieldError]! {
     max :: 536870912
     sample := encoding.__query_read_bounded(path, max) ?? return Err(query_read_error(path, err))
     if sample.size > (U64{max}) -> return Err(query_read_error(path, "input exceeds the {max}-byte query bound"))
@@ -890,7 +890,7 @@ struct CSVReader {
         Ok(None)
     }
 
-    fn next_inner(&self) -[IO]> CSVRow? EncodingError! {
+    fn next_inner(&self) -[IO, Time.Wait]> CSVRow? EncodingError! {
         if self.eof -> return Ok(None)
         loop {
             character :: if &self.character() == {
@@ -915,7 +915,7 @@ struct CSVReader {
         }
     }
 
-    fn next(&self) -[IO]> CSVRow? EncodingError! {
+    fn next(&self) -[IO, Time.Wait]> CSVRow? EncodingError! {
         if self.terminal == .Val(error) -> return Err(error)
         result :: if &self.next_inner() == {
             .Ok(row) -> row
