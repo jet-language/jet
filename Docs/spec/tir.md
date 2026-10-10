@@ -121,11 +121,21 @@ dynamic owners and nominal `Close` leaves remain indivisible. Shadowed same-name
 `Close` roots remain atomic too. A move clears every covered leaf flag;
 reinitialization sets those same flags. A move below a split root that covers no
 registered leaf is explicitly refused, including a move inside an atomic leaf.
+An owned nominal record whose stored fields are all Copy still registers one
+atomic ownership leaf. Structural cleanup becoming empty must not erase its
+move/live flag or make moving that whole field look like an unsupported move.
 Cleanup consumes only the live remainder, including on early returns. An actual
 projected move from an atomic root with its own `Close` is refused at the move
 with a type-named internal error, not at registration. The consuming receiver
 inside its own `Close` body instead gets structural remainder cleanup, never
 another call to its own `Close`.
+
+Inline blocks lower their statement tails through the canonical statement
+lowerer. A tail that terminates control flow, including an exhaustive match
+whose arms return, has no reachable value; its inert MIR placeholder is Unit.
+A reachable non-expression tail is valid only for a checked Unit block.
+If and exhaustive-match joins with no incoming continuation edge are sealed
+as unreachable, not exposed as an open continuation after all arms terminate.
 
 Native reference carriers (`View`, `ViewMut`, `Pin`, and the internal
 allocator-view tag) do not own their referents. Their synthetic scope cleanup

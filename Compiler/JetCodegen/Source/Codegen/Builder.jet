@@ -1819,16 +1819,21 @@ fn jet_codegen_register_drop_leaves(builder: &JetCodegenBuilder, program: JetCod
     ancestors := visiting.copy()
     &ancestors.push(key)
     // Cleanup reverses registration; stored fields unwind in declaration order.
+    owned_field := false
     index := fields.len()
     loop index > 0 {
         index -= 1
         field_type :: jet_codegen_checked_host_field_type(builder, program, ty, fields[index])
         if jet_codegen_ownership(field_type).drop == MIRDropKind.NoDrop -> next
+        owned_field = true
         field :: jet_codegen_host_field_id(builder, program, ty, fields[index])
         span := builder.current_span
         leaf := jet_codegen_project_field_place(&builder, program, place, span, field_type, field)
         jet_codegen_register_drop_leaves(&builder, program, leaf, field_type, initialized, false, ancestors)
     }
+    // Owned nominal records remain move/drop leaves even when their stored
+    // fields are all Copy; an empty traversal must not erase their live flag.
+    if !owned_field -> jet_codegen_register_drop_live(&builder, program, place, ty, ownership, initialized)
 }
 
 // Rust `retain_place_access`: a place row referenced by several operations

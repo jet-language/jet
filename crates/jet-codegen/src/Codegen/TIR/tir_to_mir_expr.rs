@@ -5528,24 +5528,20 @@ fn lower_inline_block(
         super::TStmt::Loop { label, body } => {
             super::tir_to_mir_stmt::lower_loop_value(ctx, label.as_deref(), body, result_ty)
         }
-        super::TStmt::Return(_)
-        | super::TStmt::Break(_)
-        | super::TStmt::BreakValue { .. }
-        | super::TStmt::Continue(_) => {
+        _ => {
+            // A statement tail can diverge through an exhaustive match or an
+            // if, not only through a syntactic return/break statement.
             ctx.lower_nested_stmts(std::slice::from_ref(tail))?;
-            if ctx.is_terminated() {
+            let unit_ty = Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string());
+            if ctx.is_terminated() || *result_ty == unit_ty {
                 return ctx.emit(
-                    "inline-block-divergent",
-                    Some(result_ty.clone()),
+                    "inline-block-statement-tail",
+                    Some(unit_ty),
                     MirOperation::Constant(MirConstant::Unit),
                 );
             }
-            unsupported_expr(
-                ctx,
-                "TExprKind::InlineBlock (divergent tail did not terminate)",
-            )
+            unsupported_expr(ctx, "TExprKind::InlineBlock (non-expression tail)")
         }
-        _ => unsupported_expr(ctx, "TExprKind::InlineBlock (non-expression tail)"),
     }
 }
 

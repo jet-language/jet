@@ -1493,6 +1493,7 @@ fn lower_swizzle_assign(
 /// canonical-pass input of the `lower_stmts` call it stands for.
 struct IfChainLink {
     join: MirBlockId,
+    then_reaches_join: bool,
     else_scope: Option<(MirScopeId, Option<(String, String)>)>,
 }
 
@@ -1526,7 +1527,8 @@ fn lower_if<'a>(
             lower_stmts(ctx, then_body)?;
             ctx.exit_scope(scope)?;
         }
-        if !ctx.is_terminated() {
+        let then_reaches_join = !ctx.is_terminated();
+        if then_reaches_join {
             ctx.terminate(MirTerminator::Jump { target: join });
         }
 
@@ -1545,6 +1547,7 @@ fn lower_if<'a>(
                 if !ctx.is_terminated() {
                     links.push(IfChainLink {
                         join,
+                        then_reaches_join,
                         else_scope: Some((scope, before)),
                     });
                     cond = next_cond;
@@ -1560,6 +1563,7 @@ fn lower_if<'a>(
         }
         links.push(IfChainLink {
             join,
+            then_reaches_join,
             else_scope: None,
         });
         break;
@@ -1569,10 +1573,16 @@ fn lower_if<'a>(
             record_lowered_statements(ctx, before);
             ctx.exit_scope(scope)?;
         }
-        if !ctx.is_terminated() {
+        let else_reaches_join = !ctx.is_terminated();
+        if else_reaches_join {
             ctx.terminate(MirTerminator::Jump { target: link.join });
         }
         ctx.switch_to(link.join);
+        if !link.then_reaches_join && !else_reaches_join {
+            ctx.terminate(MirTerminator::Unreachable {
+                reason: "both if arms terminate".to_string(),
+            });
+        }
     }
     Ok(())
 }
@@ -2427,6 +2437,7 @@ fn lower_enum_match(
     let saved_lookup_head = ctx.pattern_lookup_head.replace(ctx.current);
     let saved_lookup_caches = std::mem::take(&mut ctx.pattern_lookup_caches);
     let join = ctx.new_block(ctx.span(), "match.join")?;
+    let mut has_join_edge = false;
     let otherwise = ctx.new_block(ctx.span(), "match.otherwise")?;
     let mut tests = Vec::with_capacity(arms.len());
     let mut bodies = Vec::with_capacity(arms.len());
@@ -2470,6 +2481,7 @@ fn lower_enum_match(
         ctx.pop_lexical_frame()?;
         if !ctx.is_terminated() {
             ctx.terminate(MirTerminator::Jump { target: join });
+            has_join_edge = true;
         }
     }
     ctx.switch_to(otherwise);
@@ -2488,8 +2500,14 @@ fn lower_enum_match(
     ctx.pop_lexical_frame()?;
     if !ctx.is_terminated() {
         ctx.terminate(MirTerminator::Jump { target: join });
+        has_join_edge = true;
     }
     ctx.switch_to(join);
+    if !has_join_edge {
+        ctx.terminate(MirTerminator::Unreachable {
+            reason: "all checked pattern-match paths terminate".to_string(),
+        });
+    }
     ctx.pattern_lookup_head = saved_lookup_head;
     ctx.pattern_lookup_caches = saved_lookup_caches;
     Ok(())

@@ -7722,6 +7722,7 @@ impl<'a> LowerCtx<'a> {
         };
         visiting.push(identity);
         let owner = mir_type_as_ast(ty);
+        let first_leaf = output.len();
         for field in fields.iter().filter(|field| !field.computed) {
             let field_ty = self.field_type_for_type(&owner, &field.name)?;
             let checked = self.mir_type(&field_ty)?;
@@ -7730,6 +7731,11 @@ impl<'a> LowerCtx<'a> {
             path.pop();
         }
         visiting.pop();
+        // Nominal ownership is not structural Copy. A record whose stored
+        // members need no cleanup is still one owned move/drop leaf.
+        if for_drop && output.len() == first_leaf {
+            output.push(path.clone());
+        }
         Ok(())
     }
 
