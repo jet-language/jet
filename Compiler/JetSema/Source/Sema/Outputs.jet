@@ -555,30 +555,27 @@ fn sema_output_publish_solved_effects(graph: &SemaRegistrationGraph, modules: &[
     outputs := [ResolvedOutput]{}
     loop module_index in 0..<modules.len() {
         loop constant_index in 0..<modules[module_index].constants.len() {
-            if modules[module_index].constants[constant_index].declaration.resolved_output == .Val(output) {
-                updated := sema_output_fact_with_solved_effects(output.copy(), graph, modules, &rows, &indexed)
-                &outputs.push(updated.copy())
-                modules[module_index].constants[constant_index].declaration.resolved_output = Val(^updated)
-            }
+            updated := if modules[module_index].constants[constant_index].declaration.resolved_output == .Val(output) -> sema_output_fact_with_solved_effects(output.copy(), graph, modules, &rows, &indexed) else -> { next }
+            &outputs.push(updated.copy())
+            modules[module_index].constants[constant_index].declaration.resolved_output = Val(^updated)
         }
     }
     loop module_index in 0..<graph.modules.len() {
         loop constant_index in 0..<graph.modules[module_index].constants.len() {
-            if graph.modules[module_index].constants[constant_index].declaration.resolved_output == .Val(output) {
-                updated := sema_output_fact_with_solved_effects(output.copy(), graph, modules, &rows, &indexed)
-                graph.modules[module_index].constants[constant_index].declaration.resolved_output = Val(^updated)
-            }
+            updated := if graph.modules[module_index].constants[constant_index].declaration.resolved_output == .Val(output) -> sema_output_fact_with_solved_effects(output.copy(), graph, modules, &rows, &indexed) else -> { next }
+            graph.modules[module_index].constants[constant_index].declaration.resolved_output = Val(^updated)
         }
         // One ordered source walk, not a full item scan for each Output.
         loop item_index in 0..<graph.modules[module_index].program.items.len() {
-            if graph.modules[module_index].program.items[item_index] == .Const(definition) {
-                if definition.resolved_output == .Val(output) {
+            updated_definition := if graph.modules[module_index].program.items[item_index] == .Const(definition) -> {
+                if definition.resolved_output == .Val(output) -> {
                     updated_output := sema_output_fact_with_solved_effects(output.copy(), graph, modules, &rows, &indexed)
-                    updated_definition := definition.copy()
-                    updated_definition.resolved_output = Val(^updated_output)
-                    graph.modules[module_index].program.items[item_index] = Item.Const{value: ^updated_definition}
-                }
-            }
+                    owned_definition := definition.copy()
+                    owned_definition.resolved_output = Val(^updated_output)
+                    ^owned_definition
+                } else -> { next }
+            } else -> { next }
+            graph.modules[module_index].program.items[item_index] = Item.Const{value: ^updated_definition}
         }
     }
     ^outputs
