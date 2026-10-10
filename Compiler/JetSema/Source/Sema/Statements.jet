@@ -5413,7 +5413,15 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                 complete = false
                 sema_check_unsupported(&context, "the statement-level `prep` form at offset {span.start} is not executed by the self-hosted checker yet")
             }
-            .Layout(_, _, _, span) | .ContextBlock(_, _, span) | .Live(_, span) | .AssumeDet(_, _, _, span) -> {
+            .Live(_, span) -> {
+                complete = false
+                if sema_scope_environment_no_os(environment) {
+                    &diagnostics.push(sema_error("E3301", span, "`#Live {{ … }}` is not available on a no-OS target.", "No-OS targets have no OS; only `core`-level APIs are available.", "Terminal I/O requires an OS terminal device. Select a hosted target or declare an IO.Write provider."))
+                } else {
+                    sema_check_unsupported(&context, "the {sema_stmt_scope_form_label(statement)} block at offset {span.start} is not supported by the self-hosted checker yet")
+                }
+            }
+            .Layout(_, _, _, span) | .ContextBlock(_, _, span) | .AssumeDet(_, _, _, span) -> {
                 complete = false
                 sema_check_unsupported(&context, "the {sema_stmt_scope_form_label(statement)} block at offset {span.start} is not supported by the self-hosted checker yet")
             }

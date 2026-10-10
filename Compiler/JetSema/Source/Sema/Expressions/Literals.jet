@@ -427,6 +427,7 @@ fn sema_expression_list_member_spreads(elements: [Expr]) -> [Expr] Never! {
 }
 
 fn sema_expression_list(expr: Expr, elements: [Expr], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if sema_scope_environment_no_os(environment) -> &diagnostics.push(sema_error("E3303", span, "This no-OS program allocates memory but has no allocator fact.", "No-OS targets do not provide an implicit system heap.", "Select a typed allocator provider, or use heap-free Core operations."))
     has_spread := false
     loop element in elements {
         if element == {
@@ -495,6 +496,7 @@ fn sema_expression_list(expr: Expr, elements: [Expr], span: Span, expected: Type
 }
 
 fn sema_expression_map(expr: Expr, entries: [ExprPair], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if sema_scope_environment_no_os(environment) -> &diagnostics.push(sema_error("E3303", span, "This no-OS program allocates memory but has no allocator fact.", "No-OS targets do not provide an implicit system heap.", "Select a typed allocator provider, or use heap-free Core operations."))
     expected_key := Type?{None}
     expected_value := Type?{None}
     result_ty := Type?{None}

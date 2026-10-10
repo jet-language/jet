@@ -424,10 +424,31 @@ fn sema_call_core_has_explicit_source_target(module_name: String, member: String
     row.symbol == CoreCallSymbol.SourceOwned && row.source_target != None
 }
 
+// Rust CheckerCoreLib/serde_diags.rs: the no-OS call boundary is checked
+// before choosing either a source-owned implementation or a native Core row.
+fn sema_call_core_no_os_hint(module_name: String) -> String? Never! {
+    if module_name == {
+        "core.files" -> Val("Embed the data at compile time with `@embed(\"file\")`, or select a hosted target.")
+        "core.net" | "core.net.tls" | "core.http" -> Val("No-OS targets have no network stack. Select a hosted target, or use a declared network provider.")
+        "core.tasks" -> Val("OS threads are not available without an OS. Use cooperative or interrupt-driven concurrency.")
+        "core.term" -> Val("Standard I/O requires an OS. Use a declared IO provider or select a hosted target.")
+        "core.process" | "core.time" -> Val("System calls are not available on a no-OS target. Select a hosted target or declare the required provider.")
+        "core.log" -> Val("The log module writes to stderr (an OS resource). Use a declared IO provider or select a hosted target.")
+        "core.watcher" | "core.crypto.vault" -> Val("Select a hosted target, or replace this call with a core-level alternative.")
+        else -> None
+    }
+}
+
 // Compiler-owned query contracts resolve before source facades. Other source
 // exports remain ordinary functions ahead of static Core records.
 fn sema_call_core_resolve_route(environment: SemaScopeEnvironment, program: SemaProgramTables, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, first_is_move: Bool, span: Span, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     diagnostic_count := diagnostics.len()
+    if sema_scope_environment_no_os(environment) && sema_call_core_no_os_hint(module_name) == .Val(hint) {
+        short_name :: module_name.slice(module_name.rfind(".") + 1, module_name.len())
+        api :: "{short_name}.{member}"
+        &diagnostics.push(sema_error("E3301", span, "`{api}` is not available on a no-OS target.", "No-OS targets have no OS; only `core`-level APIs are available.", hint))
+        return None
+    }
     source_identity :: if sema_compiler_services_is_compiler_query(module_name, member) || sema_call_core_has_explicit_source_target(module_name, member) || sema_call_core_native_resource_consumer(module_name, member, first_is_move) -> None else -> sema_call_core_module_identity(environment, program, module_name)
     source :: if source_identity == {
         .Val(identity) -> sema_call_core_source_target(environment, program, identity, member, type_args, span, false, &diagnostics)

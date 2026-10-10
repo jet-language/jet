@@ -427,6 +427,14 @@ struct SemaScopeEnvironment {
     function_name: String{""}
 }
 
+// Core's own generic bodies are checked independently of a consumer's target.
+// User bodies consume the selected machine fact, never a host OS guess.
+fn sema_scope_environment_no_os(environment: SemaScopeEnvironment) -> Bool Never! {
+    if sema_module_is_core_source(environment.module_identity) -> return false
+    graph :: environment.registration_graph ?? return false
+    graph.target_machine.no_os
+}
+
 // The declaration scope of one module for compile-time probes (dependency
 // probes, item checks, function checks): sema_registration_apply_graph_module
 // runs once into `table` instead of once per probe, and each probe checks
