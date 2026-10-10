@@ -37,6 +37,20 @@ The `run-lower-fixtures.mjs --disjoint-lowering` mode lowers and lints those
 same MIR programs without a pack; it does not stand in for executing their
 native outputs with the admitted runtime pack.
 
+The existing TLS transport refusal runs before route lookup on both the
+argument-validation and direct-call lowering paths. Pure TLS configuration
+and certificate data remain available; transport produces the canonical
+pending-decision finding, reported by the CLI as E2104. The pack-free
+`run-lower-fixtures.mjs --tls-refusal` mode exercises both lowering paths.
+
+Native runtime ownership is partitioned per C symbol, including members that
+share a carrier. A Jet provider owns its physical ABI; a Core source operation
+uses its checked body, not a similarly named Rust layout. Seed-only adapters
+retain logical route metadata but are excluded from native-pack emission by
+`cfg(not(jet_native_pack))`. Missing providers use the existing undefined-symbol
+link refusal reported as E2104. The b5a331841 no-retained-Rust-Box invariant and
+the pack producer's independent rejection of Rust symbols remain enforced.
+
 ### What Cranelift does today (the behaviour to match)
 
 `crates/jet-jit/src/jit/runtime_host.rs` (`new_jit_module`) builds one

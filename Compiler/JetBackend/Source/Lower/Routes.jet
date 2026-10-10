@@ -239,6 +239,10 @@ fn lower_tls_transport_message() -> String Never! {
 // handle mutably. The pointer stays in the caller's place; no copy or write-back.
 fn lower_route_values(p: MIRProgram, m: &LowerModule, f: &LowerFunction, call: MIRPreludeCallID, args: [MIRCallArg], what: String) -> [MIRValueID]? {
     row :: lower_prelude_row(p, call) ?? return None
+    if lower_tls_transport_route(row) {
+        lower_fail(&m, &f, lower_tls_transport_message())
+        return None
+    }
     route :: lower_runtime_route(lower_route_symbol(row)) ?? {
         lower_fail(&m, &f, "{what} {row.module_name}.{row.member} has no runtime C-ABI route ({mir_symbol_name(row.symbol)})")
         return None
@@ -264,6 +268,7 @@ fn lower_route_values(p: MIRProgram, m: &LowerModule, f: &LowerFunction, call: M
 // for the call and dropped after it.
 fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRValueID], what: String) Never! {
     row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "{what} names missing Prelude call {call.value}")
+    if lower_tls_transport_route(row) -> return lower_fail(&m, &f, lower_tls_transport_message())
     if lower_realtime_deadline(p, c, &m, &f, instruction, row, args) -> return
     if lower_lazy_route(p, c, &m, &f, instruction, row, args) -> return
     name :: "{row.module_name}.{row.member}"

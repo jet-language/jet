@@ -52,6 +52,7 @@ import { generatedRecordPath, nativeProviderHandles, recordApplication, recordAp
 import { nativeEnvironmentRoutes, emitNativeEnvironmentRoutes } from "./native-route-environment.mjs";
 import { nativeHandleExports } from "./native-route-handles.mjs";
 import { nativeRecordExports } from "./native-route-records.mjs";
+import { excludeNativeSeedBodies, nativeSeedOnlyExports, sourceOwnedAdapterProofs } from "./native-route-partition.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const runtimePath = process.argv[2];
 const check = process.argv.includes("--check");
@@ -2069,9 +2070,20 @@ const nativeExports = [
   ...nativeRecordExports(nativeTypes),
 ].filter((descriptor) => seedHelperNames.has(descriptor.name) && !jetRuntimeExports.has(descriptor.name));
 const nativeSourceExports = new Set(nativeExports.map((row) => row.name));
-// Explicit providers replace a type's representation, not individual Box
-// operations. Inspect the existing emission pass before either output mode:
-// no retained native-pack helper or adapter may touch that Rust layout.
+// b5a331841's invariant is that no retained native-pack export touches a
+// replaced Rust Box layout. Ownership is per symbol: a shared carrier may have
+// native Jet providers and unavailable members. Every seed-only member is
+// excluded from native-pack emission, never promoted to a Jet provider; its
+// logical route remains so a native use reaches the existing E2104 linker
+// refusal. The Rust-free pack producer independently rejects Rust symbols.
+const seedOnlyExports = nativeSeedOnlyExports(seedHelperNames, adapters, jetRuntimeExports);
+const sourceAdapterProofs = sourceOwnedAdapterProofs(adapters,
+  readFileSync(`${repo}/crates/jet-foundation/src/CoreModuleExports.rs`, "utf8"),
+  readFileSync(`${repo}/crates/jet-codegen/src/Codegen/TIR/routes.rs`, "utf8"),
+  (path) => readFileSync(`${repo}/${path}`, "utf8"));
+// Inspect every retained emission before either output mode. Only the
+// explicitly partitioned seed bodies may be absent from native-pack output;
+// every remaining use of a replaced Rust layout is a hard classification error.
 const ownedBoxTypes = handleRows.filter(([name, full]) => !handleBridge(full) &&
   [...jetRuntimeExports].some((symbol) =>
     ["drop", "clone", "eq", "display", "show", "debug"].some((op) => symbol === `jet_rt_handle_${op}_${name}`) ||
@@ -2086,10 +2098,10 @@ for (const [name, full] of ownedBoxTypes) {
   const escaped = full.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pointer = new RegExp(`\\*(?:mut|const)\\s+[^;{}\\n]*?${escaped}(?![A-Za-z0-9_:<])`);
   for (const match of rs.join("\n").matchAll(/pub extern "C" fn ([A-Za-z_]\w*)\(([^{}]*?)\{/g)) {
-    if (!jetRuntimeExports.has(match[1]) && !nativeSourceExports.has(match[1]) && pointer.test(match[2])) requireUnownedBox(name, match[1]);
+    if (!jetRuntimeExports.has(match[1]) && !nativeSourceExports.has(match[1]) && !seedOnlyExports.has(match[1]) && pointer.test(match[2])) requireUnownedBox(name, match[1]);
   }
   for (const adapter of adapters) {
-    if (adapter.external || jetRuntimeExports.has(adapter.name)) continue;
+    if (adapter.external || jetRuntimeExports.has(adapter.name) || seedOnlyExports.has(adapter.name)) continue;
     const carried = [...adapter.params.map((param) => param.handle).filter(Boolean), ...adapter.result.handles];
     if (carried.some((handle) => handle.full === full)) requireUnownedBox(name, adapter.name);
   }
@@ -2113,6 +2125,10 @@ if (nativeListOnly) {
     wordRecords: [...wordRecords.values()],
     seedHelperNames: [...seedHelperNames].sort(),
     jetRuntimeExports: [...jetRuntimeExports].sort(),
+    seedOnlyExports: [...seedOnlyExports].sort(),
+    sourceOwnedAdapters: [...sourceAdapterProofs].map(([name, proof]) => ({ name, ...proof })),
+    adapterOwnership: adapters.map((adapter) => ({ symbol: adapter.symbol, name: adapter.name, rows: adapter.rows,
+      ownership: jetRuntimeExports.has(adapter.name) ? "jet-provider" : sourceAdapterProofs.has(adapter.name) ? "core-source" : adapter.external ? "external" : "seed-only" })),
     unsupportedSumCarriers: [...unsupportedSumCarriers.values()],
     unsupportedRustCarriers: [...unsupportedRustCarriers.values()],
     unsupportedGenericCarriers: [...unsupportedGenericCarriers.values()],
@@ -2238,10 +2254,10 @@ jet.push("");
 jet.push("// Fields of runtime handle structs readable in place (Places.jet):");
 jet.push("// Scalar/native handle fields lend storage; Text and header_bytes carriers");
 jet.push("// write read-only caller stack headers, never owned/freeable field values.");
-jet.push("struct LowerHandleField { runtime: String, field: String, kind: String, header_bytes: I64 }");
+jet.push("struct LowerHandleField { runtime: String, field: String, kind: String, header_bytes: Int }");
 jet.push("");
 jet.push("LOWER_HANDLE_FIELDS :: prep { [LowerHandleField]{");
-for (const row of handleFields) jet.push(`    LowerHandleField{runtime: "${row.name}", field: "${row.field}", kind: "${row.kind}", header_bytes: I64{${row.headerBytes}}},`);
+for (const row of handleFields) jet.push(`    LowerHandleField{runtime: "${row.name}", field: "${row.field}", kind: "${row.kind}", header_bytes: ${row.headerBytes}},`);
 jet.push("} }");
 jet.push("");
 jet.push("fn lower_handle_field(runtime: String, field: String) -> LowerHandleField? {");
@@ -2286,23 +2302,13 @@ jet.push("// END GENERATED C-ABI ROUTES");
 // routes. Validate every replaced C signature before excluding its seed body
 // from the native pack. sources.list is the canonical provider ownership input.
 const rustBody = rs.join("\n") + "\n";
-const rustParts = [];
-let copied = 0;
-for (const match of rustBody.matchAll(/^    #\[no_mangle\]\n    pub extern "C" fn ([A-Za-z_]\w*)([^{}]*?)\{/gm)) {
-  const [, name, raw] = match;
-  if (!jetRuntimeExports.has(name) && !nativeSourceExports.has(name)) continue;
-  if (jetRuntimeExports.has(name)) {
-    const signature = parseSignature(`fn ${name}${raw}`);
-    if (!signature || signature.generics) throw new Error(`Jet-owned generated export ${name}: unparsed C ABI`);
-    const params = splitTop(signature.params).map((param) => ({ ctys: [param.slice(param.indexOf(":") + 1).trim()] }));
-    validateRuntimeRoute({ symbol: name, name, params, result: { outs: [], ret: signature.result === "()" ? null : signature.result } }, jetRuntimeSignatures.get(name));
-  }
-  rustParts.push(rustBody.slice(copied, match.index));
-  rustParts.push("    #[cfg(not(jet_native_pack))]\n");
-  copied = match.index;
-}
-rustParts.push(rustBody.slice(copied));
-const outputs = [[rsOut, rustParts.join("")], [jetOut, jet.join("\n") + "\n"]];
+const partitionedRust = excludeNativeSeedBodies(rustBody, jetRuntimeExports, seedOnlyExports, (name, raw) => {
+  const signature = parseSignature(`fn ${name}${raw}`);
+  if (!signature || signature.generics) throw new Error(`Jet-owned generated export ${name}: unparsed C ABI`);
+  const params = splitTop(signature.params).map((param) => ({ ctys: [param.slice(param.indexOf(":") + 1).trim()] }));
+  validateRuntimeRoute({ symbol: name, name, params, result: { outs: [], ret: signature.result === "()" ? null : signature.result } }, jetRuntimeSignatures.get(name));
+});
+const outputs = [[rsOut, partitionedRust], [jetOut, jet.join("\n") + "\n"]];
 let stale = false;
 for (const [path, body] of outputs) {
   let current = "";
