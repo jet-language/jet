@@ -92,6 +92,20 @@ test('compiler Rust is denied without markers and without an allowlisted case', 
     fail(f.audit([f.mark(), f.jetExec(), fork(10, 30), f.rustc()]));
 });
 
+test('only exact allowlisted foreign rustc identity query is admitted', t => {
+    const f = fixture(t);
+    const query = exec(20, f.tools.rustc, [f.tools.rustc, '-vV']);
+    const receipt = f.audit([f.mark(), f.jetExec(), fork(10, 20), query]);
+    pass(receipt);
+    assert.equal(receipt.allowedFfiQueries.length, 1);
+    assert.equal(receipt.allowedFfiQueries[0].cachePath, f.cache);
+    assert.deepEqual(receipt.zeroRustCases, []);
+    fail(f.audit([f.mark(10, f.zero), f.jetExec(), fork(10, 20), query]));
+    fail(f.audit([f.mark(), f.jetExec(), fork(10, 20), exec(20, f.tools.rustc, [f.tools.rustc, '-vV', 'program.rs'])]));
+    fail(f.audit([f.mark(), f.jetExec(), fork(10, 20), exec(20, f.tools.rustc, [f.tools.rustc, '--print', 'sysroot'])]));
+    fail(f.audit([f.mark(), f.jetExec(10, 'self'), fork(10, 20), query]));
+});
+
 test('approved generated helper records bytes, digest, dependencies, PIDs and ancestry', t => {
     const f = fixture(t), receipt = f.audit(f.branch());
     pass(receipt);

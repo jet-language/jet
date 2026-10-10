@@ -1697,7 +1697,11 @@ closes. Rust/LLVM defaults to a violation. The committed
 `Tools/testkit/user-rust-ffi.allow` admits only source-declared user Rust crates:
 generated helper manifests must reside in the external case/dependency-digest
 cache, have exactly the declared dependencies, and be built through Jet's
-foreign Cargo branch. Jet program compilation/linking/running never gets a Rust
+foreign Cargo branch. The exact `rustc -vV` identity query is also admitted only
+in an allowlisted case's Jet foreign branch, preserving the host's helper/cache
+hashes; receipts list these queries separately. Extra query arguments or sysroot
+probes do not inherit that exception. Jet program compilation/linking/running
+never gets a Rust
 exception. Receipts distinguish zero-Rust cases, observed user-FFI builds and
 violations; performance peers remain separate product comparisons.
 Retired Rust oracle/witness modes report nonzero `UNCOVERED` with

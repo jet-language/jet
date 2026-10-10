@@ -278,7 +278,7 @@ function cargoManifest(exec, cwd, context, declared) {
 }
 
 export function auditNativeTrace({ text, root, jet, allowlistText = '', tracePath = null }) {
-    const receipt = { schema: 'jet-native-case-trace/v1', status: 'FAIL', cases: [], zeroRustCases: [], allowedFfiBuilds: [], excludedPerformancePeers: [], violations: [], events: 0, failedExecAttempts: [], tracePath };
+    const receipt = { schema: 'jet-native-case-trace/v1', status: 'FAIL', cases: [], zeroRustCases: [], allowedFfiBuilds: [], allowedFfiQueries: [], excludedPerformancePeers: [], violations: [], events: 0, failedExecAttempts: [], tracePath };
     let allowlist;
     try { root = realpathSync(root); jet = realpathSync(jet); allowlist = readUserRustAllowlist(allowlistText, root); }
     catch (error) { receipt.violations.push({ code: 'invalid-audit-input', detail: error.message }); return receipt; }
@@ -392,6 +392,10 @@ export function auditNativeTrace({ text, root, jet, allowlistText = '', tracePat
                         state.approvedRustc = { pid: event.pid, build: state.approvedCargo };
                         if (!state.approvedCargo.pids.includes(event.pid)) state.approvedCargo.pids.push(event.pid);
                         state.approvedCargo.executions.push({ ...entry, ancestry: [...state.history] });
+                    } else if (declared && latest?.admittedJet && latest.foreignBuild && latest.case === state.context.case && latest.markerLine === state.context.markerLine && exec.argv.length === 2 && exec.argv[1] === '-vV') {
+                        const cachePath = ffiCaseCachePath(state.context.cacheRoot, state.context.case, declared);
+                        if (canonical(cachePath) !== cachePath || !inside(state.context.cacheRoot, cachePath)) throw Error('toolchain query cache escapes the case/dependency namespace');
+                        receipt.allowedFfiQueries.push({ case: state.context.case, kind: 'rustc-toolchain-identity', dependencies: declared, cachePath, pid: event.pid, jetPid: latest.pid, argv: exec.argv, ancestry: [...state.history, entry] });
                     } else if (latest?.performancePeer) {
                         receipt.excludedPerformancePeers.push({ pid: event.pid, case: state.context?.case ?? null, executable: exec.path, launcher: latest.executable, script: latest.performancePeer, ancestry: [...state.history, entry], reason: 'direct Rust performance peer' });
                     } else throw Error('Rustc is not a declared Cargo foreign build or direct performance peer');
