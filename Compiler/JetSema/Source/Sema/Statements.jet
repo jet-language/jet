@@ -4248,7 +4248,7 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
     // E0362 (Rust statements.rs `compound_nested_hook`): a compound operator
     // hook on a field below a nested owner has no operator-place lowering.
     if op != None && target == .Field(field_base, _, field_span) {
-        if sema_stmt_compound_nested_hook(op ?? BinOp.Add, field_base, place.ty, environment, program) {
+        if sema_stmt_compound_nested_hook(op, field_base, place.ty, environment, program) {
             &diagnostics.push(sema_error("E0362", field_span, "compound assignment can't target a nested operator field", "the current operator-place lowering supports one named owner and one field", "bind the inner value, update it, then assign the whole inner value back"))
             _ := sema_check_expression(expr, Val(place.ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             return None

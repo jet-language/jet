@@ -904,18 +904,23 @@ fn lower_environment_byte_payload(p: MIRProgram, m: &LowerModule, f: &LowerFunct
     lower_write_at(p, &f, target, 0, byte, elem)
     lower_each_end(&f, each, [LIRValueID]{})
     empty :: lower_flag(&f)
-    lower_emit(&f, LIRInst.Compare{dst: empty, condition: LIRCondition.Eq, left: length, right: lower_const(&f, 0)})
+    zero :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Compare{dst: empty, condition: LIRCondition.Eq, left: length, right: zero})
     release :: lower_new_block(&f)
     done :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: empty, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(release, [LIRValueID]{})})
     lower_start(&f, release, [LIRValueID]{})
-    lower_call_runtime(&m, &f, "jet_rt_free", [LIRValueID]{data, length, lower_const(&f, 1)}, None)
+    alignment :: lower_const(&f, 1)
+    lower_call_runtime(&m, &f, "jet_rt_free", [LIRValueID]{data, length, alignment}, None)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
     lower_start(&f, done, [LIRValueID]{})
 }
 
 fn lower_environment_status(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, route: LowerEnvironmentRoute, args: [LIRValueID], ty: MIRType) Never! {
-    if ty.kind != .Result(_, _) -> return lower_fail(&m, &f, "environment mutation requires Result")
+    if ty.kind == {
+        .Result(_, _) -> {}
+        else -> { return lower_fail(&m, &f, "environment mutation requires Result") }
+    }
     ok_ty :: if ty.kind == .Result(ok, _) -> ok else -> panic("checked Result")
     err_ty :: if ty.kind == .Result(_, err) -> err else -> panic("checked Result")
     expected :: if route.op == .Set -> LowerRepr.Absent else -> LowerRepr.Flag
@@ -939,7 +944,8 @@ fn lower_environment_status(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
     merge :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: success_flag, then_target: lower_target(success, [LIRValueID]{}), else_target: lower_target(failure, [LIRValueID]{})})
     lower_start(&f, success, [LIRValueID]{})
-    lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: lower_const(&f, lower_result_selector(true))})
+    success_selector :: lower_const(&f, lower_result_selector(true))
+    lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: success_selector})
     if route.op == .Remove {
         removed :: lower_flag(&f)
         lower_emit(&f, LIRInst.Compare{dst: removed, condition: LIRCondition.Ne, left: status, right: zero})
@@ -947,17 +953,21 @@ fn lower_environment_status(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
     }
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
     lower_start(&f, failure, [LIRValueID]{})
-    lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: lower_const(&f, lower_result_selector(false))})
+    failure_selector :: lower_const(&f, lower_result_selector(false))
+    lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: failure_selector})
     is_name :: lower_flag(&f)
-    lower_emit(&f, LIRInst.Compare{dst: is_name, condition: LIRCondition.Eq, left: status, right: lower_const(&f, -1)})
+    invalid_name_status :: lower_const(&f, -1)
+    lower_emit(&f, LIRInst.Compare{dst: is_name, condition: LIRCondition.Eq, left: status, right: invalid_name_status})
     name_block :: lower_new_block(&f)
     value_block :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: is_name, then_target: lower_target(name_block, [LIRValueID]{}), else_target: lower_target(value_block, [LIRValueID]{})})
     lower_start(&f, name_block, [LIRValueID]{})
-    lower_emit(&f, LIRInst.Store{base: box, offset: lower_result_payload_offset(), value: lower_const(&f, lower_discriminant(invalid_name.index))})
+    name_discriminant :: lower_const(&f, lower_discriminant(invalid_name.index))
+    lower_emit(&f, LIRInst.Store{base: box, offset: lower_result_payload_offset(), value: name_discriminant})
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
     lower_start(&f, value_block, [LIRValueID]{})
-    lower_emit(&f, LIRInst.Store{base: box, offset: lower_result_payload_offset(), value: lower_const(&f, lower_discriminant(invalid_value.index))})
+    value_discriminant :: lower_const(&f, lower_discriminant(invalid_value.index))
+    lower_emit(&f, LIRInst.Store{base: box, offset: lower_result_payload_offset(), value: value_discriminant})
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
     lower_start(&f, merge, [LIRValueID]{})
     if dst == None -> lower_map_drop_value(p, &m, &f, box, ty)

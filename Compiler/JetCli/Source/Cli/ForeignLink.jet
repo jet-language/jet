@@ -424,8 +424,11 @@ fn jet_cli_native_c_closure(program: MIRProgram, sources: JetCLIForeignSources, 
         }
     }
     // FFI.rs's inline C bridge: every selected `#FFI(c)` body, one archive.
-    bridge :: jet_cli_native_inline_c(program, cache) ?? return Err(err)
-    if bridge == .Val(archive) -> jet_cli_foreign_add(&inputs, archive) ?? return Err(err)
+    if jet_cli_native_inline_c(program, cache) == {
+        .Val(archive) -> { jet_cli_foreign_add(&inputs, archive) ?? return Err(err) }
+        .None -> {}
+        .Err(error) -> { return Err(error) }
+    }
     Ok(inputs)
 }
 
