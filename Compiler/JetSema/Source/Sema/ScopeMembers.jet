@@ -406,12 +406,14 @@ fn sema_scope_members_check_marker_body(marker: String, body: [Stmt], diagnostic
 // Rust `validate_member`: E0614 for a marker without members or a name outside
 // its vocabulary, E0616 for a `.setup` that is not the first statement.
 fn sema_scope_members_validate_member(marker: String, name: String, is_first: Bool, dot_span: Span, diagnostics: &[Diagnostic]) {
-    vocabulary_option :: sema_scope_members_vocabulary(marker)
-    if vocabulary_option == None {
-        &diagnostics.push(sema_error("E0614", dot_span, "`#{marker}` blocks have no members", "only some rule blocks declare a `.member {{ … }}` vocabulary; `#{marker}` isn't one of them", "remove this `.{name}` block"))
-        return
+    vocabulary := [String]{}
+    if sema_scope_members_vocabulary(marker) == {
+        .Val(found) -> vocabulary = found
+        else -> {
+            &diagnostics.push(sema_error("E0614", dot_span, "`#{marker}` blocks have no members", "only some rule blocks declare a `.member {{ … }}` vocabulary; `#{marker}` isn't one of them", "remove this `.{name}` block"))
+            return
+        }
     }
-    vocabulary :: vocabulary_option ?? return
     if !vocabulary.contains(name) {
         listed := ""
         loop (index, member) in vocabulary {
