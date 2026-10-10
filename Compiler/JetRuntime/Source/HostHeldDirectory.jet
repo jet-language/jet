@@ -379,6 +379,33 @@ fn fs_open_at(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, links
     if (state != I64{0}) -> jet_fd_drop_raw(state)
 }
 
+// FileStream.rs:311 -> FileHandles.rs:1079 jet_fs_link_fd_at_raw: link the
+// reader's open inode into the held directory with one AT_EMPTY_PATH linkat,
+// never reopening a source pathname. (available, held, retval, errno); an
+// unknown key is (true, false, 0, 0). Success reports errno 0, where the seed
+// reads a meaningless stale errno. Core/Jetpack classify errno (EXDEV etc.).
+#Export(c) fn jet_files_link_reader_at_raw(reader: I64, into: I64, name: I64, available: I64, held: I64, value: I64, errno: I64) {
+    key :: host_native_int(into)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    rt_text_put(available, I64{1})
+    state :: fs_held_state(key)
+    if (state == I64{0}) {
+        rt_text_put(held, I64{0})
+        rt_text_store(value, I64{0})
+        rt_text_store(errno, I64{0})
+        return
+    }
+    scratch :: jet_rt_alloc(I64{32}, I64{8})
+    jet_fd_link_at_raw(reader, state, name, scratch)
+    jet_fd_drop_raw(state)
+    failed :: rt_text_word(scratch) != I64{0}
+    code :: if failed -> rt_text_word(scratch + I64{8}) else -> I64{0}
+    jet_rt_free(scratch, I64{32}, I64{8})
+    rt_text_put(held, I64{1})
+    rt_text_store(value, jet_int_owned_from_i64(if failed -> I64{-1} else -> I64{0}))
+    rt_text_store(errno, jet_int_owned_from_i64(code))
+}
+
 // jet_fs_stat_at facts: a path (negative key, follow chooses stat/lstat),
 // the held directory itself (empty name), or an entry opened
 // O_PATH|O_NOFOLLOW|O_CLOEXEC without read access. Scratch184 lends
