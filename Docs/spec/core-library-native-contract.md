@@ -246,6 +246,9 @@ Core runtime source contracts use the ratified ownership and failure spellings:
 - SQL projection `field()` returns an owned `String?`; field traversal borrows
   projection payloads directly rather than allocating names for its callback.
   There is no live-reference `@String` return contract.
+- The Path `walk()` convenience wrapper supplies `None` for the canonical
+  filesystem walk's optional ignore-file argument, preserving an unfiltered
+  traversal rather than inventing a second walk policy.
 - Expiring-secret storage acquires its edit guard in the removal helper, moves
   the payload from that owned local, restores `None`, then drops the payload.
   Close consumes the storage owner, and live callbacks retain a read guard.
