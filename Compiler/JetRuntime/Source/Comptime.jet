@@ -11,8 +11,9 @@ comptime_root := I64{0}
 // runtime-init: 3
 #Export(c) fn jet_rt_comptime_init() {
     if (comptime_root != I64{0}) -> return
-    comptime_root = alloc_required_valid(I64{40}, I64{8})
-    thread_zero(comptime_root, I64{40})
+    comptime_root = alloc_required_valid(COMPTIME_ROOT_BYTES, I64{8})
+    thread_zero(comptime_root, COMPTIME_ROOT_BYTES)
+    sync_store(comptime_root + I64{40}, I64{1})
 }
 
 fn comptime_frame_reset() { thread_zero(thread_base() + I64{256}, I64{32}) }
@@ -295,10 +296,37 @@ fn comptime_stop_frame(record: I64, budget_site: Bool) -> I64 {
     owner :: sync_load(record + I64{16})
     start :: sync_load(record + I64{24})
     end :: sync_load(record + I64{32})
-    // Rust CAbi.rs:256-257 clones under the mutex, then channel_write may
-    // block without excluding other budget charges or the next request.
-    sync_mutex_unlock(comptime_root)
-    comptime_stop_frame_write(status, owner, start, end)
+    at = comptime_json_word(at, I64{2482157869759144492}, I64{8})
+    at = comptime_json_word(at, I64{58}, I64{1})
+    at = comptime_json_number(at, owner, if budget -> budget_site else -> owner != I64{-1})
+    at = comptime_json_word(at, I64{2482735057479082540}, I64{8})
+    at = comptime_json_word(at, I64{58}, I64{1})
+    at = comptime_json_number(at, start, if budget -> budget_site else -> start != I64{-1})
+    at = comptime_json_word(at, I64{16363363393413676}, I64{7})
+    at = comptime_json_number(at, end, if budget -> budget_site else -> end != I64{-1})
+    at = comptime_json_word(at, I64{7449362198107595308}, I64{8})
+    at = comptime_json_word(at, I64{574235237}, I64{4})
+    at = comptime_json_message(at, data, length)
+    at = comptime_json_word(at, I64{32034}, I64{2})
+    sync_store(frame, at - frame - I64{16})
+    frame
+}
+
+fn comptime_frame_write(frame: I64) {
+    length :: sync_load(frame)
+    capacity :: sync_load(frame + I64{8})
+    header :: frame + capacity - I64{32}
+    digits :: world_decimal(header, length)
+    trap_put(header + digits, I64{10})
+    // Flush the live Jet stdout stream before the private channel frame.
+    jet_rt_stdout_flush()
+    fd :: trap_syscall(I64{72}, I64{3}, I64{1030}, I64{0}, I64{0}, I64{0}, I64{0})
+    if (fd >= I64{0}) {
+        comptime_channel_write(fd, header, digits + I64{1})
+        comptime_channel_write(fd, frame + I64{16}, length)
+        _ := trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    jet_rt_free(frame, capacity, I64{8})
 }
 
 // Borrow actual stop metadata; Root consumption uses precisely this channel
@@ -336,8 +364,11 @@ fn comptime_stop_frame_write(status: I64, owner: I64, start: I64, end: I64) -> U
     header :: scratch + I64{160}
     digits :: world_decimal(header, at)
     trap_put(header + digits, I64{10})
-    // Flush the live Jet stdout stream before the private channel frame.
-    trap_flush_stdout()
+    // Core.rs:988-994 flushes program stdout before the private channel frame.
+    // This is the same active stdout flush used by every native process stop.
+    jet_rt_stdout_flush()
+    // fcntl F_DUPFD_CLOEXEC borrows the compiler worker's lifetime descriptor3;
+    // failed duplicate is ignored just like protocol_channel's Option in Rust.
     fd :: trap_syscall(I64{72}, I64{3}, I64{1030}, I64{0}, I64{0}, I64{0}, I64{0})
     if (fd >= I64{0}) {
         comptime_channel_write(fd, header, digits + I64{1})

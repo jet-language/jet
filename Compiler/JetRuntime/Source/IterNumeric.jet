@@ -15,8 +15,8 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
     hi := iter_unsigned(high)
     lo := low
     if negative {
-        lo = wrapping(!lo + U64{1})
-        hi = wrapping(!hi + (if (lo == U64{0}) -> U64{1} else -> U64{0}))
+        lo = wrapping(lo.bit_not() + U64{1})
+        hi = wrapping(hi.bit_not() + (if (lo == U64{0}) -> U64{1} else -> U64{0}))
     }
     if (hi == U64{0} && lo == U64{0}) { return Float{0.0} }
     exponent := I64{52}

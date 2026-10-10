@@ -63,6 +63,10 @@ const ordinary = Buffer.from("__jet_test_ordinary_failure__");
 source += `fn test_scope_ordinary(text: I64) -> Bool {\n    if (text == I64{0}) { return false }\n    if (trap_word(text + I64{8}) != I64{${ordinary.length}}) { return false }\n    data :: trap_word(text)\n`;
 for (let i = 0; i < ordinary.length; i++) source += `    if (trap_byte(data + I64{${i}}) != I64{${ordinary[i]}}) { return false }\n`;
 source += "    true\n}\n\n";
+const e3001 = Buffer.from("E3001");
+let e3001Word = 0n;
+for (let i = 0; i < e3001.length; i++) e3001Word |= BigInt(e3001[i]) << BigInt(8 * i);
+source += `fn test_scope_record_e3001(message: I64, length: I64) {\n    test_scope_record_raw_stop(I64{${e3001Word}}, I64{${e3001.length}}, message, length)\n}\n\n`;
 const target = resolve(root, "Compiler/JetRuntime/Source/TestMessages.jet");
 if (args.includes("--check")) {
   if (readFileSync(target, "utf8") !== source) throw new Error("TestMessages.jet is stale");

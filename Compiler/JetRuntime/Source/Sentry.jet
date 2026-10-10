@@ -41,9 +41,9 @@ fn sentry_save(save: I64) { coll_copy(thread_base() + I64{128}, save, I64{56}) }
 }
 #Export(c) fn jet_rt_sentry_scope_leave(save: I64) { coll_copy(save, thread_base() + I64{128}, I64{56}) }
 fn sentry_sequence() -> I64 {
-    next :: wrapping(sync_load(sentry_root + I64{32}) + I64{1})
-    sync_store(sentry_root + I64{32}, next)
-    next
+    sequence :: wrapping(sync_load(sentry_root + I64{32}) + I64{1})
+    sync_store(sentry_root + I64{32}, sequence)
+    sequence
 }
 fn sentry_stack() -> I64 {
     stack := sync_load(thread_base() + I64{184})
@@ -535,12 +535,10 @@ fn sentry_stop(fault: I64, component: I64, fenced: Bool) {
         return
     }
     if (domain == I64{2}) {
-        record :: scheduler_stop_new(I64{5}, report)
-        sync_store(record + I64{48}, I64{1})
-        _ := scheduler_panic_publish_record(record)
+        rt_task_panic_publish_owned(report, I64{1})
         return
     }
-    trap_flush_stdout()
+    jet_rt_stdout_flush()
     trap_write_handle(report)
     jet_rt_string_drop(report)
     trap_exit(SENTRY_RUNTIME_EXIT_CODE)

@@ -46,7 +46,8 @@ fn net_unix_connect_job_drop(job: I64) {
     // Duration's provider word is untagged nanoseconds (not an exact Int).
     milliseconds :: deadline / I64{1000000}
     if (milliseconds < I64{0}) -> return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("network timeout must be non-negative")), I64{0}, error)
-    if scheduler_world_refused() -> return I64{0}
+    jet_rt_world_reject_uncontrolled(I64{1})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     save :: jet_rt_alloc(I64{16}, I64{8})
     net_route_deadline_push(milliseconds, save)
     job :: jet_rt_alloc(I64{48}, I64{8})

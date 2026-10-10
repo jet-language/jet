@@ -632,6 +632,11 @@ fn observe_live_start(identity: I64, directory: I64) -> I64 {
     writer
 }
 
+// RuntimeLower resolves this checked function-address entry, never the body.
+fn rt_observe_writer_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
 // The periodic writer shares the same run lock and never publishes after
 // final publication until a resident host restarts the run.
 #Export(c) fn jet_rt_observe_writer(argument: I64) -> I64 {

@@ -5,7 +5,7 @@
 fn host_output_utf8(value: I64, length: I64) -> Bool {
     at := I64{0}
     loop at < length {
-        width :: rt_text_valid_width(wrapping(value + at), length - at)
+        width :: rt_text_valid_width(wrapping(value + at), length - at, I64{1})
         if (width < I64{0}) -> return false
         at = wrapping(at + width)
     }
@@ -47,7 +47,7 @@ fn host_output_unicode(value: I64) -> Bool {
     short_word := I64{0}
     #Unsafe("value borrows length immutable captured startup bytes; no pointer escapes") {
         loop at < length {
-            width :: rt_text_valid_width(wrapping(value + at), length - at)
+            width :: rt_text_valid_width(wrapping(value + at), length - at, I64{1})
             if (width < I64{0}) -> return true
             if (width == I64{1}) {
                 byte :: os_load_u8(wrapping(value + at))

@@ -80,11 +80,11 @@ fn host_environment_split(bytes: I64) -> I64 {
         loop index < valid {
             row :: wrapping(rows + index * I64{24})
             length :: os_load_i64(wrapping(row + I64{16}))
-            count :: wrapping(length + I64{1})
-            rt_text_bytes_copy(cursor, os_load_i64(row), count)
+            span :: wrapping(length + I64{1})
+            rt_text_bytes_copy(cursor, os_load_i64(row), span)
             os_store_i64(row, cursor)
             os_store_i64(wrapping(row + I64{16}), wrapping(os_load_i64(wrapping(row + I64{8})) + I64{1}))
-            cursor = wrapping(cursor + count)
+            cursor = wrapping(cursor + span)
             index = wrapping(index + I64{1})
         }
     }
@@ -237,7 +237,7 @@ fn rt_env_get(key: I64) -> I64 {
     length :: host_startup_byte_length(value)
     at := I64{0}
     loop at < length {
-        width :: rt_text_valid_width(wrapping(value + at), wrapping(length - at))
+        width :: rt_text_valid_width(wrapping(value + at), wrapping(length - at), I64{1})
         if (width < I64{0}) -> return I64{0}
         at = wrapping(at + width)
     }

@@ -110,7 +110,8 @@ fn net_resolver_job_drop(job: I64) {
             at = at + I64{1}
         }
     }
-    if scheduler_world_refused() -> return I64{0}
+    jet_rt_world_reject_uncontrolled(I64{1})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     wait_kind :: host_net_wait_kind()
     if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_deadline_check(wait_kind) != I64{0}) {
         jet_rt_string_drop(wait_kind)

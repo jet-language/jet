@@ -243,7 +243,7 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
     // Valid static text uses a single buffer allocation and no builder growth.
     at := I64{0}
     loop at < len {
-        width :: rt_text_valid_width(ptr + at, len - at)
+        width :: rt_text_valid_width(ptr + at, len - at, I64{1})
         if (width < I64{0}) { break }
         at += width
     }
@@ -265,7 +265,7 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
                 start :: at
                 at += width
                 loop at < len {
-                    next_width :: rt_text_valid_width(ptr + at, len - at)
+                    next_width :: rt_text_valid_width(ptr + at, len - at, I64{1})
                     if (next_width < I64{0}) { break }
                     at += next_width
                 }
@@ -505,7 +505,7 @@ fn rt_text_builder_with_capacity(cap: I64) -> I64 {
 #Export(c) fn jet_rt_string_builder_push_static(target: I64, ptr: I64, len: I64) {
     at := I64{0}
     loop at < len {
-        width :: rt_text_valid_width(ptr + at, len - at)
+        width :: rt_text_valid_width(ptr + at, len - at, I64{1})
         if (width < I64{0}) { break }
         at += width
     }

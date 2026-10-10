@@ -150,7 +150,8 @@ fn net_udp_send(value: I64, data: I64, length: I64, address: I64, output: I64, e
 }
 
 #Export(c) fn jet_net_udp_bind(address: I64, output: I64, error: I64) -> I64 {
-    if scheduler_world_refused() -> return I64{0}
+    jet_rt_world_reject_uncontrolled(I64{1})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     operation :: rt_static_text("udp bind")
     scratch :: jet_rt_alloc(I64{48}, I64{8})
     if (net_route_resolve_text(address, operation, scratch + I64{32}, scratch + I64{40}, error) == I64{0}) {

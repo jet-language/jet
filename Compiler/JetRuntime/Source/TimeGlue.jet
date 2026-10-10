@@ -65,19 +65,22 @@ fn time_glue_pad(target: I64, value: I64, width: I64) {
 #Export(c) fn jet_rt_record_get_jet_date_year(value: I64) -> I64 { time_glue_int(value, TIME_DATE_YEAR) }
 #Export(c) fn jet_rt_record_get_jet_date_month(value: I64) -> I64 { time_glue_int(value, TIME_DATE_MONTH) }
 #Export(c) fn jet_rt_record_get_jet_date_day(value: I64) -> I64 { time_glue_int(value, TIME_DATE_DAY) }
-#Export(c) fn jet_rt_handle_show_jet_date(value: I64) -> I64 {
+fn time_glue_push_date(target: I64, raw_year: I64, month: I64, day: I64) {
     // Time280-286/1760-1765: negative year uses saturating_abs then width4.
-    target :: jet_rt_string_builder_new()
-    year := time_glue_word(value + TIME_DATE_YEAR)
+    year := raw_year
     if (year < I64{0}) {
         rt_text_push_word(target, I64{45}, I64{1})
         year = if (year == I64{-9223372036854775808}) -> I64{9223372036854775807} else -> -year
     }
     time_glue_pad(target, year, I64{4})
     rt_text_push_word(target, I64{45}, I64{1})
-    time_glue_pad(target, time_glue_word(value + TIME_DATE_MONTH), I64{2})
+    time_glue_pad(target, month, I64{2})
     rt_text_push_word(target, I64{45}, I64{1})
-    time_glue_pad(target, time_glue_word(value + TIME_DATE_DAY), I64{2})
+    time_glue_pad(target, day, I64{2})
+}
+#Export(c) fn jet_rt_handle_show_jet_date(value: I64) -> I64 {
+    target :: jet_rt_string_builder_new()
+    time_glue_push_date(target, time_glue_word(value + TIME_DATE_YEAR), time_glue_word(value + TIME_DATE_MONTH), time_glue_word(value + TIME_DATE_DAY))
     jet_rt_string_builder_finish(target)
 }
 #Export(c) fn jet_rt_handle_display_jet_date(value: I64) -> I64 { jet_rt_handle_show_jet_date(value) }
@@ -126,19 +129,21 @@ fn time_glue_pad(target: I64, value: I64, width: I64) {
     time_glue_equal(left, right, TIME_LOCAL_NANOS) &&
         (time_glue_word(left + TIME_LOCAL_NANOS).bit_and(I64{4294967295})) == (time_glue_word(right + TIME_LOCAL_NANOS).bit_and(I64{4294967295}))
 }
-#Export(c) fn jet_rt_handle_show_jet_local_time(value: I64) -> I64 {
+fn time_glue_push_time(target: I64, hour: I64, minute: I64, second: I64, nanos: I64) {
     // Time472-480: nanos unsigned, zero omitted, otherwise minimum 9 digits.
-    target :: jet_rt_string_builder_new()
-    time_glue_pad(target, time_glue_word(value + TIME_LOCAL_HOUR), I64{2})
+    time_glue_pad(target, hour, I64{2})
     rt_text_push_word(target, I64{58}, I64{1})
-    time_glue_pad(target, time_glue_word(value + TIME_LOCAL_MINUTE), I64{2})
+    time_glue_pad(target, minute, I64{2})
     rt_text_push_word(target, I64{58}, I64{1})
-    time_glue_pad(target, time_glue_word(value + TIME_LOCAL_SECOND), I64{2})
-    nanos :: time_glue_word(value + TIME_LOCAL_NANOS).bit_and(I64{4294967295})
+    time_glue_pad(target, second, I64{2})
     if (nanos != I64{0}) {
         rt_text_push_word(target, I64{46}, I64{1})
         time_glue_pad(target, nanos, I64{9})
     }
+}
+#Export(c) fn jet_rt_handle_show_jet_local_time(value: I64) -> I64 {
+    target :: jet_rt_string_builder_new()
+    time_glue_push_time(target, time_glue_word(value + TIME_LOCAL_HOUR), time_glue_word(value + TIME_LOCAL_MINUTE), time_glue_word(value + TIME_LOCAL_SECOND), time_glue_word(value + TIME_LOCAL_NANOS).bit_and(I64{4294967295}))
     jet_rt_string_builder_finish(target)
 }
 #Export(c) fn jet_rt_handle_display_jet_local_time(value: I64) -> I64 { jet_rt_handle_show_jet_local_time(value) }

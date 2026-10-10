@@ -237,7 +237,8 @@ fn net_route_listen_one(address: I64, scratch: I64) -> I64 {
     state
 }
 #Export(c) fn jet_net_tcp_listen_addr(address: I64, output: I64, error: I64) -> I64 {
-    if scheduler_world_refused() -> return I64{0}
+    jet_rt_world_reject_uncontrolled(I64{1})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     scratch :: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(scratch, I64{32})
     state :: net_route_listen_one(address, scratch)
@@ -254,7 +255,8 @@ fn net_route_listen_one(address: I64, scratch: I64) -> I64 {
     I64{1}
 }
 #Export(c) fn jet_net_tcp_listen(address: I64, output: I64, error: I64) -> I64 {
-    if scheduler_world_refused() -> return I64{0}
+    jet_rt_world_reject_uncontrolled(I64{1})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     scratch :: jet_rt_alloc(I64{48}, I64{8})
     thread_zero(scratch, I64{48})
     operation :: rt_static_text("tcp listen")
@@ -284,7 +286,8 @@ fn net_route_listen_one(address: I64, scratch: I64) -> I64 {
     I64{1}
 }
 #Export(c) fn jet_net_tcp_accept(listener: I64, output: I64, error: I64) -> I64 {
-    if scheduler_world_refused() -> return I64{0}
+    jet_rt_world_reject_uncontrolled(I64{1})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     scratch :: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(scratch, I64{32})
     operation :: rt_static_text("tcp accept")
@@ -352,11 +355,13 @@ fn net_route_connect_one(address: I64, output: I64, error: I64) -> I64 {
     I64{1}
 }
 #Export(c) fn jet_net_tcp_connect_addr(address: I64, output: I64, error: I64) -> I64 {
-    if scheduler_world_refused() -> return I64{0}
+    jet_rt_world_reject_uncontrolled(I64{1})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     net_route_connect_one(address, output, error)
 }
 #Export(c) fn jet_net_tcp_connect_timeout(address: I64, milliseconds: I64, output: I64, error: I64) -> I64 {
-    if scheduler_world_refused() -> return I64{0}
+    jet_rt_world_reject_uncontrolled(I64{1})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     duration :: milliseconds
     operation :: rt_static_text("tcp connect")
     if (duration < I64{0}) {
@@ -373,7 +378,8 @@ fn net_route_connect_one(address: I64, output: I64, error: I64) -> I64 {
     result
 }
 #Export(c) fn jet_net_tcp_connect(address: I64, output: I64, error: I64) -> I64 {
-    if scheduler_world_refused() -> return I64{0}
+    jet_rt_world_reject_uncontrolled(I64{1})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     scratch :: jet_rt_alloc(I64{16}, I64{8})
     thread_zero(scratch, I64{16})
     operation :: rt_static_text("tcp connect")
@@ -613,7 +619,8 @@ fn net_route_happy_race(rows: I64, count: I64, output: I64, error: I64) -> I64 {
     result
 }
 #Export(c) fn jet_net_tcp_connect_happy(host: I64, port: I64, milliseconds: I64, output: I64, error: I64) -> I64 {
-    if scheduler_world_refused() -> return I64{0}
+    jet_rt_world_reject_uncontrolled(I64{1})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     operation :: rt_static_text("tcp connect")
     if (port < I64{0} || port > I64{65535}) {
         text :: jet_rt_string_builder_new()

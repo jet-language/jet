@@ -78,7 +78,7 @@ fn trap_write_word_raw(word: I64, count: I64) {
 
 fn rt_trap_invalid_box_layout() {
     trap_root_prepare()
-    trap_flush_stdout()
+    jet_rt_stdout_flush()
     trap_invalid_layout_head()
     trap_footer_e3001()
     jet_rt_process_exit_finish()
@@ -110,7 +110,7 @@ fn trap_defect_exit(status: I64) {
 // metadata is already initialized before Thread's bootstrap/attach stage; its
 // unbounded raw mutex/flush path has no TLS, allocation, or user callbacks.
 fn trap_gs_failure() {
-    trap_flush_stdout()
+    jet_rt_stdout_flush()
     trap_defect_unreachable_head()
     trap_defect_newline()
     loop { trap_defect_exit(I64{101}) }
@@ -151,7 +151,7 @@ fn trap_header(code: I64) {
     trap_header_bytes(code)
 }
 fn trap_header_bytes(code: I64) {
-    trap_flush_stdout()
+    jet_rt_stdout_flush()
     if {
         (code == I64{0}) -> trap_msg_header_panic()
         (code == I64{1}) -> trap_msg_header_numeric()
@@ -260,8 +260,9 @@ fn trap_build_context(report: I64, file: I64, file_len: I64, line: I64, function
     trap_build_msg_newline(report)
 }
 
+// Same task-domain gate as rt_task_panic_publish; a double panic aborts there.
 fn trap_can_publish() -> Bool {
-    scheduler_control_current() != I64{0} && (sync_load(thread_base() + I64{64}).bit_and(I64{2})) != I64{0} && !scheduler_cleanup_panic_fatal()
+    jet_rt_stop_domain() == I64{2} && scheduler_panic_check()
 }
 
 fn trap_publish_report(report: I64, raw_message: I64, raw_length: I64) {
@@ -411,7 +412,7 @@ fn trap_native_index_range_root() {
 // Rust's thread/source/backtrace panic-hook framing is host implementation
 // detail; retain the payload bytes and the host-fault exit class.
 fn trap_host_fault(message: I64, length: I64) {
-    trap_flush_stdout()
+    jet_rt_stdout_flush()
     trap_write(message, length)
     trap_msg_newline()
     trap_exit(I64{101})
@@ -421,7 +422,7 @@ fn trap_host_fault(message: I64, length: I64) {
 // prefix is not Jet semantics; preserve the unreachable! body and status 101.
 #Export(c) fn jet_rt_unreachable(reason: I64, length: I64) {
     trap_defect_prepare()
-    trap_flush_stdout()
+    jet_rt_stdout_flush()
     trap_msg_unreachable()
     trap_write(reason, length)
     trap_msg_newline()
@@ -432,7 +433,7 @@ fn trap_host_fault(message: I64, length: I64) {
 // Rust String panics under CAbi guard: body + newline, exit 101, not a Jet stop.
 fn rt_seq_capacity_overflow_stop() {
     trap_defect_prepare()
-    trap_flush_stdout()
+    jet_rt_stdout_flush()
     trap_write_word(I64{8751735851445150051}, I64{8})
     trap_write_word(I64{8028904877209317152}, I64{8})
     trap_write_word(I64{119}, I64{1})
@@ -445,7 +446,7 @@ fn rt_seq_capacity_overflow_stop() {
 // Keep the raw reason and the x64 unsigned index, including negative I64.
 fn rt_seq_index_oob_stop(length: I64, index: I64) {
     trap_defect_prepare()
-    trap_flush_stdout()
+    jet_rt_stdout_flush()
     alloc_write_word(I64{8462017926321696361}, I64{8})
     alloc_write_word(I64{8462090116149485684}, I64{8})
     alloc_write_word(I64{7307218077177046126}, I64{8})

@@ -1151,7 +1151,7 @@ fn scheduler_fatal(message: I64) {
 }
 
 fn scheduler_abort_double_panic() {
-    trap_flush_stdout()
+    jet_rt_stdout_flush()
     // Bypass a root's report capture: this is the terminal abort diagnostic.
     alloc_write_word(I64{7955925828069384560}, I64{8})
     alloc_write_word(I64{8247343696930955552}, I64{8})
@@ -1174,10 +1174,15 @@ fn rt_task_panic_publish(message: I64, length: I64, form: I64) -> Bool {
     text :: scheduler_text_new(length)
     if (text == I64{0} && jet_rt_session_propagate() != I64{0}) -> return true
     coll_copy(message, sync_load(text), length)
-    record :: scheduler_stop_new(I64{5}, text)
+    rt_task_panic_publish_owned(text, form)
+    true
+}
+// Takes an owned, already checked report (or builder): the same publication
+// rail as rt_task_panic_publish, without a second allocation/copy.
+fn rt_task_panic_publish_owned(message: I64, form: I64) {
+    record :: scheduler_stop_new(I64{5}, message)
     sync_store(record + I64{48}, form)
     _ := scheduler_panic_publish_record(record)
-    true
 }
 
 fn scheduler_thread_detach() {
