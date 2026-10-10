@@ -210,6 +210,9 @@ The format-specific item rules are these:
 (D-DATATREE-RULES1=A). The incremental JSON reader exposes the same lexical
 number event; typed decoding performs numeric conversion only at the read
 boundary, without rounding through binary64.
+JSON object-colon transitions move the existing top key frame into its next
+state before mutating the input cursor; they do not clone a key or grow the
+already-reserved frame storage to preserve its path.
 
 - A JSON writer writes `DataEvent.Bytes` as a standard padded base64 string and
   `DataEvent.DateTime` as its canonical RFC 3339 string, exactly as whole-value

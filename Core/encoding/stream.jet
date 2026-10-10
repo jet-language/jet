@@ -521,9 +521,17 @@ struct JSONPull {
                     self.frames[count - 1] = .ObjectColonValue{key: key.copy(), key_heap: U64{heap}}
                     return Ok(Val(DataEvent.Key(key)))
                 }
-                .ObjectColonValue(key, heap) -> {
+                .ObjectColonValue(_, heap) -> {
+                    // Retire and replace the top frame in its reserved slot:
+                    // the key moves once before mutating the input cursor.
+                    owned :: &self.frames.pop() ?? panic("matched JSON object frame")
+                    if ^owned == {
+                        .ObjectColonValue(key, _) -> {
+                            &self.frames.push(ReadFrame.ObjectCommaOrEnd{key: ^key, key_heap: heap})
+                        }
+                        else -> panic("matched JSON colon frame")
+                    }
                     &self.expect(U8{58}, "`:` after object key")
-                    self.frames[count - 1] = .ObjectCommaOrEnd{key: key, key_heap: heap}
                     event :: &self.parse_value()
                     return Ok(Val(event))
                 }
@@ -1794,5 +1802,25 @@ fn jsonl_writer(output: ^FileWriter, limits: EncodingLimits) -> JSONLinesPush En
             }
             else -> panic("JSON must reject byte carriers before output")
         }
+    }
+}
+
+#Test("JSON colon transitions move the top key frame before input mutation") {
+    frames := [ReadFrame]{ReadFrame.ObjectColonValue{key: "kept", key_heap: U64{4}}}
+    count :: frames.len()
+    owned :: &frames.pop() ?? panic("top frame")
+    if ^owned == {
+        .ObjectColonValue(key, heap) -> {
+            &frames.push(ReadFrame.ObjectCommaOrEnd{key: ^key, key_heap: heap})
+        }
+        else -> panic("colon frame")
+    }
+    assert_eq(frames.len(), count)
+    if frames[0] == {
+        .ObjectCommaOrEnd(key, heap) -> {
+            assert_eq(key, "kept")
+            assert_eq(heap, U64{4})
+        }
+        else -> panic("completed colon frame")
     }
 }
