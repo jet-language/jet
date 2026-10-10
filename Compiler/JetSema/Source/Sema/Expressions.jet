@@ -52,6 +52,7 @@ use jet_foundation.[
     UnitRatio,
     ast_comptime_value_type,
     ast_empty_call_arg_flags,
+    compute_shape_dimensions,
     core_call_typed_signature,
     core_module_export,
     core_source_owns_type,
@@ -3398,6 +3399,16 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     if op == BinOp.Div && lhs.ty == Type.Int && rhs.ty == Type.Int {
         value := sema_tir_expr(Type.Named{name: "Fraction"}, TExprKind.PreciseBuiltin{type_name: "Fraction", function: "from_parts", args: [TExpr]{lhs, rhs}}, span)
         return sema_expr_expected(value, expected, environment, program, &diagnostics)
+    }
+    // D-TYPE2-MEASURE1=A (Rust `infer_binary`, E2512): `Matrix * Matrix`
+    // matches the left column measure against the right row measure.
+    if op == BinOp.Mul && lhs.ty == .Apply(left_head, _) && rhs.ty == .Apply(right_head, _) && left_head == "Matrix" && right_head == "Matrix" {
+        left_shape :: compute_shape_dimensions(lhs.ty) ?? [Int]{}
+        right_shape :: compute_shape_dimensions(rhs.ty) ?? [Int]{}
+        if left_shape.len() == 2 && right_shape.len() == 2 && left_shape[1] != right_shape[0] {
+            &diagnostics.push(sema_error("E2512", span, "matrix multiplication needs equal inner sides, but these are {left_shape[1]} and {right_shape[0]}", "the left column measure must match the right row measure", "use `Matrix<{left_shape[0]}, {left_shape[1]}> * Matrix<{left_shape[1]}, {right_shape[1]}>`"))
+            return None
+        }
     }
     if (sema_expr_measurement_type(lhs.ty) || sema_expr_measurement_type(rhs.ty)) && (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div) {
         measured_type :: Type.Apply{name: "Measurement", args: [Type]{Type.Float}}

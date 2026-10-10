@@ -503,6 +503,12 @@ fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, gener
     if ty == {
         .Named(name) -> {
             if name == "Any" -> &diagnostics.push(sema_no_any_type(span))
+            // D-LAYOUT-CTOR1 (Rust `layout_handle_renamed_to_layout`): the
+            // retired `LayoutHandle` spelling points at `Layout`.
+            if name == "LayoutHandle" {
+                &diagnostics.push(sema_error("E2936", span, "the constraint-layout type is named `Layout`, not `LayoutHandle`", "`Layout` is the solver/container value constructed by `name :: Layout.{{ … }}`", "write `Layout` instead of `LayoutHandle`"))
+                return
+            }
             if name == "Never" && !in_return -> &diagnostics.push(sema_error("E2422", span, "`Never` cannot be used in a value position.", "`Never` has no values; only a function return slot or function-type return slot may promise it (D-NEVER2=B).", "Move `Never` to a function return type, or use `()`/another value type."))
             // Compiler-owned IO enum/record rows have no public annotation origin.
             // Reuse the Core-only literal origin gate; user declarations stay E0119.
