@@ -9,11 +9,11 @@ use jet_eval.jet_eval_build_failed_value
 
 struct JetDriverBuildAdapter {
     session: BuildSession
-    http_inputs: JetDriverBuildHTTPInputs?
+    http_inputs: JetDriverSharedBuildHTTPInputs?
     network_declared: Bool
     // The host's raw build-input transport and the build file's canonical
     // directory, which `b.find`, `b.embed` and `b.fetch` paths are relative to.
-    inputs: JetDriverBuildInputs?
+    inputs: JetDriverSharedBuildInputs?
     base_dir: String
 }
 
@@ -42,7 +42,7 @@ fn jet_driver_build_impure(machine: JetEvalMachine) -> Bool Never! {
     }
     false
 }
-fn jet_driver_build_host_call(session: &BuildSession, inputs: JetDriverBuildInputs?, http_inputs: JetDriverBuildHTTPInputs?, network_declared: Bool, base_dir: String, machine: &JetEvalMachine, target: JetEvalHostCallTarget, args: [JetEvalHostArgument], span: Span) -[FS.Read, Net, Time.Wait]> JetEvalHostResult? {
+fn jet_driver_build_host_call(session: &BuildSession, inputs: JetDriverSharedBuildInputs?, http_inputs: JetDriverSharedBuildHTTPInputs?, network_declared: Bool, base_dir: String, machine: &JetEvalMachine, target: JetEvalHostCallTarget, args: [JetEvalHostArgument], span: Span) -[FS.Read, Net, Time.Wait]> JetEvalHostResult? {
     if target == .Prelude(row) {
         if row.module_name != "core.host" -> return None
         if row.member == "BuildPlan.graph" {
@@ -119,7 +119,7 @@ fn jet_driver_build_input_text(args: [BuildSessionValue], index: Int) -> String?
 // (runtime_bridge.rs `eval_program_build_input_method`), answered over the
 // host's raw transport. A host without one, and the plugin and legacy
 // importer services, keep the request: the caller refuses it.
-fn jet_driver_build_input_reply(inputs: JetDriverBuildInputs?, http_inputs: JetDriverBuildHTTPInputs?, network_declared: Bool, base_dir: String, method: String, args: [BuildSessionValue], span: Span) -[FS.Read, Net, Time.Wait]> BuildSessionReply {
+fn jet_driver_build_input_reply(inputs: JetDriverSharedBuildInputs?, http_inputs: JetDriverSharedBuildHTTPInputs?, network_declared: Bool, base_dir: String, method: String, args: [BuildSessionValue], span: Span) -[FS.Read, Net, Time.Wait]> BuildSessionReply {
     if method == "fetch" -> return jet_driver_build_fetch(inputs, http_inputs, network_declared, base_dir, args, span)
     host :: inputs ?? return BuildSessionReply.HostRequest{method: method.copy(), args: args.copy()}
     if method == {
@@ -153,7 +153,7 @@ fn jet_driver_build_within(path: String, root: String) -> Bool Never! {
 
 // dispatch.rs `checked_embed_path`: `relative` under `root`, every link
 // followed, still inside the real root. `None` when it names nothing.
-fn jet_driver_build_checked_path(host: JetDriverBuildInputs, root: String, relative: String) -[FS.Read]> JetDriverBuildPath? JetDriverBuildInputError! {
+fn jet_driver_build_checked_path(host: JetDriverSharedBuildInputs, root: String, relative: String) -[FS.Read]> JetDriverBuildPath? JetDriverBuildInputError! {
     real_root :: host.resolve(root) ?? return Err(err)
     if !real_root.exists -> return Err(JetDriverBuildInputError{message: JET_DRIVER_BUILD_NOT_FOUND})
     real :: host.resolve(jet_driver_build_join(real_root.path, relative)) ?? return Err(err)
@@ -226,7 +226,7 @@ fn jet_driver_build_glob_match(pattern: [String], pi: Int, path: [String], qi: I
 }
 
 // dispatch.rs `walk_find`: entries in name order, never through a link.
-fn jet_driver_build_walk(host: JetDriverBuildInputs, directory: String, logical: String, pattern: [String], depth: Int, max_depth: Int, out: &[String]) -[FS.Read]> String? {
+fn jet_driver_build_walk(host: JetDriverSharedBuildInputs, directory: String, logical: String, pattern: [String], depth: Int, max_depth: Int, out: &[String]) -[FS.Read]> String? {
     entries := host.entries(directory) ?? return Val(err.message)
     &entries.sort_by((left: JetDriverBuildEntry, right: JetDriverBuildEntry) -> left.name <=> right.name)
     loop entry in entries {
@@ -254,7 +254,7 @@ fn jet_driver_build_find_path_problem(glob: String, span: Span) -> BuildSessionR
 // runtime_bridge.rs `b.find` -> dispatch.rs `eval_locked_find`/`find_glob`:
 // the sorted relative files the glob matches below the build file's
 // directory, each one readable within the tree-file bound.
-fn jet_driver_build_find(host: JetDriverBuildInputs, base_dir: String, args: [BuildSessionValue], span: Span) -[FS.Read]> BuildSessionReply {
+fn jet_driver_build_find(host: JetDriverSharedBuildInputs, base_dir: String, args: [BuildSessionValue], span: Span) -[FS.Read]> BuildSessionReply {
     if args.len() != 1 -> return jet_driver_build_input_fail("E3502", "build plan is invalid: `b.find` requires exactly one glob", "`fn build` must return one deterministic typed graph whose handles all belong to that build", "fix the named target/action/toolchain/probe and run `jet inspect explain-build` to inspect the graph", span)
     raw :: jet_driver_build_input_text(args, 0) ?? return jet_driver_build_input_fail("E0957", "`find` glob must be a string literal", "a computed glob can't be audited at build time, so the compiler can't tell which file it reads", "pass the glob inline, e.g. `find(\"content/**/*.jet\")`", span)
     glob :: raw.replace("\\", "/")
@@ -301,7 +301,7 @@ fn jet_driver_build_find(host: JetDriverBuildInputs, base_dir: String, args: [Bu
 
 // runtime_bridge.rs `b.embed` -> dispatch.rs `eval_build_embed`: one locked
 // relative UTF-8 file below the build file's directory.
-fn jet_driver_build_embed(host: JetDriverBuildInputs, base_dir: String, args: [BuildSessionValue], span: Span) -[FS.Read]> BuildSessionReply {
+fn jet_driver_build_embed(host: JetDriverSharedBuildInputs, base_dir: String, args: [BuildSessionValue], span: Span) -[FS.Read]> BuildSessionReply {
     relative :: jet_driver_build_input_text(args, 0) ?? return jet_driver_build_input_fail("E0956", "``b.embed` requires a path string` isn't supported by the current evaluator yet", "The canonical TIR evaluator doesn't cover this construct yet", "Report this unsupported construct as a compiler bug", span)
     escapes := args.len() != 1 || relative.starts_with("/")
     loop part in relative.split("/") {
@@ -379,7 +379,7 @@ fn jet_driver_build_http_error(url: String, detail: String, span: Span) -> Build
 // The raw transport never follows Location, interprets status codes, chooses
 // bounds/timeouts, verifies a digest or decodes text. Any status's original
 // body is a pinned input, exactly like the reference's redirect-free fetch.
-fn jet_driver_build_fetch(inputs: JetDriverBuildInputs?, http_inputs: JetDriverBuildHTTPInputs?, network_declared: Bool, base_dir: String, args: [BuildSessionValue], span: Span) -[FS.Read, Net, Time.Wait]> BuildSessionReply {
+fn jet_driver_build_fetch(inputs: JetDriverSharedBuildInputs?, http_inputs: JetDriverSharedBuildHTTPInputs?, network_declared: Bool, base_dir: String, args: [BuildSessionValue], span: Span) -[FS.Read, Net, Time.Wait]> BuildSessionReply {
     url :: jet_driver_build_input_text(args, 0) ?? return jet_driver_build_input_fail("E3414", "fetch: first argument must be a string URL", "`core.net.fetch` expects a string URL as its first argument", "pass a string literal: `net.fetch('https://example.com/data.txt', sha256: '…')`", span)
     expected :: jet_driver_build_input_text(args, 1) ?? return jet_driver_build_input_fail("E3414", "fetch: `sha256:` argument missing or not a string", "`core.net.fetch` requires a `sha256:` labelled argument for content verification", "add `sha256: '<64-hex-chars>'` as the second argument", span)
     bytes := [U8]{}

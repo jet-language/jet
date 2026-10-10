@@ -78,8 +78,10 @@ fn jet_cli_build_query_failure(request: JetDriverCompileRequest, query: JetDrive
     report :: if json -> jet_cli_reports_status_json("diagnostics", false, jet_cli_report_cwd(), file, source, shown) else -> jet_driver_report_problems(file, source, shown, color, verbose)
     return {stdout: if json -> report else -> "", stderr: if json -> "" else -> report, exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
-fn jet_cli_build_host(request: JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, subject: String?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
-    query :: jet_driver_query_build_plan(request, &scope)
+fn jet_cli_build_host(owned_request: ^JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, subject: String?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
+    response := jet_driver_query_build_plan(^owned_request, &scope)
+    request := ^response.request
+    query := ^response.query
     if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(request, query, file, json, color, verbose)
     vector := if json -> "[]" else -> ""
     if query.plan == .Val(_) && subject == None {
@@ -203,8 +205,10 @@ fn jet_cli_build_nodes_report(record: BuildRecord, json: Bool) -> String Never! 
 // The store-owning host resolves the canonical program and supplies the
 // authenticated last record. Missing evidence follows the existing gap path;
 // the Rust static zero-duration/first-run fallback is not execution evidence.
-fn jet_cli_build_nodes_host(request: JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, program: String, record: BuildRecord?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
-    query :: jet_driver_query_build_plan(request, &scope)
+fn jet_cli_build_nodes_host(owned_request: ^JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, program: String, record: BuildRecord?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
+    response := jet_driver_query_build_plan(^owned_request, &scope)
+    request := ^response.request
+    query := ^response.query
     if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(request, query, file, json, color, verbose)
     retained :: record ?? return jet_cli_execute(jet_cli_inspect_b_report("E2104", "build execution-node evidence is unavailable", jet_cli_why("E2104"), "run the selected build with a runtime that records authenticated build-node receipts", color, json, JET_DRIVER_EXIT_USER_ERROR))
     if retained.program != program -> return jet_cli_execute(jet_cli_inspect_b_report("E2104", "build execution-node evidence belongs to another program", jet_cli_why("E2104"), "select the authenticated last-build record for this program", color, json, JET_DRIVER_EXIT_USER_ERROR))

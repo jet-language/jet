@@ -4640,7 +4640,7 @@ fn jet_driver_checked_projection(request: ^JetDriverCompileRequest) -> JetDriver
     capture := JetDriverCheckedProjectionCapture{}
     kg := jet_driver_keep_going_log(None)
     journal := canonical_pass_journal(CanonicalPassOptions{adapter_mode: request.adapter_mode, operation_ids: request.adapter_operation_ids})
-    compile := jet_driver_compile_stages(^request, &kg, false, true, &capture, &journal)
+    compile := jet_driver_compile_stages(request, &kg, false, true, &capture, &journal)
     compile.canonical_routes = canonical_pass_take(&journal)
     if !compile.complete {
         capture.source_modules = [Int]{}
@@ -4653,7 +4653,7 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
     kg := jet_driver_keep_going_log(None)
     capture := JetDriverCheckedProjectionCapture{}
     journal := canonical_pass_journal(CanonicalPassOptions{adapter_mode: request.adapter_mode, operation_ids: request.adapter_operation_ids})
-    result := jet_driver_compile_stages(^request, &kg, true, false, &capture, &journal)
+    result := jet_driver_compile_stages(request, &kg, true, false, &capture, &journal)
     result.canonical_routes = canonical_pass_take(&journal)
     result
 }
@@ -4662,11 +4662,54 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
 // a prerequisite for this feed; the checked front-end/optimizer stages and
 // their diagnostics are identical to the ordinary compile path.
 fn jet_driver_compile_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
+    jet_driver_compile_mir_borrowed(request)
+}
+
+// One ordinary MIR pipeline, borrowed by staged build queries. The owned
+// command entry above still retires its invocation request on completion.
+fn jet_driver_compile_mir_borrowed(request: JetDriverCompileRequest) -> JetDriverCompileResult {
     kg := jet_driver_keep_going_log(None)
     capture := JetDriverCheckedProjectionCapture{}
     journal := canonical_pass_journal(CanonicalPassOptions{adapter_mode: request.adapter_mode, operation_ids: request.adapter_operation_ids})
-    result := jet_driver_compile_stages(^request, &kg, false, false, &capture, &journal)
+    result := jet_driver_compile_stages(request, &kg, false, false, &capture, &journal)
     result.canonical_routes = canonical_pass_take(&journal)
+    result
+}
+
+struct JetDriverCompileSelectionRestore {
+    mode: JetDriverCompileMode
+    capture_build_program: Bool
+    capture_build_nodes: Bool
+    entry_path: String?
+    selected_entry: String?
+    restore_selected_entry: Bool
+}
+fn jet_driver_compile_selection_restore(request: &JetDriverCompileRequest, saved: ^JetDriverCompileSelectionRestore) Never! {
+    request.mode = saved.mode
+    request.capture_build_program = saved.capture_build_program
+    request.capture_build_nodes = saved.capture_build_nodes
+    if ^saved.entry_path == .Val(path) -> request.authorized_sources.entry_path = ^path
+    if saved.restore_selected_entry -> request.selected_entry = ^saved.selected_entry
+}
+fn jet_driver_compile_mir_selection(request: &JetDriverCompileRequest, mode: JetDriverCompileMode, entry_path: ^String?, selected_entry: ^String?, capture_build_program: Bool, capture_build_nodes: Bool) -> JetDriverCompileResult {
+    saved := JetDriverCompileSelectionRestore{mode: request.mode, capture_build_program: request.capture_build_program, capture_build_nodes: request.capture_build_nodes, entry_path: None, selected_entry: None, restore_selected_entry: false}
+    if ^entry_path == .Val(path) {
+        saved.entry_path = Val(request.authorized_sources.entry_path.copy())
+        request.authorized_sources.entry_path = ^path
+    }
+    if ^selected_entry == .Val(name) {
+        saved.selected_entry = request.selected_entry.copy()
+        saved.restore_selected_entry = true
+        request.selected_entry = Val(^name)
+    }
+    request.mode = mode
+    request.capture_build_program = capture_build_program
+    request.capture_build_nodes = capture_build_nodes
+    result := jet_driver_compile_mir_borrowed(request) ?? {
+        jet_driver_compile_selection_restore(&request, ^saved)
+        return Err(err)
+    }
+    jet_driver_compile_selection_restore(&request, ^saved)
     result
 }
 
@@ -4685,7 +4728,7 @@ fn jet_driver_compile_core_library_mir(owned_request: ^JetDriverCompileRequest) 
     if request.trace_sink == .Val(sink) -> sink.begin("load", "", -1, -1)
     load := jet_driver_load_core_library(request)
     if request.trace_sink == .Val(sink) -> sink.end("load", load.modules.len())
-    result := jet_driver_compile_loaded_stages(^request, &kg, false, ^load, false, &capture, &journal)
+    result := jet_driver_compile_loaded_stages(request, &kg, false, ^load, false, &capture, &journal)
     result.canonical_routes = canonical_pass_take(&journal)
     result
 }
@@ -4700,7 +4743,7 @@ fn jet_driver_compile_keep_going(request: ^JetDriverCompileRequest, options: Jet
     kg := jet_driver_keep_going_log(Val(options))
     capture := JetDriverCheckedProjectionCapture{}
     journal := canonical_pass_journal(CanonicalPassOptions{adapter_mode: request.adapter_mode, operation_ids: request.adapter_operation_ids})
-    result := jet_driver_compile_stages(^request, &kg, emit_rust, false, &capture, &journal)
+    result := jet_driver_compile_stages(request, &kg, emit_rust, false, &capture, &journal)
     result.canonical_routes = canonical_pass_take(&journal)
     if result.internal_problem == .Val(problem) -> jet_driver_keep_going_row(&kg, "internal", "-", "ICE", problem, "-")
     // Reports of a stage that returned early; recorded rows are not repeated.
@@ -4710,18 +4753,18 @@ fn jet_driver_compile_keep_going(request: ^JetDriverCompileRequest, options: Jet
     result
 }
 
-fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKeepGoingLog, emit_rust: Bool, checked_projection: Bool, capture: &JetDriverCheckedProjectionCapture, journal: &CanonicalPassJournal) -> JetDriverCompileResult {
+fn jet_driver_compile_stages(request: JetDriverCompileRequest, kg: &JetDriverKeepGoingLog, emit_rust: Bool, checked_projection: Bool, capture: &JetDriverCheckedProjectionCapture, journal: &CanonicalPassJournal) -> JetDriverCompileResult {
     // Phase spans for the host trace (JET_TRACE_FILE). A phase an early
     // return abandons is closed by the next enclosing end the host records.
     if request.trace_sink == .Val(sink) -> sink.begin("load", "", -1, -1)
     load := jet_driver_load(request)
     if request.trace_sink == .Val(sink) -> sink.end("load", load.modules.len())
-    jet_driver_compile_loaded_stages(^request, &kg, emit_rust, ^load, checked_projection, &capture, &journal)
+    jet_driver_compile_loaded_stages(request, &kg, emit_rust, ^load, checked_projection, &capture, &journal)
 }
 
 // Loading is shared by executable requests and compiler-owned library graphs;
 // both consume the identical checked front-end, TIR and MIR stages below.
-fn jet_driver_compile_loaded_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKeepGoingLog, emit_rust: Bool, owned_load: ^JetDriverLoadResult, checked_projection: Bool, capture: &JetDriverCheckedProjectionCapture, journal: &CanonicalPassJournal) -> JetDriverCompileResult {
+fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDriverKeepGoingLog, emit_rust: Bool, owned_load: ^JetDriverLoadResult, checked_projection: Bool, capture: &JetDriverCheckedProjectionCapture, journal: &CanonicalPassJournal) -> JetDriverCompileResult {
     load := ^owned_load
     trace := jet_driver_empty_compile_trace()
     if !load.complete {

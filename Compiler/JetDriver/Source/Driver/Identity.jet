@@ -241,8 +241,8 @@ struct JetDriverCompileRequest {
     capture_cost_report: Bool{false}
     generated_modules: [JetDriverGeneratedModule]{[JetDriverGeneratedModule]{}}
     // Raw transports remain distinct from ordinary comptime IO.
-    build_inputs: JetDriverBuildInputs?{None}
-    build_http_inputs: JetDriverBuildHTTPInputs?{None}
+    build_inputs: JetDriverSharedBuildInputs?{None}
+    build_http_inputs: JetDriverSharedBuildHTTPInputs?{None}
     execution_host: JetDriverExecutionHost?{None}
     // Unified host/stop contract (#4720): the comptime lowering session
     // produces MIR stop points (Poll/Stopped and the budget can-stop rows)
@@ -322,6 +322,47 @@ struct JetDriverBuildHTTPError {
 trait JetDriverBuildHTTPInputs {
     fn resolve(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] JetDriverBuildHTTPError!
     fn get(self, url: String, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> JetDriverBuildHTTPResponse JetDriverBuildHTTPError!
+}
+
+// The invocation owns each raw transport once. Adapter clones share that
+// same authority cell; they never duplicate or mint a raw host trait value.
+struct JetDriverBuildInputsStorage { transport: JetDriverBuildInputs }
+struct JetDriverSharedBuildInputs {
+    storage: Shared<JetDriverBuildInputsStorage>
+    fn resolve(self, path: String) -[FS.Read]> JetDriverBuildPath JetDriverBuildInputError! {
+        permit :: self.storage.guard_read()
+        permit.value.transport.resolve(path)
+    }
+    fn entries(self, directory: String) -[FS.Read]> [JetDriverBuildEntry] JetDriverBuildInputError! {
+        permit :: self.storage.guard_read()
+        permit.value.transport.entries(directory)
+    }
+    fn read(self, path: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError! {
+        permit :: self.storage.guard_read()
+        permit.value.transport.read(path, limit)
+    }
+    fn read_rooted(self, root: String, relative: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError! {
+        permit :: self.storage.guard_read()
+        permit.value.transport.read_rooted(root, relative, limit)
+    }
+}
+fn jet_driver_shared_build_inputs(transport: ^JetDriverBuildInputs) -> JetDriverSharedBuildInputs Never! {
+    JetDriverSharedBuildInputs{storage: shared JetDriverBuildInputsStorage{transport: ^transport}}
+}
+struct JetDriverBuildHTTPInputsStorage { transport: JetDriverBuildHTTPInputs }
+struct JetDriverSharedBuildHTTPInputs {
+    storage: Shared<JetDriverBuildHTTPInputsStorage>
+    fn resolve(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] JetDriverBuildHTTPError! {
+        permit :: self.storage.guard_read()
+        permit.value.transport.resolve(host, port)
+    }
+    fn get(self, url: String, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> JetDriverBuildHTTPResponse JetDriverBuildHTTPError! {
+        permit :: self.storage.guard_read()
+        permit.value.transport.get(url, addresses, port, timeout_ms, limit)
+    }
+}
+fn jet_driver_shared_build_http_inputs(transport: ^JetDriverBuildHTTPInputs) -> JetDriverSharedBuildHTTPInputs Never! {
+    JetDriverSharedBuildHTTPInputs{storage: shared JetDriverBuildHTTPInputsStorage{transport: ^transport}}
 }
 struct JetDriverBuildHTTPResponse {
     status: Int

@@ -1426,7 +1426,7 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
 
 fn jet_cli_inspect_checked_build_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     prepared :: jet_cli_prepare_overlays(job.file, job.file, [JetCLIOverlay]{}, job.color, job.threads, JetDriverCompileMode.Doc)
-    if prepared == {
+    if ^prepared == {
         .Refused(output) -> return output
         .Prepared(request, _) -> {
             // The checked build scope belongs to this invocation, not a CLI cache or
@@ -1446,9 +1446,9 @@ fn jet_cli_inspect_checked_build_host(job: JetCLIInspectJob) -> JetDriverVerbOut
                     .None -> None
                     .Err(error) -> { return jet_cli_execute(jet_cli_inspect_b_report("E2104", "can't read authenticated build execution-node evidence", "{error}", "check the selected workspace last-run pointer and artifact store", job.color, job.json, JET_DRIVER_EXIT_USER_ERROR)) }
                 }
-                return jet_cli_build_nodes_host(request, &scope, job.file, program, record, job.json, job.color, job.verbose)
+                return jet_cli_build_nodes_host(^request, &scope, job.file, program, record, job.json, job.color, job.verbose)
             }
-            return jet_cli_build_host(request, &scope, job.file, job.subject, job.json, job.color, job.verbose)
+            return jet_cli_build_host(^request, &scope, job.file, job.subject, job.json, job.color, job.verbose)
         }
     }
 }

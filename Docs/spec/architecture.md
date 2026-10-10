@@ -495,6 +495,18 @@ enables it. The focused
 checks that new request fields have both an emitted initializer row and its
 metadata binding before the generated producer is built.
 
+Build-plan queries move their invocation request into one query and return that
+same owner beside the query facts. Staged MIR checks borrow it; only the small
+entry/selection strings and scalar capture settings are saved and restored,
+including on an escaped stage error. The final checked bundle removes only the
+generated-source and output-selection metadata temporarily added by that query.
+It does not duplicate the authorized source tree, evaluator or execution host.
+Raw filesystem and HTTP build transports live in invocation-scoped `Shared`
+cells. Adapter clones copy those cell handles, retaining the original provider
+and its authority rather than duplicating an opaque trait value. Each call
+borrows the provider under its cell's read guard and keeps the existing exact
+effect row, destination checks and explicit missing-provider refusals.
+
 The table describes crossing responsibilities, not a list of completed ports.
 Its source links own the executable contracts. The proof-home references are
 Tower acceptance boundaries, not evidence supplied by this inventory.

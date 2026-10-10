@@ -85,7 +85,10 @@ fn run() {
     inspect_build_require(jet_cli_build_nodes_report(record, false) == "check\tkey\tmain\t0.188\tsource-changed\tmain.jet\n", "real node fields human")
     inspect_build_require(jet_cli_build_nodes_report(record, true) == "{{\"schema\":\"jet.explain-build/v1\",\"program\":\"main\",\"nodes\":[{{\"kind\":\"check\",\"key\":\"key\",\"subject\":\"main\",\"duration_ms\":0.188,\"why_ran\":\"source-changed\",\"inputs\":[\"main.jet\"]}}]}}\n", "node schema does not invent fields")
     scope := JetDriverBuildQueryScope{}
-    static_query :: jet_driver_query_build_nodes(inspect_build_request(), &scope)
+    static_response := jet_driver_query_build_nodes(inspect_build_request(), &scope)
+    static_request := ^static_response.request
+    static_query := ^static_response.query
+    inspect_build_require(static_request.authorized_sources.entry_path == "/inspect-build/main.jet" && static_request.mode == JetDriverCompileMode.Doc && !static_request.capture_build_program && !static_request.capture_build_nodes, "no-build query returns its unchanged invocation request")
     inspect_build_require(static_query.complete && static_query.plan == None && static_query.nodes.len() == 3, "no-build final checked bundle supplies nodes separately")
     inspect_build_node(static_query.nodes[0], "check", "main.jet", "e05c67e9bab9aa34ca3456b464c3adbe3b66f767085eb68b85663f8b70695957", [String]{"main.jet"})
     inspect_build_require(static_query.nodes[0].input_digests == [BuildGraphInputDigest]{{name: "main.jet", digest: "bfd8d52e2180ce4c2deb1b7c346891d3c77bbbd3a22df0fd8abfe0096e485095"}}, "exact checked bytes")
@@ -106,7 +109,11 @@ fn run() {
     inspect_build_require(jet_cli_build_compile_observation(static_query.nodes[1], build_math.from_bits(9221120237041090560), None, object) == .Err(_), "non-finite measured duration cannot become a fake zero")
     planned := inspect_build_request()
     planned.authorized_sources.roots[0].files[0].source = "fn build(b: BuildContext) -> BuildPlan {{ return b.plan() }}\nfn run() {{}}"
-    planned_query :: jet_driver_query_build_nodes(planned, &scope)
+    planned_response := jet_driver_query_build_nodes(^planned, &scope)
+    planned_request := ^planned_response.request
+    planned_query := ^planned_response.query
+    inspect_build_require(planned_request.authorized_sources.entry_path == "/inspect-build/main.jet" && planned_request.selected_entry == None && planned_request.mode == JetDriverCompileMode.Doc && !planned_request.capture_build_program && !planned_request.capture_build_nodes, "build staging restores entry and selection before returning the invocation")
+    inspect_build_require(planned_request.generated_modules.len() == 0 && planned_request.build_output_names.len() == 0, "final checked bundle leaves no temporary generated sources or output overrides in the request")
     inspect_build_require(planned_query.complete && planned_query.generated.len() == 0 && planned_query.nodes.len() == 3, "zero-generated plan still checks the final ordinary bundle")
     planned_graph :: planned_query.graph ?? panic("checked plan lost graph")
     planned_plan :: planned_query.plan ?? panic("checked plan lost plan")
@@ -115,7 +122,8 @@ fn run() {
     moved.authorized_sources.roots[0].canonical_path = "/relocated-build"
     moved.authorized_sources.roots[0].files[0].path = "/relocated-build/main.jet"
     moved.authorized_sources.entry_path = "/relocated-build/main.jet"
-    moved_query :: jet_driver_query_build_nodes(moved, &scope)
+    moved_response := jet_driver_query_build_nodes(^moved, &scope)
+    moved_query := ^moved_response.query
     inspect_build_require(moved_query.complete && moved_query.nodes == static_query.nodes, "checkout relocation preserves identity")
     selected := inspect_build_request()
     selected.capture_build_nodes = true
@@ -131,7 +139,10 @@ fn run() {
     loaded :: jet_driver_source_query(generated_request)
     inspect_build_require(loaded.complete && loaded.entry_module_index >= 0, "generated owner is loader selected")
     generated_request.generated_modules = [JetDriverGeneratedModule]{{package_identity: loaded.modules[loaded.entry_module_index].package_identity, name: "generated", relative_path: "build/generated.jet", source: "fn generated_value() -> Int {{ 7 }}"}}
-    generated_query :: jet_driver_query_build_nodes(generated_request, &scope)
+    generated_response := jet_driver_query_build_nodes(^generated_request, &scope)
+    generated_owner := ^generated_response.request
+    generated_query := ^generated_response.query
+    inspect_build_require(generated_owner.generated_modules.len() == 1, "preexisting generated source metadata is retained with its invocation owner")
     inspect_build_require(generated_query.complete && generated_query.nodes.len() == 4, "final generated source is a checked module")
     inspect_build_node(generated_query.nodes[0], "check", "build/generated.jet", "070a459848bc4669182150dd08b8cd3802535d2649bf3be1f38047472cee92b8", [String]{"build/generated.jet"})
     inspect_build_require(generated_query.nodes[0].input_digests == [BuildGraphInputDigest]{{name: "build/generated.jet", digest: "601d5b33f645e3713d0435b7ad669435dc3274d9f866b26079fddc352629ec72"}}, "generated bytes are retained, not omitted Doc modules or virtual origins")
@@ -139,7 +150,9 @@ fn run() {
     inspect_build_require(refused.exit_code == JET_DRIVER_EXIT_USER_ERROR && refused.stdout.contains("E2104") && !refused.stdout.contains("first-run") && !refused.stdout.contains("duration_ms"), "missing execution evidence refuses, never static fabricated metrics")
     broken := inspect_build_request()
     broken.authorized_sources.roots[0].files[0].source = "fn run() -> Int {{ true }}"
-    failed_query :: jet_driver_query_build_plan(broken, &scope)
+    failed_response := jet_driver_query_build_plan(^broken, &scope)
+    broken = ^failed_response.request
+    failed_query := ^failed_response.query
     inspect_build_require(!failed_query.complete && failed_query.diagnostics.len() > 0, "no-build packages still undergo semantic checking")
     inspect_build_require(failed_query.nodes.len() == 0, "failed check publishes no static identities")
     human_failure :: jet_cli_build_query_failure(broken, failed_query, "main.jet", false, false, false)
