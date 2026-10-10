@@ -566,9 +566,12 @@ fn lower_if_cond_atom(
             };
             (TIfCond::Plain(violation), Vec::new(), Vec::new())
         };
-        let enum_type = match resolved_enum_subject_type(cx, &subj.ty) {
-            Ok(enum_type) => enum_type,
-            Err(reason) => return or_pattern_invariant(reason),
+        let enum_type = match subj.ty.without_user_tags() {
+            Type::Option(_) => None,
+            _ => match resolved_enum_subject_type(cx, &subj.ty) {
+                Ok(enum_type) => Some(enum_type),
+                Err(reason) => return or_pattern_invariant(reason),
+            },
         };
         let mut binding_env = clone_env(env);
         if let Err(reason) = tir_add_pattern_bindings(cx, pattern, &mut binding_env, Some(&subj.ty))
@@ -591,8 +594,12 @@ fn lower_if_cond_atom(
             TIfCond::IfLet {
                 pattern: TPattern::from_ast_with_values(
                     pattern.clone(),
-                    Some(enum_type),
-                    TPatternPosition::Binding,
+                    enum_type,
+                    if matches!(subj.ty.without_user_tags(), Type::Option(_)) {
+                        TPatternPosition::OptionBinding
+                    } else {
+                        TPatternPosition::Binding
+                    },
                     false,
                     false,
                     |value| lower_expr(value, cx, env),

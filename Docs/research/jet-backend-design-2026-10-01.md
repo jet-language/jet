@@ -40,6 +40,14 @@ Native Sema keeps fallback payload bindings distinct from their outer source
 expression and binds a loop item's `ViewMut` arguments only on the successful
 positive type match. This preserves the lending-view escape and arity checks
 without relying on names outside their pattern scope.
+Or-pattern alternatives compare binding names and types independent of payload
+slot order; optional subjects retain their carrier while matching nested enum
+alternatives. The seed's `IOContext` record registers its known-empty generic
+parameter order alongside its fields, preserving `os_code: Int?` and
+`cause: String?` at MIR joins rather than falling through to an integer guess.
+Core `IOContext` construction narrows present OS codes exactly once through the
+generic native optional-slot adapter, not a second record-specific conversion.
+The Phi ownership and drop-compatibility guards remain unchanged.
 
 The existing TLS transport refusal runs before route lookup on both the
 argument-validation and direct-call lowering paths. Pure TLS configuration

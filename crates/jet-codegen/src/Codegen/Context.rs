@@ -1655,7 +1655,7 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
         "TLSCertificate" => Some("JetTLSCertificate"),
         "NetError" => Some("JetNetError"),
         "NetErrorDetail" => Some("JetNetErrorDetail"),
-        "NetDNSError" => Some("JetNetDnsError"),
+        "NetDNSError" => Some("JetNetDNSError"),
         "NetShutdown" => Some("JetNetShutdown"),
         "NetReadyInterest" => Some("JetNetReadyInterest"),
         "NetReady" => Some("JetNetReady"),
@@ -6060,6 +6060,10 @@ pub(crate) fn build_cx_items(
             ("cause".to_string(), Type::Option(Box::new(Type::String))),
         ],
     );
+    // The seeded Core record is a known nongeneric shape, not a shape
+    // whose parameter order is unavailable. Field lowering requires both.
+    cx.struct_type_param_order
+        .insert(Syntax::TYPE_IO_CONTEXT.to_string(), Vec::new());
     cx.cloneable.insert(Syntax::TYPE_IO_CONTEXT.to_string());
     cx.enum_variants.insert(
         Syntax::TYPE_IO_ERROR.to_string(),
@@ -8027,6 +8031,27 @@ fn walk_type_edge<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acronym_nominal_carriers_keep_the_exact_prelude_identity() {
+        let jet = include_str!("../../../../Compiler/JetCodegen/Source/Emit/Types.jet");
+        for (name, rust, prelude) in [
+            ("NetDNSError", "JetNetDNSError", include_str!("../Prelude/CoreLib/Top/NetHTTP.rs")),
+            ("HTTPRequest", "JetHTTPRequest", include_str!("../Prelude/CoreLib/Top/HTTPMessage.rs")),
+            ("HTTPClient", "JetHTTPClient", include_str!("../Prelude/CoreLib/Top/HTTPClient.rs")),
+        ] {
+            assert_eq!(net_handle_rust_type(name), Some(rust));
+            assert!(jet.contains(&format!("\"{name}\" -> Val(\"{rust}\")")));
+            assert!(prelude.contains(&format!("struct {rust}")) || prelude.contains(&format!("enum {rust}")),
+                "nominal projection must resolve the exact Prelude declaration: {name}");
+        }
+        for name in ["IOError", "IOContext", "IOOperation"] {
+            assert_eq!(core_rust_type_name(name), Some(name));
+            assert!(jet.contains(&format!("\"{name}\"")));
+            let prelude = include_str!("../Prelude/CoreLib/JetStd/Open.rs");
+            assert!(prelude.contains(&format!("struct {name}")) || prelude.contains(&format!("enum {name}")));
+        }
+    }
 
     #[test]
     fn service_allocation_type_aliases_match_the_jet_mapper() {

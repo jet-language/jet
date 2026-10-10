@@ -850,7 +850,10 @@ pub(crate) fn tir_add_pattern_bindings(
             let Some(first) = alts.first() else {
                 return Err("empty enum or-pattern");
             };
-            tir_add_pattern_bindings(cx, first, env, subject_ty)?;
+            match subject_ty {
+                Some(ty) => tir_add_nested_pattern_bindings(cx, first, env, ty)?,
+                None => tir_add_pattern_bindings(cx, first, env, None)?,
+            }
             let first_names = first.binding_names();
             let expected: Vec<(String, Option<Type>)> = first_names
                 .iter()
@@ -863,15 +866,21 @@ pub(crate) fn tir_add_pattern_bindings(
                 .collect();
             for alternative in alts.iter().skip(1) {
                 let mut alternative_env = clone_env(env);
-                tir_add_pattern_bindings(cx, alternative, &mut alternative_env, subject_ty)?;
+                match subject_ty {
+                    Some(ty) => tir_add_nested_pattern_bindings(cx, alternative, &mut alternative_env, ty)?,
+                    None => tir_add_pattern_bindings(cx, alternative, &mut alternative_env, None)?,
+                }
                 let names = alternative.binding_names();
                 if names.len() != expected.len() {
                     return Err("enum or-pattern binding count");
                 }
-                for (binding, (expected_name, expected_ty)) in names.iter().zip(&expected) {
-                    if binding.local_name() != expected_name
-                        || alternative_env.ty_of(binding.local_name()).as_ref()
-                            != expected_ty.as_ref()
+                for binding in &names {
+                    let Some((_, expected_ty)) = expected.iter()
+                        .find(|(name, _)| name == binding.local_name()) else {
+                        return Err("enum or-pattern binding shape");
+                    };
+                    if alternative_env.ty_of(binding.local_name()).as_ref()
+                        != expected_ty.as_ref()
                     {
                         return Err("enum or-pattern binding shape");
                     }

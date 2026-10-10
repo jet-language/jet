@@ -35404,15 +35404,6 @@ impl<'a> RustEmitter<'a> {
         {
             return format!("({value}).ok()");
         }
-        // The checked IOContext field is ?Int, but the native/plugin ABI
-        // carries a bounded host OS code. Preserve absence and narrow only
-        // present values at the Prelude boundary.
-        if self.type_def(type_id).key == crate::Syntax::TYPE_IO_CONTEXT
-            && field_name == "os_code"
-        {
-            let native = self.native_int_argument("os_code".to_string(), None);
-            return format!("({value}).map(|os_code| {native})");
-        }
         // TerminalSize stores dimensions as native i64 in the process
         // prelude while Core exposes them as checked Jet Int values.
         if type_name.ends_with("TerminalSize") && matches!(field_name.as_str(), "cols" | "rows") {

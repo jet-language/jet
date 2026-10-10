@@ -1,0 +1,42 @@
+struct PhiContextProbe {
+    code: Int?
+    cause: String?
+}
+enum PhiErrorProbe {
+    Context(context: PhiContextProbe)
+    Limit
+}
+fn phi_code(error: PhiErrorProbe) -> Int? Never! {
+    if error == {
+        .Context(context) -> context.code
+        else -> None
+    }
+}
+fn phi_cause(error: PhiErrorProbe) -> String? Never! {
+    if error == {
+        .Context(context) -> context.cause
+        else -> String?{None}
+    }
+}
+fn phi_io_code(error: IOError) -> Int? Never! {
+    if error == {
+        .InvalidInput(context) | .NotFound(context) -> context.os_code
+        else -> None
+    }
+}
+fn phi_io_cause(error: IOError) -> String? Never! {
+    if error == {
+        .NotFound(context) -> context.cause
+        else -> String?{None}
+    }
+}
+fn run() {
+    error :: PhiErrorProbe.Context{context: PhiContextProbe{code: Val(17), cause: Val("ready")}}
+    print(phi_code(error) ?? 0)
+    print(phi_cause(error) ?? "none")
+    print(phi_code(PhiErrorProbe.Limit) ?? 0)
+    print(phi_cause(PhiErrorProbe.Limit) ?? "none")
+    io_error :: IOError.NotFound(IOContext{operation: IOOperation.Read, resource: None, os_code: Val(23), cause: Val("missing")})
+    print(phi_io_code(io_error) ?? 0)
+    print(phi_io_cause(io_error) ?? "none")
+}

@@ -1087,9 +1087,16 @@ fn sema_pattern_validate_internal(subject_ty: Type, pattern: Pattern, env: SemaS
 
 fn sema_pattern_facts_equal(left: [TPatternBindingFact], right: [TPatternBindingFact]) -> Bool Never! {
     if left.len() != right.len() -> return false
-    loop (index, left_fact) in left {
-        right_fact :: right[index]
-        if left_fact.name != right_fact.name || !type_identity_equal(left_fact.ty, right_fact.ty) -> return false
+    loop left_fact in left {
+        found := false
+        loop right_fact in right {
+            if right_fact.name == left_fact.name {
+                if !type_identity_equal(left_fact.ty, right_fact.ty) -> return false
+                found = true
+                break
+            }
+        }
+        if !found -> return false
     }
     true
 }
