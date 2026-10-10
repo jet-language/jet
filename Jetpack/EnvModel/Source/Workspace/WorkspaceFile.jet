@@ -90,7 +90,7 @@ fn envmodel_workspace_load_checked_source(resolver: AuthorityResolver, expected:
 // this is a view for callers that still need member ordering/selection.
 fn envmodel_workspace_evaluate_package_source(source: WorkspaceSource, resolver: AuthorityResolver) -[FS]> WorkspacePlan EnvModelEvalError! {
     package :: resolver.checked_package(".")
-    checked_members :: package.facts.checked_members_in(resolver)
+    checked_members :: package.facts.checked_members_in(resolver, package.member.directory)
     members := [WorkspacePlanMember]{}
     loop member in checked_members {
         resolver.revalidate_member(member.member)

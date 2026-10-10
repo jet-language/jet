@@ -74,17 +74,15 @@ struct AuthorityResolver {
         }
         root_identity :: FileIdentity.from_stat(held, AuthorityKind.Directory)
         if root_identity != expected -> return Err(AuthorityError.Changed(effective))
-        Ok(AuthorityResolver{root: canonical, root_identity: root_identity, root_handle: handle, allow_hardlinks: allow_hardlinks})
+        Ok(AuthorityResolver{root: canonical, root_identity: root_identity, root_handle: ^handle, allow_hardlinks: allow_hardlinks})
     }
 
-    // Scope a resolver to an already-open checked directory, carrying its
-    // handle and identity forward without reopening its path.
-    fn from_checked_directory(directory: CheckedDirectory) -> AuthorityResolver Never! {
-        AuthorityResolver{
-            root: directory.path,
-            root_identity: directory.identity,
-            root_handle: directory.handle.copy(),
-            allow_hardlinks: directory.allow_hardlinks
+    // Root snapshots borrow the resolver's one pin; descendants retain their
+    // independently opened handle. Neither branch duplicates a descriptor.
+    fn directory_handle(self, directory: CheckedDirectory) -> Directory Never! from self | directory {
+        if directory.handle == {
+            .Val(handle) -> { return handle }
+            .None -> { return self.root_handle }
         }
     }
 
@@ -129,11 +127,15 @@ struct AuthorityResolver {
     fn checked_directory(self, path: String) -[FS, Env]> CheckedDirectory AuthorityError! {
         relative :: self.relative_path(path)
         full :: pkg_authority_join(self.root, relative)
-        handle := self.root_handle.copy()
+        handle := Directory?{None}
         if relative != "" {
-            handle = self.root_handle.open_directory(relative) ?? return Err(pkg_authority_map_io(full, err, true))
+            opened :: self.root_handle.open_directory(relative) ?? return Err(pkg_authority_map_io(full, err, true))
+            handle = Val(^opened)
         }
-        info :: handle.stat() ?? return Err(AuthorityError.IO{path: full, operation: "inspect", detail: "{err}"})
+        info :: if handle == {
+            .Val(opened) -> opened.stat() ?? return Err(AuthorityError.IO{path: full, operation: "inspect", detail: "{err}"})
+            .None -> self.root_handle.stat() ?? return Err(AuthorityError.IO{path: full, operation: "inspect", detail: "{err}"})
+        }
         if !info.is_dir {
             return Err(AuthorityError.WrongKind{path: full, expected: AUTHORITY_KIND_DIRECTORY, actual: pkg_authority_kind_name(info)})
         }
@@ -141,7 +143,7 @@ struct AuthorityResolver {
             path: full,
             relative: relative,
             identity: FileIdentity.from_stat(info, AuthorityKind.Directory),
-            handle: handle,
+            handle: ^handle,
             allow_hardlinks: self.allow_hardlinks
         }
         self.revalidate_directory(checked)
@@ -188,10 +190,9 @@ struct AuthorityResolver {
     // and no sibling inspection. Compiler/tool views use this boundary.
     fn checked_root_package(self) -[FS, Env]> CheckedPackage AuthorityError! {
         member :: self.checked_member(".")
-        package_resolver :: AuthorityResolver.from_checked_directory(member.directory)
         facts := member.manifest.facts
         manifest_path :: member.manifest.file.path
-        &facts.compose_configs_checked(package_resolver) ?? return Err(AuthorityError.Invalid{path: manifest_path, detail: err.message()})
+        &facts.compose_configs_checked(self, member.directory) ?? return Err(AuthorityError.Invalid{path: manifest_path, detail: err.message()})
         facts.validate_guarantees() ?? return Err(AuthorityError.Invalid{path: manifest_path, detail: err.message()})
         facts.validate_defaults() ?? return Err(AuthorityError.Invalid{path: manifest_path, detail: err.message()})
         self.revalidate_member(member)
@@ -202,12 +203,11 @@ struct AuthorityResolver {
     // Config paths and a Package's own membership are relative to that
     // Package root; the checked directory carries its opened handle.
     fn complete_checked_package(self, member: ^CheckedMember) -[FS, Env]> CheckedPackage AuthorityError! {
-        package_resolver :: AuthorityResolver.from_checked_directory(member.directory)
         facts := member.manifest.facts
         manifest_path :: member.manifest.file.path
-        &facts.compose_configs_checked(package_resolver) ?? return Err(AuthorityError.Invalid{path: manifest_path, detail: err.message()})
+        &facts.compose_configs_checked(self, member.directory) ?? return Err(AuthorityError.Invalid{path: manifest_path, detail: err.message()})
         facts.validate_defaults() ?? return Err(AuthorityError.Invalid{path: manifest_path, detail: err.message()})
-        facts.checked_members_in(package_resolver)
+        facts.checked_members_in(self, member.directory)
         self.revalidate_member(member)
         Ok(CheckedPackage{member: member, facts: facts})
     }
@@ -217,7 +217,7 @@ struct AuthorityResolver {
     fn discover_members(self, path: String) -[FS, Env]> [CheckedMember] AuthorityError! {
         scan :: self.checked_directory(path)
         budget := AuthorityWalkBudget.new()
-        entries :: pkg_authority_read_sorted_entries(scan.handle, scan.path, &budget)
+        entries :: pkg_authority_read_sorted_entries(self.directory_handle(scan), scan.path, &budget)
         members := [CheckedMember]{}
         loop entry in entries {
             if entry.info.is_symlink -> return Err(AuthorityError.Symlink(entry.path))
@@ -242,7 +242,7 @@ struct AuthorityResolver {
     fn discover_files(self, path: String, extension: String?) -[FS, Env]> [CheckedFile] AuthorityError! {
         scan :: self.checked_directory(path)
         budget := AuthorityWalkBudget.new()
-        entries :: pkg_authority_read_sorted_entries(scan.handle, scan.path, &budget)
+        entries :: pkg_authority_read_sorted_entries(self.directory_handle(scan), scan.path, &budget)
         found := [CheckedFile]{}
         loop entry in entries {
             relative :: pkg_authority_relative_join(scan.relative, entry.name)
@@ -368,7 +368,7 @@ struct AuthorityResolver {
     fn revalidate_directory(self, directory: CheckedDirectory) AuthorityError! -[FS, Env]> {
         self.validate_checked_path(directory.path, directory.relative)
         self.revalidate_root()
-        self.revalidate_directory_handle(directory.path, directory.identity, directory.handle)
+        self.revalidate_directory_handle(directory.path, directory.identity, self.directory_handle(directory))
     }
 
     // Revalidate a complete member snapshot before realizing it.
@@ -418,7 +418,7 @@ struct AuthorityResolver {
             return Err(pkg_authority_limit_error(pkg_authority_join(self.root, path), "authority source walk exceeds the {PKG_MAX_TREE_DEPTH}-level depth bound"))
         }
         scan :: self.checked_directory(path)
-        entries :: pkg_authority_read_sorted_entries(scan.handle, scan.path, &budget)
+        entries :: pkg_authority_read_sorted_entries(self.directory_handle(scan), scan.path, &budget)
         loop entry in entries {
             relative :: pkg_authority_relative_join(scan.relative, entry.name)
             if entry.info.is_symlink {

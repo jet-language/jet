@@ -112,19 +112,21 @@ impl PackageFacts {
     // Load and merge the root's declared Config files.
     fn compose_configs(&self, dir: String) PackageParseError! -[FS, Env]> {
         resolver :: AuthorityResolver.open(dir) ?? return Err(pkg_authority_package_error(err))
-        &self.compose_configs_checked(resolver)
+        directory :: resolver.checked_directory(".") ?? return Err(pkg_authority_package_error(err))
+        &self.compose_configs_checked(resolver, directory)
     }
 
     // Resolve every declared Config before changing any fact; a failure
     // leaves the facts (and `resolved_config_paths`) untouched.
-    fn compose_configs_checked(&self, resolver: AuthorityResolver) PackageParseError! -[FS, Env]> {
+    fn compose_configs_checked(&self, resolver: AuthorityResolver, directory: CheckedDirectory) PackageParseError! -[FS, Env]> {
+        if resolver.revalidate_directory(directory) == .Err(error) -> return Err(pkg_authority_package_error(error))
         parsed := [ConfigFacts]{}
         resolved_config_paths := self.resolved_config_paths
         loop relative in self.configs {
             if self.inline_configs.has_key(relative) -> next
             if relative.starts_with("/") || pkg_path_has_parent_component(relative) -> return Err(PackageParseError.InvalidValue{field: "configs", value: relative})
-            checked :: pkg_checked_config_file(resolver, relative)
-            relative_path :: checked.relative.replace("\\", "/")
+            checked :: pkg_checked_config_file(resolver, pkg_authority_relative_join(directory.relative, relative))
+            relative_path :: (if directory.relative == "" -> checked.relative else -> checked.relative.removeprefix("{directory.relative}/")).replace("\\", "/")
             if !resolved_config_paths.contains(relative_path) -> &resolved_config_paths.push(relative_path)
             text :: if checked.text() == {
                 .Ok(read) -> read
@@ -137,6 +139,7 @@ impl PackageFacts {
             if resolver.revalidate_file(checked) == .Err(error) -> return Err(pkg_authority_package_error(error))
             &parsed.push(config)
         }
+        if resolver.revalidate_directory(directory) == .Err(error) -> return Err(pkg_authority_package_error(error))
         if &self.compose(parsed) == .Err(error) -> return Err(PackageParseError.Composition(error.message()))
         self.resolved_config_paths = resolved_config_paths
     }
@@ -152,13 +155,14 @@ impl PackageFacts {
 
     // Resolve the flat member references from the same checked authority
     // used by `load`.
-    fn checked_members_in(self, resolver: AuthorityResolver) -[FS, Env]> [CheckedPackage] AuthorityError! {
+    fn checked_members_in(self, resolver: AuthorityResolver, directory: CheckedDirectory) -[FS, Env]> [CheckedPackage] AuthorityError! {
+        root_relative :: resolver.relative_identity(directory)
         if self.validate_members() == .Err(error) -> return Err(AuthorityError.Invalid{path: self.origin, detail: error.message()})
         physical := [String]{}
         names := [String]{}
         packages := [CheckedPackage]{}
         loop member in self.members {
-            relative :: member.path()
+            relative :: pkg_authority_relative_join(directory.relative, member.path())
             candidates :: if member == {
                 .Find(_) -> resolver.discover_members(relative)
                 .Path(_) -> [CheckedMember]{resolver.checked_member(relative)}
@@ -168,7 +172,7 @@ impl PackageFacts {
                 package :: resolver.complete_checked_package(^candidate)
                 canonical :: resolver.relative_identity(package.member.directory)
                 manifest_path :: package.member.manifest.file.path
-                if canonical == "." -> return Err(AuthorityError.Invalid{path: manifest_path, detail: "member reference `{relative}` resolves to its Package root"})
+                if canonical == root_relative -> return Err(AuthorityError.Invalid{path: manifest_path, detail: "member reference `{relative}` resolves to its Package root"})
                 if physical.contains(canonical) -> return Err(AuthorityError.Invalid{path: manifest_path, detail: "member reference `{relative}` has the same physical identity as another member"})
                 if names.contains(package.facts.name) -> return Err(AuthorityError.Invalid{path: manifest_path, detail: "member Package name `{package.facts.name}` is declared more than once"})
                 &physical.push(canonical)
@@ -176,7 +180,7 @@ impl PackageFacts {
                 &packages.push(package)
             }
         }
-        resolver.revalidate_root()
+        resolver.revalidate_directory(directory)
         Ok(packages)
     }
 
@@ -187,7 +191,8 @@ impl PackageFacts {
     }
 
     fn member_names_in_checked(self, resolver: AuthorityResolver) -[FS, Env]> [String] PackageParseError! {
-        if self.checked_members_in(resolver) == {
+        directory :: resolver.checked_directory(".") ?? return Err(pkg_authority_package_error(err))
+        if self.checked_members_in(resolver, directory) == {
             .Ok(packages) -> {
                 names := [String]{}
                 loop package in packages -> &names.push(package.facts.name)
@@ -566,7 +571,8 @@ fn pkg_discover_config_path(resolver: AuthorityResolver, name: String) -[FS, Env
 
 // Compose Configs, then guarantees, defaults, and members (the `load` path).
 fn pkg_load_compose_and_validate(facts: &PackageFacts, resolver: AuthorityResolver) PackageParseError! -[FS, Env]> {
-    &facts.compose_configs_checked(resolver)
+    directory :: resolver.checked_directory(".") ?? return Err(pkg_authority_package_error(err))
+    &facts.compose_configs_checked(resolver, directory)
     facts.validate_guarantees()
     if facts.validate_defaults() == .Err(error) -> return Err(PackageParseError.Composition(error.message()))
     facts.validate_members_in_checked(resolver)

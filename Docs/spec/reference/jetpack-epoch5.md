@@ -65,6 +65,14 @@ symlinks, duplicate physical directories, duplicate Package names, and nested
 member roots. The package root owns membership even when a member is discovered
 from a `find` expression.
 
+The Jet authority resolver owns one pinned root directory. Checked root
+snapshots borrow that pin; descendant snapshots own only their descriptor-relative
+opened directory. Config composition and member discovery share the resolver
+and checked package directory instead of copying handles or reopening paths.
+Overlay staging retains those descendant owners through validation, atomic
+publication, and rollback. Commit notifications borrow only the committed path,
+never the owning stage; a failed rollback is reported alongside the commit error.
+
 ### Import boundaries
 
 The declaring Package can narrow its own module edges with `boundaries`:
