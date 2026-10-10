@@ -17,6 +17,7 @@ import { readdir, readFile, realpath, stat, writeFile, mkdir, rm, copyFile } fro
 import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { compilerSliceDrift } from "./compiler-slice.mjs";
 
 const mode = process.argv[2] ?? "check";
 if (!["check", "aot", "run", "publication"].includes(mode)) fail(`unknown mode ${mode}; expected check, aot, run, or internal publication`);
@@ -202,6 +203,12 @@ async function readManifest(name) {
 // Registration/inventory still sees the fixed entry in ordinary modes, but
 // only the internal publication artifact emits it.
 const registeredSources = await readManifest("sources.list");
+// The compiler slice is closed under Compiler/Bootstrap/sources.list; a use
+// that only an unlisted slice-package file declares fails the assembly.
+const sliceDrift = compilerSliceDrift(sourceRootDir);
+const sliceFailures = sliceDrift.filter((problem) => !problem.includes("outside the compiler slice"));
+if (sliceFailures.length > 0) fail(`the Jetpack compiler slice drifted from Compiler/Bootstrap/sources.list:\n${sliceFailures.map((problem) => `  ${problem}`).join("\n")}`);
+for (const problem of sliceDrift.filter((problem) => problem.includes("outside the compiler slice"))) console.log(`note: ${problem}`);
 const sources = registeredSources.filter((entry) => mode === "publication" || entry.sourcePath !== PUBLICATION_ENTRY);
 if (mode === "publication" && registeredSources.filter((entry) => entry.sourcePath === PUBLICATION_ENTRY).length !== 1) {
   fail(`internal publication requires exactly one Store registration of ${PUBLICATION_ENTRY}`);
