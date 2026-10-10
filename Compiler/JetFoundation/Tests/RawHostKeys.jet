@@ -49,15 +49,18 @@ fn run() {
     assert(files.members.contains("compiler_link_held"))
     assert(!files.members.contains("__link_held"))
     assert(core_call("core.files", "compiler_link_held") == None)
-    loop member in [String]{"__read_bytes_os", "__read_at_os", "__read_link_os", "__scope_read_at", "__reader_line_bytes"} {
+    read_members :: [String]{"__read_bytes_os", "__read_at_os", "__read_link_os", "__scope_read_at", "__reader_line_bytes"}
+    loop member in read_members {
         row :: core_call("core.files", member) ?? panic("file read leaf is registered")
         assert(row.effect_kind == Val(Effect.FS) && row.effect_leaf == Val("FS.Read"))
     }
-    loop member in [String]{"__write_bytes_os", "__append_bytes_os", "__create_dirs_os", "__write_at_os", "__writer_refusal", "__atomic_reserve", "__atomic_finish", "__atomic_remove", "__atomic_rename", "__atomic_sync_parent", "__atomic_close"} {
+    write_members :: [String]{"__write_bytes_os", "__append_bytes_os", "__create_dirs_os", "__write_at_os", "__writer_refusal", "__atomic_reserve", "__atomic_finish", "__atomic_remove", "__atomic_rename", "__atomic_sync_parent", "__atomic_close"}
+    loop member in write_members {
         row :: core_call("core.files", member) ?? panic("file write leaf is registered")
         assert(row.effect_kind == Val(Effect.FS) && row.effect_leaf == Val("FS.Write"))
     }
-    loop member in [String]{"__path_windows", "__atomic_pid", "__scope_roots", "__reader_path"} {
+    inspect_members :: [String]{"__path_windows", "__atomic_pid", "__scope_roots", "__reader_path"}
+    loop member in inspect_members {
         row :: core_call("core.files", member) ?? panic("file inspection leaf is registered")
         assert(row.effect_kind == None && row.effect_leaf == None)
     }

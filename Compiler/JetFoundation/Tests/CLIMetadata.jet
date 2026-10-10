@@ -122,7 +122,10 @@ fn cli_metadata_accept(bytes: [U8], expected: CLICommandSchema) Never! {
 }
 fn cli_metadata_refuse(bytes: [U8], expected: MetadataError, maximum: U64) Never! {
     actual :: read_executable(bytes.view(0..<bytes.len()), maximum)
-    refused :: if actual == { .Err(error) -> error == expected .Ok(_) -> false }
+    refused :: if actual == {
+        .Err(error) -> error == expected
+        .Ok(_) -> false
+    }
     cli_metadata_require(refused, "canonical failure classification")
 }
 fn run() {
@@ -137,8 +140,9 @@ fn run() {
     cli_metadata_require(decoded.root_completion_words() == [String]{"--help", "--verbose", "-v", "--quiet", "-q", "--color", "--version", "output-file", "--output-file", "-o"}, "root completion order")
     cli_metadata_require(decoded.job_completion_words() == [String]{"release", "release"}, "visible duplicate jobs retained")
     cli_metadata_require(decoded.command_completion_words(decoded.commands[0]) == [String]{"--help"}, "root inputs not repeated in command")
-    loop wide in [Bool]{false, true} {
-        loop little in [Bool]{false, true} {
+    flags :: [Bool]{false, true}
+    loop wide in flags {
+        loop little in flags {
             cli_metadata_accept(cli_metadata_elf(record, wide, little), schema)
             cli_metadata_accept(cli_metadata_fat(cli_metadata_mach(record, false), cli_metadata_mach(record, true), wide, little), schema)
         }
