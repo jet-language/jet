@@ -90,11 +90,22 @@ same-source GREEN may be reused only after verifying its artifacts.
 The native fixed point is stage1 (built by the candidate) compiling stage2.
 Require both objects and ELF executables to be byte-identical, and require each
 stage's own all-phases diagnostic report to exist and contain zero failures.
+Run the final full-suite/golden gate with `JET=stage2/jet`, not only the earlier
+candidate S5 signal. Require the same-source complete suite receipt, registries,
+and hello/sample native runs at O0 and O2. Rust/LLVM execution is default-denied;
+only committed, source-proved user Rust FFI cases may admit their foreign crate
+builds, never a Rust fallback for compiling the Jet program.
 The Rust-hosted `native-compiler --seed-build` does not execute Jet Host/Entry
 and cannot produce that TSV. Its proof instead requires the real host build
 exit zero, a seed log with no error/ICE/panic rows, and verified seed JSON and
 executable ELF hashes. Preserve this hosted/native boundary in the receipt;
 never fabricate an empty keep-going report to pass a hosted seed.
+Before the RC seed build, assemble its exact CLI unit and emit the complete
+inline Rust monolith with the final debug snapshot. Capture that snapshot's
+small release build rustc argv, then type-check the monolith using
+`--emit=metadata` and the captured release edition/cfg/type-affecting flags,
+without backend codegen/LTO/link. Record the Dev Jet frontend versus Release
+rustc boundary; this preflight is not a successful release seed build.
 The missing historical display comparator and AGE testkit generator are retired
 Rust-oracle modes (owner #38(b)/#59), not native-suite failures. Report their
 individual rows as `UNCOVERED`, print them, and require a Tower card; never label
