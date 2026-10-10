@@ -541,7 +541,7 @@ fn pkg_ffi_inline_asm_entry_diagnostic(asm: ExternEntry, inline: InlineEntry, ta
     contract :: inline.asm_contract ?? return Val(pkg_ffi_asm_error("{asm.line_hint} has no checked assembly contract", "assembly output and clobbers must be normalized by sema before native bridge generation", "fix the inline assembly operand contract and re-run sema"))
     if inline.param_names != asm.param_names || inline.param_names.len() != asm.params.len() -> return Val(pkg_ffi_asm_error("{asm.line_hint} has a stale assembly parameter map", "the native bridge must consume the sema-checked parameter order and names", "re-run sema so the inline assembly contract is normalized for this declaration"))
     if contract.target != target -> return Val(pkg_ffi_asm_error("{asm.line_hint} was checked for `{contract.target}`, not selected target `{target}`", "inline assembly is validated and compiled for the driver's selected target, not the host architecture", "select the checked target or provide an assembly body for the selected target"))
-    if !sema_inline_assembly_target_supported(target) -> return Val(pkg_ffi_asm_error("{asm.line_hint} has no audited inline-assembly register set for target `{target}`", "inline assembly needs a target-specific register namespace before native bridge generation", "select a supported native target or provide a target-specific assembly body"))
+    if !inline_assembly_target_supported(target) -> return Val(pkg_ffi_asm_error("{asm.line_hint} has no audited inline-assembly register set for target `{target}`", "inline assembly needs a target-specific register namespace before native bridge generation", "select a supported native target or provide a target-specific assembly body"))
     returns_value := false
     if asm.return_type == .Val(ty) -> returns_value = pkg_ffi_inline_rust_type(ty) != "()"
     if contract.output == None && returns_value -> return Val(pkg_ffi_asm_error("{asm.line_hint} has no checked output destination", "a value-returning assembly body must identify its result with the sema-checked output operand", "mark one named output or explicit target register with `; -> return`"))
@@ -555,7 +555,7 @@ fn pkg_ffi_inline_asm_entry_diagnostic(asm: ExternEntry, inline: InlineEntry, ta
     clobbers :: contract.clobbers
     loop clobber in clobbers {
         normalized :: pkg_ffi_normalize_register(clobber)
-        if !sema_inline_assembly_register_known(target, normalized) -> return Val(pkg_ffi_asm_error("{asm.line_hint} names clobber register `{clobber}`, which is not valid for target `{target}`", "fixed assembly clobbers are checked against the selected target namespace", "use a register valid for the selected target"))
+        if !inline_assembly_register_known(target, normalized) -> return Val(pkg_ffi_asm_error("{asm.line_hint} names clobber register `{clobber}`, which is not valid for target `{target}`", "fixed assembly clobbers are checked against the selected target namespace", "use a register valid for the selected target"))
         if seen_clobbers.contains(normalized) -> return Val(pkg_ffi_asm_error("{asm.line_hint} repeats clobber register `{clobber}`", "the checked assembly contract must contain each discarded output exactly once", "remove duplicate names from `; clobbers …`"))
         &seen_clobbers.push(normalized)
         if output_register == .Val(result_register) {
@@ -568,7 +568,7 @@ fn pkg_ffi_inline_asm_entry_diagnostic(asm: ExternEntry, inline: InlineEntry, ta
 fn pkg_ffi_asm_output_problem(asm: ExternEntry, output: InlineAsmOutput, target: String) -> Diagnostic? Never! {
     if output == {
         .Parameter(index) -> if index >= asm.params.len() -> Val(pkg_ffi_asm_error("{asm.line_hint} names output parameter index {index}, but the function has {asm.params.len()} parameters", "the checked output operand must refer to a declared Jet parameter", "use a named parameter in the `; -> return` anchor")) else -> None
-        .Register(register) -> if sema_inline_assembly_register_known(target, register) -> None else -> Val(pkg_ffi_asm_error("{asm.line_hint} names register `{register}`, which is not valid for target `{target}`", "fixed assembly registers are checked against the selected target namespace", "use a register valid for the selected target"))
+        .Register(register) -> if inline_assembly_register_known(target, register) -> None else -> Val(pkg_ffi_asm_error("{asm.line_hint} names register `{register}`, which is not valid for target `{target}`", "fixed assembly registers are checked against the selected target namespace", "use a register valid for the selected target"))
     }
 }
 

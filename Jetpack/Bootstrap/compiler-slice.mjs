@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const DECLARATION = /^(?:pub\s+)?(?:fn|struct|enum|trait|type)\s+([A-Za-z_][A-Za-z0-9_]*)|^([A-Z][A-Z0-9_]*)\s*::/gm;
+const DECLARATION = /^(?:pub\s+)?(fn|struct|enum|trait|type)\s+([A-Za-z_][A-Za-z0-9_]*)|^([A-Z][A-Z0-9_]*)\s*::/gm;
 
 function listed(text) {
   return text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#"));
@@ -23,12 +23,20 @@ function code(text) {
   return text.replace(/\/\/[^\n]*/g, "").replace(/"""[\s\S]*?"""/g, '""').replace(/"(?:[^"\\\n]|\\.)*"/g, '""');
 }
 
-function declared(text) {
-  return [...code(text).matchAll(DECLARATION)].map((match) => match[1] ?? match[2]);
+function declarations(text) {
+  return [...code(text).matchAll(DECLARATION)].map((match) => ({ name: match[2] ?? match[3], fn: match[1] === "fn" }));
 }
 
+function declared(text) {
+  return declarations(text).map((row) => row.name);
+}
+
+// A function is used only when called; a same-named local binding is not a use.
 function referenced(text) {
-  return new Set(code(text).match(/\b[A-Za-z_][A-Za-z0-9_]*\b/g) ?? []);
+  const source = code(text);
+  const names = new Set(source.match(/\b[A-Za-z_][A-Za-z0-9_]*\b/g) ?? []);
+  const called = new Set([...source.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*)\s*\(/g)].map((match) => match[1]));
+  return { names, called };
 }
 
 export function compilerSliceDrift(root) {
@@ -47,17 +55,19 @@ export function compilerSliceDrift(root) {
   const unitDeclared = new Set(jetpackList.flatMap((path) => declared(read(path))));
   const owners = new Map();
   for (const path of compilerList) {
-    for (const name of declared(read(path))) owners.set(name, owners.has(name) ? null : path);
+    for (const row of declarations(read(path))) owners.set(row.name, owners.has(row.name) ? null : { path, fn: row.fn });
   }
   const listedSet = new Set(slice);
   const missing = new Map();
   const queue = [...jetpackList];
   while (queue.length > 0) {
     const path = queue.shift();
-    for (const name of referenced(read(path))) {
+    const uses = referenced(read(path));
+    for (const name of uses.names) {
       if (unitDeclared.has(name)) continue;
-      const owner = owners.get(name);
-      if (!owner || listedSet.has(owner)) continue;
+      const declaration = owners.get(name);
+      if (!declaration || listedSet.has(declaration.path) || (declaration.fn && !uses.called.has(name))) continue;
+      const owner = declaration.path;
       if (!slicePackages.has(packageOf(owner))) {
         problems.push(`${path} uses ${name}, which only ${owner} declares, outside the compiler slice`);
         continue;
