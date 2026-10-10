@@ -375,6 +375,95 @@ fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, 
     &diagnostics.push(sema_error("E0307", span, "this `if` doesn't cover every case — missing: {names}", "every arm here is a pattern test, so each variant must appear once", "add an arm for: {names}"))
 }
 
+// Rust switches.rs `note_pattern_coverage`: an arm head that an earlier full
+// arm, or an ancestor group arm (D-TAG1), already covers is unreachable —
+// E0365 over an anonymous union subject, L0301 otherwise.
+fn sema_coverage_check_unreachable_arms(conditions: [TExpr], multi_head: Bool, diagnostics: &[Diagnostic]) {
+    table :: sema_coverage_table(conditions) ?? return
+    union_subject :: sema_pattern_unwrap_tags(table.subject.ty) == .Union(_)
+    covered := [String]{}
+    loop shape in table.shapes {
+        full := [String]{}
+        partial := [String]{}
+        sema_coverage_arm_heads(shape, &full, &partial)
+        heads := [String]{}
+        full_heads := [Bool]{}
+        loop name in full {
+            &heads.push(name)
+            &full_heads.push(true)
+        }
+        loop name in partial {
+            &heads.push(name)
+            &full_heads.push(false)
+        }
+        loop (index, variant) in heads {
+            already := false
+            loop earlier in covered {
+                if earlier == variant || variant.starts_with("{earlier}.") -> already = true
+            }
+            if {
+                already -> {
+                    what :: if multi_head -> "head `{variant}` is unreachable — an earlier head already handles it" else -> "arm `{variant}` is unreachable — that case is already handled"
+                    why :: if multi_head -> "multi-head declaration order selects the first matching head" else -> "every earlier arm already covers this pattern"
+                    fix :: if multi_head -> "remove this head or merge it with the earlier head" else -> "remove this arm or merge it with the one above"
+                    span :: sema_coverage_shape_span(shape)
+                    &diagnostics.push(if union_subject -> sema_error("E0365", span, what, why, fix) else -> sema_lint("L0301", span, what, why, fix))
+                }
+                full_heads[index] -> &covered.push(variant)
+            }
+        }
+    }
+}
+
+// Rust `collect_covered_variant_names` / `collect_partial_variant_names`: the
+// heads one arm covers fully, and the heads it only tests with a nested
+// payload pattern (S31). A range payload slot covers no head.
+fn sema_coverage_arm_heads(shape: TPatternShape, full: &[String], partial: &[String]) {
+    if shape == .Or(alternatives, _) {
+        loop alternative in alternatives -> sema_coverage_arm_heads(alternative, &full, &partial)
+        return
+    }
+    if shape == {
+        .Variant(variant, bindings, _, _) -> {
+            nested := false
+            ranged := false
+            loop binding in bindings {
+                if binding == {
+                    .Nested(_) -> nested = true
+                    .Range(_, _) -> ranged = true
+                    else -> {}
+                }
+            }
+            if nested {
+                &partial.push(variant)
+            } else if !ranged {
+                &full.push(variant)
+            }
+        }
+        .Present(_, _, inner, _) -> sema_coverage_push_head("Val", inner == None, &full, &partial)
+        .Absent(_) -> &full.push("None")
+        .Ok(_, _, inner, _) -> sema_coverage_push_head("Ok", inner == None, &full, &partial)
+        .Err(_, _, inner, _) -> sema_coverage_push_head("Err", inner == None, &full, &partial)
+        else -> {}
+    }
+}
+
+fn sema_coverage_push_head(head: String, full_cover: Bool, full: &[String], partial: &[String]) {
+    if full_cover {
+        &full.push(head)
+    } else {
+        &partial.push(head)
+    }
+}
+
+fn sema_coverage_shape_span(shape: TPatternShape) -> Span Never! {
+    if shape == {
+        .Variant(_, _, _, span) | .Present(_, _, _, span) | .Ok(_, _, _, span) | .Err(_, _, _, span) -> span
+        .Absent(span) -> span
+        .Range(_, _, span) | .Or(_, span) | .Struct(_, _, span) | .List(_, _, span) | .Map(_, _, span) | .Text(_, span) | .Binary(_, span) -> span
+    }
+}
+
 // A pattern arm lowered to an IfLet condition reads, for coverage, as the
 // pattern test it was checked from.
 fn sema_coverage_if_let_value(pattern: TPattern, subject: TExpr) -> TExpr Never! {

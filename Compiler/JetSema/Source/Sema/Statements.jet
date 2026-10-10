@@ -872,6 +872,15 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
     loop site in else_path.share_found -> sema_ownership_note_share_found(&state, site)
     sema_scope_join_hardware_paths(&scopes, before_hardware, hardware_merged, else_hardware, true)
     if !complete -> return SemaStatementResult{value: [TStmt]{}, complete: false}
+    // Rust `check_switch` notes each all-pattern arm's coverage (E0365/L0301),
+    // with or without an `else`, before the E0307 completeness proof.
+    if !subjectless_guard {
+        noted_conditions := [TExpr]{}
+        loop condition in conditions {
+            if condition == .Val(noted) -> &noted_conditions.push(noted.value)
+        }
+        if noted_conditions.len() == conditions.len() -> sema_coverage_check_unreachable_arms(noted_conditions, multi_head, &diagnostics)
+    }
     // A subjectless guard table proves no coverage: its arms test their own
     // subjects (Rust `check_switch` skips E0307 for subjectless guards).
     if else_body == None && !subjectless_guard {
@@ -5532,7 +5541,10 @@ fn sema_stmt_check_expression_statement(expr: Expr, return_type: Type?, environm
                     else -> {
                         // A hoisted dispatch subject's binding precedes the chain.
                         conditions :: sema_coverage_noelse_statement_conditions(expr, checked.value[checked.value.len() - 1])
-                        if conditions == .Val(table) -> sema_coverage_check_table(table, false, expr_span(expr), environment, program, &diagnostics)
+                        if conditions == .Val(table) {
+                            sema_coverage_check_unreachable_arms(table, false, &diagnostics)
+                            sema_coverage_check_table(table, false, expr_span(expr), environment, program, &diagnostics)
+                        }
                         // L0303 (#3716): a table whose arms cover a closed set has an `else` that can never run.
                         if sema_coverage_is_else_table(environment, program, expr_span(expr)) -> sema_coverage_check_redundant_else(sema_coverage_else_statement_conditions(expr, checked.value[checked.value.len() - 1]), expr_span(expr), environment, program, &diagnostics)
                         loop checked_statement in checked.value -> &output.push(checked_statement)

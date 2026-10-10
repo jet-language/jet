@@ -1829,7 +1829,10 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     }
     if chain_head {
         chain_conditions :: sema_coverage_noelse_chain_conditions(checked_condition, else_checked, span)
-        if chain_conditions == .Val(table) -> sema_coverage_check_table(table, false, span, environment, program, &diagnostics)
+        if chain_conditions == .Val(table) {
+            sema_coverage_check_unreachable_arms(table, false, &diagnostics)
+            sema_coverage_check_table(table, false, span, environment, program, &diagnostics)
+        }
     }
     if else_table_head -> sema_coverage_check_redundant_else(sema_coverage_else_chain_conditions(checked_condition, else_checked, span), span, environment, program, &diagnostics)
     value :: sema_tir_expr(result_ty, TExprKind.IfExpr{cond: checked.condition, then_body: then_result.value, then_value: joined_then, else_body: else_result.value, else_value: joined_else}, span)
