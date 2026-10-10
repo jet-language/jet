@@ -114,12 +114,6 @@ fn jet_rust_emit_local_declaration(ctx: &JetRustEmitContext, function: MIRFuncti
     }
     // MIRRust: a shared-capture local is one shared cell (S47/M2).
     if jet_rust_emit_local_is_shared(&ctx, local.id) -> return "let {jet_rust_emit_local_slot(local.id)}: std::rc::Rc<std::cell::RefCell<Option<{jet_rust_emit_type(&ctx, local.ty)}>>> = std::rc::Rc::new(std::cell::RefCell::new(None));"
-    // MIRRust emit_slots (#4566 slice 8): a list that never leaves the
-    // function keeps its first values in the frame (jet_rust_emit_plan_inline_lists).
-    if ctx.move_facts.inline_lists.get(local.id.value) == .Val(capacity) {
-        if local.ty.kind == .List(elem) -> return "let mut {jet_rust_emit_local_slot(local.id)}: Option<{ctx.config.root_prefix}jet_mem::JetInlineList<{jet_rust_emit_type(&ctx, elem)}, {capacity}>> = None;"
-        panic("checked MIR inline list local is not a list")
-    }
     // MIRRust emit_slots: a reference binding holds the value it binds in place.
     reference_binding :: ctx.ref_bindings.locals.get(local.id.value) != None
     borrow :: if reference_binding -> "&" else -> ""
@@ -583,6 +577,16 @@ fn jet_rust_emit_fold_find(bytes: [U8], pattern: [U8], from: Int) -> Int Never! 
         index += 1
     }
     -1
+}
+// Every non-overlapping occurrence of `pattern` (str::matches).
+fn jet_rust_emit_fold_occurrences(bytes: [U8], pattern: [U8]) -> [Int] Never! {
+    found := [Int]{}
+    at := jet_rust_emit_fold_find(bytes, pattern, 0)
+    loop at >= 0 {
+        &found.push(at)
+        at = jet_rust_emit_fold_find(bytes, pattern, at + pattern.len())
+    }
+    found
 }
 
 
@@ -1714,9 +1718,8 @@ fn jet_rust_emit_compact_numbered(text: [U8], at: Int, prefix: [U8]) -> Int Neve
 // MIRRust compact_function_text: the final text pass over one emitted body
 // (`lines[start..]`). Every slot and label named from a 64-bit MIR id is
 // renamed in first-mention order to a short sequential name (`__jet_v_N` ->
-// `_vK`, `__jet_l_N` -> `_lK`, `__jet_pm_N` -> `_pK`, the native Int shadows
-// `__jet_vi_N` -> `_nK` and `__jet_li_N` -> `_mK`, `'jet_block_N` -> `'bK`,
-// `'jet_loop_N` -> `'cK`), and leading indentation becomes one space per
+// `_vK`, `__jet_l_N` -> `_lK`, `__jet_pm_N` -> `_pK`, `'jet_block_N` ->
+// `'bK`, `'jet_loop_N` -> `'cK`), and leading indentation becomes one space per
 // four-space level, capped at eight. String, raw-string and comment text is
 // never touched, and a line that starts inside a string keeps its
 // indentation. The names are local to the function, so the renaming is
@@ -1728,8 +1731,8 @@ fn jet_rust_emit_compact_function_text(lines: [String], start: Int) -> [String] 
         &text.extend(entry.bytes())
         &text.push(U8{10})
     }
-    prefixes :: [String]{"__jet_v_", "__jet_l_", "__jet_pm_", "'jet_block_", "'jet_loop_", "__jet_vi_", "__jet_li_"}
-    shorts :: [String]{"_v", "_l", "_p", "'b", "'c", "_n", "_m"}
+    prefixes :: [String]{"__jet_v_", "__jet_l_", "__jet_pm_", "'jet_block_", "'jet_loop_"}
+    shorts :: [String]{"_v", "_l", "_p", "'b", "'c"}
     value_prefix :: prefixes[0].bytes()
     local_prefix :: prefixes[1].bytes()
     payload_prefix :: prefixes[2].bytes()
@@ -1893,18 +1896,6 @@ fn jet_rust_emit_compact_function_text(lines: [String], start: Int) -> [String] 
                         if digits > 0 {
                             kind = 2
                             prefix_width = payload_prefix.len()
-                        } else {
-                            digits = jet_rust_emit_compact_numbered(text, index, native_value_prefix)
-                            if digits > 0 {
-                                kind = 5
-                                prefix_width = native_value_prefix.len()
-                            } else {
-                                digits = jet_rust_emit_compact_numbered(text, index, native_local_prefix)
-                                if digits > 0 {
-                                    kind = 6
-                                    prefix_width = native_local_prefix.len()
-                                }
-                            }
                         }
                     }
                 }
@@ -3467,14 +3458,13 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     previous_ref_bindings := ctx.ref_bindings
     previous_body_index := ctx.body_index
     previous_expected_exits := ctx.expected_test_exits
-    previous_native_ints := ctx.native_ints
     ctx.current_function = Val(function.id)
     ctx.body_index = jet_rust_emit_body_index(function)
     ctx.expected_test_exits = jet_rust_emit_expected_scope_exits(&ctx, function)
     // The shared-capture plan reads the new index's partial-move rows.
     shared_locals :: jet_rust_emit_shared_capture_locals(ctx, function)
     ctx.body_index.shared_locals = shared_locals
-    bindings :: jet_rust_emit_place_bindings(ctx, function)
+    bindings :: jet_rust_emit_place_bindings(&ctx, function)
     ctx.body_index.bindings = bindings
     move_facts :: jet_rust_emit_move_facts(&ctx, function)
     ctx.move_facts = move_facts
@@ -3487,30 +3477,8 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     // binding rows above.
     read_bindings :: jet_rust_emit_read_bindings(&ctx, function)
     ctx.body_index.bindings = read_bindings
-    // MIRRust RustEmitter::new plan_native_ints (#4566 slice 1b); it reads
-    // the index, shared locals and reference bindings above.
-    native_ints :: jet_rust_emit_plan_native_ints(&ctx, function, [Int:JetRustEmitIntRange]{})
-    // MIRRust plan_native_version / emit_callable (#4566 loop versioning): a
-    // versioned function prints its native version under its own symbol, then
-    // its exact body as the cold `{name}__jet_exact` fallback.
-    version :: jet_rust_emit_plan_native_version(&ctx, function, native_ints)
-    // MIRRust emit_callable_named: a direct call fills its caller's slot; the
-    // function's own name stays a by-value wrapper (jet_rust_emit_plan_return_slot).
-    return_slot :: ctx.return_slots.get(function.id.value)
-    wrapper :: if return_slot != None -> jet_rust_emit_return_slot_wrapper(&ctx, function) else -> [String]{}
-    head :: if return_slot != None -> jet_rust_emit_return_slot_signature(&ctx, function) else -> jet_rust_emit_function_signature(&ctx, function)
-    lines := [String]{}
-    exact := [String]{}
-    if version == .Val(native) {
-        ctx.native_ints = native
-        lines = jet_rust_emit_function_text(&ctx, function, head)
-        ctx.native_ints = native_ints
-        exact_signature :: jet_rust_emit_exact_version_signature(&ctx, function)
-        exact = jet_rust_emit_function_text(&ctx, function, exact_signature)
-    } else {
-        ctx.native_ints = native_ints
-        lines = jet_rust_emit_function_text(&ctx, function, head)
-    }
+    head :: jet_rust_emit_function_signature(&ctx, function)
+    lines :: jet_rust_emit_function_text(&ctx, function, head)
     memo_header := [String]{}
     if jet_rust_emit_function_memoized(function) {
         root :: ctx.config.root_prefix.copy()
@@ -3526,34 +3494,19 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     ctx.move_facts = previous_move_facts
     ctx.ref_bindings = previous_ref_bindings
     ctx.body_index = previous_body_index
-    ctx.native_ints = previous_native_ints
     ctx.expected_test_exits = previous_expected_exits
-    // MIRRust emit_callable_named: the inline attributes precede the item,
-    // and a return-slot function's wrapper precedes its body symbol.
-    if !function.is_inline_always && !function.is_inline && wrapper.len() == 0 && exact.len() == 0 && memo_header.len() == 0 -> return lines
+    // MIRRust emit_callable_named: inline attributes precede the item.
+    if !function.is_inline_always && !function.is_inline && memo_header.len() == 0 -> return lines
     out := ^memo_header
-    attribute :: if function.is_inline_always -> "#[inline(always)]" else -> "#[inline]"
-    attributed :: function.is_inline_always || function.is_inline
-    if wrapper.len() > 0 {
-        if attributed -> &out.push(attribute)
-        loop line in wrapper -> &out.push(line)
+    if function.is_inline_always -> &out.push("#[inline(always)]") else {
+        if function.is_inline -> &out.push("#[inline]")
     }
-    if attributed -> &out.push(attribute)
     loop line in lines -> &out.push(line)
-    if exact.len() > 0 {
-        &out.push("")
-        if attributed -> &out.push(attribute)
-        loop line in exact -> &out.push(line)
-    }
     out
 }
 
-// MIRRust emit_callable_named: one body of `function` under the signature
-// `head`, with ctx.native_ints as its native plan. A native version's plan
-// (ctx.native_ints.params non-empty) checks its versioned parameters first.
+// MIRRust emit_callable_named: one exact body under the checked signature.
 fn jet_rust_emit_function_text(ctx: &JetRustEmitContext, function: MIRFunction, head: String) -> [String] Never! {
-    return_slot :: ctx.return_slots.get(function.id.value)
-    destinations :: ctx.call_destinations.get(function.id.value)
     lines := [String]{head}
     if jet_rust_emit_function_memoized(function) {
         &lines.push("    let __jet_memo_key: {jet_rust_emit_memo_key_type(&ctx, function)} = {jet_rust_emit_memo_key_value(&ctx, function)};")
@@ -3571,58 +3524,13 @@ fn jet_rust_emit_function_text(ctx: &JetRustEmitContext, function: MIRFunction, 
         &lines.push("    {ctx.config.root_prefix}jet_std::jet_stream_task(move |__jet_yield_tx| {{")
         loop name in borrowed -> &lines.push("        let {name} = &{name};")
     }
-    // MIRRust emit_callable_named (#4566 slice 1b): native Int shadows sit
-    // before the slots, outside the slot text passes, in row order;
-    // compaction renames them with the body.
-    loop local in function.locals {
-        if ctx.native_ints.locals.get(local.id.value) != None -> &lines.push("    let mut {jet_rust_emit_native_local_slot(local.id)}: i64 = 0;")
-    }
-    loop value in function.values {
-        if ctx.native_ints.values.get(value.id.value) != None -> &lines.push("    let mut {jet_rust_emit_native_value_slot(value.id)}: i64 = 0;")
-    }
-    // MIRRust emit_callable_named (#4566 loop versioning): the native version
-    // checks each versioned parameter once; a call outside the ranges runs the
-    // exact body.
-    if ctx.native_ints.params.len() > 0 {
-        checks := [String]{}
-        args := [String]{}
-        loop capture in function.capture_params {
-            name :: jet_rust_emit_capture_name(capture.slot)
-            &args.push(name)
-            index :: function.params.len() + capture.slot
-            admitted :: ctx.native_ints.params.get(index) ?? next
-            shadow :: jet_rust_emit_native_param_slot(index)
-            &lines.push("    let {shadow}: i64 = {name}.to_raw();")
-            &checks.push("({admitted.low}i64..={admitted.high}i64).contains(&{shadow})")
-        }
-        loop parameter in function.params {
-            name :: jet_rust_emit_parameter_name(function, parameter.index)
-            &args.push(name)
-            admitted :: ctx.native_ints.params.get(parameter.index) ?? next
-            shadow :: jet_rust_emit_native_param_slot(parameter.index)
-            &lines.push("    let {shadow}: i64 = {name}.to_raw();")
-            &checks.push("({admitted.low}i64..={admitted.high}i64).contains(&{shadow})")
-        }
-        if return_slot != None -> &args.push(JET_RUST_EMIT_RETURN_SLOT_PARAMETER)
-        &lines.push("    if !({checks.join(" && ")}) {{")
-        &lines.push("        return {jet_rust_emit_exact_version_symbol(&ctx, function)}({args.join(", ")});")
-        &lines.push("    }}")
-    }
     slots_start :: lines.len()
     partial_lines :: jet_rust_emit_partial_declarations(&ctx, function)
     loop line in partial_lines -> &lines.push("    {line}")
     locals_start :: lines.len()
-    loop local in function.locals -> &lines.push("    {jet_rust_emit_local_declaration(&ctx, local)}")
+    loop local in function.locals -> &lines.push("    {jet_rust_emit_local_declaration(&ctx, function, local)}")
     values_start :: lines.len()
     loop value in function.values {
-        if return_slot == .Val(slot) {
-            if slot.tail_values.get(value.id.value) != None -> next
-        }
-        if destinations == .Val(planned) {
-            if planned.values.get(value.id.value) != None -> next
-        }
-        if ctx.native_ints.values.get(value.id.value) != None && ctx.native_ints.materialized.get(value.id.value) == None -> next
-        if ctx.move_facts.inline_values.get(value.id.value) != None -> next
         if ctx.ref_bindings.payloads.get(value.id.value) != None || ctx.ref_bindings.collections.get(value.id.value) != None -> next
         // MIRRust emit_slots: a borrowed binding names its place; it has no slot.
         if ctx.body_index.bindings.get(value.id.value) != None -> next
@@ -3705,15 +3613,5 @@ fn jet_rust_emit_function_text(ctx: &JetRustEmitContext, function: MIRFunction, 
     if generator -> &lines.push("    }})")
     if jet_rust_emit_function_memoized(function) -> &lines.push("    }})")
     &lines.push("}}")
-    memo_header := [String]{}
-    if jet_rust_emit_function_memoized(function) {
-        root :: ctx.config.root_prefix.copy()
-        key :: jet_rust_emit_memo_key_type(&ctx, function)
-        value :: jet_rust_emit_callable_return(&ctx, function)
-        bound :: jet_rust_emit_memo_bound(function)
-        id :: function.id.value
-        &memo_header.push("static __jet_memo_store_{id}: std::sync::OnceLock<std::sync::Mutex<{root}JetMemo<{key}, {value}>>> = std::sync::OnceLock::new();")
-        &memo_header.push("fn __jet_memo_stats_{id}() -> {root}JetMemoStats {{ {root}jet_memo_stats(__jet_memo_store_{id}.get_or_init(|| std::sync::Mutex::new({root}JetMemo::with_bound({bound})))) }}")
-    }
-    "#[cold]\nfn {symbol}{generics}({params.join(", ")}) -> {jet_rust_emit_callable_return(&ctx, function)} {{"
+    lines
 }

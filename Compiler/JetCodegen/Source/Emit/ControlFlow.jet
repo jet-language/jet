@@ -127,15 +127,6 @@ fn jet_rust_emit_is_unit_ratio_parameter(ctx: &JetRustEmitContext, function: MIR
 
 fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, instruction: MIRInstruction) -> [String] Never! {
     lines := [String]{}
-    // MIRRust emit_instruction: the return slot replaces a return tail and a
-    // call destination's write.
-    if jet_rust_emit_return_slot_replaces(&ctx, function, instruction.id) -> return lines
-    // MIRRust emit_instruction (#4566 slice 1b): native shadows come first; the
-    // exact form follows only for a consumer that reads it.
-    if jet_rust_emit_native_int(&ctx, function, instruction, &lines) -> return lines
-    // MIRRust emit_instruction (#4566 slice 8): an inline list's empty literal
-    // and the move into its drop (jet_rust_emit_plan_inline_lists).
-    if ctx.move_facts.inline_skipped.get(instruction.id.value) != None -> return lines
     if instruction.result == .Val(value) {
         if jet_rust_emit_partial_drop_value(&ctx, function, value) != None -> return lines
         if jet_rust_emit_uninit_fixed_drop_value(ctx, function, value) != None -> return lines
@@ -181,21 +172,6 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
     }
     if instruction.operation == {
         .WritePlace(place, value) | .ReplacePlace(place, value) -> {
-            // MIRRust emit_instruction (#4566 slice 7): an empty-literal write
-            // of a return-slot place empties the caller's buffer in place
-            // (jet_rust_emit_bind_return_slot).
-            if ctx.return_slots.get(function.id.value) == .Val(slot) {
-                if slot.reuse.get(instruction.id.value) != None {
-                    &lines.push(jet_rust_emit_return_slot_reuse_write(slot.local))
-                    return lines
-                }
-            }
-            // MIRRust emit_instruction (#4566 slice 8): an inline list starts
-            // empty in its frame storage (jet_rust_emit_plan_inline_lists).
-            if ctx.move_facts.inline_writes.get(instruction.id.value) == .Val(local) {
-                &lines.push("{jet_rust_emit_local_slot(local)} = Some({ctx.config.root_prefix}jet_mem::JetInlineList::new());")
-                return lines
-            }
             // MIRRust emit_instruction (#4566): `place += text` grows the
             // place's own buffer, and `place = ""` empties it in place.
             if instruction.operation == .WritePlace(_, _) {
@@ -263,40 +239,6 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
             return lines
         }
         else -> {}
-    }
-    // MIRRust emit_instruction (#4566 slice 7): a refilled buffer's drop drops
-    // its contents and keeps the emptied buffer in its slot for the refilling
-    // call.
-    if instruction.operation == .Drop(_, _) {
-        if ctx.call_destinations.get(function.id.value) == .Val(planned) {
-            if planned.retires.get(instruction.id.value) == .Val(local) {
-                &lines.push("jet_retire_slot(&mut {jet_rust_emit_local_slot(local)});")
-                return lines
-            }
-        }
-        // MIRRust emit_instruction (#4566 slice 8): an inline list drops in
-        // its slot (jet_rust_emit_plan_inline_lists).
-        if ctx.move_facts.inline_drops.get(instruction.id.value) == .Val(local) {
-            &lines.push("drop({jet_rust_emit_local_slot(local)}.take().expect(\"MIR local\"));")
-            return lines
-        }
-    }
-    // MIRRust emit_instruction: a return-slot callee builds its result in
-    // the destination's slot, else in the result's own value slot.
-    if instruction.operation == .Call(callee, args, _) {
-        if callee == .User(target) {
-            partial := false
-            if instruction.result == .Val(result) -> partial = jet_rust_emit_partial_root_has(ctx, function, MIRPlaceBase.Temporary{value: result})
-            if ctx.return_slots.get(target.value) != None && !partial {
-                destination := "None"
-                if instruction.result == .Val(result) -> destination = jet_rust_emit_value_slot(result)
-                if ctx.call_destinations.get(function.id.value) == .Val(planned) {
-                    if planned.targets.get(instruction.id.value) == .Val(local) -> destination = jet_rust_emit_local_slot(local)
-                }
-                &lines.push("{jet_rust_emit_return_slot_call(&ctx, function, callee, target, args, destination)};")
-                return lines
-            }
-        }
     }
     location :: jet_rust_emit_instruction_location(&ctx, function, instruction)
     expression :: jet_rust_emit_operation(&ctx, function, instruction.operation, instruction.result, Val(location))
@@ -684,9 +626,11 @@ fn jet_rust_emit_int_sum_walk(ctx: &JetRustEmitContext, function: MIRFunction, p
         }
     }
     if ctx.ref_bindings.locals.get(acc_local.value) != None -> return None
-    if ctx.native_ints.locals.get(acc_local.value) != None || ctx.native_ints.values.get(total.value) != None -> return None
     // Every body value feeds the next body instruction only.
-    if jet_rust_emit_return_slot_use_count(index, accumulated) != 1 || jet_rust_emit_return_slot_use_count(index, read_element) != 1 || jet_rust_emit_return_slot_use_count(index, total) != 1 -> return None
+    accumulated_slot :: index.use_slots.get(accumulated.value) ?? return None
+    element_slot :: index.use_slots.get(read_element.value) ?? return None
+    total_slot :: index.use_slots.get(total.value) ?? return None
+    if index.uses[accumulated_slot].len() != 1 || index.uses[element_slot].len() != 1 || index.uses[total_slot].len() != 1 -> return None
     // The cursor value and the index read are used in the body alone.
     confined := [MIRValueID]{cursor_value}
     if index_read == .Val(read) -> &confined.push(read)
@@ -945,11 +889,6 @@ fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MIRFunction, pla
             if {
                 function.generator != None -> {
                 if value != None -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR generator return carries a value", "generator returns must terminate the stream without a value", Val(function.span))
-                &items.push(jet_rust_emit_cfg_line("{indent}return;"))
-                }
-                // MIRRust emit_terminator: the caller's slot already holds a
-                // return-slot function's result.
-                ctx.return_slots.get(function.id.value) != None -> {
                 &items.push(jet_rust_emit_cfg_line("{indent}return;"))
                 }
                 else -> {
