@@ -17,6 +17,8 @@
 // (Tests/Fixtures/RouteCarriers.jet) without a pack.
 // --list-routes lowers/lints the four stage1-required canonical List witnesses
 // without a pack; the ordinary fixture run executes their native images.
+// --assemble-only emits the complete unit for a frontend check without a pack.
+// It does not execute any native image or qualify a runtime.
 // then:  cd <outdir> && jet run unit.jet        (writes <fixture>.elf files)
 // then:  node Compiler/JetBackend/Tests/check-native-fixtures.mjs <outdir>
 //        (with JET_RUNTIME_C_LIB, it also runs every image through load.jet)
@@ -36,7 +38,7 @@ if (!outDir) {
   process.exit(64);
 }
 const runtimePack = process.env.JET_RUNTIME_PACK;
-if (!sanitizeOnlyArgument() && !process.argv.includes("--foreign-descriptors") && !process.argv.includes("--disjoint-lowering") && !process.argv.includes("--tls-refusal") && !process.argv.includes("--route-carriers") && !process.argv.includes("--list-routes") && !runtimePack) throw new Error("JET_RUNTIME_PACK must explicitly name an admitted fresh Jet pack");
+if (!process.argv.includes("--assemble-only") && !sanitizeOnlyArgument() && !process.argv.includes("--foreign-descriptors") && !process.argv.includes("--disjoint-lowering") && !process.argv.includes("--tls-refusal") && !process.argv.includes("--route-carriers") && !process.argv.includes("--list-routes") && !runtimePack) throw new Error("JET_RUNTIME_PACK must explicitly name an admitted fresh Jet pack");
 function sanitizeOnlyArgument() { return process.argv.includes("--sanitize"); }
 // While other edits are in flight: FX_HEAD (comma-separated repo paths) reads
 // those files as committed at HEAD, and FX_EXCLUDE (comma-separated file

@@ -141,6 +141,10 @@ user-facing codec diagnostics instead of teaching retired dynamic-tree names.
 The native fixed point is stage1 (built by the candidate) compiling stage2.
 Require both objects and ELF executables to be byte-identical, and require each
 stage's own all-phases diagnostic report to exist and contain zero failures.
+Before a fresh pack exists, lower-fixture `--assemble-only` permits a full
+frontend check and `--route-carriers` permits the carrier execution probe.
+Neither qualifies native fixture execution: full bits/ContainerCodecs images
+still require the same-source admitted Jet pack and unfiltered native registry.
 Run the final full-suite/golden gate with `JET=stage2/jet`, not only the earlier
 candidate S5 signal. Require the same-source complete suite receipt, registries,
 and hello/sample native runs at O0 and O2. Rust/LLVM execution is default-denied;
