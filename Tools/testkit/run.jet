@@ -81,7 +81,7 @@ fn kit_parse_options(args: [String]) -> KitOptions {
     if options.coverage && options.suite != "ui" -> options.error = "option not valid for suite: --coverage"
     seen := [String]{}
     loop tier in options.tiers {
-        if tier != "ref" && tier != "o0" && tier != "o1" && tier != "o2" {
+        if tier != "o0" && tier != "o1" && tier != "o2" {
             options.error = "unknown tier: {tier}"
             return options
         }
@@ -356,7 +356,6 @@ struct KitPlan {
     environment: [String]
     normalize: [String]
     compile_only: Bool
-    ref_audit: String
     artifact: String
     refused: String
     steps: [KitStep]
@@ -377,7 +376,6 @@ struct KitTier {
     name: String
     flags: [String]
     direct: Bool
-    audit: Bool
 }
 
 struct KitGoldenStepCtx {

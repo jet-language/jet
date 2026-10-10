@@ -40,18 +40,6 @@ fn kit_test_golden_env(root: String) -> KitEnv {
     assert_eq(kit_golden_stream_verdict("case", kit_test_golden_fixture("missing"), kit_test_golden_run("", "", 0), kit_test_golden_bless(), "", "").status, "FAIL")
 }
 
-#Test("ref audit enforces both gated directions and reads code not data") {
-    assert_eq(kit_golden_audit_code("fn main() {{ unsafe {{ }} }}", false, false).status, "FAIL")
-    assert_eq(kit_golden_audit_code("fn main() {{ }}", true, false).status, "FAIL")
-    assert_eq(kit_golden_audit_code("unsafe fn checked() {{ }} fn main() {{ unsafe {{ }} }}", true, false).status, "PASS")
-    assert_eq(kit_golden_audit_code("unsafe extern {{ }} fn main() {{ }}", true, false).status, "FAIL")
-    assert_eq(kit_golden_audit_code("fn main() {{ let name = \"unsafe\"; let raw = r#\"unsafe\"#; let ch = 'u'; /* unsafe */ }}", false, false).status, "PASS")
-    assert_eq(kit_golden_audit_code("fn unsafe_identifier() {{ }} fn main() {{ }}", false, false).status, "PASS")
-    registry :: "pub fn strip_vetted_prelude_modules(s: &str) -> String {{\n let s = strip_mod(s, \"jet_mem\");\n let s = strip_vetted_module(&s, \"jet_cell\");\n s\n}}\n"
-    emitted :: "mod jet_mem {{ unsafe fn internal() {{}} }}\n// JET_VETTED_UNSAFE_BEGIN: jet_cell\nunsafe fn cell() {{}}\n// JET_VETTED_UNSAFE_END: jet_cell\nfn main() {{}}\n"
-    assert_eq(kit_golden_audit_code(kit_golden_strip_vetted(emitted, registry), false, false).status, "PASS")
-}
-
 #Test("golden driver handles missing stream, compile-only, stdin, stderr and tier split") {
     root :: kit_test_golden_scratch("driver")
     project :: "Examples/features/topic"

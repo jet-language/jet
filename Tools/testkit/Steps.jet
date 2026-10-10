@@ -13,7 +13,7 @@ fn kit_steps_words(text: String) -> [String]? {
 }
 
 fn kit_steps_parse(source: String) -> KitPlan {
-    plan := KitPlan{requires: [], fixture: "", environment: [], normalize: ["paths"], compile_only: false, ref_audit: "", artifact: "", refused: "", steps: [], error: ""}
+    plan := KitPlan{requires: [], fixture: "", environment: [], normalize: ["paths"], compile_only: false, artifact: "", refused: "", steps: [], error: ""}
     line_number := 0
     pending := [String]{}
     joined := [String]{}
@@ -254,12 +254,8 @@ fn kit_steps_parse(source: String) -> KitPlan {
             next
         }
         if key == "ref-audit" {
-            if kit_steps_byte_slice(value, 0, kit_steps_byte_index(value, " #") ?? value.count_bytes()).trim() != "bridge" {
-                plan.error = "line {line_number}: unknown ref-audit"
-                return plan
-            }
-            plan.ref_audit = "bridge"
-            next
+            plan.error = "line {line_number}: ref-audit is retired"
+            return plan
         }
         if key == "normalize" {
             if value.starts_with("replace ") {

@@ -185,7 +185,6 @@ fn kit_ui_fixed(entry: KitEntry, ctx: KitCtx, source: String, overlay: [KitEnvVa
     if verdict.status != "PASS" -> return [KitOutcome{verdict: verdict, run: checked, tier: "fixed-check"}]
     loop tier in ctx.options.tiers {
         args := [String]{ctx.env.jet, if tier == "o0" -> "run" else -> "build", fixed}
-        if tier == "ref" -> &args.push("--profile=debug")
         if tier == "o2" -> &args.push("--release")
         built :: kit_exec_invoke_with_env(ctx.env, args, source, ctx.scratch, "", overlay)
         failure :: kit_exec_process_failure(built) ?? kit_expect_verdict(if built.code == 0 -> "PASS" else -> "FAIL", "fixed companion build/run exit {built.code}")

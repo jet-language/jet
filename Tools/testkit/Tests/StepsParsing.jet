@@ -32,7 +32,7 @@ fn kit_test_steps_env() -> KitEnv {
     assert(kit_expect_named(plan.normalize, "argv0"))
     assert(kit_steps_parse("stdout: = result.out\n").error != "")
     assert(kit_steps_parse("step: jet check x.jet\nstdout: ~ timing\n").error != "")
-    assert_eq(kit_steps_parse("run: none\nref-audit: bridge # vetted bridge\n").ref_audit, "bridge")
+    assert(kit_steps_parse("run: none\nref-audit: bridge # vetted bridge\n").error != "")
     assert_eq(kit_steps_parse("artifact: custom-executable\n").artifact, "custom-executable")
 }
 

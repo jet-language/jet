@@ -10,7 +10,7 @@ fn kit_ui_test_scratch(label: String) -> String {
 
 fn kit_ui_test_context(root: String, label: String) -> KitCtx {
     options := kit_exec_defaults()
-    options.tiers = ["ref", "o1"]
+    options.tiers = ["o0", "o1"]
     env :: KitEnv{root: root, scratch: root, jet: files.join(sys.current_dir(), "Tools/testkit/Fixtures/ui/compiler.sh"), jetpack: "", timeout: 5s, memory_limit: 0}
     KitCtx{options: options, env: env, root: root, scratch: files.join(root, label), bless: options.bless}
 }
@@ -92,7 +92,7 @@ fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
         loop outcome in outcomes -> assert_eq(outcome.verdict.status, "PASS")
         if entry.path == "tests/ui/clean.jet" {
             assert_eq(outcomes.len(), 3)
-            assert_eq(outcomes[1].tier, "ref")
+            assert_eq(outcomes[1].tier, "o0")
             assert_eq(outcomes[2].tier, "o1")
         }
     }
