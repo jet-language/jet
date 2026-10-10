@@ -36,7 +36,7 @@ fn jet_cli_devtools_new_ui(args: [String], color: Bool, json: Bool) -> JetDriver
     }
     cli_files.write(expected, actual) ?? return jet_cli_maintenance_error("E2105", "couldn't write `{expected}`: {jet_cli_io_error_text(err)}", None, color, json)
     stdout := "wrote {file}\nwrote {expected}\n"
-    if actual == "(no errors)\n" -> stdout = "{stdout}note: scaffold compiled cleanly — edit `{file}` to trigger the diagnostic you want, then `jet devtools bless diagnostic_snapshots`\n"
+    if actual == "(no errors)\n" -> stdout = "{stdout}note: scaffold compiled cleanly — edit `{file}` to trigger the diagnostic you want, then bless it with `node Tools/testkit/run.mjs ui --bless <fixture> --reason <why>`\n"
     JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 

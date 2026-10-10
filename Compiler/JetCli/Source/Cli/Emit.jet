@@ -1,7 +1,5 @@
-// `jet emit`. `--rust` follows Source/CmdDevTools.rs `run_emit_rust`:
-// successful --json still prints raw generated Rust; the mode flag changes
-// only compiler diagnostic routing. `--ast`, `--mir` and `--lir` print one
-// EmitTree (EmitTree.jet): text by default, the `emit` status under --json.
+// `jet emit`. `--ast`, `--mir` and `--lir` print one EmitTree (EmitTree.jet):
+// text by default, the `emit` status under --json.
 use jet_backend.[lir_lint_module, lir_lower_entry]
 use jet_driver.[
     JetDriverAuthorizedSourceSnapshot,
@@ -46,8 +44,8 @@ fn jet_cli_emit_ast(file: String, source: String, color: Bool, json: Bool, funct
     jet_cli_emit_printed("ast", file, function, json, nodes, "")
 }
 
-// `jet emit --mir|--lir <file>`: the file checks as `jet emit --rust` does
-// (Run mode; errors stop it, visible lints go to stderr); `--mir` prints the
+// `jet emit --mir|--lir <file>`: the file checks in Run mode (errors stop it,
+// visible lints go to stderr); `--mir` prints the
 // checked MIR, `--lir` the LIR `jet build` lowers from it, before the LIR
 // passes of its optimization level.
 fn jet_cli_emit_tier_result(file: String, source: String, color: Bool, json: Bool, requires_run: Bool, tier: String, function: String?, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {

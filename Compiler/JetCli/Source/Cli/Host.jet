@@ -168,50 +168,20 @@ fn jet_cli_write_notice(notice: String) {
     &stderr_handle.write(notice).drop("jet stderr")
 }
 
-// `jet emit --<tier> <file>`. `--ast` parses the file (Emit.jet). The other
-// tiers check it in Run mode (an entry with no `fn run` is E0101); errors
+// `jet emit --<tier> <file>`. `--ast` parses the file (Emit.jet). `--mir` and
+// `--lir` check it in Run mode (an entry with no `fn run` is E0101); errors
 // stop them with the problem count; visible lints (not a11y) go to stderr
-// without a summary. `--rust` (CmdDevTools.rs `run_emit_rust`) prints the
-// Rust of the dev-mode artifact: the runtime/Core prefix (MIRRust
-// `emit_mir_runtime_text` under the development devtools policy) followed by
-// the emitted program; `--mir` and `--lir` print their EmitTree.
+// without a summary; they print their EmitTree.
 fn jet_cli_compile_emit(file: String, source: String, color: Bool, json: Bool, tier: String, function: String?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     if tier == "ast" -> return jet_cli_emit_ast(file, source, color, json, function)
     requires_run :: jet_cli_entry_lacks_run(source)
-    rust :: tier == "rust"
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_entry(file, color, rust, None, JetDriverCompileMode.Program, None, trace_sink)
+    compiled :: jet_cli_compile_entry(file, color, false, None, JetDriverCompileMode.Program, None, trace_sink)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
-        .Compiled(result, snapshot) -> {
-            if rust -> jet_cli_finish(jet_cli_emit_result(file, source, color, json, requires_run, result, snapshot))
-            jet_cli_finish(jet_cli_emit_tier_result(file, source, color, json, requires_run, tier, function, result, snapshot))
-        }
+        .Compiled(result, snapshot) -> jet_cli_finish(jet_cli_emit_tier_result(file, source, color, json, requires_run, tier, function, result, snapshot))
     }
     output
-}
-
-fn jet_cli_emit_result(file: String, source: String, color: Bool, json: Bool, requires_run: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS]> JetDriverVerbOutput Never! {
-    diagnostics := jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-    if requires_run -> &diagnostics.push(jet_cli_no_run_diagnostic())
-    errors :: jet_cli_errors(diagnostics)
-    if errors.len() > 0 -> return jet_cli_emit_check_failure(file, source, errors, color, json)
-    if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
-    if !result.complete -> return jet_cli_ice("the Jet compiler stopped before finishing `{file}`")
-    lints := [Diagnostic]{}
-    loop diagnostic in diagnostics {
-        if !jet_driver_is_a11y_lint(diagnostic.code) -> &lints.push(diagnostic)
-    }
-    stderr := ""
-    if lints.len() > 0 -> stderr = diagnostic_render_all(file, source, lints, color)
-    items :: result.emitted_source ?? return jet_cli_ice("the Jet compiler finished `{file}` without emitting Rust")
-    program :: result.mir ?? return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
-    prefix := ""
-    if jet_cli_runtime_text(file, program, color, true) == {
-        .Text(text) -> prefix = text
-        .Failed(failure) -> return failure
-    }
-    JetDriverVerbOutput{stdout: "{prefix}{items}", stderr: stderr, exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // `jet eval <file>` (CmdDevTools.rs `run_eval`): the entry checks for the
@@ -1627,14 +1597,6 @@ fn jet_cli_terminal_bits() -> [U8] {
     bits
 }
 
-// `jet self devtools bless`: the waited child's exact Rust `ExitStatus`
-// display (`exit status: N`, or the signal number and name with
-// ` (core dumped)`), recorded by the runtime when it waited for this receipt's
-// process: compiler-private raw leaf `core.process.jet_process_exit_status_raw`.
-fn jet_cli_bless_child_status(receipt: cli_process.ProcessReceipt) -> String {
-    cli_process.jet_process_exit_status_raw(receipt.pid) ?? panic("the runtime waited for child {receipt.pid} without recording its exit status")
-}
-
 // CmdDevTools.rs `run_completions` caps a program's metadata read here.
 JET_CLI_COMPLETION_PROGRAM_MAX :: 536870912
 JET_CLI_COMPLETION_READ_CHUNK :: 16777216
@@ -1726,8 +1688,7 @@ fn jet_cli_maintenance_host(action: String, args: [String], color: Bool, json: B
         "new-ui" -> return jet_cli_devtools_new_ui(args, color, json)
         "check-fixture-paths" -> return jet_cli_devtools_fixture_paths(color, json)
         "reduce" -> return jet_cli_devtools_reduce(args, color, json)
-        "ice-report" -> return jet_cli_devtools_ice_report(args, color, json)
-        else -> return jet_cli_devtools_bless(args, color, json)
+        else -> return jet_cli_devtools_ice_report(args, color, json)
     }
 }
 

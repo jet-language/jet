@@ -3,10 +3,10 @@
 // commands (E2101) and flags (E2102), then the verbs the Jet driver owns
 // (`explain <CODE>`, `check [<file>|<dir>]`, `build <file>`,
 // `run [<file>|<dir>]`, `test <file>`, `new <name>`, `doc <file>`, `fmt`,
-// and `emit --ast|--mir|--lir|--rust <file>`; a bare or directory target
+// and `emit --ast|--mir|--lir <file>`; a bare or directory target
 // resolves the project entry, Entry.jet), and the inspect group
 // (Inspect.jet). Every report is the Rust host's exact bytes and exit
-// status for the same argv, except `jet emit`'s Jet-only parts: the
+// status for the same argv, except `jet emit`, which is Jet-only: its
 // `--ast`/`--mir`/`--lir` tiers, `--fn`, and the E2102 reports for a target
 // with no mode flag or with two. A command whose Jet port has not landed yet
 // is refused with E2104 instead of guessing its behavior.
@@ -73,9 +73,8 @@ enum JetCLIPlan {
     // `jet doc <file>` (Source/CmdDoc.rs `run_doc`): `json` prints the
     // `inspect.doc` status, `check` reports undocumented public items.
     Doc(file: String, source: String, color: Bool, json: Bool, check: Bool)
-    // `jet emit --ast|--mir|--lir|--rust <file>`: print one tier of the
-    // entry (`--rust`: CmdDevTools.rs `run_emit_rust`); `function` is the
-    // `--fn` selection of the AST, MIR and LIR tiers.
+    // `jet emit --ast|--mir|--lir <file>`: print one tier of the entry;
+    // `function` is the `--fn` selection.
     Emit(file: String, source: String, color: Bool, json: Bool, tier: String, function: String?)
     // `jet eval <file>` (CmdDevTools.rs `run_eval`): evaluate the entry's
     // `run` and print its value; `pure` (`--pure`) adds the transitive E3401
@@ -123,7 +122,7 @@ enum JetCLIPlan {
     // CmdTry uses the actual invocation-owned checked projection and counters.
     // Quiet does not change its output contract; JSON selects its wire report.
     Try(plan_path: String, keep: Bool, json: Bool)
-    // `jet self devtools new-ui|check-fixture-paths|reduce|ice-report|bless`
+    // `jet self devtools new-ui|check-fixture-paths|reduce|ice-report`
     // (CmdDevTools.rs `run_devtools`): `args` is the raw argv after the tool
     // word; their confirmations are direct bytes under --json/--quiet too.
     Maintenance(action: String, args: [String], color: Bool, json: Bool)
@@ -380,9 +379,6 @@ fn jet_cli_check_flags(jet_argv: [String], command: String, color: Bool) -> JetC
         if jet_cli_is_known_flag(argument) -> next
         head :: argument.split("=").to_list()[0]
         if external_fmt && JET_CLI_EXTERNAL_FMT_FLAGS.contains(head) -> next
-        if head == "--emit-rust" {
-            return Val(jet_cli_fail("E2102", "`--emit-rust` isn't a flag jet understands", "generated output belongs to the `emit` command", "run `jet emit --rust <file.jet>`", color, JET_DRIVER_EXIT_USAGE))
-        }
         program :: command == "run" || command == "test"
         fix := ""
         if jet_cli_closest_flag(head) == .Val(close) {
@@ -1140,14 +1136,12 @@ fn jet_cli_fuzz_command(jet_argv: [String], args: [String], color: Bool, quiet: 
 }
 
 // The tiers `jet emit` prints, one mode flag each (`--ast`, `--mir`,
-// `--lir`, `--rust`).
-JET_CLI_EMIT_TIERS :: [String]{"ast", "mir", "lir", "rust"}
+// `--lir`).
+JET_CLI_EMIT_TIERS :: [String]{"ast", "mir", "lir"}
 
-// `jet emit --ast|--mir|--lir|--rust <file>` (`--rust`: Source/main.rs
-// `"emit"`, CmdDevTools.rs `run_emit_rust`): with no target the command's
-// help is a usage error; a target needs exactly one mode flag (E2102); the
-// file is read as typed. `--fn NAME` selects one function's tree on the
-// AST, MIR and LIR tiers.
+// `jet emit --ast|--mir|--lir <file>`: with no target the command's help is
+// a usage error; a target needs exactly one mode flag (E2102); the file is
+// read as typed. `--fn NAME` selects one function's tree.
 fn jet_cli_emit(jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
     if args.len() < 2 -> return jet_cli_done("", if quiet -> "" else -> jet_cli_command_help("emit"), JET_DRIVER_EXIT_USAGE)
     modes := [String]{}
@@ -1155,7 +1149,7 @@ fn jet_cli_emit(jet_argv: [String], args: [String], color: Bool, quiet: Bool, js
         if jet_argv.contains("--{tier}") -> &modes.push(tier)
     }
     if modes.len() == 0 {
-        return jet_cli_fail("E2102", "usage: jet emit --ast|--mir|--lir|--rust <file.jet>", "`emit` needs a mode flag naming the tier it prints", "run `jet emit --mir <file.jet>`; `--ast`, `--lir` and `--rust` print the other tiers", color, JET_DRIVER_EXIT_USAGE)
+        return jet_cli_fail("E2102", "usage: jet emit --ast|--mir|--lir <file.jet>", "`emit` needs a mode flag naming the tier it prints", "run `jet emit --mir <file.jet>`; `--ast` and `--lir` print the other tiers", color, JET_DRIVER_EXIT_USAGE)
     }
     if modes.len() > 1 {
         return jet_cli_fail("E2102", "`jet emit` prints one tier, but both `--{modes[0]}` and `--{modes[1]}` were given", "`emit` writes a single tier so its output has one meaning", "keep one of the mode flags", color, JET_DRIVER_EXIT_USAGE)
@@ -1170,9 +1164,6 @@ fn jet_cli_emit(jet_argv: [String], args: [String], color: Bool, quiet: Bool, js
         name :: jet_cli_option_value(jet_argv, "--fn") ?? ""
         if name == "" || name.starts_with("-") {
             return jet_cli_fail("E2104", "`--fn` needs a function name", jet_cli_why("E2104"), "write `jet emit --{tier} <file.jet> --fn <name>`", color, JET_DRIVER_EXIT_USAGE)
-        }
-        if tier == "rust" {
-            return jet_cli_fail("E2102", "`--fn` doesn't apply to `jet emit --rust`", "`--rust` prints the whole generated program", "use `--fn` with `--ast`, `--mir` or `--lir`, or drop it", color, JET_DRIVER_EXIT_USAGE)
         }
         function = Val(name)
     }
@@ -1510,7 +1501,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
             tool :: if argv.len() > 1 -> argv[1] else -> ""
             if tool == {
                 "new-example" -> return jet_cli_devtools_new_example(jet_cli_tail(argv, 2), color)
-                "new-ui" | "reduce" | "ice-report" | "bless" -> return JetCLIPlan.Maintenance{action: tool, args: jet_cli_tail(argv, 2), color: color, json: json}
+                "new-ui" | "reduce" | "ice-report" -> return JetCLIPlan.Maintenance{action: tool, args: jet_cli_tail(argv, 2), color: color, json: json}
                 // Rust ignores extra words after `check-fixture-paths`.
                 "check-fixture-paths" -> return JetCLIPlan.Maintenance{action: tool, args: [String]{}, color: color, json: json}
                 else -> {}
@@ -1535,7 +1526,6 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         "test" -> return jet_cli_test(jet_argv, color, quiet, verbose, threads)
         "new" -> return jet_cli_new(jet_argv, args, color, quiet)
         "doc" -> return jet_cli_doc(jet_argv, args, color, quiet, json, jet_argv.contains("--check"))
-        "emit" -> return jet_cli_emit(jet_argv, args, color, quiet, json)
         "eval" -> return jet_cli_eval(argv, args, color, json)
         "fill" -> {
             if args.len() < 2 -> return jet_cli_done("", if quiet -> "" else -> jet_cli_command_help("fill"), JET_DRIVER_EXIT_USAGE)

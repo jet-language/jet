@@ -22,17 +22,16 @@ source and the complete diff; blessing is not a way to hide a red behavior.
 For example, a single UI fixture uses its repository-relative filter:
 
 ```sh
-Tools/agent/jet-env env JET_UI_FILTER=tests/ui/arg_type_mismatch.jet \
-  cargo test --test diagnostic_snapshots ui_snapshots -- --nocapture
-Tools/agent/jet-env env JET_UI_FILTER=tests/ui/arg_type_mismatch.jet \
-  UPDATE_EXPECT=tests/ui/arg_type_mismatch.jet \
-  cargo test --test diagnostic_snapshots ui_snapshots -- --nocapture
-Tools/agent/jet-env jet self devtools bless tests/ui/arg_type_mismatch.jet --dry-run
+Tools/agent/jet-env node Tools/testkit/run.mjs ui --jet "$JET" \
+  --filter tests/ui/arg_type_mismatch.jet
+Tools/agent/jet-env node Tools/testkit/run.mjs ui --jet "$JET" \
+  --filter tests/ui/arg_type_mismatch.jet \
+  --bless tests/ui/arg_type_mismatch.jet --reason "<commit or ratified decision>"
 ```
 
-Build a fresh binary with `Tools/agent/jet-env cargo build` before any `jet
-explain`, runtime, or generated-page claim; then bless only the named target
-after its dry run and review. Do not create a Markdown diagnostic catalog or
+Use the admitted native compiler named by `JET` before any `jet explain`,
+runtime, or generated-page claim; then bless only the named target after its
+review. Do not create a Markdown diagnostic catalog or
 status mirror.
 
 ## Executable goldens

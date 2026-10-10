@@ -21,9 +21,7 @@ option from an older guide.
 
 Help and version are human renderables, not machine records: `jet help --json`
 and `jet version --json` succeed with no output. Diagnostic essays instead
-use the `jet.status/v1` `explain` action under `--json`. `jet emit --rust --json`
-still writes the generated Rust verbatim; its machine mode affects diagnostic
-failures, not the emitted program. C and C++ driver aliases own their raw
+use the `jet.status/v1` `explain` action under `--json`. C and C++ driver aliases own their raw
 arguments (including `--help` and `--version`) before Jet parses global flags.
 
 `jet emit --ast|--mir|--lir <file>` prints one compiler tier of a file:
@@ -833,28 +831,15 @@ fail a semantic compile.
 ## Maintainer workflows
 
 `jet self devtools reduce <file> --code <CODE>` minimizes line chunks while
-the compiler still emits the requested error or lint. Without `--code`, the
-oracle requires frontend acceptance and rejection of the generated Rust by
-the hidden backend's metadata-only probe. An unavailable backend is not a
-reproduction. The sibling output is `<stem>.reduced.<extension>`; files
+the compiler still emits the requested error or lint; `--code` is required. The sibling output is `<stem>.reduced.<extension>`; files
 without an extension use `.jet`. Candidates are compiled from their actual
 temporary files, never by treating diagnostic display text as source input.
 
-`jet self devtools ice-report <file>` writes the original source, generated
-Rust, backend stderr, and both tool versions into a timestamped
-`.jet/ice-report/` directory in the source project. Frontend errors prevent
-publication. Backend acceptance is reported as a note but still permits a
-bundle. Files are published sequentially, so an I/O failure can leave a
-partial bundle.
-
-`jet self devtools bless [target...] --dry-run` lists the selected snapshot
-test commands without launching them or requiring a reason. A real sweep
-requires at least eight UTF-8 bytes in the trimmed `UPDATE_EXPECT_REASON`;
-it sets `UPDATE_EXPECT=1` for each child and inherits its standard streams.
-Requested order and duplicate targets are preserved, and every selected
-target is attempted even if an earlier one fails. These maintainer commands
-own their raw arguments: `reduce` accepts the two-word `--code` form, and
-`bless` treats options other than `--dry-run` as target names.
+`jet self devtools ice-report <file>` writes the original source and the
+compiler version into a timestamped `.jet/ice-report/` directory in the
+source project. Frontend errors prevent publication. Files are published
+sequentially, so an I/O failure can leave a partial bundle. These maintainer
+commands own their raw arguments: `reduce` accepts the two-word `--code` form.
 
 `jet inspect gates [<entry.jet>] [--kind <kind>] [--scope <scope>]`
 uses the canonical load-only gate query, not semantic body checking or emission.
