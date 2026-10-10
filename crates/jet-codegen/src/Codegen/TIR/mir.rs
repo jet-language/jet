@@ -9901,9 +9901,10 @@ impl<'a> LowerCtx<'a> {
                 self.lower_numeric_range(subject, subject_ty, *lo, *hi)
             }
             MirPatternShape::Or { alternatives, .. } => {
-                let mut tests = Vec::with_capacity(alternatives.len());
+                let join = self.new_block(self.span(), "pattern.or.join")?;
+                let mut incoming = Vec::with_capacity(alternatives.len() + 1);
                 for (index, alternative) in alternatives.iter().enumerate() {
-                    tests.push(self.lower_pattern_shape_condition(
+                    let test = self.lower_pattern_shape_condition(
                         subject,
                         subject_ty,
                         owner,
@@ -9914,9 +9915,25 @@ impl<'a> LowerCtx<'a> {
                         // bindings stay read-only values even under a `&place`
                         // subject (sema declares them so).
                         None,
-                    )?);
+                    )?;
+                    let matched = self.new_block(self.span(), "pattern.or.matched")?;
+                    let next = self.new_block(self.span(), "pattern.or.next")?;
+                    self.terminate(MirTerminator::Branch {
+                        condition: test, then_target: matched, else_target: next,
+                    });
+                    self.switch_to(matched);
+                    let value = self.emit_checked("pattern", Some(&Type::Bool),
+                        MirOperation::Constant(MirConstant::Bool(true)))?;
+                    incoming.push((self.current_block(), value));
+                    self.terminate(MirTerminator::Jump { target: join });
+                    self.switch_to(next);
                 }
-                self.combine_pattern_tests(tests, jet_foundation::AST::BinOp::Or)
+                let value = self.emit_checked("pattern", Some(&Type::Bool),
+                    MirOperation::Constant(MirConstant::Bool(false)))?;
+                incoming.push((self.current_block(), value));
+                self.terminate(MirTerminator::Jump { target: join });
+                self.switch_to(join);
+                self.emit_checked("pattern", Some(&Type::Bool), MirOperation::Phi { incoming })
             }
             MirPatternShape::Struct { fields, .. } => {
                 let owner = owner.ok_or_else(|| {

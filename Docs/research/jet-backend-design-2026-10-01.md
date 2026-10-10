@@ -48,6 +48,11 @@ parameter order alongside its fields, preserving `os_code: Int?` and
 Core `IOContext` construction narrows present OS codes exactly once through the
 generic native optional-slot adapter, not a second record-specific conversion.
 The Phi ownership and drop-compatibility guards remain unchanged.
+Ordered or-patterns stop at the first matching alternative; failed nested
+carrier probes leave the subject available for subsequent alternatives. The
+Rust reference now mirrors native Sema's recursive Result-carrier admission and
+native codegen's ordered branch structure. Its owning payload projection takes
+the carrier only when no later reachable MIR use needs it.
 
 The existing TLS transport refusal runs before route lookup on both the
 argument-validation and direct-call lowering paths. Pure TLS configuration

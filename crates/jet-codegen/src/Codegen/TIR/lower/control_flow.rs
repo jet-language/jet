@@ -530,6 +530,14 @@ fn lower_if_cond_impl(
     (combined, bindings, prefixes)
 }
 
+fn pattern_uses_result_carrier(pattern: &Pattern) -> bool {
+    match pattern {
+        Pattern::Ok { .. } | Pattern::Err { .. } => true,
+        Pattern::Or(alternatives, _) => alternatives.iter().any(pattern_uses_result_carrier),
+        _ => false,
+    }
+}
+
 fn lower_if_cond_atom(
     cond: &Expr,
     cx: &Cx,
@@ -551,7 +559,16 @@ fn lower_if_cond_atom(
         ..
     } = cond
     {
-        let subj = lower_if_expr(subject, cx, env, cached);
+        let subj = if pattern_uses_result_carrier(pattern) {
+            let _cache_scope = cached.then(|| super::expressions::ExprCacheScope::enter());
+            let fallback_subject = env.fallback_subject;
+            env.fallback_subject = true;
+            let subj = lower_if_let_subject(subject, cx, env, false);
+            env.fallback_subject = fallback_subject;
+            subj
+        } else {
+            lower_if_let_subject(subject, cx, env, cached)
+        };
         // Checked bundles always carry the owner layout. An isolated comptime
         // fragment may not (the implicit binding fold); return the same typed
         // lowering failure as the statement-level variant path so that fold
@@ -567,7 +584,7 @@ fn lower_if_cond_atom(
             (TIfCond::Plain(violation), Vec::new(), Vec::new())
         };
         let enum_type = match subj.ty.without_user_tags() {
-            Type::Option(_) => None,
+            Type::Option(_) | Type::Result { .. } => None,
             _ => match resolved_enum_subject_type(cx, &subj.ty) {
                 Ok(enum_type) => Some(enum_type),
                 Err(reason) => return or_pattern_invariant(reason),
@@ -1080,7 +1097,7 @@ fn lower_if_cond_atom(
             pattern,
             Pattern::Present { .. } | Pattern::Ok { .. } | Pattern::Err { .. }
         ) {
-            let subj = if matches!(pattern, Pattern::Ok { .. } | Pattern::Err { .. }) {
+            let subj = if pattern_uses_result_carrier(pattern) {
                 // Result patterns inspect the carrier itself. Normal value
                 // lowering consumes a plain helper's carrier through `Try`;
                 // isolate the worklist cache and lower this subject under the
@@ -1318,14 +1335,9 @@ pub(crate) fn lower_switch<'a>(
             return lower_guard_switch(arms, else_body, env, Some((subject, subject.clone())));
         }
         let name = jet_format!("{jet_prefix}switch_subject_{}", subject.span().start);
-        let carrier = arms.iter().any(|arm| {
-            matches!(
-                &arm.cond,
-                Expr::PatternTest {
-                    pattern: Pattern::Ok { .. } | Pattern::Err { .. },
-                    ..
-                }
-            )
+        let carrier = arms.iter().any(|arm| match &arm.cond {
+            Expr::PatternTest { pattern, .. } => pattern_uses_result_carrier(pattern),
+            _ => false,
         });
         let fallback_subject = env.fallback_subject;
         env.fallback_subject = carrier || fallback_subject;

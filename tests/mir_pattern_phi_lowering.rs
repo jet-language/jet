@@ -34,3 +34,12 @@ fn or_patterns_bind_by_name_and_preserve_optional_subjects() {
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, "policy\n2\ncall\n1\ntrue\ntrue\nfalse\nfalse\n");
 }
+
+#[test]
+fn or_patterns_short_circuit_and_preserve_failed_nested_carriers() {
+    let source = include_str!("fixtures/mir_or_pattern_ordered_carriers.jet");
+    check_mir("or_pattern_ordered_carriers", source);
+    let (code, stdout, stderr) = tir_support::build_and_run_full("or_pattern_ordered_carriers", "run", source);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "1\n8\n3\n7\n0\n11\n13\n0\n0\n13\n17\n");
+}

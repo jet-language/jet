@@ -22213,6 +22213,56 @@ impl<'a> RustEmitter<'a> {
             && !writes.iter().any(|(block, _)| region.contains(block))
     }
 
+    /// An owning carrier can surrender its payload only at its last reachable
+    /// use. Nested pattern probes may fail and continue with another alternative.
+    fn carrier_has_later_use(
+        &self,
+        function: &MirFunction,
+        subject: MirValueId,
+        projection: Option<MirValueId>,
+    ) -> bool {
+        let Some(projection) = projection else { return true };
+        let index = self.function_index(function);
+        let Some(&(block, position)) = index.definitions.get(&projection) else { return true };
+        let Some(uses) = index.uses.get(&subject) else { return false };
+        if uses.iter().any(|&(used_block, used_position)| {
+            used_block == block && used_position.is_none_or(|used_position| used_position > position)
+        }) {
+            return true;
+        }
+        let definition_block = index.definitions.get(&subject).map(|&(block, _)| block);
+        if uses.iter().all(|&(used_block, _)| {
+            used_block == block || Some(used_block) == definition_block
+        }) {
+            return false;
+        }
+        let mut seen = vec![false; function.blocks.len()];
+        let mut pending = Vec::new();
+        for &(used_block, _) in uses {
+            if used_block != block && !seen[used_block] {
+                seen[used_block] = true;
+                pending.push(used_block);
+            }
+        }
+        while let Some(used_block) = pending.pop() {
+            // Returning to the carrier's definition produces a fresh value,
+            // not another use of the payload surrendered in this iteration.
+            if Some(used_block) == definition_block {
+                continue;
+            }
+            for &predecessor in &index.predecessors[used_block] {
+                if predecessor == block {
+                    return true;
+                }
+                if !seen[predecessor] {
+                    seen[predecessor] = true;
+                    pending.push(predecessor);
+                }
+            }
+        }
+        false
+    }
+
     /// A shared reference for a consumer that only inspects `value`: the read
     /// parameter's own place when `value` reads one, else the value slot.
     fn inspected_value_reference(&self, function: &MirFunction, value: MirValueId) -> String {
@@ -26142,14 +26192,20 @@ impl<'a> RustEmitter<'a> {
             MirOperation::EnumIs { subject, owner, variant } => self.enum_is(function, *subject, *owner, variant),
             MirOperation::EnumPayload { subject, owner, variant, index } => self.enum_payload(function, result, *subject, *owner, variant, *index),
             MirOperation::OptionIsSome { subject } => format!("matches!({}, Ok(_))", self.inspected_value_reference(function, *subject)),
-            MirOperation::OptionValue { subject } => match self.immutable_read_place(function, *subject) {
-                Some(place) => format!("match {} {{ Ok(value) => value.clone(), Err(_) => unreachable!(\"MIR option payload missing\") }}", self.place_reference(function, place, MirAccess::Read)),
-                None => format!("match {} {{ Ok(value) => value, Err(_) => unreachable!(\"MIR option payload missing\") }}", self.value_move(*subject)),
+            MirOperation::OptionValue { subject } => {
+                if self.immutable_read_place(function, *subject).is_some()
+                    || self.carrier_has_later_use(function, *subject, result)
+                {
+                    format!("match {} {{ Ok(value) => value.clone(), Err(_) => unreachable!(\"MIR option payload missing\") }}", self.inspected_value_reference(function, *subject))
+                } else {
+                    format!("match {} {{ Ok(value) => value, Err(_) => unreachable!(\"MIR option payload missing\") }}", self.value_move(*subject))
+                }
             },
             MirOperation::ResultIsOk { subject } => format!("matches!({}, Ok(_))", self.inspected_value_reference(function, *subject)),
-            MirOperation::ResultValue { subject, ok } if self.immutable_read_place(function, *subject).is_some() => {
-                let place = self.immutable_read_place(function, *subject).expect("checked read place");
-                let subject = self.place_reference(function, place, MirAccess::Read);
+            MirOperation::ResultValue { subject, ok }
+                if self.immutable_read_place(function, *subject).is_some()
+                    || self.carrier_has_later_use(function, *subject, result) => {
+                let subject = self.inspected_value_reference(function, *subject);
                 if *ok {
                     format!("match {subject} {{ Ok(value) => value.clone(), Err(_) => unreachable!(\"MIR result success payload missing\") }}")
                 } else {
