@@ -3664,8 +3664,6 @@ fn jet_codegen_declared_type_slots(function_index: JetCodegenFunctionIndex, modu
     loop module_index in 0..<modules.len() {
         loop definition_index in 0..<modules[module_index].declarations.type_defs.len() {
             definition :: modules[module_index].declarations.type_defs[definition_index]
-            // core.term stream handles lower to their native carrier, never a record row.
-            if jet_codegen_is_core_term_stream_carrier(modules, definition.module_identity, definition.name) -> next
             declared_keys[definition.key] = true
             if !definition.key.starts_with("<corelib>/") -> program_type_names[definition.name] = true
             if definition.key == JET_CODEGEN_PARSE_ERROR_ALIAS -> parse_error_declared = true
