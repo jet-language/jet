@@ -95,10 +95,45 @@ fn codec_fail(reason: I64, err: I64, err_len: I64) -> I64 {
 // The canonical scalar Decode adapters (CAbiRoutes.rs jet_rt_codec_decode_*
 // over EncodingTraits.rs:185-430 and JetStd/Dyn.rs:406-566). Each borrows the
 // runtime Dyn; status 1 writes the owned value into `ok` (Bool as one byte),
-// status 0 writes codec_fail's one FieldError. JetStd/Dyn.rs:9-35's text-cell
-// scope, where a Text leaf parses into a scalar, is entered only by the
-// text-native sources (CSV cells, environment), which have no native
-// provider; here a Text leaf is always the "found text" failure.
+// status 0 writes codec_fail's one FieldError. Inside the text-cell scope a
+// Text leaf parses into an Int, Float or Bool; outside it, it fails.
+
+// JetStd/Dyn.rs:9-35: the thread-local text-cell scope a text-native source
+// (CSV cells, environment) decodes inside. The scalar word is the active flag;
+// a fresh attached thread starts outside the scope.
+codec_text_cells_key := I64{0}
+
+// runtime-init: 3
+#Export(c) fn jet_rt_codec_text_cells_init() {
+    if (codec_text_cells_key == I64{0}) -> codec_text_cells_key = jet_rt_tls_key_new(I64{0})
+}
+
+// jet_decode_text_cells: enter returns the previous state, which leave
+// restores, exactly as JetTextCellsScope's drop does.
+#Export(c) fn jet_rt_codec_text_cells_enter() -> I64 {
+    previous :: jet_rt_tls_get(codec_text_cells_key)
+    jet_rt_tls_set(codec_text_cells_key, I64{1})
+    previous
+}
+#Export(c) fn jet_rt_codec_text_cells_leave(previous: I64) { jet_rt_tls_set(codec_text_cells_key, previous) }
+
+fn codec_text_cells() -> Bool { jet_rt_tls_get(codec_text_cells_key) != I64{0} }
+
+// `text.trim() == literal` (Unicode White_Space trim, as str::trim).
+fn codec_trimmed_is(text: I64, literal: I64) -> Bool {
+    start :: numeric_trim_start(text)
+    end :: numeric_trim_end(text, start)
+    length :: rt_text_len(literal)
+    if (end - start != length) -> return false
+    data :: rt_text_data(text)
+    expected :: rt_text_data(literal)
+    at := I64{0}
+    loop at < length {
+        if (rt_text_byte(data + start + at) != rt_text_byte(expected + at)) -> return false
+        at += I64{1}
+    }
+    true
+}
 
 // DynKind.rs dyn_kind over Dyn.rs dyn_kind_for; a borrowed static text.
 fn codec_kind(tree: I64) -> I64 {
@@ -327,6 +362,18 @@ fn codec_decode_integer(tree: I64, kind: I64, range: I64, ok: I64, err: I64, err
             jet_rt_int_drop(value)
             return codec_fail(codec_framed(rt_static_text("expected Int, found number "), payload, rt_static_text("")), err, err_len)
         }
+    } else if (kind_tag == DATA_TREE_TEXT && codec_text_cells()) {
+        // A text cell is the exact Int (CtBigInt::from_str) or i128 FromStr
+        // of the trimmed text; any failure names the original text.
+        if (jet_int_parse(payload, ok, err) == I64{0}) {
+            jet_rt_string_drop(data_tree_word(err))
+            return codec_fail(codec_found(rt_static_text("expected Int, found "), tree, false), err, err_len)
+        }
+        value = data_tree_word(ok)
+        if (kind >= I64{0} && !codec_i128(value)) {
+            jet_rt_int_drop(value)
+            return codec_fail(codec_found(rt_static_text("expected Int, found "), tree, false), err, err_len)
+        }
     } else {
         return codec_fail(codec_found(rt_static_text("expected Int, found "), tree, false), err, err_len)
     }
@@ -395,14 +442,38 @@ fn codec_finite(bits: I64) -> Bool { ((bits >> I64{52}).bit_and(I64{2047})) != I
         if !codec_finite(data_tree_word(ok)) -> return codec_fail(codec_framed(rt_static_text("expected Float, found out-of-range number "), payload, rt_static_text("")), err, err_len)
         return I64{1}
     }
+    if (kind_tag == DATA_TREE_TEXT && codec_text_cells()) {
+        // The trimmed text's f64, kept only when finite.
+        if (jet_float_parse(payload, ok, err) == I64{0}) {
+            jet_rt_string_drop(data_tree_word(err))
+            return codec_fail(codec_found(rt_static_text("expected Float, found "), tree, false), err, err_len)
+        }
+        if !codec_finite(data_tree_word(ok)) -> return codec_fail(codec_found(rt_static_text("expected Float, found "), tree, false), err, err_len)
+        return I64{1}
+    }
     codec_fail(codec_found(rt_static_text("expected Float, found "), tree, false), err, err_len)
 }
 
-// Dyn.rs:533-553 decode_bool.
+// Dyn.rs:533-553 decode_bool; a text cell is exactly `true` or `false` once
+// trimmed.
 #Export(c) fn jet_rt_codec_decode_bool(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
-    if (data_tree_word(tree + DATA_TREE_TAG) != DATA_TREE_BOOL) -> return codec_fail(codec_found(rt_static_text("expected Bool, found "), tree, false), err, err_len)
-    rt_text_put(ok, if (data_tree_word(tree + DATA_TREE_PAYLOAD) != I64{0}) -> I64{1} else -> I64{0})
-    I64{1}
+    kind_tag :: data_tree_word(tree + DATA_TREE_TAG)
+    payload :: data_tree_word(tree + DATA_TREE_PAYLOAD)
+    if (kind_tag == DATA_TREE_BOOL) {
+        rt_text_put(ok, if (payload != I64{0}) -> I64{1} else -> I64{0})
+        return I64{1}
+    }
+    if (kind_tag == DATA_TREE_TEXT && codec_text_cells()) {
+        if codec_trimmed_is(payload, rt_static_text("true")) {
+            rt_text_put(ok, I64{1})
+            return I64{1}
+        }
+        if codec_trimmed_is(payload, rt_static_text("false")) {
+            rt_text_put(ok, I64{0})
+            return I64{1}
+        }
+    }
+    codec_fail(codec_found(rt_static_text("expected Bool, found "), tree, false), err, err_len)
 }
 
 // Dyn.rs:555-566 decode_string.

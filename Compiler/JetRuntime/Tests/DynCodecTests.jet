@@ -141,5 +141,43 @@ fn codec_fixture_decode() -> I64 {
     if !codec_fixture_rejects(jet_rt_codec_decode_string(absent, slots, slots, slots + I64{8}), slots, rt_static_text("expected Text, found null")) -> return I64{48}
     jet_rt_handle_drop_dyn(absent)
     jet_rt_free(slots, I64{16}, I64{8})
+    codec_fixture_text_cells()
+}
+
+// JetStd/Dyn.rs text-cell scope: only inside it does a Text leaf parse into
+// Int, Float or Bool (trimmed); leaving restores the previous state.
+fn codec_fixture_text_cells() -> I64 {
+    jet_rt_codec_text_cells_init()
+    slots :: jet_rt_alloc(I64{16}, I64{8})
+    cell :: jet_rt_record_new_dyn_text(rt_static_text(" 42 "))
+    if !codec_fixture_rejects(jet_rt_codec_decode_i64(cell, slots, slots, slots + I64{8}), slots, rt_static_text("expected Int, found text \" 42 \"")) -> return I64{60}
+    outer :: jet_rt_codec_text_cells_enter()
+    if (outer != I64{0}) -> return I64{61}
+    inner :: jet_rt_codec_text_cells_enter()
+    if (jet_rt_codec_decode_i64(cell, slots, slots, slots + I64{8}) != I64{1} || text_glue_word(slots) != I64{42}) -> return I64{62}
+    jet_rt_codec_text_cells_leave(inner)
+    if (jet_rt_codec_decode_int(cell, slots, slots, slots + I64{8}) != I64{1} || text_glue_word(slots) != I64{42}) -> return I64{63}
+    if (jet_rt_codec_decode_float(cell, slots, slots, slots + I64{8}) != I64{1} || rt_f64_from_bits(text_glue_word(slots)) != Float{42.0}) -> return I64{64}
+    if !codec_fixture_rejects(jet_rt_codec_decode_i8(cell, slots, slots, slots + I64{8}), slots, rt_static_text("expected I8, found out-of-range Int")) -> return I64{65}
+    if !codec_fixture_rejects(jet_rt_codec_decode_bool(cell, slots, slots, slots + I64{8}), slots, rt_static_text("expected Bool, found text \" 42 \"")) -> return I64{66}
+    if (jet_rt_codec_decode_string(cell, slots, slots, slots + I64{8}) != I64{1} || !jet_rt_string_eq(text_glue_word(slots), rt_static_text(" 42 "))) -> return I64{67}
+    jet_rt_string_drop(text_glue_word(slots))
+    jet_rt_handle_drop_dyn(cell)
+    big :: jet_rt_record_new_dyn_text(rt_static_text("300"))
+    if !codec_fixture_rejects(jet_rt_codec_decode_u8(big, slots, slots, slots + I64{8}), slots, rt_static_text("expected U8, found out-of-range Int")) -> return I64{68}
+    jet_rt_handle_drop_dyn(big)
+    infinite :: jet_rt_record_new_dyn_text(rt_static_text("inf"))
+    if !codec_fixture_rejects(jet_rt_codec_decode_float(infinite, slots, slots, slots + I64{8}), slots, rt_static_text("expected Float, found text \"inf\"")) -> return I64{69}
+    if !codec_fixture_rejects(jet_rt_codec_decode_int(infinite, slots, slots, slots + I64{8}), slots, rt_static_text("expected Int, found text \"inf\"")) -> return I64{70}
+    jet_rt_handle_drop_dyn(infinite)
+    truth :: jet_rt_record_new_dyn_text(rt_static_text("\ttrue "))
+    text_glue_store(slots, I64{0})
+    if (jet_rt_codec_decode_bool(truth, slots, slots, slots + I64{8}) != I64{1} || text_glue_word(slots) != I64{1}) -> return I64{71}
+    jet_rt_handle_drop_dyn(truth)
+    jet_rt_codec_text_cells_leave(outer)
+    falsity :: jet_rt_record_new_dyn_text(rt_static_text("false"))
+    if !codec_fixture_rejects(jet_rt_codec_decode_bool(falsity, slots, slots, slots + I64{8}), slots, rt_static_text("expected Bool, found text \"false\"")) -> return I64{72}
+    jet_rt_handle_drop_dyn(falsity)
+    jet_rt_free(slots, I64{16}, I64{8})
     I64{0}
 }
