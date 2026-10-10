@@ -136,7 +136,7 @@ fn sema_compute_panic_sites_are_compute_failures(function_key: String, modules: 
     if sema_compute_has_panic_edge(function.effects.call_edges) && !local_panic -> safe = false
     &visiting.push(function_key)
     if safe {
-        loop edge in modules[function.module_index].functions[function.row].effects.call_edges {
+        loop edge in modules[position.module_index].functions[position.row_index].effects.call_edges {
             if edge == "__jet_panic__" -> next
             target_position :: sema_compute_function_position(index, edge, &work) ?? next
             if !sema_compute_effects_have_root(modules[target_position.module_index].functions[target_position.row_index].effects.solved, "Panic") -> next
