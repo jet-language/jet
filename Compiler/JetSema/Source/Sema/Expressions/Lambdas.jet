@@ -2084,6 +2084,20 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         &diagnostics.push(sema_type_mismatch(expected_ret ?? ret_ty, ret_ty, lambda.span))
         return None
     }
+    // A concrete lambda's checked body, not a same-named file function,
+    // establishes its failure rail. An unconstrained total value lambda
+    // retains Never instead of acquiring the default Err at the call site.
+    if expected == None && !inline_loop && !lambda_work.meta.fallible_propagation && ret_ty != (Type.Named{name: "Unit"}) {
+        has_carrier :: if ret_ty == {
+            .Result(_, _) | .Option(_) -> true
+            .Named(name) -> name == "Never"
+            else -> false
+        }
+        if !has_carrier {
+            ret_ty = Type.Result{ok: ret_ty, err: Type.Named{name: "Never"}}
+            lambda_work.meta.fallible_carrier = Val(ret_ty)
+        }
+    }
     ret_slot := Type?{None}
     if ret_ty != (Type.Named{name: "Unit"}) -> ret_slot = Val(ret_ty)
     lambda_return_provenance := lambda_context.return_view_provenance

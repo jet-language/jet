@@ -253,7 +253,8 @@ fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, dept
         if stop_before_comparison && parser_expression_comparison_boundary(operator) -> break
         operator_token :: parser_bump(&state)
         if operator == TOKEN_STAR && parser_current_kind(&state) == TOKEN_STAR && parser_current(&state).span.start == operator_token.span.end {
-            parser_add_fatal_code(&state, "E0396", parser_cover(operator_token.span, parser_current(&state).span), "Jet writes a power as `^`, not `**`.", "`**` is the power operator in some other languages; in Jet it would read as multiplication followed by a raw-pointer `*`.", "Write `base ^ exponent`, for example `2 ^ 3`.")
+            power_span :: parser_cover(operator_token.span, parser_current(&state).span)
+            parser_add_fatal_code(&state, "E0396", power_span, "Jet writes a power as `^`, not `**`.", "`**` is the power operator in some other languages; in Jet it would read as multiplication followed by a raw-pointer `*`.", "Write `base ^ exponent`, for example `2 ^ 3`.")
             break
         }
 
@@ -650,7 +651,7 @@ fn parser_try_parse_typed_literal(state: &JetParserState, depth: Int) -> ParsedE
 // Rust `starts_shared_operand`: the tokens that open the value of a
 // `shared expr` construction. Anything else leaves `shared` a plain name.
 fn parser_starts_shared_operand(kind: Int) -> Bool Never! {
-    kind == TOKEN_IDENT || kind == TOKEN_INT || kind == TOKEN_FLOAT || kind == TOKEN_UNIT_NUMBER || kind == TOKEN_RAW_STRING || kind == TOKEN_STRING || kind == TOKEN_CHAR || kind == TOKEN_TRUE || kind == TOKEN_FALSE || kind == TOKEN_SELF || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE
+    kind == TOKEN_IDENT || kind == TOKEN_INT || kind == TOKEN_FLOAT || kind == TOKEN_UNIT_NUMBER || kind == TOKEN_RAW_STRING || kind == TOKEN_STRING || kind == TOKEN_CHAR || kind == TOKEN_TRUE || kind == TOKEN_FALSE || kind == TOKEN_SELF || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE || kind == TOKEN_LPAREN
 }
 
 fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Bool, stop_before_comparison: Bool) -> ParsedExpr {

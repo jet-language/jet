@@ -1085,7 +1085,24 @@ impl<'a> Checker<'a> {
         } else {
             body_ret
         };
-        lam.meta.fallible_carrier = if lam.meta.fallible_propagation {
+        // A concrete, unconstrained lambda has already had its own body
+        // checked. Do not reintroduce the default Err rail when its binding
+        // is called: no propagated failure means the rail is Never.
+        let ret_ty = if !expected_callable && !inline_loop && !lam.meta.fallible_propagation {
+            ret_ty.map(|ret| {
+                if ret.is_fallible() || ret.is_never() {
+                    ret
+                } else {
+                    Type::Result {
+                        ok: Box::new(ret),
+                        err: Box::new(Type::Named(Syntax::TYPE_NEVER.to_string())),
+                    }
+                }
+            })
+        } else {
+            ret_ty
+        };
+        lam.meta.fallible_carrier = if lam.meta.fallible_propagation || (!expected_callable && !inline_loop) {
             inferred_fallible_ret.or_else(|| {
                 ret_ty.as_ref().and_then(|ty| {
                     matches!(ty, Type::Result { .. } | Type::Option(_)).then(|| ty.clone())

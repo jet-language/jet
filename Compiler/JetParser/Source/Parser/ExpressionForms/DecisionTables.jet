@@ -255,6 +255,10 @@ fn parser_expression_form_value_block(state: &JetParserState, depth: Int, result
             if result_handler -> parser_expression_form_result_error(&state, token.span, "expected `}}` to close this Result handler branch", "every `{{` needs a matching `}}`", "add a closing `}}`") else -> parser_expression_form_error(&state, "E0003", token.span, "expected `}}` to close this value branch", "every `{{` needs a matching `}}`", "add `}}` after the branch value")
             return ParserExpressionFormValueBranch{body: statements, value: Expr.NoElse{span: token.span}, span: parser_cover(open.span, token.span)}
         }
+        if kind == TOKEN_IDENT && parser_current(&state).text == "next" && (parser_kind_at(&state, 1) == TOKEN_SEMI || parser_kind_at(&state, 1) == TOKEN_RBRACE || parser_kind_at(&state, 1) == TOKEN_LPAREN) {
+            &statements.push(parser_parse_statement(&state))
+            next
+        }
         // As in Rust's value blocks: a line that reaches the closing `}` is
         // tried as the branch value and kept when it parses cleanly; any
         // other line, or a failed try, is an ordinary statement.

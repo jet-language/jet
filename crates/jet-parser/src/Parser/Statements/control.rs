@@ -1064,7 +1064,14 @@ impl<'a> Parser<'a> {
                 });
         }
         self.expect(TokKind::LBrace, "after `#Unsafe(…)`")?;
+        // An audited region can be the callable's value tail, including
+        // another audited region. Preserve that value grammar one level in.
+        let saved_tail_depth = self.callable_tail_block_depth;
+        if self.callable_tail_expects_value && saved_tail_depth == Some(self.block_depth) {
+            self.callable_tail_block_depth = Some(self.block_depth + 1);
+        }
         let body = self.block_stmts();
+        self.callable_tail_block_depth = saved_tail_depth;
         let end = self.toks[self.pos - 1].span.end;
         let span = Span::new(start.start, end);
         self.bind_rule_fact(&marker.name, marker.name_span, Some(span), crate::Policy::RuleSite::Block);

@@ -272,6 +272,11 @@ impl<'a> Checker<'a> {
     }
 
     fn resolve_failure_function(&self, name: &str) -> Option<(usize, String, crate::AST::FuncSig)> {
+        // Failure provenance and the union solver obey the same lexical
+        // precedence as call checking; a local callable is not a file fn.
+        if self.lookup(name).is_some() {
+            return None;
+        }
         if let Some(signature) = self.funcs.get(name) {
             return Some((self.module_idx, name.to_string(), signature.clone()));
         }
@@ -358,6 +363,18 @@ impl<'a> Checker<'a> {
     fn failure_call_provenance(&self, inner: &Expr) -> FailureCallProvenance {
         match inner {
             Expr::Call(call) => {
+                if let Some(info) = self.lookup(&call.name) {
+                    let ret = match &info.ty {
+                        Type::Fn { ret, .. } => ret.as_deref(),
+                        _ => None,
+                    };
+                    return FailureCallProvenance {
+                        callee: call.name.clone(),
+                        definition: self.definition_location(self.module_idx, info.def_span)
+                            .unwrap_or_else(|| self.definition_fallback_text()),
+                        contract: crate::AST::FailureContract::from_return_type(ret).source(),
+                    };
+                }
                 let (definition, contract) = self
                     .resolve_failure_function(&call.name)
                     .map(|(owner, name, signature)| {

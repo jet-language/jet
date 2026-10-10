@@ -11,6 +11,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 fn errors(src: &str) -> Vec<Diagnostic> {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(jet_codegen::Codegen::MIREval::install_mir_bridge);
     let (toks, lex_diags) = Lexer::lex(src);
     assert!(lex_diags.is_empty(), "{lex_diags:?}");
     let mut prog = Parser::parse(&toks).expect("lambda fixture parses");
@@ -131,4 +133,59 @@ fn char_crossings_and_infallible_list_reserve_do_not_invent_an_api() {
         "fn value() Never! { bytes := [U8]{}\n &bytes.reserve(4) }\nfn run() {}\n",
     );
     assert!(found.iter().any(|d| d.code == "E0311"), "{found:?}");
+}
+
+#[test]
+fn unannotated_local_predicates_keep_their_own_failure_contract() {
+    let found = errors(
+        "fn has(key: String) -> Bool { Err(\"global failure\") }\n\
+         fn text(key: String) -> Bool { Err(\"global failure\") }\n\
+         fn valid() -> Bool Never! {\n\
+             has :: (key: String) -> !(key == \"\")\n\
+             text :: (key: String) -> has(key)\n\
+             text(\"value\")\n\
+         }\nfn run() {}\n",
+    );
+    assert!(found.is_empty(), "unexpected errors: {found:?}");
+}
+
+#[test]
+fn braced_value_arm_next_is_loop_control() {
+    let found = errors(
+        "fn value() -> Int Never! {\n\
+             loop { event :: 0\n\
+                 node :: if event == { 0 -> { next }\n else -> 1 }\n\
+                 return node\n\
+             }\n\
+         }\nfn run() {}\n",
+    );
+    assert!(found.is_empty(), "unexpected errors: {found:?}");
+}
+
+#[test]
+fn guard_payload_is_visible_inside_a_braced_arm() {
+    let found = errors(
+        "struct Name { prefix: String?, namespace_uri: String? }\n\
+         struct NamespaceSet { fn insert(&self, key: String?) -> Bool Never! { true } }\n\
+         fn value(name: Name) Never! {\n\
+             visible := NamespaceSet{}\n\
+             if name.prefix == .Val(prefix) { _ :: &visible.insert(Val(prefix)) } else if name.namespace_uri != None { _ :: &visible.insert(None) }\n\
+         }\n\
+         fn nested(name: String?) -> Int Never! {\n\
+             if true -> {\n\
+                 if name == .Val(prefix) { _ :: prefix.len() }\n\
+                 1\n\
+             } else -> 0\n\
+         }\nfn run() {}\n",
+    );
+    assert!(found.is_empty(), "unexpected errors: {found:?}");
+}
+
+#[test]
+fn shared_accepts_a_parenthesized_generic_optional_payload() {
+    let found = errors(
+        "fn value<T>(x: ^T) -> Shared<T?> { shared (T?{Val(^x)}) }\n\
+         fn run() {}\n",
+    );
+    assert!(found.is_empty(), "unexpected errors: {found:?}");
 }

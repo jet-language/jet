@@ -1964,7 +1964,11 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
             return Stmt.Switched{marker: marker, body: [Stmt]{statement}, span: Span{start: hash.span.start, end: parser_previous_end(state)}}
         }
     }
-    body :: parser_parse_block(&state)
+    saved_tail_depth :: state.callable_tail_depth
+    value_tail :: marker.name == "Unsafe" && state.callable_tail_depth == state.block_depth
+    if value_tail -> state.callable_tail_depth = state.block_depth + 1
+    body :: parser_parse_body_block(&state, value_tail)
+    state.callable_tail_depth = saved_tail_depth
     span :: parser_cover(hash.span, body.span)
     if marker.name == {
         "Unsafe" -> {

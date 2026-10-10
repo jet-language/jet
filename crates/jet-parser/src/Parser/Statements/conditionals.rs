@@ -220,6 +220,12 @@ impl<'a> Parser<'a> {
                 }
                 _ => {}
             }
+            if matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::KW_NEXT)
+                && matches!(self.peek2().kind, TokKind::Semi | TokKind::RBrace | TokKind::LParen)
+            {
+                stmts.push(self.stmt()?);
+                continue;
+            }
             let save = self.pos;
             let saved_diags = self.diags.len();
             if let Ok(value) = self.expr() {
@@ -1803,6 +1809,14 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 _ => {}
+            }
+            // `next` is contextual loop control in statement position. Do
+            // not mistake a terminating control statement for the tail name.
+            if matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::KW_NEXT)
+                && matches!(self.peek2().kind, TokKind::Semi | TokKind::RBrace | TokKind::LParen)
+            {
+                stmts.push(self.stmt()?);
+                continue;
             }
             // Try the current position as the trailing value expression.
             let save = self.pos;

@@ -7,11 +7,32 @@ fn xml_roots_predicate() -> Bool Never! {
     object("value")
 }
 fn xml_roots_byte() -> U8 Never! {
-    #Unsafe("no raw operations in this regression") { U8{7} }
+    #Unsafe("no raw operations in this regression") {
+        #Unsafe("nested tail retains its value grammar") { U8{7} }
+    }
 }
 fn xml_roots_first(bytes: View<U8>) -> U8 Never! { bytes[0] }
 fn xml_roots_window(bytes: [U8]) -> U8 Never! {
     xml_roots_first(bytes[0..<bytes.len()])
+}
+fn has(key: String) -> Bool { Err("global failure") }
+fn xml_roots_local_failure_contract() -> Bool Never! {
+    has :: (key: String) -> !(key == "")
+    text :: (key: String) -> has(key)
+    text("value")
+}
+fn xml_roots_next() -> Int Never! {
+    loop {
+        event :: 1
+        node :: if event == { 0 -> { next } else -> 1 }
+        return node
+    }
+}
+fn xml_roots_prefix(name: String?) Never! {
+    if name == .Val(prefix) { _ :: prefix.len() }
+}
+fn xml_roots_shared<T>(x: ^T) -> Shared<T?> {
+    shared (T?{Val(^x)})
 }
 fn run() {
     print(xml_roots_predicate())

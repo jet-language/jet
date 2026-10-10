@@ -711,6 +711,9 @@ A lambda is `(params) -> expression` or `(params) -> { ... }`. A single
 assignment or a unit call needs no extra braces after the arrow. Parameter
 annotations may be omitted when an expected function type supplies them; with
 no expected type, omitted annotations report **E0801** (S46).
+A locally inferred value lambda keeps the failure contract proved by its own
+body; a body with no failure has a `Never` failure rail. A same-named file
+function cannot supply the local binding's call or failure contract.
 
 ```jet
 square :: (n: Int) -> n * n
@@ -1287,7 +1290,8 @@ The lock is per statement. When one statement touches a second shared value,
 the ordered shared engine avoids nesting locks and therefore avoids the plain
 access deadlock class. The closure spellings `Shared.read(f)` and `Shared.edit(f)`
 are retired (E1116); read fields directly. `Shared.new(x)` is retired (E1115);
-use `shared x`.
+use `shared x`. A grouped operand uses the same construction, `shared (expr)`;
+for example, a generic optional payload can be `shared (T?{Val(^x)})`.
 
 Expert code can hold a lock across helper calls with `guard_read()` or
 `guard_edit()`. Each returns an owned `SharedGuard<T>` and releases it on every
