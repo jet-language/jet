@@ -6078,3 +6078,103 @@ fn run() Never! {
         std::fs::remove_dir_all(directory).unwrap();
     });
 }
+
+#[test]
+fn core_owner_stream_records_keep_source_nominals() {
+    let source = jet_foundation::CoreModuleExports::core_source_module("core.term")
+        .expect("Core terminal source module");
+    let body = jet_sema::CoreSources::core_source_text(source.module).unwrap();
+    let source_for_parse = jet_pkg_model::Package::mask_inline_package_source(body).unwrap().0;
+    let (tokens, diagnostics) = crate::Lexer::lex_generated(&source_for_parse);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let (program, _) = crate::Parser::parse_for_check_with_source(&tokens, &source_for_parse).unwrap();
+    let items: Vec<_> = program.items.into_iter().filter(|item| matches!(
+        item, Item::Struct(definition)
+            if matches!(definition.name.as_str(), "Stdout" | "Stderr" | "StdinHandle")
+    )).collect();
+    assert_eq!(items.len(), 3, "all source-owned stream records are exercised");
+    let module = "<corelib>/Core/term::Core/term/term.jet";
+    let declarations = super::tir_to_mir_types::lower_declarations_from_items(
+        &items, module, &jet_foundation::Layout::TargetLayout::host(),
+    );
+    for leaf in ["Stdout", "Stderr", "StdinHandle"] {
+        let key = format!("{module}::{leaf}");
+        let row = declarations.type_defs.iter().find(|row| row.key == key)
+            .unwrap_or_else(|| panic!("source record owner was discarded: {key}"));
+        let super::tir_to_mir_types::TirTypeDefKind::Struct { fields, .. } = &row.kind else {
+            panic!("{key} must retain its source record shape");
+        };
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].name, "fd");
+        assert_eq!(fields[0].ty, Type::Int);
+        let lowered = super::tir_to_mir_types::lower_type(&Type::Named(key.clone()));
+        let jet_foundation::MIR::MirTypeKind::Apply { name, .. } = &lowered.kind else {
+            panic!("{key} must remain nominal");
+        };
+        assert_eq!(name.name, key, "source stream identity must not collapse to a Prelude carrier");
+    }
+}
+
+#[test]
+fn core_owner_range_error_has_canonical_reason_record() {
+    let declarations = super::tir_to_mir_types::lower_declarations_from_items(
+        &[], "", &jet_foundation::Layout::TargetLayout::host(),
+    );
+    let row = declarations.type_defs.iter().find(|row| row.key == "RangeError")
+        .expect("checked Core-only RangeError constructors need a canonical record owner");
+    let super::tir_to_mir_types::TirTypeDefKind::Struct { fields, .. } = &row.kind else {
+        panic!("RangeError must retain its canonical record shape");
+    };
+    assert_eq!(fields.len(), 1);
+    assert_eq!(fields[0].name, "reason");
+    assert_eq!(fields[0].ty, crate::Sema::core_struct_field_type("RangeError", "reason", &[]).unwrap());
+    assert_eq!(fields[0].ty, Type::String);
+}
+
+#[test]
+fn core_owner_qualified_guard_and_streams_compile_and_run() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (bundle, nominals) = checked_bundle(include_str!(
+            "../../../../../Compiler/JetCodegen/Tests/CoreOwnerGuardFixtures.jet"
+        ));
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("qualified guard and stream calls must lower to checked MIR");
+        mir.validate().expect("qualified guard and stream MIR must validate");
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("core-owner-proof"))
+            .join(format!("qualified-guard-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("core_owner_guard.rs");
+        let executable = directory.join(format!("core_owner_guard{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, &rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=core_owner_guard", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("qualified guard proof requires rustc");
+        assert!(compiled.status.success(), "qualified guard and stream code must compile:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("qualified guard proof must run");
+        assert!(executed.status.success(), "qualified guard and streams must run:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        assert_eq!(String::from_utf8_lossy(&executed.stdout), "body\nstdout owner\nguard\n");
+        assert_eq!(String::from_utf8_lossy(&executed.stderr), "stderr owner\n");
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}

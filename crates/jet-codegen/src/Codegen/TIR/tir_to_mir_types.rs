@@ -437,11 +437,6 @@ fn lower_nominal_ref(name: &str) -> MirNominalRef {
 /// Project one checked source type into the canonical ABI-bearing type carrier.
 /// The semantic type key is deterministic and remains present on every MIR
 pub(super) fn lower_type(ty: &Type) -> MirType {
-    if let Type::Named(name) = ty {
-        if let Some(carrier) = core_term_stream_carrier(name) {
-            return lower_type(&Type::Named(carrier.to_string()));
-        }
-    }
     let lowered = {
         let kind = lower_type_kind(ty);
         MirType::from_kind(kind).with_identity(MirTypeId(stable_id(
@@ -1393,7 +1388,6 @@ pub(super) fn lower_tir_declarations(
         );
     }
     discard_duplicate_core_enum_fallbacks(&mut out);
-    discard_core_term_stream_carriers(&mut out);
     ensure_builtin_debug_trait(&mut out);
     out
 }
@@ -1448,7 +1442,6 @@ pub(super) fn lower_declarations_from_items_with_boxed_edges(
         checked_nominals,
     );
     discard_duplicate_core_enum_fallbacks(&mut out);
-    discard_core_term_stream_carriers(&mut out);
     ensure_builtin_debug_trait(&mut out);
     out
 }
@@ -1483,26 +1476,6 @@ fn discard_duplicate_core_enum_fallbacks(declarations: &mut TirDeclarations) {
     });
 }
 
-/// `core.term` declares `Stdout`, `Stderr`, and `StdinHandle` so Jet code can
-/// name them, but their values are the Prelude's native stream carriers
-/// (`core.term.stdout()` and friends), not records. MIR therefore types every
-/// spelling of these handles as the one native nominal, exactly like the bare
-/// host signature; a record row here would make the JIT drop a record the
-/// value never was.
-pub(crate) fn core_term_stream_carrier(name: &str) -> Option<&'static str> {
-    match name {
-        "<corelib>/Core/term::Core/term/term.jet::Stdout" => Some("Stdout"),
-        "<corelib>/Core/term::Core/term/term.jet::Stderr" => Some("Stderr"),
-        "<corelib>/Core/term::Core/term/term.jet::StdinHandle" => Some("StdinHandle"),
-        _ => None,
-    }
-}
-
-fn discard_core_term_stream_carriers(declarations: &mut TirDeclarations) {
-    declarations
-        .type_defs
-        .retain(|row| core_term_stream_carrier(&row.key).is_none());
-}
 
 fn collect_items(
     out: &mut TirDeclarations,
@@ -2407,6 +2380,7 @@ const COMPILER_OWNED_REFLECTION_ENUMS: &[(&str, &[&str])] = &[(
 const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("PluginFrame", &["function", "component", "offset"]),
     ("PluginFault", &["export", "message", "frames"]),
+    ("RangeError", &["reason"]),
     (
         crate::Syntax::TYPE_IO_CONTEXT,
         crate::Syntax::IO_CONTEXT_FIELDS,

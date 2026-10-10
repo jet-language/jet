@@ -35,6 +35,10 @@ fn fc_tuple_owners() {
 fn fc_nominal_owners() {
     range :: fc_field(Type.Named{name: "Range"}, "lo")
     fc_require(range.owner_key == "Range" && range.field_name == "lo", "compiler-owned record")
+    reason_fields :: jet_codegen_compiler_owned_record_fields("RangeError") ?? panic("RangeError record owner")
+    fc_require(reason_fields.len() == 1 && reason_fields[0].name == "reason" && reason_fields[0].ty == Type.String, "RangeError canonical reason field")
+    reason_owner :: jet_codegen_compiler_owned_record_definition("fixture", "RangeError", reason_fields)
+    fc_require(reason_owner.key == "RangeError" && fc_field(Type.Named{name: "RangeError"}, "reason").owner_key == reason_owner.key, "RangeError literal and field share their record owner")
     measurement :: fc_field(Type.Apply{name: "Measurement", args: [Type]{Type.Int}}, "value")
     fc_require(measurement.owner_key == "Measurement", "generic fields belong to the declaration")
     payload :: fc_field(Type.Named{name: "WsError"}, "limit")

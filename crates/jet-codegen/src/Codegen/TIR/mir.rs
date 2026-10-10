@@ -4953,9 +4953,6 @@ fn canonical_nominal_name(
     name: &str,
     span: Span,
 ) -> Result<String, LowerError> {
-    if let Some(carrier) = crate::Codegen::TIR::tir_to_mir_types::core_term_stream_carrier(name) {
-        return Ok(carrier.to_string());
-    }
     if let Some((key, row)) = type_index.exact.get_key_value(name) {
         if row.ambiguous {
             return Err(LowerError::new(

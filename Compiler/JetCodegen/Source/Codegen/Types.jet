@@ -288,22 +288,8 @@ fn jet_codegen_merge_nominal_identity(found: JetCodegenNominalIdentity?, candida
     found
 }
 
-// `core.term` declares `Stdout`, `Stderr`, and `StdinHandle` so Jet code can
-// name them, but their values are the Prelude's native stream carriers, not
-// records. MIR types every spelling of these handles as the one bare native
-// nominal, exactly like the host signature of `core.term.stdout()`; a record
-// identity would make a backend drop a record the value never was.
-fn jet_codegen_is_core_term_stream_carrier(modules: [SemaGraphModuleResult], module_identity: String, name: String) -> Bool Never! {
-    if name != "Stdout" && name != "Stderr" && name != "StdinHandle" -> return false
-    loop semantic_module in modules {
-        if semantic_module.module_identity == module_identity -> return semantic_module.module_name == "core.term"
-    }
-    false
-}
-
 fn jet_codegen_find_nominal_identity(modules: [SemaGraphModuleResult], current_module_identity: String, name: String, generic_names: [String]) -> JetCodegenNominalIdentity? {
     found :: jet_codegen_find_source_nominal_identity(modules, current_module_identity, name, generic_names) ?? return None
-    if jet_codegen_is_core_term_stream_carrier(modules, found.module_identity, found.name) -> return None
     Val(found)
 }
 
@@ -381,8 +367,6 @@ fn jet_codegen_qualified_nominal_name(modules: [SemaGraphModuleResult], current_
     nominal := jet_codegen_find_source_nominal_identity(modules, current_module_identity, name, generic_names)
     if nominal == None -> return name.copy()
     value :: nominal ?? panic("checked nominal type lookup lost its unique result")
-    // Every spelling of a core.term stream handle is its bare native carrier.
-    if jet_codegen_is_core_term_stream_carrier(modules, value.module_identity, value.name) -> return value.name
     value.qualified_name
 }
 
@@ -766,6 +750,7 @@ struct JetCodegenCompilerOwnedRecord {
 JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS :: prep { [JetCodegenCompilerOwnedRecord]{
     JetCodegenCompilerOwnedRecord{name: "PluginFrame", fields: [String]{"function", "component", "offset"}},
     JetCodegenCompilerOwnedRecord{name: "PluginFault", fields: [String]{"export", "message", "frames"}},
+    JetCodegenCompilerOwnedRecord{name: "RangeError", fields: [String]{"reason"}},
     JetCodegenCompilerOwnedRecord{name: "IOContext", fields: [String]{"operation", "resource", "os_code", "cause"}},
     JetCodegenCompilerOwnedRecord{name: "NetErrorDetail", fields: [String]{"operation", "address", "name", "message", "os_code"}},
     JetCodegenCompilerOwnedRecord{name: "__ResolveError", fields: [String]{"kind", "has_os_code", "os_code", "message"}},
