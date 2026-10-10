@@ -2129,6 +2129,39 @@ fn emitted_rust(src: &str) -> (jet_foundation::MIR::MirProgram, String) {
     (mir, rust)
 }
 
+#[test]
+fn never_helper_call_values_consume_checked_failure_carrier() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (mir, rust) = emitted_rust(r#"
+fn channel_key(bounded: Bool) -> String Never! {
+    bytes :: if bounded -> [U8]{U8{0}, U8{98}} else -> [U8]{U8{0}, U8{110}}
+    String.from_bytes(bytes) ?? panic("invalid channel key")
+}
+fn run() {
+    unbounded :: channel_key(false)
+    bounded :: channel_key(true)
+    print(unbounded)
+    print(bounded)
+}
+"#);
+        let run = mir.functions.iter().find(|function| function.name == "run")
+            .expect("entry function");
+        let mut stores = 0;
+        for instruction in run.blocks.iter().flat_map(|block| &block.instructions) {
+            if let jet_foundation::MIR::MirOperation::WritePlace { place, value } = instruction.operation {
+                let destination = run.places.iter().find(|row| row.id == place).unwrap();
+                if matches!(destination.ty.kind, jet_foundation::MIR::MirTypeKind::String) {
+                    let (_, source, _, _) = run.values.iter().find(|row| row.0 == value).unwrap();
+                    assert!(matches!(source.kind, jet_foundation::MIR::MirTypeKind::String),
+                        "Never! call value retained a failure carrier: {rust}");
+                    stores += 1;
+                }
+            }
+        }
+        assert_eq!(stores, 2, "both Never! helper calls must store plain text");
+    });
+}
+
 /// The `filter_map` over owned text of `Examples/features/collections/
 /// builtin_routes.jet`, with a default-`Err` failure in its callee.
 const OWNED_TEXT_FILTER_MAP: &str = r#"

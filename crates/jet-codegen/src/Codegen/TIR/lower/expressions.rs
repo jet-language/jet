@@ -9351,7 +9351,10 @@ pub(crate) fn consume_plain_helper_route(
     env: &LowerEnv,
 ) -> TExpr {
     if env.fallback_subject
-        || !resolved_ret.is_some_and(|declared| !declared.is_fallible())
+        || !resolved_ret.is_some_and(|declared| {
+            !declared.is_fallible()
+                || crate::Codegen::TIR::mir::never_carrier_success(declared).is_some()
+        })
         || resolved_ret.is_some_and(|declared| {
             matches!(
                 declared,

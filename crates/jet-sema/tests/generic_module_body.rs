@@ -1358,7 +1358,7 @@ enum Packet<T> {
 }
 fn packet<U>(value: U) -> Packet<U> Never! { Packet<U>.Value{value: value} }
 fn empty<U>() -> Packet<U> Never! { Packet<U>.Empty{} }
-fn contextual(value: Int) -> Packet<Int> Never! { .Value{value: value} }
+fn contextual(value: Int) -> Packet<Int> Never! { Packet.Value{value: value} }
 fn run() {
     packet :: packet(7)
     empty :: empty<Int>()
