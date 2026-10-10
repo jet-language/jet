@@ -331,6 +331,13 @@ fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
                 if kind != TOKEN_EOF && kind != TOKEN_RBRACE && kind != TOKEN_COMMA -> parser_bump(&state)
                 return ParsedType{ty: Type.Named{name: "__jet_error"}, span: start.span}
             }
+            // D-SOA2C (Rust `Types.rs` E1107): the per-container prefix
+            // spelling `columnar [T]` is reserved; nothing ships, so it is a
+            // fatal teaching error at the prefix word.
+            if kind == TOKEN_IDENT && parser_value(state, start) == "columnar" && parser_kind_at(&state, 1) == TOKEN_LBRACKET {
+                parser_add_fatal_code(&state, "E1107", start.span, "the `columnar [T]` per-container layout form is reserved", "a per-use columnar override isn't built yet — only the whole-struct form ships", "put `#Layout(columnar)` on the `struct` declaration instead")
+                return ParsedType{ty: Type.Named{name: "__jet_error"}, span: start.span}
+            }
             parser_bump(&state)
             name := parser_value(state, start)
             end := start.span
