@@ -7,6 +7,7 @@
 // `package.jet`, or the entry's own directory for a loose file.
 use core.files as cli_files
 use core.sys as cli_sys
+use core.files.[IOError]
 use jet_foundation.[
     AppAuthorizedDirectory,
     AppAuthorizedDirectoryEntry,
@@ -21,6 +22,7 @@ use jet_driver.[
     JetDriverBuildEntry,
     JetDriverBuildInputs,
     JetDriverBuildPath,
+    JetDriverBuildInputError,
     JetDriverCompileRequest,
     JetDriverCompileResult,
     JetDriverKeepGoing,
@@ -63,7 +65,7 @@ fn jet_cli_compile_request(request: ^JetDriverCompileRequest, emit_rust: Bool) -
 // Packaging uses the ordinary hosted source loader and checked NativeLibrary
 // MIR. The private environment seam is shared with the bootstrap observer;
 // neither Tests.rs factories nor emitted Rust enter object/pack production.
-fn jet_cli_runtime_library(result: JetDriverCompileResult, prefix: String) -> JetDriverCompileResult {
+fn jet_cli_runtime_library(result: ^JetDriverCompileResult, prefix: String) -> JetDriverCompileResult {
     if !result.complete || result.internal_problem != None -> return result
     program :: result.mir ?? return jet_driver_compile_escaped_failure("the runtime front end returned no checked MIR")
     lifecycle_path :: cli_sys.get("JET_FRONT_LIBRARY_LIFECYCLE") ?? return jet_driver_compile_escaped_failure("runtime packaging requires the lifecycle list")
@@ -178,15 +180,15 @@ struct JetCLISourceBudget {
     files: Int
 }
 
-fn jet_cli_source_read_limit(budget: JetCLISourceBudget, size: Int, path: String) -> Int String! {
-    if size > JET_CLI_MAX_SOURCE_BYTES -> return Err("`{path}` exceeds the {JET_CLI_MAX_SOURCE_BYTES}-byte file bound")
-    if budget.files >= JET_CLI_MAX_SOURCE_FILES -> return Err("authorized sources exceed the {JET_CLI_MAX_SOURCE_FILES}-file bound at `{path}`")
+fn jet_cli_source_read_limit(budget: JetCLISourceBudget, size: Int, path: String) -> Int JetCLIReadError! {
+    if size > JET_CLI_MAX_SOURCE_BYTES -> return Err(jet_cli_read_error("`{path}` exceeds the {JET_CLI_MAX_SOURCE_BYTES}-byte file bound"))
+    if budget.files >= JET_CLI_MAX_SOURCE_FILES -> return Err(jet_cli_read_error("authorized sources exceed the {JET_CLI_MAX_SOURCE_FILES}-file bound at `{path}`"))
     remaining :: JET_CLI_MAX_SOURCE_TOTAL - budget.bytes
-    if size > remaining -> return Err("authorized sources exceed the {JET_CLI_MAX_SOURCE_TOTAL}-byte total bound at `{path}`")
+    if size > remaining -> return Err(jet_cli_read_error("authorized sources exceed the {JET_CLI_MAX_SOURCE_TOTAL}-byte total bound at `{path}`"))
     Ok(if remaining < JET_CLI_MAX_SOURCE_BYTES -> remaining else -> JET_CLI_MAX_SOURCE_BYTES)
 }
 
-fn jet_cli_replace_source_budget(budget: &JetCLISourceBudget, before: String, after: String, path: String) -> Int String! {
+fn jet_cli_replace_source_budget(budget: &JetCLISourceBudget, before: String, after: String, path: String) -> Int JetCLIReadError! {
     replacement :: JetCLISourceBudget{entries: budget.entries, bytes: budget.bytes - before.count_bytes(), files: budget.files - 1}
     size :: after.count_bytes()
     _ :: jet_cli_source_read_limit(replacement, size, path)
@@ -198,10 +200,10 @@ fn jet_cli_walk_sources(root: String, relative: String, depth: Int, files: &[Jet
     directory :: if relative == "" -> root else -> jet_cli_authority_path(root, relative)
     chain := [cli_files.Directory]{}
     names := [String]{}
-    initial :: jet_cli_hold_root_chain(directory, &chain, &names) ?? return Val(err)
-    if jet_cli_build_read_chain_current(&chain, &names, initial) == .Err(problem) -> return Val(problem)
+    initial :: jet_cli_hold_root_chain(directory, &chain, &names) ?? return Val(err.message)
+    if jet_cli_build_read_chain_current(&chain, &names, initial) == .Err(problem) -> return Val(problem.message)
     if jet_cli_walk_held_sources(root, relative, depth, chain[chain.len() - 1], &files, &directories, retain_directories, &budget) == .Val(problem) -> return Val(problem)
-    if jet_cli_build_read_chain_current(&chain, &names, initial) == .Err(problem) -> return Val(problem)
+    if jet_cli_build_read_chain_current(&chain, &names, initial) == .Err(problem) -> return Val(problem.message)
     None
 }
 
@@ -244,7 +246,7 @@ fn jet_cli_walk_held_sources(root: String, relative: String, depth: Int, held: c
             if opened.id != stat.id -> return Val("`{path}` changed while it was held")
             if jet_cli_held_project_boundary(child_held) == {
                 .Ok(boundary) -> { if boundary -> next }
-                .Err(problem) -> { return Val(problem) }
+                .Err(problem) -> { return Val(problem.message) }
             }
             if depth >= JET_CLI_MAX_TREE_DEPTH -> return Val("the source walk exceeds the {JET_CLI_MAX_TREE_DEPTH}-level depth bound at `{path}`")
             if jet_cli_walk_held_sources(root, child, depth + 1, child_held, &files, &directories, retain_directories, &budget) == .Val(problem) -> return Val(problem)
@@ -254,8 +256,8 @@ fn jet_cli_walk_held_sources(root: String, relative: String, depth: Int, held: c
         }
         if !name.ends_with(".jet") -> next
         if !stat.is_file -> return Val("`{path}` is not a regular file")
-        limit :: jet_cli_source_read_limit(budget, stat.size, path) ?? return Val(err)
-        read :: jet_cli_read_held_source(held, name, limit) ?? return Val("cannot read `{path}`: {err}")
+        limit :: jet_cli_source_read_limit(budget, stat.size, path) ?? return Val(err.message)
+        read :: jet_cli_read_held_source(held, name, limit) ?? return Val("cannot read `{path}`: {err.message}")
         budget.bytes += read.stat.size
         budget.files += 1
         if !jet_cli_build_read_same_file(stat, read.stat) -> return Val("`{path}` changed while it was held")
@@ -265,25 +267,25 @@ fn jet_cli_walk_held_sources(root: String, relative: String, depth: Int, held: c
     None
 }
 
-fn jet_cli_held_project_boundary(directory: cli_files.Directory) -[FS]> Bool String! {
+fn jet_cli_held_project_boundary(directory: cli_files.Directory) -[FS]> Bool JetCLIReadError! {
     loop marker in JET_CLI_PROJECT_MARKERS {
         if marker == ".jet/lock" {
             info :: directory.entry_stat(".jet") ?? {
                 if err == .NotFound(_) -> next
-                return Err(jet_cli_io_error_text(err))
+                return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
             }
             if info.is_symlink -> return Ok(true)
             if !info.is_dir -> next
-            nested :: directory.open_directory(".jet") ?? return Err(jet_cli_io_error_text(err))
+            nested :: directory.open_directory(".jet") ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
             lock :: nested.entry_stat("lock") ?? {
                 if err == .NotFound(_) -> next
-                return Err(jet_cli_io_error_text(err))
+                return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
             }
             if lock.is_file || lock.is_symlink -> return Ok(true)
         } else {
             info :: directory.entry_stat(marker) ?? {
                 if err == .NotFound(_) -> next
-                return Err(jet_cli_io_error_text(err))
+                return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
             }
             if info.is_file || info.is_symlink -> return Ok(true)
         }
@@ -297,14 +299,14 @@ struct JetCLICacheSource {
 }
 
 // One checked foreign-cache record under `root` (a binding or its sidecar).
-fn jet_cli_cache_file(root: String, relative: String, budget: &JetCLISourceBudget) -[FS]> JetCLICacheSource String! {
+fn jet_cli_cache_file(root: String, relative: String, budget: &JetCLISourceBudget) -[FS]> JetCLICacheSource JetCLIReadError! {
     path :: jet_cli_authority_path(root, relative)
-    stat :: cli_files.stat(path) ?? return Err("cannot inspect `{path}`: {err}")
-    if stat.is_symlink -> return Err("`{path}` is a symbolic link")
-    if !stat.is_file -> return Err("`{path}` is not a regular file")
+    stat :: cli_files.stat(path) ?? return Err(jet_cli_read_error("cannot inspect `{path}`: {err}"))
+    if stat.is_symlink -> return Err(jet_cli_read_error("`{path}` is a symbolic link"))
+    if !stat.is_file -> return Err(jet_cli_read_error("`{path}` is not a regular file"))
     limit :: jet_cli_source_read_limit(budget, stat.size, path)
-    read :: jet_cli_read_rooted_source(root, relative, limit) ?? return Err("cannot read `{path}`: {err}")
-    if !jet_cli_build_read_same_file(stat, read.stat) -> return Err("`{path}` changed while it was held")
+    read :: jet_cli_read_rooted_source(root, relative, limit) ?? return Err(jet_cli_read_error("cannot read `{path}`: {err.message}"))
+    if !jet_cli_build_read_same_file(stat, read.stat) -> return Err(jet_cli_read_error("`{path}` changed while it was held"))
     budget.bytes += read.stat.size
     budget.files += 1
     Ok(JetCLICacheSource{relative_path: relative, read: read})
@@ -340,13 +342,13 @@ fn jet_cli_foreign_cache_files(root: String, caches: &[JetDriverAuthorizedSource
             if !stat.is_file -> return Val("`{path}` is not a regular file")
             // discover_files validates every .jet, including hidden bindings
             // and adapted views, before its caller selects generated caches.
-            limit := jet_cli_source_read_limit(discovery, stat.size, path) ?? return Val(err)
+            limit := jet_cli_source_read_limit(discovery, stat.size, path) ?? return Val(err.message)
             adapted :: name.ends_with(".adapted.jet")
             if !adapted {
-                shared_limit :: jet_cli_source_read_limit(budget, stat.size, path) ?? return Val(err)
+                shared_limit :: jet_cli_source_read_limit(budget, stat.size, path) ?? return Val(err.message)
                 if shared_limit < limit -> limit = shared_limit
             }
-            read :: jet_cli_read_held_source(held, name, limit) ?? return Val("cannot read `{path}`: {err}")
+            read :: jet_cli_read_held_source(held, name, limit) ?? return Val("cannot read `{path}`: {err.message}")
             if !jet_cli_build_read_same_file(stat, read.stat) -> return Val("`{path}` changed while it was held")
             discovery.bytes += read.stat.size
             discovery.files += 1
@@ -368,7 +370,7 @@ fn jet_cli_foreign_cache_files(root: String, caches: &[JetDriverAuthorizedSource
                     if err == .NotFound(_) -> next
                     return Val("cannot inspect `{path}`: {err}")
                 }
-                sidecar :: jet_cli_cache_file(root, relative, &budget) ?? return Val(err)
+                sidecar :: jet_cli_cache_file(root, relative, &budget) ?? return Val(err.message)
                 &collected.push(sidecar)
             }
             &collected.push(^binding)
@@ -394,7 +396,10 @@ fn jet_cli_root_dependencies(root: JetDriverAuthorizedSourceRoot) -> [String: De
     loop relative in JET_CLI_STOCK_ENTRIES {
         loop file in root.files {
             if file.relative_path != relative -> next
-            inline :: PackageFacts.parse_inline(file.source, file.path) ?? return [String: DepSpec]{}
+            inline :: if PackageFacts.parse_inline(file.source, file.path) == {
+                .Ok(value) -> value
+                .Err(_) -> { return [String: DepSpec]{} }
+            }
             if inline == .Val(carrier) {
                 manifest :: pkg_to_manifest(carrier.facts, file.source) ?? return [String: DepSpec]{}
                 return manifest.dependencies
@@ -616,48 +621,52 @@ fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sour
 struct JetCLIBuildInputs {}
 
 impl JetCLIBuildInputs.JetDriverBuildInputs {
-    fn resolve(self, path: String) -[FS.Read]> JetDriverBuildPath String! { jet_cli_build_resolve(path) }
-    fn entries(self, directory: String) -[FS.Read]> [JetDriverBuildEntry] String! {
-        listed :: cli_files.list_dir(directory) ?? return Err(jet_cli_io_error_text(err))
+    fn resolve(self, path: String) -[FS.Read]> JetDriverBuildPath JetDriverBuildInputError! {
+        resolved :: jet_cli_build_resolve(path) ?? return Err(JetDriverBuildInputError{message: err.message})
+        Ok(resolved)
+    }
+    fn entries(self, directory: String) -[FS.Read]> [JetDriverBuildEntry] JetDriverBuildInputError! {
+        listed :: cli_files.list_dir(directory) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
         out := [JetDriverBuildEntry]{}
         loop entry in listed {
-            info :: cli_files.stat(jet_cli_entry_join(directory, entry.name)) ?? return Err(jet_cli_io_error_text(err))
+            info :: cli_files.stat(jet_cli_entry_join(directory, entry.name)) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
             &out.push(JetDriverBuildEntry{name: entry.name, directory: info.is_dir && !info.is_symlink, file: info.is_file && !info.is_symlink})
         }
         Ok(out)
     }
-    fn read(self, path: String, limit: Int) -[FS.Read]> [U8] String! {
-        if limit < 0 || limit > 536870912 -> return Err("file read bound exceeds the tree hashing bound")
-        expected :: cli_files.stat(path) ?? return Err(jet_cli_io_error_text(err))
-        if expected.is_symlink || !expected.is_file -> return Err("file is not a regular file")
-        reader :: cli_files.open(path, cli_files.LinkPolicy.Refuse) ?? return Err(jet_cli_io_error_text(err))
-        opened :: reader.stat() ?? return Err(jet_cli_io_error_text(err))
-        if !opened.is_file || expected.id != opened.id || expected.size != opened.size || expected.modified != opened.modified || expected.changed != opened.changed -> return Err("file changed before reading")
-        if expected.size > limit -> return Err("file exceeds its read bound")
-        bytes := [U8].with_capacity(if expected.size < 65536 -> expected.size else -> 65536)
+    fn read(self, path: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError! {
+        if limit < 0 || limit > 536870912 -> return Err(JetDriverBuildInputError{message: "file read bound exceeds the tree hashing bound"})
+        expected :: cli_files.stat(path) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
+        if expected.is_symlink || !expected.is_file -> return Err(JetDriverBuildInputError{message: "file is not a regular file"})
+        reader :: cli_files.open(path, .Refuse) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
+        opened :: reader.stat() ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
+        if !opened.is_file || expected.id != opened.id || expected.size != opened.size || expected.modified != opened.modified || expected.changed != opened.changed -> return Err(JetDriverBuildInputError{message: "file changed before reading"})
+        if expected.size > limit -> return Err(JetDriverBuildInputError{message: "file exceeds its read bound"})
+        bytes := [U8]{}
         loop {
             remaining :: limit + 1 - bytes.len()
-            chunk :: reader.read(if remaining < 65536 -> remaining else -> 65536) ?? return Err(jet_cli_io_error_text(err))
+            chunk :: reader.read(if remaining < 65536 -> remaining else -> 65536) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
             if chunk.len() == 0 -> break
             &bytes.extend(chunk)
-            if bytes.len() > limit -> return Err("file exceeds its read bound")
+            if bytes.len() > limit -> return Err(JetDriverBuildInputError{message: "file exceeds its read bound"})
         }
-        after :: reader.stat() ?? return Err(jet_cli_io_error_text(err))
-        path_after :: cli_files.stat(path) ?? return Err(jet_cli_io_error_text(err))
+        after :: reader.stat() ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
+        path_after :: cli_files.stat(path) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
         if !after.is_file || !path_after.is_file || expected.id != after.id || expected.id != path_after.id || expected.size != after.size || expected.size != path_after.size || expected.modified != after.modified || expected.modified != path_after.modified || expected.changed != after.changed || expected.changed != path_after.changed || bytes.len() != expected.size {
-            return Err("file changed while reading")
+            return Err(JetDriverBuildInputError{message: "file changed while reading"})
         }
         Ok(bytes)
     }
-    fn read_rooted(self, root: String, relative: String, limit: Int) -[FS.Read]> [U8] String! {
-        jet_cli_build_read_rooted(root, relative, limit)
+    fn read_rooted(self, root: String, relative: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError! {
+        bytes :: jet_cli_build_read_rooted(root, relative, limit) ?? return Err(JetDriverBuildInputError{message: err.message})
+        Ok(bytes)
     }
 }
 
 // CheckReads::read_nofollow_at_root's raw transport. Keep every directory
 // pinned and recheck its parent entry; no canonicalize-then-read window can
 // follow a replaced intermediate component outside the authorized build root.
-fn jet_cli_build_read_rooted(root: String, relative: String, limit: Int) -[FS.Read]> [U8] String! {
+fn jet_cli_build_read_rooted(root: String, relative: String, limit: Int) -[FS.Read]> [U8] JetCLIReadError! {
     read :: jet_cli_read_rooted_source(root, relative, limit)
     Ok(^read.bytes)
 }
@@ -667,22 +676,22 @@ struct JetCLIHeldSource {
     stat: cli_files.Stat
 }
 
-fn jet_cli_read_rooted_source(root: String, relative: String, limit: Int) -[FS.Read]> JetCLIHeldSource String! {
-    if limit < 0 || limit > JET_CLI_MAX_SOURCE_BYTES -> return Err("file read bound exceeds the tree hashing bound")
-    if relative.starts_with("/") -> return Err("file authority path must be relative and normalized")
+fn jet_cli_read_rooted_source(root: String, relative: String, limit: Int) -[FS.Read]> JetCLIHeldSource JetCLIReadError! {
+    if limit < 0 || limit > JET_CLI_MAX_SOURCE_BYTES -> return Err(jet_cli_read_error("file read bound exceeds the tree hashing bound"))
+    if relative.starts_with("/") -> return Err(jet_cli_read_error("file authority path must be relative and normalized"))
     parts := [String]{}
     loop part in relative.split("/") {
         if part == "" || part == "." -> next
-        if part == ".." -> return Err("file authority path must be relative and normalized")
+        if part == ".." -> return Err(jet_cli_read_error("file authority path must be relative and normalized"))
         loop byte in part.bytes() {
-            if byte == (U8{0}) -> return Err("file authority path contains NUL")
+            if byte == (U8{0}) -> return Err(jet_cli_read_error("file authority path contains NUL"))
         }
         &parts.push(part)
     }
     directories := [cli_files.Directory]{}
     names := [String]{}
     initial :: jet_cli_hold_root_chain(root, &directories, &names)
-    if parts.len() == 0 -> return Err("file authority path is empty")
+    if parts.len() == 0 -> return Err(jet_cli_read_error("file authority path is empty"))
     loop index in 0..<(parts.len() - 1) {
         opened :: directories[directories.len() - 1].open_directory(parts[index]) ?? return Err(jet_cli_build_rooted_open_error(err))
         &directories.push(opened)
@@ -691,18 +700,18 @@ fn jet_cli_read_rooted_source(root: String, relative: String, limit: Int) -[FS.R
     name :: parts[parts.len() - 1]
     if jet_cli_build_read_chain_current(&directories, &names, initial) == .Err(error) -> return Err(error)
     read :: jet_cli_read_held_source(directories[directories.len() - 1], name, limit)
-    if jet_cli_build_read_chain_current(&directories, &names, initial) == .Err(_) -> return Err("file changed while it was being read")
+    if jet_cli_build_read_chain_current(&directories, &names, initial) == .Err(_) -> return Err(jet_cli_read_error("file changed while it was being read"))
     Ok(read)
 }
 
-fn jet_cli_hold_root_chain(root: String, directories: &[cli_files.Directory], names: &[String]) -[FS.Read]> String String! {
+fn jet_cli_hold_root_chain(root: String, directories: &[cli_files.Directory], names: &[String]) -[FS.Read]> String JetCLIReadError! {
     initial :: if root.starts_with("/") -> "/" else -> "."
-    &directories.push(cli_files.open_directory(initial) ?? return Err(jet_cli_io_error_text(err)))
+    &directories.push(cli_files.open_directory(initial) ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err))))
     loop part in root.split("/") {
         if part == "" || part == "." -> next
-        if part == ".." -> return Err("file authority root must not contain parent components")
+        if part == ".." -> return Err(jet_cli_read_error("file authority root must not contain parent components"))
         loop byte in part.bytes() {
-            if byte == (U8{0}) -> return Err("file authority path contains NUL")
+            if byte == (U8{0}) -> return Err(jet_cli_read_error("file authority path contains NUL"))
         }
         opened :: directories[directories.len() - 1].open_directory(part) ?? return Err(jet_cli_build_rooted_open_error(err))
         &directories.push(opened)
@@ -713,29 +722,29 @@ fn jet_cli_hold_root_chain(root: String, directories: &[cli_files.Directory], na
 
 // Both source snapshots and build input reads consume this same opened file.
 // The stat in the snapshot therefore describes exactly the bytes read.
-fn jet_cli_read_held_source(directory: cli_files.Directory, name: String, limit: Int) -[FS.Read]> JetCLIHeldSource String! {
-    if limit < 0 || limit > JET_CLI_MAX_SOURCE_BYTES -> return Err("file read bound exceeds the tree hashing bound")
+fn jet_cli_read_held_source(directory: cli_files.Directory, name: String, limit: Int) -[FS.Read]> JetCLIHeldSource JetCLIReadError! {
+    if limit < 0 || limit > JET_CLI_MAX_SOURCE_BYTES -> return Err(jet_cli_read_error("file read bound exceeds the tree hashing bound"))
     reader :: directory.open(name) ?? return Err(jet_cli_build_rooted_open_error(err))
-    expected :: reader.stat() ?? return Err(jet_cli_io_error_text(err))
-    if !expected.is_file -> return Err("file authority input is not a regular file")
-    if expected.links != 1 -> return Err("file authority input has multiple hard links")
-    current :: directory.entry_stat(name) ?? return Err(jet_cli_io_error_text(err))
-    if !current.is_file -> return Err("file authority input is not a regular file")
-    if current.links != 1 -> return Err("file authority input has multiple hard links")
-    if !jet_cli_build_read_same_file(expected, current) -> return Err("file authority input moved while it was held")
-    if expected.size > limit -> return Err("file exceeds its read bound")
-    bytes := [U8].with_capacity(if expected.size < 65536 -> expected.size else -> 65536)
+    expected :: reader.stat() ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
+    if !expected.is_file -> return Err(jet_cli_read_error("file authority input is not a regular file"))
+    if expected.links != 1 -> return Err(jet_cli_read_error("file authority input has multiple hard links"))
+    current :: directory.entry_stat(name) ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
+    if !current.is_file -> return Err(jet_cli_read_error("file authority input is not a regular file"))
+    if current.links != 1 -> return Err(jet_cli_read_error("file authority input has multiple hard links"))
+    if !jet_cli_build_read_same_file(expected, current) -> return Err(jet_cli_read_error("file authority input moved while it was held"))
+    if expected.size > limit -> return Err(jet_cli_read_error("file exceeds its read bound"))
+    bytes := [U8]{}
     loop {
         remaining :: limit + 1 - bytes.len()
-        chunk :: reader.read(if remaining < 65536 -> remaining else -> 65536) ?? return Err(jet_cli_io_error_text(err))
+        chunk :: reader.read(if remaining < 65536 -> remaining else -> 65536) ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
         if chunk.len() == 0 -> break
         &bytes.extend(chunk)
-        if bytes.len() > limit -> return Err("file exceeds its read bound")
+        if bytes.len() > limit -> return Err(jet_cli_read_error("file exceeds its read bound"))
     }
-    after :: reader.stat() ?? return Err(jet_cli_io_error_text(err))
-    path_after :: directory.entry_stat(name) ?? return Err("file changed while it was being read")
+    after :: reader.stat() ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
+    path_after :: directory.entry_stat(name) ?? return Err(jet_cli_read_error("file changed while it was being read"))
     if !jet_cli_build_read_same_file(expected, after) || !jet_cli_build_read_same_file(expected, path_after) || after.size != bytes.len() {
-        return Err("file changed while it was being read")
+        return Err(jet_cli_read_error("file changed while it was being read"))
     }
     Ok(JetCLIHeldSource{bytes: bytes, stat: expected})
 }
@@ -744,27 +753,27 @@ fn jet_cli_build_read_same_file(left: cli_files.Stat, right: cli_files.Stat) -> 
     right.is_file && right.links == 1 && left.id == right.id && left.size == right.size && left.modified == right.modified && left.changed == right.changed
 }
 
-fn jet_cli_build_read_chain_current(directories: &[cli_files.Directory], names: &[String], initial: String) -[FS.Read]> Bool String! {
-    base :: cli_files.stat(initial) ?? return Err(jet_cli_io_error_text(err))
-    held_base :: directories[0].stat() ?? return Err(jet_cli_io_error_text(err))
-    if !base.is_dir || base.is_symlink || base.id != held_base.id -> return Err("file authority directory moved while it was held")
+fn jet_cli_build_read_chain_current(directories: &[cli_files.Directory], names: &[String], initial: String) -[FS.Read]> Bool JetCLIReadError! {
+    base :: cli_files.stat(initial) ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
+    held_base :: directories[0].stat() ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
+    if !base.is_dir || base.is_symlink || base.id != held_base.id -> return Err(jet_cli_read_error("file authority directory moved while it was held"))
     loop index in 0..<names.len() {
-        named :: directories[index].entry_stat(names[index]) ?? return Err(jet_cli_io_error_text(err))
-        held :: directories[index + 1].stat() ?? return Err(jet_cli_io_error_text(err))
-        if !named.is_dir || named.is_symlink || named.id != held.id -> return Err("file authority directory moved while it was held")
+        named :: directories[index].entry_stat(names[index]) ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
+        held :: directories[index + 1].stat() ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
+        if !named.is_dir || named.is_symlink || named.id != held.id -> return Err(jet_cli_read_error("file authority directory moved while it was held"))
     }
     Ok(true)
 }
 
-fn jet_cli_build_rooted_open_error(error: IOError) -> String Never! {
+fn jet_cli_build_rooted_open_error(error: IOError) -> JetCLIReadError Never! {
     message :: jet_cli_io_error_text(error)
-    if message.ends_with("(os error 40)") || message.ends_with("(os error 62)") -> "file authority path contains a symlink" else -> message
+    jet_cli_read_error(if message.ends_with("(os error 40)") || message.ends_with("(os error 62)") -> "file authority path contains a symlink" else -> message)
 }
 
 // Where absolute `path` resolves with every link followed (fs::canonicalize
 // over lstat/readlink): a missing component is `exists: false`; a link chain
 // longer than the system's 40 is ELOOP.
-fn jet_cli_build_resolve(path: String) -[FS.Read]> JetDriverBuildPath String! {
+fn jet_cli_build_resolve(path: String) -[FS.Read]> JetDriverBuildPath JetCLIReadError! {
     pending := path.split("/").to_list()
     index := 0
     resolved := ""
@@ -782,15 +791,15 @@ fn jet_cli_build_resolve(path: String) -[FS.Read]> JetDriverBuildPath String! {
         candidate :: "{resolved}/{part}"
         info :: cli_files.stat(candidate) ?? {
             if err == .NotFound(_) -> return Ok(JetDriverBuildPath{exists: false, path: candidate, file: false, links: 0})
-            return Err(jet_cli_io_error_text(err))
+            return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
         }
         if !info.is_symlink {
             resolved = candidate
             next
         }
         followed += 1
-        if followed > 40 -> return Err("Too many levels of symbolic links (os error 40)")
-        target :: cli_files.read_link(candidate) ?? return Err(jet_cli_io_error_text(err))
+        if followed > 40 -> return Err(jet_cli_read_error("Too many levels of symbolic links (os error 40)"))
+        target :: cli_files.read_link(candidate) ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
         spliced :: if target.starts_with("/") -> target else -> "{resolved}/{target}"
         rest := spliced.split("/").to_list()
         loop remaining in index..<pending.len() -> &rest.push(pending[remaining])
@@ -799,7 +808,7 @@ fn jet_cli_build_resolve(path: String) -[FS.Read]> JetDriverBuildPath String! {
         resolved = ""
     }
     final :: if resolved == "" -> "/" else -> resolved
-    info :: cli_files.stat(final) ?? return Err(jet_cli_io_error_text(err))
+    info :: cli_files.stat(final) ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
     Ok(JetDriverBuildPath{exists: true, path: final, file: info.is_file, links: info.links})
 }
 
@@ -871,8 +880,8 @@ fn jet_cli_outside_walk(root: String, relative: String) -[FS]> Bool Never! {
 }
 
 // `files` with `added` placed at its root-relative position in walk order.
-fn jet_cli_insert_source(files: [JetDriverAuthorizedSourceFile], added: JetDriverAuthorizedSourceFile) -> [JetDriverAuthorizedSourceFile] Never! {
-    ordered := [JetDriverAuthorizedSourceFile].with_capacity(files.len() + 1)
+fn jet_cli_insert_source(files: ^[JetDriverAuthorizedSourceFile], added: JetDriverAuthorizedSourceFile) -> [JetDriverAuthorizedSourceFile] Never! {
+    ordered := [JetDriverAuthorizedSourceFile]{}
     placed := false
     loop file in files {
         if !placed && jet_cli_relative_precedes(added.relative_path, file.relative_path) {
@@ -905,12 +914,19 @@ fn jet_cli_prepare_refused(what: String, fix: String, color: Bool) -> JetCLIPrep
 // walked file, or adds an absent `.jet` file the walk would have read; the
 // source loader and its authorization stay the one in this file.
 fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLICompiled {
+    jet_cli_compile_for_target(anchor, entry, overlays, color, emit_rust, threads, mode, JetDriverCompileTarget.Native)
+}
+
+// Sandbox and native targets use the same authorized source snapshot.
+fn jet_cli_compile_for_target(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, target: JetDriverCompileTarget) -> JetCLICompiled {
     if jet_cli_prepare_overlays(anchor, entry, overlays, color, threads, mode) == {
-        .Refused(output) -> return JetCLICompiled.Refused{output: output}
+        .Refused(output) -> { return JetCLICompiled.Refused{output: output} }
         .Prepared(request, snapshot) -> {
-            library_prefix :: cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT")
-            result := jet_cli_compile_request(^request, emit_rust && library_prefix == None)
-            if library_prefix == .Val(prefix) -> result = jet_cli_runtime_library(result, prefix)
+            selected := request
+            selected.target = target
+            library_prefix :: if target == .Native -> cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") else -> None
+            result := jet_cli_compile_request(^selected, emit_rust && library_prefix == None)
+            if library_prefix == .Val(prefix) -> result = jet_cli_runtime_library(^result, prefix)
             return JetCLICompiled.Compiled{result: result, snapshot: snapshot}
         }
     }
@@ -940,8 +956,8 @@ fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLIOver
             stat :: cli_files.stat(entry_path) ?? return jet_cli_prepare_refused("can't securely read the sources under `{root}`: cannot inspect `{entry_path}`: {err}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
             if stat.is_symlink -> return jet_cli_prepare_refused("can't securely read the sources under `{root}`: `{entry_path}` is a symbolic link", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
             if stat.is_file {
-                limit :: jet_cli_source_read_limit(budget, stat.size, entry_path) ?? return jet_cli_prepare_refused(err, "reduce the source tree size", color)
-                read :: jet_cli_read_rooted_source(root, relative, limit) ?? return jet_cli_prepare_refused("can't securely read the sources under `{root}`: cannot read `{entry_path}`: {err}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
+                limit :: jet_cli_source_read_limit(budget, stat.size, entry_path) ?? return jet_cli_prepare_refused(err.message, "reduce the source tree size", color)
+                read :: jet_cli_read_rooted_source(root, relative, limit) ?? return jet_cli_prepare_refused("can't securely read the sources under `{root}`: cannot read `{entry_path}`: {err.message}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
                 if !jet_cli_build_read_same_file(stat, read.stat) -> return jet_cli_prepare_refused("`{entry_path}` changed while it was held", "retry with a stable source tree", color)
                 budget.bytes += read.stat.size
                 budget.files += 1
@@ -955,7 +971,7 @@ fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLIOver
         replaced := false
         loop index in 0..<files.len() {
             if files[index].path != path -> next
-            _ :: jet_cli_replace_source_budget(&budget, files[index].source, overlay.source, path) ?? return jet_cli_prepare_refused(err, "reduce the source tree size", color)
+            _ :: jet_cli_replace_source_budget(&budget, files[index].source, overlay.source, path) ?? return jet_cli_prepare_refused(err.message, "reduce the source tree size", color)
             files[index].source = overlay.source
             replaced = true
         }
@@ -965,7 +981,7 @@ fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLIOver
             return jet_cli_prepare_refused("`{overlay.path}` is not a checked source file of `{root}`", "check a `.jet` file that is not inside a skipped or nested project directory", color)
         }
         size :: overlay.source.count_bytes()
-        _ :: jet_cli_source_read_limit(budget, size, path) ?? return jet_cli_prepare_refused(err, "reduce the source tree size", color)
+        _ :: jet_cli_source_read_limit(budget, size, path) ?? return jet_cli_prepare_refused(err.message, "reduce the source tree size", color)
         budget.bytes += size
         budget.files += 1
         added :: JetDriverAuthorizedSourceFile{path: path, relative_path: relative, identity: "authority-file-v1;kind=overlay;length={size};modified_ns=none;device=none;inode=none", source: overlay.source}
@@ -990,7 +1006,7 @@ fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLIOver
     if !current_root.is_dir || current_root.is_symlink || current_root.id != root_stat.id -> return jet_cli_prepare_refused("source root `{root}` changed while it was held", "retry with a stable source tree", color)
     root_identity :: jet_cli_identity_key("directory", root_stat)
     roots := [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: root, identity: root_identity, allow_hardlinks: false, files: files, foreign_cache_files: caches, directories: directories}}
-    if jet_cli_path_dependency_roots(&roots, color) == .Val(refusal) -> return JetCLICompiled.Refused{output: refusal}
+    if jet_cli_path_dependency_roots(&roots, color) == .Val(refusal) -> return JetCLIPrepared.Refused{output: refusal}
     snapshot :: JetDriverAuthorizedSourceSnapshot{
         roots: roots,
         entry_root_identity: root_identity,
