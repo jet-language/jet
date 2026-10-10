@@ -86,6 +86,57 @@ fn fx_numeric_print_fixed(b: &FxBuilder, unsigned: Bool, mode: String, op: Strin
     fx_print(&b, value)
 }
 
+// The compiler's fixed infix division uses Binary(Prelude), not OverflowOption.
+fn fx_numeric_u64_binary(b: &FxBuilder, op: MIRBinaryOp, member: String, left: Int, right: Int) -> MIRValueID Never! {
+    a :: fx_u64_const(&b, left)
+    divisor :: fx_u64_const(&b, right)
+    location :: MIRPanicLoc{file: fx_source_file(), line: 3, column: 0}
+    fx_copy(&b, fx_u64(), MIROperation.Binary{op: op, dispatch: MIRBinaryDispatch.Prelude{call: fx_prelude_id("core.numeric", "u64.trap.{member}"), location: Val(location)}, overflow: MIRBinaryOverflow.Unchecked, left: a, right: divisor})
+}
+
+fn fx_numeric_u64_binary_program(b: FxBuilder) -> MIRProgram Never! {
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    loop member in [String]{"div", "floor_div", "rem"} {
+        &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.Overflow, "core.numeric", "u64.trap.{member}", "jet_u64_trap_{member}", 4, MIRPreludeABI.Value))
+    }
+    p
+}
+
+// expect-stdout numeric-u64-binary-division: "2\n2\n1\n9223372036854775807\n9223372036854775807\n1\n"
+fn fx_numeric_u64_binary_division() -> MIRProgram Never! {
+    b := fx_builder()
+    // -1 carries U64.MAX's high-bit word, as in Unsigned.jet's fixtures.
+    loop pair in [(left: Int, right: Int)]{(left: 7, right: 3), (left: -1, right: 2)} {
+        fx_print(&b, fx_numeric_u64_binary(&b, .Div, "div", pair.left, pair.right))
+        fx_print(&b, fx_numeric_u64_binary(&b, .FloorDiv, "floor_div", pair.left, pair.right))
+        fx_print(&b, fx_numeric_u64_binary(&b, .Rem, "rem", pair.left, pair.right))
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_numeric_u64_binary_program(b)
+}
+
+fn fx_numeric_u64_binary_zero(op: MIRBinaryOp, member: String) -> MIRProgram Never! {
+    b := fx_builder()
+    _ := fx_numeric_u64_binary(&b, op, member, 7, 0)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_numeric_u64_binary_program(b)
+}
+
+// expect-stdout numeric-u64-binary-div-zero: ""
+// expect-exit numeric-u64-binary-div-zero: 70
+// expect-stderr numeric-u64-binary-div-zero: "Stop [E3010]: `divided by zero`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_u64_binary_div_zero() -> MIRProgram Never! { fx_numeric_u64_binary_zero(.Div, "div") }
+
+// expect-stdout numeric-u64-binary-floor-zero: ""
+// expect-exit numeric-u64-binary-floor-zero: 70
+// expect-stderr numeric-u64-binary-floor-zero: "Stop [E3010]: `divided by zero`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_u64_binary_floor_zero() -> MIRProgram Never! { fx_numeric_u64_binary_zero(.FloorDiv, "floor_div") }
+
+// expect-stdout numeric-u64-binary-rem-zero: ""
+// expect-exit numeric-u64-binary-rem-zero: 70
+// expect-stderr numeric-u64-binary-rem-zero: "Stop [E3010]: `divided by zero`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_u64_binary_rem_zero() -> MIRProgram Never! { fx_numeric_u64_binary_zero(.Rem, "rem") }
+
 // Raw I64 `/` truncates toward zero and `%` keeps the dividend's sign.
 // Negative non-integral cases distinguish these operators from floor division.
 // expect-stdout numeric-i64-truncation: "-2\n-1\n-2\n1\n2\n-1\n2\n1\n0\n-1\n0\n1\n"

@@ -5,12 +5,13 @@ use jet_foundation.[
     MIRType, MIRTypeKind, MIRValueID, mir_symbol_name, mir_type_display_name,
 ]
 
-// `jet_<u|i><bits>_trap_<add|sub|mul|shl|shr>`: Rust checked fixed-width
-// arithmetic that stops on overflow or an out-of-range shift count, which
-// lower_binary emits natively (lower_narrow_binary / Overflows).
+// Fixed-width trapping arithmetic stays in the native checked operator body.
+// Division/remainder include its zero and signed MIN / -1 checks; unsigned
+// U64 floor division shares ordinary unsigned division.
 fn lower_fixed_trap_route(symbol: String) -> Bool Never! {
+    if symbol == "jet_u64_trap_floor_div" -> return true
     widths :: [String]{"u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64"}
-    operations :: [String]{"add", "sub", "mul", "shl", "shr"}
+    operations :: [String]{"add", "sub", "mul", "div", "rem", "shl", "shr"}
     loop width in widths {
         loop operation in operations {
             expected :: "jet_{width}_trap_{operation}"
