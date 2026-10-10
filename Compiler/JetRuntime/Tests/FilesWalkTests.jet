@@ -1,0 +1,161 @@
+// Link with the composed Jet-only runtime and FilesWalkWitness.c (via
+// run-files-walk-fixtures.mjs). The C caller supplies one fresh directory.
+fn files_walk_fixture_path(root: I64, suffix: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(text, root)
+    jet_rt_string_builder_push(text, suffix)
+    jet_rt_string_builder_finish(text)
+}
+
+fn files_walk_fixture_write(path: I64, content: I64, error: I64) -> Bool {
+    length :: rt_text_len(content)
+    bytes :: jet_rt_alloc(length * RT_HOST_U8_STRIDE + I64{1}, I64{8})
+    at := I64{0}
+    loop at < length {
+        host_u8_put(bytes, at, rt_text_byte(rt_text_data(content) + at))
+        at += I64{1}
+    }
+    written :: jet_files_write_bytes_os(path, bytes, length, error) == I64{1}
+    jet_rt_free(bytes, length * RT_HOST_U8_STRIDE + I64{1}, I64{8})
+    written
+}
+
+fn files_walk_fixture_ignored(rules: I64, relative: I64, is_dir: Bool) -> Bool {
+    matcher :: ignore_matcher_new()
+    extended :: ignore_matcher_extend(matcher, rt_static_text(""), rules)
+    ignore_matcher_drop(matcher)
+    result :: ignore_matcher_ignored(extended, relative, is_dir)
+    ignore_matcher_drop(extended)
+    result
+}
+
+// FSIgnore.rs precedence, parent blocking, globstar, class and anchoring.
+#Export(c) fn jet_rt_files_ignore_fixture() -> I64 {
+    if !files_walk_fixture_ignored(rt_static_text("foo/\n"), rt_static_text("foo"), true) -> return I64{1}
+    if files_walk_fixture_ignored(rt_static_text("foo/\n"), rt_static_text("foo"), false) -> return I64{2}
+    if !files_walk_fixture_ignored(rt_static_text("foo/\n"), rt_static_text("foo/bar"), false) -> return I64{3}
+    if files_walk_fixture_ignored(rt_static_text("foo/\n!foo/\n"), rt_static_text("foo/bar"), false) -> return I64{4}
+    if files_walk_fixture_ignored(rt_static_text("dir/**\n"), rt_static_text("dir"), true) -> return I64{5}
+    if !files_walk_fixture_ignored(rt_static_text("dir/**\n"), rt_static_text("dir/x"), false) -> return I64{6}
+    if files_walk_fixture_ignored(rt_static_text("foo[!x]\n"), rt_static_text("foo"), false) -> return I64{7}
+    if !files_walk_fixture_ignored(rt_static_text("foo[!x]\n"), rt_static_text("fooy"), false) -> return I64{8}
+    if files_walk_fixture_ignored(rt_static_text("foo[!x]\n"), rt_static_text("foox"), false) -> return I64{9}
+    if !files_walk_fixture_ignored(rt_static_text("foo[!x]\n"), rt_static_text("fooé"), false) -> return I64{10}
+    crlf :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(crlf, rt_static_text("/root.txt"))
+    rt_text_push_word(crlf, I64{2573}, I64{2}) // "\r\n"
+    if !files_walk_fixture_ignored(crlf, rt_static_text("root.txt"), false) -> return I64{11}
+    jet_rt_string_drop(crlf)
+    if files_walk_fixture_ignored(rt_static_text("/root.txt\n"), rt_static_text("sub/root.txt"), false) -> return I64{12}
+    if !files_walk_fixture_ignored(rt_static_text("*.log\n!keep.log\n"), rt_static_text("a/b.log"), false) -> return I64{13}
+    if files_walk_fixture_ignored(rt_static_text("*.log\n!keep.log\n"), rt_static_text("keep.log"), false) -> return I64{14}
+    if !files_walk_fixture_ignored(rt_static_text("a\\ \n"), rt_static_text("a "), false) -> return I64{15}
+    if files_walk_fixture_ignored(rt_static_text("# a\n\n"), rt_static_text("# a"), false) -> return I64{16}
+    if !files_walk_fixture_ignored(rt_static_text("**/cache/**\n"), rt_static_text("x/cache/y"), false) -> return I64{17}
+    if !files_walk_fixture_ignored(rt_static_text("[a-c]?.md\n"), rt_static_text("bz.md"), false) -> return I64{18}
+    if (walk_parent_length(rt_text_data(rt_static_text("a/./b/")), I64{6}) != I64{1}) -> return I64{19}
+    if (walk_parent_length(rt_text_data(rt_static_text("/a")), I64{2}) != I64{1}) -> return I64{20}
+    if (walk_parent_length(rt_text_data(rt_static_text(".")), I64{1}) != I64{0}) -> return I64{21}
+    if (walk_parent_length(rt_text_data(rt_static_text("/")), I64{1}) != I64{-1}) -> return I64{22}
+    if (walk_path_compare(rt_text_data(rt_static_text("a/b")), I64{3}, rt_text_data(rt_static_text("a.b")), I64{3}) >= I64{0}) -> return I64{23}
+    I64{0}
+}
+
+fn files_walk_fixture_live(key: I64) -> Bool {
+    root :: walk_root
+    sync_mutex_lock(root)
+    node := rt_text_word(root + I64{16})
+    loop node != (I64{0}) && rt_text_word(node + I64{8}) != key -> node = rt_text_word(node)
+    sync_mutex_unlock(root)
+    node != I64{0}
+}
+
+// One FSWalk8Raw walk over root/{.ignore, a/b.txt, c.log}, then the
+// lifetime contract: a close during an operation keeps the context alive
+// until that operation releases it, and a repeated close is a no-op.
+#Export(c) fn jet_rt_files_walk_fixture(root: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{160}, I64{8})
+    error :: scratch + I64{128}
+    directory :: files_walk_fixture_path(root, rt_static_text("/a"))
+    if (jet_files_create_dirs_os(directory, error) != I64{1}) -> return I64{1}
+    if !files_walk_fixture_write(files_walk_fixture_path(root, rt_static_text("/.ignore")), rt_static_text("b.txt\n"), error) -> return I64{2}
+    if !files_walk_fixture_write(files_walk_fixture_path(root, rt_static_text("/a/b.txt")), rt_static_text("b"), error) -> return I64{3}
+    if !files_walk_fixture_write(files_walk_fixture_path(root, rt_static_text("/c.log")), rt_static_text("c"), error) -> return I64{4}
+    if (jet_std_fs_list_dir_raw(root, scratch, scratch + I64{8}, error) != I64{1} || rt_text_word(scratch + I64{8}) != I64{3}) -> return I64{5}
+    listed :: rt_text_word(scratch)
+    if !jet_rt_string_eq(rt_text_word(rt_text_word(listed)), rt_static_text(".ignore")) || !jet_rt_string_eq(rt_text_word(rt_text_word(listed + I64{8})), rt_static_text("a")) -> return I64{6}
+    if !jet_rt_record_get_dir_entry_is_dir(rt_text_word(listed + I64{8})) || jet_rt_record_get_dir_entry_is_dir(rt_text_word(listed + I64{16})) -> return I64{7}
+    at := I64{0}
+    loop at < (I64{3}) {
+        jet_rt_handle_drop_dir_entry(rt_text_word(listed + at * I64{8}))
+        at += I64{1}
+    }
+    jet_rt_free(listed, I64{24}, I64{8})
+
+    key :: jet_walk8_open(root, rt_static_text(".ignore"), true)
+    if (key < I64{1} || jet_walk8_validation_path(key, I64{0}) != I64{0}) -> return I64{8}
+    out :: jet_rt_alloc(I64{96}, I64{8})
+    thread_zero(out, I64{96})
+    jet_walk8_metadata(key, I64{0}, out, out + I64{8}, out + I64{16}, out + I64{24}, out + I64{32}, out + I64{40}, out + I64{48})
+    if (rt_text_word(out) != I64{1} || rt_text_word(out + I64{8}) != I64{0} || rt_text_word(out + I64{16}) != I64{0} || rt_text_word(out + I64{24}) != I64{0}) -> return I64{9}
+    jet_walk8_matcher_new(key)
+    jet_walk8_rules(key, I64{0}, rt_static_text(".ignore"), out, out + I64{8}, out + I64{16}, out + I64{24}, out + I64{32})
+    if (rt_text_word(out + I64{24}) != I64{0}) -> return I64{10}
+    jet_walk8_read_dir(key, I64{0}, out, out + I64{8}, out + I64{16}, out + I64{24}, out + I64{32})
+    if (rt_text_word(out + I64{24}) != I64{0}) -> return I64{11}
+    seen := I64{0}
+    child := I64{-1}
+    loop {
+        thread_zero(out, I64{96})
+        jet_walk8_next(key, I64{0}, out, out + I64{8}, out + I64{16}, out + I64{24}, out + I64{32}, out + I64{40}, out + I64{48}, out + I64{56}, out + I64{64}, out + I64{72}, out + I64{80}, out + I64{88})
+        if (rt_text_word(out + I64{80}) != I64{0}) -> return I64{12}
+        relative :: rt_text_word(out + I64{40})
+        if (rt_text_word(out) != I64{0}) {
+            jet_rt_string_drop(rt_text_word(out + I64{32}))
+            jet_rt_string_drop(relative)
+            break
+        }
+        if jet_rt_string_eq(relative, rt_static_text(".ignore")) {
+            if (rt_text_word(out + I64{48}) != I64{1}) -> return I64{13}
+            seen = seen.bit_or(I64{1})
+        } else if jet_rt_string_eq(relative, rt_static_text("a")) {
+            if (rt_text_word(out + I64{16}) != I64{1}) -> return I64{14}
+            child = rt_text_word(out + I64{8})
+            seen = seen.bit_or(I64{2})
+        } else if jet_rt_string_eq(relative, rt_static_text("c.log")) {
+            if (rt_text_word(out + I64{24}) != I64{1} || jet_walk8_ignored(key, I64{0}, relative, false)) -> return I64{15}
+            seen = seen.bit_or(I64{4})
+        } else {
+            return I64{16}
+        }
+        jet_rt_string_drop(rt_text_word(out + I64{32}))
+        jet_rt_string_drop(relative)
+    }
+    if (seen != I64{7} || !jet_walk8_ignored(key, I64{0}, rt_static_text("b.txt"), false)) -> return I64{17}
+    jet_walk8_inherit(key, child, I64{0})
+    if !jet_walk8_ignored(key, child, rt_static_text("a/b.txt"), false) -> return I64{18}
+    if !jet_walk8_before(key, I64{0}, child) || jet_walk8_before(key, child, I64{0}) -> return I64{19}
+    shown :: jet_walk8_shown(key, child)
+    if !jet_rt_string_eq(shown, directory) -> return I64{20}
+    jet_rt_string_drop(shown)
+
+    // An in-flight operation holds the context across a concurrent close.
+    context :: walk_enter(key)
+    jet_walk8_close(key)
+    if files_walk_fixture_live(key) -> return I64{21}
+    if (walk_slot_length(context, I64{0}) != rt_text_len(root)) -> return I64{22}
+    walk_leave(context)
+    // The context is released; a second close of the dead key is a no-op.
+    jet_walk8_close(key)
+    other :: jet_walk8_open(root, rt_static_text(""), false)
+    if (other <= key || !files_walk_fixture_live(other)) -> return I64{23}
+    jet_walk8_close(other)
+    jet_walk8_close(other)
+
+    jet_rt_free(out, I64{96}, I64{8})
+    if (jet_std_fs_remove_all_raw(root, true, error) != I64{1}) -> return I64{24}
+    if (jet_std_fs_stat_mode_raw(root, scratch, error) != I64{0}) -> return I64{25}
+    jet_rt_handle_drop_io_error(rt_text_word(error))
+    jet_rt_free(scratch, I64{160}, I64{8})
+    I64{0}
+}

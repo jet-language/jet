@@ -1,0 +1,670 @@
+// Core/FSWalk8Raw.rs walk identities for Core/files walk_impl: the
+// queue, policy and error construction stay in Core; this owns only path,
+// matcher and open-directory slots.
+// FSWalk8Raw.rs:13-29 lifetime: one process table of monotonic keys (from 1,
+// never reused) to shared contexts. Every operation retains its context from
+// the table before taking the context lock, so a close only drops the table's
+// reference: an operation in flight keeps the context alive, a repeated close
+// is a no-op, and a key that is not live panics "live walk context".
+// Root24: mutex @0, next key @8, list head @16. Node24: next @0, key @8,
+// context (the table's reference) @16.
+// Context64: lock @0, owned root bytes @8 / length @16 (NUL-terminated),
+// owned ignore-file name E4 or 0 @24, slot words @32, count @40, capacity @48,
+// references @56.
+// Slot32: owned path bytes @0 (length+1, NUL-terminated), length @8,
+// shared FilesIgnore matcher or 0 @16, directory stream or 0 @24.
+// Stream40: fd @0, getdents64 buffer @8, filled @16, position @24, ended @32.
+WALK_CONTEXT_BYTES :: prep { I64{64} }
+WALK_SLOT_BYTES :: prep { I64{32} }
+WALK_STREAM_BYTES :: prep { I64{40} }
+WALK_NUL :: prep { I64{-5000} }
+WALK_ROOT :: prep { I64{1} }
+WALK_CUR :: prep { I64{2} }
+WALK_PARENT :: prep { I64{3} }
+WALK_NORMAL :: prep { I64{4} }
+
+fn walk_panic(message: I64) { jet_rt_panic_message(rt_text_data(message), rt_text_len(message)) }
+
+walk_root := I64{0}
+// runtime-init: 4
+#Export(c) fn jet_rt_walk8_init() {
+    if (walk_root != I64{0}) -> return
+    root :: jet_rt_alloc(I64{24}, I64{8})
+    thread_zero(root, I64{24})
+    sync_store(root + I64{8}, I64{1})
+    walk_root = root
+}
+
+// The live context for `key`, retained for one operation and locked; 0 after
+// the "live walk context" panic.
+fn walk_enter(key: I64) -> I64 {
+    root :: walk_root
+    sync_mutex_lock(root)
+    node := rt_text_word(root + I64{16})
+    loop node != (I64{0}) && rt_text_word(node + I64{8}) != key -> node = rt_text_word(node)
+    context :: if (node == I64{0}) -> I64{0} else -> rt_text_word(node + I64{16})
+    if (context != I64{0}) -> _ := sync_add(context + I64{56}, I64{1})
+    sync_mutex_unlock(root)
+    if (context == I64{0}) {
+        walk_panic(rt_static_text("live walk context"))
+        return I64{0}
+    }
+    sync_mutex_lock(context)
+    context
+}
+
+fn walk_release(context: I64) {
+    if (sync_add(context + I64{56}, I64{-1}) != I64{1}) -> return
+    count :: rt_text_word(context + I64{40})
+    at := I64{0}
+    loop at < count {
+        slot :: walk_slot(context, at)
+        jet_rt_free(rt_text_word(slot), rt_text_word(slot + I64{8}) + I64{1}, I64{1})
+        ignore_matcher_drop(rt_text_word(slot + I64{16}))
+        walk_stream_close(rt_text_word(slot + I64{24}))
+        at += I64{1}
+    }
+    capacity :: rt_text_word(context + I64{48})
+    if (capacity != I64{0}) -> jet_rt_free(rt_text_word(context + I64{32}), capacity * WALK_SLOT_BYTES, I64{8})
+    jet_rt_free(rt_text_word(context + I64{8}), rt_text_word(context + I64{16}) + I64{1}, I64{1})
+    ignore :: rt_text_word(context + I64{24})
+    if (ignore != I64{0}) -> jet_rt_string_drop(ignore)
+    jet_rt_free(context, WALK_CONTEXT_BYTES, I64{8})
+}
+
+fn walk_leave(context: I64) {
+    sync_mutex_unlock(context)
+    walk_release(context)
+}
+
+fn walk_bytes_new(data: I64, length: I64) -> I64 {
+    bytes :: jet_rt_alloc(length + I64{1}, I64{1})
+    rt_text_bytes_copy(bytes, data, length)
+    rt_text_put(bytes + length, I64{0})
+    bytes
+}
+
+fn walk_has_nul(data: I64, length: I64) -> Bool {
+    at := I64{0}
+    loop at < length {
+        if (rt_text_byte(data + at) == I64{0}) -> return true
+        at += I64{1}
+    }
+    false
+}
+
+fn walk_slot(context: I64, index: I64) -> I64 { rt_text_word(context + I64{32}) + index * WALK_SLOT_BYTES }
+fn walk_slot_data(context: I64, index: I64) -> I64 { rt_text_word(walk_slot(context, index)) }
+fn walk_slot_length(context: I64, index: I64) -> I64 { rt_text_word(walk_slot(context, index) + I64{8}) }
+
+// Takes ownership of `bytes` (length+1, NUL-terminated).
+fn walk_slot_push(context: I64, bytes: I64, length: I64) -> I64 {
+    count :: rt_text_word(context + I64{40})
+    capacity :: rt_text_word(context + I64{48})
+    if (count == capacity) {
+        grown :: if (capacity == I64{0}) -> I64{16} else -> capacity * I64{2}
+        data :: jet_rt_alloc(grown * WALK_SLOT_BYTES, I64{8})
+        old :: rt_text_word(context + I64{32})
+        coll_copy(old, data, count * WALK_SLOT_BYTES)
+        if (capacity != I64{0}) -> jet_rt_free(old, capacity * WALK_SLOT_BYTES, I64{8})
+        rt_text_store(context + I64{32}, data)
+        rt_text_store(context + I64{48}, grown)
+    }
+    slot :: rt_text_word(context + I64{32}) + count * WALK_SLOT_BYTES
+    rt_text_store(slot, bytes)
+    rt_text_store(slot + I64{8}, length)
+    rt_text_store(slot + I64{16}, I64{0})
+    rt_text_store(slot + I64{24}, I64{0})
+    rt_text_store(context + I64{40}, count + I64{1})
+    count
+}
+
+fn walk_stream_close(stream: I64) {
+    if (stream == I64{0}) -> return
+    _ := host_call(I64{3}, rt_text_word(stream), I64{0}, I64{0})
+    jet_rt_free(rt_text_word(stream + I64{8}), FILES_DIRENT_BYTES, I64{8})
+    jet_rt_free(stream, WALK_STREAM_BYTES, I64{8})
+}
+
+// PathBuf::join(name) on raw bytes: a separator only after a non-empty path
+// not already ending in '/', and an absolute name replaces the path.
+fn walk_join(data: I64, length: I64, name: I64, name_length: I64, output: I64) -> I64 {
+    if (name_length > I64{0} && rt_text_byte(name) == I64{47}) {
+        rt_text_store(output, walk_bytes_new(name, name_length))
+        return name_length
+    }
+    separator :: length != I64{0} && rt_text_byte(data + length - I64{1}) != I64{47}
+    total :: length + name_length + (if separator -> I64{1} else -> I64{0})
+    bytes :: jet_rt_alloc(total + I64{1}, I64{1})
+    rt_text_bytes_copy(bytes, data, length)
+    if separator -> rt_text_put(bytes + length, I64{47})
+    rt_text_bytes_copy(bytes + total - name_length, name, name_length)
+    rt_text_put(bytes + total, I64{0})
+    rt_text_store(output, bytes)
+    total
+}
+
+// std Path::components on Unix as (kind, start, end) word triples: RootDir,
+// a leading CurDir only for a relative "." prefix, ParentDir, Normal; empty
+// and other "." parts are skipped.
+fn walk_components(data: I64, length: I64) -> I64 {
+    parts :: files_words_new()
+    at := I64{0}
+    if (length > I64{0} && rt_text_byte(data) == I64{47}) {
+        files_words_push(parts, WALK_ROOT)
+        files_words_push(parts, I64{0})
+        files_words_push(parts, I64{1})
+        at = I64{1}
+    } else if (length > I64{0} && rt_text_byte(data) == I64{46} && (length == I64{1} || rt_text_byte(data + I64{1}) == I64{47})) {
+        files_words_push(parts, WALK_CUR)
+        files_words_push(parts, I64{0})
+        files_words_push(parts, I64{1})
+        at = I64{1}
+    }
+    loop at < length {
+        end := at
+        loop end < length && rt_text_byte(data + end) != (I64{47}) -> end += I64{1}
+        size :: end - at
+        dot :: size >= I64{1} && rt_text_byte(data + at) == I64{46}
+        kind :: if {
+            (size == I64{2} && dot && rt_text_byte(data + at + I64{1}) == I64{46}) -> WALK_PARENT
+            (size == I64{0} || (size == I64{1} && dot)) -> I64{0}
+            else -> WALK_NORMAL
+        }
+        if (kind != I64{0}) {
+            files_words_push(parts, kind)
+            files_words_push(parts, at)
+            files_words_push(parts, end)
+        }
+        at = end + I64{1}
+    }
+    parts
+}
+
+fn walk_component_count(parts: I64) -> I64 { rt_text_word(parts + I64{8}) / I64{3} }
+fn walk_component_word(parts: I64, index: I64, field: I64) -> I64 { rt_text_word(rt_text_word(parts) + (index * I64{3} + field) * I64{8}) }
+
+fn walk_bytes_compare(left: I64, left_length: I64, right: I64, right_length: I64) -> I64 {
+    length :: if (left_length < right_length) -> left_length else -> right_length
+    at := I64{0}
+    loop at < length {
+        a :: rt_text_byte(left + at)
+        b :: rt_text_byte(right + at)
+        if (a != b) -> return if (a < b) -> I64{-1} else -> I64{1}
+        at += I64{1}
+    }
+    if (left_length == right_length) -> return I64{0}
+    if (left_length < right_length) -> I64{-1} else -> I64{1}
+}
+
+// Component `index` of `left` against component `other` of `right`
+// (derived Component order: RootDir < CurDir < ParentDir < Normal bytes).
+fn walk_component_compare(left: I64, left_parts: I64, index: I64, right: I64, right_parts: I64, other: I64) -> I64 {
+    left_kind :: walk_component_word(left_parts, index, I64{0})
+    right_kind :: walk_component_word(right_parts, other, I64{0})
+    if (left_kind != right_kind) -> return if (left_kind < right_kind) -> I64{-1} else -> I64{1}
+    if (left_kind != WALK_NORMAL) -> return I64{0}
+    left_start :: walk_component_word(left_parts, index, I64{1})
+    right_start :: walk_component_word(right_parts, other, I64{1})
+    walk_bytes_compare(left + left_start, walk_component_word(left_parts, index, I64{2}) - left_start, right + right_start, walk_component_word(right_parts, other, I64{2}) - right_start)
+}
+
+// Path's Ord (compare_components): component-wise lexicographic.
+fn walk_path_compare(left: I64, left_length: I64, right: I64, right_length: I64) -> I64 {
+    left_parts :: walk_components(left, left_length)
+    right_parts :: walk_components(right, right_length)
+    left_count :: walk_component_count(left_parts)
+    right_count :: walk_component_count(right_parts)
+    result := I64{0}
+    at := I64{0}
+    loop result == (I64{0}) && at < left_count && at < right_count {
+        result = walk_component_compare(left, left_parts, at, right, right_parts, at)
+        at += I64{1}
+    }
+    if (result == I64{0} && left_count != right_count) -> result = if (left_count < right_count) -> I64{-1} else -> I64{1}
+    files_words_free(left_parts)
+    files_words_free(right_parts)
+    result
+}
+
+// `child.strip_prefix(root).unwrap_or(child).to_string_lossy()`: the rest
+// after the matched components (as_path trims leading and trailing "" and
+// "." parts), or the whole child when root is not a component prefix.
+fn walk_relative(child: I64, child_length: I64, root: I64, root_length: I64) -> I64 {
+    child_parts :: walk_components(child, child_length)
+    root_parts :: walk_components(root, root_length)
+    child_count :: walk_component_count(child_parts)
+    root_count :: walk_component_count(root_parts)
+    matched := root_count <= child_count
+    at := I64{0}
+    loop matched && at < root_count {
+        matched = walk_component_compare(child, child_parts, at, root, root_parts, at) == I64{0}
+        at += I64{1}
+    }
+    end :: if (child_count == I64{0}) -> I64{0} else -> walk_component_word(child_parts, child_count - I64{1}, I64{2})
+    start :: if (!matched || root_count == I64{0}) -> I64{0} else if (root_count < child_count) -> walk_component_word(child_parts, root_count, I64{1}) else -> end
+    result :: if (!matched) -> rt_text_lossy(child, child_length) else -> rt_text_lossy(child + start, end - start)
+    files_words_free(child_parts)
+    files_words_free(root_parts)
+    result
+}
+
+// One parse_next_component_back step over data[before..end): the part's
+// start and the end left after it (the separator is consumed).
+fn walk_back_start(data: I64, before: I64, end: I64) -> I64 {
+    sep := end - I64{1}
+    loop sep >= before && rt_text_byte(data + sep) != (I64{47}) -> sep -= I64{1}
+    if (sep < before) -> before else -> sep + I64{1}
+}
+fn walk_back_rest(data: I64, before: I64, end: I64) -> I64 {
+    start :: walk_back_start(data, before, end)
+    if (start == before) -> before else -> start - I64{1}
+}
+fn walk_back_real(data: I64, before: I64, end: I64) -> Bool {
+    start :: walk_back_start(data, before, end)
+    size :: end - start
+    size > I64{0} && !(size == I64{1} && rt_text_byte(data + start) == I64{46})
+}
+
+// Path::parent as a byte-prefix length, or -1 for None: the last real part
+// is removed and then trailing "" / "." parts are trimmed; a lone CurDir
+// leaves "", RootDir has no parent.
+fn walk_parent_length(data: I64, length: I64) -> I64 {
+    has_root :: length > I64{0} && rt_text_byte(data) == I64{47}
+    current :: !has_root && length > I64{0} && rt_text_byte(data) == I64{46} && (length == I64{1} || rt_text_byte(data + I64{1}) == I64{47})
+    before :: if (has_root || current) -> I64{1} else -> I64{0}
+    end := length
+    found := false
+    loop !found && end > before {
+        found = walk_back_real(data, before, end)
+        end = walk_back_rest(data, before, end)
+    }
+    if found {
+        loop end > before && !walk_back_real(data, before, end) -> end = walk_back_rest(data, before, end)
+        return end
+    }
+    if current -> return I64{0}
+    I64{-1}
+}
+
+// jet_walk8_error: InvalidInput 1, NotFound 2, PermissionDenied 3,
+// TimedOut 4, NotConnected/BrokenPipe 5, else 0; the raw OS code; Display.
+fn walk_errno_kind(code: I64) -> I64 {
+    if {
+        (code == I64{22}) -> I64{1}
+        (code == I64{2}) -> I64{2}
+        (code == I64{1} || code == I64{13}) -> I64{3}
+        (code == I64{110}) -> I64{4}
+        (code == I64{107} || code == I64{32}) -> I64{5}
+        else -> I64{0}
+    }
+}
+
+fn walk_out_flag(out: I64, value: Bool) { rt_text_store(out, if value -> I64{1} else -> I64{0}) }
+
+// (kind: Int, code: Int?, cause: String?) through five caller-zeroed words.
+// `failure`: 0, -errno, or WALK_NUL (std's CString refusal, no OS code).
+fn walk_out_error(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+    if (failure == I64{0}) {
+        rt_text_store(kind, jet_int_owned_from_i64(I64{0}))
+        rt_text_store(code_tag, I64{0})
+        rt_text_store(cause_tag, I64{0})
+        return
+    }
+    if (failure == WALK_NUL) {
+        rt_text_store(kind, jet_int_owned_from_i64(I64{1}))
+        rt_text_store(code_tag, I64{0})
+        rt_text_store(cause_tag, I64{1})
+        rt_text_store(cause, jet_rt_string_clone(rt_static_text("file name contained an unexpected NUL byte")))
+        return
+    }
+    errno :: -failure
+    rt_text_store(kind, jet_int_owned_from_i64(walk_errno_kind(errno)))
+    rt_text_store(code_tag, I64{1})
+    rt_text_store(code, jet_int_owned_from_i64(errno))
+    rt_text_store(cause_tag, I64{1})
+    rt_text_store(cause, host_errno_cause(errno))
+}
+
+#Export(c) fn jet_walk8_open(root: I64, ignore: I64, enabled: Bool) -> I64 {
+    context :: jet_rt_alloc(WALK_CONTEXT_BYTES, I64{8})
+    rt_text_store(context, I64{0})
+    length :: rt_text_len(root)
+    rt_text_store(context + I64{8}, walk_bytes_new(rt_text_data(root), length))
+    rt_text_store(context + I64{16}, length)
+    rt_text_store(context + I64{24}, if enabled -> jet_rt_string_clone(ignore) else -> I64{0})
+    rt_text_store(context + I64{32}, I64{0})
+    rt_text_store(context + I64{40}, I64{0})
+    rt_text_store(context + I64{48}, I64{0})
+    sync_store(context + I64{56}, I64{1})
+    _ := walk_slot_push(context, walk_bytes_new(rt_text_data(root), length), length)
+    node :: jet_rt_alloc(I64{24}, I64{8})
+    root_table :: walk_root
+    sync_mutex_lock(root_table)
+    key :: rt_text_word(root_table + I64{8})
+    rt_text_store(root_table + I64{8}, key + I64{1})
+    rt_text_store(node, rt_text_word(root_table + I64{16}))
+    rt_text_store(node + I64{8}, key)
+    rt_text_store(node + I64{16}, context)
+    rt_text_store(root_table + I64{16}, node)
+    sync_mutex_unlock(root_table)
+    jet_int_owned_from_i64(key)
+}
+
+// HashMap::remove: a key that is not live is a no-op; the context itself is
+// freed by whichever of the table and in-flight operations releases it last.
+#Export(c) fn jet_walk8_close(key: I64) {
+    root :: walk_root
+    sync_mutex_lock(root)
+    link := root + I64{16}
+    context := I64{0}
+    loop rt_text_word(link) != (I64{0}) {
+        node :: rt_text_word(link)
+        if (rt_text_word(node + I64{8}) == key) {
+            context = rt_text_word(node + I64{16})
+            rt_text_store(link, rt_text_word(node))
+            jet_rt_free(node, I64{24}, I64{8})
+            break
+        }
+        link = node
+    }
+    sync_mutex_unlock(root)
+    if (context != I64{0}) -> walk_release(context)
+}
+
+// An empty path validates as "." in a new slot.
+#Export(c) fn jet_walk8_validation_path(key: I64, slot: I64) -> I64 {
+    context :: walk_enter(key)
+    if (context == I64{0}) -> return I64{0}
+    result := slot
+    if (walk_slot_length(context, slot) == I64{0}) {
+        dot :: jet_rt_alloc(I64{2}, I64{1})
+        rt_text_put(dot, I64{46})
+        rt_text_put(dot + I64{1}, I64{0})
+        result = walk_slot_push(context, dot, I64{1})
+    }
+    walk_leave(context)
+    jet_int_owned_from_i64(result)
+}
+
+// Path::ancestors without empty paths, each as a new slot.
+#Export(c) fn jet_walk8_ancestors(key: I64, slot: I64, output: I64) -> I64 {
+    context :: walk_enter(key)
+    if (context == I64{0}) -> return I64{0}
+    data :: walk_slot_data(context, slot)
+    keys :: files_words_new()
+    length := walk_slot_length(context, slot)
+    loop length >= (I64{0}) {
+        if (length > I64{0}) -> files_words_push(keys, walk_slot_push(context, walk_bytes_new(data, length), length))
+        length = walk_parent_length(data, length)
+    }
+    walk_leave(context)
+    files_words_take(keys, output)
+}
+
+// symlink_metadata: (directory, symlink, kind, code?, cause?).
+#Export(c) fn jet_walk8_metadata(key: I64, slot: I64, directory: I64, symlink: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+    context :: walk_enter(key)
+    if (context == I64{0}) -> return
+    data :: walk_slot_data(context, slot)
+    failure := WALK_NUL
+    mode := I64{0}
+    if !walk_has_nul(data, walk_slot_length(context, slot)) {
+        mode = files_lstat_c(data)
+        failure = if (mode < I64{0}) -> mode else -> I64{0}
+    }
+    walk_leave(context)
+    bits :: mode.bit_and(I64{61440})
+    walk_out_flag(directory, failure == I64{0} && bits == I64{16384})
+    walk_out_flag(symlink, failure == I64{0} && bits == I64{40960})
+    walk_out_error(failure, kind, code_tag, code, cause_tag, cause)
+}
+
+#Export(c) fn jet_walk8_shown(key: I64, slot: I64) -> I64 {
+    context :: walk_enter(key)
+    if (context == I64{0}) -> return jet_rt_string_builder_new()
+    result :: rt_text_lossy(walk_slot_data(context, slot), walk_slot_length(context, slot))
+    walk_leave(context)
+    result
+}
+
+#Export(c) fn jet_walk8_before(key: I64, left: I64, right: I64) -> Bool {
+    context :: walk_enter(key)
+    if (context == I64{0}) -> return false
+    result :: walk_path_compare(walk_slot_data(context, left), walk_slot_length(context, left), walk_slot_data(context, right), walk_slot_length(context, right))
+    walk_leave(context)
+    result < I64{0}
+}
+
+#Export(c) fn jet_walk8_matcher_new(key: I64) {
+    context :: walk_enter(key)
+    if (context == I64{0}) -> return
+    slot :: walk_slot(context, I64{0})
+    ignore_matcher_drop(rt_text_word(slot + I64{16}))
+    rt_text_store(slot + I64{16}, ignore_matcher_new())
+    walk_leave(context)
+}
+
+// std::fs::read: open O_RDONLY|O_CLOEXEC and read to the end, EINTR retried.
+// Returns 0 with the bytes/length/capacity in `output`, or -errno.
+fn walk_read_file(name: I64, output: I64) -> I64 {
+    fd := I64{-4}
+    loop {
+        fd = host_call(I64{2}, name, I64{524288}, I64{0})
+        if (fd != I64{-4}) -> break
+    }
+    if (fd < I64{0}) -> return fd
+    capacity := I64{8192}
+    bytes := jet_rt_alloc(capacity, I64{1})
+    used := I64{0}
+    failure := I64{0}
+    loop {
+        if (used == capacity) {
+            grown :: capacity * I64{2}
+            next_bytes :: jet_rt_alloc(grown, I64{1})
+            rt_text_bytes_copy(next_bytes, bytes, used)
+            jet_rt_free(bytes, capacity, I64{1})
+            bytes = next_bytes
+            capacity = grown
+        }
+        count :: host_call(I64{0}, fd, bytes + used, capacity - used)
+        if (count == I64{-4}) -> next
+        if (count <= I64{0}) {
+            failure = count
+            break
+        }
+        used += count
+    }
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    if (failure < I64{0}) {
+        jet_rt_free(bytes, capacity, I64{1})
+        return failure
+    }
+    rt_text_store(output, bytes)
+    rt_text_store(output + I64{8}, used)
+    rt_text_store(output + I64{16}, capacity)
+    I64{0}
+}
+
+// JetFsIgnoreMatcher::with_directory_rules(slot path, filename): a missing or
+// non-regular (including symlink) ignore file keeps the inherited rules.
+#Export(c) fn jet_walk8_rules(key: I64, slot: I64, filename: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+    context :: walk_enter(key)
+    if (context == I64{0}) -> return
+    matcher :: rt_text_word(walk_slot(context, slot) + I64{16})
+    if (matcher == I64{0}) {
+        walk_leave(context)
+        walk_panic(rt_static_text("inherited ignore matcher"))
+        return
+    }
+    data :: walk_slot_data(context, slot)
+    length :: walk_slot_length(context, slot)
+    scratch :: jet_rt_alloc(I64{24}, I64{8})
+    path_length :: walk_join(data, length, rt_text_data(filename), rt_text_len(filename), scratch)
+    path :: rt_text_word(scratch)
+    failure := I64{0}
+    if walk_has_nul(path, path_length) {
+        failure = WALK_NUL
+    } else {
+        mode :: files_lstat_c(path)
+        if (mode < I64{0}) {
+            if (mode != I64{-2}) -> failure = mode
+        } else if ((mode.bit_and(I64{61440})) == I64{32768}) {
+            failure = walk_read_file(path, scratch)
+            if (failure == I64{0}) {
+                text :: rt_text_lossy(rt_text_word(scratch), rt_text_word(scratch + I64{8}))
+                jet_rt_free(rt_text_word(scratch), rt_text_word(scratch + I64{16}), I64{1})
+                base :: walk_relative(data, length, rt_text_word(context + I64{8}), rt_text_word(context + I64{16}))
+                at := I64{0}
+                loop at < rt_text_len(base) {
+                    if (rt_text_byte(rt_text_data(base) + at) == I64{92}) -> rt_text_put(rt_text_data(base) + at, I64{47})
+                    at += I64{1}
+                }
+                rt_text_store(walk_slot(context, slot) + I64{16}, ignore_matcher_extend(matcher, base, text))
+                ignore_matcher_drop(matcher)
+                jet_rt_string_drop(base)
+                jet_rt_string_drop(text)
+            }
+        }
+    }
+    jet_rt_free(path, path_length + I64{1}, I64{1})
+    jet_rt_free(scratch, I64{24}, I64{8})
+    walk_leave(context)
+    walk_out_error(failure, kind, code_tag, code, cause_tag, cause)
+}
+
+#Export(c) fn jet_walk8_ignored(key: I64, slot: I64, relative: I64, directory: Bool) -> Bool {
+    context :: walk_enter(key)
+    if (context == I64{0}) -> return false
+    matcher :: rt_text_word(walk_slot(context, slot) + I64{16})
+    if (matcher == I64{0}) {
+        walk_leave(context)
+        walk_panic(rt_static_text("inherited ignore matcher"))
+        return false
+    }
+    result :: ignore_matcher_ignored(matcher, relative, directory)
+    walk_leave(context)
+    result
+}
+
+#Export(c) fn jet_walk8_inherit(key: I64, child: I64, parent: I64) {
+    context :: walk_enter(key)
+    if (context == I64{0}) -> return
+    inherited :: ignore_matcher_retain(rt_text_word(walk_slot(context, parent) + I64{16}))
+    target :: walk_slot(context, child) + I64{16}
+    ignore_matcher_drop(rt_text_word(target))
+    rt_text_store(target, inherited)
+    walk_leave(context)
+}
+
+// std::fs::read_dir (opendir: O_RDONLY|O_DIRECTORY|O_CLOEXEC) into the slot.
+#Export(c) fn jet_walk8_read_dir(key: I64, slot: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+    context :: walk_enter(key)
+    if (context == I64{0}) -> return
+    data :: walk_slot_data(context, slot)
+    failure := WALK_NUL
+    if !walk_has_nul(data, walk_slot_length(context, slot)) {
+        fd :: host_call(I64{2}, data, FILES_O_DIRECTORY_CLOEXEC, I64{0})
+        failure = if (fd < I64{0}) -> fd else -> I64{0}
+        if (fd >= I64{0}) {
+            stream :: jet_rt_alloc(WALK_STREAM_BYTES, I64{8})
+            rt_text_store(stream, fd)
+            rt_text_store(stream + I64{8}, jet_rt_alloc(FILES_DIRENT_BYTES, I64{8}))
+            rt_text_store(stream + I64{16}, I64{0})
+            rt_text_store(stream + I64{24}, I64{0})
+            rt_text_store(stream + I64{32}, I64{0})
+            target :: walk_slot(context, slot) + I64{24}
+            walk_stream_close(rt_text_word(target))
+            rt_text_store(target, stream)
+        }
+    }
+    walk_leave(context)
+    walk_out_error(failure, kind, code_tag, code, cause_tag, cause)
+}
+
+// readdir (musl): skip "." and ".."; ENOENT is end of stream; any other
+// error ends the stream after it is reported. Returns a dirent64 record,
+// 0 at end, or -errno.
+fn walk_stream_next(stream: I64) -> I64 {
+    buffer :: rt_text_word(stream + I64{8})
+    loop {
+        position :: rt_text_word(stream + I64{24})
+        if (position >= rt_text_word(stream + I64{16})) {
+            if (rt_text_word(stream + I64{32}) != I64{0}) -> return I64{0}
+            count :: host_call(I64{217}, rt_text_word(stream), buffer, FILES_DIRENT_BYTES)
+            if (count <= I64{0}) {
+                rt_text_store(stream + I64{32}, I64{1})
+                if (count == I64{0} || count == I64{-2}) -> return I64{0}
+                return count
+            }
+            rt_text_store(stream + I64{16}, count)
+            rt_text_store(stream + I64{24}, I64{0})
+            next
+        }
+        record :: buffer + position
+        rt_text_store(stream + I64{24}, position + rt_text_byte(record + I64{16}).bit_or((rt_text_byte(record + I64{17}) << I64{8})))
+        if !files_dot_entry(record + I64{19}) -> return record
+    }
+}
+
+// ReadDir::next for the slot: (end, child, directory, file, path, relative,
+// ignore_file, kind, code?, cause?). file_type comes from d_type, with
+// std's no-follow metadata fallback for any other d_type value; a fallback
+// failure is neither a directory nor a file.
+#Export(c) fn jet_walk8_next(key: I64, slot: I64, end: I64, child: I64, directory: I64, file: I64, path: I64, relative: I64, ignore_file: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+    context :: walk_enter(key)
+    if (context == I64{0}) -> return
+    target :: walk_slot(context, slot) + I64{24}
+    stream :: rt_text_word(target)
+    if (stream == I64{0}) {
+        walk_leave(context)
+        walk_panic(rt_static_text("open walk directory"))
+        return
+    }
+    record :: walk_stream_next(stream)
+    if (record <= I64{0}) {
+        if (record == I64{0}) {
+            walk_stream_close(stream)
+            rt_text_store(target, I64{0})
+        }
+        walk_leave(context)
+        walk_out_flag(end, record == I64{0})
+        rt_text_store(child, jet_int_owned_from_i64(I64{0}))
+        walk_out_flag(directory, false)
+        walk_out_flag(file, false)
+        rt_text_store(path, jet_rt_string_builder_new())
+        rt_text_store(relative, jet_rt_string_builder_new())
+        walk_out_flag(ignore_file, false)
+        walk_out_error(record, kind, code_tag, code, cause_tag, cause)
+        return
+    }
+    name :: record + I64{19}
+    name_length :: files_c_len(name)
+    scratch :: jet_rt_alloc(I64{8}, I64{8})
+    child_length :: walk_join(walk_slot_data(context, slot), walk_slot_length(context, slot), name, name_length, scratch)
+    child_path :: rt_text_word(scratch)
+    jet_rt_free(scratch, I64{8}, I64{8})
+    entry_type :: rt_text_byte(record + I64{18})
+    mode := if {
+        (entry_type == I64{4}) -> I64{16384}
+        (entry_type == I64{8}) -> I64{32768}
+        (entry_type == I64{1} || entry_type == I64{2} || entry_type == I64{6} || entry_type == I64{10} || entry_type == I64{12}) -> I64{0}
+        else -> files_lstat_c(child_path)
+    }
+    if (mode < I64{0}) -> mode = I64{0}
+    bits :: mode.bit_and(I64{61440})
+    shown :: rt_text_lossy(child_path, child_length)
+    rest :: walk_relative(child_path, child_length, rt_text_word(context + I64{8}), rt_text_word(context + I64{16}))
+    ignore :: rt_text_word(context + I64{24})
+    matches_ignore :: ignore != I64{0} && rt_text_len(ignore) == name_length && rt_text_equal_bytes(rt_text_data(ignore), name, name_length)
+    index :: walk_slot_push(context, child_path, child_length)
+    walk_leave(context)
+    walk_out_flag(end, false)
+    rt_text_store(child, jet_int_owned_from_i64(index))
+    walk_out_flag(directory, bits == I64{16384})
+    walk_out_flag(file, bits == I64{32768})
+    rt_text_store(path, shown)
+    rt_text_store(relative, rest)
+    walk_out_flag(ignore_file, matches_ignore)
+    walk_out_error(I64{0}, kind, code_tag, code, cause_tag, cause)
+}
