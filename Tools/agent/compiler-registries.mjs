@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { prepareTransport, runTransport } from './compiler-registry-transports.mjs';
 import { assertPinnedSource } from './proof-source.mjs';
+import { partitionRegistries } from './registry-shard.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -37,14 +38,15 @@ function usePinnedSource(head) {
     if (child.error) throw child.error;
     process.exit(child.status ?? 1);
 }
-const usage = 'compiler-registries.mjs manifest SHA [--out DIR]; run --jet JET --manifest JSON [--runtime DIR] [--receipt JSON]';
+const usage = 'compiler-registries.mjs manifest SHA [--out DIR]; run --jet JET --manifest JSON [--runtime DIR] [--receipt JSON] [--shard I/N]';
 const [command, ...args] = process.argv.slice(2);
 const options = {};
 if (command === 'manifest') options.head = args.shift();
 for (let i = 0; i < args.length; i += 2) {
     const name = args[i];
-    if (!['--jet', '--manifest', '--receipt', '--out', '--runtime'].includes(name) || !args[i + 1]) throw Error(usage);
-    options[name.slice(2)] = resolve(args[i + 1]);
+    if (!['--jet', '--manifest', '--receipt', '--out', '--runtime', '--shard'].includes(name) || !args[i + 1]) throw Error(usage);
+    if (name === '--shard' && command !== 'run') throw Error(usage);
+    options[name.slice(2)] = name === '--shard' ? args[i + 1] : resolve(args[i + 1]);
 }
 if (command === 'run' && !options.jet && process.env.JET) options.jet = resolve(process.env.JET);
 function filesUnder(directory, extension = '.jet') {
@@ -284,17 +286,20 @@ async function run() {
     for (const source of manifest.sourceManifests) if (hash(readFileSync(join(repo, source.path))) !== source.sha256) throw Error(`source manifest changed: ${source.path}`);
     if (JSON.stringify(testkitInventory()) !== JSON.stringify(manifest.testkit)) throw Error('testkit sources/cases changed since manifest');
     for (const source of manifest.compilerSources) if (hash(readFileSync(join(repo, source.path))) !== source.sha256) throw Error(`compiler source changed: ${source.path}`);
+    // Partition only after all full-manifest integrity/completeness checks.
+    const selected = partitionRegistries(manifest.entries, options.shard);
     const receiptPath = options.receipt ?? `${options.manifest}.receipt.json`;
     mkdirSync(dirname(receiptPath), { recursive: true });
     const logDir = `${receiptPath}.logs`; mkdirSync(logDir, { recursive: true });
     const receipt = { status: 'FAIL', head: manifest.head, jet: options.jet, jetSha256: hash(readFileSync(options.jet)),
-        manifestSha256: hash(bytes), sourceProof: manifest.sourceProof, total: ids.length, passed: 0, blocked: 0, failed: 0, entries: [] };
+        manifestSha256: hash(bytes), sourceProof: manifest.sourceProof, total: selected.length, passed: 0, blocked: 0, failed: 0, entries: [],
+        ...(options.shard ? { shard: options.shard, fullTotal: ids.length } : {}) };
     let runtime, runtimeError;
-    if (manifest.entries.some(entry => entry.kind === 'transport' && entry.status !== 'BLOCKED')) {
+    if (selected.some(entry => entry.kind === 'transport' && entry.status !== 'BLOCKED')) {
         try { runtime = nativeRuntime(options.jet); receipt.runtime = runtime; }
         catch (error) { runtimeError = error; }
     }
-    for (const entry of manifest.entries) {
+    for (const entry of selected) {
         const result = { id: entry.id, mode: entry.mode, testCount: entry.testCount };
         if (entry.status === 'BLOCKED') { result.status = 'BLOCKED'; result.reason = entry.reason; receipt.blocked++; }
         else if (entry.kind === 'transport' && runtimeError) {

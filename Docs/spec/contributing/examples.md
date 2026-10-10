@@ -127,3 +127,47 @@ For same-code snapshot refreshes, compare the diagnostic text with its current
 Jet emitter or active registry row, and source excerpts with the fixture.
 Do not bless different codes, lost diagnostics, or a Rust-host/native-tier
 discrepancy merely because one compiler printed it.
+
+## Collect-all closeout
+
+Run the complete census with an already-built compiler and a committed source
+tree:
+
+```sh
+JET=/path/to/jet JET_TOOLCHAIN_ROOT=/path/to/source \
+  Tools/agent/jet-env node Tools/agent/goldens-census.mjs \
+  --jobs 2 --timeout 90 --registry-timeout 600
+```
+
+The command exports that source commit into private disk-backed scratch. Tests
+and examples run from a separate mutable copy, never from the supplied checkout.
+It builds the native testkit once, runs its complete golden/UI/CLI-case corpus
+with deterministic shards and all three tiers, runs the compiler registries
+with independently sealed shard receipts, and runs Core's named `#Test` suites
+and `Examples/suites` goldens. The compiler itself is never rebuilt.
+
+All children share **one total memory scope**, not one allowance per shard.
+The default is 4 GiB; `JET_CENSUS_MEMORY=8G` selects 8 GiB when the coordinator
+permits it. Launch is refused below 12 GiB `MemAvailable`. `--runtime DIR`
+selects a matching Jet-native runtime directory for native registry transports;
+otherwise the compiler's adjacent `jet-runtime` is used. Missing prerequisites
+are recorded as blocked/skipped, never as passes. Native-only transports and
+host-specific fixtures therefore remain visible when a Rust host is selected.
+
+Evidence goes into a unique `census-*` directory below
+`~/.cache/jet-dev/scratch/GoldensCensus` (or `--scratch DIR`). `census.tsv` records
+the test, kind, pass/fail/skip, and first diff/error lines; JSON retains raw
+statuses, tiers, repro commands and complete log paths. Native testkit result
+records retain their diff alongside the existing detail and exit fields.
+`remaining-root-table.{json,tsv}` lists counts, complete affected-test lists,
+sample repros and owner proposals. `--roots JSON` carries an earlier root
+classification forward without blessing a failing output. `latest.json` points
+to the run, and the latest TSV/root tables are also published at the scratch
+base. Counts are verdict rows (including separate optimization tiers); compiler
+registry receipts and named compiler Tests are reported as separate kinds.
+An interrupted run is explicitly incomplete, and any non-pass exits nonzero.
+
+Compiler fixture text follows the same language rules: escape literal braces
+in quoted parser input, and use explicit filesystem cleanup rather than an
+arbitrary `defer { ... }` block. S63 permits `defer close(^resource)`, not general
+deferred actions.
