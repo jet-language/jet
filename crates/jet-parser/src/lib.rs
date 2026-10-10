@@ -675,7 +675,7 @@ fn run() {
     }
 
     #[test]
-    fn double_star_teaches_caret_power() {
+    fn double_star_teaches_power_method() {
         let source = "fn run() { x :: 2 ** 3 }\n";
         let (tokens, lexer_diagnostics) = Lexer::lex(source);
         assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
@@ -683,16 +683,15 @@ fn run() {
         assert!(
             diagnostics.iter().any(|diagnostic| {
                 diagnostic.code == "E0396"
-                    && diagnostic.what.contains("`^`")
+                    && diagnostic.what.contains("`value.pow(exponent)`")
+                    && diagnostic.fix.contains("`base.pow(exponent)`")
                     && diagnostic.span.is_some_and(|span| &source[span.start..span.end] == "**")
             }),
             "{diagnostics:?}"
         );
         // `a * *p` (spaced) keeps its raw-pointer meaning for sema to gate.
         let (tokens, _) = Lexer::lex("fn run() { x :: a * *p }\n");
-        if let Err(diagnostics) = Parser::parse(&tokens) {
-            assert!(diagnostics.iter().all(|diagnostic| diagnostic.code != "E0396"), "{diagnostics:?}");
-        }
+        Parser::parse(&tokens).expect("spaced multiplication and raw-pointer-of remain ordinary syntax");
     }
 
     #[test]

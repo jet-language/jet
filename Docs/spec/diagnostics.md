@@ -53,6 +53,9 @@ E0396 teaches `value.pow(exponent)` for the non-Jet `**` spelling, under
 D-SIGIL-ALGEBRA1=B. Its structured repair covers both operands and parenthesizes
 the receiver before calling `pow`, like E0398's precedence-preserving repairs;
 it never replaces `**` with the retired arithmetic `^` spelling.
+The source-less parser keeps the same teaching and exact `**` location;
+spaced `a * *p` remains ordinary multiplication and raw-pointer-of syntax,
+with its unsafe obligation checked separately.
 
 ## Human rendering
 
