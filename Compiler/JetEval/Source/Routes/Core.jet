@@ -6,6 +6,7 @@ use jet_foundation.[
     CoreCallInterpreterRoute,
     CoreCallPureRoute,
     MIRCallFallibility,
+    Effect,
     MIRCoreCall,
     MIRCoreCallID,
     MIRPreludeABI,
@@ -16,6 +17,9 @@ use jet_foundation.[
     TComptimeEnumArg,
     TComptimeField,
     TComptimeValue,
+    diagnostic_from_registry,
+    diagnostic_registry_row,
+    diagnostic_with_rights,
     mir_symbol_name,
 ]
 
@@ -227,12 +231,34 @@ fn jet_eval_route_core_unary(symbol: String, number: Float) -> Float Never! {
     }
 }
 
+// MIREval `eval_core_call` (D-DET1 / D-CTEFFECT1): compile-time evaluation
+// runs only Core calls whose effect row is empty, memory and panics aside.
+// Ambient time or randomness is E3403; any other effect is observable outside
+// the program, so folding it would bake one build-time result into every run
+// (E3410). False after recording the refusal.
+fn jet_eval_route_core_comptime_effect_allowed(row: MIRCoreCall, machine: &JetEvalMachine, span: Span) -> Bool {
+    kind :: row.effect_kind ?? return true
+    if kind == Effect.Mem || kind == Effect.Panic -> return true
+    if machine.failure != None -> return false
+    if kind == Effect.Time || kind == Effect.Rand {
+        segments :: row.module_name.split(".").to_list()
+        api :: "{segments[segments.len() - 1]}.{row.member}"
+        entry :: diagnostic_registry_row("E3403") ?? panic("E3403 has no registry row")
+        refusal :: diagnostic_from_registry("E3403", Val(span), entry.what.replace("{{what}}", api), entry.why, entry.fix)
+        machine.failure = Val(JetEvalError{kind: JetEvalErrorKind.Effect, diagnostic: diagnostic_with_rights(refusal, "pure", [String]{api}, [String]{}, None)})
+        return false
+    }
+    machine.failure = Val(JetEvalError{kind: JetEvalErrorKind.Effect, diagnostic: diagnostic_from_registry("E3410", Val(span), "`{row.module_name}.{row.member}` is a Tier-2 comptime effect — it requires a `#Impure` gate", "effectful Core APIs are not allowed in pure comptime evaluation", "wrap the comptime binding in `#Impure(\"reason\") {{ … }}` and pass `--gate impure=allow` to the build, or keep the call at runtime")})
+    false
+}
+
 fn jet_eval_route_core(machine: &JetEvalMachine, call: MIRCoreCallID, route: MIRPreludeCallID, args: [JetEvalRuntimeValue], type_args: [MIRType], fallibility: MIRCallFallibility, result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
     row :: jet_eval_route_core_row(&machine, call, span) ?? return None
     route_row :: jet_eval_route_prelude_row(&machine, route, span) ?? return None
     symbol :: jet_eval_route_core_symbol(row, &machine, span) ?? return None
     if route_row.abi == MIRPreludeABI.Control || route_row.abi == MIRPreludeABI.Effect -> return jet_eval_route_not_supported(&machine, span, "Core route references a non-value Prelude route")
     if !jet_eval_route_signature_core(row, args.len(), &machine, span) -> return None
+    if !machine.config.runtime_execution && !jet_eval_route_core_comptime_effect_allowed(row, &machine, span) -> return None
     // MIREval `eval_core_call_binding`: runtime evaluation takes the ambient
     // adapter; comptime evaluation of a row that also carries a pure
     // descriptor takes the pure dispatcher, and only ambient-only rows are an
