@@ -252,7 +252,8 @@ fn lower_route_carrier_matches(p: MIRProgram, ty: MIRType, carrier: LowerRouteCa
     if carrier == .Word && lower_route_word_field(p, ty) != None -> return lower_route_word_record(p, ty) != None || lower_route_word_getter(p, ty) != None
     if carrier == .HandleMut(name) {
         expected :: LowerRouteCarrier.Handle{name: name}
-        return lower_route_carrier_of(p, ty) == Val(expected)
+        actual :: lower_route_carrier_of(p, ty) ?? return false
+        return actual == expected
     }
     // A Core record crosses as its runtime handle (Records.jet), a List of
     // them as a buffer of handles.
@@ -260,7 +261,8 @@ fn lower_route_carrier_matches(p: MIRProgram, ty: MIRType, carrier: LowerRouteCa
         if lower_record_handle(p, ty) == .Val(runtime) -> return runtime == name
     }
     if lower_record_list_element(p, ty, carrier) != None -> return lower_repr(p, ty) == .Inline(_)
-    lower_route_carrier_of(p, ty) == .Val(carrier)
+    actual :: lower_route_carrier_of(p, ty) ?? return false
+    actual == carrier
 }
 
 // The runtime type a value of `ty` crossing as `carrier` is converted to and

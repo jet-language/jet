@@ -168,13 +168,60 @@ fn fx_route_carrier_dyn_order(calls: [String]) -> Bool Never! {
     at == expected.len()
 }
 
-fn fx_route_carrier_checks() -> Bool {
+// Constructor-shaped RHS expressions can bind a fresh payload in ==.
+// Cover positive and negative scalar, List and composed Option identities,
+// plus mutable-handle and packed-byte record sequence constraints.
+fn fx_route_carrier_identity_checks() -> Bool {
+    p :: fx_route_carriers_program(fx_builder())
     clean := true
+    if !lower_route_carrier_matches(p, fx_bool(), LowerRouteCarrier.Flag)
+        || lower_route_carrier_matches(p, fx_bool(), LowerRouteCarrier.Word) {
+        print("route-carriers: Bool must cross Flag, not Word")
+        clean = false
+    }
+    if !lower_route_carrier_matches(p, fx_int(), LowerRouteCarrier.Word)
+        || lower_route_carrier_matches(p, fx_int(), LowerRouteCarrier.Flag) {
+        print("route-carriers: Int must cross Word, not Flag")
+        clean = false
+    }
+    if !lower_route_carrier_matches(p, fx_string(), LowerRouteCarrier.Text)
+        || lower_route_carrier_matches(p, fx_string(), LowerRouteCarrier.Word) {
+        print("route-carriers: String must cross Text, not Word")
+        clean = false
+    }
+    flags :: mir_type_from_kind(MIRTypeKind.List{inner: fx_bool()})
+    if !lower_route_carrier_matches(p, flags, LowerRouteCarrier.List{elem: LowerRouteCarrier.Flag})
+        || lower_route_carrier_matches(p, flags, LowerRouteCarrier.List{elem: LowerRouteCarrier.Word}) {
+        print("route-carriers: List<Bool> must retain its Flag element carrier")
+        clean = false
+    }
+    optional :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_bool()})
+    if !lower_route_carrier_matches(p, optional, LowerRouteCarrier.Option{some: LowerRouteCarrier.Flag})
+        || lower_route_carrier_matches(p, optional, LowerRouteCarrier.Option{some: LowerRouteCarrier.Word}) {
+        print("route-carriers: Option<Bool> must retain its Flag payload carrier")
+        clean = false
+    }
+    if lower_route_carrier_matches(p, fx_bool(), LowerRouteCarrier.HandleMut{name: "Dyn"})
+        || lower_route_carrier_matches(p, fx_int(), LowerRouteCarrier.HandleMut{name: "Dyn"}) {
+        print("route-carriers: a mutable Dyn handle must not accept Flag or Word")
+        clean = false
+    }
+    bytes :: mir_type_from_kind(MIRTypeKind.List{inner: mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8})})
+    if !lower_record_kind_matches(p, bytes, "List.Byte")
+        || lower_record_kind_matches(p, bytes, "List.Rec.FieldError") {
+        print("route-carriers: a packed-byte record sequence must retain its exact kind")
+        clean = false
+    }
+    clean
+}
+
+fn fx_route_carrier_checks() -> Bool {
+    clean := fx_route_carrier_identity_checks()
     admitted :: lir_lower_entry(fx_route_carriers_admitted(), mir_function_id("run"))
-    loop issue in admitted.issues -> print("route-carriers: {issue.message}")
+    loop issue in admitted.issues -> print("route-carriers: {issue.function}: {issue.message}")
     if admitted.issues.len() != 0 -> clean = false
     lint :: lir_lint_module(admitted.lir)
-    loop issue in lint -> print("route-carriers: {issue.message}")
+    loop issue in lint -> print("route-carriers: {issue.function} b{issue.block}: {issue.message}")
     if lint.len() != 0 -> clean = false
     calls :: fx_route_carrier_runtime_calls(admitted.lir)
     loop symbol in ([String]{"jet_string_slice_builtin", "jet_text_parse_find", "jet_rt_string_eq"}) {
@@ -226,6 +273,7 @@ fn fx_route_carrier_checks() -> Bool {
     }
     if !matched || refused.entry != None {
         print("route-carriers: an Int route checked as Bool was not refused")
+        loop issue in refused.issues -> print("route-carriers: refusal {issue.function}: {issue.message}")
         clean = false
     }
     print(if clean -> "route-carriers: exact Int and Dyn cross their route carriers" else -> "route-carriers: carrier witnesses failed")

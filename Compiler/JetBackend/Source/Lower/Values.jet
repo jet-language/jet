@@ -393,12 +393,14 @@ fn lower_close_receiver_value(c: LowerContext, f: LowerFunction, value: MIRValue
     root :: lower_move_root(c, value)
     if root == parameter -> return true
     slot :: lower_slot_of_value(c, parameter) ?? return false
-    lower_slot_of_value(c, root) == Val(slot)
+    actual :: lower_slot_of_value(c, root) ?? return false
+    actual == slot
 }
 
 fn lower_close_receiver_slot(c: LowerContext, f: LowerFunction, slot: Int) -> Bool Never! {
     parameter :: f.close_parameter ?? return false
-    lower_slot_of_value(c, parameter) == Val(slot)
+    actual :: lower_slot_of_value(c, parameter) ?? return false
+    actual == slot
 }
 
 fn lower_close_frame(p: MIRProgram, m: &LowerModule, f: &LowerFunction) Never! {

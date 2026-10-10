@@ -233,7 +233,10 @@ fn lower_record_kind_matches(p: MIRProgram, ty: MIRType, kind: String) -> Bool N
     if kind == "Int" -> return lower_is_exact_int(ty)
     if kind == "Flag" -> return ty.kind == .Bool
     if kind == "Float" -> return ty.kind == .Float
-    if kind.starts_with("List.") || kind.starts_with("Entries.") -> return lower_record_sequence_kind(p, ty) == Val(kind)
+    if kind.starts_with("List.") || kind.starts_with("Entries.") {
+        actual :: lower_record_sequence_kind(p, ty) ?? return false
+        return actual == kind
+    }
     if kind.starts_with("Opt") {
         if ty.kind == .Option(inner) -> return lower_record_kind_matches(p, inner, lower_record_tail(kind, 3))
         return false

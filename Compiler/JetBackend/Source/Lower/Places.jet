@@ -312,7 +312,10 @@ fn lower_handle_field_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, h
             "Text" -> field.ty.kind == .String
             "Float" -> field.ty.kind == .Float
             "Flag" -> field.ty.kind == .Bool
-            else -> lent.kind.starts_with("Handle.") && lower_route_carrier_of(p, field.ty) == Val(expected)
+            else -> {
+                actual :: lower_route_carrier_of(p, field.ty) ?? return None
+                lent.kind.starts_with("Handle.") && actual == expected
+            }
         }
         if !matches -> return None
         address :: lower_pointer(&f)

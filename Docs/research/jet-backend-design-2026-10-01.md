@@ -1035,6 +1035,17 @@ provider; it never wipes a temporary Rust Vec. `NativeValues.jet` lowers and
 lints all three callable witnesses in the route-carrier fixture harness and
 rejects cloning-bridge imports.
 
+Carrier admission unwraps `carrier_of(checked_type)` into a fresh `actual`
+and then compares `actual == requested_carrier`. A dotted `.Val(carrier)`
+or bare `Val(carrier)` on the right of `==` is a binding pattern in the
+host's pattern position, not a comparison with that existing carrier, and
+would admit every `Val` unchecked. The same explicit unwrap-and-compare
+rule protects mutable handle fields, record sequence kinds and consuming
+Close receiver slot identities. The route fixture covers distinct
+Bool/Flag, Int/Word and String/Text carriers, List element identities and
+composed Option payload identities, in addition to the deliberately
+wrong Bool-typed Int route whose callable entry must be refused.
+
 `IOError` is a C-carrier boundary, not a `Box` of the Rust enum. Its 56-byte,
 eight-aligned `JetCIOError` stores kind, operation, optional E4 resource text,
 OS-code presence and value, optional E4 cause text, and resource-limit tag.
