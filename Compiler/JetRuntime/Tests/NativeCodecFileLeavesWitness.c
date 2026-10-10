@@ -73,6 +73,12 @@ extern W jet_fs_directory_open(W, Text *, W *, void **);
 extern void jet_fs_directory_close(W);
 extern W jet_fs_directory_list(W, Bytes **, W *, void **);
 extern void jet_terminal8_read_all(Text **, W *, Text **);
+typedef struct { W stride, clone, drop, show, equal, compare, kind; const void *child0, *child1; } Meta;
+typedef struct { W len, cap; W *data; } Words;
+extern W jet_rt_codec_csv(Text *, uintptr_t, const Meta *, Words *, uintptr_t **, W *);
+extern W jet_rt_codec_decode_int(void *, W *, uintptr_t **, W *);
+extern W jet_dyn_field(void *, Text *, void **, uintptr_t **, W *);
+extern void *jet_rt_record_new_dyn_text(Text *);
 static char path[] = "/tmp/jet-native-codec-files-XXXXXX";
 static Text *text(const char *s) { return jet_rt_string_from_static(s, (W)strlen(s)); }
 static void text_is(Text *value, const char *expected) {
@@ -152,6 +158,49 @@ static void codecs(void) {
     jet_rt_string_drop(s);
     text_is(jet_rt_record_get_field_error_path((void *)errors[0]), "");
     text_is(jet_rt_record_get_field_error_reason((void *)errors[0]), "invalid JSON (line 2): expected a JSON value");
+    jet_rt_handle_drop_field_error((void *)errors[0]); jet_rt_free(errors, (W)sizeof(uintptr_t), 8);
+}
+// A checked Decode callback for `struct { n: Int }`: it borrows the row tree
+// and decodes its Text cell, which succeeds only inside the text-cell scope.
+static W csv_rows;
+static uint64_t csv_int_row(void *tree, W *value, W *tag, uintptr_t **errors, W *count) {
+    ++csv_rows;
+    Text *name = text("n"); void *cell = NULL;
+    assert(jet_dyn_field(tree, name, &cell, errors, count) == 1);
+    jet_rt_string_drop(name);
+    *tag = jet_rt_codec_decode_int(cell, value, errors, count);
+    jet_rt_handle_drop_dyn(cell);
+    return 0;
+}
+static void csv(void) {
+    const Meta integer = { .stride = 8, .kind = 1 };
+    Words rows = {0}; uintptr_t *errors = NULL; W count = 0;
+    Text *s = text("n,extra\n 7 \n\"4\"\"2\"\r\n-3,ignored,more\n");
+    csv_rows = 0;
+    assert(jet_rt_codec_csv(s, (uintptr_t)csv_int_row, &integer, &rows, &errors, &count) == 0);
+    jet_rt_string_drop(s);
+    assert(csv_rows == 3 && count == 1);
+    text_is(jet_rt_record_get_field_error_path((void *)errors[0]), "row 2");
+    text_is(jet_rt_record_get_field_error_reason((void *)errors[0]), "expected Int, found text \"4\\\"2\"");
+    jet_rt_handle_drop_field_error((void *)errors[0]); jet_rt_free(errors, (W)sizeof(uintptr_t), 8);
+    s = text("n\n 7 \n-3");
+    csv_rows = 0;
+    assert(jet_rt_codec_csv(s, (uintptr_t)csv_int_row, &integer, &rows, &errors, &count) == 1);
+    jet_rt_string_drop(s);
+    assert(csv_rows == 2 && rows.len == 2 && rows.cap == 2 && rows.data[0] == 7 && rows.data[1] == -3);
+    jet_rt_free(rows.data, 2 * (W)sizeof(W), 8);
+    // Outside the kernel the same Text cell is the plain "found text" failure.
+    s = text("7"); void *cell = jet_rt_record_new_dyn_text(s); W value = 0;
+    jet_rt_string_drop(s);
+    assert(jet_rt_codec_decode_int(cell, &value, &errors, &count) == 0 && count == 1);
+    text_is(jet_rt_record_get_field_error_reason((void *)errors[0]), "expected Int, found text \"7\"");
+    jet_rt_handle_drop_field_error((void *)errors[0]); jet_rt_free(errors, (W)sizeof(uintptr_t), 8);
+    jet_rt_handle_drop_dyn(cell);
+    s = text("n\na\"b\n");
+    assert(jet_rt_codec_csv(s, (uintptr_t)csv_int_row, &integer, &rows, &errors, &count) == 0 && count == 1);
+    jet_rt_string_drop(s);
+    text_is(jet_rt_record_get_field_error_path((void *)errors[0]), "");
+    text_is(jet_rt_record_get_field_error_reason((void *)errors[0]), "E2701: CSV row 2, line 2, column 2 \xe2\x80\x94 quote inside an unquoted field");
     jet_rt_handle_drop_field_error((void *)errors[0]); jet_rt_free(errors, (W)sizeof(uintptr_t), 8);
 }
 static void line(void *reader, const unsigned char *expected, W size) {
@@ -258,6 +307,7 @@ static void exercise(void) {
     directory_entries();
     terminal_read_all();
     codecs();
+    csv();
     Text *name = text(path); void *reader = NULL, *error = NULL;
     assert(jet_std_files_open_reader_nonblocking(name, &reader, &error) == 1 && error == NULL);
     jet_rt_string_drop(name);
@@ -281,6 +331,6 @@ int main(void) {
     assert(fwrite("\r\r\nb\ntail\r", 1, 10, file) == 10 && fclose(file) == 0);
     int32_t status = jet_rt_main(exercise);
     assert(unlink(path) == 0 && status == 0);
-    puts("CHECK OK — Jet-only Dyn encodes, FieldError frames, JSON codec and shared buffered lines");
+    puts("CHECK OK — Jet-only Dyn encodes, FieldError frames, JSON and CSV codecs and shared buffered lines");
     return 0;
 }

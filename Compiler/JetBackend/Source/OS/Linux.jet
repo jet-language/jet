@@ -743,6 +743,27 @@ fn os_call4_i64(address: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
     """
 }
 
+#[Unsafe("calls a checked native runtime callback with five machine-word arguments"), FFI(asm)]
+fn os_call5_i64(address: I64, a: I64, b: I64, c: I64, d: I64, e: I64) -> I64 {
+    """
+    push {address}
+    push {a}
+    push {b}
+    push {c}
+    push {d}
+    push {e}
+    pop r8
+    pop rcx
+    pop rdx
+    pop rsi
+    pop rdi
+    pop r11
+    call r11
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
+    """
+}
+
 
 // Linux AT_EMPTY_PATH refers to the held source inode (FileHandles.rs), never
 // reopens an old pathname. The borrowed empty path is one stack-local zero.
