@@ -329,7 +329,7 @@ fn jet_cli_fix_name(stem: String) -> String Never! {
     sanitized
 }
 
-fn jet_cli_commit_fix(file: String, before: [U8], staged: [U8], semantic_ops: [JetCLISemOp]?) -[FS, Env, Exec, Time]> String JetCLIReadError! {
+fn jet_cli_commit_fix(file: String, before: [U8], staged: [U8], semantic_ops: [JetCLISemOp]?) -[FS, Env, Exec, Time, IO, FFI.C, FFI.Asm, Net]> String JetCLIReadError! {
     path :: cli_files.realpath(file) ?? return Err(jet_cli_read_error("could not canonicalize fix target `{file}`: {jet_cli_io_error_text(err)}"))
     parent :: jet_cli_parent(path) ?? return Err(jet_cli_read_error("fix target has no parent directory"))
     cache := WorkspaceDeclarationCache.new()

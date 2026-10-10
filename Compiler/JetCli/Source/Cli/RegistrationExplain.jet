@@ -21,8 +21,7 @@ fn jet_cli_registration_fact_explanation(index: Int) -> DiagnosticExplanation Ne
 }
 
 fn jet_cli_registration_truth_explanation(index: Int) -> DiagnosticExplanation Never! {
-    // Prepared list lookup projects an Option, even for an in-range index.
-    row :: REGISTRATION_TRUTH_ROWS[index] ?? panic("registration truth index must name a canonical row")
+    row :: REGISTRATION_TRUTH_ROWS[index]
     DiagnosticExplanation{
         code: row.name,
         stage: "registration table",
@@ -41,7 +40,7 @@ fn jet_cli_explain_registration(query: String, color: Bool, json: Bool) -> JetCL
         if REGISTRATION_FACT_ROWS[index].name == name -> return Val(jet_cli_explanation_output(jet_cli_registration_fact_explanation(index), color, json))
     }
     loop index in 0..<REGISTRATION_TRUTH_ROWS.len() {
-        row :: REGISTRATION_TRUTH_ROWS[index] ?? panic("registration truth iteration stays within canonical rows")
+        row :: REGISTRATION_TRUTH_ROWS[index]
         if row.name == name -> return Val(jet_cli_explanation_output(jet_cli_registration_truth_explanation(index), color, json))
     }
     None

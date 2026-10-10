@@ -128,6 +128,10 @@ Checked-build DNS and pinned byte transport likewise use the existing
 `jet_http_build_resolve` and `jet_http_build_get` raw spellings. Driver retains
 address authorization, bounds, digest verification, and error classification;
 these leaves do not supply a second public HTTP or generic host policy.
+Compiler-backed inspection and fix planning declare the execution host's actual
+`Exec`, `IO`, `FFI.C`, and `FFI.Asm` ceilings. Fix semantic checks also declare
+`Net` for the checked build-input HTTP provider already admitted by the CLI
+package; these ceilings do not change the package's authority grants.
 The CLI maps a failed byte fetch into the driver's typed build-HTTP error before
 examining response bytes; it never lets the provider's failure carrier escape
 through that boundary.
@@ -232,6 +236,9 @@ jet shared-store <command>           Manage the optional shared package broker
 jet try <plan.json>                  Speculatively apply a plan and re-check its claims
 jet fold [args]                      Reverse a recorded Package source transition
 ```
+
+`jet try` reports compiler-query and checked-index failures through its existing
+typed output error boundary before publishing a speculative verdict.
 
 The `bind` shorthand accepts the explicit binding-plan form shown by help:
 `bind <name> --update --preview` or

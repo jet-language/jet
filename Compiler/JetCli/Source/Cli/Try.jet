@@ -243,12 +243,12 @@ fn jet_cli_try_check(queries: &JetDriverCompilerQueries, entry: String, disk: Bo
             if disk {
                 loop root in snapshot.roots { loop file in root.files -> sources[jet_cli_try_canonical(file.path)] = file.source }
             }
-            checked :: if disk -> jet_driver_compiler_queries_check_disk(&queries, parsed, ^request) else -> jet_driver_compiler_queries_check_text(&queries, parsed, ^request)
+            checked :: (if disk -> jet_driver_compiler_queries_check_disk(&queries, parsed, ^request) else -> jet_driver_compiler_queries_check_text(&queries, parsed, ^request)) ?? return Err(JetCLITryError.Output{output: jet_cli_try_fail("{err}")})
             if checked.internal_problem == .Val(problem) -> return Err(JetCLITryError.Output{output: jet_cli_ice(problem)})
             index := JetCLISemIndex?{None}
             if disk && checked.complete {
                 if checked.product == {
-                    .RetainedCheckedProjection(projection) -> { index = Val(jet_cli_checked_semindex(projection.compile)) }
+                    .RetainedCheckedProjection(projection) -> { index = Val(jet_cli_checked_semindex(projection.compile) ?? return Err(JetCLITryError.Output{output: jet_cli_try_fail("{err}")})) }
                     .CheckedCompilerValue(_) -> { return Err(JetCLITryError.Output{output: jet_cli_ice("the invocation query returned an unrequested compiler value")}) }
                     .Failed -> { return Err(JetCLITryError.Output{output: jet_cli_ice("the invocation query completed without its requested checked product")}) }
                 }
