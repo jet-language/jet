@@ -3130,8 +3130,13 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     range_head :: sema_stmt_range_conversion_head(binding.init, environment, program, &scopes)
     previous_binding_initializer :: context.binding_initializer
     context.binding_initializer = true
+    // D-DETACH1 (Rust `current_binding_name`): a task spawned by this
+    // initializer records its binding for the `.detach()` refusals.
+    previous_binding_name :: context.taskgroups.binding_name
+    context.taskgroups.binding_name = Val(binding.name)
     checked_init := if range_head == .Val(head) -> sema_stmt_check_range_conversion(binding.init, head, binding.ty, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression_with_lambda_escapes(binding_expr, binding.ty, environment, program, &scopes, &state, &tail_store, &context, lambda_escapes, &diagnostics)
     context.binding_initializer = previous_binding_initializer
+    context.taskgroups.binding_name = previous_binding_name
     init :: checked_init ?? {
         sema_stmt_declare_unchecked_binding(binding, environment, program, &scopes)
         return None

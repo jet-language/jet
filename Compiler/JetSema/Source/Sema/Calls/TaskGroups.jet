@@ -72,6 +72,16 @@ struct SemaTaskGroupState {
     scoped_loan_read_reported: Bool
     current_binding: String?
     time_effects: [TEffectSpan]
+    // D-DETACH1 (Rust `current_binding_name` / `task_spawn_binding_name`):
+    // the binding whose initializer is being checked, and the binding a task
+    // spawn initializes while its body is checked.
+    binding_name: String?{None}
+    spawn_binding: String?{None}
+    // D-DETACH1 (Rust `view_borrow_escape_tasks` / `view_capture_tasks`): the
+    // task bindings whose spawn captured a view borrow (E1106 at `.detach()`)
+    // or failed sendability another way (E1103 at `.detach()`).
+    detach_view_tasks: [String]{[String]{}}
+    detach_unsound_tasks: [String]{[String]{}}
 }
 
 fn sema_taskgroup_state_init() -> SemaTaskGroupState Never! {
@@ -116,6 +126,10 @@ fn sema_taskgroup_state_snapshot(source: SemaTaskGroupState) -> SemaTaskGroupSta
         scoped_loan_read_reported: source.scoped_loan_read_reported,
         current_binding: source.current_binding,
         time_effects: effects,
+        binding_name: source.binding_name,
+        spawn_binding: source.spawn_binding,
+        detach_view_tasks: source.detach_view_tasks.copy(),
+        detach_unsound_tasks: source.detach_unsound_tasks.copy(),
     }
 }
 
@@ -183,6 +197,20 @@ fn sema_taskgroup_set_current_binding(context: &SemaCheckContext, name: String?)
     previous := context.taskgroups.current_binding
     context.taskgroups.current_binding = name
     previous
+}
+
+// D-DETACH1 (Rust `report_unsendable` in a task spawn context): an E1102 at a
+// task capture or result records the task binding, so `.detach()` reports the
+// right refusal: a view borrow is E1106, any other sendability failure E1103.
+fn sema_taskgroup_note_detach_problem(context: &SemaCheckContext, view_borrow: Bool) Never! {
+    binding := context.taskgroups.binding_name
+    if binding == None -> binding = context.taskgroups.spawn_binding
+    name :: binding ?? return
+    if view_borrow {
+        if !context.taskgroups.detach_view_tasks.contains(name) -> &context.taskgroups.detach_view_tasks.push(name)
+    } else {
+        if !context.taskgroups.detach_unsound_tasks.contains(name) -> &context.taskgroups.detach_unsound_tasks.push(name)
+    }
 }
 
 fn sema_taskgroup_push_parameter(context: &SemaCheckContext, name: String) Never! {
@@ -493,9 +521,15 @@ fn sema_taskgroup_check_lambda_captures(lambda: TLambda, span: Span, environment
         if !taken && !frozen && !materialized {
             borrowed = sema_taskgroup_admit_capture_borrow(capture, lambda.capture_facts, span, scopes, &state, &context, &diagnostics)
         }
+        // A scoped `task.group` borrow is admitted, but a detached task could
+        // outlive it (Rust `view_borrow_escape_tasks`).
+        if borrowed == (Val(true)) -> sema_taskgroup_note_detach_problem(&context, true)
         if borrowed == (Val(true)) || borrowed == (Val(false)) -> next
         problem := sema_ownership_crossing_problem_for_name(capture.source, capture.ty, SemaSendCrossing.TaskCapture, taken, environment, program, scopes, state, context)
-        if problem == .Val(value) -> &diagnostics.push(sema_ownership_crossing_diagnostic(capture.source, capture.ty, value, SemaSendCrossing.TaskCapture, span))
+        if problem == .Val(value) {
+            sema_taskgroup_note_detach_problem(&context, value.kind == SemaSendProblemKind.ViewBorrow)
+            &diagnostics.push(sema_ownership_crossing_diagnostic(capture.source, capture.ty, value, SemaSendCrossing.TaskCapture, span))
+        }
     }
 }
 
@@ -676,13 +710,19 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
     saved_in_spawn := context.taskgroups.in_spawn
     saved_floor := context.taskgroups.spawn_group_floor
     saved_binding := context.taskgroups.current_binding
+    saved_binding_name := context.taskgroups.binding_name
+    saved_spawn_binding := context.taskgroups.spawn_binding
     context.taskgroups.in_spawn = true
     context.taskgroups.spawn_group_floor = context.taskgroups.stack.len()
     context.taskgroups.current_binding = None
+    context.taskgroups.spawn_binding = saved_binding_name
+    context.taskgroups.binding_name = None
     checked_body := sema_check_expression_with_lambda_escapes(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, Val(true), &diagnostics)
     context.taskgroups.in_spawn = saved_in_spawn
     context.taskgroups.spawn_group_floor = saved_floor
     context.taskgroups.current_binding = saved_binding
+    context.taskgroups.binding_name = saved_binding_name
+    context.taskgroups.spawn_binding = saved_spawn_binding
     body :: checked_body ?? return SemaMethodSpecialCheck{handled: true, value: None}
     body_ty :: sema_taskgroup_call_body_result(body.ty) ?? {
         &diagnostics.push(sema_error("E0112", args[0].span, "`task` needs a callable body, not `{type_name(body.ty)}`", "a spawned task executes one zero-parameter callable on a worker thread", "pass a zero-parameter lambda or function"))
@@ -702,7 +742,10 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
     sema_taskgroup_check_lambda_captures(lambda, args[0].span, environment, program, scopes, &state, &context, &diagnostics)
     task_result_ty := body_ty
     problem := sema_ownership_crossing_problem(task_result_ty, SemaSendCrossing.TaskResult, false, environment, program, scopes, context)
-    if problem == .Val(value) -> &diagnostics.push(sema_ownership_crossing_diagnostic("this task", task_result_ty, value, SemaSendCrossing.TaskResult, args[0].span))
+    if problem == .Val(value) {
+        sema_taskgroup_note_detach_problem(&context, value.kind == SemaSendProblemKind.ViewBorrow)
+        &diagnostics.push(sema_ownership_crossing_diagnostic("this task", task_result_ty, value, SemaSendCrossing.TaskResult, args[0].span))
+    }
     group := TExpr?{None}
     if sema_taskgroup_spawn_group_index(context) != None {
         group = sema_taskgroup_task_group_expr(context, environment, program, &scopes, &state, &tail_store, &diagnostics, span)
@@ -791,6 +834,16 @@ fn sema_taskgroup_check_task_method(receiver: Expr, receiver_value: TExpr, metho
     if (method != "join" && method != "detach") || args.len() != 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
     payload :: sema_taskgroup_task_payload(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_taskgroup_is_canonical_task(receiver_value.ty, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    // D-DETACH1 (Rust builtin `Task.detach`): a task whose spawn captured a
+    // view borrow may outlive it (E1106); one with any other sendability
+    // failure is unsound to run unsupervised (E1103).
+    if method == "detach" && receiver == .Ident(name, _) {
+        if context.taskgroups.detach_view_tasks.contains(name) {
+            &diagnostics.push(sema_error("E1106", span, "can't detach task `{name}` — it captured a `view` borrow that may not live long enough", "a detached task runs unsupervised and may outlive the caller; a captured `view` would dangle", "pass an owned `copy`, or a `Shared<T>` handle, to the task instead of a `view`"))
+        } else if context.taskgroups.detach_unsound_tasks.contains(name) {
+            &diagnostics.push(sema_error("E1103", span, "can't detach task `{name}` — it captured a value that can't cross a thread boundary", "a detached task runs unsupervised; it must only hold values it owns cleanly", "fix the E1102 error at the spawn site first, then `.detach()` is safe"))
+        }
+    }
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Move, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     join := method == "join"
     result_type := if join -> sema_taskgroup_failure_result(payload) else -> Type.Named{name: "Unit"}
