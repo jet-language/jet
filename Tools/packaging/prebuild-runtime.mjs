@@ -9,10 +9,19 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { nativePackRecipe, readNativeRuntimePack } from './runtime-pack-cache.mjs';
+import { invokeStageZeroFactory, readStageZeroFactory } from '../agent/stage1/native-factory.mjs';
 
-const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+let repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const [compiler, destination, ...extra] = process.argv.slice(2);
-if (!compiler || extra.length) throw Error('usage: prebuild-runtime.mjs <hosted-jet> [runtime-dir]');
+const usage = 'prebuild-runtime.mjs <compiler> [runtime-dir] [--factory-record <admitted-stage0-receipt>] [--repo <exact-source-export>]';
+if (!compiler) throw Error(usage);
+let factoryRecord = null;
+for (let i = 0; i < extra.length; i += 2) {
+  if (!extra[i + 1] || extra[i + 1].startsWith('--')) throw Error(usage);
+  if (extra[i] === '--factory-record') factoryRecord = resolve(extra[i + 1]);
+  else if (extra[i] === '--repo') repo = resolve(extra[i + 1]);
+  else throw Error(usage);
+}
 const jet = resolve(compiler);
 const out = resolve(destination ?? join(dirname(jet), 'jet-runtime'));
 const musl = process.env.JET_PACK_MUSL_LIB;
@@ -46,6 +55,7 @@ const backend = inventory(jetFiles('Compiler/JetBackend/Source'));
 const lifecycle = inventory(['Compiler/JetRuntime/lifecycle.list']);
 const platformInputs = platform.map(path => ({ path, sha256: sha256(readFileSync(path)), language: 'C', role: 'platform' }));
 const compilerSha256 = sha256(readFileSync(jet));
+if (factoryRecord && resolve(readStageZeroFactory(factoryRecord, repo).factory.path) !== jet) throw Error('runtime compiler does not match admitted factory');
 const recipeSha256 = nativePackRecipe(source.sha256, backend.sha256, lifecycle.sha256,
   platformInputs.map(row => row.sha256), compilerSha256);
 if (existsSync(join(out, 'native.key'))) {
@@ -73,17 +83,23 @@ try {
   execFileSync(process.execPath, [join(repo, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), library, '--assemble-only'], { stdio: 'inherit' });
   const prefix = join(work, 'jet_runtime_jet');
   const pack = join(work, 'jet_runtime.pack.o');
-  const run = spawnSync(jet, ['check', join(library, 'unit.jet')], {
-    cwd: library, stdio: 'inherit',
-    env: { ...process.env, JET_TOOLCHAIN_ROOT: repo,
-      JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix,
-      JET_FRONT_LIBRARY_LIFECYCLE: join(repo, 'Compiler/JetRuntime/lifecycle.list'),
-      JET_FRONT_RUNTIME_PACK_OUTPUT: pack,
-      JET_FRONT_RUNTIME_PLATFORM_INPUTS: platform.join('\n'),
-    },
-  });
-  if (run.error) throw run.error;
-  if (run.status !== 0) throw Error(`Jet runtime production failed (${run.status})`);
+  const policy = {
+    JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix,
+    JET_FRONT_LIBRARY_LIFECYCLE: join(repo, 'Compiler/JetRuntime/lifecycle.list'),
+    JET_FRONT_RUNTIME_PACK_OUTPUT: pack,
+    JET_FRONT_RUNTIME_PLATFORM_INPUTS: platform.join('\n'),
+  };
+  let factory = null;
+  if (factoryRecord) {
+    factory = invokeStageZeroFactory({ recordFile: factoryRecord, repo, sourceRoot: library, entry: 'unit.jet', work: join(out, 'factory'), policy });
+  } else {
+    const run = spawnSync(jet, ['check', join(library, 'unit.jet')], {
+      cwd: library, stdio: 'inherit',
+      env: { ...process.env, JET_TOOLCHAIN_ROOT: repo, ...policy },
+    });
+    if (run.error) throw run.error;
+    if (run.status !== 0) throw Error(`Jet runtime production failed (${run.status})`);
+  }
   for (const path of [prefix + '.o', pack]) noRust(path);
   const abiBytes = readFileSync(prefix + '.abi.json');
   const abi = JSON.parse(abiBytes);
@@ -100,6 +116,7 @@ try {
   copyFileSync(prefix + '.exports', join(directory, 'runtime.exports'));
   copyFileSync(pack, join(directory, 'jet_runtime.pack.o'));
   const provenance = { backend: 'jet-native', runtimeKey: key, objectSha256: sha256(readFileSync(prefix + '.o')), packSha256: sha256(readFileSync(pack)), rustObjects: 0, llvmObjects: 0, abiSha256, source, backendInputs: backend, lifecycle, cPlatformArchives: platformInputs, compilerSha256, recipeSha256 };
+  if (factory) provenance.bootstrapFactory = { sourceCommit: factory.sourceCommit, protocol: factory.compilerProtocol, receipt: factory.receipt, keepGoingReport: factory.census, producerSha256: sha256(readFileSync(fileURLToPath(import.meta.url))), harnessSha256: sha256(readFileSync(new URL('../agent/stage1/native-factory.mjs', import.meta.url))) };
   writeFileSync(join(directory, 'provenance.json'), JSON.stringify(provenance, null, 2) + '\n');
   writeFileSync(join(out, 'provenance.json'), JSON.stringify(provenance, null, 2) + '\n');
   writeFileSync(join(out, 'native.key.new'), key + '\n');

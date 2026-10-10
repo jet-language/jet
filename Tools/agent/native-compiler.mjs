@@ -12,6 +12,8 @@
 // node Tools/agent/native-compiler.mjs --jet /path/to/jetc0 \
 //   --runtime-dir /path/to/jet-runtime --out /disk/fresh-output [--repo DIR]
 // --dry-run assembles the real unit and records commands without executing jet.
+// --assemble-only writes the canonical CLI unit/map for the source-bound
+// factory/native-feed path, without inventing a hosted Rust build plan.
 // --stages 1 produces one successor; default 2 proves stage1 == stage2, for
 // both object and executable, using the same source path and runtime each time.
 // --seed-build is the explicit bootstrap exception: --jet names the Rust host
@@ -27,18 +29,20 @@ import { fileURLToPath } from 'node:url';
 import { readNativeRuntimePack } from '../packaging/runtime-pack-cache.mjs';
 import { hostedSeedCensus } from './hosted-seed-proof.mjs';
 
-const usage = 'native-compiler.mjs --jet CLI_SEED --runtime-dir DIR --out FRESH_DIR [--repo DIR] [--stages 1|2] [--dry-run]; bootstrap only: --seed-build --jet RUST_HOST --out FRESH_DIR [--repo DIR] [--dry-run]';
+const usage = 'native-compiler.mjs --jet CLI_SEED --runtime-dir DIR --out FRESH_DIR [--repo DIR] [--stages 1|2] [--dry-run]; assembly: --assemble-only --out FRESH_DIR [--repo DIR]; bootstrap only: --seed-build --jet RUST_HOST --out FRESH_DIR [--repo DIR] [--dry-run]';
 const options = { repo: resolve(dirname(fileURLToPath(import.meta.url)), '../..'), stages: 2, dryRun: false };
 for (let i = 2; i < process.argv.length; i++) {
     const flag = process.argv[i];
     if (flag === '--help') { console.log(usage); process.exit(0); }
     if (flag === '--dry-run') { options.dryRun = true; continue; }
     if (flag === '--seed-build') { options.seedBuild = true; continue; }
+    if (flag === '--assemble-only') { options.assembleOnly = true; continue; }
     const key = { '--jet': 'jet', '--runtime-dir': 'runtime', '--out': 'out', '--repo': 'repo', '--stages': 'stages' }[flag];
     if (!key || !process.argv[i + 1] || process.argv[i + 1].startsWith('--')) throw Error(usage);
     options[key] = key === 'stages' ? Number(process.argv[++i]) : resolve(process.argv[++i]);
 }
-if (!options.jet || (!options.seedBuild && !options.runtime) || !options.out || ![1, 2].includes(options.stages)) throw Error(usage);
+if (!options.out || ![1, 2].includes(options.stages) || (!options.assembleOnly && (!options.jet || (!options.seedBuild && !options.runtime)))) throw Error(usage);
+if (options.assembleOnly && (options.jet || options.runtime || options.seedBuild || options.dryRun)) throw Error('assembly-only does not execute or plan a compiler build');
 const { repo, out } = options;
 if (existsSync(out)) throw Error(`output already exists; use a fresh directory: ${out}`);
 mkdirSync(out, { recursive: true });
@@ -78,6 +82,12 @@ const map = JSON.parse(readFileSync(join(bootstrap, 'compiler.map.json'), 'utf8'
 map.source_segments.push({ generated: { start: Buffer.byteLength(aggregate + marker), end: Buffer.byteLength(source) }, source_file: entryPath,
     line_starts: [0, ...[...Buffer.from(entry).entries()].filter(([, byte]) => byte === 10).map(([index]) => index + 1)] });
 json(join(out, 'compiler.map.json'), map);
+if (options.assembleOnly) {
+    const assembly = { schema: 'jet-cli-assembly/v1', sourceRoot: repo, source: unit, sourceSha256: hash(Buffer.from(source)), project, entry: entryPath, map: join(out, 'compiler.map.json') };
+    json(join(out, 'plan.json'), assembly);
+    console.log(JSON.stringify(assembly, null, 2));
+    process.exit(0);
+}
 
 const environment = { ...process.env, JET_TOOLCHAIN_ROOT: repo, JET_KEEP_GOING: '1' };
 // Factory/library observation hooks are not compilation policy; they must not

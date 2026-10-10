@@ -80,6 +80,33 @@ files, their hashes, and the empty all-phases failure census before publishing
 the native CLI. The factory's own Rust sharded build remains the explicit
 bootstrap exception; subsequent native stages and their runtime are Rust-free.
 
+The sharded path is admitted by a `jet-sharded-stage-zero/v1` receipt containing
+the actual retained factory and generated-source hashes, source commit/tree,
+and successful canonical build/hello result. `native-factory.mjs` checks those
+identities before calling the environment protocol. Its native/library receipt
+may have zero Rust-source bytes, but must be complete, have zero reports, select
+the AOT factory, and produce an empty all-phases TSV. The library helper uses
+the real lifecycle and platform archive inputs to write ABI JSON and the
+Rust-free pack, not just an unlinked object.
+
+```sh
+Tools/agent/jet-env node Tools/packaging/prebuild-runtime.mjs \
+  /disk/retained/jetc0 /disk/native-runtime \
+  --factory-record /disk/stage-zero/receipt.json --repo /disk/pinned-source
+Tools/agent/jet-env node Tools/agent/stage1/native-feed.mjs \
+  --factory-record /disk/stage-zero/receipt.json \
+  --runtime-dir /disk/native-runtime --out /disk/native-fixedpoint \
+  --repo /disk/pinned-source
+```
+
+`native-feed.mjs --dry-run` performs only canonical CLI-unit assembly and records
+the future artifact dependencies; it does not admit missing upstream artifacts.
+The real run lowers that exact unit through `Entry.native` to stage 1, then
+uses stage 1's real `build` argv to compile the same unit into stage 2. Both
+all-phases censuses must exist and be empty; both objects and ELFs must compare
+byte-identically. No stage 3 is required. Producer/harness hashes are recorded
+separately from the single pinned compiler/runtime source identity.
+
 ## Compiler-owned registries
 
 `Tools/agent/compiler-registries.mjs` is the canonical census and runner for
