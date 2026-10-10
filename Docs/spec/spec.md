@@ -881,6 +881,12 @@ field of it directly is E0310 (D-OUTCOME-SHAPE1=A). The postfix form `?(text)`
 is not a second propagation operator; it adds one failure-context frame to the
 report. Use it when a boundary needs a local explanation. (S7, D-FAIL-CTX1)
 
+A `T Never!` call supplies `T` in an ordinary value position, including a
+source field default evaluated by a generated codec. The codec checks the
+default's payload type, not `Result<T, Never>`; an explicit result slot still
+retains the carrier. A value arm's expected return type does not apply to
+a loop source or an indexed assignment's owner and key.
+
 `??` is the fallback operator for an optional or fallible value. It yields the
 success payload or evaluates its right side. Its precedence is looser than
 `&&` and `||`, and the right side may be a value, `return`, `return expr`, or

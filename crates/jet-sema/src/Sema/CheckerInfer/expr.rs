@@ -2170,7 +2170,10 @@ impl<'a> Checker<'a> {
                 return result;
             }
         }
-        if inline_loop_call || self.compiler_generated
+        // Generated codecs retain their explicit fallible scaffolding, but
+        // a source total constructor used by a field default still supplies
+        // its payload in an ordinary value position.
+        if inline_loop_call || (self.compiler_generated && !never_carrier)
             || !matches!(
                 e.without_parens(),
                 Expr::Call(..) | Expr::MethodCall { .. } | Expr::CallValue { .. }

@@ -1793,8 +1793,13 @@ impl<'a> Checker<'a> {
                             None
                         };
                         self.borrow_ctx = true;
+                        // The target and its key have no value slot: the
+                        // enclosing arm's Dyn expectation must not convert
+                        // a typed map or a String loop key into Dyn here.
+                        let saved_expected = self.expected_type.take();
                         let base_ty = self.infer(base);
                         let idx_ty = self.infer(index);
+                        self.expected_type = saved_expected;
                         match &base_ty {
                             Some(Type::Map { .. }) => *kind = IndexKind::Map,
                             // S76/D-FIXARR1: `buf[i] = v` on a fixed-size `[T#N]` indexes

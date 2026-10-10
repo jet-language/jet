@@ -189,3 +189,70 @@ fn shared_accepts_a_parenthesized_generic_optional_payload() {
     );
     assert!(found.is_empty(), "unexpected errors: {found:?}");
 }
+
+#[test]
+fn field_defaults_unwrap_total_constructor_calls_before_serde() {
+    let src = r#"
+struct E {
+    n: Int
+    fn empty() -> E Never! { E{n: 0} }
+}
+struct P { e: E{E.empty()} }
+fn make() -> P Never! { P{} }
+fn run() {}
+"#;
+    let found = errors(src);
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn optional_value_equality_uses_lifting_not_a_duplicate_payload_binder() {
+    let src = r#"
+fn f(program: String) -> Bool Never! {
+    v :: String?{None}
+    answer :: v == program
+    program.len() > 0 && answer
+}
+fn in_loop(program: String, rows: [String?]) -> Bool Never! {
+    loop row in rows {
+        if row == program -> return true
+    }
+    false
+}
+fn run() {}
+"#;
+    let found = errors(src);
+    assert!(found.is_empty(), "{found:?}");
+    let rejected = errors(r#"
+fn f(program: String) -> Bool Never! {
+    v :: String?{None}
+    if v == Val(program) -> return true
+    false
+}
+fn run() {}
+"#);
+    assert!(rejected.iter().any(|diagnostic| diagnostic.code == "E0118"),
+        "a bare name in == Val(name) remains a no-shadowing binder: {rejected:?}");
+}
+
+#[test]
+fn loop_over_total_function_result_keeps_string_element_type() {
+    let src = r#"
+enum F {
+    Map([String:F])
+    fn tree(self) -> Dyn Never! {
+        if self == {
+            .Map(values) -> {
+                o := [String:Dyn]{}
+                loop key in keys(values.keys().to_list()) -> o[key] = Dyn.Null
+                Dyn.Object(o)
+            }
+        }
+    }
+}
+fn keys(v: ^[String]) -> [String] Never! { v }
+fn run() {}
+"#;
+    let found = errors(src);
+    assert!(found.is_empty(), "{found:?}");
+}
