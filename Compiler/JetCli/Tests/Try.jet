@@ -15,15 +15,15 @@ fn try_service_request(core_sources: [JetDriverCoreSource]) -> JetDriverCompileR
         entry_root_identity: "try-service-root",
         entry_path: "/try-service-fixture/main.jet",
     }
-    request := jet_cli_driver_request(snapshot, core_sources, Val(1), JetDriverCompileMode.Check)
+    request := jet_cli_driver_request(snapshot, core_sources, Val(1), JetDriverCompileMode.Doc)
     request.schema_snapshots = Val([String:SchemaSnapshot]{})
     request
 }
-fn try_service_ownership(request: JetDriverCompileRequest, expected_source_rows: Int) {
+fn try_service_ownership(request: ^JetDriverCompileRequest, expected_source_rows: Int) {
     session := jet_driver_compiler_queries_new()
     source :: request.authorized_sources.roots[0].files[0].source
     parsed :: jet_cli_try_parse(source) ?? panic("actual service input")
-    checked :: jet_driver_compiler_queries_check_disk(&session, parsed, request)
+    checked :: jet_driver_compiler_queries_check_disk(&session, parsed, ^request)
     assert(checked.complete && checked.internal_problem == None && jet_cli_errors(checked.diagnostics).len() == 0)
     if checked.product == {
         .CheckedCompilerValue(_) -> panic("retained mode must not construct the opaque compiler value")
@@ -34,7 +34,7 @@ fn try_service_ownership(request: JetDriverCompileRequest, expected_source_rows:
             assert(projection.schema_ingress != None && projection.entry_module != None)
             index :: jet_cli_checked_semindex(projection.compile)
             baseline := JetCLITryChecked{checked: checked, index: Val(index), sources: [String:String]{"/try-service-fixture/main.jet": source}, entry_source: source}
-            plan :: JetCLITryPlan{name: "Ownership", entry: "/try-service-fixture/main.jet", action: .Rename("serve", "renamed")}
+            plan :: JetCLITryPlan{name: "Ownership", entry: "/try-service-fixture/main.jet", action: JetCLITryAction.Rename.{from: "serve", to: "renamed"}}
             changes :: jet_cli_try_stage(plan, &baseline) ?? panic("actual catalog rename")
             operations :: jet_cli_try_semantic_ops(plan, &baseline) ?? panic("actual catalog semantic operation")
             assert(changes.len() == 1 && changes[0].before == source.bytes())
@@ -45,8 +45,8 @@ fn try_service_ownership(request: JetDriverCompileRequest, expected_source_rows:
     }
 }
 fn run() {
-    try_service_ownership(try_service_request([JetDriverCoreSource]{}), 1)
-    try_service_ownership(try_service_request([JetDriverCoreSource]{
+    try_service_ownership(^try_service_request([JetDriverCoreSource]{}), 1)
+    try_service_ownership(^try_service_request([JetDriverCoreSource]{
         JetDriverCoreSource{module_name: "core.devtools", alias: "core_devtools_fixture", path: "Core/devtools-fixture.jet", owner: "", owned_members: [String]{}, runtime: false, source: ""},
         JetDriverCoreSource{module_name: "core.devtools.fixture_private", alias: "core_devtools_fixture_private", path: "Core/devtools-fixture-private.jet", owner: "core.devtools", owned_members: [String]{}, runtime: false, source: ""},
     }), 3)
@@ -111,7 +111,7 @@ fn run() {
     assert(replacement == original.replace("{{ 1 }}", "{{ 2 }}"))
     // The original graph/index/source ownership remains authoritative even if
     // the disk is changed after the one baseline check. There is no reindex.
-    rename :: JetCLITryPlan{name: "Rename", entry: entry, action: .Rename("changed", "renamed")}
+    rename :: JetCLITryPlan{name: "Rename", entry: entry, action: JetCLITryAction.Rename.{from: "changed", to: "renamed"}}
     renamed :: jet_cli_try_stage(rename, &baseline) ?? panic("same-graph rename")
     rename_ops :: jet_cli_try_semantic_ops(rename, &baseline) ?? panic("same-graph rename operations")
     assert(renamed.len() == 1 && renamed[0].before == original.bytes())
