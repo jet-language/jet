@@ -95,6 +95,9 @@ Rust-oracle modes (owner #38(b)/#59), not native-suite failures. Report their
 individual rows as `UNCOVERED`, print them, and require a Tower card; never label
 them PASS. The native golden union and `run-crypto-fixtures` AGE decoder/sealer
 tests remain mandatory and their failures still block the final native gate.
+S5 native runners select the admitted `JET` from the same-source runtime-pack
+publication; its executable hash must match `candidate_jetc0`. Do not pass the
+retired `JET_FRONT_JETC0` factory override into native suite runners.
 Effect-budget witness origins borrow the checked graph until enforcement
 materializes denied-module diagnostics. Project effects after the compile
 transfers that graph, and retain fallback checked bundles through enforcement;

@@ -13,11 +13,10 @@ if (!P.ready) { P.finish(); process.exit(process.exitCode); }
 const {D, run, start, blocked} = P;
 const node = process.execPath;
 const jet = path.join(process.env.S5_BUILD, 'jet');
-const jetc0 = path.join(process.env.S5_BUILD, 'jetc0');
 const object = path.join(D, 'runtime', 'jet_runtime_jet.o');
 const pack = path.join(D, 'jet_runtime.pack.o');
 const packDir = path.join(process.env.S5_SHARED_PACK_DIRECTORY, 'jet-runtime');
-const env = {JET: jet, JET_FRONT_JETC0: jetc0, JET_RUNTIME_JET_OBJECT: object, JET_RUNTIME_PACK: pack};
+const env = {JET: jet, JET_RUNTIME_JET_OBJECT: object, JET_RUNTIME_PACK: pack};
 const haveJet = fs.existsSync(jet);
 const receiptPath = path.join(process.env.S5_SHARED_PACK_DIRECTORY, 'receipt.json');
 let produced = false;

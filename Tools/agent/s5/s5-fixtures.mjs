@@ -26,7 +26,7 @@ const inputs = process.env.S5_INPUTS;
 const baseline = '/mnt/jetscratch/candidates/NativeLead3/nat-n7full.results.tsv';
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const sys = ['-lpthread', '-ldl', '-lm'];
-const env = {JET: jet, JET_FRONT_JETC0: jetc0, JET_RUNTIME_JET_OBJECT: object, JET_RUNTIME_PACK: pack,
+const env = {JET: jet, JET_RUNTIME_JET_OBJECT: object, JET_RUNTIME_PACK: pack,
   JET_CHECKER: jet, CC: 'cc', NM: 'nm', LD: 'ld', COMPOSED_SHA: P.head};
 const out = name => path.join(D, name), r = (file, ...args) => [node, `${T}/${file}.mjs`, ...args];
 const registry = new Map(), executed = new Map();

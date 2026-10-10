@@ -20,7 +20,7 @@ try { pack = readSharedPack({directory: process.env.S5_SHARED_PACK_DIRECTORY, he
 catch (error) { blocked('shared-runtime-publication', error.message); P.finish(); process.exit(process.exitCode); }
 const baseline = '/mnt/jetscratch/candidates/NativeLead3/nat-n7full.results.tsv';
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-const env = {JET_RUNTIME_JET_OBJECT: object, JET_RUNTIME_PACK: pack, JET: jet, JET_FRONT_JETC0: jetc0, JET_MIR_EMIT: '0'};
+const env = {JET_RUNTIME_JET_OBJECT: object, JET_RUNTIME_PACK: pack, JET: jet, JET_MIR_EMIT: '0'};
 const plans = [
   ['int', 'run-int-goldens', ['--plan'], 'int.cases'],
   ['unicode', 'run-unicode-goldens', ['--plan'], 'unicode.cases'],
