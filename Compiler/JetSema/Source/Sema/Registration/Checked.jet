@@ -2339,6 +2339,131 @@ fn sema_checked_item_span(item: Item) -> Span Never! {
     }
 }
 
+// D-SHARED-CYCLE1=C. Resolve nominal identity through the registration graph,
+// not a leaf-name scan, and only traverse structs like Rust StrongSharedCycleGraph.
+fn sema_checked_shared_reaches(graph: SemaRegistrationGraph, owner: String, caller: String, ty: Type, memo: &[String:Bool], active: &[String:Bool]) -> (reaches: Bool, cut: Bool) Never! {
+    if ty == {
+        .Named(_) -> {
+            row :: sema_type_resolve_nominal_row(graph, ty, caller) ?? return (reaches: false, cut: false)
+            key :: graph.modules[row.module_index].nominals[row.row].symbol.id.key
+            if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(.Struct(definition)) {
+                if key == owner -> return (reaches: true, cut: false)
+                if memo.get(key) == .Val(known) -> return (reaches: known, cut: false)
+                if active.get(key) == (Val(true)) -> return (reaches: false, cut: true)
+                active[key] = true
+                reaches := false
+                cut := false
+                module_identity :: graph.modules[row.module_index].module_identity
+                loop field in definition.fields {
+                    if field.computed != None -> next
+                    result :: sema_checked_shared_reaches(graph, owner, module_identity, field.ty, &memo, &active)
+                    cut = cut || result.cut
+                    if result.reaches {
+                        reaches = true
+                        break
+                    }
+                }
+                active[key] = false
+                // A negative reached through an active cycle is provisional:
+                // a later sibling may reach the owner. Never memoize that cut.
+                if reaches || !cut -> memo[key] = reaches
+                return (reaches: reaches, cut: cut)
+            }
+            (reaches: false, cut: false)
+        }
+        .Shared(inner) | .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> sema_checked_shared_reaches(graph, owner, caller, inner, &memo, &active)
+        .Map(first, _, second) | .Result(first, second) -> {
+            left :: sema_checked_shared_reaches(graph, owner, caller, first, &memo, &active)
+            if left.reaches -> return left
+            right :: sema_checked_shared_reaches(graph, owner, caller, second, &memo, &active)
+            (reaches: right.reaches, cut: left.cut || right.cut)
+        }
+        .Tuple(fields) -> {
+            cut := false
+            loop field in fields {
+                result :: sema_checked_shared_reaches(graph, owner, caller, field.ty, &memo, &active)
+                cut = cut || result.cut
+                if result.reaches -> return (reaches: true, cut: cut)
+            }
+            (reaches: false, cut: cut)
+        }
+        .Union(members) | .Apply(_, members) -> {
+            if ty == .Apply(name, _) && name == "Shared.Weak" -> return (reaches: false, cut: false)
+            cut := false
+            loop member in members {
+                result :: sema_checked_shared_reaches(graph, owner, caller, member, &memo, &active)
+                cut = cut || result.cut
+                if result.reaches -> return (reaches: true, cut: cut)
+            }
+            (reaches: false, cut: cut)
+        }
+        else -> (reaches: false, cut: false)
+    }
+}
+
+// Returns the first strong payload that closes a cycle. By-value struct
+// paths can contain the Shared edge; weak handles never contribute one.
+fn sema_checked_shared_witness(graph: SemaRegistrationGraph, owner: String, caller: String, ty: Type, memo: &[String:Bool], stack: &[String]) -> String? Never! {
+    if ty == {
+        .Shared(inner) -> {
+            active := [String:Bool]{}
+            result :: sema_checked_shared_reaches(graph, owner, caller, inner, &memo, &active)
+            if result.reaches -> Val(type_name(inner)) else -> None
+        }
+        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> sema_checked_shared_witness(graph, owner, caller, inner, &memo, &stack)
+        .Map(first, _, second) | .Result(first, second) -> {
+            first_witness :: sema_checked_shared_witness(graph, owner, caller, first, &memo, &stack)
+            if first_witness != None -> first_witness else -> sema_checked_shared_witness(graph, owner, caller, second, &memo, &stack)
+        }
+        .Tuple(fields) -> {
+            loop field in fields {
+                witness :: sema_checked_shared_witness(graph, owner, caller, field.ty, &memo, &stack)
+                if witness != None -> return witness
+            }
+            None
+        }
+        .Union(members) | .Apply(_, members) -> {
+            if ty == .Apply(name, _) && name == "Shared.Weak" -> return None
+            loop member in members {
+                witness :: sema_checked_shared_witness(graph, owner, caller, member, &memo, &stack)
+                if witness != None -> return witness
+            }
+            None
+        }
+        .Named(_) -> {
+            row :: sema_type_resolve_nominal_row(graph, ty, caller) ?? return None
+            key :: graph.modules[row.module_index].nominals[row.row].symbol.id.key
+            if stack.contains(key) -> return None
+            if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(.Struct(definition)) {
+                &stack.push(key)
+                witness := String?{None}
+                module_identity :: graph.modules[row.module_index].module_identity
+                loop field in definition.fields {
+                    if field.computed != None -> next
+                    witness = sema_checked_shared_witness(graph, owner, module_identity, field.ty, &memo, &stack)
+                    if witness != None -> break
+                }
+                _ := &stack.pop()
+                return witness
+            }
+            None
+        }
+        else -> None
+    }
+}
+
+fn sema_checked_shared_cycles(graph: SemaRegistrationGraph, module_identity: String, nominal: SemaRegistrationNominal, definition: StructDef, diagnostics: &[Diagnostic]) Never! {
+    owner :: nominal.symbol.id.key
+    memo := [String:Bool]{}
+    stack := [String]{}
+    loop field in definition.fields {
+        if field.computed != None -> next
+        if sema_checked_shared_witness(graph, owner, module_identity, field.ty, &memo, &stack) == .Val(through) {
+            &diagnostics.push(sema_error("E0221", field.name_span, "field `{field.name}` on `{definition.name}` can form a strong `Shared` cycle", "a strong `Shared` edge through `{through}` can point back at `{definition.name}`, so reference counting alone cannot free the graph", "use `Shared.Weak<T>` for intentional back-edges, or store an id instead of a strong `Shared` handle"))
+        }
+    }
+}
+
 fn sema_checked_type_def(graph: SemaRegistrationGraph, boxed: [String:[String]], module_row: SemaRegistrationModule, layout_engine: TargetLayoutEngine?, nominal: SemaRegistrationNominal, diagnostics: &[Diagnostic]) -> TTypeDef? {
     definition :: sema_registration_nominal_source_item(nominal.source) ?? return None
     if nominal.kind == SemaRegistrationNominalKind.Trait -> return None
@@ -2380,6 +2505,7 @@ fn sema_checked_type_def(graph: SemaRegistrationGraph, boxed: [String:[String]],
             sema_checked_validate_field_default_marker(value, &diagnostics)
             sema_checked_validate_layout(value, &diagnostics)
             fields :: sema_checked_struct_fields(graph, module_row, value, generic_params, &diagnostics)
+            sema_checked_shared_cycles(graph, module_row.module_identity, nominal, value, &diagnostics)
             kind = Val(TTypeDefKind.Struct{fields: fields, methods: sema_checked_nominal_methods(definition, nominal.methods)})
         }
         .Enum(value) -> {

@@ -1,0 +1,31 @@
+// Production parser + checker coverage for D-SHARED-CYCLE1=C.
+fn shared_cycle_expect(source: String, fields: [String]) {
+    parsed :: parse_source(source.bytes())
+    if parsed.diagnostics.len() != 0 -> panic("shared cycle fixture must parse")
+    checked :: check_program(parsed.program, "shared_cycle_parity", "shared_cycle_parity.jet", [SemaSourceSegment]{})
+    found := [String]{}
+    loop diagnostic in checked.diagnostics {
+        if diagnostic.severity != DIAGNOSTIC_ERROR -> next
+        if diagnostic.code != "E0221" -> panic("unexpected shared-cycle checker diagnostic: {diagnostic.code}: {diagnostic.what}")
+        span :: diagnostic.span ?? panic("shared cycle diagnostic has no field span")
+        &found.push(source.slice(span.start, span.end))
+    }
+    &found.sort()
+    wanted := fields.copy()
+    &wanted.sort()
+    if found != wanted -> panic("shared cycle fields differ from the canonical graph")
+}
+
+fn run() {
+    shared_cycle_expect("struct Node {{\nnext: Shared<Node>?\n}}", [String]{"next"})
+    shared_cycle_expect("struct First {{\nsecond: Shared<Second>?\n}}\nstruct Second {{\nfirst: Shared<First>?\n}}", [String]{"first", "second"})
+    // By-value containers can carry the strong edge; tuples and results are
+    // traversed in field order. An acyclic Shared leaf is allowed.
+    shared_cycle_expect("struct Leaf {{\nvalue: Int\n}}\nstruct Holder {{\nleaf: Shared<Leaf>\n}}", [String]{})
+    shared_cycle_expect("struct Node {{\nnext: Shared.Weak<Node>?\n}}", [String]{})
+    shared_cycle_expect("struct Node {{\nchildren: [Shared<Node>]\n}}", [String]{"children"})
+    // This active-cycle cut must not be memoized as negative: the later
+    // branch from Branch reaches Owner, and both routes close a real cycle.
+    shared_cycle_expect("struct Owner {{\nbranch: Shared<Branch>?\n}}\nstruct Branch {{\nlooping: Shared<Looping>?\nowner: Shared<Owner>?\n}}\nstruct Looping {{\nbranch: Shared<Branch>?\n}}", [String]{"branch", "branch", "looping", "owner"})
+    print("shared cycle parity: passed")
+}

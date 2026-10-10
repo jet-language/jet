@@ -1306,6 +1306,9 @@ write lock; a read-modify-write such as `config.hits += 1` holds one lock across
 both halves. Each statement is one atomic step. Cloning a `Shared<T>` clones the
 cheap handle, not the payload, so it can cross a task boundary without `^`
 (D-SHARED-API1, D-CONC-SHARE1=A).
+Stored fields that can close a strong `Shared` cycle are rejected with E0221.
+Weak `Shared.Weak<T>` back-edges do not keep the cycle alive; computed fields
+are not stored edges (D-SHARED-CYCLE1=C).
 
 The complete assignment place stays under that lock: `store.items[key] = value`
 updates the stored map, and nested field or indexed-record writes update the
