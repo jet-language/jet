@@ -78,7 +78,7 @@ fn jet_cli_perf_read_private(path: String, limit: Int) -[FS.Read, Env, Time.Wait
     if before.owner != Val(perf_sys.getuid()) -> return Err(jet_cli_read_error("observation belongs to another user"))
     bytes := [U8]{}
     loop {
-        chunk :: reader.read(min(65536, limit + 1 - bytes.len())) ?? return Err(jet_cli_read_error("cannot read observation `{path}`"))
+        chunk :: reader.read(jet_cli_table_min(65536, limit + 1 - bytes.len())) ?? return Err(jet_cli_read_error("cannot read observation `{path}`"))
         if chunk.len() == 0 -> break
         loop byte in chunk -> &bytes.push(byte)
         if bytes.len() > limit -> return Err(jet_cli_read_error("observation exceeds {limit} bytes"))
@@ -113,9 +113,15 @@ fn jet_cli_perf_live_decode(text: String) -> JetCLIPerfLive JetCLIReadError! {
         loop key in ([String]{"value_id", "type_identity", "reason"}) { _ :: jet_cli_perf_text(jet_cli_perf_field(value, key)) }
         disposition :: jet_cli_perf_text(jet_cli_perf_field(value, "disposition"))
         if !([String]{"kept", "migrated", "reset", "rejected"}).contains(disposition) -> return Err(jet_cli_read_error("unsupported live value disposition"))
-        if jet_cli_perf_optional(value, "rendered_value") == .Val(rendered) && rendered != .Null {
-            shown :: jet_cli_perf_text(rendered)
-            if shown.bytes().len() > 16384 -> return Err(jet_cli_read_error("live value exceeds its bound"))
+        if jet_cli_perf_optional(value, "rendered_value") == .Val(rendered) {
+            if rendered == {
+                .Null -> {}
+                .Text(shown) -> {
+                    _ :: jet_cli_perf_text(rendered)
+                    if shown.bytes().len() > 16384 -> return Err(jet_cli_read_error("live value exceeds its bound"))
+                }
+                else -> { return Err(jet_cli_read_error("observation field must be text")) }
+            }
         }
     }
     tasks := [JetCLIPerfTask]{}

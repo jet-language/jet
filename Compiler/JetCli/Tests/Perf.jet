@@ -43,9 +43,15 @@ fn jet_cli_perf_test_snapshot() -> String Never! {
     assert_eq(profile.rows[0].execution_count, None)
     assert_eq(profile.rows[0].sample_count, U64{2})
     assert_eq(profile.overhead_ns, None)
+    bounded :: jet_cli_perf_source_profile(source, U64{5000}, U64{4500}, false) ?? panic(err.message)
+    assert_eq(bounded.status, "truncated")
+    assert_eq(bounded.rows[0].sample_count, U64{4096})
+    assert_eq(bounded.rows[0].sample_weight, U64{4096})
+    assert_eq(bounded.rows[1].sample_count, U64{4096})
+    assert_eq(bounded.rows[1].sample_weight, U64{4096})
 }
 #Test("perf capture keeps observed IO, locks and allocations causal") {
-    live :: jet_cli_perf_live_decode(jet_cli_perf_test_snapshot()) ?? panic(err.message)
+    live :: jet_cli_perf_live_decode(jet_cli_perf_test_snapshot().replace("\"id\":1,\"parent\":0", "\"id\":17,\"parent\":0")) ?? panic(err.message)
     observations :: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: live}, JetCLIPerfObservation{at_ns: U64{20}, live: live}}
     capture :: jet_cli_perf_capture_source("app.jet", "fn run() -> Int { 1 }", observations, "x86_64-unknown-linux-gnu") ?? panic(err.message)
     assert_eq(capture.io.len(), 1)
@@ -53,6 +59,7 @@ fn jet_cli_perf_test_snapshot() -> String Never! {
     assert_eq(capture.io[0].end_ns, U64{20})
     assert_eq(capture.locks.len(), 1)
     assert_eq(capture.allocations[0].bytes, U64{64})
+    assert_eq(capture.tasks[0].id, U64{1})
     assert_eq(capture.spans[0].start_ns, Val(U64{10}))
     assert_eq(capture.spans[0].end_ns, Val(U64{20}))
     toolchain :: TraceToolchain{jet_version: "test", compiler_build_id: "test", stdlib_id: "test", runner_id: "test"}

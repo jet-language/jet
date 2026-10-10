@@ -42,8 +42,10 @@ fn jet_cli_perf_source_profile(source: JetCLIPerfSource, wall_samples: U64, cpu_
     location :: TraceProfileSource{path: source.identity.path, sha256: source.identity.sha256, start_line: start.line, start_column: start.column, end_line: end.line, end_column: end.column}
     symbol :: JetSymbolRef{path: source.identity.path, name: "run"}
     rows := [TraceProfileRow]{}
-    if wall_samples > (U64{0}) -> &rows.push(TraceProfileRow{clock: "wall", execution_count: None, sample_count: min(wall_samples, U64{4096}), sample_weight: min(wall_samples, U64{4096}), source: location, symbol: symbol})
-    if cpu_samples > (U64{0}) -> &rows.push(TraceProfileRow{clock: "cpu", execution_count: None, sample_count: min(cpu_samples, U64{4096}), sample_weight: min(cpu_samples, U64{4096}), source: location, symbol: symbol})
+    wall_count :: if wall_samples < (U64{4096}) -> wall_samples else -> U64{4096}
+    cpu_count :: if cpu_samples < (U64{4096}) -> cpu_samples else -> U64{4096}
+    if wall_samples > (U64{0}) -> &rows.push(TraceProfileRow{clock: "wall", execution_count: None, sample_count: wall_count, sample_weight: wall_count, source: location, symbol: symbol})
+    if cpu_samples > (U64{0}) -> &rows.push(TraceProfileRow{clock: "cpu", execution_count: None, sample_count: cpu_count, sample_weight: cpu_count, source: location, symbol: symbol})
     limited :: truncated || wall_samples > U64{4096} || cpu_samples > U64{4096}
     status :: if limited -> "truncated" else if rows.len() == 0 -> "no_samples" else -> "captured"
     coverage :: if rows.len() == 0 && !limited -> "none" else -> "partial"

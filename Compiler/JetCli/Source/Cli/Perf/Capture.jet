@@ -45,13 +45,15 @@ fn jet_cli_perf_capture_observations(capture: &JetCLIPerfCapture, observations: 
         }
     }
     loop index in 0..<capture.tasks.len() {
-        observed_task :: capture.tasks[index]
-        if observed_task.parent != (U64{0}) && !task_indexes.has_key(observed_task.parent) -> return Err(jet_cli_read_error("observed task has an unobserved parent"))
+        // Retain only scalar identities before mutating the task owner.
+        observed_id :: capture.tasks[index].id
+        observed_parent :: capture.tasks[index].parent
+        if observed_parent != (U64{0}) && !task_indexes.has_key(observed_parent) -> return Err(jet_cli_read_error("observed task has an unobserved parent"))
         stable_id :: U64{index + 1}
-        stable_parent :: if observed_task.parent == (U64{0}) -> U64{0} else -> U64{task_indexes[observed_task.parent] + 1}
+        stable_parent :: if observed_parent == (U64{0}) -> U64{0} else -> U64{task_indexes[observed_parent] + 1}
         capture.tasks[index].id = stable_id
         capture.tasks[index].parent = stable_parent
-        if observations.len() > 1 -> &capture.spans.push(TraceSpan{clock: "monotonic", start_ns: Val(first_seen[observed_task.id]), end_ns: Val(last_seen[observed_task.id]), kind: "task_observed", parent_task_id: if stable_parent == (U64{0}) -> None else -> Val(stable_parent), reason: "", status: "captured", symbol: symbol, task_id: Val(stable_id)})
+        if observations.len() > 1 -> &capture.spans.push(TraceSpan{clock: "monotonic", start_ns: Val(first_seen[observed_id]), end_ns: Val(last_seen[observed_id]), kind: "task_observed", parent_task_id: if stable_parent == (U64{0}) -> None else -> Val(stable_parent), reason: "", status: "captured", symbol: symbol, task_id: Val(stable_id)})
     }
     if capture.spans.len() == 0 -> &capture.spans.push(TraceSpan{clock: "monotonic", start_ns: None, end_ns: None, kind: "task_observed", parent_task_id: None, reason: "task span requires multiple live observations", status: "unavailable", symbol: symbol, task_id: None})
     // Instantaneous blocked facts, not invented syscall duration intervals.
