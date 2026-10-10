@@ -18,7 +18,7 @@ fn run() {
     if global.program.items[0] != .Const(_) -> panic("Known global was not recovered as a declaration")
     local :: known_retirement_expect("fn run() {{\n#Known HTTPValue :: 1\n}}", [String]{"write `http_value :: prep {{ … }}`"})
     if local.program.items[0] == .Func(function) {
-        if function.body[0] == .Bind(binding) {
+        if function.body[0] == .Val(binding) {
             if !binding.is_comptime || binding.name != "HTTPValue" -> panic("Known local lost its authored name or staging")
         } else { panic("Known local was not recovered as a binding") }
     } else { panic("Known local lost its enclosing function") }
