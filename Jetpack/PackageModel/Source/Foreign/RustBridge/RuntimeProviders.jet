@@ -431,23 +431,211 @@ fn main() {{
 """
 }
 
-// The repository-relative inputs that fingerprint the jet-foundation path
-// dependency of parquet and plugin bridges.
-FFI_JET_FOUNDATION_SOURCE_SCHEMA :: prep { "jet-ffi-foundation-source-v3" }
-FFI_JET_FOUNDATION_CODEGEN_INPUTS :: prep { [String]{"Effects.jet", "Core.jet", "core/prelude.jet", "Facts.jet", "Diagnostics.jet", "Core/InlineRange.rs", "Core/TimeMonotonic.rs", "Core/MapKey.rs", "Markers.jet", "CoreLib/Top/UnicodeTables.rs"} }
-FFI_JET_FOUNDATION_ARCHIVE_INPUTS :: prep { [String]{"archive.jet", "gzip.jet", "zstd.jet"} }
-FFI_JET_FOUNDATION_TEXT_INPUTS :: prep { [String]{"string.jet"} }
-FFI_JET_FOUNDATION_TEST_INPUTS :: prep { [String]{"diagnostics_coverage_baseline.txt"} }
+// Fingerprint and project the transitive Rust include closure, not a second
+// manually maintained list of Prelude inputs.
+FFI_JET_FOUNDATION_SOURCE_SCHEMA :: prep { "jet-ffi-foundation-source-v4" }
 
-// The verified jet-foundation source directories and their input digest.
 struct JetFoundationSources {
+    root: String
     foundation: String
     unicode: String
-    codegen_prelude: String
-    archive_source: String
-    text_source: String
-    tests: String
+    inputs: [String]
     digest: String
+}
+
+// Literal tokens carry a quote prefix, so text inside comments and strings
+// cannot manufacture an include. Rust lifetimes are not character literals.
+fn pkg_ffi_include_tokens(source: String) -> [String] Never! {
+    raw :: source.bytes()
+    tokens := [String]{}
+    i := 0
+    loop i < raw.len() {
+        byte :: Int.from_u8(raw[i])
+        if byte <= 32 {
+            i += 1
+            next
+        }
+        if i + 1 < raw.len() && Int.from_u8(raw[i]) == 47 && Int.from_u8(raw[i + 1]) == 47 {
+            loop i < raw.len() && Int.from_u8(raw[i]) != 10 -> i += 1
+            next
+        }
+        if i + 1 < raw.len() && Int.from_u8(raw[i]) == 47 && Int.from_u8(raw[i + 1]) == 42 {
+            i += 2
+            depth := 1
+            loop i < raw.len() && depth > 0 {
+                if {
+                    i + 1 < raw.len() && Int.from_u8(raw[i]) == 47 && Int.from_u8(raw[i + 1]) == 42 -> {
+                        depth += 1
+                        i += 2
+                    }
+                    i + 1 < raw.len() && Int.from_u8(raw[i]) == 42 && Int.from_u8(raw[i + 1]) == 47 -> {
+                        depth -= 1
+                        i += 2
+                    }
+                    else -> i += 1
+                }
+            }
+            next
+        }
+        // Raw strings can have any number of delimiter hashes.
+        quote := i
+        hashes := 0
+        if byte == 114 {
+            quote += 1
+            loop quote < raw.len() && Int.from_u8(raw[quote]) == 35 {
+                hashes += 1
+                quote += 1
+            }
+        }
+        if quote < raw.len() && Int.from_u8(raw[quote]) == 34 && (quote == i || byte == 114) {
+            value := [U8]{}
+            i = quote + 1
+            loop i < raw.len() {
+                if Int.from_u8(raw[i]) == 34 {
+                    end := i + 1
+                    loop end < raw.len() && end < i + 1 + hashes && Int.from_u8(raw[end]) == 35 -> end += 1
+                    if end == i + 1 + hashes {
+                        i = end
+                        break
+                    }
+                }
+                if {
+                    byte == 34 && Int.from_u8(raw[i]) == 92 && i + 1 < raw.len() -> {
+                        i += 1
+                        escaped :: raw[i]
+                        &value.push(if {
+                            Int.from_u8(escaped) == 110 -> U8{10}
+                            Int.from_u8(escaped) == 114 -> U8{13}
+                            Int.from_u8(escaped) == 116 -> U8{9}
+                            else -> escaped
+                        })
+                    }
+                    else -> &value.push(raw[i])
+                }
+                i += 1
+            }
+            &tokens.push("\"{String.from_bytes(value) ?? ""}")
+            next
+        }
+        if byte == 39 {
+            end := i + 1
+            if {
+                end < raw.len() && Int.from_u8(raw[end]) == 92 -> end += 2
+                else -> end += 1
+            }
+            if end < raw.len() && Int.from_u8(raw[end]) == 39 {
+                i = end + 1
+                next
+            }
+        }
+        if {
+            (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95 -> {
+                word := [U8]{}
+                loop i < raw.len() {
+                    code :: Int.from_u8(raw[i])
+                    if !((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 95) -> break
+                    &word.push(raw[i])
+                    i += 1
+                }
+                &tokens.push(String.from_bytes(word) ?? "")
+            }
+            else -> {
+                &tokens.push(String.from_bytes([U8]{raw[i]}) ?? "")
+                i += 1
+            }
+        }
+    }
+    tokens
+}
+
+fn pkg_ffi_rust_include_paths(source: String, manifest: String) -> [String] ForeignBridgeError! {
+    tokens :: pkg_ffi_include_tokens(source)
+    paths := [String]{}
+    i := 0
+    loop i + 2 < tokens.len() {
+        name :: tokens[i]
+        if (name != "include" && name != "include_str" && name != "include_bytes") || tokens[i + 1] != "!" || tokens[i + 2] != "(" {
+            i += 1
+            next
+        }
+        i += 3
+        path := ""
+        generated := false
+        depth := 1
+        loop i < tokens.len() && depth > 0 {
+            token :: tokens[i]
+            if token == "env" && i + 4 < tokens.len() && tokens[i + 1] == "!" && tokens[i + 2] == "(" && tokens[i + 4] == ")" {
+                variable :: tokens[i + 3].removeprefix("\"")
+                if {
+                    variable == "CARGO_MANIFEST_DIR" -> path = "{path}{manifest}"
+                    variable == "OUT_DIR" -> generated = true
+                    else -> return Err(pkg_bridge_error("unsupported Rust include environment `{variable}`"))
+                }
+                i += 5
+                next
+            }
+            if {
+                token.starts_with("\"") -> path = "{path}{token.removeprefix("\"")}"
+                token == "(" -> depth += 1
+                token == ")" -> depth -= 1
+                token != "concat" && token != "!" && token != "," -> return Err(pkg_bridge_error("unsupported Rust include expression `{token}`"))
+                else -> {}
+            }
+            i += 1
+        }
+        if depth != 0 || path == "" -> return Err(pkg_bridge_error("incomplete Rust include expression"))
+        // Build-script output is generated inside Cargo's writable target.
+        if !generated -> &paths.push(path)
+    }
+    paths
+}
+
+fn pkg_ffi_foundation_rust_sources(directory: String) -[FS]> [String] ForeignBridgeError! {
+    paths := [String]{}
+    entries :: files.list_dir(directory) ?? return Err(pkg_bridge_error("read foundation sources `{directory}`: {err}"))
+    loop entry in entries {
+        if entry.name.starts_with(".") || entry.name == "target" -> next
+        if {
+            entry.is_dir -> {
+                loop path in pkg_ffi_foundation_rust_sources(entry.path) -> &paths.push(path)
+            }
+            entry.name.ends_with(".rs") -> &paths.push(entry.path)
+            else -> {}
+        }
+    }
+    &paths.sort()
+    paths
+}
+
+fn pkg_ffi_foundation_include_closure(root: String, foundation: String, unicode: String) -[FS]> [String] ForeignBridgeError! {
+    pending := [(source: String, manifest: String)]{}
+    loop path in pkg_ffi_foundation_rust_sources(foundation) -> &pending.push((source: path, manifest: foundation))
+    loop path in pkg_ffi_foundation_rust_sources(unicode) -> &pending.push((source: path, manifest: unicode))
+    seen := [(source: String, manifest: String)]{}
+    external := [String]{}
+    index := 0
+    loop index < pending.len() {
+        item :: pending[index]
+        index += 1
+        if seen.contains(item) -> next
+        &seen.push(item)
+        source :: item.source
+        manifest :: item.manifest
+        if !source.ends_with(".rs") -> next
+        text :: files.read(source) ?? return Err(pkg_bridge_error("read Rust include source `{source}`: {err}"))
+        loop include in pkg_ffi_rust_include_paths(text, manifest) {
+            candidate :: if include.starts_with("/") -> include else -> files.join(files.dirname(source), include)
+            stat :: files.stat(candidate) ?? return Err(pkg_bridge_error("Rust include `{candidate}` is unavailable: {err}"))
+            if stat.is_symlink || !stat.is_file -> return Err(pkg_bridge_error("Rust include `{candidate}` is not a regular file"))
+            path :: files.canonicalize(candidate) ?? return Err(pkg_bridge_error("canonicalize Rust include `{candidate}`: {err}"))
+            if !path.starts_with("{root}/") -> return Err(pkg_bridge_error("Rust include `{path}` escapes the source root"))
+            if !path.starts_with("{foundation}/") && !path.starts_with("{unicode}/") && !external.contains(path) -> &external.push(path)
+            next_item :: (source: path, manifest: manifest)
+            if !seen.contains(next_item) -> &pending.push(next_item)
+        }
+    }
+    &external.sort()
+    external
 }
 
 // The absolute path of the bridge's jet-foundation path dependency.
@@ -479,31 +667,23 @@ fn pkg_ffi_nul_joined(relative: String, digest: String) -> [U8] Never! {
     bytes
 }
 
-fn pkg_ffi_add_foundation_inputs(identity: &ForeignIdentityBuilder, field: String, root: String, inputs: [String], label: String) ForeignBridgeError! -[FS]> {
-    loop relative in inputs {
-        digest :: pkg_ffi_foundation_input_digest(root, relative, label)
-        &identity.field(field, pkg_ffi_nul_joined(relative, digest))
-    }
-}
-
 fn pkg_ffi_jet_foundation_sources() -[FS, Env]> JetFoundationSources ForeignBridgeError! {
     root :: foundation_jet_source_root() ?? return Err(pkg_bridge_error("{err}"))
     foundation :: pkg_ffi_verified_source_directory(files.join(root, FFI_JET_FOUNDATION_CRATE_PATH), "crate")
     unicode :: pkg_ffi_verified_source_directory(files.join(root, FFI_JET_UNICODE_CRATE_PATH), "unicode crate")
-    codegen_prelude :: pkg_ffi_verified_source_directory(files.join(root, FFI_JET_FOUNDATION_CODEGEN_PRELUDE_PATH), "codegen")
-    archive_source :: pkg_ffi_verified_source_directory(files.join(root, FFI_JET_FOUNDATION_ARCHIVE_SOURCE_PATH), "archive")
-    text_source :: pkg_ffi_verified_source_directory(files.join(root, FFI_JET_FOUNDATION_TEXT_SOURCE_PATH), "text")
-    tests :: pkg_ffi_verified_source_directory(files.join(root, FFI_JET_FOUNDATION_TESTS_PATH), "tests")
+    canonical_root :: files.canonicalize(root) ?? return Err(pkg_bridge_error("canonicalize foundation root: {err}"))
+    inputs :: pkg_ffi_foundation_include_closure(canonical_root, foundation, unicode)
     foundation_tree :: foundation_try_tree_hash(foundation) ?? return Err(pkg_bridge_error("could not fingerprint jet-foundation source: {err.message()}"))
+    unicode_tree :: foundation_try_tree_hash(unicode) ?? return Err(pkg_bridge_error("could not fingerprint jet-unicode source: {err.message()}"))
     identity := ForeignIdentityBuilder.new(FFI_JET_FOUNDATION_SOURCE_SCHEMA)
     &identity.field("foundation-tree", foundation_tree.bytes())
-    unicode_tree :: foundation_try_tree_hash(unicode) ?? return Err(pkg_bridge_error("could not fingerprint jet-unicode source: {err.message()}"))
     &identity.field("unicode-tree", unicode_tree.bytes())
-    pkg_ffi_add_foundation_inputs(&identity, "codegen-input", codegen_prelude, FFI_JET_FOUNDATION_CODEGEN_INPUTS, "codegen")
-    pkg_ffi_add_foundation_inputs(&identity, "archive-input", archive_source, FFI_JET_FOUNDATION_ARCHIVE_INPUTS, "archive")
-    pkg_ffi_add_foundation_inputs(&identity, "text-input", text_source, FFI_JET_FOUNDATION_TEXT_INPUTS, "text")
-    pkg_ffi_add_foundation_inputs(&identity, "tests-input", tests, FFI_JET_FOUNDATION_TEST_INPUTS, "tests")
-    Ok(JetFoundationSources{foundation: foundation, unicode: unicode, codegen_prelude: codegen_prelude, archive_source: archive_source, text_source: text_source, tests: tests, digest: identity.finish()})
+    loop path in inputs {
+        relative :: path.removeprefix("{canonical_root}/")
+        digest :: pkg_ffi_foundation_input_digest(canonical_root, relative, "include")
+        &identity.field("include-input", pkg_ffi_nul_joined(relative, digest))
+    }
+    Ok(JetFoundationSources{root: canonical_root, foundation: foundation, unicode: unicode, inputs: inputs, digest: identity.finish()})
 }
 
 // Copy one included foundation input into the Linux source-closure stage.
@@ -516,38 +696,34 @@ fn pkg_ffi_stage_foundation_input(source_root: String, relative: String, destina
     files.copy(source, destination) ?? return Err(pkg_bridge_error("could not stage jet-foundation {label} input `{source}`: {err}"))
 }
 
-fn pkg_ffi_stage_foundation_inputs(source_root: String, inputs: [String], destination_root: String, label: String) ForeignBridgeError! -[FS]> {
-    loop relative in inputs -> pkg_ffi_stage_foundation_input(source_root, relative, destination_root, label)
-}
-
-// The generated manifest keeps Cargo's host path dependency, so the sandboxed
-// Cargo must see that canonical path. Linux stages only the external files
-// Foundation includes into a private closure; other backends expose the
-// source directories directly because they do not remap mount destinations.
+// Linux projects only discovered external inputs at their original root,
+// followed by the two complete path crates. Other adapters cannot remap paths.
 fn pkg_ffi_jet_foundation_mounts(cache_root: String, sources: JetFoundationSources) -[FS, Env]> [NativeSandboxMount] ForeignBridgeError! {
-    mounts := [NativeSandboxMount]{NativeSandboxMount{source: sources.foundation, destination: sources.foundation}, NativeSandboxMount{source: sources.unicode, destination: sources.unicode}}
-    if !sys.is_linux() {
-        &mounts.push(NativeSandboxMount{source: sources.codegen_prelude, destination: sources.codegen_prelude})
-        &mounts.push(NativeSandboxMount{source: sources.archive_source, destination: sources.archive_source})
-        &mounts.push(NativeSandboxMount{source: sources.text_source, destination: sources.text_source})
-        &mounts.push(NativeSandboxMount{source: sources.tests, destination: sources.tests})
-        return Ok(mounts)
+    mounts := [NativeSandboxMount]{}
+    if {
+        sys.is_linux() -> {
+            closure_root :: files.join(cache_root, ".jet-foundation-source-closure")
+            if files.lexists(closure_root) {
+                files.remove_all(closure_root) ?? return Err(pkg_bridge_error("could not clear jet-foundation source closure `{closure_root}`: {err}"))
+            }
+            files.create_dir_all(closure_root) ?? return Err(pkg_bridge_error("create foundation source closure: {err}"))
+            loop path in sources.inputs {
+                pkg_ffi_stage_foundation_input(sources.root, path.removeprefix("{sources.root}/"), closure_root, "include")
+            }
+            &mounts.push(NativeSandboxMount{source: closure_root, destination: sources.root})
+        }
+        else -> {
+            parents := [String]{}
+            loop path in sources.inputs {
+                parent :: files.dirname(path)
+                if !parents.contains(parent) {
+                    &parents.push(parent)
+                    &mounts.push(NativeSandboxMount{source: parent, destination: parent})
+                }
+            }
+        }
     }
-    closure_root :: files.join(cache_root, ".jet-foundation-source-closure")
-    if files.lexists(closure_root) {
-        files.remove_all(closure_root) ?? return Err(pkg_bridge_error("could not clear jet-foundation source closure `{closure_root}`: {err}"))
-    }
-    codegen_stage :: files.join(closure_root, "codegen/src/Prelude")
-    archive_stage :: files.join(closure_root, "archive/src")
-    text_stage :: files.join(closure_root, "Core/text")
-    tests_stage :: files.join(closure_root, "tests")
-    pkg_ffi_stage_foundation_inputs(sources.codegen_prelude, FFI_JET_FOUNDATION_CODEGEN_INPUTS, codegen_stage, "codegen")
-    pkg_ffi_stage_foundation_inputs(sources.archive_source, FFI_JET_FOUNDATION_ARCHIVE_INPUTS, archive_stage, "archive")
-    pkg_ffi_stage_foundation_inputs(sources.text_source, FFI_JET_FOUNDATION_TEXT_INPUTS, text_stage, "text")
-    pkg_ffi_stage_foundation_inputs(sources.tests, FFI_JET_FOUNDATION_TEST_INPUTS, tests_stage, "tests")
-    &mounts.push(NativeSandboxMount{source: codegen_stage, destination: sources.codegen_prelude})
-    &mounts.push(NativeSandboxMount{source: archive_stage, destination: sources.archive_source})
-    &mounts.push(NativeSandboxMount{source: text_stage, destination: sources.text_source})
-    &mounts.push(NativeSandboxMount{source: tests_stage, destination: sources.tests})
+    &mounts.push(NativeSandboxMount{source: sources.foundation, destination: sources.foundation})
+    &mounts.push(NativeSandboxMount{source: sources.unicode, destination: sources.unicode})
     Ok(mounts)
 }

@@ -388,10 +388,14 @@ make the change at the contract boundary and migrate its users in one cutover.
 
 Prepared foreign bridges that depend on Foundation expose its complete owned
 source closure to the native build sandbox. This includes the `jet-unicode`
-path dependency at its canonical Cargo location, as well as the existing
-external include inputs. The bridge identity fingerprints both crate trees
-and those includes: changing Unicode data invalidates an old bridge instead of
-reusing a build prepared against a different Foundation dependency closure.
+path dependency at its canonical Cargo location. External inputs are discovered
+transitively from Rust `include!`, `include_str!`, and `include_bytes!` expressions,
+including literal `concat!` paths rooted at `CARGO_MANIFEST_DIR`; comments and
+string contents are not dependencies. Cargo-generated `OUT_DIR` inputs remain
+inside the build target. Missing includes or includes escaping the repository
+fail the preparation. The bridge identity fingerprints both crate trees and
+the sorted include closure, so changing or adding an included registry or
+Unicode table invalidates a previously prepared bridge.
 
 Native lowering must fail closed when a construct cannot preserve the shared
 runtime's ABI, error behavior, or observable output. Report an unsupported

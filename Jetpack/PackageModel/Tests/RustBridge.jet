@@ -391,3 +391,55 @@ dependencies = [
     assert(string_source.contains("fn jet_ffi_out_string_native(p0: *mut std::os::raw::c_char);"))
     assert(string_source.contains("p0_ptr as *mut std::os::raw::c_char"))
 }
+
+#Test("foundation includes ignore comments and literals and resolve manifest concat") {
+    source :: `// include!("missing-comment.rs");
+/* outer /* include_str!("missing-nested.jet"); */ */
+const TEXT: &str = "include!(\"missing-string.rs\")";
+const RAW: &str = r##"include!("missing-raw.rs")"##;
+fn lifetime<'a>() {}
+include ! ("first.rs");
+include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Compiler/registry.jet"));
+include_bytes!(r#"bytes.bin"#);
+include!(concat!(env!("OUT_DIR"), "/generated.rs"));
+`
+    assert_eq(pkg_ffi_rust_include_paths(source, "/repo/crates/foundation") ?? panic("includes"),
+        [String]{"first.rs", "/repo/crates/foundation/../../Compiler/registry.jet", "bytes.bin"})
+    assert_eq(pkg_ffi_rust_include_paths(`include!("escaped\\path.rs"); include!("second.rs");`, "") ?? panic("escaped"),
+        [String]{"escaped\\path.rs", "second.rs"})
+    assert(pkg_ffi_rust_include_paths(`include!(unknown_path());`, "") == .Err(_))
+}
+
+#Test("foundation source closure discovers new nested inputs and cycles without a whitelist") {
+    scratch :: files.temp_dir("ffi-include-closure") ?? panic("scratch")
+    root :: files.canonicalize(scratch.path) ?? panic("root")
+    foundation :: files.join(root, "crates/foundation")
+    unicode :: files.join(root, "crates/unicode")
+    external :: files.join(root, "Compiler/Registry")
+    files.create_dir_all(files.join(foundation, "src")) ?? panic("foundation")
+    files.create_dir_all(files.join(unicode, "src")) ?? panic("unicode")
+    files.create_dir_all(external) ?? panic("external")
+    files.write(files.join(foundation, "src/lib.rs"), `include!("../../../Compiler/Registry/new.rs");`) ?? panic("entry")
+    files.write(files.join(unicode, "src/lib.rs"), "") ?? panic("unicode entry")
+    files.write(files.join(external, "new.rs"), `include!("nested.rs"); include_str!("law.jet");`) ?? panic("new")
+    files.write(files.join(external, "nested.rs"), `include!("new.rs");`) ?? panic("cycle")
+    files.write(files.join(external, "law.jet"), "ratified") ?? panic("law")
+    inputs :: pkg_ffi_foundation_include_closure(root, foundation, unicode) ?? panic("closure")
+    assert_eq(inputs, [String]{files.join(external, "law.jet"), files.join(external, "nested.rs"), files.join(external, "new.rs")})
+    identity := ForeignIdentityBuilder.new(FFI_JET_FOUNDATION_SOURCE_SCHEMA)
+    loop path in inputs {
+        relative :: path.removeprefix("{root}/")
+        digest :: pkg_ffi_foundation_input_digest(root, relative, "include") ?? panic("digest")
+        &identity.field("include-input", pkg_ffi_nul_joined(relative, digest))
+    }
+    sources :: JetFoundationSources{root: root, foundation: foundation, unicode: unicode, inputs: inputs, digest: identity.finish()}
+    mounts :: pkg_ffi_jet_foundation_mounts(files.join(root, "cache"), sources) ?? panic("mounts")
+    assert(mounts.len() >= 3)
+    if sys.is_linux() {
+        staged :: files.join(root, "cache/.jet-foundation-source-closure/Compiler/Registry")
+        assert_eq(files.read(files.join(staged, "law.jet")) ?? panic("staged law"), "ratified")
+        assert_eq(mounts[0].destination, root)
+    }
+    files.write(files.join(external, "nested.rs"), `include!("missing.rs");`) ?? panic("missing input")
+    assert(pkg_ffi_foundation_include_closure(root, foundation, unicode) == .Err(_))
+}
