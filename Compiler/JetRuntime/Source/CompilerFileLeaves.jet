@@ -1,0 +1,69 @@
+// FileStream.rs:318-323: read_until('\n') on the one shared reader. No
+// fault checkpoint, UTF-8 validation or line trimming belongs to this leaf.
+// FD72 owns refill/position; HostFiles read/seek consume this same state.
+#Export(c) fn jet_file_reader_line_bytes_raw(reader: I64, output: I64, length: I64, error: I64) -> I64 {
+    bytes := I64{0}
+    capacity := I64{0}
+    used := I64{0}
+    failure := I64{0}
+    fd_lock(reader)
+    if (fd_word(reader, I64{16}) != I64{0}) {
+        failure = I64{-9}
+    } else {
+        fd_put(reader, I64{40}, I64{8192})
+        buffer :: fd_buffer(reader)
+        loop {
+            position := fd_word(reader, I64{56})
+            filled := fd_word(reader, I64{48})
+            if (position == filled) {
+                count :: host_call(I64{0}, fd_word(reader, I64{8}), buffer, I64{8192})
+                if (count == I64{-4}) -> next
+                if (count <= I64{0}) {
+                    failure = count
+                    break
+                }
+                position = I64{0}
+                filled = count
+                fd_put(reader, I64{56}, I64{0})
+                fd_put(reader, I64{48}, filled)
+            }
+            end := position
+            found := false
+            loop end < filled {
+                byte :: rt_text_byte(buffer + end)
+                end += I64{1}
+                if (byte == I64{10}) {
+                    found = true
+                    break
+                }
+            }
+            count :: end - position
+            required :: used + count
+            if (required > capacity) {
+                grown := if (capacity == I64{0}) -> I64{128} else -> capacity
+                loop grown < required -> grown *= I64{2}
+                next_bytes :: jet_rt_alloc(grown, I64{8})
+                if (used != I64{0}) -> rt_text_bytes_copy(next_bytes, bytes, used)
+                if (capacity != I64{0}) -> jet_rt_free(bytes, capacity, I64{8})
+                bytes = next_bytes
+                capacity = grown
+            }
+            rt_text_bytes_copy(bytes + used, buffer + position, count)
+            used = required
+            fd_put(reader, I64{56}, end)
+            if found -> break
+        }
+    }
+    fd_unlock(reader)
+    if (failure < I64{0}) {
+        if (capacity != I64{0}) -> jet_rt_free(bytes, capacity, I64{8})
+        return compiler_fs_errno(HOST_IO_OP_READ, fd_word(reader, I64{24}), -failure, error)
+    }
+    if (capacity == I64{0}) {
+        rt_text_store(output, I64{0})
+        rt_text_store(length, I64{0})
+    } else {
+        compiler_fs_bytes_take(bytes, capacity, used, output, length)
+    }
+    I64{1}
+}

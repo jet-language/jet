@@ -1,5 +1,5 @@
 // Vetted host transport. FD72: lock0, fd8, closed16, owned E4 path24,
-// byte buffer32, capacity40 (negative = writer; zero = raw reader), filled48, pos56,
+// byte buffer32, capacity40 (negative = writer; positive = buffered reader), filled48, pos56,
 // refs64. Retain shares the state; dup owns a new state and a dup'ed fd.
 // ErrorOut32: domain U32@0, stage U32@4, code I64@8, kind U32@16,
 // pad U32@20, owned E4 message@24. Linux emits POSIX domain1 or success0;
@@ -153,8 +153,8 @@ fn fd_read_error(result: I64, error: I64) -> I64 {
 }
 
 
-// A single mechanical read into caller-owned compact bytes. Source FileReader
-// owns buffering/retry; EINTR is a real POSIX ErrorOut32 code4, not swallowed.
+// Consume pending shared reader bytes, or issue one mechanical compact read.
+// No refill or EINTR retry here; the line provider owns both on this same FD72.
 #Export(c) fn jet_fd_read_raw(state: I64, bytes: I64, length: I64, error: I64) -> I64 {
     requested :: host_native_int(length)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
@@ -162,7 +162,14 @@ fn fd_read_error(result: I64, error: I64) -> I64 {
     result := fd_flush_locked(state)
     if (result == I64{0}) {
         // A writer's filled bytes are pending output, never readable input.
-        result = host_call(I64{0}, fd_word(state, I64{8}), bytes, requested)
+        unread :: if (fd_word(state, I64{40}) > I64{0}) -> fd_word(state, I64{48}) - fd_word(state, I64{56}) else -> I64{0}
+        if (unread != I64{0}) {
+            result = if (requested < unread) -> requested else -> unread
+            rt_text_bytes_copy(bytes, fd_word(state, I64{32}) + fd_word(state, I64{56}), result)
+            fd_put(state, I64{56}, fd_word(state, I64{56}) + result)
+        } else {
+            result = host_call(I64{0}, fd_word(state, I64{8}), bytes, requested)
+        }
     }
     fd_unlock(state)
     fd_read_error(result, error)
@@ -231,7 +238,22 @@ fn fd_read_error(result: I64, error: I64) -> I64 {
     fd_lock(state)
     result := fd_flush_locked(state)
     if (result == I64{0}) {
-        result = host_call(I64{8}, fd_word(state, I64{8}), delta, origin)
+        // A line read may have filled ahead. SEEK_CUR is relative to the
+        // logical cursor, not the descriptor's end-of-buffer position.
+        unread :: if (fd_word(state, I64{40}) > I64{0}) -> fd_word(state, I64{48}) - fd_word(state, I64{56}) else -> I64{0}
+        adjusted := delta
+        if (origin == I64{1} && unread != I64{0}) {
+            if (delta < I64{-9223372036854775808} + unread) {
+                result = host_call(I64{8}, fd_word(state, I64{8}), -unread, I64{1})
+                if (result >= I64{0}) {
+                    fd_put(state, I64{48}, I64{0})
+                    fd_put(state, I64{56}, I64{0})
+                }
+            } else {
+                adjusted -= unread
+            }
+        }
+        if (result >= I64{0}) -> result = host_call(I64{8}, fd_word(state, I64{8}), adjusted, origin)
         if (result >= I64{0}) {
             fd_put(state, I64{48}, I64{0})
             fd_put(state, I64{56}, I64{0})

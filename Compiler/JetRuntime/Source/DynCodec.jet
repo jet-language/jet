@@ -1,0 +1,86 @@
+// CAbiRoutes.rs:23802-24025 and EncodingTraits.rs:39-116. Native Dyn
+// uses DataABI, never the bootstrap Rust Box/enum layout. Scalar inputs borrow;
+// encoded owners retain exact Int/Text, FieldError.under clones each input.
+#Export(c) fn jet_rt_codec_encode_int(value: I64) -> I64 { jet_rt_record_new_dyn_int(value) }
+#Export(c) fn jet_rt_codec_encode_bool(value: U8) -> I64 { jet_rt_record_new_dyn_bool(value != U8{0}) }
+#Export(c) fn jet_rt_codec_encode_float(value: Float) -> I64 { jet_rt_record_new_dyn_float(value) }
+#Export(c) fn jet_rt_codec_encode_string(value: I64) -> I64 { jet_rt_record_new_dyn_text(value) }
+#Export(c) fn jet_raw_typed_text(value: I64) -> I64 { jet_rt_record_new_dyn_text(value) }
+#Export(c) fn jet_rt_codec_encode_char(value: I64) -> I64 {
+    // The existing scalar adapter replaces an invalid Unicode scalar with U+FFFD.
+    data_tree_new(DATA_TREE_TEXT, jet_rt_char_to_string(value))
+}
+fn codec_encode_word(value: I64) -> I64 { data_tree_new(DATA_TREE_INT, jet_int_owned_from_i64(value)) }
+#Export(c) fn jet_rt_codec_encode_u8(value: I64) -> I64 { codec_encode_word(value.bit_and(I64{255})) }
+#Export(c) fn jet_rt_codec_encode_u16(value: I64) -> I64 { codec_encode_word(value.bit_and(I64{65535})) }
+#Export(c) fn jet_rt_codec_encode_u32(value: I64) -> I64 { codec_encode_word(value.bit_and(I64{4294967295})) }
+#Export(c) fn jet_rt_codec_encode_u64(value: I64) -> I64 {
+    if (value >= I64{0}) -> return codec_encode_word(value)
+    // The C word carries unsigned bits, not a signed value or an exact-Int tag.
+    // Build its positive base-1e9 magnitude without text or a second Int owner.
+    node :: int_new(I64{3})
+    half := (value >> I64{1}).bit_and(I64{9223372036854775807})
+    at := I64{0}
+    loop half != (I64{0}) {
+        int_set(node, at, half % I64{1000000000})
+        half = half /% I64{1000000000}
+        at += I64{1}
+    }
+    int_store(node + I64{32}, at)
+    int_scale(node, I64{2}, value.bit_and(I64{1}))
+    data_tree_new(DATA_TREE_INT, int_tag(node))
+}
+fn codec_signed_word(value: I64, mask: I64, sign: I64) -> I64 {
+    low :: value.bit_and(mask)
+    codec_encode_word(if (low >= sign) -> low - mask - I64{1} else -> low)
+}
+#Export(c) fn jet_rt_codec_encode_i8(value: I64) -> I64 { codec_signed_word(value, I64{255}, I64{128}) }
+#Export(c) fn jet_rt_codec_encode_i16(value: I64) -> I64 { codec_signed_word(value, I64{65535}, I64{32768}) }
+#Export(c) fn jet_rt_codec_encode_i32(value: I64) -> I64 { codec_signed_word(value, I64{4294967295}, I64{2147483648}) }
+#Export(c) fn jet_rt_codec_encode_i64(value: I64) -> I64 { codec_encode_word(value) }
+fn codec_under_path(segment: I64, path: I64) -> I64 {
+    // FieldError.rs:18-26: empty child uses the segment, indexed child has no dot.
+    if (rt_text_len(path) == I64{0}) -> return jet_rt_string_clone(segment)
+    target :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(target, segment)
+    if (rt_text_byte(rt_text_data(path)) != I64{91}) -> rt_text_push_word(target, I64{46}, I64{1})
+    jet_rt_string_builder_push(target, path)
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_codec_under(segment: I64, errors: I64, length: I64, output: I64) -> I64 {
+    data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{8}, I64{8})
+    at := I64{0}
+    loop at < length {
+        source :: text_glue_word(errors + at * I64{8})
+        value :: jet_rt_alloc(TEXT_FIELD_BYTES, I64{8})
+        text_glue_store(value + TEXT_FIELD_PATH, codec_under_path(segment, text_glue_word(source + TEXT_FIELD_PATH)))
+        text_glue_store(value + TEXT_FIELD_REASON, jet_rt_string_clone(text_glue_word(source + TEXT_FIELD_REASON)))
+        text_glue_store(data + at * I64{8}, value)
+        at += I64{1}
+    }
+    text_glue_store(output, data)
+    length
+}
+#Export(c) fn jet_rt_codec_parse_json(text: I64, ok: I64, errors: I64, count: I64) -> I64 {
+    // Reuse the strict compiler parser, not Core's distinct policy parser.
+    // EncodingTraits.rs:711-716 wraps its exact reason and optional line.
+    status :: jet_std_json_parse(text, ok, errors)
+    if (status != I64{0}) -> return status
+    error :: encoding_word(errors)
+    line :: if (encoding_word(error + ENCODING_ERROR_LINE_PRESENT) != I64{0}) -> encoding_word(error + ENCODING_ERROR_LINE) else -> I64{0}
+    target :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(target, rt_static_text("invalid JSON (line "))
+    rt_text_push_number(target, line)
+    jet_rt_string_builder_push(target, rt_static_text("): "))
+    jet_rt_string_builder_push(target, encoding_word(error + ENCODING_ERROR_REASON))
+    reason :: jet_rt_string_builder_finish(target)
+    field :: jet_rt_alloc(TEXT_FIELD_BYTES, I64{8})
+    text_glue_store(field + TEXT_FIELD_PATH, jet_rt_string_clone(rt_static_text("")))
+    text_glue_store(field + TEXT_FIELD_REASON, reason)
+    jet_rt_handle_drop_encoding_error(error)
+    slot :: jet_rt_alloc(I64{8}, I64{8})
+    text_glue_store(slot, field)
+    text_glue_store(errors, slot)
+    text_glue_store(count, I64{1})
+    I64{0}
+}

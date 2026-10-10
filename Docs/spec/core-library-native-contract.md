@@ -35,6 +35,24 @@ hex codecs remain the same public functions; these imports make the checked
 source dependency visible rather than treating it as a root-Core dispatcher
 leaf. Production calls and service signature-vector tests use those same owners.
 
+The private native Dyn codec providers retain exact Int and Text owners when
+encoding, including the unsigned high half of a U64 input word. Char encoding
+uses the existing invalid-scalar replacement contract. `FieldError.under` clones
+the input errors and frames all paths in order: empty paths take the segment,
+index paths concatenate without a dot, and other child paths add a dot.
+The codec JSON entry reuses the strict compiler JSON parser (exact Number
+lexemes and its existing depth/error contract), wrapping syntax failures as one
+empty-path FieldError with `invalid JSON (line N): reason`. It does not substitute
+the public Core JSON policy parser.
+
+The native file line leaf owns no UTF-8, terminator, or fault policy. It reads
+through LF inclusively, preserves every CR byte, and returns an empty byte list
+at EOF. Its refill state is the same FD72 buffer used by subsequent reads and
+relative seeks; read-ahead must not skip bytes or advance the logical cursor.
+`DynCodecTests.jet` and `CompilerFileLeavesTests.jet` are direct provider
+witnesses. Hosted checks or execution do not constitute native-pack C ABI proof;
+that proof requires the freshly composed Jet-only runtime object.
+
 Native task-stop publication requires both a current task control and the
 compiler's scoped publication capability: only a checked operation immediately
 followed by MIR `Poll(Propagate)` may arm it. Plain calls and root bodies remain
