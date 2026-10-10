@@ -8274,8 +8274,10 @@ pub(crate) fn run_emit_rust(file: &str, mode: OutputMode, emit_metadata: bool) {
             exit(ExitCodes::USER_ERROR);
         }
     };
+    let check_span = jet_driver::Trace::span("sema.check");
     let (diagnostics, bundle, _facts, checked_nominals) =
         jet::Driver::check_file_with_effect_facts_for_run(file, "dev", &BTreeMap::new());
+    drop(check_span);
     let (errors, lints): (Vec<_>, Vec<_>) = diagnostics
         .into_iter()
         .partition(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error);
@@ -8309,6 +8311,7 @@ pub(crate) fn run_emit_rust(file: &str, mode: OutputMode, emit_metadata: bool) {
                 bundle.build_facts.target_triple.clone(),
             )
         };
+        let mut lower_span = jet_driver::Trace::span("lower");
         let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
             bundle,
             &checked_nominals,
@@ -8318,11 +8321,16 @@ pub(crate) fn run_emit_rust(file: &str, mode: OutputMode, emit_metadata: bool) {
                 jet_foundation::MIR::MirArtifactBuildMode::Dev,
             ),
         );
+        lower_span.items(mir.functions.len());
+        drop(lower_span);
+        let digest_span = jet_driver::Trace::span("mir.digest");
         let mir_digest = jet_foundation::MIR::mir_program_digest(&mir);
+        drop(digest_span);
         let mut execution = jet::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
         execution.emit_metadata = emit_metadata;
         execution.semantic_digest = emit_metadata.then_some(mir_digest);
-        jet::Codegen::MIRRust::emit_mir_program(
+        let mut emit_span = jet_driver::Trace::span("emit");
+        let rust = jet::Codegen::MIRRust::emit_mir_program(
             &mir,
             &jet::Codegen::MIRRust::MirRustConfig {
                 target,
@@ -8330,7 +8338,9 @@ pub(crate) fn run_emit_rust(file: &str, mode: OutputMode, emit_metadata: bool) {
                 root_prefix: String::new(),
                 execution,
             },
-        )
+        );
+        emit_span.items(mir.functions.len());
+        rust
     });
     print!("{rust}");
 }

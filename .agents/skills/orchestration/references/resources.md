@@ -169,6 +169,19 @@ small release build rustc argv, then type-check the monolith using
 `--emit=metadata` and the captured release edition/cfg/type-affecting flags,
 without backend codegen/LTO/link. Record the Dev Jet frontend versus Release
 rustc boundary; this preflight is not a successful release seed build.
+For an emit-only preflight, set `JET_TRACE_FILE` and retain the actual
+`sema.check`, `lower`, `mir.digest`, and `emit` trace spans, together with the
+per-step UTC/exit records. The emit CLI has its own entry and must not rely on
+the build entry's trace wrappers. Entry into the following `mir.digest` span
+proves MIR lowering returned and bounds successful sealing; an end event alone
+can also occur during unwinding. Neither is a distinct internal seal timestamp.
+Keep externally observed canonical-order acceptance separate from exact trace
+timestamps. On a retry that already has complete MIR dumps, do not enable `JET_DUMP_MIR`
+again: the debug text is many gigabytes and is not a mandatory clean-run gate.
+Require the hosted emitter's own final `0/<actual item count>` census in
+collect-all mode, preserving every failed item's kind, lossless identity,
+source span, and full diagnostic. A missing emitter census, any failed item,
+or later accepted output after an earlier emission failure is not a pass.
 The missing historical display comparator and AGE testkit generator are retired
 Rust-oracle modes (owner #38(b)/#59), not native-suite failures. Report their
 individual rows as `UNCOVERED`, print them, and require a Tower card; never label

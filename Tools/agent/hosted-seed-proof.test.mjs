@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {hostedSeedCensus, hostedLowerSweepCensus, hostedOptimizationPassCensus} from './hosted-seed-proof.mjs';
+import {hostedSeedCensus, hostedLowerSweepCensus, hostedOptimizationPassCensus, hostedEmissionCensus} from './hosted-seed-proof.mjs';
 
 test('hosted seed accepts only a real successful build without error diagnostics', () => {
     const proof = hostedSeedCensus(0, 'warning: unused import\nFinished release profile\n');
@@ -70,4 +70,55 @@ test('optimizer gate requires main boundary evidence and rejects inconsistent ac
         main + 'JET_DEBUG_LOWER_ALL optimization: operation=mir.optimize pass=cfg-simplification violation=InvalidReference\n' + accepted]) {
         assert.equal(hostedOptimizationPassCensus(log).clean, false);
     }
+});
+
+test('emitter census uses its actual item count and separates comptime probes', () => {
+    const proof = hostedEmissionCensus([
+        'JET_DEBUG_LOWER_ALL summary: 0 of 1 functions failed to lower',
+        'JET_DEBUG_LOWER_ALL emission: kind=function id=1 name="probe" span=0..1 message="probe failure"',
+        'JET_DEBUG_LOWER_ALL emission failures 1 of 1',
+        'JET_DEBUG_LOWER_ALL summary: 0 of 28533 functions failed to lower',
+        'JET_DEBUG_LOWER_ALL emission failures 0 of 32007',
+    ].join('\n'));
+    assert.equal(proof.clean, true);
+    assert.equal(proof.final_summary.total, 32007);
+    assert.equal(proof.failures.length, 1);
+    assert.deepEqual(proof.main_failures, []);
+});
+
+test('emitter census preserves every failure and lossless u64 identities', () => {
+    const proof = hostedEmissionCensus([
+        'JET_DEBUG_LOWER_ALL summary: 0 of 28533 functions failed to lower',
+        'JET_DEBUG_LOWER_ALL emission: kind=impl id=10065691745087956836 name="JetCLINativeExecutor" span=21291822..21291987 message="trait \\"Err\\" differs"',
+        'JET_DEBUG_LOWER_ALL emission: kind=function id=18446744073709551615 name="next" span=10..20 message="second\\nline"',
+        'JET_DEBUG_LOWER_ALL emission failures 2 of 32007',
+    ].join('\n'));
+    assert.equal(proof.clean, false);
+    assert.equal(proof.main_failures.length, 2);
+    assert.equal(proof.main_failures[0].id, '10065691745087956836');
+    assert.equal(proof.main_failures[1].id, '18446744073709551615');
+    assert.equal(proof.main_failures[0].message, 'trait "Err" differs');
+    assert.equal(proof.main_failures[1].message, 'second\nline');
+});
+
+test('emitter gate never accepts missing, empty, malformed or contradictory evidence', () => {
+    const main = 'JET_DEBUG_LOWER_ALL summary: 0 of 28533 functions failed to lower\n';
+    const zero = 'JET_DEBUG_LOWER_ALL emission failures 0 of 32007\n';
+    for (const log of ['', zero, main, main + zero.replace('32007', '0'),
+        main + 'JET_DEBUG_LOWER_ALL emission: truncated row\n' + zero,
+        main + 'JET_DEBUG_LOWER_ALL emission: kind=function id=1 name="bad" span=0..1 message="failure"\n' + zero,
+        main + 'JET_DEBUG_LOWER_ALL emission failures 1 of 32007\n' + zero]) {
+        assert.equal(hostedEmissionCensus(log).clean, false);
+    }
+});
+
+test('Rust Debug-only escapes remain visible rather than inventing decoded diagnostics', () => {
+    const proof = hostedEmissionCensus([
+        'JET_DEBUG_LOWER_ALL summary: 0 of 2 functions failed to lower',
+        'JET_DEBUG_LOWER_ALL emission: kind=function id=2 name="symbol" span=1..2 message="control\\u{1b}"',
+        'JET_DEBUG_LOWER_ALL emission failures 1 of 2',
+    ].join('\n'));
+    assert.equal(proof.clean, false);
+    assert.equal(proof.main_failures[0].message, null);
+    assert.equal(proof.main_failures[0].message_debug, '"control\\u{1b}"');
 });

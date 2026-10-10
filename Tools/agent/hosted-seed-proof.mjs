@@ -51,3 +51,43 @@ export function hostedOptimizationPassCensus(log) {
         boundary: 'Main-program verified optimization boundaries; every rejection stays a failure despite rollback and later accepted passes. Build rc, emission and metadata remain separate gates.',
     };
 }
+
+// Emission has its own item census; valid MIR is not proof of emitted Rust.
+// Keep u64 identities as strings and preserve quoted diagnostics verbatim.
+export function hostedEmissionCensus(log) {
+    const main = [...log.matchAll(/^JET_DEBUG_LOWER_ALL summary: (\d+) of (\d+) functions failed to lower$/gm)].at(-1);
+    const summaries = [...log.matchAll(/^JET_DEBUG_LOWER_ALL emission failures (\d+) of (\d+)$/gm)]
+        .map(row => ({failed: Number(row[1]), total: Number(row[2]), offset: row.index}));
+    const failures = [], malformed = [];
+    const quoted = '"(?:[^"\\\\]|\\\\.)*"';
+    const item = new RegExp(`^JET_DEBUG_LOWER_ALL emission: kind=(\\S+) id=(\\d+) name=(${quoted}) span=(\\d+)\\.\\.(\\d+) message=(${quoted})$`);
+    const decode = value => {
+        try { return JSON.parse(value); } catch { return null; }
+    };
+    for (const row of log.matchAll(/^JET_DEBUG_LOWER_ALL emission: (.*)$/gm)) {
+        const fields = item.exec(row[0]);
+        if (!fields) { malformed.push({raw: row[0], offset: row.index}); continue; }
+        failures.push({
+            kind: fields[1], id: fields[2],
+            name: decode(fields[3]), name_debug: fields[3],
+            span: {start: Number(fields[4]), end: Number(fields[5])},
+            message: decode(fields[6]), message_debug: fields[6],
+            raw: row[0], offset: row.index,
+        });
+    }
+    const afterMain = row => main && row.offset > main.index;
+    const mainSummaries = summaries.filter(afterMain);
+    const mainFailures = failures.filter(afterMain);
+    const mainMalformed = malformed.filter(afterMain);
+    const final = mainSummaries.at(-1) ?? null;
+    return {
+        schema: 'jet-hosted-emission-census/v1',
+        summaries, failures, malformed,
+        main_summaries: mainSummaries, main_failures: mainFailures, main_malformed_rows: mainMalformed,
+        final_summary: final,
+        clean: final !== null && final.total > 0 && final.failed === 0
+            && mainSummaries.every(row => row.failed === 0)
+            && mainFailures.length === 0 && mainMalformed.length === 0,
+        boundary: 'Final hosted Rust-emitter item sweep only; successful emission, complete Rust output and rustc metadata remain separate gates.',
+    };
+}
