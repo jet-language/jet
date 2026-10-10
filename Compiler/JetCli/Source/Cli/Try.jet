@@ -35,7 +35,7 @@ enum JetCLITryError {
         }
     }
 }
-impl JetCLIReadError -> JetCLITryError { JetCLITryError.Read.{error: self} }
+impl JetCLIReadError -> JetCLITryError { JetCLITryError.Read{error: self} }
 
 fn jet_cli_try_error_output(error: JetCLITryError) -> JetDriverVerbOutput Never! {
     if error == {
@@ -172,12 +172,12 @@ fn jet_cli_try_stage_files(groups: [JetCLITryFileEdits], sources: &[String:Strin
             .Val(source) -> source.bytes()
             .None -> {
                 if checked_rename -> return Err(JetCLITryError.Output{output: jet_cli_ice("the retained rename index lost its original source ownership")})
-                cli_files.read_bytes(group.path) ?? return Err(JetCLITryError.Read.{error: jet_cli_read_error("could not read `{group.path}`: {jet_cli_io_error_text(err)}")})
+                cli_files.read_bytes(group.path) ?? return Err(JetCLITryError.Read{error: jet_cli_read_error("could not read `{group.path}`: {jet_cli_io_error_text(err)}")})
             }
         }
-        source :: String.from_bytes(before) ?? return Err(JetCLITryError.Read.{error: jet_cli_read_error("try target `{group.path}` is not UTF-8")})
-        after :: jet_driver_apply_edits(source, group.edits) ?? return Err(JetCLITryError.Read.{error: jet_cli_read_error("try edits overlap or fall outside `{group.path}`")})
-        if source == after -> return Err(JetCLITryError.Read.{error: jet_cli_read_error("try edit leaves `{group.path}` unchanged")})
+        source :: String.from_bytes(before) ?? return Err(JetCLITryError.Read{error: jet_cli_read_error("try target `{group.path}` is not UTF-8")})
+        after :: jet_driver_apply_edits(source, group.edits) ?? return Err(JetCLITryError.Read{error: jet_cli_read_error("try edits overlap or fall outside `{group.path}`")})
+        if source == after -> return Err(JetCLITryError.Read{error: jet_cli_read_error("try edit leaves `{group.path}` unchanged")})
         &changes.push(JetCLISourceChange{path: group.path, before: before, after: after.bytes()})
     }
     Ok(changes)
@@ -206,7 +206,7 @@ fn jet_cli_try_stage(plan: JetCLITryPlan, baseline: &JetCLITryChecked) -> [JetCL
             loop reference in index.references {
                 if reference.name == from -> jet_cli_try_group_edit(&groups, &positions, jet_cli_try_canonical(reference.module_path), TextEdit{span: reference.span, new_text: to})
             }
-            if groups.len() == 0 -> return Err(JetCLITryError.Read.{error: jet_cli_read_error("try plan found no `{from}` symbols")})
+            if groups.len() == 0 -> return Err(JetCLITryError.Read{error: jet_cli_read_error("try plan found no `{from}` symbols")})
         }
     }
     jet_cli_try_stage_files(groups, &baseline.sources, checked_rename)
@@ -237,7 +237,7 @@ fn jet_cli_try_check(queries: &JetDriverCompilerQueries, entry: String, disk: Bo
         .Prepared(request, snapshot) -> {
             source := String?{None}
             loop root in snapshot.roots { loop file in root.files { if file.path == snapshot.entry_path -> source = Val(file.source) } }
-            text :: source ?? return Err(JetCLITryError.Read.{error: jet_cli_read_error("try entry has no actual prepared source")})
+            text :: source ?? return Err(JetCLITryError.Read{error: jet_cli_read_error("try entry has no actual prepared source")})
             parsed :: jet_cli_try_parse(text)
             sources := [String:String]{}
             if disk {
@@ -263,7 +263,7 @@ fn jet_cli_try_counter_delta(before: Int, after: Int) -> Int JetCLITryError! {
 }
 fn jet_cli_try_verdict(queries: &JetDriverCompilerQueries, before: JetDriverCompilerQueryStats, entry: String, changes: [JetCLISourceChange], entry_source: String) -> JetCLITryVerdict JetCLITryError! {
     loop change in changes {
-        text :: String.from_bytes(change.after) ?? return Err(JetCLITryError.Read.{error: jet_cli_read_error("try overlay contains non-UTF-8 source")})
+        text :: String.from_bytes(change.after) ?? return Err(JetCLITryError.Read{error: jet_cli_read_error("try overlay contains non-UTF-8 source")})
         jet_driver_compiler_queries_set_document(&queries, change.path, text)
     }
     jet_driver_compiler_queries_set_document(&queries, jet_cli_try_canonical(entry), entry_source)
