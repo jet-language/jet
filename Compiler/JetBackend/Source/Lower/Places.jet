@@ -238,8 +238,8 @@ fn lower_handle_field_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, h
         }
         if !matches -> return None
         address :: lower_pointer(&f)
-        if (lent.kind == "Text" || lent.header_bytes > I64{0}) {
-            bytes :: if lent.kind == "Text" -> I64{24} else -> lent.header_bytes
+        if (lent.kind == "Text" || lent.header_bytes > 0) {
+            bytes :: if lent.kind == "Text" -> 24 else -> lent.header_bytes
             lower_emit(&f, LIRInst.StackSlot{dst: address, size: bytes, align: 8})
             lower_call_runtime(&m, &f, "jet_rt_handle_field_{runtime.runtime}_{field.name}", [LIRValueID]{handle, address}, None)
         } else {
