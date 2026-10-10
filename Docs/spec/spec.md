@@ -2446,6 +2446,7 @@ The teaching diagnostic **E0040** directs `async`/`await` users to `task`;
 **E0041** directs `Mutex`/`lock` users to channels.
 These direct-call teaching forms are diagnosed before ordinary name resolution.
 Likewise, `getenv(name)` and `os.environ` teach `core.sys` access with E0039.
+The field-form diagnostic marks `environ`, rather than the whole access path.
 
 ### Parallel collection adapters
 

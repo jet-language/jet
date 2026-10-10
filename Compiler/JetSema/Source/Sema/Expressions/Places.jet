@@ -367,7 +367,9 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
     // Rust infer_field diagnoses the foreign surface before reading `os`,
     // without treating a lexical `os` binding as an exemption.
     if base == .Ident(root, _) && root == "os" && member == "environ" {
-        &diagnostics.push(sema_error("E0039", span, "`os.environ` is written `env.get` in Jet", "environment access lives in the `core.sys` module", "import `core.sys as env` and call `env.get(name)`"))
+        // Native Field carries the whole path; Rust Field carries its member.
+        member_span :: Span{start: span.end - member.len(), end: span.end}
+        &diagnostics.push(sema_error("E0039", member_span, "`os.environ` is written `env.get` in Jet", "environment access lives in the `core.sys` module", "import `core.sys as env` and call `env.get(name)`"))
         return None
     }
     // D-BUILD-FACT3=A: `$package.*` / `$build.*` fold from the build snapshot.
