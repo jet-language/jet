@@ -3,7 +3,10 @@ Error [E0121]: `p` was consumed by `consume`, so it can't be used here
     |
  12 |     print(p.x)
     |             ^
- Why: after a value moves to another name, the old name no longer gives access to it
- Fix: give away a copy instead (`~p`) where it moved
-move site: source bytes 116..117; reuse site: source bytes 131..132; consuming callee: consume
+  --> tests/ui/struct_use_after_move.jet:11:14
+    |
+ 11 |     consume(^p)
+    |              ^ `p` moved to `consume` here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `p` after the move, or give `consume` a copy with `p.copy()` where it moved.
 More: jet-lang.dev/e/E0121
