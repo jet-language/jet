@@ -48,6 +48,7 @@ use jet_foundation.[
     mir_builtin_codec_trait_id,
     mir_boundary_head_carrier_module,
     mir_field_id,
+    mir_measure_expression,
     mir_nominal_ref,
     mir_trait_id,
     mir_trait_ref,
@@ -1416,3 +1417,52 @@ fn jet_codegen_mir_trait_ref_for_symbol(modules: [SemaGraphModuleResult], symbol
     panic("checked trait symbol has no registered nominal declaration")
 }
 
+
+// Rust mir_type_as_ast: recover the checked shape for Prelude route selection.
+// This is not a new nominal lookup or an emitter's ABI reconstruction.
+fn jet_codegen_mir_type_as_type(ty: MIRType) -> Type Never! {
+    if ty.kind == {
+        .Int -> Type.Int
+        .Float -> Type.Float
+        .Bool -> Type.Bool
+        .String -> Type.String
+        .Char -> Type.Char
+        .List(inner) -> Type.List{element: jet_codegen_mir_type_as_type(inner)}
+        .Map(key, value) -> Type.Map{key: jet_codegen_mir_type_as_type(key), key_span: None, value: jet_codegen_mir_type_as_type(value)}
+        .Shared(inner) -> Type.Shared{inner: jet_codegen_mir_type_as_type(inner)}
+        .Option(inner) -> Type.Option{inner: jet_codegen_mir_type_as_type(inner)}
+        .Result(ok, err) -> Type.Result{ok: jet_codegen_mir_type_as_type(ok), err: jet_codegen_mir_type_as_type(err)}
+        .Fn(signature) -> jet_codegen_mir_callable_as_type(signature.params, signature.ret)
+        .SendFn(params, ret, _) -> jet_codegen_mir_callable_as_type(params, ret)
+        .Apply(name, args) -> {
+            if args.len() == 0 -> return Type.Named{name: name.name}
+            lowered :: loop arg in args -> jet_codegen_mir_type_as_type(arg)
+            Type.Apply{name: name.name, args: lowered}
+        }
+        .TraitObject(bounds) -> {
+            names :: loop bound in bounds -> bound.name
+            Type.TraitObject{bounds: names}
+        }
+        .Tuple(fields) -> {
+            lowered :: loop field in fields -> TypeTupleField{name: field.name, ty: jet_codegen_mir_type_as_type(field.ty)}
+            Type.Tuple{fields: lowered}
+        }
+        .FixedList(elem, len) -> Type.FixedList{elem: jet_codegen_mir_type_as_type(elem), len: Measure.Symbol{kind: "mir-measure", name: mir_measure_expression(len)}}
+        .IntN(signed, bits) -> Type.IntN{signed: signed, bits: bits}
+        .InlineRange(base, lo, hi) -> Type.InlineRange{base: jet_codegen_mir_type_as_type(base), lo: lo, hi: hi}
+        .Float32 -> Type.Float32
+        .Tagged(_, inner) | .Quantity(inner, _) -> jet_codegen_mir_type_as_type(inner)
+        .Union(members) -> {
+            lowered :: loop member in members -> jet_codegen_mir_type_as_type(member)
+            Type.Union{members: lowered}
+        }
+        .Measure(value) -> Type.Measure{measure: Measure.Symbol{kind: "mir-measure", name: mir_measure_expression(value)}}
+    }
+}
+
+fn jet_codegen_mir_callable_as_type(params: [MIRType], ret: MIRType?) -> Type Never! {
+    lowered :: loop param in params -> jet_codegen_mir_type_as_type(param)
+    result := Type?{None}
+    if ret == .Val(value) -> result = Val(jet_codegen_mir_type_as_type(value))
+    Type.Fn{params: lowered, ret: result, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+}

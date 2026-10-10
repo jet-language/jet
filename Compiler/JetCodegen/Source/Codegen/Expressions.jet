@@ -1131,6 +1131,58 @@ fn jet_codegen_lane_index_write_route(builder: &JetCodegenBuilder, program: JetC
     jet_codegen_intern_route(&builder, program, MIRPreludeFamily.MathBuiltin, "core.math", "lane_set", "jet_math_{type_name}_lane_set", 5, [Bool]{true, false, false, true, false}, None, carrier, MIRPreludeABI.Value)
 }
 
+fn jet_codegen_projection_address_equal(left: MIRProjection, right: MIRProjection) -> Bool Never! {
+    if left == {
+        .Field(field, _) -> { if right == .Field(other, _) -> return field == other }
+        .Index(kind, index, _, _, _, _, _) -> { if right == .Index(other_kind, other, _, _, _, _, _) -> return kind == other_kind && index == other }
+        .Deref(_) -> { if right == .Deref(_) -> return true }
+        .Payload(kind, _) -> { if right == .Payload(other, _) -> return kind == other }
+        .Range(range, _, _) -> { if right == .Range(other, _, _) -> return range == other }
+        .MapLookup(lookup, optional, _) -> { if right == .MapLookup(other, other_optional, _) -> return lookup == other && optional == other_optional }
+    }
+    false
+}
+
+// Rust LowerCtx::promote_index_accessors. Access changes apply to every
+// inherited index kernel, including an index below a projected field.
+fn jet_codegen_projected_accessors(builder: &JetCodegenBuilder, program: JetCodegenProgram, source: &MIRPlace, access: MIRAccess) Never! {
+    position := source.projections.len()
+    loop position > 0 {
+        position -= 1
+        at :: position
+        if source.projections[at] == .Index(kind, index, _, _, location, context, span) {
+            parent := MIRType?{None}
+            loop candidate in builder.places {
+                if candidate.base != source.base || candidate.projections.len() != at -> next
+                same := true
+                loop part in 0..<at {
+                    if !jet_codegen_projection_address_equal(candidate.projections[part], source.projections[part]) {
+                        same = false
+                        break
+                    }
+                }
+                if same {
+                    parent = Val(candidate.ty)
+                    break
+                }
+            }
+            base :: jet_codegen_mir_type_as_type(parent ?? panic("index alias has no checked parent place"))
+            lane_name :: if base == {
+                .Named(name) | .Apply(name, _) -> name
+                else -> ""
+            }
+            element :: if kind == MIRIndexKind.Lane -> jet_codegen_math_scalar_type(lane_name) else -> jet_codegen_index_element_type(base, kind)
+            carrier :: jet_codegen_failure_carrier_for_type(element)
+            getter :: if kind == MIRIndexKind.Lane -> jet_codegen_lane_index_route(&builder, program, lane_name, element, carrier) else -> jet_codegen_index_route(&builder, program, kind, if access == MIRAccess.Write -> MIRAccess.Write else -> MIRAccess.Read, carrier)
+            setter := MIRPreludeCallID?{None}
+            if access == MIRAccess.Write {
+                setter = Val(if kind == MIRIndexKind.Lane -> jet_codegen_lane_index_write_route(&builder, program, lane_name, carrier) else -> jet_codegen_index_write_route(&builder, program, kind, base, carrier))
+            }
+            source.projections[at] = MIRProjection.Index{kind: kind, index: index, call: getter, write_call: setter, location: location, context: context, span: span}
+        }
+    }
+}
+
 // Rust: none (Jet-only pass)
 fn jet_codegen_place_access(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID, access: MIRAccess) -> MIRPlaceID Never! {
     source := jet_codegen_find_place(builder, program, place) ?? panic("checked place access has no MIR place")
@@ -1138,6 +1190,7 @@ fn jet_codegen_place_access(builder: &JetCodegenBuilder, program: JetCodegenProg
     identity := jet_codegen_identity(&builder, program, "place", source.span, "access", "{place.value}|{access}")
     source.id = MIRPlaceID{value: stable_id("mir-place", identity)}
     source.access = access
+    jet_codegen_projected_accessors(&builder, program, &source, access)
     jet_codegen_push_place(&builder, program, source)
     source.id
 }

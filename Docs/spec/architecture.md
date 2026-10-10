@@ -575,6 +575,12 @@ through another reference binding retains the original owner's identity;
 hoisting the reference slot must not extend its borrow across a later loop
 iteration's owner assignment.
 
+When a checked handle operation requests write access through an indexed
+read-window alias, lowering updates every inherited index accessor to its
+exact mutable getter and setter rows. Nested fields and indexes retain the
+original owner and path; the access decoration cannot disagree with those
+rows. This changes no source-level permission or authority decision.
+
 A bare registered Core-carrier trait reference resolves through that carrier's
 one source-module owner and the exact trait/method identity. It cannot match an
 unrelated same-named method, a different trait or an arbitrary suffix alias.

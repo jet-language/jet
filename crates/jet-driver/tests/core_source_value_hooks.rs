@@ -340,3 +340,80 @@ fn run() Never! {
         std::fs::remove_dir_all(directory).unwrap();
     });
 }
+
+#[test]
+fn indexed_loop_handle_receivers_keep_exact_accessors() {
+    jet_driver::run_compiler_work(|| {
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("core-value-hook-proof"))
+            .join(format!("jet-indexed-reader-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("input.txt"), "AB").unwrap();
+        std::fs::write(directory.join("package.jet"),
+            "name: \"indexed_reader_proof\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS.Read] } }\n").unwrap();
+        let entry = directory.join("run.jet");
+        std::fs::write(&entry, r#"
+use core.files.[FileReader, open]
+struct Row { reader: FileReader }
+fn run() -[FS]> {
+    groups := [[Row]]{[Row]{Row{reader: open("input.txt") ?? panic("open")}}}
+    loop group in groups {
+        loop row in group {
+            first :: row.reader.read(1) ?? panic("read")
+            second :: row.reader.read(1) ?? panic("read")
+            assert_eq(first[0], U8{65})
+            assert_eq(second[0], U8{66})
+            assert_eq((row.reader.read(1) ?? panic("read")).len(), 0)
+        }
+    }
+}
+"#).unwrap();
+        let mut bundle = Loader::load_entry(entry.to_str().unwrap()).expect("indexed reader source must load");
+        let (diagnostics, _, nominals) =
+            Sema::check_bundle_with_effect_facts(&mut bundle, Sema::CompileMode::Check);
+        assert!(diagnostics.iter().all(|diagnostic| {
+            diagnostic.severity != Diagnostics::Severity::Error
+        }), "indexed handle reads must pass the checker: {diagnostics:?}");
+        let request = MirArtifactRequest::new(
+            MirArtifactTarget::RustAot,
+            MirArtifactKind::NativeExecutable,
+            MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = Codegen::TIR::lower_checked_mir_program_for(
+            &bundle, &nominals, request,
+        ).expect("indexed handle read windows must keep legal accessor metadata");
+        mir.validate().expect("indexed handle MIR is valid");
+        assert!(mir.functions.iter().flat_map(|function| &function.places).any(|place| {
+            place.access == jet_foundation::MIR::MirAccess::Write
+                && place.ty.nominal_name().is_some_and(|name| name.ends_with("::FileReader"))
+                && place.projections.iter().filter(|projection| {
+                    matches!(projection, jet_foundation::MIR::MirProjection::Index { write_call: Some(_), .. })
+                }).count() >= 2
+        }), "nested reader receiver must retain both exact index setters");
+        let rust = Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let source = directory.join("indexed_reader.rs");
+        let executable = directory.join(format!("indexed_reader{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=indexed_reader", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("indexed reader regression requires rustc");
+        assert!(compiled.status.success(), "indexed handle receivers must compile:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable).current_dir(&directory)
+            .output().expect("indexed reader regression must execute");
+        assert!(executed.status.success(), "all reads must advance the same retained handle:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}

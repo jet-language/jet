@@ -10838,14 +10838,74 @@ impl<'a> LowerCtx<'a> {
             })
     }
 
+    /// A read-window alias can contain an internally mutable handle. Its
+    /// checked write receiver changes the place's access, so every inherited
+    /// index projection must change its exact getter/setter routes as well.
+    fn promote_index_accessors(&mut self, row: usize) -> Result<(), LowerError> {
+        // Resolve deeper parents while their original prefix routes still
+        // match the checked place rows.
+        for at in (0..self.places[row].projections.len()).rev() {
+            let MirProjection::Index { kind, .. } = self.places[row].projections[at] else {
+                continue;
+            };
+            let parent = self.places.iter().find(|place| {
+                place.base == self.places[row].base
+                    && place.projections.len() == at
+                    && place.projections.iter().zip(&self.places[row].projections).all(|(left, right)| match (left, right) {
+                        (MirProjection::Field { field: left, .. }, MirProjection::Field { field: right, .. }) => left == right,
+                        (MirProjection::Index { kind: left_kind, index: left, .. }, MirProjection::Index { kind: right_kind, index: right, .. }) => left_kind == right_kind && left == right,
+                        (MirProjection::Deref { .. }, MirProjection::Deref { .. }) => true,
+                        (MirProjection::Payload { kind: left, .. }, MirProjection::Payload { kind: right, .. }) => left == right,
+                        (MirProjection::Range { range: left, .. }, MirProjection::Range { range: right, .. }) => left == right,
+                        (MirProjection::MapLookup { lookup: left, optional: left_optional, .. }, MirProjection::MapLookup { lookup: right, optional: right_optional, .. }) => left == right && left_optional == right_optional,
+                        _ => false,
+                    })
+            }).ok_or_else(|| self.error(self.places[row].span, "index alias has no checked parent place"))?;
+            let base = mir_type_as_ast(&parent.ty);
+            let lane_name = match base.without_user_tags() {
+                Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
+                _ => None,
+            };
+            let element = if kind == MirIndexKind::Lane {
+                let name = lane_name.ok_or_else(|| self.error(self.places[row].span, "lane alias has no checked lane type"))?;
+                crate::Sema::math_scalar_ty(name)
+            } else {
+                self.index_element_type(&base, kind)?
+            };
+            let carrier = TFailureCarrier::from_checked_type(&element);
+            let (getter, setter) = if kind == MirIndexKind::Lane {
+                let name = lane_name.expect("checked lane alias");
+                (
+                    super::lane_index_route(name, &element, &carrier)?,
+                    super::lane_index_write_route(name, &element, &carrier)?,
+                )
+            } else {
+                (
+                    super::index_route(kind, MirAccess::Write, &element, &carrier)?,
+                    super::index_write_route(kind, &base, &element, &carrier)?,
+                )
+            };
+            let getter = self.intern_prelude_route(getter)?;
+            let setter = self.intern_prelude_route(setter)?;
+            if let MirProjection::Index { call, write_call, .. } = &mut self.places[row].projections[at] {
+                *call = getter;
+                *write_call = Some(setter);
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn place_for_local(
         &mut self,
         local: &TLocal,
         access: MirAccess,
     ) -> Result<MirPlaceId, LowerError> {
         if let Some(id) = self.local_places.get(&local.name).copied() {
-            if let Some(place) = self.places.iter_mut().find(|place| place.id == id) {
-                retain_place_access(place, access);
+            if let Some(row) = self.places.iter().position(|place| place.id == id) {
+                if access == MirAccess::Write && self.places[row].access == MirAccess::Read {
+                    self.promote_index_accessors(row)?;
+                }
+                retain_place_access(&mut self.places[row], access);
             }
             return Ok(id);
         }
