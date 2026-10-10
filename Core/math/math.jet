@@ -134,7 +134,7 @@ fn gamma(n: Float) -> Float Never! {
     accumulator = accumulator + Float{9.984369654078991e-6} / (z + 7.0)
     accumulator = accumulator + Float{1.5056327351493116e-7} / (z + 8.0)
     t :: z + 7.0 + 0.5
-    sqrt(2.0 * pi()) * pow(t, z + 0.5) * exp(-t) * accumulator
+    sqrt(2.0 * pi()) * t.pow(z + 0.5) * exp(-t) * accumulator
 }
 fn lgamma(n: Float) -> Float Never! {
     value :: gamma(n)
@@ -254,7 +254,7 @@ fn ilogb(n: Float) -> Int? Never! {
 }
 fn ldexp(n: Float, exponent: Int) -> Float Never! {
     if !is_finite(n) || n == 0.0 || exponent == 0 -> return n
-    n * pow(2.0, Float{clamp(exponent, -2099, 2099)})
+    n * (Float{2.0}).pow(Float{clamp(exponent, -2099, 2099)})
 }
 fn scaleb(n: Float, exponent: Int) -> Float Never! { ldexp(n, exponent) }
 fn radix(n: Float) -> Int Never! { 2 }
@@ -626,7 +626,7 @@ fn copy(n: Float) -> Float Never! { n }
     assert_eq(digits(-9223372036854775808), 19)
     assert_eq(leading_ones(-1), 64)
     assert_eq(trailing_ones(-1), 64)
-    assert_eq(xor(3, 5), 6)
+    assert_eq((Int{3}).bit_xor(5), 6)
 }
 
 #Test("math special functions retain their approximation") {
@@ -1291,7 +1291,7 @@ fn __decimal_to_float(value: Decimal) -> Float Never! {
     // Match CtDecimal: preserve its small-carrier projection, then the exact
     // ratio rounding used by the arbitrary-precision carrier.
     if value.magnitude <= 170141183460469231731687303715884105727 {
-        approximate :: Float{value.magnitude} / pow(10.0, Float{value.scale})
+        approximate :: Float{value.magnitude} / (Float{10.0}).pow(Float{value.scale})
         if value.negative -> return -approximate
         return approximate
     }

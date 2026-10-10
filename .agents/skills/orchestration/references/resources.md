@@ -108,6 +108,11 @@ the immutable export, not the shared worktree, and require 18/18 before moving
 the hold into the runnable queue. A worktree check can consume uncommitted
 hash refreshes that the export omits; commit the canonical generated outputs
 and re-export rather than bypassing the build-script stale-table guard.
+Retired arithmetic entry points have no internal compatibility exemption:
+Core implementations and tests use numeric `.pow()` / `.bit_xor()` receivers,
+with explicit `Float` receivers for floating literal bases. Sweep both Core
+and Runtime sources before the final embedded-Core bake; preserve `Dyn` in
+user-facing codec diagnostics instead of teaching retired dynamic-tree names.
 The native fixed point is stage1 (built by the candidate) compiling stage2.
 Require both objects and ELF executables to be byte-identical, and require each
 stage's own all-phases diagnostic report to exist and contain zero failures.

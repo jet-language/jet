@@ -119,7 +119,7 @@ impl Parser {
         if additional == 31 {
             self.indefinite(start, path) ?? return Err(err)
             if depth + 1 > self.options.max_depth -> return Err(failure(.Limit, start, path, "max_depth {self.options.max_depth} exceeded"))
-            if major == 2 -> return Err(failure(.Unsupported, start, path, "CBOR byte strings are outside core.encoding.Data; use decode<[U8]>"))
+            if major == 2 -> return Err(failure(.Unsupported, start, path, "CBOR byte strings are outside core.encoding.Dyn; use decode<[U8]>"))
             bytes := [U8]{}
             loop {
                 if self.cursor == input.len() -> return Err(failure(.Truncated, input.len(), path, "indefinite CBOR string ended before its break"))
@@ -145,7 +145,7 @@ impl Parser {
         }
         length :: &self.argument(input, additional, start, path) ?? return Err(err)
         if length.value > input.len() - self.cursor -> return Err(failure(.Truncated, input.len(), path, "CBOR byte/text string is truncated"))
-        if major == 2 -> return Err(failure(.Unsupported, start, path, "CBOR byte strings are outside core.encoding.Data; use decode<[U8]>"))
+        if major == 2 -> return Err(failure(.Unsupported, start, path, "CBOR byte strings are outside core.encoding.Dyn; use decode<[U8]>"))
         bytes := [U8]{}
         &self.reserve<U8>(&bytes, length.value, 1, start, path, "CBOR text string") ?? return Err(err)
         loop _ in 0..<length.value {
