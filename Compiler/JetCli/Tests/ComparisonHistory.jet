@@ -13,7 +13,7 @@ fn run() Never! {
     if !jet_cli_receipt_secret_name("--apiToken2") || !jet_cli_receipt_secret_name("--HTTPPassword") || jet_cli_receipt_secret_name("--monkey") -> panic("secret name components")
     argv :: jet_cli_receipt_argv_identity([String]{"test-compare", "--apiToken2=hidden", "--password", "hidden", "corpus.json"})
     expected := [U8]{}
-    loop arg in [String]{"test-compare", "--apiToken2=<redacted>", "--password", "<redacted>", "corpus.json"} -> jet_cli_receipt_frame(&expected, arg.bytes())
+    loop arg in ([String]{"test-compare", "--apiToken2=<redacted>", "--password", "<redacted>", "corpus.json"}) -> jet_cli_receipt_frame(&expected, arg.bytes())
     if argv != expected -> panic("receipt argv redaction framing")
     members := [JetCLIReceiptInput]{}
     jet_cli_receipt_canonical_member(JetCLIReceiptInput{path: "/project/.jet/generated/cache.bin", digest: id}, "/project", &members) ?? panic("generated exclusion")
