@@ -327,8 +327,10 @@ fn effect_is_deny_only(effect: &str) -> bool {
     // has to enumerate them: allocation is not a right you request, it is one
     // you can be refused. Without this, every `-[IO]>` function that formats a
     // string reported E0740 for `Mem.Alloc`.
+    // D-AUTH-AMBIENT2=A: only the exact Time.Wait leaf is deny-only;
+    // clock observation and the Time root retain ordinary positive bounds.
     let root = effect_root(effect);
-    root == Effect::Panic.name() || root == "Mem"
+    root == Effect::Panic.name() || root == "Mem" || effect == TIME_WAIT_EFFECT
 }
 
 /// The subset of `inferred` NOT covered by any entry of `bound_set` — the
@@ -1695,10 +1697,10 @@ mod deny_only_effect_tests {
 
     #[test]
     fn deny_only_matching_uses_exact_roots() {
-        for effect in ["Mem", "Mem.Alloc", "Mem.Rc", "Panic", "Panic.Stop"] {
+        for effect in ["Mem", "Mem.Alloc", "Mem.Rc", "Panic", "Panic.Stop", "Time.Wait"] {
             assert!(effect_is_deny_only(effect), "{effect}");
         }
-        for effect in ["IO", "FS.Read", "Membrane", "PanicOther"] {
+        for effect in ["IO", "FS.Read", "Membrane", "PanicOther", "Time", "Time.Read", "Time.Wait.More"] {
             assert!(!effect_is_deny_only(effect), "{effect}");
         }
     }
@@ -1709,13 +1711,34 @@ mod deny_only_effect_tests {
             "Mem.Alloc".to_string(),
             "Mem.Rc".to_string(),
             "Panic".to_string(),
+            "Time.Wait".to_string(),
             "IO".to_string(),
         ]);
         assert_eq!(
             effects_uncovered(&inferred, &EffectSet::new()),
             EffectSet::from(["IO".to_string()])
         );
-        assert_eq!(inferred.len(), 4);
+        assert_eq!(inferred.len(), 5);
+    }
+
+    #[test]
+    fn wait_keeps_negative_denials_without_widening_time() {
+        let inferred = EffectSet::from(["Time.Wait".to_string()]);
+        let row = super::RightsRow::invocation(
+            std::iter::empty::<&str>(),
+            ["Time.Wait"],
+            super::RightsProvenance::new("sema::test", "deny waiting"),
+        );
+        assert!(row.walk(&inferred, &[], &[]).denials.iter()
+            .any(|denial| denial.right == "Time.Wait"));
+        assert_eq!(
+            effects_uncovered(
+                &EffectSet::from(["Time.Wait".to_string(), "Time.Read".to_string()]),
+                &EffectSet::new(),
+            ),
+            EffectSet::from(["Time.Read".to_string()]),
+        );
+        assert!(inferred.contains("Time.Wait"));
     }
 }
 

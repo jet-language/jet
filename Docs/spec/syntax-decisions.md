@@ -3153,6 +3153,12 @@ D-EFFTREE1 and D-AUTHORITY-ROOTS1: a root may be dotted into an open leaf path
 (`FS.Read`) and ancestor matching is subsumption; old flat FFI language roots
 are retired. `effect <Name>` user declarations remain reserved, unminted.
 
+**D-AUTH-AMBIENT2=A — Waiting is deny-only**: the exact `Time.Wait` leaf
+remains an inferred reachability fact and can be prohibited with
+`-[!Time.Wait]>`, but never needs a positive callable bound or authority
+grant. `Time` and its other leaves retain their ordinary positive bounds.
+This applies to Rust bootstrap and native Jet effect-bound checks alike.
+
 **D-EFFTREE1 — Effect tree** *(ratified 2026-07-03, card #181)*: the
 D-EFF4/5 names are tree roots; a signature/`#Abilities`/`-[!…]>` entry may
 be a dotted path rooted at one (`FS.Read`, `Net.HTTP.Get`) — root closed

@@ -411,7 +411,7 @@ fn sema_effect_without_deny_only(values: [String]) -> [String] Never! {
     result := [String]{}
     loop value in values {
         root :: sema_effect_root(value)
-        if root != "Panic" && root != "Mem" -> sema_effect_set_add(&result, value)
+        if root != "Panic" && root != "Mem" && value != "Time.Wait" -> sema_effect_set_add(&result, value)
     }
     result
 }
@@ -486,13 +486,14 @@ fn sema_effect_declarations_irreversible_fact(declarations: [Item], effect_name:
 // not maintain a second root allowlist: adding or removing an irreversible
 // effect in Prelude/Effects.jet changes this fact at the source boundary.
 fn sema_effect_canonical_irreversible_fact(environment: SemaScopeEnvironment, program: SemaProgramTables, effect_name: String) -> Bool? {
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return None
-    canonical_identity :: graph.canonical_effect_module_identity
-    if canonical_identity == "" -> return None
-    module_index :: sema_registration_module_index(graph, canonical_identity) ?? return None
-    if graph.modules[module_index].package_identity != JET_CANONICAL_EFFECT_PACKAGE_IDENTITY || graph.modules[module_index].module_path != JET_CANONICAL_EFFECT_MODULE_PATH -> return None
-    sema_effect_declarations_irreversible_fact(graph.modules[module_index].program.items, effect_name)
+    if program.registration_graph == .Val(graph) {
+        canonical_identity :: graph.canonical_effect_module_identity
+        if canonical_identity == "" -> return None
+        module_index :: sema_registration_module_index(graph, canonical_identity) ?? return None
+        if graph.modules[module_index].package_identity != JET_CANONICAL_EFFECT_PACKAGE_IDENTITY || graph.modules[module_index].module_path != JET_CANONICAL_EFFECT_MODULE_PATH -> return None
+        return sema_effect_declarations_irreversible_fact(graph.modules[module_index].program.items, effect_name)
+    }
+    None
 }
 
 fn sema_effect_root_is_irreversible(environment: SemaScopeEnvironment, program: SemaProgramTables, effect_name: String) -> Bool? {
@@ -1492,8 +1493,7 @@ fn sema_effect_find_dispatch(nodes: [SemaEffectNode], node_by_key: [String:Int],
     if nodes[index].dispatches.len() > 0 -> return Val(SemaEffectDispatchSite{dispatch: nodes[index].dispatches[0], module_index: nodes[index].module_index})
     loop edge in nodes[index].call_edges {
         target :: sema_effect_node_index(node_by_key, edge) ?? next
-        if !reach[target] -> next
-        found :: sema_effect_find_dispatch(nodes, node_by_key, reach, target, &seen, &visited)
+        found :: sema_effect_find_dispatch(nodes, node_by_key, target, &seen)
         if found != None -> return found
     }
     None
@@ -2057,13 +2057,15 @@ fn sema_effect_check_unsafe_statements(statements: [Stmt], diagnostics: &[Diagno
     valid
 }
 
-// The effect walkers over checked TIR: the one a child visit continues with,
-// and its own arguments (sema_effect_walk_expr, sema_effect_check_unsafe_expr,
-// sema_effect_walk_region_expr).
+// The walkers over checked TIR: the one a child visit continues with, and its
+// own arguments (sema_effect_walk_expr, sema_effect_check_unsafe_expr,
+// sema_effect_walk_region_expr, and FailureLaw's prelude-conversion demand
+// walk sema_prelude_conversion_demands_visit, whose state is its one row).
 enum SemaEffectWalk {
     Collect(node_index: Int)
     Unsafe(audited: Bool)
     Region(node_index: Int, region: Span)
+    PreludeDemands(state: Shared<SemaPreludeDemandWalk>)
 }
 
 fn sema_effect_walk_visit(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, expression: TExpr) {
@@ -2071,6 +2073,7 @@ fn sema_effect_walk_visit(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts:
         .Collect(node_index) -> sema_effect_walk_expr(&nodes, node_index, expression, facts, &diagnostics, caller_key)
         .Unsafe(audited) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, expression, audited, &diagnostics)
         .Region(node_index, region) -> sema_effect_walk_region_expr(&nodes, node_index, expression, region, facts, &diagnostics, caller_key)
+        .PreludeDemands(state) -> sema_prelude_conversion_demands_visit(walk, state, &nodes, facts, &diagnostics, caller_key, expression)
     }
 }
 
@@ -2509,12 +2512,6 @@ fn sema_effect_walk_require_children(walk: SemaEffectWalk, nodes: &[SemaEffectNo
 
 fn sema_effect_walk_host_call_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, call: THostCall) {
     if call == {
-        .Helper(_, _, args) -> loop argument in args {
-            if argument == {
-                .Expr(value) | .Borrow(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
-                .Lambda(value) -> sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller_key, value)
-            }
-        }
         .Method(receiver, _, args) -> {
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, receiver)
             loop value in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
@@ -2539,11 +2536,6 @@ fn sema_effect_walk_host_call_children(walk: SemaEffectWalk, nodes: &[SemaEffect
         .EnvSet(name, value, _) -> {
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, name)
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
-        }
-        .ExpiringSecretNew(value, duration, clock, _) | .ExpiringValueNew(value, duration, clock) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, duration)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, clock)
         }
         .CCallback(_, lambda, _, _, _, _) -> sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller_key, lambda)
         .FnName(_) | .MemoStats(_) | .GCRead(_) | .SwitchSubjectField(_) | .SwitchSubjectValue | .NumericBounds(_, _) -> {}

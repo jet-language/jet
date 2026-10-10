@@ -267,21 +267,21 @@ fn queue_enqueue_request(queue: JobQueue, request: EnqueueRequest) -[DB, Time]> 
 }
 
 impl JobQueue {
-    fn receipt(self, id: String) -[DB, Time.Wait]> JobQueueReceipt ServiceError! {
+    fn receipt(self, id: String) -[DB]> JobQueueReceipt ServiceError! {
         service.__authority_validate(self.endpoint) ?? return Err(err)
         queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
         guard := self.data.guard_edit()
         record :: queue_find(&guard.value.driver, self.authority, self.name, id) ?? return Err(err)
         Ok(queue_receipt(record, false))
     }
-    fn inspect(self, limit: Int, include_payload: Bool) -[DB, Time.Wait]> [JobQueueRecord] ServiceError! {
+    fn inspect(self, limit: Int, include_payload: Bool) -[DB]> [JobQueueRecord] ServiceError! {
         queue_validate_nonnegative_limit(limit, "inspection limit") ?? return Err(err)
         service.__authority_validate(self.endpoint) ?? return Err(err)
         if limit <= 0 || limit > 1024 -> return Err(ServiceError.Policy("queue inspection limit must be positive and bounded"))
         guard := self.data.guard_edit()
         queue_inspect_on_driver(&guard.value.driver, self.authority, self.name, limit, include_payload && false)
     }
-    fn events(self, id: String) -[DB, Time.Wait]> [JobQueueEvent] ServiceError! {
+    fn events(self, id: String) -[DB]> [JobQueueEvent] ServiceError! {
         service.__authority_validate(self.endpoint) ?? return Err(err)
         queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
         guard := self.data.guard_edit()
@@ -381,7 +381,7 @@ fn queue_set_paused(queue: JobQueue, paused: Bool) -[DB, Time]> JobQueueStatus S
 
 // Returning from these helpers releases the lexical SharedGuard before any
 // publication or subsequent acquisition of the same queue lock.
-fn queue_enqueue_transaction(queue: JobQueue, requests: [EnqueueRequest], now: Int) -[DB, Time.Wait]> (receipts: [JobQueueReceipt], observations: [QueueTransition]) ServiceError! {
+fn queue_enqueue_transaction(queue: JobQueue, requests: [EnqueueRequest], now: Int) -[DB]> (receipts: [JobQueueReceipt], observations: [QueueTransition]) ServiceError! {
     guard := queue.data.guard_edit()
     queue_begin(guard.value.driver) ?? return Err(err)
     result :: queue_enqueue_on_driver(&guard.value.driver, queue.authority, queue.name, 1024, false, requests, now) ?? {
@@ -457,7 +457,7 @@ fn queue_read_status(queue: JobQueue) -[DB, Time]> JobQueueStatus ServiceError! 
     guard := queue.data.guard_edit()
     queue_status_on_driver(&guard.value.driver, queue.authority, queue.name)
 }
-fn queue_pause_transaction(queue: JobQueue, paused: Bool, now: Int) ServiceError! -[DB, Time.Wait]> {
+fn queue_pause_transaction(queue: JobQueue, paused: Bool, now: Int) ServiceError! -[DB]> {
     guard := queue.data.guard_edit()
     queue_begin(guard.value.driver) ?? return Err(err)
     result :: queue_pause_on_driver(&guard.value.driver, queue.authority, queue.name, paused, now) ?? {
