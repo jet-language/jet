@@ -515,3 +515,61 @@ fn immutable_bindings_over_pure_work_fold_to_literals() {
         assert_eq!(jet(mode), "noisy\n144 hello jet 15 14 5\n", "jet {mode:?}");
     }
 }
+
+#[test]
+fn comptime_struct_field_writes_through_moved_locals_preserve_values() {
+    tir_support::assert_tiers_agree(
+        "comptime_moved_struct_field_write",
+        r#"
+enum AccessConvention {
+    Read
+    Write
+}
+
+struct Coverage {
+    bits: Int
+    reserved: Int
+}
+
+struct Row {
+    access: AccessConvention
+    coverage: Coverage
+    untouched: Int
+}
+
+fn write(row: ^Row) -> Row Never! {
+    updated := row
+    updated.access = AccessConvention.Write
+    updated
+}
+
+fn write_nested(row: ^Row) -> Row Never! {
+    updated := row
+    updated.coverage.bits = (updated.coverage.bits).bit_or(4)
+    updated
+}
+
+SIMPLE_ROWS :: [write(^Row{
+    access: AccessConvention.Read,
+    coverage: Coverage{bits: 1, reserved: 7},
+    untouched: 9,
+})]
+
+ROWS :: [write_nested(write(^Row{
+    access: AccessConvention.Read,
+    coverage: Coverage{bits: 1, reserved: 7},
+    untouched: 9,
+}))]
+
+fn run() {
+    print(SIMPLE_ROWS[0].access == AccessConvention.Write)
+    print(SIMPLE_ROWS[0].coverage.bits)
+    print(ROWS[0].access == AccessConvention.Write)
+    print(ROWS[0].coverage.bits)
+    print(ROWS[0].coverage.reserved)
+    print(ROWS[0].untouched)
+}
+"#,
+        "true\n1\ntrue\n5\n7\n9\n",
+    );
+}

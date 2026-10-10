@@ -31684,6 +31684,11 @@ fn project_field_id_named(
     name: &str,
     span: Span,
 ) -> Result<RuntimeValue, Diagnostic> {
+    // Field reads already project through a materialized Present carrier.
+    // Keep runtime success payloads in their native representation as well.
+    if let RuntimeValue::Result { ok: true, value } = value {
+        return project_field_id_named(_program, *value, field, name, span);
+    }
     if let RuntimeValue::SharedCell(cell) = value {
         prepare_shared_cell_access(&cell, span)?;
         let mut path = cell.path.clone();
@@ -31714,6 +31719,13 @@ fn replace_runtime_field(
 ) -> Result<RuntimeValue, Diagnostic> {
 
     match parent {
+        RuntimeValue::Result { ok: true, mut value } => {
+            // Rebuild the same success carrier that the field read projected
+            // through, rather than treating the payload as an opaque handle.
+            let payload = std::mem::replace(value.as_mut(), RuntimeValue::Moved);
+            *value = replace_runtime_field(_program, payload, field, name, replacement, span)?;
+            Ok(RuntimeValue::Result { ok: true, value })
+        }
         RuntimeValue::Aggregate(mut fields) => {
             let Some((_, value)) = fields.iter_mut().find(|(candidate, _)| *candidate == field)
             else {
@@ -31724,8 +31736,12 @@ fn replace_runtime_field(
         }
         RuntimeValue::Data(mut data) => {
             let replacement = runtime_to_data(replacement, span)?;
+            let target = match &mut data {
+                MirEvalValue::Present(value) => value.as_mut(),
+                value => value,
+            };
             replace_path(
-                &mut data,
+                target,
                 &[PathStep::Field(name.to_string())],
                 replacement,
                 span,
@@ -31757,7 +31773,11 @@ fn replace_runtime_field(
             "MIR field write cannot project a game handle",
             span,
         )),
-        RuntimeValue::App(_) | RuntimeValue::Result { .. } => Err(mir_error_at(
+        RuntimeValue::Result { ok: false, .. } => Err(mir_error_at(
+            "MIR field write cannot project a failed result",
+            span,
+        )),
+        RuntimeValue::App(_) => Err(mir_error_at(
             "MIR field write cannot project an App handle",
             span,
         )),
@@ -33825,6 +33845,98 @@ mod source_value_hook_tests {
             type_instances: Vec::new(), codec_migrations: HashMap::new(),
             unreachable: Vec::new(),
         }
+    }
+
+    #[test]
+    fn success_carrier_field_writes_preserve_nested_payload_and_siblings() {
+        let program = program(Vec::new());
+        let span = Span::new(0, 0);
+        let coverage = MirEvalValue::Struct {
+            type_name: "Coverage".into(),
+            fields: vec![
+                ("bits".into(), MirEvalValue::Int(1)),
+                ("reserved".into(), MirEvalValue::Int(7)),
+            ],
+        };
+        let row = MirEvalValue::Struct {
+            type_name: "Row".into(),
+            fields: vec![
+                ("access".into(), MirEvalValue::Int(0)),
+                ("coverage".into(), coverage),
+            ],
+        };
+        let mut expected = row.clone();
+        replace_path(
+            &mut expected,
+            &[
+                PathStep::Field("coverage".into()),
+                PathStep::Field("bits".into()),
+            ],
+            MirEvalValue::Int(5),
+            span,
+        ).unwrap();
+        for parent in [
+            RuntimeValue::Result {
+                ok: true,
+                value: Box::new(RuntimeValue::Data(row.clone())),
+            },
+            RuntimeValue::Data(MirEvalValue::Present(Box::new(row.clone()))),
+        ] {
+            let child = project_field_id_named(
+                &program, parent.clone(), MirFieldId(1), "coverage", span,
+            ).unwrap();
+            let bits = project_field_id_named(
+                &program, child.clone(), MirFieldId(2), "bits", span,
+            ).unwrap();
+            assert_eq!(runtime_to_data(bits, span).unwrap(), MirEvalValue::Int(1));
+            let child = replace_runtime_field(
+                &program, child, MirFieldId(2), "bits",
+                RuntimeValue::Data(MirEvalValue::Int(5)), span,
+            ).unwrap();
+            let updated = replace_runtime_field(
+                &program, parent, MirFieldId(1), "coverage", child, span,
+            ).unwrap();
+            assert_eq!(
+                runtime_to_data(updated, span).unwrap(),
+                MirEvalValue::Present(Box::new(expected.clone())),
+            );
+        }
+
+        let parent = RuntimeValue::Result {
+            ok: true,
+            value: Box::new(RuntimeValue::Aggregate(vec![
+                (MirFieldId(3), RuntimeValue::Data(MirEvalValue::Int(0))),
+            ])),
+        };
+        let field = project_field_id_named(
+            &program, parent.clone(), MirFieldId(3), "access", span,
+        ).unwrap();
+        assert_eq!(runtime_to_data(field, span).unwrap(), MirEvalValue::Int(0));
+        let updated = replace_runtime_field(
+            &program, parent, MirFieldId(3), "access",
+            RuntimeValue::Data(MirEvalValue::Int(1)), span,
+        ).unwrap();
+        let RuntimeValue::Result { ok: true, value } = updated else {
+            panic!("field write discarded the success carrier");
+        };
+        let RuntimeValue::Aggregate(fields) = *value else {
+            panic!("field write materialized the runtime aggregate");
+        };
+        assert_eq!(fields[0].0, MirFieldId(3));
+        assert_eq!(
+            runtime_to_data(fields[0].1.clone(), span).unwrap(),
+            MirEvalValue::Int(1),
+        );
+
+        let failure = RuntimeValue::Result {
+            ok: false,
+            value: Box::new(RuntimeValue::Data(row)),
+        };
+        let error = replace_runtime_field(
+            &program, failure, MirFieldId(3), "access",
+            RuntimeValue::Data(MirEvalValue::Int(1)), span,
+        ).expect_err("a failed result must not expose success fields");
+        assert!(error.what.contains("failed result"), "{error:?}");
     }
 
     fn field(id: u64, name: &str) -> MirField {
