@@ -2057,6 +2057,97 @@ fn checked_c_record_raw_pointers_prepare_without_native_repr_ice() {
 }
 
 #[test]
+fn fresh_noncopy_shared_construction_moves_payload_and_keeps_identity() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (bundle, nominals) = checked_bundle(r#"
+trait RawInput { fn read(self) -[]> Int Never! }
+struct InputValue { value: Int }
+impl InputValue.RawInput { fn read(self) -[]> Int Never! { self.value } }
+struct InputStorage { transport: RawInput }
+struct SharedInput {
+    storage: Shared<InputStorage>
+    fn read(self) -> Int Never! {
+        permit :: self.storage.guard_read()
+        permit.value.transport.read()
+    }
+}
+fn share_input(transport: ^RawInput) -> SharedInput Never! {
+    SharedInput{storage: shared InputStorage{transport: ^transport}}
+}
+fn share_moved(storage: ^InputStorage) -> SharedInput Never! {
+    SharedInput{storage: shared (^storage)}
+}
+fn new_storage(transport: ^RawInput) -> InputStorage Never! {
+    InputStorage{transport: ^transport}
+}
+fn share_call(transport: ^RawInput) -> SharedInput Never! {
+    SharedInput{storage: shared new_storage(^transport)}
+}
+fn run() {
+    input :: share_input(InputValue{value: 7})
+    cloned :: input.copy()
+    assert(input.storage.same(cloned.storage))
+    assert(input.read() == 7 && cloned.read() == 7)
+    storage := InputStorage{transport: InputValue{value: 11}}
+    moved :: share_moved(^storage)
+    assert(moved.read() == 11)
+    called :: share_call(InputValue{value: 13})
+    assert(called.read() == 13)
+    text :: "retained"
+    text_cell :: shared text
+    assert(text == "retained")
+    permit :: text_cell.guard_read()
+    assert(permit.value == "retained")
+}
+"#);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("fresh and moved shared payloads lower to checked MIR");
+        mir.validate().expect("shared payload transfers have valid MIR");
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let constructors = rust.lines().filter(|line| {
+            line.contains("JetShared::<") && line.contains("InputStorage") && line.contains("::new(")
+        }).collect::<Vec<_>>();
+        assert_eq!(constructors.len(), 3, "all three owning constructor paths must be exercised");
+        assert!(constructors.iter().all(|line| !line.contains(".clone()")),
+            "noncopy shared payloads must transfer, not clone: {constructors:?}");
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("shared-payload-proof"))
+            .join(format!("fresh-owner-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("shared_payload.rs");
+        let executable = directory.join(format!("shared_payload{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, &rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=shared_payload", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("shared payload codegen proof requires rustc");
+        assert!(compiled.status.success(),
+            "shared noncopy payloads must compile:\n{}", String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("shared payload codegen proof must run");
+        assert!(executed.status.success(),
+            "shared provider identity and borrowed text must survive:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
+
+#[test]
 fn native_stop_producer_checks_entry_calls_loops_and_panic_cleanup() {
     use jet_foundation::MIR::{MirPollKind, MirTerminator};
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
@@ -5872,8 +5963,8 @@ fn nested_pure_closure_never_carriers_compile_and_run() {
             "nested pure closure execution must succeed:\n{}",
             String::from_utf8_lossy(&executed.stderr));
         assert_eq!(String::from_utf8_lossy(&executed.stdout),
-            "11\n12\n10\n11\n22\n9\n",
-            "mutable snapshots, frozen captures and nested success values remain distinct");
+            include_str!("../../../../../Examples/features/expected/basics/closure_capture_snapshot.out"),
+            "mutable live borrows, frozen captures and nested success values remain distinct");
         std::fs::remove_dir_all(directory).unwrap();
     });
 }
