@@ -29,6 +29,15 @@ every program, `jet build`, `jet run` and `jet dev` compile through the Rust
 path and execute its result; the evaluator serves comptime only until native
 O0 comptime lands. Both are removed with the rest of Rust (owner directive 19).
 
+Bootstrap MIR optimization verifies legality in both development and release
+builds. `JET_DEBUG_LOWER_ALL=1` additionally reports all global identity
+collisions and independent legality checks for each function before returning
+the original first failure; it neither accepts invalid MIR nor continues
+optimization. Checks that require valid component prerequisites still reject
+that component rather than reading invalid references. With `JET_DUMP_MIR`
+also set, the checked lowering pipeline saves the pre-verification program at
+`<dump-path>.before-legality`; the usual post-optimization dump remains unchanged.
+
 The native runtime object's `jet_rt_alloc` and `jet_rt_free` own C-carrier
 allocation. Generated Rust adapters allocate List result buffers through that
 same allocator because native List paths release them with `jet_rt_free`.
@@ -542,6 +551,19 @@ Collection callbacks returning `T Never!` select the non-fallible operation:
 their empty failure carrier is normalized before invocation. In particular,
 two-argument sort comparators, whether named or literal, use the checked
 comparator route rather than attempting a fallible key-selector route.
+
+The native backend lowers canonical `List.reverse`, `List.extend`, `List.last`
+and `List.try_reserve` directly over the List header. Reverse swaps packed
+scalars or complete inline owner layouts without cloning or allocation. Extend
+consumes the source buffer, adopting it into an empty destination or relocating
+its elements into one geometrically grown destination; it never closes moved
+elements. Last uses the ordinary checked List-get clone and optional carrier.
+Fallible reserve retains the original header and element owners on failure and
+consults the allocation fault rail exactly once for each nonnegative request,
+including requests satisfied by existing capacity. Its error is the canonical
+`AllocError`, not a backend-private layout. The pack-free `--list-routes`
+fixture mode executes production lowering and LIR lint for all four witnesses;
+native image execution remains part of the admitted-pack fixture census.
 
 A bare registered Core-carrier trait reference resolves through that carrier's
 one source-module owner and the exact trait/method identity. It cannot match an

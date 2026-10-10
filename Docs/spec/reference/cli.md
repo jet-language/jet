@@ -13,6 +13,9 @@ and the command table in
 The Rust host keeps commands in
 [`crates/jet-foundation/src/CLICommands.rs`](../../../crates/jet-foundation/src/CLICommands.rs)
 and flags in `crates/jet-cli/src/CLI.rs`; `node Compiler/Bootstrap/check-command-table.mjs` compares the assembled tables.
+The compiler aggregate includes that Foundation registry exactly once; the CLI
+imports its command, handler, and flag rows rather than maintaining a second
+Jet copy. The bootstrap inventory contract checks their sole authored owner.
 Run `jet help <command>` for the complete options for one command; do not infer an
 option from an older guide.
 

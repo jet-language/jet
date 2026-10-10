@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -87,4 +87,21 @@ test("unwired CLI exclusions do not mask another unlisted CLI source", (t) => {
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Compiler\/JetCli\/Source\/Cli\/Unlisted\.jet/);
   assert.doesNotMatch(result.stderr, /(?:Dependency|Jobs|Supply|ToolchainPin)\.jet/);
+});
+
+test("shared CLI registries have one authored owner in the compiler inventory", () => {
+  const repo = new URL("../../", import.meta.url);
+  const paths = readFileSync(new URL("Compiler/Bootstrap/sources.list", repo), "utf8")
+    .split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
+  const canonical = "Compiler/JetFoundation/Source/Registry/CLICommands.jet";
+  assert.equal(paths.filter((path) => path === canonical).length, 1);
+  assert.equal(existsSync(new URL("Compiler/JetCli/Source/Cli/Commands.jet", repo)), false);
+  const owners = new Map(["JET_CLI_COMMANDS", "JET_CLI_HANDLERS", "JET_CLI_FLAGS"].map((name) => [name, []]));
+  for (const path of paths) {
+    const text = readFileSync(new URL(path, repo), "utf8");
+    for (const declaration of text.matchAll(/^([A-Za-z_][A-Za-z_0-9]*)[ \t]*::/gm)) {
+      owners.get(declaration[1])?.push(path);
+    }
+  }
+  for (const [name, found] of owners) assert.deepEqual(found, [canonical], `${name} must have one canonical declaration`);
 });

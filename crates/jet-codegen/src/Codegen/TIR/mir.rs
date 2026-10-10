@@ -3997,6 +3997,18 @@ pub fn lower_checked_mir_program_for_with_debug(
     // Compile time is explicit in the checker, so ordinary immutable bindings
     // over pure work are folded here, once, for every execution tier.
     crate::Codegen::MIREval::fold_pure_calls(&mut mir);
+    // The collect-all census must expose the input even when entry legality
+    // rejects it. Stream Debug text through the existing bounded writer; the
+    // ordinary canonical post-pass dump keeps its original path and behavior.
+    if std::env::var_os("JET_DEBUG_LOWER_ALL").is_some_and(|value| value != "0") {
+        if let Some(path) = std::env::var_os("JET_DUMP_MIR") {
+            let mut before = path.clone();
+            before.push(".before-legality");
+            if let Err(error) = dump_mir_debug(&before, &mir) {
+                eprintln!("JET_DUMP_MIR: cannot write pre-legality input: {error}");
+            }
+        }
+    }
     let mir = jet_foundation::MIR::optimize_mir_program(
         mir,
         &jet_foundation::MIR::MirOptimizationPolicy::conservative(),

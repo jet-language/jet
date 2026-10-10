@@ -163,6 +163,22 @@ impl std::error::Error for MirOptimizationError {}
 /// later adapter.  The verifier is intentionally independent of optimization
 /// or backend representation.
 pub fn verify_mir_legality(program: &MirProgram) -> Result<(), MirLegalityError> {
+    let result = verify_mir_legality_first(program);
+    if std::env::var_os("JET_DEBUG_LOWER_ALL").is_some_and(|value| value != "0") {
+        if let Err(first) = &result {
+            let errors = collect_mir_legality_errors(program, first);
+            for error in &errors {
+                eprintln!("JET_DEBUG_LOWER_ALL legality: {error}");
+            }
+            eprintln!("JET_DEBUG_LOWER_ALL legality summary: {} violations", errors.len());
+        } else {
+            eprintln!("JET_DEBUG_LOWER_ALL legality summary: 0 violations");
+        }
+    }
+    result
+}
+
+fn verify_mir_legality_first(program: &MirProgram) -> Result<(), MirLegalityError> {
     program.validate().map_err(MirLegalityError::Validation)?;
     verify_operator_markers(program)?;
     let function_ids: HashSet<_> = program.functions.iter().map(|function| function.id).collect();
@@ -218,6 +234,122 @@ pub fn verify_mir_legality(program: &MirProgram) -> Result<(), MirLegalityError>
         verify_transparent_conversions(function, &program.types)?;
     }
     Ok(())
+}
+
+// Measurement only: retain the original failure, but do not let one invalid
+// program row hide independent rows or functions. A failed prerequisite inside
+// one verifier still stops that component before it can index malformed data.
+fn collect_mir_legality_errors(program: &MirProgram, first: &MirLegalityError) -> Vec<MirLegalityError> {
+    let mut errors = vec![first.clone()];
+    let mut record = |result: Result<(), MirLegalityError>| {
+        if let Err(error) = result {
+            if !errors.contains(&error) {
+                errors.push(error);
+            }
+        }
+    };
+    macro_rules! identities {
+        ($rows:expr, $field:ident, $kind:literal) => {{
+            let mut seen = HashMap::new();
+            for (index, row) in $rows.iter().enumerate() {
+                let id = row.$field.0;
+                if id == 0 {
+                    record(Err(MirLegalityError::Validation(MirValidationError::ZeroId {
+                        kind: $kind, span: None,
+                    })));
+                }
+                if let Some(previous) = seen.insert(id, index) {
+                    eprintln!("JET_DEBUG_LOWER_ALL identity: kind={} id={} rows={previous},{index}", $kind, id);
+                    record(Err(MirLegalityError::Validation(MirValidationError::DuplicateId {
+                        kind: $kind, id,
+                    })));
+                }
+            }
+        }};
+    }
+    identities!(program.modules, id, "module");
+    identities!(program.imports, id, "import");
+    identities!(program.traits, id, "trait");
+    identities!(program.impls, id, "impl");
+    identities!(program.constants, id, "constant");
+    identities!(program.foreign, id, "foreign");
+    identities!(program.links, id, "link unit");
+    identities!(program.callbacks, id, "callback");
+    identities!(program.handles, id, "handle");
+    identities!(program.jobs, id, "job");
+    identities!(program.tests, id, "test");
+    identities!(program.harnesses, id, "harness");
+    identities!(program.artifacts, id, "artifact");
+    identities!(program.functions, id, "function");
+    identities!(program.types, id, "type definition");
+    identities!(program.core_owners, id, "Core owner");
+    identities!(program.core_owners, nominal_id, "Core owner nominal");
+    identities!(program.fields, id, "field");
+    identities!(program.source_files, id, "source file");
+    identities!(program.core_calls, id, "Core call");
+    identities!(program.prelude_calls, id, "Prelude call");
+    let mut instance_ids = HashSet::new();
+    for row in &program.type_instances {
+        match row.identity {
+            None => record(Err(MirLegalityError::Validation(MirValidationError::MissingTypeIdentity))),
+            Some(id) => {
+                if id.0 == 0 {
+                    record(Err(MirLegalityError::Validation(MirValidationError::ZeroId {
+                        kind: "type instance", span: None,
+                    })));
+                }
+                if !instance_ids.insert(id) {
+                    record(Err(MirLegalityError::Validation(MirValidationError::DuplicateId {
+                        kind: "type instance", id: id.0,
+                    })));
+                }
+            }
+        }
+    }
+    let mut constant_ids = HashMap::new();
+    for row in &program.constants {
+        if let Some(previous) = constant_ids.insert(row.id, row) {
+            eprintln!("JET_DEBUG_LOWER_ALL constant collision: id={} first=({:?},{:?},{:?}) second=({:?},{:?},{:?})",
+                row.id.0, previous.key, previous.name, previous.span, row.key, row.name, row.span);
+        }
+    }
+    let function_ids: HashSet<_> = program.functions.iter().map(|row| row.id).collect();
+    let type_ids: HashSet<_> = program.types.iter().map(|row| row.id)
+        .chain(program.type_instances.iter().filter_map(|row| row.identity)).collect();
+    let field_ids: HashSet<_> = program.fields.iter().map(|row| row.id).collect();
+    let source_ids: HashSet<_> = program.source_files.iter().map(|row| row.id).collect();
+    let foreign_ids: HashSet<_> = program.foreign.iter().map(|row| row.id).collect();
+    let callback_ids: HashSet<_> = program.callbacks.iter().map(|row| row.id).collect();
+    let trait_ids: HashSet<_> = program.traits.iter().map(|row| row.id).collect();
+    let core_ids: HashSet<_> = program.core_calls.iter().map(|row| row.id).collect();
+    let core_calls: HashMap<_, _> = program.core_calls.iter().map(|row| (row.id, row)).collect();
+    let prelude_calls: HashMap<_, _> = program.prelude_calls.iter().map(|row| (row.id, row)).collect();
+    record(verify_operator_markers(program));
+    record(verify_program_rows(program, &function_ids, &type_ids, &field_ids, &source_ids));
+    record(verify_hardware_setups(program));
+    record(verify_prelude_rows(program, &type_ids, &field_ids));
+    for row in &program.core_calls {
+        record(verify_core_call(row));
+    }
+    for row in &program.types {
+        record(verify_type_def(row, &function_ids, &field_ids));
+    }
+    for row in &program.type_instances {
+        record(verify_type(row, Span { start: 0, end: 0 }, MirFunctionId(0)));
+    }
+    let mut keys = HashSet::new();
+    for function in &program.functions {
+        if !keys.insert(function.key.as_str()) {
+            record(Err(MirLegalityError::Validation(MirValidationError::DuplicateKey {
+                kind: "function", key: function.key.clone(),
+            })));
+        }
+        record(verify_function(function, &function_ids, &type_ids, &trait_ids, &field_ids,
+            &source_ids, &foreign_ids, &callback_ids, &core_ids, &core_calls, &prelude_calls));
+        record(verify_capture_operations(function));
+        record(verify_transparent_conversions(function, &program.types));
+    }
+    errors
 }
 fn invalid_program_row(subject: impl Into<String>, span: Span) -> MirLegalityError {
     MirLegalityError::InvalidReference {
@@ -16351,6 +16483,55 @@ mod ownership_guard_tests {
             entry: MirBlockId(0), locals, values: Vec::new(), places,
             scopes: Vec::new(), drops: Vec::new(), foreign_language: None,
         }
+    }
+
+    #[test]
+    fn legality_census_reports_all_duplicate_tables_and_independent_functions() {
+        let constant = |id, name: &str| MirConstantDef {
+            id: crate::MIR::MirConstantId(id), module: crate::MIR::MirModuleId(1),
+            key: name.into(), name: name.into(), span: Span::new(0, 1),
+            visibility: crate::MIR::MirVisibility::Private,
+            ty: MirType::from_kind(MirTypeKind::Bool), is_storage: false,
+            value: MirConstant::Bool(false),
+        };
+        let mut first_function = cleanup_function(false);
+        first_function.id = MirFunctionId(1);
+        let mut second_function = cleanup_function(false);
+        second_function.id = MirFunctionId(2);
+        second_function.key = "second_function".into();
+        let program = MirProgram {
+            cffi: crate::MIR::MirCffiFacts::default(), native_pack: false,
+            schema_version: crate::MIR::MIR_SCHEMA_VERSION, package_identity: "legality-census".into(),
+            facts: crate::MIR::MirPackageFacts::default(), names: crate::MIR::MirNameFacts::default(),
+            modules: Vec::new(), imports: Vec::new(), types: Vec::new(), traits: Vec::new(),
+            core_owners: Vec::new(), impls: Vec::new(),
+            constants: vec![constant(7, "first"), constant(7, "first"),
+                constant(9, "second"), constant(9, "second")],
+            fields: Vec::new(), source_files: Vec::new(),
+            functions: vec![first_function, second_function],
+            foreign: Vec::new(), links: Vec::new(), callbacks: Vec::new(),
+            handles: Vec::new(), jobs: Vec::new(), tests: Vec::new(), harnesses: Vec::new(),
+            artifacts: Vec::new(), core_calls: Vec::new(), prelude_calls: Vec::new(),
+            type_instances: Vec::new(), codec_migrations: HashMap::new(), unreachable: Vec::new(),
+        };
+        let first = verify_mir_legality_first(&program).unwrap_err();
+        assert!(matches!(first, MirLegalityError::Validation(MirValidationError::DuplicateId {
+            kind: "constant", id: 7,
+        })));
+        let errors = collect_mir_legality_errors(&program, &first);
+        for id in [7, 9] {
+            assert!(errors.contains(&MirLegalityError::Validation(MirValidationError::DuplicateId {
+                kind: "constant", id,
+            })), "a later duplicate table must not be hidden by the first");
+        }
+        for id in [1, 2] {
+            assert!(errors.iter().any(|error| matches!(error,
+                MirLegalityError::InvalidReference { function, .. } if function.0 == id)),
+                "a global identity failure must not hide any independent function");
+        }
+        assert!(matches!(optimize_mir_program(program, &MirOptimizationPolicy::conservative()),
+            Err(MirOptimizationError::Legality { error, .. }) if error == first),
+            "the debug census must not change the optimizer's original failure");
     }
 
     // Exercise the ownership verifier itself, deriving its CFG inputs through

@@ -6248,3 +6248,25 @@ fn run() {
         std::fs::remove_dir_all(directory).unwrap();
     });
 }
+
+#[test]
+fn global_cli_registry_constants_optimize_once() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let source = format!("{}\nfn run() {{ print(JET_CLI_COMMANDS.len()) }}\n", include_str!(
+            "../../../../../Compiler/JetFoundation/Source/Registry/CLICommands.jet"
+        ));
+        let (bundle, nominals) = checked_bundle(&source);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("the canonical CLI table must pass global MIR optimization");
+        mir.validate().expect("canonical CLI constants must have unique MIR identities");
+        for name in ["JET_CLI_COMMANDS", "JET_CLI_HANDLERS", "JET_CLI_FLAGS"] {
+            assert_eq!(mir.constants.iter().filter(|constant| constant.name == name).count(), 1,
+                "{name} must have exactly one runtime declaration");
+        }
+    });
+}
