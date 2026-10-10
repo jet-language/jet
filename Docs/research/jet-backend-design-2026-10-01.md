@@ -1025,6 +1025,16 @@ production-generated adapter body and checks the walk/terminal route inventory.
 Parameters whose runtime signature is `i64`, including borrowed parameters and
 list elements, narrow the exact-Int carrier through the existing `native`
 conversion rather than interpreting a big-integer owner as a machine value.
+
+The vetted raw Object view projects the native Object entries into
+`[len, 0, data]` View storage, retaining the source buffer and its loan rather
+than cloning a runtime tree. The owned entries constructor transfers the
+original List header into the Object payload with ordinary native ownership.
+Zeroize lends the original Write List<U8> data/length to the existing native
+provider; it never wipes a temporary Rust Vec. `NativeValues.jet` lowers and
+lints all three callable witnesses in the route-carrier fixture harness and
+rejects cloning-bridge imports.
+
 `IOError` is a C-carrier boundary, not a `Box` of the Rust enum. Its 56-byte,
 eight-aligned `JetCIOError` stores kind, operation, optional E4 resource text,
 OS-code presence and value, optional E4 cause text, and resource-limit tag.

@@ -4,8 +4,8 @@
 // Requested checked codec implementations are lowered by Codecs.jet.
 // No unwired runtime/container codec policy is retained here.
 use jet_foundation.[
-    MIRInstruction, MIRLocalID, MIRNominalRef, MIRProgram, MIRType, MIRTypeKind, MIRValueID,
-    mir_type_display_name, mir_type_from_kind,
+    MIRCallArg, MIRInstruction, MIRLocalID, MIRNominalRef, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeKind, MIRValueID,
+    mir_type_display_name, mir_type_from_kind, mir_type_same_checked_type,
 ]
 
 fn lower_dyn_type(p: MIRProgram, ty: MIRType) -> Bool Never! {
@@ -268,5 +268,106 @@ fn lower_dyn_to_text(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     joined :: dst ?? lower_pointer(&f)
     lower_start(&f, merge, [LIRValueID]{joined})
     if dst == None -> lower_map_drop_value(p, &m, &f, joined, result_ty)
+    true
+}
+// These kernels already operate on Jet's native value storage. Crossing a
+// Rust Dyn bridge would clone the borrowed Object and lose its view lifetime.
+fn lower_native_value_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
+    row :: lower_prelude_row(p, call) ?? return false
+    symbol :: lower_route_symbol(row)
+    entries_view :: symbol == "jet_raw_object_entries_view"
+    entries_take :: symbol == "jet_raw_object_from_entries"
+    zeroize :: symbol == "jet_crypto_zeroize"
+    if !entries_view && !entries_take && !zeroize -> return false
+    if args.len() != 1 {
+        lower_fail(&m, &f, "native value kernel {symbol} requires one checked argument")
+        return true
+    }
+    source_ty :: lower_value_type(c, args[0].value) ?? {
+        lower_fail(&m, &f, "native value kernel {symbol} argument has no checked type")
+        return true
+    }
+    source :: lower_use(&m, &f, args[0].value) ?? return true
+    if zeroize {
+        elem :: lower_list_element(source_ty) ?? {
+            lower_fail(&m, &f, "zeroize requires the checked mutable List<U8>")
+            return true
+        }
+        byte :: if elem.kind == .IntN(signed, bits) -> !signed && bits == 8 else -> false
+        if !byte || args[0].access != .Write {
+            lower_fail(&m, &f, "zeroize must lend the original List<U8> Write buffer")
+            return true
+        }
+        data :: lower_list_data(&f, source)
+        length :: lower_list_word(&f, source, 0)
+        lower_call_runtime(&m, &f, "jet_crypto_zeroize", [LIRValueID]{data, length}, None)
+        lower_alias_absent(&f, instruction)
+        return true
+    }
+    result_ty :: lower_checked_type(c, instruction) ?? {
+        lower_fail(&m, &f, "native Object kernel {symbol} result has no checked type")
+        return true
+    }
+    tree_ty :: if entries_view -> source_ty else -> result_ty
+    definition :: lower_type_def(p, tree_ty) ?? {
+        lower_fail(&m, &f, "native Object kernel has no checked Dyn definition")
+        return true
+    }
+    if !lower_dyn_type(p, tree_ty) {
+        lower_fail(&m, &f, "native Object kernel requires the canonical Dyn")
+        return true
+    }
+    found :: lower_variant(definition, "Object") ?? {
+        lower_fail(&m, &f, "canonical Dyn has no Object variant")
+        return true
+    }
+    info :: lower_enum_payload_info(p, definition, found.variant, 0) ?? {
+        lower_fail(&m, &f, "Dyn.Object has no checked ordered entries storage")
+        return true
+    }
+    element :: lower_list_element(info.ty) ?? {
+        lower_fail(&m, &f, "Dyn.Object payload is not its checked ordered List")
+        return true
+    }
+    if entries_view {
+        view_element :: lower_view_element(result_ty) ?? {
+            lower_fail(&m, &f, "Object entries result is not a checked View")
+            return true
+        }
+        if args[0].access != .Read || !mir_type_same_checked_type(element, view_element) {
+            lower_fail(&m, &f, "Object entries view must borrow the original checked entry type")
+            return true
+        }
+        payload := source
+        if info.boxed {
+            payload = lower_pointer(&f)
+            lower_emit(&f, LIRInst.Load{dst: payload, base: source, offset: info.offset})
+        } else {
+            payload = lower_address(&f, source, info.offset)
+        }
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+        lower_storage_into(p, &f, dst, result_ty)
+        length :: lower_list_word(&f, payload, 0)
+        lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: length})
+        lower_store_word(&f, dst, 8, 0)
+        data :: lower_list_data(&f, payload)
+        lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: data})
+    } else {
+        if args[0].access != .Move || !mir_type_same_checked_type(source_ty, info.ty) {
+            lower_fail(&m, &f, "Object construction must transfer its checked ordered List")
+            return true
+        }
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+        lower_alloc(&m, &f, dst, lower_enum_box_size(p, definition))
+        lower_store_word(&f, dst, 0, lower_discriminant(found.index))
+        if info.boxed {
+            wrapper :: lower_pointer(&f)
+            lower_alloc(&m, &f, wrapper, lower_option_box_size(p, info.ty))
+            lower_write_at(p, &f, wrapper, 0, source, info.ty)
+            lower_emit(&f, LIRInst.Store{base: dst, offset: info.offset, value: wrapper})
+        } else {
+            lower_write_at(p, &f, dst, info.offset, source, info.ty)
+        }
+    }
     true
 }

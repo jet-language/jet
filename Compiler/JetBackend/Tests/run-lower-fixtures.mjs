@@ -217,7 +217,8 @@ const parts = [
     body("Compiler/JetBackend/Tests/LowerFixtures.jet").split("fn fx_hello(")[0],
     item("Compiler/JetBackend/Tests/Fixtures/Tuple.jet", "fn fx_tuple_type("),
     body("Compiler/JetBackend/Tests/Fixtures/RouteCarriers.jet"),
-    'fn run() { assert(fx_route_carrier_checks()); print("route carrier fixtures passed") }',
+    body("Compiler/JetBackend/Tests/Fixtures/NativeValues.jet"),
+    'fn run() { assert(fx_route_carrier_checks()); assert(fx_route_native_values_checks()); print("route carrier fixtures passed") }',
   ] : foreignDescriptors ? [
     body("Compiler/JetBackend/Tests/LowerFixtures.jet").split("fn fx_hello(")[0],
     body("Compiler/JetBackend/Tests/Fixtures/Foreign.jet"),
