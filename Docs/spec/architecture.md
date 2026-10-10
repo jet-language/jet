@@ -1040,6 +1040,20 @@ and a shared-output publication lock retain one helper build under concurrency.
 Cargo detail. Cargo is resolved only from `PATH`; the selected musl rustc,
 linker and archiver belong only to its helper child. Programs without Rust
 declarations perform no helper or toolchain probes.
+An explicit `JET_FFI_CACHE_DIR` is used verbatim by both hosts and retained by
+the native test marker, so a case can inspect its own shared-cache concurrency
+contract. `CARGO_NET_OFFLINE` is forwarded only to the isolated metadata child;
+an offline resolution failure still follows the shared `E0704` run/build route.
+The actual Cargo build keeps the host's explicit `CARGO_BUILD_JOBS` worker
+bound and private Cargo/home/target environment, never ambient Cargo settings.
+The native metadata sandbox deliberately forwards only `CARGO_NET_OFFLINE`,
+not the hosted metadata command's other ambient `CARGO_*` settings; this is a
+narrower metadata behavior, not an expansion of build authority.
+The outer test-trace wrapper alone sets `JET_FFI_TRACE_WORKSPACE=1`: private
+0700 workspaces remain beneath the full key's `.trace-workspaces/<nonce>` until
+the audit reads the actual sandbox-mapped manifests. Normal builds still use
+an OS TempDir with lexical cleanup; neither mode changes source-read-only or
+output-private mounts, locks, dependency identity, or the cache's root key count.
 
 Manifest-less `use package#version` admission reuses the package model's local,
 offline inline-dependency resolver: `.jet/inline-deps` is authoritative, with
@@ -1744,12 +1758,23 @@ Native cutover uses one outer process trace. Testkit's exec-only
 `native-command.mjs` labels each case without changing its command PID or streams;
 `native-trace.mjs` audits ancestry, cwd and successful executions after the trace
 closes. Rust/LLVM defaults to a violation. The committed
-`Tools/testkit/user-rust-ffi.allow` admits only source-declared user Rust crates:
-generated helper manifests must reside in the external case/dependency-digest
-cache, have exactly the declared dependencies, and be built through Jet's
-foreign Cargo branch. The exact `rustc -vV` identity query is also admitted only
-in an allowlisted case's Jet foreign branch, preserving the host's helper/cache
-hashes; receipts list these queries separately. Extra query arguments or sysroot
+`Tools/testkit/user-rust-ffi.allow` has four columns: case identity, exact reason,
+compiled source provenance and declared dependencies. A `.case` names precisely
+the fixture sources its commands compile; direct Jet cases name themselves.
+Receipts retain source hashes. Pure-Jet fixtures receive no Rust exception.
+Generated helper manifests must reside in the cache that the command actually
+uses: an explicit `JET_FFI_CACHE_DIR` is preserved verbatim, otherwise the
+external case/dependency-digest cache applies. Dependencies and admitted Jet
+foreign ancestry must match. Cargo metadata is restricted to
+`metadata --format-version 1 --manifest-path <generated helper manifest>`,
+under the same checks as builds. The immutable tracing wrapper enables retained
+private workspaces beneath `<cache>/<full-key>/.trace-workspaces/<pid>-<attempt>`;
+the source is mounted readonly at `/work/source`, output writable at
+`/work/output`. Audit maps those exact mounts back to retained manifests, rejects
+overlays/escapes, and records their bytes and hashes. Case/tier scratch is retained
+only for the outer audit; ordinary runs keep their existing cleanup.
+The exact `rustc -vV` identity query is admitted only in an allowlisted case's
+Jet foreign branch, and is recorded separately. Extra query arguments or sysroot
 probes do not inherit that exception. Jet program compilation/linking/running
 never gets a Rust
 exception. Receipts distinguish zero-Rust cases, observed user-FFI builds and

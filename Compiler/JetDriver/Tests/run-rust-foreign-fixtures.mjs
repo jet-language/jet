@@ -5,6 +5,7 @@
 // --eval <jet> executes the actual pure fixtures without the hosted emitter.
 // --native-abi --cargo-target <diskdir> also builds only that emitted helper,
 // then links/runs the C descriptor witness with the opt-in musl toolchain.
+// --host-env executes the actual isolated-helper environment argument producer.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
@@ -48,12 +49,19 @@ const planner = read('Compiler/JetDriver/Source/Driver/RustForeign.jet');
 const prefix = planner.indexOf('struct JetDriverRustForeignRecord ');
 if (prefix < 0) throw new Error('missing planner/checked-graph boundary');
 const fixture = read('Compiler/JetDriver/Tests/RustForeignFixtures.jet');
-const host = process.argv.includes('--host') || process.argv.includes('--host-full');
+const environmentFixture = process.argv.includes('--host-env');
+const host = process.argv.includes('--host') || process.argv.includes('--host-full') || environmentFixture;
 const roots = [body(planner.slice(0, prefix)), body(read('Compiler/JetDriver/Source/Driver/RustForeignSource.jet')), body(host ? fixture.slice(0, fixture.indexOf('fn run()')) : fixture)];
 if (host) {
   if (process.argv.includes('--host-full')) roots.push(body(read('Compiler/JetCli/Source/Cli/RustForeign.jet')));
-  else roots.push(body('use core.encoding.json as cli_rust_json\nuse core.encoding.json.[pointer]\nuse core.encoding.[Dyn]'));
-  roots.push(body(read('Compiler/JetCli/Tests/RustForeignFixtures.jet')));
+  else roots.push(body(read('Compiler/JetCli/Source/Cli/RustForeign.jet').split('\n').filter(line => line.startsWith('use core.')).join('\n')));
+  if (environmentFixture) {
+    const tests = read('Compiler/JetCli/Tests/RustForeign.jet');
+    const start = tests.indexOf('fn cli_rust_foreign_test_environment()');
+    const end = tests.indexOf('\nfn run()', start);
+    if (start < 0 || end < 0) throw new Error('missing canonical helper environment regression');
+    roots.push(body('use core.sys as rust_foreign_test_sys\n' + tests.slice(start, end) + '\nfn run() { cli_rust_foreign_test_environment()\nprint("FFI environment fixtures passed") }\n'));
+  } else roots.push(body(read('Compiler/JetCli/Tests/RustForeignFixtures.jet')));
 }
 const owned = new Set(roots.join('\n').match(/\b(?:JetDriverRustForeign\w*|jet_driver_rust_foreign_\w*|rust_foreign_fixture_\w*|JET_DRIVER_RUST_FOREIGN_\w*)\b/g) ?? []);
 owned.add('run');
@@ -97,7 +105,7 @@ if (jet) {
   const evaluated = spawnSync(jet, ['eval', resolve(out, 'unit.jet'), '--json'], { encoding: 'utf8', maxBuffer: 1 << 24 });
   if (evaluated.status !== 0) throw new Error(`${evaluated.stdout}\n${evaluated.stderr}`);
   if (JSON.parse(evaluated.stdout).ok !== true) throw new Error('pure fixture evaluation did not pass');
-  const marker = host ? 'FFI host fixtures passed' : 'FFI helper fixtures passed';
+  const marker = environmentFixture ? 'FFI environment fixtures passed' : host ? 'FFI host fixtures passed' : 'FFI helper fixtures passed';
   if (!evaluated.stderr.includes(marker)) throw new Error('missing executed fixture assertions');
   console.log(marker);
   if (!host) {

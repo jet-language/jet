@@ -298,6 +298,13 @@ fn jet_cli_rust_foreign_bwrap(bwrap: String, source: String, output: String, reg
         if cli_sys.get("CARGO_BUILD_JOBS") == .Val(jobs) {
             loop argument in ([String]{"--setenv", "CARGO_BUILD_JOBS", jobs}) -> &args.push(argument)
         }
+        // The host's metadata preflight inherits offline resolution control;
+        // its isolated build forwards only the explicit Cargo worker bound.
+        if metadata {
+            if cli_sys.get("CARGO_NET_OFFLINE") == .Val(offline) {
+                loop argument in ([String]{"--setenv", "CARGO_NET_OFFLINE", offline}) -> &args.push(argument)
+            }
+        }
     }
     if share_network -> &args.push("--share-net")
     Ok(args)
@@ -450,11 +457,39 @@ fn jet_cli_rust_foreign_invalidate(directory: cli_files.Directory, crate_name: S
     Ok(())
 }
 
+// Test-trace-only: the immutable outer-trace wrapper sets this mode. Actual
+// helper inputs survive until its audit; ordinary builds keep TempDir cleanup.
+// This caller holds the full-key OS lock. No workspace is a new cache root key.
+fn jet_cli_rust_foreign_trace_workspace(source: String) -[FS, Env]> cli_files.Directory JetDriverRustForeignError! {
+    owner :: cli_files.open_directory(source) ?? return Err(jet_cli_rust_foreign_io("couldn't hold traced FFI key folder: {err}"))
+    if !cli_files.exists("{source}/.trace-workspaces") {
+        created :: owner.create_directory(".trace-workspaces", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create traced FFI workspace folder: {err}"))
+    }
+    workspaces :: owner.open_directory(".trace-workspaces") ?? return Err(jet_cli_rust_foreign_io("couldn't hold traced FFI workspace folder: {err}"))
+    entries :: workspaces.list() ?? return Err(jet_cli_rust_foreign_io("couldn't list traced FFI workspaces: {err}"))
+    // The wrapper retains every attempt until audit. Exclusive creation also
+    // refuses a substituted or colliding name rather than reusing its inputs.
+    name :: "{cli_sys.getpid()}-{entries.len()}"
+    created :: workspaces.create_directory(name, Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create exclusive traced FFI workspace: {err}"))
+    Ok(^created)
+}
+
 fn jet_cli_rust_foreign_build(plan: JetDriverRustForeignPlan, cache: String, source: String, target_dir: String, release: String, toolchain: String, link_closure: String, cargo: String) JetDriverRustForeignError! -[FS, Env, Exec, Time.Wait]> {
     bwrap :: jet_cli_rust_foreign_sandbox()
-    // TempDir is an OS-created private directory with lexical cleanup.
-    temporary :: cli_files.temp_dir("jet-ffi") ?? return Err(jet_cli_rust_foreign_io("couldn't create private FFI workspace: {err}"))
-    root :: cli_files.open_directory(temporary.path) ?? return Err(jet_cli_rust_foreign_io("couldn't hold private FFI workspace: {err}"))
+    trace_workspace :: cli_sys.get("JET_FFI_TRACE_WORKSPACE") == Val("1")
+    temporary :: if trace_workspace -> { cli_files.TempDir?{None} } else -> {
+        created :: cli_files.temp_dir("jet-ffi") ?? return Err(jet_cli_rust_foreign_io("couldn't create private FFI workspace: {err}"))
+        Val(^created)
+    }
+    root :: if trace_workspace -> {
+        jet_cli_rust_foreign_trace_workspace(source) ?? return Err(err)
+    } else -> {
+        path :: if temporary == {
+            .Val(directory) -> directory.path.copy()
+            .None -> { return Err(jet_cli_rust_foreign_io("private FFI workspace was not retained")) }
+        }
+        cli_files.open_directory(path) ?? return Err(jet_cli_rust_foreign_io("couldn't hold private FFI workspace: {err}"))
+    }
     private_source :: root.create_directory("source", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create private FFI sources: {err}"))
     private_src :: private_source.create_directory("src", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create private FFI src folder: {err}"))
     private_output :: root.create_directory("output", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create private FFI output: {err}"))

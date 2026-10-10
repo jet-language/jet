@@ -1,12 +1,12 @@
 # Port of tests/cffi.rs:3255-3321, all source/renderer predicates retained.
-# PENDING-SEAM(native-sandbox): original checks native_sandbox_status.available before spawning.
-# PENDING-GRAMMAR(batch4 subject filters). No public boolean sandbox-availability probe found.
+# The real helper sandbox remains mandatory; a stale private availability
+# refusal must not bypass the public run/build diagnostic assertions.
 requires: tool:cargo
-refused: native-sandbox
 fixture: unresolvable-crate.fixture
 env: JET_FFI_CACHE_DIR={work}/ffi-cache
 env: NO_COLOR=1
 env: TERM=dumb
+env: CARGO_NET_OFFLINE=true
 mkdir: ffi-cache
 step run: jet run main.jet
 exit: nonzero

@@ -2,6 +2,7 @@
 // these tests do not prepare a helper, probe tools, spawn Cargo, or fake a cache.
 use jet_parser.[parse_source]
 use jet_driver.[JetDriverRustForeignEntry, JetDriverRustForeignFacts, JetDriverRustForeignPlan, jet_driver_rust_foreign_plan, jet_driver_rust_foreign_function, JET_DRIVER_RUST_FOREIGN_TARGET, JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE, JET_DRIVER_RUST_FOREIGN_DESCRIPTOR]
+use core.sys as rust_foreign_test_sys
 use jet_foundation.[mir_sha256_bytes, mir_sha256_hex_bytes]
 
 fn cli_rust_foreign_test_plan(name: String) -> JetDriverRustForeignPlan {
@@ -81,10 +82,28 @@ fn cli_rust_foreign_test_provenance(plan: JetDriverRustForeignPlan) {
     assert(!jet_cli_rust_foreign_hex(digest.to_upper()))
     assert(!jet_cli_rust_foreign_hex("../artifact"))
 }
+fn cli_rust_foreign_test_environment() {
+    loop metadata in ([Bool]{true, false}) {
+        args :: jet_cli_rust_foreign_bwrap("bwrap", "/fixture/source", "/fixture/output", "", true, metadata) ?? panic("helper sandbox arguments: {err}")
+        offline := String?{None}
+        loop index in 0..<args.len() {
+            if args[index] == "--setenv" && index + 2 < args.len() && args[index + 1] == "CARGO_NET_OFFLINE" {
+                assert(offline == None)
+                offline = Val(args[index + 2].copy())
+            }
+        }
+        expected :: if metadata -> { rust_foreign_test_sys.get("CARGO_NET_OFFLINE") } else -> { String?{None} }
+        assert_eq(offline, expected)
+        assert(args.contains("--clearenv"))
+        assert(args.contains("--cap-drop"))
+        assert(args.contains("--assert-userns-disabled"))
+    }
+}
 fn run() {
     plan :: cli_rust_foreign_test_plan("encode")
     assert(plan.manifest.contains("crate-type = [\"staticlib\"]"))
     assert(plan.source.contains("fn jet_ffi_encode_cabi("))
     cli_rust_foreign_test_detail(plan)
     cli_rust_foreign_test_provenance(plan)
+    cli_rust_foreign_test_environment()
 }
