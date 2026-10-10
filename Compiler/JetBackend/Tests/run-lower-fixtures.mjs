@@ -8,6 +8,8 @@
 // for just the sanitize-mode witnesses (Tests/SanitizeFixtures.jet).
 // --callable-statics assembles the production callable lifetime witness:
 // jet run unit.jet <admitted libjet_runtime_c.so> (three "héllo" lines + pass).
+// --foreign-descriptors runs descriptor lowering/lint/object witnesses only;
+// it needs no runtime pack because it does not link an executable.
 // then:  cd <outdir> && jet run unit.jet        (writes <fixture>.elf files)
 // then:  node Compiler/JetBackend/Tests/check-native-fixtures.mjs <outdir>
 //        (with JET_RUNTIME_C_LIB, it also runs every image through load.jet)
@@ -27,7 +29,7 @@ if (!outDir) {
   process.exit(64);
 }
 const runtimePack = process.env.JET_RUNTIME_PACK;
-if (!sanitizeOnlyArgument() && !runtimePack) throw new Error("JET_RUNTIME_PACK must explicitly name an admitted fresh Jet pack");
+if (!sanitizeOnlyArgument() && !process.argv.includes("--foreign-descriptors") && !runtimePack) throw new Error("JET_RUNTIME_PACK must explicitly name an admitted fresh Jet pack");
 function sanitizeOnlyArgument() { return process.argv.includes("--sanitize"); }
 // While other edits are in flight: FX_HEAD (comma-separated repo paths) reads
 // those files as committed at HEAD, and FX_EXCLUDE (comma-separated file
@@ -61,7 +63,13 @@ function body(path) {
   for (const line of read(path).split("\n")) {
     if (callableStatics && path === "Compiler/JetBackend/Tests/LowerFixtures.jet" && line.startsWith("fn run() {")) break;
     if (skipping) {
-      if (line.startsWith("]")) skipping = false;
+      if (line.startsWith("]") || line === "}") skipping = false;
+      continue;
+    }
+    // This Sema-only projection is not part of the backend fixture closure.
+    // Keeping it would require the entire semantic Type declaration graph.
+    if (path === "Compiler/JetFoundation/Source/MIR/MIR.jet" && line.startsWith("fn mir_typed_head_kind(")) {
+      skipping = true;
       continue;
     }
     if (/^use jet_\w+\.\[\s*$/.test(line)) {
@@ -98,6 +106,8 @@ const asmWitnessSource = `fn fx_asm_os_source() -> String Never! { ${JSON.string
 const abiOnly = process.argv.includes("--abi");
 const sanitizeOnly = process.argv.includes("--sanitize");
 const callableStatics = process.argv.includes("--callable-statics");
+const foreignDescriptors = process.argv.includes("--foreign-descriptors");
+if (foreignDescriptors && (abiOnly || sanitizeOnly || callableStatics)) throw new Error("--foreign-descriptors cannot be combined with other focused modes");
 if (callableStatics && (abiOnly || sanitizeOnly)) throw new Error("--callable-statics cannot be combined with --abi or --sanitize");
 const small = abiOnly || sanitizeOnly;
 const parts = [
@@ -120,6 +130,7 @@ const parts = [
     ].map((head) => item("Compiler/JetFoundation/Source/Registry/CoreCalls.jet", head)),
     item("Compiler/JetFoundation/Source/Types/Types.jet", "enum ParamZone {"),
     item("Compiler/JetFoundation/Source/Types/Types.jet", "fn param_zone_name("),
+    item("Compiler/JetFoundation/Source/Registry/CoreModules.jet", "fn core_source_value_hook("),
     ...[
       "struct ByteLayout {",
       "struct FieldLayoutFacts {",
@@ -135,6 +146,7 @@ const parts = [
   ...(sanitizeOnly ? [body("Compiler/JetBackend/Source/LIR/Sanitize.jet")] : []),
   ...(!small ? [
     body("Compiler/JetBackend/Source/LIR/Print.jet"),
+    body("Compiler/JetBackend/Source/ErrLayout.jet"),
     ...sorted("Compiler/JetBackend/Source/Lower").map(body),
     ...sorted("Compiler/JetBackend/Source/Opt").map(body),
   ] : []),
@@ -155,9 +167,15 @@ const parts = [
   body("Compiler/JetBackend/Source/Image/Archive.jet"),
   body("Compiler/JetBackend/Source/Image/StaticLink.jet"),
   body("Compiler/JetBackend/Source/Image/RuntimePack.jet"),
-  body("Compiler/JetBackend/Tests/TestPack.jet"),
-  ...(sanitizeOnly ? [body("Compiler/JetBackend/Tests/SanitizeFixtures.jet"), "fn run() { sanitize_fixtures() }"] : [body("Compiler/JetBackend/Tests/AbiFixtures.jet")]),
-  ...(abiOnly ? ["fn run() { abi_fixtures() }"] : sanitizeOnly ? [] : [body("Compiler/JetBackend/Tests/LowerFixtures.jet"), ...sorted("Compiler/JetBackend/Tests/Fixtures").map(body)]),
+  ...(foreignDescriptors ? [] : [
+    body("Compiler/JetBackend/Tests/TestPack.jet"),
+    ...(sanitizeOnly ? [body("Compiler/JetBackend/Tests/SanitizeFixtures.jet"), "fn run() { sanitize_fixtures() }"] : [body("Compiler/JetBackend/Tests/AbiFixtures.jet")]),
+  ]),
+  ...(abiOnly ? ["fn run() { abi_fixtures() }"] : sanitizeOnly ? [] : foreignDescriptors ? [
+    body("Compiler/JetBackend/Tests/LowerFixtures.jet").split("fn fx_hello(")[0],
+    body("Compiler/JetBackend/Tests/Fixtures/Foreign.jet"),
+    'fn run() { assert(fx_foreign_descriptor_checks()); print("foreign descriptor fixtures passed") }',
+  ] : [body("Compiler/JetBackend/Tests/LowerFixtures.jet"), ...sorted("Compiler/JetBackend/Tests/Fixtures").map(body)]),
   ...(callableStatics ? [
     body("Compiler/JetBackend/Source/OS/Linux.jet"),
     body("Compiler/JetBackend/Source/Image/Loader.jet"),
