@@ -1866,6 +1866,23 @@ fn sema_expr_exact_integer_literal(value: Int, raw: String?) -> Int Never! {
     if negative -> -exact else -> exact
 }
 
+// D-EXPNEG1: only a written negative numeral selects the Fraction carrier;
+// a dynamic exponent (including unary minus on a name) remains Int.
+fn sema_expr_written_negative_integer(value: Expr) -> Bool Never! {
+    if value == {
+        .Paren(inner, _) -> sema_expr_written_negative_integer(inner)
+        .Int(integer, _, _, raw) -> sema_expr_exact_integer_literal(integer, raw) < 0
+        .Unary(operator, inner, _) -> {
+            if operator != UnOp.Neg -> return false
+            if inner == {
+                .Int(integer, _, _, raw) -> sema_expr_exact_integer_literal(integer, raw) > 0
+                else -> false
+            }
+        }
+        else -> false
+    }
+}
+
 // Every synthesized unbounded literal shares the native i64/BigInt boundary;
 // Jet's exact Int carrier is wider than Rust's CtValue.Int and TIR IntLit.
 fn sema_expr_unbounded_integer_literal(value: Int, span: Span) -> TExpr Never! {
@@ -3340,14 +3357,6 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     lifted_lhs := if equality && lifted_rhs == None -> sema_expr_optional_lift(checked_lhs, checked_rhs.ty, checked_lhs.ty, environment, program) else -> None
     lhs :: lifted_lhs ?? checked_lhs
     rhs :: lifted_rhs ?? checked_rhs
-    if op == BinOp.Pow && lhs.ty == Type.Int {
-        if right == {
-            .Unary(operator, _, _) -> {
-                if operator == UnOp.Neg -> return None
-            }
-            else -> {}
-        }
-    }
     if op == BinOp.Pow && ((lhs.ty == Type.Float && rhs.ty == Type.Float32) || (lhs.ty == Type.Float32 && rhs.ty == Type.Float)) {
         &diagnostics.push(sema_error("E0109", span, "`pow` needs both float operands to have the same width", "D-FLOATW1: mixing float widths is not allowed", "convert the operands to the same float width"))
         return None
@@ -3527,7 +3536,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         sema_expr_binary_type(op, effective_lhs.ty, effective_rhs.ty, span, &diagnostics) ?? return None
         return None
     }
-    ty :: sema_expr_binary_type(op, effective_lhs.ty, effective_rhs.ty, span, &diagnostics) ?? return None
+    ty :: if op == BinOp.Pow && effective_lhs.ty == Type.Int && effective_rhs.ty == Type.Int && sema_expr_written_negative_integer(right) -> Type.Named{name: "Fraction"} else -> sema_expr_binary_type(op, effective_lhs.ty, effective_rhs.ty, span, &diagnostics) ?? return None
     overflow := false
     if (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div) && (sema_expr_is_integer(effective_lhs.ty) || sema_expr_is_integer(effective_rhs.ty)) -> overflow = true
     if op == BinOp.Pow && sema_expr_is_integer(effective_lhs.ty) -> overflow = true

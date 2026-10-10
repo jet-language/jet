@@ -6410,6 +6410,21 @@ mod stale_manifest_name_tests {
     }
 
     #[test]
+    fn negative_literal_power_keeps_fraction_result_and_dynamic_int() {
+        let root = tempdir("negative-literal-power");
+        let entry = root.join("run.jet");
+        let source = include_str!("../../../Compiler/JetSema/Tests/NegativePowerFixtures.jet");
+        fs::write(&entry, source).unwrap();
+        let (diagnostics, bundle) = crate::Driver::check_file(entry.to_str().unwrap(), None, false);
+        let errors = diagnostics.iter()
+            .filter(|diagnostic| diagnostic.severity == crate::Diagnostics::Severity::Error)
+            .collect::<Vec<_>>();
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(bundle.is_some(), "the checked power fixture must retain its bundle");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn core_text_runtime_imports_keep_aliases_and_load_each_unit_once() {
         let root = tempdir("core-text-runtime-imports");
         let entry = root.join("main.jet");

@@ -1000,6 +1000,9 @@ and shared Prelude, with the same integer-width, exactness, overflow-policy
 and D-EXPNEG1 negative-exponent rules. Shifts remain `<<` and `>>`. Prefix
 `&` and `^` retain their ownership meanings; copying is `.copy()` (D-COPY-WORD1),
 and `!` negates Bool only.
+A written negative Int exponent (including a parenthesized negative numeral)
+selects Fraction; positive literals and negative zero remain Int. An exponent
+whose sign is dynamic remains Int and uses the shared runtime negative-power stop.
 Retired infix arithmetic and compounds produce E0398 naming the method, with
 a precedence-preserving structured repair. Updates explicitly assign the
 method result back. `core.math.xor` and `core.math.pow` are removed.

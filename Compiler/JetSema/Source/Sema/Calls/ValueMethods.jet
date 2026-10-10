@@ -193,6 +193,7 @@ fn sema_call_try_value_method(receiver: Expr, receiver_value: TExpr, method: Str
     effect_row := if row.access == AccessConvention.Write -> [EffectRowEntry]{EffectRowEntry{name: "Mem", span: span}} else -> [EffectRowEntry]{}
     if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "{owner}.{method}", span, effect_row, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     result := builtin_method_bind(row.result, receiver_value.ty)
+    if method == "pow" && receiver_value.ty == Type.Int && args.len() == 1 && sema_expr_written_negative_integer(args[0].expr) -> result = Type.Named{name: "Fraction"}
     line :: sema_source_line_at(environment.source_segments, span) ?? 0
     value := sema_tir_expr(result, sema_value_method_kind(row, method, receiver_value, typed, result, line, span, environment, program, scopes), span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}

@@ -13,7 +13,7 @@ use std::collections::HashMap;
 /// Only a spelled numeral counts. An exponent whose sign the checker cannot
 /// see keeps the whole-number result type, and the Prelude traps if the value
 /// turns out negative at run time.
-fn is_written_negative_int(expr: &Expr) -> bool {
+pub(super) fn is_written_negative_int(expr: &Expr) -> bool {
     match expr {
         Expr::Paren(inner, _) => is_written_negative_int(inner),
         Expr::Int(value, _, _, raw) => {

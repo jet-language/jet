@@ -519,6 +519,12 @@ impl<'a> Checker<'a> {
             self.core_source_owner_module("core.time", "Instant")
                 .map(|owner| Type::Named(self.canonical_nominal_name(owner, "Instant")))
                 .or(ret)
+        } else if *recv_ty == Type::Int
+            && method == "pow"
+            && args.len() == 1
+            && super::super::binary::is_written_negative_int(&args[0].expr)
+        {
+            Some(Type::Named(crate::Syntax::TYPE_FRACTION.to_string()))
         } else {
             ret
         };
