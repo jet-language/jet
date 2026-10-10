@@ -21,7 +21,7 @@ fn lower_bits_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     ty :: lower_checked_type(c, instruction) ?? return false
     holder :: lower_runtime_handle_type(p, ty) ?? return false
     if holder.runtime != "JetBitSet" -> return false
-    handle :: lower_repr(p, ty) == { .Handle(_, _) -> true else -> false }
+    handle :: if lower_repr(p, ty) == { .Handle(_, _) -> true else -> false }
     if !handle -> return false
     if args.len() != 0 {
         lower_fail(&m, &f, "BitSet.new requires no arguments")
@@ -41,7 +41,7 @@ fn lower_bits_clear(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     ty :: lower_value_type(c, receiver) ?? return false
     holder :: lower_runtime_handle_type(p, ty) ?? return false
     if holder.runtime != "JetBitSet" -> return false
-    handle :: lower_repr(p, ty) == { .Handle(_, _) -> true else -> false }
+    handle :: if lower_repr(p, ty) == { .Handle(_, _) -> true else -> false }
     if !handle -> return false
     if args.len() != 0 {
         lower_fail(&m, &f, "BitSet.clear requires no arguments")
@@ -142,7 +142,8 @@ fn lower_route_word_record(p: MIRProgram, ty: MIRType) -> LowerFieldInfo? {
 }
 
 fn lower_route_word_shape(p: MIRProgram, ty: MIRType, member: String, schema: LowerRecordSchema) -> LowerFieldInfo? {
-    if lower_repr(p, ty) != LowerRepr.Inline{ty: ty} -> return None
+    inline :: if lower_repr(p, ty) == .Inline(_) -> true else -> false
+    if !inline -> return None
     definition :: lower_type_def(p, ty) ?? return None
     if schema.variants != "" || schema.fields != "{member}=Int" -> return None
     if definition.kind == .Struct(fields, _) {
