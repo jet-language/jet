@@ -39,13 +39,15 @@ fn method_wave_registration(source: String, keep_going: Bool, effects_source: St
 fn method_wave_comptime_rows(graph: SemaRegistrationGraph, hooks: Shared<SemaRegistrationHostHooks>, negative: Bool) -> [SemaComptimeFunctionResult] {
     memory_plan :: sema_function_memory_plan_from_graph(graph)
     environment := sema_comptime_environment(graph.copy(), [SemaComptimeItemValue]{}, None)
+    program := sema_program_tables_init(^environment.registration_graph, [TTypeDef]{})
+    environment.registration_graph = None
     probe := sema_comptime_probe_init(sema_host_hook_access(hooks))
     available :: sema_comptime_available_constants(graph, [SemaComptimeItemValue]{})
     name :: if negative -> "method_2" else -> "method_0"
     loop nominal in graph.modules[0].nominals {
         loop method in nominal.methods {
             if method.declaration.name != name -> next
-            checked :: sema_check_comptime_function(graph, &environment, &probe, available, memory_plan, [SemaComptimeItemValue]{}, graph.modules[0].module_identity, method.symbol.id.key)
+            checked :: sema_check_comptime_function(graph, &environment, &program, &probe, available, memory_plan, [SemaComptimeItemValue]{}, graph.modules[0].module_identity, method.symbol.id.key)
             method_wave_require(checked.complete == !negative, "the cached comptime row is a real checker result")
             return [SemaComptimeFunctionResult]{checked}
         }
@@ -65,7 +67,7 @@ fn method_wave_lowered(checked: SemaGraphResult, source: String) -> JetCodegenFu
     loop module_result in modules {
         loop function in module_result.functions -> &functions.push(function)
     }
-    lower_functions(&functions, &modules, [MIRSourceFile]{MIRSourceFile{id: mir_source_file_id("method-wave.jet"), path: "method-wave.jet", source: source}}, compiler_threads_single(), None, "2028")
+    lower_functions(&functions, &modules, [MIRSourceFile]{MIRSourceFile{id: mir_source_file_id("method-wave.jet"), path: "method-wave.jet", source: source}}, compiler_threads_single(), None, false, "2028")
 }
 
 fn method_wave_panic_witness(value: TExpr, function_name: String) -> Int {
@@ -142,8 +144,17 @@ fn method_wave_product_witnesses(graph: SemaRegistrationGraph, checked: SemaGrap
         loop type_definition in module_result.declarations.type_defs -> &types.push(type_definition)
     }
     environment := sema_check_pass_environment(graph.copy(), types, SemaComptimeBodyValues{})
+    program := SemaProgramTables{
+        registration_graph: ^environment.registration_graph,
+        checked_types: ^environment.checked_types,
+        checked_type_rows: ^environment.checked_type_rows,
+        checked_type_name_slots: ^environment.checked_type_name_slots,
+        checked_type_name_rows: ^environment.checked_type_name_rows,
+        boxed_edges: ^environment.boxed_edges,
+    }
+    environment.registration_graph = None
     hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
-    scopes := sema_check_module_summary_scopes(&environment, sema_host_hook_access(hooks), memory_plan, 0, [SemaComptimeFunctionResult]{}, [String:Int]{}, "fixture", None)
+    scopes := sema_check_module_summary_scopes(&environment, &program, sema_host_hook_access(hooks), memory_plan, 0, [SemaComptimeFunctionResult]{}, [String:Int]{}, "fixture", None)
     jobs := [SemaBodyJob]{}
     loop nominal_index in 0..<graph.modules[0].nominals.len() {
         nominal :: graph.modules[0].nominals[nominal_index]
@@ -154,7 +165,7 @@ fn method_wave_product_witnesses(graph: SemaRegistrationGraph, checked: SemaGrap
     }
     method_wave_require(jobs.len() == 2, "real host-reaching method and adjacent normal method are registered")
     part := SemaBodyPart{scopes: ^scopes, items: ^jobs, bodies: [SemaPreparedBody]{}}
-    method_wave_require(sema_check_body_part_in(environment, memory_plan, &part, 0) == 2, "both real method jobs were checked by the canonical worker")
+    method_wave_require(sema_check_body_part_in(environment, program, memory_plan, &part, 0) == 2, "both real method jobs were checked by the canonical worker")
     method_wave_require(part.bodies.len() == 2, "both worker products are present")
     first :: if part.bodies[0] == {
         .Checked(body) -> body.wanted_hooks

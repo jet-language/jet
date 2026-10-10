@@ -338,7 +338,10 @@ scope arguments into a missing table slot. Graph-owning staging and module
 retargeting corridors retain their owning transport: the graph moves into the
 program tables for checking, moves back only while a retained environment is
 retargeted, and returns to the tables afterward. These handoffs do not copy the
-registration graph or rebuild its checked-type indexes.
+registration graph or rebuild its checked-type indexes. Driver declaration,
+body, and compiler-query passes lend this single graph through staging and
+restore it on every run exit, including partial-graph exits; speculative landed
+values are rolled back through the graph mutation trail rather than graph copies.
 
 The compiler and runtime aggregates have separate explicit source inventories:
 [`Compiler/Bootstrap/sources.list`](../../Compiler/Bootstrap/sources.list) and
