@@ -22,22 +22,22 @@ fn shared_output_pair() -> JetCLIAdaptiveTable Never! {
         jet_cli_table_column("N".bytes(), .Text),
         jet_cli_table_column("v".bytes(), .Integer)
     }, [JetCLITableRow]{
-        jet_cli_table_row([JetCLITableCell]{jet_cli_table_cell_text("a".bytes()), .Integer(I128{7})}),
-        jet_cli_table_row([JetCLITableCell]{jet_cli_table_cell_text("bbb".bytes()), .Integer(I128{-2})})
+        jet_cli_table_row([JetCLITableCell]{jet_cli_table_cell_text("a".bytes()), .Integer{value: 7}}),
+        jet_cli_table_row([JetCLITableCell]{jet_cli_table_cell_text("bbb".bytes()), .Integer{value: -2}})
     })
 }
 fn shared_output_term_error(term: [U8]) Never! {
     facts := shared_output_facts()
     facts.term = Val(term.copy())
     result :: jet_cli_output_profile(facts)
-    if result == {
-        .Err(error) -> {
-            if error == {
-                .InvalidTerm(value) -> shared_output_require(value == term, "typed TERM error preserves bytes")
-                else -> panic("wrong typed TERM error")
-            }
+    if result == .Err(error) {
+        if error == .InvalidTerm(value) {
+            shared_output_require(value == term, "typed TERM error preserves bytes")
+        } else {
+            panic("wrong typed TERM error")
         }
-        .Ok(_) -> panic("invalid TERM accepted")
+    } else {
+        panic("invalid TERM accepted")
     }
 }
 fn shared_output_profiles() Never! {
@@ -45,7 +45,7 @@ fn shared_output_profiles() Never! {
     profile :: shared_output_profile(facts)
     shared_output_require(profile.width == U64{100} && profile.ansi_enabled && profile.unicode_enabled && profile.progress_enabled && profile.human_enabled && !profile.machine_enabled, "Rust human terminal capabilities")
     shared_output_require(jet_cli_output_channel(profile, .Renderable) == .HumanStdout && jet_cli_output_channel(profile, .Machine) == .Hidden, "human primary channels")
-    loop kind in [JetCLIOutputKind]{.Status, .Log, .Progress} -> shared_output_require(jet_cli_output_channel(profile, kind) == .HumanStderr, "human secondary channels")
+    loop kind in ([JetCLIOutputKind]{.Status, .Log, .Progress}) -> shared_output_require(jet_cli_output_channel(profile, kind) == .HumanStderr, "human secondary channels")
 
     facts.tty = false
     redirected :: shared_output_profile(facts)
@@ -72,7 +72,7 @@ fn shared_output_profiles() Never! {
     facts.json = true
     machine :: shared_output_profile(facts)
     shared_output_require(!machine.ansi_enabled && !machine.unicode_enabled && !machine.progress_enabled && !machine.human_enabled && machine.machine_enabled, "Rust JSON capabilities")
-    loop kind in [JetCLIOutputKind]{.Renderable, .Status, .Log, .Progress} -> shared_output_require(jet_cli_output_channel(machine, kind) == .Hidden, "JSON human channels hidden")
+    loop kind in ([JetCLIOutputKind]{.Renderable, .Status, .Log, .Progress}) -> shared_output_require(jet_cli_output_channel(machine, kind) == .Hidden, "JSON human channels hidden")
     shared_output_require(jet_cli_output_channel(machine, .Machine) == .MachineStdout, "JSON machine stdout")
     table :: shared_output_pair()
     shared_output_require(jet_cli_table_render(table, jet_cli_table_layout(table, machine)) == None, "table emits no JSON/ANSI fragment")
@@ -80,17 +80,20 @@ fn shared_output_profiles() Never! {
     facts = shared_output_facts()
     facts.width = Val(U64{0})
     result :: jet_cli_output_profile(facts)
-    if result == {
-        .Err(error) -> {
-            if error == { .InvalidWidth(value) -> shared_output_require(value == U64{0}, "typed width error") else -> panic("wrong width error") }
+    if result == .Err(error) {
+        if error == .InvalidWidth(value) {
+            shared_output_require(value == U64{0}, "typed width error")
+        } else {
+            panic("wrong width error")
         }
-        .Ok(_) -> panic("zero width accepted")
+    } else {
+        panic("zero width accepted")
     }
     shared_output_term_error("x\nterm".bytes())
     shared_output_term_error([U8]{})
-    shared_output_term_error("x\u{0085}term".bytes())
+    shared_output_term_error([U8]{120, 194, 133, 116, 101, 114, 109})
     facts = shared_output_facts()
-    facts.term = Val("x\u{2028}term".bytes())
+    facts.term = Val([U8]{120, 226, 128, 168, 116, 101, 114, 109})
     shared_output_require(shared_output_profile(facts).human_enabled, "Cc differs from diagnostic separator policy")
     facts.width = None
     shared_output_require(shared_output_profile(facts).width == U64{80}, "canonical absent width")
@@ -101,16 +104,19 @@ fn shared_output_profiles() Never! {
     second :: shared_output_profile(facts)
     shared_output_require(first.width == second.width && first.ansi_enabled == second.ansi_enabled && first.unicode_enabled == second.unicode_enabled && first.progress_enabled == second.progress_enabled && first.human_enabled == second.human_enabled && first.machine_enabled == second.machine_enabled, "Rust deterministic selection")
     spellings :: [String]{"auto", "always", "never"}
-    loop (index, color) in [JetCLIColorRequest]{.Auto, .Always, .Never} {
+    loop (index, color) in ([JetCLIColorRequest]{.Auto, .Always, .Never}) {
         shared_output_require((jet_cli_color_request(spellings[index].bytes()) ?? panic("valid color refused")) == color, "exact color spellings")
     }
     bad :: "sometimes".bytes()
     color_result :: jet_cli_color_request(bad)
-    if color_result == {
-        .Err(error) -> {
-            if error == { .InvalidColorRequest(value) -> shared_output_require(value == bad, "typed color error") else -> panic("wrong color error") }
+    if color_result == .Err(error) {
+        if error == .InvalidColorRequest(value) {
+            shared_output_require(value == bad, "typed color error")
+        } else {
+            panic("wrong color error")
         }
-        .Ok(_) -> panic("invalid color accepted")
+    } else {
+        panic("invalid color accepted")
     }
 }
 fn shared_output_grids() Never! {
@@ -133,7 +139,7 @@ fn shared_output_grids() Never! {
     shared_output_require(jet_cli_table_fit_widths([Int]{9, 2, 6}, 18) == [Int]{3, 2, 3}, "round-robin fitting")
 
     padding :: [String]{"x   ", "   x", " x  "}
-    loop (index, alignment) in [JetCLITableAlignment]{.Left, .Right, .Center} {
+    loop (index, alignment) in ([JetCLITableAlignment]{.Left, .Right, .Center}) {
         out := [U8]{}
         jet_cli_table_append_pad(&out, "x".bytes(), 4, alignment)
         shared_output_bytes(out, padding[index], "literal alignment including odd center gap")
@@ -160,14 +166,14 @@ fn shared_output_grids() Never! {
     shared_output_require(jet_cli_table_cell_kind(mismatch.rows[0].cells[0]) == .Text, "typed value kind retained")
 }
 fn shared_output_text() Never! {
-    ansi :: "\u{001b}[31mred\u{001b}[0m \u{001b}]title\u{0007}x \u{001b}]other\u{001b}\\y".bytes()
+    ansi :: [U8]{27, 91, 51, 49, 109, 114, 101, 100, 27, 91, 48, 109, 32, 27, 93, 116, 105, 116, 108, 101, 7, 120, 32, 27, 93, 111, 116, 104, 101, 114, 27, 92, 121}
     clean :: jet_cli_table_bound_text(^ansi)
     shared_output_bytes(clean, "red x y", "CSI/OSC BEL/OSC ST exact removal")
-    non_ascii_escape :: jet_cli_table_bound_text("\u{001b}αz".bytes())
+    non_ascii_escape :: jet_cli_table_bound_text([U8]{27, 206, 177, 122})
     shared_output_bytes(non_ascii_escape, "z", "ESC consumes a whole non-ASCII scalar")
     controls :: jet_cli_table_bound_text([U8]{97, 0, 9, 98})
     shared_output_require(controls == [U8]{97, 0, 9, 98}, "non-ANSI controls remain literal")
-    crlf :: jet_cli_table_wrap("a\r\n\nb\n".bytes(), 2)
+    crlf :: jet_cli_table_wrap([U8]{97, 13, 10, 10, 98, 10}, 2)
     shared_output_require(crlf == [[U8]]{"a".bytes(), [U8]{}, "b".bytes(), [U8]{}}, "CR suffix and trailing/empty logical lines")
     wide :: jet_cli_table_wrap("界a".bytes(), 1)
     shared_output_require(wide == [[U8]]{"?".bytes(), "a".bytes()}, "oversize cluster is one question mark")
@@ -216,21 +222,25 @@ fn shared_output_bounds() Never! {
     loop _ in 0..<4097 -> &rows.push(JetCLITableRow{cells: [JetCLITableCell]{}})
     row_bound :: jet_cli_table([JetCLITableColumn]{}, ^rows)
     shared_output_require(row_bound.rows.len() == 4096 && row_bound.truncated, "row cap")
-    extra :: jet_cli_table([JetCLITableColumn]{jet_cli_table_column("c".bytes(), .Text)}, [JetCLITableRow]{JetCLITableRow{cells: [JetCLITableCell]{.Empty, .Boolean(true)}}})
+    extra :: jet_cli_table([JetCLITableColumn]{jet_cli_table_column("c".bytes(), .Text)}, [JetCLITableRow]{JetCLITableRow{cells: [JetCLITableCell]{.Empty, .Boolean{value: true}}}})
     shared_output_require(extra.rows[0].cells.len() == 1 && extra.truncated, "extra cells ignored and flagged")
-    text_bound :: jet_cli_table([JetCLITableColumn]{JetCLITableColumn{name: "h".repeat(4097).bytes(), kind: .Text, alignment: .Left}}, [JetCLITableRow]{JetCLITableRow{cells: [JetCLITableCell]{.Text("x".repeat(4097).bytes())}}})
+    text_bound :: jet_cli_table([JetCLITableColumn]{JetCLITableColumn{name: "h".repeat(4097).bytes(), kind: .Text, alignment: .Left}}, [JetCLITableRow]{JetCLITableRow{cells: [JetCLITableCell]{.Text{value: "x".repeat(4097).bytes()}}}})
     shared_output_require(text_bound.columns[0].name.len() == 4096 && !text_bound.truncated, "text/name bound is not structural truncation")
-    if text_bound.rows[0].cells[0] == { .Text(value) -> shared_output_require(value.len() == 4096, "raw Text normalized by table") else -> panic("Text changed kind") }
+    if text_bound.rows[0].cells[0] == .Text(value) {
+        shared_output_require(value.len() == 4096, "raw Text normalized by table")
+    } else {
+        panic("Text changed kind")
+    }
     projection :: jet_cli_table_structured(extra)
     shared_output_require(projection.columns.len() == extra.columns.len() && projection.rows.len() == extra.rows.len() && projection.truncated == extra.truncated && jet_cli_table_cell_kind(projection.rows[0].cells[0]) == .Empty, "structured typed projection")
 
-    minimum :: JetCLITableCell.Integer(I128{-170141183460469231731687303715884105728})
-    maximum :: JetCLITableCell.Unsigned(U128{340282366920938463463374607431768211455})
-    shared_output_require(jet_cli_table_cell_width(minimum) == 40 && jet_cli_table_cell_width(maximum) == 39, "full fixed integer domains")
-    shared_output_bytes(jet_cli_table_cell_lines(minimum, 256)[0], "-170141183460469231731687303715884105728", "canonical I128 minimum Show")
-    shared_output_bytes(jet_cli_table_cell_lines(maximum, 256)[0], "340282366920938463463374607431768211455", "canonical U128 maximum Show")
-    shared_output_bytes(jet_cli_table_cell_lines(.Boolean(true), 256)[0], "true", "boolean true")
-    shared_output_bytes(jet_cli_table_cell_lines(.Boolean(false), 256)[0], "false", "boolean false")
+    minimum :: JetCLITableCell.Integer{value: -170141183460469231731687303715884105728}
+    maximum :: JetCLITableCell.Unsigned{value: 340282366920938463463374607431768211455}
+    shared_output_require(jet_cli_table_cell_width(minimum) == 40 && jet_cli_table_cell_width(maximum) == 39, "exact large integer domains")
+    shared_output_bytes(jet_cli_table_cell_lines(minimum, 256)[0], "-170141183460469231731687303715884105728", "canonical large negative Int display")
+    shared_output_bytes(jet_cli_table_cell_lines(maximum, 256)[0], "340282366920938463463374607431768211455", "canonical large positive Int display")
+    shared_output_bytes(jet_cli_table_cell_lines(.Boolean{value: true}, 256)[0], "true", "boolean true")
+    shared_output_bytes(jet_cli_table_cell_lines(.Boolean{value: false}, 256)[0], "false", "boolean false")
     shared_output_require(jet_cli_table_cell_lines(.Empty, 256) == [[U8]]{[U8]{}}, "empty value")
 }
 fn run() Never! {

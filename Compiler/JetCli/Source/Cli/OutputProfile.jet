@@ -56,7 +56,7 @@ fn jet_cli_color_request(value: [U8]) -> JetCLIColorRequest JetCLIOutputProfileE
     if value == JET_CLI_COLOR_AUTO_BYTES -> return Ok(.Auto)
     if value == JET_CLI_COLOR_ALWAYS_BYTES -> return Ok(.Always)
     if value == JET_CLI_COLOR_NEVER_BYTES -> return Ok(.Never)
-    Err(.InvalidColorRequest(value.copy()))
+    Err(.InvalidColorRequest{value: value.copy()})
 }
 
 // Rust char::is_control is Cc, not the diagnostic terminal-escape policy:
@@ -75,11 +75,11 @@ fn jet_cli_output_term_control(term: [U8]) -> Bool Never! {
 fn jet_cli_output_profile(facts: JetCLIOutputFacts) -> JetCLIOutputProfile JetCLIOutputProfileError! {
     dumb := false
     if facts.term == .Val(term) {
-        if term.len() == 0 || jet_cli_output_term_control(term) -> return Err(.InvalidTerm(term.copy()))
+        if term.len() == 0 || jet_cli_output_term_control(term) -> return Err(.InvalidTerm{value: term.copy()})
         dumb = term == JET_CLI_TERM_DUMB_BYTES
     }
     width :: facts.width ?? U64{80}
-    if width == (U64{0}) -> return Err(.InvalidWidth(width))
+    if width == (U64{0}) -> return Err(.InvalidWidth{value: width})
     human :: !facts.json
     ansi :: if facts.requested_color == {
         .Always -> true

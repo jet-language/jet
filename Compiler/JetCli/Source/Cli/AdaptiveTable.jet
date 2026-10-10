@@ -10,8 +10,8 @@ JET_CLI_TABLE_MAX_ROWS :: 4096
 
 enum JetCLITableCell {
     Text(value: [U8])
-    Integer(value: I128)
-    Unsigned(value: U128)
+    Integer(value: Int)
+    Unsigned(value: Int)
     Boolean(value: Bool)
     Empty
 }
@@ -55,7 +55,7 @@ struct JetCLITableLayout {
 }
 
 fn jet_cli_table_cell_text(value: ^[U8]) -> JetCLITableCell Never! {
-    .Text(jet_cli_table_bound_text(^value))
+    JetCLITableCell.Text{value: jet_cli_table_bound_text(^value)}
 }
 fn jet_cli_table_cell_kind(cell: JetCLITableCell) -> JetCLITableCellKind Never! {
     if cell == {
@@ -77,10 +77,10 @@ fn jet_cli_table_row(input: ^[JetCLITableCell]) -> JetCLITableRow Never! {
 }
 fn jet_cli_table_normalize_cell(cell: ^JetCLITableCell) -> JetCLITableCell Never! {
     if ^cell == {
-        .Text(value) -> .Text(jet_cli_table_bound_text(^value))
-        .Integer(value) -> .Integer(value)
-        .Unsigned(value) -> .Unsigned(value)
-        .Boolean(value) -> .Boolean(value)
+        .Text(value) -> .Text{value: jet_cli_table_bound_text(^value)}
+        .Integer(value) -> .Integer{value: value}
+        .Unsigned(value) -> .Unsigned{value: value}
+        .Boolean(value) -> .Boolean{value: value}
         .Empty -> .Empty
     }
 }
@@ -137,7 +137,8 @@ JET_CLI_TABLE_SEPARATOR_BYTES :: prep { [U8]{32, 124, 32} }
 // Last octet of ┌┬┐├┼┤└┴┘─│, all with the same E2 94 prefix.
 JET_CLI_TABLE_MARK_BYTES :: prep { [U8]{140, 172, 144, 156, 188, 164, 148, 180, 152, 128, 130} }
 
-// Numeric displays use the existing canonical fixed-integer formatter. The
+// Numeric displays use Jet's exact Int formatter, retaining large values
+// without inventing unratified fixed-width I128/U128 language types. The
 // resulting owned display facts are octets; .bytes() here is an actual owned
 // display materialization, not a READ String view/allocation-free claim.
 fn jet_cli_table_cell_width(cell: JetCLITableCell) -> Int Never! {
@@ -198,7 +199,7 @@ fn jet_cli_table_fit_widths(natural: [Int], width: Int) -> [Int] Never! {
         grew := false
         loop index in 0..<widths.len() {
             if widths[index] < natural[index] {
-                widths[index] += 1
+                widths[index] = widths[index] + 1
                 remaining -= 1
                 grew = true
                 if remaining == 0 -> break
