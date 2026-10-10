@@ -1,8 +1,9 @@
 // The `jet trust` / `jetpack config trust` command surface over the U19 trust
-// store: record JSON (Rust `record_json`/`records_json`) and grant selector
-// parsing. Kept apart from TrustStore.jet so the store's read path (path,
-// typed records) carries no JSON-writer or TrustError dependency: the
-// compiler unit assembles TrustStore.jet for `jet inspect gates` alone.
+// store: record JSON (Rust `record_json`/`records_json`), grant selector
+// parsing, and gated grant writers. Kept apart from TrustStore.jet so the
+// store's read path (path, typed records) carries no JSON-writer, TrustError,
+// or PackageGateError dependency: the compiler unit assembles TrustStore.jet
+// for `jet inspect gates` alone.
 
 // Rust `record_json`.
 fn trust_record_json(record: TrustRecord) -> String Never! {
@@ -59,4 +60,22 @@ fn trust_parse_grant_selector(selector: String, scope: String) -> TrustGrant Tru
         .None -> {}
     }
     Ok(TrustGrant{authority: TrustAuthority.infer(trimmed).label(), subject: trimmed, scope})
+}
+
+// crates/jetpack/src/Trust.rs:680: gate before even reading the store.
+fn trust_grant_hash(store: String, project_dir: String, hash: String) -[FS, Env]> Bool PackageGateError! {
+    pkg_check_project_gate(project_dir, PolicyKey.TrustGrant, "hash:{hash} -> {store}")
+    Ok(trust_store_add_line(store, "{TRUST_HASH_PREFIX}{hash}"))
+}
+
+// crates/jetpack/src/Trust.rs:691; false only when already present.
+fn trust_add_pattern(store: String, project_dir: String, pattern: String) -[FS, Env]> Bool PackageGateError! {
+    pkg_check_project_gate(project_dir, PolicyKey.TrustGrant, "pattern:{pattern} -> {store}")
+    Ok(trust_store_add_line(store, "{TRUST_PATTERN_PREFIX}{pattern}"))
+}
+
+// crates/jetpack/src/Trust.rs:703; keep the complete gate diagnostics.
+fn trust_add_grant(store: String, project_dir: String, grant: TrustGrant) -[FS, Env]> Bool PackageGateError! {
+    pkg_check_project_gate(project_dir, PolicyKey.TrustGrant, "{grant.key()} -> {store}")
+    Ok(trust_store_add_line(store, grant.line()))
 }

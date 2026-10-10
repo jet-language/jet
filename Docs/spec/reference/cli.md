@@ -812,6 +812,9 @@ ordered kind counts. These are direct inspection reports, including under
 store; invocation choices and package/lock facts feed the same ledger before
 its policy checks. No CLI source scan, manifest parser, or invented receipt
 replaces those providers.
+The compiler assembly includes only the trust store's read path. Gate-aware
+grant writers stay in Jetpack's existing command source alongside its selector
+and JSON writer; granting still checks policy before any store read or write.
 
 Build graph inspection (`inspect build`, `inspect graph`, and `inspect query
 build`) shares the driver's checked plan projection. Its `files` and
