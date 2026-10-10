@@ -202,3 +202,11 @@ fn time_optional_i64(present: Bool, output: I64) -> I64 {
 // The native platform seed embeds no TZif assets (only wasm does). Returning
 // absent here is the actual platform fact; Core then searches its zone roots.
 #Export(c) fn jet_time_raw_embedded_zone_bytes(name: I64, data_out: I64, length_out: I64) -> I64 { I64{0} }
+// TimeSleep.rs:57 core.time.__sleep_ns: the shared scheduler owns the wait
+// policy (deadline checks, clamping, cancellation). Duration.ns is an exact
+// Int word; a Duration always fits i64, so the conversion never stops.
+#Export(c) fn jet_std_time_sleep_duration_ns(nanos: I64) {
+    native :: host_native_int(nanos)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    jet_task_sleep_duration_ns_defaulted(native)
+}

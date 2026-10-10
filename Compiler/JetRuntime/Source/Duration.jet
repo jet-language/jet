@@ -43,3 +43,26 @@ fn runtime_duration_scale(unit: I64) -> I64 {
     time_glue_store(output, duration)
     I64{1}
 }
+
+// Core/Duration.rs:56-74 jet_duration_kernel_total_in: the fixed unit names
+// resolve to nanoseconds; an unknown unit reads 0.0. The C adapter lends the
+// exact-Int ns word and the unit text; neither is consumed.
+fn runtime_duration_unit_ns(unit: I64) -> I64 {
+    if (jet_rt_string_eq(unit, rt_static_text("nanosecond")) || jet_rt_string_eq(unit, rt_static_text("nanoseconds")) || jet_rt_string_eq(unit, rt_static_text("ns"))) -> return I64{1}
+    if (jet_rt_string_eq(unit, rt_static_text("microsecond")) || jet_rt_string_eq(unit, rt_static_text("microseconds")) || jet_rt_string_eq(unit, rt_static_text("us")) || jet_rt_string_eq(unit, rt_static_text("µs"))) -> return I64{1000}
+    if (jet_rt_string_eq(unit, rt_static_text("millisecond")) || jet_rt_string_eq(unit, rt_static_text("milliseconds")) || jet_rt_string_eq(unit, rt_static_text("ms"))) -> return I64{1000000}
+    if (jet_rt_string_eq(unit, rt_static_text("second")) || jet_rt_string_eq(unit, rt_static_text("seconds")) || jet_rt_string_eq(unit, rt_static_text("s"))) -> return I64{1000000000}
+    if (jet_rt_string_eq(unit, rt_static_text("minute")) || jet_rt_string_eq(unit, rt_static_text("minutes")) || jet_rt_string_eq(unit, rt_static_text("min"))) -> return I64{60000000000}
+    if (jet_rt_string_eq(unit, rt_static_text("hour")) || jet_rt_string_eq(unit, rt_static_text("hours")) || jet_rt_string_eq(unit, rt_static_text("h"))) -> return I64{3600000000000}
+    if (jet_rt_string_eq(unit, rt_static_text("day")) || jet_rt_string_eq(unit, rt_static_text("days")) || jet_rt_string_eq(unit, rt_static_text("d"))) -> return I64{86400000000000}
+    if (jet_rt_string_eq(unit, rt_static_text("week")) || jet_rt_string_eq(unit, rt_static_text("weeks")) || jet_rt_string_eq(unit, rt_static_text("w"))) -> return I64{604800000000000}
+    I64{0}
+}
+#Export(c) fn jet_duration_total_in(value: I64, unit: I64) -> Float {
+    // CAbiRoutes native(a0): an exact Int outside i64 is the shared range stop.
+    ns :: host_native_int(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return Float{0.0}
+    scale :: runtime_duration_unit_ns(unit)
+    if (scale == I64{0}) -> return Float{0.0}
+    Float{ns} / Float{scale}
+}

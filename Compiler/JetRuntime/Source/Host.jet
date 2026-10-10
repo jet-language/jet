@@ -179,6 +179,14 @@ fn host_is_tty(fd: I64) -> Bool {
     if host_is_tty(fd.bit_and(I64{4294967295})) -> I64{1} else -> I64{0}
 }
 
+// FSIoEnvOsTesting.rs:335 core.term.jet_term_is_terminal_raw: only stdin,
+// stdout and stderr are standard streams; any other Int reads false. An exact
+// Int 0..2 is its own inline word, so the borrowed word compares directly.
+#Export(c) fn jet_term_is_terminal_raw(fd: I64) -> Bool {
+    if (fd < I64{0} || fd > I64{2}) -> return false
+    host_is_tty(fd)
+}
+
 // runtime-fini: 1
 #Export(c) fn jet_rt_stdout_flush() {
     // A terminal host fault may precede the runtime's init array.

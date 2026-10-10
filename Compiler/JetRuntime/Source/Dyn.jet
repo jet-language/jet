@@ -200,6 +200,52 @@ fn data_tree_render(target: I64, tree: I64) {
     data_tree_render(target, tree)
     jet_rt_string_builder_finish(target)
 }
+// JetStd/Dyn.rs:228-243 JetDynAccess::field: the first entry with this key is
+// cloned out; a missing key or non-object tree is ONE FieldError at path
+// `name`. The C adapter lends tree and name; err receives an owned List
+// payload of one owned FieldError (CAbiRoutes list_out, length via err_len).
+#Export(c) fn jet_dyn_field(tree: I64, name: I64, ok: I64, err: I64, err_len: I64) -> I64 {
+    object :: data_tree_word(tree + DATA_TREE_TAG) == DATA_TREE_OBJECT
+    if object {
+        sequence :: data_tree_word(tree + DATA_TREE_PAYLOAD)
+        length :: data_tree_word(sequence + DATA_SEQUENCE_LENGTH)
+        data :: data_tree_word(sequence + DATA_SEQUENCE_DATA)
+        at := I64{0}
+        loop at < length {
+            entry :: data + at * DATA_TREE_ENTRY_BYTES
+            if jet_rt_string_eq(data_tree_word(entry + DATA_TREE_ENTRY_KEY), name) {
+                data_tree_store(ok, jet_rt_handle_clone_dyn(data_tree_word(entry + DATA_TREE_ENTRY_VALUE)))
+                return I64{1}
+            }
+            at += I64{1}
+        }
+    }
+    target :: jet_rt_string_builder_new()
+    if object {
+        jet_rt_string_builder_push(target, rt_static_text("field `"))
+        jet_rt_string_builder_push(target, name)
+        jet_rt_string_builder_push(target, rt_static_text("` not found"))
+    } else {
+        jet_rt_string_builder_push(target, rt_static_text("expected object, got "))
+        data_tree_render(target, tree)
+    }
+    error :: jet_rt_alloc(TEXT_FIELD_BYTES, I64{8})
+    text_glue_store(error + TEXT_FIELD_PATH, jet_rt_string_clone(name))
+    text_glue_store(error + TEXT_FIELD_REASON, jet_rt_string_builder_finish(target))
+    slot :: jet_rt_alloc(I64{8}, I64{8})
+    data_tree_store(slot, error)
+    data_tree_store(err, slot)
+    data_tree_store(err_len, I64{1})
+    I64{0}
+}
+// JetStd/Dyn.rs:344-355 JetDynAccess::to_text: scalar leaves project exactly
+// as Show does (jet_rt_handle_show_dyn); Null, Array and Object are None.
+#Export(c) fn jet_dyn_to_text(tree: I64, some: I64) -> I64 {
+    kind :: data_tree_word(tree + DATA_TREE_TAG)
+    if kind == DATA_TREE_NULL || kind >= DATA_TREE_ARRAY -> return I64{0}
+    data_tree_store(some, jet_rt_handle_show_dyn(tree))
+    I64{1}
+}
 #Export(c) fn jet_rt_record_tag_dyn(tree: I64) -> I64 { data_tree_word(tree + DATA_TREE_TAG) }
 #Export(c) fn jet_rt_record_new_dyn_null() -> I64 { data_tree_new(DATA_TREE_NULL, I64{0}) }
 #Export(c) fn jet_rt_record_new_dyn_bool(value: Bool) -> I64 { data_tree_new(DATA_TREE_BOOL, if value -> I64{1} else -> I64{0}) }
