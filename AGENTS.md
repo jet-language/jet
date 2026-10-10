@@ -223,6 +223,33 @@ This repository carries no harness-specific configuration. Agent tools use
 their own global settings; Jet contributes only this contract and the skills
 under `.agents/skills` and `Tools/tower/skills`.
 
+## Find every issue at once
+
+This is a standing owner order, repeated many times; violating it wastes hours.
+Never discover problems serially, where one blocker is found, fixed and rerun
+to find the next. Before fixing anything, collect every issue in one pass:
+
+- **Run every stage in collect-all mode.** Use the existing keep-going
+  mechanisms (`JET_KEEP_GOING=1` all-phases reports,
+  `JET_DEBUG_LOWER_ALL=1` lowering sweeps, per-error census scripts) so one run
+  reports all errors in all items, not the first one. A tool that stops at its
+  first failure needs a collect-all mode before it gates anything.
+- **Preflight the whole pipeline end to end first.** Before starting a
+  multi-stage effort (self-hosting, a cutover, a release candidate), dry-run or
+  probe every stage up front: parse, imports, sema, lowering, emission,
+  generated tables, runtime pack, link, run, tests. That maps every blocker,
+  dependency and missing piece before the first fix.
+- **Partition when a run is slow or hangs.** Split the input and check the parts
+  in parallel to localize every failure at once.
+- **Fix the whole list in parallel.** Group the findings by root, give each root
+  one owner, and land them as one batch before the next expensive build or
+  check. A rebuild that exists only to reveal the next error is a process
+  failure.
+- **Gate every commit cheaply first.** Parse and check each touched file,
+  regenerate and commit generated outputs with their sources, and run the
+  generator checks against the exact source a build will use, so no expensive
+  run is lost to a mistake a fast check would catch.
+
 ## Environment and proof
 
 Run repository commands through `Tools/agent/jet-env`. Keep scratch and logs on
