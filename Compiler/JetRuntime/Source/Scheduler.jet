@@ -694,43 +694,14 @@ fn scheduler_worker_count() -> I64 {
     scheduler_available_parallelism(I64{4})
 }
 
-// The pool's environment override stays in worker_count. Joined parallel
-// walks use this same available-parallelism probe with their own fallback1.
+// The pool's environment override stays in worker_count. Pool (fallback 4,
+// Scheduler.rs:4338), joined parallel walks (fallback 1) and cpu_count
+// (None) all read std's one available_parallelism (HostParallelism.jet).
 fn scheduler_available_parallelism(fallback: I64) -> I64 {
-    // CPU affinity is Linux's available_parallelism input. Retry EINVAL with
-    // a larger mask rather than truncate large CPU sets; syscall returns size.
-    bytes := I64{128}
-    loop {
-        mask :: jet_rt_alloc(bytes, I64{8})
-        if (mask == I64{0} && jet_rt_session_propagate() != I64{0}) -> return I64{0}
-        thread_zero(mask, bytes)
-        result := I64{0}
-        #Unsafe("sched_getaffinity writes only the owned mask; pid0 names this thread") {
-            result = os_syscall_i64(I64{204}, I64{0}, bytes, mask, I64{0}, I64{0}, I64{0})
-        }
-        if (result == I64{-22}) {
-            jet_rt_free(mask, bytes, I64{8})
-            if (jet_rt_session_propagate() != I64{0}) -> return I64{0}
-            bytes *= I64{2}
-            next
-        }
-        count := I64{0}
-        if (result > I64{0}) {
-            at := I64{0}
-            loop at < result {
-                bits := trap_byte(mask + at)
-                loop bits != (I64{0}) {
-                    bits = bits.bit_and((bits - I64{1}))
-                    count += I64{1}
-                }
-                at += I64{1}
-            }
-        }
-        jet_rt_free(mask, bytes, I64{8})
-        if (jet_rt_session_propagate() != I64{0}) -> return I64{0}
-        if (count > I64{0}) -> return count
-        return fallback
-    }
+    count :: cpu_available_parallelism(I64{0}, I64{0})
+    if (jet_rt_session_propagate() != I64{0}) -> return I64{0}
+    if (count > I64{0}) -> return count
+    fallback
 }
 
 fn scheduler_start_worker(root: I64, flags: I64) {
