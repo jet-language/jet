@@ -907,6 +907,14 @@ function elementCarrier(ty) {
   return null;
 }
 
+// A List<U8> element of an outer List: a native 24-byte [len, cap, data] header
+// with packed inner bytes. Seed Rust adapters have no nested slot codec, so this
+// element is admitted only for a Jet runtime #Export(c) (`nativeOnly`), whose
+// route row is emitted without a Rust body.
+function nestedByteElement(ty) {
+  return ty === "Vec<u8>" ? { jet: "List{elem: LowerRouteCarrier.Word}", nativeOnly: true } : null;
+}
+
 // A List parameter element of a cloneable runtime type: each slot word is a
 // borrowed handle, cloned into the Rust Vec (the lowering lends a handle per
 // element: a record element converts through Records.jet for the call).
@@ -954,11 +962,15 @@ function paramCarrier(ty, path, symbol) {
   if (/^&(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty)) return one("Word", "i64", (a) => `&unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(${a}) }`);
   const list = /^(&?)(?:\[(.+)\]|Vec<(.+)>)$/.exec(ty);
   if (list && (list[1] === "&" || list[3])) {
-    const element = elementCarrier(list[2] ?? list[3]) ?? handleElement(list[2] ?? list[3], path);
+    const element = elementCarrier(list[2] ?? list[3]) ?? handleElement(list[2] ?? list[3], path) ?? nestedByteElement(list[2] ?? list[3]);
     if (!element) return null;
     const items = (d, n) => `list_in(${d}, ${n}, |w| ${element.read})`;
-    return { jet: `List{elem: LowerRouteCarrier.${element.jet}}`, ctys: [`*const ${element.slot ?? "u64"}`, "i64"], expr: ([d, n]) => (list[1] === "&" ? `&${items(d, n)}` : items(d, n)), handle: element.handle };
+    return { jet: `List{elem: LowerRouteCarrier.${element.jet}}`, ctys: [`*const ${element.slot ?? "u64"}`, "i64"], expr: ([d, n]) => (list[1] === "&" ? `&${items(d, n)}` : items(d, n)), handle: element.handle, nativeOnly: element.nativeOnly };
   }
+  // A mutably borrowed byte List lends its own storage (data, length) to a Jet
+  // provider that writes it in place. Seed adapters have no write-back codec,
+  // and a Rust Vec copy would leave the caller's bytes untouched: native-only.
+  if (ty === "&mutVec<u8>") return { jet: "List{elem: LowerRouteCarrier.Word}", ctys: ["*mut u8", "i64"], nativeOnly: true };
   // A mutably borrowed handle: the adapter mutates the runtime value in the
   // caller's own box (the lowering lends the handle of its Write place).
   const borrowedMut = /^&mut(.+)$/.exec(ty);
@@ -1101,7 +1113,7 @@ function resultShape(ty, path, nativeInt, rawFixed = false) {
   // A List result element: a plain slot word, or a new owned handle of a
   // runtime value (the lowering's List keeps the handles as its elements).
   const resultElement = (t) => {
-    const plain = elementCarrier(t);
+    const plain = elementCarrier(t) ?? nestedByteElement(t);
     if (plain) return plain;
     if (!opaqueName.test(t) || tagCarrier(t, path)) return null;
     const handle = runtimeHandle(t, path);
@@ -1120,7 +1132,7 @@ function resultShape(ty, path, nativeInt, rawFixed = false) {
     const element = resultElement(list[1]);
     if (!element) return null;
     return {
-      jet: `Plain{carrier: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "data", cty: `*mut ${element.slot ?? "u64"}` }], handles: element.handle ? [element.handle] : [],
+      jet: `Plain{carrier: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "data", cty: `*mut ${element.slot ?? "u64"}` }], handles: element.handle ? [element.handle] : [], nativeOnly: element.nativeOnly,
       body: (call) => `list_out(${call}.into_iter().map(|e| ${element.write}).collect(), data)`,
     };
   }
@@ -1169,7 +1181,7 @@ function resultShape(ty, path, nativeInt, rawFixed = false) {
     const element = listOf(args[0]);
     if (element) {
       return {
-        jet: `Option{some: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "some", cty: `*mut ${element.slot ?? "u64"}` }, { name: "some_len", cty: "i64" }], handles: element.handle ? [element.handle] : [],
+        jet: `Option{some: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "some", cty: `*mut ${element.slot ?? "u64"}` }, { name: "some_len", cty: "i64" }], handles: element.handle ? [element.handle] : [], nativeOnly: element.nativeOnly,
         body: (call) => `match ${call} {\n            ${listArm("some", element, somePattern, 1)}\n            ${nonePattern} => 0,\n        }`,
       };
     }
@@ -1201,6 +1213,7 @@ function resultShape(ty, path, nativeInt, rawFixed = false) {
     : `Err(error) => { unsafe { err.write(${err.wrap("error")}) }; 0 }`;
   return {
     jet: `Result{ok: LowerRouteCarrier.${okJet}, err: LowerRouteCarrier.${errJet}}`, ret: "i64", outs, handles: [ok?.handle, okList?.handle, err?.handle, errList?.handle].filter(Boolean),
+    nativeOnly: Boolean(okList?.nativeOnly || errList?.nativeOnly),
     body: (call) => `match ${call} {\n            ${okArm}\n            ${errArm}\n        }`,
   };
 }
@@ -1276,9 +1289,12 @@ for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]
     return colon < 0 ? null : paramCarrier(param.slice(colon + 1), path, symbol);
   });
   if (params.some((param) => param === null)) { skip(`parameter types ${sig.params}`); continue; }
+  // A native-only carrier has no seed Rust adapter; a seed route keeps its skip.
+  const jetProvider = jetRuntimeExports.has(name);
+  if (!jetProvider && params.some((param) => param.nativeOnly)) { skip(`parameter types ${sig.params}`); continue; }
   const rawFixed = /^jet_reader_(?:read_[ui](?:8|16|32|64)(?:_le|_be)?|read_f32_(?:le|be)|peek)$/.test(name);
   const result = resultShape(sig.result, path, rawFixed ? false : route.nativeInt, rawFixed);
-  if (!result) { skip(`result type ${sig.result}`); continue; }
+  if (!result || (!jetProvider && result.nativeOnly)) { skip(`result type ${sig.result}`); continue; }
   if (jetRuntimeExports.has(name) && (name === "jet_reader_over" || name === "jet_reader_over_owned")) {
     if (params.length !== 1 || params[0].ctys.length !== 2) throw new Error(`${name}: Reader.over must have one checked byte List parameter`);
     // Logical metadata stays one List; Lower appends the checked 1|8 stride.
@@ -1298,7 +1314,10 @@ for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]
     else handles.set(handle.name, handle.full);
   }
   if (!exported.has(name)) continue;
-  adapters.push({ symbol, target, name, label, params, result, rows: route.rows });
+  // A nested native List carrier crosses only to its Jet provider: emit the
+  // route row without a Rust adapter body.
+  const external = params.some((param) => param.nativeOnly) || Boolean(result.nativeOnly);
+  adapters.push({ symbol, target, name, label, params, result, rows: route.rows, ...(external ? { external: true } : {}) });
 }
 classificationSite = null;
 

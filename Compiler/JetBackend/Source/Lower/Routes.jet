@@ -77,7 +77,10 @@ fn lower_route_carrier_of(p: MIRProgram, ty: MIRType) -> LowerRouteCarrier? {
         if lower_route_contains_float32(p, elem) -> return None
         if lower_repr(p, ty) == .Unsupported(_) -> return None
         inner :: lower_route_carrier_of(p, elem) ?? return None
-        if inner == .Unit || inner == .List(_) -> return None
+        if inner == .Unit -> return None
+        // One nested level: List<List<U8>> as inline 24-byte headers over
+        // packed bytes, which only a Jet runtime provider reads directly.
+        if inner == .List(_) && !lower_route_nested_bytes(p, elem) -> return None
         return Val(LowerRouteCarrier.List{elem: inner})
     }
     if lower_repr(p, ty) == {
@@ -91,6 +94,36 @@ fn lower_route_carrier_of(p: MIRProgram, ty: MIRType) -> LowerRouteCarrier? {
             Val(LowerRouteCarrier.Handle{name: runtime.runtime})
         }
         else -> None
+    }
+}
+
+// A nested List element crossing a route: a compact List<U8> stored inline as
+// its 24-byte [len, cap, data] header (the environment columns' layout).
+fn lower_route_nested_bytes(p: MIRProgram, elem: MIRType) -> Bool Never! {
+    lower_environment_bytes(p, elem) && lower_list_stride(p, elem) == 24
+}
+
+fn lower_route_nested_carrier(carrier: LowerRouteCarrier) -> Bool Never! {
+    if carrier == .List(elem) -> return elem == .List(_)
+    false
+}
+
+// Seed Rust adapters exchange eight-byte list slots, never nested headers.
+// Only a Jet runtime provider (native_lists) owns a nested List carrier.
+fn lower_route_nested(route: LowerRoute) -> Bool Never! {
+    loop param in route.params {
+        if lower_route_nested_carrier(param) -> return true
+    }
+    if route.result == {
+        .Plain(carrier) -> lower_route_nested_carrier(carrier)
+        .Option(some) -> lower_route_nested_carrier(some)
+        .Result(ok, err) -> lower_route_nested_carrier(ok) || lower_route_nested_carrier(err)
+        .Tuple(items) -> {
+            loop item in items {
+                if lower_route_nested_carrier(item) -> return true
+            }
+            false
+        }
     }
 }
 
@@ -337,6 +370,7 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         || route.symbol == "jet_services_runtime" || route.symbol == "jet_std_io_progress" {
         return lower_fail(&m, &f, "{what} {name} does not have native O0 runtime parity yet")
     }
+    if !route.native_lists && lower_route_nested(route) -> return lower_fail(&m, &f, "{what} {name} crosses a nested List, which only a Jet runtime provider reads")
     if route.params.len() != args.len() -> return lower_fail(&m, &f, "{what} {name} passes {args.len()} arguments; its runtime route takes {route.params.len()}")
     if route.symbol == "jet_dyn_field" && lower_dyn_field(p, c, &m, &f, instruction, route, args) -> return
     if route.symbol == "jet_dyn_to_text" && lower_dyn_to_text(p, c, &m, &f, instruction, route, args) -> return
