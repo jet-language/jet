@@ -7,6 +7,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdir
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
+import { nativePackRecipe, readNativeRuntimePack } from './runtime-pack-cache.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const [compiler, destination, ...extra] = process.argv.slice(2);
@@ -43,6 +44,20 @@ const source = inventory([manifest, 'Compiler/JetRuntime/package.jet', ...source
 const backend = inventory(jetFiles('Compiler/JetBackend/Source'));
 const lifecycle = inventory(['Compiler/JetRuntime/lifecycle.list']);
 const platformInputs = platform.map(path => ({ path, sha256: sha256(readFileSync(path)), language: 'C', role: 'platform' }));
+const compilerSha256 = sha256(readFileSync(jet));
+const recipeSha256 = nativePackRecipe(source.sha256, backend.sha256, lifecycle.sha256,
+  platformInputs.map(row => row.sha256), compilerSha256);
+if (existsSync(join(out, 'native.key'))) {
+  try {
+    const cached = readNativeRuntimePack(out, recipeSha256);
+    noRust(join(out, cached.key, 'jet_runtime_jet.o'));
+    noRust(join(out, cached.key, 'jet_runtime.pack.o'));
+    console.log(join(out, cached.key, 'jet_runtime.pack.o'));
+    process.exit(0);
+  } catch (error) {
+    console.error(`native runtime cache miss: ${error.message}`);
+  }
+}
 function noRust(path) {
   if (/\.(?:rlib|rs)$/u.test(path)) throw Error(`Rust runtime input forbidden: ${path}`);
   const symbols = execFileSync('nm', ['--format=posix', path], { encoding: 'utf8', maxBuffer: 1 << 28 });
@@ -83,7 +98,7 @@ try {
   copyFileSync(prefix + '.abi.json', join(directory, 'runtime.abi.json'));
   copyFileSync(prefix + '.exports', join(directory, 'runtime.exports'));
   copyFileSync(pack, join(directory, 'jet_runtime.pack.o'));
-  const provenance = { backend: 'jet-native', runtimeKey: key, objectSha256: sha256(readFileSync(prefix + '.o')), packSha256: sha256(readFileSync(pack)), rustObjects: 0, llvmObjects: 0, abiSha256, source, backendInputs: backend, lifecycle, cPlatformArchives: platformInputs, compilerSha256: sha256(readFileSync(jet)) };
+  const provenance = { backend: 'jet-native', runtimeKey: key, objectSha256: sha256(readFileSync(prefix + '.o')), packSha256: sha256(readFileSync(pack)), rustObjects: 0, llvmObjects: 0, abiSha256, source, backendInputs: backend, lifecycle, cPlatformArchives: platformInputs, compilerSha256, recipeSha256 };
   writeFileSync(join(directory, 'provenance.json'), JSON.stringify(provenance, null, 2) + '\n');
   writeFileSync(join(out, 'provenance.json'), JSON.stringify(provenance, null, 2) + '\n');
   writeFileSync(join(out, 'native.key.new'), key + '\n');

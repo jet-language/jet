@@ -144,6 +144,14 @@ Packaging writes `jet-runtime/native.key` beside the compiler and installs
 checked ABI, lifecycle, backend inputs and C platform archives. The accompanying
 `provenance.json` records each input digest, the pack digest and zero Rust or
 LLVM-generated Jet objects, with permitted C platform archives listed separately.
+Packaging first checks a separate recipe digest of the runtime sources, backend,
+lifecycle, C archive bytes and compiler executable. Neither the consumer program
+nor its build profile enters that recipe. A matching recipe reuses the produced
+pack without checking or compiling the runtime again; changed producer inputs
+rebuild it. Reuse requires held regular-file reads, matching object/pack/ABI
+digests, the checked export inventory, the content-addressed identity and the
+existing no-Rust-symbol check. Native compiler staging uses the same receipt
+reader. This cache does not bypass semantic checks on user programs.
 
 The all-parts runtime includes `CAbiTest.rs` once through Codegen's canonical
 prelude; the compiler-call preparation step must not append a second copy.

@@ -24,6 +24,7 @@ import { accessSync, chmodSync, constants, copyFileSync, cpSync, existsSync,
     mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readNativeRuntimePack } from '../packaging/runtime-pack-cache.mjs';
 
 const usage = 'native-compiler.mjs --jet CLI_SEED --runtime-dir DIR --out FRESH_DIR [--repo DIR] [--stages 1|2] [--dry-run]; bootstrap only: --seed-build --jet RUST_HOST --out FRESH_DIR [--repo DIR] [--dry-run]';
 const options = { repo: resolve(dirname(fileURLToPath(import.meta.url)), '../..'), stages: 2, dryRun: false };
@@ -120,13 +121,8 @@ json(join(out, 'plan.json'), plan);
 if (options.dryRun) { console.log(JSON.stringify({ dryRun: true, plan: join(out, 'plan.json'), ...plan }, null, 2)); process.exit(0); }
 
 accessSync(options.jet, constants.X_OK);
-const key = readFileSync(join(options.runtime, 'native.key'), 'utf8').trim();
-if (!key || key === '.' || key === '..' || /[\\/\s]/.test(key)) throw Error('native.key must name one runtime directory');
-const pack = readFileSync(join(options.runtime, key, 'jet_runtime.pack.o'));
-const provenance = JSON.parse(readFileSync(join(options.runtime, 'provenance.json'), 'utf8'));
-if (provenance.backend !== 'jet-native' || provenance.rustObjects !== 0 || provenance.llvmObjects !== 0 || provenance.packSha256 !== hash(pack)) {
-    throw Error('runtime pack must have matching Jet-native, zero-Rust/LLVM provenance');
-}
+const runtime = readNativeRuntimePack(options.runtime);
+const { pack } = runtime;
 const exposeRuntime = directory => cpSync(options.runtime, join(directory, 'jet-runtime'), { recursive: true, dereference: true });
 const seedDir = join(out, 'seed');
 mkdirSync(seedDir);
