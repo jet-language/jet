@@ -276,7 +276,8 @@ fn trust_pin_locked_toolchain(root: String) -[FS]> LockedToolchain? {
 fn trust_pin_read_manifest(root: String) -[FS]> String? {
     package_path :: files.join(root, PACKAGE_FILE)
     path :: if files.is_file(package_path) -> package_path else -> files.join(root, PAYLOAD_FILE)
-    files.read(path) ?? None
+    text :: files.read(path) ?? return None
+    Val(text)
 }
 
 // The executable `jet` inside the toolchain object directory, if present.

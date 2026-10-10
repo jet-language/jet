@@ -146,7 +146,7 @@ fn trust_store_path() -[Env]> String {
 }
 
 // Trimmed non-empty store lines; an unreadable store is empty.
-fn trust_store_lines(store: String) -[FS]> [String] {
+fn trust_store_lines(store: String) -[FS]> [String] Never! {
     text :: files.read(store) ?? ""
     lines := [String]{}
     loop line in trust_text_lines(text) {
@@ -158,14 +158,14 @@ fn trust_store_lines(store: String) -[FS]> [String] {
 
 // Append one line, creating the parent directory; write failures are
 // ignored as in the reference.
-fn trust_store_append(store: String, line: String) -[FS]> {
-    _ :: files.create_dir_all(files.dirname(store))
+fn trust_store_append(store: String, line: String) Never! -[FS]> {
+    files.create_dir_all(files.dirname(store)).drop("trust-store directory creation remains best-effort")
     existing := files.read(store) ?? ""
     if existing != "" && !existing.ends_with("\n") -> existing = "{existing}\n"
-    _ :: files.write(store, "{existing}{line}\n")
+    files.write(store, "{existing}{line}\n").drop("trust-store append remains best-effort")
 }
 
-fn trust_store_add_line(store: String, line: String) -[FS]> Bool {
+fn trust_store_add_line(store: String, line: String) -[FS]> Bool Never! {
     if trust_store_lines(store).contains(line) -> return false
     trust_store_append(store, line)
     true
