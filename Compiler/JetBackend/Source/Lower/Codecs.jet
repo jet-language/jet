@@ -40,7 +40,22 @@ fn lower_codec_reach(p: MIRProgram, q: &LowerPrepared, route: MIRPreludeCallID, 
     decode :: (row.module_name == "core.encoding.codec" && (row.member == "decode" || row.member == "decode_typed"))
         || (row.module_name.starts_with("core.encoding.") && row.member == "decode")
     if !encode && !decode -> return
-    if lower_codec_method(p, types[0], encode) == .Val(method) -> lower_mono_request(p, &q, method.function, Val(method.owner), [MIRType]{}, parent, site).drop("selected codec method")
+    lower_codec_reach_type(p, &q, types[0], encode, parent, site)
+}
+
+// A container's element and value codecs are selected like the outer one
+// (lower_codec_decode_into / lower_codec_encode_into), so their selected
+// methods are reached with it.
+fn lower_codec_reach_type(p: MIRProgram, q: &LowerPrepared, ty: MIRType, encode: Bool, parent: Int, site: String) Never! {
+    if lower_codec_method(p, ty, encode) == .Val(method) {
+        lower_mono_request(p, &q, method.function, Val(method.owner), [MIRType]{}, parent, site).drop("selected codec method")
+        return
+    }
+    if ty.kind == {
+        .List(elem) | .FixedList(elem, _) | .Option(elem) -> lower_codec_reach_type(p, &q, elem, encode, parent, site)
+        .Map(_, value) -> lower_codec_reach_type(p, &q, value, encode, parent, site)
+        else -> {}
+    }
 }
 
 fn lower_codec_scalar(ty: MIRType) -> String? Never! {
@@ -76,6 +91,7 @@ fn lower_codec_method_call(p: MIRProgram, m: &LowerModule, f: &LowerFunction, me
 
 fn lower_codec_decode_into(p: MIRProgram, m: &LowerModule, f: &LowerFunction, target: MIRType, result: MIRType, tree: MIRType, source: LIRValueID, dst: LIRValueID) Never! {
     if lower_codec_method(p, target, false) == .Val(method) -> return lower_codec_method_call(p, &m, &f, method, source, dst)
+    if lower_codec_container(p, target) -> return lower_call_helper(&m, &f, "codec.decode", result, [LIRValueID]{source}, Val(dst))
     scalar :: lower_codec_scalar(target) ?? return lower_fail(&m, &f, "Decode<{mir_type_display_name(target)}> has no reachable selected method or canonical scalar carrier")
     route :: lower_runtime_route("jet_rt_codec_decode_{runtime_abi_atom(scalar)}") ?? return lower_fail(&m, &f, "canonical scalar Decode adapter is missing")
     if !lower_route_shape_matches(p, result, route.result) -> return lower_fail(&m, &f, "canonical scalar Decode result does not match checked FieldError storage")
@@ -193,12 +209,7 @@ fn lower_codec_under(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         lower_fail(&m, &f, "DecodeUnder inner value is not a Result")
         return
     }
-    route :: lower_runtime_route("jet_rt_codec_under") ?? return lower_fail(&m, &f, "canonical FieldError prefix adapter is missing")
-    carrier :: if route.result == .Plain(value) -> value else -> {
-        lower_fail(&m, &f, "canonical FieldError prefix adapter has the wrong result rail")
-        return
-    }
-    if !lower_route_result_matches(p, errors, carrier) -> return lower_fail(&m, &f, "DecodeUnder error storage does not match FieldError")
+    route :: lower_codec_under_route(p, &m, &f, errors) ?? return
     value :: lower_use(&m, &f, inner) ?? return
     text :: lower_use(&m, &f, segment) ?? return
     selector :: lower_word(&f)
@@ -211,6 +222,33 @@ fn lower_codec_under(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     lower_seal(&f, LIRTerminator.Branch{condition: yes, then_target: lower_target(merge, [LIRValueID]{}), else_target: lower_target(failure, [LIRValueID]{})})
     lower_start(&f, failure, [LIRValueID]{})
     source :: lower_address(&f, value, 8)
+    lower_codec_prefix(p, &m, &f, route, errors, source, text)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
+    lower_start(&f, merge, [LIRValueID]{})
+    lower_alias(c, &f, instruction, value)
+}
+
+// The canonical FieldError prefix adapter, checked against `errors` storage.
+fn lower_codec_under_route(p: MIRProgram, m: &LowerModule, f: &LowerFunction, errors: MIRType) -> LowerRoute? {
+    route :: lower_runtime_route("jet_rt_codec_under") ?? {
+        lower_fail(&m, &f, "canonical FieldError prefix adapter is missing")
+        return None
+    }
+    carrier :: if route.result == .Plain(value) -> value else -> {
+        lower_fail(&m, &f, "canonical FieldError prefix adapter has the wrong result rail")
+        return None
+    }
+    if !lower_route_result_matches(p, errors, carrier) {
+        lower_fail(&m, &f, "DecodeUnder error storage does not match FieldError")
+        return None
+    }
+    Val(route)
+}
+
+// FieldError.under_errors(segment, errors) (FieldError.rs:18-26): replaces
+// the owned [FieldError] List header at `source` with its errors framed under
+// the borrowed `text` segment.
+fn lower_codec_prefix(p: MIRProgram, m: &LowerModule, f: &LowerFunction, route: LowerRoute, errors: MIRType, source: LIRValueID, text: LIRValueID) Never! {
     length :: lower_list_word(&f, source, 0)
     buffer :: lower_pointer(&f)
     lower_call_helper(&m, &f, "list.record_handles", errors, [LIRValueID]{source}, Val(buffer))
@@ -220,9 +258,6 @@ fn lower_codec_under(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     data :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Load{dst: data, base: out.slot, offset: 0})
     lower_record_list_from_runtime(p, &m, &f, errors, data, out.word, source)
-    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
-    lower_start(&f, merge, [LIRValueID]{})
-    lower_alias(c, &f, instruction, value)
 }
 
 // The canonical CSV row kernel owns header projection/error accumulation.
@@ -347,4 +382,293 @@ fn lower_helper_codec_csv_decode(p: MIRProgram, m: &LowerModule, glue: LowerGlue
     lower_free_shell(&m, &f, decoded, lower_box_size(p, glue.ty))
     lower_seal(&f, LIRTerminator.Return{value: Val(zero)})
     lir_builder_finish(f.builder)
+}
+
+// ---------------------------------------------------------------------------
+// Container codecs (EncodingTraits.rs:457-501 List and ?T decode, :491-493
+// Dyn decode). One "codec.decode" helper per checked Result<T, [FieldError]>
+// walks the borrowed checked native Dyn enum; every element decode recurses
+// through lower_codec_decode_into's one selection (selected method, canonical
+// scalar adapter, container helper), so nested containers share it.
+
+fn lower_codec_container(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .List(_) | .Option(_) -> true
+        else -> lower_dyn_type(p, ty)
+    }
+}
+
+// One checked Dyn variant: its native discriminant and payload storage.
+struct LowerCodecVariant {
+    discriminant: Int
+    offset: Int
+    boxed: Bool
+    ty: MIRType
+}
+
+fn lower_codec_tag_of(p: MIRProgram, tree: MIRType, name: String) -> Int? {
+    definition :: lower_type_def(p, tree) ?? return None
+    found :: lower_variant(definition, name) ?? return None
+    Val(lower_discriminant(found.index))
+}
+
+fn lower_codec_variant(p: MIRProgram, tree: MIRType, name: String) -> LowerCodecVariant? {
+    definition :: lower_type_def(p, tree) ?? return None
+    found :: lower_variant(definition, name) ?? return None
+    info :: lower_enum_payload_info(p, definition, found.variant, 0) ?? return None
+    Val(LowerCodecVariant{discriminant: lower_discriminant(found.index), offset: info.offset, boxed: info.boxed, ty: info.ty})
+}
+
+// The payload address of the Dyn box `node` holding `variant` (inside its
+// recursive-edge wrapper when the edge is boxed).
+fn lower_codec_payload(f: &LowerFunction, node: LIRValueID, variant: LowerCodecVariant) -> LIRValueID Never! {
+    address :: lower_address(&f, node, variant.offset)
+    if !variant.boxed -> return address
+    wrapper :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: wrapper, base: address, offset: 0})
+    wrapper
+}
+
+// Branches on `word == expected`: opens the matching block and returns the
+// other one, still to be started.
+fn lower_codec_on_tag(f: &LowerFunction, word: LIRValueID, expected: Int) -> LIRBlockID Never! {
+    wanted :: lower_const(&f, expected)
+    hit :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: hit, condition: LIRCondition.Eq, left: word, right: wanted})
+    taken :: lower_new_block(&f)
+    other :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: hit, then_target: lower_target(taken, [LIRValueID]{}), else_target: lower_target(other, [LIRValueID]{})})
+    lower_start(&f, taken, [LIRValueID]{})
+    other
+}
+
+// Opens the success block of the Result box `decoded`; returns its failure
+// block, still to be started.
+fn lower_codec_on_ok(f: &LowerFunction, decoded: LIRValueID) -> LIRBlockID Never! {
+    selector :: lower_word(&f)
+    lower_emit(&f, LIRInst.Load{dst: selector, base: decoded, offset: 0})
+    lower_codec_on_tag(&f, selector, lower_result_selector(true))
+}
+
+fn lower_codec_tag(f: &LowerFunction, node: LIRValueID) -> LIRValueID Never! {
+    discriminant :: lower_word(&f)
+    lower_emit(&f, LIRInst.Load{dst: discriminant, base: node, offset: 0})
+    discriminant
+}
+
+// "expected {expected}, found {kind}" with Dyn.rs dyn_kind_for's kind
+// vocabulary (DynKind.rs dyn_kind) for the native `discriminant`; owned String.
+fn lower_codec_found(p: MIRProgram, m: &LowerModule, f: &LowerFunction, tree: MIRType, discriminant: LIRValueID, expected: String) -> LIRValueID Never! {
+    builder :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
+    lower_render_static(&m, &f, builder, "expected {expected}, found ")
+    done :: lower_new_block(&f)
+    names :: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "DateTime", "Array", "Object"}
+    kinds :: [String]{"null", "Bool", "Int", "Float", "number", "Text", "Bytes", "DateTime", "a list", "an object"}
+    loop (index, name) in names {
+        known :: lower_codec_tag_of(p, tree, name) ?? next
+        other :: lower_codec_on_tag(&f, discriminant, known)
+        lower_render_static(&m, &f, builder, kinds[index])
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, other, [LIRValueID]{})
+    }
+    lower_render_static(&m, &f, builder, "value")
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+    text :: lower_render_string(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_finish", [LIRValueID]{builder}, Val(text))
+    text
+}
+
+// Err(FieldError.one(reason)) (FieldError.rs): the Result box `box` fails
+// with one error at the empty path. Consumes the owned `reason`.
+fn lower_codec_fail_one(p: MIRProgram, m: &LowerModule, f: &LowerFunction, errors: MIRType, reason: LIRValueID, box: LIRValueID) Never! {
+    empty :: lower_static_text(&m, &f, "")
+    path :: lower_render_string(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_from_static", empty, Val(path))
+    handle :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_record_new_field_error", [LIRValueID]{path, reason}, Val(handle))
+    lower_emit(&f, LIRInst.Drop{value: path})
+    lower_emit(&f, LIRInst.Drop{value: reason})
+    one :: lower_const(&f, 1)
+    buffer :: lower_list_buffer(&m, &f, one, 8)
+    lower_emit(&f, LIRInst.Store{base: buffer, offset: 0, value: handle})
+    lower_store_word(&f, box, 0, lower_result_selector(false))
+    target :: lower_address(&f, box, lower_result_payload_offset())
+    lower_record_list_from_runtime(p, &m, &f, errors, buffer, one, target)
+}
+
+// The "[index]" segment jet_decode_sequence frames element errors under;
+// owned String.
+fn lower_codec_index_segment(m: &LowerModule, f: &LowerFunction, index: LIRValueID) -> LIRValueID Never! {
+    builder :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
+    lower_render_static(&m, &f, builder, "[")
+    number :: lower_render_string(&f)
+    lower_call_runtime(&m, &f, "jet_rt_i64_to_string", [LIRValueID]{index}, Val(number))
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_push", [LIRValueID]{builder, number}, None)
+    lower_emit(&f, LIRInst.Drop{value: number})
+    lower_render_static(&m, &f, builder, "]")
+    text :: lower_render_string(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_finish", [LIRValueID]{builder}, Val(text))
+    text
+}
+
+// An empty owned [FieldError] List header in frame storage.
+fn lower_codec_failures(p: MIRProgram, f: &LowerFunction, errors: MIRType) -> LIRValueID Never! {
+    failures :: lower_new_storage(p, &f, errors)
+    zero :: lower_const(&f, 0)
+    loop offset in ([Int]{0, 8, 16}) -> lower_emit(&f, LIRInst.Store{base: failures, offset: offset, value: zero})
+    failures
+}
+
+// Moves the failed element Result `decoded`'s errors, framed under the
+// borrowed `segment`, onto the collected `failures`.
+fn lower_codec_absorb(p: MIRProgram, m: &LowerModule, f: &LowerFunction, route: LowerRoute, errors: MIRType, failures: LIRValueID, decoded: LIRValueID, segment: LIRValueID) Never! {
+    found :: lower_address(&f, decoded, lower_result_payload_offset())
+    lower_codec_prefix(p, &m, &f, route, errors, found, segment)
+    lower_call_helper(&m, &f, "list.extend", errors, [LIRValueID]{failures, found}, None)
+}
+
+// Any collected error fails the whole container with all of them, dropping
+// the partial value of `ty` at box+8; otherwise the box succeeds.
+fn lower_codec_settle(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, errors: MIRType, failures: LIRValueID, box: LIRValueID) Never! {
+    out :: lower_address(&f, box, lower_result_payload_offset())
+    count :: lower_list_word(&f, failures, 0)
+    zero :: lower_const(&f, 0)
+    failed :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Ne, left: count, right: zero})
+    failure :: lower_new_block(&f)
+    success :: lower_new_block(&f)
+    merge :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(failure, [LIRValueID]{}), else_target: lower_target(success, [LIRValueID]{})})
+    lower_start(&f, failure, [LIRValueID]{})
+    lower_map_drop_value(p, &m, &f, out, ty)
+    lower_copy_bytes(&f, out, 0, failures, 0, lower_size(p, errors).size)
+    lower_store_word(&f, box, 0, lower_result_selector(false))
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
+    lower_start(&f, success, [LIRValueID]{})
+    lower_store_word(&f, box, 0, lower_result_selector(true))
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
+    lower_start(&f, merge, [LIRValueID]{})
+}
+
+// "codec.decode" (borrowed native Dyn) -> owned Result<T, [FieldError]> box
+// for the container T of the helper's Result type.
+fn lower_helper_codec_decode(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    target :: if glue.ty.kind == .Result(ok, _) -> ok else -> panic("codec.decode needs its checked Decode Result")
+    errors :: if glue.ty.kind == .Result(_, err) -> err else -> panic("codec.decode needs its checked failures")
+    tree :: lower_dyn_program_type(p) ?? panic("codec.decode needs its checked Dyn")
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
+    source :: f.open_params[0].copy()
+    box :: lower_pointer(&f)
+    lower_alloc(&m, &f, box, lower_box_size(p, glue.ty))
+    if target.kind == {
+        .List(elem) -> lower_codec_decode_list(p, &m, &f, tree, target, elem, errors, source, box)
+        .Option(inner) -> lower_codec_decode_option(p, &m, &f, tree, inner, errors, source, box)
+        else -> {
+            // EncodingTraits.rs:491-493: Dyn decodes as its own clone.
+            cloned :: lower_pointer(&f)
+            lower_clone_into(p, &m, &f, source, cloned, tree)
+            lower_write_at(p, &f, box, lower_result_payload_offset(), cloned, tree)
+            lower_store_word(&f, box, 0, lower_result_selector(true))
+        }
+    }
+    lower_seal(&f, LIRTerminator.Return{value: Val(box)})
+    lir_builder_finish(f.builder)
+}
+
+// EncodingTraits.rs:457-478: Dyn.Array decodes through jet_decode_sequence
+// (:222-245), which keeps decoding after a failed element and frames each
+// element's errors under "[index]"; any other kind is
+// "expected a list, found {kind}". Fills the Result box `box` of List `ty`.
+fn lower_codec_decode_list(p: MIRProgram, m: &LowerModule, f: &LowerFunction, tree: MIRType, ty: MIRType, elem: MIRType, errors: MIRType, source: LIRValueID, box: LIRValueID) Never! {
+    if lower_codec_byte(elem) -> return lower_fail(&m, &f, "Decode<{mir_type_display_name(ty)}> of Dyn.Bytes or base64 Text is not lowered natively")
+    array :: lower_codec_variant(p, tree, "Array") ?? return lower_fail(&m, &f, "checked Dyn has no Array payload")
+    route :: lower_codec_under_route(p, &m, &f, errors) ?? return
+    discriminant :: lower_codec_tag(&f, source)
+    done :: lower_new_block(&f)
+    other :: lower_codec_on_tag(&f, discriminant, array.discriminant)
+    items :: lower_codec_payload(&f, source, array)
+    count :: lower_list_word(&f, items, 0)
+    stride :: lower_list_stride(p, elem)
+    data :: lower_list_buffer(&m, &f, count, stride)
+    out :: lower_address(&f, box, lower_result_payload_offset())
+    zero :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Store{base: out, offset: 0, value: zero})
+    lower_emit(&f, LIRInst.Store{base: out, offset: 8, value: count})
+    lower_emit(&f, LIRInst.Store{base: out, offset: 16, value: data})
+    failures :: lower_codec_failures(p, &f, errors)
+    decoded_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: elem, err: errors})
+    each :: lower_each_begin(p, &f, items, tree, [LIRValueID]{})
+    item :: lower_read_at(p, &f, each.address, 0, tree) ?? return lower_fail(&m, &f, "Dyn.Array element has no storage")
+    decoded :: lower_pointer(&f)
+    lower_codec_decode_into(p, &m, &f, elem, decoded_ty, tree, item, decoded)
+    failure :: lower_codec_on_ok(&f, decoded)
+    length :: lower_list_word(&f, out, 0)
+    if lower_read_at(p, &f, decoded, lower_result_payload_offset(), elem) == .Val(value) {
+        slot :: lower_list_address(&f, data, length, stride)
+        lower_write_at(p, &f, slot, 0, value, elem)
+    }
+    one :: lower_const(&f, 1)
+    grown :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: grown, op: LIRBinaryOp.Add, left: length, right: one})
+    lower_emit(&f, LIRInst.Store{base: out, offset: 0, value: grown})
+    next_item :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(next_item, [LIRValueID]{})})
+    lower_start(&f, failure, [LIRValueID]{})
+    segment :: lower_codec_index_segment(&m, &f, each.at)
+    lower_codec_absorb(p, &m, &f, route, errors, failures, decoded, segment)
+    lower_emit(&f, LIRInst.Drop{value: segment})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(next_item, [LIRValueID]{})})
+    lower_start(&f, next_item, [LIRValueID]{})
+    lower_free_shell(&m, &f, decoded, lower_box_size(p, decoded_ty))
+    lower_each_end(&f, each, [LIRValueID]{})
+    lower_codec_settle(p, &m, &f, ty, errors, failures, box)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, other, [LIRValueID]{})
+    reason :: lower_codec_found(p, &m, &f, tree, discriminant, "a list")
+    lower_codec_fail_one(p, &m, &f, errors, reason, box)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+}
+
+// T::__JET_IS_BYTE (EncodingTraits.rs:394-406): only U8 codes as a byte.
+fn lower_codec_byte(ty: MIRType) -> Bool Never! {
+    if ty.kind == .IntN(signed, bits) -> return !signed && bits == 8
+    false
+}
+
+// EncodingTraits.rs:494-501: Dyn.Null is None; any other Dyn is Some of the
+// inner decode, whose errors pass through unframed.
+fn lower_codec_decode_option(p: MIRProgram, m: &LowerModule, f: &LowerFunction, tree: MIRType, inner: MIRType, errors: MIRType, source: LIRValueID, box: LIRValueID) Never! {
+    absent_tag :: lower_codec_tag_of(p, tree, "Null") ?? return lower_fail(&m, &f, "checked Dyn has no Null variant")
+    discriminant :: lower_codec_tag(&f, source)
+    done :: lower_new_block(&f)
+    other :: lower_codec_on_tag(&f, discriminant, absent_tag)
+    absent :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: absent, value: 0})
+    lower_emit(&f, LIRInst.Store{base: box, offset: lower_result_payload_offset(), value: absent})
+    lower_store_word(&f, box, 0, lower_result_selector(true))
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, other, [LIRValueID]{})
+    decoded_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: inner, err: errors})
+    decoded :: lower_pointer(&f)
+    lower_codec_decode_into(p, &m, &f, inner, decoded_ty, tree, source, decoded)
+    failure :: lower_codec_on_ok(&f, decoded)
+    present :: lower_pointer(&f)
+    lower_alloc(&m, &f, present, lower_option_box_size(p, inner))
+    if lower_read_at(p, &f, decoded, lower_result_payload_offset(), inner) == .Val(value) -> lower_write_at(p, &f, present, 0, value, inner)
+    lower_emit(&f, LIRInst.Store{base: box, offset: lower_result_payload_offset(), value: present})
+    lower_store_word(&f, box, 0, lower_result_selector(true))
+    settled :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(settled, [LIRValueID]{})})
+    lower_start(&f, failure, [LIRValueID]{})
+    lower_copy_bytes(&f, box, lower_result_payload_offset(), decoded, lower_result_payload_offset(), lower_size(p, errors).size)
+    lower_store_word(&f, box, 0, lower_result_selector(false))
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(settled, [LIRValueID]{})})
+    lower_start(&f, settled, [LIRValueID]{})
+    lower_free_shell(&m, &f, decoded, lower_box_size(p, decoded_ty))
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
 }
