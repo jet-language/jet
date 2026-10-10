@@ -66,6 +66,8 @@ struct SemaEffectFunctionSource {
     loop_spans: [Span]{[Span]{}}
     // D-DET1: `assume_deterministic` blocks suspend E3403.
     assume_det_spans: [Span]{[Span]{}}
+    // D-MEMO1=A: the first `#Memo` marker of a non-comptime function (E0938).
+    memo_span: Span?{None}
 }
 
 // One `#FX(…)` region: its parsed caps, the head span E0712 points at, and
@@ -194,6 +196,7 @@ struct SemaEffectNode {
     memory_opens: [SemaMemoryOpen]{[SemaMemoryOpen]{}}
     loop_spans: [Span]{[Span]{}}
     assume_det_spans: [Span]{[Span]{}}
+    memo_span: Span?{None}
     // `module::name` in call paths and the source file name in reports.
     display_key: String{""}
     source_display: String{""}
@@ -216,7 +219,18 @@ fn sema_effect_source_from_function(func: Func, module_identity: String) -> Sema
         fx_regions: sema_authority_fx_regions(func.body),
         loop_spans: sema_effect_statement_spans(func.body, false),
         assume_det_spans: sema_effect_statement_spans(func.body, true),
+        memo_span: sema_effect_memo_span(func),
     }
+}
+
+// Rust `check_inferred_purity`: a comptime callable takes the purity path,
+// so only an ordinary function's first `#Memo` marker is judged by E0938.
+fn sema_effect_memo_span(func: Func) -> Span? Never! {
+    if func.is_comptime -> return None
+    loop marker in func.markers {
+        if marker.name == "Memo" -> return Val(marker.span)
+    }
+    None
 }
 
 // The spans of the body's loop statements, or of its `assume_deterministic`
@@ -736,6 +750,7 @@ fn sema_effect_node_from_source(function: TFunc, source: SemaEffectFunctionSourc
     node.unsafe_span = actual.unsafe_span
     node.loop_spans = actual.loop_spans
     node.assume_det_spans = actual.assume_det_spans
+    node.memo_span = actual.memo_span
     if actual.is_unsafe && !sema_effect_check_unsafe_function(actual, &diagnostics) {
         // The diagnostic is already source-backed; retain the node so the graph
         // remains inspectable after a failed gate check.
@@ -1768,6 +1783,18 @@ fn sema_effect_check_memory_denials(nodes: [SemaEffectNode], node_by_key: [Strin
 
 fn sema_effect_check_node(node: SemaEffectNode, solved: [String], secret_reached: Bool, dispatch: Diagnostic?, diagnostics: &[Diagnostic]) -> Bool {
     valid := true
+    // D-MEMO1=A with D-EFFECT-OMIT1=A (Rust `check_inferred_memo`, E0938): a
+    // `#Memo` function that is not declared pure is judged by its solved row;
+    // panic and memory are deny-only, as for an explicit empty bound.
+    if !node.is_pure && node.memo_span == .Val(memo_span) {
+        impure := sema_effect_uncovered(solved, [String]{})
+        if impure.len() > 0 {
+            &impure.sort()
+            shown :: impure.join(", ")
+            &diagnostics.push(sema_error("E0938", memo_span, "`#Memo` requires a pure function", "memoization reuses a completed result, but `{node.name}` uses `{shown}`", "remove the `{shown}` operations from `{node.name}`, or drop `#Memo`"))
+            valid = false
+        }
+    }
     secret_granted :: loop bound in node.declared {
         if sema_effect_root(bound) == "Secret" -> break true
     } ?? false
