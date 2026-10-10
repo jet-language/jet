@@ -291,7 +291,7 @@ fn kit_steps_capture_value(words: [String], context: KitStepCtx, state: KitStepS
         value :: kit_steps_byte_slice(line, at + marker.count_bytes(), line.count_bytes())
         return kit_steps_capture_result(if words.len() == 5 + offset -> value.trim().copy() else -> value)
     }
-    kit_steps_capture_result(kit_steps_json_scalar(source, kind, words[3 + offset]) ?? return kit_steps_capture_failure("FAIL", "capture JSON path missing or not scalar"))
+    kit_steps_capture_result(kit_steps_json_scalar(source, kind, words[3 + offset]) ?? return kit_steps_capture_failure("FAIL", err))
 }
 
 fn kit_steps_octal_text(value: Int) -> String {

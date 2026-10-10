@@ -86,7 +86,7 @@ fn kit_steps_json_select(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
         }
         if value == {
             .Object(_) -> {
-                child :: value.at(key) ?? return None
+                child :: value.get(key) ?? return None
                 return kit_steps_json_select(child, parts, depth + 1)
             }
             else -> return None
@@ -98,7 +98,7 @@ fn kit_steps_json_select(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
                 projected := [(key: String, value: Dyn)]{}
                 loop raw in kit_steps_byte_slice(part, 1, part.count_bytes() - 1).split(",") {
                     name :: raw.trim().copy()
-                    child :: value.at(name) ?? return None
+                    child :: value.get(name) ?? return None
                     &projected.push((key: name, value: child))
                 }
                 return kit_steps_json_select(Dyn.Object(projected), parts, depth + 1)

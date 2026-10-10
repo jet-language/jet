@@ -10,7 +10,7 @@ fn kit_steps_machine_object(value: Dyn) -> Dyn? {
 }
 
 fn kit_steps_machine_string(fields: Dyn, key: String) -> String? {
-    child :: fields.at(key) ?? return None
+    child :: fields.get(key) ?? return None
     if child == {
         .Text(text) -> Val(text)
         else -> None
@@ -18,7 +18,7 @@ fn kit_steps_machine_string(fields: Dyn, key: String) -> String? {
 }
 
 fn kit_steps_machine_has(fields: Dyn, key: String) -> Bool {
-    if fields.at(key) == {
+    if fields.get(key) == {
         .Val(_) -> true
         .None -> false
     }
@@ -40,8 +40,8 @@ fn kit_steps_machine_report(object: Dyn) -> String? {
     loop key in ["moment", "severity", "code", "what", "why", "fix"] {
         _ :: kit_steps_machine_string(object, key) ?? return Val("report record is missing string `{key}`")
     }
-    edits :: object.at("fix_edits")
-    reason :: object.at("no_fix_reason")
+    edits :: object.get("fix_edits")
+    reason :: object.get("no_fix_reason")
     if kit_steps_machine_has(object, "fix_edits") && kit_steps_machine_has(object, "no_fix_reason") -> return Val("report record cannot contain both `fix_edits` and `no_fix_reason`")
     if edits == {
         .Val(value) -> {
@@ -50,7 +50,7 @@ fn kit_steps_machine_report(object: Dyn) -> String? {
                     loop item in items {
                         edit :: kit_steps_machine_object(item) ?? return Val("report edit is not an object")
                         _ :: kit_steps_machine_string(edit, "file") ?? return Val("report edit is missing string `file`")
-                        span_value :: edit.at("span") ?? return Val("report edit is missing `span`")
+                        span_value :: edit.get("span") ?? return Val("report edit is missing `span`")
                         span :: kit_steps_machine_object(span_value) ?? return Val("report edit `span` is not an object")
                         loop key in ["start", "end"] {
                             if !kit_steps_machine_has(span, key) -> return Val("report edit span is missing `{key}`")
@@ -81,12 +81,12 @@ fn kit_steps_machine_status(object: Dyn) -> String? {
     action :: kit_steps_machine_string(object, "action") ?? return Val("status record is missing string `action`")
     if action == "" || kit_steps_machine_control(action) -> return Val("status record `action` must be a non-empty printable string")
     if kit_steps_machine_has(object, "status") -> return Val("status record must not contain the legacy `status` key")
-    ok :: object.at("ok") ?? return Val("status record is missing `ok`")
+    ok :: object.get("ok") ?? return Val("status record is missing `ok`")
     if ok == {
         .Bool(_) -> {}
         else -> return Val("status record field `ok` is not boolean")
     }
-    reports :: object.at("reports") ?? return Val("status record is missing `reports`")
+    reports :: object.get("reports") ?? return Val("status record is missing `reports`")
     if reports == {
         .Array(items) -> {
             loop item in items {

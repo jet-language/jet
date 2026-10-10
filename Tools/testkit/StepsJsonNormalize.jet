@@ -76,7 +76,7 @@ fn kit_steps_json_collect_spans(bytes: [U8], tree: Dyn, parts: [String], depth: 
                 key :: if key_tree == { .Text(name) -> name else -> { return Val("JSON normalization key is not text") } }
                 child :: kit_steps_json_space(bytes, kit_steps_json_space(bytes, key_end) + 1)
                 if part == (".{key}") {
-                    value :: tree.at(key) ?? return Val("JSON normalization member missing: {part}")
+                    value :: tree.get(key) ?? return Val("JSON normalization member missing: {part}")
                     return kit_steps_json_collect_spans(bytes, value, parts, depth + 1, child, kind, normalizer, &spans)
                 }
                 position = kit_steps_json_space(bytes, kit_steps_json_span_end(bytes, child))
