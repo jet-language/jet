@@ -160,6 +160,27 @@ fn lower_route_word_shape(p: MIRProgram, ty: MIRType, member: String, schema: Lo
     None
 }
 
+// A scalar record with no checked declaration (Duration: CommonTypes.rs
+// `struct Duration { ns: i64 }`, a compiler builtin) is native as its runtime
+// handle. Its declaration's word (the generated record schema `{field}=Int`)
+// crosses through the record getter, as the generator's adapter builds
+// `Duration { ns: native(word) }`. The getter returns an owned exact Int.
+fn lower_route_word_getter(p: MIRProgram, ty: MIRType) -> String? {
+    if lower_repr(p, ty) == {
+        .Handle(_, _) -> {}
+        else -> return None
+    }
+    if lower_type_def(p, ty) != None -> return None
+    member :: lower_route_word_field(p, ty) ?? return None
+    runtime :: lower_runtime_handle_type(p, ty) ?? return None
+    loop schema in LOWER_GENERATED_RECORDS {
+        if schema.jet_name == runtime.runtime && schema.variants == "" && schema.fields == "{member}=Int" {
+            return Val("jet_rt_record_get_{runtime_abi_atom(runtime.runtime)}_{runtime_abi_atom(member)}")
+        }
+    }
+    None
+}
+
 fn lower_route_type_name(p: MIRProgram, ty: MIRType) -> String Never! {
     if lower_route_word_field(p, ty) == .Val(member) -> return "{mir_type_display_name(ty)} field {member}"
     mir_type_display_name(ty)
@@ -177,7 +198,7 @@ fn lower_route_dyn(p: MIRProgram, ty: MIRType, carrier: LowerRouteCarrier) -> Bo
 fn lower_route_carrier_matches(p: MIRProgram, ty: MIRType, carrier: LowerRouteCarrier) -> Bool Never! {
     if lower_route_dyn(p, ty, carrier) -> return true
     if carrier == .Tag(_, variants) -> return lower_route_tag_matches(p, ty, variants)
-    if carrier == .Word && lower_route_word_field(p, ty) != None -> return lower_route_word_record(p, ty) != None
+    if carrier == .Word && lower_route_word_field(p, ty) != None -> return lower_route_word_record(p, ty) != None || lower_route_word_getter(p, ty) != None
     if carrier == .HandleMut(name) {
         expected :: LowerRouteCarrier.Handle{name: name}
         return lower_route_carrier_of(p, ty) == Val(expected)
@@ -313,6 +334,7 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         return lower_fail(&m, &f, "{what} {name} does not have native O0 runtime parity yet")
     }
     if route.params.len() != args.len() -> return lower_fail(&m, &f, "{what} {name} passes {args.len()} arguments; its runtime route takes {route.params.len()}")
+    if route.symbol == "jet_dyn_field" && lower_dyn_field(p, c, &m, &f, instruction, route, args) -> return
     lowered := [LIRValueID]{}
     temporaries := [LIRValueID]{}
     // Runtime Dyn trees built for the call (lower_route_dyn).
@@ -349,6 +371,13 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         if route.params[index] == .Word && lower_route_word_record(p, ty) == .Val(info) {
             field :: lower_read_at(p, &f, value, info.offset, info.ty) ?? return lower_fail(&m, &f, "Word carrier {lower_route_type_name(p, ty)} has no checked field storage")
             &lowered.push(field)
+            next
+        }
+        if route.params[index] == .Word && lower_route_word_getter(p, ty) == .Val(getter) {
+            word :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
+            lower_call_runtime(&m, &f, getter, [LIRValueID]{value}, Val(word))
+            &lowered.push(word)
+            &temporaries.push(word)
             next
         }
         if route.params[index] == .List(_) {
@@ -684,7 +713,10 @@ fn lower_route_shape_matches(p: MIRProgram, ty: MIRType, result: LowerRouteResul
 
 // Seed lists of record handles are rebuilt into native element storage.
 // Jet-owned lists already carry the native inline buffer (Records.jet).
+// A handle-native scalar record is admitted only as an argument word: its
+// result word has no native handle constructor on this rail.
 fn lower_route_result_matches(p: MIRProgram, ty: MIRType, carrier: LowerRouteCarrier) -> Bool Never! {
+    if carrier == .Word && lower_route_word_getter(p, ty) != None -> return false
     lower_route_carrier_matches(p, ty, carrier)
 }
 

@@ -1,7 +1,8 @@
 // Route carriers the compiler's own MIR crosses per call (Routes.jet): an
 // exact Int crosses a Word carrier as its carrier word, and the native Dyn
-// enum crosses a Handle{Dyn} carrier as a runtime tree built for the call and
-// converted back from the result (lower_route_dyn). A mismatched checked type
+// enum's `field` scans its own Object entries (jet_rt_string_eq) and clones a
+// hit; only a miss crosses the Handle{Dyn} carrier as a runtime tree built for
+// the call (lower_dyn_field, lower_route_dyn). A mismatched checked type
 // is still refused. Lowering witnesses: Jet lowering and LIR lint only.
 use jet_foundation.[
 MIRConstant,
@@ -62,6 +63,19 @@ fn fx_route_carriers_program(b: FxBuilder) -> MIRProgram Never! {
     &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", "string_slice", "jet_string_slice_builtin", 3, MIRPreludeABI.Value))
     &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", "find", "jet_text_parse_find", 2, MIRPreludeABI.Value))
     &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.HandleMethod, "core.encoding.dyn", "field", "jet_dyn_field", 2, MIRPreludeABI.Value))
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.HandleMethod, "core.handle", "duration.ns_value", "jet_duration_ns_value", 1, MIRPreludeABI.Value))
+    p
+}
+
+// `fn ns(d: Duration) -> Int { d.ns_value() }`: Duration has no checked
+// declaration (a builtin), so its word crosses through the record getter.
+fn fx_route_carriers_duration() -> MIRProgram Never! {
+    b := fx_builder()
+    duration :: fx_param(&b, "d", fx_named("Duration"), fx_borrow())
+    ns :: fx_owned(&b, fx_int(), MIROperation.Semantic{operation: MIRSemanticOp.HandleMethod{call: fx_prelude_id("core.handle", "duration.ns_value"), receiver: duration, args: [MIRValueID]{}, frame_schedule: None, frame_schedule_derivation: None}})
+    fx_block(&b, 0, MIRTerminator.Return{value: Val(ns)})
+    p := fx_route_carriers_program(fx_builder())
+    p.functions = [MIRFunction]{fx_function("ns", b, fx_int())}
     p
 }
 
@@ -119,8 +133,8 @@ fn fx_route_carrier_runtime_calls(lir: LIRModule) -> [String] Never! {
     calls
 }
 
-// The Dyn receiver becomes a runtime tree before the route, the tree is
-// released after it, and the Ok payload converts back to the native enum.
+// A miss builds a runtime tree before the route, releases it after, and the
+// Ok arm converts back to the native enum.
 fn fx_route_carrier_dyn_order(calls: [String]) -> Bool Never! {
     expected :: [String]{"jet_rt_dyn_from_native", "jet_dyn_field", "jet_rt_dyn_to_native", "jet_rt_handle_drop_dyn"}
     at := 0
@@ -139,7 +153,7 @@ fn fx_route_carrier_checks() -> Bool {
     loop issue in lint -> print("route-carriers: {issue.message}")
     if lint.len() != 0 -> clean = false
     calls :: fx_route_carrier_runtime_calls(admitted.lir)
-    loop symbol in ([String]{"jet_string_slice_builtin", "jet_text_parse_find"}) {
+    loop symbol in ([String]{"jet_string_slice_builtin", "jet_text_parse_find", "jet_rt_string_eq"}) {
         if !calls.contains(symbol) {
             print("route-carriers: {symbol} was not called")
             clean = false
@@ -147,6 +161,20 @@ fn fx_route_carrier_checks() -> Bool {
     }
     if !fx_route_carrier_dyn_order(calls) {
         print("route-carriers: Dyn route boundary order {calls.join(",")}")
+        clean = false
+    }
+    duration :: lir_lower_entry(fx_route_carriers_duration(), mir_function_id("ns"))
+    loop issue in duration.issues -> print("route-carriers duration: {issue.message}")
+    if duration.issues.len() != 0 -> clean = false
+    duration_calls :: fx_route_carrier_runtime_calls(duration.lir)
+    getter := false
+    loop (index, symbol) in duration_calls {
+        if symbol == "jet_rt_record_get_duration_ns" && index + 1 < duration_calls.len() && duration_calls[index + 1] == "jet_duration_ns_value" {
+            getter = true
+        }
+    }
+    if !getter {
+        print("route-carriers: Duration did not cross as its record getter word ({duration_calls.join(",")})")
         clean = false
     }
     refused :: lir_lower_entry(fx_route_carriers_refused(), mir_function_id("run"))

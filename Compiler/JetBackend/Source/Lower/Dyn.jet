@@ -4,7 +4,7 @@
 // Requested checked codec implementations are lowered by Codecs.jet.
 // No unwired runtime/container codec policy is retained here.
 use jet_foundation.[
-    MIRInstruction, MIRLocalID, MIRNominalRef, MIRProgram, MIRType, MIRTypeKind,
+    MIRInstruction, MIRLocalID, MIRNominalRef, MIRProgram, MIRType, MIRTypeKind, MIRValueID,
     mir_type_display_name, mir_type_from_kind,
 ]
 
@@ -109,5 +109,110 @@ fn lower_dyn_from_runtime(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty:
     schema :: lower_dyn_schema(p, &m, &f, ty) ?? return
     lower_call_runtime(&m, &f, "jet_rt_dyn_to_native", [LIRValueID]{schema, value}, Val(dst))
     lower_call_runtime(&m, &f, "jet_rt_handle_drop_dyn", [LIRValueID]{value}, None)
+}
+
+// `tree.field(name)` (JetStd/Dyn.rs JetDynAccess::field, Rust borrows the
+// tree): the first Object entry whose key equals `name` is cloned out of the
+// native enum with its ordinary glue, so a hit never converts the tree. Every
+// miss (absent key or non-Object receiver) asks the canonical runtime leaf
+// for its exact FieldError over a runtime tree built for that call only.
+// False when the checked types are not Dyn and Result<Dyn, [FieldError]>.
+fn lower_dyn_field(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, route: LowerRoute, args: [MIRValueID]) -> Bool Never! {
+    if args.len() != 2 -> return false
+    ty :: lower_value_type(c, args[0]) ?? return false
+    if !lower_dyn_type(p, ty) -> return false
+    result_ty :: lower_checked_type(c, instruction) ?? return false
+    if !lower_route_shape_matches(p, result_ty, route.result) -> return false
+    ok :: if route.result == { .Result(success, _) -> { success } else -> { return false } }
+    err :: if route.result == { .Result(_, failure) -> { failure } else -> { return false } }
+    errors :: if result_ty.kind == { .Result(_, failure) -> { failure } else -> { return false } }
+    definition :: lower_type_def(p, ty) ?? return false
+    object :: lower_variant(definition, "Object") ?? return false
+    payload :: lower_enum_payload_info(p, definition, object.variant, 0) ?? return false
+    entry_ty :: lower_list_element(payload.ty) ?? return false
+    members :: lower_inline_members(p, entry_ty)
+    if members.len() != 2 || members[0].name != "key" || members[1].name != "value" -> return false
+    tree :: lower_use(&m, &f, args[0]) ?? return true
+    name :: lower_use(&m, &f, args[1]) ?? return true
+    dst :: lower_result(p, c, &m, &f, instruction)
+    if f.failed -> return true
+    // Object test, then a scan of the entries in order.
+    selector :: lower_word(&f)
+    lower_emit(&f, LIRInst.Load{dst: selector, base: tree, offset: 0})
+    object_selector :: lower_const(&f, lower_discriminant(object.index))
+    is_object :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: is_object, condition: LIRCondition.Eq, left: selector, right: object_selector})
+    scan :: lower_new_block(&f)
+    head :: lower_new_block(&f)
+    body :: lower_new_block(&f)
+    next_block :: lower_new_block(&f)
+    hit :: lower_new_block(&f)
+    miss :: lower_new_block(&f)
+    merge :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: is_object, then_target: lower_target(scan, [LIRValueID]{}), else_target: lower_target(miss, [LIRValueID]{})})
+    lower_start(&f, scan, [LIRValueID]{})
+    holder := tree
+    if payload.boxed {
+        wrapper :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Load{dst: wrapper, base: tree, offset: payload.offset})
+        holder = wrapper
+    }
+    entries :: lower_read_at(p, &f, holder, if payload.boxed -> 0 else -> payload.offset, payload.ty) ?? return true
+    length :: lower_list_word(&f, entries, 0)
+    data :: lower_list_data(&f, entries)
+    stride :: lower_list_stride(p, entry_ty)
+    zero :: lower_const(&f, 0)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{zero})})
+    at :: lower_word(&f)
+    lower_start(&f, head, [LIRValueID]{at})
+    more :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Lt, left: at, right: length})
+    lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(miss, [LIRValueID]{})})
+    lower_start(&f, body, [LIRValueID]{})
+    entry :: lower_list_address(&f, data, at, stride)
+    key :: lower_read_at(p, &f, entry, members[0].offset, members[0].ty) ?? return true
+    same :: lower_flag(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_eq", [LIRValueID]{key, name}, Val(same))
+    lower_seal(&f, LIRTerminator.Branch{condition: same, then_target: lower_target(hit, [LIRValueID]{}), else_target: lower_target(next_block, [LIRValueID]{})})
+    lower_start(&f, next_block, [LIRValueID]{})
+    one :: lower_const(&f, 1)
+    following :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: following, op: LIRBinaryOp.Add, left: at, right: one})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{following})})
+    // Hit: Ok(clone of the borrowed entry value).
+    lower_start(&f, hit, [LIRValueID]{})
+    value :: lower_read_at(p, &f, entry, members[1].offset, members[1].ty) ?? return true
+    cloned :: lower_pointer(&f)
+    lower_clone_into(p, &m, &f, value, cloned, ty)
+    found :: lower_pointer(&f)
+    lower_alloc(&m, &f, found, lower_box_size(p, result_ty))
+    ok_tag :: lower_const(&f, 1)
+    lower_emit(&f, LIRInst.Store{base: found, offset: 0, value: ok_tag})
+    lower_write_at(p, &f, found, lower_result_payload_offset(), cloned, ty)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{found})})
+    // Miss: the canonical runtime FieldError (and the same lookup) on a tree.
+    lower_start(&f, miss, [LIRValueID]{})
+    runtime :: lower_dyn_to_runtime(p, &m, &f, ty, tree) ?? return true
+    out :: lower_route_result_call(&m, &f, route.export, [LIRValueID]{runtime, name}, ok, err)
+    lower_call_runtime(&m, &f, "jet_rt_handle_drop_dyn", [LIRValueID]{runtime}, None)
+    failed :: lower_pointer(&f)
+    lower_alloc(&m, &f, failed, lower_box_size(p, result_ty))
+    lower_emit(&f, LIRInst.Store{base: failed, offset: 0, value: out.word})
+    succeeded :: lower_flag(&f)
+    none :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Compare{dst: succeeded, condition: LIRCondition.Ne, left: out.word, right: none})
+    ok_block :: lower_new_block(&f)
+    err_block :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: succeeded, then_target: lower_target(ok_block, [LIRValueID]{}), else_target: lower_target(err_block, [LIRValueID]{})})
+    lower_start(&f, ok_block, [LIRValueID]{})
+    lower_route_store_payload(p, &m, &f, failed, lower_result_payload_offset(), ty, ok, out.slot, route.native_lists)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{failed})})
+    lower_start(&f, err_block, [LIRValueID]{})
+    lower_route_store_payload(p, &m, &f, failed, lower_result_payload_offset(), errors, err, out.slot, route.native_lists)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{failed})})
+    joined :: dst ?? lower_pointer(&f)
+    lower_start(&f, merge, [LIRValueID]{joined})
+    if dst == None -> lower_map_drop_value(p, &m, &f, joined, result_ty)
+    true
 }
 
