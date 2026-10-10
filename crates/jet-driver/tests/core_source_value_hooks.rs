@@ -261,3 +261,82 @@ fn run() Never! {
         std::fs::remove_dir_all(directory).unwrap();
     });
 }
+
+#[test]
+fn loop_payload_views_end_before_owner_reassignment() {
+    jet_driver::run_compiler_work(|| {
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("core-value-hook-proof"))
+            .join(format!("jet-loop-payload-view-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let entry = directory.join("run.jet");
+        std::fs::write(&entry, r#"
+struct Handle { name: String }
+fn lookup(rows: [Handle], name: String) -> Bool {
+    loop row in rows { if row.name == name -> return true }
+    false
+}
+fn route_sum() -> Int {
+    route := Int?{None}
+    total := 0
+    loop row in ([Int]{1, 2, 3}) {
+        route = Val(row)
+        loop operand in ([Int]{10, 20}) {
+            value :: if route == .Val(position) -> position + position + operand else -> 0
+            total = total + value
+        }
+        route = None
+    }
+    total
+}
+fn run() Never! {
+    assert_eq(route_sum(), 114)
+    rows :: [Handle]{Handle{name: "Float"}}
+    loop name in ([String]{"U8", "U64", "F32"}) -> assert(!lookup(rows, name))
+    assert(!lookup(rows, "Ordinary") && lookup(rows, "Float"))
+    assert_eq(rows.len(), 1)
+}
+"#).unwrap();
+        let mut bundle = Loader::load_entry(entry.to_str().unwrap())
+            .expect("nested payload views and read metadata must load");
+        let (diagnostics, _, nominals) =
+            Sema::check_bundle_with_effect_facts(&mut bundle, Sema::CompileMode::Check);
+        assert!(diagnostics.iter().all(|diagnostic| {
+            diagnostic.severity != Diagnostics::Severity::Error
+        }), "payload-view source must pass the checker: {diagnostics:?}");
+        let request = MirArtifactRequest::new(
+            MirArtifactTarget::RustAot,
+            MirArtifactKind::NativeExecutable,
+            MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = Codegen::TIR::lower_checked_mir_program_for(
+            &bundle, &nominals, request,
+        ).expect("nested payload views must lower");
+        mir.validate().expect("payload-view MIR is valid");
+        let rust = Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let source = directory.join("loop_payload_view.rs");
+        let executable = directory.join(format!("loop_payload_view{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=loop_payload_view", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("payload-view regression requires rustc");
+        assert!(compiled.status.success(), "payload references must not outlive their uses:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("payload-view regression must execute");
+        assert!(executed.status.success(), "rebound payloads and metadata reads must retain their values:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}

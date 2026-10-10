@@ -5071,6 +5071,10 @@ struct RefBindings {
     cursors: BTreeMap<MirValueId, MirPlaceId>,
     /// The collection values those cursors walk; they have no slot.
     collections: BTreeSet<MirValueId>,
+    /// Retire dead payload references before an operation changes their
+    /// owning storage. The stability proof covers their uses, not the
+    /// function-wide lifetime of the hoisted Option<&T> slots.
+    retire: BTreeMap<MirOpId, BTreeSet<MirLocalId>>,
 }
 
 /// #4566 return slot (function-boundary research 4.2, form 2) of a function
@@ -18682,6 +18686,9 @@ impl<'a> RustEmitter<'a> {
         indent: usize,
     ) {
         let mut debug_active = debug_active;
+        let ref_bindings = self.ref_bindings_of(function);
+        let native = self.native_plan(function);
+        let return_slot = self.return_slots.get(&function.id);
         for (index, instruction) in block.instructions.iter().enumerate() {
             let is_debug_scope = match &instruction.operation {
                 MirOperation::ScopeEnter { scope, .. } | MirOperation::ScopeExit { scope } => {
@@ -18701,6 +18708,16 @@ impl<'a> RustEmitter<'a> {
                     continue;
                 }
                 _ => {}
+            }
+            if let Some(locals) = ref_bindings.retire.get(&instruction.id) {
+                for local in locals {
+                    if return_slot.is_some_and(|slot| slot.exit == Some(*local))
+                        || native.is_some_and(|plan| plan.locals.contains_key(local) && !plan.dual.contains(local))
+                    {
+                        continue;
+                    }
+                    let _ = writeln!(out, "{:width$}{} = None;", "", local_slot(*local), width = indent * 4);
+                }
             }
             self.emit_instruction(function, instruction, out, indent, debug_active);
             if !debug_active {
@@ -23924,6 +23941,55 @@ impl<'a> RustEmitter<'a> {
         for (cursor, (collection, place, _)) in cursors {
             bindings.cursors.insert(cursor, place);
             bindings.collections.insert(collection);
+        }
+        let mut dependents: BTreeMap<MirLocalId, BTreeSet<MirLocalId>> = BTreeMap::new();
+        for (local, sources) in &writes {
+            for (value, _) in sources {
+                let value = match self.value_definition(function, *value) {
+                    Some(MirOperation::Move { value }) => *value,
+                    _ => *value,
+                };
+                let read = match self.value_definition(function, value) {
+                    Some(MirOperation::EnumPayload { subject, .. }
+                        | MirOperation::OptionValue { subject }
+                        | MirOperation::ResultValue { subject, .. }) => *subject,
+                    Some(MirOperation::ReadPlace(_)) => value,
+                    _ => continue,
+                };
+                if let Some(MirPlaceBase::Local(root)) = self
+                    .immutable_read_place(function, read)
+                    .and_then(|place| self.place_row(function, place))
+                    .map(|place| &place.base)
+                {
+                    dependents.entry(*root).or_default().insert(*local);
+                }
+            }
+        }
+        // A field/payload reference through another binding still borrows
+        // that binding's original owner, not its reference-slot storage.
+        for (&root, children) in &dependents {
+            if writes.contains_key(&root) {
+                continue;
+            }
+            let Some(positions) = index.local_writes.get(&root) else {
+                continue;
+            };
+            let mut pending: Vec<_> = children.iter().copied().collect();
+            let mut visited = BTreeSet::new();
+            while let Some(local) = pending.pop() {
+                if !visited.insert(local) {
+                    continue;
+                }
+                if let Some(children) = dependents.get(&local) {
+                    pending.extend(children.iter().copied());
+                }
+            }
+            for &(block, position) in positions {
+                bindings.retire
+                    .entry(function.blocks[block].instructions[position].id)
+                    .or_default()
+                    .extend(visited.iter().copied());
+            }
         }
         for (local, sources) in writes {
             bindings.locals.insert(local);

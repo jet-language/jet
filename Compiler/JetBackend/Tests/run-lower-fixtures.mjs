@@ -189,13 +189,11 @@ const parts = [
     ...["fn fx_capacity_raw_type(", "fn fx_capacity_raw(", "fn fx_capacity_foreign(", "fn fx_capacity_provider_call("].map((head) => item("Compiler/JetBackend/Tests/Fixtures/Builtins.jet", head)),
   ] : []),
   ...(abiOnly ? ["fn run() { abi_fixtures() }"] : sanitizeOnly ? [] : listRoutes ? [
-    // This mode selects the MIR builders, not the unrelated generic-runtime
-    // rejection probe. The general fixture mode still includes that probe.
-    body("Compiler/JetBackend/Tests/LowerFixtures.jet").split("fn fx_hello(")[0].replace(item("Compiler/JetBackend/Tests/LowerFixtures.jet", "fn fx_generic_runtime_rejection_checks("), ""),
+    body("Compiler/JetBackend/Tests/LowerFixtures.jet").split("fn fx_hello(")[0],
     item("Compiler/JetBackend/Tests/Fixtures/Tuple.jet", "fn fx_tuple_type("),
     item("Compiler/JetBackend/Tests/Fixtures/Tuple.jet", "fn fx_tuple_field_id("),
     body("Compiler/JetBackend/Tests/Fixtures/Lists.jet"),
-    'fn run() {\n    assert(fx_list_routes_lowering_checks())\n    print("List route lowering fixtures passed")\n}',
+    'fn run() {\n    assert(fx_generic_runtime_rejection_checks())\n    assert(fx_list_routes_lowering_checks())\n    print("List route lowering fixtures passed")\n}',
   ] : disjointLowering ? [
     body("Compiler/JetBackend/Tests/LowerFixtures.jet").split("fn fx_hello(")[0],
     item("Compiler/JetBackend/Tests/Fixtures/Tuple.jet", "fn fx_tuple_type("),

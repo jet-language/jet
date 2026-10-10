@@ -565,6 +565,15 @@ including requests satisfied by existing capacity. Its error is the canonical
 fixture mode executes production lowering and LIR lint for all four witnesses;
 native image execution remains part of the admitted-pack fixture census.
 
+Runtime-route rejection queries borrow their handle-table rows. Repeated
+queries, including short-circuit expressions, must not consume that table.
+The bootstrap Rust emitter stores eligible pattern payloads as references
+without copying their owners, but retires those reference slots before a
+checked operation changes the underlying owning storage. A payload reached
+through another reference binding retains the original owner's identity;
+hoisting the reference slot must not extend its borrow across a later loop
+iteration's owner assignment.
+
 A bare registered Core-carrier trait reference resolves through that carrier's
 one source-module owner and the exact trait/method identity. It cannot match an
 unrelated same-named method, a different trait or an arbitrary suffix alias.
