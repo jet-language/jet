@@ -95,6 +95,11 @@ fn view_pattern_sources() {
     view_pattern_case("consumed-payload-table", "{declaration}fn select(value: ^Payload) -> View<Int> Err! {{ {table} }}", "E2305")
     view_pattern_case("local-payload-if", "{declaration}fn select() -> View<Int> Err! {{ value :: Payload.Array([Int]{{1}})\n{ordinary} }}", "E2305")
     view_pattern_case("local-payload-table", "{declaration}fn select() -> View<Int> Err! {{ value :: Payload.Array([Int]{{1}})\n{table} }}", "E2305")
+    sum :: "total := 0\nloop item in ^items -> total += item\ntotal"
+    owned_table :: "if value == {{ .Object(items) -> {{ {sum} }} .Array(items) -> {{ {sum} }} }}"
+    view_pattern_case("consumed-table-payload-retains-ownership", "{declaration}fn sum(value: ^Payload) -> Int {{ {owned_table} }}", "")
+    view_pattern_case("local-table-payload-retains-ownership", "{declaration}fn sum() -> Int {{ value := Payload.Object([Int]{{1, 2}})\n{owned_table} }}", "")
+    view_pattern_case("taken-table-payload-retains-ownership", "{declaration}fn sum() -> Int {{ value := Payload.Object([Int]{{1, 2}})\nif ^value == {{ .Object(items) -> {{ {sum} }} .Array(items) -> {{ {sum} }} }} }}", "")
 }
 
 fn view_pattern_reborrows() {
