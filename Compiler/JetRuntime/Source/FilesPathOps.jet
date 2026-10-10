@@ -1,0 +1,445 @@
+// Core/files raw path leaves. Rust providers: CoreLib/Top/FSRuntimeOps.rs
+// (fsync/canonicalize/stat_mode/set_mode/temp_dir), CoreLib/Top/Text.rs
+// (remove/list_dir/remove_all), Core/FileHandleOwners.rs (TempDir owner),
+// CoreLib/Top/PathFiles.rs (Path.to_string). Core owns the fault
+// checkpoints; these leaves do the one host step with std's error mapping
+// (jet_std::io_error_at through compiler_fs_errno) and std's CString refusal.
+FILES_O_DIRECTORY_CLOEXEC :: prep { I64{589824} }
+// O_RDONLY|O_CLOEXEC|O_NOFOLLOW|O_DIRECTORY: std remove_dir_all's openat.
+FILES_TREE_OPEN :: prep { I64{720896} }
+FILES_DIRENT_BYTES :: prep { I64{8192} }
+FILES_AT_FDCWD :: prep { I64{-100} }
+
+// ErrorOut32 POSIX code, or 0 for success.
+fn files_out_errno(out: I64) -> I64 {
+    if (rt_text_word(out) == I64{0}) -> return I64{0}
+    rt_text_word(out + I64{8})
+}
+
+// symlink_metadata st_mode (>= 0) or -errno, through the shared stat leaf.
+fn files_lstat_mode(path: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{160}, I64{8})
+    jet_fs_stat_raw(path, false, scratch, scratch + I64{128})
+    code :: files_out_errno(scratch + I64{128})
+    mode :: rt_text_word(scratch + I64{16})
+    jet_rt_free(scratch, I64{160}, I64{8})
+    if (code != I64{0}) -> return -code
+    mode
+}
+
+// lstat of a terminated raw byte path; st_mode or -errno.
+fn files_lstat_c(name: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{128}, I64{8})
+    result := I64{0}
+    #Unsafe("the terminated raw path and the 128-byte stat fact row are live for the syscall") {
+        result = os_stat_facts_i64(I64{6}, name, scratch)
+    }
+    mode :: rt_text_word(scratch + I64{16})
+    jet_rt_free(scratch, I64{128}, I64{8})
+    if (result < I64{0}) -> return result
+    mode
+}
+
+// A getdents64 record name is "." or "..".
+fn files_dot_entry(name: I64) -> Bool {
+    if (rt_text_byte(name) != I64{46}) -> return false
+    second :: rt_text_byte(name + I64{1})
+    if (second == I64{0}) -> return true
+    second == I64{46} && rt_text_byte(name + I64{2}) == I64{0}
+}
+
+fn files_c_len(name: I64) -> I64 {
+    length := I64{0}
+    loop rt_text_byte(name + length) != (I64{0}) -> length += I64{1}
+    length
+}
+
+// FSRuntimeOps.rs:233 jet_fs_canonicalize: std::fs::canonicalize (realpath)
+// projected with to_string_lossy; failures are Resolve errors.
+#Export(c) fn jet_std_fs_canonicalize_raw(path: I64, output: I64, error: I64) -> I64 {
+    if !compiler_fs_path(path, HOST_IO_OP_RESOLVE, error) -> return I64{0}
+    name :: fd_c_path(path)
+    scratch :: jet_rt_alloc(I64{48}, I64{8})
+    bytes :: jet_process_path_canonicalize_raw(name, scratch, scratch + I64{8}, scratch + I64{16})
+    fd_c_path_drop(name, path)
+    if (bytes == I64{0}) {
+        code :: rt_text_word(scratch + I64{24})
+        jet_rt_free(scratch, I64{48}, I64{8})
+        return compiler_fs_errno(HOST_IO_OP_RESOLVE, path, code, error)
+    }
+    rt_text_store(output, rt_text_lossy(bytes, rt_text_word(scratch)))
+    jet_rt_free(bytes, rt_text_word(scratch + I64{8}), I64{1})
+    jet_rt_free(scratch, I64{48}, I64{8})
+    I64{1}
+}
+
+// FSRuntimeOps.rs:198: OpenOptions::read (open O_RDONLY|O_CLOEXEC, EINTR
+// retried) then sync_all (fsync, EINTR retried). Both fail as Flush.
+#Export(c) fn jet_std_fs_fsync_raw(path: I64, error: I64) -> I64 {
+    if !compiler_fs_path(path, HOST_IO_OP_FLUSH, error) -> return I64{0}
+    name :: fd_c_path(path)
+    fd := I64{-4}
+    loop {
+        fd = host_call(I64{2}, name, I64{524288}, I64{0})
+        if (fd != I64{-4}) -> break
+    }
+    fd_c_path_drop(name, path)
+    if (fd < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_FLUSH, path, -fd, error)
+    result := I64{-4}
+    loop {
+        result = host_call(I64{74}, fd, I64{0}, I64{0})
+        if (result != I64{-4}) -> break
+    }
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    if (result < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_FLUSH, path, -result, error)
+    I64{1}
+}
+
+// FSRuntimeOps.rs:298: symlink_metadata(path).mode() as the exact Int owner.
+#Export(c) fn jet_std_fs_stat_mode_raw(path: I64, output: I64, error: I64) -> I64 {
+    if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
+    mode :: files_lstat_mode(path)
+    if (mode < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, path, -mode, error)
+    rt_text_store(output, jet_int_owned_from_i64(mode))
+    I64{1}
+}
+
+// FSRuntimeOps.rs:384 (unix): the u32 range refusal precedes the path
+// conversion; set_permissions is chmod with EINTR retried.
+#Export(c) fn jet_std_fs_set_mode_raw(path: I64, mode: I64, error: I64) -> I64 {
+    if (mode < I64{0} || mode > I64{4294967295}) {
+        return host_io_other_take(HOST_IO_OP_WRITE, jet_rt_string_clone(path), jet_rt_string_clone(rt_static_text("file mode must be between 0 and u32::MAX")), error)
+    }
+    if !compiler_fs_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
+    name :: fd_c_path(path)
+    result := I64{-4}
+    loop {
+        result = host_call(I64{90}, name, mode, I64{0})
+        if (result != I64{-4}) -> break
+    }
+    fd_c_path_drop(name, path)
+    if (result < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, path, -result, error)
+    I64{1}
+}
+
+// Text.rs:1737 jet_fs_remove_entry: rmdir a non-link directory, else unlink.
+#Export(c) fn jet_std_fs_remove_raw(path: I64, error: I64) -> I64 {
+    if !compiler_fs_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
+    mode :: files_lstat_mode(path)
+    if (mode < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, path, -mode, error)
+    name :: fd_c_path(path)
+    result :: host_call(if ((mode.bit_and(I64{61440})) == I64{16384}) -> I64{84} else -> I64{87}, name, I64{0}, I64{0})
+    fd_c_path_drop(name, path)
+    if (result < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, path, -result, error)
+    I64{1}
+}
+
+// std sys/fs/unix remove_dir_all_recursive: openat O_NOFOLLOW|O_DIRECTORY;
+// ENOTDIR/ELOOP unlinks a child (the root refuses); DT_DIR and DT_UNKNOWN
+// recurse, other children unlink; a child's ENOENT is ignored; the emptied
+// directory is removed with AT_REMOVEDIR, ignoring ENOENT. Readdir ENOENT is
+// end of stream (musl readdir). Returns 0 or -errno.
+fn files_remove_tree(parent: I64, name: I64, root: Bool) -> I64 {
+    fd := I64{-4}
+    loop {
+        fd = host_call(I64{257}, parent, name, FILES_TREE_OPEN)
+        if (fd != I64{-4}) -> break
+    }
+    if (fd == I64{-20} || fd == I64{-40}) {
+        if root -> return fd
+        unlinked :: host_call(I64{263}, parent, name, I64{0})
+        return if (unlinked < I64{0}) -> unlinked else -> I64{0}
+    }
+    if (fd < I64{0}) -> return fd
+    buffer :: jet_rt_alloc(FILES_DIRENT_BYTES, I64{8})
+    failure := I64{0}
+    loop failure == (I64{0}) {
+        count :: host_call(I64{217}, fd, buffer, FILES_DIRENT_BYTES)
+        if (count == I64{0} || count == I64{-2}) -> break
+        if (count < I64{0}) {
+            failure = count
+            break
+        }
+        at := I64{0}
+        loop at < count {
+            record :: buffer + at
+            at += rt_text_byte(record + I64{16}).bit_or((rt_text_byte(record + I64{17}) << I64{8}))
+            entry :: record + I64{19}
+            if files_dot_entry(entry) -> next
+            kind :: rt_text_byte(record + I64{18})
+            result :: if (kind == I64{4} || kind == I64{0}) -> files_remove_tree(fd, entry, false) else -> host_call(I64{263}, fd, entry, I64{0})
+            if (result < I64{0} && result != I64{-2}) {
+                failure = result
+                break
+            }
+        }
+    }
+    jet_rt_free(buffer, FILES_DIRENT_BYTES, I64{8})
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    if (failure < I64{0}) -> return failure
+    removed :: host_call(I64{263}, parent, name, I64{512})
+    if (removed < I64{0} && removed != I64{-2}) -> return removed
+    I64{0}
+}
+
+// std::fs::remove_dir_all: lstat; a symlink root is unlinked, never followed.
+// `path` is NUL-free. Returns 0 or -errno.
+fn files_remove_dir_all(path: I64) -> I64 {
+    mode :: files_lstat_mode(path)
+    if (mode < I64{0}) -> return mode
+    name :: fd_c_path(path)
+    result :: if ((mode.bit_and(I64{61440})) == I64{40960}) -> host_call(I64{87}, name, I64{0}, I64{0}) else -> files_remove_tree(FILES_AT_FDCWD, name, true)
+    fd_c_path_drop(name, path)
+    if (result < I64{0}) -> return result
+    I64{0}
+}
+
+// Text.rs:1842: remove_dir_all when Core saw a directory, else remove_file.
+#Export(c) fn jet_std_fs_remove_all_raw(path: I64, directory: Bool, error: I64) -> I64 {
+    if !compiler_fs_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
+    result := I64{0}
+    if directory {
+        result = files_remove_dir_all(path)
+    } else {
+        name :: fd_c_path(path)
+        result = host_call(I64{87}, name, I64{0}, I64{0})
+        fd_c_path_drop(name, path)
+    }
+    if (result < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, path, -result, error)
+    I64{1}
+}
+
+// DirEntry24: owned name E4 @0, owned path E4 @8, is_dir word @16.
+fn files_dir_entry_new(name: I64, path: I64, is_dir: Bool) -> I64 {
+    entry :: jet_rt_alloc(I64{24}, I64{8})
+    rt_text_store(entry, name)
+    rt_text_store(entry + I64{8}, path)
+    rt_text_store(entry + I64{16}, if is_dir -> I64{1} else -> I64{0})
+    entry
+}
+#Export(c) fn jet_rt_record_new_dir_entry(name: I64, path: I64, is_dir: Bool) -> I64 {
+    files_dir_entry_new(jet_rt_string_clone(name), jet_rt_string_clone(path), is_dir)
+}
+#Export(c) fn jet_rt_record_get_dir_entry_name(entry: I64) -> I64 { jet_rt_string_clone(rt_text_word(entry)) }
+#Export(c) fn jet_rt_record_get_dir_entry_path(entry: I64) -> I64 { jet_rt_string_clone(rt_text_word(entry + I64{8})) }
+#Export(c) fn jet_rt_record_get_dir_entry_is_dir(entry: I64) -> Bool { rt_text_word(entry + I64{16}) != I64{0} }
+#Export(c) fn jet_rt_handle_clone_dir_entry(entry: I64) -> I64 {
+    files_dir_entry_new(jet_rt_string_clone(rt_text_word(entry)), jet_rt_string_clone(rt_text_word(entry + I64{8})), rt_text_word(entry + I64{16}) != I64{0})
+}
+#Export(c) fn jet_rt_handle_drop_dir_entry(entry: I64) {
+    if (entry == I64{0}) -> return
+    jet_rt_string_drop(rt_text_word(entry))
+    jet_rt_string_drop(rt_text_word(entry + I64{8}))
+    jet_rt_free(entry, I64{24}, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_dir_entry(left: I64, right: I64) -> Bool {
+    jet_rt_string_eq(rt_text_word(left), rt_text_word(right)) && jet_rt_string_eq(rt_text_word(left + I64{8}), rt_text_word(right + I64{8})) && rt_text_word(left + I64{16}) == rt_text_word(right + I64{16})
+}
+// CommonTypes.rs:6897: "DirEntry { name: {:?}, path: {:?}, is_dir: {} }".
+#Export(c) fn jet_rt_handle_show_dir_entry(entry: I64) -> I64 {
+    result :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(result, rt_static_text("DirEntry {{ name: "))
+    rt_text_push_debug_str(result, rt_text_word(entry), true)
+    jet_rt_string_builder_push(result, rt_static_text(", path: "))
+    rt_text_push_debug_str(result, rt_text_word(entry + I64{8}), true)
+    jet_rt_string_builder_push(result, rt_static_text(", is_dir: "))
+    jet_rt_string_builder_push(result, if (rt_text_word(entry + I64{16}) != I64{0}) -> rt_static_text("true") else -> rt_static_text("false"))
+    jet_rt_string_builder_push(result, rt_static_text(" }}"))
+    jet_rt_string_builder_finish(result)
+}
+
+// Words24: data @0, length @8, capacity @16; one owned word buffer.
+fn files_words_new() -> I64 {
+    words :: jet_rt_alloc(I64{24}, I64{8})
+    rt_text_store(words, I64{0})
+    rt_text_store(words + I64{8}, I64{0})
+    rt_text_store(words + I64{16}, I64{0})
+    words
+}
+fn files_words_push(words: I64, value: I64) {
+    length :: rt_text_word(words + I64{8})
+    capacity :: rt_text_word(words + I64{16})
+    if (length == capacity) {
+        grown :: if (capacity == I64{0}) -> I64{8} else -> capacity * I64{2}
+        data :: jet_rt_alloc(grown * I64{8}, I64{8})
+        old :: rt_text_word(words)
+        at := I64{0}
+        loop at < length {
+            rt_text_store(data + at * I64{8}, rt_text_word(old + at * I64{8}))
+            at += I64{1}
+        }
+        if (capacity != I64{0}) -> jet_rt_free(old, capacity * I64{8}, I64{8})
+        rt_text_store(words, data)
+        rt_text_store(words + I64{16}, grown)
+    }
+    rt_text_store(rt_text_word(words) + length * I64{8}, value)
+    rt_text_store(words + I64{8}, length + I64{1})
+}
+fn files_words_free(words: I64) {
+    capacity :: rt_text_word(words + I64{16})
+    if (capacity != I64{0}) -> jet_rt_free(rt_text_word(words), capacity * I64{8}, I64{8})
+    jet_rt_free(words, I64{24}, I64{8})
+}
+// Hand the words to a List result: an exact length*8 buffer (0 when empty).
+fn files_words_take(words: I64, output: I64) -> I64 {
+    length :: rt_text_word(words + I64{8})
+    data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{8}, I64{8})
+    at := I64{0}
+    loop at < length {
+        rt_text_store(data + at * I64{8}, rt_text_word(rt_text_word(words) + at * I64{8}))
+        at += I64{1}
+    }
+    files_words_free(words)
+    rt_text_store(output, data)
+    length
+}
+
+// Stable bottom-up merge sort of DirEntry handles by name bytes (Rust
+// sort_by(|a, b| a.name.cmp(&b.name)), equal names keep readdir order).
+fn files_entries_sort(data: I64, count: I64) {
+    if (count < I64{2}) -> return
+    temp :: jet_rt_alloc(count * I64{8}, I64{8})
+    source := data
+    target := temp
+    width := I64{1}
+    loop width < count {
+        start := I64{0}
+        loop start < count {
+            middle :: if (start + width < count) -> start + width else -> count
+            end :: if (middle + width < count) -> middle + width else -> count
+            left := start
+            right := middle
+            at := start
+            loop at < end {
+                take_left := right >= end
+                if (!take_left && left < middle) {
+                    take_left = jet_rt_string_compare(rt_text_word(rt_text_word(source + left * I64{8})), rt_text_word(rt_text_word(source + right * I64{8}))) <= I64{0}
+                }
+                if take_left {
+                    rt_text_store(target + at * I64{8}, rt_text_word(source + left * I64{8}))
+                    left += I64{1}
+                } else {
+                    rt_text_store(target + at * I64{8}, rt_text_word(source + right * I64{8}))
+                    right += I64{1}
+                }
+                at += I64{1}
+            }
+            start = end
+        }
+        swapped :: source
+        source = target
+        target = swapped
+        width *= I64{2}
+    }
+    if (source != data) {
+        at := I64{0}
+        loop at < count {
+            rt_text_store(data + at * I64{8}, rt_text_word(source + at * I64{8}))
+            at += I64{1}
+        }
+    }
+    jet_rt_free(temp, count * I64{8}, I64{8})
+}
+
+// Text.rs:1773: read_dir (opendir: O_RDONLY|O_DIRECTORY|O_CLOEXEC), name and
+// Path::join(path, name) through to_string_lossy, is_dir from d_type with
+// std's lstat fallback for DT_UNKNOWN (failure is false), sorted by name.
+#Export(c) fn jet_std_fs_list_dir_raw(path: I64, output: I64, length: I64, error: I64) -> I64 {
+    if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
+    name :: fd_c_path(path)
+    fd :: host_call(I64{2}, name, FILES_O_DIRECTORY_CLOEXEC, I64{0})
+    fd_c_path_drop(name, path)
+    if (fd < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, path, -fd, error)
+    base :: rt_text_data(path)
+    base_len :: rt_text_len(path)
+    separator :: base_len != I64{0} && rt_text_byte(base + base_len - I64{1}) != I64{47}
+    entries :: files_words_new()
+    buffer :: jet_rt_alloc(FILES_DIRENT_BYTES, I64{8})
+    failure := I64{0}
+    loop failure == (I64{0}) {
+        count :: host_call(I64{217}, fd, buffer, FILES_DIRENT_BYTES)
+        if (count == I64{0} || count == I64{-2}) -> break
+        if (count < I64{0}) {
+            failure = count
+            break
+        }
+        at := I64{0}
+        loop at < count {
+            record :: buffer + at
+            at += rt_text_byte(record + I64{16}).bit_or((rt_text_byte(record + I64{17}) << I64{8}))
+            raw :: record + I64{19}
+            if files_dot_entry(raw) -> next
+            raw_len :: files_c_len(raw)
+            entry_name :: rt_text_lossy(raw, raw_len)
+            full :: jet_rt_string_builder_new()
+            jet_rt_string_builder_push(full, path)
+            if separator -> rt_text_push_word(full, I64{47}, I64{1})
+            jet_rt_string_builder_push(full, entry_name)
+            kind :: rt_text_byte(record + I64{18})
+            is_dir := kind == I64{4}
+            if (kind == I64{0}) {
+                stat_len :: base_len + I64{1} + raw_len + I64{1}
+                target :: jet_rt_alloc(stat_len, I64{1})
+                rt_text_bytes_copy(target, base, base_len)
+                cursor := base_len
+                if separator {
+                    rt_text_put(target + cursor, I64{47})
+                    cursor += I64{1}
+                }
+                rt_text_bytes_copy(target + cursor, raw, raw_len)
+                rt_text_put(target + cursor + raw_len, I64{0})
+                mode :: files_lstat_c(target)
+                jet_rt_free(target, stat_len, I64{1})
+                is_dir = mode >= I64{0} && (mode.bit_and(I64{61440})) == I64{16384}
+            }
+            files_words_push(entries, files_dir_entry_new(entry_name, jet_rt_string_builder_finish(full), is_dir))
+        }
+    }
+    jet_rt_free(buffer, FILES_DIRENT_BYTES, I64{8})
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    if (failure < I64{0}) {
+        at := I64{0}
+        loop at < rt_text_word(entries + I64{8}) {
+            jet_rt_handle_drop_dir_entry(rt_text_word(rt_text_word(entries) + at * I64{8}))
+            at += I64{1}
+        }
+        files_words_free(entries)
+        return compiler_fs_errno(HOST_IO_OP_READ, path, -failure, error)
+    }
+    files_entries_sort(rt_text_word(entries), rt_text_word(entries + I64{8}))
+    rt_text_store(length, files_words_take(entries, output))
+    I64{1}
+}
+
+// FileHandleOwners.rs JetTempDirOwner: TempDir16 = shared refs @0, owned
+// path E4 @8. Clones share the Rc-like owner; the last owner's drop runs
+// remove_dir_all(path) and ignores its result.
+#Export(c) fn jet_std_fs_temp_dir_raw(path: I64, output: I64, error: I64) -> I64 {
+    if !compiler_fs_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
+    name :: fd_c_path(path)
+    result :: host_call(I64{83}, name, I64{511}, I64{0})
+    fd_c_path_drop(name, path)
+    if (result < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, path, -result, error)
+    owner :: jet_rt_alloc(I64{16}, I64{8})
+    sync_store(owner, I64{1})
+    rt_text_store(owner + I64{8}, jet_rt_string_clone(path))
+    rt_text_store(output, owner)
+    I64{1}
+}
+#Export(c) fn jet_rt_handle_clone_jet_temp_dir_owner(owner: I64) -> I64 {
+    _ := sync_add(owner, I64{1})
+    owner
+}
+#Export(c) fn jet_rt_handle_drop_jet_temp_dir_owner(owner: I64) {
+    if (owner == I64{0}) -> return
+    if (sync_add(owner, I64{-1}) != I64{1}) -> return
+    path :: rt_text_word(owner + I64{8})
+    _ := files_remove_dir_all(path)
+    jet_rt_string_drop(path)
+    jet_rt_free(owner, I64{16}, I64{8})
+}
+// CAbiRoutes.rs:17724: out is a borrowed read/clone-only stack Text header.
+#Export(c) fn jet_rt_handle_field_jet_temp_dir_owner_path(owner: I64, out: I64) { coll_copy(rt_text_word(owner + I64{8}), out, I64{24}) }
+
+// PathFiles.rs:27: Path.to_string is its Display text.
+#Export(c) fn jet_path_to_string(path: I64) -> I64 { path_handle_render(path) }
