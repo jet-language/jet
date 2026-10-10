@@ -28,7 +28,8 @@ fn kit_steps_json_files(directory: String, canonical: Bool) -> String Err! {
         }
         &documents.push(json.parse(text) ?? return Err("JSON files parse: {err}"))
     }
-    Ok(json.to_string(Dyn.Array(documents)))
+    encoded :: json.to_string(Dyn.Array(documents)) ?? return Err("JSON files encode: {err}")
+    Ok(encoded)
 }
 
 fn kit_steps_json_zero(tree: Dyn, key: String) -> Dyn {

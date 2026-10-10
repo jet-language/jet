@@ -46,6 +46,7 @@ for (let i = 0; i < args.length; i += 2) {
     if (!['--jet', '--manifest', '--receipt', '--out', '--runtime'].includes(name) || !args[i + 1]) throw Error(usage);
     options[name.slice(2)] = resolve(args[i + 1]);
 }
+if (command === 'run' && !options.jet && process.env.JET) options.jet = resolve(process.env.JET);
 function filesUnder(directory, extension = '.jet') {
     return readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap(entry => {
         const path = join(directory, entry.name);

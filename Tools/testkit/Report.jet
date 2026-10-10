@@ -25,7 +25,7 @@ fn kit_report_counts(results: [KitCaseResult], suites: [String]) -> String {
     timeout :: kit_report_count(results, "TIMEOUT")
     known :: kit_report_count(results, "KNOWN-FAILING")
     unexpected :: kit_report_count(results, "UNEXPECTED-PASS")
-    names :: json.to_string(suites)
+    names :: json.to_string(suites) ?? panic("testkit suite report encode: {err}")
     "{{\"PASS\":{pass},\"FAIL\":{fail},\"KNOWN-FAILING\":{known},\"UNEXPECTED-PASS\":{unexpected},\"UNSUPPORTED\":{unsupported},\"SKIP-HOST\":{skip},\"OPT-IN\":{opt_in},\"REFUSED\":{refused},\"ERROR\":{error},\"TIMEOUT\":{timeout},\"suites\":{names}}}"
 }
 
@@ -39,8 +39,8 @@ fn kit_report_finish(jet: String, results: [KitCaseResult], path: String, suites
     summary :: kit_report_counts(results, suites)
     if path != "" {
         // The reflected record preserves the literal `case` schema key.
-        records :: results.map(result -> json.to_string(result)).join(",")
-        compiler :: json.to_string(jet)
+        records :: results.map(result -> json.to_string(result) ?? panic("testkit case report encode: {err}")).join(",")
+        compiler :: json.to_string(jet) ?? panic("testkit compiler report encode: {err}")
         document :: "{{\"jet\":{compiler},\"counts\":{summary},\"results\":[{records}]}}\n"
         files.write(path, document) ?? {
             print("ERROR\tresults\t\t{err}")

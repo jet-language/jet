@@ -1,102 +1,65 @@
 #!/usr/bin/env node
-// Exercise the real verify-full control flow with real tiny fixture children,
-// never a compiler build, release token, runtime corpus, or full-gate proof.
+// Real native verifier with tiny fixture children; this is runner behavior,
+// never compiler or full-suite proof. No Cargo test adapter is involved.
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import crypto from 'node:crypto';
-import {spawnSync} from 'node:child_process';
+import { spawnSync } from 'node:child_process';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const base = process.env.JET_TEST_SCRATCH_DIR ?? join(homedir(), '.cache/jet-dev/scratch');
+mkdirSync(base, { recursive: true });
+const container = mkdtempSync(join(base, 'verify-native-fixture-'));
+const sandbox = join(container, 'source');
+mkdirSync(sandbox);
+const external = mkdtempSync(join(base, 'verify-native-evidence-'));
+const put = (name, content) => { const path = join(sandbox, name); mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content, { mode: 0o755 }); };
+try {
+    for (const path of ['Tools/agent/verify-full.sh', 'Tools/agent/verify-full.mjs', 'Tools/agent/native-suite.mjs']) put(path, readFileSync(join(repo, path)));
+    put('Tools/ci/test-shards.sh', '#!/usr/bin/env bash\nprintf "%s\\n" golden ui cases registries\n');
+    for (const gate of ['closeout-gate', 'check-unsafe-ratchet', 'check-agent-doc-flags', 'core-coverage-census']) put(`Tools/agent/${gate}.mjs`, `if (process.env.FIXTURE_MODE === 'closeout' && ${JSON.stringify(gate)} === 'closeout-gate') process.exit(3);\n`);
+    put('Tools/agent/proof-source.mjs', `import {existsSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
-
-const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
-const source=fs.readFileSync(path.join(repo,'Tools/agent/verify-full.sh'));
-const parent=process.env.TMPDIR&&!/^\/tmp(?:\/|$)/.test(process.env.TMPDIR)?process.env.TMPDIR:path.join(os.homedir(),'.cache/jet-dev/scratch');
-fs.mkdirSync(parent,{recursive:true});
-const sandbox=fs.mkdtempSync(path.join(parent,'verify-full-collect-'));
-const output=process.env.JET_COLLECT_REGRESSION_OUTPUT;
-function put(name,body){const file=path.join(sandbox,name);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,body,{mode:0o755});return file;}
-const outcomes=[];
-try{
- put('Tools/agent/verify-full.sh',source);
- for(const name of ['Tools/agent/clean-nix-tmp.sh','Tools/ci/tower-hygiene-gate.sh'])put(name,'#!/usr/bin/env bash\nexit 0\n');
- put('Tools/agent/verify-nix-eval-stopline.sh','#!/usr/bin/env bash\nprintf "nix-authority\\n" >> "$FIXTURE_COMMANDS"\nif [ "$FIXTURE_MODE" = authority ]; then exit 36; fi\nexit 0\n');
- put('Tools/ci/test-shards.sh',`#!/usr/bin/env bash
-printf '%s\\n' '-p fixture --test alpha' '-p fixture --test beta' '-p fixture --test gamma' '-p fixture --lib'
-if [ "\$FIXTURE_MODE" = missing ]; then printf '%s\\n' '-p jet --test canvas_scenarios' '-p jet --test cffi_native_matrix'; fi
+export function assertPinnedSource(source, commit) {if(existsSync(source+'/.corrupted'))throw Error('pinned source changed');return {commit};}
+export function proofTargetDirectory(commit) {return '/mnt/jetscratch/targets/source-'+commit;}
+if(process.argv[1]===fileURLToPath(import.meta.url))console.log(process.argv[3]);
 `);
- const node=put('bin/node',`#!${process.execPath}
-const fs=require('node:fs');const args=process.argv.slice(2),text=args.join(' ');fs.appendFileSync(process.env.FIXTURE_COMMANDS,'node '+text+'\\n');
-if(args[0]==='--version'){console.log('v22.0.0');process.exit(0);}
-if(process.env.FIXTURE_MODE==='integrity'&&text.includes('check-unsafe-ratchet'))process.exit(35);
-if(process.env.FIXTURE_MODE==='preflights'){
- if(text.includes('check-agent-doc-flags'))process.exit(31);
- if(text.includes('verify-jet-shell-parity'))process.exit(33);
- if(text.includes('compiler-diff')&&args.includes('--canary'))process.exit(32);
- if(text.includes('compiler-diff')&&args.includes('--corpus'))process.exit(args.includes('--keep-going')?34:92);
-}
-if(text.includes('compiler-diff')&&args.includes('--corpus')&&!args.includes('--keep-going'))process.exit(92);
-process.exit(0);
+    put('Tools/testkit/run.mjs', `import {writeFileSync} from 'node:fs';
+const args=process.argv.slice(2),suite=args[0],mode=process.env.FIXTURE_MODE;
+if(suite==='golden'&&mode==='signal')process.kill(process.pid,'SIGTERM');
+if(suite==='golden'&&mode==='ordinary')process.exit(17);
+const results=[{case:suite,suite,tier:'o0',status:suite==='ui'&&mode==='refused'?'REFUSED':'PASS'}];
+if(suite==='ui'&&mode==='corrupt')writeFileSync('.corrupted','changed');
+writeFileSync(args[args.indexOf('--results')+1],JSON.stringify({jet:process.env.JET,results}));
 `);
- put('bin/cargo',`#!${process.execPath}
-const fs=require('node:fs');const args=process.argv.slice(2),text=args.join(' '),mode=process.env.FIXTURE_MODE;fs.appendFileSync(process.env.FIXTURE_COMMANDS,'cargo '+text+'\\n');
-if(args[0]==='metadata'){console.log(JSON.stringify({workspace_members:['fixture'],packages:[{id:'fixture',name:'fixture',targets:[{kind:['lib'],doctest:mode!=='disabled-docs'}]},{id:'unselected-dependency',name:'unselected-dependency',targets:[{kind:['lib'],doctest:true}]}]}));process.exit(0);}
-if(args.includes('--keep-going')||!args.includes('--no-fail-fast'))process.exit(93);
-if(['masked-signal','masked-exit','ordinary-101'].includes(mode)&&args.includes('alpha')&&!args.includes('--no-run')){
- const child=require('node:child_process').spawnSync(process.execPath,['-e',mode==='masked-signal'?'process.kill(process.pid,\"SIGSEGV\")':mode==='masked-exit'?'process.exit(137)':'process.exit(101)'],{stdio:'pipe'});
- if(mode==='masked-signal'&&child.signal!=='SIGSEGV')process.exit(94);
- if(mode!=='masked-signal'&&child.status!==(mode==='masked-exit'?137:101))process.exit(95);
- console.error(\"  process didn't exit successfully: fixture-test-child (\"+(child.signal?'signal: 11, SIGSEGV: invalid memory reference':'exit status: '+child.status)+')');
- process.exit(101);
-}
-if(args.includes('alpha')&&args.includes('--no-run')){
- if(mode==='unsafe')process.kill(process.pid,'SIGKILL');
- if(mode==='segv')process.kill(process.pid,'SIGSEGV');
- if(mode==='abort')process.kill(process.pid,'SIGABRT');
- if(mode==='ordinary'){console.error('first independent compile failure');process.exit(17);}
-}
-if(mode==='ordinary'&&args.includes('gamma')&&!args.includes('--no-run')){console.error('second independent assertion failure');process.exit(23);}
-if(mode==='lib-failure'&&args.includes('--lib')&&args.includes('--no-run')){console.error('cfg(test)-only compile failure');process.exit(27);}
-console.log('fixture child PASS');process.exit(0);
+    put('Tools/agent/compiler-registries.mjs', `import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
+const args=process.argv.slice(2);
+if(args[0]==='manifest'){const dir=args[args.indexOf('--out')+1];mkdirSync(dir,{recursive:true});writeFileSync(dir+'/manifest.json',JSON.stringify({head:args[1],repo:process.cwd(),completeCompilerRegistries:true,entries:[{id:'fixture'}]}));}
+else {if(process.env.FIXTURE_MODE==='registry')process.exit(1);const manifest=JSON.parse(readFileSync(args[args.indexOf('--manifest')+1]));writeFileSync(args[args.indexOf('--receipt')+1],JSON.stringify({status:'PASS',head:manifest.head,jet:process.env.JET,total:1,passed:1,blocked:0,failed:0,entries:[{id:'fixture',status:'PASS'}]}));}
 `);
- for(const [name,version] of [['chromium','Chromium 123'],['firefox','Firefox 123'],['geckodriver','geckodriver 0.35'],['cc','fixture cc'],['ar','fixture ar'],['rustc','fixture rustc']])put(`bin/${name}`,`#!/usr/bin/env bash\nprintf '%s\\n' '${version}'\n`);
- for(const mode of ['ordinary','preflights','unsafe','segv','abort','integrity','missing','lib-failure','authority','disabled-docs','masked-signal','masked-exit','ordinary-101']){
-  const evidence=path.join(sandbox,`evidence-${mode}`),commands=path.join(sandbox,`commands-${mode}.log`);fs.writeFileSync(commands,'');
-  const env={...process.env,PATH:`${sandbox}/bin:${process.env.PATH}`,FIXTURE_MODE:mode,FIXTURE_COMMANDS:commands,JET_VERIFY_TMPDIR:path.join(sandbox,'temporary'),JET_CI_EVIDENCE_DIR:evidence,JET_CANVAS_CHROMIUM:path.join(sandbox,'bin/chromium'),JET_CANVAS_FIREFOX:path.join(sandbox,'bin/firefox'),JET_CANVAS_GECKODRIVER:path.join(sandbox,'bin/geckodriver'),JET_CANVAS_NODE:node,JET_CFFI_CC:path.join(sandbox,'bin/cc'),JET_CFFI_AR:path.join(sandbox,'bin/ar'),JET_CFFI_RUSTC:path.join(sandbox,'bin/rustc'),JETPACK_DOGFOOD_ROOT:path.join(sandbox,'dogfood'),JETPACK_DOGFOOD_TARGET_DIR:path.join(sandbox,'dogfood-target'),JET_CANDIDATE_COMPILER:'fixture-candidate'};
-  for(const name of ['JET_TEST_SHARD','JET_TEST_SHARD_COUNT','JET_VERIFY_CANVAS_PREREQUISITES_ONLY','JET_VERIFY_TEMP_PROBE_ONLY'])delete env[name];
-  if(mode==='missing'){env.JET_CANVAS_FIREFOX=path.join(sandbox,'absent-firefox');env.JET_CFFI_CC=path.join(sandbox,'absent-cc');}
-  const result=spawnSync('bash',['-c','ulimit -c 0; exec bash Tools/agent/verify-full.sh'],{cwd:sandbox,env,encoding:'utf8',timeout:30000});assert.equal(result.error,undefined);assert.equal(result.signal,null);assert.equal(result.status,mode==='integrity'?35:mode==='disabled-docs'?0:1,`${mode}: ${result.stdout}\n${result.stderr}`);
-  const summary=path.join(evidence,'verify-full-summary.tsv'),rows=fs.existsSync(summary)?fs.readFileSync(summary,'utf8').trim().split('\n').slice(1).map(line=>line.split('\t')):[];
-  const byScope=Object.fromEntries(rows.map(row=>[row[1],row]));const logged=fs.readFileSync(commands,'utf8');
-  if(mode==='ordinary'){
-   assert.deepEqual(['compile-1','compile-2','compile-3','compile-4','run-1','run-2','run-3','run-4','doc-4'].map(scope=>[scope,byScope[scope]?.[0]]),[['compile-1','FAIL'],['compile-2','PASS'],['compile-3','PASS'],['compile-4','PASS'],['run-1','BLOCKED'],['run-2','PASS'],['run-3','FAIL'],['run-4','PASS'],['doc-4','PASS']]);
-   assert.equal(byScope['compile-1'][2],'17');assert.equal(byScope['run-3'][2],'23');assert.equal(byScope['compile-1'][5],'-p fixture --test alpha');assert.equal(byScope['run-3'][5],'-p fixture --test gamma');assert(!logged.includes('cargo test -p fixture --test alpha --no-fail-fast\n'));assert(logged.indexOf('--test beta --no-run')>logged.indexOf('--test alpha --no-run'));assert(fs.readFileSync(byScope['compile-1'][4],'utf8').includes('first independent compile failure'));assert(fs.readFileSync(byScope['run-3'][4],'utf8').includes('second independent assertion failure'));
-  }else if(mode==='preflights'){
-   for(const scope of ['agent-doc-flags','shell-parity','comparator-canary','comparator-corpus'])assert.equal(byScope[scope][0],'FAIL');assert.equal(byScope['run-2'][0],'PASS');assert.equal(rows.filter(row=>row[0]==='FAIL').length,4);
-  }else if(['unsafe','segv','abort'].includes(mode)){
-   assert.equal(byScope['compile-1'][0],'FAIL');assert.equal(byScope['compile-1'][2],String({unsafe:137,segv:139,abort:134}[mode]));for(const scope of ['compile-2','compile-3','compile-4','run-1','run-2','run-3','run-4','doc-4'])assert.equal(byScope[scope][0],'BLOCKED');assert(!logged.includes('cargo test -p fixture --test beta'));
-  }else if(['masked-signal','masked-exit'].includes(mode)){
-   assert.equal(byScope['run-1'][0],'FAIL');assert.equal(byScope['run-1'][2],'101');assert(byScope['run-1'][3].includes(mode==='masked-signal'?'unsafe Cargo child signal 11':'unsafe Cargo child exit 137'));
-   for(const scope of ['run-2','run-3','run-4','doc-4'])assert.equal(byScope[scope][0],'BLOCKED');assert.equal(byScope['compile-2'][0],'PASS');assert(!logged.includes('cargo test -p fixture --test beta --no-fail-fast\n'));
-   assert(fs.readFileSync(byScope['run-1'][4],'utf8').includes(mode==='masked-signal'?'signal: 11, SIGSEGV':'exit status: 137'));
-  }else if(mode==='ordinary-101'){
-   assert.equal(byScope['run-1'][0],'FAIL');assert.equal(byScope['run-1'][2],'101');assert.equal(byScope['run-1'][3],'-');
-   for(const scope of ['run-2','run-3','run-4','doc-4'])assert.equal(byScope[scope][0],'PASS');assert(logged.includes('cargo test -p fixture --test beta --no-fail-fast\n'));
-  }else if(mode==='integrity'){
-   assert(!logged.includes('cargo '));assert.equal(rows.length,0);
-  }else if(mode==='lib-failure'){
-   assert.equal(byScope['compile-4'][0],'FAIL');assert.equal(byScope['compile-4'][2],'27');assert.equal(byScope['run-4'][0],'BLOCKED');assert.equal(byScope['doc-4'][0],'PASS');assert(logged.includes('cargo test -p fixture --doc --no-fail-fast'));assert.equal(byScope['run-2'][0],'PASS');
-  }else if(mode==='authority'){
-   assert.equal(byScope['nix-eval-stopline'][0],'FAIL');assert.equal(byScope['nix-eval-stopline'][2],'36');for(const scope of ['compile-1','compile-2','compile-3','compile-4','run-1','run-2','run-3','run-4','doc-4'])assert.equal(byScope[scope][0],'BLOCKED');assert(!logged.split('nix-authority\n')[1].includes('cargo '));
-  }else if(mode==='disabled-docs'){
-   assert.equal(byScope['compile-4'][0],'PASS');assert.equal(byScope['run-4'][0],'PASS');assert.equal(byScope['doc-4'],undefined);assert(!logged.includes('cargo test -p fixture --doc'));assert.equal(rows.filter(row=>row[0]!=='PASS').length,0);
-  }else{
-   for(const scope of ['canvas-prerequisites','cffi-prerequisites','run-5','run-6'])assert.equal(byScope[scope][0],'BLOCKED');assert.equal(byScope['run-2'][0],'PASS');assert.equal(byScope['compile-5'][0],'PASS');assert.equal(byScope['compile-6'][0],'PASS');
-  }
-  if(fs.existsSync(path.join(sandbox,'temporary')))assert.deepEqual(fs.readdirSync(path.join(sandbox,'temporary')),[],'production cleanup must remove temporary work while retaining summary/logs');
-  if(output){const dest=path.join(output,mode);fs.mkdirSync(dest,{recursive:true});if(fs.existsSync(evidence))fs.cpSync(evidence,path.join(dest,'evidence'),{recursive:true});fs.copyFileSync(commands,path.join(dest,'commands.log'));fs.writeFileSync(path.join(dest,'stdout.log'),result.stdout);fs.writeFileSync(path.join(dest,'stderr.log'),result.stderr);fs.writeFileSync(path.join(dest,'rc'),`${result.status}\n`);}
-  outcomes.push({mode,actualRc:result.status,counts:Object.fromEntries(['PASS','FAIL','BLOCKED'].map(status=>[status,rows.filter(row=>row[0]===status).length])),regression:'PASS'});
- }
- console.log(JSON.stringify({scope:'Actual production shell with real fixture children; NOT compiler/full-suite/Gate proof',sourceSha256:crypto.createHash('sha256').update(source).digest('hex'),outcomes,green:true},null,2));
- console.log(`CHECK OK: durable verify-full collect-all runner (${outcomes.length} scenarios)`);
-}finally{fs.rmSync(sandbox,{recursive:true,force:true});}
+    put('bin/git', '#!/usr/bin/env bash\nif [[ "$FIXTURE_MODE" == pinned ]]; then exit 19; fi\nprintf "0123456789012345678901234567890123456789\\n"\n');
+    const outcomes = [];
+    for (const mode of ['pass', 'ordinary', 'refused', 'signal', 'registry', 'corrupt', 'closeout', 'pinned']) {
+        rmSync(join(sandbox, '.corrupted'), { force: true });
+        if (mode === 'pinned') writeFileSync(join(container, 'source.manifest.json'), JSON.stringify({ commit: '0123456789012345678901234567890123456789' }));
+        const evidence = join(external, mode);
+        const ran = spawnSync('bash', [join(sandbox, 'Tools/agent/verify-full.sh')], { cwd: sandbox, env: { ...process.env, PATH: `${sandbox}/bin:${process.env.PATH}`, JET: process.execPath, FIXTURE_MODE: mode, JET_VERIFY_TMPDIR: external, JET_CI_EVIDENCE_DIR: evidence, JET_TEST_SHARD: '0', JET_TEST_SHARD_COUNT: '1' }, encoding: 'utf8', timeout: 30000 });
+        assert.equal(ran.error, undefined); assert.equal(ran.signal, null);
+        assert.equal(ran.status, ['pass', 'pinned'].includes(mode) ? 0 : 1, ran.stderr);
+        const report = JSON.parse(readFileSync(join(evidence, 'verify-full.json'), 'utf8'));
+        const rows = Object.fromEntries(report.rows.map(row => [row.scope, row]));
+        if (mode === 'ordinary') { assert.equal(rows.golden.code, 17); for (const suite of ['ui', 'cases', 'registries']) assert.equal(rows[suite].status, 'PASS'); }
+        if (mode === 'refused') { assert.equal(rows.ui.status, 'FAIL'); assert.match(rows.ui.reason, /non-PASS/); assert.equal(rows.cases.status, 'PASS'); }
+        if (mode === 'signal') { assert.equal(rows.golden.status, 'FAIL'); for (const suite of ['ui', 'cases', 'registries']) assert.equal(rows[suite].status, 'BLOCKED'); }
+        if (mode === 'registry') assert.equal(rows.registries.status, 'FAIL');
+        if (mode === 'corrupt') assert.equal(rows['source-integrity-after'].status, 'FAIL');
+        if (mode === 'pinned') { assert.equal(rows['source-integrity-before'].status, 'PASS'); assert.equal(rows['source-export'], undefined); }
+        if (mode === 'closeout') assert.equal(report.rows.length, 1);
+        if (mode === 'pass') assert.ok(report.rows.every(row => row.status === 'PASS'));
+        if (process.env.JET_COLLECT_REGRESSION_OUTPUT) cpSync(evidence, join(process.env.JET_COLLECT_REGRESSION_OUTPUT, mode), { recursive: true });
+        outcomes.push({ mode, code: ran.status });
+    }
+    console.log(JSON.stringify({ scope: 'native runner control flow only', outcomes }));
+    console.log(`CHECK OK: native verify-full collect-all (${outcomes.length} scenarios)`);
+} finally { rmSync(container, { recursive: true, force: true }); rmSync(external, { recursive: true, force: true }); }

@@ -104,6 +104,9 @@ struct KitEnv {
     env_clear: Bool{false}
     version: String{""}
     version_error: String{""}
+    trace_case: String{""}
+    trace_node: String{""}
+    trace_cache: String{""}
 }
 
 struct KitEnvVar {
@@ -787,6 +790,14 @@ fn kit_execute_suites(options: KitOptions, root: String) -> Int {
         return 2
     }
     env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, memory_limit: 8589934592}
+    if sys.get("JET_NATIVE_TRACE_LOG") != None {
+        env.trace_node = sys.get("JET_NATIVE_TRACE_NODE") ?? ""
+        env.trace_cache = sys.get("JET_NATIVE_TRACE_CACHE_ROOT") ?? ""
+        if env.trace_node == "" || env.trace_cache == "" {
+            print("ERROR\tselection\t\tnative trace requires JET_NATIVE_TRACE_NODE and JET_NATIVE_TRACE_CACHE_ROOT")
+            return 2
+        }
+    }
     version_run :: kit_exec_invoke(env, [jet, "--version"], root, run_scratch, "")
     if version_run.code == 0 && kit_exec_process_failure(version_run) == None {
         env.version = kit_steps_version(version_run.stdout) ?? ""
@@ -803,7 +814,8 @@ fn kit_execute_suites(options: KitOptions, root: String) -> Int {
             &results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "case scratch: {err}", exit: -1})
             next
         }
-        context :: KitCtx{options: options, env: env, root: root, scratch: scratch, bless: options.bless}
+        context := KitCtx{options: options, env: env, root: root, scratch: scratch, bless: options.bless}
+        context.env.trace_case = entry.path
         if !kit_expect_named(ran_suites, item.suite) -> &ran_suites.push(item.suite)
         loop outcome in item.run(entry, context) {
             &results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: outcome.tier, status: outcome.verdict.status, detail: outcome.verdict.detail, exit: outcome.run.code})

@@ -1683,7 +1683,23 @@ implementation accident.
 `JET=/absolute/path/to/jet Tools/agent/verify-full.sh` runs the complete native
 suite inventory and source-pinned compiler registries, collecting independent
 failures. Missing, refused, skipped and non-PASS verdicts do not close the gate.
-It uses an already-built compiler and neither Cargo nor a Rust MIR producer.
+It uses an already-built compiler, never Cargo to build Jet's compiler/tests,
+and never a Rust MIR producer. `Tools/agent/native-suite.mjs` exposes the shared,
+pure post-closeout command descriptors and strict receipt validator; it has no
+CLI or closeout-bypass flag. Under owner directive #59, native cutover executes
+those runners directly and reports formal qualification/closeout separately as
+**NOT MET (deferred)**, never as a suite pass.
+
+Native cutover uses one outer process trace. Testkit's exec-only
+`native-command.mjs` labels each case without changing its command PID or streams;
+`native-trace.mjs` audits ancestry, cwd and successful executions after the trace
+closes. Rust/LLVM defaults to a violation. The committed
+`Tools/testkit/user-rust-ffi.allow` admits only source-declared user Rust crates:
+generated helper manifests must reside in the external case/dependency-digest
+cache, have exactly the declared dependencies, and be built through Jet's
+foreign Cargo branch. Jet program compilation/linking/running never gets a Rust
+exception. Receipts distinguish zero-Rust cases, observed user-FFI builds and
+violations; performance peers remain separate product comparisons.
 Retired Rust oracle/witness modes report nonzero `UNCOVERED` with
 `cardRequired=true`; native witnesses remain mandatory. Rust performance peers
 and historical fixture provenance are not Jet implementation dependencies.

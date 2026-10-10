@@ -174,13 +174,12 @@ project board, not in documentation.
 Run repository commands through the pinned contributor environment:
 
 ```sh
-Tools/agent/jet-env cargo build
-Tools/agent/jet-env jet run Examples/features/basics/hello.jet
-Tools/agent/jet-env jet check Examples/features/basics/functions.jet
+export JET=/absolute/path/to/admitted/jet
+Tools/agent/jet-env "$JET" run Examples/features/basics/hello.jet
+Tools/agent/jet-env "$JET" check Examples/features/basics/functions.jet
 
 # Check one example against its golden output
-Tools/agent/jet-env env JET_GOLDEN_FILTER=Examples/features/basics/hello.jet \
-  cargo test --test golden examples_compile_and_run -- --nocapture
+Tools/agent/jet-env node tests/golden.mjs --filter Examples/features/basics/hello.jet
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and

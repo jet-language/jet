@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname, resolve, join } from 'node:path';
 
 import { fileURLToPath } from 'node:url';
 import { readCandidateRecord } from './hardening-manifest.mjs';
+import { assertPinnedSource } from './proof-source.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../..');
 const TOWER = resolve(REPO, 'Tools/tower/tower.mjs');
@@ -79,7 +80,10 @@ function milestones() {
 }
 
 function check(requested = process.env.JET_CLOSEOUT_MILESTONE) {
-  const head = frozenHead();
+  const manifest = join(dirname(REPO), 'source.manifest.json');
+  const head = existsSync(manifest)
+    ? assertPinnedSource(REPO, JSON.parse(readFileSync(manifest, 'utf8')).commit).commit
+    : frozenHead();
   const candidate = candidateAtHead(head);
   const milestone = selectCloseout(milestones(), head, requested);
   console.log(`CLOSEOUT TOKEN OK ${milestone.id} ${head} candidate ${candidate.candidate_identity.id}`);

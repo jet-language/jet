@@ -1,75 +1,34 @@
 #!/usr/bin/env node
-// Golden harness for the Jet backend: every Examples/features golden with an
-// expected stdout goes through the Rust compiler's checked MIR, the Jet
-// backend and the compiled runtime, and its output is compared with the
-// golden.
-//
-//   1. mir:     `jet run <golden>` with JET_DUMP_MIR=<out>/mir/<case>.mir
-//               (crates/jet-codegen/src/Codegen/TIR/mir.rs writes the checked
-//               program's Debug form); the run itself is the reference.
-//   2. convert: mir-debug.mjs turns the dump into the Jet MIR schema, keeps the
-//               functions the entry reaches, and writes <out>/lower/<case>.mird.
-//   3. lower:   a unit holding the Jet MIR schema, the backend, the generated
-//               decoder and GoldenLower.jet is built once with `jet build`
-//               (or, with JET_LOWER_RUN=1, run as `jet run unit.jet`, which
-//               skips the rustc build of the ~1 MB unit); shards lower every
-//               case to <case>.o/<case>.exe or <case>.issues (a fresh driver
-//               every JET_LOWER_BATCH cases and after a crash, see runShard).
-//   4. run:     each object-first executable linked to the explicitly admitted
-//               fresh Jet pack runs with the golden's stdin and is compared
-//               with Examples/features/expected/
-//               <stem>.out (exit 0; plus <stem>.stderr.out when present) or,
-//               for a <stem>.err.out golden, that stderr, stdout from its .out
-//               (empty when absent), and its ratified report-contract exit.
-//               An unrecognized report form is an explicit wrong result.
-//
-// Verdicts: pass, wrong (ran, output or exit differs), unsupported (lowering
-// or object issue, or a runtime symbol the C library does not export),
-// no-mir, convert-error, lower-crash. An example with neither expected file
-// is not a golden and is skipped, as Tools/agent/stage1/golden-cases.mjs
-// "all" skips it.
-//
-// usage: JET_RUNTIME_PACK=<admitted fresh Jet pack> [JET=<jet binary>]
-//        [JET_LOWER_RUN=1 | JET_LOWER_RELEASE=1] [JET_LOWER_SHARDS=<n>] [JET_LOWER_MEM=<cap>] [JET_LOWER_BATCH=<n>]
-//        [JET_LOWER_SANITIZE=1] also writes each AddressSanitizer-instrumented object, <case>.asan.o (LIR/Sanitize.jet; run-sanitized.mjs runs it).
-//        [JET_LOWER_OPT=<level>] optimizes the lowered LIR at that level first (Opt/Opt.jet; Compiler/JetBackend/Docs/O1.md); 0 by default.
-//        [JET_MIR_EMIT=1] dumps freshly checked MIR with `jet emit --rust`, without compiling/running the Rust output.
-//        [JET_LOWER_ASSEMBLE_ONLY=1] stops the lower stage after assembling its unit (for focused `jet check`).
-// Native registry transport uses lower ASSEMBLE_ONLY with the complete checked
-// `.mird` corpus, builds GoldenLower with production `jet build`, then invokes
-// --stage run to compare every committed output/status oracle. It does not run
-// this script's legacy Rust MIR or factory front-end stages.
-// JET_GOLDEN_NATIVE_MIR=1 records externally checked native MIR provenance and
-// permits only lower/run stages; it never selects a compiler front end.
-//        node Compiler/JetBackend/Tests/run-goldens.mjs <outdir> [--stage mir|convert|lower|run] [--until mir|convert|lower|run] [--case-list FILE | filter...]
-// A later stage reuses the files of the earlier ones in <outdir>.
-// Run-only reuses native artifacts and compares golden byte/status oracles,
-// not a Rust front-end MIR dump; front-stage preconditions must not close cases.
-// --front jet uses candidate_jetc0 (or JET_FRONT_JETC0) in factory/AOT mode:
-// the mir stage compiles, lowers and links in one process, and the convert/lower
-// stages are unnecessary. No Rust dump, generated lowering driver or rustc is
-// involved. Rebuild older candidates lacking JET_FRONT_NATIVE_OUTPUT; they are
-// reported as no-mir, never silently used as a Rust-front fallback.
-// Writes <outdir>/results.tsv and <outdir>/summary.txt.
+// Golden execution through the admitted production Jet binary, never a Rust
+// MIR dump or factory front end. JET must name the compiler under test.
+// Default: build each staged example, then compare its real executable's exit
+// and streams with the committed golden. All artifacts stay in OUTDIR.
+// Registry transport may use --stage lower --until lower with
+// JET_LOWER_ASSEMBLE_ONLY=1 and externally checked .mird inputs, then --stage run.
+// usage: JET=BIN node run-goldens.mjs OUTDIR
+//        [--stage build|lower|run] [--until build|lower|run]
+//        [--case-list FILE | filter...]
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { Converter, SUPPORT_ITEMS, encode, jetDecoder, loadMirSchema, parseRustDebug } from "./mir-debug.mjs";
-import { candidateJetc0, runJetFront } from "./jet-front.mjs";
+import { SUPPORT_ITEMS, jetDecoder, loadMirSchema } from "./mir-debug.mjs";
+import { nativeTransportEnvironment } from "../../../Tools/agent/compiler-native-transport.mjs";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const args = process.argv.slice(2);
-const outDir = args.shift();
-if (!outDir) {
-  console.error("usage: run-goldens.mjs <outdir> [--stage mir|convert|lower|run] [filter...]");
+const requestedOut = args.shift();
+if (!requestedOut) {
+  console.error("usage: JET=BIN run-goldens.mjs <outdir> [--stage build|lower|run] [filter...]");
   process.exit(64);
 }
-let first = "mir";
+const outDir = resolve(requestedOut);
+if (outDir === repo || outDir.startsWith(`${repo}/`) || outDir === "/tmp" || outDir.startsWith("/tmp/")) throw new Error("golden output must be external and disk-backed");
+let first = "build";
 let last = "run";
 const filters = [];
-let front = process.env.JET_GOLDEN_NATIVE_MIR === "1" ? "native" : "rust";
+let front = process.env.JET_GOLDEN_NATIVE_MIR === "1" ? "native" : "jet";
 let selectedStems = null;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--stage") first = args[++i];
@@ -81,16 +40,17 @@ for (let i = 0; i < args.length; i++) {
   }
   else filters.push(args[i]);
 }
-const STAGES = ["mir", "convert", "lower", "run"];
+const STAGES = ["build", "lower", "run"];
 const from = STAGES.indexOf(first);
 const until = STAGES.indexOf(last);
 if (from < 0 || until < from) throw new Error(`bad stage range ${first}..${last}`);
-if (!["rust", "jet", "native"].includes(front)) throw new Error("--front must be rust, jet, or native");
-if (front === "native" && from < 2) throw new Error("native checked MIR requires --stage lower or --stage run");
-const candidate = front === "jet" ? candidateJetc0() : null;
-const safeJet = `${process.env.HOME}/.cache/jet-dev/safe-jet.sh`;
+if (!["jet", "native"].includes(front)) throw new Error("--front must be jet or native");
+if (front === "native" && from < 1) throw new Error("externally checked native MIR requires --stage lower or --stage run");
+if (front === "jet" && (first === "lower" || last === "lower")) throw new Error("lower is only an externally checked native MIR transport stage");
+const jet = process.env.JET;
+if (!jet) throw new Error("JET must name the admitted production compiler binary");
 const runtimePack = process.env.JET_RUNTIME_PACK;
-if (!runtimePack) throw new Error("JET_RUNTIME_PACK must explicitly name an admitted fresh Jet pack");
+if (front === "native" && !runtimePack) throw new Error("JET_RUNTIME_PACK must explicitly name an admitted fresh Jet pack");
 
 const { collectGoldenEntries, goldenFailureExit, loadExampleStdin } = await import(pathToFileURL(join(repo, "Tools/agent/compiler-diff.mjs")));
 const { copyFeatureProject, featureProjectRoot } = await import(pathToFileURL(join(repo, "Tools/agent/run-feature-examples.mjs")));
@@ -101,7 +61,7 @@ const features = process.env.JET_GOLDEN_FEATURES ? resolve(process.env.JET_GOLDE
 const checkout = resolve(features, "../..");
 const stdinTable = loadExampleStdin();
 
-const dirs = { work: join(outDir, "work"), mir: join(outDir, "mir"), lower: join(outDir, "lower"), run: join(outDir, "run") };
+const dirs = { work: join(outDir, "work"), lower: join(outDir, "lower"), run: join(outDir, "run") };
 for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true });
 
 const cases = [];
@@ -119,7 +79,7 @@ for (const entry of entries) {
   const expectedErr = join(features, "expected", `${entry.stem}.err.out`);
   const expectedStderr = join(features, "expected", `${entry.stem}.stderr.out`);
   if (!existsSync(expectedOut) && !existsSync(expectedErr)) continue;
-  // tests/golden.rs suffix rule: `.err.out` pins the stderr of an expected
+  // Golden suffix rule, shared with Tools/testkit/Golden.jet: `.err.out` pins stderr of a
   // non-zero exit (70 panic, 1 uncaught Err); `.stderr.out` pins the stderr of
   // a successful run beside its `.out`.
   const expect = existsSync(expectedErr)
@@ -127,9 +87,10 @@ for (const entry of entries) {
     : { failure: false, stdout: readFileSync(expectedOut), stderr: existsSync(expectedStderr) ? readFileSync(expectedStderr) : null };
   cases.push({ entry, slug, expect, stdin: stdinTable.get(entry.stem) ?? null, verdict: null, detail: "" });
 }
+if (!cases.length) throw new Error("no executable goldens selected");
 const open = () => cases.filter((c) => c.verdict === null);
 
-// 1. MIR dumps (and the reference run).
+// 1. Build each staged project with the production compiler.
 function stage(c) {
   const dir = join(dirs.work, c.slug);
   rmSync(dir, { recursive: true, force: true });
@@ -144,237 +105,38 @@ function stage(c) {
   return dir;
 }
 
-if (from <= 0 && until >= 0) {
+if (from === 0) {
   for (const c of open()) {
     requireProofUnpaused();
-    const dump = join(dirs.mir, `${c.slug}.mir`);
-    rmSync(dump, { force: true });
     const cwd = stage(c);
-    if (front === "jet") {
-      const file = join(cwd, relative(checkout, c.entry.path));
-      const project = featureProjectRoot(c.entry);
-      const root = project ? join(cwd, relative(checkout, project)) : dirname(file);
-      const problem = runJetFront({
-        candidate, file, root, cwd, prefix: join(dirs.lower, c.slug),
-        pack: runtimePack,
-        store: join(outDir, "store", c.slug),
-      });
-      if (problem) Object.assign(c, problem);
-      console.log(`jet-front ${c.slug}: ${problem?.detail ?? "compiled directly to native"}`);
-      continue;
-    }
-    const emit = process.env.JET_MIR_EMIT === "1";
-    const command = emit ? ["emit", "--rust", c.entry.shown] : ["run", c.entry.shown];
-    const run = spawnSync(safeJet, command, {
-      cwd,
-      input: c.stdin ?? "",
-      encoding: null,
-      stdio: ["pipe", emit ? "ignore" : "pipe", "pipe"],
-      env: { ...process.env, [process.env.JET_NATIVE_STOP_POINTS === "1" ? "JET_DUMP_NATIVE_MIR" : "JET_DUMP_MIR"]: resolve(dump), SAFE_JET_TIMEOUT: process.env.SAFE_JET_TIMEOUT ?? "120" },
-      maxBuffer: 1 << 28,
+    const built = spawnSync(jet, ["build", c.entry.shown, "--color=never"], {
+      cwd, encoding: "utf8", timeout: Number(process.env.JET_GOLDEN_BUILD_TIMEOUT_MS ?? 120000),
+      env: { ...nativeTransportEnvironment(), JET_STORE_DIR: join(outDir, "store", c.slug) }, maxBuffer: 1 << 28,
     });
-    writeFileSync(join(dirs.mir, `${c.slug}.stdout`), run.stdout ?? Buffer.alloc(0));
-    writeFileSync(join(dirs.mir, `${c.slug}.stderr`), run.stderr ?? Buffer.alloc(0));
-    writeFileSync(join(dirs.mir, `${c.slug}.ref`), JSON.stringify({ mode: emit ? "emit" : "run", status: run.status }));
-    console.log(`mir ${c.slug}: ${existsSync(dump) ? "dumped" : "no dump"} (jet ${emit ? "emit" : "run"} exit ${run.status})`);
-  }
-}
-
-// 2. Conversion.
-const schema = loadMirSchema(repo);
-const programType = { k: "named", name: "MIRProgram" };
-
-function field(node, name) {
-  return node?.k === "struct" ? node.fields.find(([field]) => field === name)?.[1] : undefined;
-}
-
-function idOf(node) {
-  if (node?.k === "tuple" && node.items.length === 1) return idOf(node.items[0]);
-  return node?.k === "num" ? node.v : null;
-}
-
-function entryFunction(program) {
-  for (const artifact of field(program, "artifacts")?.items ?? []) {
-    let entry = field(artifact, "entry");
-    if (entry?.k === "tuple" && entry.name === "Some") entry = entry.items[0];
-    let fn = field(entry, "function");
-    if (fn?.k === "tuple" && fn.name === "Some") fn = fn.items[0];
-    const id = idOf(fn);
-    if (id) return id;
-  }
-  return null;
-}
-
-// Keep direct calls and semantic edges whose functions live in metadata:
-// concrete trait/render/lifecycle implementations and Iterable hook symbols.
-// Lower/Reach chooses the actual lowered subset of this closed input.
-function prune(program, entryId) {
-  const functions = field(program, "functions");
-  const byId = new Map(functions.items.map((fn) => [idOf(field(fn, "id")), fn]));
-  const byKey = new Map(functions.items.map((fn) => [field(fn, "key")?.v, idOf(field(fn, "id"))]));
-  const metadata = new Map();
-  const index = (name, id, row) => {
-    const key = `${name}:${id}`;
-    if (!metadata.has(key)) metadata.set(key, []);
-    metadata.get(key).push(row);
-  };
-  for (const row of field(program, "types")?.items ?? []) index("MirTypeId", idOf(field(row, "id")), row);
-  for (const row of field(program, "type_instances")?.items ?? []) {
-    const identity = field(row, "identity");
-    if (identity?.name === "Some") index("MirTypeId", idOf(identity.items[0]), row);
-  }
-  for (const row of field(program, "impls")?.items ?? []) {
-    const trait = field(row, "trait_ref");
-    if (trait?.name !== "Some") continue;
-    const bound = trait.items[0];
-    index("MirTraitId", idOf(field(bound, "id")), row);
-    // Rendering has no direct callee edge. Other impls are reached through the
-    // selected trait identity, not every derived codec of a mentioned type.
-    if (["Printable", "Display"].includes(field(bound, "name")?.v?.split("::").pop())) {
-      for (const id of typeIds(field(row, "self_type"))) index("MirTypeId", id, row);
+    writeFileSync(join(dirs.lower, `${c.slug}.build.stdout`), built.stdout ?? "");
+    writeFileSync(join(dirs.lower, `${c.slug}.build.stderr`), built.stderr ?? "");
+    const file = join(cwd, relative(checkout, c.entry.path));
+    const stem = basename(file, ".jet");
+    const reported = (built.stdout ?? "").match(/(?:built|artifact:)\s+([^\n]+)/i)?.[1]?.trim();
+    const candidates = [join(dirname(file), ".jet/build", stem), join(cwd, ".jet/build", stem)];
+    const root = featureProjectRoot(c.entry);
+    if (root) candidates.push(join(cwd, relative(checkout, root), ".jet/build", stem));
+    if (reported) candidates.push(resolve(cwd, reported));
+    const executable = candidates.find(path => path.startsWith(`${cwd}/`) && existsSync(path));
+    if (built.error || built.signal || built.status !== 0 || !executable) {
+      c.verdict = "build-fail";
+      c.detail = `exit ${built.status ?? built.signal}: ${built.error?.message ?? (built.stderr ?? "").split("\n")[0]}`;
+    } else {
+      c.executable = executable;
+      writeFileSync(join(dirs.lower, `${c.slug}.executable`), `${executable}\n`);
     }
-  }
-  for (const row of field(program, "traits")?.items ?? []) index("MirTraitId", idOf(field(row, "id")), row);
-  for (const row of field(program, "handles")?.items ?? []) {
-    for (const id of typeIds(field(row, "ty"))) index("MirTypeId", id, row);
-  }
-  const seenMetadata = new Set();
-  const keep = new Set([entryId]);
-  const work = [entryId];
-  while (work.length) {
-    const fn = byId.get(work.pop());
-    if (!fn) continue;
-    const visit = (node) => {
-      if (!node || typeof node !== "object") return;
-      if (node.k === "tuple" && node.name === "MirFunctionId") {
-        const id = idOf(node);
-        if (id && !keep.has(id)) {
-          keep.add(id);
-          work.push(id);
-        }
-        return;
-      }
-      const rows = metadata.get(`${node.name}:${idOf(node)}`);
-      if (rows) {
-        for (const row of rows) {
-          if (seenMetadata.has(row)) continue;
-          seenMetadata.add(row);
-          visit(row);
-        }
-      }
-      if (node.k === "str" && byKey.has(node.v)) {
-        const id = byKey.get(node.v);
-        if (!keep.has(id)) { keep.add(id); work.push(id); }
-      }
-      if (node.k === "struct") node.fields.forEach(([, value]) => visit(value));
-      else if (node.k === "tuple" || node.k === "list") node.items.forEach(visit);
-      else if (node.k === "map") node.entries.forEach(([key, value]) => (visit(key), visit(value)));
-    };
-    visit(fn);
-  }
-  functions.items = functions.items.filter((fn) => keep.has(idOf(field(fn, "id"))));
-  pruneTables(program);
-}
-
-// Tables the lowering reads by id (types, field rows, Prelude and core call
-// rows) keep the rows the kept functions reach, directly or through a kept
-// row; type instances keep those naming only kept types. The interpreted
-// lowering decodes and searches every row it is given.
-const TABLES = [
-  ["types", "MirTypeId"],
-  ["fields", "MirFieldId"],
-  ["prelude_calls", "MirPreludeCallId"],
-  ["core_calls", "MirCoreCallId"],
-];
-function typeIds(node, out = []) {
-  if (!node || typeof node !== "object") return out;
-  if (node.k === "tuple" && node.name === "MirTypeId") out.push(idOf(node));
-  else if (node.k === "struct") node.fields.forEach(([, value]) => typeIds(value, out));
-  else if (node.k === "tuple" || node.k === "list") node.items.forEach((item) => typeIds(item, out));
-  return out;
-}
-function pruneTables(program) {
-  const refs = new Map(TABLES.map(([, idName]) => [idName, new Set()]));
-  const rows = new Map(TABLES.map(([table, idName]) => [idName, new Map((field(program, table)?.items ?? []).map((row) => [idOf(field(row, "id")), row]))]));
-  const work = [...field(program, "functions").items];
-  // Metadata is not pruned: retain the checked types it references as well.
-  for (const table of ["impls", "traits", "handles", "callbacks"]) work.push(...(field(program, table)?.items ?? []));
-  while (work.length) {
-    const visit = (node) => {
-      if (!node || typeof node !== "object") return;
-      if (node.k === "tuple" && refs.has(node.name)) {
-        const id = idOf(node);
-        const seen = refs.get(node.name);
-        if (id && !seen.has(id)) {
-          seen.add(id);
-          const row = rows.get(node.name).get(id);
-          if (row) work.push(row);
-        }
-        return;
-      }
-      if (node.k === "struct") node.fields.forEach(([, value]) => visit(value));
-      else if (node.k === "tuple" || node.k === "list") node.items.forEach(visit);
-      else if (node.k === "map") node.entries.forEach(([key, value]) => (visit(key), visit(value)));
-    };
-    visit(work.pop());
-  }
-  for (const [table, idName] of TABLES) {
-    const list = field(program, table);
-    if (list) list.items = list.items.filter((row) => refs.get(idName).has(idOf(field(row, "id"))));
-  }
-  const instances = field(program, "type_instances");
-  if (instances) instances.items = instances.items.filter((ty) => typeIds(ty).every((id) => refs.get("MirTypeId").has(id)));
-}
-
-if (front === "rust" && from <= 1 && until >= 1) {
-  for (const c of open()) {
-    const dump = join(dirs.mir, `${c.slug}.mir`);
-    const mird = join(dirs.lower, `${c.slug}.mird`);
-    rmSync(mird, { force: true });
-    rmSync(join(dirs.lower, `${c.slug}.convert-error`), { force: true });
-    if (!existsSync(dump)) continue;
-    try {
-      const program = parseRustDebug(readFileSync(dump, "utf8"));
-      if (c.entry.stem === "errors/prelude_load_absent") {
-        // mir.rs ensure_artifact_source_files includes every loaded artifact
-        // module; inspect this inventory before reachable-function pruning.
-        const sourceFiles = field(program, "source_files")?.items;
-        if (!sourceFiles?.length) throw new Error("absent-prelude test has no loaded-source inventory");
-        for (const source of sourceFiles) {
-          const path = field(source, "path")?.v;
-          if (path === "Core/prelude/prelude.jet" || path?.endsWith("/Core/prelude/prelude.jet")) {
-            throw new Error("unmentioned optional-to-failure body loaded core.prelude");
-          }
-        }
-      }
-      const entryId = entryFunction(program);
-      if (!entryId) throw new Error("no artifact names an entry function");
-      prune(program, entryId);
-      const converter = new Converter(schema);
-      const value = converter.convert(program, programType, "program");
-      const lines = [BigInt(entryId).toString()];
-      encode(value, programType, schema, lines);
-      writeFileSync(mird, `${lines.join("\n")}\n`);
-    } catch (error) {
-      writeFileSync(join(dirs.lower, `${c.slug}.convert-error`), `${error.stack}\n`);
-    }
-  }
-}
-for (const c of front === "rust" && from <= 2 ? open() : []) {
-  if (!existsSync(join(dirs.mir, `${c.slug}.mir`))) {
-    c.verdict = "no-mir";
-    const ref = join(dirs.mir, `${c.slug}.ref`);
-    if (existsSync(ref)) {
-      const reference = JSON.parse(readFileSync(ref, "utf8"));
-      c.detail = `jet ${reference.mode} exit ${reference.status}`;
-    }
-  } else if (existsSync(join(dirs.lower, `${c.slug}.convert-error`))) {
-    c.verdict = "convert-error";
-    c.detail = readFileSync(join(dirs.lower, `${c.slug}.convert-error`), "utf8").split("\n")[0];
+    console.log(`build ${c.slug}: ${c.verdict ?? "built"}`);
   }
 }
 
-// 3. Lowering, in one interpreted unit.
+const schema = front === "native" ? loadMirSchema(repo) : null;
+
+// 2. Optional native MIR lowering for registry transport.
 const read = (path) => readFileSync(join(repo, path), "utf8");
 function item(path, name) {
   const lines = read(path).split("\n");
@@ -473,8 +235,7 @@ function assembleUnit() {
 // objects and issues land beside the .mird files.
 function driverCommand() {
   if (process.env.JET_LOWER_RUN === "1") {
-    const jet = process.env.JET ?? `${process.env.HOME}/.cache/jet-dev/scratch/jet-current`;
-    return [join(repo, "Tools/agent/jet-env"), jet, "run", join(dirs.lower, "unit.jet")];
+    return [jet, "run", join(dirs.lower, "unit.jet")];
   }
   return [buildDriver()];
 }
@@ -492,11 +253,9 @@ function buildDriver() {
   if (existsSync(binary) && existsSync(stampPath) && readFileSync(stampPath, "utf8") === stamp) return binary;
   rmSync(stampPath, { force: true });
   const started = Date.now();
-  const build = spawnSync(safeJet, ["build", ...(release ? ["--release"] : []), "unit.jet"], {
-    cwd: dirs.lower,
-    encoding: "utf8",
-    env: { ...process.env, SAFE_JET_TIMEOUT: process.env.SAFE_JET_TIMEOUT ?? "7200", SAFE_JET_MEM: process.env.SAFE_JET_MEM ?? "12G" },
-    maxBuffer: 1 << 28,
+  const build = spawnSync(jet, ["build", ...(release ? ["--release"] : []), "unit.jet"], {
+    cwd: dirs.lower, encoding: "utf8", timeout: Number(process.env.JET_GOLDEN_BUILD_TIMEOUT_MS ?? 600000),
+    env: nativeTransportEnvironment(), maxBuffer: 1 << 28,
   });
   writeFileSync(join(dirs.lower, "build.log"), `exit ${build.status}\n${build.stdout}\n${build.stderr}`);
   if (build.status !== 0 || !existsSync(binary)) throw new Error(`driver build failed (exit ${build.status}); see ${join(dirs.lower, "build.log")}`);
@@ -558,12 +317,11 @@ function runShard(command, index, shard) {
   });
 }
 
-if (front !== "jet" && from <= 2 && until >= 2) {
+if (front === "native" && from <= 1 && until >= 1) {
   const resume = process.env.JET_LOWER_RESUME === "1";
   if (resume && !existsSync(join(dirs.lower, "unit.jet"))) throw new Error("resume requires the original frozen lower/unit.jet");
   if (!resume) assembleUnit();
   if (process.env.JET_LOWER_ASSEMBLE_ONLY === "1") process.exit(0);
-  if (front === "native") throw new Error("native checked MIR lower stage requires JET_LOWER_ASSEMBLE_ONLY=1; the registry transport builds and executes GoldenLower");
   const pending = open().filter((c) => {
     if (!existsSync(join(dirs.lower, `${c.slug}.mird`))) return false;
     if (!resume) return true;
@@ -584,7 +342,7 @@ if (front !== "jet" && from <= 2 && until >= 2) {
 
 // 4. Link, run, compare.
 const missing = new Map();
-for (const c of until >= 3 ? open() : []) {
+for (const c of until >= 2 ? open() : []) {
   const object = join(dirs.lower, `${c.slug}.o`);
   const issues = join(dirs.lower, `${c.slug}.issues`);
   if (existsSync(issues)) {
@@ -592,13 +350,14 @@ for (const c of until >= 3 ? open() : []) {
     c.detail = readFileSync(issues, "utf8").split("\n")[0];
     continue;
   }
-  if (!existsSync(object)) {
+  if (front === "native" && !existsSync(object)) {
     c.verdict = "lower-crash";
     continue;
   }
-  // No image-runtime or C-library fallback: use only the explicit pack link.
-  c.leg = "pack";
-  const program = join(dirs.lower, `${c.slug}.exe`);
+  c.leg = front === "native" ? "pack" : "production-jet";
+  const locator = join(dirs.lower, `${c.slug}.executable`);
+  const program = front === "native" ? join(dirs.lower, `${c.slug}.exe`)
+    : c.executable ?? (existsSync(locator) ? readFileSync(locator, "utf8").trim() : "");
   const packIssues = join(dirs.lower, `${c.slug}.pack-issues`);
   if (!existsSync(program)) {
     const text = existsSync(packIssues) ? readFileSync(packIssues, "utf8") : "no linked executable";
@@ -608,8 +367,7 @@ for (const c of until >= 3 ? open() : []) {
     c.detail = symbols.length ? `runtime pack lacks ${symbols.join(" ")}` : `pack link: ${text.split("\n")[0]}`;
     continue;
   }
-  // The golden runs where its `jet run` reference ran (staged again when the
-  // mir stage ran in another output directory).
+  // Run beside the staged fixture data, including when build ran earlier.
   const cwd = existsSync(join(dirs.work, c.slug)) ? join(dirs.work, c.slug) : stage(c);
   const run = spawnSync(program, [], { input: c.stdin ?? "", encoding: null, timeout: 20000, cwd, maxBuffer: 1 << 26 });
   writeFileSync(join(dirs.run, `${c.slug}.stdout`), run.stdout ?? "");
@@ -656,3 +414,4 @@ const summary = [
 ];
 writeFileSync(join(outDir, "summary.txt"), summary.join("\n") + "\n");
 console.log(summary.join("\n"));
+process.exitCode = cases.length > 0 && cases.every(c => until < 2 ? c.verdict === null : c.verdict === "pass") ? 0 : 1;

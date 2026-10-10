@@ -62,7 +62,12 @@ fn kit_exec_base_value(name: String, env: KitEnv, scratch: String) -> String? {
 // Inherit the caller's environment, removing only the compiler-extension hook.
 // Cache roots are run-wide; temporary, schema and jetpack roots are case-local.
 fn kit_exec_spec(env: KitEnv, argv: [String], cwd: String, scratch: String, overlay: [KitEnvVar]) -> ProcessSpec {
-    spec := process.cmd(argv).cwd(cwd).stdout(.Capture).stderr(.Capture).stdin(.Stream).timeout(env.timeout)
+    commands :: if env.trace_node != "" && env.trace_case != "" -> {
+        marked := [String]{env.trace_node, files.join(env.root, "Tools/testkit/native-command.mjs"), "--case", env.trace_case, "--root", env.root, "--cwd", cwd, "--jet", env.jet, "--cache-root", env.trace_cache, "--"}
+        loop argument in argv -> &marked.push(argument)
+        marked
+    } else -> { argv }
+    spec := process.cmd(commands).cwd(cwd).stdout(.Capture).stderr(.Capture).stdin(.Stream).timeout(env.timeout)
     if env.env_clear -> spec = spec.env_clear()
     else {
         spec = spec.env_remove("JET_COMPILER_EXTENSION")
