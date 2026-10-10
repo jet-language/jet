@@ -103,6 +103,10 @@ fn x64_object_main(entry: LIRFunctionID) -> X64CompiledFunction Never! {
     start_at :: x64_call_rel32(&code)
     entry_at :: x64_lea_rip(&code, X64_RDI)
     call_at :: x64_call_rel32(&code)
+    // Retain the runtime boundary's exit status while draining buffered output.
+    x64_mov_rr(&code, X64_RBX, X64_RAX)
+    flush_at :: x64_call_rel32(&code)
+    x64_mov_rr(&code, X64_RAX, X64_RBX)
     x64_pop(&code, X64_RBX)
     x64_ret(&code)
     relocs :: [X64Reloc]{X64Reloc{at: arguments_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_arguments"}}, X64Reloc{at: start_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_program_start"}}, X64Reloc{at: entry_at, target: X64RelocTarget.Function{id: entry}}, X64Reloc{at: call_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_main"}}, X64Reloc{at: flush_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_stdout_flush"}}}

@@ -17,7 +17,7 @@ struct X64CallResult {
 // The caller owns the carriers and must obey the target's ownership contract.
 // No argument/result value is cloned or dropped by this ABI-only adapter.
 // `finalizer` (LIRLowering.finalizer) runs before the loaded image is unmapped.
-fn x64_call_image(program: LIRModule, target: LIRFunctionID, finalizer: LIRFunctionID?) -> X64CallImage Never! {
+fn x64_call_image(program: LIRModule, target: LIRFunctionID, finalizer: LIRFunctionID?, stop_points: Bool{false}) -> X64CallImage Never! {
     if target.value < 0 || target.value >= program.functions.len() -> return X64CallImage{image: x64_memory_image_failure([String]{"call target {target.value} is not in the module"}), params: [LIRLayout]{}, result: None}
     signature :: lir_signature(program, program.functions[target.value].signature) ?? return X64CallImage{image: x64_memory_image_failure([String]{"call target has no signature"}), params: [LIRLayout]{}, result: None}
     callable := program

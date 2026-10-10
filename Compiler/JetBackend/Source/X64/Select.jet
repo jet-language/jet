@@ -638,7 +638,7 @@ fn x64_variable_ranges(function: LIRFunction, allocation: X64Allocation, positio
             .Reg(reg) -> X64DebugLocation.Register{reg: reg}
             .Xmm(reg, _) -> X64DebugLocation.Register{reg: 16 + reg}
             .Stack(slot) | .FloatStack(slot, _) -> X64DebugLocation.Frame{offset: x64_slot_disp(allocation.callee_saved.len(), slot)}
-            .Imm(_) | .Folded -> next
+            .Imm(_) | .Folded -> { next }
         }
         &ranges.push(X64VariableRange{variable: binding.variable, start: start, end: end, location: location})
     }
@@ -978,16 +978,11 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             x64_finish_result(&emitter, locations[dst.value], reg)
         }
         .Load(dst, base, offset) -> {
-            base_reg :: x64_operand(&emitter, locations[base.value], X64_R10)
-            reg :: x64_result_register(locations[dst.value], X64_RAX)
-            if function.values[dst.value].layout.size == 1 {
-                x64_load_u8(&emitter.code, reg, base_reg, offset)
-            } else if function.values[dst.value].layout.size == 2 {
-                x64_load_u16(&emitter.code, reg, base_reg, offset)
-            } else if function.values[dst.value].layout.size == 4 {
-                x64_load_u32(&emitter.code, reg, base_reg, offset)
-            } else {
-                x64_load(&emitter.code, reg, base_reg, offset)
+            address :: x64_select_address(&emitter, locations, x64_memory_address(folds, base, offset))
+            if x64_is_float(function, dst) {
+                reg :: x64_float_result(locations[dst.value], 0)
+                x64_float_load_indexed(&emitter.code, x64_is_float32(function, dst), reg, address.base, address.index, address.scale, address.disp)
+                return x64_finish_float(&emitter, locations[dst.value], reg)
             }
             reg :: x64_result_register(locations[dst.value], X64_RAX)
             x64_load_indexed(&emitter.code, reg, address.base, address.index, address.scale, address.disp, function.values[dst.value].layout.size)
