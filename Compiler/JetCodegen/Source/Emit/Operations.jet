@@ -2376,6 +2376,10 @@ fn jet_rust_emit_method_dispatch(ctx: &JetRustEmitContext, function: MIRFunction
             generic :: jet_rust_emit_generic_call_args(&ctx, type_args)
             method_name :: ctx.program.functions[candidate_index].name.copy()
             if dispatch_trait == .Val(trait_ref) {
+                if !jet_rust_emit_is_no_os(&ctx) && trait_ref.name == "Debug" && access == MIRAccess.Move && jet_rust_emit_function_leaf(method_name) == "debug" {
+                    separator :: if rendered.len() == 0 -> "" else -> ", "
+                    return "{jet_rust_emit_function_name(&ctx, id)}{generic}({receiver}{separator}{rendered.join(", ")})"
+                }
                 trait_text := jet_rust_emit_trait_name(&ctx, trait_ref.id)
                 if arithmetic && rhs_type == .Val(rhs) -> trait_text = "{trait_text}<{jet_rust_emit_type(&ctx, rhs)}>"
                 separator :: if rendered.len() == 0 -> "" else -> ", "

@@ -11357,7 +11357,15 @@ impl<'a> RustEmitter<'a> {
                                 || self.emit_native_derived_compare(implementation, function, out)
                         }
                     };
-                    if !native {
+                    if !native && self.owned_debug_adapter(function) {
+                        assert!(self.type_derive_capability(
+                            &implementation.self_type, "Clone", &mut Vec::new(),
+                            &BTreeMap::new(), &BTreeSet::new(),
+                        ), "owned Debug adapter requires the owner's checked Clone capability");
+                        let helper = format!("__jet_owned_debug_{}", function.id.0);
+                        let _ = writeln!(out,
+                            "    fn jet_debug(&self) -> String {{ Self::{helper}(<Self as Clone>::clone(self)) }}");
+                    } else if !native {
                         self.emit_callable_named(
                             function,
                             out,
@@ -11481,12 +11489,32 @@ impl<'a> RustEmitter<'a> {
                 "impl{generics} ::core::fmt::Debug for {owner} {{\n    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {{\n        f.write_str(&<Self as JetDebug>::jet_debug(self))\n    }}\n}}\n"
             );
         }
+        // The checked Jet Debug body consumes its receiver. The cached Rust
+        // formatting protocol observes a borrow; keep the original body in a
+        // private method and copy only at that protocol boundary.
+        for function in functions.iter().copied() {
+            if self.owned_debug_adapter(function) {
+                let _ = writeln!(out, "impl{generics} {owner} {{");
+                let helper = format!("__jet_owned_debug_{}", function.id.0);
+                self.emit_callable_named(function, out, Some(&function.form), Some(&helper), None, None);
+                let _ = writeln!(out, "}}\n");
+            }
+        }
         self.pop_generic_scope();
         for function in functions {
             if self.owner_independent_static(function) {
                 self.emit_function(function, out);
             }
         }
+    }
+
+    fn owned_debug_adapter(&self, function: &MirFunction) -> bool {
+        !self.is_no_os() && matches!(
+            &function.form,
+            MirFunctionForm::TraitMethod { trait_ref, self_access: Some(MirAccess::Move), .. }
+                if trait_ref.name == jet_foundation::Syntax::TRAIT_DEBUG
+                    && self.function_leaf_name(function) == "debug"
+        )
     }
 
     fn arithmetic_trait_method(&self, function: &MirFunction) -> bool {
@@ -30008,6 +30036,11 @@ impl<'a> RustEmitter<'a> {
             })
             .collect::<Vec<_>>()
             .join(", ");
+        if self.owned_debug_adapter(row) {
+            // A concrete checked call already owns its receiver. Bypass the
+            // borrowed runtime bridge instead of copying it a second time.
+            return format!("({receiver}).__jet_owned_debug_{}{}({params})", row.id.0, generic);
+        }
         if let Some(trait_ref) = trait_ref {
             let mut trait_name = self.trait_nominal_name(trait_ref);
             if self.arithmetic_trait_method(row) {

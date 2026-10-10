@@ -2580,18 +2580,28 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
         return
     }
     access :: self_access ?? MIRAccess.Move
+    // Jet Debug consumes its checked receiver, while the cached Rust protocol
+    // observes &self. Copy only at that boundary; the body keeps its ownership.
+    owned_debug := false
+    if !jet_rust_emit_is_no_os(&ctx) && self_access == (Val(MIRAccess.Move)) {
+        if implementation.trait_ref == .Val(debug_ref) && debug_ref.name == "Debug" && jet_rust_emit_function_leaf(function.name) == "debug" -> owned_debug = true
+    }
+    if owned_debug && !jet_rust_emit_type_derive_capability(&ctx, owner_ty, "Clone", [MIRTypeID]{}, [String:MIRType]{}, [String]{}) {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "owned Debug adapter requires the owner's checked Clone capability", "the borrowed Rust formatting protocol must obtain an owned receiver without changing the checked body", Val(function.span))
+        return
+    }
     params := [String]{}
     if self_access != None {
         if access == {
             .Read -> &params.push("&self")
             .Write -> &params.push("&mut self")
-            else -> &params.push("mut self")
+            else -> &params.push(if owned_debug -> "&self" else -> "mut self")
         }
     }
     // The body function takes the receiver as the same borrow the impl
     // method holds: forward `self` (a reborrow), never `&mut self` (E0596).
     call_args := [String]{}
-    if self_access != None -> &call_args.push("self")
+    if self_access != None -> &call_args.push(if owned_debug -> "<Self as Clone>::clone(self)" else -> "self")
     // MIRRust arithmetic_trait_method: the runtime Add/Sub/Mul/Div traits take
     // every scalar operand by reference; the body receives the value.
     arithmetic := false

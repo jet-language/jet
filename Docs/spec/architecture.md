@@ -45,6 +45,12 @@ layout metadata remain nominal: only the ABI symbol atoms are projected.
 Providers, generated adapters and compiler callers use one spelling, with
 collision rejection before a symbol cutover.
 
+Bootstrap Rust nominal carriers use their exact Prelude declaration spelling,
+including acronym case; the ABI atom projection never supplies a type name.
+Jet's checked consuming `Debug` implementation retains its owned body. The
+borrowed Rust formatting protocol invokes that body through a private adapter,
+copying the owner only when its checked Clone capability permits it.
+
 Native TCP providers use canonical Socket56/Stream56/Listener8 carriers and the
 shared nonblocking FD72/poller seam. Their syscall error scratch is ErrorOut32;
 the positive errno is at byte 8, not the domain/stage word at byte 0. Private

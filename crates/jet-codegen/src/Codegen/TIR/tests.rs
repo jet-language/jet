@@ -6178,3 +6178,73 @@ fn core_owner_qualified_guard_and_streams_compile_and_run() {
         std::fs::remove_dir_all(directory).unwrap();
     });
 }
+
+#[test]
+fn owned_debug_adapters_preserve_checked_move_bodies() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (bundle, nominals) = checked_bundle(r#"
+struct DNSRecord { text: String }
+impl DNSRecord.Debug { fn debug(^self) -> String { self.text } }
+struct HTTPRecord { text: String }
+impl HTTPRecord.Debug { fn debug(^self) -> String { self.text } }
+struct IORecord { text: String }
+impl IORecord.Debug { fn debug(^self) -> String { self.text } }
+#Debug
+struct DebugRow { record: DNSRecord }
+fn run() {
+    dns :: DNSRecord{text: "dns"}
+    http :: HTTPRecord{text: "http"}
+    io :: IORecord{text: "io"}
+    assert("{dns:Debug}" == "dns")
+    assert("{http:Debug}" == "http")
+    assert("{io:Debug}" == "io")
+    assert(dns.text == "dns")
+    assert(http.text == "http")
+    assert(io.text == "io")
+    row :: DebugRow{record: dns.copy()}
+    assert("{row:Debug}".contains("dns"))
+    assert(row.record.text == "dns")
+}
+"#);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("owned Debug bodies must retain checked MIR");
+        mir.validate().expect("owned Debug MIR must validate");
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        assert!(rust.contains("fn jet_debug(&self) -> String"));
+        assert!(rust.contains("<Self as Clone>::clone(self)"));
+        assert!(rust.contains("fn __jet_owned_debug_"));
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("owned-debug-proof"))
+            .join(format!("checked-move-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("owned_debug.rs");
+        let executable = directory.join(format!("owned_debug{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, &rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=owned_debug", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("owned Debug adapter proof requires rustc");
+        assert!(compiled.status.success(), "owned Debug adapters must compile:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("owned Debug adapter proof must run");
+        assert!(executed.status.success(), "formatting must preserve the written consuming body and its caller:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
