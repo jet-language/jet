@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { auditNativeTrace, ffiCaseCachePath, readUserRustAllowlist } from './native-trace.mjs';
@@ -89,6 +90,28 @@ test('std-only fixed companions require their own marker and empty-dependency he
     fail(f.audit(branch(f.name), { allowlistText }));
     f.put(manifest, f.contents);
     fail(f.audit(branch(companion), { allowlistText }));
+});
+
+test('missing-Cargo marker clears only its private warmed helper and preserves PATH', t => {
+    const f = fixture(t), name = 'tests/ui/ffi_no_cargo.jet';
+    const cacheRoot = realpathSync(mkdtempSync(join(homedir(), '.jet-native-ffi-unit-')));
+    t.after(() => rmSync(cacheRoot, { recursive: true, force: true }));
+    f.put(join(f.root, name), 'extern rust "base64@0.22" { fn encode(s: String) -> String = "base64::encode" }\n');
+    f.put(join(f.root, 'Tools/testkit/user-rust-ffi.allow'), `${name}\t${reason}\t${JSON.stringify(declared)}\n`);
+    const cache = ffiCaseCachePath(cacheRoot, name, declared);
+    const warmed = f.put(join(cache, 'helper/Cargo.toml'), f.contents);
+    const otherCache = ffiCaseCachePath(cacheRoot, f.name, declared);
+    const other = f.put(join(otherCache, 'helper/Cargo.toml'), f.contents);
+    const path = join(f.home, 'empty-path');
+    mkdirSync(path);
+    const probe = 'const fs=require("node:fs"); console.log(JSON.stringify({path:process.env.PATH,cache:process.env.JET_FFI_CACHE_DIR,warm:fs.existsSync(process.argv[1]),other:fs.existsSync(process.argv[2])}));';
+    const result = spawnSync(process.execPath, [
+        new URL('./native-command.mjs', import.meta.url).pathname,
+        '--case', name, '--root', f.root, '--cwd', f.root, '--jet', process.execPath,
+        '--cache-root', cacheRoot, '--', process.execPath, '-e', probe, warmed, other,
+    ], { env: { ...process.env, PATH: path, JET_FFI_CACHE_DIR: otherCache }, encoding: 'utf8', timeout: 10000 });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), { path, cache, warm: false, other: true });
 });
 
 test('cache hash includes the canonical case and sorted dependency entries', t => {
