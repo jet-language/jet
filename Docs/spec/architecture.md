@@ -163,6 +163,11 @@ these C doors.
 The front end owns language checks and user-facing compiler diagnostics.
 Backends consume checked facts; a back end that rejects checked MIR has hit an
 internal compiler error, not another language checker.
+Checked compile-time `reject(code:, what:, why:, fix:)` calls use the canonical
+`core.compiler.__reject` intrinsic row, declared in `Prelude/Core.jet` and
+projected into both Core inventories. Its four diagnostic fields remain in
+that order; the evaluator reports the registered project diagnostic rather
+than treating a missing row as an unsupported construct.
 
 Native compiler call images retain their runtime and writable static storage
 until all calls and owning argument/result carriers have retired. Scalar

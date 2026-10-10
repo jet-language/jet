@@ -1634,7 +1634,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 7034af24f04ec74a05714d0425da4f28b16c890fbb081abf96e7ca0610bdebb4
+// Source SHA-256: e39442870d3ab415b44912769a75590ace55a377f3d6dee71a78fcfa708b3930
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.crypto", "__jetc_open_directory"),
@@ -2633,6 +2633,7 @@ pub static CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::source_owned("core.crypto", "__vault_unlock_recipient", &[true]),
     CoreCallRecord::source_owned("core.crypto", "__vault_unlock_passphrase", &[true]),
     CoreCallRecord::new("core.crypto", "__zeroize", "jet_crypto_zeroize", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_frame_accesses(&[CoreCallResourceAccess::write(0)]),
+    CoreCallRecord::new("core.compiler", "__reject", "jet_compiler_reject", true, &[true, true, true, true]).without_direct_aot(),
     CoreCallRecord::new( "core.web.storage.session", "get", "jet_web_storage_session_get", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot(),
     CoreCallRecord::new( "core.web.storage.session", "remove", "jet_web_storage_session_remove", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot(),
     CoreCallRecord::new( "core.web.storage.session", "set", "jet_web_storage_session_set", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot(),
