@@ -1,0 +1,41 @@
+// Production collection contracts: no manufactured Sema method result.
+#Test("runtime_disjoint_collection_admissions_keep_types_and_operations") {
+    loop element in ([Type]{Type.Int, Type.Float}) {
+        receiver :: Type.List{element: element}
+        view :: Type.Apply{name: "ViewMut", args: [Type]{element}}
+        pair :: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "left", ty: view}, TypeTupleField{name: "right", ty: view}}}
+        loop method in ([String]{"split_write", "get_disjoint_write", "edit_disjoint"}) {
+            contract :: sema_collection_method_contract(receiver, method) ?? panic("missing {method}")
+            assert_eq(contract.receiver_access, AccessConvention.Write)
+            assert_eq(contract.minimum_arity, if method == "edit_disjoint" -> 2 else -> 1)
+            assert_eq(contract.maximum_arity, contract.minimum_arity)
+            assert_eq(sema_collection_method_argument_type(contract, 0, None, false), Val(if method == "split_write" -> Type.Int else -> Type.List{element: Type.Int}))
+            span :: Span{start: 1, end: 2}
+            effects :: sema_collection_method_effect_row(contract, span)
+            assert_eq(effects.len(), 1)
+            assert_eq(effects[0].name, "Mem")
+            result :: sema_collection_method_result_type(contract, None, None) ?? panic("result {method}")
+            success :: if method == { "split_write" -> pair "get_disjoint_write" -> Type.List{element: view} else -> Type.Tuple{fields: [TypeTupleField]{}} }
+            assert_eq(result, Type.Result{ok: success, err: Type.String})
+            operation :: sema_collection_method_operation(contract, contract.minimum_arity, None, 0, None, false, false, "checked_pair")
+            if method == {
+                "split_write" -> assert_eq(operation, SemaCollectionOperation.Builtin{operation: TBuiltinOp.SplitWrite{tuple_struct: "checked_pair"}})
+                "get_disjoint_write" -> assert_eq(operation, SemaCollectionOperation.Builtin{operation: TBuiltinOp.GetDisjointWrite})
+                else -> {
+                    assert_eq(operation, SemaCollectionOperation.Closure{operation: TClosureOp.EditDisjoint})
+                    callback :: sema_collection_method_argument_type(contract, 1, None, false) ?? panic("callback")
+                    if callback == {
+                        .Fn(params, ret, _, _, _, _) -> {
+                            assert_eq(params, [Type]{view, view})
+                            assert_eq(ret, None)
+                        }
+                        else -> { panic("function callback") }
+                    }
+                    assert_eq(contract.callback_indices, [Int]{1})
+                }
+            }
+            assert_eq(sema_collection_method_contract(Type.Apply{name: "Iter", args: [Type]{element}}, method), None)
+            assert_eq(sema_collection_method_contract(Type.Apply{name: "View", args: [Type]{element}}, method), None)
+        }
+    }
+}

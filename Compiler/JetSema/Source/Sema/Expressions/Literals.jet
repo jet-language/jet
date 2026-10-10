@@ -317,7 +317,7 @@ fn sema_expression_list_elements(elements: [Expr], expected_element: Type?, envi
                 if expected_element == .Val(required) {
                     compatible :: sema_expr_expected_assignable(required, value.ty, environment, program) ?? return None
                     if !compatible {
-                        &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(required, environment, program), sema_expr_expected_type(value.ty, environment, program), expr_span(element)))
+                        &diagnostics.push(sema_error("E0112", expr_span(element), "A list item needs {sema_type_show(sema_expr_expected_type(required, environment, program))}, but this is {sema_type_show(sema_expr_expected_type(value.ty, environment, program))}", "Every list item must match the list's element type", "Use {sema_type_show(sema_expr_expected_type(required, environment, program))} here"))
                         return None
                     }
                 }

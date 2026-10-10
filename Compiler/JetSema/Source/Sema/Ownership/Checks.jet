@@ -4105,3 +4105,59 @@ fn sema_ownership_reject_frozen_write(state: SemaOwnershipState, expr: Expr, act
     &diagnostics.push(sema_error("E1113", span, what, row.why, row.fix))
     true
 }
+
+// Rust carries_lending_view/report_lending_view_escape. Element reads do not
+// carry the window, while owning aggregate slots and transparent wrappers do.
+fn sema_ownership_carries_lending_view(expr: Expr, name: String) -> Bool {
+    if expr == {
+        .Ident(found, _) -> return found == name
+        .Copy(inner, _) | .Place(inner, _, _) | .Paren(inner, _) | .Spread(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Present(inner, _) -> return sema_ownership_carries_lending_view(inner, name)
+        .ListLit(items, _) -> { loop item in items { if sema_ownership_carries_lending_view(item, name) -> return true } }
+        .TupleLit(fields, _, _) -> { loop field in fields { if sema_ownership_carries_lending_view(field.value, name) -> return true } }
+        .StructLit(_, _, _, _, fields, _, _) -> { loop field in fields { if sema_ownership_carries_lending_view(field.value, name) -> return true } }
+        .MapLit(entries, _) -> { loop entry in entries { if sema_ownership_carries_lending_view(entry.key, name) || sema_ownership_carries_lending_view(entry.value, name) -> return true } }
+        .EnumLit(_, _, _, args, _, _) -> {
+            loop arg in args {
+                value :: if arg == {
+                    .Positional(value) -> value
+                    .Named(_, value) -> value
+                }
+                if sema_ownership_carries_lending_view(value, name) -> return true
+            }
+        }
+        .If(_, _, _, _, _, _) -> return sema_expression_lambda_bound_expr_use(expr, name)
+        .OrFallback(value, fallback, _, _) -> {
+            if sema_expression_lambda_bound_expr_use(value, name) -> return true
+            if fallback == {
+                .Value(value) -> return sema_expression_lambda_bound_expr_use(value, name)
+                .Return(value, _) -> return sema_expression_lambda_bound_optional_expr(value, name)
+                .Block(body, value, _) -> return sema_expression_lambda_bound_statements_use(body, name) || sema_expression_lambda_bound_optional_expr(value, name)
+                else -> {}
+            }
+        }
+        .TypedLit(_, body, _) -> {
+            if body == {
+                .Fields(fields) -> { loop field in fields { if sema_expression_lambda_bound_expr_use(field.value, name) -> return true } }
+                .Elements(items) -> { loop item in items { if sema_expression_lambda_bound_expr_use(item, name) -> return true } }
+                .Entries(entries) -> { loop entry in entries { if sema_expression_lambda_bound_expr_use(entry.key, name) || sema_expression_lambda_bound_expr_use(entry.value, name) -> return true } }
+                .Value(value) -> return sema_expression_lambda_bound_expr_use(value, name)
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    false
+}
+
+fn sema_ownership_report_lending_view_escape(expr: Expr, action: String, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    loop key in context.lending_view_parameter_keys {
+        loop binding in scopes.bindings {
+            if binding.symbol.id.key != key -> next
+            name :: binding.symbol.name
+            if !sema_ownership_carries_lending_view(expr, name) -> break
+            &diagnostics.push(sema_error("E0212", expr_span(expr), "the lent mutable view `{name}` cannot {action}", "the view is valid only while the current iteration or callback invocation is active", "use the view inside that scope, and keep only owned values outside it"))
+            return true
+        }
+    }
+    false
+}

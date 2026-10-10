@@ -14,6 +14,7 @@ use jet_foundation.[
     TExprKind,
     TListRemoveMode,
     Type,
+    ViewSourcePath,
     expr_span,
     sema_collection_is_map,
     sema_collection_method_argument_type,
@@ -58,7 +59,9 @@ fn sema_call_collections_success_type(ty: Type) -> Type Never! {
 // Rust builtin-method argument inference (builtin_methods.rs): every argument is inferred under its
 // contract parameter type, so leading-dot variants and anonymous records
 // (`&rows.push(.Ready)`, `&map.add(key, {x: 1})`) take their type from it.
-fn sema_call_collections_check_argument(argument: CallArg, required: Type, callback: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_collections_check_argument(argument: CallArg, required: Type, callback: Bool, lending: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    previous_lending :: context.lambda_lending_views
+    context.lambda_lending_views = lending
     checked := if {
         callback -> {
             // An open callback result is adopted here and checked below.
@@ -68,6 +71,7 @@ fn sema_call_collections_check_argument(argument: CallArg, required: Type, callb
             sema_check_expression(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
     }
+    context.lambda_lending_views = previous_lending
     value :: checked ?? return None
     compatible := if required == {
         .Fn(_, fn_result, _, _, _, _) -> {
@@ -87,6 +91,7 @@ fn sema_call_collections_check_argument(argument: CallArg, required: Type, callb
 fn sema_call_collections_tuple_struct(ty: Type) -> String Never! {
     return if ty == {
         .Tuple(fields) -> type_tuple_struct_name(fields)
+        .Result(ok, _) -> sema_call_collections_tuple_struct(ok)
         .Option(inner) -> if inner == {
             .Tuple(fields) -> type_tuple_struct_name(fields)
             else -> ""
@@ -252,7 +257,7 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
                 sema_check_expression(updated_args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             }
             else -> {
-                sema_call_collections_check_argument(updated_args[index], required, callback, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+                sema_call_collections_check_argument(updated_args[index], required, callback, method == "edit_disjoint" && index == 1, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             }
         }
         if seed_argument {
@@ -306,6 +311,7 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     effect_row := sema_collection_method_effect_row(contract, span)
     if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "collection.{method}", span, effect_row, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if method == "split_write" || method == "get_disjoint_write" -> sema_call_collections_record_disjoint_views(receiver, method, updated_args, span, scopes, &state, &context)
 
     // A literal selector is fixed in the removal mode, so the route takes the item alone.
     if literal_remove_mode != None -> _ := &typed.pop()
@@ -352,4 +358,40 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
     }
     checked := sema_expr_expected(value, expected, environment, program, &diagnostics)
     return SemaMethodSpecialCheck{handled: true, value: checked}
+}
+
+// Rust CheckerOwnership::view_call_sources: a successful runtime proof gives
+// each output slot a distinct Fresh projection on the original owner.
+fn sema_call_collections_record_disjoint_views(receiver: Expr, method: String, args: [CallArg], span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext) {
+    proof_spans := [Span]{}
+    slots := [[String]]{}
+    if method == "split_write" {
+        &proof_spans.push(span)
+        &proof_spans.push(expr_span(args[0].expr))
+        &slots.push([String]{"left"})
+        &slots.push([String]{"right"})
+    } else {
+        if args[0].expr == .ListLit(items, _) {
+            loop item in items {
+                &proof_spans.push(expr_span(item))
+                &slots.push([String]{"[]"})
+            }
+        } else {
+            &proof_spans.push(span)
+            &slots.push([String]{"[]"})
+        }
+    }
+    bases :: sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
+    facts := [SemaCallReturnViewFact]{}
+    loop index in 0..<proof_spans.len() {
+        places := [SemaOwnershipPlace]{}
+        loop base in bases {
+            place := sema_ownership_place_snapshot(base)
+            &place.projections.push("[fresh]")
+            &place.typed_projections.push(SemaOwnershipProjection.Fresh{span: proof_spans[index]})
+            &places.push(place)
+        }
+        &facts.push(SemaCallReturnViewFact{slot: slots[index], access: AccessConvention.Write, places: places, sources: [ViewSourcePath]{}, temporaries: [Span]{}})
+    }
+    &context.call_return_views.push(SemaCallReturnView{span: span, facts: facts})
 }

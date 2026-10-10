@@ -4008,6 +4008,13 @@ fn sema_expr_check_bare_member_chain(expr: Expr, expected: Type?, environment: S
 }
 
 fn sema_check_expression(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if context.lending_view_parameter_keys.len() > 0 {
+        if expr == {
+            .Call(call) -> loop argument in call.args -> _ := sema_ownership_report_lending_view_escape(argument.expr, "be passed to a call", scopes, context, &diagnostics)
+            .MethodCall(_, _, _, _, _, args, _, _, _, _, _) | .OptMethodCall(_, _, _, _, args, _) | .CallValue(_, args, _) -> loop argument in args -> _ := sema_ownership_report_lending_view_escape(argument.expr, "be passed to a call", scopes, context, &diagnostics)
+            else -> {}
+        }
+    }
     // A direct ranged argument to a View slot borrows the same place as a local.
     if expected == .Val(required) {
         if required == .Apply(name, args) {

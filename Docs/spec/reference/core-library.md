@@ -563,6 +563,7 @@ runs each of these cases.
 | Copy | eager | an independent value; storage is shared until the first write | none | not applicable | none | none until the first write |
 | Adapt | lazy | an iterator that owns the adapted source | none | pulls only the items it yields or skips | none | none |
 | Window | lazy | an iterator of lists | none | pulls one window or chunk at a time | none | one window or chunk |
+| Disjoint | eager proof, borrowed windows | tracked exclusive ViewMut slots; edit_disjoint returns Unit | edit_disjoint invokes a callback with two lent views; the other methods have none | no callback runs for an invalid selection | String error for invalid bounds or overlapping selections | view descriptors only; the owner's elements are never copied |
 | Visit | eager on lists and maps, lazy on iterators | a List or Map on eager receivers, an iterator on iterator receivers | once per item, in source order | every item is visited | a callback Err is the whole result; no partial output | eager receivers buffer the output; iterators buffer nothing |
 | Each | eager | Unit | once per item, in source order | every item is visited | none | none |
 | Decide | eager | a Bool, Option or position | once per item, in source order, until the answer is known | the deciding item is consumed; later items are never read and an iterator receiver is dropped | none | none |
@@ -722,6 +723,9 @@ runs each of these cases.
 | `[T]` | `contains(item)` | borrows | Measure | false | current |
 | `[T]` | `count(item)` | borrows | Measure | 0 | current |
 | `[T]` | `update_first((item) -> Bool, item)` | exclusive, in place | Decide | false | current |
+| `[T]` | `split_write(Int)` | exclusive, in place | Disjoint | Ok(two empty write views) at zero | current |
+| `[T]` | `get_disjoint_write([Int])` | exclusive, in place | Disjoint | Ok(empty view list) for no indexes | current |
+| `[T]` | `edit_disjoint([Int], (ViewMut<item>, ViewMut<item>) -> T)` | exclusive, in place | Disjoint | Err for a selection that does not name two items | current |
 | `[T]` | `replace(Int, item)` | borrows | Build | empty list | current |
 | `[T]` | `binary_search(item)` | borrows | Lookup | None | current |
 | `[T]` | `binary_search_by((item) -> T)` | borrows | Search | None | current |

@@ -324,6 +324,7 @@ const ACCESS_TEXT = {
 };
 const ARG_TEXT = {
   Element: "item", Key: "key", Value: "value", Integer: "Int", Text: "String",
+  IntegerList: "[Int]", DisjointFn: "(ViewMut<item>, ViewMut<item>) -> T",
   RemoveBy: "RemoveBy", ElementList: "[item]", KeyList: "[key]", SameKind: "same kind",
   Entries: "map", Seed: "seed", ItemFn: "(item) -> T", ItemPredicate: "(item) -> Bool",
   PairPredicate: "(item, item) -> Bool", Accumulator: "(acc, item) -> acc",

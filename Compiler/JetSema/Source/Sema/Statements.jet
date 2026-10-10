@@ -1697,6 +1697,33 @@ fn sema_stmt_for_in_decl_loop_local(name: String, name_span: Span, ty: Type?, en
     Val(tir_symbol_local(name, name_span, symbol.id))
 }
 
+// Rust lends each ViewMut item for one iteration; the descriptor may not
+// escape, and its source still participates in the ordinary view ledger.
+fn sema_stmt_for_in_lend_view_item(local: TLocal?, ty: Type, collection: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext) {
+    if !(ty == .Apply("ViewMut", args) && args.len() == 1) -> return
+    variable :: local ?? return
+    symbol :: variable.symbol_id ?? return
+    facts :: sema_stmt_local_view_facts_for_expr(collection, scopes, &state, context)
+    recorded := false
+    loop fact in facts {
+        if fact.slot.len() != 1 || fact.slot[0] != "[]" -> next
+        loop place in fact.places {
+            _ := sema_ownership_record_view_fact_inner(&state, variable.name, variable.span, place, [String]{}, AccessConvention.Write, scopes, -1)
+            recorded = true
+        }
+    }
+    if !recorded {
+        places :: sema_ownership_places_from_expr_in_state(collection, scopes, &state)
+        loop source in places {
+            place := sema_ownership_place_snapshot(source)
+            &place.projections.push("[]")
+            &place.typed_projections.push(SemaOwnershipProjection.Index{value: None, span: variable.span})
+            _ := sema_ownership_record_view_fact_inner(&state, variable.name, variable.span, place, [String]{}, AccessConvention.Write, scopes, -1)
+        }
+    }
+    &context.lending_view_parameter_keys.push(symbol.key)
+}
+
 fn sema_stmt_for_in_pair_types(collection_type: Type, item_type: Type) -> SemaForInPairTypes? {
     if collection_type == {
         .List(_) | .FixedList(_, _) -> return Val(SemaForInPairTypes{first: Type.Int, second: item_type})
@@ -3063,6 +3090,7 @@ fn sema_stmt_declare_unchecked_binding(binding: Binding, environment: SemaScopeE
 }
 
 fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
+    if sema_ownership_report_lending_view_escape(binding.init, "be stored in a binding", scopes, context, &diagnostics) -> return None
     if binding.uninit -> return sema_stmt_check_uninit_binding(binding, environment, program, &scopes, &state, &diagnostics)
     if binding.arena_view -> return None
     if binding.is_comptime -> return sema_stmt_check_prepared_binding(binding, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -4217,6 +4245,7 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
 }
 
 fn sema_stmt_check_assignment(target: LValue, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
+    if sema_ownership_report_lending_view_escape(expr, "replace another value", scopes, context, &diagnostics) -> return None
     if target == {
         .Local(name, name_span) -> sema_stmt_check_local_assignment(name, name_span, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .Field(_, _, _) -> sema_stmt_check_projected_assignment(target, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -4430,6 +4459,7 @@ fn sema_stmt_check_return_value(value: Expr, return_type: Type?, environment: Se
 // A returned value (a `return` or a value tail) with its ownership and view
 // obligations: the value moves out and its views must outlive the call.
 fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if sema_ownership_report_lending_view_escape(value, "be returned", scopes, context, &diagnostics) -> return None
     // D-SHAPE-PLACE1=A (Rust `check_return`): a bare range place is a read
     // window at a named `View<T>` return boundary, acquired explicitly so
     // the returned type stays a view instead of a materialized list.
@@ -5078,6 +5108,9 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                             variable_two = sema_stmt_for_in_decl_loop_local(second_name.name, second_name.span, second_local_type, environment, program, &scopes, &state, &diagnostics)
                             if variable_two == None -> valid = false
                         }
+                        lending_depth :: context.lending_view_parameter_keys.len()
+                        sema_stmt_for_in_lend_view_item(first_local, first_type, collection_expr, scopes, &state, &context)
+                        sema_stmt_for_in_lend_view_item(variable_two, second_type ?? item_type, collection_expr, scopes, &state, &context)
                         loop_frame_index := context.loop_value_frames.len()
                         sema_loop_value_push_frame(&context, label_name)
                         previous_arrow_loop_body := context.arrow_loop_body
@@ -5097,6 +5130,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         if bindingless && !nested_bindingless -> context.implicit_loop_subject_depth += 1
                         nested := sema_check_statements(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth + 1)
                         if bindingless && !nested_bindingless -> context.implicit_loop_subject_depth -= 1
+                        loop context.lending_view_parameter_keys.len() > lending_depth -> _ := &context.lending_view_parameter_keys.pop()
                         source_stable := stable_root_key != None && sema_stmt_for_in_body_keeps(state, references_before, stable_root_key ?? "", nested.value)
                         loop context.iter_borrowed.len() > iter_borrowed_depth -> _ := &context.iter_borrowed.pop()
                         context.arrow_loop_body = previous_arrow_loop_body

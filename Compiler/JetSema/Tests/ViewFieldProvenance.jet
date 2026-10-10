@@ -147,6 +147,21 @@ fn view_constructor_and_split_fields() {
     view_pattern_case("split-write-parent-suspended", "fn run() {{ {split}child :: &parts.left[0..1]\nparts.left[0] = 10\nprint(child[0]) }}", "E0212")
 }
 
+fn view_disjoint_admission_sources() {
+    owner :: "values := [1, 2, 3, 4]\n"
+    view_pattern_case("disjoint-indexed-iteration", "fn run() {{ {owner}windows :: &values.get_disjoint_write([0, 2]) ?? panic(\"selection\")\nloop window in windows {{ window[0] = 9 }} }}", "")
+    view_pattern_case("disjoint-edit-lending-callback", "fn run() {{ {owner}result :: &values.edit_disjoint([0, 2], (left, right) -> {{ value :: left[0]\nright[0] = value\nleft[0] = 9 }}) }}", "")
+    view_pattern_case("disjoint-fixed-owner", "fn run() {{ values := [Int#4]{{1, 2, 3, 4}}\nparts :: &values.split_write(2) ?? panic(\"split\")\nparts.left[0] = 8 }}", "")
+    view_pattern_case("disjoint-split-arity", "fn run() {{ {owner}result :: &values.split_write() }}", "E0104")
+    view_pattern_case("disjoint-index-type", "fn run() {{ {owner}result :: &values.get_disjoint_write([true]) }}", "E0112")
+    view_pattern_case("disjoint-read-parameter", "fn run(values: [Int]) {{ result :: &values.split_write(2) }}", "E0202")
+    view_pattern_case("disjoint-callback-cannot-store-view", "fn run() {{ {owner}result :: &values.edit_disjoint([0, 2], (left, right) -> {{ held :: left\nright[0] = 5 }}) }}", "E0212")
+    view_pattern_case("disjoint-callback-cannot-return-value", "fn run() {{ {owner}result :: &values.edit_disjoint([0, 2], (left, right) -> {{ return left }}) }}", "E0113")
+    view_pattern_case("disjoint-callback-cannot-pass-view", "fn consume(value: ViewMut<Int>) {{}}\nfn run() {{ {owner}result :: &values.edit_disjoint([0, 2], (left, right) -> {{ consume(left) }}) }}", "E0212")
+    view_pattern_case("disjoint-iteration-cannot-store-view", "fn run() {{ {owner}windows :: &values.get_disjoint_write([0, 2]) ?? panic(\"selection\")\nloop window in windows {{ held :: window }} }}", "E0212")
+    view_pattern_case("disjoint-iteration-cannot-return-view", "fn run() -> ViewMut<Int> {{ {owner}windows :: &values.get_disjoint_write([0, 2]) ?? panic(\"selection\")\nloop window in windows {{ return window }}\npanic(\"empty\") }}", "E0212")
+}
+
 fn run() {
     view_field_case(true, AccessConvention.Read, "")
     view_field_case(false, AccessConvention.Read, "this view points into `values`, which this function owns")
@@ -155,4 +170,5 @@ fn run() {
     view_pattern_reborrows()
     view_pattern_reinitialization()
     view_constructor_and_split_fields()
+    view_disjoint_admission_sources()
 }

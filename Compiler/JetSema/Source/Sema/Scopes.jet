@@ -477,6 +477,8 @@ struct SemaCheckContext {
     allow_fixed_constructor: Bool
     generic_params: [TGenericParam]
     lambda_escapes: Bool?
+    lambda_lending_views: Bool
+    lending_view_parameter_keys: [String]
     lambda_statement_tails: [SemaStatementTailFrame]
     call_facts: [SemaCallSiteFact]
     http_routes: [String]{[String]{}}
@@ -812,6 +814,8 @@ fn sema_check_context_init() -> SemaCheckContext Never! {
         allow_fixed_constructor: false,
         generic_params: [TGenericParam]{},
         lambda_escapes: Val(true),
+        lambda_lending_views: false,
+        lending_view_parameter_keys: [String]{},
         lambda_statement_tails: [SemaStatementTailFrame]{},
         call_facts: [SemaCallSiteFact]{},
         hardware_use: sema_hardware_empty_use(),
@@ -869,6 +873,8 @@ fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Nev
         allow_fixed_constructor: source.allow_fixed_constructor,
         generic_params: source.generic_params.copy(),
         lambda_escapes: source.lambda_escapes,
+        lambda_lending_views: source.lambda_lending_views,
+        lending_view_parameter_keys: source.lending_view_parameter_keys.copy(),
         lambda_statement_tails: source.lambda_statement_tails.copy(),
         call_facts: source.call_facts.copy(),
         http_routes: source.http_routes.copy(),
@@ -993,6 +999,8 @@ fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Ne
             allow_fixed_constructor: context.allow_fixed_constructor,
             generic_params: context.generic_params.copy(),
             lambda_escapes: context.lambda_escapes,
+            lambda_lending_views: context.lambda_lending_views,
+            lending_view_parameter_keys: context.lending_view_parameter_keys.copy(),
             lambda_statement_tails: context.lambda_statement_tails.copy(),
             call_facts: [SemaCallSiteFact]{},
             http_routes: context.http_routes.copy(),
@@ -1086,6 +1094,8 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
     context.allow_fixed_constructor = saved.allow_fixed_constructor
     context.generic_params = saved.generic_params.copy()
     context.lambda_escapes = saved.lambda_escapes
+    context.lambda_lending_views = saved.lambda_lending_views
+    context.lending_view_parameter_keys = saved.lending_view_parameter_keys.copy()
     context.lambda_statement_tails = saved.lambda_statement_tails.copy()
     context.hardware_use = sema_hardware_use_snapshot(saved.hardware_use)
     context.http_routes = saved.http_routes.copy()
