@@ -10,6 +10,7 @@ use jet_foundation.[
     ContractClause,
     DIAGNOSTIC_ERROR,
     Diagnostic,
+    core_module_export,
     Expr,
     Func,
     Item,
@@ -113,6 +114,95 @@ fn sema_web_host_check_core_usage(target_name: String, used_core: [String], diag
     }
     complete
 }
+
+// Reuses TargetSurface from 371361c3e against current registration facts.
+fn sema_target_is_socket_surface(path: String) -> Bool Never! {
+    if path == {
+        "core.net" | "core.net.tls" | "core.net.ws" | "core.http" | "core.http.client" | "core.http.server" | "core.email" -> true
+        else -> false
+    }
+}
+
+fn sema_target_socket_surface(path: String) -> String? Never! {
+    if sema_target_is_socket_surface(path) -> return Val(path)
+    if core_module_export(path) != None -> return None
+    separator :: path.rfind(".")
+    if separator < 0 -> return None
+    owner :: path.slice(0, separator)
+    if sema_target_is_socket_surface(owner) -> Val(owner) else -> None
+}
+
+fn sema_target_wasip2_unsupported_operations(used_core: [String]) -> [String] Never! {
+    operations := [String]{}
+    loop usage in used_core {
+        separator :: usage.find("::")
+        if separator < 0 -> next
+        module_name :: usage.slice(0, separator)
+        member :: usage.slice(separator + 2, usage.len())
+        unsupported :: if module_name == {
+            "core.net" -> if member == {
+                "tcp_connect_happy" | "tcp_ready" | "udp_ready" | "tls_connect" | "tls_read" | "tls_write" | "tls_close" | "dns_a" | "dns_aaaa" | "dns_txt" | "dns_ptr" | "dns_srv" -> true
+                else -> member.starts_with("unix_")
+            }
+            "core.http" -> member == "get" || member == "post" || member == "request"
+            "core.http.server" -> member == "tls"
+            "core.net.tls" | "core.http.client" | "core.email" -> true
+            else -> false
+        }
+        if unsupported -> sema_core_string_add(&operations, "{module_name}.{member}")
+    }
+    operations
+}
+
+fn sema_target_check_socket_surfaces(graph: SemaRegistrationGraph, used_core: [String], diagnostics: &[Diagnostic]) -> Bool Never! {
+    target :: if graph.target_machine.name == "wasm.browser" -> "web" else -> graph.target_machine.triple
+    wasip2 :: target == "wasm32-wasip2"
+    socket_target :: wasip2 || target.contains("linux") || target.contains("android") || target.contains("apple") || target.contains("darwin") || target.contains("windows") || target.contains("freebsd") || target.contains("openbsd") || target.contains("netbsd")
+    if socket_target && !wasip2 -> return true
+    operations :: if wasip2 -> sema_target_wasip2_unsupported_operations(used_core) else -> [String]{}
+    seen := [String:Bool]{}
+    complete := true
+    loop module_row in graph.modules {
+        diagnostic_start :: diagnostics.len()
+        loop imported in module_row.imports {
+            path := imported.target_module_identity
+            if sema_registration_module_index(graph, path) == .Val(index) -> path = graph.modules[index].module_name
+            surface :: sema_target_socket_surface(path) ?? next
+            span :: if imported.declaration.kind == {
+                .Unqualified(_, _, _, items_span, _) -> items_span
+                else -> imported.declaration.alias_span
+            }
+            key :: "{module_row.module_identity}:{span.start}:{span.end}:E3304"
+            if !socket_target && seen.get(key) == None {
+                seen[key] = true
+                &diagnostics.push(sema_error("E3304", span, "`{surface}` is not available for target `{target}`.", "`{surface}` needs native sockets or WASI Preview 2 sockets, and this target provides neither runtime boundary. A `jet build` or `jet run` run reports this target-support diagnostic.", "Build for `wasm32-wasip2` or a supported native target, or remove the `{surface}` import."))
+                complete = false
+            }
+            if !wasip2 -> next
+            unsupported_surface :: surface == "core.net.tls" || surface == "core.net.ws" || surface == "core.http.client" || surface == "core.email"
+            if unsupported_surface {
+                operation_key :: "{module_row.module_identity}:{span.start}:{span.end}:E3305:{surface}"
+                if seen.get(operation_key) == None {
+                    seen[operation_key] = true
+                    &diagnostics.push(sema_error("E3305", span, "`{surface}` is not available for target `{target}`.", "The selected target has no Prelude adapter for `{surface}`; WASI Preview 2 provides TCP/UDP sockets but not this operation. A `jet build` or `jet run` run reports this target-support diagnostic.", "use a supported TCP/UDP operation, or build for a native target."))
+                    complete = false
+                }
+            }
+            loop operation in operations {
+                separator :: operation.rfind(".")
+                if separator < 0 || operation.slice(0, separator) != surface -> next
+                operation_key :: "{module_row.module_identity}:{span.start}:{span.end}:E3305:{operation}"
+                if seen.get(operation_key) != None -> next
+                seen[operation_key] = true
+                &diagnostics.push(sema_error("E3305", span, "`{operation}` is not available for target `{target}`.", "The selected target has no Prelude adapter for `{operation}`; WASI Preview 2 provides TCP/UDP sockets but not this operation. A `jet build` or `jet run` run reports this target-support diagnostic.", "use a supported TCP/UDP operation, or build for a native target."))
+                complete = false
+            }
+        }
+        sema_attach_diagnostic_source_locations(&diagnostics, diagnostic_start, module_row.source_segments)
+    }
+    complete
+}
+
 
 struct SemaResult {
     module_name: String
@@ -6154,6 +6244,7 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     }
     core_usage := sema_core_combine_module_usage(core_modules)
     if !sema_web_host_check_core_usage(final_graph.target_machine.name, core_usage.used_core, &diagnostics) -> complete = false
+    if !sema_target_check_socket_surfaces(final_graph, core_usage.used_core, &diagnostics) -> complete = false
     loop module_usage in core_usage.modules {
         usage_index :: sema_registration_module_index(final_graph, module_usage.module_identity) ?? next
         source_module :: final_graph.modules[usage_index]
