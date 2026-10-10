@@ -33,6 +33,13 @@ APIs without restoring retired providers or aliases. Append the candidate entry
 only after its real CLI hello succeeds and its collect-all report contains no
 failure rows; typed traps are failure evidence, not a green compiler.
 
+The hosted seed preflight enables `JET_DEBUG_LOWER_ALL=1` to collect every
+per-function MIR failure before another bootstrap rebuild. Require its final
+`0/<actual total>` summary, then successful Rust emission and metadata checking
+as separate gates. Earlier `__comptime` probe summaries are not the main-program
+census. A completed per-function sweep does not establish final program assembly
+or Rust type correctness. Native stages still require their empty all-phases TSV.
+
 ## Keep build output separate and bounded
 
 Keep build output outside the repository on disk-backed storage. Give each

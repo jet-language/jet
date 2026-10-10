@@ -14,3 +14,20 @@ export function hostedSeedCensus(buildRc, log) {
         keepGoingTsvRequired: false,
     };
 }
+
+// This optional hosted MIR discovery is not Jet Host/Entry keep-going.
+// Earlier summaries can be failed __comptime probes with a checked fallback;
+// the final summary belongs to the complete compiler function sweep.
+export function hostedLowerSweepCensus(log) {
+    const summaries = [...log.matchAll(/^JET_DEBUG_LOWER_ALL summary: (\d+) of (\d+) functions failed to lower$/gm)]
+        .map(row => ({failed: Number(row[1]), total: Number(row[2])}));
+    const final = summaries.at(-1);
+    if (!final || final.failed !== 0 || final.total < 1) {
+        throw Error(`hosted MIR sweep is not clean: final=${JSON.stringify(final ?? null)}`);
+    }
+    return {
+        schema: 'jet-hosted-lower-sweep-census/v1',
+        failed: final.failed, total: final.total, summaries,
+        boundary: 'Final hosted per-function MIR sweep only; build rc, emission and metadata remain separate gates',
+    };
+}

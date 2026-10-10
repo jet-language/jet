@@ -1419,12 +1419,14 @@ fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool)
         // Only this function's lowering reads its body.
         program.funcs[index].body = Vec::new();
     }
-    if let Some(first) = sweep_failures.first() {
+    if sweep {
         eprintln!(
             "JET_DEBUG_LOWER_ALL summary: {} of {} functions failed to lower",
             sweep_failures.len(),
             program.funcs.len()
         );
+    }
+    if let Some(first) = sweep_failures.first() {
         return Err(first.clone());
     }
     ensure_artifact_source_files(
