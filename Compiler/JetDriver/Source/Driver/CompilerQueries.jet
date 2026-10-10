@@ -117,7 +117,9 @@ use jet_sema.[
     SemaRegistrationPackagePolicy,
     sema_collect_comptime_declarations,
     sema_comptime_graph_with_values,
-    sema_finalize_registration_graph,
+    sema_finalize_graph,
+    sema_graph_trail_init,
+    sema_graph_trail_undo,
     sema_registration_prepare_graph,
 ]
 use jet_eval.[
@@ -394,13 +396,20 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
     loop diagnostic in output_diagnostics -> &registration.diagnostics.push(diagnostic)
     if jet_driver_has_errors(output_diagnostics) -> registration.complete = false
     if registration.internal_problem == .Val(problem) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val(problem))
-    // The declaration pass takes its own graph; `registration` stays for the
-    // provisional finalizations and the packet.
-    stage := sema_collect_comptime_declarations(registration.copy(), jet_driver_compiler_check_package_policies(load), input.request.eval_config.host_hooks, input.request.compiler_threads, input.request.trace_sink)
+    // Declaration checking loans the single graph to its stage, then returns it.
+    stage := sema_collect_comptime_declarations(^registration, jet_driver_compiler_check_package_policies(load), input.request.eval_config.host_hooks, input.request.compiler_threads, input.request.trace_sink)
+    declared_registration := ^stage.graph
+    stage.graph = None
+    registration = ^declared_registration ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the declaration pass lost its registration graph"))
     if !stage.complete || stage.modules.len() != registration_count || jet_driver_has_errors(stage.diagnostics) {
         jet_driver_comptime_diagnostics_add(&load.diagnostics, stage.diagnostics)
-        if stage.modules.len() == registration_inputs.len() {
-            provisional := sema_finalize_registration_graph(registration, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, input.request.eval_config.host_hooks, input.request.compiler_threads, None, input.request.trace_sink)
+        if stage.modules.len() == registration_count {
+            trail := sema_graph_trail_init()
+            provisional := sema_finalize_graph(^registration, &trail, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, input.request.eval_config.host_hooks, input.request.compiler_threads, None, input.request.trace_sink)
+            restored := ^provisional.registration_graph
+            provisional.registration_graph = None
+            registration = ^restored ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("semantic finalization lost its registration graph"))
+            sema_graph_trail_undo(&registration, &trail)
             jet_driver_comptime_diagnostics_add(&load.diagnostics, provisional.diagnostics)
             packet := jet_driver_compiler_check_diagnostic_packet(input, ^registration, ^provisional, module_sources, load.diagnostics)
             if packet == .Val(result) -> return result
@@ -413,15 +422,11 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
     // diagnostics, so this existing stage boundary travels beside the load.
     stage_diagnostics := load.diagnostics
     load.diagnostics = [Diagnostic]{}
-    // The declaration pass's graph becomes the run's environment graph,
-    // and its modules move into the run, which hands them back.
-    staged_graph := ^stage.graph
-    stage.graph = None
-    run_staged := ^staged_graph ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the declaration pass lost its registration graph"))
+    // The run owns this same graph and hands it back on every exit.
     declared_modules := ^stage.modules
     stage.modules = [SemaGraphModuleResult]{}
     run := jet_driver_run_comptime(
-        ^run_staged,
+        ^registration,
         ^declared_modules,
         stage.sources,
         stage.names,
@@ -433,20 +438,27 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
     )
     jet_driver_comptime_return_declared(&stage, &run)
     load.diagnostics = stage_diagnostics
+    registration = jet_driver_comptime_take_registration(&run)
     if run.soft_stop -> return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, None)
     if !run.complete {
         if run.internal_problem == None {
-            provisional := sema_finalize_registration_graph(registration, None, stage, run.values, run.functions, input.request.eval_config.host_hooks, input.request.compiler_threads, None, input.request.trace_sink)
+            provisional := sema_finalize_graph(^registration, &run.trail, stage, run.values, run.functions, input.request.eval_config.host_hooks, input.request.compiler_threads, None, input.request.trace_sink)
+            restored := ^provisional.registration_graph
+            provisional.registration_graph = None
+            registration = ^restored ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("semantic finalization lost its registration graph"))
+            sema_graph_trail_undo(&registration, &run.trail)
             jet_driver_comptime_diagnostics_add(&load.diagnostics, provisional.diagnostics)
             packet := jet_driver_compiler_check_diagnostic_packet(input, ^registration, ^provisional, module_sources, load.diagnostics)
             if packet == .Val(result) -> return result
         }
         return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, run.internal_problem)
     }
-    run_graph := ^run.graph
-    run.graph = None
-    graph := sema_finalize_registration_graph(registration, ^run_graph, stage, run.values, run.functions, input.request.eval_config.host_hooks, input.request.compiler_threads, input.sema_session, input.request.trace_sink)
-    if graph.modules.len() != registration_inputs.len() {
+    graph := sema_finalize_graph(^registration, &run.trail, stage, run.values, run.functions, input.request.eval_config.host_hooks, input.request.compiler_threads, input.sema_session, input.request.trace_sink)
+    restored := ^graph.registration_graph
+    graph.registration_graph = None
+    registration = ^restored ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("semantic finalization lost its registration graph"))
+    sema_graph_trail_undo(&registration, &run.trail)
+    if graph.modules.len() != registration_count {
         jet_driver_comptime_diagnostics_add(&load.diagnostics, graph.diagnostics)
         return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("semantic finalization did not return every registered module"))
     }
@@ -456,7 +468,7 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
     stage_diagnostics = load.diagnostics
     load.diagnostics = [Diagnostic]{}
     body_run := jet_driver_orchestrate_comptime_bodies(
-        registration,
+        &registration,
         stage,
         ^graph,
         run.values,
@@ -479,7 +491,7 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
     stage_diagnostics = load.diagnostics
     load.diagnostics = [Diagnostic]{}
     validation := jet_driver_validate_checked_text(
-        registration,
+        &registration,
         stage,
         ^graph,
         body_run.values,
@@ -501,8 +513,8 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
     graph = ^validation.graph
     if input.retain_projection {
         schema_ingress :: schema_check.ingress ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the retained compiler query lost its actual schema input"))
-        resolved_registration := sema_comptime_graph_with_values(registration, validation.values)
-        projection := jet_driver_project_completed_check(input.request, ^load, resolved_registration, graph, validation.values, canonical_identity, schema_ingress, validation.trace)
+        resolved_registration := sema_comptime_graph_with_values(^registration, validation.values)
+        projection := jet_driver_project_completed_check(input.request, ^load, ^resolved_registration, graph, validation.values, canonical_identity, schema_ingress, validation.trace)
         diagnostics :: projection.compile.diagnostics
         failed_stage :: projection.compile.failed_stage
         complete :: projection.compile.complete
