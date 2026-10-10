@@ -12,7 +12,7 @@ struct JetCLIProjectClaim {
 
 // CmdStatus.rs `target_arg` up to its default: the one explicit target, or
 // None when the caller must select the stock project entry.
-fn jet_cli_project_status_target(args: [String]) -> String? String! {
+fn jet_cli_project_status_target(args: [String]) -> String? JetCLIReadError! {
     target := String?{None}
     skip := false
     loop arg in args {
@@ -25,8 +25,8 @@ fn jet_cli_project_status_target(args: [String]) -> String? String! {
             skip = true
             next
         }
-        if arg.starts_with("-") -> return Err("unknown `jet status` flag `{arg}`")
-        if target != None -> return Err("`jet status` accepts at most one target")
+        if arg.starts_with("-") -> return Err(jet_cli_read_error("unknown `jet status` flag `{arg}`"))
+        if target != None -> return Err(jet_cli_read_error("`jet status` accepts at most one target"))
         target = Val(arg)
     }
     Ok(target)
@@ -51,13 +51,13 @@ fn jet_cli_project_status_summarize(root: String, receipts: [JetCLIReceipt], nam
     failure := JetCLIReceipt?{None}
     stale := JetCLIReceipt?{None}
     loop receipt in receipts {
-        current :: jet_cli_receipt_lookup(root, receipt.claim) ?? {
-            failure = Val(receipt)
-            next
+        if jet_cli_receipt_lookup(root, receipt.claim) == {
+            .Val(_) -> {
+                if receipt.status == 0 -> success = Val(receipt) else -> failure = Val(receipt)
+            }
+            .None -> stale = Val(receipt)
+            .Err(_) -> failure = Val(receipt)
         }
-        if current == Val(receipt) {
-            if receipt.status == 0 -> success = Val(receipt) else -> failure = Val(receipt)
-        } else { stale = Val(receipt) }
     }
     selected := JetCLIReceipt?{None}
     state := "unproven"
@@ -77,7 +77,7 @@ fn jet_cli_project_status_summarize(root: String, receipts: [JetCLIReceipt], nam
     receipt_id := String?{None}
     sections := jet_cli_status_object([JetCLIStatusField]{})
     if selected == .Val(receipt) {
-        receipt_id = Val(receipt.claim.key.slice(0, min(12, receipt.claim.key.len())))
+        receipt_id = Val(receipt.claim.key.slice(0, if receipt.claim.key.len() < 12 -> receipt.claim.key.len() else -> 12))
         sections = jet_cli_project_status_sections(receipt)
     }
     JetCLIProjectClaim{name: name, action: "jet {name} {target}", state: state, receipt: receipt_id, sections: sections, reason: reason}
@@ -117,7 +117,7 @@ fn jet_cli_project_status_render(target: String, rows: [JetCLIProjectClaim], err
 // The host supplies the normal default project entry and ReceiptStore's
 // selected root for the parsed target, exactly as run_status does in Rust.
 fn jet_cli_project_status_at(root: String, cwd: String, target: String, json: Bool) -[FS, Time.Wait]> JetCLIPlan Never! {
-    receipts :: jet_cli_receipt_list(root) ?? return jet_cli_project_status_render(target, [JetCLIProjectClaim]{}, "receipt store is unreadable: {err}", json)
+    receipts :: jet_cli_receipt_list(root) ?? return jet_cli_project_status_render(target, [JetCLIProjectClaim]{}, "receipt store is unreadable: {err.message}", json)
     absolute :: if target.starts_with("/") -> target else -> jet_cli_entry_join(cwd, target)
     canonical :: cli_files.realpath(absolute) ?? absolute
     directory :: if cli_files.stat(canonical) == {.Ok(info) -> info.is_dir else -> false}

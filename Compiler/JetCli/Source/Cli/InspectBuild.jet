@@ -1,8 +1,7 @@
 // Checked graph queries share the Driver invocation; no CLI graph reconstruction.
 use jet_driver.[JetDriverCompileRequest, JetDriverBuildQueryScope, JetDriverBuildQueryResult, JetDriverOptimizationQueryResult, JetDriverVerbOutput, jet_driver_query_build_plan, jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation, jet_driver_optimization_query, jet_driver_report_problems, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
-use jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, MIROptimizationDecision]
-use jet_store.[BuildRecord, BuildNodeRecord, ObjectHandle]
-use core.build.[BuildGraphNode]
+use jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, MIROptimizationDecision, MIRSourceFile]
+use core.build.[BuildGraphNode as InspectBuildGraphNode]
 use core.math as build_math
 
 fn jet_cli_build_vector(query: JetDriverOptimizationQueryResult, json: Bool) -> String Never! {
@@ -63,7 +62,7 @@ fn jet_cli_build_report(query: JetDriverBuildQueryResult, vector: String, subjec
 
 fn jet_cli_build_query_failure(request: JetDriverCompileRequest, query: JetDriverBuildQueryResult, file: String, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput Never! {
     if query.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
-    diagnostics :: jet_driver_present_diagnostics(query.diagnostics, request.authorized_sources, [])
+    diagnostics :: jet_driver_present_diagnostics(query.diagnostics, request.authorized_sources, [MIRSourceFile]{})
     errors :: jet_cli_errors(diagnostics)
     if errors.len() == 0 -> return jet_cli_ice("the checked build query stopped before completing `{file}`")
     source := ""
@@ -83,7 +82,7 @@ fn jet_cli_build_host(request: JetDriverCompileRequest, scope: &JetDriverBuildQu
     query :: jet_driver_query_build_plan(request, &scope)
     if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(request, query, file, json, color, verbose)
     vector := if json -> "[]" else -> ""
-    if query.plan != None && subject == None {
+    if query.plan == .Val(_) && subject == None {
         optimization :: jet_driver_optimization_query(request)
         // The reference omits vector rows on failed semantic lowering. An
         // actual completed producer, never an absent provider, supplies [].
@@ -111,9 +110,9 @@ fn jet_cli_build_duration(value: Float) -> String Never! {
         if shift > 60 -> scaled = 0
         else {
             divisor :: 1 << shift
-            quotient :: scaled / divisor
+            quotient :: scaled /% divisor
             remainder :: scaled % divisor
-            half :: divisor / 2
+            half :: divisor /% 2
             scaled = quotient
             if remainder > half || (remainder == half && quotient % 2 != 0) -> scaled += 1
         }
@@ -122,7 +121,7 @@ fn jet_cli_build_duration(value: Float) -> String Never! {
     digits := [Int]{}
     loop {
         &digits.push(scaled % 10)
-        scaled /= 10
+        scaled /%= 10
         if scaled == 0 -> break
     }
     loop exponent > 0 {
@@ -130,7 +129,7 @@ fn jet_cli_build_duration(value: Float) -> String Never! {
         loop index in 0..<digits.len() {
             doubled :: digits[index] * 2 + carry
             digits[index] = doubled % 10
-            carry = doubled / 10
+            carry = doubled /% 10
         }
         if carry != 0 -> &digits.push(carry)
         exponent -= 1
@@ -156,9 +155,9 @@ struct JetCLICompileNodeObservation {
     object: ObjectHandle
 }
 
-fn jet_cli_build_compile_observation(executed: BuildGraphNode, duration_ms: Float, previous: BuildRecord?, object: ObjectHandle) -> JetCLICompileNodeObservation String! {
-    if executed.kind != "compile" -> return Err("native object production requires a compile node")
-    if duration_ms - duration_ms != 0.0 || duration_ms < 0.0 -> return Err("native compile duration is not a finite non-negative observation")
+fn jet_cli_build_compile_observation(executed: InspectBuildGraphNode, duration_ms: Float, previous: BuildRecord?, object: ObjectHandle) -> JetCLICompileNodeObservation JetCLIReadError! {
+    if executed.kind != "compile" -> return Err(jet_cli_read_error("native object production requires a compile node"))
+    if duration_ms - duration_ms != 0.0 || duration_ms < 0.0 -> return Err(jet_cli_read_error("native compile duration is not a finite non-negative observation"))
     // CmdCompile15122-15129 names the first canonical input when a prior
     // authenticated record exists. It does not claim that input changed.
     reason :: if {

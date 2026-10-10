@@ -10,7 +10,7 @@ fn jet_cli_acceleration_receipt_rows(receipt: JetCLIReceipt, record_sequence: U6
         if section.type_name != MIR_ACCELERATION_RECEIPT_TYPE_NAME || !section.name.starts_with(MIR_ACCELERATION_RECEIPT_SECTION_PREFIX) -> next
         if section.schema_digest != MIR_ACCELERATION_RECEIPT_SCHEMA_DIGEST -> return Err(canonical_json_error("acceleration section `{section.name}` has an unexpected schema digest"))
         suffix :: section.name.removeprefix(MIR_ACCELERATION_RECEIPT_SECTION_PREFIX)
-        sequence :: U64.parse(suffix) ?? return Err(canonical_json_error("invalid acceleration section sequence `{section.name}`"))
+        sequence :: jet_cli_remote_unsigned(suffix) ?? return Err(canonical_json_error("invalid acceleration section sequence `{section.name}`"))
         value :: canonical_json_parse(section.bytes) ?? return Err(canonical_json_error("canonical JSON is invalid: {err.message}"))
         fields :: mir_acceleration_json_object(value, "acceleration receipt", [String]{"decision", "function", "loop_header", "source"})
         function :: mir_acceleration_json_string(fields, "function")
@@ -92,7 +92,7 @@ fn jet_cli_acceleration_target(cache: &WorkspaceDeclarationCache, cwd: String, v
 // One prepared input family per Rust test/prove/build invocation. The canonical
 // identity helper already owns authority manifests, lock and generated inputs;
 // this function only supplies the same current member closure to that helper.
-fn jet_cli_acceleration_input_paths(cache: &WorkspaceDeclarationCache, request: JetDriverCompileRequest, selected: String, verb: String) -[FS, Env]> [String] String! {
+fn jet_cli_acceleration_input_paths(cache: &WorkspaceDeclarationCache, request: JetDriverCompileRequest, selected: String, verb: String) -[FS, Env]> [String] JetCLIReadError! {
     paths := [String]{}
     info :: cli_files.stat(selected) ?? return Ok(paths)
     if info.is_dir {
@@ -102,16 +102,16 @@ fn jet_cli_acceleration_input_paths(cache: &WorkspaceDeclarationCache, request: 
         // A different default verb target needs its own authorized source
         // preparation; never mutate the opaque request's selected entry.
         queried :: if jet_cli_watch_canonical(request.authorized_sources.entry_path) == jet_cli_watch_canonical(selected) -> request else -> {
-            prepared :: jet_cli_prepare_overlays(selected, selected, [], false, Val(1), JetDriverCompileMode.Doc)
+            prepared :: jet_cli_prepare_overlays(selected, selected, [JetCLIOverlay]{}, false, Val(1), JetDriverCompileMode.Doc)
             if prepared == {
                 .Prepared(value, _) -> value
-                .Refused(output) -> { return Err(output.stderr) }
+                .Refused(output) -> { return Err(jet_cli_read_error(output.stderr)) }
             }
         }
         if jet_cli_watch_discover(&cache, queried) == {
             .Ok(graph) -> { loop path in graph.paths -> &paths.push(path) }
             .Err(error) -> {
-                if error.comptime_unavailable -> return Err(error.message)
+                if error.comptime_unavailable -> return Err(jet_cli_read_error(error.message))
                 // Rust discovery errors retain the explicit target and then
                 // fingerprint its authorities; only absent coverage refuses.
                 &paths.push(selected)
@@ -155,7 +155,7 @@ fn jet_cli_acceleration_select_receipt(cache: &WorkspaceDeclarationCache, file: 
 // Missing/stale/corrupt optional history is legitimately absent. The explicit
 // #4736 compiler coverage gap is NOT optional-history absence: it propagates to
 // the shared host as a refusal, rather than fabricating an empty runtime query.
-fn jet_cli_acceleration_runtime_rows(request: JetDriverCompileRequest, query: JetDriverOptimizationQueryResult, file: String, scope: String, target: String?) -[FS, Env, Time.Wait]> [JetCLIAccelerationRuntime] String! {
+fn jet_cli_acceleration_runtime_rows(request: JetDriverCompileRequest, query: JetDriverOptimizationQueryResult, file: String, scope: String, target: String?) -[FS, Env, Time.Wait]> [JetCLIAccelerationRuntime] JetCLIReadError! {
     cwd :: cli_sys.current_dir() ?? return Ok([JetCLIAccelerationRuntime]{})
     cache := WorkspaceDeclarationCache.new()
     store_root := String?{None}
@@ -190,8 +190,11 @@ fn jet_cli_acceleration_runtime_rows(request: JetDriverCompileRequest, query: Je
     listed :: jet_cli_receipt_list(root) ?? return Ok([JetCLIAccelerationRuntime]{})
     current := [JetCLIReceipt]{}
     loop receipt in listed {
-        authenticated :: jet_cli_receipt_lookup(root, receipt.claim) ?? next
-        if authenticated == .Val(value) -> &current.push(value)
+        if jet_cli_receipt_lookup(root, receipt.claim) == {
+            .Val(value) -> &current.push(value)
+            .None -> {}
+            .Err(_) -> {}
+        }
     }
     Ok(jet_cli_acceleration_select_receipt(&cache, for_file, identities, entries, current, JET_COMPILER_TARGET_USIZE_MAX))
 }
