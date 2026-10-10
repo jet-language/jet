@@ -24259,7 +24259,7 @@ impl<'a> RustEmitter<'a> {
         index: usize,
     ) -> Option<(String, bool)> {
         let ty = self.value_type(function, subject);
-        let owner = ty.nominal_id().or(ty.identity).unwrap_or(owner);
+        let owner = Self::enum_subject_owner(ty, owner);
         let key = &self.type_def(owner).key;
         if key.starts_with("<corelib>/")
             || has_native_type_projection(key)
@@ -32987,6 +32987,17 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
+    /// Shape identities (including structural unions) do not name enum
+    /// declarations. Preserve the checked owner unless the subject carries
+    /// an actual nominal application, whose instance identity can refine it.
+    fn enum_subject_owner(subject: &MirType, checked_owner: MirTypeId) -> MirTypeId {
+        match subject.kind() {
+            MirTypeKind::Apply { name, .. } => subject.identity.unwrap_or(name.id),
+            MirTypeKind::Tagged { inner, .. } => Self::enum_subject_owner(inner, checked_owner),
+            _ => checked_owner,
+        }
+    }
+
     fn enum_is(
         &self,
         function: &MirFunction,
@@ -32995,10 +33006,7 @@ impl<'a> RustEmitter<'a> {
         variant: &str,
     ) -> String {
         let subject_type = self.value_type(function, subject);
-        let effective_owner = subject_type
-            .nominal_id()
-            .or(subject_type.identity)
-            .unwrap_or(owner);
+        let effective_owner = Self::enum_subject_owner(subject_type, owner);
         // A variant test only inspects its subject.
         let reference = self.inspected_value_reference(function, subject);
         if self.is_core_http_type(effective_owner, "Body") {
@@ -33033,10 +33041,7 @@ impl<'a> RustEmitter<'a> {
         index: usize,
     ) -> String {
         let subject_type = self.value_type(function, subject);
-        let effective_owner = subject_type
-            .nominal_id()
-            .or(subject_type.identity)
-            .unwrap_or(owner);
+        let effective_owner = Self::enum_subject_owner(subject_type, owner);
         // A moved subject that only feeds this block's bindings is taken
         // apart once instead of cloning each payload out of it.
         if variant == "DateTime"

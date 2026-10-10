@@ -581,6 +581,11 @@ exact mutable getter and setter rows. Nested fields and indexes retain the
 original owner and path; the access decoration cannot disagree with those
 rows. This changes no source-level permission or authority decision.
 
+Enum tests and payload reads keep their checked declaration owner when the
+subject is a structural union. A union's shape identity is not a nominal
+definition ID. Only an actual nominal application, possibly under a tag,
+can refine that owner to its checked instance identity.
+
 A bare registered Core-carrier trait reference resolves through that carrier's
 one source-module owner and the exact trait/method identity. It cannot match an
 unrelated same-named method, a different trait or an arbitrary suffix alias.
