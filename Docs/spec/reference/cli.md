@@ -290,6 +290,8 @@ dependency-role metadata, source policy and advisory authorization before
 Hangar ingest. A selective update retains unrelated machine and semantic
 records. The machine graph and its resolution rationales are serialized in one
 atomic lock publication, after foreign provider bindings have been verified.
+Provider-fact maps project into the canonical ordered `Dyn.Object` pair carrier
+with keys in byte order, preserving deterministic identity and serialized facts.
 Locked fetch verifies exact source identities and uses the existing registry
 checkpoint without downloading an index.
 

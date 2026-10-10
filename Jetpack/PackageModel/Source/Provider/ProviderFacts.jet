@@ -32,8 +32,8 @@ enum ProviderFactValue {
                 Dyn.Array(items)
             }
             .Map(values) -> {
-                object := [String: Dyn]{}
-                loop key in pkg_provider_sorted_keys(values.keys().to_list()) -> object[key] = values[key].to_json_tree()
+                object := [(key: String, value: Dyn)]{}
+                loop key in pkg_provider_sorted_keys(values.keys().to_list()) -> &object.push((key: key, value: values[key].to_json_tree()))
                 Dyn.Object(object)
             }
         }
