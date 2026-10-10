@@ -128,6 +128,7 @@ use jet_foundation.[
     mir_type_same_checked_type,
     stable_id,
     symbol_id,
+    TTypeDef,
 ]
 use jet_parser.[
     parse_source,
@@ -3270,6 +3271,14 @@ fn jet_driver_run_comptime(
         checked_type_name_rows: ^environment.checked_type_name_rows,
         boxed_edges: ^environment.boxed_edges,
     }
+    // The program now owns these tables. Restore the environment's ordinary
+    // empty table fields before retargeting its still-owned module metadata.
+    environment.registration_graph = None
+    environment.checked_types = [TTypeDef]{}
+    environment.checked_type_rows = [String:Int]{}
+    environment.checked_type_name_slots = [String:Int]{}
+    environment.checked_type_name_rows = [[Int]]{}
+    environment.boxed_edges = [String:[String]]{}
     // The run sets `sites` once it has items to check.
     staging := JetDriverComptimeStaging{session: None, runtime_modules: [SemaGraphModuleResult]{}, foreign: None, count: -1, live: [JetDriverComptimeLive]{}, growth_constants: [MIRConstantDef]{}, restore: false, global_keys: [String:Bool]{}, global_count: 0, sites: sema_comptime_value_sites_empty(), bare: false, bare_ok: bare_ok, declared: ^declared, declared_staged: false}
     result := jet_driver_comptime_run(&program, &environment, &trail, keep_going, sources, names, initial_values, initial_functions, load, request, &staging, &counters, &diagnostics)

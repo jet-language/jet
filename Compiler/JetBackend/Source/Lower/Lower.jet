@@ -583,7 +583,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         &functions.push(lower_checked_glue_function(program, &m, startup_glue))
         lowered_entry = Val(startup)
     }
-    closures :: if !wrap_entry && m.issues.len() == 0 -> lower_closure_value_layouts(program, prepared, m) else -> [LIRClosureValueLayout]{}
+    closures :: if !wrap_entry && m.issues.len() == 0 -> lower_closure_value_layouts(program, prepared.functions, prepared.instances, m) else -> [LIRClosureValueLayout]{}
     core_callables := [LIRCoreCallableExport]{}
     if !shared_sites_dynamic {
         loop glue in m.glue {

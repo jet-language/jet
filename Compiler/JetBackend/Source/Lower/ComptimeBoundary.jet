@@ -197,11 +197,11 @@ fn lower_value_release(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFu
     lir_builder_finish(f.builder)
 }
 
-fn lower_closure_value_layouts(program: MIRProgram, prepared: LowerPrepared, m: LowerModule) -> [LIRClosureValueLayout] Never! {
+fn lower_closure_value_layouts(program: MIRProgram, functions: [LowerPreparedFunction], instances: [MIRFunction], m: LowerModule) -> [LIRClosureValueLayout] Never! {
     layouts := [LIRClosureValueLayout]{}
-    loop (index, row) in prepared.functions {
+    loop (index, row) in functions {
         original :: program.functions[row.source_row]
-        source :: if row.instance_row >= 0 -> prepared.instances[row.instance_row] else -> original
+        source :: if row.instance_row >= 0 -> instances[row.instance_row] else -> original
         code := LIRFunctionID{value: index}
         if source.capture_params.len() == 0 {
             thunk :: m.glue_rows.get(lower_glue_row_key("h:closure.thunk", "{index}")) ?? next

@@ -267,3 +267,14 @@ Compiler comparisons against an already-bound optional ID or interpolated
 symbol use parenthesized value expressions, not capture patterns. Decision
 hashing passes byte ranges as `View<U8>` and projects only runtime-part variants
 present in the canonical MIR inventory.
+
+Prepared host Shared transfers validate the borrowed tree before committing
+the owner alias. After that commit, adoption updates the original carrier
+through write views; it does not copy containers, finalizers, or cleanup roots.
+An adoption failure after alias commitment is a consumed failure, never a
+rejection that pretends the original Source alias is still active.
+
+Recursive host type-shape growth detaches the needed struct payload at a call
+boundary before growing its owner vector. Compiler carriers whose tables move
+into a separate program owner restore their empty moved fields before the
+remaining carrier is borrowed again.

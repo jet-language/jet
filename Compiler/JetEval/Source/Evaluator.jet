@@ -4515,10 +4515,9 @@ fn jet_eval_callback_closure_reusable(machine: JetEvalMachine, closure: JetEvalR
 
 // Walk the borrowed host tree to its leaf before checking it. Returning each
 // intermediate subtree would copy every remaining capture and cleanup program.
-// Only pre-adoption constructs an independently mutable carrier at the leaf.
 enum JetEvalHostTransferRead {
     Closure(function: MIRFunctionID, capture_count: Int)
-    Shared(index: Int, owner_alias_token: Int, capability: JetEvalSharedHostRootCapability, pre_adopted: Bool)
+    Shared(index: Int, owner_alias_token: Int, capability: JetEvalSharedHostRootCapability)
 }
 fn jet_eval_result_host_value_transfer_read(machine: &JetEvalMachine, value: JetEvalHostValue, path: [JetEvalHostProjection], position: Int, read: JetEvalHostTransferRead, span: Span) -> JetEvalHostValue? {
     if position >= path.len() {
@@ -4534,8 +4533,7 @@ fn jet_eval_result_host_value_transfer_read(machine: &JetEvalMachine, value: Jet
                 jet_eval_ownership_fail(&machine, span, "prepared physical closure path no longer selects its checked closure")
                 return None
             }
-            .Shared(index, token, capability, pre_adopted) -> {
-                if pre_adopted -> return jet_eval_result_host_shared_transfer_pre_adopted_leaf(&machine, value, index, token, span)
+            .Shared(index, token, capability) -> {
                 if !jet_eval_result_host_shared_transfer_validate_leaf(&machine, value, index, token, capability, span) -> return None
                 return Val(JetEvalHostValue.Data{value: TComptimeValue.Unit})
             }
@@ -4572,115 +4570,61 @@ fn jet_eval_result_host_value_transfer_read(machine: &JetEvalMachine, value: Jet
     None
 }
 
-fn jet_eval_result_host_value_transfer_replace(machine: &JetEvalMachine, value: JetEvalHostValue, path: [JetEvalHostProjection], position: Int, token: Int, index: Int, replacement: ^JetEvalHostValue, span: Span) -> JetEvalHostValue? {
+// Validation walks a read view before the alias commit. Adoption then edits
+// the same host tree: no aggregate, finalizer, or owned root is duplicated.
+fn jet_eval_result_host_value_transfer_replace(machine: &JetEvalMachine, value: &JetEvalHostValue, path: [JetEvalHostProjection], position: Int, token: Int, index: Int, span: Span) -> Bool {
     if position >= path.len() {
-        if value == .SharedCarrier(carrier) {
-            if carrier.kind == JetEvalSharedHostKind.Shared && carrier.index == (Val(index)) && carrier.owner_alias_token == (Val(token)) {
-                if replacement == .SharedCarrier(committed) {
-                    if committed.kind == JetEvalSharedHostKind.Shared && committed.index == (Val(index)) && committed.owner_alias_token == (Val(token)) && committed.owner_alias_token_pre_adopted -> return Val(JetEvalHostValue.SharedCarrier{carrier: ^committed})
-                }
+        if &value == .SharedCarrier(carrier) {
+            if carrier.kind == JetEvalSharedHostKind.Shared && carrier.index == (Val(index)) && carrier.owner_alias_token == (Val(token)) && !carrier.owner_alias_token_pre_adopted && carrier.owns_root_capability {
+                carrier.owner_alias_token_pre_adopted = true
+                return true
             }
         }
         jet_eval_ownership_fail(&machine, span, "prepared host Shared transfer no longer matches its staged owner alias")
-        return None
+        return false
     }
-    projection := path[position]
-    if value == {
-        .Present(inner) -> if projection == {
-            .Present -> {
-                updated :: jet_eval_result_host_value_transfer_replace(&machine, inner, path, position + 1, token, index, ^replacement, span) ?? return None
-                return Val(JetEvalHostValue.Present{value: updated})
-            }
-            else -> {}
+    projection :: path[position]
+    if &value == .Present(inner) {
+        if projection == .Present -> return jet_eval_result_host_value_transfer_replace(&machine, &inner, path, position + 1, token, index, span)
+    }
+    if &value == .Failed(inner) {
+        if projection == .Failed -> return jet_eval_result_host_value_transfer_replace(&machine, &inner, path, position + 1, token, index, span)
+    }
+    if &value == .List(values) {
+        if projection == .List(child) {
+            if child >= 0 && child < values.len() -> return jet_eval_result_host_value_transfer_replace(&machine, &values[child], path, position + 1, token, index, span)
         }
-        .Failed(inner) -> if projection == {
-            .Failed -> {
-                updated :: jet_eval_result_host_value_transfer_replace(&machine, inner, path, position + 1, token, index, ^replacement, span) ?? return None
-                return Val(JetEvalHostValue.Failed{value: updated})
-            }
-            else -> {}
+    }
+    if &value == .Map(entries) {
+        if projection == .MapKey(child) {
+            if child >= 0 && child < entries.len() -> return jet_eval_result_host_value_transfer_replace(&machine, &entries[child].key, path, position + 1, token, index, span)
         }
-        .List(values) -> if projection == {
-            .List(child) -> {
-                if child >= 0 && child < values.len() {
-                    replaced :: jet_eval_result_host_value_transfer_replace(&machine, values[child], path, position + 1, token, index, ^replacement, span) ?? return None
-                    updated_values := values.copy()
-                    updated_values[child] = replaced
-                    return Val(JetEvalHostValue.List{values: updated_values})
-                }
-            }
-            else -> {}
+        if projection == .MapValue(child) {
+            if child >= 0 && child < entries.len() -> return jet_eval_result_host_value_transfer_replace(&machine, &entries[child].value, path, position + 1, token, index, span)
         }
-        .Map(entries) -> if projection == {
-            .MapKey(child) -> {
-                if child >= 0 && child < entries.len() {
-                    replaced :: jet_eval_result_host_value_transfer_replace(&machine, entries[child].key, path, position + 1, token, index, ^replacement, span) ?? return None
-                    updated_entries := entries.copy()
-                    updated_entries[child].key = replaced
-                    return Val(JetEvalHostValue.Map{entries: updated_entries})
-                }
+    }
+    if &value == .Struct(_, fields) {
+        if projection == .StructField(field_name) {
+            loop child in 0..<fields.len() {
+                if fields[child].name == field_name -> return jet_eval_result_host_value_transfer_replace(&machine, &fields[child].value, path, position + 1, token, index, span)
             }
-            .MapValue(child) -> {
-                if child >= 0 && child < entries.len() {
-                    replaced :: jet_eval_result_host_value_transfer_replace(&machine, entries[child].value, path, position + 1, token, index, ^replacement, span) ?? return None
-                    updated_entries := entries.copy()
-                    updated_entries[child].value = replaced
-                    return Val(JetEvalHostValue.Map{entries: updated_entries})
-                }
-            }
-            else -> {}
         }
-        .Struct(name, fields) -> if projection == {
-            .StructField(field_name) -> {
-                found := Int?{None}
-                loop child in 0..<fields.len() {
-                    if fields[child].name == field_name {
-                        found = Val(child)
-                        break
-                    }
-                }
-                if found == .Val(child) {
-                    replaced :: jet_eval_result_host_value_transfer_replace(&machine, fields[child].value, path, position + 1, token, index, ^replacement, span) ?? return None
-                    updated_fields := fields.copy()
-                    updated_fields[child].value = replaced
-                    return Val(JetEvalHostValue.Struct{type_name: name, fields: updated_fields})
-                }
-            }
-            else -> {}
+    }
+    if &value == .Enum(_, _, args) {
+        if projection == .EnumArg(child) {
+            if child >= 0 && child < args.len() -> return jet_eval_result_host_value_transfer_replace(&machine, &args[child].value, path, position + 1, token, index, span)
         }
-        .Enum(name, variant, args) -> if projection == {
-            .EnumArg(child) -> {
-                if child >= 0 && child < args.len() {
-                    replaced :: jet_eval_result_host_value_transfer_replace(&machine, args[child].value, path, position + 1, token, index, ^replacement, span) ?? return None
-                    updated_args := args.copy()
-                    updated_args[child].value = replaced
-                    return Val(JetEvalHostValue.Enum{type_name: name, variant: variant, args: updated_args})
-                }
-            }
-            else -> {}
+    }
+    if &value == .Closure(_, captures) {
+        if projection == .Capture(child) {
+            if child >= 0 && child < captures.len() -> return jet_eval_result_host_value_transfer_replace(&machine, &captures[child], path, position + 1, token, index, span)
         }
-        .Closure(function, captures) -> if projection == {
-            .Capture(child) -> {
-                if child >= 0 && child < captures.len() {
-                    replaced :: jet_eval_result_host_value_transfer_replace(&machine, captures[child], path, position + 1, token, index, ^replacement, span) ?? return None
-                    updated_captures := captures.copy()
-                    updated_captures[child] = replaced
-                    return Val(JetEvalHostValue.Closure{function: function, captures: updated_captures})
-                }
-            }
-            else -> {}
-        }
-        .Handle(handle, raw, owner, payload) -> if projection == {
-            .HandlePayload -> {
-                updated :: jet_eval_result_host_value_transfer_replace(&machine, payload, path, position + 1, token, index, ^replacement, span) ?? return None
-                return Val(JetEvalHostValue.Handle{handle: handle, raw: raw, owner: owner, payload: updated})
-            }
-            else -> {}
-        }
-        else -> {}
+    }
+    if &value == .Handle(_, _, _, payload) {
+        if projection == .HandlePayload -> return jet_eval_result_host_value_transfer_replace(&machine, &payload, path, position + 1, token, index, span)
     }
     jet_eval_ownership_fail(&machine, span, "prepared host Shared transfer path changed before commit")
-    None
+    false
 }
 
 fn jet_eval_result_host_runtime_transfer_replace(machine: &JetEvalMachine, value: JetEvalRuntimeValue, path: [JetEvalHostProjection], position: Int, expected: JetEvalRuntimeValue, span: Span) -> JetEvalRuntimeValue? {
@@ -4805,7 +4749,7 @@ fn jet_eval_result_host_shared_transfer_validate(machine: &JetEvalMachine, sourc
         jet_eval_ownership_fail(&machine, span, "prepared Shared transfer no longer selects its Source root")
         return false
     }
-    read :: JetEvalHostTransferRead.Shared{index: transfer.index, owner_alias_token: transfer.owner_alias_token, capability: jet_eval_result_host_shared_transfer_capability(transfer), pre_adopted: false}
+    read :: JetEvalHostTransferRead.Shared{index: transfer.index, owner_alias_token: transfer.owner_alias_token, capability: jet_eval_result_host_shared_transfer_capability(transfer)}
     checked :: jet_eval_result_host_value_transfer_read(&machine, host_value, transfer.path, 0, read, span) ?? return false
     true
 }
@@ -4855,21 +4799,6 @@ fn jet_eval_result_host_shared_transfer_validate_leaf(machine: &JetEvalMachine, 
     false
 }
 
-fn jet_eval_result_host_shared_transfer_pre_adopted_value(machine: &JetEvalMachine, host_value: JetEvalHostValue, transfer: JetEvalResultHostSharedTransfer, span: Span) -> JetEvalHostValue? {
-    read :: JetEvalHostTransferRead.Shared{index: transfer.index, owner_alias_token: transfer.owner_alias_token, capability: jet_eval_result_host_shared_transfer_capability(transfer), pre_adopted: true}
-    jet_eval_result_host_value_transfer_read(&machine, host_value, transfer.path, 0, read, span)
-}
-fn jet_eval_result_host_shared_transfer_pre_adopted_leaf(machine: &JetEvalMachine, host_value: JetEvalHostValue, index: Int, token: Int, span: Span) -> JetEvalHostValue? {
-    if host_value == .SharedCarrier(carrier) {
-        if carrier.kind == JetEvalSharedHostKind.Shared && carrier.index == (Val(index)) && carrier.owner_alias_token == (Val(token)) && !carrier.owner_alias_token_pre_adopted && carrier.owns_root_capability {
-            adopted := carrier.copy()
-            adopted.owner_alias_token_pre_adopted = true
-            return Val(JetEvalHostValue.SharedCarrier{carrier: adopted})
-        }
-    }
-    jet_eval_ownership_fail(&machine, span, "prepared Shared transfer cannot mark its exact host owner alias as pre-adopted")
-    None
-}
 
 fn jet_eval_result_host_transfer_shared_stage_dispose(machine: &JetEvalMachine, transfers: &[JetEvalResultHostSharedTransfer], span: Span) -> Bool {
     ok := true
@@ -5021,20 +4950,6 @@ fn jet_eval_result_host_transfer_commit_session(session: &JetEvalRuntimeSession,
             }
             return JetEvalResultHostTransferCommitDisposition.Rejected
         }
-        prepared_host :: jet_eval_result_host_shared_transfer_pre_adopted_value(&session.machine, host_value, transfer, span) ?? {
-            if consumed {
-                receipt.consumed_failure = true
-                return JetEvalResultHostTransferCommitDisposition.ConsumedFailure
-            }
-            return JetEvalResultHostTransferCommitDisposition.Rejected
-        }
-        replaced_host :: jet_eval_result_host_value_transfer_replace(&session.machine, host_value, transfer.path, 0, transfer.owner_alias_token, transfer.index, ^prepared_host, span) ?? {
-            if consumed {
-                receipt.consumed_failure = true
-                return JetEvalResultHostTransferCommitDisposition.ConsumedFailure
-            }
-            return JetEvalResultHostTransferCommitDisposition.Rejected
-        }
         capability := jet_eval_result_host_shared_transfer_capability(transfer)
         committed :: jet_eval_shared_runtime_owner_alias_transfer_commit(&session.machine, transfer.index, transfer.owner_alias_token, capability, span) ?? {
             if consumed {
@@ -5047,7 +4962,10 @@ fn jet_eval_result_host_transfer_commit_session(session: &JetEvalRuntimeSession,
         transfer.transferred = true
         transfer.staged = false
         receipt.shared_transfers[index] = transfer
-        host_value = replaced_host
+        if !jet_eval_result_host_value_transfer_replace(&session.machine, &host_value, transfer.path, 0, transfer.owner_alias_token, transfer.index, span) {
+            receipt.consumed_failure = true
+            return JetEvalResultHostTransferCommitDisposition.ConsumedFailure
+        }
         expected := JetEvalRuntimeValue.Shared{index: transfer.index}
         replaced_source :: jet_eval_result_host_runtime_transfer_replace(&session.machine, source_root, transfer.path, 0, expected, span) ?? {
             receipt.consumed_failure = true
@@ -5249,6 +5167,15 @@ fn jet_eval_result_host_closure_shape_node(machine: &JetEvalMachine, ty: MIRType
     return Val(closure_node)
 }
 
+// Detach only the struct payload that recursive shape growth must own. The
+// source-node loan ends at this call boundary, before `nodes` can grow.
+fn jet_eval_result_host_struct_shape_owned(node: JetEvalHostTypeNode) -> (type_id: MIRTypeID, type_name: String, args: [Int], fields: [JetEvalHostTypeFieldShape])? {
+    if node == .Struct(type_id, type_name, args, fields) {
+        return Val((type_id: type_id.copy(), type_name: type_name.copy(), args: args.copy(), fields: fields.copy()))
+    }
+    None
+}
+
 fn jet_eval_result_host_type_shape_node(machine: &JetEvalMachine, value: JetEvalRuntimeValue, ty: MIRType, nodes: &[JetEvalHostTypeNode], seen: &[String:Int], span: Span) -> Int? {
     if value == .Closure(function, captures) -> return jet_eval_result_host_closure_shape_node(&machine, ty, function, captures, &nodes, &seen, span)
     if value == .Result(ok, nested) {
@@ -5280,15 +5207,17 @@ fn jet_eval_result_host_type_shape_node(machine: &JetEvalMachine, value: JetEval
         if aggregate == {
             .Struct(_, runtime_fields) -> {
                 base :: jet_eval_host_shape_node(&machine, ty, &nodes, &seen, span) ?? return None
-                if nodes[base] == .Struct(type_id, type_name, type_args, shape_fields) {
-                    if runtime_fields.len() != shape_fields.len() {
+                struct_shape := jet_eval_result_host_struct_shape_owned(nodes[base])
+                if struct_shape != None {
+                    snapshot := ^struct_shape ?? panic("validated struct shape disappeared")
+                    if runtime_fields.len() != snapshot.fields.len() {
                         jet_eval_compiler_fail(&machine, span, "Source result struct fields disagree with its checked host type shape")
                         return None
                     }
-                    updated_fields := shape_fields.copy()
-                    owned_id := type_id.copy()
-                    owned_name := type_name.copy()
-                    owned_args := type_args.copy()
+                    updated_fields := ^snapshot.fields
+                    owned_id := ^snapshot.type_id
+                    owned_name := ^snapshot.type_name
+                    owned_args := ^snapshot.args
                     loop runtime_field in runtime_fields {
                         field_ty :: jet_eval_host_struct_field_type(&machine, Val(ty), runtime_field.name, span) ?? return None
                         child :: jet_eval_result_host_type_shape_node(&machine, runtime_field.value, field_ty, &nodes, &seen, span) ?? return None
