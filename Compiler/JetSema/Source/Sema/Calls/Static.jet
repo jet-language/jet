@@ -547,7 +547,15 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
     }
 
     if expected == .Val(expected_type) {
-        _ := sema_call_builtin_static_bind(row.return_type, sema_call_resolved_type(expected_type, environment, program), row, &bindings)
+        hint :: sema_call_resolved_type(expected_type, environment, program)
+        pattern := row.return_type
+        if pattern == .Result(success, _) {
+            if hint == {
+                .Result(_, _) -> {}
+                else -> pattern = success
+            }
+        }
+        _ := sema_call_builtin_static_bind(pattern, hint, row, &bindings)
     }
     loop name in row.type_params {
         if !sema_call_builtin_static_bound(bindings, name) -> &bindings.push(SemaInferenceBinding{name: name, ty: Type.Int, source: "builtin static default"})

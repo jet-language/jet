@@ -101,3 +101,40 @@ fn imported_associated_function_keeps_method_visibility() {
     ]);
     assert!(errors.iter().any(|error| error.starts_with("E0605:")), "{errors:?}");
 }
+
+#[test]
+fn list_static_owner_arguments_survive_fallible_constructors() {
+    let source = include_str!("../../../Compiler/JetSema/Tests/CollectionStaticFixtures.jet");
+    let errors = check_sources(&[("pkg/main.jet", "main", source, &[])]);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn list_static_omitted_owner_uses_contextual_success_type() {
+    let source = r#"
+fn strings() -> [String] Never! {
+    List.try_with_capacity(2) ?? panic("allocation failed")
+}
+fn bytes() -> [U8] Never! {
+    List.try_new() ?? panic("allocation failed")
+}
+fn run() {}
+"#;
+    let errors = check_sources(&[("pkg/main.jet", "main", source, &[])]);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn list_static_explicit_owner_is_not_overridden_by_context() {
+    let source = r#"
+fn wrong() -> [String] Never! {
+    List<U8>.try_new() ?? panic("allocation failed")
+}
+fn run() {}
+"#;
+    let errors = check_sources(&[("pkg/main.jet", "main", source, &[])]);
+    assert!(
+        errors.iter().any(|error| error.starts_with("E0113:") || error.starts_with("E0108:")),
+        "{errors:?}",
+    );
+}

@@ -2936,7 +2936,23 @@ impl<'a> Checker<'a> {
             // Keep this aligned with TIR's static-call shadow check so sema
             // never accepts code that lowering must reject.
             if self.lookup(type_name).is_none() {
-                if let Some(ty) = builtin_type_from_ident(type_name) {
+                if let Some(mut ty) = builtin_type_from_ident(type_name) {
+                    // Generic collection statics retain their written owner
+                    // argument. A contextual success type refines only an
+                    // omitted argument; the bare builtin default is last.
+                    if let Type::List(inner) = &mut ty {
+                        if let Some(element) = owner_type_args.first() {
+                            **inner = self.resolve_type(element.clone());
+                        } else {
+                            let expected = match &self.expected_type {
+                                Some(Type::Result { ok, .. }) => Some(ok.as_ref()),
+                                other => other.as_ref(),
+                            };
+                            if let Some(Type::List(element)) = expected {
+                                **inner = (**element).clone();
+                            }
+                        }
+                    }
                     if let Some(ret) =
                         Collections::builtin_method_return(&ty, method, args.len(), true)
                     {

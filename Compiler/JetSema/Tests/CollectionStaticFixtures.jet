@@ -1,0 +1,35 @@
+// Generic collection constructors retain owner arguments across failure rails.
+struct CollectionStaticRow { value: Int }
+
+fn collection_static_bytes() -> [U8] Never! {
+    values := List<U8>.try_with_capacity(1) ?? panic("allocation failed")
+    &values.push(U8{7})
+    values
+}
+
+fn collection_static_strings() -> [String] Never! {
+    values := List<String>.try_new() ?? panic("allocation failed")
+    &values.push("text")
+    values
+}
+
+fn collection_static_rows() -> [CollectionStaticRow] Never! {
+    values := List<CollectionStaticRow>.try_with_capacity(1) ?? panic("allocation failed")
+    &values.push(CollectionStaticRow{value: 9})
+    values
+}
+
+fn collection_static_contextual() -> [String] Never! {
+    List.try_with_capacity(2) ?? panic("allocation failed")
+}
+
+fn run() {
+    bytes :: collection_static_bytes()
+    strings :: collection_static_strings()
+    rows :: collection_static_rows()
+    contextual :: collection_static_contextual()
+    if bytes.len() != 1 || bytes[0] != (U8{7}) -> panic("List<U8> owner type was lost")
+    if strings.len() != 1 || strings[0] != "text" -> panic("List<String> owner type was lost")
+    if rows.len() != 1 || rows[0].value != 9 -> panic("nominal List owner type was lost")
+    if contextual.len() != 0 -> panic("contextual List construction was not empty")
+}
