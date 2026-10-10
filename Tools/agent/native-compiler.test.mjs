@@ -33,6 +33,9 @@ function dryRun(extra, inspect) {
         const executeRow = '-[Exec, IO, FFI.C, FFI.Asm, Time.Wait]>';
         assert.equal(source.split(`fn execute(self, request: X64ExecutionRequest) ${executeRow} X64ExecutionResponse`).length - 1, 2,
             'the execution-host trait and implementation retain the same explicit transport bound');
+        assert.match(source, /^use core\.build\.\[BuildGraphNode\]$/m);
+        assert.doesNotMatch(source, /^use core\.build\.BuildGraphNode$/m,
+            'a Core build type must use the member-import route, not a fictitious module path');
         assert.equal(JSON.parse(readFileSync(join(out, 'compiler.map.json'))).source_segments.at(-1).source_file, 'Compiler/JetCli/run.jet');
         assert.equal(existsSync(join(out, 'seed/jet')), false, 'dry-run must not manufacture a compiler');
         inspect(JSON.parse(readFileSync(join(out, 'plan.json'))));

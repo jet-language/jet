@@ -334,6 +334,9 @@ language leaves its host uses, not the `FFI` root or unrelated Browser, DB, GPU,
 Log, or Secret authority. An omitted trait row would instead make dynamic
 dispatch maximal and cannot stand in for this checked boundary.
 
+Driver Core build carriers use the public module's member-import route, such as
+`use core.build.[BuildGraphNode]`; the carrier name is not a Core module path.
+
 The Jet semantic checker separates read-only registration/program tables from
 mutable scope, ownership, and diagnostic state. Read-only graph probes match
 the optional registration graph in place; they do not materialize an owning
