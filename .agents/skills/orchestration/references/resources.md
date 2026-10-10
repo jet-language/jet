@@ -94,7 +94,12 @@ Run the final full-suite/golden gate with `JET=stage2/jet`, not only the earlier
 candidate S5 signal. Require the same-source complete suite receipt, registries,
 and hello/sample native runs at O0 and O2. Rust/LLVM execution is default-denied;
 only committed, source-proved user Rust FFI cases may admit their foreign crate
-builds, never a Rust fallback for compiling the Jet program.
+builds with the exact declared dependency manifest and foreign-build ancestry.
+The exact `rustc -vV` identity query is admitted only under direct Jet ancestry
+in that same allowlisted case/dependency cache namespace; report it separately
+as `allowedFfiQueries`, not a crate build. Never admit a Rust fallback for
+compiling the Jet program. Preserve PASS cases without an observed command
+marker as an explicit category without inferring why the marker is absent.
 The cutover suite composes the same native runner commands as `verify-full`
 after its formal closeout prefix, without adding a skip-closeout option.
 Report qualified formal proof composition and milestone closeout separately
