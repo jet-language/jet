@@ -33,15 +33,31 @@ test("bootstrap native and library feeds share the CLI keep-going collector", ()
   const compile = body("jet_bootstrap_compile");
   assert.match(compile, /JET_FRONT_NATIVE_OUTPUT[\s\S]*jet_bootstrap_native\(\^request, prefix\)/);
   assert.match(body("jet_bootstrap_native"), /jet_bootstrap_mir\(\^request\)/);
-  for (const name of ["jet_bootstrap_mir", "jet_bootstrap_library_object"]) {
-    const feed = body(name);
-    assert.match(feed, /jet_cli_compile_request\(\^request, false\)/, `${name} must preserve the native MIR backend choice`);
-    assert.ok(feed.indexOf("jet_cli_compile_request") < feed.indexOf("!result.complete"), `${name} must collect before refusing an incomplete artifact`);
-  }
+  const mir = body("jet_bootstrap_mir");
+  assert.match(mir, /jet_cli_compile_request\(\^request, false\)/, "native feeds must preserve the native MIR backend choice");
+  assert.ok(mir.indexOf("jet_cli_compile_request") < mir.indexOf("!result.complete"), "MIR observation must collect before refusing an incomplete artifact");
+  const library = body("jet_bootstrap_library_object");
+  assert.match(library, /jet_bootstrap_mir\(\^request\)/);
+  assert.match(library, /jet_cli_runtime_library\(\^result, prefix\)/);
   assert.match(compile, /jet_cli_compile_request\(\^request, true\)/);
   assert.doesNotMatch(entry, /jet_driver_compile(?:_mir|_keep_going)?\(\^request/);
   assert.doesNotMatch(entry, /cli_sys\.get\("JET_KEEP_GOING(?:_REPORT|_SKIP)?"\)/);
   assert.match(request, /jet_driver_compile_keep_going\(\^request, JetDriverKeepGoing\{skip: skip\}, emit_rust\)/);
   assert.match(request, /keep_going_rows\.len\(\) > 0 -> result\.complete = false/);
   assert.match(request, /"phase\\titem\\tcode\\tmessage\\tspan"/);
+});
+
+test("bootstrap library feed delegates ABI and optional pack production to the CLI", () => {
+  const entry = readFileSync(new URL("../../Compiler/Bootstrap/Host/Entry.jet", import.meta.url), "utf8");
+  const request = readFileSync(new URL("../../Compiler/JetCli/Source/Cli/Request.jet", import.meta.url), "utf8");
+  const library = entry.match(/^fn jet_bootstrap_library_object\([^\n]*\{\n([\s\S]*?)^\}/m);
+  assert.ok(library, "bootstrap library feed must exist");
+  assert.match(library[1], /jet_cli_runtime_library\(\^result, prefix\)/);
+  assert.doesNotMatch(library[1], /x64_runtime_library|write_bytes|\.exports/);
+  const producer = request.match(/^fn jet_cli_runtime_library\([^\n]*\{\n([\s\S]*?)^\}/m);
+  assert.ok(producer, "canonical CLI runtime producer must exist");
+  assert.match(producer[1], /!result\.complete/);
+  for (const artifact of [".o", ".exports", ".abi.json"]) assert.ok(producer[1].includes(`{prefix}${artifact}`), `${artifact} must remain a canonical output`);
+  for (const key of ["JET_FRONT_LIBRARY_LIFECYCLE", "JET_FRONT_RUNTIME_PACK_OUTPUT", "JET_FRONT_RUNTIME_PLATFORM_INPUTS"]) assert.ok(producer[1].includes(key), `${key} must be honored by the shared producer`);
+  assert.match(producer[1], /x64_link_runtime_pack\(names, \^bytes, roots\)/);
 });
