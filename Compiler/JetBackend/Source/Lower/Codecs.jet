@@ -39,6 +39,7 @@ fn lower_codec_reach(p: MIRProgram, q: &LowerPrepared, route: MIRPreludeCallID, 
     encode :: row.module_name == "core.encoding.codec" && row.member == "encode"
     decode :: (row.module_name == "core.encoding.codec" && (row.member == "decode" || row.member == "decode_typed"))
         || (row.module_name.starts_with("core.encoding.") && row.member == "decode")
+        || (row.module_name == "core.sys" && row.member == "decode")
     if !encode && !decode -> return
     lower_codec_reach_type(p, &q, types[0], encode, parent, site)
 }
@@ -137,6 +138,7 @@ fn lower_codec_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     if lower_native_value_call(p, c, &m, &f, instruction, call, args) -> return true
     row :: lower_prelude_row(p, call) ?? return false
     if types.len() == 1 && row.module_name == "core.encoding.csv" && row.member == "decode" -> return lower_codec_csv(p, c, &m, &f, instruction, args, types[0])
+    if types.len() == 1 && row.module_name == "core.sys" && row.member == "decode" -> return lower_codec_env(p, c, &m, &f, instruction, args, types[0])
     codec :: row.module_name == "core.encoding.codec" && (row.member == "encode" || row.member == "decode" || row.member == "decode_typed")
     parsed :: (row.module_name == "core.encoding.json" || row.module_name == "core.encoding.toml" || row.module_name == "core.encoding.yaml") && row.member == "decode"
     if types.len() != 1 || (!codec && !parsed) -> return false
@@ -257,8 +259,9 @@ fn lower_codec_prefix(p: MIRProgram, m: &LowerModule, f: &LowerFunction, route: 
     lower_record_list_from_runtime(p, &m, &f, errors, data, out.word, source)
 }
 
-// The canonical CSV row kernel owns header projection/error accumulation.
-// This boundary supplies only its checked native Decode callback and storage.
+// The canonical CSV row and env config kernels own source projection and
+// error accumulation. Each boundary supplies only its checked native Decode
+// callback ("codec.tree.decode") and storage.
 fn lower_codec_csv(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, args: [MIRCallArg], target: MIRType) -> Bool Never! {
     if args.len() != 1 {
         lower_fail(&m, &f, "typed CSV intrinsic needs its checked text argument")
@@ -279,20 +282,84 @@ fn lower_codec_csv(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
         lower_fail(&m, &f, "typed CSV does not return a checked Result")
         return true
     }
-    carrier :: LowerRouteCarrier.List{elem: LowerRouteCarrier.Handle{name: "FieldError"}}
-    if !lower_route_result_matches(p, errors, carrier) {
-        lower_fail(&m, &f, "typed CSV failures do not match canonical FieldError storage")
-        return true
-    }
-    if lower_dyn_program_type(p) == None {
-        lower_fail(&m, &f, "typed CSV has no checked Dyn declaration")
-        return true
-    }
+    if !lower_codec_kernel_ready(p, &m, &f, errors, "typed CSV") -> return true
     source :: lower_use(&m, &f, args[0].value) ?? return true
     dst :: lower_result(p, c, &m, &f, instruction) ?? return true
     callback_type :: mir_type_from_kind(MIRTypeKind.Result{ok: target, err: errors})
-    invoke :: lower_lazy_helper_address(&m, &f, "codec.csv.decode", callback_type)
+    invoke :: lower_lazy_helper_address(&m, &f, "codec.tree.decode", callback_type)
     meta :: lower_lazy_meta(p, &m, &f, target)
+    lower_codec_kernel_call(p, &m, &f, "jet_rt_codec_csv", [LIRValueID]{source, invoke, meta}, result, errors, dst)
+    true
+}
+
+// D-CONFIG-ENV1 `env.decode<T>(prefix, file, allow)`: the kernel receives
+// T's checked shape names as `env=key` lines (MIRRust.rs shape_name_map).
+fn lower_codec_env(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, args: [MIRCallArg], target: MIRType) -> Bool Never! {
+    if args.len() != 3 {
+        lower_fail(&m, &f, "typed env decode needs its checked prefix, file and allow arguments")
+        return true
+    }
+    result :: lower_checked_type(c, instruction) ?? return true
+    errors :: if result.kind == .Result(ok, failure) -> {
+        if !mir_type_same_checked_type(ok, target) {
+            lower_fail(&m, &f, "typed env decode success does not match its checked target")
+            return true
+        }
+        failure
+    } else -> {
+        lower_fail(&m, &f, "typed env decode does not return a checked Result")
+        return true
+    }
+    if !lower_codec_kernel_ready(p, &m, &f, errors, "typed env decode") -> return true
+    definition :: lower_type_def(p, target) ?? {
+        lower_fail(&m, &f, "typed env decode target has no definition")
+        return true
+    }
+    names := ""
+    if definition.kind == .Struct(fields, _) {
+        loop field in fields {
+            if field.skip || field.computed -> next
+            key :: field.shape_names.json ?? field.shape_names.text
+            names = "{names}{field.shape_names.env}={key}\n"
+        }
+    } else {
+        lower_fail(&m, &f, "typed env decode target {mir_type_display_name(target)} is not a struct")
+        return true
+    }
+    lowered := [LIRValueID]{}
+    loop arg in args {
+        value :: lower_use(&m, &f, arg.value) ?? return true
+        &lowered.push(value)
+    }
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    names_text :: lower_static_text(&m, &f, names)
+    shape :: lower_render_string(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_from_static", names_text, Val(shape))
+    &lowered.push(shape)
+    callback_type :: mir_type_from_kind(MIRTypeKind.Result{ok: target, err: errors})
+    &lowered.push(lower_lazy_helper_address(&m, &f, "codec.tree.decode", callback_type))
+    lower_codec_kernel_call(p, &m, &f, "jet_rt_codec_env", lowered, result, errors, dst)
+    lower_emit(&f, LIRInst.Drop{value: shape})
+    true
+}
+
+fn lower_codec_kernel_ready(p: MIRProgram, m: &LowerModule, f: &LowerFunction, errors: MIRType, what: String) -> Bool Never! {
+    carrier :: LowerRouteCarrier.List{elem: LowerRouteCarrier.Handle{name: "FieldError"}}
+    if !lower_route_result_matches(p, errors, carrier) {
+        lower_fail(&m, &f, "{what} failures do not match canonical FieldError storage")
+        return false
+    }
+    if lower_dyn_program_type(p) == None {
+        lower_fail(&m, &f, "{what} has no checked Dyn declaration")
+        return false
+    }
+    true
+}
+
+// Calls the kernel `symbol` with `args` then (value payload, errors out,
+// length out) and fills the Result box `dst`: its status is the selector, a
+// failure's handle buffer becomes the native [FieldError].
+fn lower_codec_kernel_call(p: MIRProgram, m: &LowerModule, f: &LowerFunction, symbol: String, args: [LIRValueID], result: MIRType, errors: MIRType, dst: LIRValueID) Never! {
     lower_alloc(&m, &f, dst, lower_box_size(p, result))
     failure_out :: lower_pointer(&f)
     lower_emit(&f, LIRInst.StackSlot{dst: failure_out, size: 16, align: 8})
@@ -302,7 +369,9 @@ fn lower_codec_csv(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     selector :: lower_word(&f)
     payload :: lower_address(&f, dst, 8)
     length_out :: lower_address(&f, failure_out, 8)
-    lower_call_runtime(&m, &f, "jet_rt_codec_csv", [LIRValueID]{source, invoke, meta, payload, failure_out, length_out}, Val(selector))
+    call_args := args.copy()
+    loop value in ([LIRValueID]{payload, failure_out, length_out}) -> &call_args.push(value)
+    lower_call_runtime(&m, &f, symbol, call_args, Val(selector))
     lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: selector})
     succeeded :: lower_flag(&f)
     lower_emit(&f, LIRInst.Compare{dst: succeeded, condition: LIRCondition.Ne, left: selector, right: zero})
@@ -317,17 +386,16 @@ fn lower_codec_csv(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     lower_record_list_from_runtime(p, &m, &f, errors, buffer, length, payload)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
     lower_start(&f, merge, [LIRValueID]{})
-    true
 }
 
-// OCB1 borrowed input: always returns consumed mask zero. The status/value
-// outs are written only after the masked delivered-stop gate succeeds. The
-// canonical kernel (JetRuntime CodecCSV.jet) invokes it inside the text-cell
-// scope.
-fn lower_helper_codec_csv_decode(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
-    target :: if glue.ty.kind == .Result(ok, _) -> ok else -> panic("CSV callback needs its checked Decode Result")
-    errors :: if glue.ty.kind == .Result(_, err) -> err else -> panic("CSV callback needs its checked failures")
-    tree :: lower_dyn_program_type(p) ?? panic("CSV callback needs its checked Dyn")
+// "codec.tree.decode" (borrowed runtime Dyn, value out, status out, errors
+// out, length out) -> consumed mask zero, the OCB1 callback both kernels
+// invoke inside the text-cell scope. The status/value outs are written only
+// after the masked delivered-stop gate succeeds.
+fn lower_helper_codec_tree_decode(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    target :: if glue.ty.kind == .Result(ok, _) -> ok else -> panic("tree Decode callback needs its checked Decode Result")
+    errors :: if glue.ty.kind == .Result(_, err) -> err else -> panic("tree Decode callback needs its checked failures")
+    tree :: lower_dyn_program_type(p) ?? panic("tree Decode callback needs its checked Dyn")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer(), lir_layout_pointer(), lir_layout_pointer(), lir_layout_pointer()}, Val(lir_layout_word()))
     borrowed :: f.open_params[0].copy()
     output :: f.open_params[1].copy()

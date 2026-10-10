@@ -79,6 +79,9 @@ extern W jet_rt_codec_csv(Text *, uintptr_t, const Meta *, Words *, uintptr_t **
 extern W jet_rt_codec_decode_int(void *, W *, uintptr_t **, W *);
 extern W jet_dyn_field(void *, Text *, void **, uintptr_t **, W *);
 extern void *jet_rt_record_new_dyn_text(Text *);
+extern W jet_rt_codec_env(Text *, Text *, const Words *, Text *, uintptr_t, W *, uintptr_t **, W *);
+extern W jet_rt_logical_env_set(Text *, Text *);
+extern W jet_rt_logical_env_unset(Text *);
 static char path[] = "/tmp/jet-native-codec-files-XXXXXX";
 static Text *text(const char *s) { return jet_rt_string_from_static(s, (W)strlen(s)); }
 static void text_is(Text *value, const char *expected) {
@@ -203,6 +206,46 @@ static void csv(void) {
     text_is(jet_rt_record_get_field_error_reason((void *)errors[0]), "E2701: CSV row 2, line 2, column 2 \xe2\x80\x94 quote inside an unquoted field");
     jet_rt_handle_drop_field_error((void *)errors[0]); jet_rt_free(errors, (W)sizeof(uintptr_t), 8);
 }
+// A checked Decode callback for `struct { port: Int }`: the field's errors
+// are framed under `port`, as a derived decoder does.
+static uint64_t env_port(void *tree, W *value, W *tag, uintptr_t **errors, W *count) {
+    Text *name = text("port"); void *cell = NULL;
+    assert(jet_dyn_field(tree, name, &cell, errors, count) == 1);
+    jet_rt_string_drop(name);
+    *tag = jet_rt_codec_decode_int(cell, value, errors, count);
+    jet_rt_handle_drop_dyn(cell);
+    if (*tag == 0) {
+        uintptr_t *framed = NULL; Text *segment = text("port");
+        assert(jet_rt_codec_under(segment, *errors, *count, &framed) == *count);
+        jet_rt_string_drop(segment);
+        for (W i = 0; i < *count; ++i) jet_rt_handle_drop_field_error((void *)(*errors)[i]);
+        jet_rt_free(*errors, *count * (W)sizeof(uintptr_t), 8);
+        *errors = framed;
+    }
+    return 0;
+}
+static void env(void) {
+    Text *key = text("JET_WITNESS_PORT"), *setting = text(" 8080 ");
+    assert(jet_rt_logical_env_set(key, setting) == 0);
+    jet_rt_string_drop(setting);
+    Text *prefix = text("jet_witness_"), *file = text(""), *names = text("PORT=port\n");
+    Words allow = {0}; W value = 0; uintptr_t *errors = NULL; W count = 0;
+    assert(jet_rt_codec_env(prefix, file, &allow, names, (uintptr_t)env_port, &value, &errors, &count) == 1 && value == 8080);
+    setting = text("eighty");
+    assert(jet_rt_logical_env_set(key, setting) == 0);
+    jet_rt_string_drop(setting);
+    assert(jet_rt_codec_env(prefix, file, &allow, names, (uintptr_t)env_port, &value, &errors, &count) == 0 && count == 1);
+    text_is(jet_rt_record_get_field_error_path((void *)errors[0]), "port");
+    text_is(jet_rt_record_get_field_error_reason((void *)errors[0]), "E2416: env var JET_WITNESS_PORT -> port: expected Int, found text \"eighty\"");
+    jet_rt_handle_drop_field_error((void *)errors[0]); jet_rt_free(errors, (W)sizeof(uintptr_t), 8);
+    assert(jet_rt_logical_env_unset(key) == 1);
+    jet_rt_string_drop(key); jet_rt_string_drop(file);
+    file = text("/etc/.env");
+    assert(jet_rt_codec_env(prefix, file, &allow, names, (uintptr_t)env_port, &value, &errors, &count) == 0 && count == 1);
+    text_is(jet_rt_record_get_field_error_reason((void *)errors[0]), "E2416: Dotenv.file must be project-relative");
+    jet_rt_handle_drop_field_error((void *)errors[0]); jet_rt_free(errors, (W)sizeof(uintptr_t), 8);
+    jet_rt_string_drop(file); jet_rt_string_drop(prefix); jet_rt_string_drop(names);
+}
 static void line(void *reader, const unsigned char *expected, W size) {
     unsigned char *bytes = NULL; W count = -1; void *error = NULL;
     assert(jet_file_reader_line_bytes_raw(reader, &bytes, &count, &error) == 1 && count == size && error == NULL);
@@ -308,6 +351,7 @@ static void exercise(void) {
     terminal_read_all();
     codecs();
     csv();
+    env();
     Text *name = text(path); void *reader = NULL, *error = NULL;
     assert(jet_std_files_open_reader_nonblocking(name, &reader, &error) == 1 && error == NULL);
     jet_rt_string_drop(name);
@@ -331,6 +375,6 @@ int main(void) {
     assert(fwrite("\r\r\nb\ntail\r", 1, 10, file) == 10 && fclose(file) == 0);
     int32_t status = jet_rt_main(exercise);
     assert(unlink(path) == 0 && status == 0);
-    puts("CHECK OK — Jet-only Dyn encodes, FieldError frames, JSON and CSV codecs and shared buffered lines");
+    puts("CHECK OK — Jet-only Dyn encodes, FieldError frames, JSON, CSV and env codecs and shared buffered lines");
     return 0;
 }

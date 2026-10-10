@@ -72,7 +72,7 @@ for (const row of [...archiveInputs, ...crt]) if (fileObject(row.path) !== row.h
 for (const row of [dataAbi, collections]) if (fileObject(join(root, row.path)) !== row.handle) throw Error(`canonical ABI source changed during proof: ${row.path}`);
 if (fileObject(source) !== sourceHandle || fileObject(jet) !== compilerHandle || fileObject(object) !== objectHandle) throw Error('witness, compiler, or admitted object changed during proof');
 const result = command('run', executable, []);
-const expected = 'CHECK OK — Jet-only Dyn encodes, FieldError frames, JSON and CSV codecs and shared buffered lines\n';
+const expected = 'CHECK OK — Jet-only Dyn encodes, FieldError frames, JSON, CSV and env codecs and shared buffered lines\n';
 if (result.stdout !== expected || result.stderr !== '') throw Error('codec/file runtime witness output differs from its exact success receipt');
 receipt('result.json', { status: 0, runtimeKey: admitted.key, object: objectHandle, compiler: compilerHandle, witness: sourceHandle, cObject: fileObject(cObject), executable: fileObject(executable), stdout: result.stdout, stderr: result.stderr });
 console.log(`native codec/file leaves: ok (${admitted.key})`);
