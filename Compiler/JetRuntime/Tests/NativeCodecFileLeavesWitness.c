@@ -2,11 +2,13 @@
 // provider, alternate runtime, or guessed Rust enum/Box layout is required.
 #define _POSIX_C_SOURCE 200809L
 #include <assert.h>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #ifndef RT_HOST_U8_STRIDE
 #error "runner must provide the RC-pinned native U8 element stride"
@@ -67,6 +69,10 @@ extern W jet_fd_seek_raw(void *, W, W, W *, bool *);
 extern void jet_fd_close_raw(void *, W *, bool *);
 extern void jet_fd_drop_raw(void *);
 extern void jet_rt_handle_drop_io_error(void *);
+extern W jet_fs_directory_open(W, Text *, W *, void **);
+extern void jet_fs_directory_close(W);
+extern W jet_fs_directory_list(W, Bytes **, W *, void **);
+extern void jet_terminal8_read_all(Text **, W *, Text **);
 static char path[] = "/tmp/jet-native-codec-files-XXXXXX";
 static Text *text(const char *s) { return jet_rt_string_from_static(s, (W)strlen(s)); }
 static void text_is(Text *value, const char *expected) {
@@ -183,8 +189,74 @@ static void packed_boundary(void) {
     assert(offset == 256 && jet_rt_http_body_chunks_drop(chunks) == 0);
     assert(jet_rt_http_body_drop(body) == 0);
 }
+static void directory_entries(void) {
+    char directory[] = "/tmp/jet-native-directory-XXXXXX";
+    assert(mkdtemp(directory) != NULL);
+    int fd = open(directory, O_RDONLY | O_DIRECTORY); assert(fd >= 0);
+    assert(mkdirat(fd, "sub", 0700) == 0);
+    int file = openat(fd, "plain", O_CREAT | O_WRONLY, 0600); assert(file >= 0 && close(file) == 0);
+    file = openat(fd, "bad-\377", O_CREAT | O_WRONLY, 0600); assert(file >= 0 && close(file) == 0);
+    assert(symlinkat("sub", fd, "link") == 0);
+    Text *name = text(directory); W key = 0; void *error = NULL;
+    assert(jet_fs_directory_open(-1, name, &key, &error) == 1 && error == NULL);
+    jet_rt_string_drop(name);
+    for (unsigned pass = 0; pass != 2; ++pass) {
+        Bytes *rows = NULL; W count = 0; unsigned found = 0;
+        assert(jet_fs_directory_list(key, &rows, &count, &error) == 1 && error == NULL && count == 4);
+        for (W i = 0; i != count; ++i) {
+            const unsigned char *bytes = rows[i].data; W length = rows[i].len;
+            assert(rows[i].cap == length && length > 1);
+            if (length == 4 && memcmp(bytes + 1, "sub", 3) == 0) { assert(bytes[0] == 1); found |= 1; }
+            else if (length == 6 && memcmp(bytes + 1, "plain", 5) == 0) { assert(bytes[0] == 0); found |= 2; }
+            else if (length == 5 && memcmp(bytes + 1, "link", 4) == 0) { assert(bytes[0] == 0); found |= 4; }
+            else { assert(length == 6 && bytes[0] == 0 && memcmp(bytes + 1, "bad-\377", 5) == 0); found |= 8; }
+            jet_rt_free(rows[i].data, rows[i].cap * RT_HOST_U8_STRIDE, 8);
+        }
+        assert(found == 15); jet_rt_free(rows, count * (W)sizeof(*rows), 8);
+    }
+    jet_fs_directory_close(key);
+    Bytes *rows = NULL; W count = 0;
+    assert(jet_fs_directory_list(key, &rows, &count, &error) == 0 && error != NULL);
+    jet_rt_handle_drop_io_error(error); jet_rt_int_drop(key);
+    assert(unlinkat(fd, "plain", 0) == 0 && unlinkat(fd, "bad-\377", 0) == 0);
+    assert(unlinkat(fd, "link", 0) == 0 && unlinkat(fd, "sub", AT_REMOVEDIR) == 0);
+    assert(close(fd) == 0 && rmdir(directory) == 0);
+}
+static FILE *stdin_bytes(const unsigned char *bytes, size_t length) {
+    FILE *file = tmpfile(); assert(file != NULL);
+    assert(fwrite(bytes, 1, length, file) == length && fseek(file, 0, SEEK_SET) == 0);
+    assert(dup2(fileno(file), STDIN_FILENO) == STDIN_FILENO);
+    return file;
+}
+static void terminal_read_all(void) {
+    int saved = dup(STDIN_FILENO); assert(saved >= 0);
+    unsigned char bytes[8194]; memset(bytes, 'x', sizeof(bytes));
+    memcpy(bytes + 4095, "\360\237\231\202", 4);
+    FILE *file = stdin_bytes(bytes, sizeof(bytes));
+    Text *value = NULL, *error = NULL; W tag = -1;
+    jet_terminal8_read_all(&value, &tag, &error);
+    assert(tag == 0 && error == NULL && value->len == (W)sizeof(bytes));
+    assert(memcmp(value->data, bytes, sizeof(bytes)) == 0); jet_rt_string_drop(value);
+    value = NULL; tag = -1;
+    jet_terminal8_read_all(&value, &tag, &error);
+    assert(tag == 0 && error == NULL); text_is(value, "");
+    assert(fclose(file) == 0);
+    const unsigned char invalid[] = { 0xc3 };
+    file = stdin_bytes(invalid, sizeof(invalid)); value = NULL; tag = -1;
+    jet_terminal8_read_all(&value, &tag, &error);
+    assert(tag == 1 && error != NULL); text_is(value, "");
+    text_is(error, "stream did not contain valid UTF-8"); error = NULL;
+    assert(fclose(file) == 0 && close(STDIN_FILENO) == 0);
+    value = NULL; tag = -1;
+    jet_terminal8_read_all(&value, &tag, &error);
+    assert(tag == 1 && error != NULL && error->len != 0); text_is(value, "");
+    jet_rt_string_drop(error);
+    assert(dup2(saved, STDIN_FILENO) == STDIN_FILENO && close(saved) == 0);
+}
 static void exercise(void) {
     packed_boundary();
+    directory_entries();
+    terminal_read_all();
     codecs();
     Text *name = text(path); void *reader = NULL, *error = NULL;
     assert(jet_std_files_open_reader_nonblocking(name, &reader, &error) == 1 && error == NULL);

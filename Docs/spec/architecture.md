@@ -232,6 +232,14 @@ native socket and readiness providers, while the `https://` branch connects and
 then returns the runtime's canonical TLS refusal text (D-NATIVE-TLS1=B) as its
 String error without sending a request.
 
+Held-directory listing reuses the one FD72-backed held-directory table. Each
+call reads a fresh stream, returns packed raw filename rows with a no-follow
+directory-kind byte, and transfers the nested List headers and buffers as
+native owners. Terminal read-all serializes stdin reads with its lifecycle
+mutex, assembles complete UTF-8 across syscall chunk boundaries, and retains
+the existing empty-text/optional-error result rail. The admitted C witness
+also covers independent directory cursors, raw non-UTF-8 names, symlink kinds,
+closed directories, multi-chunk UTF-8 stdin, EOF and read/encoding errors.
 Native C consumers and pack/link drivers invoke the shared
 `Tools/packaging/native-c-compiler.mjs` policy. It appends
 `-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0` and removes only Nix's `fortify` and
