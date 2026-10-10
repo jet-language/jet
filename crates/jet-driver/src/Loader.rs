@@ -6410,6 +6410,24 @@ mod stale_manifest_name_tests {
     }
 
     #[test]
+    fn declared_rule_rejection_uses_its_registered_diagnostic() {
+        let root = tempdir("declared-rule-rejection");
+        let entry = root.join("run.jet");
+        let source = include_str!("../../../Compiler/JetSema/Tests/RejectDiagnosticFixtures.jet");
+        fs::write(&entry, source).unwrap();
+        let (diagnostics, _) = crate::Driver::check_file(entry.to_str().unwrap(), None, false);
+        let errors = diagnostics.iter()
+            .filter(|diagnostic| diagnostic.severity == crate::Diagnostics::Severity::Error)
+            .collect::<Vec<_>>();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].code, "E0927", "{errors:?}");
+        assert_eq!(errors[0].what, "The rule rejected this type");
+        assert_eq!(errors[0].why, "The test rule is deliberately strict");
+        assert_eq!(errors[0].fix, "Remove the marker");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn negative_literal_power_keeps_fraction_result_and_dynamic_int() {
         let root = tempdir("negative-literal-power");
         let entry = root.join("run.jet");
