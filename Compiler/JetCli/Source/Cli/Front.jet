@@ -460,7 +460,7 @@ fn jet_cli_status(status_args: [String], color: Bool, json: Bool) -[FS, Env, Tim
     explicit := String?{None}
     if jet_cli_project_status_target(status_args) == {
         .Ok(found) -> explicit = found
-        .Err(message) -> return jet_cli_fail("E2102", message, "jet status accepts one project target and registered output flags", "run `jet status [<file.jet|dir>]` with one target", color, JET_DRIVER_EXIT_USAGE)
+        .Err(message) -> return jet_cli_fail("E2102", message.message, "jet status accepts one project target and registered output flags", "run `jet status [<file.jet|dir>]` with one target", color, JET_DRIVER_EXIT_USAGE)
     }
     notices := [String]{}
     target := explicit ?? ""
@@ -984,7 +984,7 @@ fn jet_cli_explain(jet_argv: [String], args: [String], color: Bool, json: Bool) 
     if query == "marker" {
         // CmdDevTools.rs `run_explain_marker`: extra words stay ignored.
         if args.len() < 4 -> return jet_cli_done("", "usage: jet explain marker <file>:<line> <policy-key>\n", JET_DRIVER_EXIT_USAGE)
-        marker :: jet_cli_explain_marker_site(args[2]) ?? return jet_cli_fail("E2104", err, jet_cli_why("E2104"), "correct the named argument or input, then run the command again", color, JET_DRIVER_EXIT_USAGE)
+        marker :: jet_cli_explain_marker_site(args[2]) ?? return jet_cli_fail("E2104", err.message, jet_cli_why("E2104"), "correct the named argument or input, then run the command again", color, JET_DRIVER_EXIT_USAGE)
         key :: policy_key_parse(args[3]) ?? return jet_cli_fail("E2104", "`{args[3]}` is not a registered scoped policy", jet_cli_why("E2104"), "correct the named argument or input, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
         return JetCLIPlan.PolicyExplain{key: key, file: marker.file, site: Val(args[2]), line: Val(marker.line), color: color, json: json}
     }

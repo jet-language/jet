@@ -170,7 +170,7 @@ fn jet_cli_gates_diagnostics(result: JetDriverGateQueryResult, snapshot: JetDriv
     reports := [String]{}
     stderr := ""
     cwd :: if json -> jet_cli_report_cwd() else -> None
-    diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, [])
+    diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, [MIRSourceFile]{})
     loop (index, diagnostic) in diagnostics {
         path :: if diagnostic.origin == .Val(origin) -> origin.display else -> file
         source :: if diagnostic.origin == .Val(origin) -> origin.source else -> jet_cli_gates_source(result.source.modules, path)
@@ -181,7 +181,7 @@ fn jet_cli_gates_diagnostics(result: JetDriverGateQueryResult, snapshot: JetDriv
             stderr = "{stderr}{diagnostic_render_all(path, source, [Diagnostic]{diagnostic}, color)}"
         }
     }
-    stdout :: if json -> "{jet_cli_status_render_with_reports("inspect.gates", false, reports, [])}\n" else -> ""
+    stdout :: if json -> "{jet_cli_status_render_with_reports("inspect.gates", false, reports, [JetCLIStatusField]{})}\n" else -> ""
     JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
 

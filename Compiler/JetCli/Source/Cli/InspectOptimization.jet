@@ -67,7 +67,7 @@ fn jet_cli_optimization_rejection(reason: MIROptimizationRejection) -> (code: St
 }
 fn jet_cli_optimization_gate_statement(status: MIRAccelerationGateStatus?) -> String Never! {
     if status == None -> return "the runtime profile has not been published"
-    if (status ?? .Selected) == {
+    if status == {
         .BelowStaticFloor -> "the source item count is at or below the static floor"
         .Pinned(pin) -> "the loop is pinned by {mir_acceleration_pin_name(pin)}"
         .NotReleaseBuild -> "the build is not a release profile"
@@ -207,12 +207,12 @@ fn jet_cli_acceleration_report(query: JetDriverOptimizationQueryResult, scope: S
             }
             decision := MIRAccelerationDecision?{None}
             if trip == .Val(items) {
-                if U64.from_int(items) == .Val(count) -> decision = Val(mir_acceleration_evaluate(gate, fact.transform, mir_acceleration_deferred(fact, count, query.release_build, parity)))
+                if U64.from_int(items) == .Ok(count) -> decision = Val(mir_acceleration_evaluate(gate, fact.transform, mir_acceleration_deferred(fact, count, query.release_build, parity)))
             }
             runtime_index := Int?{None}
             source_start :: U64.from_int(fact.span.start)
             source_end :: U64.from_int(fact.span.end)
-            if source_start == .Val(start) && source_end == .Val(end) {
+            if source_start == .Ok(start) && source_end == .Ok(end) {
                 loop (index, value) in runtime {
                     if value.function != function.key || value.loop_header != fact.loop_header.value || start != value.source.start || end != value.source.end -> next
                     runtime_index = Val(index)
@@ -377,7 +377,7 @@ fn jet_cli_decisions_report(ledger: MIRDecisionLedger, scope: String, file: Stri
 // then present. This ordering preserves the journal of this actual invocation.
 fn jet_cli_optimization_host(request: JetDriverCompileRequest, query: JetDriverOptimizationQueryResult, plane: String, scope: String, file: String, runtime: [JetCLIAccelerationRuntime], canonical_routes: [JetCLIStatusValue], color: Bool, json: Bool) -> JetDriverVerbOutput {
     if !query.compile.complete || query.compile.internal_problem != None {
-        diagnostics :: jet_driver_present_diagnostics(query.compile.diagnostics, request.authorized_sources, [])
+        diagnostics :: jet_driver_present_diagnostics(query.compile.diagnostics, request.authorized_sources, [MIRSourceFile]{})
         report :: if json -> jet_cli_reports_status_json("inspect", false, jet_cli_report_cwd(), file, "", diagnostics) else -> diagnostic_render_all(file, "", diagnostics, color)
         return JetDriverVerbOutput{stdout: if json -> report else -> "", stderr: if json -> "" else -> report, exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }

@@ -48,7 +48,7 @@ fn jet_cli_output_report(query: JetDriverOutputQueryResult, output: ResolvedOutp
 fn jet_cli_output_host(request: JetDriverCompileRequest, address: String?, file: String, json: Bool) -> JetDriverVerbOutput {
     query :: jet_driver_output_query(request, address)
     if !query.compile.complete || query.compile.internal_problem != None {
-        diagnostics :: jet_driver_present_diagnostics(query.compile.diagnostics, request.authorized_sources, [])
+        diagnostics :: jet_driver_present_diagnostics(query.compile.diagnostics, request.authorized_sources, [MIRSourceFile]{})
         report :: if json -> jet_cli_reports_status_json("inspect", false, jet_cli_report_cwd(), file, "", diagnostics) else -> diagnostic_render_all(file, "", diagnostics, false)
         return JetDriverVerbOutput{stdout: if json -> report else -> "", stderr: if json -> "" else -> report, exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
