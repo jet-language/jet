@@ -548,13 +548,12 @@ pub(crate) fn eval_comptime_items(
             }
         }
         for index in 0..items.len() {
-            let (name, value, known, known_ty, module_value) = match &items[index] {
+            let (name, value, known, known_ty) = match &items[index] {
                 Item::Const(c) if const_evaluated_at_build(c) => (
                     c.name.clone(),
                     c.value.clone(),
                     c.ct.clone(),
                     c.ty.clone(),
-                    !c.is_comptime,
                 ),
                 _ => continue,
             };
@@ -742,13 +741,10 @@ pub(crate) fn eval_comptime_items(
                         &globals,
                     );
 
-                    // A literal module constant keeps its checked type, so
-                    // `U8{5}` and an empty `[Rgb]{}` stay exact. For a
-                    // comptime binding, `v.jet_type()` reads the element type
-                    // off the value's first element; a fixed-return-type
-                    // builtin whose result is empty prefers its known static
-                    // return type.
-                    let ty = match checked_ty.filter(|_| module_value) {
+                    // Evaluation values erase numeric widths and cannot infer
+                    // empty collection elements. Keep the initializer's checked
+                    // type for prep bindings as well as ordinary constants.
+                    let ty = match checked_ty {
                         Some(ty) => ty,
                         None => comptime_builtin_fixed_return_type(&value, core_imports, &v)
                             .unwrap_or_else(|| v.jet_type()),

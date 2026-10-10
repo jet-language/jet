@@ -940,6 +940,8 @@ tag 0 (RFC 3339 text) to `Dyn.DateTime` with the written offset, and tag 1
 (epoch seconds, Int or Float) to `Dyn.DateTime` at offset `+00:00`; encoding
 writes `Dyn.Bytes` as major type 2 and `Dyn.DateTime` as tag 0 with its
 canonical RFC 3339 text, in both preferred and canonical form (D-INFER-PRIVATE1=A).
+`Bytes` is a public `Dyn` variant: ordinary `.Bytes(bytes)` patterns bind its
+`[U8]` payload without an audited unsafe region or a Core-only source origin.
 Reject every other tag, bignums outside `Int`, non-text map keys, duplicate text
 keys, undefined/unsupported simple values, and all values outside `Dyn`; never
 coerce. Typed `decode<T>` accepts only shapes admitted by `T`'s one Codable

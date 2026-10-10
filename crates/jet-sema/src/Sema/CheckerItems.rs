@@ -2995,12 +2995,14 @@ impl<'a> Checker<'a> {
         if segs.is_empty() || self.lookup(root).is_some() {
             return None;
         }
-        let (identity, path) = if self.imports.contains_key(root) && !self.is_known_enum(root) {
+        let (identity, path) = if (self.imports.contains_key(root) || self.core_imports.contains_key(root))
+            && !self.is_known_enum(root)
+        {
             let qualified = format!("{root}.{}", segs[0]);
-            if !self.is_known_enum(&qualified) {
+            let identity = self.import_qualified_nominal(&qualified)?;
+            if !self.is_known_enum(&identity) {
                 return None;
             }
-            let identity = self.import_qualified_nominal(&qualified)?;
             (identity, segs[1..].join("."))
         } else {
             if !self.is_known_enum(root) {
@@ -3052,6 +3054,9 @@ impl<'a> Checker<'a> {
         if let Some(module) = namespace.and_then(|namespace| self.core_imports.get(namespace)) {
             if let Some(owner) = self.core_source_enum_owner_module(module, leaf) {
                 return Some(self.canonical_nominal_name(owner, leaf));
+            }
+            if crate::Sema::CheckerCoreLib::core_native_enum_variant_names(module, leaf).is_some() {
+                return Some(leaf.to_string());
             }
         }
         if self.member_imported_type(name)
@@ -5022,16 +5027,6 @@ impl<'a> Checker<'a> {
             ) => {
                 let display_enum_name = self.display_type_name(enum_name, None);
                 if is_json_type_name(enum_name) {
-                    if variant == "Bytes"
-                        && !(self.in_unsafe && self.name_ledger.module_alias(self.module_idx).is_some_and(|alias|
-                            jet_foundation::CoreModuleExports::CORE_SOURCE_MODULES.iter().any(|source| source.alias == alias)
-                            || jet_foundation::CoreSourceParts::core_private_source_part_by_alias(alias).is_some()))
-                    {
-                        self.diags.push(Diagnostic::error("E0510", "private DataTree carrier pattern".to_string(),
-                            "native carrier payloads may be borrowed only by vetted Core internals inside #Unsafe".to_string(),
-                            "use the public DataTree variants".to_string(), Some(span)));
-                        return HashMap::new();
-                    }
                     let Some(expected) = core_json_pattern_types(variant) else {
                         self.diags.push(Diagnostic::error(
                             "E0305",

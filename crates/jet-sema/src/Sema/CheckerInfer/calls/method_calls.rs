@@ -1459,7 +1459,7 @@ impl<'a> Checker<'a> {
         // ordinary receiver walk tries to treat `alias.module` as a value.
         if let Expr::Field(base, inline_module, _) = receiver.as_ref() {
             if let Expr::Ident(alias, alias_span) = base.as_ref() {
-                if let Some(&module_idx) = self.imports.get(alias) {
+                if let Some(&module_idx) = self.imports.get(alias).filter(|_| self.lookup(alias).is_none()) {
                     let is_inline_module = self.modules.is_some_and(|modules| {
                         modules[module_idx].code_modules.contains_key(inline_module)
                     });
@@ -1748,7 +1748,7 @@ impl<'a> Checker<'a> {
             if let Expr::Ident(alias_storage, alias_span) = &mut **base {
                 let alias = &*alias_storage;
                 let leaf = &*leaf_storage;
-                if let Some(ns) = self.core_imports.get(alias).cloned() {
+                if let Some(ns) = self.core_imports.get(alias).filter(|_| self.lookup(alias).is_none()).cloned() {
                     self.record_import_alias_reference(alias, *alias_span);
                     if ns == "core.net.tls" && leaf == "ClientConfig" && method == "default" {
                         if !args.is_empty() {
@@ -2349,6 +2349,7 @@ impl<'a> Checker<'a> {
                 if let Some(&mod_idx) = self
                     .inline_reexport_foreign
                     .get(&(inline_alias.clone(), leaf.clone()))
+                    .filter(|_| self.lookup(inline_alias).is_none())
                 {
                     return self.infer_import_call(
                         inline_alias,
@@ -2368,7 +2369,8 @@ impl<'a> Checker<'a> {
         // otherwise `use core.encoding.[Dyn]` is misread as
         // `core.encoding.Bool`.
         if let Expr::Ident(alias, alias_span) = &**receiver {
-            if let (Some(module), Some(item)) = (
+            if let (None, Some(module), Some(item)) = (
+                self.lookup(alias),
                 self.core_imports.get(alias).cloned(),
                 self.core_item_imports.get(alias).cloned(),
             ) {
@@ -2479,7 +2481,7 @@ impl<'a> Checker<'a> {
             return ret;
         }
         if let Expr::Ident(alias, alias_span) = &**receiver {
-            if let Some(module) = self.core_imports.get(alias).cloned() {
+            if let Some(module) = self.core_imports.get(alias).filter(|_| self.lookup(alias).is_none()).cloned() {
                 self.inferred_call_type_args = None;
                 let ret = self.infer_core_call(
                     &module,
@@ -2497,7 +2499,7 @@ impl<'a> Checker<'a> {
                 }
                 return ret;
             }
-            if let Some(&mod_idx) = self.imports.get(alias) {
+            if let Some(&mod_idx) = self.imports.get(alias).filter(|_| self.lookup(alias).is_none()) {
                 self.inferred_call_type_args = None;
                 let ret = self.infer_import_call(
                     alias,
@@ -2514,7 +2516,7 @@ impl<'a> Checker<'a> {
             }
             // D-MOD2: inline code module call — `math.double(x)` where `math` is an
             // inline `module math { … }` in this file. Resolve via mangled name.
-            if let Some(canonical) = self.code_modules.get(alias.as_str()) {
+            if let Some(canonical) = self.code_modules.get(alias.as_str()).filter(|_| self.lookup(alias).is_none()) {
                 let mangled = jet_foundation::Names::member_name(canonical, method);
                 self.inferred_call_type_args = None;
                 let ret = self.infer_code_module_call(

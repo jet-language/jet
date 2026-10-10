@@ -308,8 +308,13 @@ Other readable aliases are `Clock`, `Instant`, `Date`, `Duration`, `Path`,
 names are `embed_file`, `embed_bytes`, `find`, and `fetch`; `random` remains
 qualified as `core.math.random` (D-NAME-ALIAS1=A, D-CORE-PRELUDE1=A).
 A user declaration shadows a readable prelude alias; the language-owned built-in
-names remain reserved. `#NoPrelude` disables the readable prelude aliases for that
-file, so use the qualified Core call instead (D-NAME-ALIAS1=A, D-PRELUDEX1=A).
+names remain reserved. In member access, the nearest local value binding also
+shadows an imported module alias or an implicit Core module name: `term.len()`,
+`hex.bytes()`, and `time.contains(name)` use the local receiver when one exists.
+An unshadowed module alias can qualify a declared enum and its variants while
+retaining that enum's source-owned identity. `#NoPrelude` disables the readable
+prelude aliases for that file, so use the qualified Core call instead
+(D-NAME-ALIAS1=A, D-PRELUDEX1=A).
 
 Automatic Core source loading and readable-prelude alias injection use identifiers
 from the canonical lexer, including code inside string interpolation.
@@ -1109,6 +1114,10 @@ unmarked move that a later use reaches stays E0121.
 See [`view_move_copy.jet`](../../Examples/features/memory/view_move_copy.jet)
 and [`share_on_reuse.jet`](../../Examples/features/memory/share_on_reuse.jet).
 
+After a partial move from an owned local, assigning a replacement to that
+field initializes that field and its descendants again; it does not restore a
+moved ancestor or an unrelated moved field.
+
 ### Named views and places
 
 Raw reference syntax is not a first-class Jet value: `-> &T` return types,
@@ -1182,6 +1191,13 @@ spelling: a local uses its definition identity, a public function parameter its
 zero-based position, and static storage its declaration. Shadowing therefore
 creates a different owner. A place is an owner plus ordered field, index, or
 range projections; reborrowing preserves that owner.
+
+Pattern payload bindings retain the matched place's owner. A payload borrowed
+from a parameter may therefore supply a returned view `from` that parameter;
+a payload taken from a local or consumed parameter cannot outlive its owner.
+A nested write-pattern binding reborrows its parent's write access. While the
+child is live, overlapping accesses through the parent are suspended; accesses
+through the child do not create an independent competing loan.
 
 Each view fact records place, read/write access, lexical extent, source kind, and
 invalidation state. Read views may overlap. A write view is unique and cannot

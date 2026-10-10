@@ -5401,7 +5401,9 @@ impl<'a> Checker<'a> {
                 // D-MOD2: an alias-qualified enum (`types.Kind.Alpha`) always
                 // folds, because the Field route has no module-alias hop.
                 if let Some((type_name, variant)) = self.fold_enum_variant_path(e, false) {
-                    if variant.contains('.') || (type_name.contains("::") && !variant.is_empty()) {
+                    if !variant.is_empty() && (variant.contains('.') || type_name.contains("::")
+                        || matches!(e, Expr::Field(inner, ..) if matches!(inner.as_ref(), Expr::Field(..))))
+                    {
                         let ty = self.check_enum_lit(&type_name, &variant, &mut [], span, None);
                         *e = Expr::EnumLit {
                             type_name,
