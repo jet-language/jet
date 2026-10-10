@@ -16,7 +16,7 @@ const key = readFileSync(join(runtime, "native.key"), "utf8").trim();
 assert.ok(key && key !== "." && key !== ".." && !key.includes("/"), "pack key must name one directory");
 assert.ok(existsSync(join(runtime, key, "jet_runtime.pack.o")), "native CLI must have its admitted pack");
 for (const [name, expected] of [
-  ["native_tls_refusal", "TLS transport is not available in native builds yet (pending decision); use plain TCP/HTTP"],
+  ["native_tls_refusal", "TLS transport is not available in native builds until Jet's own TLS implementation lands (D-NATIVE-TLS1=B); use plain HTTP or TCP meanwhile"],
   ["native_missing_ws_provider", "undefined symbol `jet_ws_connect`, referenced by"],
 ]) {
   const cwd = join(out, name); mkdirSync(cwd, {recursive: true});

@@ -415,20 +415,10 @@ fn http_body_list(count: I64) -> I64 {
 }
 
 // Called only in the chosen HTTPS/STARTTLS/implicit-TLS branch. Plain HTTP
-// never reaches this registered E3001 stop (L2 panic-message path).
+// never reaches this registered E3001 stop (L2 panic-message path). The text
+// is the lowering's one native TLS refusal (generated trap_msg_native_tls).
 #Export(c) fn jet_rt_http_tls_refuse() {
-    message :: jet_rt_alloc(I64{96}, I64{8})
-    http_body_store(message, I64{7953764259997109332})
-    http_body_store(wrapping(message + I64{8}), I64{8316213871424532595})
-    http_body_store(wrapping(message + I64{16}), I64{7022907460951174688})
-    http_body_store(wrapping(message + I64{24}), I64{7575166089418599529})
-    http_body_store(wrapping(message + I64{32}), I64{7311146993654308974})
-    http_body_store(wrapping(message + I64{40}), I64{2338323048323965472})
-    http_body_store(wrapping(message + I64{48}), I64{7954887634465351033})
-    http_body_store(wrapping(message + I64{56}), I64{7162240872739662180})
-    http_body_store(wrapping(message + I64{64}), I64{2322495587131945833})
-    http_body_store(wrapping(message + I64{72}), I64{7593469675559023477})
-    http_body_store(wrapping(message + I64{80}), I64{6073156119282589806})
-    http_body_store(wrapping(message + I64{88}), I64{20564})
-    jet_rt_panic_message(message, I64{90})
+    message :: jet_rt_string_builder_new()
+    trap_build_msg_native_tls(message)
+    jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
 }

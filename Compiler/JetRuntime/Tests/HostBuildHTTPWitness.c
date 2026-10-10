@@ -157,7 +157,7 @@ int main(void) {
 
     // TLS is the canonical native refusal after connecting; no plaintext leaves.
     assert(exchange("", 0, 64, 2000, true, 0, &rows, &count, &error, &peer) == 0 && peer.received == 0);
-    assert(said(error, "TLS transport is not available in native builds yet (pending decision); use plain TCP/HTTP"));
+    assert(said(error, "TLS transport is not available in native builds until Jet's own TLS implementation lands (D-NATIVE-TLS1=B); use plain HTTP or TCP meanwhile"));
 
     // Conversion, carrier and connect failures precede any request.
     Text host = text("fixture.invalid"), target = text("/");
