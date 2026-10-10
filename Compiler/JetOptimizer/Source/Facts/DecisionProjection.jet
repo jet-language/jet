@@ -275,9 +275,14 @@ fn mir_decision_payload_error(message: String) -> MIRDecisionPayloadError Never!
     MIRDecisionPayloadError{message: message}
 }
 fn mir_decision_object(value: Dyn, keys: [String], label: String) -> [String:Dyn] MIRDecisionPayloadError! {
-    fields :: if value == .Object(rows) -> rows else -> { return Err(mir_decision_payload_error("{label} must be an object")) }
+    rows :: if value == .Object(entries) -> entries else -> { return Err(mir_decision_payload_error("{label} must be an object")) }
+    fields := [String:Dyn]{}
+    loop row in rows -> fields[row.key] = row.value
     if fields.len() != keys.len() -> return Err(mir_decision_payload_error("{label} has missing or unsafe fields"))
-    loop key in keys { if fields.get(key) == None -> return Err(mir_decision_payload_error("{label} has missing or unsafe fields")) }
+    loop key in keys {
+        if fields.get(key) == .Val(_) -> next
+        return Err(mir_decision_payload_error("{label} has missing or unsafe fields"))
+    }
     Ok(fields)
 }
 fn mir_decision_text(fields: [String:Dyn], key: String) -> String MIRDecisionPayloadError! {
@@ -335,11 +340,15 @@ fn mir_decision_parse_method(value: Dyn) -> MIRDerivationMethod? MIRDecisionPayl
 fn mir_decision_parse_row(value: Dyn) -> MIRDecisionRow MIRDecisionPayloadError! {
     fields :: mir_decision_object(value, ["derivation_disposition", "derivation_ref", "disposition", "edit", "evidence", "evidence_method", "function", "function_id", "function_name", "id", "identity", "kind", "producer", "reason", "rule", "span"], "decision row")
     function := MIRFunctionID?{None}
-    if fields["function_id"] != Dyn.Null -> function = Val(MIRFunctionID{value: mir_decision_number(fields["function_id"], "function id")})
+    if fields["function_id"] == {
+        .Null -> {}
+        else -> function = Val(MIRFunctionID{value: mir_decision_number(fields["function_id"], "function id")})
+    }
     row := mir_pass_decision_row(mir_decision_parse_kind(mir_decision_text(fields, "kind")), mir_decision_parse_disposition(mir_decision_text(fields, "disposition")), function, mir_decision_text(fields, "function_name"), mir_decision_parse_span(fields["span"]), mir_decision_text(fields, "rule"), mir_decision_text(fields, "reason"), mir_decision_text(fields, "producer"), mir_decision_text(fields, "evidence"))
     id :: mir_decision_number(fields["id"], "row id")
     if row.id != id -> return Err(mir_decision_payload_error("decision row id {id} does not match its canonical fields"))
-    if fields["edit"] != Dyn.Null {
+    if fields["edit"] == .Null {
+    } else {
         edit :: mir_decision_object(fields["edit"], ["replacement", "span"], "decision edit")
         row.edit = Val(MIRDecisionEdit{replacement: mir_decision_text(edit, "replacement"), span: mir_decision_parse_span(edit["span"])})
     }
@@ -360,4 +369,15 @@ fn mir_decision_ledger_read(payload: String) -> MIRDecisionLedger MIRDecisionPay
     ledger :: mir_decision_ledger_from_rows(identity, rows)
     if mir_decision_ledger_json(ledger) != payload -> return Err(mir_decision_payload_error("decision ledger payload is not canonical JSON or has an untrusted derivation relation"))
     Ok(ledger)
+}
+
+#Test("decision object projection retains canonical entry keys") {
+    value :: foundation_parse_protocol_json("{{\"first\":1,\"second\":2}}") ?? panic("decision object fixture is invalid")
+    fields :: mir_decision_object(value, ["first", "second"], "fixture") ?? panic("decision object fixture lost its keys")
+    assert_eq(fields.len(), 2)
+    rejected :: if mir_decision_object(value, ["first", "other"], "fixture") == {
+        .Err(_) -> true
+        .Ok(_) -> false
+    }
+    assert(rejected)
 }

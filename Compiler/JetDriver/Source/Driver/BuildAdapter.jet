@@ -269,13 +269,19 @@ fn jet_driver_build_find(host: JetDriverBuildInputs, base_dir: String, args: [Bu
         &prefix.push(segment)
     }
     recursive :: segments.contains("**")
-    base_root :: jet_driver_build_checked_path(host, base_dir, ".") ?? return jet_driver_build_input_fail("E0955", walk_what, err.message, walk_fix, span)
-    root_dir :: base_root ?? return jet_driver_build_input_fail("E0955", walk_what, JET_DRIVER_BUILD_NOT_FOUND, walk_fix, span)
+    root_dir :: if jet_driver_build_checked_path(host, base_dir, ".") == {
+        .Val(root_path) -> root_path
+        .None -> { return jet_driver_build_input_fail("E0955", walk_what, JET_DRIVER_BUILD_NOT_FOUND, walk_fix, span) }
+        .Err(root_error) -> { return jet_driver_build_input_fail("E0955", walk_what, root_error.message, walk_fix, span) }
+    }
     logical :: prefix.join("/")
     root := root_dir.copy()
     if prefix.len() > 0 {
-        found :: jet_driver_build_checked_path(host, root_dir.path, logical) ?? return jet_driver_build_input_fail("E0955", walk_what, err.message, walk_fix, span)
-        root = found ?? return BuildSessionReply.Value{value: BuildSessionValue.List{values: []}}
+        root = if jet_driver_build_checked_path(host, root_dir.path, logical) == {
+            .Val(selected_path) -> selected_path
+            .None -> { return BuildSessionReply.Value{value: BuildSessionValue.List{values: []}} }
+            .Err(selected_error) -> { return jet_driver_build_input_fail("E0955", walk_what, selected_error.message, walk_fix, span) }
+        }
     }
     matches := [String]{}
     if root.file {
