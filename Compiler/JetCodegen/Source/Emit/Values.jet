@@ -958,7 +958,9 @@ fn jet_rust_emit_place_bindings(ctx: &JetRustEmitContext, function: MIRFunction)
             if access == MIRAccess.Move || kept.get(value.value) != None || bindings.get(value.value) != None -> next
             write := String?{None}
             if access == MIRAccess.Write -> write = Val(jet_rust_emit_parameter_place(&ctx, function, value, true))
-            bindings[value.value] = JetRustEmitPlaceBinding{read: jet_rust_emit_parameter_place(&ctx, function, value, false), write: write, bitwise: jet_rust_emit_copy_carrier(ctx, jet_rust_emit_value_type(ctx, function, value))}
+            read := jet_rust_emit_parameter_place(&ctx, function, value, false)
+            bitwise :: jet_rust_emit_copy_carrier(ctx, jet_rust_emit_value_type(ctx, function, value))
+            bindings[value.value] = JetRustEmitPlaceBinding{read: ^read, write: ^write, bitwise: bitwise}
         }
     }
     bindings
