@@ -364,6 +364,12 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
 }
 
 fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    // Rust infer_field diagnoses the foreign surface before reading `os`,
+    // without treating a lexical `os` binding as an exemption.
+    if base == .Ident(root, _) && root == "os" && member == "environ" {
+        &diagnostics.push(sema_error("E0039", span, "`os.environ` is written `env.get` in Jet", "environment access lives in the `core.sys` module", "import `core.sys as env` and call `env.get(name)`"))
+        return None
+    }
     // D-BUILD-FACT3=A: `$package.*` / `$build.*` fold from the build snapshot.
     build_fact :: sema_fact_build_read(base, member, span, expected, environment, program, &diagnostics)
     if build_fact.handled -> return build_fact.value

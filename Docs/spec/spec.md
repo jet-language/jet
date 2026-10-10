@@ -2439,6 +2439,8 @@ For a relative wall-clock budget, derive that absolute millisecond value from
 
 The teaching diagnostic **E0040** directs `async`/`await` users to `task`;
 **E0041** directs `Mutex`/`lock` users to channels.
+These direct-call teaching forms are diagnosed before ordinary name resolution.
+Likewise, `getenv(name)` and `os.environ` teach `core.sys` access with E0039.
 
 ### Parallel collection adapters
 
