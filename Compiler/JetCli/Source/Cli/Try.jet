@@ -243,7 +243,11 @@ fn jet_cli_try_check(queries: &JetDriverCompilerQueries, entry: String, disk: Bo
             if disk {
                 loop root in snapshot.roots { loop file in root.files -> sources[jet_cli_try_canonical(file.path)] = file.source }
             }
-            checked :: (if disk -> jet_driver_compiler_queries_check_disk(&queries, parsed, ^request) else -> jet_driver_compiler_queries_check_text(&queries, parsed, ^request)) ?? return Err(JetCLITryError.Output{output: jet_cli_try_fail("{err}")})
+            checked :: if disk -> {
+                jet_driver_compiler_queries_check_disk(&queries, parsed, ^request) ?? return Err(JetCLITryError.Output{output: jet_cli_try_fail("{err}")})
+            } else -> {
+                jet_driver_compiler_queries_check_text(&queries, parsed, ^request) ?? return Err(JetCLITryError.Output{output: jet_cli_try_fail("{err}")})
+            }
             if checked.internal_problem == .Val(problem) -> return Err(JetCLITryError.Output{output: jet_cli_ice(problem)})
             index := JetCLISemIndex?{None}
             if disk && checked.complete {
