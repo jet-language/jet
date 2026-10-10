@@ -45,6 +45,21 @@ layout metadata remain nominal: only the ABI symbol atoms are projected.
 Providers, generated adapters and compiler callers use one spelling, with
 collision rejection before a symbol cutover.
 
+Native TCP providers use canonical Socket56/Stream56/Listener8 carriers and the
+shared nonblocking FD72/poller seam. Their syscall error scratch is ErrorOut32;
+the positive errno is at byte 8, not the domain/stage word at byte 0. Private
+route Word parameters/results are raw i64 (including millisecond timeouts and
+TTL), while the independent exact-Int carrier helpers retain tagged ownership.
+Happy Eyeballs preserves resolver order within each family, alternates families
+starting with the resolver's first family, staggers attempts by 250ms, and
+accelerates the next launch after failure. Losing descriptors are dropped on
+success, cancellation, or deadline; native C witnesses link the actual composed
+runtime rather than mock socket providers.
+`Compiler/JetRuntime/Tests/run-native-tcp-routes.mjs OUT STAGE2_JET RC_RUNTIME_DIR`
+consumes the first RC pack's admitted standalone object without rebuilding the
+runtime. It compiles the C witness fresh, binds the U8 stride to the pack's
+source identity, and records admission, compile, native link, and run receipts.
+
 The native [Duration constructor](../../Compiler/JetRuntime/Source/Duration.jet)
 borrows the exact-Int input, checks narrowing and nanosecond scaling without a
 panic, and writes only the selected owned Duration or RangeError result. It uses
