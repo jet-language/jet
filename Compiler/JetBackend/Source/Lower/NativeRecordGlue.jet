@@ -25,15 +25,16 @@ fn lower_native_record_field(p: MIRProgram, ty: MIRType, member: String) -> Lowe
 
 fn lower_native_record_sequence_type(p: MIRProgram, ty: MIRType, kind: String) -> MIRType? {
     definition :: lower_type_def(p, ty) ?? return None
+    expected :: Val(kind)
     if definition.kind == .Struct(fields, _) {
         loop field in lower_stored_fields(fields) {
-            if lower_record_sequence_kind(p, field.ty) == Val(kind) -> return Val(field.ty)
+            if lower_record_sequence_kind(p, field.ty) == expected -> return Val(field.ty)
         }
     }
     if definition.kind == .Enum(variants, _) {
         loop variant in variants {
             if variant.payload == .Single(inner) {
-                if lower_record_sequence_kind(p, inner) == Val(kind) -> return Val(inner)
+                if lower_record_sequence_kind(p, inner) == expected -> return Val(inner)
             }
         }
     }
@@ -146,11 +147,13 @@ fn lower_native_record_get_member(p: MIRProgram, m: &LowerModule, f: &LowerFunct
         present :: lower_new_block(&f)
         lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(missing, [LIRValueID]{}), else_target: lower_target(present, [LIRValueID]{})})
         lower_start(&f, missing, [LIRValueID]{})
-        lower_seal(&f, LIRTerminator.Return{value: Val(lower_const(&f, 0))})
+        zero :: lower_const(&f, 0)
+        lower_seal(&f, LIRTerminator.Return{value: Val(zero)})
         lower_start(&f, present, [LIRValueID]{})
         value :: lower_native_record_get_value(p, &m, &f, inner, box, 0)
         lower_emit(&f, LIRInst.Store{base: f.open_params[1].copy(), offset: 0, value: value})
-        lower_seal(&f, LIRTerminator.Return{value: Val(lower_const(&f, 1))})
+        one :: lower_const(&f, 1)
+        lower_seal(&f, LIRTerminator.Return{value: Val(one)})
         return
     }
     value :: lower_native_record_get_value(p, &m, &f, info.ty, base, offset)
@@ -209,7 +212,8 @@ fn lower_native_record_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
         } else if definition.kind == .Enum(variants, _) {
             loop (index, variant) in variants {
                 if variant.name != member -> next
-                lower_emit(&f, LIRInst.Store{base: shell, offset: 0, value: lower_const(&f, lower_discriminant(index))})
+                tag_word :: lower_const(&f, lower_discriminant(index))
+                lower_emit(&f, LIRInst.Store{base: shell, offset: 0, value: tag_word})
                 if lower_native_record_field(p, ty, member) == .Val(info) -> lower_native_record_store_member(p, &m, &f, info, f.open_params[0].copy(), shell)
             }
         }
@@ -225,12 +229,14 @@ fn lower_native_record_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
                 actual :: lower_word(&f)
                 lower_emit(&f, LIRInst.Load{dst: actual, base: f.open_params[0].copy(), offset: 0})
                 correct :: lower_flag(&f)
-                lower_emit(&f, LIRInst.Compare{dst: correct, condition: LIRCondition.Eq, left: actual, right: lower_const(&f, lower_discriminant(index))})
+                expected_tag :: lower_const(&f, lower_discriminant(index))
+                lower_emit(&f, LIRInst.Compare{dst: correct, condition: LIRCondition.Eq, left: actual, right: expected_tag})
                 good :: lower_new_block(&f)
                 bad :: lower_new_block(&f)
                 lower_seal(&f, LIRTerminator.Branch{condition: correct, then_target: lower_target(good, [LIRValueID]{}), else_target: lower_target(bad, [LIRValueID]{})})
                 lower_start(&f, bad, [LIRValueID]{})
-                lower_noreturn_call(&m, &f, "jet_rt_unreachable", lower_static_text(&m, &f, "record variant index out of range"))
+                message :: lower_static_text(&m, &f, "record variant index out of range")
+                lower_noreturn_call(&m, &f, "jet_rt_unreachable", message)
                 lower_start(&f, good, [LIRValueID]{})
             }
         }
@@ -276,12 +282,14 @@ fn lower_native_record_sequence_glue(p: MIRProgram, m: &LowerModule, glue: Lower
     source :: f.open_params[0].copy()
     if op == "new" {
         negative :: lower_flag(&f)
-        lower_emit(&f, LIRInst.Compare{dst: negative, condition: LIRCondition.Lt, left: source, right: lower_const(&f, 0)})
+        zero :: lower_const(&f, 0)
+        lower_emit(&f, LIRInst.Compare{dst: negative, condition: LIRCondition.Lt, left: source, right: zero})
         lower_check(&m, &f, negative, "jet_rt_panic_overflow")
         header :: lower_pointer(&f)
         lower_alloc(&m, &f, header, 24)
         data :: lower_list_buffer(&m, &f, source, lower_list_stride(p, elem))
-        lower_emit(&f, LIRInst.Store{base: header, offset: 0, value: lower_const(&f, 0)})
+        zero_word :: lower_const(&f, 0)
+        lower_emit(&f, LIRInst.Store{base: header, offset: 0, value: zero_word})
         lower_emit(&f, LIRInst.Store{base: header, offset: 8, value: source})
         lower_emit(&f, LIRInst.Store{base: header, offset: 16, value: data})
         lower_seal(&f, LIRTerminator.Return{value: Val(header)})
@@ -300,7 +308,8 @@ fn lower_native_record_sequence_glue(p: MIRProgram, m: &LowerModule, glue: Lower
         lower_start(&f, done, [LIRValueID]{})
         lower_seal(&f, LIRTerminator.Return{value: None})
     } else if op == "len" {
-        lower_seal(&f, LIRTerminator.Return{value: Val(lower_list_word(&f, source, 0))})
+        current_len :: lower_list_word(&f, source, 0)
+        lower_seal(&f, LIRTerminator.Return{value: Val(current_len)})
     } else if op == "push" {
         length :: lower_list_word(&f, source, 0)
         lower_list_reserve(p, &m, &f, source, elem).drop("capacity is reserved before taking the current buffer")
@@ -313,14 +322,16 @@ fn lower_native_record_sequence_glue(p: MIRProgram, m: &LowerModule, glue: Lower
         } else if kind == "List.Byte" {
             byte :: f.open_params[1].copy()
             invalid :: lower_flag(&f)
-            lower_emit(&f, LIRInst.Compare{dst: invalid, condition: LIRCondition.UGt, left: byte, right: lower_const(&f, 255)})
+            limit :: lower_const(&f, 255)
+            lower_emit(&f, LIRInst.Compare{dst: invalid, condition: LIRCondition.UGt, left: byte, right: limit})
             lower_check(&m, &f, invalid, "jet_rt_panic_int_range")
             lower_write_at(p, &f, address, 0, byte, elem)
         } else {
             lower_native_record_take(p, &m, &f, elem, f.open_params[1].copy(), address, 0)
         }
         next_length :: lower_word(&f)
-        lower_emit(&f, LIRInst.Binary{dst: next_length, op: LIRBinaryOp.Add, left: length, right: lower_const(&f, 1)})
+        one :: lower_const(&f, 1)
+        lower_emit(&f, LIRInst.Binary{dst: next_length, op: LIRBinaryOp.Add, left: length, right: one})
         lower_emit(&f, LIRInst.Store{base: source, offset: 0, value: next_length})
         lower_seal(&f, LIRTerminator.Return{value: None})
     } else {
@@ -332,9 +343,11 @@ fn lower_native_record_sequence_glue(p: MIRProgram, m: &LowerModule, glue: Lower
         bad :: lower_new_block(&f)
         lower_seal(&f, LIRTerminator.Branch{condition: valid, then_target: lower_target(good, [LIRValueID]{}), else_target: lower_target(bad, [LIRValueID]{})})
         lower_start(&f, bad, [LIRValueID]{})
-        lower_noreturn_call(&m, &f, "jet_rt_unreachable", lower_static_text(&m, &f, "record sequence index out of range"))
+        message :: lower_static_text(&m, &f, "record sequence index out of range")
+        lower_noreturn_call(&m, &f, "jet_rt_unreachable", message)
         lower_start(&f, good, [LIRValueID]{})
-        address :: lower_list_address(&f, lower_list_data(&f, source), index, lower_list_stride(p, elem))
+        data :: lower_list_data(&f, source)
+        address :: lower_list_address(&f, data, index, lower_list_stride(p, elem))
         if kind == "List.Byte" {
             byte :: lower_read_at(p, &f, address, 0, elem) ?? panic("a byte has storage")
             lower_seal(&f, LIRTerminator.Return{value: Val(byte)})

@@ -3779,7 +3779,8 @@ fn jet_codegen_merge_shared_sites(rows: &[MIRConstantDef], incoming: [MIRConstan
 // (jet_codegen_lower_constant_rows of `modules`).
 // The lowered rows are owned: each row's function, nested functions and
 // metadata rows move out of it in program order, so no MIR row is copied.
-fn jet_codegen_functions_from_rows(lowered_rows: ^[JetCodegenLoweredFunction], functions: [TFunc], function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], trait_names: JetCodegenTraitNames, declared_types: ^[MIRTypeDef], constants: ^[MIRConstantDef]) -> JetCodegenFunctions {
+fn jet_codegen_functions_from_rows(lowered_rows: ^[JetCodegenLoweredFunction], functions: [TFunc], function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], trait_names: JetCodegenTraitNames, declared_types: ^[MIRTypeDef], constant_rows: ^[MIRConstantDef]) -> JetCodegenFunctions {
+    constants := ^constant_rows
     lowered_functions := [MIRFunction]{}
     prelude_calls := [MIRPreludeCall]{}
     core_calls := [MIRCoreCall]{}

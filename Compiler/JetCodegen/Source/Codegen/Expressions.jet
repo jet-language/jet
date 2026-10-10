@@ -6670,7 +6670,10 @@ fn jet_codegen_pattern_lookup_cache(builder: &JetCodegenBuilder, program: JetCod
         }
     }
     key_identity :: tir_pattern_key_identity(key) ?? "expression:{key.span.start}"
-    identity = "{identity}/key:{key_identity}"
+    // The match head scopes cache identity, including nested matches, without
+    // moving the builder's map out of its write-borrowed owner.
+    lookup_head :: if builder.pattern_lookup_head == .Val(block) -> "{block.value}" else -> "none"
+    identity = "{lookup_head}:{identity}/key:{key_identity}"
     if builder.pattern_lookup_caches.get(identity) == .Val(cache) -> return cache
     cache_ty :: Type.Option{inner: lookup_ty}
     local :: tir_generated_local("pattern_lookup_cache_{builder.locals.len()}", span)

@@ -71,7 +71,8 @@ fn lower_ptr_deref(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     // initialize aggregate payload storage; MIR Propagate owns the cleanup.
     if lower_is_inline(p, elem) -> lower_storage_into(p, &f, dst, elem)
     valid :: lower_flag(&f)
-    lower_emit(&f, LIRInst.Compare{dst: valid, condition: LIRCondition.Ne, left: pointer, right: lower_const(&f, 0)})
+    zero :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Compare{dst: valid, condition: LIRCondition.Ne, left: pointer, right: zero})
     load :: lower_new_block(&f)
     stopped :: lower_new_block(&f)
     done :: lower_new_block(&f)

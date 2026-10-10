@@ -1008,9 +1008,9 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             } else {
                 x64_store(&emitter.code, base_reg, offset, value_reg)
             }
-            value_reg :: x64_operand(&emitter, locations[value.value], X64_RAX)
+            stored_reg :: x64_operand(&emitter, locations[value.value], X64_RAX)
             address :: x64_select_address(&emitter, locations, x64_memory_address(folds, base, offset))
-            x64_store_indexed(&emitter.code, address.base, address.index, address.scale, address.disp, value_reg, function.values[value.value].layout.size)
+            x64_store_indexed(&emitter.code, address.base, address.index, address.scale, address.disp, stored_reg, function.values[value.value].layout.size)
         }
         .StackSlot(dst, _, _) -> {
             reg :: x64_result_register(locations[dst.value], X64_RAX)

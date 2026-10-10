@@ -491,7 +491,8 @@ fn jet_driver_payload_read_text(codec: JetDriverNativePayloadCodec, word: Int) -
     if data.refusal_key != "" || length.refusal_key != "" || length.word < 0 -> return None
     bytes := [U8]{}
     loop index in 0..<length.word -> &bytes.push(U8{x64_value_byte(data.word + index)})
-    String.from_bytes(bytes) ?? None
+    decoded :: String.from_bytes(bytes) ?? return None
+    Val(decoded)
 }
 fn jet_driver_payload_decode_scalar(codec: JetDriverNativePayloadCodec, row: CoreSharedNativeLayout, source: Int) -> TComptimeValue? {
     kind :: row.kind.bit_and(4294967295)

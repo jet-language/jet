@@ -66,7 +66,8 @@ fn lower_wide_show(p: MIRProgram, m: &LowerModule, f: &LowerFunction, dst: LIRVa
         low_nonzero :: lower_numeric_compare(&f, LIRCondition.Ne, low, zero)
         borrow :: lower_word(&f)
         lower_emit(&f, LIRInst.Convert{dst: borrow, src: low_nonzero})
-        neg_high :: lower_numeric_binary(&f, LIRBinaryOp.Sub, lower_numeric_binary(&f, LIRBinaryOp.Sub, zero, high), borrow)
+        neg_high_base :: lower_numeric_binary(&f, LIRBinaryOp.Sub, zero, high)
+        neg_high :: lower_numeric_binary(&f, LIRBinaryOp.Sub, neg_high_base, borrow)
         magnitude_low = lower_numeric_choose(&f, negative, neg_low, low)
         magnitude_high = lower_numeric_choose(&f, negative, neg_high, high)
     } else {
@@ -97,12 +98,15 @@ fn lower_wide_show(p: MIRProgram, m: &LowerModule, f: &LowerFunction, dst: LIRVa
     remainder := zero
     quotients := [LIRValueID]{}
     loop limb in limbs {
-        input :: lower_numeric_binary(&f, LIRBinaryOp.Or, lower_numeric_binary(&f, LIRBinaryOp.Shl, remainder, shift), limb)
+        remainder_shifted :: lower_numeric_binary(&f, LIRBinaryOp.Shl, remainder, shift)
+        input :: lower_numeric_binary(&f, LIRBinaryOp.Or, remainder_shifted, limb)
         &quotients.push(lower_numeric_binary(&f, LIRBinaryOp.UDiv, input, ten))
         remainder = lower_numeric_binary(&f, LIRBinaryOp.URem, input, ten)
     }
-    next_high :: lower_numeric_binary(&f, LIRBinaryOp.Or, lower_numeric_binary(&f, LIRBinaryOp.Shl, quotients[0], shift), quotients[1])
-    next_low :: lower_numeric_binary(&f, LIRBinaryOp.Or, lower_numeric_binary(&f, LIRBinaryOp.Shl, quotients[2], shift), quotients[3])
+    quotient_high_shifted :: lower_numeric_binary(&f, LIRBinaryOp.Shl, quotients[0], shift)
+    next_high :: lower_numeric_binary(&f, LIRBinaryOp.Or, quotient_high_shifted, quotients[1])
+    quotient_low_shifted :: lower_numeric_binary(&f, LIRBinaryOp.Shl, quotients[2], shift)
+    next_low :: lower_numeric_binary(&f, LIRBinaryOp.Or, quotient_low_shifted, quotients[3])
     next_cursor :: lower_numeric_binary(&f, LIRBinaryOp.Sub, cursor, one)
     digit :: lower_numeric_binary(&f, LIRBinaryOp.Add, remainder, ascii_zero)
     byte :: lower_new_value(&f, LIRLayout{size: 1, align: 1, class: LIRABIClass.Integer}, LIRDrop.Trivial, None)
@@ -110,7 +114,8 @@ fn lower_wide_show(p: MIRProgram, m: &LowerModule, f: &LowerFunction, dst: LIRVa
     address :: lower_pointer(&f)
     lower_emit(&f, LIRInst.PointerAdd{dst: address, base: buffer, offset: next_cursor})
     lower_emit(&f, LIRInst.Store{base: address, offset: 0, value: byte})
-    more :: lower_numeric_compare(&f, LIRCondition.Ne, lower_numeric_binary(&f, LIRBinaryOp.Or, next_low, next_high), zero)
+    joined :: lower_numeric_binary(&f, LIRBinaryOp.Or, next_low, next_high)
+    more :: lower_numeric_compare(&f, LIRCondition.Ne, joined, zero)
     lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(digits, [LIRValueID]{next_low, next_high, next_cursor}), else_target: lower_target(finished, [LIRValueID]{next_cursor})})
     lower_start(&f, finished, [LIRValueID]{start})
     minus :: lower_new_block(&f)
@@ -202,14 +207,17 @@ fn lower_wide_checked_construct(p: MIRProgram, c: LowerContext, m: &LowerModule,
     carry := digit
     products := [LIRValueID]{}
     loop word in words {
-        product :: lower_numeric_binary(&f, LIRBinaryOp.Add, lower_numeric_binary(&f, LIRBinaryOp.Mul, word, base), carry)
+        scaled :: lower_numeric_binary(&f, LIRBinaryOp.Mul, word, base)
+        product :: lower_numeric_binary(&f, LIRBinaryOp.Add, scaled, carry)
         &products.push(lower_numeric_binary(&f, LIRBinaryOp.And, product, mask))
         carry = lower_numeric_binary(&f, LIRBinaryOp.UShr, product, shift)
     }
     overflow :: lower_numeric_compare(&f, LIRCondition.Ne, carry, zero)
     lower_numeric_check(p, Val(c), &m, &f, overflow, site, message)
-    next_low :: lower_numeric_binary(&f, LIRBinaryOp.Or, products[0], lower_numeric_binary(&f, LIRBinaryOp.Shl, products[1], shift))
-    next_high :: lower_numeric_binary(&f, LIRBinaryOp.Or, products[2], lower_numeric_binary(&f, LIRBinaryOp.Shl, products[3], shift))
+    product_low_shifted :: lower_numeric_binary(&f, LIRBinaryOp.Shl, products[1], shift)
+    next_low :: lower_numeric_binary(&f, LIRBinaryOp.Or, products[0], product_low_shifted)
+    product_high_shifted :: lower_numeric_binary(&f, LIRBinaryOp.Shl, products[3], shift)
+    next_high :: lower_numeric_binary(&f, LIRBinaryOp.Or, products[2], product_high_shifted)
     more :: lower_numeric_compare(&f, LIRCondition.Ne, index, zero)
     lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(digits, [LIRValueID]{index, next_low, next_high}), else_target: lower_target(accumulated, [LIRValueID]{next_low, next_high})})
     lower_start(&f, accumulated, [LIRValueID]{final_low, final_high})
@@ -229,7 +237,8 @@ fn lower_wide_checked_construct(p: MIRProgram, c: LowerContext, m: &LowerModule,
         neg_low :: lower_numeric_binary(&f, LIRBinaryOp.Sub, zero, final_low)
         borrow :: lower_word(&f)
         lower_emit(&f, LIRInst.Convert{dst: borrow, src: nonzero_low})
-        neg_high :: lower_numeric_binary(&f, LIRBinaryOp.Sub, lower_numeric_binary(&f, LIRBinaryOp.Sub, zero, final_high), borrow)
+        neg_high_base :: lower_numeric_binary(&f, LIRBinaryOp.Sub, zero, final_high)
+        neg_high :: lower_numeric_binary(&f, LIRBinaryOp.Sub, neg_high_base, borrow)
         result_low = lower_numeric_choose(&f, negative, neg_low, final_low)
         result_high = lower_numeric_choose(&f, negative, neg_high, final_high)
     }

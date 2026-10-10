@@ -123,9 +123,9 @@ fn x64_address_folds(function: LIRFunction) -> X64AddressFolds Never! {
                 }
                 def_blocks[dst.value] = row
             }
-            loop used in lir_inst_uses(inst) -> uses[used.value] += 1
+            loop used in lir_inst_uses(inst) -> uses[used.value] = uses[used.value] + 1
         }
-        loop used in lir_terminator_uses(block.terminator) -> uses[used.value] += 1
+        loop used in lir_terminator_uses(block.terminator) -> uses[used.value] = uses[used.value] + 1
     }
     loop (row, block) in function.blocks {
         loop inst in block.insts {
@@ -165,15 +165,15 @@ fn x64_address_folds(function: LIRFunction) -> X64AddressFolds Never! {
                 folds.skipped[dst.value] = true
                 if address.index != Val(off) && address.index != None -> folds.skipped[off.value] = true
             }
-            if inst == .Binary(dst, op, left, right) && op == .Add && function.values[dst.value].layout == lir_layout_word() {
-                if (overflow_at.get(left.value * count + right.value) ?? -1) > position -> next
-                address := x64_address_parts(left, right, definitions, uses)
-                if address.index == Val(right) {
-                    swapped :: x64_address_parts(right, left, definitions, uses)
+            if inst == .Binary(dst, op, left, rhs) && op == .Add && function.values[dst.value].layout == lir_layout_word() {
+                if (overflow_at.get(left.value * count + rhs.value) ?? -1) > position -> next
+                address := x64_address_parts(left, rhs, definitions, uses)
+                if address.index == Val(rhs) {
+                    swapped :: x64_address_parts(rhs, left, definitions, uses)
                     if swapped.index == None || swapped.index != Val(left) -> address = swapped
                 }
                 // Only an immediate or single-use scale is better than Add.
-                original_index :: if address.base == left -> right else -> left
+                original_index :: if address.base == left -> rhs else -> left
                 if address.index != Val(original_index) {
                     folds.addresses[dst.value] = Val(address)
                     if address.index != None -> folds.skipped[original_index.value] = true

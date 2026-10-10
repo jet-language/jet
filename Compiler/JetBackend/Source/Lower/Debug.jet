@@ -198,7 +198,9 @@ fn lower_debug_describe(p: MIRProgram, m: &LowerModule, ty: MIRType) -> LIRDebug
     if lower_repr(p, ty) == {
         .Absent -> LIRDebugType{name: name, size: 0, kind: LIRDebugTypeKind.Opaque}
         .Word -> lower_debug_word(name, ty)
+        .ExactInt -> LIRDebugType{name: "", size: 8, kind: LIRDebugTypeKind.Pointer{target: lower_debug_opaque(&m, name)}}
         .FloatBits -> LIRDebugType{name: name, size: 8, kind: LIRDebugTypeKind.Base{encoding: LIRDebugEncoding.Float}}
+        .Float32Bits -> LIRDebugType{name: name, size: 4, kind: LIRDebugTypeKind.Base{encoding: LIRDebugEncoding.Float}}
         .Flag -> LIRDebugType{name: name, size: 1, kind: LIRDebugTypeKind.Base{encoding: LIRDebugEncoding.Bool}}
         .Handle(_, _) -> LIRDebugType{name: "", size: 8, kind: LIRDebugTypeKind.Pointer{target: lower_debug_opaque(&m, name)}}
         .Boxed(boxed) -> LIRDebugType{name: "", size: 8, kind: LIRDebugTypeKind.Pointer{target: lower_debug_box(p, &m, name, boxed)}}

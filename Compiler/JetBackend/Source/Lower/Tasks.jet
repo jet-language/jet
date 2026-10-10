@@ -542,14 +542,12 @@ fn lower_shared_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     meta :: lower_lazy_meta(p, &m, &f, inner_ty)
     // The descriptor already holds the mono address-based ordinary drop role
     // (zero for trivial T). Last release owns invoking it, not Meta16 fallback.
-    drop_code :: lower_pointer(&f)
-    lower_emit(&f, LIRInst.Load{dst: drop_code, base: meta, offset: 16})
     dst :: lower_result(p, c, &m, &f, instruction) ?? return true
     // The runtime owns this exact typed destructor, including a consuming
     // Close implementation. Do not invent zero or a second cleanup callback.
-    drop_code :: lower_pointer(&f)
-    lower_emit(&f, LIRInst.Load{dst: drop_code, base: meta, offset: 16})
-    lower_call_runtime(&m, &f, "jet_rt_native_shared_new", [LIRValueID]{slot, meta, drop_code}, Val(dst))
+    drop_fn :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: drop_fn, base: meta, offset: 16})
+    lower_call_runtime(&m, &f, "jet_rt_native_shared_new", [LIRValueID]{slot, meta, drop_fn}, Val(dst))
     true
 }
 

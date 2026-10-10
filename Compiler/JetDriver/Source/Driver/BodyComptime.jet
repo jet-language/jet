@@ -101,12 +101,8 @@ fn jet_driver_comptime_diagnostics_add(diagnostics: &[Diagnostic], incoming: [Di
     }
 }
 // A run returns its one graph on every exit, with later edits in its trail.
-fn jet_driver_comptime_take_registration(run: &JetDriverComptimeRunResult) -> SemaRegistrationGraph Never! {
-    finished := ^run.graph
-    run.graph = None
+fn jet_driver_comptime_take_registration(finished: ^SemaRegistrationGraph?, partial: ^SemaRegistrationGraph?) -> SemaRegistrationGraph Never! {
     if finished == .Val(graph) -> return ^graph
-    partial := ^run.partial_graph
-    run.partial_graph = None
     ^partial ?? panic("a comptime run lost its registration graph")
 }
 
@@ -246,7 +242,11 @@ fn jet_driver_comptime_body_pass(
         ^graph, [SemaGraphModuleResult]{}, body_sources, current_graph.names, values, functions,
         load, request, &diagnostics,
     )
-    graph = jet_driver_comptime_take_registration(&run)
+    finished_registration := ^run.graph
+    run.graph = None
+    partial_registration := ^run.partial_graph
+    run.partial_graph = None
+    graph = jet_driver_comptime_take_registration(^finished_registration, ^partial_registration)
     jet_driver_comptime_trace_append(&trace, run.trace)
     if run.soft_stop {
         sema_graph_trail_undo(&graph, &run.trail)
@@ -310,7 +310,11 @@ fn jet_driver_validate_checked_text(
         request,
         &diagnostics,
     )
-    graph = jet_driver_comptime_take_registration(&run)
+    finished_registration := ^run.graph
+    run.graph = None
+    partial_registration := ^run.partial_graph
+    run.partial_graph = None
+    graph = jet_driver_comptime_take_registration(^finished_registration, ^partial_registration)
     sema_graph_trail_undo(&graph, &run.trail)
     trace := initial_trace
     jet_driver_comptime_trace_append(&trace, run.trace)

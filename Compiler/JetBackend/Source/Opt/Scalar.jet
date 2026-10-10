@@ -189,9 +189,8 @@ fn opt_scalar_slot(original: LIRFunction, slot: LIRValueID, fields: [OptScalarFi
         saved[row] = current
         loop (field, phi) in phis[row] { if phi >= 0 -> current[field] = phi }
         insts := [LIRInst]{}
-        block :: function.blocks[row]
         lines := [Int]{}
-        loop (index, inst) in block.insts {
+        loop (index, inst) in function.blocks[row].insts {
             removed := false
             if inst == {
                 .StackSlot(dst, _, _) -> { if dst == slot -> removed = true }
@@ -228,12 +227,12 @@ fn opt_scalar_slot(original: LIRFunction, slot: LIRValueID, fields: [OptScalarFi
                 else -> {}
             }
             if !removed -> &insts.push(inst)
-            loop lines.len() < insts.len() -> &lines.push(opt_debug_line(block, index))
+            loop lines.len() < insts.len() -> &lines.push(opt_debug_line(function.blocks[row], index))
         }
-        &lines.push(opt_debug_line(block, block.insts.len()))
+        &lines.push(opt_debug_line(function.blocks[row], function.blocks[row].insts.len()))
         function.blocks[row].lines = lines
         function.blocks[row].insts = insts
-        terminator :: function.blocks[row].terminator
+        terminator := function.blocks[row].terminator.copy()
         function.blocks[row].terminator = if terminator == {
             .Jump(target) -> {
                 rewritten :: opt_scalar_edge(target, rows, phis, current) ?? return None

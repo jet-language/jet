@@ -153,7 +153,8 @@ fn lower_map_drop_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, value
             lower_close_emit(p, &m, &f, value, ty, method)
         }
         if lower_value_drop(f, value) != .Trivial {
-            consumed :: lower_new_value(&f, lower_value_layout(f, value), LIRDrop.Trivial, ty.identity)
+            consumed_layout :: lower_value_layout(f, value)
+            consumed :: lower_new_value(&f, consumed_layout, LIRDrop.Trivial, ty.identity)
             lower_emit(&f, LIRInst.Reown{dst: consumed, src: value})
         }
         return
@@ -162,7 +163,8 @@ fn lower_map_drop_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, value
     drop :: lower_drop(&m, repr, true)
     if drop == .Trivial -> return
     if lower_value_drop(f, value) != .Trivial -> return lower_emit(&f, LIRInst.Drop{value: value})
-    owned :: lower_new_value(&f, lower_value_layout(f, value), drop, ty.identity)
+    owned_layout :: lower_value_layout(f, value)
+    owned :: lower_new_value(&f, owned_layout, drop, ty.identity)
     lower_emit(&f, LIRInst.Reown{dst: owned, src: value})
     lower_emit(&f, LIRInst.Drop{value: owned})
 }

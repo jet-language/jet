@@ -1139,7 +1139,8 @@ fn lower_call_runtime_typed(c: LowerContext, m: &LowerModule, f: &LowerFunction,
 // original row for mono clones); glue and helpers never call these hooks.
 fn lower_comptime_site(m: &LowerModule, f: &LowerFunction, symbol: String, start: Int, end: Int) Never! {
     if !m.comptime_budget -> return
-    owner :: lower_const(&f, m.mir_sources[f.builder.id.value])
+    function_id := f.builder.id.value
+    owner :: lower_const(&f, m.mir_sources[function_id])
     first :: lower_const(&f, start)
     last :: lower_const(&f, end)
     lower_call_runtime(&m, &f, symbol, [LIRValueID]{owner, first, last}, None)
@@ -2323,7 +2324,8 @@ fn lower_map_lookup(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     found :: lower_word(&f)
     lower_call_helper(&m, &f, "map.find", map_row.ty, [LIRValueID]{map, key}, Val(found))
     present :: lower_flag(&f)
-    lower_emit(&f, LIRInst.Compare{dst: present, condition: LIRCondition.Ge, left: found, right: lower_const(&f, 0)})
+    zero_index :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Compare{dst: present, condition: LIRCondition.Ge, left: found, right: zero_index})
     hit :: lower_new_block(&f)
     miss :: lower_new_block(&f)
     publish :: lower_new_block(&f)
@@ -2441,7 +2443,8 @@ fn lower_test_scope(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         loop candidate_instruction in block.instructions {
             if candidate_instruction.operation == .ScopeEnter(candidate, .Val(member)) {
                 if candidate != scope -> next
-                return lower_test_scope_member(p, c, &m, &f, scope, member, enter, lower_instruction_has_stop_poll(c, f, instruction))
+                publishes :: lower_instruction_has_stop_poll(c, f, instruction)
+                return lower_test_scope_member(p, c, &m, &f, scope, member, enter, publishes)
             }
         }
     }
@@ -2449,7 +2452,7 @@ fn lower_test_scope(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 }
 
 fn lower_test_scope_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, scope: MIRScopeID, member: MIRTestScopeMember, enter: Bool, publishes: Bool) Never! {
-    id :: lower_const(&f, scope.value.to_int())
+    id :: lower_const(&f, Int.from_u64(scope.value))
     if member == {
         .ExpectFail(code, message) -> {
             expected :: lower_test_scope_text(&m, &f, code)
@@ -2458,7 +2461,8 @@ fn lower_test_scope_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
             stopped :: lower_pointer(&f)
             lower_call_runtime(&m, &f, "jet_rt_test_expect_fail_leave_scope", [LIRValueID]{id}, Val(stopped))
             absent :: lower_flag(&f)
-            lower_emit(&f, LIRInst.Compare{dst: absent, condition: LIRCondition.Eq, left: stopped, right: lower_require_null(&f)})
+            null_pointer :: lower_require_null(&f)
+            lower_emit(&f, LIRInst.Compare{dst: absent, condition: LIRCondition.Eq, left: stopped, right: null_pointer})
             unmet :: lower_new_block(&f)
             completed :: lower_new_block(&f)
             join :: lower_new_block(&f)
@@ -2470,7 +2474,8 @@ fn lower_test_scope_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
             status :: lower_word(&f)
             lower_call_runtime(&m, &f, "jet_rt_session_status", [LIRValueID]{}, Val(status))
             pending :: lower_flag(&f)
-            lower_emit(&f, LIRInst.Compare{dst: pending, condition: LIRCondition.Ne, left: status, right: lower_const(&f, 0)})
+            zero_word :: lower_const(&f, 0)
+            lower_emit(&f, LIRInst.Compare{dst: pending, condition: LIRCondition.Ne, left: status, right: zero_word})
             failed :: lower_new_block(&f)
             lower_seal(&f, LIRTerminator.Branch{condition: pending, then_target: lower_target(join, [LIRValueID]{}), else_target: lower_target(failed, [LIRValueID]{})})
             lower_start(&f, failed, [LIRValueID]{})
@@ -2523,7 +2528,10 @@ fn lower_test_scope_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
             return lower_start(&f, join, [LIRValueID]{})
         }
         .Skip(whole_test) -> {
-            if !enter -> lower_call_runtime(&m, &f, "jet_rt_test_skip_scope", [LIRValueID]{lower_const_flag(&f, if whole_test -> 1 else -> 0)}, None)
+            if !enter {
+                skip_flag :: lower_const_flag(&f, if whole_test -> 1 else -> 0)
+                lower_call_runtime(&m, &f, "jet_rt_test_skip_scope", [LIRValueID]{skip_flag}, None)
+            }
         }
         // Like the reference MIR emitter, Measure has no scope runtime action.
         .Measure -> {}
@@ -2540,13 +2548,13 @@ fn lower_constant(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if lower_wide_signed(p, ty) != None -> return lower_constant_into(p, c, &m, &f, instruction, constant, dst)
     if constant == {
         .Int(value, _, _) -> {
-            exact :: if instruction.ty == .Val(ty) -> lower_is_exact_int(ty) else -> false
+            exact :: if instruction.ty != None -> lower_is_exact_int(ty) else -> false
             if exact -> lower_exact_int_constant(&m, &f, dst, value)
             else -> lower_emit(&f, LIRInst.Const{dst: dst, value: value})
         }
         .BigInt(decimal) -> {
             if lower_is_unsigned_word(ty) -> return lower_constant_into(p, c, &m, &f, instruction, constant, dst)
-            exact :: if instruction.ty == .Val(ty) -> lower_is_exact_int(ty) else -> false
+            exact :: if instruction.ty != None -> lower_is_exact_int(ty) else -> false
             if !exact -> return lower_fail(&m, &f, "BigInt constant of a non-Int type is not lowered at O0 yet")
             lower_big_int_constant(&m, &f, dst, decimal)
         }
@@ -4442,6 +4450,7 @@ fn lower_operation_name(operation: MIROperation) -> String Never! {
         .BuildString(_) -> "BuildString"
         .BuildList(_, _) -> "BuildList"
         .BuildMap(_) -> "BuildMap"
+        .MapLookup(_, _, _) -> "MapLookup"
         .EnumIs(_, _, _) -> "EnumIs"
         .EnumPayload(_, _, _, _) -> "EnumPayload"
         .OptionIsSome(_) -> "OptionIsSome"

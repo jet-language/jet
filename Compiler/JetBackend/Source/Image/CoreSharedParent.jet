@@ -41,7 +41,8 @@ fn core_shared_abi_field(tree: Dyn, name: String) -> Dyn? Never! {
         selected := Dyn?{None}
         loop field in fields {
             if field.key != name -> next
-            if selected != None -> return None
+            present :: if selected == { .Val(_) -> true else -> false }
+            if present -> return None
             selected = Val(field.value)
         }
         return selected
@@ -347,7 +348,8 @@ fn core_shared_payload_callable_error(row: CoreSharedCallableBinding, type_key: 
 }
 fn core_shared_parent_payload_callable(parent: CoreSharedParent, attachment: CoreSharedParentAttachment, type_key: String, clone: Bool) -> CoreSharedParentCallableResult Never! {
     role :: if clone -> "lazy.clone" else -> "lazy.drop"
-    lookup :: core_shared_parent_callable_lookup(&parent, attachment, "{role}:{type_key}")
+    owner := parent
+    lookup :: core_shared_parent_callable_lookup(&owner, attachment, "{role}:{type_key}")
     row :: lookup.row ?? return CoreSharedParentCallableResult{address: 0, refusal_key: lookup.refusal_key}
     signature_error :: core_shared_payload_callable_error(row, type_key, clone)
     if signature_error != "" -> return CoreSharedParentCallableResult{address: 0, refusal_key: signature_error}

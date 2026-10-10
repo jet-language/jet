@@ -113,7 +113,8 @@ fn lower_static_fill(p: MIRProgram, m: &LowerModule, f: &LowerFunction, object: 
         if lower_map_shape(p, aggregate) == None -> return lower_fail(&m, &f, "Map constant without a Map type is not lowered at O0 yet")
         if entries.len() == 0 {
             // Empty frozen storage still has the usual non-null sentinel.
-            lower_static_store(&m, object, offset + 16, lower_static_pointer(lower_static_object(&m, 0)))
+            sentinel :: lower_static_object(&m, 0)
+            lower_static_store(&m, object, offset + 16, lower_static_pointer(sentinel))
         } else {
             capacity :: lower_static_object(&m, 8)
             &m.static_fixups.push(LowerStaticFixup{object: object, offset: offset,

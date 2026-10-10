@@ -134,9 +134,8 @@ fn opt_licm_loop(function: &LIRFunction, header: Int) Never! {
         loop (row, member) in body {
             if !member -> next
             kept := [LIRInst]{}
-            block :: function.blocks[row]
             kept_lines := [Int]{}
-            loop (index, inst) in block.insts {
+            loop (index, inst) in function.blocks[row].insts {
                 movable := opt_licm_candidate(function, defs, inst, row == header, clobbered)
                 if lir_inst_def(inst) == .Val(dst) {
                     if consumed[dst.value] || function.values[dst.value].drop != .Trivial -> movable = false
@@ -147,14 +146,14 @@ fn opt_licm_loop(function: &LIRFunction, header: Int) Never! {
                 if movable {
                     if lir_inst_def(inst) == .Val(dst) -> available[dst.value] = true
                     &hoisted.push(inst)
-                    &hoisted_lines.push(opt_debug_line(block, index))
+                    &hoisted_lines.push(opt_debug_line(function.blocks[row], index))
                     changed = true
                 } else {
                     &kept.push(inst)
-                    &kept_lines.push(opt_debug_line(block, index))
+                    &kept_lines.push(opt_debug_line(function.blocks[row], index))
                 }
             }
-            &kept_lines.push(opt_debug_line(block, block.insts.len()))
+            &kept_lines.push(opt_debug_line(function.blocks[row], function.blocks[row].insts.len()))
             function.blocks[row].lines = kept_lines
             function.blocks[row].insts = kept
         }
@@ -165,11 +164,10 @@ fn opt_licm_loop(function: &LIRFunction, header: Int) Never! {
         predecessor :: outside[0].copy()
         if function.blocks[predecessor].terminator == .Jump(target) {
             if target.block == header_id {
-                block :: function.blocks[predecessor]
                 lines := [Int]{}
-                loop at in 0..<block.insts.len() -> &lines.push(opt_debug_line(block, at))
+                loop at in 0..<function.blocks[predecessor].insts.len() -> &lines.push(opt_debug_line(function.blocks[predecessor], at))
                 loop line in hoisted_lines -> &lines.push(line)
-                &lines.push(opt_debug_line(block, block.insts.len()))
+                &lines.push(opt_debug_line(function.blocks[predecessor], function.blocks[predecessor].insts.len()))
                 function.blocks[predecessor].lines = lines
                 loop inst in hoisted -> &function.blocks[predecessor].insts.push(inst)
                 return

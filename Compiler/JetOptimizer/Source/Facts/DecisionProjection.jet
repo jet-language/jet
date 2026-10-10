@@ -313,13 +313,13 @@ fn mir_decision_parse_span(value: Dyn) -> Span MIRDecisionPayloadError! {
     Ok(Span{start: start, end: end})
 }
 fn mir_decision_parse_kind(text: String) -> MIRDecisionKind MIRDecisionPayloadError! {
-    loop kind in [MIRDecisionKind.Tier, .Inline, .Vectorize, .Parallel, .Copy, .Bounds, .Deopt, .Unreachable, .LoopInvariant] {
+    loop kind in [MIRDecisionKind.Tier, MIRDecisionKind.Inline, MIRDecisionKind.Vectorize, MIRDecisionKind.Parallel, MIRDecisionKind.Copy, MIRDecisionKind.Bounds, MIRDecisionKind.Deopt, MIRDecisionKind.Unreachable, MIRDecisionKind.LoopInvariant] {
         if mir_pass_decision_kind_name(kind) == text -> return Ok(kind)
     }
     Err(mir_decision_payload_error("decision row has unsupported kind `{text}`"))
 }
 fn mir_decision_parse_disposition(text: String) -> MIRDecisionDisposition MIRDecisionPayloadError! {
-    loop value in [MIRDecisionDisposition.Accepted, .Rejected, .Selected, .NotAttempted, .Unavailable] {
+    loop value in [MIRDecisionDisposition.Accepted, MIRDecisionDisposition.Rejected, MIRDecisionDisposition.Selected, MIRDecisionDisposition.NotAttempted, MIRDecisionDisposition.Unavailable] {
         if mir_pass_decision_disposition_name(value) == text -> return Ok(value)
     }
     Err(mir_decision_payload_error("decision row has unsupported disposition `{text}`"))
@@ -327,7 +327,7 @@ fn mir_decision_parse_disposition(text: String) -> MIRDecisionDisposition MIRDec
 fn mir_decision_parse_method(value: Dyn) -> MIRDerivationMethod? MIRDecisionPayloadError! {
     if value == .Null -> return Ok(None)
     text :: if value == .Text(text) -> text else -> { return Err(mir_decision_payload_error("decision row has invalid `evidence_method`")) }
-    loop method in [MIRDerivationMethod.StaticDerivation, .FormalProof, .RecordedExecution, .SampledAgreement, .ExternalAssumption] {
+    loop method in [MIRDerivationMethod.StaticDerivation, MIRDerivationMethod.FormalProof, MIRDerivationMethod.RecordedExecution, MIRDerivationMethod.SampledAgreement, MIRDerivationMethod.ExternalAssumption] {
         if mir_decision_method_json(method) == foundation_json_quote(text) -> return Ok(Val(method))
     }
     Err(mir_decision_payload_error("decision row has unsupported `evidence_method`"))
@@ -335,11 +335,11 @@ fn mir_decision_parse_method(value: Dyn) -> MIRDerivationMethod? MIRDecisionPayl
 fn mir_decision_parse_row(value: Dyn) -> MIRDecisionRow MIRDecisionPayloadError! {
     fields :: mir_decision_object(value, ["derivation_disposition", "derivation_ref", "disposition", "edit", "evidence", "evidence_method", "function", "function_id", "function_name", "id", "identity", "kind", "producer", "reason", "rule", "span"], "decision row")
     function := MIRFunctionID?{None}
-    if fields["function_id"] != .Null -> function = Val(MIRFunctionID{value: mir_decision_number(fields["function_id"], "function id")})
+    if fields["function_id"] != Dyn.Null -> function = Val(MIRFunctionID{value: mir_decision_number(fields["function_id"], "function id")})
     row := mir_pass_decision_row(mir_decision_parse_kind(mir_decision_text(fields, "kind")), mir_decision_parse_disposition(mir_decision_text(fields, "disposition")), function, mir_decision_text(fields, "function_name"), mir_decision_parse_span(fields["span"]), mir_decision_text(fields, "rule"), mir_decision_text(fields, "reason"), mir_decision_text(fields, "producer"), mir_decision_text(fields, "evidence"))
     id :: mir_decision_number(fields["id"], "row id")
     if row.id != id -> return Err(mir_decision_payload_error("decision row id {id} does not match its canonical fields"))
-    if fields["edit"] != .Null {
+    if fields["edit"] != Dyn.Null {
         edit :: mir_decision_object(fields["edit"], ["replacement", "span"], "decision edit")
         row.edit = Val(MIRDecisionEdit{replacement: mir_decision_text(edit, "replacement"), span: mir_decision_parse_span(edit["span"])})
     }

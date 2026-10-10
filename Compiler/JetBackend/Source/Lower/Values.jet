@@ -366,7 +366,7 @@ fn lower_close_type(p: MIRProgram, ty: MIRType) -> MIRType Never! {
     if lower_type_def(p, ty) == .Val(definition) {
         if definition.kind == .Alias(target) -> return lower_close_type(p, target)
     }
-    ty
+    ty.copy()
 }
 
 fn lower_close_method(p: MIRProgram, index: [U64:[LowerCloseImpl]], ty: MIRType) -> MIRFunctionID? Never! {
@@ -402,7 +402,7 @@ fn lower_close_receiver_slot(c: LowerContext, f: LowerFunction, slot: Int) -> Bo
 }
 
 fn lower_close_frame(p: MIRProgram, m: &LowerModule, f: &LowerFunction) Never! {
-    ty :: f.closing ?? return
+    ty := (f.closing.copy()) ?? return
     receiver := (f.params[0].copy()) ?? return lower_fail(&m, &f, "Close receiver has no value")
     if !lower_is_inline(p, ty) {
         pointer_receiver :: if lower_repr(p, ty) == {

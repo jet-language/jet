@@ -3101,12 +3101,12 @@ fn jet_driver_comptime_flush(
         }
         if batch.shareable {
             live = [JetDriverComptimeLive]{}
-            if built == .Val(program) -> &live.push(jet_driver_comptime_live(load, program, sources, ^closure))
+            if built == .Val(built_program) -> &live.push(jet_driver_comptime_live(load, built_program, sources, ^closure))
             staging.growth_constants = [MIRConstantDef]{}
             staging.restore = false
         }
-        program := ^built ?? panic("a comptime flush lost its retained MIR")
-        &machines.push(JetDriverComptimeMachine{program: ^program, closure_sources: sources})
+        retained_program := ^built ?? panic("a comptime flush lost its retained MIR")
+        &machines.push(JetDriverComptimeMachine{program: ^retained_program, closure_sources: sources})
     }
     evaluated_index := 0
     loop index in start..<batch.entries.len() {

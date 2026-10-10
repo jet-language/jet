@@ -32,7 +32,8 @@ fn lower_native_err_place(p: MIRProgram, f: &LowerFunction, handle: LIRValueID, 
     if field.name != "message" && field.name != "code" && field.name != "cause" -> return None
     offset :: if field.name == "message" -> Int.from_i64(ERR_MESSAGE) else if field.name == "code" -> Int.from_i64(ERR_CODE) else -> Int.from_i64(ERR_CAUSE)
     cell :: lower_address(&f, handle, offset)
-    if field.ty.kind != .Option(_) -> return Val(LowerPlaceAddress{address: LowerFieldAddress{base: cell, offset: 0}, ty: field.ty, borrowed: true})
+    optional :: field.ty.kind == { .Option(_) -> true else -> false }
+    if !optional -> return Val(LowerPlaceAddress{address: LowerFieldAddress{base: cell, offset: 0}, ty: field.ty, borrowed: true})
     payload :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Load{dst: payload, base: cell, offset: 0})
     null :: lower_pointer(&f)

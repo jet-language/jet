@@ -493,7 +493,7 @@ fn jet_rust_emit_declared_call_arguments(ctx: &JetRustEmitContext, function: MIR
     rendered := [String]{}
     loop (index, arg) in args {
         formal :: ctx.program.functions[target].params[index].ty.copy()
-        access :: ctx.program.functions[target].params[index].access
+        access := ctx.program.functions[target].params[index].access
         borrowed :: access == MIRAccess.Write || (access == MIRAccess.Read && jet_rust_emit_type_is_borrowed(formal))
         &rendered.push(jet_rust_emit_call_arg_for_formal(&ctx, function, arg, formal, borrowed))
     }

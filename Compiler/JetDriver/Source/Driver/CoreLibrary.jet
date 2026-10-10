@@ -26,7 +26,7 @@ fn jet_driver_core_library_sources(rows: [JetDriverCoreSource]) -> [CoreSharedSo
 // A library request carries compiler/host execution facts, never the importing
 // user's source authority, gates or evaluation entry. This empty authority table
 // is not passed to the program snapshot validator: CoreLibrary owns its graph.
-fn jet_driver_core_library_request(template: JetDriverCompileRequest, rows: [JetDriverCoreSource]) -> JetDriverCompileRequest Never! {
+fn jet_driver_core_library_request(template: ^JetDriverCompileRequest, rows: [JetDriverCoreSource]) -> JetDriverCompileRequest Never! {
     JetDriverCompileRequest{
         authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{}, entry_root_identity: "", entry_path: ""},
         canonical_effect_source: template.canonical_effect_source,
@@ -34,8 +34,8 @@ fn jet_driver_core_library_request(template: JetDriverCompileRequest, rows: [Jet
         host_facts: template.host_facts,
         eval_config: jet_eval_runtime_config(template.eval_config),
         target: JetDriverCompileTarget.Native,
-        record_store: template.record_store.copy(),
-        trace_sink: template.trace_sink.copy(),
+        record_store: ^template.record_store,
+        trace_sink: ^template.trace_sink,
         mir_lint_every_pass: template.mir_lint_every_pass,
         compiler_threads: template.compiler_threads,
     }

@@ -56,7 +56,8 @@ fn lower_constant_store(p: MIRProgram, m: &LowerModule, f: &LowerFunction, boxed
 // Bytes is the compact MIR spelling of a packed U8 List, not a String.
 fn lower_constant_bytes_type(p: MIRProgram, ty: MIRType) -> Bool Never! {
     aggregate :: lower_inline_type(p, ty) ?? return false
-    if aggregate.kind != .List(_) && aggregate.kind != .FixedList(_, _) -> return false
+    is_seq :: aggregate.kind == { .List(_) | .FixedList(_, _) -> true else -> false }
+    if !is_seq -> return false
     elem :: lower_list_element(aggregate) ?? return false
     lower_narrow_bits(elem) == 8 && !lower_narrow_signed(elem)
 }

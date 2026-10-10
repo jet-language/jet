@@ -438,7 +438,11 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
     )
     jet_driver_comptime_return_declared(&stage, &run)
     load.diagnostics = stage_diagnostics
-    registration = jet_driver_comptime_take_registration(&run)
+    finished_registration := ^run.graph
+    run.graph = None
+    partial_registration := ^run.partial_graph
+    run.partial_graph = None
+    registration = jet_driver_comptime_take_registration(^finished_registration, ^partial_registration)
     if run.soft_stop -> return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, None)
     if !run.complete {
         if run.internal_problem == None {
