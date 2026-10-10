@@ -249,6 +249,19 @@ to find the next. Before fixing anything, collect every issue in one pass:
   regenerate and commit generated outputs with their sources, and run the
   generator checks against the exact source a build will use, so no expensive
   run is lost to a mistake a fast check would catch.
+- **Run independent stages in parallel.** A pipeline's dependency order does not
+  make its probes serial. Start every stage that can run now (a host build
+  beside a sweep, checks of later-stage inputs beside earlier stages), and
+  make each stage keep going past its failures far enough that the next stage's
+  own collect-all census runs in the same cycle (for example, write partial
+  output so a downstream type check reports everything else at once).
+- **A stage only stops at a failure that blocks every later item.** Everywhere
+  else it records the failure, skips the item and continues, then reports the
+  full list and returns the first error.
+- **Never claim a job started until it is observed running.** After releasing
+  queued work, confirm it in the scheduler's actual running state (the real
+  queue path, its start decision, its live process) before reporting it as
+  started; a misplaced job file is a silent day-long stall.
 
 ## Environment and proof
 
