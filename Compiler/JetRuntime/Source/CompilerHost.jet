@@ -107,3 +107,60 @@ fn compiler_process_status_text(status: I64) -> I64 {
 // the build target identity, not uname's machine/release or the compiler target.
 #Export(c) fn jet_std_os_name() -> I64 { jet_rt_string_clone(rt_static_text("linux")) }
 #Export(c) fn jet_std_os_arch() -> I64 { jet_rt_string_clone(rt_static_text("x86_64")) }
+
+// OsExtra.rs jet_sys_executable_raw: std::env::current_exe on Linux reads the
+// /proc/self/exe link, decoded lossily; any failure is None. The native
+// compiler locates its jet-runtime pack beside this path.
+#Export(c) fn jet_sys_executable_raw(some: I64) -> I64 {
+    path :: rt_static_text("/proc/self/exe")
+    scratch :: jet_rt_alloc(I64{32}, I64{8})
+    capacity := I64{256}
+    loop {
+        bytes :: jet_rt_alloc(capacity, I64{8})
+        count :: jet_fs_readlink_raw(path, bytes, capacity, scratch)
+        if (count < I64{0}) {
+            jet_rt_free(bytes, capacity, I64{8})
+            jet_rt_free(scratch, I64{32}, I64{8})
+            return I64{0}
+        }
+        if (count < capacity) {
+            rt_text_store(some, rt_text_lossy(bytes, count))
+            jet_rt_free(bytes, capacity, I64{8})
+            jet_rt_free(scratch, I64{32}, I64{8})
+            return I64{1}
+        }
+        jet_rt_free(bytes, capacity, I64{8})
+        capacity *= I64{2}
+    }
+}
+
+// OsExtra.rs jet_sys_current_dir_raw: std::env::current_dir is getcwd(3),
+// decoded lossily; the error is the io::Error text "<message> (os error N)".
+// The raw syscall reports an unreachable directory as a non-absolute path,
+// which getcwd(3) refuses with ENOENT.
+#Export(c) fn jet_sys_current_dir_raw(ok: I64, err: I64) -> I64 {
+    capacity := I64{512}
+    loop {
+        bytes :: jet_rt_alloc(capacity, I64{8})
+        result :: host_call(I64{79}, bytes, capacity, I64{0})
+        failure := I64{0}
+        if (result > I64{0}) {
+            if (rt_text_byte(bytes) == I64{47}) {
+                rt_text_store(ok, rt_text_lossy(bytes, result - I64{1}))
+                jet_rt_free(bytes, capacity, I64{8})
+                return I64{1}
+            }
+            failure = I64{2}
+        } else {
+            failure = -result
+        }
+        jet_rt_free(bytes, capacity, I64{8})
+        if (failure != I64{34}) {
+            text :: jet_rt_string_builder_new()
+            host_errno_cause_append(text, failure)
+            rt_text_store(err, jet_rt_string_builder_finish(text))
+            return I64{0}
+        }
+        capacity *= I64{2}
+    }
+}
