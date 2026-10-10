@@ -2418,6 +2418,14 @@ fn jet_driver_check_reserved_import(declaration: ImportDecl, diagnostics: &[Diag
         return false
     }
     if declaration.kind == .Module(name, span) {
+        // D-CORENS1 / E0341: the old `jet.<ring>` spelling teaches `core.<ring>`.
+        if name.starts_with("jet.") {
+            ring :: name.slice(4, name.len())
+            if jet_driver_is_ring_module(ring) {
+                &diagnostics.push(jet_driver_diagnostic("E0341", span, "`use jet.{ring}` is the old first-party library spelling", "first-party libraries moved to the `core.*` namespace (D-CORENS1)", "write `use {jet_driver_canonical_ring_module(ring)}` instead"))
+                return false
+            }
+        }
         root :: name.split(".").to_list()[0]
         if JET_DRIVER_FIRST_PARTY_RESERVED.contains(root) {
             &diagnostics.push(jet_driver_diagnostic("E1002", span, "`{root}` is reserved for first-party or foreign packages", "`core`, `jet`, first-party ring names, and foreign-language roots can't be used for local modules", "choose a different module name"))
@@ -2425,6 +2433,18 @@ fn jet_driver_check_reserved_import(declaration: ImportDecl, diagnostics: &[Diag
         }
     }
     true
+}
+
+// Rust Syntax `is_ring_module`: ring module names that resolve as
+// compiler-known modules.
+fn jet_driver_is_ring_module(name: String) -> Bool Never! {
+    name == "log" || name == "crypto" || name == "http" || name == "regex" || name == "reactive" || name == "archive" || name == "raylib" || name == "db" || name == "time" || name == "plugin"
+}
+
+// Rust Syntax `canonical_ring_module`: the Core home of an old ring spelling.
+fn jet_driver_canonical_ring_module(name: String) -> String Never! {
+    if name == "raylib" -> return "core.game.raylib"
+    "core.{name}"
 }
 
 // D-ECO-INLINEPACKAGE1: the one leading `package { … }` carrier of a source
