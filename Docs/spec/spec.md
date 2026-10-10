@@ -249,6 +249,9 @@ which the compile-time evaluator folds once, and every read is an ordinary
 copy (D-MODULE-VALUE1). Both are visible to functions in the file; only the
 mutable form may be assigned after initialization. Calls, operators, and name
 reads in an initializer are E0622; computation belongs in an explicit function.
+Typed scalar literals such as `I64{0}`, `I64{-1}`, and `F32{1.25}` retain their
+checked scalar type in module storage (D-BIND-BARE1); the inner value must still
+be literal data, not a call or arithmetic expression.
 Inside a function, the same spellings are local bindings. A top-level executable statement is
 rejected with E0621; Jet does not synthesize an implicit runtime function.
 The `const` keyword is retired and is recognized only to teach its replacement

@@ -2358,6 +2358,60 @@ mod structure_tests {
             edition: "2027".to_string(),
         }
     }
+
+    fn typed_scalar_module_check(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
+        static INSTALL: std::sync::Once = std::sync::Once::new();
+        INSTALL.call_once(jet_codegen::Codegen::MIREval::install_mir_bridge);
+        check_bundle(bundle, CompileMode::Check)
+    }
+
+    #[test]
+    fn typed_scalar_module_globals_preserve_checked_carriers() {
+        let source = include_str!("../../../../Compiler/JetSema/Tests/ScalarGlobalFixtures.jet");
+        let mut bundle = incremental_bundle(source);
+        let diagnostics = typed_scalar_module_check(&mut bundle);
+        assert!(diagnostics.iter().all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error), "{diagnostics:#?}");
+        for (name, expected) in [
+            ("root", Type::IntN { signed: true, bits: 64 }),
+            ("argc", Type::IntN { signed: true, bits: 64 }),
+            ("small", Type::IntN { signed: false, bits: 8 }),
+            ("enabled", Type::Bool),
+            ("fraction", Type::Float32),
+            ("precise", Type::Float),
+            ("CONSTANT_I64", Type::IntN { signed: true, bits: 64 }),
+        ] {
+            let constant = bundle.modules[0].items.iter().find_map(|item| {
+                if let Item::Const(constant) = item {
+                    (constant.name == name).then_some(constant)
+                } else {
+                    None
+                }
+            }).unwrap();
+            assert_eq!(constant.ty.as_ref(), Some(&expected), "{name}");
+            assert!(constant.ct.is_some(), "{name} must be initialized once from checked scalar data");
+        }
+    }
+
+    #[test]
+    fn typed_scalar_module_storage_rejects_nonliteral_initializers() {
+        for source in [
+            "fn make() -> Int { 0 }\nvalue := I64{make()}\nfn run() {}\n",
+            "value := I64{1 + 2}\nfn run() {}\n",
+            "struct CellValue { field: Int }\nvalue := CellValue{field: 1}\nfn run() {}\n",
+        ] {
+            let mut bundle = incremental_bundle(source);
+            let diagnostics = typed_scalar_module_check(&mut bundle);
+            assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0622"), "{source}\n{diagnostics:#?}");
+        }
+    }
+
+    #[test]
+    fn typed_scalar_module_storage_checks_literal_range() {
+        let mut bundle = incremental_bundle("value := U8{256}\nfn run() {}\n");
+        let diagnostics = typed_scalar_module_check(&mut bundle);
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.severity == crate::Diagnostics::Severity::Error), "{diagnostics:#?}");
+        assert!(!diagnostics.iter().any(|diagnostic| diagnostic.code == "E0622"), "a scalar literal must reach normal checked conversion diagnostics: {diagnostics:#?}");
+    }
     #[test]
     fn checked_nominal_contexts_share_reachable_module_bodies() {
         let mut bundle = incremental_bundle("fn run() {}\n");

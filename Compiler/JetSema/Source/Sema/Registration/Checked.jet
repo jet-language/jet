@@ -2978,7 +2978,39 @@ fn sema_checked_constant_type(definition: ConstDef) -> Type? {
         .Bool(_, _) -> Val(Type.Bool)
         .Char(_, _) -> Val(Type.Char)
         .Str(parts, _) -> if parts.len() == 1 && parts[0] == .Lit(_) -> Val(Type.String) else -> None
+        .TypedLit(_, _, _) -> sema_checked_typed_scalar_literal_type(definition.value)
         else -> None
+    }
+}
+
+// D-BIND-BARE1: preserve the type on a scalar literal when no staged type
+// has been installed yet. Calls/operators remain outside module storage.
+fn sema_checked_typed_scalar_literal_type(value: Expr) -> Type? {
+    if value == .TypedLit(head, body, _) {
+        ty :: head ?? return None
+        if ty == {
+            .Int | .IntN(_, _) | .Float | .Float32 | .Bool -> {}
+            else -> { return None }
+        }
+        inner :: if body == {
+            .Value(item) -> item
+            .Elements(items) -> {
+                if items.len() != 1 -> return None
+                items[0]
+            }
+            else -> { return None }
+        }
+        if sema_checked_module_scalar_literal(inner) -> return Val(ty)
+    }
+    None
+}
+
+fn sema_checked_module_scalar_literal(value: Expr) -> Bool Never! {
+    if value == {
+        .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) -> true
+        .Unary(op, inner, _) -> op == UnOp.Neg && (inner == .Int(_, _, _, _) || inner == .Float(_, _, _, _))
+        .Paren(inner, _) -> sema_checked_module_scalar_literal(inner)
+        else -> false
     }
 }
 

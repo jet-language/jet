@@ -1619,7 +1619,33 @@ fn module_scalar_const_type(c: &crate::AST::ConstDef) -> Option<Type> {
         {
             Some(Type::String)
         }
+        Expr::TypedLit { .. } => module_typed_scalar_const_type(c),
         _ => supported_module_array_type(c),
+    }
+}
+
+// D-BIND-BARE1 puts a scalar's type on its literal, not on the binding.
+// Classify only literal operands here; the existing checked evaluator proves
+// the conversion/range and retains its type before CtValue erases widths.
+fn module_typed_scalar_const_type(c: &crate::AST::ConstDef) -> Option<Type> {
+    let Expr::TypedLit { head: Some(ty), body, .. } = &c.value else { return None };
+    if !matches!(ty, Type::Int | Type::IntN { .. } | Type::Float | Type::Float32 | Type::Bool) {
+        return None;
+    }
+    let value = match body {
+        crate::AST::TypedLitBody::Value(value) => value.as_ref(),
+        crate::AST::TypedLitBody::Elements(values) if values.len() == 1 => &values[0],
+        _ => return None,
+    };
+    module_scalar_literal(value).then(|| ty.clone())
+}
+
+fn module_scalar_literal(value: &Expr) -> bool {
+    match value {
+        Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) => true,
+        Expr::Unary(crate::AST::UnOp::Neg, inner, _) => matches!(inner.as_ref(), Expr::Int(..) | Expr::Float(..)),
+        Expr::Paren(inner, _) => module_scalar_literal(inner),
+        _ => false,
     }
 }
 
@@ -1640,7 +1666,7 @@ fn module_value_const(c: &crate::AST::ConstDef) -> bool {
 /// Evaluated before type registration: comptime bindings and literal module
 /// constants share the one compile-time evaluator.
 pub(crate) fn const_evaluated_at_build(c: &crate::AST::ConstDef) -> bool {
-    c.is_comptime || module_value_const(c)
+    c.is_comptime || module_typed_scalar_const_type(c).is_some() || module_value_const(c)
 }
 
 /// Literal data only: no calls, operators, or name reads. An uppercase
