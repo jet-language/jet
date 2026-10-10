@@ -206,7 +206,36 @@ fn __expiry_deadline(now_ms: Int, ttl: Duration) -> Int Never! {
     assert(saturated.is_valid(high))
 }
 impl Clock.Equatable {
-    fn equal(self, rhs: Clock) -> Bool { self.now() == rhs.now() }
+    // Equality compares stored timelines, never an effectful host sample.
+    fn equal(self, rhs: Clock) -> Bool {
+        left :: self.state.guard_read()
+        right :: rhs.state.guard_read()
+        if left.value == {
+            .Manual(value) -> if right.value == {
+                .Manual(other) -> value == other
+                .System(_, _) -> false
+            }
+            .System(started_ns, offset_ms) -> if right.value == {
+                .Manual(_) -> false
+                .System(other_started_ns, other_offset_ms) -> started_ns == other_started_ns && offset_ms == other_offset_ms
+            }
+        }
+    }
+}
+
+#Test("Clock equality compares stored manual and system state without sampling") {
+    manual :: Clock.new(4)
+    assert(manual.equal(Clock.new(4)))
+    assert(!manual.equal(Clock.new(5)))
+    system :: Clock{state: shared __ClockState.System{started_ns: 0, offset_ms: 4}}
+    same :: Clock{state: shared __ClockState.System{started_ns: 0, offset_ms: 4}}
+    later :: Clock{state: shared __ClockState.System{started_ns: 1, offset_ms: 4}}
+    shifted :: Clock{state: shared __ClockState.System{started_ns: 0, offset_ms: 5}}
+    assert(system.equal(same))
+    assert(!system.equal(later))
+    assert(!system.equal(shifted))
+    assert(!system.equal(manual))
+    assert(!manual.equal(system))
 }
 
 #Test("Clock manual forks are independent while observers retain identity") {

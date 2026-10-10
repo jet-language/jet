@@ -36,15 +36,15 @@ fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
 fn file_tag(error: crypto.FileCryptoError) -> String {
     if error == {
         .OpenFailed -> "open-failed"
-        .SealFailed(_) -> "seal-failed"
-        .SourceIo -> "source-io"
+        .SealFailed -> "seal-failed"
+        .SourceIO -> "source-io"
         .DestinationExists -> "destination-exists"
-        .DestinationIo -> "destination-io"
+        .DestinationIO -> "destination-io"
     }
 }
 #Test("file_crypto_error_projection_is_exhaustive_and_redacted") {
-    // D-CRYPTO-ENVELOPE2=A five variants in ratified order; Core enum54-58 drift is #4821.
-    public :: [crypto.FileCryptoError]{.OpenFailed, .SealFailed(crypto.CryptoError.Unavailable), .SourceIo, .DestinationExists, .DestinationIo}
+    // D-CRYPTO-ERRFAM1=A keeps all five file-error cases payload-free.
+    public :: [crypto.FileCryptoError]{.OpenFailed, .SealFailed, .SourceIO, .DestinationExists, .DestinationIO}
     tags := [String]{}
     loop error in public -> &tags.push(file_tag(error))
     assert_eq(tags, ["open-failed", "seal-failed", "source-io", "destination-exists", "destination-io"])

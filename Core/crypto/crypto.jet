@@ -122,7 +122,7 @@ enum CryptoError {
 #Error
 enum FileCryptoError {
     OpenFailed
-    SealFailed(CryptoError)
+    SealFailed
     SourceIO
     DestinationExists
     DestinationIO
@@ -956,7 +956,7 @@ fn jetc_seal_stage(recipients: [jetc.Recipient], parent: JetcParent, stage: Jetc
 fn jetc_random(length: Int) -[Rand]> Secret FileCryptoError! {
     if random.bytes(length) == {
         .Ok(bytes) -> Ok(Secret{bytes: bytes})
-        .Err(error) -> Err(.SealFailed(error))
+        .Err(_) -> Err(.SealFailed)
     }
 }
 fn jetc_exists_errno(errno: Int) -> Bool Never! {

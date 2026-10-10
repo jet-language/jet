@@ -241,6 +241,27 @@ records take their checked shapes from canonical Core source declarations.
 They must not also appear in compiler-owned record inventories. Root-Prelude
 carrier mappings remain ABI spellings, not owners of those checked fields.
 
+Core runtime source contracts use the ratified ownership and failure spellings:
+
+- SQL projection `field()` returns an owned `String?`; field traversal borrows
+  projection payloads directly rather than allocating names for its callback.
+  There is no live-reference `@String` return contract.
+- Expiring-secret storage acquires its edit guard in the removal helper, moves
+  the payload from that owned local, restores `None`, then drops the payload.
+  Close consumes the storage owner, and live callbacks retain a read guard.
+  Callbacks are non-failing (`Never!`); expiry is the wrapper's typed failure.
+  Shared handle operations never copy credential material.
+- XML CR normalization uses literal text; code-point encoding at the byte-token
+  boundary handles failure as `InvalidEncoding`. Public `Float` and `Bytes`
+  patterns reject non-XML values. Private `Number` carriers fall through the
+  invalid-carrier arm without borrowing their payload outside the stream owner.
+- `FileCryptoError.SealFailed` is a unit variant, like the other file-error
+  cases, under D-CRYPTO-ERRFAM1. Core maps primitive seal failures to that case
+  rather than attaching a retired crypto-error payload.
+- `Clock.equal` is pure: manual clocks compare stored millisecond values;
+  system clocks compare stored start and offset values. Comparing clocks never
+  samples the host clock or invokes a time wait.
+
 The bootstrap Rust assembler embeds the SQL and bounded CSV-read kernels into
 the generated source; it does not retain paths relative to the Prelude tree.
 Its private String/byte carrier helpers come solely from `Core/ForeignBytes.rs`,

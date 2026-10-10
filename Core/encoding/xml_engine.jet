@@ -1592,8 +1592,7 @@ fn canonical_leaf(value: Dyn, kind: String, output: &String) XMLFault! {
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2694
 fn normalize_lines(value: String) -> String Never! {
-    cr :: unicode.encode_cp(13)
-    value.replace("{cr}\n", "\n").replace(cr, "\n")
+    value.replace("\r\n", "\n").replace("\r", "\n")
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2697
 fn canonical_text_escape(value: String) -> String Never! {
@@ -1601,7 +1600,7 @@ fn canonical_text_escape(value: String) -> String Never! {
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2703
 fn canonical_attr_escape(value: String) -> String Never! {
-    value.replace("&", "&amp;").replace("<", "&lt;").replace("\"", "&quot;").replace("\t", "&#x9;").replace("\n", "&#xA;").replace(unicode.encode_cp(13), "&#xD;")
+    value.replace("&", "&amp;").replace("<", "&lt;").replace("\"", "&quot;").replace("\t", "&#x9;").replace("\n", "&#xA;").replace("\r", "&#xD;")
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2714
 fn xml_tag_of(value: Dyn) -> String? Never! {
@@ -1788,17 +1787,18 @@ fn project_element_value(element: Dyn, path: String) -> Dyn XMLFault! {
         if key_index.get(key) == .Val(index) {
             last :: child_keys.len() - 1
             &child_keys.__swap(index, last)
-            entry := &child_keys.pop() ?? panic("indexed XML projection entry must exist")
+            entry :: &child_keys.pop() ?? panic("indexed XML projection entry must exist")
+            entry_key :: ^entry.key
             prior := ^entry.value
-            if prior == {
+            combined :: if prior == {
                 .Array(items) -> {
                     values := ^items
                     &values.push(projected)
-                    entry.value = Dyn.Array(^values)
+                    Dyn.Array(^values)
                 }
-                else -> entry.value = Dyn.Array([Dyn]{^prior, projected})
+                else -> { Dyn.Array([Dyn]{^prior, projected}) }
             }
-            &child_keys.push(^entry)
+            &child_keys.push((key: ^entry_key, value: ^combined))
             &child_keys.__swap(index, last)
         } else {
             key_index[key] = child_keys.len()
@@ -2091,7 +2091,7 @@ impl ByteLexer {
         loop index in 0..<count {
             unit :: self.units[index]
             &scalar_bytes.push(unit.raw.len())
-            text += unicode.encode_cp(unit.scalar)
+            text += unicode.encode_cp(unit.scalar) ?? return Err(&self.fail(Reason.InvalidEncoding, "invalid Unicode scalar in decoded XML token"))
             loop byte in unit.raw -> &raw_bytes.push(byte)
         }
         self.retained_bytes -= raw_bytes.len()
@@ -2345,7 +2345,11 @@ fn predefined(name: String) -> String? Never! {
                 index += 1
             }
             if number > 0x10ffff || (number >= 0xd800 && number <= 0xdfff) -> return None
-            if valid_xml_char(number) -> Val(unicode.encode_cp(number)) else -> None
+            if !valid_xml_char(number) -> return None
+            if unicode.encode_cp(number) == {
+                .Ok(text) -> Val(^text)
+                .Err(_) -> panic("validated XML character must be a Unicode scalar")
+            }
         }
     }
 }
@@ -3265,7 +3269,7 @@ impl Scanner {
 #Test("XML quote delimiters and CR policy retain their literal semantics") {
     assert_eq(escape_attribute("a'b", "'"), "a&apos;b")
     assert_eq(escape_attribute("a\"b", "\""), "a&quot;b")
-    cr :: unicode.encode_cp(13)
+    cr :: "\r"
     assert_eq(normalize_lines("a{cr}\nb{cr}c"), "a\nb\nc")
     assert_eq(canonical_attr_escape(cr), "&#xD;")
 }
@@ -3283,4 +3287,19 @@ impl Scanner {
         }
         else -> panic("UTF16 supplementary text did not produce a token")
     }
+}
+
+#Test("XML repeated child projections retain insertion order and append every value") {
+    document :: parse_document("<r><x>a</x><y>other</y><x>b</x><x>c</x></r>") ?? panic("parse repeated children")
+    projected :: project_document_for_decode(document) ?? panic("project repeated children")
+    values :: array_value(field(projected, "x")) ?? panic("repeated x must be an array")
+    assert_eq(values.len(), 3)
+    expected :: ["a", "b", "c"]
+    loop index in 0..<values.len() {
+        if values[index] == {
+            .Text(value) -> assert_eq(value, expected[index])
+            else -> panic("projected child must remain text")
+        }
+    }
+    assert_eq(text_value(field(projected, "y")), Val("other"))
 }

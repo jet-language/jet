@@ -96,7 +96,7 @@ fn seal(key: [U8], nonce: [U8], plain: [U8], aad: [U8]) -> [U8] crypto.FileCrypt
     #Unsafe("Core JETC2 applies the fixed XChaCha20-Poly1305 suite and protocol-owned nonce/AAD domains") {
         if expert.xchacha20poly1305_seal(key, nonce, plain, aad) == {
             .Ok(bytes) -> return Ok(^bytes)
-            .Err(error) -> return Err(.SealFailed(error))
+            .Err(_) -> return Err(.SealFailed)
         }
     }
 }
@@ -204,10 +204,10 @@ fn record_shape(length: Int, flags: U8) -> Bool Never! {
 }
 
 fn canonical(recipients: [crypto.X25519PublicKey]) -> [Recipient] crypto.FileCryptoError! {
-    if recipients.len() < 1 || recipients.len() > 256 -> return Err(.SealFailed(.Length))
+    if recipients.len() < 1 || recipients.len() > 256 -> return Err(.SealFailed)
     sorted := [Recipient]{}
     loop public in recipients {
-        if public.bytes.len() != 32 -> return Err(.SealFailed(.Length))
+        if public.bytes.len() != 32 -> return Err(.SealFailed)
         &sorted.push(Recipient{id: id(public.bytes), public: public})
     }
     loop i in 1..<sorted.len() {
@@ -222,7 +222,7 @@ fn canonical(recipients: [crypto.X25519PublicKey]) -> [Recipient] crypto.FileCry
         sorted[j] = current
     }
     loop i in 1..<sorted.len() {
-        if sorted[i - 1].public.bytes == sorted[i].public.bytes -> return Err(.SealFailed(.KeyRejected))
+        if sorted[i - 1].public.bytes == sorted[i].public.bytes -> return Err(.SealFailed)
     }
     Ok(sorted)
 }
@@ -266,14 +266,14 @@ fn writer(sorted: [Recipient], plain_length: Int,
     file_id: [U8], file_key: ^crypto.Secret, ephemeral_secret: ^crypto.Secret,
     nonce_prefix: [U8]) -> Writer crypto.FileCryptoError! {
     body :: body_length(plain_length) ?? return Err(.SourceIO)
-    if file_id.len() != 16 || secret_length(file_key) != 32 || secret_length(ephemeral_secret) != 32 || nonce_prefix.len() != 16 -> return Err(.SealFailed(.Length))
+    if file_id.len() != 16 || secret_length(file_key) != 32 || secret_length(ephemeral_secret) != 32 || nonce_prefix.len() != 16 -> return Err(.SealFailed)
     ephemeral_key := crypto.X25519SecretKey{bytes: [U8]{}}
     #Unsafe("Core JETC2 copies a validated ephemeral Secret into a zeroizing X25519SecretKey; both owners retain their Close duty") {
-        ephemeral_key = crypto.X25519SecretKey.from_bytes(expert.secret_bytes(ephemeral_secret)) ?? return Err(.SealFailed(err))
+        ephemeral_key = crypto.X25519SecretKey.from_bytes(expert.secret_bytes(ephemeral_secret)) ?? return Err(.SealFailed)
     }
     ephemeral :: if crypto.x25519_public(ephemeral_key) == {
         .Ok(value) -> ^value
-        .Err(error) -> { return Err(.SealFailed(error)) }
+        .Err(_) -> { return Err(.SealFailed) }
     }
     fixed := [U8]{74, 69, 84, 67, 2, 1, 1, 0}
     append(&fixed, little(BASE + STANZA * sorted.len() + TAG, 4))
@@ -288,15 +288,15 @@ fn writer(sorted: [Recipient], plain_length: Int,
     loop recipient in sorted {
         shared :: if crypto.x25519(ephemeral_key, recipient.public) == {
             .Ok(value) -> ^value
-            .Err(error) -> { return Err(.SealFailed(error)) }
+            .Err(_) -> { return Err(.SealFailed) }
         }
         kek :: if derive_key(shared, file_id, info("JETC2 wrap key", ephemeral.bytes, recipient.public.bytes), 32) == {
             .Ok(value) -> ^value
-            .Err(error) -> { return Err(.SealFailed(error)) }
+            .Err(_) -> { return Err(.SealFailed) }
         }
         wrap_nonce :: if derive_key(shared, file_id, info("JETC2 wrap nonce", ephemeral.bytes, recipient.public.bytes), 24) == {
             .Ok(value) -> ^value
-            .Err(error) -> { return Err(.SealFailed(error)) }
+            .Err(_) -> { return Err(.SealFailed) }
         }
         wrapped :: seal_wrap(kek, wrap_nonce, file_key, wrap_aad(fixed, base, recipient.id, recipient.public.bytes))
         append(&header, recipient.id)

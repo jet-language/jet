@@ -59,17 +59,28 @@ impl JetSQLSelectItem {
             }
         }
     }
-    // Rust field:60–69. Retains the actual item owner, never an owning shim.
-    fn field(self) -> (@String)? Never! from self {
+    // Rust field:60–69. Return an owned field name, not an escaping read window.
+    fn field(self) -> String? Never! {
         if self == {
-            .Field(field, _) -> Val(@field)
+            .Field(field, _) -> Val(field.copy())
             .Aggregate(_, field, _) -> {
-                if field == .Val(name) -> return Val(@name)
+                if field == .Val(name) -> return Val(name.copy())
                 None
             }
             .Wildcard -> None
         }
     }
+}
+
+#Test("SQL projection field access returns owned names without consuming items") {
+    field :: JetSQLSelectItem.Field{field: "price", alias: Val("display")}
+    assert_eq(field.field(), Val("price"))
+    assert_eq(field.field(), Val("price"))
+    aggregate :: JetSQLSelectItem.Aggregate{function: .Sum, field: Val("price"), alias: None}
+    assert_eq(aggregate.field(), Val("price"))
+    count :: JetSQLSelectItem.Aggregate{function: .Count, field: None, alias: None}
+    assert(count.field() == None)
+    assert(JetSQLSelectItem.Wildcard.field() == None)
 }
 
 
@@ -549,7 +560,13 @@ priv module internal {
 // excluded, including zero; callback order and repeated visits stay unchanged.
 fn sql_query_fields(query: JetSQLQuery, visit: fn(String)) Never! {
     loop item in query.projection {
-        if item.field() == .Val(field) -> visit(field)
+        if item == {
+            .Field(field, _) -> visit(field)
+            .Aggregate(_, field, _) -> {
+                if field == .Val(name) -> visit(name)
+            }
+            .Wildcard -> {}
+        }
     }
     loop key in query.group_by {
         field :: group_field(query, key) ?? next

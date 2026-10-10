@@ -43,41 +43,40 @@ impl ExpiringSecret {
 
     fn expires_at_ms(self) -> Int Never! { self.deadline_ms }
 
-    fn with<R>(self, callback: fn(T) -> R) -> R time.Expired! {
-        guard := self.value.guard_edit()
-        if self.observer.now() > self.deadline_ms -> __take_expired(&guard)
-        __loan_secret(guard.value, callback)
+    fn with<R>(self, callback: fn(T) -> R Never!) -> R time.Expired! {
+        if self.observer.now() > self.deadline_ms -> __take_expired<T>(self.value)
+        guard :: self.value.guard_read()
+        __loan_secret<T, R>(guard.value, callback)
     }
 }
 
 impl ExpiringSecret.Close {
     fn close(^self) {
         owner :: ^self
-        __close_secret_storage(owner.value)
+        __close_secret_storage<T>(^owner.value)
     }
 }
 
 // A Shared provider only releases its storage handle. Source takes the live
 // credential first, so provider cleanup never needs a source Close callback.
-fn __close_secret_storage<T>(value: Shared<T?>) Never! {
-    guard := value.guard_edit()
-    __take_expired(&guard)
+fn __close_secret_storage<T>(value: ^Shared<T?>) Never! {
+    owner :: ^value
+    __take_expired<T>(owner)
 }
 
-// Take, reinitialize the shared slot, then end the owned payload's scope.
+// Acquire the guard here: removal consumes an owned local, never a borrowed
+// guard parameter. Reinitialize the slot before dropping its moved payload.
 // The approved general mono-time Close drop glue (#4792) owns cleanup.
-fn __take_expired<T>(guard: &SharedGuard<T?>) Never! {
+fn __take_expired<T>(storage: Shared<T?>) Never! {
+    guard := storage.guard_edit()
     removed :: ^guard.value
     guard.value = None
-    if ^removed == {
-        .Val(value) -> {}
-        None -> {}
-    }
+    _ :: ^removed
 }
 
 // A read parameter's pattern payload is an existing non-owning read window.
 // Keep the guard held in `with` until the source callback has returned.
-fn __loan_secret<T, R>(value: T?, callback: fn(T) -> R) -> R time.Expired! {
+fn __loan_secret<T, R>(value: T?, callback: fn(T) -> R Never!) -> R time.Expired! {
     if value == {
         .Val(secret) -> Ok(callback(secret))
         None -> Err(time.Expired{})
@@ -100,7 +99,7 @@ struct ExpiryCloseOwner { value: Shared<ExpiryCloseProbe?> }
 impl ExpiryCloseOwner.Close {
     fn close(^self) {
         owner :: ^self
-        __close_secret_storage(owner.value)
+        __close_secret_storage<ExpiryCloseProbe>(^owner.value)
     }
 }
 
@@ -108,11 +107,11 @@ impl ExpiryCloseOwner.Close {
     count :: shared ExpiryCloseCount{count: 0}
     storage :: shared (ExpiryCloseProbe?{Val(ExpiryCloseProbe{count: count.copy()})})
     if true {
-        guard := storage.guard_edit()
-        __take_expired(&guard)
+        __take_expired<ExpiryCloseProbe>(storage)
+        guard :: storage.guard_read()
         assert(guard.value == None)
-        __take_expired(&guard)
     }
+    __take_expired<ExpiryCloseProbe>(storage)
     // Dropping still-live storage must run the same payload Close exactly once.
     if true {
         live :: ExpiryCloseOwner{value: shared (ExpiryCloseProbe?{Val(ExpiryCloseProbe{count: count.copy()})})}
