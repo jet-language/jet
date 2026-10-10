@@ -24,13 +24,15 @@ fn lower_runtime_order(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MI
         b = lower_record_to_runtime(p, &m, &f, ty, runtime, right)
     }
     if runtime == "Duration" {
-        x :: lower_word(&f)
-        y :: lower_word(&f)
-        lower_call_runtime(&m, &f, "jet_duration_ns_value", [LIRValueID]{a}, Val(x))
-        lower_call_runtime(&m, &f, "jet_duration_ns_value", [LIRValueID]{b}, Val(y))
-        // This route returns exact Int, including tagged values beyond 2^62.
+        // The record getter returns each ns as an owned exact Int.
+        x :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
+        y :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
+        lower_call_runtime(&m, &f, "jet_rt_record_get_duration_ns", [LIRValueID]{a}, Val(x))
+        lower_call_runtime(&m, &f, "jet_rt_record_get_duration_ns", [LIRValueID]{b}, Val(y))
         lower_exact_compare(&m, &f, less, LIRCondition.Lt, x, y)
         lower_exact_compare(&m, &f, same, LIRCondition.Eq, x, y)
+        lower_emit(&f, LIRInst.Drop{value: x})
+        lower_emit(&f, LIRInst.Drop{value: y})
     } else {
         route :: lower_runtime_route("{runtime}::compare_value") ?? return
         order :: lower_word(&f)

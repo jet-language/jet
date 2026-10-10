@@ -2,7 +2,9 @@
 // top_math_random_time.jet and kernel_duration.jet at the native C ABI.
 // D-TIMERES1 / D-SHAPE-DURATIONCONVERT1: narrow exact Int without a trap,
 // checked positive-unit multiplication, and an owned RangeError on failure.
-// Duration8 and RangeError8 remain owned by TimeGlue/TextGlue, not this route.
+// At the C ABI a Duration crosses as its ns exact-Int word (CAbiRoutes
+// `Duration { ns: native(word) }` in, `jet_int_from_i64(d.ns)` out); the
+// native handle (TimeGlue) is built from that word by the caller.
 fn runtime_duration_error(error: I64) -> I64 {
     reason :: rt_static_text("duration is outside the supported range")
     time_glue_store(error, jet_rt_record_new_range_error(reason))
@@ -38,11 +40,32 @@ fn runtime_duration_scale(unit: I64) -> I64 {
     minimum :: I64{-9223372036854775807 - 1}
     maximum :: I64{9223372036854775807}
     if raw < minimum / scale || raw > maximum / scale -> return runtime_duration_error(error)
-    duration :: jet_rt_alloc(TIME_DURATION_BYTES, I64{8})
-    time_glue_store(duration + TIME_DURATION_NS, raw * scale)
-    time_glue_store(output, duration)
+    // CAbiRoutes:19658 writes the ns as an owned exact-Int word.
+    time_glue_store(output, jet_int_owned_from_i64(raw * scale))
     I64{1}
 }
+
+// MathRandomTime.rs:165 jet_duration_ns_value: d.ns, through the C adapter's
+// native(a0) (range stop beyond i64) and jet_int_from_i64 (owned word).
+#Export(c) fn jet_duration_ns_value(value: I64) -> I64 {
+    ns :: host_native_int(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    jet_int_owned_from_i64(ns)
+}
+
+// MathRandomTime.rs:186 / Duration.rs:187 difference: saturating i64 sub.
+#Export(c) fn jet_duration_difference(left: I64, right: I64) -> I64 {
+    a :: host_native_int(left)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    b :: host_native_int(right)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (b < I64{0} && a > I64{9223372036854775807} + b) -> return jet_int_owned_from_i64(I64{9223372036854775807})
+    if (b > I64{0} && a < I64{-9223372036854775807 - 1} + b) -> return jet_int_owned_from_i64(I64{-9223372036854775807 - 1})
+    jet_int_owned_from_i64(a - b)
+}
+
+// CAbiRoutes:31752 source duration addition: raw i64 words, saturating.
+#Export(c) fn jet_i64_saturating_add(left: I64, right: I64) -> I64 { datetime_saturating_add(left, right) }
 
 // Core/Duration.rs:56-74 jet_duration_kernel_total_in: the fixed unit names
 // resolve to nanoseconds; an unknown unit reads 0.0. The C adapter lends the

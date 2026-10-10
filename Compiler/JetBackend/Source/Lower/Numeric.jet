@@ -47,10 +47,18 @@ fn lower_binary_route(p: MIRProgram, m: &LowerModule, f: &LowerFunction, dst: LI
 
 // Duration's canonical add/sub kernels (Duration.rs179–190; historical Jet
 // kernel_duration.add/sub) use saturated I64 nanoseconds. Only marshaling is
-// emitted here: arithmetic and construction remain shared runtime calls.
-fn lower_duration_nanoseconds(m: &LowerModule, f: &LowerFunction, handle: LIRValueID) -> LIRValueID Never! {
+// emitted here: arithmetic and construction remain shared runtime calls. A
+// native Duration is its runtime handle; the C routes carry its ns exact-Int
+// word (CAbiRoutes `Duration { ns: native(word) }`), read with the record
+// getter and rebuilt with the record constructor.
+fn lower_duration_word(m: &LowerModule, f: &LowerFunction, handle: LIRValueID) -> LIRValueID Never! {
     exact :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
-    lower_call_runtime(&m, &f, "jet_duration_ns_value", [LIRValueID]{handle}, Val(exact))
+    lower_call_runtime(&m, &f, "jet_rt_record_get_duration_ns", [LIRValueID]{handle}, Val(exact))
+    exact
+}
+
+fn lower_duration_nanoseconds(m: &LowerModule, f: &LowerFunction, handle: LIRValueID) -> LIRValueID Never! {
+    exact :: lower_duration_word(&m, &f, handle)
     raw :: lower_word(&f)
     lower_call_runtime(&m, &f, "jet_int_owned_to_i64", [LIRValueID]{exact}, Val(raw))
     lower_emit(&f, LIRInst.Drop{value: exact})
@@ -90,7 +98,14 @@ fn lower_duration_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
         }
         handle :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_duration"}, None)
         if op == .Sub {
-            lower_call_runtime(&m, &f, "jet_duration_difference", [LIRValueID]{left_handle, right_handle}, Val(handle))
+            left_word :: lower_duration_word(&m, &f, left_handle)
+            right_word :: lower_duration_word(&m, &f, right_handle)
+            difference :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
+            lower_call_runtime(&m, &f, "jet_duration_difference", [LIRValueID]{left_word, right_word}, Val(difference))
+            lower_emit(&f, LIRInst.Drop{value: left_word})
+            lower_emit(&f, LIRInst.Drop{value: right_word})
+            lower_call_runtime(&m, &f, "jet_rt_record_new_duration", [LIRValueID]{difference}, Val(handle))
+            lower_emit(&f, LIRInst.Drop{value: difference})
         } else {
             route :: lower_runtime_route("jet_i64_saturating_add") ?? {
                 lower_fail(&m, &f, "Duration addition requires the canonical raw I64 saturated-add runtime ABI")
@@ -102,12 +117,10 @@ fn lower_duration_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
             lower_call_runtime(&m, &f, route.export, [LIRValueID]{add_left, add_right}, Val(sum))
             exact :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
             lower_call_runtime(&m, &f, "jet_int_owned_from_i64", [LIRValueID]{sum}, Val(exact))
-            // Every I64 nanosecond value is representable: from_int's scale
-            // is exactly one for the canonical Nanoseconds variant ordinal.
-            unit :: lower_const(&f, 0)
-            out :: lower_route_result_call(&m, &f, "jet_duration_from_int", [LIRValueID]{exact, unit}, duration, LowerRouteCarrier.Handle{name: "RangeError"})
+            // Every I64 nanosecond value is a Duration; the constructor
+            // borrows the ns word.
+            lower_call_runtime(&m, &f, "jet_rt_record_new_duration", [LIRValueID]{exact}, Val(handle))
             lower_emit(&f, LIRInst.Drop{value: exact})
-            lower_emit(&f, LIRInst.Load{dst: handle, base: out.slot, offset: 0})
         }
         if lower_record_handle(p, result_ty) != None {
             lower_record_from_runtime(p, &m, &f, result_ty, handle, Val(dst))

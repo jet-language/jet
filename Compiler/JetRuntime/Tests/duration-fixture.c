@@ -1,5 +1,6 @@
 /* Current Jet-only runtime C ABI witness: no Rust build/oracle. Borrowed exact
- * Int inputs, owned Duration8/RangeError8 outputs and all six declared units. */
+ * Int inputs, an owned ns exact-Int word (CAbiRoutes `jet_int_from_i64(d.ns)`)
+ * or owned RangeError8 output, and all six declared units. */
 #define _POSIX_C_SOURCE 200809L
 #include <assert.h>
 #include <stdint.h>
@@ -13,7 +14,8 @@ typedef struct { const char *data; uint64_t len, cap; } Text;
 typedef struct { uint64_t refs, retired_next, negative; uint32_t *limbs; uint64_t len, cap; } IntNode;
 _Static_assert(sizeof(IntNode) == 48, "canonical base-1e9 exact Int");
 extern H jet_duration_from_int(H, H, H *, H *);
-extern void jet_rt_handle_drop_duration(H);
+extern H jet_int_owned_to_i64(H);
+extern void jet_rt_int_drop(H);
 extern Text *jet_rt_record_get_range_error_reason(H);
 extern void jet_rt_handle_drop_range_error(H);
 extern void jet_rt_string_drop(Text *);
@@ -33,8 +35,8 @@ static void accepted(H value, int unit, int64_t ns) {
     H output = 71, error = 73;
     assert(jet_duration_from_int(value, unit, &output, &error) == 1);
     assert(error == 73); /* Only the selected out pointer is written. */
-    assert(*(const int64_t *)(uintptr_t)output == ns);
-    jet_rt_handle_drop_duration(output);
+    assert(jet_int_owned_to_i64(output) == ns);
+    jet_rt_int_drop(output);
 }
 static void rejected(H value, int unit) {
     H output = 71, error = 73;
