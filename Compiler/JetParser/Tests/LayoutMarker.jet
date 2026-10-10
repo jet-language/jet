@@ -1,0 +1,47 @@
+// Production parser regression for D-REPRC1 / D-SOA1 / D-PLACE1 /
+// D-LAYOUT-ALIGN1 / D-SOA2C (Rust `layout_type_def`, the grouped
+// `#[Layout(…)]` path, and the reserved `columnar [T]` prefix). Assemble with
+// the canonical parser L2 unit, not a replacement parser.
+// Native UI proof: jet check tests/ui/layout_unknown_variant.jet and
+// tests/ui/layout_unsupported_variant.jet (E1105), and
+// tests/ui/layout_columnar_prefix_reserved.jet (E1107).
+fn layout_marker_struct(source: String) -> StructDef {
+    parsed :: parse_source(source.bytes())
+    if parsed.diagnostics.len() != 0 -> panic("a supported layout form reported a diagnostic")
+    if parsed.program.items[0] == .Struct(definition) -> return definition
+    panic("the layout struct was not parsed")
+}
+
+fn layout_marker_refusal(source: String, code: String, spelled: String) {
+    parsed :: parse_source(source.bytes())
+    if parsed.diagnostics.len() != 1 -> panic("a refused layout form reported {parsed.diagnostics.len()} diagnostics")
+    diagnostic :: parsed.diagnostics[0]
+    if diagnostic.code != code -> panic("a refused layout form reported {diagnostic.code}, not {code}")
+    span :: diagnostic.span ?? panic("a layout refusal has no span")
+    if source.slice(span.start, span.end) != spelled -> panic("a layout refusal points at `{source.slice(span.start, span.end)}`, not `{spelled}`")
+}
+
+fn run() {
+    plain :: layout_marker_struct("#Layout(c)\nstruct P {{ x: Int }}")
+    if plain.layout != Val(StructLayout.C) || plain.layout_span == None -> panic("`#Layout(c)` lost its C layout fact")
+    aligned :: layout_marker_struct("#Layout(c, align(64))\nstruct P {{ x: Int }}")
+    if aligned.layout != Val(StructLayout.CAligned{alignment: 64, target: false}) -> panic("`#Layout(c, align(64))` lost its alignment")
+    target :: layout_marker_struct("#Layout(c, align(target, 2097152))\nstruct P {{ x: Int }}")
+    if target.layout != Val(StructLayout.CAligned{alignment: 2097152, target: true}) -> panic("`align(target, N)` lost its target mode")
+    columnar :: layout_marker_struct("#Layout(columnar)\nstruct P {{ x: Int }}")
+    if columnar.layout != Val(StructLayout.Columnar) -> panic("`#Layout(columnar)` lost its columnar fact")
+    grouped :: layout_marker_struct("#[Layout(c), Codable]\nstruct P {{ x: Int }}")
+    if grouped.layout != Val(StructLayout.C) || grouped.layout_span == None -> panic("a grouped `#Layout(c)` lost its C layout fact")
+    default :: layout_marker_struct("struct P {{ x: Int }}")
+    if default.layout != None || default.layout_span != None -> panic("an unmarked struct gained a layout fact")
+    tagged :: parse_source("#Layout(c, I32)\nenum E {{ A }}".bytes())
+    if tagged.diagnostics.len() != 0 -> panic("an enum C tag width was refused")
+    layout_marker_refusal("#Layout(packed)\nstruct P {{ x: Int }}", "E1105", "packed")
+    layout_marker_refusal("#Layout(sparse)\nstruct P {{ x: Int }}", "E1105", "sparse")
+    layout_marker_refusal("#Layout(columnar, align(64))\nstruct P {{ x: Int }}", "E1105", "64")
+    layout_marker_refusal("#Layout(c, I32)\nstruct P {{ x: Int }}", "E1105", "#Layout(c, I32)")
+    layout_marker_refusal("#Layout(c, align(8))\nenum E {{ A }}", "E1105", "c")
+    layout_marker_refusal("#[Layout(c, align(8)), Codable]\nenum E {{ A }}", "E1105", "Layout(c, align(8))")
+    layout_marker_refusal("struct P {{ x: Float }}\nfn f(ps: columnar [P]) -> Float {{ 0.0 }}", "E1107", "columnar")
+    print("Layout marker: passed")
+}

@@ -140,6 +140,8 @@ struct ParsedItemModifiers {
     is_sanitizer: Bool{false}
     // D-MOD4: `pub use` re-exports (the only remaining `pub`, ballot pending).
     reexport: Bool{false}
+    // The markers came from at least one `#[…]` list (Rust's grouped marker path).
+    grouped_markers: Bool{false}
 }
 struct ParsedFunction {
     value: Func
@@ -469,7 +471,7 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
     }
     noun :: parser_marker_sequence_noun(&state, item_visibility)
     if noun != "" -> parser_report_adjacent_markers(&state, markers, marker_chunks, bracket_chunks, sequence, noun)
-    ParsedItemModifiers{is_pub: is_pub, is_package_pub: is_package_pub, is_comptime: is_comptime, markers: markers, start_span: start, is_sanitizer: is_sanitizer, reexport: reexport}
+    ParsedItemModifiers{is_pub: is_pub, is_package_pub: is_package_pub, is_comptime: is_comptime, markers: markers, start_span: start, is_sanitizer: is_sanitizer, reexport: reexport, grouped_markers: bracket_chunks > 0}
 }
 
 // The target a declaration marker sequence attaches to, named as Rust's
@@ -1735,6 +1737,8 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
     value.is_package_pub = modifiers.is_package_pub
     value.type_params = parser_parse_type_params(&state)
     value.type_markers = modifiers.markers
+    value.layout = parser_layout_marker_fact(&state, modifiers.markers, modifiers.grouped_markers, false)
+    value.layout_span = parser_layout_marker_span(modifiers.markers, modifiers.grouped_markers, value.layout)
     parser_apply_type_markers(&value, modifiers.markers)
     if parser_current_kind(&state) != TOKEN_LBRACE {
         parser_add_error_here(&state, "expected `{{` before struct fields", "record fields are declared inside a struct body", "open a struct body with `{{`")
@@ -1842,6 +1846,7 @@ fn parser_parse_enum(state: &JetParserState, modifiers: ParsedItemModifiers) -> 
     value.is_package_pub = modifiers.is_package_pub
     value.type_params = parser_parse_type_params(&state)
     value.type_markers = modifiers.markers
+    _ := parser_layout_marker_fact(&state, modifiers.markers, modifiers.grouped_markers, true)
     index := 0
     loop index < modifiers.markers.len() {
         marker :: modifiers.markers[index]
