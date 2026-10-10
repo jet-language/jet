@@ -510,6 +510,11 @@ and its authority rather than duplicating an opaque trait value. Each call
 borrows the provider under its cell's read guard and keeps the existing exact
 effect row, destination checks and explicit missing-provider refusals.
 
+The native Shared constructor adopts a fresh or explicitly moved payload under
+the canonical MIR ownership-transfer rules. It must not clone an opaque
+provider merely to put it into the cell; copying a handle never copies that
+provider. Borrowed copyable payloads retain their checked materialization.
+
 The table describes crossing responsibilities, not a list of completed ports.
 Its source links own the executable contracts. The proof-home references are
 Tower acceptance boundaries, not evidence supplied by this inventory.

@@ -2075,7 +2075,7 @@ fn share_input(transport: ^RawInput) -> SharedInput Never! {
     SharedInput{storage: shared InputStorage{transport: ^transport}}
 }
 fn share_moved(storage: ^InputStorage) -> SharedInput Never! {
-    SharedInput{storage: shared (^storage)}
+    SharedInput{storage: shared storage}
 }
 fn new_storage(transport: ^RawInput) -> InputStorage Never! {
     InputStorage{transport: ^transport}
@@ -2094,7 +2094,7 @@ fn run() {
     called :: share_call(InputValue{value: 13})
     assert(called.read() == 13)
     text :: "retained"
-    text_cell :: shared text
+    text_cell :: shared text.copy()
     assert(text == "retained")
     permit :: text_cell.guard_read()
     assert(permit.value == "retained")

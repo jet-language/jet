@@ -33475,6 +33475,15 @@ impl<'a> RustEmitter<'a> {
             .map(|type_arg| self.rust_prelude_type_arg(row, type_arg))
             .collect::<Vec<_>>()
             .join(", ");
+        if row.module == "::jet_std::JetShared" && row.member == "new" {
+            let [arg] = args else {
+                panic!("MIR Shared constructor has no value argument");
+            };
+            // The cell adopts the payload. A fresh or moved value transfers
+            // its ownership; a checked borrowed/copy value is materialized
+            // under the same transfer rules as other owning consumers.
+            return format!("{owner}::<{owner_args}>::{method}({})", self.value_transfer(arg.value));
+        }
         let atomic_int_wire = row.family == MirPreludeFamily::StaticPrelude
             && row.module == "::JetAtomic"
             && matches!(row.member.as_str(), "new" | "try_new")

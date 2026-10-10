@@ -12225,8 +12225,16 @@ fn lower_method_call_impl(
                 // annotation needed — the argument alone fixes it).
                 if type_name == "Shared" && method == "new" && args.len() == 1 {
                     return in_own_frame(|| {
-                        let arg_t = lower_expr(&args[0].expr, cx, env);
-                        let elem_ty = arg_t.ty.clone();
+                        let convention = if args[0].convention == AccessConvention::Move {
+                            let Some(Type::Shared(payload)) = resolved_ret else {
+                                unreachable!("checked Shared constructor move has no payload type");
+                            };
+                            Some((AccessConvention::Move, (**payload).clone()))
+                        } else {
+                            None
+                        };
+                        let arg_t = lower_one_call_arg(&args[0], convention, env, cx);
+                        let elem_ty = arg_t.value.ty.clone();
                         return TExpr {
                             ty: Type::Shared(Box::new(elem_ty.clone())),
                             kind: TExprKind::StaticCall {
@@ -12237,18 +12245,7 @@ fn lower_method_call_impl(
                                 owner_type: None,
                                 method: TMethodRef::bare("new"),
                                 type_args: Vec::new(),
-                                args: vec![TCallArg {
-                                    value: arg_t,
-                                    template_items: None,
-                                    borrow: false,
-                                    mut_borrow: false,
-                                    clone: false,
-                                    arc_clone: false,
-                                    fn_coerce: None,
-                                    widen_to_vec: false,
-                                    widen_to_union: None,
-                                    box_as_trait: None,
-                                }],
+                                args: vec![arg_t],
                             },
                         };
                     });
