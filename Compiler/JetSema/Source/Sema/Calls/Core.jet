@@ -6,6 +6,7 @@
 use jet_foundation.[
     AccessConvention,
     CORE_CALL_COVERAGE_SEMA,
+    CORE_MODULE_EXPORTS,
     CORE_SOURCE_OWNED_ROWS,
     Call,
     CallArg,
@@ -34,6 +35,7 @@ use jet_foundation.[
     TFailureCarrier,
     TGenericParam,
     TStmt,
+    TextEdit,
     Type,
     ViewProvenance,
     ViewProvenanceEntry,
@@ -53,6 +55,8 @@ use jet_foundation.[
     core_call_typed_signature,
     core_call_typed_signature_for,
     core_receiver_method,
+    core_module_export,
+    diagnostic_with_edit,
     expr_span,
     sema_effect_covers,
     type_name,
@@ -294,13 +298,60 @@ fn sema_call_core_module_identity(environment: SemaScopeEnvironment, program: Se
     }
 }
 
-fn sema_call_core_unknown(module_name: String, member: String, span: Span) -> Diagnostic {
-    sema_error("E0104", span, "`{module_name}.{member}` is not a registered Core call", "Core calls must resolve to a canonical member in the Foundation call registry", "use a registered Core member or its source-owned declaration")
+// Rust `serde_diags::unknown_core_item` (E1004): the one report for a Core
+// module member that does not resolve at this position.
+fn sema_call_core_unknown_item(module_name: String, member: String, span: Span) -> Diagnostic {
+    if module_name == "core.time" && member == "clock" -> return sema_error("E1004", span, "`time.clock` was retired", "deterministic fresh values use a type-owned `new` constructor (D-SHAPE-CTORVERB1)", "use `Clock.new(seed)`")
+    if module_name == "core.time.expiring" && member == "new" -> return sema_error("E1004", span, "`expiring.new` was retired", "fresh values use a type-owned `new` constructor (D-SHAPE-CTORVERB1)", "use `ExpiringValue.new(value, ttl, clock)`")
+    if module_name == "core.event" && member == "policy_async" -> return sema_error("E1004", span, "`event.policy_async` was retired", "a synchronous `Event<T>` cannot provide real queued dispatch; `AsyncEvent<T, E>` is the sole asynchronous event model", "use `event.async_result<T, E>(AsyncPolicy.{{ capacity: n, overflow: .Block }}, FailurePolicy.Collect)`")
+    if module_name == "core.crypto" && member == "constant_time_eq" -> return sema_error("E1004", span, "`crypto.constant_time_eq` was retired", "`eq` is not one of Jet's blessed API abbreviations", "use `crypto.constant_time_equal_bytes(a, b)`")
+    if module_name == "core.crypto" && member.ends_with("_bytes") {
+        algorithm :: member.removesuffix("_bytes")
+        digest :: if algorithm == {
+            "sha256" | "blake3" -> "Digest256"
+            "sha512" -> "Digest512"
+            else -> ""
+        }
+        if digest != "" -> return sema_error("E1004", span, "`crypto.{member}` was retired", "`crypto.{algorithm}` returns `{digest}`, so the representation is explicit", "use `crypto.{algorithm}(bytes).hex()` for text or `.bytes()` for raw bytes")
+    }
+    items :: if core_module_export(module_name) == {
+        .Val(row) -> row.members
+        .None -> [String]{}
+    }
+    // #2002: the module exposes the name, but this position has no arm for it.
+    if items.contains(member) -> return sema_error("E1004", span, "`{module_name}` exposes `{member}`, but not in this position", "standard library modules expose a fixed set of public items, each reachable only where its surface declares", "import it directly with `use {module_name}.[{member}]`")
+    // #1965: an exact submodule hit outranks this module's own menu.
+    if sema_call_core_submodule_path_hint(module_name, member, span) == .Val(hint) -> return hint
+    suggestion :: sema_suggest_field(member, items)
+    fix :: if suggestion == {
+        .Val(candidate) -> "did you mean `{candidate}`?"
+        .None -> if items.len() == 0 -> "import a specific core module, like `import core.files as fs;`" else -> "use one of: {items.join(", ")}"
+    }
+    diagnostic :: sema_error("E1004", span, "`{module_name}` has no item `{member}`", "standard library modules expose a fixed set of public items", fix)
+    if suggestion == .Val(candidate) -> return diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: candidate})
+    diagnostic
+}
+
+// Rust `submodule_path_hint`: `{module}.{member}` is itself a submodule, or
+// `member` is an item of one. No typed edit: the import path shape changes.
+fn sema_call_core_submodule_path_hint(module_name: String, member: String, span: Span) -> Diagnostic? {
+    why :: "Core is one nested tree, so a name under this module can belong to a submodule instead of the module itself"
+    nested :: "{module_name}.{member}"
+    if core_module_export(nested) == .Val(row) {
+        fix :: if row.members.len() > 0 -> "`{nested}` is a submodule, so name an item on it: `{nested}.{row.members[0]}`" else -> "`{nested}` is a submodule; import it with `import {nested};`"
+        return Val(sema_error("E1004", span, "`{module_name}` has no item `{member}`", why, fix))
+    }
+    prefix :: "{module_name}."
+    loop candidate in CORE_MODULE_EXPORTS {
+        if !candidate.module_name.starts_with(prefix) || !candidate.members.contains(member) -> next
+        return Val(sema_error("E1004", span, "`{module_name}` has no item `{member}`", why, "`{member}` lives in the submodule `{candidate.module_name}`, so write `{candidate.module_name}.{member}`"))
+    }
+    None
 }
 
 fn sema_call_core_projection_error(module_name: String, member: String, error: CoreCallProjectionError, span: Span, diagnostics: &[Diagnostic]) {
     if error == {
-        .Unknown -> &diagnostics.push(sema_call_core_unknown(module_name, member, span))
+        .Unknown -> &diagnostics.push(sema_call_core_unknown_item(module_name, member, span))
         .Uncovered(_) -> &diagnostics.push(sema_error("E0904", span, "`{module_name}.{member}` has no source semantic call contract", "the registered Core row is not covered by this semantic projection", "use a source-owned callable or a Core row with SEMA coverage"))
         .Arity(expected, actual) -> {
             row :: core_call(module_name, member)

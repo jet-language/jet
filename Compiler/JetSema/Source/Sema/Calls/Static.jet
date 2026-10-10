@@ -596,7 +596,19 @@ fn sema_call_try_builtin_static_field(base: Expr, owner: String, method: String,
     }
     if !sema_expr_core_module_alias_visible(alias, scopes) -> return SemaMethodSpecialCheck{handled: false, value: None}
     module_name :: sema_call_core_import_module(environment, program, alias) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if module_name == "core.crypto" && sema_call_retired_entropy_constructor(owner, method, span) == .Val(retired) {
+        &diagnostics.push(retired)
+        sema_call_builtin_static_discard(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     sema_call_try_builtin_static(owner, module_name, method, owner_type_args, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+// Rust `infer_method_call` (D-SHAPE-CTORVERB1): entropy constructors use
+// `new_random`; the retired `generate` spelling is E1004.
+fn sema_call_retired_entropy_constructor(owner: String, method: String, span: Span) -> Diagnostic? Never! {
+    if method != "generate" || (owner != "SigningKey" && owner != "X25519SecretKey") -> return None
+    Val(sema_error("E1004", span, "`{owner}.generate` was retired", "constructors that draw entropy use `new_random` (D-SHAPE-CTORVERB1)", "use `{owner}.new_random()`"))
 }
 
 // The ambient Perf type is an alternate spelling of the checked core.perf
@@ -652,6 +664,11 @@ fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span
         if receiver == .Field(base, owner_leaf, _) -> return sema_call_try_builtin_static_field(base, owner_leaf, method, owner_type_args, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if receiver == .Ident(name, _) {
             if name == "Perf" && sema_scope_resolve_index(scopes, name) == None -> return sema_call_perf_static(method, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            if sema_scope_resolve_index(scopes, name) == None && sema_call_retired_entropy_constructor(name, method, span) == .Val(retired) {
+                &diagnostics.push(retired)
+                sema_call_builtin_static_discard(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
             return sema_call_try_builtin_static(name, "", method, owner_type_args, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
         return SemaMethodSpecialCheck{handled: false, value: None}

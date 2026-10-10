@@ -120,7 +120,7 @@ fn sema_compiler_services_compile_time_gate(module_name: String, member: String,
 fn sema_compiler_services_check_call(module_name: String, member: String, args: [CallArg], span: Span, compiler_api_allowed: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCompilerServicesCallCheck {
     contract := sema_compiler_services_call_contract(module_name, member)
     if contract == None {
-        &diagnostics.push(sema_call_core_unknown(module_name, member, span))
+        &diagnostics.push(sema_call_core_unknown_item(module_name, member, span))
         sema_compiler_services_check_untyped(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         result := sema_compiler_services_result("CompilerError", "CompilerError")
         return SemaCompilerServicesCallCheck{recognized: false, arguments_complete: false, module_name: module_name, member: member, arguments: [TExpr]{}, result_type: result, failure_carrier: TFailureCarrier.Result{success: Type.Named{name: "CompilerError"}, error: Type.Named{name: "CompilerError"}}}
