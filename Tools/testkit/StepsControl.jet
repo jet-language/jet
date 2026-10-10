@@ -67,7 +67,7 @@ fn kit_steps_loop_values(step: KitStep, context: KitStepCtx, state: KitStepState
         directory :: kit_steps_work_path(words[2], context.env, context.work, context.scratch, state.built) ?? return Err("loop directory escapes work")
         sorted :: words[words.len() - 3] == "sorted"
         end :: if sorted -> words.len() - 3 else -> words.len() - 2
-        paths := kit_steps_entries(directory, words.slice(2, end)) ?? return Err(err)
+        paths := kit_steps_entries(directory, words.slice(2, end)) ?? return Err("{err}")
         if sorted -> &paths.sort_by(path -> files.basename(path))
         return Ok(paths)
     }
@@ -170,7 +170,7 @@ fn kit_steps_process_nonzombie_probe(stat: String?, mode: String) -> Bool? {
 
 // Callers guard nonZ modes on Linux before expanding the PID or observing it.
 fn kit_steps_process_nonzombie(pid: Int, mode: String) -> Bool {
-    stat :: files.read("/proc/{pid}/stat") ?? return kit_steps_process_nonzombie_probe(None, mode) ?? kit_steps_process_alive(pid)
+    stat :: files.read("/proc/{pid}/stat") ?? { return kit_steps_process_nonzombie_probe(None, mode) ?? kit_steps_process_alive(pid) }
     kit_steps_process_nonzombie_probe(Val(stat), mode) ?? kit_steps_process_alive(pid)
 }
 

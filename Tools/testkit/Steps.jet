@@ -945,7 +945,7 @@ fn kit_steps_prepare(step: KitStep, env: KitEnv, work: String, scratch: String, 
     cwd :: if step.cwd == "" -> work else -> kit_steps_work_path(step.cwd, env, work, scratch, built) ?? return Err("cwd escapes work directory")
     if step.isolate == "no-nix" {
         bootstrap :: if step.action == "spawn" -> files.join(scratch, "child-{step.label}") else -> scratch
-        argv = kit_no_nix_argv(policy, argv, bootstrap, step.isolate_network) ?? return Err(err)
+        argv = kit_no_nix_argv(policy, argv, bootstrap, step.isolate_network) ?? return Err("{err}")
     }
     Ok(KitProcessInput{argv: argv, cwd: cwd, stdin: stdin, env: policy, overlay: environment})
 }

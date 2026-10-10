@@ -21,7 +21,7 @@ fn kit_steps_inventory(directory: String, root: String) -> [KitInventoryItem] Er
             digest = crypto.sha256(bytes).hex()
         }
         &result.push(KitInventoryItem{path: files.relative(entry.path, root), kind: info.kind,
-            size: info.size, modified_ms: info.modified_ms, digest: digest})
+            size: info.size, modified_ms: info.modified.to_unix_ms(), digest: digest})
         if info.is_dir && !info.is_symlink {
             descendants :: kit_steps_inventory(entry.path, root) ?? return Err(err)
             loop child in descendants -> &result.push(child)
