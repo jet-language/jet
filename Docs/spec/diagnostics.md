@@ -278,3 +278,18 @@ Recursive host type-shape growth detaches the needed struct payload at a call
 boundary before growing its owner vector. Compiler carriers whose tables move
 into a separate program owner restore their empty moved fields before the
 remaining carrier is borrowed again.
+
+Boolean values returned by `Never!` helpers consume their checked failure
+carrier before entering logical joins. MIR Phi inputs must retain matching
+drop obligations; recursive write views of trait-owning enum/list values do
+not relax that invariant. `compiler_host_owner_write_view.jet` is lowered and
+validated by the bootstrap regression, which checks plain Bool Phi inputs.
+
+An internal checked-TIR lowering failure preserves its underlying reason and
+source-byte span in the existing ICE report and exits 101 under I2.
+
+Borrowed enum payload bindings over checked list indexes remain rooted in
+their stable collection owner. Rust emission references the selected element's
+payload instead of cloning it; the existing owner-invalidation rules still
+govern the view. The recursive noncopy-owner regression compiles and executes
+the generated Rust in addition to validating MIR.

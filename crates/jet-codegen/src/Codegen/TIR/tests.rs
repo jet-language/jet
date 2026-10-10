@@ -2285,6 +2285,78 @@ fn run() {
     });
 }
 
+#[test]
+fn recursive_noncopy_enum_write_views_keep_boolean_phi_carriers_plain() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (bundle, nominals) = checked_bundle(include_str!(
+            "../../../../../tests/ui/compiler_host_owner_write_view.jet"
+        ));
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("recursive noncopy enum write views lower to MIR");
+        mir.validate().expect("recursive noncopy enum write views have valid MIR");
+        let mut boolean_phis = 0;
+        for function in &mir.functions {
+            for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+                let jet_foundation::MIR::MirOperation::Phi { incoming } = &instruction.operation else {
+                    continue;
+                };
+                let Some(result) = instruction.result else { continue };
+                let (_, result_ty, _, _) = function.values.iter().find(|value| value.0 == result)
+                    .expect("Phi result has a checked value row");
+                if !matches!(result_ty.kind, jet_foundation::MIR::MirTypeKind::Bool) {
+                    continue;
+                }
+                boolean_phis += 1;
+                for (_, incoming) in incoming {
+                    let (_, ty, _, ownership) = function.values.iter().find(|value| value.0 == *incoming)
+                        .expect("Phi input has a checked value row");
+                    assert!(matches!(ty.kind, jet_foundation::MIR::MirTypeKind::Bool),
+                        "boolean Phi kept a Never! failure carrier: {ty:?}");
+                    assert_eq!(ownership.drop, jet_foundation::MIR::MirDropKind::None);
+                }
+            }
+        }
+        assert!(boolean_phis > 0, "the recursive write-view fixture must exercise boolean joins");
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("noncopy-write-view-proof"))
+            .join(format!("recursive-owner-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("noncopy_write_view.rs");
+        let executable = directory.join(format!("noncopy_write_view{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, &rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=noncopy_write_view", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("recursive write-view codegen proof requires rustc");
+        assert!(compiled.status.success(),
+            "recursive noncopy enum write views must compile:\n{}\nMIR run: {:#?}",
+            String::from_utf8_lossy(&compiled.stderr),
+            mir.functions.iter().find(|function| function.key.ends_with("::test.jet::run")));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("recursive write-view codegen proof must run");
+        assert!(executed.status.success(),
+            "nested adoption must preserve owner identity and reject duplicate aliases:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
+
 /// The `filter_map` over owned text of `Examples/features/collections/
 /// builtin_routes.jet`, with a default-`Err` failure in its callee.
 const OWNED_TEXT_FILTER_MAP: &str = r#"

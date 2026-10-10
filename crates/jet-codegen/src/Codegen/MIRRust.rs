@@ -22047,6 +22047,19 @@ impl<'a> RustEmitter<'a> {
         let Some(uses) = index.uses.get(&value) else {
             return true;
         };
+        Self::unchanged_until_positions(
+            function, index, read_block, read_position, uses.iter().copied(), writes,
+        )
+    }
+
+    fn unchanged_until_positions(
+        function: &MirFunction,
+        index: &FunctionIndex,
+        read_block: usize,
+        read_position: usize,
+        uses: impl Iterator<Item = (usize, Option<usize>)>,
+        writes: &[(usize, usize)],
+    ) -> bool {
         let first_write_after_read = writes
             .iter()
             .filter(|(block, position)| *block == read_block && *position > read_position)
@@ -22056,13 +22069,13 @@ impl<'a> RustEmitter<'a> {
         let mut region: HashSet<usize> = HashSet::new();
         let mut pending: Vec<usize> = Vec::new();
         for (block, position) in uses {
-            if *block == read_block {
-                let at = position.unwrap_or(function.blocks[*block].instructions.len());
+            if block == read_block {
+                let at = position.unwrap_or(function.blocks[block].instructions.len());
                 if first_write_after_read.is_some_and(|write| write <= at) {
                     return false;
                 }
-            } else if region.insert(*block) {
-                pending.push(*block);
+            } else if region.insert(block) {
+                pending.push(block);
             }
         }
         while let Some(block) = pending.pop() {
@@ -23952,7 +23965,47 @@ impl<'a> RustEmitter<'a> {
                         *at_block == block && bound_position < *at && *at < position
                     })
                 });
-                (!changed).then_some(Some(root))
+                if changed {
+                    return None;
+                }
+                let MirOperation::WritePlace { place: binding, .. } =
+                    function.blocks[block].instructions[position].operation else {
+                        return None;
+                    };
+                let MirPlaceBase::Local(binding) = self.place_row(function, binding)?.base else {
+                    return None;
+                };
+                // An owned collection may also lend its payload. Its owner
+                // must stay unchanged through every use and cleanup of the
+                // binding, not merely through the initial payload read.
+                let uses = function.blocks.iter().enumerate().flat_map(|(block, row)| {
+                    row.instructions.iter().enumerate().filter_map(move |(position, instruction)| {
+                        let place = match instruction.operation {
+                            MirOperation::ReadPlace(place)
+                            | MirOperation::MovePlace { place }
+                            | MirOperation::AddressOf { place, .. } => place,
+                            _ => return None,
+                        };
+                        self.place_row(function, place)
+                            .is_some_and(|place| place.base == MirPlaceBase::Local(binding))
+                            .then_some((block, position, instruction.result))
+                    })
+                }).flat_map(|(block, position, result)| {
+                    std::iter::once((block, Some(position))).chain(
+                        result.into_iter().flat_map(|value| {
+                            index.uses.get(&value).into_iter().flatten().copied()
+                        }),
+                    )
+                });
+                let origin = self.transparent_read(function, read).unwrap_or(read);
+                let &(read_block, read_position) = index.definitions.get(&origin)?;
+                let stable_owner = root != binding
+                    && !index.escaped_locals.contains(&root)
+                    && Self::unchanged_until_positions(
+                        function, &index, read_block, read_position, uses,
+                        index.local_writes.get(&root).map_or(&[][..], Vec::as_slice),
+                    );
+                Some(if stable_owner { None } else { Some(root) })
             }
             _ => None,
         }
