@@ -82,5 +82,14 @@ through checked field symbols and explicit initializer rows. Keep the canonical
 `selected_entry` spelling and the declared Dev/build/adapter/transport defaults;
 source defaults alone do not initialize the host's generated Rust struct literal.
 
+Release holds only after their immutable source export and managed output
+directories exist. Queue completion is not a pass: consumers require the real
+driver verdict and same-source artifact hashes. Retry a failed shared proof
+under a fresh queue name while preserving its earlier receipts; a completed
+same-source GREEN may be reused only after verifying its artifacts.
+The native fixed point is stage1 (built by the candidate) compiling stage2.
+Require both objects and ELF executables to be byte-identical, and require each
+stage's own all-phases diagnostic report to exist and contain zero failures.
+
 Use fresh artifacts for runtime claims. A source check, worker receipt, or stale
 binary cannot establish runtime, tier, snapshot, golden, or I9 evidence.

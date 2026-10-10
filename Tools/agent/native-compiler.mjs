@@ -12,7 +12,7 @@
 // node Tools/agent/native-compiler.mjs --jet /path/to/jetc0 \
 //   --runtime-dir /path/to/jet-runtime --out /disk/fresh-output [--repo DIR]
 // --dry-run assembles the real unit and records commands without executing jet.
-// --stages 1 produces one successor; default 3 proves stage2 == stage3, for
+// --stages 1 produces one successor; default 2 proves stage1 == stage2, for
 // both object and executable, using the same source path and runtime each time.
 // --seed-build is the explicit bootstrap exception: --jet names the Rust host
 // from job (a), which builds this same production entry with --release. Job
@@ -25,8 +25,8 @@ import { accessSync, chmodSync, constants, copyFileSync, cpSync, existsSync,
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const usage = 'native-compiler.mjs --jet CLI_SEED --runtime-dir DIR --out FRESH_DIR [--repo DIR] [--stages 1|3] [--dry-run]; bootstrap only: --seed-build --jet RUST_HOST --out FRESH_DIR [--repo DIR] [--dry-run]';
-const options = { repo: resolve(dirname(fileURLToPath(import.meta.url)), '../..'), stages: 3, dryRun: false };
+const usage = 'native-compiler.mjs --jet CLI_SEED --runtime-dir DIR --out FRESH_DIR [--repo DIR] [--stages 1|2] [--dry-run]; bootstrap only: --seed-build --jet RUST_HOST --out FRESH_DIR [--repo DIR] [--dry-run]';
+const options = { repo: resolve(dirname(fileURLToPath(import.meta.url)), '../..'), stages: 2, dryRun: false };
 for (let i = 2; i < process.argv.length; i++) {
     const flag = process.argv[i];
     if (flag === '--help') { console.log(usage); process.exit(0); }
@@ -36,7 +36,7 @@ for (let i = 2; i < process.argv.length; i++) {
     if (!key || !process.argv[i + 1] || process.argv[i + 1].startsWith('--')) throw Error(usage);
     options[key] = key === 'stages' ? Number(process.argv[++i]) : resolve(process.argv[++i]);
 }
-if (!options.jet || (!options.seedBuild && !options.runtime) || !options.out || ![1, 3].includes(options.stages)) throw Error(usage);
+if (!options.jet || (!options.seedBuild && !options.runtime) || !options.out || ![1, 2].includes(options.stages)) throw Error(usage);
 const { repo, out } = options;
 if (existsSync(out)) throw Error(`output already exists; use a fresh directory: ${out}`);
 mkdirSync(out, { recursive: true });
@@ -109,13 +109,13 @@ const stages = Array.from({ length: options.stages }, (_, index) => {
     const builder = join(out, stage === 1 ? 'seed' : `stage${stage - 1}`, 'jet');
     return { stage, builder, command: [join(repo, 'Tools/agent/jet-env'), builder, 'build', unit], cwd: project,
         object: join(project, '.jet/build/selfhost.o'), binary: join(project, '.jet/build/selfhost'),
-        destination: join(out, `stage${stage}`, 'jet') };
+        destination: join(out, `stage${stage}`, 'jet'), keepGoingReport: join(out, `stage${stage}-keep-going.tsv`) };
 });
 const plan = { schema: 'jet-native-compiler-plan/v1', seed: options.jet, runtimeDir: options.runtime,
     sourceRoot: repo, source: unit, sourceSha256: hash(Buffer.from(source)), entry: entryPath,
     backend: 'jet-native', optimization: 'O0', environment: { JET_TOOLCHAIN_ROOT: repo, JET_KEEP_GOING: '1' },
     lowering: 'lir_lower_entry', objectWriter: 'x64_relocatable_object', linker: 'x64_link_executable',
-    stages, comparisons: options.stages === 3 ? ['stage2/jet.o == stage3/jet.o', 'stage2/jet == stage3/jet'] : [] };
+    stages, comparisons: options.stages === 2 ? ['stage1/jet.o == stage2/jet.o', 'stage1/jet == stage2/jet'] : [] };
 json(join(out, 'plan.json'), plan);
 if (options.dryRun) { console.log(JSON.stringify({ dryRun: true, plan: join(out, 'plan.json'), ...plan }, null, 2)); process.exit(0); }
 
@@ -140,7 +140,11 @@ for (const stage of stages) {
     rmSync(stage.binary, { force: true });
     rmSync(stage.object, { force: true });
     const start = Date.now();
-    execute(stage.command[0], stage.command.slice(1), environment, stage.cwd, join(out, `stage${stage.stage}.log`));
+    execute(stage.command[0], stage.command.slice(1), { ...environment, JET_KEEP_GOING_REPORT: stage.keepGoingReport }, stage.cwd, join(out, `stage${stage.stage}.log`));
+    if (!existsSync(stage.keepGoingReport)) throw Error(`stage${stage.stage} did not produce its all-phases diagnostic report`);
+    const diagnostics = readFileSync(stage.keepGoingReport, 'utf8').split('\n')
+        .filter(line => line !== '' && !line.startsWith('phase\titem\tcode\tmessage\tspan'));
+    if (diagnostics.length !== 0) throw Error(`stage${stage.stage} contains ${diagnostics.length} all-phases failures; see ${stage.keepGoingReport}`);
     accessSync(stage.binary, constants.X_OK);
     const bytes = readFileSync(stage.binary), object = readFileSync(stage.object);
     if (bytes.subarray(0, 4).toString('hex') !== '7f454c46' || object.subarray(0, 4).toString('hex') !== '7f454c46') throw Error('native build did not produce ELF outputs');
@@ -150,14 +154,15 @@ for (const stage of stages) {
     copyFileSync(stage.object, `${stage.destination}.o`);
     chmodSync(stage.destination, 0o755);
     exposeRuntime(directory);
-    receipts.push({ stage: stage.stage, binary: stage.destination, sha256: hash(bytes), objectSha256: hash(object), seconds: (Date.now() - start) / 1000 });
+    receipts.push({ stage: stage.stage, binary: stage.destination, sha256: hash(bytes), objectSha256: hash(object), seconds: (Date.now() - start) / 1000,
+        keepGoingReport: stage.keepGoingReport, keepGoingFailures: diagnostics.length });
     json(join(out, 'stages.json'), receipts);
 }
 let fixedPoint = null;
-if (options.stages === 3) {
-    fixedPoint = ['jet', 'jet.o'].every(name => readFileSync(join(out, 'stage2', name)).equals(readFileSync(join(out, 'stage3', name))));
-    json(join(out, 'comparisons.json'), { fixedPoint, stages: [2, 3] });
-    if (!fixedPoint) throw Error('native fixed point differs: stage2 and stage3 object/executable must both be byte-identical');
+if (options.stages === 2) {
+    fixedPoint = ['jet', 'jet.o'].every(name => readFileSync(join(out, 'stage1', name)).equals(readFileSync(join(out, 'stage2', name))));
+    json(join(out, 'comparisons.json'), { fixedPoint, stages: [1, 2] });
+    if (!fixedPoint) throw Error('native fixed point differs: stage1 and stage2 object/executable must both be byte-identical');
 }
 const final = stages.at(-1).destination;
 json(join(out, 'native-compiler.json'), { schema: 'jet-native-compiler/v1', sourceSha256: plan.sourceSha256,

@@ -42,19 +42,20 @@ function dryRun(extra, inspect) {
     } finally { rmSync(root, { recursive: true, force: true }); }
 }
 
-test('native assembly selects real CLI and three native O0 builds at the same path', () => {
+test('native assembly selects real CLI and two native O0 builds at the same path', () => {
     dryRun(root => ['--runtime-dir', join(root, 'unavailable-runtime')], plan => {
         assert.equal(plan.backend, 'jet-native');
         assert.equal(plan.optimization, 'O0');
         assert.equal(plan.lowering, 'lir_lower_entry');
         assert.equal(plan.linker, 'x64_link_executable');
-        assert.equal(plan.stages.length, 3);
+        assert.equal(plan.stages.length, 2);
         for (const stage of plan.stages) {
             assert.deepEqual(stage.command.slice(-2), ['build', plan.source]);
             assert.equal(stage.command.includes('--release'), false);
             assert.match(stage.object, /selfhost\.o$/);
+            assert.match(stage.keepGoingReport, new RegExp(`stage${stage.stage}-keep-going\\.tsv$`));
         }
-        assert.equal(plan.comparisons.length, 2);
+        assert.deepEqual(plan.comparisons, ['stage1/jet.o == stage2/jet.o', 'stage1/jet == stage2/jet']);
     });
 });
 
