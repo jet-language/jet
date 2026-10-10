@@ -1998,6 +1998,10 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     // D-SHAPE-CASE1: identifier casing is checked on the parsed source before
     // any declaration is registered or rewritten.
     sema_casing_program(module_row.program, &diagnostics)
+    // D-STRUCT-LIFE1=A (E0932): `#Deprecated` retires a public item; checked
+    // on the parsed items, inline module bodies included, before inline
+    // modules are lowered.
+    sema_registration_deprecated_visibility(module_row.program.items, &diagnostics)
     loop facts in owned.foreign_handles {
         if sema_registration_module_has_name(module_row, facts.jet_name) {
             &diagnostics.push(sema_defined_twice(facts.jet_name, "module declarations share one namespace", facts.source_span))
@@ -2398,6 +2402,46 @@ fn sema_registration_serde_items(items: [Item], diagnostics: &[Diagnostic]) {
                 }
             }
         }
+    }
+}
+
+// D-STRUCT-LIFE1=A (Rust `check_deprecated_visibility`, E0932): a
+// `#Deprecated` marker needs a public (not package-public) item. Functions,
+// type markers, inherent and trait-impl methods, distinct types, and impl
+// methods are checked; an inline module body is walked as its own item list.
+fn sema_registration_deprecated_visibility(items: [Item], diagnostics: &[Diagnostic]) {
+    loop item in items {
+        if item == {
+            .Func(function) -> sema_registration_deprecated_markers(function.markers, function.is_pub && !function.is_package_pub, &diagnostics)
+            .Struct(definition) -> {
+                sema_registration_deprecated_markers(definition.type_markers, definition.is_pub && !definition.is_package_pub, &diagnostics)
+                sema_registration_deprecated_methods(definition.methods, &diagnostics)
+                loop block in definition.trait_impls -> sema_registration_deprecated_methods(block.methods, &diagnostics)
+            }
+            .Enum(definition) -> {
+                sema_registration_deprecated_markers(definition.type_markers, definition.is_pub && !definition.is_package_pub, &diagnostics)
+                sema_registration_deprecated_methods(definition.methods, &diagnostics)
+                loop block in definition.trait_impls -> sema_registration_deprecated_methods(block.methods, &diagnostics)
+            }
+            .Distinct(definition) -> sema_registration_deprecated_markers(definition.type_markers, definition.is_pub && !definition.is_package_pub, &diagnostics)
+            .Impl(implementation) -> sema_registration_deprecated_methods(implementation.methods, &diagnostics)
+            .CodeModule(code_module) -> {
+                if code_module.body == .Val(body) -> sema_registration_deprecated_visibility(body, &diagnostics)
+            }
+            else -> {}
+        }
+    }
+}
+
+fn sema_registration_deprecated_methods(methods: [Func], diagnostics: &[Diagnostic]) {
+    loop method in methods -> sema_registration_deprecated_markers(method.markers, method.is_pub && !method.is_package_pub, &diagnostics)
+}
+
+// Rust `check_deprecated_marker_visibility`: the row's text is the report.
+fn sema_registration_deprecated_markers(markers: [Marker], is_public: Bool, diagnostics: &[Diagnostic]) {
+    if is_public -> return
+    loop marker in markers {
+        if marker.name == "Deprecated" -> &diagnostics.push(sema_error("E0932", marker.span, "`#Deprecated` requires a public item", "the lifecycle marker retires stable public declarations; an item inside a `priv module` is not part of the public surface", "move the item out of its `priv module`, or remove `#Deprecated`"))
     }
 }
 
