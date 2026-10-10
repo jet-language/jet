@@ -18,8 +18,10 @@ fn pkg_entry_test_write(root: String, relative: String, text: String) Never! -[F
 }
 
 fn pkg_entry_test_facts(cache: &WorkspaceDeclarationCache, entry: String) -[FS, Env]> PackageFacts Never! {
-    found :: pkg_package_facts_for_entry(&cache, entry) ?? panic("entry facts load")
-    found ?? panic("entry has a package")
+    if pkg_package_facts_for_entry(&cache, entry) == {
+        .Ok(found) -> found ?? panic("entry has a package")
+        .Err(_) -> panic("entry facts load")
+    }
 }
 
 fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS, Env]> Diagnostic Never! {

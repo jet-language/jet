@@ -42,12 +42,12 @@ fn pkg_capability_snapshot_text(snapshots: [PackageCapabilitySnapshot]) -> Strin
 }
 fn pkg_project_capability_digest(project_root: String) -[FS, Env]> String Never! {
     directory :: sys.get("JET_API_CACHE_DIR") ?? files.join(project_root, ".jet/cache/api")
-    names := files.list_dir(directory) ?? return ""
-    &names.sort()
+    entries := files.list_dir(directory) ?? return ""
+    &entries.sort_by((left: files.DirEntry, right: files.DirEntry) -> left.name <=> right.name)
     snapshots := [PackageCapabilitySnapshot]{}
-    loop name in names {
-        if !name.ends_with(".api") -> next
-        bytes :: foundation_read_file_nofollow_at_root(directory, name, PKG_MAX_LOCK_BYTES) ?? next
+    loop entry in entries {
+        if !entry.name.ends_with(".api") -> next
+        bytes :: foundation_read_file_nofollow_at_root(directory, entry.name, PKG_MAX_LOCK_BYTES) ?? next
         raw :: String.from_bytes(bytes) ?? next
         snapshot :: pkg_capability_snapshot_parse(raw) ?? next
         &snapshots.push(snapshot)

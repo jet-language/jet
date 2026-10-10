@@ -245,7 +245,7 @@ struct DashboardOutput {
 // the non-interactive path can never emit an alternate-screen sequence.
 fn cli_run_dashboard(verification: &StoreVerification) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
-    stdout_tty :: term.stdout().is_terminal()
+    stdout_tty :: term.stdout().is_tty()
     choice :: if stdout_tty -> ColorChoice.Auto else -> ColorChoice.Never
     theme :: Theme.resolve_for(choice, stdout_tty)
     if !cli_dashboard_interactive_mode(term.stdin().is_terminal(), stdout_tty) {

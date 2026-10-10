@@ -396,7 +396,7 @@ struct Theme {
 
     // The shared explicit > NO_COLOR > FORCE_COLOR > TTY policy for stderr.
     fn resolve_choice(choice: ColorChoice) -[IO, Env]> Theme Never! {
-        Theme.resolve_for(choice, term.stderr().is_terminal())
+        Theme.resolve_for(choice, term.stderr().is_tty())
     }
 
     // Resolve against the stream that will actually receive the bytes.
@@ -444,7 +444,7 @@ struct Theme {
     }
 
     fn live_enabled(self) -[IO, Env]> Bool Never! {
-        terminal_live_output_enabled(self.color, term.stderr().is_terminal(), sys.get("CI") != None)
+        terminal_live_output_enabled(self.color, term.stderr().is_tty(), sys.get("CI") != None)
     }
 
     // The aligned `jetpack` gutter every status line shares.

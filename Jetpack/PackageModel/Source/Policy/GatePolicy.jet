@@ -60,7 +60,10 @@ fn pkg_load_organization_gate_policy() -[FS, Env]> [PolicyDeclaration] PackageGa
 // crates/jet-driver/src/Loader.rs:403 `project_gate_declarations`.
 fn pkg_project_gate_declarations(cache: &WorkspaceDeclarationCache, root: String) -[FS, Env]> [PolicyDeclaration] PackageGateError! {
     declarations := pkg_load_organization_gate_policy()
-    loaded :: pkg_package_facts_for_root(&cache, root) ?? return Err(PackageGateError{diagnostics: [Diagnostic]{err.diagnostic}})
+    loaded :: if pkg_package_facts_for_root(&cache, root) == {
+        .Ok(found) -> found
+        .Err(error) -> return Err(PackageGateError{diagnostics: [Diagnostic]{error.diagnostic}})
+    }
     if loaded == .Val(facts) {
         loop declaration in facts.policy.declarations {
             projected := declaration

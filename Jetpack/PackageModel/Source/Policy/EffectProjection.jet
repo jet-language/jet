@@ -176,7 +176,7 @@ fn pkg_effect_texts(effects: [String]) -> Dyn Never! {
     Dyn.Array(items)
 }
 
-fn pkg_render_effect_json(effects: [String]) -> String Never! {
+fn pkg_render_effect_json(effects: [String]) -> String ReportError! {
     StatusEnvelope.new(EFFECT_STATUS_ACTION, true).with_field("effects", pkg_effect_texts(effects)).json()
 }
 
@@ -184,7 +184,7 @@ fn pkg_effect_summary_line_for_program(program: EffectBudgetProgram, summaries: 
     pkg_render_effect_line(pkg_program_effects(program, summaries, default_entry))
 }
 
-fn pkg_effect_summary_json_for_program(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String) -> String Never! {
+fn pkg_effect_summary_json_for_program(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String) -> String ReportError! {
     pkg_render_effect_json(pkg_program_effects(program, summaries, default_entry))
 }
 
@@ -236,6 +236,6 @@ fn pkg_effect_summary_line_for_entry(summaries: [String: PackageEffectSummary], 
     pkg_render_effect_line(pkg_entry_effects(summaries, entry))
 }
 
-fn pkg_effect_summary_json_for_entry(summaries: [String: PackageEffectSummary], entry: String) -> String Never! {
+fn pkg_effect_summary_json_for_entry(summaries: [String: PackageEffectSummary], entry: String) -> String ReportError! {
     pkg_render_effect_json(pkg_entry_effects(summaries, entry))
 }

@@ -140,7 +140,7 @@ fn pkg_test_package_effects(name: String, effects: [String], sites: [String: Str
         "callbacks::apply_twice": pkg_test_effect_summary([String]{}, [String]{}, true)
     }
     assert_eq(pkg_effect_summary_line_for_entry(summaries, "run"), "effects: IO")
-    assert(pkg_effect_summary_json_for_entry(summaries, "run").contains("\"action\":\"build.effects\""))
+    assert((pkg_effect_summary_json_for_entry(summaries, "run") ?? panic("render effects")).contains("\"action\":\"build.effects\""))
 }
 
 #Test("application projection keeps required granted denied and authority distinct") {
