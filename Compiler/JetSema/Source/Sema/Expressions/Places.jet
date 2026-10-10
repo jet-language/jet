@@ -443,14 +443,19 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
 enum SemaMathSwizzleParse {
     NotSwizzle
     InvalidLane
-    Lanes([Int])
+    Lanes(packed: Int, count: Int, overlaps: Bool)
 }
 
 fn sema_expression_math_swizzle_parse(type_name_value: String, member: String, span: Span, diagnostics: &[Diagnostic]) -> SemaMathSwizzleParse {
     swizzleable :: type_name_value == "F32x4" || type_name_value == "F64x2" || type_name_value == "Vec2" || type_name_value == "Vec3" || type_name_value == "Vec4"
     if !swizzleable || member.len() == 0 || member.len() > 4 -> return .NotSwizzle
     arity :: sema_call_math_arity(type_name_value)
-    lanes := [Int]{}
+    // Four two-bit lane indexes fit in one scalar. Write validation needs
+    // no temporary collection; reads allocate only their final TIR lane list.
+    packed := 0
+    count := 0
+    seen := 0
+    overlaps := false
     loop byte in member.bytes() {
         code :: Int.from_u8(byte)
         lane :: if code == {
@@ -478,16 +483,20 @@ fn sema_expression_math_swizzle_parse(type_name_value: String, member: String, s
             &diagnostics.push(sema_error("E3110", span, "lane `{letter}` isn't valid on `{type_name_value}`", "swizzle members name lanes with x/y/z/w — `{type_name_value}` only has {valid}", "use only the lanes defined for `{type_name_value}`"))
             return .InvalidLane
         }
-        &lanes.push(lane)
+        bit :: 1 << lane
+        if seen.bit_and(bit) != 0 -> overlaps = true
+        seen = seen.bit_or(bit)
+        packed = packed.bit_or(lane << (count * 2))
+        count += 1
     }
-    .Lanes(lanes)
+    .Lanes(packed, count, overlaps)
 }
 
 fn sema_expression_math_swizzle(receiver: TExpr, type_name_value: String, member: String, span: Span, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     lanes :: if sema_expression_math_swizzle_parse(type_name_value, member, span, &diagnostics) == {
         .NotSwizzle -> { return SemaDirectSpecialCheck{handled: false, value: None} }
         .InvalidLane -> { return SemaDirectSpecialCheck{handled: true, value: None} }
-        .Lanes(parsed) -> parsed
+        .Lanes(packed, count, _) -> loop index in 0..<count -> (packed >> (index * 2)).bit_and(3)
     }
     arity :: sema_call_math_arity(type_name_value)
     result_ty :: if {

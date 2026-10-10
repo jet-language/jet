@@ -4186,21 +4186,17 @@ fn sema_stmt_check_assignment_place(target: LValue, compound: Bool, environment:
                 owner := sema_expression_type_symbol(&scopes, environment, program, math_name)
                 if owner == None -> owner = sema_expression_carrier_type_symbol(environment, program, math_name)
                 nominal := false
-                if owner == .Val(symbol) -> nominal = sema_scope_declaration_struct(environment, program, symbol.id) != None || sema_scope_declaration_enum(environment, program, symbol.id) != None
+                if owner == .Val(symbol) {
+                    kind :: sema_scope_declaration_kind(environment, program, symbol.id)
+                    nominal = kind == Val(SemaScopeDeclarationKind.Struct) || kind == Val(SemaScopeDeclarationKind.Enum)
+                }
                 if !nominal {
                     parsed :: sema_expression_math_swizzle_parse(math_name, member, span, &diagnostics)
                     if parsed == .InvalidLane -> return None
-                    if parsed == .Lanes(lanes) {
-                        seen := 0
-                        loop lane in lanes {
-                            bit :: 1 << lane
-                            if seen.bit_and(bit) != 0 {
-                                root :: sema_expr_place_root_ident(base) ?? "v"
-                                &diagnostics.push(sema_error("E3111", span, "write swizzle `{member}` repeats a lane on `{math_name}`", "each lane may be written at most once — overlapping patterns like `v.xx` have no single meaning", "assign each lane once, e.g. `{root}.xy = …` instead of `{root}.{member} = …`"))
-                                return None
-                            }
-                            seen = seen.bit_or(bit)
-                        }
+                    if parsed == .Lanes(_, _, overlaps) && overlaps {
+                        root :: sema_expr_place_root_ident(base) ?? "v"
+                        &diagnostics.push(sema_error("E3111", span, "write swizzle `{member}` repeats a lane on `{math_name}`", "each lane may be written at most once — overlapping patterns like `v.xx` have no single meaning", "assign each lane once, e.g. `{root}.xy = …` instead of `{root}.{member} = …`"))
+                        return None
                     }
                 }
             }
