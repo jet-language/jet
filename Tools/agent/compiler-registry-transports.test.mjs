@@ -48,7 +48,7 @@ test('native corpus assemblers retain the real registry and complete MIR decoder
             ['Compiler/JetOptimizer/Tests/run-lint-corpus.mjs', [], 'JET_LINT_ASSEMBLE_ONLY', 'lint', 'lc_case'],
         ]) {
             const result = spawnSync(process.execPath, [join(repo, runner), out, ...args], {
-                encoding: 'utf8', env: { ...process.env, JET_RUNTIME_PACK: options.runtimePack, JET_GOLDEN_FEATURES: features, JET_GOLDEN_NATIVE_MIR: '1', [variable]: '1', JET_LOWER_RESUME: '0' },
+                encoding: 'utf8', env: { ...process.env, JET: options.jet, JET_RUNTIME_PACK: options.runtimePack, JET_GOLDEN_FEATURES: features, JET_GOLDEN_NATIVE_MIR: '1', [variable]: '1', JET_LOWER_RESUME: '0' },
             });
             assert.equal(result.status, 0, result.stderr);
             const unit = readFileSync(join(out, folder, 'unit.jet'), 'utf8');

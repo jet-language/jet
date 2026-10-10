@@ -97,6 +97,7 @@ function runGoldenFixture(stem, overrides = {}) {
       const built = spawnSync(tool, args, { cwd: dir, encoding: "utf8", timeout: 10000 });
       assert.equal(built.status, 0, `${tool}: ${built.error?.message ?? built.stderr}`);
     }
+    writeFileSync(join(lower, `${slug}.executable`), `${join(lower, `${slug}.elf`)}\n`);
     const list = join(dir, "cases");
     writeFileSync(list, `${stem}\n`);
     const checked = spawnSync(process.execPath, [
@@ -104,13 +105,14 @@ function runGoldenFixture(stem, overrides = {}) {
       "--stage", "run", "--until", "run", "--case-list", list,
     ], {
       cwd: repo, encoding: "utf8", timeout: 30000,
-      env: { ...process.env, JET_RUNTIME_PACK: "", JET_RUNTIME_C_LIB: "", JET_GOLDEN_FEATURES: join(repo, "Examples/features") },
+      env: { ...process.env, JET: process.execPath, JET_RUNTIME_PACK: "", JET_RUNTIME_C_LIB: "", JET_GOLDEN_FEATURES: join(repo, "Examples/features") },
     });
-    assert.equal(checked.status, 0, checked.stdout + checked.stderr);
+    const row = readFileSync(join(dir, "results.tsv"), "utf8").trim().split("\t").slice(1);
+    assert.equal(checked.status, row[0] === "pass" ? 0 : 1, checked.stdout + checked.stderr);
     assert.deepEqual(readFileSync(join(dir, "run", `${slug}.stdout`)), stdout);
     assert.deepEqual(readFileSync(join(dir, "run", `${slug}.stderr`)), stderr);
     assert.equal(JSON.parse(readFileSync(join(dir, "run", `${slug}.status.json`))).status, status);
-    return readFileSync(join(dir, "results.tsv"), "utf8").trim().split("\t").slice(1);
+    return row;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

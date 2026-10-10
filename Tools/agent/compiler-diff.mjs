@@ -64,7 +64,7 @@ export function usage() {
   return [
     "Usage: compiler-diff.mjs --reference <jet> --candidate <jet> [options]",
     "       compiler-diff.mjs --canary [--reference <jet>]",
-    "  --reference PATH     pinned reference compiler (default $JET_REFERENCE_COMPILER, else target/debug/jet)",
+    "  --reference PATH     pinned reference compiler (default $JET_REFERENCE_COMPILER, else $JET; required)",
     "  --candidate PATH     candidate compiler (default $JET_CANDIDATE_COMPILER; required)",
     "  --corpus NAME        golden | ui | differential | all (default all; repeatable)",
     "  --phases LIST        override phases: check,run,build",
@@ -84,7 +84,7 @@ class Unavailable extends Error {}
 
 export function parseArgs(argv) {
   const options = {
-    reference: process.env.JET_REFERENCE_COMPILER || join(ROOT, "target/debug/jet"),
+    reference: process.env.JET_REFERENCE_COMPILER || process.env.JET || null,
     candidate: process.env.JET_CANDIDATE_COMPILER || null,
     corpora: [],
     phases: null,
@@ -450,7 +450,7 @@ function scratchRoot(options) {
 }
 
 function requireExecutable(path, role) {
-  if (!path) throw new Unavailable(`no ${role} compiler: pass --${role} or set JET_${role.toUpperCase()}_COMPILER`);
+  if (!path) throw new Unavailable(`no ${role} compiler: pass --${role} or set JET_${role.toUpperCase()}_COMPILER${role === "reference" ? " or JET" : ""}`);
   const absolute = resolve(path);
   try {
     if (!statSync(absolute).isFile()) throw new Error("not a file");
@@ -1104,10 +1104,6 @@ async function compare(options) {
   const probeEnv = baseEnv();
   if (options.memLimit !== "none" && !toolAvailable("systemd-run", ["--version"], probeEnv)) {
     throw new Unavailable("systemd-run is unavailable for --mem-limit; pass --mem-limit none to run uncapped");
-  }
-  const needsRustc = cases.some((c) => c.commands.some((command) => command.phase === "run" || command.phase === "build"));
-  if (needsRustc && !toolAvailable("rustc", ["--version"], probeEnv)) {
-    throw new Unavailable("rustc is unavailable; run and build phases cannot be compared (run under Tools/agent/jet-env)");
   }
 
   const release = acquireLock(root);
