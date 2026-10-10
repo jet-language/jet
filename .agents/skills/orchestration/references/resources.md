@@ -90,6 +90,11 @@ same-source GREEN may be reused only after verifying its artifacts.
 The native fixed point is stage1 (built by the candidate) compiling stage2.
 Require both objects and ELF executables to be byte-identical, and require each
 stage's own all-phases diagnostic report to exist and contain zero failures.
+The Rust-hosted `native-compiler --seed-build` does not execute Jet Host/Entry
+and cannot produce that TSV. Its proof instead requires the real host build
+exit zero, a seed log with no error/ICE/panic rows, and verified seed JSON and
+executable ELF hashes. Preserve this hosted/native boundary in the receipt;
+never fabricate an empty keep-going report to pass a hosted seed.
 The missing historical display comparator and AGE testkit generator are retired
 Rust-oracle modes (owner #38(b)/#59), not native-suite failures. Report their
 individual rows as `UNCOVERED`, print them, and require a Tower card; never label

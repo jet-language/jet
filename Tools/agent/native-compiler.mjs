@@ -25,6 +25,7 @@ import { accessSync, chmodSync, constants, copyFileSync, cpSync, existsSync,
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readNativeRuntimePack } from '../packaging/runtime-pack-cache.mjs';
+import { hostedSeedCensus } from './hosted-seed-proof.mjs';
 
 const usage = 'native-compiler.mjs --jet CLI_SEED --runtime-dir DIR --out FRESH_DIR [--repo DIR] [--stages 1|2] [--dry-run]; bootstrap only: --seed-build --jet RUST_HOST --out FRESH_DIR [--repo DIR] [--dry-run]';
 const options = { repo: resolve(dirname(fileURLToPath(import.meta.url)), '../..'), stages: 2, dryRun: false };
@@ -85,6 +86,9 @@ for (const name of Object.keys(environment)) {
     if (name.startsWith('JET_FRONT_') || name.startsWith('JET_BOOTSTRAP_') || name === 'JET_DUMP_MIR') delete environment[name];
 }
 if (options.seedBuild) {
+    // Rust host compilation cannot produce Jet Host/Entry's all-phases TSV.
+    delete environment.JET_KEEP_GOING;
+    delete environment.JET_KEEP_GOING_REPORT;
     const command = [join(repo, 'Tools/agent/jet-env'), options.jet, 'build', '--release', unit];
     const destination = join(out, 'seed/jet');
     const seedPlan = { schema: 'jet-cli-seed-plan/v1', bootstrap: 'rust-emission', command, cwd: project,
@@ -94,14 +98,19 @@ if (options.seedBuild) {
         console.log(JSON.stringify({ dryRun: true, ...seedPlan }, null, 2));
     } else {
         execute(command[0], command.slice(1), environment, project, join(out, 'seed-build.log'));
+        const seedLog = readFileSync(join(out, 'seed-build.log'));
+        const hostedCensus = { ...hostedSeedCensus(0, seedLog.toString('utf8')), log: join(out, 'seed-build.log'), logSha256: hash(seedLog) };
         const binary = join(project, '.jet/build/selfhost');
         accessSync(binary, constants.X_OK);
         mkdirSync(dirname(destination));
         copyFileSync(binary, destination);
         chmodSync(destination, 0o755);
-        json(join(out, 'seed.json'), { ...seedPlan, sha256: hash(readFileSync(destination)),
+        const seedBytes = readFileSync(destination);
+        if (!seedBytes.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) throw Error('hosted seed is not an ELF executable');
+        const sha256 = hash(seedBytes);
+        json(join(out, 'seed.json'), { ...seedPlan, sha256, hostedCensus,
             bootstrapHostSha256: hash(readFileSync(options.jet)), native: false });
-        console.log(JSON.stringify({ jet: destination, sha256: hash(readFileSync(destination)), native: false }));
+        console.log(JSON.stringify({ jet: destination, sha256, native: false }));
     }
     process.exit(0);
 }
