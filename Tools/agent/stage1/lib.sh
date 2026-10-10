@@ -324,8 +324,8 @@ jetc() {
   [ -n "${JET_TRACE_DETAIL:-}" ] && batch+=(JET_TRACE_DETAIL="$JET_TRACE_DETAIL")
   # Native-feed policy is an explicit part of this request, not an ambient
   # factory override. Preserve output identities and the real all-phases TSV.
-  for name in JET_FRONT_NATIVE_OUTPUT JET_FRONT_LIBRARY_OBJECT_OUTPUT JET_RUNTIME_PACK JET_KEEP_GOING JET_KEEP_GOING_REPORT JET_KEEP_GOING_SKIP; do
-    [ -n "${!name:-}" ] && batch+=("$name=${!name}")
+  for name in JET_FRONT_NATIVE_OUTPUT JET_FRONT_LIBRARY_OBJECT_OUTPUT JET_FRONT_LIBRARY_LIFECYCLE JET_FRONT_RUNTIME_PACK_OUTPUT JET_FRONT_RUNTIME_PLATFORM_INPUTS JET_RUNTIME_PACK JET_KEEP_GOING JET_KEEP_GOING_REPORT JET_KEEP_GOING_SKIP; do
+    if [ -n "${!name:-}" ]; then batch+=("$name=${!name}"); fi
   done
   ( ulimit -c 0
     ulimit -s "${STAGE1_MAIN_STACK_KIB:-1048576}"
