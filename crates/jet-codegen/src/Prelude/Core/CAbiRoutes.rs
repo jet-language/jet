@@ -1357,22 +1357,6 @@ mod jet_c_abi_routes {
 
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_part(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_part(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart) -> *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_jet_x3ccorelib_x3e_s_core_sprocess_c_c_core_sprocess_sprocess_djet_c_c_process_signal(value: *mut crate::__jet__x3ccorelib_x3e_sCore_sprocess_c_cCore_sprocess_sprocess_djet_c_cProcessSignal) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
@@ -1415,54 +1399,6 @@ mod jet_c_abi_routes {
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_clone_jet_x3ccorelib_x3e_s_core_ssync_c_c_core_ssync_ssync_djet_c_c_row_policy(value: *mut crate::__jet__x3ccorelib_x3e_sCore_ssync_c_cCore_ssync_ssync_djet_c_cRowPolicy) -> *mut crate::__jet__x3ccorelib_x3e_sCore_ssync_c_cCore_ssync_ssync_djet_c_cRowPolicy {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_jet_x3ccorelib_x3e_s_core_sterm_c_c_core_sterm_sterm_djet_c_c_stderr(value: *mut crate::__jet__x3ccorelib_x3e_sCore_sterm_c_cCore_sterm_sterm_djet_c_cStderr) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_jet_x3ccorelib_x3e_s_core_sterm_c_c_core_sterm_sterm_djet_c_c_stderr(value: *mut crate::__jet__x3ccorelib_x3e_sCore_sterm_c_cCore_sterm_sterm_djet_c_cStderr) -> *mut crate::__jet__x3ccorelib_x3e_sCore_sterm_c_cCore_sterm_sterm_djet_c_cStderr {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_jet_x3ccorelib_x3e_s_core_sterm_c_c_core_sterm_sterm_djet_c_c_stdin_handle(value: *mut crate::__jet__x3ccorelib_x3e_sCore_sterm_c_cCore_sterm_sterm_djet_c_cStdinHandle) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_jet_x3ccorelib_x3e_s_core_sterm_c_c_core_sterm_sterm_djet_c_c_stdin_handle(value: *mut crate::__jet__x3ccorelib_x3e_sCore_sterm_c_cCore_sterm_sterm_djet_c_cStdinHandle) -> *mut crate::__jet__x3ccorelib_x3e_sCore_sterm_c_cCore_sterm_sterm_djet_c_cStdinHandle {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_jet_x3ccorelib_x3e_s_core_sterm_c_c_core_sterm_sterm_djet_c_c_stdout(value: *mut crate::__jet__x3ccorelib_x3e_sCore_sterm_c_cCore_sterm_sterm_djet_c_cStdout) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_jet_x3ccorelib_x3e_s_core_sterm_c_c_core_sterm_sterm_djet_c_c_stdout(value: *mut crate::__jet__x3ccorelib_x3e_sCore_sterm_c_cCore_sterm_sterm_djet_c_cStdout) -> *mut crate::__jet__x3ccorelib_x3e_sCore_sterm_c_cCore_sterm_sterm_djet_c_cStdout {
         // SAFETY: `value` is a live handle the caller owns for this call.
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
@@ -1632,22 +1568,6 @@ mod jet_c_abi_routes {
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_clone_jet_x3ccorelib_x3e_s_core_stime_c_c_core_stime_stime_djet_c_c_zoned_date_time(value: *mut crate::__jet__x3ccorelib_x3e_sCore_stime_c_cCore_stime_stime_djet_c_cZonedDateTime) -> *mut crate::__jet__x3ccorelib_x3e_sCore_stime_c_cCore_stime_stime_djet_c_cZonedDateTime {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_jet_x3ccorelib_x3e_s_core_stime_c_c_core_stime_stime_djet_c_c_zone_info(value: *mut crate::__jet__x3ccorelib_x3e_sCore_stime_c_cCore_stime_stime_djet_c_cZoneInfo) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_jet_x3ccorelib_x3e_s_core_stime_c_c_core_stime_stime_djet_c_c_zone_info(value: *mut crate::__jet__x3ccorelib_x3e_sCore_stime_c_cCore_stime_stime_djet_c_cZoneInfo) -> *mut crate::__jet__x3ccorelib_x3e_sCore_stime_c_cCore_stime_stime_djet_c_cZoneInfo {
         // SAFETY: `value` is a live handle the caller owns for this call.
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
@@ -2107,22 +2027,6 @@ mod jet_c_abi_routes {
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_clone_db_value(value: *mut crate::jet_std::DBValue) -> *mut crate::jet_std::DBValue {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_dir_entry(value: *mut crate::jet_std::DirEntry) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_dir_entry(value: *mut crate::jet_std::DirEntry) -> *mut crate::jet_std::DirEntry {
         // SAFETY: `value` is a live handle the caller owns for this call.
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
@@ -3266,22 +3170,6 @@ mod jet_c_abi_routes {
 
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_jet_file_lock_owner(value: *mut crate::JetFileLockOwner) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_jet_file_lock_owner(value: *mut crate::JetFileLockOwner) -> *mut crate::JetFileLockOwner {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_jet_file_scope(value: *mut crate::JetFileScope) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
@@ -3294,15 +3182,6 @@ mod jet_c_abi_routes {
     pub extern "C" fn jet_rt_handle_clone_jet_file_scope(value: *mut crate::JetFileScope) -> *mut crate::JetFileScope {
         // SAFETY: `value` is a live handle the caller owns for this call.
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_jet_file_writer(value: *mut crate::JetFileWriter) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
     }
 
     #[cfg(not(jet_native_pack))]
@@ -3358,54 +3237,6 @@ mod jet_c_abi_routes {
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_clone_jet_fraction(value: *mut crate::jet_std::JetFraction) -> *mut crate::jet_std::JetFraction {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_jet_fs_lock_call(value: *mut crate::jet_std::JetFsLockCall) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_jet_fs_lock_call(value: *mut crate::jet_std::JetFsLockCall) -> *mut crate::jet_std::JetFsLockCall {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_jet_fs_lock_identity(value: *mut crate::jet_std::JetFsLockIdentity) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_jet_fs_lock_identity(value: *mut crate::jet_std::JetFsLockIdentity) -> *mut crate::jet_std::JetFsLockIdentity {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_jet_fs_lock_wait(value: *mut crate::jet_std::JetFsLockWait) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_jet_fs_lock_wait(value: *mut crate::jet_std::JetFsLockWait) -> *mut crate::jet_std::JetFsLockWait {
         // SAFETY: `value` is a live handle the caller owns for this call.
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
@@ -4889,22 +4720,6 @@ mod jet_c_abi_routes {
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_clone_jet_table_plan(value: *mut crate::JetTablePlan) -> *mut crate::JetTablePlan {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_jet_temp_dir_owner(value: *mut crate::JetTempDirOwner) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_jet_temp_dir_owner(value: *mut crate::JetTempDirOwner) -> *mut crate::JetTempDirOwner {
         // SAFETY: `value` is a live handle the caller owns for this call.
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
@@ -6752,13 +6567,6 @@ mod jet_c_abi_routes {
 
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_show_dir_entry(value: *mut crate::jet_std::DirEntry) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::jet_std::DirEntry as crate::JetShow>::jet_show(unsafe { &*value })))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_display_f32x4(value: *mut crate::jet_std::F32x4) -> JetCString {
         // SAFETY: `value` is a live handle the caller lends for this call.
         guard(|| handle(<crate::jet_std::F32x4 as crate::JetDisplay>::jet_display(unsafe { &*value })))
@@ -7907,13 +7715,6 @@ mod jet_c_abi_routes {
 
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_dir_entry(left: *mut crate::jet_std::DirEntry, right: *mut crate::jet_std::DirEntry) -> bool {
-        // SAFETY: both are live handles the caller lends for this call.
-        guard(|| unsafe { &*left } == unsafe { &*right })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_envelope(left: *mut crate::jet_email::Envelope, right: *mut crate::jet_email::Envelope) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
@@ -8328,27 +8129,6 @@ mod jet_c_abi_routes {
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_jet_fraction(left: *mut crate::jet_std::JetFraction, right: *mut crate::jet_std::JetFraction) -> bool {
-        // SAFETY: both are live handles the caller lends for this call.
-        guard(|| unsafe { &*left } == unsafe { &*right })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_jet_fs_lock_call(left: *mut crate::jet_std::JetFsLockCall, right: *mut crate::jet_std::JetFsLockCall) -> bool {
-        // SAFETY: both are live handles the caller lends for this call.
-        guard(|| unsafe { &*left } == unsafe { &*right })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_jet_fs_lock_identity(left: *mut crate::jet_std::JetFsLockIdentity, right: *mut crate::jet_std::JetFsLockIdentity) -> bool {
-        // SAFETY: both are live handles the caller lends for this call.
-        guard(|| unsafe { &*left } == unsafe { &*right })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_jet_fs_lock_wait(left: *mut crate::jet_std::JetFsLockWait, right: *mut crate::jet_std::JetFsLockWait) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
     }
@@ -9251,23 +9031,6 @@ mod jet_c_abi_routes {
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_record_seq_list_rec_jet_x3ccorelib_x3e_s_core_shttp_c_c_core_shttp_shttp_djet_c_c_header_push(value: *mut Vec<crate::__jet__x3ccorelib_x3e_sCore_shttp_c_cCore_shttp_shttp_djet_c_cHeader>, item: *mut crate::__jet__x3ccorelib_x3e_sCore_shttp_c_cCore_shttp_shttp_djet_c_cHeader) {
-        guard(|| unsafe { &mut *value }.push(*unsafe { Box::from_raw(item) }));
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_seq_list_rec_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_part_new(capacity: i64) -> *mut Vec<crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart> { guard(|| Box::into_raw(Box::new(Vec::with_capacity(capacity as usize)))) }
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_seq_list_rec_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_part_len(value: *mut Vec<crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart>) -> i64 { guard(|| unsafe { &*value }.len() as i64) }
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_seq_list_rec_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_part_get(value: *mut Vec<crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart>, index: i64) -> *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart {
-        guard(|| { let item = &unsafe { &*value }[index as usize]; &(*item) as *const crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart as *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart })
-    }
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_seq_list_rec_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_part_push(value: *mut Vec<crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart>, item: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart) {
         guard(|| unsafe { &mut *value }.push(*unsafe { Box::from_raw(item) }));
     }
 
@@ -11699,116 +11462,6 @@ mod jet_c_abi_routes {
 
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_scheme_text(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; handle(value.__jet_scheme_text.clone()) })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_user_text(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; handle(value.__jet_user_text.clone()) })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_password_text(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; handle(value.__jet_password_text.clone()) })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_host_text(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; handle(value.__jet_host_text.clone()) })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_port_value(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL) -> i64 {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; value.__jet_port_value.clone().into_raw() })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_port_explicit(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL) -> bool {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; value.__jet_port_explicit })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_path_text(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; handle(value.__jet_path_text.clone()) })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_query_text(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; handle(value.__jet_query_text.clone()) })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_fragment_text(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; handle(value.__jet_fragment_text.clone()) })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_raw(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; handle(value.__jet_raw.clone()) })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_host_recipe(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL) -> *mut Vec<crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart> {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; &value.__jet_host_recipe as *const Vec<crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart> as *mut Vec<crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart> })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_path_recipe(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL) -> *mut Vec<crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart> {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; &value.__jet_path_recipe as *const Vec<crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart> as *mut Vec<crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart> })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url(m0: JetCString, m1: JetCString, m2: JetCString, m3: JetCString, m4: i64, m5: u8, m6: JetCString, m7: JetCString, m8: JetCString, m9: JetCString, m10: *mut Vec<crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart>, m11: *mut Vec<crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart>) -> *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL {
-        guard(|| Box::into_raw(Box::new(crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL { __jet_scheme_text: view(m0).to_owned(), __jet_user_text: view(m1).to_owned(), __jet_password_text: view(m2).to_owned(), __jet_host_text: view(m3).to_owned(), __jet_port_value: unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(m4) }, __jet_port_explicit: m5 != 0, __jet_path_text: view(m6).to_owned(), __jet_query_text: view(m7).to_owned(), __jet_fragment_text: view(m8).to_owned(), __jet_raw: view(m9).to_owned(), __jet_host_recipe: *unsafe { Box::from_raw(m10) }, __jet_path_recipe: *unsafe { Box::from_raw(m11) } })))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_part_text(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; handle(value.__jet_text.clone()) })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_part_hole(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart) -> bool {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; value.__jet_hole })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_part(m0: JetCString, m1: u8) -> *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart {
-        guard(|| Box::into_raw(Box::new(crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURLPart { __jet_text: view(m0).to_owned(), __jet_hole: m1 != 0 })))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
     pub extern "C" fn jet_rt_record_get_jet_x3ccorelib_x3e_s_core_sservice_c_c_core_sservice_sservice_djet_c_c_delivery_event_sequence(value: *mut crate::__jet__x3ccorelib_x3e_sCore_sservice_c_cCore_sservice_sservice_djet_c_cDeliveryEvent) -> i64 {
         // SAFETY: `value` is a live handle the caller lends for this call.
         guard(|| { let value = unsafe { &*value }; value.__jet_sequence.clone().into_raw() })
@@ -11846,45 +11499,6 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_rt_record_new_jet_x3ccorelib_x3e_s_core_sservice_c_c_core_sservice_sservice_djet_c_c_delivery_event(m0: i64, m1: i64, m2: i64, m3: i64, m4: JetCString) -> *mut crate::__jet__x3ccorelib_x3e_sCore_sservice_c_cCore_sservice_sservice_djet_c_cDeliveryEvent {
         guard(|| Box::into_raw(Box::new(crate::__jet__x3ccorelib_x3e_sCore_sservice_c_cCore_sservice_sservice_djet_c_cDeliveryEvent { __jet_sequence: unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(m0) }, __jet_state: match m1 { 0 => crate::JetDeliveryState::Pending, 1 => crate::JetDeliveryState::Accepted, 2 => crate::JetDeliveryState::Delivering, 3 => crate::JetDeliveryState::Delivered, 4 => crate::JetDeliveryState::DeadLettered, 5 => crate::JetDeliveryState::Cancelled, _ => range_stop() }, __jet_attempts: unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(m2) }, __jet_timestamp: unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(m3) }, __jet_signature: view(m4).to_owned() })))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_jet_x3ccorelib_x3e_s_core_sterm_c_c_core_sterm_sterm_djet_c_c_stderr_fd(value: *mut crate::__jet__x3ccorelib_x3e_sCore_sterm_c_cCore_sterm_sterm_djet_c_cStderr) -> i64 {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; value.__jet_fd.clone().into_raw() })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_jet_x3ccorelib_x3e_s_core_sterm_c_c_core_sterm_sterm_djet_c_c_stderr(m0: i64) -> *mut crate::__jet__x3ccorelib_x3e_sCore_sterm_c_cCore_sterm_sterm_djet_c_cStderr {
-        guard(|| Box::into_raw(Box::new(crate::__jet__x3ccorelib_x3e_sCore_sterm_c_cCore_sterm_sterm_djet_c_cStderr { __jet_fd: unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(m0) } })))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_jet_x3ccorelib_x3e_s_core_sterm_c_c_core_sterm_sterm_djet_c_c_stdin_handle_fd(value: *mut crate::__jet__x3ccorelib_x3e_sCore_sterm_c_cCore_sterm_sterm_djet_c_cStdinHandle) -> i64 {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; value.__jet_fd.clone().into_raw() })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_jet_x3ccorelib_x3e_s_core_sterm_c_c_core_sterm_sterm_djet_c_c_stdin_handle(m0: i64) -> *mut crate::__jet__x3ccorelib_x3e_sCore_sterm_c_cCore_sterm_sterm_djet_c_cStdinHandle {
-        guard(|| Box::into_raw(Box::new(crate::__jet__x3ccorelib_x3e_sCore_sterm_c_cCore_sterm_sterm_djet_c_cStdinHandle { __jet_fd: unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(m0) } })))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_jet_x3ccorelib_x3e_s_core_sterm_c_c_core_sterm_sterm_djet_c_c_stdout_fd(value: *mut crate::__jet__x3ccorelib_x3e_sCore_sterm_c_cCore_sterm_sterm_djet_c_cStdout) -> i64 {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; value.__jet_fd.clone().into_raw() })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_jet_x3ccorelib_x3e_s_core_sterm_c_c_core_sterm_sterm_djet_c_c_stdout(m0: i64) -> *mut crate::__jet__x3ccorelib_x3e_sCore_sterm_c_cCore_sterm_sterm_djet_c_cStdout {
-        guard(|| Box::into_raw(Box::new(crate::__jet__x3ccorelib_x3e_sCore_sterm_c_cCore_sterm_sterm_djet_c_cStdout { __jet_fd: unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(m0) } })))
     }
 
     #[cfg(not(jet_native_pack))]
@@ -12039,26 +11653,6 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_rt_record_new_jet_x3ccorelib_x3e_s_core_stime_c_c_core_stime_stime_djet_c_c_time_error(m0: JetCString) -> *mut crate::__jet__x3ccorelib_x3e_sCore_stime_c_cCore_stime_stime_djet_c_cTimeError {
         guard(|| Box::into_raw(Box::new(crate::__jet__x3ccorelib_x3e_sCore_stime_c_cCore_stime_stime_djet_c_cTimeError { __jet_reason: view(m0).to_owned() })))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_jet_x3ccorelib_x3e_s_core_stime_c_c_core_stime_stime_djet_c_c_zone_info_offset(value: *mut crate::__jet__x3ccorelib_x3e_sCore_stime_c_cCore_stime_stime_djet_c_cZoneInfo) -> i64 {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; value.__jet_offset.clone().into_raw() })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_jet_x3ccorelib_x3e_s_core_stime_c_c_core_stime_stime_djet_c_c_zone_info_is_dst(value: *mut crate::__jet__x3ccorelib_x3e_sCore_stime_c_cCore_stime_stime_djet_c_cZoneInfo) -> bool {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; value.__jet_is_dst })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_jet_x3ccorelib_x3e_s_core_stime_c_c_core_stime_stime_djet_c_c_zone_info(m0: i64, m1: u8) -> *mut crate::__jet__x3ccorelib_x3e_sCore_stime_c_cCore_stime_stime_djet_c_cZoneInfo {
-        guard(|| Box::into_raw(Box::new(crate::__jet__x3ccorelib_x3e_sCore_stime_c_cCore_stime_stime_djet_c_cZoneInfo { __jet_offset: unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(m0) }, __jet_is_dst: m1 != 0 })))
     }
 
     #[cfg(not(jet_native_pack))]
@@ -16814,6 +16408,76 @@ mod jet_c_abi_routes {
     pub extern "C" fn jet_rt_handle_field_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_smime_djet_c_c_mime_jet_sub(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_smime_djet_c_cMIME, out: *mut super::jet_c_abi::JetCText) {
         // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
         unsafe { let text = &(*value).__jet_sub; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
+    }
+
+    #[cfg(not(jet_native_pack))]
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_jet_scheme_text(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).__jet_scheme_text; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
+    }
+
+    #[cfg(not(jet_native_pack))]
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_jet_user_text(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).__jet_user_text; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
+    }
+
+    #[cfg(not(jet_native_pack))]
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_jet_password_text(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).__jet_password_text; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
+    }
+
+    #[cfg(not(jet_native_pack))]
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_jet_host_text(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).__jet_host_text; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
+    }
+
+    #[cfg(not(jet_native_pack))]
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_jet_port_value(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL) -> *const crate::jet_foundation::Numeric::JetInt {
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).__jet_port_value) }
+    }
+
+    #[cfg(not(jet_native_pack))]
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_jet_port_explicit(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL) -> *const bool {
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
+        unsafe { std::ptr::addr_of!((*value).__jet_port_explicit) }
+    }
+
+    #[cfg(not(jet_native_pack))]
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_jet_path_text(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).__jet_path_text; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
+    }
+
+    #[cfg(not(jet_native_pack))]
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_jet_query_text(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).__jet_query_text; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
+    }
+
+    #[cfg(not(jet_native_pack))]
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_jet_fragment_text(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).__jet_fragment_text; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
+    }
+
+    #[cfg(not(jet_native_pack))]
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_field_jet_x3ccorelib_x3e_s_core_snet_c_c_core_snet_surl_djet_c_c_url_jet_raw(value: *mut crate::__jet__x3ccorelib_x3e_sCore_snet_c_cCore_snet_surl_djet_c_cURL, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).__jet_raw; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[cfg(not(jet_native_pack))]
@@ -32041,7 +31705,6 @@ mod jet_c_abi_routes {
 //   jet_compute_view_mut (core.builtin.compute_view_mut_new): no runtime function
 //   jet_compute_zeros (core.compute.zeros): no runtime function
 //   jet_config_merge (core.args.merge): no runtime function
-//   jet_crypto_zeroize (core.crypto.__zeroize): parameter types bytes: &mut Vec<u8>
 //   jet_data_arrow_import (core.data.arrow.import): generic
 //   jet_data_bar_svg_checked (TIR/lower/method_calls.rs): generic
 //   jet_data_bar_text_checked (core.data.bar_text): generic
@@ -32217,8 +31880,6 @@ mod jet_c_abi_routes {
 //   jet_game_scene_query (core.handle.game.scene_query): no runtime function
 //   jet_gc_read (core.gc.read): no runtime function
 //   jet_get_disjoint_write (core.builtin.get_disjoint_write): generic
-//   jet_http_build_get (core.http.client.jet_http_build_get): parameter types  host: &String, authority: &String, target: &String, secure: bool, addresses: &Vec<Vec<u8>>, port: i64, timeout_ms: i64, limit: i64, 
-//   jet_http_build_resolve (core.http.client.jet_http_build_resolve): result type Result<Vec<Vec<u8>>, String>
 //   jet_http_client_get (core.http.get): no runtime function
 //   jet_http_client_new_impl (core.handle.http.client_new): no runtime function
 //   jet_http_client_post (core.http.client.__post): no runtime function
@@ -32618,7 +32279,6 @@ mod jet_c_abi_routes {
 //   jet_std::channel (core.tasks.__channel_new): generic
 //   jet_std::channel_bounded (core.tasks.__channel_bounded): generic
 //   jet_std::FieldError::under (core.encoding.decode_under): generic
-//   jet_std::jet_fs_directory_list (core.files.__list_directory): result type Result<Vec<Vec<u8>>, IOError>
 //   jet_std::jet_fs_xattr_get (core.files.__xattr_get): result type Result<Option<Vec<u8>>, IOError>
 //   jet_std::jet_int_try_from_checked (core.numeric.int_try_from): result type Result<i128, String>
 //   jet_std::jet_pool_get (TIR/routes.rs): generic
