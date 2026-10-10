@@ -56,7 +56,7 @@ CLI. Plain `build` selects native O0 lowering, ELF object emission and the Jet
 static linker. The runtime directory must have `native.key`, the matching
 `KEY/jet_runtime.pack.o`, and `provenance.json` identifying a Jet-native pack
 with zero Rust/LLVM objects and its SHA-256. Every output stage receives this
-runtime beside `jet`. Stage 2 and stage 3 must have byte-identical objects and
+runtime beside `jet`. Stage 1 and stage 2 must have byte-identical objects and
 executables; `native-compiler.json` records successful production and comparison.
 `--stages 1` builds one successor without claiming a fixed point.
 
@@ -67,6 +67,18 @@ builds the same production entry through the host's `build --release` route.
 Its `seed/jet` is a Jet-built, Rust-origin seed, **not** a Rust-free delivery;
 `seed.json` records that distinction. It uses no private `Tests.rs` main.
 Builds and full fixed-point runs still require Main's measured proofq admission.
+
+The sharded stage-zero factory is a separate bootstrap input, not a CLI seed.
+Its explicit `JET_BOOTSTRAP_*` protocol can feed the Jet compiler's own
+`JET_FRONT_LIBRARY_OBJECT_OUTPUT` and `JET_FRONT_NATIVE_OUTPUT` paths. Produce
+the runtime library object first, then supply that real same-source object as
+`JET_RUNTIME_PACK` while lowering the exact assembled CLI unit. `lib.sh` forwards
+these request paths and `JET_KEEP_GOING`, `JET_KEEP_GOING_REPORT`, and
+`JET_KEEP_GOING_SKIP` through its otherwise-clean environment. A factory process
+exit alone admits neither object nor executable: check its reports, the emitted
+files, their hashes, and the empty all-phases failure census before publishing
+the native CLI. The factory's own Rust sharded build remains the explicit
+bootstrap exception; subsequent native stages and their runtime are Rust-free.
 
 ## Compiler-owned registries
 
