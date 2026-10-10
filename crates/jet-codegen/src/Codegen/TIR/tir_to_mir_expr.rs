@@ -1829,7 +1829,7 @@ pub(super) fn lower_expr(
                     let value = ctx.emit("geometry-source-constructor", Some(returned.clone()), MirOperation::Call {
                         callee: MirCallee::Associated { function, owner }, args, type_args: Vec::new(),
                     })?;
-                    return if super::mir::is_plain_call_return(&returned, &expr.ty) {
+                    return if super::mir::is_plain_call_return(ctx, &returned, &expr.ty) {
                         ctx.reconcile_plain_call_return(expr, value, &returned)
                     } else { Ok(value) };
                 }
@@ -1843,7 +1843,7 @@ pub(super) fn lower_expr(
                         callee: MirCallee::User(function), args, type_args: Vec::new(),
                     })?;
                     if let Some(returned) = returned {
-                        if super::mir::is_plain_call_return(&returned, &expr.ty) {
+                        if super::mir::is_plain_call_return(ctx, &returned, &expr.ty) {
                             return ctx.reconcile_plain_call_return(expr, value, &returned);
                         }
                     }
@@ -1890,7 +1890,7 @@ pub(super) fn lower_expr(
                     },
                 )?;
                 if let Some(returned) = returned {
-                    if super::mir::is_plain_call_return(&returned, &expr.ty) {
+                    if super::mir::is_plain_call_return(ctx, &returned, &expr.ty) {
                         return ctx.reconcile_plain_call_return(expr, value, &returned);
                     }
                 }
@@ -4739,8 +4739,8 @@ pub(super) fn lower_expr(
                     Some(target) if super::mir::is_plain_return(returned) => {
                         !super::mir::is_plain_return(target)
                     }
-                    Some(target) => super::mir::is_plain_call_return(returned, target),
-                    None => super::mir::is_plain_call_return(returned, &expr.ty),
+                    Some(target) => super::mir::is_plain_call_return(ctx, returned, target),
+                    None => super::mir::is_plain_call_return(ctx, returned, &expr.ty),
                 });
             let type_args = lower_mir_types(ctx, type_args)?;
             let value = ctx.emit(
@@ -6071,7 +6071,7 @@ pub(super) fn lower_plain_return_value(
     expr: &TExpr,
     expected: &Type,
 ) -> Result<Option<jet_foundation::MIR::MirValueId>, LowerError> {
-    if !super::mir::is_plain_call_return(expected, &expr.ty) {
+    if !super::mir::is_plain_call_return(ctx, expected, &expr.ty) {
         return Ok(None);
     }
     if let TExprKind::Ok(inner) = &expr.kind {

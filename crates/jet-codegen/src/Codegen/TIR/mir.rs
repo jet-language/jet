@@ -592,6 +592,12 @@ impl FunctionRegistry {
             if rhs.is_some() || !candidates.is_empty() {
                 return candidates;
             }
+            if rhs.is_none() && !raw_owner.contains("::") && !raw_owner.contains('.') {
+                let candidates = self.carrier_record_methods(raw_owner, method, Some(trait_name));
+                if !candidates.is_empty() {
+                    return candidates;
+                }
+            }
             // A bounded generic receiver can reach MIR with no concrete owner
             // spelling. Keep the lookup checked and deterministic: a lone
             // implementation of this trait method is usable; several remain
@@ -629,7 +635,7 @@ impl FunctionRegistry {
                 .cloned()
                 .unwrap_or_default();
             if local.is_empty() && rhs.is_none() {
-                return self.carrier_record_methods(raw_prefix, method);
+                return self.carrier_record_methods(raw_prefix, method, None);
             }
             local
         }
@@ -640,7 +646,12 @@ impl FunctionRegistry {
     /// a method on it is that record's checked method. Any other bare Core
     /// export (`Digest256` returned by `sha256` into `core.email`) names the
     /// record of the one Core source module that exports it.
-    fn carrier_record_methods(&self, owner: &str, method: &str) -> Vec<MirFunctionId> {
+    fn carrier_record_methods(
+        &self,
+        owner: &str,
+        method: &str,
+        trait_name: Option<&str>,
+    ) -> Vec<MirFunctionId> {
         let modules = match crate::Syntax::typed_head_kind(owner)
             .and_then(|kind| kind.carrier_record_module())
         {
@@ -655,6 +666,19 @@ impl FunctionRegistry {
         else {
             return Vec::new();
         };
+        if let Some(trait_name) = trait_name {
+            return self
+                .by_target
+                .iter()
+                .filter(|(target, _)| {
+                    target.method == method
+                        && target.trait_name.as_deref() == Some(trait_name)
+                        && target.rhs.is_none()
+                        && target.owner.ends_with(&suffix)
+                })
+                .flat_map(|(_, ids)| ids.iter().copied())
+                .collect();
+        }
         self.by_owner_method
             .iter()
             .filter(|((_, candidate_owner, candidate_method), _)| {
@@ -2092,13 +2116,19 @@ pub(super) fn is_plain_return(ty: &Type) -> bool {
 /// before the failure solve names the default `Result<T, Err>`). An `Option`
 /// return is plain only as the exact success of a `T? Never!` carrier, since
 /// a callee that keeps its `T?` carrier returns that `Option` itself.
-pub(super) fn is_plain_call_return(returned: &Type, checked: &Type) -> bool {
+pub(super) fn is_plain_call_return(ctx: &LowerCtx, returned: &Type, checked: &Type) -> bool {
     if is_plain_return(returned) {
         return is_result_carrier(checked);
     }
     matches!(returned.without_user_tags(), Type::Option(_))
         && never_carrier_success(checked)
-            .is_some_and(|success| success.without_user_tags() == returned.without_user_tags())
+            .is_some_and(|success| {
+                let success = success.without_user_tags();
+                let returned = returned.without_user_tags();
+                success == returned
+                    || ctx.normalize_contextual_type(success)
+                        == ctx.normalize_contextual_type(returned)
+            })
 }
 
 /// The adaptation a raw-payload function value needs to fill a callable slot
@@ -11107,7 +11137,7 @@ impl<'a> LowerCtx<'a> {
         let Ok(Some(returned)) = self.function_registry.call_return_type_for(function, &[]) else {
             return Ok(None);
         };
-        if !is_plain_call_return(&returned, ret) {
+        if !is_plain_call_return(self, &returned, ret) {
             return Ok(None);
         }
         let source_params = (0..params.len())
@@ -11182,7 +11212,7 @@ impl<'a> LowerCtx<'a> {
         value: MirValueId,
         returned: &Type,
     ) -> Result<MirValueId, LowerError> {
-        if !is_plain_call_return(returned, &expr.ty) {
+        if !is_plain_call_return(self, returned, &expr.ty) {
             return Ok(value);
         }
         if self.plain_try_operand == Some(expr as *const TExpr as usize) {
@@ -12835,5 +12865,51 @@ mod nominal_index_tests {
             let ty = Type::Named(name.into());
             assert_eq!(ctx.normalize_contextual_type(&ty), ty);
         }
+    }
+}
+
+#[cfg(test)]
+mod core_carrier_trait_target_tests {
+    use super::*;
+
+    #[test]
+    fn bare_core_trait_target_keeps_owner_trait_and_ambiguity() {
+        let source = jet_foundation::CoreModuleExports::core_source_module("core.math").unwrap();
+        let module = "<corelib>/Core/math::Core/math/math.jet".to_string();
+        let owner = format!("{}::Fraction", module);
+        assert!(owner.ends_with(&format!("{}::Fraction", source.path)));
+        let key = FunctionTargetKey {
+            module,
+            owner,
+            trait_name: Some("Display".to_string()),
+            method: "display".to_string(),
+            rhs: None,
+        };
+        let mut registry = FunctionRegistry::build(&[], None).unwrap();
+        let display = MirFunctionId(1);
+        registry.by_target.insert(key.clone(), vec![display]);
+        let span = Span::new(0, 1);
+        assert_eq!(
+            registry.resolve("Fraction::Display::display", "consumer::run", span).unwrap(),
+            display,
+        );
+        assert!(registry.resolve("Fraction::Debug::display", "consumer::run", span).is_err());
+        assert!(registry.resolve("Other::Display::display", "consumer::run", span).is_err());
+
+        let local = MirFunctionId(2);
+        registry.by_target.insert(FunctionTargetKey {
+            module: "consumer::run".to_string(),
+            owner: "consumer::run::Fraction".to_string(),
+            trait_name: Some("Display".to_string()),
+            method: "display".to_string(),
+            rhs: None,
+        }, vec![local]);
+        assert_eq!(
+            registry.resolve("Fraction::Display::display", "consumer::run", span).unwrap(),
+            local,
+        );
+        registry.by_target.insert(key, vec![display, MirFunctionId(3)]);
+        assert!(registry.resolve("Fraction::Display::display", "another::run", span)
+            .unwrap_err().message.contains("ambiguous checked function target"));
     }
 }

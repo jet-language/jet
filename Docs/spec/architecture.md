@@ -506,6 +506,25 @@ checked source signature: injected manual clocks do not acquire ambient Time
 through their shared helper. Ambient wall/host sampling and system Clock
 construction keep their Time authority; this is not a package-budget grant.
 
+Authored Core `Close`, `Display` and `Debug` implementations are implicit
+executable roots: cleanup and formatting need their checked bodies even when
+the caller's AST has no method reference. Their ordinary callee closure remains
+subject to the same source-body reachability walk. The Jet lowerer already
+retains authored Core methods; bootstrap lowering preserves these implicit
+targets too, rather than losing a formatter merely because arithmetic produced
+its receiver.
+
+A bare registered Core-carrier trait reference resolves through that carrier's
+one source-module owner and the exact trait/method identity. It cannot match an
+unrelated same-named method, a different trait or an arbitrary suffix alias.
+Missing or ambiguous checked targets remain lowering failures.
+
+For `T? Never!`, the executable return is the one optional carrier, not a
+nested `Result<Option<T>, Never>`. Reconciliation compares its success type
+under the declaring module's checked nominal identities: a local source leaf
+and that leaf's imported qualified owner are one type. It unwraps the empty
+failure layer once while preserving the optional presence/absence layer.
+
 The Jet Driver carries each installed Core row's runtime classification into
 its parse job. Runtime dependencies retain all functions but omit their test
 controls; only an entry with the installed unit's exact path and bytes keeps

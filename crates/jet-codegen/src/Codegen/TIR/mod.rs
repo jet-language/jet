@@ -11436,18 +11436,17 @@ fn collect_trait_impl_callable_groups(
     }
 }
 
-/// D-SHAPE-RESOURCE1=A: a Core `Close` implementation is reached implicitly by
-/// scope-end cleanup of a live value, never through a source reference, so
-/// reference reachability alone would prune it and leave the automatic close
-/// without a lowered target. Collect its methods so they stay rooted.
-fn collect_core_close_callables(
+/// Core cleanup and formatting implementations are invoked implicitly, without
+/// an authored method reference. Keep their checked targets and normal callee
+/// closure, matching the authored Core-method roots in the Jet lowering.
+fn collect_core_implicit_trait_callables(
     items: &[Item],
     module: usize,
     prefix: Option<&str>,
     index: &CostCallableIndex,
     out: &mut Vec<usize>,
 ) {
-    fn push_close(
+    fn push_implicit(
         trait_name: &str,
         owner_name: &str,
         prefix: Option<&str>,
@@ -11456,13 +11455,24 @@ fn collect_core_close_callables(
         index: &CostCallableIndex,
         out: &mut Vec<usize>,
     ) {
-        if trait_name.rsplit('.').next() != Some(crate::Syntax::TRAIT_CLOSE) {
+        if !matches!(
+            trait_name.rsplit('.').next(),
+            Some(
+                crate::Syntax::TRAIT_CLOSE
+                    | crate::Syntax::TRAIT_DISPLAY
+                    | crate::Syntax::TRAIT_DEBUG
+            )
+        ) {
             return;
         }
         let owner = scoped_cost_owner(prefix, owner_name);
         out.extend(
             methods
                 .iter()
+                .filter(|method| {
+                    trait_name.rsplit('.').next() == Some(crate::Syntax::TRAIT_CLOSE)
+                        || !method.compiler_generated
+                })
                 .filter_map(|method| index.named(module, Some(&owner), &method.name)),
         );
     }
@@ -11471,23 +11481,23 @@ fn collect_core_close_callables(
         match item {
             Item::Struct(definition) => {
                 for implementation in &definition.trait_impls {
-                    push_close(&implementation.trait_name, &definition.name, prefix, &implementation.methods, module, index, out);
+                    push_implicit(&implementation.trait_name, &definition.name, prefix, &implementation.methods, module, index, out);
                 }
             }
             Item::Enum(definition) => {
                 for implementation in &definition.trait_impls {
-                    push_close(&implementation.trait_name, &definition.name, prefix, &implementation.methods, module, index, out);
+                    push_implicit(&implementation.trait_name, &definition.name, prefix, &implementation.methods, module, index, out);
                 }
             }
             Item::Impl(implementation) => {
                 if let Some(trait_name) = &implementation.trait_name {
-                    push_close(trait_name, &implementation.type_name, prefix, &implementation.methods, module, index, out);
+                    push_implicit(trait_name, &implementation.type_name, prefix, &implementation.methods, module, index, out);
                 }
             }
             Item::CodeModule(code_module) => {
                 if let Some(body) = &code_module.body {
                     let nested = scoped_cost_owner(prefix, &code_module.name);
-                    collect_core_close_callables(body, module, Some(&nested), index, out);
+                    collect_core_implicit_trait_callables(body, module, Some(&nested), index, out);
                 }
             }
             _ => {}
@@ -11592,7 +11602,7 @@ fn reachable_core_source_callables(
     // any explicit method is live, its siblings are required to keep that impl
     // complete; an otherwise unreachable implementation stays pruned.
     let mut trait_impl_groups = Vec::new();
-    let mut close_callables = Vec::new();
+    let mut implicit_trait_callables = Vec::new();
     for (module, data) in bundle.modules.iter().enumerate() {
         if core_modules.contains(&module) {
             collect_trait_impl_callable_groups(
@@ -11602,10 +11612,10 @@ fn reachable_core_source_callables(
                 &lookup,
                 &mut trait_impl_groups,
             );
-            collect_core_close_callables(&data.items, module, None, &lookup, &mut close_callables);
+            collect_core_implicit_trait_callables(&data.items, module, None, &lookup, &mut implicit_trait_callables);
         }
     }
-    for index in close_callables {
+    for index in implicit_trait_callables {
         rooted[index].root = true;
     }
     let callees = cost_call_graph(bundle, &rooted, &lookup);

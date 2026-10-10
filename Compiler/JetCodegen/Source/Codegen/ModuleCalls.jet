@@ -27,10 +27,10 @@ fn jet_codegen_lower_module_call(builder: &JetCodegenBuilder, program: JetCodege
     if function.generic_params.len() == 0 || function.generic_params.len() == type_args.len() {
         returned := jet_codegen_executable_function_return_type(function, type_args)
         plain := if target_return == {
-            None -> jet_codegen_is_plain_call_return(returned, expression.ty)
+            None -> jet_codegen_is_plain_call_return(builder, program, returned, expression.ty)
             Val(target_type) -> if {
                 jet_codegen_is_plain_return(returned) -> !jet_codegen_is_plain_return(target_type)
-                else -> jet_codegen_is_plain_call_return(returned, target_type)
+                else -> jet_codegen_is_plain_call_return(builder, program, returned, target_type)
             }
         }
         if plain -> plain_return = Val(returned)

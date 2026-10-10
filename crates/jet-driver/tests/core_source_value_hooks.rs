@@ -115,3 +115,78 @@ fn run() {
         std::fs::remove_dir_all(directory).unwrap();
     });
 }
+
+#[test]
+fn checked_core_fraction_display_reaches_implicit_trait_target() {
+    jet_driver::run_compiler_work(|| {
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("core-value-hook-proof"))
+            .join(format!("jet-core-fraction-display-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let entry = directory.join("run.jet");
+        std::fs::write(&entry, r#"
+use core.math.[gcd]
+fn exact_quotient(top: Int, bottom: Int) -> Fraction Never! { top / bottom }
+fn format_bounds(span: Int) -> String Never! { "{0 - span / 2} to {span / 2 - 1}" }
+fn run() Never! {
+    assert_eq(gcd(2, 4), 2)
+    quotient :: exact_quotient(1, 3)
+    assert_eq("{quotient}", "1/3")
+    eighth :: exact_quotient(1, 8)
+    assert_eq("{eighth}", "0.125")
+    assert_eq(format_bounds(8), "-4 to 3")
+}
+"#).unwrap();
+        let mut bundle = Loader::load_entry(entry.to_str().unwrap())
+            .expect("source-owned Fraction must load with its checked Display implementation");
+        let (diagnostics, _, nominals) =
+            Sema::check_bundle_with_effect_facts(&mut bundle, Sema::CompileMode::Check);
+        assert!(diagnostics.iter().all(|diagnostic| {
+            diagnostic.severity != Diagnostics::Severity::Error
+        }), "Fraction formatting must pass the real checker: {diagnostics:?}");
+        let request = MirArtifactRequest::new(
+            MirArtifactTarget::RustAot,
+            MirArtifactKind::NativeExecutable,
+            MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = Codegen::TIR::lower_checked_mir_program_for(
+            &bundle, &nominals, request,
+        ).expect("implicit Fraction Display must name a checked MIR target");
+        mir.validate().expect("Fraction formatting MIR is valid");
+        assert!(mir.functions.iter().any(|function| {
+            matches!(&function.form,
+                jet_foundation::MIR::MirFunctionForm::TraitMethod { owner, trait_ref, .. }
+                    if trait_ref.name == "Display"
+                        && owner.nominal_name().is_some_and(|name| {
+                            name.ends_with("::Core/math/math.jet::Fraction")
+                        }))
+        }), "Core Fraction Display must remain materialized");
+        let rust = Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let source = directory.join("fraction_display.rs");
+        let executable = directory.join(format!("fraction_display{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=fraction_display", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("Fraction Display proof requires rustc");
+        assert!(compiled.status.success(),
+            "source-owned Fraction formatting must compile:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("Fraction Display proof must execute");
+        assert!(executed.status.success(),
+            "fraction and compiler-range formatting must preserve exact text:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}

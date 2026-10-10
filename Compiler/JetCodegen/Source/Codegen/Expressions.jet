@@ -929,7 +929,7 @@ fn jet_codegen_lower_precise_builtin(builder: &JetCodegenBuilder, program: JetCo
             }
             returned :: jet_codegen_executable_function_return_type(target, [Type]{})
             value :: jet_codegen_emit_value(&builder, program, span, returned, MIROperation.Call{callee: MIRCallee.User{function: jet_codegen_function_id(target)}, args: call_args, type_args: [MIRType]{}})
-            if jet_codegen_is_plain_call_return(returned, result_type) {
+            if jet_codegen_is_plain_call_return(builder, program, returned, result_type) {
                 return jet_codegen_reconcile_plain_call_return(&builder, program, expression, target.key, value, returned)
             }
             return value
@@ -2214,7 +2214,7 @@ fn jet_codegen_lower_math_builtin(builder: &JetCodegenBuilder, program: JetCodeg
                 &call_args.push(jet_codegen_numeric_call_arg(value, argument.span))
             }
             value :: jet_codegen_emit_value(&builder, program, expression.span, returned, MIROperation.Call{callee: MIRCallee.Associated{function: jet_codegen_function_id(source), owner: owner}, args: call_args, type_args: [MIRType]{}})
-            if jet_codegen_is_plain_call_return(returned, expression.ty) -> return jet_codegen_reconcile_plain_call_return(&builder, program, expression, source.key, value, returned)
+            if jet_codegen_is_plain_call_return(builder, program, returned, expression.ty) -> return jet_codegen_reconcile_plain_call_return(&builder, program, expression, source.key, value, returned)
             return value
         }
     }
@@ -2721,7 +2721,7 @@ fn jet_codegen_is_plain_return(ty: Type) -> Bool Never! {
 // pairs with any `Result` carrier. An `Option` return is plain only as the
 // exact success of a `T? Never!` carrier, since a callee that keeps its `T?`
 // carrier returns that `Option` itself.
-fn jet_codegen_is_plain_call_return(returned: Type, checked: Type) -> Bool Never! {
+fn jet_codegen_is_plain_call_return(builder: JetCodegenBuilder, program: JetCodegenProgram, returned: Type, checked: Type) -> Bool Never! {
     if jet_codegen_is_plain_return(returned) {
         return if jet_codegen_unwrap_pattern_tags(checked) == {
             .Result(_, _) -> true
@@ -2733,7 +2733,10 @@ fn jet_codegen_is_plain_call_return(returned: Type, checked: Type) -> Bool Never
         else -> return false
     }
     success :: jet_codegen_never_carrier_success(checked) ?? return false
-    jet_codegen_unwrap_pattern_tags(success) == jet_codegen_unwrap_pattern_tags(returned)
+    if jet_codegen_unwrap_pattern_tags(success) == jet_codegen_unwrap_pattern_tags(returned) -> return true
+    qualified_success :: jet_codegen_qualify_type(jet_codegen_unwrap_pattern_tags(success), program.modules, builder.function.module_identity, builder.generic_type_names)
+    qualified_returned :: jet_codegen_qualify_type(jet_codegen_unwrap_pattern_tags(returned), program.modules, builder.function.module_identity, builder.generic_type_names)
+    qualified_success == qualified_returned
 }
 
 fn jet_codegen_plain_try_identity(callee_key: String, span: Span) -> String Never! {
@@ -2768,7 +2771,7 @@ fn jet_codegen_plain_try_call_root(inner: TExpr) -> String? Never! {
 // the source still consumes the `T Never!` carrier (a `??`, a match, a
 // carrier-typed slot).
 fn jet_codegen_reconcile_plain_call_return(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, callee_key: String, value: MIRValueID, returned: Type) -> MIRValueID Never! {
-    if !jet_codegen_is_plain_call_return(returned, expression.ty) -> return value.copy()
+    if !jet_codegen_is_plain_call_return(builder, program, returned, expression.ty) -> return value.copy()
     if builder.plain_try_operand == .Val(operand) && operand == jet_codegen_plain_try_identity(callee_key, expression.span) {
         builder.plain_try_operand = None
         builder.plain_try_taken = true
@@ -2783,7 +2786,7 @@ fn jet_codegen_reconcile_plain_call_return(builder: &JetCodegenBuilder, program:
 // `T? Never!` function hands back its `T?` the same way.
 fn jet_codegen_lower_return_value(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: TExpr) -> MIRValueID {
     expected := builder.function.ret ?? Type.Named{name: "Unit"}
-    if builder.contract_scopes.len() > 0 || builder.function.ret == None || !jet_codegen_is_plain_call_return(expected, value.ty) -> return jet_codegen_lower_expr(&builder, program, value)
+    if builder.contract_scopes.len() > 0 || builder.function.ret == None || !jet_codegen_is_plain_call_return(builder, program, expected, value.ty) -> return jet_codegen_lower_expr(&builder, program, value)
     if value.kind == {
         .Ok(inner) -> {
             lowered := jet_codegen_lower_expr(&builder, program, inner)
@@ -2816,7 +2819,7 @@ fn jet_codegen_plain_named_function_value(builder: &JetCodegenBuilder, program: 
     carrier :: slot_return ?? return None
     function :: jet_codegen_find_function(program.function_index, name) ?? return None
     returned :: jet_codegen_plain_return(function) ?? return None
-    if !jet_codegen_is_plain_call_return(returned, carrier) -> return None
+    if !jet_codegen_is_plain_call_return(builder, program, returned, carrier) -> return None
     source_params := [String]{}
     source_symbols := [SymbolID]{}
     args := [TCallArg]{}
