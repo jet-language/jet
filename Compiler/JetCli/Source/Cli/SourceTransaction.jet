@@ -179,7 +179,7 @@ fn jet_cli_transaction_recover(project: JetCLIRootedDirectory, journal: JetCLIRo
     _ :: journal.remove("transaction.journal")
 }
 
-fn jet_cli_transaction_commit_locked(project: JetCLIRootedDirectory, journal: JetCLIRootedDirectory, changes: [JetCLISourceChange], log_name: String, log: [U8]) -[FS, Env, Time, Time.Wait]> String JetCLIReadError! {
+fn jet_cli_transaction_commit_locked(project: JetCLIRootedDirectory, journal: JetCLIRootedDirectory, changes: [JetCLISourceChange], log_name: String, log: [U8]) -[FS, Env, Exec, Time]> String JetCLIReadError! {
     jet_cli_rooted_validate_name(log_name)
     if !log_name.ends_with(".log.json") -> return Err(jet_cli_read_error("codemod replay log name must end in .log.json"))
     if changes.len() == 0 -> return Err(jet_cli_read_error("codemod has no file edits"))
@@ -233,7 +233,7 @@ fn jet_cli_transaction_commit_locked(project: JetCLIRootedDirectory, journal: Je
     Ok(log_path)
 }
 
-fn jet_cli_commit_source_changes(root: String, changes: [JetCLISourceChange], log_name: String, log: [U8]) -[FS, Env, Time, Time.Wait]> String JetCLIReadError! {
+fn jet_cli_commit_source_changes(root: String, changes: [JetCLISourceChange], log_name: String, log: [U8]) -[FS, Env, Exec, Time]> String JetCLIReadError! {
     project :: JetCLIRootedDirectory.open(root, [String]{}, false)
     journal :: project.descendant([String]{".jet", "codemods"}, true)
     lock :: journal.transaction_lock()
@@ -329,7 +329,7 @@ fn jet_cli_fix_name(stem: String) -> String Never! {
     sanitized
 }
 
-fn jet_cli_commit_fix(file: String, before: [U8], staged: [U8], semantic_ops: [JetCLISemOp]?) -[FS, Env, Time, Time.Wait]> String JetCLIReadError! {
+fn jet_cli_commit_fix(file: String, before: [U8], staged: [U8], semantic_ops: [JetCLISemOp]?) -[FS, Env, Exec, Time]> String JetCLIReadError! {
     path :: cli_files.realpath(file) ?? return Err(jet_cli_read_error("could not canonicalize fix target `{file}`: {jet_cli_io_error_text(err)}"))
     parent :: jet_cli_parent(path) ?? return Err(jet_cli_read_error("fix target has no parent directory"))
     cache := WorkspaceDeclarationCache.new()
@@ -383,7 +383,7 @@ fn jet_cli_transaction_known_fields(value: JetCLIStatusValue, allowed: [String],
     Err(jet_cli_read_error("{label} must be an object"))
 }
 
-fn jet_cli_undo_source_changes(root: String, log_name: String) -[FS, Env, Time, Time.Wait]> String JetCLIReadError! {
+fn jet_cli_undo_source_changes(root: String, log_name: String) -[FS, Env, Exec, Time]> String JetCLIReadError! {
     jet_cli_rooted_validate_name(log_name)
     if !log_name.ends_with(".log.json") -> return Err(jet_cli_read_error("replay log name must end in .log.json"))
     project :: JetCLIRootedDirectory.open(root, [String]{}, false)

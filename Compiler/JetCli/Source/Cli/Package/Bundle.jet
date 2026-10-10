@@ -78,12 +78,14 @@ struct JetCLIBundleStoreRequest {
 // symlink; preserve inspected/read diagnostics. Materialize requires checked
 // Build.native_sandboxed authority and target-native output publication.
 // Native materializer policy (CmdPackage.rs:415-1204) is a separate packet.
+// These ceilings match the native host's actual operations; read-only test
+// hosts may implement a narrower row.
 trait JetCLIBundleHost {
-    fn current_dir(&self) -> bundle_paths.Path JetCLIBundleError!
-    fn metadata_no_follow(&self, path: bundle_paths.Path) -> JetCLIBundleMetadata JetCLIBundleError!
-    fn read_bytes(&self, path: bundle_paths.Path) -> [U8] JetCLIBundleError!
-    fn materialize(&self, plan: &BundlePlan, output: bundle_paths.Path) -> JetCLIBundleMaterializedFacts JetCLIBundleError!
-    fn record(&self, request: JetCLIBundleStoreRequest) -> String JetCLIBundleError!
+    fn current_dir(&self) -[FS, Env]> bundle_paths.Path JetCLIBundleError!
+    fn metadata_no_follow(&self, path: bundle_paths.Path) -[FS]> JetCLIBundleMetadata JetCLIBundleError!
+    fn read_bytes(&self, path: bundle_paths.Path) -[FS]> [U8] JetCLIBundleError!
+    fn materialize(&self, plan: &BundlePlan, output: bundle_paths.Path) -[FS, Env, Exec, Time]> JetCLIBundleMaterializedFacts JetCLIBundleError!
+    fn record(&self, request: JetCLIBundleStoreRequest) -[FS, Env]> String JetCLIBundleError!
 }
 
 // Rust parse_package_args::value (CmdPackage.rs:262-275).
