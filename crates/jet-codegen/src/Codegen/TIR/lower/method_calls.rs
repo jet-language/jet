@@ -9840,47 +9840,59 @@ fn lower_method_call_impl(
     // D-NUMWIDEN-CROSS1=E / card #1662: sema owns the checked-crossing
     // decision and records it in `Expr::MethodCall::checked_widen` (replaces
     // the retired `\0numeric.checked_widen` fake-`recv_type` marker).
-    // Lowering only records adapter facts.
+    // Lowering only selects the conversion the source/target pair names,
+    // exactly as the Jet checker's `sema_expr_numeric_conversion`.
     if checked_widen && args.len() == 1 {
         return in_own_frame(|| {
             let source = lower_expr(&args[0].expr, cx, env);
-            let source_signed = !matches!(source.ty, Type::IntN { signed: false, .. });
             let target = resolved_ret.cloned().unwrap_or(Type::Float);
-            if matches!(&target, Type::IntN { .. }) && matches!(&source.ty, Type::Int) {
-                let conversion = resolve_numeric_conversion_op(&target.name(), "Int")
-                    .expect("sema admitted a fixed-width Int conversion");
-                let TNumericOp::TryFrom {
-                    host_kind,
-                    dst_rust,
-                    dst_spelling,
-                } = conversion
-                else {
-                    unreachable!("fixed-width Int conversion must be checked");
-                };
-                return TExpr {
-                    ty: target,
-                    kind: TExprKind::NumericMethod {
-                        recv: Box::new(source),
-                        op: TNumericOp::CheckedIntToFixed {
-                            host_kind,
-                            dst_rust,
-                            dst_spelling,
-                            line: cx.src_line_col(method_span.start).0 as u32,
-                        },
-                    },
-                };
-            }
-            return TExpr {
-                ty: target.clone(),
-                kind: TExprKind::NumericMethod {
-                    recv: Box::new(source),
-                    op: TNumericOp::CheckedIntToFloat {
-                        source_signed,
+            let line = cx.src_line_col(method_span.start).0 as u32;
+            let op = match (source.ty.without_user_tags(), target.without_user_tags()) {
+                (Type::Int | Type::IntN { .. }, Type::Float | Type::Float32) => {
+                    TNumericOp::CheckedIntToFloat {
+                        source_signed: !matches!(source.ty, Type::IntN { signed: false, .. }),
                         target_f32: target == Type::Float32,
-                        line: cx.src_line_col(method_span.start).0 as u32,
-                    },
+                        line,
+                    }
+                }
+                (Type::Int, Type::IntN { .. }) => {
+                    let conversion = resolve_numeric_conversion_op(&target.name(), "Int")
+                        .expect("sema admitted a fixed-width Int conversion");
+                    let TNumericOp::TryFrom {
+                        host_kind,
+                        dst_rust,
+                        dst_spelling,
+                    } = conversion
+                    else {
+                        unreachable!("fixed-width Int conversion must be checked");
+                    };
+                    TNumericOp::CheckedIntToFixed {
+                        host_kind,
+                        dst_rust,
+                        dst_spelling,
+                        line,
+                    }
+                }
+                // Checked F64 -> F32 narrowing: an out-of-range value stops
+                // instead of becoming infinity.
+                (Type::Float, Type::Float32) => TNumericOp::FloatNarrow {
+                    dst_spelling: target.name(),
+                },
+                // A fixed-width carrier converted to another fixed width or to
+                // exact `Int` keeps the carrier cast every tier shares.
+                _ => TNumericOp::CastAs {
+                    dst_rust: crate::Codegen::TIR::numeric_rust_type_tir(&target.name())
+                        .map(|(rust, _)| rust.to_string())
+                        .unwrap_or_default(),
                 },
             };
+            TExpr {
+                ty: target,
+                kind: TExprKind::NumericMethod {
+                    recv: Box::new(source),
+                    op,
+                },
+            }
         });
     }
 

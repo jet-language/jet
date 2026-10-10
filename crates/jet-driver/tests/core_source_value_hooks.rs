@@ -417,3 +417,130 @@ fn run() -[FS]> {
         std::fs::remove_dir_all(directory).unwrap();
     });
 }
+
+/// Check, lower, emit, rustc-compile and run one regression program through
+/// the hosted Rust seed path (the r16 collect-all emission sweep).
+fn hosted_seed_program_runs(label: &str, package: Option<&str>, program: &str) {
+    jet_driver::run_compiler_work(|| {
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("core-value-hook-proof"))
+            .join(format!("jet-{label}-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        if let Some(package) = package {
+            std::fs::write(directory.join("package.jet"), package).unwrap();
+        }
+        let entry = directory.join("run.jet");
+        std::fs::write(&entry, program).unwrap();
+        let mut bundle = Loader::load_entry(entry.to_str().unwrap()).expect("regression source must load");
+        let (diagnostics, _, nominals) =
+            Sema::check_bundle_with_effect_facts(&mut bundle, Sema::CompileMode::Check);
+        let errors: Vec<_> = diagnostics.iter()
+            .filter(|diagnostic| diagnostic.severity == Diagnostics::Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "{label} must pass the checker: {errors:?}");
+        let request = MirArtifactRequest::new(
+            MirArtifactTarget::RustAot,
+            MirArtifactKind::NativeExecutable,
+            MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = Codegen::TIR::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("regression program must lower to checked MIR");
+        mir.validate().expect("regression MIR is valid");
+        let rust = Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let source = directory.join(format!("{label}.rs"));
+        let executable = directory.join(format!("{label}{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "-Awarnings"])
+            .arg(format!("--crate-name={label}"))
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("regression requires rustc");
+        assert!(compiled.status.success(), "{label} must compile:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable).current_dir(&directory)
+            .output().expect("regression must execute");
+        assert!(executed.status.success(), "{label} must run:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
+
+/// r16 root 1: an audited `#Unsafe` value tail is the callable's value, and a
+/// covered else-less nested-pattern table never falls off the function end.
+#[test]
+fn value_tails_inside_unsafe_and_covered_nested_tables_return_values() {
+    hosted_seed_program_runs("value_tails", None, r#"
+enum Prepared {
+    Checked(Int)
+    Replay(String)
+}
+fn unsafe_tail(value: Int) -> Int IOError! {
+    #Unsafe("regression: the audited region's last line is the callable value") {
+        Ok(value + 1)
+    }
+}
+fn prepared(owned: Prepared?, allowed: Bool) -> Int? {
+    if owned == {
+        .Val(.Checked(value)) -> return Val(value)
+        .Val(.Replay(_)) -> {
+            if !allowed -> return None
+            return Val(-1)
+        }
+        .None -> {
+            return None
+        }
+    }
+}
+fn run() {
+    assert_eq(unsafe_tail(41) ?? panic("tail"), 42)
+    assert_eq(prepared(Val(Prepared.Checked(7)), false), Val(7))
+    assert_eq(prepared(Val(Prepared.Replay("r")), true), Val(-1))
+    assert_eq(prepared(Val(Prepared.Replay("r")), false), None)
+    assert_eq(prepared(None, true), None)
+}
+"#);
+}
+
+/// r16 root 3: a checked scalar head converts by its source/target pair:
+/// F64 -> F32 narrows, and fixed-width -> fixed-width keeps the carrier cast.
+#[test]
+fn checked_scalar_heads_select_the_source_target_conversion() {
+    hosted_seed_program_runs("scalar_heads", None, r#"
+fn shown(value: Float, is_f32: Bool) -> String? {
+    if is_f32 -> Val("{F32{value}}") else -> Val("{value}")
+}
+fn byte(word: Int) -> U8 { U8{U64{word}.bit_and(U64{255})} }
+fn run() {
+    assert_eq(shown(1.5, true), Val("1.5"))
+    assert_eq(shown(0.25, false), Val("0.25"))
+    assert_eq(Int{byte(513)}, 1)
+}
+"#);
+}
+
+/// r16 root 4: `EnvError` is a cataloged Core enum leaf, so its checked MIR
+/// owner row exists wherever `core.sys` names it (`entry_names`).
+#[test]
+fn env_error_has_a_checked_core_enum_owner_row() {
+    hosted_seed_program_runs(
+        "env_error_owner",
+        Some("name: \"env_error_owner\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Env] } }\n"),
+        r#"
+use core.sys as sys
+fn run() -[Env]> {
+    names :: sys.vars() ?? panic("environment snapshot")
+    assert(names.len() >= 0)
+}
+"#,
+    );
+}

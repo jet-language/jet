@@ -55,7 +55,7 @@ use std::rc::Rc;
 pub(crate) fn lower_value_block(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
     if matches!(
         stmts.last(),
-        Some(Stmt::Switch { .. } | Stmt::ComptimeSwitch { .. })
+        Some(Stmt::Switch { .. } | Stmt::ComptimeSwitch { .. } | Stmt::Unsafe { .. })
     ) {
         let mut rewritten = stmts.to_vec();
         rewrite_function_value_tails(&mut rewritten);
@@ -100,6 +100,9 @@ fn rewrite_function_value_tails(body: &mut Vec<Stmt>) {
                 rewrite_function_value_tails(else_body);
             }
         }
+        // Sema checks an audited `#Unsafe` tail as a value block
+        // (`check_value_tail`), so its own final line is the callable's value.
+        Some(Stmt::Unsafe { body, .. }) => rewrite_function_value_tails(body),
         _ => {}
     }
 }
@@ -1321,8 +1324,11 @@ pub(crate) fn lower_switch<'a>(
         {
             return lower_readiness_switch(arms, else_body, cx, env);
         }
-        return lower_guard_switch(arms, else_body, env, None);
+        return lower_guard_switch(arms, else_body, env, None, 0);
     }
+    // Sema proves an else-less subject table covers its subject (E0307), so
+    // the guard chain's miss path is the checked exhaustive dead end.
+    let covered_line = cx.src_line_col(span.start).0;
     // S31: nested payload patterns test and bind through the short-circuit
     // TIfCond chain; MIR lowers each nested test structurally on every tier.
     // A non-identifier subject is evaluated once into a compiler local that
@@ -1332,7 +1338,7 @@ pub(crate) fn lower_switch<'a>(
         .any(|arm| crate::Codegen::TIR::arm_has_nested_pattern(&arm.cond))
     {
         if matches!(subject, Expr::Ident(..)) {
-            return lower_guard_switch(arms, else_body, env, Some((subject, subject.clone())));
+            return lower_guard_switch(arms, else_body, env, Some((subject, subject.clone())), covered_line);
         }
         let name = jet_format!("{jet_prefix}switch_subject_{}", subject.span().start);
         let carrier = arms.iter().any(|arm| match &arm.cond {
@@ -1346,7 +1352,7 @@ pub(crate) fn lower_switch<'a>(
         let ty = init.ty.clone();
         env.bind(&name, TLocal::generated(&name), Some(ty.clone()));
         let local_subject = Expr::Ident(name.clone(), subject.span());
-        return lower_guard_switch(arms, else_body, env, Some((subject, local_subject))).map_stmt(
+        return lower_guard_switch(arms, else_body, env, Some((subject, local_subject)), covered_line).map_stmt(
             move |stmt| {
                 let TStmt::If {
                     cond,
@@ -1406,7 +1412,7 @@ pub(crate) fn lower_switch<'a>(
             })
         })
     {
-        return lower_guard_switch(arms, else_body, env, Some((subject, subject.clone())));
+        return lower_guard_switch(arms, else_body, env, Some((subject, subject.clone())), covered_line);
     }
     // Shape B: all arm-head ranges + else → if/else chain (`emit_mixed_switch`).
     if else_body.is_some()
@@ -1436,7 +1442,7 @@ pub(crate) fn lower_switch<'a>(
                 || arm_guarded_variant_pattern(cx, &a.cond, subject).is_some()
         })
     {
-        return lower_guard_switch(arms, else_body, env, Some((subject, subject.clone())));
+        return lower_guard_switch(arms, else_body, env, Some((subject, subject.clone())), covered_line);
     }
     let class = classify_branch(subject, arms, cx);
     // Shape D (c109 Phase 15): all arms are plain comparison/Bool conds — or D-IF3 range
@@ -1843,6 +1849,8 @@ fn lower_guard_switch<'a>(
     // The switch subject as written and the expression each arm's head
     // pattern test reads instead.
     subject_override: Option<(&'a Expr, Expr)>,
+    // Source line of an else-less subject table's covered dead end.
+    covered_line: usize,
 ) -> LowerStmtPlan<'a> {
     // The chain is wrapped from the last arm back toward the first, so the deferred
     // bodies run in reverse source order. Prepare each condition immediately before
@@ -1882,10 +1890,19 @@ fn lower_guard_switch<'a>(
         arm_states.push(state);
     }
     let has_else = else_body.is_some();
+    let covered = !has_else && subject_override.is_some();
     deferred_stmt(bodies, move |lowered| {
         let mut lowered = lowered.into_iter();
         let mut chain = if has_else {
             lowered.next().expect("guard else body was deferred")
+        } else if covered {
+            // Rust `lower_enum_match` / Jet `sema_stmt_check_switch`: the miss
+            // path of a covered else-less table is unreachable, so it never
+            // falls through to the code after the table.
+            vec![TStmt::ExprStmt(TExpr {
+                ty: Type::Named("Unit".to_string()),
+                kind: TExprKind::Unreachable { line: covered_line },
+            })]
         } else {
             Vec::new()
         };

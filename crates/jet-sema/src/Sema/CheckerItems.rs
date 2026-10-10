@@ -2767,7 +2767,7 @@ impl<'a> Checker<'a> {
             return true;
         }
         // Native Core dot-literal enums do not have a source declaration.
-        if matches!(enum_name, "ProcessStreamMode" | "ProcessSignal" | "EnvError" | Syntax::TYPE_TASK_FAILURE) {
+        if matches!(enum_name, "ProcessStreamMode" | "ProcessSignal" | Syntax::TYPE_TASK_FAILURE) {
             return true;
         }
         // D-TEXTWIDTH1=B: `TextWidth`'s two field enums.
@@ -2915,9 +2915,6 @@ impl<'a> Checker<'a> {
         }
         if enum_name == Syntax::TYPE_TERMINAL_MODE {
             return Some(core_terminal_mode_variants());
-        }
-        if enum_name == "EnvError" {
-            return Some(core_env_error_variants());
         }
         if let Some(v) = core_delivery_state_variants(enum_name) {
             return Some(v);

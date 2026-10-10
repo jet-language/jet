@@ -32471,6 +32471,21 @@ impl<'a> RustEmitter<'a> {
             .map(|(symbol, _)| format!("{}{symbol}", self.config.root_prefix))
             .unwrap_or(symbol);
         let emitted = format!("{symbol}({})", args.join(", "));
+        // A checked scalar head (`F32{value}`) narrows in value position:
+        // the Prelude kernel reports an out-of-range F64 as an error, which
+        // stops at the source line like every other arithmetic stop.
+        let emitted = if member == "float_narrow"
+            && matches!(fallibility, MirCallFallibility::Infallible)
+        {
+            format!(
+                "({emitted}).unwrap_or_else(|error| {}jet_arithmetic_stop({:?}, {}u32, error))",
+                self.config.root_prefix,
+                self.source_file_path(location.file),
+                location.line,
+            )
+        } else {
+            emitted
+        };
         // An exact-Int adapter already returns the owned exact Int.
         self.numeric_conversion_result(&emitted, target, fallibility, adapter.is_some())
     }

@@ -818,7 +818,7 @@ fn numeric_host_kind(signed: bool, bits: u8) -> Option<i64> {
     })
 }
 
-fn numeric_rust_type_tir(name: &str) -> Option<(&'static str, Option<(bool, u8)>)> {
+pub(crate) fn numeric_rust_type_tir(name: &str) -> Option<(&'static str, Option<(bool, u8)>)> {
     Some(match name {
         "I8" => ("i8", Some((true, 8))),
         "I16" => ("i16", Some((true, 16))),

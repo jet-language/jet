@@ -635,6 +635,15 @@ subject is a structural union. A union's shape identity is not a nominal
 definition ID. Only an actual nominal application, possibly under a tag,
 can refine that owner to its checked instance identity.
 
+A callable's value tail may sit inside an audited `#Unsafe` region; lowering
+returns that region's last line exactly as it returns a table arm's. The miss
+path of a covered else-less pattern table is an unreachable dead end on every
+producer, never a fall-through to the callable's end. A checked scalar head
+(`F32{x}`, `U8{y}`) lowers to the conversion its source and target name:
+integer-to-float widening, checked `Int`-to-fixed, `F64`-to-`F32` narrowing,
+or the fixed-width carrier cast. Native Core enums such as `EnvError` are
+cataloged enum leaves, so their checked MIR owner rows always exist.
+
 Only `JET_DEBUG_LOWER_ALL=1` enables the bootstrap Rust emission census.
 Each selected type, trait, implementation, top-level function, constant,
 foreign item, callback/export provider, C-ABI physical type or signature
