@@ -2525,7 +2525,7 @@ fn sema_registration_serde_union_members(items: [Item], union_ty: Type, members:
             &diagnostics.push(sema_error("E2411", span, "union `{union_shown}` can't be decoded — `{member_label}` has no compiler-known wire shape", "`{member_label}` uses a custom or imported decoder; anonymous unions need each member's outer wire shape before codegen", "use a compiler-derived codec, a configured tagged enum, or a #CodableAsBase distinct type"))
             next
         }
-        loop shape in sema_registration_serde_sorted_shapes(resolved ?? [SerdeWireShape]{}) {
+        loop shape in sema_registration_serde_sorted_shapes(resolved) {
             previous := -1
             loop (index, known) in seen_shapes {
                 if known == shape {
