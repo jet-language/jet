@@ -5827,3 +5827,53 @@ fn run() Never! {
         std::fs::remove_dir_all(directory).unwrap();
     });
 }
+
+#[test]
+fn nested_pure_closure_never_carriers_compile_and_run() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let source_text = include_str!("../../../../../Examples/features/basics/closure_capture_snapshot.jet");
+        let (bundle, nominals) = checked_bundle(source_text);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("nested pure closures lower to MIR");
+        mir.validate().expect("nested pure closure MIR is valid");
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("nested-pure-closure-proof"))
+            .join(format!("never-carriers-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("nested_pure_closure.rs");
+        let executable = directory.join(format!("nested_pure_closure{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, &rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=nested_pure_closure", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("nested pure closure proof requires rustc");
+        assert!(compiled.status.success(),
+            "nested pure closure carriers must compile:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("nested pure closure proof must run");
+        assert!(executed.status.success(),
+            "nested pure closure execution must succeed:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        assert_eq!(String::from_utf8_lossy(&executed.stdout),
+            "11\n12\n10\n11\n22\n9\n",
+            "mutable snapshots, frozen captures and nested success values remain distinct");
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}

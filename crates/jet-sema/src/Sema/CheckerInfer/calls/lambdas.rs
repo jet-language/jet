@@ -1090,7 +1090,9 @@ impl<'a> Checker<'a> {
         // is called: no propagated failure means the rail is Never.
         let ret_ty = if !expected_callable && !inline_loop && !lam.meta.fallible_propagation {
             ret_ty.map(|ret| {
-                if ret.is_fallible() || ret.is_never() {
+                if matches!(ret.without_user_tags(), Type::Result { .. } | Type::Option(_))
+                    || ret.is_never()
+                {
                     ret
                 } else {
                     Type::Result {

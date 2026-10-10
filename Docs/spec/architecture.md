@@ -221,6 +221,9 @@ An empty failure set does not by itself erase a checked value carrier.
 automatic propagation consumes that carrier to produce `T`, including inside
 prepared enum payloads. Lowering may omit propagation only when the operand
 is already the plain success value, not merely when it cannot fail.
+Concrete closure inference preserves an existing `Result` or `Option` by its
+shape, not by whether its error set is inhabited. A nested pure closure's
+`Result<T, Never>` must not acquire a second `Never` rail around that carrier.
 
 Bootstrap Rust's final slot-name compaction covers native `Int` shadow
 declarations and their uses together. Shadow storage stays outside the ordinary
