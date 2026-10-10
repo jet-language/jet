@@ -448,7 +448,8 @@ Semantic checking APIs thread `SemaProgramTables` explicitly alongside
 `SemaScopeEnvironment`; callers pass the tables rather than shifting mutable
 scope arguments into a missing table slot. An owned pass environment transfers
 its registration graph and checked-type indexes into the one program-table
-owner before checking; its moved fields are reinitialized before further use.
+owner before checking; both comptime staging and finalization reinitialize every
+moved field before handing the complete environment owner to shared state.
 Module retargeting reads that graph in place and replaces only module-local
 scope facts. It neither extracts fields from borrowed owners nor copies the
 graph or rebuilds the checked-type indexes. Staging and speculative landed

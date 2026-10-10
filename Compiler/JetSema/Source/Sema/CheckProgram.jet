@@ -5189,6 +5189,12 @@ fn sema_collect_comptime_declarations(graph: ^SemaRegistrationGraph, package_pol
         checked_type_name_rows: ^initial_environment.checked_type_name_rows,
         boxed_edges: ^initial_environment.boxed_edges,
     }
+    initial_environment.registration_graph = None
+    initial_environment.checked_types = [TTypeDef]{}
+    initial_environment.checked_type_rows = [String:Int]{}
+    initial_environment.checked_type_name_slots = [String:Int]{}
+    initial_environment.checked_type_name_rows = [[Int]]{}
+    initial_environment.boxed_edges = [String:[String]]{}
     module_state :: shared SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}
     sema_check_shared_fill(module_state, ^initial_environment, ^initial_program, ^initial_memory_plan)
     module_index := 0

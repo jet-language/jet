@@ -6250,6 +6250,106 @@ fn run() {
 }
 
 #[test]
+fn comptime_program_handoff_reinitializes_moved_environment_fields() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let checker = include_str!("../../../../../Compiler/JetSema/Source/Sema/CheckProgram.jet");
+        let stage = &checker[checker.find("fn sema_collect_comptime_declarations(").unwrap()..];
+        let start = stage.find("    initial_program := SemaProgramTables{").unwrap();
+        let end = stage[start..].find("    module_state ::").unwrap() + start;
+        // Execute the actual extraction/reset code, not an independently fixed
+        // fixture: losing any reset in the compiler must fail this native proof.
+        let transfer = &stage[start..end];
+        let prefix = r#"
+struct SemaRegistrationGraph { name: String }
+struct TTypeDef { name: String }
+struct SemaScopeEnvironment {
+    registration_graph: SemaRegistrationGraph?
+    checked_types: [TTypeDef]
+    checked_type_rows: [String:Int]
+    checked_type_name_slots: [String:Int]
+    checked_type_name_rows: [[Int]]
+    boxed_edges: [String:[String]]
+    publication: String
+}
+struct SemaProgramTables {
+    registration_graph: SemaRegistrationGraph?
+    checked_types: [TTypeDef]
+    checked_type_rows: [String:Int]
+    checked_type_name_slots: [String:Int]
+    checked_type_name_rows: [[Int]]
+    boxed_edges: [String:[String]]
+}
+fn handoff(environment: ^SemaScopeEnvironment, program: ^SemaProgramTables) Never! {
+    if environment.registration_graph == .Val(_) { panic("environment retained the graph") }
+    assert(environment.checked_types.len() == 0)
+    assert(environment.checked_type_rows.len() == 0)
+    assert(environment.checked_type_name_slots.len() == 0)
+    assert(environment.checked_type_name_rows.len() == 0)
+    assert(environment.boxed_edges.len() == 0)
+    assert(environment.publication == "publication")
+    if program.registration_graph == .Val(graph) {
+        assert(graph.name == "registered")
+    } else { panic("program lost the graph") }
+    assert(program.checked_types[0].name == "Checked")
+    assert(program.checked_type_rows.get("Checked") == Val(3))
+    assert(program.checked_type_name_slots.get("Checked") == Val(4))
+    assert(program.checked_type_name_rows[0][0] == 5)
+    assert(program.boxed_edges["Checked"][0] == "Edge")
+}
+fn run() Never! {
+    initial_environment := SemaScopeEnvironment{
+        registration_graph: Val(SemaRegistrationGraph{name: "registered"}),
+        checked_types: [TTypeDef]{TTypeDef{name: "Checked"}},
+        checked_type_rows: [String:Int]{"Checked": 3},
+        checked_type_name_slots: [String:Int]{"Checked": 4},
+        checked_type_name_rows: [[Int]]{[Int]{5}},
+        boxed_edges: [String:[String]]{"Checked": [String]{"Edge"}},
+        publication: "publication",
+    }
+"#;
+        let source_text = format!("{prefix}\n{transfer}\n    handoff(^initial_environment, ^initial_program)\n}}\n");
+        let (bundle, nominals) = checked_bundle(&source_text);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("complete comptime owners must pass global MIR optimization");
+        mir.validate().expect("comptime table handoff MIR must validate");
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("comptime-table-handoff-proof"))
+            .join(format!("checked-owners-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("comptime_table_handoff.rs");
+        let executable = directory.join(format!("comptime_table_handoff{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, &rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=comptime_table_handoff", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("comptime owner handoff proof requires rustc");
+        assert!(compiled.status.success(), "comptime owners must compile after field reinitialization:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("comptime owner handoff proof must run");
+        assert!(executed.status.success(), "the moved tables and retained publication must survive handoff:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
+
+#[test]
 fn global_cli_registry_constants_optimize_once() {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let source = format!("{}\nfn run() {{ print(JET_CLI_COMMANDS.len()) }}\n", include_str!(
