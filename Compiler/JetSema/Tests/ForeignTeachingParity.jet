@@ -8,6 +8,7 @@ fn foreign_teaching_expect(source: String, code: String, spelling: String) {
     loop diagnostic in checked.diagnostics {
         if diagnostic.severity != DIAGNOSTIC_ERROR -> next
         if diagnostic.code != code -> panic("unexpected foreign teaching code: {diagnostic.code}: {diagnostic.what}")
+        if code == "E0040" && diagnostic.fix != "write `task your_work()` or `task {{ … }}`" -> panic("task teaching lost its literal block braces")
         span :: diagnostic.span ?? panic("foreign teaching has no span")
         if source.slice(span.start, span.end) != spelling -> panic("foreign teaching marked the wrong source token")
         found += 1
