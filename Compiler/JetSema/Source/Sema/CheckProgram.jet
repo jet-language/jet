@@ -2735,6 +2735,16 @@ fn sema_check_registration_module_program(environment: SemaScopeEnvironment, pro
         }
         // Rust ScopeMembers.rs `check`: structural `.member { … }` checks in every mode.
         loop diagnostic in sema_scope_members_check(graph.modules[module_index].program.items) -> &module_result.diagnostics.push(diagnostic)
+        // Typestate declarations are bundle-wide; collect that view only for
+        // a module that declares a state section or a typestate marker.
+        if !sema_module_is_core_source(graph.modules[module_index].module_identity) && sema_state_items_use_typestate(graph.modules[module_index].program.items) {
+            bundle_items := [Item]{}
+            loop registered_module in graph.modules {
+                if sema_module_is_core_source(registered_module.module_identity) -> next
+                loop item in registered_module.program.items -> &bundle_items.push(item)
+            }
+            loop diagnostic in sema_state_validate_declarations(graph.modules[module_index].program.items, bundle_items) -> &module_result.diagnostics.push(diagnostic)
+        }
         item_index := 0
         loop item_index < graph.modules[module_index].program.items.len() {
             if count_work -> items_scanned += 1
