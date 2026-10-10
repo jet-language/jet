@@ -26,7 +26,6 @@ const MAX_FRONTEND_WORKERS: usize = 8;
 
 pub(crate) enum PreparedFrontendModule {
     Parsed(crate::AST::Program, Vec<Diagnostic>, crate::AST::CoreIdentifierDemand),
-    LexFailed(Vec<Diagnostic>),
     ParseFailed(Vec<Diagnostic>),
 }
 
@@ -423,16 +422,32 @@ fn package_facts_from_resolver(
     }
 }
 
+/// Lexer recovery retains tokens, so parser teaching must survive lexical errors.
+fn parse_frontend_tokens(
+    tokens: &[crate::Lexer::Token],
+    source: &str,
+    mut diagnostics: Vec<Diagnostic>,
+) -> Result<(crate::AST::Program, Vec<Diagnostic>), Vec<Diagnostic>> {
+    match Parser::parse_for_check_with_source(tokens, source) {
+        Ok((program, teaching)) if diagnostics.is_empty() => Ok((program, teaching)),
+        Ok((_, teaching)) => {
+            diagnostics.extend(teaching);
+            Err(diagnostics)
+        }
+        Err(parse_diagnostics) => {
+            diagnostics.extend(parse_diagnostics);
+            Err(diagnostics)
+        }
+    }
+}
+
 fn prepare_frontend_module(source: &str) -> PreparedFrontendModule {
     let source_for_parse = match crate::Package::mask_inline_package_source(source) {
         Ok((masked, _)) => masked,
-        Err(error) => return PreparedFrontendModule::LexFailed(vec![error.diagnostic()]),
+        Err(error) => return PreparedFrontendModule::ParseFailed(vec![error.diagnostic()]),
     };
     let (tokens, lex_diags) = Lexer::lex(&source_for_parse);
-    if !lex_diags.is_empty() {
-        return PreparedFrontendModule::LexFailed(lex_diags);
-    }
-    match Parser::parse_for_check_with_source(&tokens, &source_for_parse) {
+    match parse_frontend_tokens(&tokens, &source_for_parse, lex_diags) {
         Ok((program, teaching)) => PreparedFrontendModule::Parsed(
             program,
             teaching,
@@ -2735,7 +2750,8 @@ fn load_entry_with_overlays_mode_on_stack(
             .map_err(|error| {
                 record_loader_error(
                     &mut sink,
-                    LoaderError::at(&display, &source, vec![error.diagnostic()]),
+                    LoaderError::at(&display, &source, vec![error.diagnostic()])
+                        .with_module_origin(&display, Path::new(&display)),
                 )
             })?;
         // Embedded Core sources are vetted stdlib internals (I1): they may
@@ -2743,18 +2759,13 @@ fn load_entry_with_overlays_mode_on_stack(
         // Only this embedded-Core path lexes that way; a user file, even one
         // named `Core/...`, goes through `Lexer::lex` and still gets E0067.
         let (tokens, lex_diags) = Lexer::lex_generated(&source_for_parse);
-        if !lex_diags.is_empty() {
-            return Err(record_loader_error(
-                &mut sink,
-                LoaderError::at(&display, &source, lex_diags),
-            ));
-        }
-        let (mut program, teaching) = match Parser::parse_for_check_with_source(&tokens, &source_for_parse) {
+        let (mut program, teaching) = match parse_frontend_tokens(&tokens, &source_for_parse, lex_diags) {
             Ok(parsed) => parsed,
             Err(diags) => {
                 return Err(record_loader_error(
                     &mut sink,
-                    LoaderError::at(&display, &source, diags),
+                    LoaderError::at(&display, &source, diags)
+                        .with_module_origin(&display, Path::new(&display)),
                 ));
             }
         };
@@ -4525,9 +4536,6 @@ fn load_file_located(
         .map(|entry| entry.module);
     let (mut prog, teaching, core_identifier_demand) = match prepared {
         Some(PreparedFrontendModule::Parsed(program, teaching, demand)) => (program, teaching, demand),
-        Some(PreparedFrontendModule::LexFailed(diagnostics)) => {
-            return Err(LoaderError::at(display, &source, diagnostics));
-        }
         Some(PreparedFrontendModule::ParseFailed(diagnostics)) => {
             return Err(LoaderError::at(display, &source, diagnostics));
         }
@@ -4540,10 +4548,7 @@ fn load_file_located(
             } else {
                 Lexer::lex(&source_for_parse)
             };
-            if !lex_diags.is_empty() {
-                return Err(LoaderError::at(display, &source, lex_diags));
-            }
-            match Parser::parse_for_check_with_source(&tokens, &source_for_parse) {
+            match parse_frontend_tokens(&tokens, &source_for_parse, lex_diags) {
                 Ok((program, teaching)) => (program, teaching, Lexer::core_identifier_demand(&tokens)),
                 Err(diagnostics) => return Err(LoaderError::at(display, &source, diagnostics)),
             }
@@ -6363,6 +6368,48 @@ mod stale_manifest_name_tests {
     }
 
     #[test]
+    fn frontend_reports_parser_teaching_after_lexical_errors() {
+        let source = include_str!("../../../tests/ui/dunder_retired_bit_operator.jet");
+        let PreparedFrontendModule::ParseFailed(diagnostics) = prepare_frontend_module(source) else {
+            panic!("reserved names and retired bit operators must fail");
+        };
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0067"));
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0398"));
+        let (tokens, lex_diagnostics) = Lexer::lex(source);
+        let direct = parse_frontend_tokens(&tokens, source, lex_diagnostics).unwrap_err();
+        assert_eq!(
+            diagnostics.iter().map(|diagnostic| &diagnostic.code).collect::<Vec<_>>(),
+            direct.iter().map(|diagnostic| &diagnostic.code).collect::<Vec<_>>(),
+        );
+        assert_eq!(
+            crate::Diagnostics::render_all("tests/ui/dunder_retired_bit_operator.jet", source, &diagnostics),
+            include_str!("../../../tests/ui/dunder_retired_bit_operator.stderr"),
+        );
+    }
+
+    #[test]
+    fn embedded_core_parse_failures_keep_their_source_origin() {
+        let display = "<corelib>/Core/crypto/crypto.jet";
+        let source = "fn run() { value :: 1 | 2 }\n";
+        let (tokens, lexical) = Lexer::lex_generated(source);
+        let diagnostics = parse_frontend_tokens(&tokens, source, lexical).unwrap_err();
+        let diagnostics = record_loader_error(
+            &mut None,
+            LoaderError::at(display, source, diagnostics)
+                .with_module_origin(display, Path::new(display)),
+        );
+        let diagnostic = diagnostics.iter().find(|diagnostic| diagnostic.code == "E0398").unwrap();
+        let origin = diagnostic.origin().expect("Core origin must survive plain conversion");
+        assert_eq!(origin.display, display);
+        assert_eq!(origin.source, source);
+        assert!(diagnostic.span.is_some());
+        assert_eq!(
+            crate::Diagnostics::render_all("run.jet", "fn run() {}\n", &diagnostics),
+            include_str!("../../../tests/fixtures/core_parse_origin.stderr"),
+        );
+    }
+
+    #[test]
     fn core_text_runtime_imports_keep_aliases_and_load_each_unit_once() {
         let root = tempdir("core-text-runtime-imports");
         let entry = root.join("main.jet");
@@ -6421,7 +6468,7 @@ mod stale_manifest_name_tests {
         assert!(schedule("struct DateTime { value: Int }\nstruct Stat { modified: DateTime? }\n").is_empty());
         assert!(schedule("struct Stat<DateTime> { modified: DateTime? }\n").is_empty());
         assert!(schedule("struct Stat { modified: unrelated.DateTime }\n").is_empty());
-        let owners = schedule("alias Times :: [DateTime?]\nenum Stamp { At(DateTime), Missing }\nstruct Stat { times: Times }\n");
+        let owners = schedule("alias Times :: [DateTime?]\nenum Stamp {\n At(DateTime)\n Missing\n}\nstruct Stat { times: Times }\n");
         assert_eq!(owners.iter().filter(|module| **module == "core.time").count(), 1);
     }
 

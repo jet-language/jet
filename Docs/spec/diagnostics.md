@@ -26,6 +26,11 @@ Retired marker spellings retain their `$retired` replacement in
 `Prelude/Markers.jet`. Parser recovery must teach that same replacement and
 must not reinterpret a retired foreign import as a binding-generator module.
 
+Lexical recovery does not end diagnostic collection: the retained token stream
+is parsed so parser-owned teaching (including retired operators) accompanies
+lexer errors. Failed embedded-Core parses keep the Core source identity and
+text through loader-error conversion, just as successful parses do.
+
 ## Plain-words rubric
 
 Every active row, and every message builder that fills one, reads in plain
