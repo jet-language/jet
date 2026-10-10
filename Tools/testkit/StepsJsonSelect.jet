@@ -85,8 +85,8 @@ fn kit_steps_json_select(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
             key = if decoded == { .Text(text) -> text else -> { return None } }
         }
         if value == {
-            .Object(fields) -> {
-                child :: fields.get(key) ?? return None
+            .Object(_) -> {
+                child :: value.at(key) ?? return None
                 return kit_steps_json_select(child, parts, depth + 1)
             }
             else -> return None
@@ -94,12 +94,12 @@ fn kit_steps_json_select(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
     }
     if part.starts_with("{{") {
         if value == {
-            .Object(fields) -> {
-                projected := [String: Dyn]{}
+            .Object(_) -> {
+                projected := [(key: String, value: Dyn)]{}
                 loop raw in kit_steps_byte_slice(part, 1, part.count_bytes() - 1).split(",") {
                     name :: raw.trim().copy()
-                    child :: fields.get(name) ?? return None
-                    _ :: &projected.add(name, child)
+                    child :: value.at(name) ?? return None
+                    &projected.push((key: name, value: child))
                 }
                 return kit_steps_json_select(Dyn.Object(projected), parts, depth + 1)
             }
@@ -198,13 +198,16 @@ fn kit_steps_json_relation(actual: String, assertion: KitAssertion, history: [Ki
     None
 }
 
-fn kit_steps_json_scalar(text: String, mode: String, path: String) -> String? {
-    values :: kit_steps_json_values(text, mode, path) ?? return None
-    if values.len() != 1 -> return None
+fn kit_steps_json_scalar(text: String, mode: String, path: String) -> String Err! {
+    values :: kit_steps_json_values(text, mode, path) ?? return Err("capture JSON path missing or not scalar")
+    if values.len() != 1 -> return Err("capture JSON path missing or not scalar")
     value :: values[0]
     if value == {
-        .Text(scalar) -> Val(scalar)
-        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) -> Val(json.to_string(value))
-        else -> None
+        .Text(scalar) -> Ok(scalar)
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) -> {
+            encoded :: json.to_string(value) ?? return Err("capture JSON encode: {err}")
+            Ok(encoded)
+        }
+        else -> Err("capture JSON path missing or not scalar")
     }
 }
