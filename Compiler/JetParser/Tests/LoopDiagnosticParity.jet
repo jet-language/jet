@@ -15,7 +15,7 @@ fn run() {
     _ := loop_diagnostic_expect("fn run() {{\nouter := loop {{}}\n}}", "E0988", "outer := loop")
     prefix :: loop_diagnostic_expect("fn run() {{\n@outer loop {{ break(outer) }}\n}}", "E0988", "@outer")
     suffix :: loop_diagnostic_expect("fn run() {{\nouter@ loop {{ break(outer) }}\n}}", "E0988", "outer@")
-    loop parsed in [ParseResult]{prefix, suffix} {
+    loop parsed in ([ParseResult]{prefix, suffix}) {
         if parsed.program.items[0] == .Func(function) {
             if function.body[0] == .Loop(_, _, _, label) {
                 if label == .Val(name) {
@@ -24,7 +24,7 @@ fn run() {
             } else { panic("retired loop declaration lost its loop AST") }
         } else { panic("loop recovery lost its enclosing function") }
     }
-    loop control in [String]{"break @outer", "break outer@", "next @outer", "next outer@"} {
+    loop control in ([String]{"break @outer", "break outer@", "next @outer", "next outer@"}) {
         marked :: if control.ends_with("@") -> "outer@" else -> "@outer"
         _ := loop_diagnostic_expect("fn run() {{\nouter :: loop {{\n{control}\n}}\n}}", "E0988", marked)
     }

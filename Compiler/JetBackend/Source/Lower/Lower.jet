@@ -3319,9 +3319,7 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
     if left_layout.class == .Float -> return lower_float_binary(&m, &f, dst, op, left_ty, left_layout == lir_layout_float32(), left_value, right_value)
     // Fixed unsigned floor division is ordinary UDiv (FixedArithmetic.rs).
     // Signed floor division is not the truncating word operator.
-    word_op :: if op == .FloorDiv && unsigned && fixed_trap {
-        LIRBinaryOp.Div
-    } else {
+    word_op :: if op == .FloorDiv && unsigned && fixed_trap -> LIRBinaryOp.Div else -> {
         lower_word_op(op) ?? return lower_fail(&m, &f, "operator {lower_binary_name(op)} on {mir_type_display_name(left_ty)} is not lowered at O0 yet")
     }
     if exact -> return lower_fail(&m, &f, "exact Int operator {lower_binary_name(op)} without a Prelude route")

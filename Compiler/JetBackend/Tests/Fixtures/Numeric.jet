@@ -96,7 +96,7 @@ fn fx_numeric_u64_binary(b: &FxBuilder, op: MIRBinaryOp, member: String, left: I
 
 fn fx_numeric_u64_binary_program(b: FxBuilder) -> MIRProgram Never! {
     p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
-    loop member in [String]{"div", "floor_div", "rem"} {
+    loop member in ([String]{"div", "floor_div", "rem"}) {
         &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.Overflow, "core.numeric", "u64.trap.{member}", "jet_u64_trap_{member}", 4, MIRPreludeABI.Value))
     }
     p
@@ -106,7 +106,7 @@ fn fx_numeric_u64_binary_program(b: FxBuilder) -> MIRProgram Never! {
 fn fx_numeric_u64_binary_division() -> MIRProgram Never! {
     b := fx_builder()
     // -1 carries U64.MAX's high-bit word, as in Unsigned.jet's fixtures.
-    loop pair in [(left: Int, right: Int)]{(left: 7, right: 3), (left: -1, right: 2)} {
+    loop pair in ([(left: Int, right: Int)]{(left: 7, right: 3), (left: -1, right: 2)}) {
         fx_print(&b, fx_numeric_u64_binary(&b, .Div, "div", pair.left, pair.right))
         fx_print(&b, fx_numeric_u64_binary(&b, .FloorDiv, "floor_div", pair.left, pair.right))
         fx_print(&b, fx_numeric_u64_binary(&b, .Rem, "rem", pair.left, pair.right))
