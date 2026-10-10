@@ -816,8 +816,8 @@ fn jet_cli_build_resolve(path: String) -[FS.Read]> JetDriverBuildPath JetCLIRead
 // Build the request for `file` (the entry as the user named it) and run the
 // Jet compiler on it in `mode` with at most `threads` compiler threads
 // (`--threads N`; `None` admits threads automatically). `emit_rust` asks for
-// the Rust source a release build or test binary needs; otherwise the compile
-// stops at checked MIR with the same diagnostics.
+// explicit Rust emission queries; native builds/runs/tests stop at checked MIR
+// with the same diagnostics, then use the native backend's existing optimizer.
 // `jet_driver_compile` declares no effect row or failure (its Eval host
 // adapter makes dynamic calls with no effect bound), so this function and the
 // host verbs above it stay unannotated, like the bootstrap entry

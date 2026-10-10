@@ -1,4 +1,4 @@
-// Two-tier C FFI proof. Invoked by the integrator under the cheap proof lane.
+// Native O0/O2 C FFI parity. Invoked by the integrator under the cheap proof lane.
 import { cpSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,7 +23,7 @@ for (const [directory, expected] of fixtures) {
   for (const release of [false, true]) {
     const args = ['run', ...(release ? ['--release'] : []), join(scratch, directory, 'run.jet')];
     const result = spawnSync(jet, args, { cwd: scratch, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
-    const tier = release ? 'Rust' : 'native';
+    const tier = release ? 'native O2' : 'native O0';
     if (result.error || result.status !== 0 || result.signal) {
       throw new Error(`${directory} ${tier} failed: ${result.error ?? result.signal ?? result.status}\n${result.stdout ?? ''}${result.stderr ?? ''}`);
     }
@@ -33,5 +33,5 @@ for (const [directory, expected] of fixtures) {
     if (release && result.stdout !== native) throw new Error(`${directory} tier meaning differs`);
     native = result.stdout;
   }
-  console.log(`${directory}: native/Rust identical`);
+  console.log(`${directory}: native O0/O2 identical`);
 }
