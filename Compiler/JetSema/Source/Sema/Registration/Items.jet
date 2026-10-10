@@ -42,6 +42,7 @@ use jet_foundation.[
     ParamZone,
     Program,
     QuantityKind,
+    SerdeWireShape,
     Span,
     Stmt,
     StructDef,
@@ -79,6 +80,7 @@ use jet_foundation.[
     type_with_effective_fn_returns,
 ]
 use jet_parser.[
+    jfmt_decode_shapes,
     parse_generated_source,
 ]
 
@@ -2051,6 +2053,10 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
         }
     }
     module_row.program.items = ^items
+    // D-SERDE (E2408, E2415): serde field markers and anonymous-union decode
+    // shapes are checked on the registered items, as the Rust reference's
+    // `validate_serde_items` runs after the trait registry is built.
+    sema_registration_serde_items(module_row.program.items, &diagnostics)
     // D-CLIFLAG1 / D-CLI-GLOBAL1=E / D-CLI-POS1 / D-CLI-FIELD-MARKERS1: checked
     // on the registered items, as the Rust reference's `validate_cli_items`
     // runs after struct registration.
@@ -2354,6 +2360,175 @@ fn sema_registration_cli_marker_string(marker: Marker) -> String? {
     if marker.args.len() == 0 -> return None
     if marker.args[0] == .Expr(value) && value == .Str(parts, _) && parts.len() == 1 && parts[0] == .Lit(text) -> return Val(text)
     None
+}
+
+// D-SERDE (Rust `validate_serde_items`): `#Flatten` needs a struct-typed field
+// (E2408), and every decoded anonymous union needs one distinct outer wire
+// shape per member (E2415, or E2411 for a member with no known shape). The
+// remaining Rust serde marker checks (E2409/E2411 field codability) are not
+// part of this pass.
+fn sema_registration_serde_items(items: [Item], diagnostics: &[Diagnostic]) {
+    loop item in items {
+        if item == .Struct(definition) {
+            encode :: sema_registration_serde_derives(definition.derives, "Encode")
+            decode :: sema_registration_serde_derives(definition.derives, "Decode")
+            if !encode && !decode -> next
+            loop field in definition.fields {
+                skip := false
+                flatten := false
+                loop marker in field.serde_markers {
+                    if marker.name == "Skip" -> skip = true
+                    if marker.name == "Flatten" -> flatten = true
+                }
+                if flatten && !sema_registration_serde_struct_named(field.ty) {
+                    &diagnostics.push(sema_error("E2408", field.name_span, "`#[Flatten]` on `{field.name}` needs a struct-typed field", "flatten splices another struct's keys into this object, so the field must be a `#[Codable]` struct — not a primitive, list, or map", "give `{field.name}` a `#[Codable]` struct type, or drop `#[Flatten]`"))
+                    next
+                }
+                if skip || flatten -> next
+                if decode -> sema_registration_serde_union_shapes(items, field.ty, field.name_span, &diagnostics)
+            }
+        }
+        if item == .Enum(definition) {
+            if !sema_registration_serde_derives(definition.derives, "Decode") -> next
+            loop variant in definition.variants {
+                if variant.payload == {
+                    .Unit -> {}
+                    .Single(ty, _) -> sema_registration_serde_union_shapes(items, ty, variant.name_span, &diagnostics)
+                    .Named(fields) -> loop field in fields -> sema_registration_serde_union_shapes(items, field.ty, variant.name_span, &diagnostics)
+                }
+            }
+        }
+    }
+}
+
+fn sema_registration_serde_derives(derives: [NamedSpan], name: String) -> Bool Never! {
+    loop derive_item in derives {
+        if derive_item.name == name -> return true
+    }
+    false
+}
+
+// Rust `is_struct_named`: a named type that is not a data-tree type.
+fn sema_registration_serde_struct_named(ty: Type) -> Bool Never! {
+    if ty == .Named(name) -> return !sema_data_is_json_name(name)
+    false
+}
+
+// Rust `validate_union_decode_shapes`. The Rust parser hands sema every union
+// in canonical member order (D-UNIONTYPE1=A `canonicalize_union`); the native
+// parser keeps the written order, so each union is canonicalized here first.
+fn sema_registration_serde_union_shapes(items: [Item], ty: Type, span: Span, diagnostics: &[Diagnostic]) {
+    if ty == .Union(written) {
+        canonical :: sema_failure_union_canonical(written)
+        if canonical == .Union(members) {
+            sema_registration_serde_union_members(items, canonical, members, span, &diagnostics)
+            loop member in members -> sema_registration_serde_union_shapes(items, member, span, &diagnostics)
+            return
+        }
+        sema_registration_serde_union_shapes(items, canonical, span, &diagnostics)
+        return
+    }
+    if ty == {
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) -> sema_registration_serde_union_shapes(items, inner, span, &diagnostics)
+        .Map(key, _, value) | .Result(key, value) -> {
+            sema_registration_serde_union_shapes(items, key, span, &diagnostics)
+            sema_registration_serde_union_shapes(items, value, span, &diagnostics)
+        }
+        .Apply(_, args) -> loop arg in args -> sema_registration_serde_union_shapes(items, arg, span, &diagnostics)
+        .Tuple(fields) -> loop field in fields -> sema_registration_serde_union_shapes(items, field.ty, span, &diagnostics)
+        .Fn(params, ret, _, _, _, _) -> {
+            loop param in params -> sema_registration_serde_union_shapes(items, param, span, &diagnostics)
+            if ret == .Val(value) -> sema_registration_serde_union_shapes(items, value, span, &diagnostics)
+        }
+        else -> {}
+    }
+}
+
+// One canonical union: each member's sorted outer wire shapes; a shape two
+// members share is E2415 once per member pair.
+fn sema_registration_serde_union_members(items: [Item], union_ty: Type, members: [Type], span: Span, diagnostics: &[Diagnostic]) {
+    union_shown :: sema_type_show(union_ty)
+    seen_shapes := [SerdeWireShape]{}
+    seen_members := [Type]{}
+    reported := [String]{}
+    loop member in members {
+        visited := [String]{}
+        resolved :: jfmt_decode_shapes(items, member, &visited)
+        member_label :: sema_registration_serde_label(member)
+        if resolved == None {
+            &diagnostics.push(sema_error("E2411", span, "union `{union_shown}` can't be decoded — `{member_label}` has no compiler-known wire shape", "`{member_label}` uses a custom or imported decoder; anonymous unions need each member's outer wire shape before codegen", "use a compiler-derived codec, a configured tagged enum, or a #CodableAsBase distinct type"))
+            next
+        }
+        loop shape in sema_registration_serde_sorted_shapes(resolved ?? [SerdeWireShape]{}) {
+            previous := -1
+            loop (index, known) in seen_shapes {
+                if known == shape {
+                    previous = index
+                    break
+                }
+            }
+            if previous < 0 {
+                &seen_shapes.push(shape)
+                &seen_members.push(member)
+                next
+            }
+            first_label :: sema_registration_serde_label(seen_members[previous])
+            pair :: "{first_label}\n{member_label}"
+            if reported.contains(pair) -> next
+            &reported.push(pair)
+            &diagnostics.push(sema_error("E2415", span, "Union `{union_shown}` can't be decoded — `{first_label}` and `{member_label}` share wire shape `{sema_registration_serde_shape_name(shape)}`", "anonymous-union decode picks a member by wire shape; two members with the same shape would force an arbitrary order", "use a named enum with an explicit tag, or change the members so each has a distinct wire shape"))
+        }
+    }
+}
+
+// Rust `label`: the member's `Type::show` with surrounding backticks trimmed.
+fn sema_registration_serde_label(ty: Type) -> String Never! {
+    label := sema_type_show(ty)
+    loop label.starts_with("`") -> label = label.slice(1, label.len())
+    loop label.ends_with("`") -> label = label.slice(0, label.len() - 1)
+    label
+}
+
+// Rust `SerdeWireShape` order (`finish` sorts each resolved shape set).
+fn sema_registration_serde_shape_rank(shape: SerdeWireShape) -> Int Never! {
+    if shape == {
+        .Null -> 0
+        .Int -> 1
+        .Float -> 2
+        .Bool -> 3
+        .Text -> 4
+        .Array -> 5
+        .Object -> 6
+        .Number -> 7
+    }
+}
+
+fn sema_registration_serde_sorted_shapes(shapes: [SerdeWireShape]) -> [SerdeWireShape] Never! {
+    sorted := shapes
+    loop index in 1..<sorted.len() {
+        current := sorted[index]
+        insertion := index - 1
+        loop insertion >= 0 && sema_registration_serde_shape_rank(sorted[insertion]) > sema_registration_serde_shape_rank(current) {
+            sorted[insertion + 1] = sorted[insertion]
+            insertion -= 1
+        }
+        sorted[insertion + 1] = current
+    }
+    sorted
+}
+
+// Rust `SerdeWireShape::name`.
+fn sema_registration_serde_shape_name(shape: SerdeWireShape) -> String Never! {
+    if shape == {
+        .Null -> "Null"
+        .Int -> "Int"
+        .Float -> "Float"
+        .Bool -> "Bool"
+        .Text -> "Text"
+        .Array -> "Array"
+        .Object -> "Object"
+        .Number -> "Number"
+    }
 }
 
 fn sema_registration_import_is_unqualified(declaration: ImportDecl) -> Bool Never! {
