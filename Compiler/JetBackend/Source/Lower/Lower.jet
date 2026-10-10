@@ -669,6 +669,7 @@ fn lower_enum_is_tag(variants: [MIRVariant]) -> Bool Never! {
 }
 
 fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
+    if lower_shared_guard_repr(ty) == .Val(guard) -> return guard
     if lower_atomic_scalar(p, ty) != None -> return LowerRepr.Inline{ty: ty}
     if lower_trait_ref(p, ty) != None -> return LowerRepr.Boxed{ty: ty}
     if ty.kind == {
@@ -3568,6 +3569,13 @@ fn lower_print_releases(c: LowerContext, f: LowerFunction, value: MIRValueID, lo
 }
 
 fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, semantic: MIRSemanticOp) Never! {
+    if semantic == .SharedGuardWait(_, guard, condition, predicate) -> return lower_condition_wait(p, c, &m, &f, instruction, guard, condition, predicate)
+    if semantic == .ConditionNotify(_, condition, all) -> return lower_condition_notify(p, c, &m, &f, instruction, condition, all)
+    if semantic == .TextPatternMatch(_, subject, parts) -> return lower_scan_match(p, c, &m, &f, instruction, subject, Val(parts), None)
+    if semantic == .BinaryPatternMatch(_, subject, parts) -> return lower_scan_match(p, c, &m, &f, instruction, subject, None, Val(parts))
+    if semantic == .CursorTakePattern(receiver, place, parts) -> return lower_scan_take(p, c, &m, &f, instruction, receiver, place, Val(parts), None)
+    if semantic == .ReaderTakePattern(receiver, place, parts) -> return lower_scan_take(p, c, &m, &f, instruction, receiver, place, None, Val(parts))
+    if semantic == .DecodeUnder(_, segment, inner) -> return lower_codec_under(p, c, &m, &f, instruction, segment, inner)
     if semantic == .Print(call, value) {
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "print names missing Prelude call {call.value}")
         text :: lower_show(p, c, &m, &f, value) ?? return
@@ -3637,6 +3645,8 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     }
     if semantic == .StaticPreludeCall(call, args, owner_type_args, type_args) {
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "static call names missing Prelude row")
+        if lower_encoding_list_leaf(p, c, &m, &f, instruction, call, args, type_args) -> return
+        if lower_condition_new(p, c, &m, &f, instruction, row, args) -> return
         if lower_atomic_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_set_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_tally_new(p, c, &m, &f, instruction, call, args) -> return
@@ -3857,7 +3867,7 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
     if lower_is_static_text_call(m, callee) -> return lower_static_text_call(p, c, &m, &f, instruction, args)
     if callee == .TraitMethod(method, bound, receiver) -> return lower_trait_call(p, c, &m, &f, instruction, method, bound, receiver, args, type_args)
     if callee == .Foreign(foreign) && m.asm_foreign.get(foreign.value) == None {
-        lower_asm_import_call(p, c, &m, &f, instruction, foreign.value, args, type_args)
+        lower_c_import_call(p, c, &m, &f, instruction, foreign.value, args, type_args)
         return
     }
     if callee == .Prelude(call) {
@@ -4363,6 +4373,10 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "core.shared.init" -> return lower_core_shared_init(p, &m, glue)
     if glue.helper == "callable.init" -> return lower_callable_init(p, &m, glue)
     if glue.helper == "callable.fini" -> return lower_callable_fini(p, &m, glue)
+    if glue.helper == "callable.value" -> return lower_value_callable(p, &m, glue)
+    if glue.helper == "callable.release" -> return lower_value_release(p, &m, glue)
+    if lower_native_handle_operation(glue.helper) == .Val(op) -> return lower_native_handle_glue(p, &m, glue, op)
+    if glue.helper.starts_with("native.record.") -> return lower_native_record_glue(p, &m, glue)
     if glue.helper == "export.entry" -> return lower_export_entry(p, &m, glue)
     if glue.helper == "record.in" -> return lower_helper_record_in(p, &m, glue)
     if glue.helper == "record.out" -> return lower_helper_record_out(p, &m, glue)
