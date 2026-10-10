@@ -1895,9 +1895,15 @@ fn sema_marker_rules_no_prelude_call(call: Call, environment: SemaScopeEnvironme
 // The first refused parameter ends the check, as in the Rust reference.
 // Purity (E0938) is judged by the solved effect row, not here.
 fn sema_check_memoized_function(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam], diagnostics: &[Diagnostic]) {
-    marker :: loop candidate in func.markers {
-        if candidate.name == "Memo" -> break candidate
-    } ?? return
+    memo := Marker?{None}
+    loop candidate in func.markers {
+        if candidate.name == "Memo" {
+            memo = Val(candidate)
+            break
+        }
+    }
+    if memo == None -> return
+    marker :: memo ?? panic("checked #Memo marker disappeared")
     loop parameter in func.params {
         declared :: if parameter.variadic -> Type.List{element: parameter.ty} else -> parameter.ty
         ty :: sema_function_resolve_declared(environment, program, declared, environment.module_identity, generic_params)

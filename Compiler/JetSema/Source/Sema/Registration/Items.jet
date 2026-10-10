@@ -2143,9 +2143,7 @@ fn sema_registration_cli_items(items: [Item], diagnostics: &[Diagnostic]) {
                     &diagnostics.push(sema_error("E1305", field.name_span, "field `{field.name}` has no CLI flag mapping ({type_name(field.ty)})", "a `#[CLI]` field becomes one `--flag` (and a positional when required); only `Int` (including inline ranges), `Float`, `Bool`, `String`, `Path`, and `T?` of those have a defined shape (nested `#[CLI]` structs and other collection/closure types don't).", "change the field to a supported type, or drop it from the `#[CLI]` struct"))
                     next
                 }
-                flag_marker :: loop candidate in field.serde_markers {
-                    if candidate.name == "Flag" -> break candidate
-                }
+                flag_marker :: sema_registration_cli_marker(field.serde_markers, "Flag")
                 if flag_marker == .Val(marker) && kind != SemaRegistrationCLIFieldKind.RequiredOption {
                     &diagnostics.push(sema_error("E1309", marker.name_span, "`#[Flag]` on `{field.name}` has nothing to opt out of", "`#[Flag]` keeps a required value field flag-only. Bool fields, optional fields (`T?`), and fields with a `{{expr}}` default already stay flag-only.", "remove `#[Flag]`, or make the field a required scalar without a `{{expr}}` default"))
                 }
@@ -2156,9 +2154,7 @@ fn sema_registration_cli_items(items: [Item], diagnostics: &[Diagnostic]) {
                 seen_flags[flag] = true
                 sema_registration_cli_short_name(field, &seen_shorts, &diagnostics)
                 if kind == SemaRegistrationCLIFieldKind.Flag {
-                    env_marker :: loop candidate in field.serde_markers {
-                        if candidate.name == "Env" -> break candidate
-                    }
+                    env_marker :: sema_registration_cli_marker(field.serde_markers, "Env")
                     if env_marker == .Val(marker) && sema_registration_cli_marker_string(marker) != None {
                         &diagnostics.push(sema_registration_e1319("Env", field.name, "a `Bool` command field is a presence flag, while `#Env` lowers to a value option.", "remove `#Env`, or use it on an `Int`, `Float`, `String`, `Path`, or optional value field", marker.name_span))
                     }
@@ -2175,8 +2171,12 @@ fn sema_registration_cli_items(items: [Item], diagnostics: &[Diagnostic]) {
                 command_count += 1
                 command :: unicode.lower(function.name)
                 sema_registration_cli_command_word(command, function.name_span, seen_flags, &seen_commands, &diagnostics)
-                receiver :: loop param in function.params {
-                    if param.name == "self" -> break param
+                receiver := Param?{None}
+                loop param in function.params {
+                    if param.name == "self" {
+                        receiver = Val(param)
+                        break
+                    }
                 }
                 if receiver == .Val(self_param) && self_param.convention != AccessConvention.Read {
                     &diagnostics.push(sema_error("E1347", self_param.name_span, "a CLI method receiver must be read-only", "shared root flags are parsed into one program value and command dispatch must not mutate that value.", "change the receiver to read-only `self`"))
@@ -2212,10 +2212,12 @@ fn sema_registration_cli_items(items: [Item], diagnostics: &[Diagnostic]) {
 // string, is one ASCII letter that no earlier field (or the standard pack)
 // already selects.
 fn sema_registration_cli_short_name(field: Field, seen: &[String:String], diagnostics: &[Diagnostic]) {
-    marker :: loop candidate in field.serde_markers {
-        if candidate.name == "Short" -> break candidate
-    } ?? return
-    short :: sema_registration_cli_marker_string(marker) ?? return
+    marker_value :: sema_registration_cli_marker(field.serde_markers, "Short")
+    if marker_value == None -> return
+    marker :: marker_value ?? panic("checked #Short marker disappeared")
+    short_value :: sema_registration_cli_marker_string(marker)
+    if short_value == None -> return
+    short :: short_value ?? panic("checked #Short literal disappeared")
     bytes :: short.bytes()
     letter := false
     if bytes.len() == 1 {
@@ -2246,12 +2248,12 @@ fn sema_registration_cli_command_word(command: String, span: Span, seen_flags: [
 // at most once, first and read-only (bound members only), and otherwise only
 // scalar or optional scalar, non-variadic parameters with literal defaults.
 fn sema_registration_cli_callable_params(function: Func, command: String, shared_type: String?, diagnostics: &[Diagnostic]) {
-    shared := [Int]{}
+    shared_slots := [Int]{}
     if shared_type == .Val(shared_name) {
         loop (index, param) in function.params {
-            if sema_registration_cli_named_leaf(param.ty) == .Val(shared_name) -> &shared.push(index)
+            if sema_registration_cli_named_leaf(param.ty) == Val(shared_name) -> &shared_slots.push(index)
         }
-        if shared.len() > 1 || (shared.len() == 1 && shared[0] != 0) {
+        if shared_slots.len() > 1 || (shared_slots.len() == 1 && shared_slots[0] != 0) {
             &diagnostics.push(sema_registration_e1345(command, function.name_span, "a bound function may receive the shared program struct only once, as its first parameter"))
         }
     }
@@ -2260,7 +2262,7 @@ fn sema_registration_cli_callable_params(function: Func, command: String, shared
             if shared_type != None -> &diagnostics.push(sema_registration_e1345(command, param.name_span, "a bound function receives shared state as an ordinary first program-struct parameter, not as a method receiver"))
             next
         }
-        if shared.contains(index) {
+        if shared_slots.contains(index) {
             if param.convention != AccessConvention.Read -> &diagnostics.push(sema_registration_e1345(command, param.name_span, "the shared program-struct parameter must be read-only"))
             next
         }
@@ -2279,8 +2281,7 @@ fn sema_registration_cli_callable_params(function: Func, command: String, shared
 
 // Rust `Expr::without_parens` matched against a literal Int, Float, Bool or String.
 fn sema_registration_cli_literal_default(expr: Expr) -> Bool Never! {
-    current := expr
-    loop current == .Paren(inner, _) -> current = inner
+    current :: sema_registration_cli_without_parens(expr)
     if current == {
         .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) | .Str(_, _) -> true
         else -> false
@@ -2298,12 +2299,32 @@ fn sema_registration_cli_named_leaf(ty: Type) -> String? {
 
 // Rust `binding_target`: the module function a bound CLI member names.
 fn sema_registration_cli_binding_target(items: [Item], target: Expr) -> Func? {
-    current := target
-    loop current == .Paren(inner, _) -> current = inner
+    current :: sema_registration_cli_without_parens(target)
     if current == .Ident(name, _) {
         loop item in items {
             if item == .Func(function) && function.name == name -> return Val(function)
         }
+    }
+    None
+}
+
+// Rust `Expr::without_parens`.
+fn sema_registration_cli_without_parens(expr: Expr) -> Expr Never! {
+    current := expr
+    loop {
+        if current == .Paren(inner, _) {
+            current = inner
+        } else {
+            break
+        }
+    }
+    current
+}
+
+// The first marker named `name` (Rust `iter().find(|m| m.name == name)`).
+fn sema_registration_cli_marker(markers: [Marker], name: String) -> Marker? {
+    loop marker in markers {
+        if marker.name == name -> return Val(marker)
     }
     None
 }
