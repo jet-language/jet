@@ -25,7 +25,7 @@ fn jet_cli_maintainer_name(file: String) -> String Never! {
         if bytes[index] == 47 -> return file.slice(index + 1..<bytes.len())
         index -= 1
     }
-    file
+    file.copy()
 }
 fn jet_cli_maintainer_dot(name: String) -> Int? Never! {
     bytes :: name.bytes()
@@ -112,11 +112,12 @@ fn jet_cli_reduce_candidate(lines: &[String], start: Int, end: Int) -> [String] 
     }
     candidate
 }
-fn jet_cli_reduce_lines(lines: [String], scratch: String, code: String?) -> [String] {
+// The reducer owns its line buffer; candidates borrow it until accepted.
+fn jet_cli_reduce_lines(lines: ^[String], scratch: String, code: String?) -> [String] {
     current := ^lines
     chunks := 2
     loop current.len() >= 2 {
-        size :: (current.len() + chunks - 1) / chunks
+        size :: (current.len() + chunks - 1) /% chunks
         if size == 0 -> break
         progress := false
         start := 0
@@ -158,9 +159,9 @@ fn jet_cli_devtools_reduce(args: [String], color: Bool, json: Bool) -> JetDriver
         why :: if code == .Val(wanted) -> "the front end never emits `{wanted}` for this file" else -> "either the front end already rejects it, or rustc accepts the generated Rust"
         return jet_cli_maintainer_error("E2104", "`{file}` doesn't reproduce the target oracle as given", Val(why), Val("confirm the case fails the way you expect, then reduce it"), color, json, JET_DRIVER_EXIT_USER_ERROR)
     }
-    lines :: source.lines().to_list()
+    lines :: source.lines()
     cli_term.print("reduce: starting at {lines.len()} line(s)")
-    reduced :: jet_cli_reduce_lines(lines, scratch, code)
+    reduced :: jet_cli_reduce_lines(^lines, scratch, code)
     cli_term.print("reduce: finished at {reduced.len()} line(s)")
     text :: reduced.join("\n")
     output :: jet_cli_reduced_path(file)

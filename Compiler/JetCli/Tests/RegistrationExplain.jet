@@ -14,6 +14,7 @@ fn run() Never! {
     }
     loop index in 0..<REGISTRATION_TRUTH_ROWS.len() {
         explanation :: jet_cli_registration_truth_explanation(index)
-        if explanation.code != REGISTRATION_TRUTH_ROWS[index].name || explanation.what == None || explanation.why == None || explanation.fix == None -> panic("every corpus truth names its home and guard")
+        row :: REGISTRATION_TRUTH_ROWS[index] ?? panic("truth fixture iterates canonical rows")
+        if explanation.code != row.name || explanation.what == None || explanation.why == None || explanation.fix == None -> panic("every corpus truth names its home and guard")
     }
 }

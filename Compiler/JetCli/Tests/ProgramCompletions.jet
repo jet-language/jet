@@ -13,6 +13,8 @@ fn run() {
     program_completion_require(jet_cli_program_completions("unknown", "greeter", schema) == None, "unsupported shell")
     input :: CLIInputSchema{field: "name", flag: "name", short: None, env: None, help: "person to greet", metavar: Val("NAME"), shape: CLIInputShape.Value{kind: .String, optional: false, default: None}, positional: Val(U16{0})}
     schema.inputs = [CLIInputSchema]{input}
+    input_zsh :: jet_cli_program_completions("zsh", "greeter", schema) ?? panic("input zsh supported")
+    program_completion_require(input_zsh.contains("':name:person to greet'") && input_zsh.contains("'--name[person to greet]:name:'"), "canonical lowercase metavars for positional and flag inputs")
     fish :: jet_cli_program_completions("fish", "greeter'odd", schema) ?? panic("fish supported")
     program_completion_require(fish == "# fish completion from JetCommandSchema v8\ncomplete -c 'greeter'\\''odd' -l help -d 'show help'\ncomplete -c 'greeter'\\''odd' -l name -d 'person to greet' -r\n", "quoted fish and value marker")
     schema.standard = true

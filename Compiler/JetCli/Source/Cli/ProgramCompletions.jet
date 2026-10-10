@@ -31,11 +31,11 @@ fn jet_cli_program_zsh_inputs(inputs: [CLIInputSchema]) -> [String] Never! {
     }
     loop index in positions {
         input :: inputs[index]
-        meta :: (input.metavar ?? input.flag).to_lowercase()
+        meta :: (input.metavar ?? input.flag).to_lower()
         &specs.push("    ':{jet_cli_program_zsh_single(meta)}:{jet_cli_program_zsh_bracket(input.help)}'")
     }
     loop input in inputs {
-        value :: if input.metavar == .Val(name) -> ":{name.to_lowercase()}:" else -> ""
+        value :: if input.metavar == .Val(name) -> ":{name.to_lower()}:" else -> ""
         names :: if input.short == .Val(short) -> "(-{short} --{input.flag}){{-{short},--{input.flag}}}" else -> "--{input.flag}"
         &specs.push("    '{jet_cli_program_zsh_single(names)}[{jet_cli_program_zsh_bracket(input.help)}]{value}'")
     }
@@ -154,7 +154,7 @@ fn jet_cli_program_completion_error(program: String, why: String) -> JetCLIPlan 
 // Called only after the host's single nonblocking open, opened-file metadata
 // check, and bounded read. No pathname re-stat or application execution here.
 fn jet_cli_program_completion_metadata(shell: String, command_name: String, program: String, bytes: [U8], usize_max: U64) -> JetCLIPlan Never! {
-    schema :: read_executable(bytes.view(0..<bytes.len()), usize_max) ?? return jet_cli_program_completion_error(program, err.display())
+    schema :: read_executable(bytes[0..<bytes.len()], usize_max) ?? return jet_cli_program_completion_error(program, err.display())
     script :: jet_cli_program_completions(shell, command_name, schema) ?? panic("completion shell was validated before reading metadata")
     jet_cli_done(script, "", JET_DRIVER_EXIT_OK)
 }
