@@ -57,6 +57,10 @@ carrier probes leave the subject available for subsequent alternatives. The
 Rust reference now mirrors native Sema's recursive Result-carrier admission and
 native codegen's ordered branch structure. Its owning payload projection takes
 the carrier only when no later reachable MIR use needs it.
+The call-coercion legality check distinguishes a plain Read trait view from
+owning trait boxing, matching the checked call access. Borrowed non-Copy enum
+payloads remain available after the call. Function/union conversions, authority
+boundaries, and owning conversions retain the non-Copy consumption guard.
 
 The existing TLS transport refusal runs before route lookup on both the
 argument-validation and direct-call lowering paths. Pure TLS configuration

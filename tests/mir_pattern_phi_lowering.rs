@@ -43,3 +43,12 @@ fn or_patterns_short_circuit_and_preserve_failed_nested_carriers() {
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, "1\n8\n3\n7\n0\n11\n13\n0\n0\n13\n17\n");
 }
+
+#[test]
+fn borrowed_trait_coercion_preserves_prepared_enum_payload() {
+    let source = include_str!("fixtures/mir_borrowed_trait_coercion.jet");
+    check_mir("borrowed_trait_coercion", source);
+    let (code, stdout, stderr) = tir_support::build_and_run_full("borrowed_trait_coercion", "run", source);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "17\n17\n10\n");
+}

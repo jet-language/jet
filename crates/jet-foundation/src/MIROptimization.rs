@@ -2776,8 +2776,18 @@ fn verify_call_args(
                 return invalid(format!("trait boxing type {type_id:?}"));
             }
         }
+        // A plain Read trait formal receives a borrowed trait view, not an
+        // owning box. This matches lower_call_arg and call_arg_for_function.
+        let borrows_trait = arg.access == MirAccess::Read
+            && !arg.authority_boundary
+            && !arg.implicit_clone
+            && !arg.shared_auto_clone
+            && !arg.widen_fixed_to_list
+            && arg.widen_to_union.is_none()
+            && arg.fn_coercion.is_none();
         let boxes_trait = arg.box_as_trait.is_some()
-            && !matches!(source_ty.kind(), MirTypeKind::TraitObject(_));
+            && !matches!(source_ty.kind(), MirTypeKind::TraitObject(_))
+            && !borrows_trait;
         let coercion_consumes =
             arg.fn_coercion.is_some() || arg.widen_to_union.is_some() || boxes_trait;
         if coercion_consumes
@@ -16482,6 +16492,44 @@ mod ownership_guard_tests {
             ],
             entry: MirBlockId(0), locals, values: Vec::new(), places,
             scopes: Vec::new(), drops: Vec::new(), foreign_language: None,
+        }
+    }
+
+    #[test]
+    fn read_trait_reference_preserves_noncopy_coercion_guards() {
+        use crate::MIR::{MirCallArg, MirFnCoercion, MirUnionCoercion};
+        let function = MirFunctionId(1);
+        let source = MirValueId(1);
+        let span = Span::new(0, 1);
+        let defs = HashMap::from([(
+            source,
+            (MirBlockId(0), 0, MirType::from_kind(MirTypeKind::String), MirOwnership::Owned),
+        )]);
+        let types = HashSet::from([MirTypeId(2), MirTypeId(3)]);
+        let borrowed = MirCallArg {
+            value: source, place: Some(OWNER), access: MirAccess::Read, span,
+            label: None, source_index: None, binder_slot: None, spread: false,
+            implicit_clone: false, shared_auto_clone: false, owned_last_use: false,
+            authority_boundary: false, fn_coercion: None, widen_fixed_to_list: false,
+            widen_to_union: None, box_as_trait: Some(MirTypeId(3)),
+        };
+        let invalid = |subject| Err(MirLegalityError::InvalidReference { function, subject, span });
+        assert!(verify_call_args(std::slice::from_ref(&borrowed), &types, &defs, function, &invalid).is_ok());
+
+        let mut boundary = borrowed.clone();
+        boundary.authority_boundary = true;
+        let mut widening = borrowed.clone();
+        widening.widen_to_union = Some(MirUnionCoercion { union: MirTypeId(2), variant: "String".into() });
+        let mut function_coercion = borrowed.clone();
+        function_coercion.fn_coercion = Some(MirFnCoercion { ty: MirType::from_kind(MirTypeKind::Bool), already_boxed: false });
+        let mut fixed_widening = borrowed.clone();
+        fixed_widening.widen_fixed_to_list = true;
+        for arg in [boundary, widening, function_coercion, fixed_widening] {
+            assert!(matches!(
+                verify_call_args(&[arg], &types, &defs, function, &invalid),
+                Err(MirLegalityError::InvalidReference { subject, .. })
+                    if subject.contains("coercion consumes non-Copy")
+            ));
         }
     }
 
