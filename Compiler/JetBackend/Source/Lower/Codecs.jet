@@ -2,7 +2,7 @@
 // BackendBoost2 (52f103e67), not its unwired runtime/container policy. User and
 // compiler-generated implementations remain ordinary monomorphic Jet methods;
 // scalar adapters invoke the canonical runtime traits without a second codec.
-use jet_foundation.[MIRCallArg, MIRFunctionID, MIRInstruction, MIRNominalRef, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeKind, MIRValueID, mir_type_display_name, mir_type_from_kind, mir_type_same_checked_type]
+use jet_foundation.[MIRCallArg, MIRFunctionID, MIRInstruction, MIRMeasure, MIRNominalRef, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeKind, MIRValueID, mir_measure_literal_value, mir_type_display_name, mir_type_from_kind, mir_type_same_checked_type]
 
 struct LowerCodecMethod { function: MIRFunctionID, owner: MIRType }
 
@@ -385,15 +385,17 @@ fn lower_helper_codec_csv_decode(p: MIRProgram, m: &LowerModule, glue: LowerGlue
 }
 
 // ---------------------------------------------------------------------------
-// Container codecs (EncodingTraits.rs:457-501 List and ?T decode, :491-493
-// Dyn decode). One "codec.decode" helper per checked Result<T, [FieldError]>
-// walks the borrowed checked native Dyn enum; every element decode recurses
-// through lower_codec_decode_into's one selection (selected method, canonical
-// scalar adapter, container helper), so nested containers share it.
+// Container codecs (EncodingTraits.rs:457-535 decode: List, [T#N], ?T, Dyn,
+// Map<String, V>). One "codec.decode" helper per checked Result<T,
+// [FieldError]> walks the borrowed checked native Dyn enum; every element
+// decode recurses through lower_codec_decode_into's one selection (selected
+// method, canonical scalar adapter, container helper), so nested containers
+// share it.
 
 fn lower_codec_container(p: MIRProgram, ty: MIRType) -> Bool Never! {
     if ty.kind == {
-        .List(_) | .Option(_) -> true
+        .List(_) | .FixedList(_, _) | .Option(_) -> true
+        .Map(key, _) -> key.kind == .String
         else -> lower_dyn_type(p, ty)
     }
 }
@@ -565,7 +567,9 @@ fn lower_helper_codec_decode(p: MIRProgram, m: &LowerModule, glue: LowerGlue) ->
     lower_alloc(&m, &f, box, lower_box_size(p, glue.ty))
     if target.kind == {
         .List(elem) -> lower_codec_decode_list(p, &m, &f, tree, target, elem, errors, source, box)
+        .FixedList(elem, len) -> lower_codec_decode_fixed(p, &m, &f, tree, target, elem, len, errors, source, box)
         .Option(inner) -> lower_codec_decode_option(p, &m, &f, tree, inner, errors, source, box)
+        .Map(_, value) -> lower_codec_decode_map(p, &m, &f, tree, target, value, errors, source, box)
         else -> {
             // EncodingTraits.rs:491-493: Dyn decodes as its own clone.
             cloned :: lower_pointer(&f)
@@ -578,16 +582,37 @@ fn lower_helper_codec_decode(p: MIRProgram, m: &LowerModule, glue: LowerGlue) ->
     lir_builder_finish(f.builder)
 }
 
-// EncodingTraits.rs:457-478: Dyn.Array decodes through jet_decode_sequence
-// (:222-245), which keeps decoding after a failed element and frames each
-// element's errors under "[index]"; any other kind is
-// "expected a list, found {kind}". Fills the Result box `box` of List `ty`.
+// EncodingTraits.rs:457-478: a byte (U8) List also accepts Dyn.Bytes and
+// base64 Dyn.Text; Dyn.Array decodes through jet_decode_sequence (:222-245),
+// which keeps decoding after a failed element and frames each element's
+// errors under "[index]"; any other kind is "expected a list, found {kind}".
+// Fills the Result box `box` of List `ty`.
 fn lower_codec_decode_list(p: MIRProgram, m: &LowerModule, f: &LowerFunction, tree: MIRType, ty: MIRType, elem: MIRType, errors: MIRType, source: LIRValueID, box: LIRValueID) Never! {
-    if lower_codec_byte(elem) -> return lower_fail(&m, &f, "Decode<{mir_type_display_name(ty)}> of Dyn.Bytes or base64 Text is not lowered natively")
     array :: lower_codec_variant(p, tree, "Array") ?? return lower_fail(&m, &f, "checked Dyn has no Array payload")
     route :: lower_codec_under_route(p, &m, &f, errors) ?? return
     discriminant :: lower_codec_tag(&f, source)
     done :: lower_new_block(&f)
+    if lower_codec_byte(elem) {
+        bytes :: lower_codec_variant(p, tree, "Bytes") ?? return lower_fail(&m, &f, "checked Dyn has no Bytes payload")
+        text :: lower_codec_variant(p, tree, "Text") ?? return lower_fail(&m, &f, "checked Dyn has no Text payload")
+        not_bytes :: lower_codec_on_tag(&f, discriminant, bytes.discriminant)
+        // :460-462: jet_decode_byte accepts every byte, so the List is a copy.
+        held :: lower_codec_payload(&f, source, bytes)
+        copied :: lower_pointer(&f)
+        lower_clone_into(p, &m, &f, held, copied, bytes.ty)
+        lower_copy_bytes(&f, box, lower_result_payload_offset(), copied, 0, lower_size(p, bytes.ty).size)
+        lower_store_word(&f, box, 0, lower_result_selector(true))
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, not_bytes, [LIRValueID]{})
+        not_text :: lower_codec_on_tag(&f, discriminant, text.discriminant)
+        // :463-468: strict standard base64 Text.
+        encoded_at :: lower_codec_payload(&f, source, text)
+        encoded :: lower_read_at(p, &f, encoded_at, 0, text.ty) ?? return lower_fail(&m, &f, "Dyn.Text has no storage")
+        byte_list :: mir_type_from_kind(MIRTypeKind.List{inner: elem})
+        lower_call_helper(&m, &f, "codec.base64", mir_type_from_kind(MIRTypeKind.Result{ok: byte_list, err: errors}), [LIRValueID]{encoded, box}, None)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, not_text, [LIRValueID]{})
+    }
     other :: lower_codec_on_tag(&f, discriminant, array.discriminant)
     items :: lower_codec_payload(&f, source, array)
     count :: lower_list_word(&f, items, 0)
@@ -671,4 +696,349 @@ fn lower_codec_decode_option(p: MIRProgram, m: &LowerModule, f: &LowerFunction, 
     lower_free_shell(&m, &f, decoded, lower_box_size(p, decoded_ty))
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
     lower_start(&f, done, [LIRValueID]{})
+}
+
+// EncodingTraits.rs:479-490: decodes as a List, then any length other than
+// N fails with "expected a fixed list of length {N}, found {found}".
+fn lower_codec_decode_fixed(p: MIRProgram, m: &LowerModule, f: &LowerFunction, tree: MIRType, ty: MIRType, elem: MIRType, len: MIRMeasure, errors: MIRType, source: LIRValueID, box: LIRValueID) Never! {
+    expected :: mir_measure_literal_value(len) ?? return lower_fail(&m, &f, "Decode<{mir_type_display_name(ty)}> has no literal length")
+    list :: mir_type_from_kind(MIRTypeKind.List{inner: elem})
+    lower_codec_decode_list(p, &m, &f, tree, list, elem, errors, source, box)
+    done :: lower_new_block(&f)
+    failed :: lower_codec_on_ok(&f, box)
+    out :: lower_address(&f, box, lower_result_payload_offset())
+    found :: lower_list_word(&f, out, 0)
+    wrong :: lower_codec_on_tag(&f, found, expected)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, wrong, [LIRValueID]{})
+    builder :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
+    lower_render_static(&m, &f, builder, "expected a fixed list of length {expected}, found ")
+    number :: lower_render_string(&f)
+    lower_call_runtime(&m, &f, "jet_rt_i64_to_string", [LIRValueID]{found}, Val(number))
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_push", [LIRValueID]{builder, number}, None)
+    lower_emit(&f, LIRInst.Drop{value: number})
+    reason :: lower_render_string(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_finish", [LIRValueID]{builder}, Val(reason))
+    lower_map_drop_value(p, &m, &f, out, list)
+    lower_codec_fail_one(p, &m, &f, errors, reason, box)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, failed, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+}
+
+// EncodingTraits.rs:502-535: each Dyn.Object entry's value decodes in entry
+// order and is inserted into the key-ordered Map (BTreeMap insert: a repeated
+// key keeps the later value); an entry's errors are framed under its key and
+// collected; any other kind is "expected an object, found {kind}".
+fn lower_codec_decode_map(p: MIRProgram, m: &LowerModule, f: &LowerFunction, tree: MIRType, ty: MIRType, value_ty: MIRType, errors: MIRType, source: LIRValueID, box: LIRValueID) Never! {
+    shape :: lower_map_shape(p, ty) ?? return lower_fail(&m, &f, "Decode<{mir_type_display_name(ty)}> has no Map layout")
+    object :: lower_codec_variant(p, tree, "Object") ?? return lower_fail(&m, &f, "checked Dyn has no Object payload")
+    entry :: lower_list_element(object.ty) ?? return lower_fail(&m, &f, "Dyn.Object payload is not a List")
+    members :: lower_inline_members(p, entry)
+    if members.len() != 2 || members[0].name != "key" || members[1].name != "value" -> return lower_fail(&m, &f, "Dyn.Object entries need checked key/value members")
+    route :: lower_codec_under_route(p, &m, &f, errors) ?? return
+    discriminant :: lower_codec_tag(&f, source)
+    done :: lower_new_block(&f)
+    other :: lower_codec_on_tag(&f, discriminant, object.discriminant)
+    entries :: lower_codec_payload(&f, source, object)
+    out :: lower_address(&f, box, lower_result_payload_offset())
+    zero :: lower_const(&f, 0)
+    loop offset in ([Int]{0, 8, 16}) -> lower_emit(&f, LIRInst.Store{base: out, offset: offset, value: zero})
+    failures :: lower_codec_failures(p, &f, errors)
+    decoded_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: value_ty, err: errors})
+    each :: lower_each_begin(p, &f, entries, entry, [LIRValueID]{})
+    key :: lower_read_at(p, &f, each.address, members[0].offset, members[0].ty) ?? return lower_fail(&m, &f, "Dyn.Object key has no storage")
+    item :: lower_read_at(p, &f, each.address, members[1].offset, tree) ?? return lower_fail(&m, &f, "Dyn.Object value has no storage")
+    decoded :: lower_pointer(&f)
+    lower_codec_decode_into(p, &m, &f, value_ty, decoded_ty, tree, item, decoded)
+    failure :: lower_codec_on_ok(&f, decoded)
+    value :: lower_read_at(p, &f, decoded, lower_result_payload_offset(), value_ty) ?? return lower_fail(&m, &f, "Map value has no storage")
+    owned_key :: lower_new_like(&f, key)
+    lower_clone_into(p, &m, &f, key, owned_key, shape.key)
+    lower_call_helper(&m, &f, "map.set", ty, [LIRValueID]{out, owned_key, value}, None)
+    next_entry :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(next_entry, [LIRValueID]{})})
+    lower_start(&f, failure, [LIRValueID]{})
+    lower_codec_absorb(p, &m, &f, route, errors, failures, decoded, key)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(next_entry, [LIRValueID]{})})
+    lower_start(&f, next_entry, [LIRValueID]{})
+    lower_free_shell(&m, &f, decoded, lower_box_size(p, decoded_ty))
+    lower_each_end(&f, each, [LIRValueID]{})
+    lower_codec_settle(p, &m, &f, ty, errors, failures, box)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, other, [LIRValueID]{})
+    reason :: lower_codec_found(p, &m, &f, tree, discriminant, "an object")
+    lower_codec_fail_one(p, &m, &f, errors, reason, box)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+}
+
+// "codec.base64" (borrowed String, Result<[U8], [FieldError]> box to fill):
+// decode_base64(text, false, false) (BaseEncodingStrict.rs:51-276), strict
+// standard base64 with required padding and no whitespace, whose failure is
+// FieldError.one(reason) (EncodingTraits.rs:463-468). Scan and bit assembly
+// share one pass; the quantum checks then run in decode_quanta's order, the
+// unused-bit check last. Scan state lives in one frame slot:
+// [at, first padding offset (-1), padding count, symbols, bit buffer, bits,
+// last symbol offset (-1), output length].
+fn lower_helper_codec_base64(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    target :: if glue.ty.kind == .Result(ok, _) -> ok else -> panic("codec.base64 needs its checked byte List Result")
+    errors :: if glue.ty.kind == .Result(_, err) -> err else -> panic("codec.base64 needs its checked failures")
+    byte :: lower_list_element(target) ?? panic("codec.base64 needs its checked byte List")
+    stride :: lower_list_stride(p, byte)
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
+    text :: f.open_params[0].copy()
+    box :: f.open_params[1].copy()
+    data :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_data", [LIRValueID]{text}, Val(data))
+    length :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_byte_len", [LIRValueID]{text}, Val(length))
+    out :: lower_list_buffer(&m, &f, length, stride)
+    state :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: state, size: 64, align: 8})
+    zero :: lower_const(&f, 0)
+    unset :: lower_const(&f, -1)
+    one :: lower_const(&f, 1)
+    loop offset in ([Int]{0, 16, 24, 32, 40, 56}) -> lower_emit(&f, LIRInst.Store{base: state, offset: offset, value: zero})
+    lower_emit(&f, LIRInst.Store{base: state, offset: 8, value: unset})
+    lower_emit(&f, LIRInst.Store{base: state, offset: 48, value: unset})
+    exit :: lower_new_block(&f)
+    head :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{})})
+    lower_start(&f, head, [LIRValueID]{})
+    at :: lower_list_word(&f, state, 0)
+    more :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Lt, left: at, right: length})
+    body :: lower_new_block(&f)
+    finish :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(finish, [LIRValueID]{})})
+    lower_start(&f, body, [LIRValueID]{})
+    value :: lower_text_byte(&f, data, at)
+    blank :: lower_new_block(&f)
+    loop code in ([Int]{9, 10, 11, 12, 13, 32}) -> lower_text_byte_is(&f, value, code, blank)
+    padding :: lower_new_block(&f)
+    lower_text_byte_is(&f, value, 61, padding)
+    first_pad :: lower_list_word(&f, state, 8)
+    padded :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: padded, condition: LIRCondition.Ge, left: first_pad, right: zero})
+    late :: lower_new_block(&f)
+    symbol :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: padded, then_target: lower_target(late, [LIRValueID]{}), else_target: lower_target(symbol, [LIRValueID]{})})
+    lower_start(&f, symbol, [LIRValueID]{})
+    accept :: lower_new_block(&f)
+    upper :: lower_new_block(&f)
+    lower_check :: lower_new_block(&f)
+    lower_text_byte_between(&f, value, 65, 90, upper, lower_check)
+    lower_start(&f, lower_check, [LIRValueID]{})
+    lowercase :: lower_new_block(&f)
+    digit_check :: lower_new_block(&f)
+    lower_text_byte_between(&f, value, 97, 122, lowercase, digit_check)
+    lower_start(&f, digit_check, [LIRValueID]{})
+    digit :: lower_new_block(&f)
+    marks :: lower_new_block(&f)
+    lower_text_byte_between(&f, value, 48, 57, digit, marks)
+    lower_start(&f, marks, [LIRValueID]{})
+    plus :: lower_new_block(&f)
+    slash :: lower_new_block(&f)
+    lower_text_byte_is(&f, value, 43, plus)
+    lower_text_byte_is(&f, value, 47, slash)
+    lower_codec_base64_fail(p, &m, &f, errors, box, out, length, stride, at, "", Val(value), exit)
+    // std_b64: A-Z 0-25, a-z 26-51, 0-9 52-61, '+' (43) 62, '/' (47) 63.
+    mapped_blocks :: [LIRBlockID]{upper, lowercase, digit, plus, slash}
+    deltas :: [Int]{-65, -71, 4, 19, 16}
+    loop (index, block) in mapped_blocks {
+        lower_start(&f, block, [LIRValueID]{})
+        delta :: lower_const(&f, deltas[index])
+        mapped :: lower_word(&f)
+        lower_emit(&f, LIRInst.Binary{dst: mapped, op: LIRBinaryOp.Add, left: value, right: delta})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(accept, [LIRValueID]{mapped})})
+    }
+    sextet :: lower_word(&f)
+    lower_start(&f, accept, [LIRValueID]{sextet})
+    six :: lower_const(&f, 6)
+    held :: lower_list_word(&f, state, 32)
+    shifted :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: shifted, op: LIRBinaryOp.Shl, left: held, right: six})
+    combined :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: combined, op: LIRBinaryOp.Or, left: shifted, right: sextet})
+    lower_emit(&f, LIRInst.Store{base: state, offset: 32, value: combined})
+    held_bits :: lower_list_word(&f, state, 40)
+    bits :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: bits, op: LIRBinaryOp.Add, left: held_bits, right: six})
+    lower_emit(&f, LIRInst.Store{base: state, offset: 40, value: bits})
+    symbols_before :: lower_list_word(&f, state, 24)
+    symbols_after :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: symbols_after, op: LIRBinaryOp.Add, left: symbols_before, right: one})
+    lower_emit(&f, LIRInst.Store{base: state, offset: 24, value: symbols_after})
+    lower_emit(&f, LIRInst.Store{base: state, offset: 48, value: at})
+    eight :: lower_const(&f, 8)
+    full :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: full, condition: LIRCondition.Ge, left: bits, right: eight})
+    emit :: lower_new_block(&f)
+    step :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: full, then_target: lower_target(emit, [LIRValueID]{}), else_target: lower_target(step, [LIRValueID]{})})
+    lower_start(&f, emit, [LIRValueID]{})
+    rest :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: rest, op: LIRBinaryOp.Sub, left: bits, right: eight})
+    lower_emit(&f, LIRInst.Store{base: state, offset: 40, value: rest})
+    aligned :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: aligned, op: LIRBinaryOp.UShr, left: combined, right: rest})
+    low_byte :: lower_const(&f, 255)
+    produced :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: produced, op: LIRBinaryOp.And, left: aligned, right: low_byte})
+    written :: lower_list_word(&f, state, 56)
+    slot :: lower_list_address(&f, out, written, stride)
+    lower_write_at(p, &f, slot, 0, produced, byte)
+    grown :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: grown, op: LIRBinaryOp.Add, left: written, right: one})
+    lower_emit(&f, LIRInst.Store{base: state, offset: 56, value: grown})
+    // Only the unconsumed low `rest` bits stay buffered.
+    reach :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: reach, op: LIRBinaryOp.Shl, left: one, right: rest})
+    mask :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: mask, op: LIRBinaryOp.Sub, left: reach, right: one})
+    kept :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: kept, op: LIRBinaryOp.And, left: combined, right: mask})
+    lower_emit(&f, LIRInst.Store{base: state, offset: 32, value: kept})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(step, [LIRValueID]{})})
+    lower_start(&f, padding, [LIRValueID]{})
+    pad_seen :: lower_list_word(&f, state, 8)
+    first :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: first, condition: LIRCondition.Lt, left: pad_seen, right: zero})
+    mark :: lower_new_block(&f)
+    counted :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: first, then_target: lower_target(mark, [LIRValueID]{}), else_target: lower_target(counted, [LIRValueID]{})})
+    lower_start(&f, mark, [LIRValueID]{})
+    lower_emit(&f, LIRInst.Store{base: state, offset: 8, value: at})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(counted, [LIRValueID]{})})
+    lower_start(&f, counted, [LIRValueID]{})
+    pads_before :: lower_list_word(&f, state, 16)
+    pads_after :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: pads_after, op: LIRBinaryOp.Add, left: pads_before, right: one})
+    lower_emit(&f, LIRInst.Store{base: state, offset: 16, value: pads_after})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(step, [LIRValueID]{})})
+    lower_start(&f, step, [LIRValueID]{})
+    next_at :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: one})
+    lower_emit(&f, LIRInst.Store{base: state, offset: 0, value: next_at})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{})})
+    lower_start(&f, blank, [LIRValueID]{})
+    lower_codec_base64_fail(p, &m, &f, errors, box, out, length, stride, at, "ASCII whitespace is not allowed", None, exit)
+    lower_start(&f, late, [LIRValueID]{})
+    lower_codec_base64_fail(p, &m, &f, errors, box, out, length, stride, at, "padding may appear only at the end", None, exit)
+    lower_start(&f, finish, [LIRValueID]{})
+    symbols :: lower_list_word(&f, state, 24)
+    pads :: lower_list_word(&f, state, 16)
+    pad_at :: lower_list_word(&f, state, 8)
+    last :: lower_list_word(&f, state, 48)
+    total :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: total, op: LIRBinaryOp.Add, left: symbols, right: pads})
+    three :: lower_const(&f, 3)
+    remainder :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: remainder, op: LIRBinaryOp.And, left: total, right: three})
+    // eof: the first padding offset, else one past the last symbol.
+    after_last :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: after_last, op: LIRBinaryOp.Add, left: last, right: one})
+    has_pad :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: has_pad, condition: LIRCondition.Gt, left: pads, right: zero})
+    pad_eof :: lower_new_block(&f)
+    symbol_eof :: lower_new_block(&f)
+    quanta :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: has_pad, then_target: lower_target(pad_eof, [LIRValueID]{}), else_target: lower_target(symbol_eof, [LIRValueID]{})})
+    lower_start(&f, pad_eof, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(quanta, [LIRValueID]{pad_at})})
+    lower_start(&f, symbol_eof, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(quanta, [LIRValueID]{after_last})})
+    eof :: lower_word(&f)
+    lower_start(&f, quanta, [LIRValueID]{eof})
+    // decode_quanta: a remainder of 1 symbol is never whole bytes; 2 or 3
+    // lack padding.
+    remainders :: [Int]{1, 2, 3}
+    reasons :: [String]{"encoded length cannot represent whole bytes", "expected 2 padding characters", "expected 1 padding characters"}
+    loop (index, rem) in remainders {
+        whole :: lower_codec_on_tag(&f, remainder, rem)
+        lower_codec_base64_fail(p, &m, &f, errors, box, out, length, stride, eof, reasons[index], None, exit)
+        lower_start(&f, whole, [LIRValueID]{})
+    }
+    padded_check :: lower_new_block(&f)
+    bits_check :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: has_pad, then_target: lower_target(padded_check, [LIRValueID]{}), else_target: lower_target(bits_check, [LIRValueID]{})})
+    lower_start(&f, padded_check, [LIRValueID]{})
+    tail :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: tail, op: LIRBinaryOp.And, left: symbols, right: three})
+    tail_other :: lower_codec_on_tag(&f, tail, 1)
+    lower_codec_base64_fail(p, &m, &f, errors, box, out, length, stride, pad_at, "expected 0 padding characters", None, exit)
+    lower_start(&f, tail_other, [LIRValueID]{})
+    // Two trailing symbols need exactly "==", three exactly "=".
+    tails :: [Int]{2, 3}
+    needed :: [Int]{2, 1}
+    loop (index, wanted_tail) in tails {
+        next_tail :: lower_codec_on_tag(&f, tail, wanted_tail)
+        excess :: lower_codec_on_tag(&f, pads, needed[index])
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(bits_check, [LIRValueID]{})})
+        lower_start(&f, excess, [LIRValueID]{})
+        lower_codec_base64_fail(p, &m, &f, errors, box, out, length, stride, pad_at, "unexpected padding", None, exit)
+        lower_start(&f, next_tail, [LIRValueID]{})
+    }
+    lower_codec_base64_fail(p, &m, &f, errors, box, out, length, stride, pad_at, "unexpected padding", None, exit)
+    lower_start(&f, bits_check, [LIRValueID]{})
+    leftover :: lower_list_word(&f, state, 32)
+    dirty :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: dirty, condition: LIRCondition.Ne, left: leftover, right: zero})
+    unused :: lower_new_block(&f)
+    success :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: dirty, then_target: lower_target(unused, [LIRValueID]{}), else_target: lower_target(success, [LIRValueID]{})})
+    lower_start(&f, unused, [LIRValueID]{})
+    lower_codec_base64_fail(p, &m, &f, errors, box, out, length, stride, last, "non-zero unused bits", None, exit)
+    lower_start(&f, success, [LIRValueID]{})
+    produced_count :: lower_list_word(&f, state, 56)
+    lower_emit(&f, LIRInst.Store{base: box, offset: lower_result_payload_offset(), value: produced_count})
+    lower_emit(&f, LIRInst.Store{base: box, offset: lower_result_payload_offset() + 8, value: length})
+    lower_emit(&f, LIRInst.Store{base: box, offset: lower_result_payload_offset() + 16, value: out})
+    lower_store_word(&f, box, 0, lower_result_selector(true))
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(exit, [LIRValueID]{})})
+    lower_start(&f, exit, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+// One decode_base64 failure, "invalid base64 at byte {offset}: {reason}"
+// (BaseEncodingStrict.rs:9-11), as FieldError.one after releasing the
+// partial output; `foreign` is the byte an alphabet failure names as
+// "byte 0x{XX} is not in the standard base64 alphabet". Seals into `exit`.
+fn lower_codec_base64_fail(p: MIRProgram, m: &LowerModule, f: &LowerFunction, errors: MIRType, box: LIRValueID, out: LIRValueID, cap: LIRValueID, stride: Int, offset: LIRValueID, reason: String, foreign: LIRValueID?, exit: LIRBlockID) Never! {
+    lower_list_free_buffer(&m, &f, out, cap, stride)
+    builder :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
+    lower_render_static(&m, &f, builder, "invalid base64 at byte ")
+    number :: lower_render_string(&f)
+    lower_call_runtime(&m, &f, "jet_rt_i64_to_string", [LIRValueID]{offset}, Val(number))
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_push", [LIRValueID]{builder, number}, None)
+    lower_emit(&f, LIRInst.Drop{value: number})
+    lower_render_static(&m, &f, builder, ": ")
+    if foreign == .Val(value) {
+        lower_render_static(&m, &f, builder, "byte 0x")
+        hex :: lower_static_text(&m, &f, "0123456789ABCDEF")
+        one :: lower_const(&f, 1)
+        four :: lower_const(&f, 4)
+        fifteen :: lower_const(&f, 15)
+        high :: lower_word(&f)
+        lower_emit(&f, LIRInst.Binary{dst: high, op: LIRBinaryOp.UShr, left: value, right: four})
+        low :: lower_word(&f)
+        lower_emit(&f, LIRInst.Binary{dst: low, op: LIRBinaryOp.And, left: value, right: fifteen})
+        loop nibble in ([LIRValueID]{high, low}) {
+            glyph :: lower_pointer(&f)
+            lower_emit(&f, LIRInst.PointerAdd{dst: glyph, base: hex[0], offset: nibble})
+            lower_call_runtime(&m, &f, "jet_rt_string_builder_push_static", [LIRValueID]{builder, glyph, one}, None)
+        }
+        lower_render_static(&m, &f, builder, " is not in the standard base64 alphabet")
+    } else {
+        lower_render_static(&m, &f, builder, reason)
+    }
+    message :: lower_render_string(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_finish", [LIRValueID]{builder}, Val(message))
+    lower_codec_fail_one(p, &m, &f, errors, message, box)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(exit, [LIRValueID]{})})
 }
