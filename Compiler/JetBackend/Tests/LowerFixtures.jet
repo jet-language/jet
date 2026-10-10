@@ -720,23 +720,13 @@ fn fx_compare_value(b: &FxBuilder, operation: MIROperation) -> MIRValueID Never!
 // Lower `program`, print its LIR and issues, then write its relocatable object,
 // explicit fresh-pack executable and in-memory image/import manifest.
 fn fx_report(name: String, program: MIRProgram) -> Bool {
-    fx_report_mode(name, program, false)
-}
-
-// Task-control imports exist only in the composed Jet runtime. Static image
-// coverage stays held until native image cutover; never supply fake providers.
-fn fx_report_native(name: String, program: MIRProgram) -> Bool {
-    fx_report_mode(name, program, true)
-}
-
-fn fx_report_mode(name: String, program: MIRProgram, native_only: Bool) -> Bool {
     lowered :: lir_lower_entry(program, mir_function_id("run"))
     print("== {name}")
     print(lir_print_module(lowered.lir))
     loop issue in lowered.issues -> print("issue {issue.function}: {issue.message}")
     if lowered.issues.len() > 0 -> return false
     entry :: lowered.entry ?? panic("lowering without issues has an entry")
-    fx_report_image(name, lowered.lir, entry.value, native_only)
+    fx_report_image(name, lowered.lir, entry.value)
 }
 
 // Runtime witnesses use the same admitted pack as every other fixture.
@@ -747,7 +737,7 @@ fn fx_report_runtime(name: String, program: MIRProgram) -> Bool {
     loop issue in lowered.issues -> print("issue {issue.function}: {issue.message}")
     if lowered.issues.len() > 0 -> return false
     entry :: lowered.entry ?? panic("lowering without issues has an entry")
-    fx_report_image(name, lowered.lir, entry.value, native_only)
+    fx_report_image(name, lowered.lir, entry.value)
 }
 
 // The compile/write half of fx_report for a lint-clean LIR module (hand LIR
@@ -920,6 +910,9 @@ fn run() {
     if !fx_report("lists", fx_lists()) -> clean = false
     if !fx_report("lists-clear", fx_lists_clear()) -> clean = false
     if !fx_report("lists-oob", fx_lists_oob()) -> clean = false
+    if !fx_report("disjoint-split", fx_disjoint_split()) -> clean = false
+    if !fx_report("disjoint-get", fx_disjoint_get()) -> clean = false
+    if !fx_report("disjoint-edit", fx_disjoint_edit()) -> clean = false
     if !fx_report_runtime("para-map", fx_parallel_map()) -> clean = false
     if !fx_report("try-map", fx_closure_try_map_fixture()) -> clean = false
     if !fx_report_runtime("para-map-owned", fx_parallel_map_owned()) -> clean = false
@@ -1062,18 +1055,18 @@ fn run() {
     if !fx_report("statics-map", fx_statics_map()) -> clean = false
     if !fx_report_lir("statics-map-lifetime", fx_statics_map_lifetime()) -> clean = false
     if !fx_report("require-pass", fx_require_pass()) -> clean = false
-    if !fx_report_native("require-native-pass", fx_require_native_pass()) -> clean = false
-    if !fx_report_native("panic-task-checked", fx_panic_capability(true)) -> clean = false
-    if !fx_report_native("panic-task-plain", fx_panic_capability(false)) -> clean = false
-    if !fx_report_native("panic-root-checked", fx_panic_capability(true)) -> clean = false
-    if !fx_report_native("expect-match", fx_expect_fail("match")) -> clean = false
-    if !fx_report_native("expect-mismatch", fx_expect_fail("mismatch")) -> clean = false
-    if !fx_report_native("expect-unmet", fx_expect_fail("unmet")) -> clean = false
-    if !fx_report_native("expect-nested", fx_expect_fail("nested")) -> clean = false
-    if !fx_report_native("expect-r080", fx_expect_fail("r080")) -> clean = false
-    if !fx_report_native("expect-r080-unarmed", fx_expect_fail("r080-unarmed")) -> clean = false
-    if !fx_report_native("expect-deeper-close", fx_expect_fail("deeper-close")) -> clean = false
-    if !fx_report_native("expect-own-close", fx_expect_fail("own-close")) -> clean = false
+    if !fx_report("require-native-pass", fx_require_native_pass()) -> clean = false
+    if !fx_report("panic-task-checked", fx_panic_capability(true)) -> clean = false
+    if !fx_report("panic-task-plain", fx_panic_capability(false)) -> clean = false
+    if !fx_report("panic-root-checked", fx_panic_capability(true)) -> clean = false
+    if !fx_report("expect-match", fx_expect_fail("match")) -> clean = false
+    if !fx_report("expect-mismatch", fx_expect_fail("mismatch")) -> clean = false
+    if !fx_report("expect-unmet", fx_expect_fail("unmet")) -> clean = false
+    if !fx_report("expect-nested", fx_expect_fail("nested")) -> clean = false
+    if !fx_report("expect-r080", fx_expect_fail("r080")) -> clean = false
+    if !fx_report("expect-r080-unarmed", fx_expect_fail("r080-unarmed")) -> clean = false
+    if !fx_report("expect-deeper-close", fx_expect_fail("deeper-close")) -> clean = false
+    if !fx_report("expect-own-close", fx_expect_fail("own-close")) -> clean = false
     if !fx_report("require-fail", fx_require_fail()) -> clean = false
     if !fx_report("require-eq-int", fx_require_eq_int()) -> clean = false
     if !fx_report("require-eq-string", fx_require_eq_string()) -> clean = false

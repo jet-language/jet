@@ -6,7 +6,7 @@
 // copies; a closure argument moved into the method is dropped after it.
 use jet_foundation.[
     MIRCallArg, MIRInstruction, MIRPreludeCall, MIRPreludeCallID, MIRProgram, MIRType,
-    MIRTypeKind, MIRValueID, mir_nominal_ref, mir_type_display_name,
+    MIRTypeKind, MIRTupleField, MIRValueID, mir_nominal_ref, mir_type_display_name,
     mir_type_from_kind,
 ]
 
@@ -93,6 +93,7 @@ fn lower_call_closure_box(p: MIRProgram, m: &LowerModule, f: &LowerFunction, clo
 
 fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, args: [MIRCallArg], call: MIRPreludeCallID) Never! {
     row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "ClosureMethod names missing Prelude call {call.value}")
+    if row.module_name == "core.collections" && row.member == "edit_disjoint" && lower_runtime_symbol(row) == "jet_edit_disjoint" -> return lower_disjoint_edit(p, c, &m, &f, instruction, receiver, args)
     if lower_parallel_method(p, c, &m, &f, instruction, receiver, args, row) -> return
     if lower_lazy_closure_method(p, c, &m, &f, instruction, receiver, args, row) -> return
     unsupported :: "semantic operation ClosureMethod {row.module_name}.{row.member} is not lowered at O0 yet"
@@ -1083,4 +1084,108 @@ fn lower_free_shell(m: &LowerModule, f: &LowerFunction, boxed: LIRValueID, bytes
     size :: lower_const(&f, if bytes < 8 -> 8 else -> bytes)
     align :: lower_const(&f, 8)
     lower_call_runtime(&m, &f, "jet_rt_free", [LIRValueID]{boxed, size, align}, None)
+}
+
+// Exactly two one-element windows are lent to one invocation. Cardinality
+// wins before bounds, and all bounds win before overlap, as Core/Disjoint.rs.
+fn lower_disjoint_edit(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, args: [MIRCallArg]) Never! {
+    if args.len() != 2 -> return lower_fail(&m, &f, "edit_disjoint needs its index list and callback")
+    result_ty :: lower_checked_type(c, instruction) ?? return
+    if result_ty.kind == .Result(ok, err) {
+        if lower_repr(p, ok) != .Absent || err.kind != .String -> return lower_fail(&m, &f, "edit_disjoint requires its checked Unit/String result")
+        receiver_ty :: lower_value_type(c, receiver) ?? return
+        elem :: lower_list_element(receiver_ty) ?? return
+        list :: lower_use(&m, &f, receiver) ?? return
+        indices_ty :: lower_value_type(c, args[0].value) ?? return
+        index_ty :: lower_list_element(indices_ty) ?? return
+        indices :: lower_use(&m, &f, args[0].value) ?? return
+        closure_ty :: lower_value_type(c, args[1].value) ?? return
+        closure :: lower_use(&m, &f, args[1].value) ?? return
+        callback_ret := mir_type_from_kind(MIRTypeKind.Tuple{fields: [MIRTupleField]{}})
+        if closure_ty.kind == .Fn(signature) {
+            if signature.ret == .Val(ret) -> callback_ret = ret
+        }
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return
+        lower_alloc(&m, &f, dst, lower_result_box_size(p, ok, err))
+        count :: lower_list_word(&f, indices, 0)
+        length :: lower_list_word(&f, list, 0)
+        two :: lower_const(&f, 2)
+        wrong_count :: lower_numeric_compare(&f, LIRCondition.Ne, count, two)
+        cardinality :: lower_new_block(&f)
+        bounds :: lower_new_block(&f)
+        done :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: wrong_count, then_target: lower_target(cardinality, [LIRValueID]{}), else_target: lower_target(bounds, [LIRValueID]{})})
+        lower_start(&f, cardinality, [LIRValueID]{})
+        lower_disjoint_fail(p, &m, &f, dst, err, "cardinality", count, length)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, bounds, [LIRValueID]{})
+        index_data :: lower_list_data(&f, indices)
+        checked := [LIRValueID]{}
+        loop position in 0..<2 {
+            offered :: lower_read_at(p, &f, index_data, position * lower_list_stride(p, index_ty), index_ty) ?? return
+            at := offered
+            if lower_is_exact_int(index_ty) {
+                at = lower_word(&f)
+                lower_convert_exact(&m, &f, at, offered, "jet_int_owned_to_i64", false)
+            }
+            invalid :: lower_disjoint_invalid(&f, at, length, false)
+            failure :: lower_new_block(&f)
+            valid :: lower_new_block(&f)
+            lower_seal(&f, LIRTerminator.Branch{condition: invalid, then_target: lower_target(failure, [LIRValueID]{}), else_target: lower_target(valid, [LIRValueID]{})})
+            lower_start(&f, failure, [LIRValueID]{})
+            lower_disjoint_fail(p, &m, &f, dst, err, "index", at, length)
+            lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+            lower_start(&f, valid, [LIRValueID]{})
+            &checked.push(at)
+        }
+        duplicate :: lower_numeric_compare(&f, LIRCondition.Eq, checked[0], checked[1])
+        overlap :: lower_new_block(&f)
+        invoke :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: duplicate, then_target: lower_target(overlap, [LIRValueID]{}), else_target: lower_target(invoke, [LIRValueID]{})})
+        lower_start(&f, overlap, [LIRValueID]{})
+        lower_disjoint_fail(p, &m, &f, dst, err, "duplicate", checked[0], length)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, invoke, [LIRValueID]{})
+        data :: lower_list_data(&f, list)
+        one :: lower_const(&f, 1)
+        windows := [LIRValueID]{}
+        loop at in checked {
+            window :: lower_pointer(&f)
+            lower_emit(&f, LIRInst.StackSlot{dst: window, size: 24, align: 8})
+            address :: lower_list_address(&f, data, at, lower_list_stride(p, elem))
+            lower_disjoint_header(&f, window, one, address)
+            &windows.push(window)
+        }
+        returned :: lower_call_closure_box(p, &m, &f, closure, windows, callback_ret)
+        // A stopped callback may leave its carrier unwritten. Release only live
+        // temporaries, then enter the caller's checked Propagate cleanup edge.
+        if lower_instruction_has_stop_poll(c, f, instruction) {
+            status :: lower_word(&f)
+            lower_call_runtime(&m, &f, "jet_rt_session_propagate", [LIRValueID]{}, Val(status))
+            zero :: lower_const(&f, 0)
+            stopped :: lower_numeric_compare(&f, LIRCondition.Ne, status, zero)
+            stop :: lower_new_block(&f)
+            resume :: lower_new_block(&f)
+            lower_seal(&f, LIRTerminator.Branch{condition: stopped, then_target: lower_target(stop, [LIRValueID]{}), else_target: lower_target(resume, [LIRValueID]{})})
+            lower_start(&f, stop, [LIRValueID]{})
+            scope :: lower_stop_cleanup_enter(&m, &f)
+            bytes :: lower_const(&f, lower_result_box_size(p, ok, err))
+            alignment :: lower_const(&f, 8)
+            lower_call_runtime(&m, &f, "jet_rt_free", [LIRValueID]{dst, bytes, alignment}, None)
+            if args[1].access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
+            lower_stop_cleanup_leave(&m, &f, scope)
+            lower_numeric_stopped(p, Val(c), &m, &f)
+            lower_start(&f, resume, [LIRValueID]{})
+        }
+        if returned == .Val(value) -> lower_map_drop_value(p, &m, &f, value, callback_ret)
+        lower_store_word(&f, dst, 0, lower_result_selector(true))
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, done, [LIRValueID]{})
+        if args[1].access == .Move {
+            scope :: lower_stop_cleanup_enter(&m, &f)
+            lower_map_drop_value(p, &m, &f, closure, closure_ty)
+            lower_stop_cleanup_leave(&m, &f, scope)
+            if lower_instruction_has_stop_poll(c, f, instruction) -> lower_sort_release_guard(p, c, &m, &f, Val(dst), result_ty)
+        }
+    } else { lower_fail(&m, &f, "edit_disjoint requires its checked Result") }
 }

@@ -22,6 +22,21 @@ parent/child Core startup in `Image/Loader.jet` (82fe5a735). LIR debug facts,
 builder source lines and x64 variable ranges are restored from e0628be87;
 optimizer and sanitizer constructors retain those facts across rewrites.
 
+Native `split_write`, `get_disjoint_write`, and `edit_disjoint` lower their
+disjointness proof directly to LIR before producing any mutable descriptor.
+The borrowed `ViewMut` representation remains `[len, 0, data]`: no receiver
+elements are copied or owned by the returned windows. Indexed selection
+checks bounds in request order, then detects duplicates in sorted order and
+restores request order; its descriptor allocation doubles as proof scratch.
+`edit_disjoint` checks cardinality before bounds and overlap, invokes its
+callback exactly once only on success, and releases a moved callback on all
+normal and checked-stop paths. `Tests/Fixtures/Disjoint.jet` supplies one
+production MIR-to-native witness for each operation, including error
+precedence, backing-store mutation, endpoints, and empty selection.
+The `run-lower-fixtures.mjs --disjoint-lowering` mode lowers and lints those
+same MIR programs without a pack; it does not stand in for executing their
+native outputs with the admitted runtime pack.
+
 ### What Cranelift does today (the behaviour to match)
 
 `crates/jet-jit/src/jit/runtime_host.rs` (`new_jit_module`) builds one

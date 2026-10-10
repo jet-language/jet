@@ -283,6 +283,14 @@ fn lower_list_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     _ := lower_list_element(ty) ?? return false
     if row.family != .BuiltinMethod || row.module_name != "core.builtin" -> return false
     symbol :: lower_runtime_symbol(row)
+    if row.member == "split_write" && symbol == "jet_split_write" {
+        lower_disjoint_split(p, c, &m, &f, instruction, receiver, ty, receiver_place, args)
+        return true
+    }
+    if row.member == "get_disjoint_write" && symbol == "jet_get_disjoint_write" {
+        lower_disjoint_get(p, c, &m, &f, instruction, receiver, ty, receiver_place, args)
+        return true
+    }
     if row.member == "list_swap" && symbol == "jet_list_swap" {
         if args.len() != 2 {
             lower_fail(&m, &f, "List.__swap requires two indices")
@@ -1645,4 +1653,271 @@ fn lower_helper_list_remove(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
     lower_emit(&f, LIRInst.Store{base: list, offset: 0, value: last})
     lower_seal(&f, LIRTerminator.Return{value: Val(boxed)})
     lir_builder_finish(f.builder)
+}
+
+// D-MEMDISJOINT1: the proof is complete before any mutable descriptor exists.
+// Result owns its box (and a selected-view List owns only its descriptor
+// buffer); each ViewMut header borrows the original receiver's elements.
+fn lower_disjoint_header(f: &LowerFunction, dst: LIRValueID, count: LIRValueID, data: LIRValueID) Never! {
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: count})
+    lower_store_word(&f, dst, 8, 0)
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: data})
+}
+
+fn lower_disjoint_error(m: &LowerModule, f: &LowerFunction, kind: String, index: LIRValueID, length: LIRValueID) -> LIRValueID Never! {
+    builder :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
+    if kind == "cardinality" {
+        lower_render_static(&m, &f, builder, "edit_disjoint needs exactly two indexes")
+    } else {
+        number :: lower_render_string(&f)
+        lower_call_runtime(&m, &f, "jet_rt_i64_to_string", [LIRValueID]{index}, Val(number))
+        lower_render_static(&m, &f, builder, if kind == "duplicate" -> "duplicate index " else if kind == "split" -> "split point " else -> "index ")
+        lower_call_runtime(&m, &f, "jet_rt_string_builder_push", [LIRValueID]{builder, number}, None)
+        lower_emit(&f, LIRInst.Drop{value: number})
+        if kind == "duplicate" {
+            lower_render_static(&m, &f, builder, " overlaps itself")
+        } else {
+            count :: lower_render_string(&f)
+            lower_call_runtime(&m, &f, "jet_rt_i64_to_string", [LIRValueID]{length}, Val(count))
+            lower_render_static(&m, &f, builder, if kind == "split" -> " is outside 0..=" else -> " is outside 0..")
+            lower_call_runtime(&m, &f, "jet_rt_string_builder_push", [LIRValueID]{builder, count}, None)
+            lower_render_static(&m, &f, builder, " for ")
+            lower_call_runtime(&m, &f, "jet_rt_string_builder_push", [LIRValueID]{builder, count}, None)
+            lower_render_static(&m, &f, builder, " items")
+            lower_emit(&f, LIRInst.Drop{value: count})
+        }
+    }
+    text :: lower_render_string(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_finish", [LIRValueID]{builder}, Val(text))
+    text
+}
+
+fn lower_disjoint_fail(p: MIRProgram, m: &LowerModule, f: &LowerFunction, dst: LIRValueID, err: MIRType, kind: String, index: LIRValueID, length: LIRValueID) Never! {
+    text :: lower_disjoint_error(&m, &f, kind, index, length)
+    lower_store_word(&f, dst, 0, lower_result_selector(false))
+    lower_write_at(p, &f, dst, lower_result_payload_offset(), text, err)
+}
+
+fn lower_disjoint_invalid(f: &LowerFunction, index: LIRValueID, length: LIRValueID, split: Bool) -> LIRValueID Never! {
+    zero :: lower_const(&f, 0)
+    negative :: lower_flag(&f)
+    past :: lower_flag(&f)
+    invalid :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: negative, condition: LIRCondition.Lt, left: index, right: zero})
+    lower_emit(&f, LIRInst.Compare{dst: past, condition: if split -> LIRCondition.Gt else -> LIRCondition.Ge, left: index, right: length})
+    lower_logic(&f, invalid, false, negative, past)
+    invalid
+}
+
+fn lower_disjoint_split(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, receiver_ty: MIRType, receiver_place: MIRPlaceID?, args: [MIRValueID]) Never! {
+    if args.len() != 1 -> return lower_fail(&m, &f, "split_write needs one checked split point")
+    ty :: lower_checked_type(c, instruction) ?? return
+    if ty.kind == .Result(ok, err) {
+        fields :: lower_inline_members(p, ok)
+        if fields.len() != 2 || lower_view_element(fields[0].ty) == None || lower_view_element(fields[1].ty) == None || err.kind != .String -> return lower_fail(&m, &f, "split_write requires its checked two-view/String result")
+        elem :: lower_list_element(receiver_ty) ?? return
+        list :: lower_receiver_header(p, c, &m, &f, receiver_place, "split_write") ?? return
+        at :: lower_list_native_index(c, &m, &f, args[0]) ?? return
+        length :: lower_list_word(&f, list, 0)
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return
+        lower_alloc(&m, &f, dst, lower_result_box_size(p, ok, err))
+        invalid :: lower_disjoint_invalid(&f, at, length, true)
+        failure :: lower_new_block(&f)
+        success :: lower_new_block(&f)
+        done :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: invalid, then_target: lower_target(failure, [LIRValueID]{}), else_target: lower_target(success, [LIRValueID]{})})
+        lower_start(&f, failure, [LIRValueID]{})
+        lower_disjoint_fail(p, &m, &f, dst, err, "split", at, length)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, success, [LIRValueID]{})
+        lower_store_word(&f, dst, 0, lower_result_selector(true))
+        data :: lower_list_data(&f, list)
+        left :: lower_address(&f, dst, lower_result_payload_offset() + fields[0].offset)
+        right :: lower_address(&f, dst, lower_result_payload_offset() + fields[1].offset)
+        remaining :: lower_word(&f)
+        lower_emit(&f, LIRInst.Binary{dst: remaining, op: LIRBinaryOp.Sub, left: length, right: at})
+        from :: lower_list_address(&f, data, at, lower_list_stride(p, elem))
+        lower_disjoint_header(&f, left, at, data)
+        lower_disjoint_header(&f, right, remaining, from)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, done, [LIRValueID]{})
+    } else { lower_fail(&m, &f, "split_write requires its checked Result") }
+}
+
+// The eventual 24-byte descriptor buffer doubles as proof scratch:
+// [native index, original position, unused]. Heap sort is allocation-free
+// O(n log n); permutation cycles restore input order in O(n), after checking
+// adjacent duplicates in sorted order (the Rust error precedence).
+fn lower_disjoint_swap(f: &LowerFunction, buffer: LIRValueID, left: LIRValueID, right: LIRValueID) Never! {
+    a :: lower_list_address(&f, buffer, left, 24)
+    b :: lower_list_address(&f, buffer, right, 24)
+    loop offset in ([Int]{0, 8}) {
+        x :: lower_list_word(&f, a, offset)
+        y :: lower_list_word(&f, b, offset)
+        lower_emit(&f, LIRInst.Store{base: a, offset: offset, value: y})
+        lower_emit(&f, LIRInst.Store{base: b, offset: offset, value: x})
+    }
+}
+
+fn lower_disjoint_key(f: &LowerFunction, buffer: LIRValueID, index: LIRValueID) -> LIRValueID Never! {
+    row :: lower_list_address(&f, buffer, index, 24)
+    lower_list_word(&f, row, 0)
+}
+
+fn lower_disjoint_sift(f: &LowerFunction, buffer: LIRValueID, length: LIRValueID, root: LIRValueID) Never! {
+    head :: lower_new_block(&f)
+    choose :: lower_new_block(&f)
+    right_test :: lower_new_block(&f)
+    take_right :: lower_new_block(&f)
+    selected :: lower_new_block(&f)
+    swap :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    cursor :: lower_word(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{root})})
+    lower_start(&f, head, [LIRValueID]{cursor})
+    two :: lower_const(&f, 2)
+    one :: lower_const(&f, 1)
+    twice :: lower_word(&f)
+    child :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: twice, op: LIRBinaryOp.Mul, left: cursor, right: two})
+    lower_emit(&f, LIRInst.Binary{dst: child, op: LIRBinaryOp.Add, left: twice, right: one})
+    exists :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: exists, condition: LIRCondition.Lt, left: child, right: length})
+    lower_seal(&f, LIRTerminator.Branch{condition: exists, then_target: lower_target(choose, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, choose, [LIRValueID]{})
+    right :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: right, op: LIRBinaryOp.Add, left: child, right: one})
+    has_right :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: has_right, condition: LIRCondition.Lt, left: right, right: length})
+    lower_seal(&f, LIRTerminator.Branch{condition: has_right, then_target: lower_target(right_test, [LIRValueID]{}), else_target: lower_target(selected, [LIRValueID]{child})})
+    lower_start(&f, right_test, [LIRValueID]{})
+    a :: lower_disjoint_key(&f, buffer, child)
+    b :: lower_disjoint_key(&f, buffer, right)
+    greater :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: greater, condition: LIRCondition.Gt, left: b, right: a})
+    lower_seal(&f, LIRTerminator.Branch{condition: greater, then_target: lower_target(take_right, [LIRValueID]{}), else_target: lower_target(selected, [LIRValueID]{child})})
+    lower_start(&f, take_right, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(selected, [LIRValueID]{right})})
+    best :: lower_word(&f)
+    lower_start(&f, selected, [LIRValueID]{best})
+    parent :: lower_disjoint_key(&f, buffer, cursor)
+    biggest :: lower_disjoint_key(&f, buffer, best)
+    ordered :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: ordered, condition: LIRCondition.Ge, left: parent, right: biggest})
+    lower_seal(&f, LIRTerminator.Branch{condition: ordered, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(swap, [LIRValueID]{})})
+    lower_start(&f, swap, [LIRValueID]{})
+    lower_disjoint_swap(&f, buffer, cursor, best)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{best})})
+    lower_start(&f, done, [LIRValueID]{})
+}
+
+fn lower_disjoint_sort(f: &LowerFunction, buffer: LIRValueID, length: LIRValueID) Never! {
+    zero :: lower_const(&f, 0)
+    one :: lower_const(&f, 1)
+    two :: lower_const(&f, 2)
+    parents :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: parents, op: LIRBinaryOp.Div, left: length, right: two})
+    build :: lower_sort_loop(&f, zero, parents)
+    last :: lower_word(&f)
+    root :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: last, op: LIRBinaryOp.Sub, left: parents, right: one})
+    lower_emit(&f, LIRInst.Binary{dst: root, op: LIRBinaryOp.Sub, left: last, right: build.at})
+    lower_disjoint_sift(&f, buffer, length, root)
+    lower_each_end(&f, build, [LIRValueID]{})
+    drain :: lower_sort_loop(&f, one, length)
+    remaining :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: remaining, op: LIRBinaryOp.Sub, left: length, right: drain.at})
+    lower_disjoint_swap(&f, buffer, zero, remaining)
+    lower_disjoint_sift(&f, buffer, remaining, zero)
+    lower_each_end(&f, drain, [LIRValueID]{})
+}
+
+fn lower_disjoint_get(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, receiver_ty: MIRType, receiver_place: MIRPlaceID?, args: [MIRValueID]) Never! {
+    if args.len() != 1 -> return lower_fail(&m, &f, "get_disjoint_write needs one checked index list")
+    ty :: lower_checked_type(c, instruction) ?? return
+    if ty.kind == .Result(ok, err) {
+        view :: lower_list_element(ok) ?? return lower_fail(&m, &f, "get_disjoint_write result must be a view List")
+        elem :: lower_view_element(view) ?? return lower_fail(&m, &f, "get_disjoint_write result must contain checked views")
+        if err.kind != .String -> return lower_fail(&m, &f, "get_disjoint_write error must be String")
+        indices_ty :: lower_value_type(c, args[0]) ?? return
+        index_ty :: lower_list_element(indices_ty) ?? return
+        indices :: lower_use(&m, &f, args[0]) ?? return
+        list :: lower_receiver_header(p, c, &m, &f, receiver_place, "get_disjoint_write") ?? return
+        length :: lower_list_word(&f, list, 0)
+        count :: lower_list_word(&f, indices, 0)
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return
+        lower_alloc(&m, &f, dst, lower_result_box_size(p, ok, err))
+        buffer :: lower_list_buffer(&m, &f, count, 24)
+        zero :: lower_const(&f, 0)
+        one :: lower_const(&f, 1)
+        done :: lower_new_block(&f)
+        scan :: lower_each_begin(p, &f, indices, index_ty, [LIRValueID]{})
+        offered :: lower_read_at(p, &f, scan.address, 0, index_ty) ?? return
+        at := offered
+        if lower_is_exact_int(index_ty) {
+            at = lower_word(&f)
+            lower_convert_exact(&m, &f, at, offered, "jet_int_owned_to_i64", false)
+        }
+        invalid :: lower_disjoint_invalid(&f, at, length, false)
+        failure :: lower_new_block(&f)
+        valid :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: invalid, then_target: lower_target(failure, [LIRValueID]{}), else_target: lower_target(valid, [LIRValueID]{})})
+        lower_start(&f, failure, [LIRValueID]{})
+        lower_list_free_buffer(&m, &f, buffer, count, 24)
+        lower_disjoint_fail(p, &m, &f, dst, err, "index", at, length)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, valid, [LIRValueID]{})
+        row :: lower_list_address(&f, buffer, scan.at, 24)
+        lower_emit(&f, LIRInst.Store{base: row, offset: 0, value: at})
+        lower_emit(&f, LIRInst.Store{base: row, offset: 8, value: scan.at})
+        lower_each_end(&f, scan, [LIRValueID]{})
+        lower_disjoint_sort(&f, buffer, count)
+        pairs :: lower_sort_loop(&f, one, count)
+        before :: lower_word(&f)
+        lower_emit(&f, LIRInst.Binary{dst: before, op: LIRBinaryOp.Sub, left: pairs.at, right: one})
+        previous :: lower_disjoint_key(&f, buffer, before)
+        current :: lower_disjoint_key(&f, buffer, pairs.at)
+        duplicate :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: duplicate, condition: LIRCondition.Eq, left: previous, right: current})
+        overlap :: lower_new_block(&f)
+        distinct :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: duplicate, then_target: lower_target(overlap, [LIRValueID]{}), else_target: lower_target(distinct, [LIRValueID]{})})
+        lower_start(&f, overlap, [LIRValueID]{})
+        lower_list_free_buffer(&m, &f, buffer, count, 24)
+        lower_disjoint_fail(p, &m, &f, dst, err, "duplicate", current, length)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, distinct, [LIRValueID]{})
+        lower_each_end(&f, pairs, [LIRValueID]{})
+        restore :: lower_sort_loop(&f, zero, count)
+        head :: lower_new_block(&f)
+        cycle :: lower_new_block(&f)
+        restored :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{})})
+        lower_start(&f, head, [LIRValueID]{})
+        from :: lower_list_address(&f, buffer, restore.at, 24)
+        position :: lower_list_word(&f, from, 8)
+        placed :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: placed, condition: LIRCondition.Eq, left: position, right: restore.at})
+        lower_seal(&f, LIRTerminator.Branch{condition: placed, then_target: lower_target(restored, [LIRValueID]{}), else_target: lower_target(cycle, [LIRValueID]{})})
+        lower_start(&f, cycle, [LIRValueID]{})
+        lower_disjoint_swap(&f, buffer, restore.at, position)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{})})
+        lower_start(&f, restored, [LIRValueID]{})
+        lower_each_end(&f, restore, [LIRValueID]{})
+        data :: lower_list_data(&f, list)
+        construct :: lower_sort_loop(&f, zero, count)
+        window :: lower_list_address(&f, buffer, construct.at, 24)
+        selected :: lower_list_word(&f, window, 0)
+        address :: lower_list_address(&f, data, selected, lower_list_stride(p, elem))
+        lower_disjoint_header(&f, window, one, address)
+        lower_each_end(&f, construct, [LIRValueID]{})
+        lower_store_word(&f, dst, 0, lower_result_selector(true))
+        output :: lower_address(&f, dst, lower_result_payload_offset())
+        lower_emit(&f, LIRInst.Store{base: output, offset: 0, value: count})
+        lower_emit(&f, LIRInst.Store{base: output, offset: 8, value: count})
+        lower_emit(&f, LIRInst.Store{base: output, offset: 16, value: buffer})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, done, [LIRValueID]{})
+    } else { lower_fail(&m, &f, "get_disjoint_write requires its checked Result") }
 }
