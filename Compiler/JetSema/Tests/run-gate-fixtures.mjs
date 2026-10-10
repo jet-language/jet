@@ -26,6 +26,7 @@ const fixtures = [
     ["gate-ledger", "Compiler/JetSema/Tests/GateLedger.jet"],
     ["gate-projection", "Compiler/JetCli/Tests/GateProjection.jet"],
     ["export-boundary", "Compiler/JetSema/Tests/ExportBoundary.jet"],
+    ["view-field-provenance", "Compiler/JetSema/Tests/ViewFieldProvenance.jet"],
 ];
 for (const [name, path] of fixtures) {
     const project = join(out, name);

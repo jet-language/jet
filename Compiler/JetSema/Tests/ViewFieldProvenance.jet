@@ -52,8 +52,87 @@ fn view_field_case(parameter: Bool, access: AccessConvention, expected: String) 
     view_field_require(nested_facts.len() == 1 && nested_facts[0].slot == [String]{"values", "values"}, "nested aggregate fields preserve every output slot")
 }
 
+// Exercise the production parser and complete Source checker, rather than
+// manufacturing payload facts: both ordinary conditions and dispatch tables
+// must preserve the matched owner's return provenance.
+fn view_pattern_case(name: String, source: String, expected: String) {
+    parsed :: parse_source(source.bytes())
+    view_field_require(!sema_has_error_since(parsed.diagnostics, 0), "{name} parses: {parsed.diagnostics:Debug}")
+    checked :: check_program(parsed.program, "view-pattern", "view-pattern.jet", [SemaSourceSegment]{})
+    codes := [String]{}
+    loop diagnostic in checked.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR && !codes.contains(diagnostic.code) -> &codes.push(diagnostic.code)
+    }
+    if expected != "" {
+        view_field_require(!checked.complete && codes.contains(expected), "{name} rejects {expected}: {checked.diagnostics:Debug}")
+        return
+    }
+    view_field_require(checked.complete && codes.len() == 0, "{name} checks: {checked.diagnostics:Debug}")
+    if name.starts_with("read-payload") {
+        found := false
+        loop function in checked.functions {
+            if function.name != "select" -> next
+            provenance :: function.return_view_provenance ?? panic("{name}: missing parameter provenance")
+            loop entry in provenance.entries {
+                loop source in entry.value.sources {
+                    view_field_require(source.source == ViewSource.Parameter{index: 0}, "{name}: payload still aliases the parameter")
+                    view_field_require(source.projections.contains(ViewSourceProjection.Range), "{name}: payload slice keeps its range projection")
+                    found = true
+                }
+            }
+        }
+        view_field_require(found, "{name}: checked return has actual view sources")
+    }
+}
+
+fn view_pattern_sources() {
+    declaration :: "enum Payload {{ Object([Int]) Array([Int]) }}\n"
+    ordinary :: "if value == .Array(items) {{ return Ok(items[0..<items.len()]) }}\nif value == .Object(items) {{ return Ok(items[0..<items.len()]) }}\npanic(\"no payload\")"
+    table :: "return if value == {{ .Array(items) -> Ok(items[0..<items.len()]) .Object(items) -> Ok(items[0..<items.len()]) }}"
+    view_pattern_case("read-payload-if", "{declaration}fn select(value: Payload) -> View<Int> Err! {{ {ordinary} }}", "")
+    view_pattern_case("read-payload-table", "{declaration}fn select(value: Payload) -> View<Int> Err! {{ {table} }}", "")
+    view_pattern_case("consumed-payload-if", "{declaration}fn select(value: ^Payload) -> View<Int> Err! {{ {ordinary} }}", "E2305")
+    view_pattern_case("consumed-payload-table", "{declaration}fn select(value: ^Payload) -> View<Int> Err! {{ {table} }}", "E2305")
+    view_pattern_case("local-payload-if", "{declaration}fn select() -> View<Int> Err! {{ value :: Payload.Array([Int]{{1}})\n{ordinary} }}", "E2305")
+    view_pattern_case("local-payload-table", "{declaration}fn select() -> View<Int> Err! {{ value :: Payload.Array([Int]{{1}})\n{table} }}", "E2305")
+}
+
+fn view_pattern_reborrows() {
+    declaration :: "enum Value {{ Struct(String, [Field]) List([Value]) Text(String) }}\nstruct Field {{ value: Value }}\n"
+    nested :: "if &fields[i].value == .Struct(_, metadata_fields) {{ if &metadata_fields[j].value == .List(items) {{ &items.push(^item) }} }}"
+    view_pattern_case("nested-write-payload", "{declaration}fn edit(result: &Value, item: ^Value, i: Int, j: Int) {{ if &result == .Struct(_, fields) {{ {nested}\ncount :: fields.len() }} }}", "")
+    view_pattern_case("nested-write-payload-table", "{declaration}fn edit(result: &Value, item: ^Value, i: Int, j: Int) {{ if &result == {{ .Struct(_, fields) -> {{ {nested} }} else -> {{}} }} }}", "")
+    view_pattern_case("nested-write-parent-suspended", "{declaration}fn edit(result: &Value, item: ^Value, i: Int, j: Int) {{ if &result == .Struct(_, fields) {{ if &fields[i].value == .Struct(_, metadata_fields) {{ count :: fields.len()\nif &metadata_fields[j].value == .List(items) {{ &items.push(^item) }} }} }} }}", "E0220")
+    view_pattern_case("nested-write-unrelated-view-conflicts", "{declaration}fn edit(result: &Value, item: ^Value, i: Int, j: Int) {{ if &result == .Struct(_, fields) {{ unrelated :: fields[0..<fields.len()]\n{nested}\ncount :: unrelated.len() }} }}", "E0212")
+    view_pattern_case("inner-owned-match-subject-type", "enum Outer {{ Case(Int) }}\nenum Inner {{ Text(String) Empty }}\nfn inspect(value: Outer) -> Int {{ if value == {{ .Case(number) -> {{ inner :: Inner.Text(\"x\")\nif inner == {{ .Text(text) -> text.count_bytes() .Empty -> 0 }} }} }} }}", "")
+}
+
+fn view_pattern_reinitialization() {
+    declaration :: "struct Inner {{ left: String right: String }}\nstruct Pair {{ inner: Inner other: String }}\nfn consume(value: ^String) {{}}\nfn consume_inner(value: ^Inner) {{}}\n"
+    initial :: "pair := Pair{{inner: Inner{{left: \"left\", right: \"right\"}}, other: \"other\"}}"
+    view_pattern_case("partial-field-reinitialized", "{declaration}fn inspect() -> Int {{ {initial}\nconsume(^pair.inner.left)\npair.inner.left = \"new\"\npair.inner.right.count_bytes() + pair.inner.left.count_bytes() }}", "")
+    view_pattern_case("partial-field-sibling-stays-readable", "{declaration}fn inspect() -> Int {{ {initial}\nconsume(^pair.inner.left)\npair.inner.right.count_bytes() }}", "")
+    view_pattern_case("whole-moved-ancestor-not-reinitialized", "{declaration}fn inspect() -> Int {{ {initial}\nconsume_inner(^pair.inner)\npair.inner.left = \"new\"\npair.inner.right.count_bytes() }}", "E0121")
+    // The state hook itself must retain the whole moved ancestor even when a
+    // caller has already admitted the descendant assignment.
+    span :: Span{start: 10, end: 20}
+    owner :: view_field_symbol("pair", SymbolKind.Local, Type.Named{name: "Pair"}, span)
+    scopes := sema_scope_init("fixture")
+    state := sema_ownership_state_init()
+    view_field_require(sema_scope_declare_local(&scopes, owner, true, AccessConvention.Read, None, false), "reinit owner declared")
+    base :: Expr.Field{base: Expr.Ident{name: "pair", span: span}, member: "inner", span: span}
+    place :: sema_ownership_place_from_expr_inner(base, scopes) ?? panic("missing ancestor place")
+    &state.moved.push(SemaOwnershipMovedPlace{place: place, origin: SemaOwnershipMoveOrigin{span: span, consumer: "consume_inner", share_ty: None}})
+    child :: sema_ownership_place_from_expr_inner(Expr.Field{base: base, member: "left", span: span}, scopes) ?? panic("missing child place")
+    sema_ownership_clear_moved(&state, child)
+    view_field_require(state.moved.len() == 1 && sema_ownership_place_exact(state.moved[0].place, place), "descendant assignment never clears its moved ancestor")
+}
+
 fn run() {
     view_field_case(true, AccessConvention.Read, "")
     view_field_case(false, AccessConvention.Read, "this view points into `values`, which this function owns")
     view_field_case(true, AccessConvention.Move, "this view points into `values`, which this function consumes")
+    view_pattern_sources()
+    view_pattern_reborrows()
+    view_pattern_reinitialization()
 }
