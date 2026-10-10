@@ -98,6 +98,12 @@ per case. The gate supplies concurrency, not a thread pool inside the kit.
 Timeouts must be positive seconds within `Duration`'s representable range;
 out-of-range values are refused before corpus discovery with exit code 2.
 
+UI comparison uses the corpus-relative source ID for the primary diagnostic
+location header, whether the compiler printed that ID or just its basename.
+This same normalization applies to expected and actual text; imported-source
+headers, line/column positions, diagnostic codes, and message bodies remain
+exact. `Tools/testkit/Ui.jet` owns the rule.
+
 Expected files are read-only unless explicitly selected for blessing:
 
 ```sh

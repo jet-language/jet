@@ -150,6 +150,14 @@ fn kit_ui_rendered_only(text: String) -> String {
     "{lines.slice(0, n - 4).join("\n")}\n"
 }
 
+// Internal renderer snapshots use the corpus ID; the public CLI can use its
+// basename. Canonicalize only this primary-source location header, on both
+// comparison sides. Diagnostic bodies and imported-source paths remain exact.
+fn kit_ui_primary_source_headers(shown: String, text: String) -> String {
+    prefix :: "  --> {files.basename(shown)}:"
+    text.split("\n").map(line -> if line.starts_with(prefix) -> "  --> {shown}:{line.removeprefix(prefix)}" else -> line.copy()).to_list().join("\n")
+}
+
 fn kit_ui_normalize(shown: String, actual: String, root: String) -> String {
     text := actual.replace("{root}/", "")
     if shown.ends_with("/workspace.jet") -> text = text.replace(kit_steps_byte_slice(shown, 0, shown.count_bytes() - 14), "/tmp")
@@ -179,7 +187,9 @@ fn kit_ui_snapshot(entry: KitEntry, call: KitUICall, result: KitRun, actual: Str
     if call.streams == "lint" && (result.code != 0 || !actual.split("\n").any(line -> line.starts_with("Warning ["))) -> return kit_expect_verdict("FAIL", "lint fixture must compile and emit a lint")
     if (call.streams == "rendered" || call.streams == "rendered-both") && result.code != 0 && kit_expect_diagnostics(actual) == 0 -> return kit_expect_verdict("ERROR", "compiler failed without a rendered diagnostic")
     expected :: files.join(ctx.root, entry.expected)
-    kit_expect_exact_with_count(entry.path, expected, kit_exec_optional(expected), actual, ctx.bless, (text: String) -[]> kit_expect_diagnostics(text))
+    original :: kit_exec_optional(expected)
+    normalized :: if original == .Val(text) -> Val(kit_ui_primary_source_headers(entry.path, text)) else -> None
+    kit_expect_exact_with_count(entry.path, expected, normalized, kit_ui_primary_source_headers(entry.path, actual), ctx.bless, (text: String) -[]> kit_expect_diagnostics(text))
 }
 
 fn kit_ui_fixed(entry: KitEntry, ctx: KitCtx, source: String, overlay: [KitEnvVar]) -> [KitOutcome] {

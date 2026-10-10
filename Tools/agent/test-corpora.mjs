@@ -94,10 +94,13 @@ export function renderedOnly(text) {
   return text.replace(/\n\n(?:\d+ problems? found|ok: `[^\n]+` has no errors \(\d+ warnings?\))\nrun `jet explain [^\n]+` to learn more\n$/u, '\n');
 }
 
+// Mirror of the canonical kit_ui_primary_source_headers in Tools/testkit/Ui.jet.
+const primarySourceHeaders = (shown, text) => text.split('\n').map(line => line.startsWith(`  --> ${basename(shown)}:`) ? `  --> ${shown}:${line.slice(`  --> ${basename(shown)}:`.length)}` : line).join('\n');
+
 export function snapshotVerdict(entry, run, actual, expected) {
   if (expected === null) return verdict('FAIL', 'missing snapshot');
   if (entry.suite === 'lint' && (run.code !== 0 || !/^Warning \[/mu.test(actual))) return verdict('FAIL', 'lint fixture must compile and emit a lint');
-  return actual === expected ? verdict('PASS') : verdict('FAIL', 'snapshot mismatch');
+  return (entry.shown ? primarySourceHeaders(entry.shown, actual) === primarySourceHeaders(entry.shown, expected) : actual === expected) ? verdict('PASS') : verdict('FAIL', 'snapshot mismatch');
 }
 
 function invoke(binary, args, cwd, env, timeout, stdin = '') {

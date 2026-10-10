@@ -55,6 +55,14 @@ test('internal snapshots discard only the known CLI envelope', () => {
 test('UI normalizer matches Rust lines and repo/workspace normalization', () => {
   assert.equal(normalizeUi('tests/ui/a/workspace.jet', '/repo/tests/ui/a/file\r\nBlocking waiting for file lock on package cache\n', '/repo'), '/tmp/file\n');
 });
+test('primary UI header paths normalize symmetrically without hiding content differences', () => {
+  const entry = { suite: 'ui', shown: 'tests/ui/example.jet' };
+  const short = 'Error [E0109]: mismatch\n  --> example.jet:2:4\n Why: example.jet\n  --> imported.jet:8:3\n';
+  const canonical = short.replace('  --> example.jet:', '  --> tests/ui/example.jet:');
+  assert.equal(snapshotVerdict(entry, run, short, canonical).status, 'PASS');
+  assert.equal(snapshotVerdict(entry, run, canonical, short).status, 'PASS');
+  for (const changed of [short.replace('E0109', 'E0107'), short.replace('mismatch', 'different'), short.replace(':2:4', ':2:5'), short.replace('Why: example.jet', 'Why: tests/ui/example.jet'), short.replace('imported.jet', 'elsewhere.jet')]) assert.equal(snapshotVerdict(entry, run, changed, canonical).status, 'FAIL');
+});
 test('missing snapshots and empty lint output cannot pass', () => {
   assert.equal(snapshotVerdict({ suite: 'ui' }, run, '', null).status, 'FAIL');
   assert.equal(snapshotVerdict({ suite: 'lint' }, run, '', '').status, 'FAIL');

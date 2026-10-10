@@ -33,6 +33,24 @@ fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
     assert_eq(kit_ui_actual(lint, kit_ui_test_run(0, "Warning [L0302]: lint\n\nok: `one.jet` has no errors (1 warning)\nrun `jet explain L0302` to learn more\n")), "Warning [L0302]: lint\n")
 }
 
+#Test("UI comparison normalizes only primary location paths and retains every other mismatch") {
+    root :: kit_ui_test_scratch("primary-source")
+    entry :: KitEntry{path: "tests/ui/example.jet", expected: "tests/ui/example.stderr", project: "tests/ui", suite: "ui", mode: "plain"}
+    call :: kit_ui_invocation("", entry.path, false)
+    ctx :: kit_ui_test_context(root, "case")
+    short :: "Error [E0109]: mismatch\n  --> example.jet:2:4\n Why: example.jet must stay in the message\n  --> imported.jet:8:3\n"
+    canonical :: "Error [E0109]: mismatch\n  --> tests/ui/example.jet:2:4\n Why: example.jet must stay in the message\n  --> imported.jet:8:3\n"
+    assert_eq(kit_ui_primary_source_headers(entry.path, short), canonical)
+    kit_exec_write(files.join(root, entry.expected), canonical)
+    assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, short), short, ctx).status, "PASS")
+    kit_exec_write(files.join(root, entry.expected), short)
+    assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, canonical), canonical, ctx).status, "PASS")
+    loop changed in [short.replace("E0109", "E0107"), short.replace("mismatch", "different"), short.replace(":2:4", ":2:5"), short.replace("Why: example.jet", "Why: tests/ui/example.jet"), short.replace("imported.jet", "elsewhere.jet")] {
+        assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, changed), changed, ctx).status, "FAIL")
+    }
+    files.remove_all(root) ?? panic("remove primary-source scratch: {err}")
+}
+
 #Test("UI directive table preserves argv cwd streams and refuses internal or unknown facts") {
     loop row in kit_ui_directives() {
         argument :: if row.name == "complexity_cli" -> "branches 8" else if row.name == "compiler_extension" -> "Tools/hook.wasm" else -> ""
