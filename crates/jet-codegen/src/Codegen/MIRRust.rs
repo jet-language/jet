@@ -1499,6 +1499,180 @@ pub fn emit_mir_runtime_text(program: &MirProgram, config: &MirRustConfig<'_>) -
     out
 }
 
+/// Measurement only: never admit an artifact after any failed item.
+struct EmissionCensus {
+    enabled: bool,
+    attempted: usize,
+    failures: usize,
+    first_panic: Option<Box<dyn std::any::Any + Send>>,
+}
+
+impl EmissionCensus {
+    fn new() -> Self {
+        Self {
+            enabled: std::env::var("JET_DEBUG_LOWER_ALL").is_ok_and(|value| value == "1"),
+            attempted: 0,
+            failures: 0,
+            first_panic: None,
+        }
+    }
+
+    fn item(
+        &mut self,
+        kind: &str,
+        id: u64,
+        name: &str,
+        span: std::ops::Range<usize>,
+        out: &mut String,
+        emit: impl FnOnce(&mut String),
+    ) -> bool {
+        if !self.enabled {
+            emit(out);
+            return true;
+        }
+        self.attempted += 1;
+        let start = out.len();
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| emit(out))) {
+            Ok(()) => true,
+            Err(payload) => {
+                out.truncate(start);
+                self.failures += 1;
+                let message = emission_panic_message(payload.as_ref());
+                eprintln!(
+                    "JET_DEBUG_LOWER_ALL emission: kind={kind} id={id} name=\"{}\" span={}..{} message=\"{}\"",
+                    jet_foundation::JSON::json_escape(name),
+                    span.start,
+                    span.end,
+                    jet_foundation::JSON::json_escape(message),
+                );
+                if self.first_panic.is_none() {
+                    self.first_panic = Some(payload);
+                }
+                false
+            }
+        }
+    }
+
+    fn finish(self, out: &mut String, program_start: usize) {
+        if self.enabled {
+            eprintln!(
+                "JET_DEBUG_LOWER_ALL emission failures {} of {}",
+                self.failures, self.attempted,
+            );
+        }
+        if let Some(payload) = self.first_panic {
+            out.truncate(program_start);
+            // Keep the original failure and the caller's existing ICE/exit-101
+            // path; collecting evidence must not turn a panic into success.
+            std::panic::resume_unwind(payload);
+        }
+    }
+}
+
+fn emission_panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+    if let Some(message) = payload.downcast_ref::<String>() {
+        message
+    } else if let Some(message) = payload.downcast_ref::<&str>() {
+        message
+    } else {
+        "non-string panic payload"
+    }
+}
+
+#[cfg(test)]
+mod emission_census_tests {
+    use super::{emission_panic_message, EmissionCensus};
+
+    #[test]
+    fn reports_all_bad_items_only_in_collect_mode() {
+        const CHILD: &str = "JET_TEST_EMISSION_CENSUS_CHILD";
+        if let Ok(mode) = std::env::var(CHILD) {
+            let mut census = EmissionCensus::new();
+            let mut out = String::from("prefix");
+            let mut reached_last = false;
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                census.item("type", 11, "bad \"type\"", 3..7, &mut out, |out| {
+                    out.push_str("partial-type");
+                    if mode != "success" {
+                        std::panic::panic_any(String::from("bad type\n\"first\""));
+                    }
+                });
+                census.item("impl", 12, "bad impl", 7..9, &mut out, |out| {
+                    out.push_str("partial-impl");
+                    if mode != "success" {
+                        panic!("bad impl second");
+                    }
+                });
+                census.item("function", 13, "good", 9..10, &mut out, |out| {
+                    out.push_str("good");
+                    reached_last = true;
+                });
+                if mode == "collect" {
+                    assert_eq!(out, "prefixgood", "failed item fragments must be discarded");
+                }
+                census.finish(&mut out, "prefix".len());
+            }));
+            if mode == "success" {
+                assert!(result.is_ok());
+                assert!(reached_last);
+            } else {
+                let payload = result.expect_err("an emission failure must remain an ICE");
+                assert!(payload.downcast_ref::<String>().is_some());
+                assert_eq!(emission_panic_message(payload.as_ref()), "bad type\n\"first\"");
+                assert_eq!(reached_last, mode == "collect");
+                if mode == "collect" {
+                    assert_eq!(out, "prefix", "a failed program must not publish partial Rust");
+                }
+            }
+            return;
+        }
+
+        // A subprocess exercises the real environment gate without mutating
+        // process-global environment or panic hooks beside sibling tests.
+        let module = module_path!().split_once("::").unwrap().1;
+        let test = format!("{module}::reports_all_bad_items_only_in_collect_mode");
+        for mode in ["collect", "normal", "success"] {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command.args(["--exact", &test, "--nocapture"]).env(CHILD, mode);
+            if mode == "normal" {
+                command.env_remove("JET_DEBUG_LOWER_ALL");
+            } else {
+                command.env("JET_DEBUG_LOWER_ALL", "1");
+            }
+            let output = command.output().unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(output.status.success(), "{mode}: {stdout}\n{stderr}");
+            assert!(stdout.contains("1 passed"), "{mode}: child test was not selected: {stdout}");
+            let rows = stderr.lines()
+                .filter(|line| line.starts_with("JET_DEBUG_LOWER_ALL emission:"))
+                .collect::<Vec<_>>();
+            match mode {
+                "collect" => {
+                    assert_eq!(rows.len(), 2, "{stderr}");
+                    assert!(rows[0].contains(
+                        "kind=type id=11 name=\"bad \\\"type\\\"\" span=3..7 message=\"bad type\\n\\\"first\\\"\""
+                    ), "{stderr}");
+                    assert!(rows[1].contains(
+                        "kind=impl id=12 name=\"bad impl\" span=7..9 message=\"bad impl second\""
+                    ), "{stderr}");
+                    assert!(stderr.contains("JET_DEBUG_LOWER_ALL emission failures 2 of 3"));
+                }
+                "normal" => {
+                    assert!(rows.is_empty(), "{stderr}");
+                    assert!(!stderr.contains("bad impl second"), "{stderr}");
+                    assert!(!stderr.contains("emission failures"), "{stderr}");
+                }
+                "success" => {
+                    assert!(rows.is_empty(), "{stderr}");
+                    assert!(stderr.contains("JET_DEBUG_LOWER_ALL emission failures 0 of 3"));
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+}
+
 /// Append a complete Rust fragment from optimized canonical MIR.
 pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: &mut String) {
     let canonical_input = CanonicalPass::enabled().then(|| canonical_payload(program));
@@ -1512,6 +1686,8 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
             panic!("MIR Rust emission requires canonical artifact identity: {error}")
         });
     let emitter = RustEmitter::new(program, config, artifact_identity.clone());
+    let program_start = out.len();
+    let mut census = EmissionCensus::new();
     let target_supports_atomic =
         program
             .facts
@@ -1528,14 +1704,17 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
         config.target.triple
     );
     let mut emitted_methods = BTreeSet::new();
-    emit_runtime_block(&emitter, program, config, out);
+    census.item("support", emitter.artifact.id.0, "runtime", 0..0, out,
+        |out| emit_runtime_block(&emitter, program, config, out));
     // Program items go to their build unit's section (see `EmissionUnits`);
     // without units every sink is `out` itself.
     let mut units = EmissionUnits::new(program);
     if emitter.coverage_enabled() {
         super::push_coverage_prelude(EmissionUnits::sink(&mut units, out, None));
     }
-    emitter.emit_hardware_facts(EmissionUnits::sink(&mut units, out, None));
+    census.item("support", emitter.artifact.id.0, "hardware-facts", 0..0,
+        EmissionUnits::sink(&mut units, out, None),
+        |out| emitter.emit_hardware_facts(out));
     if !emitter.is_no_os() {
         if let jet_foundation::TargetMachine::AllocatorPolicy::Counting { cap } =
             &program.facts.program_allocator
@@ -1551,23 +1730,32 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
     EmissionUnits::sink(&mut units, out, None).push('\n');
 
     if config.execution.emit_metadata {
-        emitter.emit_program_metadata(EmissionUnits::sink(&mut units, out, None));
-        emitter.emit_modules_and_imports(EmissionUnits::sink(&mut units, out, None));
+        census.item("support", emitter.artifact.id.0, "program-metadata", 0..0,
+            EmissionUnits::sink(&mut units, out, None), |out| {
+                emitter.emit_program_metadata(out);
+                emitter.emit_modules_and_imports(out);
+            });
     }
     if config.execution.emit_types {
         for handle in &program.handles {
             if handle.payload.library != "core.process" {
-                emitter.emit_handle_type(handle, EmissionUnits::sink(&mut units, out, None));
+                census.item("handle", handle.id.0, &handle.payload.typedef_name, 0..0,
+                    EmissionUnits::sink(&mut units, out, None),
+                    |out| emitter.emit_handle_type(handle, out));
             }
         }
         let carrierless_records = emitter.used_carrierless_core_records();
         for def in &program.types {
             let unit = units.as_ref().map(|units| units.module_unit(def.module, def.span.start));
             if emitter.declares_type_def(def) || carrierless_records.contains(&def.id) {
-                emitter.emit_type_def(def, EmissionUnits::sink(&mut units, out, unit));
+                census.item("type", def.id.0, &def.key, def.span.start..def.span.end,
+                    EmissionUnits::sink(&mut units, out, unit),
+                    |out| emitter.emit_type_def(def, out));
             }
         }
-        emitter.emit_history_strategies(EmissionUnits::sink(&mut units, out, None));
+        census.item("support", emitter.artifact.id.0, "history-strategies", 0..0,
+            EmissionUnits::sink(&mut units, out, None),
+            |out| emitter.emit_history_strategies(out));
         for trait_def in &program.traits {
             let emit_compiler_rollback = trait_def.name == crate::Syntax::TRAIT_ROLLBACK;
             if emitter.module_selected(trait_def.module)
@@ -1581,11 +1769,15 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
                 let unit = units
                     .as_ref()
                     .map(|units| units.module_unit(trait_def.module, trait_def.span.start));
-                emitter.emit_trait_def(
-                    trait_def,
-                    &mut emitted_methods,
+                if !census.item("trait", trait_def.id.0, &trait_def.key,
+                    trait_def.span.start..trait_def.span.end,
                     EmissionUnits::sink(&mut units, out, unit),
-                );
+                    |out| emitter.emit_trait_def(trait_def, &mut emitted_methods, out))
+                {
+                    // The failed trait owns its default bodies. Do not report
+                    // those again as methods without an implementation row.
+                    emitted_methods.extend(trait_def.methods.iter().filter_map(|method| method.default));
+                }
             }
         }
         // Card #4258: a constant whose every read was copied into its use
@@ -1609,23 +1801,31 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
                 let unit = units
                     .as_ref()
                     .map(|units| units.module_unit(constant.module, constant.span.start));
-                emitter.emit_constant_def(constant, EmissionUnits::sink(&mut units, out, unit));
+                census.item("constant", constant.id.0, &constant.key,
+                    constant.span.start..constant.span.end,
+                    EmissionUnits::sink(&mut units, out, unit),
+                    |out| emitter.emit_constant_def(constant, out));
             }
         }
     }
-    emitter.emit_link_closure(EmissionUnits::sink(&mut units, out, None));
-    emitter.emit_c_abi_records(EmissionUnits::sink(&mut units, out, None));
+    census.item("support", emitter.artifact.id.0, "link-closure", 0..0,
+        EmissionUnits::sink(&mut units, out, None),
+        |out| emitter.emit_link_closure(out));
+    emitter.emit_c_abi_records(EmissionUnits::sink(&mut units, out, None), &mut census);
     if config.execution.emit_foreign {
         for foreign in &program.foreign {
             if emitter.module_selected(foreign.module_id) {
                 let unit = units
                     .as_ref()
                     .map(|units| units.module_unit(foreign.module_id, foreign.span.start));
-                emitter.emit_foreign(foreign, EmissionUnits::sink(&mut units, out, unit));
+                census.item("foreign", foreign.id.0, &foreign.key,
+                    foreign.span.start..foreign.span.end,
+                    EmissionUnits::sink(&mut units, out, unit),
+                    |out| emitter.emit_foreign(foreign, out));
             }
         }
     }
-    emitter.emit_callback_trampolines(EmissionUnits::sink(&mut units, out, None));
+    emitter.emit_callback_trampolines(EmissionUnits::sink(&mut units, out, None), &mut census);
     let codec_keep = demanded_codec_impls(program);
     for (index, implementation) in program.impls.iter().enumerate() {
         if !emitter.module_selected(implementation.module)
@@ -1643,11 +1843,14 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
             Some(def) => units.module_unit(def.module, def.span.start),
             None => units.module_unit(implementation.module, implementation.span.start),
         });
-        emitter.emit_impl(
-            implementation,
-            &mut emitted_methods,
+        if !census.item("impl", implementation.id.0, &implementation.key,
+            implementation.span.start..implementation.span.end,
             EmissionUnits::sink(&mut units, out, unit),
-        );
+            |out| emitter.emit_impl(implementation, &mut emitted_methods, out))
+        {
+            // Skip the whole failed impl, including bodies it did not reach.
+            emitted_methods.extend(implementation.methods.iter().copied());
+        }
     }
     for function in &program.functions {
         if !emitter.module_selected(function.module_id) || !emitter.selected_for_target(function) {
@@ -1658,14 +1861,17 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
                 let unit = units
                     .as_ref()
                     .map(|units| units.file_unit(function.source_file, function.span.start));
-                emitter.emit_function(function, EmissionUnits::sink(&mut units, out, unit));
+                census.item("function", function.id.0, &function.key,
+                    function.span.start..function.span.end,
+                    EmissionUnits::sink(&mut units, out, unit),
+                    |out| emitter.emit_function(function, out));
             }
             MirFunctionForm::Method { .. } | MirFunctionForm::TraitMethod { .. } => {
                 if !emitted_methods.contains(&function.id) {
-                    panic!(
-                        "MIR method {:?} has no selected implementation row",
-                        function.id
-                    );
+                    census.item("function", function.id.0, &function.key,
+                        function.span.start..function.span.end, out, |_| {
+                            panic!("MIR method {:?} has no selected implementation row", function.id);
+                        });
                 }
             }
         }
@@ -1673,10 +1879,13 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
     if let Some(units) = units {
         units.write_sections(out);
     }
-    emitter.emit_web_data_type_registration(out);
-    emitter.emit_exports(out);
-    emitter.emit_entry(out);
-    emitter.emit_harness(out);
+    census.item("support", emitter.artifact.id.0, "web-data-registration", 0..0, out,
+        |out| emitter.emit_web_data_type_registration(out));
+    emitter.emit_exports(out, &mut census);
+    census.item("support", emitter.artifact.id.0, "entry", 0..0, out,
+        |out| emitter.emit_entry(out));
+    census.item("support", emitter.artifact.id.0, "harness", 0..0, out,
+        |out| emitter.emit_harness(out));
     for encoder in emitter.history_capture_encoders.borrow().values() {
         out.push_str(encoder);
     }
@@ -1684,12 +1893,15 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
         if matches!(*arity, 0 | 1 | 3) {
             continue;
         }
+        census.item("support", *arity as u64, "history-callable", 0..0, out, |out| {
         let args = (0..*arity)
             .map(|index| format!(", A{index}"))
             .collect::<String>();
         let _ = writeln!(out, "jet_history_callable!(JetHistoryFn{arity}{args});");
+        });
     }
     for (arity, modes) in emitter.history_callable_modes.borrow().iter() {
+        census.item("support", *arity as u64, modes, 0..0, out, |out| {
         let args = modes
             .chars()
             .enumerate()
@@ -1709,7 +1921,9 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
             out,
             "jet_history_callable!(JetHistoryFn{arity}B{modes}; {args});"
         );
+        });
     }
+    census.finish(out, program_start);
     if let (Some(canonical_input), Some(canonical_input_identity)) =
         (canonical_input, canonical_input_identity)
     {
@@ -14668,14 +14882,27 @@ impl<'a> RustEmitter<'a> {
         self.prelude_symbol(call)
     }
 
-    fn emit_callback_trampolines(&self, out: &mut String) {
+    fn emit_callback_trampolines(&self, out: &mut String, census: &mut EmissionCensus) {
         let mut symbols = BTreeSet::new();
         for callback_id in self.callback_ids() {
             let callback = self
                 .program
                 .callbacks
                 .iter()
-                .find(|callback| callback.id == callback_id)
+                .find(|callback| callback.id == callback_id);
+            let name = callback.map_or("<missing callback row>", |row| row.symbol.as_str());
+            let span = if census.enabled {
+                callback
+                    .and_then(|row| self.function_positions.get(&row.function))
+                    .map_or(0..0, |position| {
+                        let row = &self.program.functions[*position];
+                        row.span.start..row.span.end
+                    })
+            } else {
+                0..0
+            };
+            census.item("callback", callback_id.0, name, span, out, |out| {
+            let callback = callback
                 .unwrap_or_else(|| panic!("MIR callback ID {:?} has no adapter row", callback_id));
             if !symbols.insert(callback.symbol.clone()) {
                 panic!(
@@ -14758,7 +14985,7 @@ impl<'a> RustEmitter<'a> {
                     callback.symbol,
                     self.config.root_prefix,
                 );
-                continue;
+                return;
             }
             if target.params.len() != callback.params.len()
                 || target
@@ -14811,6 +15038,7 @@ impl<'a> RustEmitter<'a> {
                 "#[no_mangle]\npub extern \"{abi}\" fn {}({params}){ret} {{ {boundary}(|| {target_call}) }}\n",
                 callback.symbol,
             );
+            });
         }
     }
 
@@ -14933,7 +15161,7 @@ impl<'a> RustEmitter<'a> {
         row.symbol.clone()
     }
 
-    fn emit_exports(&self, out: &mut String) {
+    fn emit_exports(&self, out: &mut String, census: &mut EmissionCensus) {
         if matches!(
             self.artifact.kind,
             MirArtifactKind::NativeLibrary | MirArtifactKind::SandboxPlugin
@@ -14944,11 +15172,20 @@ impl<'a> RustEmitter<'a> {
             return;
         }
         if self.config.target_kind == MirRustTarget::WebWasm {
-            self.emit_web_exports(out);
+            self.emit_web_exports(out, census);
             return;
         }
         let mut symbols = BTreeSet::new();
         for export in &self.artifact.exports {
+            let span = if census.enabled {
+                self.function_positions.get(&export.function).map_or(0..0, |position| {
+                    let row = &self.program.functions[*position];
+                    row.span.start..row.span.end
+                })
+            } else {
+                0..0
+            };
+            census.item("export", export.function.0, &export.symbol, span, out, |out| {
             let function = self.function_row(export.function);
             if export.symbol.is_empty() {
                 panic!(
@@ -15012,6 +15249,7 @@ impl<'a> RustEmitter<'a> {
                 "#[no_mangle]\npub extern \"{abi}\" fn {}({params}) -> {ret} {{ {call} }}\n",
                 export.symbol
             );
+            });
         }
     }
 
@@ -15159,7 +15397,7 @@ impl<'a> RustEmitter<'a> {
         Ok(())
     }
 
-    fn emit_web_exports(&self, out: &mut String) {
+    fn emit_web_exports(&self, out: &mut String, census: &mut EmissionCensus) {
         let exports = self
             .program
             .functions
@@ -15171,10 +15409,14 @@ impl<'a> RustEmitter<'a> {
                         == Some(jet_foundation::WebPartition::WebPartitionMarker::WasmExport)
             })
             .collect::<Vec<_>>();
-        out.push_str(include_str!("../Prelude/Core/WebAbi.rs"));
-        Self::emit_web_time_zones(out)
-            .unwrap_or_else(|error| panic!("cannot embed checked Web timezone data: {error}"));
+        census.item("support", self.artifact.id.0, "web-abi", 0..0, out, |out| {
+            out.push_str(include_str!("../Prelude/Core/WebAbi.rs"));
+            Self::emit_web_time_zones(out)
+                .unwrap_or_else(|error| panic!("cannot embed checked Web timezone data: {error}"));
+        });
         for function in exports {
+            census.item("export", function.id.0, &function.key,
+                function.span.start..function.span.end, out, |out| {
             if !matches!(function.form, MirFunctionForm::TopLevel)
                 || !function.capture_params.is_empty()
             {
@@ -15256,6 +15498,7 @@ impl<'a> RustEmitter<'a> {
                 function.id.0,
                 params.join(", "),
             );
+            });
         }
     }
 
@@ -29237,7 +29480,7 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
-    fn emit_c_abi_records(&self, out: &mut String) {
+    fn emit_c_abi_records(&self, out: &mut String, census: &mut EmissionCensus) {
         let mut needed = HashSet::new();
         for foreign in &self.program.foreign {
             if !self.module_selected(foreign.module_id)
@@ -29247,12 +29490,15 @@ impl<'a> RustEmitter<'a> {
             {
                 continue;
             }
+            census.item("cabi", foreign.id.0, &foreign.key,
+                foreign.span.start..foreign.span.end, out, |_| {
             for param in &foreign.params {
                 self.collect_c_abi_types(&param.ty, &mut needed);
             }
             if let Some(ty) = &foreign.return_type {
                 self.collect_c_abi_types(ty, &mut needed);
             }
+            });
         }
         for definition in &self.program.types {
             if !self.module_selected(definition.module)
@@ -29267,6 +29513,8 @@ impl<'a> RustEmitter<'a> {
             let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
                 continue;
             };
+            census.item("cabi_type", definition.id.0, &definition.key,
+                definition.span.start..definition.span.end, out, |out| {
             let name = self.c_abi_record_name(definition);
             match definition.layout {
                 Some(MirStructLayout::C) => out.push_str("#[repr(C)]\n"),
@@ -29293,11 +29541,17 @@ impl<'a> RustEmitter<'a> {
                 let _ = writeln!(out, "    {}: {field_ty},", self.field_name(field.id));
             }
             out.push_str("}\n\n");
+            });
         }
-        self.emit_c_abi_enums(out, &needed);
+        self.emit_c_abi_enums(out, &needed, census);
     }
 
-    fn emit_c_abi_enums(&self, out: &mut String, needed: &HashSet<MirTypeId>) {
+    fn emit_c_abi_enums(
+        &self,
+        out: &mut String,
+        needed: &HashSet<MirTypeId>,
+        census: &mut EmissionCensus,
+    ) {
         for definition in &self.program.types {
             if !self.module_selected(definition.module)
                 || !needed.contains(&definition.id)
@@ -29308,9 +29562,11 @@ impl<'a> RustEmitter<'a> {
             {
                 continue;
             }
+            census.item("cabi_type", definition.id.0, &definition.key,
+                definition.span.start..definition.span.end, out, |out| {
             self.c_abi_enum_facts(definition);
             if !self.c_abi_enum_has_payload(definition) {
-                continue;
+                return;
             }
             let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
                 unreachable!();
@@ -29360,6 +29616,7 @@ impl<'a> RustEmitter<'a> {
                 out,
                 "#[repr(C)]\n#[derive(Clone, Copy)]\nstruct {enum_name} {{\n    tag: {tag_name},\n    payload: {payload_name},\n}}\n\n"
             );
+            });
         }
     }
     fn c_abi_encode_enum_ref(

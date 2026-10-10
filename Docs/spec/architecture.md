@@ -302,6 +302,13 @@ end: the Jet code generator, or the transitional
 [`MIRRust`](../../crates/jet-codegen/src/Codegen/MIRRust.rs) emission. These are
 consumers of one checked meaning, not separate front ends.
 
+Trait declaration projection retains the original checked Prelude owner for an
+implicit default error domain. Its effective return type and failure carrier
+come from the same resolved contract, so an implementation and its trait do not
+acquire different nominal `Err` identities. Authored explicit error domains
+remain authored; native emission still checks exact normalized signature
+identity rather than accepting matching display names.
+
 ### Native representation boundaries
 
 The [Jet x86-64 selector](../../Compiler/JetBackend/Source/X64/Select.jet)
@@ -589,6 +596,19 @@ Enum tests and payload reads keep their checked declaration owner when the
 subject is a structural union. A union's shape identity is not a nominal
 definition ID. Only an actual nominal application, possibly under a tag,
 can refine that owner to its checked instance identity.
+
+Only `JET_DEBUG_LOWER_ALL=1` enables the bootstrap Rust emission census.
+Each selected type, trait, implementation, top-level function, constant,
+foreign item, callback/export provider, C-ABI physical type or signature
+discovery, or synthesized support batch is an attempted item. A failure
+records its kind, stable ID, name, source byte span,
+and original reason; absent source spans are `0..0`. Names and reasons use
+JSON string escaping. The failed item's text is discarded and later items
+are attempted. Failed traits and impls also own their skipped method bodies.
+The final `emission failures N of M` counts failed and attempted items,
+independently of MIR's function census. Any failure discards the entire new
+Rust fragment and propagates the first original panic through the existing
+ICE/exit-101 path; normal emission remains fail-fast.
 
 A bare registered Core-carrier trait reference resolves through that carrier's
 one source-module owner and the exact trait/method identity. It cannot match an
