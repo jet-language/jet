@@ -18,8 +18,8 @@ typedef struct {
 _Static_assert(sizeof(Node) == 160 && offsetof(Node, accessibility) == 136 && offsetof(Node, shortcut) == 144, "UiABI");
 extern H jet_ui_raw_accessibility_transfer(H, H, uint8_t);
 extern H jet_ui_raw_shortcut_transfer(H, H, uint8_t);
-extern void jet_rt_handle_drop_JetUiNode(H);
-extern bool jet_rt_handle_eq_JetUiAccessibility(H, H), jet_rt_handle_eq_JetUiShortcut(H, H);
+extern void jet_rt_handle_drop_jet_ui_node(H);
+extern bool jet_rt_handle_eq_jet_ui_accessibility(H, H), jet_rt_handle_eq_jet_ui_shortcut(H, H);
 static H handle(const void *p) { return (H)(uintptr_t)p; }
 static Node *node(H h) { return (Node *)(uintptr_t)h; }
 int main(void) {
@@ -43,21 +43,21 @@ int main(void) {
         assert((out->accessibility != NULL) == (present != 0));
         if (present) {
             assert(out->accessibility != &new_a && out->accessibility->name != &new_name);
-            assert(jet_rt_handle_eq_JetUiAccessibility(handle(out->accessibility), handle(&new_a)));
+            assert(jet_rt_handle_eq_jet_ui_accessibility(handle(out->accessibility), handle(&new_a)));
         }
-        assert(out->shortcut != &old_s && jet_rt_handle_eq_JetUiShortcut(handle(out->shortcut), handle(&old_s)));
+        assert(out->shortcut != &old_s && jet_rt_handle_eq_jet_ui_shortcut(handle(out->shortcut), handle(&old_s)));
         assert(memcmp(&input, &saved, sizeof input) == 0);
-        jet_rt_handle_drop_JetUiNode(a);
+        jet_rt_handle_drop_jet_ui_node(a);
         H s = jet_ui_raw_shortcut_transfer(handle(&input), present ? handle(&new_s) : 1, present ? 255 : 0);
         out = node(s);
         assert((out->shortcut != NULL) == (present != 0));
         if (present) {
             assert(out->shortcut != &new_s && out->shortcut->key != &new_key);
-            assert(jet_rt_handle_eq_JetUiShortcut(handle(out->shortcut), handle(&new_s)));
+            assert(jet_rt_handle_eq_jet_ui_shortcut(handle(out->shortcut), handle(&new_s)));
         }
-        assert(out->accessibility != &old_a && jet_rt_handle_eq_JetUiAccessibility(handle(out->accessibility), handle(&old_a)));
+        assert(out->accessibility != &old_a && jet_rt_handle_eq_jet_ui_accessibility(handle(out->accessibility), handle(&old_a)));
         assert(memcmp(&input, &saved, sizeof input) == 0);
-        jet_rt_handle_drop_JetUiNode(s);
+        jet_rt_handle_drop_jet_ui_node(s);
     }
     return 0;
 }

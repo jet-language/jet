@@ -34,23 +34,23 @@ extern Text *jet_rt_handle_show_##name(Triple *); \
 extern Text *jet_rt_handle_display_##name(Triple *); \
 extern Text *jet_rt_handle_debug_##name(Triple *)
 TRIPLE_API(JetDate,year,month,day); TRIPLE_API(JetPeriod,years,months,days);
-extern Local *jet_rt_handle_clone_JetLocalTime(Local *);
-extern void jet_rt_handle_drop_JetLocalTime(Local *);
-extern bool jet_rt_handle_eq_JetLocalTime(Local *,Local *);
-extern Text *jet_rt_handle_show_JetLocalTime(Local *);
-extern Text *jet_rt_handle_display_JetLocalTime(Local *);
-extern Text *jet_rt_handle_debug_JetLocalTime(Local *);
-extern Duration *jet_rt_record_new_Duration(int64_t);
-extern Duration *jet_rt_handle_clone_Duration(Duration *);
-extern void jet_rt_handle_drop_Duration(Duration *);
-extern bool jet_rt_handle_eq_Duration(Duration *,Duration *);
-extern int64_t jet_rt_record_get_Duration_ns(Duration *);
-extern Text *jet_rt_handle_show_Duration(Duration *);
-extern Text *jet_rt_handle_display_Duration(Duration *);
-extern Text *jet_rt_handle_debug_Duration(Duration *);
-extern Unit *jet_rt_handle_clone_DurationUnit(Unit *);
-extern void jet_rt_handle_drop_DurationUnit(Unit *);
-extern bool jet_rt_handle_eq_DurationUnit(Unit *,Unit *);
+extern Local *jet_rt_handle_clone_jet_local_time(Local *);
+extern void jet_rt_handle_drop_jet_local_time(Local *);
+extern bool jet_rt_handle_eq_jet_local_time(Local *,Local *);
+extern Text *jet_rt_handle_show_jet_local_time(Local *);
+extern Text *jet_rt_handle_display_jet_local_time(Local *);
+extern Text *jet_rt_handle_debug_jet_local_time(Local *);
+extern Duration *jet_rt_record_new_duration(int64_t);
+extern Duration *jet_rt_handle_clone_duration(Duration *);
+extern void jet_rt_handle_drop_duration(Duration *);
+extern bool jet_rt_handle_eq_duration(Duration *,Duration *);
+extern int64_t jet_rt_record_get_duration_ns(Duration *);
+extern Text *jet_rt_handle_show_duration(Duration *);
+extern Text *jet_rt_handle_display_duration(Duration *);
+extern Text *jet_rt_handle_debug_duration(Duration *);
+extern Unit *jet_rt_handle_clone_duration_unit(Unit *);
+extern void jet_rt_handle_drop_duration_unit(Unit *);
+extern bool jet_rt_handle_eq_duration_unit(Unit *,Unit *);
 static struct { void *pointer; int64_t bytes,align; unsigned frees; } watched[16];
 static size_t count;
 static unsigned intercepted;
@@ -103,48 +103,48 @@ static void locals(void) {
     const char *goldens[]={"01:02:03","01:02:03.000000001","01:02:03.100000000","01:02:03.4294967295"};
     for(size_t n=0;n<4;++n) {
         Local *a=jet_rt_alloc(32,8); a->hour=1; a->minute=2; a->second=3; a->nanos=nanos[n]; a->padding=UINT32_MAX;
-        Local *b=jet_rt_handle_clone_JetLocalTime(a);
-        assert(a!=b && b->padding==0 && jet_rt_handle_eq_JetLocalTime(a,b));
+        Local *b=jet_rt_handle_clone_jet_local_time(a);
+        assert(a!=b && b->padding==0 && jet_rt_handle_eq_jet_local_time(a,b));
         int64_t *fields[]={&b->hour,&b->minute,&b->second};
-        for(size_t i=0;i<3;++i) { *fields[i]^=1; assert(!jet_rt_handle_eq_JetLocalTime(a,b)); *fields[i]^=1; }
-        b->nanos^=1; assert(!jet_rt_handle_eq_JetLocalTime(a,b)); b->nanos^=1;
-        b->padding=123; assert(jet_rt_handle_eq_JetLocalTime(a,b));
-        golden(jet_rt_handle_show_JetLocalTime(a),jet_rt_handle_display_JetLocalTime(a),jet_rt_handle_debug_JetLocalTime(a),goldens[n]);
+        for(size_t i=0;i<3;++i) { *fields[i]^=1; assert(!jet_rt_handle_eq_jet_local_time(a,b)); *fields[i]^=1; }
+        b->nanos^=1; assert(!jet_rt_handle_eq_jet_local_time(a,b)); b->nanos^=1;
+        b->padding=123; assert(jet_rt_handle_eq_jet_local_time(a,b));
+        golden(jet_rt_handle_show_jet_local_time(a),jet_rt_handle_display_jet_local_time(a),jet_rt_handle_debug_jet_local_time(a),goldens[n]);
         a->hour=-1; a->minute=100; a->second=-9; a->nanos=0;
-        golden(jet_rt_handle_show_JetLocalTime(a),jet_rt_handle_display_JetLocalTime(a),jet_rt_handle_debug_JetLocalTime(a),"-1:100:-9");
-        watch(a,32,8); watch(b,32,8); jet_rt_handle_drop_JetLocalTime(a); jet_rt_handle_drop_JetLocalTime(b); done();
+        golden(jet_rt_handle_show_jet_local_time(a),jet_rt_handle_display_jet_local_time(a),jet_rt_handle_debug_jet_local_time(a),"-1:100:-9");
+        watch(a,32,8); watch(b,32,8); jet_rt_handle_drop_jet_local_time(a); jet_rt_handle_drop_jet_local_time(b); done();
     }
-    jet_rt_handle_drop_JetLocalTime(NULL);
+    jet_rt_handle_drop_jet_local_time(NULL);
 }
 static void durations(void) {
     const int64_t raws[]={INT64_MIN,INT64_MAX,-1,0,1};
     const char *goldens[]={"-9223372036854775808ns","9223372036854775807ns","-1ns","0ns","1ns"};
     for(size_t i=0;i<5;++i) {
-        int64_t input=jet_int_owned_from_i64(raws[i]); Duration *a=jet_rt_record_new_Duration(input), *b=jet_rt_handle_clone_Duration(a);
-        int64_t first=jet_rt_record_get_Duration_ns(a),second=jet_rt_record_get_Duration_ns(a);
+        int64_t input=jet_int_owned_from_i64(raws[i]); Duration *a=jet_rt_record_new_duration(input), *b=jet_rt_handle_clone_duration(a);
+        int64_t first=jet_rt_record_get_duration_ns(a),second=jet_rt_record_get_duration_ns(a);
         if(i<2) assert(first!=input && second!=input && first!=second);
-        jet_rt_int_drop(input); assert(a->ns==raws[i] && a!=b && jet_rt_handle_eq_Duration(a,b));
+        jet_rt_int_drop(input); assert(a->ns==raws[i] && a!=b && jet_rt_handle_eq_duration(a,b));
         assert(jet_int_owned_to_i64(first)==raws[i] && jet_int_owned_to_i64(second)==raws[i]);
         jet_rt_int_drop(first); jet_rt_int_drop(second);
-        b->ns^=1; assert(!jet_rt_handle_eq_Duration(a,b)); b->ns^=1;
-        golden(jet_rt_handle_show_Duration(a),jet_rt_handle_display_Duration(a),jet_rt_handle_debug_Duration(a),goldens[i]);
-        watch(a,8,8); watch(b,8,8); jet_rt_handle_drop_Duration(a); jet_rt_handle_drop_Duration(b); done();
+        b->ns^=1; assert(!jet_rt_handle_eq_duration(a,b)); b->ns^=1;
+        golden(jet_rt_handle_show_duration(a),jet_rt_handle_display_duration(a),jet_rt_handle_debug_duration(a),goldens[i]);
+        watch(a,8,8); watch(b,8,8); jet_rt_handle_drop_duration(a); jet_rt_handle_drop_duration(b); done();
     }
-    jet_rt_handle_drop_Duration(NULL);
+    jet_rt_handle_drop_duration(NULL);
     for(int64_t i=0;i<6;++i) {
-        Unit *a=jet_rt_alloc(8,8); a->tag=i; Unit *b=jet_rt_handle_clone_DurationUnit(a);
-        assert(a!=b && jet_rt_handle_eq_DurationUnit(a,b)); b->tag=(i+1)%6; assert(!jet_rt_handle_eq_DurationUnit(a,b));
-        watch(a,8,8); watch(b,8,8); jet_rt_handle_drop_DurationUnit(a); jet_rt_handle_drop_DurationUnit(b); done();
+        Unit *a=jet_rt_alloc(8,8); a->tag=i; Unit *b=jet_rt_handle_clone_duration_unit(a);
+        assert(a!=b && jet_rt_handle_eq_duration_unit(a,b)); b->tag=(i+1)%6; assert(!jet_rt_handle_eq_duration_unit(a,b));
+        watch(a,8,8); watch(b,8,8); jet_rt_handle_drop_duration_unit(a); jet_rt_handle_drop_duration_unit(b); done();
     }
-    jet_rt_handle_drop_DurationUnit(NULL);
+    jet_rt_handle_drop_duration_unit(NULL);
 }
 int main(int argc,char **argv) {
     jet_rt_alloc_init();
     if(argc>1) {
         int64_t hi=jet_int_owned_from_i64(INT64_MAX),over=jet_int_add(hi,1);
-        if(strcmp(argv[1],"date-overflow")==0) (void)jet_rt_record_new_JetDate(over,1,1);
-        else if(strcmp(argv[1],"period-overflow")==0) (void)jet_rt_record_new_JetPeriod(0,over,0);
-        else if(strcmp(argv[1],"duration-overflow")==0) (void)jet_rt_record_new_Duration(over);
+        if(strcmp(argv[1],"date-overflow")==0) (void)jet_rt_record_new_jet_date(over,1,1);
+        else if(strcmp(argv[1],"period-overflow")==0) (void)jet_rt_record_new_jet_period(0,over,0);
+        else if(strcmp(argv[1],"duration-overflow")==0) (void)jet_rt_record_new_duration(over);
         else return 2;
         assert(!"overflow mode returned"); return 1;
     }

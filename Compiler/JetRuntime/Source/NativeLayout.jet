@@ -69,7 +69,7 @@ fn layout_combine(left: I64, right: I64, sign: Float) -> I64 {
         }
         if (slot == count) {
             if (count == I64{16}) {
-                jet_rt_handle_drop_LinExpr(result)
+                jet_rt_handle_drop_lin_expr(result)
                 layout_term_overflow()
                 return I64{0}
             }
@@ -115,7 +115,7 @@ fn layout_normalize(row: I64) {
         handle :: jet_rt_layout_new(empty)
         jet_rt_string_drop(empty)
         id = layout_word(handle + I64{8})
-        jet_rt_handle_drop_Handle(handle)
+        jet_rt_handle_drop_handle(handle)
     }
     inner :: layout_word(data_sequence_slot(layout_registry(), id, I64{8}))
     rows :: inner + I64{40}
@@ -127,7 +127,7 @@ fn layout_normalize(row: I64) {
     layout_put(row + I64{272}, op)
     layout_put(row + I64{288}, layout_row_label(index, op))
     layout_normalize(row)
-    jet_rt_handle_drop_LinExpr(combined)
+    jet_rt_handle_drop_lin_expr(combined)
     layout_list_publish(rows)
     layout_put(inner + I64{136}, I64{1})
     result :: jet_rt_alloc(I64{16}, I64{8})

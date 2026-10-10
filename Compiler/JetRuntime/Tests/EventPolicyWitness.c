@@ -7,10 +7,10 @@
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t, int64_t);
 extern void __real_jet_rt_free(void *, int64_t, int64_t);
-extern int64_t *jet_rt_handle_clone_JetHookPolicy(int64_t *);
-extern void jet_rt_handle_drop_JetHookPolicy(int64_t *);
-extern int64_t *jet_rt_handle_clone_JetEventPolicy(int64_t *);
-extern void jet_rt_handle_drop_JetEventPolicy(int64_t *);
+extern int64_t *jet_rt_handle_clone_jet_hook_policy(int64_t *);
+extern void jet_rt_handle_drop_jet_hook_policy(int64_t *);
+extern int64_t *jet_rt_handle_clone_jet_event_policy(int64_t *);
+extern void jet_rt_handle_drop_jet_event_policy(int64_t *);
 typedef int64_t *(*Clone)(int64_t *);
 typedef void (*Drop)(int64_t *);
 static struct { void *pointer; unsigned frees; } watched[3];
@@ -58,8 +58,8 @@ static void policy_cases(Clone clone, Drop drop) {
 }
 int main(void) {
     jet_rt_alloc_init();
-    policy_cases(jet_rt_handle_clone_JetHookPolicy, jet_rt_handle_drop_JetHookPolicy);
-    policy_cases(jet_rt_handle_clone_JetEventPolicy, jet_rt_handle_drop_JetEventPolicy);
+    policy_cases(jet_rt_handle_clone_jet_hook_policy, jet_rt_handle_drop_jet_hook_policy);
+    policy_cases(jet_rt_handle_clone_jet_event_policy, jet_rt_handle_drop_jet_event_policy);
     assert(intercepted != 0);
     puts("EventPolicy/HookPolicy ownership OK");
     return 0;

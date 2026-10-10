@@ -45,7 +45,7 @@ fn time_glue_pad(target: I64, value: I64, width: I64) {
     }
     rt_text_push_number(target, number)
 }
-#Export(c) fn jet_rt_record_new_JetDate(year: I64, month: I64, day: I64) -> I64 {
+#Export(c) fn jet_rt_record_new_jet_date(year: I64, month: I64, day: I64) -> I64 {
     // CAbi10193-10194 is a record ctor, NOT the checked civil constructor.
     y :: jet_int_owned_to_i64(year)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
@@ -59,13 +59,13 @@ fn time_glue_pad(target: I64, value: I64, width: I64) {
     time_glue_store(result + TIME_DATE_DAY, d)
     result
 }
-#Export(c) fn jet_rt_handle_clone_JetDate(value: I64) -> I64 { time_glue_clone(value, TIME_DATE_BYTES) }
-#Export(c) fn jet_rt_handle_drop_JetDate(value: I64) { time_glue_drop(value, TIME_DATE_BYTES) }
-#Export(c) fn jet_rt_handle_eq_JetDate(left: I64, right: I64) -> Bool { time_glue_equal(left, right, TIME_DATE_BYTES) }
-#Export(c) fn jet_rt_record_get_JetDate_year(value: I64) -> I64 { time_glue_int(value, TIME_DATE_YEAR) }
-#Export(c) fn jet_rt_record_get_JetDate_month(value: I64) -> I64 { time_glue_int(value, TIME_DATE_MONTH) }
-#Export(c) fn jet_rt_record_get_JetDate_day(value: I64) -> I64 { time_glue_int(value, TIME_DATE_DAY) }
-#Export(c) fn jet_rt_handle_show_JetDate(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_date(value: I64) -> I64 { time_glue_clone(value, TIME_DATE_BYTES) }
+#Export(c) fn jet_rt_handle_drop_jet_date(value: I64) { time_glue_drop(value, TIME_DATE_BYTES) }
+#Export(c) fn jet_rt_handle_eq_jet_date(left: I64, right: I64) -> Bool { time_glue_equal(left, right, TIME_DATE_BYTES) }
+#Export(c) fn jet_rt_record_get_jet_date_year(value: I64) -> I64 { time_glue_int(value, TIME_DATE_YEAR) }
+#Export(c) fn jet_rt_record_get_jet_date_month(value: I64) -> I64 { time_glue_int(value, TIME_DATE_MONTH) }
+#Export(c) fn jet_rt_record_get_jet_date_day(value: I64) -> I64 { time_glue_int(value, TIME_DATE_DAY) }
+#Export(c) fn jet_rt_handle_show_jet_date(value: I64) -> I64 {
     // Time280-286/1760-1765: negative year uses saturating_abs then width4.
     target :: jet_rt_string_builder_new()
     year := time_glue_word(value + TIME_DATE_YEAR)
@@ -80,9 +80,9 @@ fn time_glue_pad(target: I64, value: I64, width: I64) {
     time_glue_pad(target, time_glue_word(value + TIME_DATE_DAY), I64{2})
     jet_rt_string_builder_finish(target)
 }
-#Export(c) fn jet_rt_handle_display_JetDate(value: I64) -> I64 { jet_rt_handle_show_JetDate(value) }
-#Export(c) fn jet_rt_handle_debug_JetDate(value: I64) -> I64 { jet_rt_handle_show_JetDate(value) }
-#Export(c) fn jet_rt_record_new_JetPeriod(years: I64, months: I64, days: I64) -> I64 {
+#Export(c) fn jet_rt_handle_display_jet_date(value: I64) -> I64 { jet_rt_handle_show_jet_date(value) }
+#Export(c) fn jet_rt_handle_debug_jet_date(value: I64) -> I64 { jet_rt_handle_show_jet_date(value) }
+#Export(c) fn jet_rt_record_new_jet_period(years: I64, months: I64, days: I64) -> I64 {
     y :: jet_int_owned_to_i64(years)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     m :: jet_int_owned_to_i64(months)
@@ -95,13 +95,13 @@ fn time_glue_pad(target: I64, value: I64, width: I64) {
     time_glue_store(result + TIME_PERIOD_DAYS, d)
     result
 }
-#Export(c) fn jet_rt_handle_clone_JetPeriod(value: I64) -> I64 { time_glue_clone(value, TIME_PERIOD_BYTES) }
-#Export(c) fn jet_rt_handle_drop_JetPeriod(value: I64) { time_glue_drop(value, TIME_PERIOD_BYTES) }
-#Export(c) fn jet_rt_handle_eq_JetPeriod(left: I64, right: I64) -> Bool { time_glue_equal(left, right, TIME_PERIOD_BYTES) }
-#Export(c) fn jet_rt_record_get_JetPeriod_years(value: I64) -> I64 { time_glue_int(value, TIME_PERIOD_YEARS) }
-#Export(c) fn jet_rt_record_get_JetPeriod_months(value: I64) -> I64 { time_glue_int(value, TIME_PERIOD_MONTHS) }
-#Export(c) fn jet_rt_record_get_JetPeriod_days(value: I64) -> I64 { time_glue_int(value, TIME_PERIOD_DAYS) }
-#Export(c) fn jet_rt_handle_show_JetPeriod(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_period(value: I64) -> I64 { time_glue_clone(value, TIME_PERIOD_BYTES) }
+#Export(c) fn jet_rt_handle_drop_jet_period(value: I64) { time_glue_drop(value, TIME_PERIOD_BYTES) }
+#Export(c) fn jet_rt_handle_eq_jet_period(left: I64, right: I64) -> Bool { time_glue_equal(left, right, TIME_PERIOD_BYTES) }
+#Export(c) fn jet_rt_record_get_jet_period_years(value: I64) -> I64 { time_glue_int(value, TIME_PERIOD_YEARS) }
+#Export(c) fn jet_rt_record_get_jet_period_months(value: I64) -> I64 { time_glue_int(value, TIME_PERIOD_MONTHS) }
+#Export(c) fn jet_rt_record_get_jet_period_days(value: I64) -> I64 { time_glue_int(value, TIME_PERIOD_DAYS) }
+#Export(c) fn jet_rt_handle_show_jet_period(value: I64) -> I64 {
     // Time619-620: P{years}Y{months}M{days}D, no normalization.
     target :: jet_rt_string_builder_new()
     rt_text_push_word(target, I64{80}, I64{1})
@@ -113,20 +113,20 @@ fn time_glue_pad(target: I64, value: I64, width: I64) {
     rt_text_push_word(target, I64{68}, I64{1})
     jet_rt_string_builder_finish(target)
 }
-#Export(c) fn jet_rt_handle_display_JetPeriod(value: I64) -> I64 { jet_rt_handle_show_JetPeriod(value) }
-#Export(c) fn jet_rt_handle_debug_JetPeriod(value: I64) -> I64 { jet_rt_handle_show_JetPeriod(value) }
-#Export(c) fn jet_rt_handle_clone_JetLocalTime(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_display_jet_period(value: I64) -> I64 { jet_rt_handle_show_jet_period(value) }
+#Export(c) fn jet_rt_handle_debug_jet_period(value: I64) -> I64 { jet_rt_handle_show_jet_period(value) }
+#Export(c) fn jet_rt_handle_clone_jet_local_time(value: I64) -> I64 {
     result :: time_glue_clone(value, TIME_LOCAL_BYTES)
     // Nanos is u32; upper half of its native word is padding, not semantics.
     time_glue_store(result + TIME_LOCAL_NANOS, time_glue_word(value + TIME_LOCAL_NANOS).bit_and(I64{4294967295}))
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetLocalTime(value: I64) { time_glue_drop(value, TIME_LOCAL_BYTES) }
-#Export(c) fn jet_rt_handle_eq_JetLocalTime(left: I64, right: I64) -> Bool {
+#Export(c) fn jet_rt_handle_drop_jet_local_time(value: I64) { time_glue_drop(value, TIME_LOCAL_BYTES) }
+#Export(c) fn jet_rt_handle_eq_jet_local_time(left: I64, right: I64) -> Bool {
     time_glue_equal(left, right, TIME_LOCAL_NANOS) &&
         (time_glue_word(left + TIME_LOCAL_NANOS).bit_and(I64{4294967295})) == (time_glue_word(right + TIME_LOCAL_NANOS).bit_and(I64{4294967295}))
 }
-#Export(c) fn jet_rt_handle_show_JetLocalTime(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_show_jet_local_time(value: I64) -> I64 {
     // Time472-480: nanos unsigned, zero omitted, otherwise minimum 9 digits.
     target :: jet_rt_string_builder_new()
     time_glue_pad(target, time_glue_word(value + TIME_LOCAL_HOUR), I64{2})
@@ -141,28 +141,28 @@ fn time_glue_pad(target: I64, value: I64, width: I64) {
     }
     jet_rt_string_builder_finish(target)
 }
-#Export(c) fn jet_rt_handle_display_JetLocalTime(value: I64) -> I64 { jet_rt_handle_show_JetLocalTime(value) }
-#Export(c) fn jet_rt_handle_debug_JetLocalTime(value: I64) -> I64 { jet_rt_handle_show_JetLocalTime(value) }
-#Export(c) fn jet_rt_record_new_Duration(ns: I64) -> I64 {
+#Export(c) fn jet_rt_handle_display_jet_local_time(value: I64) -> I64 { jet_rt_handle_show_jet_local_time(value) }
+#Export(c) fn jet_rt_handle_debug_jet_local_time(value: I64) -> I64 { jet_rt_handle_show_jet_local_time(value) }
+#Export(c) fn jet_rt_record_new_duration(ns: I64) -> I64 {
     raw :: jet_int_owned_to_i64(ns)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     result :: jet_rt_alloc(TIME_DURATION_BYTES, I64{8})
     time_glue_store(result + TIME_DURATION_NS, raw)
     result
 }
-#Export(c) fn jet_rt_handle_clone_Duration(value: I64) -> I64 { time_glue_clone(value, TIME_DURATION_BYTES) }
-#Export(c) fn jet_rt_handle_drop_Duration(value: I64) { time_glue_drop(value, TIME_DURATION_BYTES) }
-#Export(c) fn jet_rt_handle_eq_Duration(left: I64, right: I64) -> Bool { time_glue_equal(left, right, TIME_DURATION_BYTES) }
-#Export(c) fn jet_rt_record_get_Duration_ns(value: I64) -> I64 { time_glue_int(value, TIME_DURATION_NS) }
-#Export(c) fn jet_rt_handle_show_Duration(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_duration(value: I64) -> I64 { time_glue_clone(value, TIME_DURATION_BYTES) }
+#Export(c) fn jet_rt_handle_drop_duration(value: I64) { time_glue_drop(value, TIME_DURATION_BYTES) }
+#Export(c) fn jet_rt_handle_eq_duration(left: I64, right: I64) -> Bool { time_glue_equal(left, right, TIME_DURATION_BYTES) }
+#Export(c) fn jet_rt_record_get_duration_ns(value: I64) -> I64 { time_glue_int(value, TIME_DURATION_NS) }
+#Export(c) fn jet_rt_handle_show_duration(value: I64) -> I64 {
     // Duration195-197: signed ns followed by the literal "ns".
     target :: jet_rt_string_builder_new()
     rt_text_push_number(target, time_glue_word(value + TIME_DURATION_NS))
     rt_text_push_word(target, I64{29550}, I64{2})
     jet_rt_string_builder_finish(target)
 }
-#Export(c) fn jet_rt_handle_display_Duration(value: I64) -> I64 { jet_rt_handle_show_Duration(value) }
-#Export(c) fn jet_rt_handle_debug_Duration(value: I64) -> I64 { jet_rt_handle_show_Duration(value) }
-#Export(c) fn jet_rt_handle_clone_DurationUnit(value: I64) -> I64 { time_glue_clone(value, TIME_DURATION_UNIT_BYTES) }
-#Export(c) fn jet_rt_handle_drop_DurationUnit(value: I64) { time_glue_drop(value, TIME_DURATION_UNIT_BYTES) }
-#Export(c) fn jet_rt_handle_eq_DurationUnit(left: I64, right: I64) -> Bool { time_glue_equal(left, right, TIME_DURATION_UNIT_BYTES) }
+#Export(c) fn jet_rt_handle_display_duration(value: I64) -> I64 { jet_rt_handle_show_duration(value) }
+#Export(c) fn jet_rt_handle_debug_duration(value: I64) -> I64 { jet_rt_handle_show_duration(value) }
+#Export(c) fn jet_rt_handle_clone_duration_unit(value: I64) -> I64 { time_glue_clone(value, TIME_DURATION_UNIT_BYTES) }
+#Export(c) fn jet_rt_handle_drop_duration_unit(value: I64) { time_glue_drop(value, TIME_DURATION_UNIT_BYTES) }
+#Export(c) fn jet_rt_handle_eq_duration_unit(left: I64, right: I64) -> Bool { time_glue_equal(left, right, TIME_DURATION_UNIT_BYTES) }

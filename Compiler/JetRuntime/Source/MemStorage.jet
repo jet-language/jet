@@ -157,8 +157,8 @@ fn storage_block_reserve(block: I64, offset: I64, bytes: I64) -> I64 {
     storage_word(block) + offset
 }
 
-#Export(c) fn JetArena_new() -> I64 { JetArena_with_capacity(I64{4096}) }
-#Export(c) fn JetArena_with_capacity(capacity_word: I64) -> I64 {
+#Export(c) fn jet_arena_new() -> I64 { jet_arena_with_capacity(I64{4096}) }
+#Export(c) fn jet_arena_with_capacity(capacity_word: I64) -> I64 {
     capacity :: storage_capacity(capacity_word)
     first :: if (capacity == I64{0}) -> I64{1} else -> capacity
     storage_arena_open()
@@ -223,7 +223,7 @@ fn storage_arena_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, 
     }
     storage_put(handle + I64{24}, I64{0})
 }
-#Export(c) fn jet_rt_handle_drop_JetArena(handle: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_arena(handle: I64) {
     if (handle == I64{0}) -> return
     jet_rt_mem_arena_storage_reset(handle)
     storage_arena_close()
@@ -239,8 +239,8 @@ fn storage_arena_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, 
     jet_rt_free(handle, I64{80}, I64{8})
 }
 
-#Export(c) fn JetBump_new() -> I64 { JetBump_with_capacity(I64{65536}) }
-#Export(c) fn JetBump_with_capacity(capacity_word: I64) -> I64 {
+#Export(c) fn jet_bump_new() -> I64 { jet_bump_with_capacity(I64{65536}) }
+#Export(c) fn jet_bump_with_capacity(capacity_word: I64) -> I64 {
     capacity :: storage_capacity(capacity_word)
     first :: if (capacity == I64{0}) -> I64{1} else -> capacity
     storage_arena_open()
@@ -266,7 +266,7 @@ fn storage_bump_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, f
     storage_reset_entries(handle)
     storage_put(handle + I64{24}, I64{0})
 }
-#Export(c) fn jet_rt_handle_drop_JetBump(handle: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_bump(handle: I64) {
     if (handle == I64{0}) -> return
     jet_rt_mem_bump_storage_reset(handle)
     storage_arena_close()
@@ -275,8 +275,8 @@ fn storage_bump_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, f
     jet_rt_free(handle, I64{72}, I64{8})
 }
 
-#Export(c) fn jet_rt_mem_pool_storage_new() -> I64 { JetPool_with_slots(I64{64}) }
-#Export(c) fn JetPool_with_slots(slots_word: I64) -> I64 {
+#Export(c) fn jet_rt_mem_pool_storage_new() -> I64 { jet_pool_with_slots(I64{64}) }
+#Export(c) fn jet_pool_with_slots(slots_word: I64) -> I64 {
     slots :: storage_capacity(slots_word)
     if (slots > I64{9223372036854775807} /% I64{40}) -> panic("capacity overflow")
     storage_arena_open()
@@ -353,7 +353,7 @@ fn storage_pool_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, f
     next :: wrapping(storage_word(handle + I64{24}) + I64{1})
     storage_put(handle + I64{24}, if (next == I64{0}) -> I64{1} else -> next)
 }
-#Export(c) fn jet_rt_handle_drop_JetPool(handle: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_pool(handle: I64) {
     if (handle == I64{0}) -> return
     jet_rt_mem_pool_storage_reset(handle)
     storage_arena_close()
@@ -450,7 +450,7 @@ fn storage_fixed_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, 
     storage_put(handle + I64{48}, I64{0})
     storage_arena_reset(allocations, bytes)
 }
-#Export(c) fn jet_rt_handle_drop_JetFixed(handle: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_fixed(handle: I64) {
     if (handle == I64{0}) -> return
     jet_rt_mem_fixed_storage_reset(handle)
     // Fixed never frees its borrowed backing; the Rust adapter releases its

@@ -4,15 +4,15 @@
 HTTP_ERROR_BYTES :: prep { I64{16} }
 HTTP_ERROR_TAG :: prep { I64{0} }
 HTTP_ERROR_PAYLOAD :: prep { I64{8} }
-#Export(c) fn jet_rt_handle_clone_JetHTTPOperation(value: I64) -> I64 { encoding_enum_clone(value) }
-#Export(c) fn jet_rt_handle_drop_JetHTTPOperation(value: I64) { encoding_enum_drop(value) }
-#Export(c) fn jet_rt_handle_eq_JetHTTPOperation(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_jet_http_operation(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_http_operation(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_http_operation(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
 fn http_error_tag(value: I64) -> I64 {
     ordinal :: encoding_word(value + HTTP_ERROR_TAG)
     if (ordinal < I64{0} || ordinal > I64{20}) -> rt_record_variant_panic()
     ordinal
 }
-#Export(c) fn jet_rt_handle_clone_JetHTTPError(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_http_error(value: I64) -> I64 {
     ordinal :: http_error_tag(value)
     payload :: encoding_word(value + HTTP_ERROR_PAYLOAD)
     result :: jet_rt_alloc(HTTP_ERROR_BYTES, I64{8})
@@ -20,13 +20,13 @@ fn http_error_tag(value: I64) -> I64 {
     encoding_store(result + HTTP_ERROR_PAYLOAD, if (ordinal >= I64{9} && ordinal <= I64{19}) -> jet_rt_string_clone(payload) else -> payload)
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetHTTPError(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_http_error(value: I64) {
     if (value == I64{0}) -> return
     ordinal :: http_error_tag(value)
     if (ordinal >= I64{9} && ordinal <= I64{19}) -> jet_rt_string_drop(encoding_word(value + HTTP_ERROR_PAYLOAD))
     jet_rt_free(value, HTTP_ERROR_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetHTTPError(left: I64, right: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_http_error(left: I64, right: I64) -> Bool {
     ordinal :: http_error_tag(left)
     if (ordinal != http_error_tag(right)) -> return false
     if (ordinal < I64{8}) -> return true
@@ -142,7 +142,7 @@ fn http_error_prefix(target: I64, ordinal: I64) {
         else -> rt_text_push_word(target, I64{138786657352}, I64{5}) // HTTP (tag20)
     }
 }
-#Export(c) fn jet_rt_handle_show_JetHTTPError(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_show_jet_http_error(value: I64) -> I64 {
     ordinal :: http_error_tag(value)
     payload :: encoding_word(value + HTTP_ERROR_PAYLOAD)
     if (ordinal == I64{20} && (payload < I64{0} || payload > I64{2})) -> rt_record_variant_panic()
@@ -177,5 +177,5 @@ fn http_error_prefix(target: I64, ordinal: I64) {
     }
     jet_rt_string_builder_finish(target)
 }
-#Export(c) fn jet_rt_handle_display_JetHTTPError(value: I64) -> I64 { jet_rt_handle_show_JetHTTPError(value) }
-#Export(c) fn jet_rt_handle_debug_JetHTTPError(value: I64) -> I64 { jet_rt_handle_show_JetHTTPError(value) }
+#Export(c) fn jet_rt_handle_display_jet_http_error(value: I64) -> I64 { jet_rt_handle_show_jet_http_error(value) }
+#Export(c) fn jet_rt_handle_debug_jet_http_error(value: I64) -> I64 { jet_rt_handle_show_jet_http_error(value) }

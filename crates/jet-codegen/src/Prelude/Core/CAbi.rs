@@ -530,7 +530,7 @@ mod jet_c_abi {
     // the process with its report and exit status 1.
 
     /// Ends the process with the report of `error` (taken, from
-    /// jet_rt_record_new_JetErr).
+    /// jet_rt_record_new_jet_err).
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_entry_error_exit_err(error: *mut super::JetErr) {
@@ -585,7 +585,7 @@ mod jet_c_abi {
     // Same-name canonical Err88 provider owns this ABI in native packs.
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_JetErr(message: JetCString, code: *const JetCString, cause: *mut super::JetErr) -> *mut super::JetErr {
+    pub extern "C" fn jet_rt_record_new_jet_err(message: JetCString, code: *const JetCString, cause: *mut super::JetErr) -> *mut super::JetErr {
         guard(|| {
             let cause = if cause.is_null() { Err(super::JetAbsent) } else { Ok(take_record(cause)) };
             record(super::jet_err(view(message).to_owned(), option_text(code), cause))
@@ -594,21 +594,21 @@ mod jet_c_abi {
 
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_JetErr_message(error: *mut super::JetErr) -> JetCString {
+    pub extern "C" fn jet_rt_record_get_jet_err_message(error: *mut super::JetErr) -> JetCString {
         // SAFETY: `error` is a live handle the caller lends for this call.
         guard(|| handle(super::jet_err_message(unsafe { &*error })))
     }
 
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_JetErr_code(error: *mut super::JetErr, some: *mut JetCString) -> i64 {
+    pub extern "C" fn jet_rt_record_get_jet_err_code(error: *mut super::JetErr, some: *mut JetCString) -> i64 {
         // SAFETY: `error` is a live handle the caller lends for this call.
         guard(|| some_text(some, &super::jet_err_code(unsafe { &*error })))
     }
 
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_JetErr_cause(error: *mut super::JetErr, some: *mut *mut super::JetErr) -> i64 {
+    pub extern "C" fn jet_rt_record_get_jet_err_cause(error: *mut super::JetErr, some: *mut *mut super::JetErr) -> i64 {
         // SAFETY: `error` is a live handle the caller lends; `some` is its zeroed out slot.
         guard(|| match super::jet_err_cause(unsafe { &*error }) {
             Ok(cause) => { unsafe { some.write(record(cause)) }; 1 }
@@ -646,7 +646,7 @@ mod jet_c_abi {
         }
 
         #[no_mangle]
-        pub extern "C" fn jet_rt_record_new_IOContext(operation: i64, resource: *const JetCString, os_code: *const i64, cause: *const JetCString) -> *mut JetCIOContext {
+        pub extern "C" fn jet_rt_record_new_io_context(operation: i64, resource: *const JetCString, os_code: *const i64, cause: *const JetCString) -> *mut JetCIOContext {
             guard(|| {
                 if !(0..8).contains(&operation) { record_index_stop(); }
                 carrier(JetCIOContext {
@@ -659,17 +659,17 @@ mod jet_c_abi {
         }
 
         #[no_mangle]
-        pub extern "C" fn jet_rt_record_get_IOContext_operation(context: *mut JetCIOContext) -> i64 {
+        pub extern "C" fn jet_rt_record_get_io_context_operation(context: *mut JetCIOContext) -> i64 {
             guard(|| unsafe { (*context).operation })
         }
 
         #[no_mangle]
-        pub extern "C" fn jet_rt_record_get_IOContext_resource(context: *mut JetCIOContext, some: *mut JetCString) -> i64 {
+        pub extern "C" fn jet_rt_record_get_io_context_resource(context: *mut JetCIOContext, some: *mut JetCString) -> i64 {
             guard(|| text_out(unsafe { (*context).resource }, some))
         }
 
         #[no_mangle]
-        pub extern "C" fn jet_rt_record_get_IOContext_os_code(context: *mut JetCIOContext, some: *mut i64) -> i64 {
+        pub extern "C" fn jet_rt_record_get_io_context_os_code(context: *mut JetCIOContext, some: *mut i64) -> i64 {
             guard(|| {
                 let value = unsafe { &*context };
                 if value.has_os_code == 0 { return 0; }
@@ -679,12 +679,12 @@ mod jet_c_abi {
         }
 
         #[no_mangle]
-        pub extern "C" fn jet_rt_record_get_IOContext_cause(context: *mut JetCIOContext, some: *mut JetCString) -> i64 {
+        pub extern "C" fn jet_rt_record_get_io_context_cause(context: *mut JetCIOContext, some: *mut JetCString) -> i64 {
             guard(|| text_out(unsafe { (*context).cause }, some))
         }
 
         #[no_mangle]
-        pub extern "C" fn jet_rt_record_tag_IOError(error: *mut JetCIOError) -> i64 {
+        pub extern "C" fn jet_rt_record_tag_io_error(error: *mut JetCIOError) -> i64 {
             guard(|| unsafe { (*error).kind })
         }
 
@@ -722,20 +722,20 @@ mod jet_c_abi {
         }
 
         io_error_context_variants! {
-            0: jet_rt_record_get_IOError_InvalidInput, jet_rt_record_new_IOError_InvalidInput;
-            1: jet_rt_record_get_IOError_NotFound, jet_rt_record_new_IOError_NotFound;
-            2: jet_rt_record_get_IOError_PermissionDenied, jet_rt_record_new_IOError_PermissionDenied;
-            3: jet_rt_record_get_IOError_TimedOut, jet_rt_record_new_IOError_TimedOut;
-            4: jet_rt_record_get_IOError_Cancelled, jet_rt_record_new_IOError_Cancelled;
-            5: jet_rt_record_get_IOError_Closed, jet_rt_record_new_IOError_Closed;
-            6: jet_rt_record_get_IOError_Protocol, jet_rt_record_new_IOError_Protocol;
-            7: jet_rt_record_get_IOError_Other, jet_rt_record_new_IOError_Other;
-            9: jet_rt_record_get_IOError_AlreadyExists, jet_rt_record_new_IOError_AlreadyExists;
-            10: jet_rt_record_get_IOError_Unsupported, jet_rt_record_new_IOError_Unsupported;
+            0: jet_rt_record_get_io_error_invalid_input, jet_rt_record_new_io_error_invalid_input;
+            1: jet_rt_record_get_io_error_not_found, jet_rt_record_new_io_error_not_found;
+            2: jet_rt_record_get_io_error_permission_denied, jet_rt_record_new_io_error_permission_denied;
+            3: jet_rt_record_get_io_error_timed_out, jet_rt_record_new_io_error_timed_out;
+            4: jet_rt_record_get_io_error_cancelled, jet_rt_record_new_io_error_cancelled;
+            5: jet_rt_record_get_io_error_closed, jet_rt_record_new_io_error_closed;
+            6: jet_rt_record_get_io_error_protocol, jet_rt_record_new_io_error_protocol;
+            7: jet_rt_record_get_io_error_other, jet_rt_record_new_io_error_other;
+            9: jet_rt_record_get_io_error_already_exists, jet_rt_record_new_io_error_already_exists;
+            10: jet_rt_record_get_io_error_unsupported, jet_rt_record_new_io_error_unsupported;
         }
 
         #[no_mangle]
-        pub extern "C" fn jet_rt_record_get_IOError_ResourceLimit(error: *mut JetCIOError) -> i64 {
+        pub extern "C" fn jet_rt_record_get_io_error_resource_limit(error: *mut JetCIOError) -> i64 {
             guard(|| {
                 let value = unsafe { &*error };
                 if value.kind != 8 { record_index_stop(); }
@@ -744,7 +744,7 @@ mod jet_c_abi {
         }
 
         #[no_mangle]
-        pub extern "C" fn jet_rt_record_new_IOError_ResourceLimit(limit: i64) -> *mut JetCIOError {
+        pub extern "C" fn jet_rt_record_new_io_error_resource_limit(limit: i64) -> *mut JetCIOError {
             guard(|| {
                 if !(0..5).contains(&limit) { record_index_stop(); }
                 carrier(JetCIOError {
@@ -755,12 +755,12 @@ mod jet_c_abi {
         }
 
         #[no_mangle]
-        pub extern "C" fn jet_rt_record_tag_JetTaskFailure(failure: *mut JetCTaskFailure) -> i64 {
+        pub extern "C" fn jet_rt_record_tag_jet_task_failure(failure: *mut JetCTaskFailure) -> i64 {
             guard(|| unsafe { (*failure).tag })
         }
 
         #[no_mangle]
-        pub extern "C" fn jet_rt_record_get_JetTaskFailure_Panicked(failure: *mut JetCTaskFailure) -> JetCString {
+        pub extern "C" fn jet_rt_record_get_jet_task_failure_panicked(failure: *mut JetCTaskFailure) -> JetCString {
             guard(|| {
                 let value = unsafe { &*failure };
                 if value.tag != 2 { record_index_stop(); }
@@ -769,17 +769,17 @@ mod jet_c_abi {
         }
 
         #[no_mangle]
-        pub extern "C" fn jet_rt_record_new_JetTaskFailure_Cancelled() -> *mut JetCTaskFailure {
+        pub extern "C" fn jet_rt_record_new_jet_task_failure_cancelled() -> *mut JetCTaskFailure {
             guard(|| carrier(JetCTaskFailure { tag: 0, reason: std::ptr::null_mut() }))
         }
 
         #[no_mangle]
-        pub extern "C" fn jet_rt_record_new_JetTaskFailure_DeadlineBlown() -> *mut JetCTaskFailure {
+        pub extern "C" fn jet_rt_record_new_jet_task_failure_deadline_blown() -> *mut JetCTaskFailure {
             guard(|| carrier(JetCTaskFailure { tag: 1, reason: std::ptr::null_mut() }))
         }
 
         #[no_mangle]
-        pub extern "C" fn jet_rt_record_new_JetTaskFailure_Panicked(reason: JetCString) -> *mut JetCTaskFailure {
+        pub extern "C" fn jet_rt_record_new_jet_task_failure_panicked(reason: JetCString) -> *mut JetCTaskFailure {
             guard(|| carrier(JetCTaskFailure { tag: 2, reason: clone_text(reason) }))
         }
     }

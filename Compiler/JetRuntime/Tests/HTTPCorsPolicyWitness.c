@@ -15,14 +15,14 @@ extern void __real_jet_rt_free(void *,int64_t,int64_t);
 extern Text *jet_rt_string_from_static(const void *,int64_t);
 extern Text *jet_rt_string_clone(Text *);
 extern void jet_rt_string_drop(Text *);
-extern Policy *jet_rt_handle_clone_JetHTTPCorsPolicy(Policy *);
-extern void jet_rt_handle_drop_JetHTTPCorsPolicy(Policy *);
-extern Origins *jet_rt_handle_clone_JetHTTPCorsOrigins(Origins *);
-extern void jet_rt_handle_drop_JetHTTPCorsOrigins(Origins *);
-extern const Origins *jet_rt_handle_field_JetHTTPCorsPolicy_origins(Policy *);
-extern const unsigned char *jet_rt_handle_field_JetHTTPCorsPolicy_credentials(Policy *);
-extern void jet_rt_handle_field_JetHTTPCorsPolicy_allow_methods(Policy *,Text *);
-extern void jet_rt_handle_field_JetHTTPCorsPolicy_allow_headers(Policy *,Text *);
+extern Policy *jet_rt_handle_clone_jet_http_cors_policy(Policy *);
+extern void jet_rt_handle_drop_jet_http_cors_policy(Policy *);
+extern Origins *jet_rt_handle_clone_jet_http_cors_origins(Origins *);
+extern void jet_rt_handle_drop_jet_http_cors_origins(Origins *);
+extern const Origins *jet_rt_handle_field_jet_http_cors_policy_origins(Policy *);
+extern const unsigned char *jet_rt_handle_field_jet_http_cors_policy_credentials(Policy *);
+extern void jet_rt_handle_field_jet_http_cors_policy_allow_methods(Policy *,Text *);
+extern void jet_rt_handle_field_jet_http_cors_policy_allow_headers(Policy *,Text *);
 static struct { void *p; int64_t n,a; unsigned freed; } watched[40];
 static size_t count;
 void __wrap_jet_rt_free(void *p,int64_t n,int64_t a) {
@@ -49,25 +49,25 @@ static void run(int64_t ordinal,int64_t credential) {
         l->data[0]=text("https://example.com"); l->data[1]=text(""); p->origins.payload=l;
     }
     p->methods=text("GET, POST"); p->headers=text("content-type"); p->credentials=credential; p->max_age=INT64_MAX;
-    Text method_view,header_view; jet_rt_handle_field_JetHTTPCorsPolicy_allow_methods(p,&method_view); jet_rt_handle_field_JetHTTPCorsPolicy_allow_headers(p,&header_view);
+    Text method_view,header_view; jet_rt_handle_field_jet_http_cors_policy_allow_methods(p,&method_view); jet_rt_handle_field_jet_http_cors_policy_allow_headers(p,&header_view);
     assert(method_view.data==p->methods->data && header_view.data==p->headers->data);
     assert(method_view.capacity==p->methods->capacity && header_view.capacity==p->headers->capacity);
-    assert(jet_rt_handle_field_JetHTTPCorsPolicy_origins(p)==&p->origins);
-    assert(jet_rt_handle_field_JetHTTPCorsPolicy_credentials(p)==(unsigned char *)&p->credentials);
-    assert(*jet_rt_handle_field_JetHTTPCorsPolicy_credentials(p)==(unsigned char)credential);
+    assert(jet_rt_handle_field_jet_http_cors_policy_origins(p)==&p->origins);
+    assert(jet_rt_handle_field_jet_http_cors_policy_credentials(p)==(unsigned char *)&p->credentials);
+    assert(*jet_rt_handle_field_jet_http_cors_policy_credentials(p)==(unsigned char)credential);
     Text *method=jet_rt_string_clone(&method_view),*header=jet_rt_string_clone(&header_view);
-    Origins *origin=jet_rt_handle_clone_JetHTTPCorsOrigins((Origins *)jet_rt_handle_field_JetHTTPCorsPolicy_origins(p));
-    Policy *copy=jet_rt_handle_clone_JetHTTPCorsPolicy(p);
+    Origins *origin=jet_rt_handle_clone_jet_http_cors_origins((Origins *)jet_rt_handle_field_jet_http_cors_policy_origins(p));
+    Policy *copy=jet_rt_handle_clone_jet_http_cors_policy(p);
     assert(copy!=p && copy->methods!=p->methods && copy->headers!=p->headers);
     assert(copy->credentials==((unsigned char)credential!=0) && copy->max_age==INT64_MAX);
     assert(copy->origins.ordinal==ordinal); if(ordinal) assert(copy->origins.payload!=p->origins.payload && copy->origins.payload->data[0]!=p->origins.payload->data[0]);
     watch_policy(p); watch_policy(copy); watch_text(method); watch_text(header); watch(origin,16,8); watch_origins_child(origin);
-    jet_rt_handle_drop_JetHTTPCorsPolicy(p);
+    jet_rt_handle_drop_jet_http_cors_policy(p);
     text_is(method,"GET, POST"); text_is(header,"content-type"); text_is(copy->methods,"GET, POST");
     if(ordinal) text_is(origin->payload->data[0],"https://example.com");
-    jet_rt_handle_drop_JetHTTPCorsPolicy(copy); jet_rt_string_drop(method); jet_rt_string_drop(header); jet_rt_handle_drop_JetHTTPCorsOrigins(origin); all_freed();
+    jet_rt_handle_drop_jet_http_cors_policy(copy); jet_rt_string_drop(method); jet_rt_string_drop(header); jet_rt_handle_drop_jet_http_cors_origins(origin); all_freed();
 }
 int main(void) {
-    jet_rt_alloc_init(); run(0,0); run(0,256); run(1,255); run(1,257); jet_rt_handle_drop_JetHTTPCorsPolicy(NULL);
+    jet_rt_alloc_init(); run(0,0); run(0,256); run(1,255); run(1,257); jet_rt_handle_drop_jet_http_cors_policy(NULL);
     puts("http cors policy: deep embedded ownership + borrowed fields + Bool byte ok"); return 0;
 }

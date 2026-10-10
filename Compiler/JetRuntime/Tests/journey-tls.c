@@ -18,7 +18,7 @@ extern void jet_rt_host_arguments(W,W,W);
 extern Text *jet_rt_string_from_static(const char *,W);
 extern void jet_rt_string_drop(Text *);
 extern Err *jet_err_from_message(Text *);
-extern void jet_rt_handle_drop_JetErr(Err *);
+extern void jet_rt_handle_drop_jet_err(Err *);
 extern void jet_journey_origin(Text *,W,W,Text *);
 extern void jet_journey_frame_text(Text *,W,W,Text *,Text *);
 extern void jet_journey_reset(void);

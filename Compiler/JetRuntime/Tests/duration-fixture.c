@@ -13,9 +13,9 @@ typedef struct { const char *data; uint64_t len, cap; } Text;
 typedef struct { uint64_t refs, retired_next, negative; uint32_t *limbs; uint64_t len, cap; } IntNode;
 _Static_assert(sizeof(IntNode) == 48, "canonical base-1e9 exact Int");
 extern H jet_duration_from_int(H, H, H *, H *);
-extern void jet_rt_handle_drop_Duration(H);
-extern Text *jet_rt_record_get_RangeError_reason(H);
-extern void jet_rt_handle_drop_RangeError(H);
+extern void jet_rt_handle_drop_duration(H);
+extern Text *jet_rt_record_get_range_error_reason(H);
+extern void jet_rt_handle_drop_range_error(H);
 extern void jet_rt_string_drop(Text *);
 static const int64_t scales[] = {1, 1000, 1000000, 1000000000, 60000000000LL, 3600000000000LL};
 
@@ -34,18 +34,18 @@ static void accepted(H value, int unit, int64_t ns) {
     assert(jet_duration_from_int(value, unit, &output, &error) == 1);
     assert(error == 73); /* Only the selected out pointer is written. */
     assert(*(const int64_t *)(uintptr_t)output == ns);
-    jet_rt_handle_drop_Duration(output);
+    jet_rt_handle_drop_duration(output);
 }
 static void rejected(H value, int unit) {
     H output = 71, error = 73;
     assert(jet_duration_from_int(value, unit, &output, &error) == 0);
     assert(output == 71);
-    Text *reason = jet_rt_record_get_RangeError_reason(error);
+    Text *reason = jet_rt_record_get_range_error_reason(error);
     static const char expected[] = "duration is outside the supported range";
     assert(reason->len == sizeof expected - 1);
     assert(memcmp(reason->data, expected, sizeof expected - 1) == 0);
     jet_rt_string_drop(reason);
-    jet_rt_handle_drop_RangeError(error);
+    jet_rt_handle_drop_range_error(error);
 }
 static void invalid_unit(void) {
     int fds[2];

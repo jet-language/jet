@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { runtimeAbiAtom } from "../agent/runtime-abi-symbols.mjs";
 // Admission receipt for the pack and resident-child library from one rustc run.
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -28,7 +29,7 @@ const required = ['session_create', 'session_begin', 'session_end', 'session_res
   'session_shield_leave', 'execution_begin', 'execution_end', 'execution_stop_write',
   'comptime_begin', 'comptime_enter', 'comptime_step', 'comptime_leave', 'comptime_end'];
 for (const name of required) {
-  if (!exports.includes(`jet_rt_${name}`)) throw new Error(`resident runtime lacks jet_rt_${name}`);
+  if (!exports.includes(`jet_rt_${runtimeAbiAtom(name)}`)) throw new Error(`resident runtime lacks jet_rt_${runtimeAbiAtom(name)}`);
 }
 const runtime = artifact('libjet_runtime.so');
 const manifest = { format: 'jet-native-runtime-v1', source_tree_sha: tree,

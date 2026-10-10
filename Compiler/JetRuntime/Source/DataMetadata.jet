@@ -1,12 +1,12 @@
 // Native mirrors of Core/data/data.jet:29,164-187; not source-module registrations.
 // CommonTypes.rs:1039-1128 owns field order. DataABI owns the private offsets.
 // Text fields own E4 headers; nested records and text lists own deep carriers.
-#Export(c) fn jet_rt_handle_clone_DataFormat(value: I64) -> I64 { encoding_enum_clone(value) }
-#Export(c) fn jet_rt_handle_drop_DataFormat(value: I64) { encoding_enum_drop(value) }
-#Export(c) fn jet_rt_handle_eq_DataFormat(a: I64, b: I64) -> Bool { encoding_enum_eq(a, b) }
-#Export(c) fn jet_rt_handle_clone_DataLoaderKind(value: I64) -> I64 { encoding_enum_clone(value) }
-#Export(c) fn jet_rt_handle_drop_DataLoaderKind(value: I64) { encoding_enum_drop(value) }
-#Export(c) fn jet_rt_handle_eq_DataLoaderKind(a: I64, b: I64) -> Bool { encoding_enum_eq(a, b) }
+#Export(c) fn jet_rt_handle_clone_data_format(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_data_format(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_data_format(a: I64, b: I64) -> Bool { encoding_enum_eq(a, b) }
+#Export(c) fn jet_rt_handle_clone_data_loader_kind(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_data_loader_kind(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_data_loader_kind(a: I64, b: I64) -> Bool { encoding_enum_eq(a, b) }
 fn data_metadata_format(target: I64, ordinal: I64) {
     if {
         (ordinal == I64{0}) -> rt_text_push_word(target, I64{7762787}, I64{3})
@@ -17,12 +17,12 @@ fn data_metadata_format(target: I64, ordinal: I64) {
         else -> trap_native_index_range_stop()
     }
 }
-#Export(c) fn jet_rt_handle_show_DataFormat(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_show_data_format(value: I64) -> I64 {
     result :: jet_rt_string_builder_new()
     data_metadata_format(result, encoding_word(value))
     jet_rt_string_builder_finish(result)
 }
-#Export(c) fn jet_rt_handle_show_DataLoaderKind(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_show_data_loader_kind(value: I64) -> I64 {
     result :: jet_rt_string_builder_new()
     data_metadata_kind(result, encoding_word(value))
     jet_rt_string_builder_finish(result)
@@ -36,27 +36,27 @@ fn data_metadata_kind(target: I64, ordinal: I64) {
         else -> trap_native_index_range_stop()
     }
 }
-#Export(c) fn jet_rt_record_new_DataAuthority(scope: I64, revision: I64) -> I64 {
+#Export(c) fn jet_rt_record_new_data_authority(scope: I64, revision: I64) -> I64 {
     result :: jet_rt_alloc(DATA_AUTHORITY_BYTES, I64{8})
     encoding_store(result + DATA_AUTHORITY_SCOPE, jet_rt_string_clone(scope))
     encoding_store(result + DATA_AUTHORITY_REVISION, jet_rt_string_clone(revision))
     result
 }
-#Export(c) fn jet_rt_handle_clone_DataAuthority(value: I64) -> I64 {
-    jet_rt_record_new_DataAuthority(encoding_word(value + DATA_AUTHORITY_SCOPE), encoding_word(value + DATA_AUTHORITY_REVISION))
+#Export(c) fn jet_rt_handle_clone_data_authority(value: I64) -> I64 {
+    jet_rt_record_new_data_authority(encoding_word(value + DATA_AUTHORITY_SCOPE), encoding_word(value + DATA_AUTHORITY_REVISION))
 }
-#Export(c) fn jet_rt_handle_drop_DataAuthority(value: I64) {
+#Export(c) fn jet_rt_handle_drop_data_authority(value: I64) {
     if (value == I64{0}) -> return
     jet_rt_string_drop(encoding_word(value + DATA_AUTHORITY_SCOPE))
     jet_rt_string_drop(encoding_word(value + DATA_AUTHORITY_REVISION))
     jet_rt_free(value, DATA_AUTHORITY_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_DataAuthority(a: I64, b: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_data_authority(a: I64, b: I64) -> Bool {
     jet_rt_string_eq(encoding_word(a + DATA_AUTHORITY_SCOPE), encoding_word(b + DATA_AUTHORITY_SCOPE)) && jet_rt_string_eq(encoding_word(a + DATA_AUTHORITY_REVISION), encoding_word(b + DATA_AUTHORITY_REVISION))
 }
-#Export(c) fn jet_rt_record_get_DataAuthority_scope(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DATA_AUTHORITY_SCOPE)) }
-#Export(c) fn jet_rt_record_get_DataAuthority_revision(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DATA_AUTHORITY_REVISION)) }
-#Export(c) fn jet_rt_handle_clone_DataSourceIdentity(value: I64) -> I64 {
+#Export(c) fn jet_rt_record_get_data_authority_scope(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DATA_AUTHORITY_SCOPE)) }
+#Export(c) fn jet_rt_record_get_data_authority_revision(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DATA_AUTHORITY_REVISION)) }
+#Export(c) fn jet_rt_handle_clone_data_source_identity(value: I64) -> I64 {
     result :: jet_rt_alloc(DATA_SOURCE_BYTES, I64{8})
     encoding_store(result + DATA_SOURCE_KIND, encoding_word(value + DATA_SOURCE_KIND))
     encoding_store(result + DATA_SOURCE_LOCATOR, jet_rt_string_clone(encoding_word(value + DATA_SOURCE_LOCATOR)))
@@ -64,43 +64,43 @@ fn data_metadata_kind(target: I64, ordinal: I64) {
     encoding_store(result + DATA_SOURCE_PARAMETERS, process_text_list_clone(encoding_word(value + DATA_SOURCE_PARAMETERS), false))
     result
 }
-#Export(c) fn jet_rt_handle_drop_DataSourceIdentity(value: I64) {
+#Export(c) fn jet_rt_handle_drop_data_source_identity(value: I64) {
     if (value == I64{0}) -> return
     jet_rt_string_drop(encoding_word(value + DATA_SOURCE_LOCATOR))
     jet_rt_string_drop(encoding_word(value + DATA_SOURCE_MEMBER))
     process_text_list_drop(encoding_word(value + DATA_SOURCE_PARAMETERS), false)
     jet_rt_free(value, DATA_SOURCE_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_DataSourceIdentity(a: I64, b: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_data_source_identity(a: I64, b: I64) -> Bool {
     encoding_word(a + DATA_SOURCE_KIND) == encoding_word(b + DATA_SOURCE_KIND)
         && jet_rt_string_eq(encoding_word(a + DATA_SOURCE_LOCATOR), encoding_word(b + DATA_SOURCE_LOCATOR))
         && jet_rt_string_eq(encoding_word(a + DATA_SOURCE_MEMBER), encoding_word(b + DATA_SOURCE_MEMBER))
         && process_text_list_eq(encoding_word(a + DATA_SOURCE_PARAMETERS), encoding_word(b + DATA_SOURCE_PARAMETERS), false)
 }
 // CAbiRoutes.rs:12442-50: out is a borrowed, read/clone-only stack Text header.
-#Export(c) fn jet_rt_handle_field_DataSourceIdentity_locator(value: I64, out: I64) { coll_copy(encoding_word(value + DATA_SOURCE_LOCATOR), out, I64{24}) }
-#Export(c) fn jet_rt_handle_field_DataSourceIdentity_member(value: I64, out: I64) { coll_copy(encoding_word(value + DATA_SOURCE_MEMBER), out, I64{24}) }
-#Export(c) fn jet_rt_handle_clone_DataProvenance(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_field_data_source_identity_locator(value: I64, out: I64) { coll_copy(encoding_word(value + DATA_SOURCE_LOCATOR), out, I64{24}) }
+#Export(c) fn jet_rt_handle_field_data_source_identity_member(value: I64, out: I64) { coll_copy(encoding_word(value + DATA_SOURCE_MEMBER), out, I64{24}) }
+#Export(c) fn jet_rt_handle_clone_data_provenance(value: I64) -> I64 {
     result :: jet_rt_alloc(DATA_PROVENANCE_BYTES, I64{8})
-    encoding_store(result + DATA_PROVENANCE_SOURCE, jet_rt_handle_clone_DataSourceIdentity(encoding_word(value + DATA_PROVENANCE_SOURCE)))
+    encoding_store(result + DATA_PROVENANCE_SOURCE, jet_rt_handle_clone_data_source_identity(encoding_word(value + DATA_PROVENANCE_SOURCE)))
     encoding_store(result + DATA_PROVENANCE_FORMAT, encoding_word(value + DATA_PROVENANCE_FORMAT))
-    encoding_store(result + DATA_PROVENANCE_AUTHORITY, jet_rt_handle_clone_DataAuthority(encoding_word(value + DATA_PROVENANCE_AUTHORITY)))
+    encoding_store(result + DATA_PROVENANCE_AUTHORITY, jet_rt_handle_clone_data_authority(encoding_word(value + DATA_PROVENANCE_AUTHORITY)))
     result
 }
-#Export(c) fn jet_rt_handle_drop_DataProvenance(value: I64) {
+#Export(c) fn jet_rt_handle_drop_data_provenance(value: I64) {
     if (value == I64{0}) -> return
-    jet_rt_handle_drop_DataSourceIdentity(encoding_word(value + DATA_PROVENANCE_SOURCE))
-    jet_rt_handle_drop_DataAuthority(encoding_word(value + DATA_PROVENANCE_AUTHORITY))
+    jet_rt_handle_drop_data_source_identity(encoding_word(value + DATA_PROVENANCE_SOURCE))
+    jet_rt_handle_drop_data_authority(encoding_word(value + DATA_PROVENANCE_AUTHORITY))
     jet_rt_free(value, DATA_PROVENANCE_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_DataProvenance(a: I64, b: I64) -> Bool {
-    jet_rt_handle_eq_DataSourceIdentity(encoding_word(a + DATA_PROVENANCE_SOURCE), encoding_word(b + DATA_PROVENANCE_SOURCE))
+#Export(c) fn jet_rt_handle_eq_data_provenance(a: I64, b: I64) -> Bool {
+    jet_rt_handle_eq_data_source_identity(encoding_word(a + DATA_PROVENANCE_SOURCE), encoding_word(b + DATA_PROVENANCE_SOURCE))
         && encoding_word(a + DATA_PROVENANCE_FORMAT) == encoding_word(b + DATA_PROVENANCE_FORMAT)
-        && jet_rt_handle_eq_DataAuthority(encoding_word(a + DATA_PROVENANCE_AUTHORITY), encoding_word(b + DATA_PROVENANCE_AUTHORITY))
+        && jet_rt_handle_eq_data_authority(encoding_word(a + DATA_PROVENANCE_AUTHORITY), encoding_word(b + DATA_PROVENANCE_AUTHORITY))
 }
-#Export(c) fn jet_rt_handle_field_DataProvenance_source(value: I64) -> I64 { encoding_word(value + DATA_PROVENANCE_SOURCE) }
-#Export(c) fn jet_rt_handle_field_DataProvenance_authority(value: I64) -> I64 { encoding_word(value + DATA_PROVENANCE_AUTHORITY) }
-#Export(c) fn jet_rt_record_new_DataSnapshotIdentity(id: I64, source: I64, content: I64, schema: I64, format: I64) -> I64 {
+#Export(c) fn jet_rt_handle_field_data_provenance_source(value: I64) -> I64 { encoding_word(value + DATA_PROVENANCE_SOURCE) }
+#Export(c) fn jet_rt_handle_field_data_provenance_authority(value: I64) -> I64 { encoding_word(value + DATA_PROVENANCE_AUTHORITY) }
+#Export(c) fn jet_rt_record_new_data_snapshot_identity(id: I64, source: I64, content: I64, schema: I64, format: I64) -> I64 {
     if (format < I64{0} || format > I64{4}) -> trap_native_index_range_stop()
     result :: jet_rt_alloc(DATA_SNAPSHOT_BYTES, I64{8})
     encoding_store(result + DATA_SNAPSHOT_ID, jet_rt_string_clone(id))
@@ -110,10 +110,10 @@ fn data_metadata_kind(target: I64, ordinal: I64) {
     encoding_store(result + DATA_SNAPSHOT_FORMAT, format)
     result
 }
-#Export(c) fn jet_rt_handle_clone_DataSnapshotIdentity(value: I64) -> I64 {
-    jet_rt_record_new_DataSnapshotIdentity(encoding_word(value + DATA_SNAPSHOT_ID), encoding_word(value + DATA_SNAPSHOT_SOURCE), encoding_word(value + DATA_SNAPSHOT_CONTENT), encoding_word(value + DATA_SNAPSHOT_SCHEMA), encoding_word(value + DATA_SNAPSHOT_FORMAT))
+#Export(c) fn jet_rt_handle_clone_data_snapshot_identity(value: I64) -> I64 {
+    jet_rt_record_new_data_snapshot_identity(encoding_word(value + DATA_SNAPSHOT_ID), encoding_word(value + DATA_SNAPSHOT_SOURCE), encoding_word(value + DATA_SNAPSHOT_CONTENT), encoding_word(value + DATA_SNAPSHOT_SCHEMA), encoding_word(value + DATA_SNAPSHOT_FORMAT))
 }
-#Export(c) fn jet_rt_handle_drop_DataSnapshotIdentity(value: I64) {
+#Export(c) fn jet_rt_handle_drop_data_snapshot_identity(value: I64) {
     if (value == I64{0}) -> return
     jet_rt_string_drop(encoding_word(value + DATA_SNAPSHOT_ID))
     jet_rt_string_drop(encoding_word(value + DATA_SNAPSHOT_SOURCE))
@@ -121,19 +121,19 @@ fn data_metadata_kind(target: I64, ordinal: I64) {
     jet_rt_string_drop(encoding_word(value + DATA_SNAPSHOT_SCHEMA))
     jet_rt_free(value, DATA_SNAPSHOT_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_DataSnapshotIdentity(a: I64, b: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_data_snapshot_identity(a: I64, b: I64) -> Bool {
     jet_rt_string_eq(encoding_word(a + DATA_SNAPSHOT_ID), encoding_word(b + DATA_SNAPSHOT_ID))
         && jet_rt_string_eq(encoding_word(a + DATA_SNAPSHOT_SOURCE), encoding_word(b + DATA_SNAPSHOT_SOURCE))
         && jet_rt_string_eq(encoding_word(a + DATA_SNAPSHOT_CONTENT), encoding_word(b + DATA_SNAPSHOT_CONTENT))
         && jet_rt_string_eq(encoding_word(a + DATA_SNAPSHOT_SCHEMA), encoding_word(b + DATA_SNAPSHOT_SCHEMA))
         && encoding_word(a + DATA_SNAPSHOT_FORMAT) == encoding_word(b + DATA_SNAPSHOT_FORMAT)
 }
-#Export(c) fn jet_rt_record_get_DataSnapshotIdentity_id(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DATA_SNAPSHOT_ID)) }
-#Export(c) fn jet_rt_record_get_DataSnapshotIdentity_source(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DATA_SNAPSHOT_SOURCE)) }
-#Export(c) fn jet_rt_record_get_DataSnapshotIdentity_content(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DATA_SNAPSHOT_CONTENT)) }
-#Export(c) fn jet_rt_record_get_DataSnapshotIdentity_schema(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DATA_SNAPSHOT_SCHEMA)) }
-#Export(c) fn jet_rt_record_get_DataSnapshotIdentity_format(value: I64) -> I64 { encoding_word(value + DATA_SNAPSHOT_FORMAT) }
-#Export(c) fn jet_rt_handle_show_DataSnapshotIdentity(value: I64) -> I64 {
+#Export(c) fn jet_rt_record_get_data_snapshot_identity_id(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DATA_SNAPSHOT_ID)) }
+#Export(c) fn jet_rt_record_get_data_snapshot_identity_source(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DATA_SNAPSHOT_SOURCE)) }
+#Export(c) fn jet_rt_record_get_data_snapshot_identity_content(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DATA_SNAPSHOT_CONTENT)) }
+#Export(c) fn jet_rt_record_get_data_snapshot_identity_schema(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DATA_SNAPSHOT_SCHEMA)) }
+#Export(c) fn jet_rt_record_get_data_snapshot_identity_format(value: I64) -> I64 { encoding_word(value + DATA_SNAPSHOT_FORMAT) }
+#Export(c) fn jet_rt_handle_show_data_snapshot_identity(value: I64) -> I64 {
     result :: jet_rt_string_builder_new()
     rt_text_push_word(result, I64{8390039475830484563}, I64{8})
     rt_text_push_word(result, I64{8751735924676977737}, I64{8})
@@ -154,7 +154,7 @@ fn data_metadata_kind(target: I64, ordinal: I64) {
     rt_text_push_word(result, I64{32032}, I64{2})
     jet_rt_string_builder_finish(result)
 }
-#Export(c) fn jet_rt_handle_show_DataAuthority(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_show_data_authority(value: I64) -> I64 {
     result :: jet_rt_string_builder_new()
     data_public_authority_part(result, encoding_word(value + DATA_AUTHORITY_SCOPE))
     revision :: encoding_word(value + DATA_AUTHORITY_REVISION)
@@ -164,7 +164,7 @@ fn data_metadata_kind(target: I64, ordinal: I64) {
     }
     jet_rt_string_builder_finish(result)
 }
-#Export(c) fn jet_rt_handle_show_DataSourceIdentity(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_show_data_source_identity(value: I64) -> I64 {
     result :: jet_rt_string_builder_new()
     data_metadata_kind(result, encoding_word(value + DATA_SOURCE_KIND))
     rt_text_push_scalar(result, I64{58})

@@ -90,23 +90,23 @@ fn err_new_take(message: I64, code: I64, cause: I64) -> I64 {
     result
 }
 // CAbi.rs:372-377: borrow+clone message/code, TAKE cause, borrow option box.
-#Export(c) fn jet_rt_record_new_JetErr(message: I64, code: I64, cause: I64) -> I64 {
+#Export(c) fn jet_rt_record_new_jet_err(message: I64, code: I64, cause: I64) -> I64 {
     err_new_take(jet_rt_string_clone(message), if (code == I64{0}) -> I64{0} else -> jet_rt_string_clone(rt_text_word(code)), cause)
 }
 #Export(c) fn jet_err_from_message(message: I64) -> I64 {
     err_new_take(jet_rt_string_clone(message), I64{0}, I64{0})
 }
-#Export(c) fn jet_rt_record_get_JetErr_message(error: I64) -> I64 { jet_rt_string_clone(rt_text_word(error + ERR_MESSAGE)) }
-#Export(c) fn jet_rt_record_get_JetErr_code(error: I64, some: I64) -> I64 {
+#Export(c) fn jet_rt_record_get_jet_err_message(error: I64) -> I64 { jet_rt_string_clone(rt_text_word(error + ERR_MESSAGE)) }
+#Export(c) fn jet_rt_record_get_jet_err_code(error: I64, some: I64) -> I64 {
     code :: rt_text_word(error + ERR_CODE)
     if (code == I64{0}) -> return I64{0}
     rt_text_store(some, jet_rt_string_clone(code))
     I64{1}
 }
-#Export(c) fn jet_rt_record_get_JetErr_cause(error: I64, some: I64) -> I64 {
+#Export(c) fn jet_rt_record_get_jet_err_cause(error: I64, some: I64) -> I64 {
     cause :: rt_text_word(error + ERR_CAUSE)
     if (cause == I64{0}) -> return I64{0}
-    rt_text_store(some, jet_rt_handle_clone_JetErr(cause))
+    rt_text_store(some, jet_rt_handle_clone_jet_err(cause))
     I64{1}
 }
 fn err_details_clone(value: I64) -> I64 {
@@ -119,20 +119,20 @@ fn err_details_clone(value: I64) -> I64 {
     rt_text_store(result + ERR_DETAILS_END, rt_text_word(value + ERR_DETAILS_END))
     result
 }
-#Export(c) fn jet_rt_handle_clone_JetErr(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_err(value: I64) -> I64 {
     if (value == I64{0}) -> return I64{0}
-    result :: err_new_take(err_text_clone(rt_text_word(value + ERR_MESSAGE)), err_text_clone(rt_text_word(value + ERR_CODE)), jet_rt_handle_clone_JetErr(rt_text_word(value + ERR_CAUSE)))
+    result :: err_new_take(err_text_clone(rt_text_word(value + ERR_MESSAGE)), err_text_clone(rt_text_word(value + ERR_CODE)), jet_rt_handle_clone_jet_err(rt_text_word(value + ERR_CAUSE)))
     rt_text_store(result + ERR_IDENTITY, err_text_clone(rt_text_word(value + ERR_IDENTITY)))
     err_rows_clone(value + ERR_CONTEXT, result + ERR_CONTEXT, ERR_CONTEXT_BYTES)
     err_rows_clone(value + ERR_CONVERSIONS, result + ERR_CONVERSIONS, ERR_CONVERSION_BYTES)
     rt_text_store(result + ERR_DETAILS, err_details_clone(rt_text_word(value + ERR_DETAILS)))
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetErr(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_err(value: I64) {
     if (value == I64{0}) -> return
     jet_rt_string_drop(rt_text_word(value + ERR_MESSAGE))
     jet_rt_string_drop(rt_text_word(value + ERR_CODE))
-    jet_rt_handle_drop_JetErr(rt_text_word(value + ERR_CAUSE))
+    jet_rt_handle_drop_jet_err(rt_text_word(value + ERR_CAUSE))
     jet_rt_string_drop(rt_text_word(value + ERR_IDENTITY))
     err_rows_drop(value + ERR_CONTEXT, ERR_CONTEXT_BYTES)
     err_rows_drop(value + ERR_CONVERSIONS, ERR_CONVERSION_BYTES)
@@ -144,10 +144,10 @@ fn err_details_clone(value: I64) -> I64 {
     }
     jet_rt_free(value, ERR_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetErr(left: I64, right: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_err(left: I64, right: I64) -> Bool {
     if (left == I64{0} || right == I64{0}) -> return left == right
     if !err_text_eq(rt_text_word(left + ERR_MESSAGE), rt_text_word(right + ERR_MESSAGE)) || !err_text_eq(rt_text_word(left + ERR_CODE), rt_text_word(right + ERR_CODE)) || !err_text_eq(rt_text_word(left + ERR_IDENTITY), rt_text_word(right + ERR_IDENTITY)) -> return false
-    if !jet_rt_handle_eq_JetErr(rt_text_word(left + ERR_CAUSE), rt_text_word(right + ERR_CAUSE)) -> return false
+    if !jet_rt_handle_eq_jet_err(rt_text_word(left + ERR_CAUSE), rt_text_word(right + ERR_CAUSE)) -> return false
     if !err_rows_eq(left + ERR_CONTEXT, right + ERR_CONTEXT, ERR_CONTEXT_BYTES) || !err_rows_eq(left + ERR_CONVERSIONS, right + ERR_CONVERSIONS, ERR_CONVERSION_BYTES) -> return false
     a :: rt_text_word(left + ERR_DETAILS)
     b :: rt_text_word(right + ERR_DETAILS)
@@ -159,11 +159,11 @@ fn err_details_clone(value: I64) -> I64 {
 }
 // Values.rs:317-330: JetDisplay, JetShow and JetDebug all return message only;
 // Outcome's root report is a separate operation, never these trait adapters.
-#Export(c) fn jet_rt_handle_display_JetErr(value: I64) -> I64 { jet_rt_record_get_JetErr_message(value) }
-#Export(c) fn jet_rt_handle_show_JetErr(value: I64) -> I64 { jet_rt_record_get_JetErr_message(value) }
-#Export(c) fn jet_rt_handle_debug_JetErr(value: I64) -> I64 { jet_rt_record_get_JetErr_message(value) }
+#Export(c) fn jet_rt_handle_display_jet_err(value: I64) -> I64 { jet_rt_record_get_jet_err_message(value) }
+#Export(c) fn jet_rt_handle_show_jet_err(value: I64) -> I64 { jet_rt_record_get_jet_err_message(value) }
+#Export(c) fn jet_rt_handle_debug_jet_err(value: I64) -> I64 { jet_rt_record_get_jet_err_message(value) }
 #Export(c) fn jet_err_apply_conversion(value: I64, source: I64, target: I64) -> I64 {
-    result :: jet_rt_handle_clone_JetErr(value)
+    result :: jet_rt_handle_clone_jet_err(value)
     if (rt_text_word(result + ERR_IDENTITY) == I64{0}) -> rt_text_store(result + ERR_IDENTITY, jet_rt_string_clone(source))
     row :: err_rows_append(result + ERR_CONVERSIONS, ERR_CONVERSION_BYTES)
     rt_text_store(row, jet_rt_string_clone(source))

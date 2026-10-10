@@ -57,7 +57,7 @@ for (const [symbol, status, dispatch, body, nativeExport, reference] of census) 
   if (status === 'native-provider') {
     if (!exported.has(nativeExport) || !implementation?.startsWith(`#Export(c) fn ${nativeExport}(`)) failures.push(`${symbol}: missing exported Jet provider ${nativeExport}`);
     const marshal = read(lower + 'LazyIter.jet');
-    if (!marshal.includes(`"${nativeExport}"`) && !(marshal.includes('"jet_rt_native_{tail}"') && nativeExport === 'jet_rt_native_' + symbol.slice(4))) failures.push(`${symbol}: no native provider marshalling`);
+    if (!marshal.includes(`"${nativeExport}"`) && !(marshal.includes('"jet_rt_native_{runtime_abi_atom(tail)}"') && nativeExport === 'jet_rt_native_' + symbol.slice(4))) failures.push(`${symbol}: no native provider marshalling`);
   } else if (status !== 'native-LIR' || nativeExport !== '-' || !reachable.has(body)) failures.push(`${symbol}: invalid direct-LIR body/status`);
 }
 const expected = { iter: 32, list: 48, loop: 1, map: 28, option: 1, slice: 3, view: 6 };
@@ -68,7 +68,7 @@ for (const [symbol, status, nativeExport, provider, rustPath] of hands) {
   if (!exported.has(nativeExport) || !implementation?.startsWith(`#Export(c) fn ${nativeExport}(`)) failures.push(`${symbol}: missing native provider ${provider}`);
   if (status === 'removed') {
     const dispatch = read(lower + 'LazyIter.jet');
-    if (!dispatch.includes(`"${symbol}"`) || !dispatch.includes('"jet_rt_native_{tail}"')) failures.push(`${symbol}: missing native callback/count dispatcher`);
+    if (!dispatch.includes(`"${symbol}"`) || !dispatch.includes('"jet_rt_native_{runtime_abi_atom(tail)}"')) failures.push(`${symbol}: missing native callback/count dispatcher`);
   } else if (status !== 'seed-only') failures.push(`${symbol}: invalid handwritten ABI disposition`);
 }
 if (hands.length !== 19 || hands.filter(row => row[1] === 'removed').length !== 14 || hands.filter(row => row[1] === 'seed-only').length !== 5) failures.push('handwritten ABI coverage drift');

@@ -28,7 +28,7 @@ fn lower_realtime_callback_type(p: MIRProgram, ty: MIRType) -> Bool Never! {
 
 fn lower_realtime_stream(p: MIRProgram, ty: MIRType) -> Bool Never! {
     row :: lower_runtime_handle_type(p, ty) ?? return false
-    row.runtime == "JetRealtimeStream" && lower_repr(p, ty) == LowerRepr.Handle{drop: "jet_rt_handle_drop_JetRealtimeStream", clone: "jet_rt_handle_clone_JetRealtimeStream"}
+    row.runtime == "JetRealtimeStream" && lower_repr(p, ty) == LowerRepr.Handle{drop: "jet_rt_handle_drop_jet_realtime_stream", clone: "jet_rt_handle_clone_jet_realtime_stream"}
 }
 
 fn lower_realtime_start(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, values: [MIRValueID], closure: MIRValueID?) Never! {
@@ -56,7 +56,7 @@ fn lower_realtime_start(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     // ABI skipped_word: zero selects the stream's preallocated internal skip
     // signal; no caller-owned Atomic<Bool> is borrowed by this producer.
     skipped_word :: lower_const(&f, 0)
-    dst :: lower_result(p, c, &m, &f, instruction) ?? lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_JetRealtimeStream"}, result_ty.identity)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_jet_realtime_stream"}, result_ty.identity)
     lower_call_runtime(&m, &f, "jet_rt_native_realtime_start", [LIRValueID]{rate, frames, env, invoke, release, worker, skipped_word}, Val(dst))
     // The runtime owns env even on validation/spawn failure and releases it
     // exactly once. Never release it here or clone/drop the borrowed inputs.

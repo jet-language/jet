@@ -11,10 +11,10 @@ typedef struct { double mean,weight; } Centroid;
 typedef struct { int64_t refs,mutex,len,capacity; Centroid *data; } TD;
 _Static_assert(sizeof(TD)==40 && sizeof(Centroid)==16,"TD40 and centroid16");
 extern void jet_rt_alloc_init(void);
-extern TD *JetTDigest_new(void);
-extern TD *jet_rt_handle_clone_JetTDigest(TD *);
-extern void jet_rt_handle_drop_JetTDigest(TD *);
-extern Text *jet_rt_handle_show_JetTDigest(TD *);
+extern TD *jet_t_digest_new(void);
+extern TD *jet_rt_handle_clone_jet_t_digest(TD *);
+extern void jet_rt_handle_drop_jet_t_digest(TD *);
+extern Text *jet_rt_handle_show_jet_t_digest(TD *);
 extern void jet_rt_native_tdigest_add(TD *,double);
 extern double jet_rt_native_tdigest_quantile(TD *,double);
 extern void jet_rt_string_drop(Text *);
@@ -37,22 +37,22 @@ static void nan_cases(void){
     const uint64_t initial[3][3]={{nan,one,two},{one,nan,two},{one,two,nan}};
     const uint64_t expected[3][4]={{nan,one,half,two},{one,half,nan,two},{one,half,two,nan}};
     for(unsigned n=0;n<3;++n){
-        TD *td=JetTDigest_new();
+        TD *td=jet_t_digest_new();
         for(unsigned i=0;i<3;++i)jet_rt_native_tdigest_add(td,(double)i);
         assert(td->len==3);
         for(unsigned i=0;i<3;++i)td->data[i].mean=from(initial[n][i]);
         jet_rt_native_tdigest_add(td,1.5);assert(td->len==4);
         for(unsigned i=0;i<4;++i){assert(bits(td->data[i].mean)==expected[n][i]);assert(td->data[i].weight==1.0);}
         q(td,0.0,expected[n][0]);q(td,0.5,expected[n][1]);q(td,1.0,expected[n][3]);q(td,from(nan),expected[n][3]);
-        jet_rt_handle_drop_JetTDigest(td);
+        jet_rt_handle_drop_jet_t_digest(td);
     }
 }
 int main(int argc,char **argv){
     assert(argc==2);jet_rt_alloc_init();
-    TD *td=JetTDigest_new();watched=td;
+    TD *td=jet_t_digest_new();watched=td;
     assert(td->refs==1 && td->mutex==0 && td->len==0 && td->capacity==0);
     q(td,0.5,0);q(td,NAN,0);
-    TD *a=jet_rt_handle_clone_JetTDigest(td),*b=jet_rt_handle_clone_JetTDigest(a);
+    TD *a=jet_rt_handle_clone_jet_t_digest(td),*b=jet_rt_handle_clone_jet_t_digest(a);
     assert(td==a && a==b && td->refs==3);
     for(unsigned i=0;i<512;++i)jet_rt_native_tdigest_add(a,(double)((i*37)%97)-48.0);
     FILE *vectors=fopen(argv[1],"r");assert(vectors);
@@ -67,20 +67,20 @@ int main(int argc,char **argv){
     const double quantiles[]={-1,0,.01,.1,.5,.9,.99,1,2,NAN};
     const uint64_t expected[]={UINT64_C(0xc048000000000000),UINT64_C(0xc048000000000000),UINT64_C(0xc048000000000000),UINT64_C(0xc043800000000000),UINT64_C(0x3fc999999999999a),UINT64_C(0x4043800000000000),UINT64_C(0x4047800000000000),UINT64_C(0x4048000000000000),UINT64_C(0x4048000000000000),UINT64_C(0x4048000000000000)};
     for(unsigned i=0;i<10;++i)q(b,quantiles[i],expected[i]);
-    Text *text=jet_rt_handle_show_JetTDigest(b);assert(text->len==7 && memcmp(text->data,"TDigest",7)==0);jet_rt_string_drop(text);
+    Text *text=jet_rt_handle_show_jet_t_digest(b);assert(text->len==7 && memcmp(text->data,"TDigest",7)==0);jet_rt_string_drop(text);
     watched_buffer=b->data;watched_capacity=b->capacity;
-    jet_rt_handle_drop_JetTDigest(td);assert(shell_frees==0 && buffer_frees==0 && a->refs==2);
-    jet_rt_handle_drop_JetTDigest(a);assert(shell_frees==0 && buffer_frees==0 && b->refs==1);
-    jet_rt_handle_drop_JetTDigest(NULL);jet_rt_handle_drop_JetTDigest(b);assert(shell_frees==1 && buffer_frees==1);
+    jet_rt_handle_drop_jet_t_digest(td);assert(shell_frees==0 && buffer_frees==0 && a->refs==2);
+    jet_rt_handle_drop_jet_t_digest(a);assert(shell_frees==0 && buffer_frees==0 && b->refs==1);
+    jet_rt_handle_drop_jet_t_digest(NULL);jet_rt_handle_drop_jet_t_digest(b);assert(shell_frees==1 && buffer_frees==1);
     watched=NULL;watched_buffer=NULL;
     nan_cases();
-    TD *shared=JetTDigest_new();pthread_t threads[3];
+    TD *shared=jet_t_digest_new();pthread_t threads[3];
     for(unsigned i=0;i<3;++i)assert(pthread_create(&threads[i],NULL,adds,shared)==0);
     for(unsigned i=0;i<3;++i)assert(pthread_join(threads[i],NULL)==0);
     double total=0;for(int64_t i=0;i<shared->len;++i){assert(shared->data[i].mean==42);total+=shared->data[i].weight;}
-    assert(total==3000);q(shared,.5,UINT64_C(0x4045000000000000));jet_rt_handle_drop_JetTDigest(shared);
-    TD *edge=JetTDigest_new();jet_rt_native_tdigest_add(edge,-0.0);q(edge,0,UINT64_C(0x8000000000000000));jet_rt_handle_drop_JetTDigest(edge);
-    edge=JetTDigest_new();jet_rt_native_tdigest_add(edge,INFINITY);q(edge,1,UINT64_C(0x7ff0000000000000));jet_rt_handle_drop_JetTDigest(edge);
-    edge=JetTDigest_new();jet_rt_native_tdigest_add(edge,-INFINITY);q(edge,0,UINT64_C(0xfff0000000000000));jet_rt_handle_drop_JetTDigest(edge);
+    assert(total==3000);q(shared,.5,UINT64_C(0x4045000000000000));jet_rt_handle_drop_jet_t_digest(shared);
+    TD *edge=jet_t_digest_new();jet_rt_native_tdigest_add(edge,-0.0);q(edge,0,UINT64_C(0x8000000000000000));jet_rt_handle_drop_jet_t_digest(edge);
+    edge=jet_t_digest_new();jet_rt_native_tdigest_add(edge,INFINITY);q(edge,1,UINT64_C(0x7ff0000000000000));jet_rt_handle_drop_jet_t_digest(edge);
+    edge=jet_t_digest_new();jet_rt_native_tdigest_add(edge,-INFINITY);q(edge,0,UINT64_C(0xfff0000000000000));jet_rt_handle_drop_jet_t_digest(edge);
     puts("TDigest frozen centroids/NaN/shared/quantile/drop OK");
 }

@@ -23,21 +23,21 @@ fn cms_hash(text: I64, initial: I64) -> I64 {
     }
     hash
 }
-#Export(c) fn JetCountMinSketch_new() -> I64 {
+#Export(c) fn jet_count_min_sketch_new() -> I64 {
     value :: jet_rt_alloc(CMS_BYTES, I64{8})
     thread_zero(value, CMS_BYTES)
     sync_store(value + CMS_REFS, I64{1})
     value
 }
-#Export(c) fn jet_rt_handle_clone_JetCountMinSketch(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_count_min_sketch(value: I64) -> I64 {
     _ := sync_add(value + CMS_REFS, I64{1})
     value
 }
-#Export(c) fn jet_rt_handle_drop_JetCountMinSketch(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_count_min_sketch(value: I64) {
     if (value == I64{0}) -> return
     if (sync_add(value + CMS_REFS, I64{-1}) == I64{1}) -> jet_rt_free(value, CMS_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_show_JetCountMinSketch(_value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_show_jet_count_min_sketch(_value: I64) -> I64 {
     text :: jet_rt_string_builder_new()
     rt_text_push_word(text, I64{7955975379191426883}, I64{8})
     rt_text_push_word(text, I64{114776363854675}, I64{6})

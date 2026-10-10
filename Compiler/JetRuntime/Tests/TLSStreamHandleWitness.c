@@ -21,8 +21,8 @@ extern void __real_jet_rt_free(void *,int64_t,int64_t);
 extern void *jet_fd_adopt_unbuffered_raw(int64_t,Text *);
 extern Text *jet_rt_string_clone(Text *);
 extern void jet_rt_string_drop(Text *);
-extern void jet_rt_handle_drop_JetTLSStream(Stream *);
-extern Text *jet_rt_handle_show_JetTLSStream(Stream *);
+extern void jet_rt_handle_drop_jet_tls_stream(Stream *);
+extern Text *jet_rt_handle_show_jet_tls_stream(Stream *);
 struct Watched { void *ptr; int64_t size,align; unsigned freed; };
 static struct Watched watched[128];
 static size_t count;
@@ -55,7 +55,7 @@ static Peer *peer(void) {
 }
 static void callback_must_not_run(void) { abort(); }
 int main(void) {
-    jet_rt_alloc_init(); jet_rt_handle_drop_JetTLSStream(NULL);
+    jet_rt_alloc_init(); jet_rt_handle_drop_jet_tls_stream(NULL);
     const int64_t ids[]={INT64_MIN,-1,0,1,INT64_MAX};
     for(size_t i=0;i<sizeof(ids)/sizeof(ids[0]);++i) for(unsigned present=0;present<2;++present) {
         int pipefd[2]; assert(pipe(pipefd)==0); fd_number=pipefd[0];
@@ -64,11 +64,11 @@ int main(void) {
         s->id=ids[i]; s->fd=fd_owner; s->read_present=1; s->read_ms=-1; s->write_present=1; s->write_ms=INT64_MAX;
         for(unsigned k=0;k<7;++k) s->callbacks[k]=callback_must_not_run;
         peer_owner=present ? peer() : NULL; s->peer=peer_owner; stream_owner=s; stage=0;
-        Text *shown=jet_rt_handle_show_JetTLSStream(s); watch(shown,24,8); watch(shown->data,shown->cap,1);
+        Text *shown=jet_rt_handle_show_jet_tls_stream(s); watch(shown,24,8); watch(shown->data,shown->cap,1);
         char expected[64]; int length=snprintf(expected,sizeof(expected),"TLSStream(%lld)",(long long)ids[i]);
         assert(length>=0 && shown->len==length && !memcmp(shown->data,expected,(size_t)length));
         jet_rt_string_drop(shown); assert(fcntl(fd_number,F_GETFD)!=-1);
-        jet_rt_handle_drop_JetTLSStream(s); assert(stage==3); assert(close(pipefd[1])==0);
+        jet_rt_handle_drop_jet_tls_stream(s); assert(stage==3); assert(close(pipefd[1])==0);
         fd_owner=NULL; peer_owner=NULL; stream_owner=NULL;
     }
     for(size_t i=0;i<count;++i) assert(watched[i].freed==1);

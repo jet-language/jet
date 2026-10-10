@@ -235,7 +235,7 @@ fn coll_bits_bound(bits: I64, value: I64) -> I64 {
     coll_zero(bits, I64{24})
 }
 
-#Export(c) fn jet_rt_handle_drop_JetBitSet(bits: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_bit_set(bits: I64) {
     if (bits == I64{0}) {
         return
     }
@@ -323,7 +323,7 @@ fn coll_bits_bound(bits: I64, value: I64) -> I64 {
     copied
 }
 
-#Export(c) fn jet_rt_handle_clone_JetBitSet(bits: I64) -> I64 { jet_bits_copy(bits) }
+#Export(c) fn jet_rt_handle_clone_jet_bit_set(bits: I64) -> I64 { jet_bits_copy(bits) }
 
 // Route List results return a native length and transfer the fresh slot
 // buffer through out_data. Each initialized slot owns its exact Int carrier.
@@ -375,11 +375,11 @@ fn coll_bits_render(bits: I64) -> I64 {
     jet_rt_string_builder_finish(text)
 }
 
-#Export(c) fn jet_rt_handle_display_JetBitSet(bits: I64) -> I64 { coll_bits_render(bits) }
+#Export(c) fn jet_rt_handle_display_jet_bit_set(bits: I64) -> I64 { coll_bits_render(bits) }
 
-#Export(c) fn jet_rt_handle_show_JetBitSet(bits: I64) -> I64 { coll_bits_render(bits) }
+#Export(c) fn jet_rt_handle_show_jet_bit_set(bits: I64) -> I64 { coll_bits_render(bits) }
 
-#Export(c) fn jet_rt_handle_debug_JetBitSet(bits: I64) -> I64 { coll_bits_render(bits) }
+#Export(c) fn jet_rt_handle_debug_jet_bit_set(bits: I64) -> I64 { coll_bits_render(bits) }
 
 // These legacy collection routes use native signed-I64 words, not tagged Int
 // input slots (CAbiRoutes.rs list_in(... |w| w as i64)). Their scalar index
@@ -631,9 +631,9 @@ fn coll_text_list_copy(header: I64, out_data: I64) -> I64 {
 
 #Export(c) fn jet_coll_ordered_map() -> I64 { coll_pair_new(I64{0}) }
 
-#Export(c) fn jet_rt_handle_drop_JetOrderedMap(map: I64) { coll_pair_drop(map, false) }
+#Export(c) fn jet_rt_handle_drop_jet_ordered_map(map: I64) { coll_pair_drop(map, false) }
 
-#Export(c) fn jet_rt_handle_clone_JetOrderedMap(map: I64) -> I64 { coll_pair_copy(map, false) }
+#Export(c) fn jet_rt_handle_clone_jet_ordered_map(map: I64) -> I64 { coll_pair_copy(map, false) }
 
 #Export(c) fn jet_coll_map_contains(map: I64, key: I64) -> Bool {
     coll_pair_find(map, key) != I64{-1}
@@ -730,11 +730,11 @@ fn coll_ordered_map_render(map: I64) -> I64 {
     jet_rt_string_builder_finish(text)
 }
 
-#Export(c) fn jet_rt_handle_display_JetOrderedMap(map: I64) -> I64 { coll_ordered_map_render(map) }
+#Export(c) fn jet_rt_handle_display_jet_ordered_map(map: I64) -> I64 { coll_ordered_map_render(map) }
 
-#Export(c) fn jet_rt_handle_show_JetOrderedMap(map: I64) -> I64 { coll_ordered_map_render(map) }
+#Export(c) fn jet_rt_handle_show_jet_ordered_map(map: I64) -> I64 { coll_ordered_map_render(map) }
 
-#Export(c) fn jet_rt_handle_debug_JetOrderedMap(map: I64) -> I64 { coll_ordered_map_render(map) }
+#Export(c) fn jet_rt_handle_debug_jet_ordered_map(map: I64) -> I64 { coll_ordered_map_render(map) }
 
 fn coll_i64_add(left: I64, right: I64) -> I64 {
     result :: wrapping(left + right)
@@ -805,9 +805,9 @@ fn coll_counter_delta(counter: I64, key: I64, amount: I64) {
 
 #Export(c) fn jet_coll_counter() -> I64 { coll_pair_new(I64{0}) }
 
-#Export(c) fn jet_rt_handle_drop_JetCounter(counter: I64) { coll_pair_drop(counter, true) }
+#Export(c) fn jet_rt_handle_drop_jet_counter(counter: I64) { coll_pair_drop(counter, true) }
 
-#Export(c) fn jet_rt_handle_clone_JetCounter(counter: I64) -> I64 { coll_pair_copy(counter, true) }
+#Export(c) fn jet_rt_handle_clone_jet_counter(counter: I64) -> I64 { coll_pair_copy(counter, true) }
 
 #Export(c) fn jet_coll_counter_clear(counter: I64) -> I64 { jet_coll_counter() }
 
@@ -817,7 +817,7 @@ fn coll_counter_delta(counter: I64, key: I64, amount: I64) {
     loop at < length {
         coll_counter_delta(result, trap_word(keys + at * I64{8}), I64{1})
         if (jet_scheduler_native_propagate() != I64{0}) {
-            jet_rt_handle_drop_JetCounter(result)
+            jet_rt_handle_drop_jet_counter(result)
             return I64{0}
         }
         at += I64{1}
@@ -830,7 +830,7 @@ fn coll_counter_delta(counter: I64, key: I64, amount: I64) {
     result :: coll_counter_copy_capacity(counter, capacity)
     coll_counter_delta(result, key, amount)
     if (jet_scheduler_native_propagate() != I64{0}) {
-        jet_rt_handle_drop_JetCounter(result)
+        jet_rt_handle_drop_jet_counter(result)
         return I64{0}
     }
     result
@@ -947,12 +947,12 @@ fn coll_counter_merge(left: I64, right: I64, subtract: Bool) -> I64 {
         count :: trap_word(counts + at * I64{8})
         amount :: if subtract -> coll_i64_sub(I64{0}, count) else -> count
         if (jet_scheduler_native_propagate() != I64{0}) {
-            jet_rt_handle_drop_JetCounter(result)
+            jet_rt_handle_drop_jet_counter(result)
             return I64{0}
         }
         coll_counter_delta(result, trap_word(keys + at * I64{8}), amount)
         if (jet_scheduler_native_propagate() != I64{0}) {
-            jet_rt_handle_drop_JetCounter(result)
+            jet_rt_handle_drop_jet_counter(result)
             return I64{0}
         }
         at += I64{1}
@@ -1005,11 +1005,11 @@ fn coll_counter_render(counter: I64) -> I64 {
     jet_rt_string_builder_finish(text)
 }
 
-#Export(c) fn jet_rt_handle_display_JetCounter(counter: I64) -> I64 { coll_counter_render(counter) }
+#Export(c) fn jet_rt_handle_display_jet_counter(counter: I64) -> I64 { coll_counter_render(counter) }
 
-#Export(c) fn jet_rt_handle_show_JetCounter(counter: I64) -> I64 { coll_counter_render(counter) }
+#Export(c) fn jet_rt_handle_show_jet_counter(counter: I64) -> I64 { coll_counter_render(counter) }
 
-#Export(c) fn jet_rt_handle_debug_JetCounter(counter: I64) -> I64 { coll_counter_render(counter) }
+#Export(c) fn jet_rt_handle_debug_jet_counter(counter: I64) -> I64 { coll_counter_render(counter) }
 
 // Native Chain owns a list of inline 48-byte Layer pairs. Each Layer keeps
 // both input lengths, matching Core/Collections.rs:3524-3555 (not layer_from's
@@ -1038,13 +1038,13 @@ fn coll_layer_copy_into(layer: I64, target: I64) {
     coll_layer_init(target, trap_word(layer + I64{16}), trap_word(layer), trap_word(layer + I64{40}), trap_word(layer + I64{24}))
 }
 
-#Export(c) fn jet_rt_handle_clone_JetLayer(layer: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_layer(layer: I64) -> I64 {
     result :: jet_rt_alloc(I64{48}, I64{8})
     coll_layer_copy_into(layer, result)
     result
 }
 
-#Export(c) fn jet_rt_handle_drop_JetLayer(layer: I64) { coll_pair_drop(layer, false) }
+#Export(c) fn jet_rt_handle_drop_jet_layer(layer: I64) { coll_pair_drop(layer, false) }
 
 fn coll_chain_new(length: I64) -> I64 {
     chain :: coll_list_new()
@@ -1056,7 +1056,7 @@ fn coll_chain_new(length: I64) -> I64 {
 
 #Export(c) fn jet_coll_chain() -> I64 { coll_chain_new(I64{0}) }
 
-#Export(c) fn jet_rt_handle_clone_JetChain(chain: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_chain(chain: I64) -> I64 {
     length :: trap_word(chain)
     result :: coll_chain_new(length)
     source :: trap_word(chain + I64{16})
@@ -1069,7 +1069,7 @@ fn coll_chain_new(length: I64) -> I64 {
     result
 }
 
-#Export(c) fn jet_rt_handle_drop_JetChain(chain: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_chain(chain: I64) {
     if (chain == I64{0}) {
         return
     }
@@ -1154,11 +1154,11 @@ fn coll_layer_render(layer: I64) -> I64 {
     jet_rt_string_builder_finish(text)
 }
 
-#Export(c) fn jet_rt_handle_display_JetLayer(layer: I64) -> I64 { coll_layer_render(layer) }
+#Export(c) fn jet_rt_handle_display_jet_layer(layer: I64) -> I64 { coll_layer_render(layer) }
 
-#Export(c) fn jet_rt_handle_show_JetLayer(layer: I64) -> I64 { coll_layer_render(layer) }
+#Export(c) fn jet_rt_handle_show_jet_layer(layer: I64) -> I64 { coll_layer_render(layer) }
 
-#Export(c) fn jet_rt_handle_debug_JetLayer(layer: I64) -> I64 { coll_layer_render(layer) }
+#Export(c) fn jet_rt_handle_debug_jet_layer(layer: I64) -> I64 { coll_layer_render(layer) }
 
 fn coll_chain_render(chain: I64) -> I64 {
     text :: jet_rt_string_builder_new()
@@ -1178,11 +1178,11 @@ fn coll_chain_render(chain: I64) -> I64 {
     jet_rt_string_builder_finish(text)
 }
 
-#Export(c) fn jet_rt_handle_display_JetChain(chain: I64) -> I64 { coll_chain_render(chain) }
+#Export(c) fn jet_rt_handle_display_jet_chain(chain: I64) -> I64 { coll_chain_render(chain) }
 
-#Export(c) fn jet_rt_handle_show_JetChain(chain: I64) -> I64 { coll_chain_render(chain) }
+#Export(c) fn jet_rt_handle_show_jet_chain(chain: I64) -> I64 { coll_chain_render(chain) }
 
-#Export(c) fn jet_rt_handle_debug_JetChain(chain: I64) -> I64 { coll_chain_render(chain) }
+#Export(c) fn jet_rt_handle_debug_jet_chain(chain: I64) -> I64 { coll_chain_render(chain) }
 
 // Legacy numeric LoopRange uses the CAbi.rs:735-780 exact-Int boundary.
 // The private native cursor keeps [current, end, step, exclusive, done].

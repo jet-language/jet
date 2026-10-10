@@ -565,13 +565,13 @@ fn compiler_url_trim_view(value: I64) -> I64 {
     success :: compiler_url_parse_body(input, value, err)
     if input != a0 -> jet_rt_free(input, I64{24}, I64{8})
     if !success {
-        jet_rt_handle_drop_JetURL(value)
+        jet_rt_handle_drop_jet_url(value)
         return I64{0}
     }
     rt_text_store(ok, value)
     I64{1}
 }
-#Export(c) fn jet_rt_handle_drop_JetURL(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_url(value: I64) {
     if (value == I64{0}) -> return
     offset := I64{0}
     loop offset < (I64{80}) {
@@ -580,7 +580,7 @@ fn compiler_url_trim_view(value: I64) -> I64 {
     }
     jet_rt_free(value, I64{80}, I64{8})
 }
-#Export(c) fn jet_rt_handle_clone_JetURL(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_url(value: I64) -> I64 {
     out :: jet_rt_alloc(I64{80}, I64{8})
     offset := I64{0}
     loop offset < (I64{80}) {
@@ -590,7 +590,7 @@ fn compiler_url_trim_view(value: I64) -> I64 {
     }
     out
 }
-#Export(c) fn jet_rt_handle_eq_JetURL(a: I64, b: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_url(a: I64, b: I64) -> Bool {
     offset := I64{0}
     loop offset < (I64{80}) {
         left :: rt_text_word(a + offset)
@@ -600,20 +600,20 @@ fn compiler_url_trim_view(value: I64) -> I64 {
     }
     true
 }
-#Export(c) fn jet_rt_handle_show_JetURL(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{72})) }
-#Export(c) fn jet_rt_handle_display_JetURL(value: I64) -> I64 { jet_rt_handle_show_JetURL(value) }
-#Export(c) fn jet_rt_handle_debug_JetURL(value: I64) -> I64 { jet_rt_handle_show_JetURL(value) }
-#Export(c) fn jet_rt_record_get_JetURL_scheme(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value)) }
-#Export(c) fn jet_rt_record_get_JetURL_user_text(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{8})) }
-#Export(c) fn jet_rt_record_get_JetURL_password_text(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{16})) }
-#Export(c) fn jet_rt_record_get_JetURL_host(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{24})) }
-#Export(c) fn jet_rt_record_get_JetURL_port(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{32})) }
-#Export(c) fn jet_rt_record_get_JetURL_port_explicit(value: I64) -> Bool { rt_text_word(value + I64{40}) != I64{0} }
-#Export(c) fn jet_rt_record_get_JetURL_path(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{48})) }
-#Export(c) fn jet_rt_record_get_JetURL_query(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{56})) }
-#Export(c) fn jet_rt_record_get_JetURL_fragment(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{64})) }
-#Export(c) fn jet_rt_record_get_JetURL_raw(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{72})) }
-#Export(c) fn jet_rt_record_new_JetURL(m0: I64, m1: I64, m2: I64, m3: I64, m4: I64, m5: Bool, m6: I64, m7: I64, m8: I64, m9: I64) -> I64 {
+#Export(c) fn jet_rt_handle_show_jet_url(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{72})) }
+#Export(c) fn jet_rt_handle_display_jet_url(value: I64) -> I64 { jet_rt_handle_show_jet_url(value) }
+#Export(c) fn jet_rt_handle_debug_jet_url(value: I64) -> I64 { jet_rt_handle_show_jet_url(value) }
+#Export(c) fn jet_rt_record_get_jet_url_scheme(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value)) }
+#Export(c) fn jet_rt_record_get_jet_url_user_text(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{8})) }
+#Export(c) fn jet_rt_record_get_jet_url_password_text(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{16})) }
+#Export(c) fn jet_rt_record_get_jet_url_host(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{24})) }
+#Export(c) fn jet_rt_record_get_jet_url_port(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{32})) }
+#Export(c) fn jet_rt_record_get_jet_url_port_explicit(value: I64) -> Bool { rt_text_word(value + I64{40}) != I64{0} }
+#Export(c) fn jet_rt_record_get_jet_url_path(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{48})) }
+#Export(c) fn jet_rt_record_get_jet_url_query(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{56})) }
+#Export(c) fn jet_rt_record_get_jet_url_fragment(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{64})) }
+#Export(c) fn jet_rt_record_get_jet_url_raw(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{72})) }
+#Export(c) fn jet_rt_record_new_jet_url(m0: I64, m1: I64, m2: I64, m3: I64, m4: I64, m5: Bool, m6: I64, m7: I64, m8: I64, m9: I64) -> I64 {
     value :: jet_rt_alloc(I64{80}, I64{8})
     rt_text_store(value, jet_rt_string_clone(m0))
     rt_text_store(value + I64{8}, jet_rt_string_clone(m1))

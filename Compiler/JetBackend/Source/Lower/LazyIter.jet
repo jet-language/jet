@@ -316,7 +316,7 @@ fn lower_lazy_value_slot(p: MIRProgram, m: &LowerModule, f: &LowerFunction, valu
 fn lower_lazy_runtime_symbol(symbol: String) -> String Never! {
     bytes :: symbol.bytes()
     tail :: String.from_bytes(bytes.slice(4, bytes.len())) ?? panic("runtime symbol is not UTF-8")
-    "jet_rt_native_{tail}"
+    "jet_rt_native_{runtime_abi_atom(tail)}"
 }
 
 // Common entry for the checked BuiltinMethod and static CoreCall routes.

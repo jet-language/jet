@@ -15,9 +15,9 @@ extern void jet_rt_alloc_init(void);
 extern H __real_jet_rt_alloc(H,H);
 extern void __real_jet_rt_free(H,H,H);
 extern H jet_web_forms_action_error(void),jet_web_forms_action_field_error(H,H,H),jet_web_forms_action_form_error(H,H);
-extern H jet_rt_handle_clone_JetWebFormActionError(H);
-extern void jet_rt_handle_drop_JetWebFormActionError(H);
-extern bool jet_rt_handle_eq_JetWebFormActionError(H,H);
+extern H jet_rt_handle_clone_jet_web_form_action_error(H);
+extern void jet_rt_handle_drop_jet_web_form_action_error(H);
+extern bool jet_rt_handle_eq_jet_web_form_action_error(H,H);
 static struct { H address,bytes,align; bool live; } ledger[8192];
 static size_t allocations,frees;
 static bool tracking;
@@ -33,23 +33,23 @@ static void text_eq(Text *t,const void *bytes,size_t n){assert(t->len==n&&(!n||m
 static void field(Error *e,const char *name,const char *msg){assert(jet_web_forms_action_field_error(h(e),string(name),string(msg))==h(e));}
 static void form(Error *e,const char *msg){assert(jet_web_forms_action_form_error(h(e),string(msg))==h(e));}
 static void clone_and_drop(Error *a){
-    Error *b=(Error *)(uintptr_t)jet_rt_handle_clone_JetWebFormActionError(h(a));
-    assert(a!=b&&jet_rt_handle_eq_JetWebFormActionError(h(a),h(b)));
+    Error *b=(Error *)(uintptr_t)jet_rt_handle_clone_jet_web_form_action_error(h(a));
+    assert(a!=b&&jet_rt_handle_eq_jet_web_form_action_error(h(a),h(b)));
     assert(b->fields.cap==b->fields.len&&b->form.cap==b->form.len);
     if(a->fields.len){assert(a->fields.data!=b->fields.data);Entry *x=a->fields.data,*y=b->fields.data;for(size_t i=0;i<a->fields.len;++i){assert(x[i].key!=y[i].key&&x[i].key->data!=y[i].key->data);assert(y[i].messages.cap==y[i].messages.len);if(x[i].messages.len)assert(x[i].messages.data!=y[i].messages.data);for(size_t j=0;j<x[i].messages.len;++j){Text *u=message(&x[i].messages,j),*v=message(&y[i].messages,j);assert(u!=v);if(u->len)assert(u->data!=v->data);}}}
     if(a->form.len)assert(a->form.data!=b->form.data);
-    jet_rt_handle_drop_JetWebFormActionError(h(a));assert(jet_rt_handle_eq_JetWebFormActionError(h(b),h(b)));jet_rt_handle_drop_JetWebFormActionError(h(b));balanced();
+    jet_rt_handle_drop_jet_web_form_action_error(h(a));assert(jet_rt_handle_eq_jet_web_form_action_error(h(b),h(b)));jet_rt_handle_drop_jet_web_form_action_error(h(b));balanced();
 }
 static void ordered_case(void){
     Error *a=fresh();field(a,"z","z0");field(a,"a","a0");field(a,"m","m0");field(a,"a","a1");field(a,"_","u0");field(a,"b","b0");field(a,"aa","aa0");form(a,"");form(a,"form1");
     const char *keys[]={"_","a","aa","b","m","z"};Entry *entries=a->fields.data;assert(a->fields.len==6&&a->fields.cap>6);
     for(size_t i=0;i<6;++i){text_eq(entries[i].key,keys[i],strlen(keys[i]));}assert(entries[1].messages.len==2);text_eq(message(&entries[1].messages,0),"a0",2);text_eq(message(&entries[1].messages,1),"a1",2);
-    Error *b=(Error *)(uintptr_t)jet_rt_handle_clone_JetWebFormActionError(h(a));assert(jet_rt_handle_eq_JetWebFormActionError(h(a),h(b)));
-    Entry *peers=b->fields.data;peers[1].key->data[0]^=1;assert(!jet_rt_handle_eq_JetWebFormActionError(h(a),h(b)));peers[1].key->data[0]^=1;
-    message(&peers[1].messages,1)->data[0]^=1;assert(!jet_rt_handle_eq_JetWebFormActionError(h(a),h(b)));message(&peers[1].messages,1)->data[0]^=1;
-    message(&b->form,1)->data[0]^=1;assert(!jet_rt_handle_eq_JetWebFormActionError(h(a),h(b)));message(&b->form,1)->data[0]^=1;
-    Text *saved=message(&peers[1].messages,0);((Text **)peers[1].messages.data)[0]=message(&peers[1].messages,1);((Text **)peers[1].messages.data)[1]=saved;assert(!jet_rt_handle_eq_JetWebFormActionError(h(a),h(b)));((Text **)peers[1].messages.data)[1]=((Text **)peers[1].messages.data)[0];((Text **)peers[1].messages.data)[0]=saved;
-    jet_rt_handle_drop_JetWebFormActionError(h(b));clone_and_drop(a);
+    Error *b=(Error *)(uintptr_t)jet_rt_handle_clone_jet_web_form_action_error(h(a));assert(jet_rt_handle_eq_jet_web_form_action_error(h(a),h(b)));
+    Entry *peers=b->fields.data;peers[1].key->data[0]^=1;assert(!jet_rt_handle_eq_jet_web_form_action_error(h(a),h(b)));peers[1].key->data[0]^=1;
+    message(&peers[1].messages,1)->data[0]^=1;assert(!jet_rt_handle_eq_jet_web_form_action_error(h(a),h(b)));message(&peers[1].messages,1)->data[0]^=1;
+    message(&b->form,1)->data[0]^=1;assert(!jet_rt_handle_eq_jet_web_form_action_error(h(a),h(b)));message(&b->form,1)->data[0]^=1;
+    Text *saved=message(&peers[1].messages,0);((Text **)peers[1].messages.data)[0]=message(&peers[1].messages,1);((Text **)peers[1].messages.data)[1]=saved;assert(!jet_rt_handle_eq_jet_web_form_action_error(h(a),h(b)));((Text **)peers[1].messages.data)[1]=((Text **)peers[1].messages.data)[0];((Text **)peers[1].messages.data)[0]=saved;
+    jet_rt_handle_drop_jet_web_form_action_error(h(b));clone_and_drop(a);
 }
 static bool letter(unsigned byte){return (byte>='a'&&byte<='z')||(byte>='A'&&byte<='Z')||byte=='_';}
 static void name_case(const unsigned char *name,size_t n,bool valid){Error *e=fresh();assert(jet_web_forms_action_field_error(h(e),owned(name,n),string("input"))==h(e));assert(e->fields.len==(valid?1u:0u)&&e->form.len==(valid?0u:1u));if(valid){Entry *entry=e->fields.data;text_eq(entry->key,name,n);text_eq(message(&entry->messages,0),"input",5);}else{text_eq(message(&e->form,0),"action returned an invalid field error",37);}clone_and_drop(e);}
@@ -58,4 +58,4 @@ static void bound_case(size_t start,const unsigned char *scalar,size_t width,boo
     unsigned char bytes[4105];memset(bytes,'a',sizeof bytes);memcpy(bytes+start,scalar,width);size_t n=start+width+2;size_t expected=n<=4096?n:(start<4096&&start+width>4096?start+width:4096);
     Error *e=fresh();H msg=owned(bytes,n);assert((as_field?jet_web_forms_action_field_error(h(e),string("key"),msg):jet_web_forms_action_form_error(h(e),msg))==h(e));List *list=as_field?&((Entry *)e->fields.data)[0].messages:&e->form;Text *out=message(list,0);assert(h(out)==msg&&out->cap==n);text_eq(out,bytes,expected);clone_and_drop(e);
 }
-int main(void){jet_rt_alloc_init();tracking=true;clone_and_drop(fresh());ordered_case();names();const unsigned char scalars[4][4]={{'x',0,0,0},{0xc3,0xa9,0,0},{0xe2,0x82,0xac,0},{0xf0,0x9f,0x98,0x80}};for(size_t w=1;w<=4;++w)for(size_t start=4092;start<=4096;++start)for(unsigned field_mode=0;field_mode<2;++field_mode)bound_case(start,scalars[w-1],w,field_mode!=0);jet_rt_handle_drop_JetWebFormActionError(0);balanced();puts("UI ActionError: real consumed producers, ordered maps, name and UTF8 bounds, independent clones and exact frees ok");return 0;}
+int main(void){jet_rt_alloc_init();tracking=true;clone_and_drop(fresh());ordered_case();names();const unsigned char scalars[4][4]={{'x',0,0,0},{0xc3,0xa9,0,0},{0xe2,0x82,0xac,0},{0xf0,0x9f,0x98,0x80}};for(size_t w=1;w<=4;++w)for(size_t start=4092;start<=4096;++start)for(unsigned field_mode=0;field_mode<2;++field_mode)bound_case(start,scalars[w-1],w,field_mode!=0);jet_rt_handle_drop_jet_web_form_action_error(0);balanced();puts("UI ActionError: real consumed producers, ordered maps, name and UTF8 bounds, independent clones and exact frees ok");return 0;}

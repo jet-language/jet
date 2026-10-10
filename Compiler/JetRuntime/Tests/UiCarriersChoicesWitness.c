@@ -14,13 +14,13 @@ extern H jet_rt_alloc(H,H);
 extern H __real_jet_rt_alloc(H,H);
 extern void __real_jet_rt_free(H,H,H);
 extern void jet_rt_string_drop(Text *);
-extern H jet_rt_handle_clone_JetUiAriaRole(H);
-extern void jet_rt_handle_drop_JetUiAriaRole(H);
-extern bool jet_rt_handle_eq_JetUiAriaRole(H,H);
-extern Text *jet_rt_handle_show_JetUiAriaRole(H);
-extern H jet_rt_handle_clone_JetWebFormValidationTiming(H);
-extern void jet_rt_handle_drop_JetWebFormValidationTiming(H);
-extern bool jet_rt_handle_eq_JetWebFormValidationTiming(H,H);
+extern H jet_rt_handle_clone_jet_ui_aria_role(H);
+extern void jet_rt_handle_drop_jet_ui_aria_role(H);
+extern bool jet_rt_handle_eq_jet_ui_aria_role(H,H);
+extern Text *jet_rt_handle_show_jet_ui_aria_role(H);
+extern H jet_rt_handle_clone_jet_web_form_validation_timing(H);
+extern void jet_rt_handle_drop_jet_web_form_validation_timing(H);
+extern bool jet_rt_handle_eq_jet_web_form_validation_timing(H,H);
 static struct { H address,bytes,align; bool live; } ledger[256];
 static size_t allocations,frees;
 static bool tracking;
@@ -46,17 +46,17 @@ static void cases(H (*clone)(H),void (*drop)(H),bool (*eq)(H,H),H count,bool ari
     for(H i=0;i<count;++i) {
         H a=choice(i),b=clone(a);assert(a!=b&&eq(a,b));
         for(H j=0;j<count;++j){H other=choice(j);assert(eq(a,other)==(i==j));drop(other);}
-        if(aria){Text *rendered=jet_rt_handle_show_JetUiAriaRole(b);assert(rendered->len==strlen(labels[i])&&!memcmp(rendered->data,labels[i],rendered->len));jet_rt_string_drop(rendered);}
+        if(aria){Text *rendered=jet_rt_handle_show_jet_ui_aria_role(b);assert(rendered->len==strlen(labels[i])&&!memcmp(rendered->data,labels[i],rendered->len));jet_rt_string_drop(rendered);}
         drop(a);assert(*(H *)(uintptr_t)b==i);drop(b);
     }
     drop(0);
 }
 int main(int argc,char **argv) {
     jet_rt_alloc_init();
-    if(argc==2){if(strcmp(argv[1],"aria-tag"))return 2;jet_rt_handle_show_JetUiAriaRole(choice(4));return 99;}
+    if(argc==2){if(strcmp(argv[1],"aria-tag"))return 2;jet_rt_handle_show_jet_ui_aria_role(choice(4));return 99;}
     tracking=true;
-    cases(jet_rt_handle_clone_JetUiAriaRole,jet_rt_handle_drop_JetUiAriaRole,jet_rt_handle_eq_JetUiAriaRole,4,true);
-    cases(jet_rt_handle_clone_JetWebFormValidationTiming,jet_rt_handle_drop_JetWebFormValidationTiming,jet_rt_handle_eq_JetWebFormValidationTiming,3,false);
+    cases(jet_rt_handle_clone_jet_ui_aria_role,jet_rt_handle_drop_jet_ui_aria_role,jet_rt_handle_eq_jet_ui_aria_role,4,true);
+    cases(jet_rt_handle_clone_jet_web_form_validation_timing,jet_rt_handle_drop_jet_web_form_validation_timing,jet_rt_handle_eq_jet_web_form_validation_timing,3,false);
     assert(allocations==frees);for(size_t i=0;i<allocations;++i)assert(!ledger[i].live);
     puts("UI choices: all ordinals, role spellings, independent clones and exact-once frees ok");return 0;
 }

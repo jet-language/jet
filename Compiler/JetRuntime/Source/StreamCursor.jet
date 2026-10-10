@@ -31,11 +31,11 @@ fn stream_drop(handle: I64) {
 fn stream_clone(handle: I64) -> I64 {
     stream_new(rt_text_data(handle), rt_text_len(handle), I64{1}, rt_text_word(handle + I64{24}))
 }
-#Export(c) fn jet_rt_handle_drop_JetCursor(handle: I64) { stream_drop(handle) }
-#Export(c) fn jet_rt_handle_drop_JetReader(handle: I64) { stream_drop(handle) }
-#Export(c) fn jet_rt_handle_clone_JetCursor(handle: I64) -> I64 { stream_clone(handle) }
-#Export(c) fn jet_rt_handle_clone_JetReader(handle: I64) -> I64 { stream_clone(handle) }
-#Export(c) fn jet_rt_handle_field_JetCursor_buf(handle: I64, output: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_cursor(handle: I64) { stream_drop(handle) }
+#Export(c) fn jet_rt_handle_drop_jet_reader(handle: I64) { stream_drop(handle) }
+#Export(c) fn jet_rt_handle_clone_jet_cursor(handle: I64) -> I64 { stream_clone(handle) }
+#Export(c) fn jet_rt_handle_clone_jet_reader(handle: I64) -> I64 { stream_clone(handle) }
+#Export(c) fn jet_rt_handle_field_jet_cursor_buf(handle: I64, output: I64) {
     // G1 field projection is a borrowed read/clone-only E4 stack header, not an
     // owner. The caller must neither grow nor drop this temporary view.
     rt_text_store(output, rt_text_data(handle))

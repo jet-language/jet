@@ -9,9 +9,9 @@
 typedef uintptr_t Handle;
 typedef uintptr_t (*Allocate)(Handle, int64_t, int64_t, uintptr_t);
 typedef void (*Reset)(Handle);
-extern Handle JetArena_new(void), JetArena_with_capacity(int64_t);
-extern Handle JetBump_new(void), JetBump_with_capacity(int64_t);
-extern Handle JetPool_with_slots(int64_t), jet_rt_mem_pool_storage_new(void);
+extern Handle jet_arena_new(void), jet_arena_with_capacity(int64_t);
+extern Handle jet_bump_new(void), jet_bump_with_capacity(int64_t);
+extern Handle jet_pool_with_slots(int64_t), jet_rt_mem_pool_storage_new(void);
 extern Handle jet_rt_mem_fixed_storage_over(uintptr_t, int64_t);
 #define KIND(K, T) \
     extern uintptr_t jet_rt_mem_##K##_storage_alloc(Handle, int64_t, int64_t, uintptr_t); \
@@ -78,7 +78,7 @@ static void probe(uint64_t allocations, uint64_t bytes) {
 }
 static void arena(void) {
     jet_rt_mem_allocation_probe_reset();
-    Handle h = JetArena_with_capacity(16);
+    Handle h = jet_arena_with_capacity(16);
     resources(1, 0, 0);
     assert(retained() == 16);
     uintptr_t a = put(jet_rt_mem_arena_storage_alloc, h, 8, 8, 1);
@@ -97,13 +97,13 @@ static void arena(void) {
     assert(zero == a + 8);
     resources(1, 2, 8);
     probe(2, 8);
-    jet_rt_handle_drop_JetArena(h);
+    jet_rt_handle_drop_jet_arena(h);
     resources(0, 0, 0);
     assert(retained() == 0);
     puts("Arena: align/grow/reuse/ZST/reverse-drop ok");
 }
 static void bump(void) {
-    Handle h = JetBump_with_capacity(32);
+    Handle h = jet_bump_with_capacity(32);
     uintptr_t a = put(jet_rt_mem_bump_storage_alloc, h, 8, 8, 10);
     uintptr_t b = put(jet_rt_mem_bump_storage_alloc, h, 8, 16, 20);
     assert(b == a + 16);
@@ -114,13 +114,13 @@ static void bump(void) {
     resources(1, 3, 16);
     reverse(jet_rt_mem_bump_storage_reset, h, 20, 10, 0, 3, 16);
     assert(jet_rt_mem_bump_storage_alloc(h, 8, 8, 0) == a);
-    jet_rt_handle_drop_JetBump(h);
+    jet_rt_handle_drop_jet_bump(h);
     resources(0, 0, 0);
     assert(retained() == 0);
     puts("Bump: align/capacity/reuse/reverse-drop ok");
 }
 static void pool(void) {
-    Handle h = JetPool_with_slots(2);
+    Handle h = jet_pool_with_slots(2);
     uintptr_t a = put(jet_rt_mem_pool_storage_alloc, h, 8, 8, 1);
     uintptr_t b = put(jet_rt_mem_pool_storage_alloc, h, 32, 32, 2);
     assert(retained() == 40);
@@ -131,13 +131,13 @@ static void pool(void) {
     reverse(jet_rt_mem_pool_storage_reset, h, 4, 3, 0, 2, 24);
     uintptr_t replacement = jet_rt_mem_pool_storage_alloc(h, 64, 64, 0);
     assert(replacement != a && retained() == 96); // slot0 class replaced
-    jet_rt_handle_drop_JetPool(h);
+    jet_rt_handle_drop_jet_pool(h);
     resources(0, 0, 0);
     assert(retained() == 0);
-    h = JetPool_with_slots(0);
+    h = jet_pool_with_slots(0);
     assert(jet_rt_mem_pool_storage_try_alloc(h, 8, 8, 0) == 0);
     resources(1, 0, 0);
-    jet_rt_handle_drop_JetPool(h);
+    jet_rt_handle_drop_jet_pool(h);
     puts("Pool: class priority/replacement/zero-slots/reuse/reverse-drop ok");
 }
 static void fixed(void) {
@@ -153,7 +153,7 @@ static void fixed(void) {
     assert(jet_rt_mem_fixed_storage_try_alloc(h, 256, 8, 0) == 0);
     reverse(jet_rt_mem_fixed_storage_reset, h, 30, 20, 10, 3, 16);
     assert(jet_rt_mem_fixed_storage_alloc(h, 8, 64, 0) == a);
-    jet_rt_handle_drop_JetFixed(h);
+    jet_rt_handle_drop_jet_fixed(h);
     assert(bytes[0] == 0xa5 && bytes[257] == 0xa5); // neither guard touched
     bytes[1] = 0x5a; // borrowed backing is still live, never freed by Fixed.
     resources(0, 0, 0);
@@ -162,11 +162,11 @@ static void fixed(void) {
     h = jet_rt_mem_fixed_storage_over((uintptr_t)tiny, sizeof(tiny));
     assert(jet_rt_mem_fixed_storage_alloc(h, 0, 8, 0) == 8);
     assert(jet_rt_mem_fixed_storage_try_alloc(h, 0, 8, 0) == 0);
-    jet_rt_handle_drop_JetFixed(h);
+    jet_rt_handle_drop_jet_fixed(h);
     puts("Fixed: in-buffer headers/unaligned backing/ZST dangling/reuse/reverse-drop/borrowed backing ok");
 }
 static void tries(void) {
-    Handle h = JetArena_with_capacity(1);
+    Handle h = jet_arena_with_capacity(1);
     jet_rt_fault_allocation_arm(2, true);
     uintptr_t p = jet_rt_mem_arena_storage_try_alloc(h, 16, 8, 0);
     assert(p && jet_rt_fault_allocation_fact(0) == 1);
@@ -196,13 +196,13 @@ static void tries(void) {
     resources(1, 0, 0);
     assert(retained() == 25);
     jet_rt_fault_allocation_clear();
-    jet_rt_handle_drop_JetArena(h);
+    jet_rt_handle_drop_jet_arena(h);
     puts("try: inject once/grow/reuse/OOM rollback/no double probe ok");
 }
 static void defaults(void) {
-    Handle a = JetArena_new();
+    Handle a = jet_arena_new();
     assert(retained() == 4096);
-    Handle b = JetBump_new();
+    Handle b = jet_bump_new();
     assert(retained() == 4096 + 65536);
     Handle p = jet_rt_mem_pool_storage_new();
     resources(3, 0, 0);
@@ -211,13 +211,13 @@ static void defaults(void) {
     for (unsigned i = 1; i < 64; ++i)
         assert(jet_rt_mem_pool_storage_alloc(p, 0, 1, 0));
     assert(jet_rt_mem_pool_storage_try_alloc(p, 0, 1, 0) == 0);
-    jet_rt_handle_drop_JetPool(p);
-    jet_rt_handle_drop_JetBump(b);
-    jet_rt_handle_drop_JetArena(a);
-    jet_rt_handle_drop_JetArena(0);
-    jet_rt_handle_drop_JetBump(0);
-    jet_rt_handle_drop_JetPool(0);
-    jet_rt_handle_drop_JetFixed(0);
+    jet_rt_handle_drop_jet_pool(p);
+    jet_rt_handle_drop_jet_bump(b);
+    jet_rt_handle_drop_jet_arena(a);
+    jet_rt_handle_drop_jet_arena(0);
+    jet_rt_handle_drop_jet_bump(0);
+    jet_rt_handle_drop_jet_pool(0);
+    jet_rt_handle_drop_jet_fixed(0);
     puts("defaults: Arena=4096 Bump=65536 Pool=64 ok");
 }
 int main(void) {

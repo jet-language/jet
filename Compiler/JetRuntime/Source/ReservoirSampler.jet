@@ -1,6 +1,6 @@
 // Sketch.rs:171-227; shared Native64 owner, #4828 Arc/Mutex clone semantics.
 // The seed RNG is xorshift(13,7,17), NOT Core's divergent SplitMix64 source.
-#Export(c) fn JetReservoirSampler_new(capacity: I64) -> I64 {
+#Export(c) fn jet_reservoir_sampler_new(capacity: I64) -> I64 {
     value :: jet_rt_alloc(RESERVOIR_BYTES, I64{8})
     thread_zero(value, RESERVOIR_BYTES)
     sync_store(value + RESERVOIR_REFS, I64{1})
@@ -9,11 +9,11 @@
     data_tree_store(value + RESERVOIR_SEQUENCE + DATA_SEQUENCE_DATA, I64{8})
     value
 }
-#Export(c) fn jet_rt_handle_clone_JetReservoirSampler(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_reservoir_sampler(value: I64) -> I64 {
     _ := sync_add(value + RESERVOIR_REFS, I64{1})
     value
 }
-#Export(c) fn jet_rt_handle_drop_JetReservoirSampler(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_reservoir_sampler(value: I64) {
     if (value == I64{0}) -> return
     if (sync_add(value + RESERVOIR_REFS, I64{-1}) != I64{1}) -> return
     coll_text_list_drop(value + RESERVOIR_SEQUENCE, true)
@@ -59,7 +59,7 @@
     sync_mutex_unlock(value + RESERVOIR_MUTEX)
     result
 }
-#Export(c) fn jet_rt_handle_show_JetReservoirSampler(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_show_jet_reservoir_sampler(value: I64) -> I64 {
     sync_mutex_lock(value + RESERVOIR_MUTEX)
     count :: iter_unsigned(data_tree_word(value + RESERVOIR_COUNT))
     sync_mutex_unlock(value + RESERVOIR_MUTEX)

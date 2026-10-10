@@ -14,10 +14,10 @@ extern FD *jet_fd_adopt_unbuffered_raw(int64_t,void *);
 extern Stream *jet_socket_stream_from_fd_raw(FD *);
 extern void jet_socket_stream_mark_shutdown_raw(Stream *,int64_t);
 extern void jet_socket_stream_mark_closed_raw(Stream *);
-extern void jet_rt_handle_drop_JetTCPStream(Stream *);
-extern const bool *jet_rt_handle_field_JetTCPStream_closed(Stream *);
-extern const bool *jet_rt_handle_field_JetTCPStream_read_shutdown(Stream *);
-extern const bool *jet_rt_handle_field_JetTCPStream_write_shutdown(Stream *);
+extern void jet_rt_handle_drop_jet_tcp_stream(Stream *);
+extern const bool *jet_rt_handle_field_jet_tcp_stream_closed(Stream *);
+extern const bool *jet_rt_handle_field_jet_tcp_stream_read_shutdown(Stream *);
+extern const bool *jet_rt_handle_field_jet_tcp_stream_write_shutdown(Stream *);
 static FD *watched_fd;
 static Stream *watched_stream;
 static unsigned fd_freed,stream_freed;
@@ -34,9 +34,9 @@ int main(void) {
         fd_freed=stream_freed=0;
         // Inspect the native Bool slot's byte through character aliases, which
         // are legal even after this C client writes an I64 padding word.
-        const unsigned char *closed=(const unsigned char *)jet_rt_handle_field_JetTCPStream_closed(watched_stream);
-        const unsigned char *read=(const unsigned char *)jet_rt_handle_field_JetTCPStream_read_shutdown(watched_stream);
-        const unsigned char *write=(const unsigned char *)jet_rt_handle_field_JetTCPStream_write_shutdown(watched_stream);
+        const unsigned char *closed=(const unsigned char *)jet_rt_handle_field_jet_tcp_stream_closed(watched_stream);
+        const unsigned char *read=(const unsigned char *)jet_rt_handle_field_jet_tcp_stream_read_shutdown(watched_stream);
+        const unsigned char *write=(const unsigned char *)jet_rt_handle_field_jet_tcp_stream_write_shutdown(watched_stream);
         assert((const void *)closed==(const void *)&watched_fd->closed);
         assert((const void *)read==(const void *)&watched_stream->read_shutdown && (const void *)write==(const void *)&watched_stream->write_shutdown);
         assert(!*closed && !*read && !*write);
@@ -46,7 +46,7 @@ int main(void) {
         // Projections remain live aliases: no allocated snapshots or owners.
         watched_stream->read_shutdown=0x100; watched_stream->write_shutdown=0x101;
         assert(!*read && *write);
-        jet_rt_handle_drop_JetTCPStream(watched_stream); assert(fd_freed==1 && stream_freed==1); assert(close(pipefd[1])==0);
+        jet_rt_handle_drop_jet_tcp_stream(watched_stream); assert(fd_freed==1 && stream_freed==1); assert(close(pipefd[1])==0);
     }
     puts("tcp-stream-fields: borrowed canonical FD.closed/read/write Bool slots, live low-byte aliases, shutdown/close source of truth, no projection owners OK");
     return 0;

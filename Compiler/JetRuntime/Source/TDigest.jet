@@ -17,18 +17,18 @@ fn td_partition(data: I64, length: I64, value: Float) -> I64 {
     offset :: if (td_float(data + base * TD_CENTROID_BYTES + TD_MEAN) < value) -> I64{1} else -> I64{0}
     base + offset
 }
-#Export(c) fn JetTDigest_new() -> I64 {
+#Export(c) fn jet_t_digest_new() -> I64 {
     value :: jet_rt_alloc(TD_BYTES, I64{8})
     thread_zero(value, TD_BYTES)
     sync_store(value + TD_REFS, I64{1})
     data_tree_store(value + TD_SEQUENCE + DATA_SEQUENCE_DATA, I64{8})
     value
 }
-#Export(c) fn jet_rt_handle_clone_JetTDigest(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_t_digest(value: I64) -> I64 {
     _ := sync_add(value + TD_REFS, I64{1})
     value
 }
-#Export(c) fn jet_rt_handle_drop_JetTDigest(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_t_digest(value: I64) {
     if (value == I64{0}) -> return
     if (sync_add(value + TD_REFS, I64{-1}) != I64{1}) -> return
     sequence :: value + TD_SEQUENCE
@@ -36,7 +36,7 @@ fn td_partition(data: I64, length: I64, value: Float) -> I64 {
     if (capacity != I64{0}) -> jet_rt_free(data_tree_word(sequence + DATA_SEQUENCE_DATA), capacity * TD_CENTROID_BYTES, I64{8})
     jet_rt_free(value, TD_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_show_JetTDigest(_value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_show_jet_t_digest(_value: I64) -> I64 {
     text :: jet_rt_string_builder_new()
     rt_text_push_word(text, I64{32777976662279252}, I64{7}) // TDigest
     jet_rt_string_builder_finish(text)

@@ -51,10 +51,10 @@ extern W jet_rt_native_shared_clone(W);
 extern void jet_rt_native_shared_drop(W);
 extern void jet_rt_native_shared_read(W,W,W,W);
 extern void jet_rt_native_shared_edit(W,W,W,W);
-extern W jet_rt_handle_clone_Closed(W);
-extern void jet_rt_handle_drop_Closed(W);
-extern uint8_t jet_rt_handle_eq_Closed(W,W);
-extern W jet_rt_handle_show_Closed(W);
+extern W jet_rt_handle_clone_closed(W);
+extern void jet_rt_handle_drop_closed(W);
+extern uint8_t jet_rt_handle_eq_closed(W,W);
+extern W jet_rt_handle_show_closed(W);
 extern W jet_rt_string_data(W);
 extern W jet_rt_string_byte_len(W);
 extern void jet_rt_string_drop(W);
@@ -65,12 +65,12 @@ extern W jet_fixture_rust_closed_show(W);
 static void closed_cross(void) {
     W from_rust = jet_fixture_rust_closed_new();
     assert(from_rust == 1);
-    W shown = jet_rt_handle_show_Closed(from_rust);
+    W shown = jet_rt_handle_show_closed(from_rust);
     assert(jet_rt_string_byte_len(shown) == 6);
     assert(!memcmp((void *)jet_rt_string_data(shown), "Closed", 6));
     jet_rt_string_drop(shown);
-    jet_rt_handle_drop_Closed(from_rust);
-    W from_jet = jet_rt_handle_clone_Closed(1);
+    jet_rt_handle_drop_closed(from_rust);
+    W from_jet = jet_rt_handle_clone_closed(1);
     shown = jet_fixture_rust_closed_show(from_jet);
     assert(jet_rt_string_byte_len(shown) == 6);
     assert(!memcmp((void *)jet_rt_string_data(shown), "Closed", 6));
@@ -116,7 +116,7 @@ static uint64_t inspect(W,W,W);
 static uint64_t now_ns(void) { struct timespec t; assert(!clock_gettime(CLOCK_MONOTONIC,&t)); return (uint64_t)t.tv_sec*1000000000u+(uint64_t)t.tv_nsec; }
 static W receive(W rx) { W out=0; assert(jet_rt_native_receiver_receive(rx,(W)&out)==1); return out; }
 static Header words(const W *p,size_t n) { Header h={n,n,0}; if(n){h.data=jet_rt_alloc(n*8,8);memcpy((void*)h.data,p,n*8);}return h; }
-static void closed(W rx) { W out=0; assert(jet_rt_native_receiver_receive(rx,(W)&out)==0); assert(out==1); assert(jet_rt_handle_clone_Closed(out)==1); assert(jet_rt_handle_eq_Closed(out,1)); W text=jet_rt_handle_show_Closed(out); assert(jet_rt_string_byte_len(text)==6); assert(!memcmp((void*)jet_rt_string_data(text),"Closed",6));jet_rt_string_drop(text);jet_rt_handle_drop_Closed(out); }
+static void closed(W rx) { W out=0; assert(jet_rt_native_receiver_receive(rx,(W)&out)==0); assert(out==1); assert(jet_rt_handle_clone_closed(out)==1); assert(jet_rt_handle_eq_closed(out,1)); W text=jet_rt_handle_show_closed(out); assert(jet_rt_string_byte_len(text)==6); assert(!memcmp((void*)jet_rt_string_data(text),"Closed",6));jet_rt_string_drop(text);jet_rt_handle_drop_closed(out); }
 
 static void queue_tests(void) {
 #ifdef JET_CLOSED_CROSS

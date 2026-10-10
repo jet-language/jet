@@ -10,10 +10,10 @@ typedef struct { unsigned char *data; int64_t length, capacity; } Text;
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t, int64_t);
 extern void __real_jet_rt_free(void *, int64_t, int64_t);
-extern int64_t *jet_rt_handle_clone_JetEventResult(int64_t *);
-extern void jet_rt_handle_drop_JetEventResult(int64_t *);
-extern bool jet_rt_handle_eq_JetEventResult(int64_t *, int64_t *);
-extern Text *jet_rt_handle_show_JetEventResult(int64_t *);
+extern int64_t *jet_rt_handle_clone_jet_event_result(int64_t *);
+extern void jet_rt_handle_drop_jet_event_result(int64_t *);
+extern bool jet_rt_handle_eq_jet_event_result(int64_t *, int64_t *);
+extern Text *jet_rt_handle_show_jet_event_result(int64_t *);
 extern void jet_rt_string_drop(Text *);
 static struct { void *pointer; int64_t size, align; unsigned frees; } watched[6];
 static size_t count;
@@ -42,7 +42,7 @@ static int64_t *new_result(int64_t ordinal) {
 int main(int argc, char **argv) {
     jet_rt_alloc_init();
     if (argc == 2 && strcmp(argv[1], "invalid-tag") == 0) {
-        (void)jet_rt_handle_show_JetEventResult(new_result(2));
+        (void)jet_rt_handle_show_jet_event_result(new_result(2));
         fputs("invalid-tag unexpectedly returned\n", stderr);
         return 99;
     }
@@ -50,11 +50,11 @@ int main(int argc, char **argv) {
     const char *expected[] = {"Handled", "Ignored"};
     for (int64_t ordinal = 0; ordinal < 2; ++ordinal) {
         int64_t *a = new_result(ordinal);
-        int64_t *b = jet_rt_handle_clone_JetEventResult(a);
+        int64_t *b = jet_rt_handle_clone_jet_event_result(a);
         assert(a != b && *a == ordinal && *b == ordinal);
-        assert(jet_rt_handle_eq_JetEventResult(a, a) && jet_rt_handle_eq_JetEventResult(a, b));
-        Text *first = jet_rt_handle_show_JetEventResult(a);
-        Text *second = jet_rt_handle_show_JetEventResult(a);
+        assert(jet_rt_handle_eq_jet_event_result(a, a) && jet_rt_handle_eq_jet_event_result(a, b));
+        Text *first = jet_rt_handle_show_jet_event_result(a);
+        Text *second = jet_rt_handle_show_jet_event_result(a);
         assert(first != second && first->data != second->data);
         assert(first->length == 7 && second->length == 7);
         assert(memcmp(first->data, expected[ordinal], 7) == 0);
@@ -62,20 +62,20 @@ int main(int argc, char **argv) {
         first->data[0] = '?';
         assert(memcmp(second->data, expected[ordinal], 7) == 0 && *a == ordinal);
         *b = 1 - ordinal;
-        assert(*a == ordinal && !jet_rt_handle_eq_JetEventResult(a, b));
-        assert(!jet_rt_handle_eq_JetEventResult(b, a) && jet_rt_handle_eq_JetEventResult(b, b));
+        assert(*a == ordinal && !jet_rt_handle_eq_jet_event_result(a, b));
+        assert(!jet_rt_handle_eq_jet_event_result(b, a) && jet_rt_handle_eq_jet_event_result(b, b));
         watch(a, 8, 8); watch(b, 8, 8);
         watch(first, 24, 8); watch(first->data, first->capacity, 1);
         watch(second, 24, 8); watch(second->data, second->capacity, 1);
         unsigned before = intercepted;
-        jet_rt_handle_drop_JetEventResult(a); jet_rt_handle_drop_JetEventResult(b);
+        jet_rt_handle_drop_jet_event_result(a); jet_rt_handle_drop_jet_event_result(b);
         jet_rt_string_drop(first); jet_rt_string_drop(second);
         assert(intercepted == before + count);
         for (size_t i = 0; i < count; ++i) assert(watched[i].frees == 1);
         count = 0;
     }
     unsigned before = intercepted;
-    jet_rt_handle_drop_JetEventResult(NULL);
+    jet_rt_handle_drop_jet_event_result(NULL);
     assert(intercepted == before && intercepted != 0);
     puts("EventResult ownership/equality/Show OK");
     return 0;

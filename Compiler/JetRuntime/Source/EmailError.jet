@@ -28,7 +28,7 @@ fn email_error_option_eq(left: I64, right: I64, text: Bool) -> Bool {
     b :: encoding_word(right)
     if text -> jet_rt_string_eq(a, b) else -> jet_int_compare(a, b) == I64{0}
 }
-#Export(c) fn jet_rt_handle_clone_Error(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_error(value: I64) -> I64 {
     ordinal :: email_error_tag(value)
     result :: jet_rt_alloc(EMAIL_ERROR_BYTES, I64{8})
     encoding_store(result + EMAIL_ERROR_TAG, ordinal)
@@ -38,7 +38,7 @@ fn email_error_option_eq(left: I64, right: I64, text: Bool) -> Bool {
     encoding_store(result + EMAIL_ERROR_REASON, jet_rt_string_clone(encoding_word(value + EMAIL_ERROR_REASON)))
     result
 }
-#Export(c) fn jet_rt_handle_drop_Error(value: I64) {
+#Export(c) fn jet_rt_handle_drop_error(value: I64) {
     if (value == I64{0}) -> return
     email_error_tag(value)
     jet_rt_string_drop(encoding_word(value + EMAIL_ERROR_OPERATION))
@@ -47,7 +47,7 @@ fn email_error_option_eq(left: I64, right: I64, text: Bool) -> Bool {
     jet_rt_string_drop(encoding_word(value + EMAIL_ERROR_REASON))
     jet_rt_free(value, EMAIL_ERROR_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_Error(left: I64, right: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_error(left: I64, right: I64) -> Bool {
     a :: email_error_tag(left)
     b :: email_error_tag(right)
     if (a != b) -> return false

@@ -104,8 +104,8 @@ fn layout_expr_copy(value: I64) -> I64 {
     coll_copy(value, result, LAYOUT_EXPR_BYTES)
     result
 }
-#Export(c) fn jet_rt_handle_clone_LinExpr(value: I64) -> I64 { layout_expr_copy(value) }
-#Export(c) fn jet_rt_handle_drop_LinExpr(value: I64) {
+#Export(c) fn jet_rt_handle_clone_lin_expr(value: I64) -> I64 { layout_expr_copy(value) }
+#Export(c) fn jet_rt_handle_drop_lin_expr(value: I64) {
     if (value != I64{0}) { jet_rt_free(value, LAYOUT_EXPR_BYTES, I64{8}) }
 }
 fn layout_handle_copy(value: I64) -> I64 {
@@ -121,7 +121,7 @@ fn layout_handle_drop(value: I64) {
     layout_inner_release(layout_word(value))
     jet_rt_free(value, I64{16}, I64{8})
 }
-#Export(c) fn jet_rt_handle_clone_Handle(value: I64) -> I64 { layout_handle_copy(value) }
-#Export(c) fn jet_rt_handle_drop_Handle(value: I64) { layout_handle_drop(value) }
-#Export(c) fn jet_rt_handle_clone_Constraint(value: I64) -> I64 { layout_handle_copy(value) }
-#Export(c) fn jet_rt_handle_drop_Constraint(value: I64) { layout_handle_drop(value) }
+#Export(c) fn jet_rt_handle_clone_handle(value: I64) -> I64 { layout_handle_copy(value) }
+#Export(c) fn jet_rt_handle_drop_handle(value: I64) { layout_handle_drop(value) }
+#Export(c) fn jet_rt_handle_clone_constraint(value: I64) -> I64 { layout_handle_copy(value) }
+#Export(c) fn jet_rt_handle_drop_constraint(value: I64) { layout_handle_drop(value) }

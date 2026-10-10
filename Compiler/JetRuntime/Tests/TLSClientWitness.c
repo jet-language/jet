@@ -20,11 +20,11 @@ extern void __real_jet_rt_free(void *,int64_t,int64_t);
 extern int64_t runtime_tls_u8_stride(void);
 extern Text *jet_rt_string_from_static(const char *,int64_t);
 extern Bytes *jet_rt_secret_from_bytes(Bytes *);
-extern Identity *jet_rt_handle_clone_JetTLSClientIdentity(Identity *);
-extern void jet_rt_handle_drop_JetTLSClientIdentity(Identity *);
-extern Config *jet_rt_handle_clone_JetTLSClientConfig(Config *);
-extern void jet_rt_handle_drop_JetTLSClientConfig(Config *);
-extern Trust *jet_rt_handle_field_JetTLSClientConfig_trust(Config *);
+extern Identity *jet_rt_handle_clone_jet_tls_client_identity(Identity *);
+extern void jet_rt_handle_drop_jet_tls_client_identity(Identity *);
+extern Config *jet_rt_handle_clone_jet_tls_client_config(Config *);
+extern void jet_rt_handle_drop_jet_tls_client_config(Config *);
+extern Trust *jet_rt_handle_field_jet_tls_client_config_trust(Config *);
 struct Watch { void *ptr; int64_t size,align; unsigned erase,freed; };
 static struct Watch watched[4096];
 static size_t count,erased,intercepted;
@@ -103,18 +103,18 @@ static Config *config(int64_t kind,int with_identity,int64_t protocols) {
 }
 int main(void) {
     jet_rt_alloc_init(); stride=runtime_tls_u8_stride(); assert(stride==1 || stride==8);
-    jet_rt_handle_drop_JetTLSClientIdentity(NULL); jet_rt_handle_drop_JetTLSClientConfig(NULL);
+    jet_rt_handle_drop_jet_tls_client_identity(NULL); jet_rt_handle_drop_jet_tls_client_config(NULL);
     for(int64_t len=0;len<4;++len) {
-        Identity *a=identity(len),*b=jet_rt_handle_clone_JetTLSClientIdentity(a); identity_watch(b);
-        identity_independent(a,b); jet_rt_handle_drop_JetTLSClientIdentity(a);
+        Identity *a=identity(len),*b=jet_rt_handle_clone_jet_tls_client_identity(a); identity_watch(b);
+        identity_independent(a,b); jet_rt_handle_drop_jet_tls_client_identity(a);
         assert(b->chain.len==len && b->key->len==len);
         for(int64_t at=0;at<len;++at) assert(b->key->data[at*stride]==(unsigned char)(at ? 255 : 0));
-        jet_rt_handle_drop_JetTLSClientIdentity(b);
+        jet_rt_handle_drop_jet_tls_client_identity(b);
     }
     for(int64_t kind=0;kind<3;++kind) for(int present=0;present<2;++present) for(int64_t protocols=0;protocols<3;++protocols) {
-        Config *a=config(kind,present,protocols),*b=jet_rt_handle_clone_JetTLSClientConfig(a); config_watch(b);
-        assert(a!=b && jet_rt_handle_field_JetTLSClientConfig_trust(a)==&a->trust);
-        assert(jet_rt_handle_field_JetTLSClientConfig_trust(b)==&b->trust && b->trust.kind==kind);
+        Config *a=config(kind,present,protocols),*b=jet_rt_handle_clone_jet_tls_client_config(a); config_watch(b);
+        assert(a!=b && jet_rt_handle_field_jet_tls_client_config_trust(a)==&a->trust);
+        assert(jet_rt_handle_field_jet_tls_client_config_trust(b)==&b->trust && b->trust.kind==kind);
         if(kind) bytes_independent(&a->trust.roots,&b->trust.roots);
         else assert(!b->trust.roots.len && !b->trust.roots.cap && !b->trust.roots.data);
         assert((b->identity!=NULL)==present);
@@ -124,10 +124,10 @@ int main(void) {
             Text *x=a->alpn.data[at],*y=b->alpn.data[at];
             assert(x!=y && x->data!=y->data && x->len==y->len && !memcmp(x->data,y->data,(size_t)x->len));
         }
-        jet_rt_handle_drop_JetTLSClientConfig(a);
+        jet_rt_handle_drop_jet_tls_client_config(a);
         if(present) assert(b->identity->key->len==3 && b->identity->key->data[2*stride]==255);
         if(protocols>1) assert(b->alpn.data[1]->len==4 && b->alpn.data[1]->data[1]==0 && b->alpn.data[1]->data[3]==255);
-        jet_rt_handle_drop_JetTLSClientConfig(b);
+        jet_rt_handle_drop_jet_tls_client_config(b);
     }
     assert(intercepted>0 && erased>0);
     for(size_t i=0;i<count;++i) assert(watched[i].freed==1);

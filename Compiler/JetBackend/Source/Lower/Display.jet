@@ -208,9 +208,9 @@ fn lower_render_handle_symbol(p: MIRProgram, ty: MIRType, mode: LowerRenderMode)
             if lower_type_def(p, ty) == .Val(_) -> return None
         }
         runtime :: lower_runtime_handle(name.name) ?? return None
-        if mode == .Show && runtime.show -> return Val("jet_rt_handle_show_{runtime.runtime}")
-        if mode == .Display && runtime.display -> return Val("jet_rt_handle_display_{runtime.runtime}")
-        if mode == .Debug && runtime.debug -> return Val("jet_rt_handle_debug_{runtime.runtime}")
+        if mode == .Show && runtime.show -> return Val("jet_rt_handle_show_{runtime_abi_atom(runtime.runtime)}")
+        if mode == .Display && runtime.display -> return Val("jet_rt_handle_display_{runtime_abi_atom(runtime.runtime)}")
+        if mode == .Debug && runtime.debug -> return Val("jet_rt_handle_debug_{runtime_abi_atom(runtime.runtime)}")
     }
     None
 }

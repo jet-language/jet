@@ -17,13 +17,13 @@ extern void __real_jet_rt_free(void *,int64_t,int64_t);
 extern int64_t runtime_attachment_u8_stride(void);
 extern Text *jet_rt_string_clone(Text *);
 extern void jet_rt_string_drop(Text *);
-extern Attachment *jet_rt_record_new_Attachment(Text *,Text *,Bytes *);
-extern Attachment *jet_rt_handle_clone_Attachment(Attachment *);
-extern void jet_rt_handle_drop_Attachment(Attachment *);
-extern bool jet_rt_handle_eq_Attachment(Attachment *,Attachment *);
-extern Text *jet_rt_record_get_Attachment_filename(Attachment *);
-extern Text *jet_rt_record_get_Attachment_mime(Attachment *);
-extern Bytes *jet_rt_record_get_Attachment_bytes(Attachment *);
+extern Attachment *jet_rt_record_new_attachment(Text *,Text *,Bytes *);
+extern Attachment *jet_rt_handle_clone_attachment(Attachment *);
+extern void jet_rt_handle_drop_attachment(Attachment *);
+extern bool jet_rt_handle_eq_attachment(Attachment *,Attachment *);
+extern Text *jet_rt_record_get_attachment_filename(Attachment *);
+extern Text *jet_rt_record_get_attachment_mime(Attachment *);
+extern Bytes *jet_rt_record_get_attachment_bytes(Attachment *);
 struct Watched { void *ptr; int64_t size,align; unsigned freed; };
 static struct Watched watched[512];
 static size_t count;
@@ -55,37 +55,37 @@ static Bytes *list(int64_t len,int64_t spare) {
 }
 int main(void) {
     jet_rt_alloc_init(); stride=runtime_attachment_u8_stride(); assert(stride==1);
-    jet_rt_handle_drop_Attachment(NULL);
+    jet_rt_handle_drop_attachment(NULL);
     unsigned char name_data[]={'f',0,0xc3,0xa9},mime_data[]={'a','/',0,'b'};
     Text name={name_data,4,4},mime={mime_data,4,4},empty={(unsigned char *)"",0,0};
     for(int64_t len=0;len<3;++len) for(int64_t spare=0;spare<3;++spare) {
         Bytes *b=list(len,spare); unsigned char *data=b->data; size_t shell=count-(b->cap ? 2 : 1);
         Text *n=jet_rt_string_clone(&name),*m=jet_rt_string_clone(&mime); text_watch(n); text_watch(m);
-        Attachment *a=jet_rt_record_new_Attachment(n,m,b); attachment_watch(a,true);
+        Attachment *a=jet_rt_record_new_attachment(n,m,b); attachment_watch(a,true);
         assert(watched[shell].freed && a->filename!=n && a->mime!=m);
         assert(a->bytes.data==data && a->bytes.len==len && a->bytes.cap==len+spare);
         jet_rt_string_drop(n); jet_rt_string_drop(m); text_equal(a->filename,&name); text_equal(a->mime,&mime);
-        assert(jet_rt_record_get_Attachment_bytes(a)==&a->bytes);
-        Attachment *copy=jet_rt_handle_clone_Attachment(a); attachment_watch(copy,false);
+        assert(jet_rt_record_get_attachment_bytes(a)==&a->bytes);
+        Attachment *copy=jet_rt_handle_clone_attachment(a); attachment_watch(copy,false);
         assert(copy!=a && copy->filename!=a->filename && copy->mime!=a->mime && copy->bytes.cap==len);
-        assert(jet_rt_handle_eq_Attachment(a,copy) && jet_rt_handle_eq_Attachment(copy,a));
-        copy->filename->data[0]^=1; assert(!jet_rt_handle_eq_Attachment(a,copy)); copy->filename->data[0]^=1;
-        copy->mime->data[0]^=1; assert(!jet_rt_handle_eq_Attachment(a,copy)); copy->mime->data[0]^=1;
+        assert(jet_rt_handle_eq_attachment(a,copy) && jet_rt_handle_eq_attachment(copy,a));
+        copy->filename->data[0]^=1; assert(!jet_rt_handle_eq_attachment(a,copy)); copy->filename->data[0]^=1;
+        copy->mime->data[0]^=1; assert(!jet_rt_handle_eq_attachment(a,copy)); copy->mime->data[0]^=1;
         if(len) {
             assert(copy->bytes.data!=a->bytes.data); copy->bytes.data[0]^=1;
-            assert(!jet_rt_handle_eq_Attachment(a,copy)); copy->bytes.data[0]^=1;
+            assert(!jet_rt_handle_eq_attachment(a,copy)); copy->bytes.data[0]^=1;
         }
-        copy->bytes.len=len+1; assert(!jet_rt_handle_eq_Attachment(a,copy)); copy->bytes.len=len;
-        Text *got_name=jet_rt_record_get_Attachment_filename(a),*got_mime=jet_rt_record_get_Attachment_mime(a);
+        copy->bytes.len=len+1; assert(!jet_rt_handle_eq_attachment(a,copy)); copy->bytes.len=len;
+        Text *got_name=jet_rt_record_get_attachment_filename(a),*got_mime=jet_rt_record_get_attachment_mime(a);
         text_watch(got_name); text_watch(got_mime); assert(got_name!=a->filename && got_mime!=a->mime);
-        jet_rt_handle_drop_Attachment(a); text_equal(got_name,&name); text_equal(got_mime,&mime);
+        jet_rt_handle_drop_attachment(a); text_equal(got_name,&name); text_equal(got_mime,&mime);
         text_equal(copy->filename,&name); text_equal(copy->mime,&mime);
         for(int64_t i=0;i<len;++i) assert(copy->bytes.data[i*stride]==(unsigned char)(i ? 255 : 0));
-        jet_rt_string_drop(got_name); jet_rt_string_drop(got_mime); jet_rt_handle_drop_Attachment(copy);
+        jet_rt_string_drop(got_name); jet_rt_string_drop(got_mime); jet_rt_handle_drop_attachment(copy);
     }
-    Attachment *a=jet_rt_record_new_Attachment(&empty,&empty,list(0,0)); attachment_watch(a,true);
-    Attachment *b=jet_rt_handle_clone_Attachment(a); attachment_watch(b,false); assert(jet_rt_handle_eq_Attachment(a,b));
-    jet_rt_handle_drop_Attachment(a); jet_rt_handle_drop_Attachment(b);
+    Attachment *a=jet_rt_record_new_attachment(&empty,&empty,list(0,0)); attachment_watch(a,true);
+    Attachment *b=jet_rt_handle_clone_attachment(a); attachment_watch(b,false); assert(jet_rt_handle_eq_attachment(a,b));
+    jet_rt_handle_drop_attachment(a); jet_rt_handle_drop_attachment(b);
     for(size_t i=0;i<count;++i) assert(watched[i].freed==1);
     puts("attachment: constructor text borrow/list transfer, owned text and borrowed bytes getters, deep clone/value equality, binary and empty data, capacity frees, packed stride, null drop OK");
     return 0;

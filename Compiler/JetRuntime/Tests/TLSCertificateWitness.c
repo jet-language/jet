@@ -22,19 +22,19 @@ extern int64_t runtime_tls_u8_stride(void);
 extern Text *jet_rt_string_from_static(const char *,int64_t);
 extern Text *jet_rt_string_clone(Text *);
 extern void jet_rt_string_drop(Text *);
-extern Cert *jet_rt_handle_clone_JetTLSCertificate(Cert *);
-extern void jet_rt_handle_drop_JetTLSCertificate(Cert *);
-extern void jet_rt_handle_field_JetTLSCertificate_subject(Cert *,Text *);
-extern void jet_rt_handle_field_JetTLSCertificate_issuer(Cert *,Text *);
-extern Peer *jet_rt_handle_clone_JetTLSPeerIdentity(Peer *);
-extern void jet_rt_handle_drop_JetTLSPeerIdentity(Peer *);
-extern void jet_rt_handle_field_JetTLSPeerIdentity_verified_server_name(Peer *,Text *);
-extern void jet_rt_handle_field_JetTLSPeerIdentity_cipher_suite(Peer *,Text *);
-extern Cert *jet_rt_handle_field_JetTLSPeerIdentity_leaf(Peer *);
-extern Certs *jet_rt_record_seq_List_Rec_JetTLSCertificate_new(int64_t);
-extern int64_t jet_rt_record_seq_List_Rec_JetTLSCertificate_len(Certs *);
-extern Cert *jet_rt_record_seq_List_Rec_JetTLSCertificate_get(Certs *,int64_t);
-extern void jet_rt_record_seq_List_Rec_JetTLSCertificate_push(Certs *,Cert *);
+extern Cert *jet_rt_handle_clone_jet_tls_certificate(Cert *);
+extern void jet_rt_handle_drop_jet_tls_certificate(Cert *);
+extern void jet_rt_handle_field_jet_tls_certificate_subject(Cert *,Text *);
+extern void jet_rt_handle_field_jet_tls_certificate_issuer(Cert *,Text *);
+extern Peer *jet_rt_handle_clone_jet_tls_peer_identity(Peer *);
+extern void jet_rt_handle_drop_jet_tls_peer_identity(Peer *);
+extern void jet_rt_handle_field_jet_tls_peer_identity_verified_server_name(Peer *,Text *);
+extern void jet_rt_handle_field_jet_tls_peer_identity_cipher_suite(Peer *,Text *);
+extern Cert *jet_rt_handle_field_jet_tls_peer_identity_leaf(Peer *);
+extern Certs *jet_rt_record_seq_list_rec_jet_tls_certificate_new(int64_t);
+extern int64_t jet_rt_record_seq_list_rec_jet_tls_certificate_len(Certs *);
+extern Cert *jet_rt_record_seq_list_rec_jet_tls_certificate_get(Certs *,int64_t);
+extern void jet_rt_record_seq_list_rec_jet_tls_certificate_push(Certs *,Cert *);
 struct Watch { void *ptr; int64_t size,align; unsigned freed; };
 static struct Watch watched[4096];
 static size_t count,intercepted;
@@ -97,45 +97,45 @@ static void cert_independent(Cert *a,Cert *b) {
 int main(int argc,char **argv) {
     jet_rt_alloc_init(); stride=runtime_tls_u8_stride(); assert(stride==1 || stride==8);
     if(argc==2) {
-        if(!strcmp(argv[1],"bad-capacity")) { (void)jet_rt_record_seq_List_Rec_JetTLSCertificate_new(-1); return 99; }
-        if(!strcmp(argv[1],"capacity-overflow")) { (void)jet_rt_record_seq_List_Rec_JetTLSCertificate_new(INT64_MAX); return 99; }
-        Certs *s=jet_rt_record_seq_List_Rec_JetTLSCertificate_new(0);
-        if(!strcmp(argv[1],"index-low")) { (void)jet_rt_record_seq_List_Rec_JetTLSCertificate_get(s,-1); return 99; }
-        if(!strcmp(argv[1],"index-high")) { (void)jet_rt_record_seq_List_Rec_JetTLSCertificate_get(s,0); return 99; }
+        if(!strcmp(argv[1],"bad-capacity")) { (void)jet_rt_record_seq_list_rec_jet_tls_certificate_new(-1); return 99; }
+        if(!strcmp(argv[1],"capacity-overflow")) { (void)jet_rt_record_seq_list_rec_jet_tls_certificate_new(INT64_MAX); return 99; }
+        Certs *s=jet_rt_record_seq_list_rec_jet_tls_certificate_new(0);
+        if(!strcmp(argv[1],"index-low")) { (void)jet_rt_record_seq_list_rec_jet_tls_certificate_get(s,-1); return 99; }
+        if(!strcmp(argv[1],"index-high")) { (void)jet_rt_record_seq_list_rec_jet_tls_certificate_get(s,0); return 99; }
         assert(!"unknown mode");
     }
-    jet_rt_handle_drop_JetTLSCertificate(NULL); jet_rt_handle_drop_JetTLSPeerIdentity(NULL);
+    jet_rt_handle_drop_jet_tls_certificate(NULL); jet_rt_handle_drop_jet_tls_peer_identity(NULL);
     for(int64_t len=0;len<3;++len) {
-        Cert *c=certificate(len),*copy=jet_rt_handle_clone_JetTLSCertificate(c); watch(copy,128,8); cert_fields_watch(copy); cert_independent(c,copy);
-        Text subject,issuer; jet_rt_handle_field_JetTLSCertificate_subject(c,&subject); jet_rt_handle_field_JetTLSCertificate_issuer(c,&issuer);
+        Cert *c=certificate(len),*copy=jet_rt_handle_clone_jet_tls_certificate(c); watch(copy,128,8); cert_fields_watch(copy); cert_independent(c,copy);
+        Text subject,issuer; jet_rt_handle_field_jet_tls_certificate_subject(c,&subject); jet_rt_handle_field_jet_tls_certificate_issuer(c,&issuer);
         assert(subject.data==c->subject->data && subject.len==c->subject->len && subject.cap==c->subject->cap);
         assert(issuer.data==c->issuer->data && issuer.len==0);
         Text *saved=jet_rt_string_clone(&subject); text_watch(saved);
-        jet_rt_handle_drop_JetTLSCertificate(c); text_equal(saved,copy->subject); jet_rt_string_drop(saved); jet_rt_handle_drop_JetTLSCertificate(copy);
+        jet_rt_handle_drop_jet_tls_certificate(c); text_equal(saved,copy->subject); jet_rt_string_drop(saved); jet_rt_handle_drop_jet_tls_certificate(copy);
     }
-    Certs *chain=jet_rt_record_seq_List_Rec_JetTLSCertificate_new(1); watch(chain,24,8); watch(chain->data,128,8);
+    Certs *chain=jet_rt_record_seq_list_rec_jet_tls_certificate_new(1); watch(chain,24,8); watch(chain->data,128,8);
     for(int64_t i=0;i<6;++i) {
         Cert *item=certificate(i%3); unsigned char *adopted=item->der.data; Cert *old=chain->data;
-        jet_rt_record_seq_List_Rec_JetTLSCertificate_push(chain,item);
+        jet_rt_record_seq_list_rec_jet_tls_certificate_push(chain,item);
         if(old!=chain->data) watch(chain->data,chain->cap*128,8);
-        assert(jet_rt_record_seq_List_Rec_JetTLSCertificate_len(chain)==i+1);
-        Cert *got=jet_rt_record_seq_List_Rec_JetTLSCertificate_get(chain,i);
+        assert(jet_rt_record_seq_list_rec_jet_tls_certificate_len(chain)==i+1);
+        Cert *got=jet_rt_record_seq_list_rec_jet_tls_certificate_get(chain,i);
         assert(got==chain->data+i && got->der.data==adopted);
         for(int64_t j=0;j<=i;++j) assert(chain->data[j].from==INT64_MIN && chain->data[j].until==INT64_MAX);
     }
     Peer *p=jet_rt_alloc(176,8); watch(p,176,8); p->verified=text("example.com"); p->cipher=text("TLS_AES_128_GCM_SHA256"); p->version=1;
     Cert *leaf=certificate(2); p->leaf=*leaf; jet_rt_free(leaf,128,8); p->chain=*chain; jet_rt_free(chain,24,8);
-    Peer *copy=jet_rt_handle_clone_JetTLSPeerIdentity(p); peer_watch(copy);
+    Peer *copy=jet_rt_handle_clone_jet_tls_peer_identity(p); peer_watch(copy);
     assert(copy->version==1 && copy->chain.len==6 && copy->chain.cap==6 && copy->chain.data!=p->chain.data);
     cert_independent(&p->leaf,&copy->leaf); text_independent(p->verified,copy->verified); text_independent(p->cipher,copy->cipher);
     for(int64_t i=0;i<6;++i) cert_independent(&p->chain.data[i],&copy->chain.data[i]);
-    assert(jet_rt_handle_field_JetTLSPeerIdentity_leaf(p)==&p->leaf);
-    Text name,cipher; jet_rt_handle_field_JetTLSPeerIdentity_verified_server_name(p,&name); jet_rt_handle_field_JetTLSPeerIdentity_cipher_suite(p,&cipher);
+    assert(jet_rt_handle_field_jet_tls_peer_identity_leaf(p)==&p->leaf);
+    Text name,cipher; jet_rt_handle_field_jet_tls_peer_identity_verified_server_name(p,&name); jet_rt_handle_field_jet_tls_peer_identity_cipher_suite(p,&cipher);
     assert(name.data==p->verified->data && cipher.data==p->cipher->data);
     Text *saved=jet_rt_string_clone(&cipher); text_watch(saved);
-    jet_rt_handle_drop_JetTLSPeerIdentity(p); text_equal(saved,copy->cipher); jet_rt_string_drop(saved);
+    jet_rt_handle_drop_jet_tls_peer_identity(p); text_equal(saved,copy->cipher); jet_rt_string_drop(saved);
     assert(copy->leaf.der.data[0]==0 && copy->leaf.der.data[stride]==255);
-    jet_rt_handle_drop_JetTLSPeerIdentity(copy);
+    jet_rt_handle_drop_jet_tls_peer_identity(copy);
     assert(intercepted>0); for(size_t i=0;i<count;++i) assert(watched[i].freed==1);
     puts("TLSCert13: certificate/peer/list deep ownership, borrowed fields, growth, signed times OK");
     return 0;

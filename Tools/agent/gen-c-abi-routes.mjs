@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { runtimeAbiAtom, emitRuntimeAbiAtom } from "./runtime-abi-symbols.mjs";
 // Generate the runtime's C-ABI route layer (D-EXEC1, I8) from the Core call
 // registry: one `#[no_mangle] extern "C"` adapter per Prelude route whose Rust
 // kernel signature has a C carrier, plus the backend's matching route table.
@@ -676,13 +677,13 @@ const handleBridges = new Map();
 for (const [rust, type, stem, borrowedBytes = 0] of [
   ["jet_std::IOError", "JetCIOError", "error"],
   ["jet_std::IOContext", "JetCIOContext", "context"],
-  ...(jetRuntimeExports.has("jet_rt_handle_drop_JetTaskFailure")
+  ...(jetRuntimeExports.has("jet_rt_handle_drop_jet_task_failure")
     ? [["JetTaskFailure", "JetCTaskFailure", "failure"]] : []),
-  ...(jetRuntimeExports.has("jet_rt_handle_drop_Jet__ResolveError")
+  ...(jetRuntimeExports.has("jet_rt_handle_drop_jet_resolve_error")
     ? [["Jet__ResolveError", "JetCResolveError", "resolve_error"]] : []),
-  ...(jetRuntimeExports.has("jet_rt_handle_drop_JetIpAddr")
+  ...(jetRuntimeExports.has("jet_rt_handle_drop_jet_ip_addr")
     ? [["JetIpAddr", "JetCIpAddr", "ip", 24]] : []),
-  ...(jetRuntimeExports.has("jet_rt_handle_drop_JetSocketAddr")
+  ...(jetRuntimeExports.has("jet_rt_handle_drop_jet_socket_addr")
     ? [["JetSocketAddr", "JetCSocketAddr", "socket", 56]] : []),
 ]) {
   const key = declarationOf(rust)?.key;
@@ -1206,8 +1207,9 @@ for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]
   // call_symbol_for_function); the route keeps the symbol.
   const target = exactAdapters.get(symbol) ?? symbol;
   const segments = symbol.split("::");
-  // A method's export names its type too (`JetDateTime::date` -> `JetDateTime_date`).
-  const name = segments.length > 1 && /^[A-Z]/.test(segments[segments.length - 2]) ? segments.slice(-2).join("_") : segments[segments.length - 1];
+  // The logical Rust/kernel route stays nominal; only its internal C export
+  // projects type atoms (`JetDateTime::date` -> `jet_date_time_date`).
+  const name = runtimeAbiAtom(segments.length > 1 && /^[A-Z]/.test(segments[segments.length - 2]) ? segments.slice(-2).join("_") : segments[segments.length - 1]);
   const label = route.rows[0];
   if (handExports.has(name)) {
     if (jetRuntimeExports.has(name)) {
@@ -1296,8 +1298,8 @@ for (const [name, rust, jet, cty, read, write] of codecScalars) {
   const error = { name: "FieldError", full: "crate::jet_std::FieldError" };
   handles.set(tree.name, tree.full);
   handles.set(error.name, error.full);
-  const encode = `jet_rt_codec_encode_${name}`;
-  const decode = `jet_rt_codec_decode_${name}`;
+  const encode = `jet_rt_codec_encode_${runtimeAbiAtom(name)}`;
+  const decode = `jet_rt_codec_decode_${runtimeAbiAtom(name)}`;
   adapters.push({
     symbol: encode, target: "jet_codec_encode", name: encode, label: "canonical scalar Encode", rows: [],
     params: [{ jet, ctys: [cty], expr: ([a]) => name === "String" ? `0, ${paramCarrier("&String", "").expr([a])}` : `0, &(${read(a)})` }],
@@ -1316,7 +1318,7 @@ for (const [name, rust, jet, cty, read, write] of codecScalars) {
 // Parse-to-tree specialization retains the typed intrinsic's exact parser and
 // FieldError envelope, then the native backend invokes the checked Decode impl.
 for (const format of ["json", "toml", "yaml"]) {
-  const symbol = `jet_rt_codec_parse_${format}`;
+  const symbol = `jet_rt_codec_parse_${runtimeAbiAtom(format)}`;
   const result = resultShape("Result<jet_std::Dyn,Vec<jet_std::FieldError>>", "", false);
   if (!result) throw new Error(`gen-c-abi-routes: missing ${format} typed tree carriers`);
   adapters.push({ symbol, target: `jet_enc_${format}_decode::<crate::jet_std::Dyn>`, name: symbol,
@@ -1388,7 +1390,7 @@ for (const [name, params, result, row] of [
     ["guard_reacquire_and_refresh", 2, "Flag"], ["guard_drop", 1, "Unit"],
     ["guard_wait_once", 2, "Word"],
   ].map(([operation, arity, carrier]) => [
-    `jet_rt_shared_${operation}`,
+    `jet_rt_shared_${runtimeAbiAtom(operation)}`,
     Array.from({ length: arity }, () => ({ jet: "Word", ctys: ["i64"] })),
     { jet: `Plain{carrier: LowerRouteCarrier.${carrier}}`,
       ret: carrier === "Unit" ? null : carrier === "Flag" ? "bool" : "i64", outs: [] },
@@ -1599,7 +1601,7 @@ const jetNames = new Map(); // Jet name -> runtime handle name
 // Handle drops: Core types that cross the boundary by handle.
 const handleRows = [...handles].sort((a, b) => a[0].localeCompare(b[0]));
 for (const [name, full] of handleRows) {
-  if (handleBridge(full) && (!jetRuntimeExports.has(`jet_rt_handle_drop_${name}`) || !jetRuntimeExports.has(`jet_rt_handle_clone_${name}`))) {
+  if (handleBridge(full) && (!jetRuntimeExports.has(`jet_rt_handle_drop_${runtimeAbiAtom(name)}`) || !jetRuntimeExports.has(`jet_rt_handle_clone_${runtimeAbiAtom(name)}`))) {
     throw new Error(`${name} carrier requires Jet clone/drop exports in sources.list before adapter cutover`);
   }
 }
@@ -1671,21 +1673,21 @@ rs.push("    }");
 const cloneable = new Set(handleRows.filter(([, full]) => derivesClone(full)).map(([name]) => name));
 for (const [name, full] of handleRows) {
   const pointer = `*mut ${handleType(full)}`;
-  if (!jetOwnsHandleGlue(`jet_rt_handle_drop_${name}`, [pointer], null)) {
+  if (!jetOwnsHandleGlue(`jet_rt_handle_drop_${runtimeAbiAtom(name)}`, [pointer], null)) {
     rs.push("");
     rs.push("    #[no_mangle]");
-    rs.push(`    pub extern "C" fn jet_rt_handle_drop_${name}(value: ${pointer}) {`);
+    rs.push(`    pub extern "C" fn jet_rt_handle_drop_${runtimeAbiAtom(name)}(value: ${pointer}) {`);
     rs.push("        if !value.is_null() {");
     rs.push("            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.");
     rs.push(handleBridge(full) ? `            super::jet_c_abi_host::${handleBridge(full).stem}_drop(value);` : "            drop(unsafe { Box::from_raw(value) });");
     rs.push("        }");
     rs.push("    }");
   }
-  const ownedClone = jetOwnsHandleGlue(`jet_rt_handle_clone_${name}`, [pointer], pointer);
+  const ownedClone = jetOwnsHandleGlue(`jet_rt_handle_clone_${runtimeAbiAtom(name)}`, [pointer], pointer);
   if (!cloneable.has(name) || ownedClone) continue;
   rs.push("");
   rs.push("    #[no_mangle]");
-  rs.push(`    pub extern "C" fn jet_rt_handle_clone_${name}(value: *mut ${handleType(full)}) -> *mut ${handleType(full)} {`);
+  rs.push(`    pub extern "C" fn jet_rt_handle_clone_${runtimeAbiAtom(name)}(value: *mut ${handleType(full)}) -> *mut ${handleType(full)} {`);
   rs.push("        // SAFETY: `value` is a live handle the caller owns for this call.");
   rs.push(`        guard(|| ${handleOut(full, handleCopy(full, "value"))})`);
   rs.push("    }");
@@ -1698,11 +1700,11 @@ const rendered = (name, full) => {
 };
 for (const [name, full] of handleRows) {
   for (const [kind, trait, method] of [["display", "JetDisplay", "jet_display"], ["show", "JetShow", "jet_show"], ["debug", "JetDebug", "jet_debug"]]) {
-    const owned = jetOwnsHandleGlue(`jet_rt_handle_${kind}_${name}`, [`*mut ${handleType(full)}`], "JetCString");
+    const owned = jetOwnsHandleGlue(`jet_rt_handle_${runtimeAbiAtom(kind)}_${runtimeAbiAtom(name)}`, [`*mut ${handleType(full)}`], "JetCString");
     if (!rendered(name, full)[kind] || owned) continue;
     rs.push("");
     rs.push("    #[no_mangle]");
-    rs.push(`    pub extern "C" fn jet_rt_handle_${kind}_${name}(value: *mut ${handleType(full)}) -> JetCString {`);
+    rs.push(`    pub extern "C" fn jet_rt_handle_${runtimeAbiAtom(kind)}_${runtimeAbiAtom(name)}(value: *mut ${handleType(full)}) -> JetCString {`);
     rs.push("        // SAFETY: `value` is a live handle the caller lends for this call.");
     rs.push(`        guard(|| handle(<${full} as crate::${trait}>::${method}(${handleBorrow(full, "value")})))`);
     rs.push("    }");
@@ -1711,11 +1713,11 @@ for (const [name, full] of handleRows) {
 const comparable = new Set(handleRows.filter(([, full]) => derives(full, "PartialEq")).map(([name]) => name));
 for (const [name, full] of handleRows) {
   const pointer = `*mut ${handleType(full)}`;
-  const owned = jetOwnsHandleGlue(`jet_rt_handle_eq_${name}`, [pointer, pointer], "bool");
+  const owned = jetOwnsHandleGlue(`jet_rt_handle_eq_${runtimeAbiAtom(name)}`, [pointer, pointer], "bool");
   if (!comparable.has(name) || owned) continue;
   rs.push("");
   rs.push("    #[no_mangle]");
-  rs.push(`    pub extern "C" fn jet_rt_handle_eq_${name}(left: *mut ${handleType(full)}, right: *mut ${handleType(full)}) -> bool {`);
+  rs.push(`    pub extern "C" fn jet_rt_handle_eq_${runtimeAbiAtom(name)}(left: *mut ${handleType(full)}, right: *mut ${handleType(full)}) -> bool {`);
   rs.push("        // SAFETY: both are live handles the caller lends for this call.");
   rs.push(`        guard(|| ${handleBorrow(full, "left")} == ${handleBorrow(full, "right")})`);
   rs.push("    }");
@@ -1781,7 +1783,7 @@ const recordMember = (ty, path, site) => {
     const kind = `${entries ? "Entries" : "List"}.${element ? element.kind : "Byte"}`;
     const elementFull = element ? element.cty.replace(/^\*mut /, "") : "u8";
     const full = `Vec<${entries ? `(String, ${elementFull})` : elementFull}>`;
-    const prefix = `jet_rt_record_seq_${kind.replaceAll(".", "_")}`;
+    const prefix = `jet_rt_record_seq_${runtimeAbiAtom(kind.replaceAll(".", "_"))}`;
     recordSequences.set(kind, { kind, prefix, full, entries: !!entries, element, elementFull });
     return { kind, ret: `*mut ${full}`, get: (v) => `&${v} as *const ${full} as *mut ${full}`,
       cty: `*mut ${full}`, make: (p) => `*unsafe { Box::from_raw(${p}) }` };
@@ -1825,7 +1827,7 @@ for (let changed = true; changed;) {
   changed = false;
   for (const [name, members] of recordMembers) {
     const nestedKinds = members.map((member) => member.carrier?.kind.replace(/^(?:Opt|List\.|Entries\.)/, "") ?? "").filter((kind) => kind.startsWith("Rec."));
-    if (nestedKinds.every((kind) => recordMembers.has(kind.slice(4)) || handExports.has(`jet_rt_record_new_${kind.slice(4)}`))) continue;
+    if (nestedKinds.every((kind) => recordMembers.has(kind.slice(4)) || handExports.has(`jet_rt_record_new_${runtimeAbiAtom(kind.slice(4))}`))) continue;
     if (concreteHandles.has(name)) classificationFailure(new Error(`generic record ${recordable.get(name).full}: nested record schema is unsupported`), recordable.get(name).full, "", { phase: "nested record schema" });
     recordMembers.delete(name);
     changed = true;
@@ -1853,22 +1855,22 @@ for (const [name, members] of [...recordMembers].sort((a, b) => a[0].localeCompa
   recordSchemas.push(kind === "struct" ? { name, variants: "", fields: described } : { name, variants: described, fields: "" });
   // Hand-written carrier helpers still need the real field schema. Their
   // ownership changes where the definition lives, not the record's shape.
-  if (handExports.has(`jet_rt_record_tag_${name}`) || handExports.has(`jet_rt_record_new_${name}`)) {
+  if (handExports.has(`jet_rt_record_tag_${runtimeAbiAtom(name)}`) || handExports.has(`jet_rt_record_new_${runtimeAbiAtom(name)}`)) {
     const validate = (export_, ctys, ret) => {
       if (!jetRuntimeExports.has(export_)) return;
       validateRuntimeRoute({ symbol: export_, name: export_, params: ctys.map((cty) => ({ ctys: [cty] })), result: { ret, outs: [] } }, jetRuntimeSignatures.get(export_));
     };
     const pointer = `*mut ${handleType(full)}`;
     if (kind === "struct") {
-      validate(`jet_rt_record_new_${name}`, members.map((member) => member.carrier.cty), pointer);
+      validate(`jet_rt_record_new_${runtimeAbiAtom(name)}`, members.map((member) => member.carrier.cty), pointer);
       for (const { name: field, carrier } of members) {
-        validate(`jet_rt_record_get_${name}_${field}`, [pointer, ...(carrier.outCty ? [`*mut ${carrier.outCty}`] : [])], carrier.ret);
+        validate(`jet_rt_record_get_${runtimeAbiAtom(name)}_${runtimeAbiAtom(field)}`, [pointer, ...(carrier.outCty ? [`*mut ${carrier.outCty}`] : [])], carrier.ret);
       }
     } else {
-      validate(`jet_rt_record_tag_${name}`, [pointer], "i64");
+      validate(`jet_rt_record_tag_${runtimeAbiAtom(name)}`, [pointer], "i64");
       for (const { name: variant, carrier } of members) {
-        validate(`jet_rt_record_new_${name}_${variant}`, carrier ? [carrier.cty] : [], pointer);
-        if (carrier) validate(`jet_rt_record_get_${name}_${variant}`, [pointer, ...(carrier.outCty ? [`*mut ${carrier.outCty}`] : [])], carrier.ret);
+        validate(`jet_rt_record_new_${runtimeAbiAtom(name)}_${runtimeAbiAtom(variant)}`, carrier ? [carrier.cty] : [], pointer);
+        if (carrier) validate(`jet_rt_record_get_${runtimeAbiAtom(name)}_${runtimeAbiAtom(variant)}`, [pointer, ...(carrier.outCty ? [`*mut ${carrier.outCty}`] : [])], carrier.ret);
       }
     }
     continue;
@@ -1885,10 +1887,10 @@ for (const [name, members] of [...recordMembers].sort((a, b) => a[0].localeCompa
   if (kind === "struct") {
     // A fieldless struct carries nothing a schema row can check.
     if (members.length === 0) { recordSchemas.pop(); continue; }
-    for (const member of members) getter(`jet_rt_record_get_${name}_${member.name}`, `{ let value = ${handleBorrow(full, "value")};`, member.carrier, `${member.carrier.get(`value.${member.rustName}`)} }`);
+    for (const member of members) getter(`jet_rt_record_get_${runtimeAbiAtom(name)}_${runtimeAbiAtom(member.name)}`, `{ let value = ${handleBorrow(full, "value")};`, member.carrier, `${member.carrier.get(`value.${member.rustName}`)} }`);
     rs.push("");
     rs.push("    #[no_mangle]");
-    rs.push(`    pub extern "C" fn jet_rt_record_new_${name}(${members.map((member, k) => `m${k}: ${member.carrier.cty}`).join(", ")}) -> *mut ${handleType(full)} {`);
+    rs.push(`    pub extern "C" fn jet_rt_record_new_${runtimeAbiAtom(name)}(${members.map((member, k) => `m${k}: ${member.carrier.cty}`).join(", ")}) -> *mut ${handleType(full)} {`);
     rs.push(`        guard(|| ${handleOut(full, `${expressionType(full)} { ${members.map((member, k) => `${member.rustName}: ${member.carrier.make(`m${k}`)}`).join(", ")} }`)})`);
     rs.push("    }");
     continue;
@@ -1897,17 +1899,17 @@ for (const [name, members] of [...recordMembers].sort((a, b) => a[0].localeCompa
   if (members.every((member) => !member.carrier)) continue;
   rs.push("");
   rs.push("    #[no_mangle]");
-  rs.push(`    pub extern "C" fn jet_rt_record_tag_${name}(value: *mut ${handleType(full)}) -> i64 {`);
+  rs.push(`    pub extern "C" fn jet_rt_record_tag_${runtimeAbiAtom(name)}(value: *mut ${handleType(full)}) -> i64 {`);
   rs.push("        // SAFETY: `value` is a live handle the caller lends for this call.");
   rs.push(`        guard(|| match ${handleBorrow(full, "value")} { ${members.map((member, k) => `${expressionType(full)}::${member.rustName}${member.carrier ? "(_)" : ""} => ${k}`).join(", ")} })`);
   rs.push("    }");
   for (const member of members) {
     if (member.carrier) {
-      getter(`jet_rt_record_get_${name}_${member.name}`, `match ${handleBorrow(full, "value")} { ${expressionType(full)}::${member.rustName}(item) =>`, member.carrier, `${member.carrier.get("(*item)")}, _ => crate::jet_panic("<core.prelude>", 0, "record variant index out of range") }`);
+      getter(`jet_rt_record_get_${runtimeAbiAtom(name)}_${runtimeAbiAtom(member.name)}`, `match ${handleBorrow(full, "value")} { ${expressionType(full)}::${member.rustName}(item) =>`, member.carrier, `${member.carrier.get("(*item)")}, _ => crate::jet_panic("<core.prelude>", 0, "record variant index out of range") }`);
     }
     rs.push("");
     rs.push("    #[no_mangle]");
-    rs.push(`    pub extern "C" fn jet_rt_record_new_${name}_${member.name}(${member.carrier ? `payload: ${member.carrier.cty}` : ""}) -> *mut ${handleType(full)} {`);
+    rs.push(`    pub extern "C" fn jet_rt_record_new_${runtimeAbiAtom(name)}_${runtimeAbiAtom(member.name)}(${member.carrier ? `payload: ${member.carrier.cty}` : ""}) -> *mut ${handleType(full)} {`);
     rs.push(`        guard(|| ${handleOut(full, `${expressionType(full)}::${member.rustName}${member.carrier ? `(${member.carrier.make("payload")})` : ""}`)})`);
     rs.push("    }");
   }
@@ -1949,15 +1951,15 @@ for (const [name, full] of handleRows) {
     rs.push("");
     rs.push("    #[no_mangle]");
     if (kind === "Text") {
-      rs.push(`    pub extern "C" fn jet_rt_handle_field_${name}_${field[2]}(value: *mut ${full}, out: *mut ${pointee}) {`);
+      rs.push(`    pub extern "C" fn jet_rt_handle_field_${runtimeAbiAtom(name)}_${runtimeAbiAtom(field[2])}(value: *mut ${full}, out: *mut ${pointee}) {`);
       rs.push("        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.");
       rs.push(`        unsafe { let text = &(*value).${field[2]}; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }`);
     } else if (borrowedBridge) {
-      rs.push(`    pub extern "C" fn jet_rt_handle_field_${name}_${field[2]}(value: *mut ${full}, out: *mut ${pointee}) {`);
+      rs.push(`    pub extern "C" fn jet_rt_handle_field_${runtimeAbiAtom(name)}_${runtimeAbiAtom(field[2])}(value: *mut ${full}, out: *mut ${pointee}) {`);
       rs.push("        // SAFETY: caller owns read-only stack carrier storage; no owner clone or heap allocation.");
       rs.push(`        unsafe { out.write(super::jet_c_abi_host::${borrowedBridge.stem}_borrow_carrier(&(*value).${field[2]})); }`);
     } else {
-      rs.push(`    pub extern "C" fn jet_rt_handle_field_${name}_${field[2]}(value: *mut ${full}) -> *const ${pointee} {`);
+      rs.push(`    pub extern "C" fn jet_rt_handle_field_${runtimeAbiAtom(name)}_${runtimeAbiAtom(field[2])}(value: *mut ${full}) -> *const ${pointee} {`);
       rs.push("        // SAFETY: value is a live handle the caller lends; the field outlives this read.");
       rs.push(`        unsafe { std::ptr::addr_of!((*value).${field[2]}) }`);
     }
@@ -2086,10 +2088,10 @@ const sourceAdapterProofs = sourceOwnedAdapterProofs(adapters,
 // every remaining use of a replaced Rust layout is a hard classification error.
 const ownedBoxTypes = handleRows.filter(([name, full]) => !handleBridge(full) &&
   [...jetRuntimeExports].some((symbol) =>
-    ["drop", "clone", "eq", "display", "show", "debug"].some((op) => symbol === `jet_rt_handle_${op}_${name}`) ||
-    symbol.startsWith(`jet_rt_handle_field_${name}_`) ||
-    symbol === `jet_rt_record_new_${name}` || symbol === `jet_rt_record_tag_${name}` ||
-    symbol.startsWith(`jet_rt_record_new_${name}_`) || symbol.startsWith(`jet_rt_record_get_${name}_`)));
+    ["drop", "clone", "eq", "display", "show", "debug"].some((op) => symbol === `jet_rt_handle_${runtimeAbiAtom(op)}_${runtimeAbiAtom(name)}`) ||
+    symbol.startsWith(`jet_rt_handle_field_${runtimeAbiAtom(name)}_`) ||
+    symbol === `jet_rt_record_new_${runtimeAbiAtom(name)}` || symbol === `jet_rt_record_tag_${runtimeAbiAtom(name)}` ||
+    symbol.startsWith(`jet_rt_record_new_${runtimeAbiAtom(name)}_`) || symbol.startsWith(`jet_rt_record_get_${runtimeAbiAtom(name)}_`)));
 const requireUnownedBox = (name, symbol) => {
   classificationFailure(new Error(`all-or-none ownership for ${name}: retained Rust Box-layout emission ${symbol} requires a complete Jet-owned type family`),
     handles.get(name) ?? name, "", { phase: "type-family ownership", handle: name, symbol });
@@ -2110,7 +2112,8 @@ for (const [name, full] of ownedBoxTypes) {
 // writes generated tables or treats this list as actual MIR layout admission.
 if (nativeListOnly) {
   const digest = (body) => createHash("sha256").update(body).digest("hex");
-  const declarations = [...new Set(nativeTypes.map((type) => type.source.path))].sort();
+  const declarations = [...new Set([...nativeTypes.map((type) => type.source.path),
+    ...[...sourceAdapterProofs.values()].flatMap((proof) => proof.declarations.map((declaration) => declaration.path))])].sort();
   const inventory = {
     mode: "native-pack-descriptors",
     provenance: {
@@ -2172,6 +2175,7 @@ jet.push("// Shared carriers of runtime C-ABI routes, whether their definition l
 jet.push("// in CAbiRoutes.rs or a Jet runtime #Export(c), keyed by the route's");
 jet.push("// Prelude symbol; `export` is the adapter's C name (its last segment).");
 jet.push("");
+jet.push(emitRuntimeAbiAtom());
 jet.push("// `HandleMut` lends the handle of the caller's Write place: the runtime");
 jet.push("// mutates the value in that box. A `Tuple` result writes item `i` through its");
 jet.push("// `i`-th out pointer (one zeroed eight-byte slot each) and returns nothing.");

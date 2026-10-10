@@ -682,7 +682,7 @@ fn lower_channel_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     endpoint :: if sender != None -> "sender" else -> "receiver"
     handle :: lower_use(&m, &f, receiver) ?? return true
     if symbol == "close" {
-        lower_call_runtime(&m, &f, "jet_rt_native_{endpoint}_close", [LIRValueID]{handle}, None)
+        lower_call_runtime(&m, &f, "jet_rt_native_{runtime_abi_atom(endpoint)}_close", [LIRValueID]{handle}, None)
         lower_alias_absent(&f, instruction)
         return true
     }

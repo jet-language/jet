@@ -1,3 +1,4 @@
+import { runtimeAbiAtom } from "./runtime-abi-symbols.mjs";
 // The native route and the Jet definition share a C ABI, not a Jet value type.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -160,7 +161,7 @@ function accepts(rust, jet) {
 // HostNetAddress/Resolver18eb2f82f discard high port/flow/scope bits at the
 // boundary with the same explicit unsigned masks.
 const maskedWordParameters = new Map([
-  ["jet_rt_record_new_Jet__ResolveError", new Map([[1, "u8"]])],
+  ["jet_rt_record_new_jet_resolve_error", new Map([[1, "u8"]])],
   ["jet_net_raw_socket_from_parts", new Map([[1, "u16"], [2, "u32"], [3, "u32"]])],
   ["jet_net_raw_resolve_ordered", new Map([[1, "u16"]])],
 ]);
@@ -208,12 +209,12 @@ export function validateLoweringRuntimeAbi(definitions) {
 // struct or a guessed Rust type. Pipe24 is shared by these two nominals.
 export function nativeProviderHandles(definitions) {
   const types = ["ProcessStdoutStream", "ProcessStderrStream"];
-  const lifecycle = types.flatMap((type) => [`jet_rt_handle_clone_${type}`, `jet_rt_handle_drop_${type}`]);
+  const lifecycle = types.flatMap((type) => [`jet_rt_handle_clone_${runtimeAbiAtom(type)}`, `jet_rt_handle_drop_${runtimeAbiAtom(type)}`]);
   if (!lifecycle.some((name) => definitions.has(name))) return [];
   const required = [
     ...types.flatMap((type) => [
-      { name: `jet_rt_handle_clone_${type}`, params: ["i64"], ret: "i64" },
-      { name: `jet_rt_handle_drop_${type}`, params: ["i64"], ret: null },
+      { name: `jet_rt_handle_clone_${runtimeAbiAtom(type)}`, params: ["i64"], ret: "i64" },
+      { name: `jet_rt_handle_drop_${runtimeAbiAtom(type)}`, params: ["i64"], ret: null },
     ]),
     { name: "jet_process_pipe_take_raw", params: ["i64"], ret: "i64" },
     { name: "jet_process_stream_line_bytes_raw", params: ["i64", "i64", "i64", "i64"], ret: "i64" },

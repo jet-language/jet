@@ -25,11 +25,11 @@ extern Word jet_fd_adopt_raw(Word, Word, bool);
 extern Word jet_process_pipe_take_raw(Word);
 extern void jet_process_pipe_close_raw(Word);
 extern Word jet_process_stream_line_bytes_raw(Word, Word, Word, Word);
-extern Word jet_rt_handle_clone_ProcessStdoutStream(Word);
-extern void jet_rt_handle_drop_ProcessStdoutStream(Word);
-extern Word jet_rt_handle_clone_ProcessStderrStream(Word);
-extern void jet_rt_handle_drop_ProcessStderrStream(Word);
-extern void jet_rt_handle_drop_IOError(Word);
+extern Word jet_rt_handle_clone_process_stdout_stream(Word);
+extern void jet_rt_handle_drop_process_stdout_stream(Word);
+extern Word jet_rt_handle_clone_process_stderr_stream(Word);
+extern void jet_rt_handle_drop_process_stderr_stream(Word);
+extern void jet_rt_handle_drop_io_error(Word);
 extern Word jet_rt_native_iter_process_lines(Word, Word, Word);
 extern Word jet_rt_native_iter_next(Word);
 extern void jet_rt_native_iter_drop(Word);
@@ -63,10 +63,10 @@ static void closed(int fd) {
 }
 static Word release(Word held) {
     ++releases;
-    jet_rt_handle_drop_ProcessStdoutStream(held);
+    jet_rt_handle_drop_process_stdout_stream(held);
     return 0;
 }
-static Word clone(Word held) { return jet_rt_handle_clone_ProcessStdoutStream(held); }
+static Word clone(Word held) { return jet_rt_handle_clone_process_stdout_stream(held); }
 static Word stop_next(Word held, Word output) {
     // Read real shared buffered bytes first; fuel then stops the callback.
     Word data = 0, len = 0, error = 0;
@@ -143,7 +143,7 @@ static void writer_take(void) {
     assert(lseek(number,0,SEEK_CUR)==6);
     line(holder,(const unsigned char *)"b\n",2);
     line(holder,NULL,0);
-    jet_fd_drop_raw(alias); jet_rt_handle_drop_ProcessStdoutStream(holder);
+    jet_fd_drop_raw(alias); jet_rt_handle_drop_process_stdout_stream(holder);
     closed(number); assert(!fclose(file));
     int ends[2]; assert(!pipe(ends));
     fd=jet_fd_adopt_raw(ends[0],0,false); alias=jet_fd_retain_raw(fd);
@@ -152,12 +152,12 @@ static void writer_take(void) {
     line(holder,(const unsigned char *)"x\n",2);
     assert(jet_fd_write_raw(alias,"z",1,facts,&zero)==-1 && facts[0]==1 && facts[1]==EBADF);
     line(holder,(const unsigned char *)"y\n",2);
-    jet_fd_drop_raw(alias); jet_rt_handle_drop_ProcessStdoutStream(holder);
+    jet_fd_drop_raw(alias); jet_rt_handle_drop_process_stdout_stream(holder);
 }
 int main(void) {
     writer_take();
-    Word (*clones[])(Word) = {jet_rt_handle_clone_ProcessStdoutStream, jet_rt_handle_clone_ProcessStderrStream};
-    void (*drops[])(Word) = {jet_rt_handle_drop_ProcessStdoutStream, jet_rt_handle_drop_ProcessStderrStream};
+    Word (*clones[])(Word) = {jet_rt_handle_clone_process_stdout_stream, jet_rt_handle_clone_process_stderr_stream};
+    void (*drops[])(Word) = {jet_rt_handle_drop_process_stdout_stream, jet_rt_handle_drop_process_stderr_stream};
     for (size_t family = 0; family < 2; ++family) {
         const unsigned char bytes[] = {'a', '\r', '\n', 'b', '\n', 0xff, '\r'};
         Word holder = pipe_of(bytes, sizeof(bytes));
@@ -190,7 +190,7 @@ int main(void) {
     }
     Word holder = jet_process_pipe_take_raw(0);
     line(holder, NULL, 0);
-    jet_rt_handle_drop_ProcessStdoutStream(holder);
+    jet_rt_handle_drop_process_stdout_stream(holder);
     holder = pipe_of((const unsigned char *)"a\nb\n", 4);
     int fd = transferred_fd;
     assert(jet_rt_comptime_begin(UINT64_C(1000000), UINT64_C(1000)));
@@ -209,8 +209,8 @@ int main(void) {
     Word data = 0, len = 0, error = 0;
     assert(jet_process_stream_line_bytes_raw(holder, (Word)&data, (Word)&len, (Word)&error) == 0);
     assert(!data && !len && error);
-    jet_rt_handle_drop_IOError(error);
-    jet_rt_handle_drop_ProcessStdoutStream(holder);
+    jet_rt_handle_drop_io_error(error);
+    jet_rt_handle_drop_process_stdout_stream(holder);
     borrow_stop();
     puts("process pipe: shared refill/clone/close, raw bytes, early-stop release and RefCell panic");
     return 0;

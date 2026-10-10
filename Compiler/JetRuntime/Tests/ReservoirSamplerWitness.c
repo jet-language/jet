@@ -10,10 +10,10 @@ typedef struct { int64_t len,capacity; Text **data; } List;
 typedef struct { int64_t refs,mutex,limit; uint64_t count,rng; List items; } Reservoir;
 _Static_assert(sizeof(List)==24 && sizeof(Reservoir)==64,"canonical List24 / Reservoir64");
 extern void jet_rt_alloc_init(void);
-extern Reservoir *JetReservoirSampler_new(int64_t);
-extern Reservoir *jet_rt_handle_clone_JetReservoirSampler(Reservoir *);
-extern void jet_rt_handle_drop_JetReservoirSampler(Reservoir *);
-extern Text *jet_rt_handle_show_JetReservoirSampler(Reservoir *);
+extern Reservoir *jet_reservoir_sampler_new(int64_t);
+extern Reservoir *jet_rt_handle_clone_jet_reservoir_sampler(Reservoir *);
+extern void jet_rt_handle_drop_jet_reservoir_sampler(Reservoir *);
+extern Text *jet_rt_handle_show_jet_reservoir_sampler(Reservoir *);
 extern void jet_rt_native_reservoir_add(Reservoir *,const Text *);
 extern List *jet_rt_native_reservoir_sample(Reservoir *);
 extern void jet_rt_string_drop(Text *);
@@ -34,12 +34,12 @@ static void watch_owner(Reservoir *r){
     for(int64_t i=0;i<r->items.len;++i){Text *t=r->items.data[i];watch(t,24,8);if(t->capacity)watch(t->data,t->capacity,1);}
 }
 static void expect(const Text *t,const char *s,int64_t len){assert(t->len==len && memcmp(t->data,s,(size_t)len)==0);}
-static void show(Reservoir *r,const char *s){Text *t=jet_rt_handle_show_JetReservoirSampler(r);expect(t,s,(int64_t)strlen(s));jet_rt_string_drop(t);}
+static void show(Reservoir *r,const char *s){Text *t=jet_rt_handle_show_jet_reservoir_sampler(r);expect(t,s,(int64_t)strlen(s));jet_rt_string_drop(t);}
 static void drop_list(List *list){for(int64_t i=0;i<list->len;++i)jet_rt_string_drop(list->data[i]);if(list->capacity)jet_rt_free(list->data,list->capacity*8,8);jet_rt_free(list,24,8);}
 static void *adds(void *p){Text text={"shared",6,6};for(unsigned i=0;i<1000;++i)jet_rt_native_reservoir_add(p,&text);return NULL;}
 int main(int argc,char **argv){
     jet_rt_alloc_init();
-    if(argc==2 && strcmp(argv[1],"overflow")==0){Reservoir *r=JetReservoirSampler_new(1);r->count=UINT64_MAX;Text t={"x",1,1};jet_rt_native_reservoir_add(r,&t);return 1;}
+    if(argc==2 && strcmp(argv[1],"overflow")==0){Reservoir *r=jet_reservoir_sampler_new(1);r->count=UINT64_MAX;Text t={"x",1,1};jet_rt_native_reservoir_add(r,&t);return 1;}
     assert(argc==1);
     // Actual seed Sketch.rs oracle: capacity clamping, RNG bits and every output slot.
     static const int64_t capacities[]={-1,0,1,4,16};
@@ -47,31 +47,31 @@ int main(int argc,char **argv){
     static const unsigned indices[][16]={{57},{57},{57},{13,18,105,86},{0,73,77,52,64,54,98,59,69,102,70,11,41,44,95,67}};
     static const uint64_t rng[]={UINT64_C(16206406808196824173),UINT64_C(16206406808196824173),UINT64_C(16206406808196824173),UINT64_C(5777307760054783851),UINT64_C(2515031985831341802)};
     for(unsigned c=0;c<5;++c){
-        Reservoir *r=JetReservoirSampler_new(capacities[c]);
+        Reservoir *r=jet_reservoir_sampler_new(capacities[c]);
         assert(r->refs==1 && r->mutex==0 && r->limit==(capacities[c]<1?1:capacities[c]));
         assert(r->count==0 && r->rng==UINT64_C(0xdeadbeefcafebabe) && r->items.len==0 && r->items.capacity==0);
         show(r,"ReservoirSampler(n=0)");List *empty=jet_rt_native_reservoir_sample(r);assert(empty->len==0);drop_list(empty);
-        Reservoir *a=jet_rt_handle_clone_JetReservoirSampler(r),*b=jet_rt_handle_clone_JetReservoirSampler(a);assert(r==a && a==b && r->refs==3);
+        Reservoir *a=jet_rt_handle_clone_jet_reservoir_sampler(r),*b=jet_rt_handle_clone_jet_reservoir_sampler(a);assert(r==a && a==b && r->refs==3);
         for(unsigned i=0;i<128;++i){char word[32];int n=snprintf(word,sizeof(word),"sample-%u",i);Text text={word,n,n};jet_rt_native_reservoir_add(a,&text);memset(word,'?',(size_t)n);}
         assert(b->count==128 && b->rng==rng[c] && b->items.len==lengths[c]);show(b,"ReservoirSampler(n=128)");
         List *sample=jet_rt_native_reservoir_sample(b);assert(sample->len==lengths[c]);
         for(unsigned i=0;i<lengths[c];++i){char word[32];int n=snprintf(word,sizeof(word),"sample-%u",indices[c][i]);expect(b->items.data[i],word,n);expect(sample->data[i],word,n);assert(sample->data[i]!=b->items.data[i] && sample->data[i]->data!=b->items.data[i]->data);}
         watch_owner(r);
-        jet_rt_handle_drop_JetReservoirSampler(r);assert(watched==a && a->refs==2);
-        jet_rt_handle_drop_JetReservoirSampler(a);assert(b->refs==1);
-        jet_rt_handle_drop_JetReservoirSampler(NULL);
+        jet_rt_handle_drop_jet_reservoir_sampler(r);assert(watched==a && a->refs==2);
+        jet_rt_handle_drop_jet_reservoir_sampler(a);assert(b->refs==1);
+        jet_rt_handle_drop_jet_reservoir_sampler(NULL);
         for(unsigned i=0;i<nwatched;++i)assert(freed[i]==0);
-        jet_rt_handle_drop_JetReservoirSampler(b);for(unsigned i=0;i<nwatched;++i)assert(freed[i]==1);
+        jet_rt_handle_drop_jet_reservoir_sampler(b);for(unsigned i=0;i<nwatched;++i)assert(freed[i]==1);
         watched=NULL;nwatched=0;
         for(unsigned i=0;i<lengths[c];++i){char word[32];int n=snprintf(word,sizeof(word),"sample-%u",indices[c][i]);expect(sample->data[i],word,n);}
         drop_list(sample);
     }
-    Reservoir *raw=JetReservoirSampler_new(INT64_MAX); // Seed allocates lazily, not a capacity-sized eager allocation.
+    Reservoir *raw=jet_reservoir_sampler_new(INT64_MAX); // Seed allocates lazily, not a capacity-sized eager allocation.
     char unicode[]={ 's',0,(char)0xe9,(char)0x9b,(char)0xaa };Text text={unicode,5,5},empty={"",0,0};
     jet_rt_native_reservoir_add(raw,&text);jet_rt_native_reservoir_add(raw,&empty);
     List *sample=jet_rt_native_reservoir_sample(raw);memset(unicode,'?',5);assert(sample->len==2);expect(sample->data[0],"s\0\xe9\x9b\xaa",5);expect(sample->data[1],"",0);
-    jet_rt_handle_drop_JetReservoirSampler(raw);expect(sample->data[0],"s\0\xe9\x9b\xaa",5);drop_list(sample);
-    Reservoir *shared=JetReservoirSampler_new(4);pthread_t threads[3];
+    jet_rt_handle_drop_jet_reservoir_sampler(raw);expect(sample->data[0],"s\0\xe9\x9b\xaa",5);drop_list(sample);
+    Reservoir *shared=jet_reservoir_sampler_new(4);pthread_t threads[3];
     for(unsigned i=0;i<3;++i)assert(pthread_create(&threads[i],NULL,adds,shared)==0);
     for(unsigned i=0;i<3;++i)assert(pthread_join(threads[i],NULL)==0);
     assert(shared->count==3000 && shared->items.len==4);for(unsigned i=0;i<4;++i)expect(shared->items.data[i],"shared",6);
@@ -79,6 +79,6 @@ int main(int argc,char **argv){
     // Exercise the unsigned half without billions of calls; one real add updates the full U64 count.
     shared->count=INT64_MAX;jet_rt_native_reservoir_add(shared,&empty);assert(shared->count==UINT64_C(9223372036854775808));show(shared,"ReservoirSampler(n=9223372036854775808)");
     shared->count=UINT64_MAX-1;jet_rt_native_reservoir_add(shared,&empty);assert(shared->count==UINT64_MAX);show(shared,"ReservoirSampler(n=18446744073709551615)");
-    jet_rt_handle_drop_JetReservoirSampler(shared);
+    jet_rt_handle_drop_jet_reservoir_sampler(shared);
     puts("Reservoir frozen RNG/sample/shared/unsigned/drop OK");
 }

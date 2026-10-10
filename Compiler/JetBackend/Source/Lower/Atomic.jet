@@ -131,7 +131,7 @@ fn lower_atomic_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     }
     // new/try_new have no allocation/fault probe for the atomic itself.
     // Result boxing follows existing fatal, unprobed metadata convention.
-    lower_call_runtime(&m, &f, "jet_rt_atomic_{lane}_init", [LIRValueID]{storage, input}, None)
+    lower_call_runtime(&m, &f, "jet_rt_atomic_{runtime_abi_atom(lane)}_init", [LIRValueID]{storage, input}, None)
     if instruction.result == None -> lower_map_drop_value(p, &m, &f, dst, result_ty)
     true
 }
@@ -157,7 +157,7 @@ fn lower_atomic_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
     values := [LIRValueID]{address}
     loop arg in args -> &values.push(lower_atomic_taken(p, c, &m, &f, arg, scalar, true) ?? return true)
     if operation == "store" {
-        lower_call_runtime(&m, &f, "jet_rt_atomic_{lane}_store", values, None)
+        lower_call_runtime(&m, &f, "jet_rt_atomic_{runtime_abi_atom(lane)}_store", values, None)
         lower_alias_absent(&f, instruction)
         return true
     }
@@ -181,7 +181,7 @@ fn lower_atomic_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
         return true
     }
     dst :: lower_result(p, c, &m, &f, instruction) ?? lower_new_value(&f, lower_repr_layout(lower_repr(p, result_ty)) ?? lir_layout_word(), lower_drop(&m, lower_repr(p, result_ty), true), result_ty.identity)
-    lower_call_runtime(&m, &f, "jet_rt_atomic_{lane}_{operation}", values, Val(dst))
+    lower_call_runtime(&m, &f, "jet_rt_atomic_{runtime_abi_atom(lane)}_{runtime_abi_atom(operation)}", values, Val(dst))
     if instruction.result == None -> lower_map_drop_value(p, &m, &f, dst, result_ty)
     true
 }
@@ -234,9 +234,9 @@ fn lower_helper_atomic_try_add(p: MIRProgram, m: &LowerModule, glue: LowerGlue) 
     allocator_text :: lower_static_text(&m, &f, "exact-int")
     lower_call_runtime(&m, &f, "jet_rt_string_from_static", allocator_text, Val(allocator))
     // Existing canonical constructor, same ownership conversion as
-    // Builtins.jet lower_helper_try_capacity (jet_rt_record_new_AllocError).
-    error_handle :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_AllocError"}, None)
-    lower_call_runtime(&m, &f, "jet_rt_record_new_AllocError", [LIRValueID]{exact_requested, allocator}, Val(error_handle))
+    // Builtins.jet lower_helper_try_capacity (jet_rt_record_new_alloc_error).
+    error_handle :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_alloc_error"}, None)
+    lower_call_runtime(&m, &f, "jet_rt_record_new_alloc_error", [LIRValueID]{exact_requested, allocator}, Val(error_handle))
     lower_emit(&f, LIRInst.Drop{value: exact_requested})
     lower_emit(&f, LIRInst.Drop{value: allocator})
     error :: lower_pointer(&f)

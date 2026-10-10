@@ -26,11 +26,11 @@ extern void jet_rt_native_sender_send(int64_t, int64_t, int64_t);
 extern void jet_rt_native_sender_drop(int64_t);
 extern void jet_rt_native_receiver_drop(int64_t);
 extern int64_t jet_rt_native_task_join(int64_t, int64_t, int64_t);
-extern void jet_rt_handle_drop_JetTaskFailure(int64_t);
-extern int64_t jet_rt_record_new_IOContext(int64_t, int64_t, int64_t, int64_t);
-extern int64_t jet_rt_record_get_IOError_NotFound(int64_t);
-extern int64_t jet_rt_record_get_IOError_ResourceLimit(int64_t);
-extern int64_t jet_rt_record_new_IOError_ResourceLimit(int64_t);
+extern void jet_rt_handle_drop_jet_task_failure(int64_t);
+extern int64_t jet_rt_record_new_io_context(int64_t, int64_t, int64_t, int64_t);
+extern int64_t jet_rt_record_get_io_error_not_found(int64_t);
+extern int64_t jet_rt_record_get_io_error_resource_limit(int64_t);
+extern int64_t jet_rt_record_new_io_error_resource_limit(int64_t);
 extern void jet_rt_thread_detach(void);
 extern void jet_rt_thread_attach(void);
 extern void jet_rt_unreachable(int64_t, int64_t);
@@ -195,7 +195,7 @@ static void task_origin(void) {
     int64_t result[4] = {0};
     assert(jet_rt_native_task_join(task, 0, WORD(result)) == 0);
     assert(atomic_load_explicit(&task_released, memory_order_acquire));
-    jet_rt_handle_drop_JetTaskFailure(result[0]);
+    jet_rt_handle_drop_jet_task_failure(result[0]);
     /* Keeping the real control alive does not make this caller a Task frame. */
     int64_t save[4];
     jet_rt_control_enter(control, WORD(save));
@@ -356,13 +356,13 @@ int main(int argc, char **argv, char **envp) {
             int64_t error[7] = {0}, unchanged[7] = {0};
             if (!strcmp(mode, "host-context-operation")) {
                 /* Borrowed sentinel arguments must not be inspected on refusal. */
-                assert(jet_rt_record_new_IOContext(-1, 1, 1, 1) == 0);
+                assert(jet_rt_record_new_io_context(-1, 1, 1, 1) == 0);
             } else if (!strcmp(mode, "host-error-context")) {
-                assert(jet_rt_record_get_IOError_NotFound(WORD(error)) == 0);
+                assert(jet_rt_record_get_io_error_not_found(WORD(error)) == 0);
             } else if (!strcmp(mode, "host-limit-tag")) {
-                assert(jet_rt_record_get_IOError_ResourceLimit(WORD(error)) == 0);
+                assert(jet_rt_record_get_io_error_resource_limit(WORD(error)) == 0);
             } else {
-                assert(jet_rt_record_new_IOError_ResourceLimit(-1) == 0);
+                assert(jet_rt_record_new_io_error_resource_limit(-1) == 0);
             }
             assert(!memcmp(error, unchanged, sizeof error));
         }

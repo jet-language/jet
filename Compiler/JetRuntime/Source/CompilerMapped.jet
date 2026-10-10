@@ -136,7 +136,7 @@ fn compiler_mapped_unregister(key: I64) {
     rt_text_store(output, map)
     I64{1}
 }
-#Export(c) fn jet_rt_handle_drop_JetMappedFile(map: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_mapped_file(map: I64) {
     if (map == I64{0}) -> return
     // MappedFile is affine; borrowed byte views keep its checked owner alive.
     file :: rt_text_word(map + I64{8})
@@ -153,4 +153,4 @@ fn compiler_mapped_unregister(key: I64) {
 }
 #Export(c) fn jet_std_fs_map_len(map: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(map + I64{40})) }
 #Export(c) fn jet_std_fs_map_is_empty(map: I64) -> Bool { rt_text_word(map + I64{40}) == I64{0} }
-#Export(c) fn jet_rt_record_get_JetMappedFile_path(map: I64) -> I64 { jet_rt_string_clone(rt_text_word(map + I64{16})) }
+#Export(c) fn jet_rt_record_get_jet_mapped_file_path(map: I64) -> I64 { jet_rt_string_clone(rt_text_word(map + I64{16})) }

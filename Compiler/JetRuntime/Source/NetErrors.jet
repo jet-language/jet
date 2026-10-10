@@ -16,7 +16,7 @@ fn net_optional_text_get(value: I64, field: I64, some: I64) -> I64 {
     encoding_store(some, jet_rt_string_clone(text))
     I64{1}
 }
-#Export(c) fn jet_rt_record_new_JetNetErrorDetail(operation: I64, address: I64, name: I64, message: I64, os_code: I64) -> I64 {
+#Export(c) fn jet_rt_record_new_jet_net_error_detail(operation: I64, address: I64, name: I64, message: I64, os_code: I64) -> I64 {
     // Convert optional exact Int before allocation; text pointer options borrow.
     code :: encoding_optional_input(os_code)
     result :: jet_rt_alloc(NET_DETAIL_BYTES, I64{8})
@@ -28,7 +28,7 @@ fn net_optional_text_get(value: I64, field: I64, some: I64) -> I64 {
     encoding_store(result + NET_DETAIL_OS_CODE, code)
     result
 }
-#Export(c) fn jet_rt_handle_clone_JetNetErrorDetail(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_net_error_detail(value: I64) -> I64 {
     result :: jet_rt_alloc(NET_DETAIL_BYTES, I64{8})
     encoding_store(result + NET_DETAIL_OPERATION, jet_rt_string_clone(encoding_word(value + NET_DETAIL_OPERATION)))
     encoding_store(result + NET_DETAIL_ADDRESS, net_optional_text_clone(encoding_word(value + NET_DETAIL_ADDRESS)))
@@ -38,7 +38,7 @@ fn net_optional_text_get(value: I64, field: I64, some: I64) -> I64 {
     encoding_store(result + NET_DETAIL_OS_CODE, encoding_word(value + NET_DETAIL_OS_CODE))
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetNetErrorDetail(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_net_error_detail(value: I64) {
     if (value == I64{0}) -> return
     jet_rt_string_drop(encoding_word(value + NET_DETAIL_OPERATION))
     jet_rt_string_drop(encoding_word(value + NET_DETAIL_ADDRESS))
@@ -46,18 +46,18 @@ fn net_optional_text_get(value: I64, field: I64, some: I64) -> I64 {
     jet_rt_string_drop(encoding_word(value + NET_DETAIL_MESSAGE))
     jet_rt_free(value, NET_DETAIL_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetNetErrorDetail(left: I64, right: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_net_error_detail(left: I64, right: I64) -> Bool {
     jet_rt_string_eq(encoding_word(left + NET_DETAIL_OPERATION), encoding_word(right + NET_DETAIL_OPERATION)) &&
         net_optional_text_eq(encoding_word(left + NET_DETAIL_ADDRESS), encoding_word(right + NET_DETAIL_ADDRESS)) &&
         net_optional_text_eq(encoding_word(left + NET_DETAIL_NAME), encoding_word(right + NET_DETAIL_NAME)) &&
         jet_rt_string_eq(encoding_word(left + NET_DETAIL_MESSAGE), encoding_word(right + NET_DETAIL_MESSAGE)) &&
         encoding_optional_eq(left, right, NET_DETAIL_OS_PRESENT, NET_DETAIL_OS_CODE)
 }
-#Export(c) fn jet_rt_record_get_JetNetErrorDetail_operation(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + NET_DETAIL_OPERATION)) }
-#Export(c) fn jet_rt_record_get_JetNetErrorDetail_address(value: I64, some: I64) -> I64 { net_optional_text_get(value, NET_DETAIL_ADDRESS, some) }
-#Export(c) fn jet_rt_record_get_JetNetErrorDetail_name(value: I64, some: I64) -> I64 { net_optional_text_get(value, NET_DETAIL_NAME, some) }
-#Export(c) fn jet_rt_record_get_JetNetErrorDetail_message(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + NET_DETAIL_MESSAGE)) }
-#Export(c) fn jet_rt_record_get_JetNetErrorDetail_os_code(value: I64, some: I64) -> I64 { encoding_optional_get(value, NET_DETAIL_OS_PRESENT, NET_DETAIL_OS_CODE, some) }
+#Export(c) fn jet_rt_record_get_jet_net_error_detail_operation(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + NET_DETAIL_OPERATION)) }
+#Export(c) fn jet_rt_record_get_jet_net_error_detail_address(value: I64, some: I64) -> I64 { net_optional_text_get(value, NET_DETAIL_ADDRESS, some) }
+#Export(c) fn jet_rt_record_get_jet_net_error_detail_name(value: I64, some: I64) -> I64 { net_optional_text_get(value, NET_DETAIL_NAME, some) }
+#Export(c) fn jet_rt_record_get_jet_net_error_detail_message(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + NET_DETAIL_MESSAGE)) }
+#Export(c) fn jet_rt_record_get_jet_net_error_detail_os_code(value: I64, some: I64) -> I64 { encoding_optional_get(value, NET_DETAIL_OS_PRESENT, NET_DETAIL_OS_CODE, some) }
 fn net_dns_new(ordinal: I64, text: I64) -> I64 {
     if (ordinal < NET_DNS_NOT_FOUND || ordinal > NET_DNS_FAILURE) -> trap_native_index_range_stop()
     result :: jet_rt_alloc(NET_DNS_BYTES, I64{8})
@@ -69,18 +69,18 @@ fn net_dns_get(value: I64, ordinal: I64) -> I64 {
     if encoding_word(value + NET_DNS_TAG) != ordinal -> rt_record_variant_panic()
     jet_rt_string_clone(encoding_word(value + NET_DNS_TEXT))
 }
-#Export(c) fn jet_rt_record_tag_JetNetDnsError(value: I64) -> I64 { encoding_word(value + NET_DNS_TAG) }
-#Export(c) fn jet_rt_record_new_JetNetDnsError_NotFound(text: I64) -> I64 { net_dns_new(NET_DNS_NOT_FOUND, text) }
-#Export(c) fn jet_rt_record_new_JetNetDnsError_Failure(text: I64) -> I64 { net_dns_new(NET_DNS_FAILURE, text) }
-#Export(c) fn jet_rt_record_get_JetNetDnsError_NotFound(value: I64) -> I64 { net_dns_get(value, NET_DNS_NOT_FOUND) }
-#Export(c) fn jet_rt_record_get_JetNetDnsError_Failure(value: I64) -> I64 { net_dns_get(value, NET_DNS_FAILURE) }
-#Export(c) fn jet_rt_handle_clone_JetNetDnsError(value: I64) -> I64 { net_dns_new(encoding_word(value + NET_DNS_TAG), encoding_word(value + NET_DNS_TEXT)) }
-#Export(c) fn jet_rt_handle_drop_JetNetDnsError(value: I64) {
+#Export(c) fn jet_rt_record_tag_jet_net_dns_error(value: I64) -> I64 { encoding_word(value + NET_DNS_TAG) }
+#Export(c) fn jet_rt_record_new_jet_net_dns_error_not_found(text: I64) -> I64 { net_dns_new(NET_DNS_NOT_FOUND, text) }
+#Export(c) fn jet_rt_record_new_jet_net_dns_error_failure(text: I64) -> I64 { net_dns_new(NET_DNS_FAILURE, text) }
+#Export(c) fn jet_rt_record_get_jet_net_dns_error_not_found(value: I64) -> I64 { net_dns_get(value, NET_DNS_NOT_FOUND) }
+#Export(c) fn jet_rt_record_get_jet_net_dns_error_failure(value: I64) -> I64 { net_dns_get(value, NET_DNS_FAILURE) }
+#Export(c) fn jet_rt_handle_clone_jet_net_dns_error(value: I64) -> I64 { net_dns_new(encoding_word(value + NET_DNS_TAG), encoding_word(value + NET_DNS_TEXT)) }
+#Export(c) fn jet_rt_handle_drop_jet_net_dns_error(value: I64) {
     if (value == I64{0}) -> return
     jet_rt_string_drop(encoding_word(value + NET_DNS_TEXT))
     jet_rt_free(value, NET_DNS_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetNetDnsError(left: I64, right: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_net_dns_error(left: I64, right: I64) -> Bool {
     encoding_word(left + NET_DNS_TAG) == encoding_word(right + NET_DNS_TAG) &&
         jet_rt_string_eq(encoding_word(left + NET_DNS_TEXT), encoding_word(right + NET_DNS_TEXT))
 }
@@ -94,26 +94,26 @@ fn net_error_new(ordinal: I64, payload: I64) -> I64 {
 fn net_error_get(value: I64, ordinal: I64) -> I64 {
     if encoding_word(value + NET_ERROR_TAG) != ordinal -> rt_record_variant_panic()
     payload :: encoding_word(value + NET_ERROR_PAYLOAD)
-    if ordinal == NET_ERROR_DNS -> jet_rt_handle_clone_JetNetDnsError(payload) else -> jet_rt_handle_clone_JetNetErrorDetail(payload)
+    if ordinal == NET_ERROR_DNS -> jet_rt_handle_clone_jet_net_dns_error(payload) else -> jet_rt_handle_clone_jet_net_error_detail(payload)
 }
-#Export(c) fn jet_rt_record_tag_JetNetError(value: I64) -> I64 { encoding_word(value + NET_ERROR_TAG) }
-#Export(c) fn jet_rt_handle_clone_JetNetError(value: I64) -> I64 {
+#Export(c) fn jet_rt_record_tag_jet_net_error(value: I64) -> I64 { encoding_word(value + NET_ERROR_TAG) }
+#Export(c) fn jet_rt_handle_clone_jet_net_error(value: I64) -> I64 {
     ordinal :: encoding_word(value + NET_ERROR_TAG)
     net_error_new(ordinal, net_error_get(value, ordinal))
 }
-#Export(c) fn jet_rt_handle_drop_JetNetError(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_net_error(value: I64) {
     if (value == I64{0}) -> return
     payload :: encoding_word(value + NET_ERROR_PAYLOAD)
-    if encoding_word(value + NET_ERROR_TAG) == NET_ERROR_DNS -> jet_rt_handle_drop_JetNetDnsError(payload)
-    else -> jet_rt_handle_drop_JetNetErrorDetail(payload)
+    if encoding_word(value + NET_ERROR_TAG) == NET_ERROR_DNS -> jet_rt_handle_drop_jet_net_dns_error(payload)
+    else -> jet_rt_handle_drop_jet_net_error_detail(payload)
     jet_rt_free(value, NET_ERROR_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetNetError(left: I64, right: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_net_error(left: I64, right: I64) -> Bool {
     ordinal :: encoding_word(left + NET_ERROR_TAG)
     if ordinal != encoding_word(right + NET_ERROR_TAG) -> return false
     a :: encoding_word(left + NET_ERROR_PAYLOAD)
     b :: encoding_word(right + NET_ERROR_PAYLOAD)
-    if ordinal == NET_ERROR_DNS -> jet_rt_handle_eq_JetNetDnsError(a, b) else -> jet_rt_handle_eq_JetNetErrorDetail(a, b)
+    if ordinal == NET_ERROR_DNS -> jet_rt_handle_eq_jet_net_dns_error(a, b) else -> jet_rt_handle_eq_jet_net_error_detail(a, b)
 }
 // One explicit conversion table: CAbiRoutes declaration tags -> NetHTTP530-558 render surface.
 fn net_render_ordinal(ordinal: I64) -> I64 {
@@ -125,7 +125,7 @@ fn net_render_ordinal(ordinal: I64) -> I64 {
         else -> ordinal
     }
 }
-#Export(c) fn jet_rt_handle_show_JetNetError(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_show_jet_net_error(value: I64) -> I64 {
     ordinal :: net_render_ordinal(encoding_word(value + NET_ERROR_TAG))
     payload :: encoding_word(value + NET_ERROR_PAYLOAD)
     // Core/NetError.rs7-22: every detail is message-only; DNS Failure also message-only.
@@ -140,35 +140,35 @@ fn net_render_ordinal(ordinal: I64) -> I64 {
     rt_text_push_word(target, I64{96}, I64{1})
     jet_rt_string_builder_finish(target)
 }
-#Export(c) fn jet_rt_handle_display_JetNetError(value: I64) -> I64 { jet_rt_handle_show_JetNetError(value) }
-#Export(c) fn jet_rt_handle_debug_JetNetError(value: I64) -> I64 { jet_rt_handle_show_JetNetError(value) }
-#Export(c) fn jet_rt_record_new_JetNetError_InvalidInput(payload: I64) -> I64 { net_error_new(NET_ERROR_INVALID_INPUT, payload) }
-#Export(c) fn jet_rt_record_get_JetNetError_InvalidInput(value: I64) -> I64 { net_error_get(value, NET_ERROR_INVALID_INPUT) }
-#Export(c) fn jet_rt_record_new_JetNetError_PermissionDenied(payload: I64) -> I64 { net_error_new(NET_ERROR_PERMISSION_DENIED, payload) }
-#Export(c) fn jet_rt_record_get_JetNetError_PermissionDenied(value: I64) -> I64 { net_error_get(value, NET_ERROR_PERMISSION_DENIED) }
-#Export(c) fn jet_rt_record_new_JetNetError_AddressInUse(payload: I64) -> I64 { net_error_new(NET_ERROR_ADDRESS_IN_USE, payload) }
-#Export(c) fn jet_rt_record_get_JetNetError_AddressInUse(value: I64) -> I64 { net_error_get(value, NET_ERROR_ADDRESS_IN_USE) }
-#Export(c) fn jet_rt_record_new_JetNetError_AddressUnavailable(payload: I64) -> I64 { net_error_new(NET_ERROR_ADDRESS_UNAVAILABLE, payload) }
-#Export(c) fn jet_rt_record_get_JetNetError_AddressUnavailable(value: I64) -> I64 { net_error_get(value, NET_ERROR_ADDRESS_UNAVAILABLE) }
-#Export(c) fn jet_rt_record_new_JetNetError_ConnectionRefused(payload: I64) -> I64 { net_error_new(NET_ERROR_CONNECTION_REFUSED, payload) }
-#Export(c) fn jet_rt_record_get_JetNetError_ConnectionRefused(value: I64) -> I64 { net_error_get(value, NET_ERROR_CONNECTION_REFUSED) }
-#Export(c) fn jet_rt_record_new_JetNetError_ConnectionReset(payload: I64) -> I64 { net_error_new(NET_ERROR_CONNECTION_RESET, payload) }
-#Export(c) fn jet_rt_record_get_JetNetError_ConnectionReset(value: I64) -> I64 { net_error_get(value, NET_ERROR_CONNECTION_RESET) }
-#Export(c) fn jet_rt_record_new_JetNetError_NotConnected(payload: I64) -> I64 { net_error_new(NET_ERROR_NOT_CONNECTED, payload) }
-#Export(c) fn jet_rt_record_get_JetNetError_NotConnected(value: I64) -> I64 { net_error_get(value, NET_ERROR_NOT_CONNECTED) }
-#Export(c) fn jet_rt_record_new_JetNetError_Closed(payload: I64) -> I64 { net_error_new(NET_ERROR_CLOSED, payload) }
-#Export(c) fn jet_rt_record_get_JetNetError_Closed(value: I64) -> I64 { net_error_get(value, NET_ERROR_CLOSED) }
-#Export(c) fn jet_rt_record_new_JetNetError_Timeout(payload: I64) -> I64 { net_error_new(NET_ERROR_TIMEOUT, payload) }
-#Export(c) fn jet_rt_record_get_JetNetError_Timeout(value: I64) -> I64 { net_error_get(value, NET_ERROR_TIMEOUT) }
-#Export(c) fn jet_rt_record_new_JetNetError_Cancelled(payload: I64) -> I64 { net_error_new(NET_ERROR_CANCELLED, payload) }
-#Export(c) fn jet_rt_record_get_JetNetError_Cancelled(value: I64) -> I64 { net_error_get(value, NET_ERROR_CANCELLED) }
-#Export(c) fn jet_rt_record_new_JetNetError_Unsupported(payload: I64) -> I64 { net_error_new(NET_ERROR_UNSUPPORTED, payload) }
-#Export(c) fn jet_rt_record_get_JetNetError_Unsupported(value: I64) -> I64 { net_error_get(value, NET_ERROR_UNSUPPORTED) }
-#Export(c) fn jet_rt_record_new_JetNetError_DNS(payload: I64) -> I64 { net_error_new(NET_ERROR_DNS, payload) }
-#Export(c) fn jet_rt_record_get_JetNetError_DNS(value: I64) -> I64 { net_error_get(value, NET_ERROR_DNS) }
-#Export(c) fn jet_rt_record_new_JetNetError_TLS(payload: I64) -> I64 { net_error_new(NET_ERROR_TLS, payload) }
-#Export(c) fn jet_rt_record_get_JetNetError_TLS(value: I64) -> I64 { net_error_get(value, NET_ERROR_TLS) }
-#Export(c) fn jet_rt_record_new_JetNetError_Protocol(payload: I64) -> I64 { net_error_new(NET_ERROR_PROTOCOL, payload) }
-#Export(c) fn jet_rt_record_get_JetNetError_Protocol(value: I64) -> I64 { net_error_get(value, NET_ERROR_PROTOCOL) }
-#Export(c) fn jet_rt_record_new_JetNetError_Other(payload: I64) -> I64 { net_error_new(NET_ERROR_OTHER, payload) }
-#Export(c) fn jet_rt_record_get_JetNetError_Other(value: I64) -> I64 { net_error_get(value, NET_ERROR_OTHER) }
+#Export(c) fn jet_rt_handle_display_jet_net_error(value: I64) -> I64 { jet_rt_handle_show_jet_net_error(value) }
+#Export(c) fn jet_rt_handle_debug_jet_net_error(value: I64) -> I64 { jet_rt_handle_show_jet_net_error(value) }
+#Export(c) fn jet_rt_record_new_jet_net_error_invalid_input(payload: I64) -> I64 { net_error_new(NET_ERROR_INVALID_INPUT, payload) }
+#Export(c) fn jet_rt_record_get_jet_net_error_invalid_input(value: I64) -> I64 { net_error_get(value, NET_ERROR_INVALID_INPUT) }
+#Export(c) fn jet_rt_record_new_jet_net_error_permission_denied(payload: I64) -> I64 { net_error_new(NET_ERROR_PERMISSION_DENIED, payload) }
+#Export(c) fn jet_rt_record_get_jet_net_error_permission_denied(value: I64) -> I64 { net_error_get(value, NET_ERROR_PERMISSION_DENIED) }
+#Export(c) fn jet_rt_record_new_jet_net_error_address_in_use(payload: I64) -> I64 { net_error_new(NET_ERROR_ADDRESS_IN_USE, payload) }
+#Export(c) fn jet_rt_record_get_jet_net_error_address_in_use(value: I64) -> I64 { net_error_get(value, NET_ERROR_ADDRESS_IN_USE) }
+#Export(c) fn jet_rt_record_new_jet_net_error_address_unavailable(payload: I64) -> I64 { net_error_new(NET_ERROR_ADDRESS_UNAVAILABLE, payload) }
+#Export(c) fn jet_rt_record_get_jet_net_error_address_unavailable(value: I64) -> I64 { net_error_get(value, NET_ERROR_ADDRESS_UNAVAILABLE) }
+#Export(c) fn jet_rt_record_new_jet_net_error_connection_refused(payload: I64) -> I64 { net_error_new(NET_ERROR_CONNECTION_REFUSED, payload) }
+#Export(c) fn jet_rt_record_get_jet_net_error_connection_refused(value: I64) -> I64 { net_error_get(value, NET_ERROR_CONNECTION_REFUSED) }
+#Export(c) fn jet_rt_record_new_jet_net_error_connection_reset(payload: I64) -> I64 { net_error_new(NET_ERROR_CONNECTION_RESET, payload) }
+#Export(c) fn jet_rt_record_get_jet_net_error_connection_reset(value: I64) -> I64 { net_error_get(value, NET_ERROR_CONNECTION_RESET) }
+#Export(c) fn jet_rt_record_new_jet_net_error_not_connected(payload: I64) -> I64 { net_error_new(NET_ERROR_NOT_CONNECTED, payload) }
+#Export(c) fn jet_rt_record_get_jet_net_error_not_connected(value: I64) -> I64 { net_error_get(value, NET_ERROR_NOT_CONNECTED) }
+#Export(c) fn jet_rt_record_new_jet_net_error_closed(payload: I64) -> I64 { net_error_new(NET_ERROR_CLOSED, payload) }
+#Export(c) fn jet_rt_record_get_jet_net_error_closed(value: I64) -> I64 { net_error_get(value, NET_ERROR_CLOSED) }
+#Export(c) fn jet_rt_record_new_jet_net_error_timeout(payload: I64) -> I64 { net_error_new(NET_ERROR_TIMEOUT, payload) }
+#Export(c) fn jet_rt_record_get_jet_net_error_timeout(value: I64) -> I64 { net_error_get(value, NET_ERROR_TIMEOUT) }
+#Export(c) fn jet_rt_record_new_jet_net_error_cancelled(payload: I64) -> I64 { net_error_new(NET_ERROR_CANCELLED, payload) }
+#Export(c) fn jet_rt_record_get_jet_net_error_cancelled(value: I64) -> I64 { net_error_get(value, NET_ERROR_CANCELLED) }
+#Export(c) fn jet_rt_record_new_jet_net_error_unsupported(payload: I64) -> I64 { net_error_new(NET_ERROR_UNSUPPORTED, payload) }
+#Export(c) fn jet_rt_record_get_jet_net_error_unsupported(value: I64) -> I64 { net_error_get(value, NET_ERROR_UNSUPPORTED) }
+#Export(c) fn jet_rt_record_new_jet_net_error_dns(payload: I64) -> I64 { net_error_new(NET_ERROR_DNS, payload) }
+#Export(c) fn jet_rt_record_get_jet_net_error_dns(value: I64) -> I64 { net_error_get(value, NET_ERROR_DNS) }
+#Export(c) fn jet_rt_record_new_jet_net_error_tls(payload: I64) -> I64 { net_error_new(NET_ERROR_TLS, payload) }
+#Export(c) fn jet_rt_record_get_jet_net_error_tls(value: I64) -> I64 { net_error_get(value, NET_ERROR_TLS) }
+#Export(c) fn jet_rt_record_new_jet_net_error_protocol(payload: I64) -> I64 { net_error_new(NET_ERROR_PROTOCOL, payload) }
+#Export(c) fn jet_rt_record_get_jet_net_error_protocol(value: I64) -> I64 { net_error_get(value, NET_ERROR_PROTOCOL) }
+#Export(c) fn jet_rt_record_new_jet_net_error_other(payload: I64) -> I64 { net_error_new(NET_ERROR_OTHER, payload) }
+#Export(c) fn jet_rt_record_get_jet_net_error_other(value: I64) -> I64 { net_error_get(value, NET_ERROR_OTHER) }

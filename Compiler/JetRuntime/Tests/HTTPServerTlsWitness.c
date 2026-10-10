@@ -11,11 +11,11 @@ extern void jet_rt_alloc_init(void);
 extern void __real_jet_rt_free(void *,int64_t,int64_t);
 extern Text *jet_rt_string_from_static(const void *,int64_t);
 extern void jet_rt_string_drop(Text *);
-extern Tls *jet_rt_record_new_JetHTTPServerTls(Text *,Text *);
-extern Tls *jet_rt_handle_clone_JetHTTPServerTls(Tls *);
-extern void jet_rt_handle_drop_JetHTTPServerTls(Tls *);
-extern Text *jet_rt_record_get_JetHTTPServerTls_cert_pem(Tls *);
-extern Text *jet_rt_record_get_JetHTTPServerTls_key_pem(Tls *);
+extern Tls *jet_rt_record_new_jet_http_server_tls(Text *,Text *);
+extern Tls *jet_rt_handle_clone_jet_http_server_tls(Tls *);
+extern void jet_rt_handle_drop_jet_http_server_tls(Tls *);
+extern Text *jet_rt_record_get_jet_http_server_tls_cert_pem(Tls *);
+extern Text *jet_rt_record_get_jet_http_server_tls_key_pem(Tls *);
 static struct { void *p; int64_t n,a; unsigned freed; } watched[28];
 static size_t count;
 void __wrap_jet_rt_free(void *p,int64_t n,int64_t a) {
@@ -31,17 +31,17 @@ static void all_freed(void) { for(size_t i=0;i<count;i++) assert(watched[i].free
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }
 static void text_is(Text *t,const char *s) { assert(t->length==(int64_t)strlen(s) && !memcmp(t->data,s,(size_t)t->length)); }
 static void run(const char *cert,const char *key) {
-    Text *c=text(cert),*k=text(key); Tls *a=jet_rt_record_new_JetHTTPServerTls(c,k),*b=jet_rt_handle_clone_JetHTTPServerTls(a);
-    Text *cg=jet_rt_record_get_JetHTTPServerTls_cert_pem(a),*kg=jet_rt_record_get_JetHTTPServerTls_key_pem(a),*cg2=jet_rt_record_get_JetHTTPServerTls_cert_pem(a);
+    Text *c=text(cert),*k=text(key); Tls *a=jet_rt_record_new_jet_http_server_tls(c,k),*b=jet_rt_handle_clone_jet_http_server_tls(a);
+    Text *cg=jet_rt_record_get_jet_http_server_tls_cert_pem(a),*kg=jet_rt_record_get_jet_http_server_tls_key_pem(a),*cg2=jet_rt_record_get_jet_http_server_tls_cert_pem(a);
     assert(a!=b && c!=a->cert && k!=a->key && a->cert!=b->cert && a->key!=b->key && cg!=a->cert && kg!=a->key && cg2!=cg);
     text_is(c,cert); text_is(k,key); text_is(a->cert,cert); text_is(a->key,key); text_is(b->cert,cert); text_is(b->key,key);
     watch_text(c); watch_text(k); watch_tls(a); watch_tls(b); watch_text(cg); watch_text(kg); watch_text(cg2);
-    jet_rt_string_drop(c); jet_rt_string_drop(k); jet_rt_handle_drop_JetHTTPServerTls(a);
+    jet_rt_string_drop(c); jet_rt_string_drop(k); jet_rt_handle_drop_jet_http_server_tls(a);
     text_is(b->cert,cert); text_is(b->key,key); text_is(cg,cert); text_is(kg,key); text_is(cg2,cert);
-    jet_rt_handle_drop_JetHTTPServerTls(b); jet_rt_string_drop(cg); jet_rt_string_drop(kg); jet_rt_string_drop(cg2); all_freed();
+    jet_rt_handle_drop_jet_http_server_tls(b); jet_rt_string_drop(cg); jet_rt_string_drop(kg); jet_rt_string_drop(cg2); all_freed();
 }
 int main(void) {
     jet_rt_alloc_init(); run("-----BEGIN CERTIFICATE-----\ncert\n-----END CERTIFICATE-----", "-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----");
-    run("",""); run("arbitrary certificate text","caf\xc3\xa9 key"); jet_rt_handle_drop_JetHTTPServerTls(NULL);
+    run("",""); run("arbitrary certificate text","caf\xc3\xa9 key"); jet_rt_handle_drop_jet_http_server_tls(NULL);
     puts("http server tls: borrowed ctor + deep owners + fresh getters ok"); return 0;
 }

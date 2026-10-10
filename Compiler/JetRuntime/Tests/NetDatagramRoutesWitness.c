@@ -24,9 +24,9 @@ extern int64_t jet_net_udp_send_to(UDP *, Text *, Address *, int64_t *, NetError
 extern int64_t jet_net_udp_send_bytes_to(UDP *, const uint64_t *, int64_t, Address *, int64_t *, NetError **);
 extern int64_t jet_socket_receive_from_raw(FD *, uint64_t *, int64_t, Address *, Facts *);
 extern void jet_udp_socket_mark_closed_raw(UDP *);
-extern void jet_rt_handle_drop_JetUDPSocket(UDP *);
-extern void jet_rt_handle_drop_JetSocketAddr(Address *);
-extern void jet_rt_handle_drop_JetNetError(NetError *);
+extern void jet_rt_handle_drop_jet_udp_socket(UDP *);
+extern void jet_rt_handle_drop_jet_socket_addr(Address *);
+extern void jet_rt_handle_drop_jet_net_error(NetError *);
 extern int64_t jet_int_owned_to_i64(int64_t);
 extern void jet_rt_int_drop(int64_t);
 int main(void) {
@@ -39,7 +39,7 @@ int main(void) {
     assert(endpoint->ip.family==4 && endpoint->port>0 && !memcmp(endpoint->ip.octets,loopback.ip.octets,4));
     assert(jet_net_udp_set_timeout(receiver,1000,&error)==1 && receiver->state->timeout_ms==1000 && !error);
     assert(jet_net_udp_set_timeout(receiver,-1,&error)==0 && error && error->tag==0);
-    jet_rt_handle_drop_JetNetError(error); error=NULL;
+    jet_rt_handle_drop_jet_net_error(error); error=NULL;
     unsigned char binary[]={0,1,127,255}; Text message={binary,4,0}; int64_t sent;
     assert(jet_net_udp_send_to(sender,&message,endpoint,&sent,&error)==1 && !error);
     assert(jet_int_owned_to_i64(sent)==4); jet_rt_int_drop(sent);
@@ -51,10 +51,10 @@ int main(void) {
     assert(jet_socket_receive_from_raw(receiver->state->fd,bytes,2,&from,&facts)==4 && bytes[0]==255 && bytes[1]==127);
     jet_udp_socket_mark_closed_raw(sender);
     assert(jet_net_udp_send_to(sender,&message,endpoint,&sent,&error)==0 && error && error->tag==7);
-    jet_rt_handle_drop_JetNetError(error); error=NULL;
+    jet_rt_handle_drop_jet_net_error(error); error=NULL;
     jet_udp_socket_mark_closed_raw(receiver);
     Address *closed=NULL; assert(jet_net_udp_local_addr(receiver,&closed,&error)==0 && error && error->tag==7 && !closed);
-    jet_rt_handle_drop_JetNetError(error); jet_rt_handle_drop_JetSocketAddr(endpoint);
-    jet_rt_handle_drop_JetUDPSocket(receiver); jet_rt_handle_drop_JetUDPSocket(sender);
+    jet_rt_handle_drop_jet_net_error(error); jet_rt_handle_drop_jet_socket_addr(endpoint);
+    jet_rt_handle_drop_jet_udp_socket(receiver); jet_rt_handle_drop_jet_udp_socket(sender);
     puts("UDP leaves: bind/address/timeout/raw scalar inputs/exact count outputs/binary text/native bytes/closed errors OK");
 }

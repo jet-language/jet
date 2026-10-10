@@ -1,3 +1,4 @@
+import { runtimeAbiAtom } from "./runtime-abi-symbols.mjs";
 // Native handle exports describe existing Lower operations, not a second
 // representation or renderer. gen-c-abi-routes owns source classification;
 // only rows with an actual Jet declaration may enter this partition.
@@ -12,7 +13,7 @@ export function nativeHandleExports(types) {
       throw new Error("native handle requires its actual source declaration and concrete identity");
     }
     for (const op of ["drop", ...operations.filter((op) => type[op])]) {
-      const name = `jet_rt_handle_${op}_${type.runtime}`;
+      const name = `jet_rt_handle_${runtimeAbiAtom(op)}_${runtimeAbiAtom(type.runtime)}`;
       if (names.has(name)) throw new Error(`duplicate native handle export ${name}`);
       names.add(name);
       exports.push({ name, runtime: type.runtime, jetName: type.jetName, op });

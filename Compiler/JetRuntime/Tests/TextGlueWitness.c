@@ -27,23 +27,23 @@ extern Text *jet_rt_handle_show_##name(Message *); \
 extern Text *jet_rt_handle_display_##name(Message *); \
 extern Text *jet_rt_handle_debug_##name(Message *)
 MESSAGE_API(TextError,message); MESSAGE_API(UTF8Error,message); MESSAGE_API(RangeError,reason);
-extern Field *jet_rt_record_new_FieldError(Text *,Text *);
-extern Field *jet_rt_handle_clone_FieldError(Field *);
-extern void jet_rt_handle_drop_FieldError(Field *);
-extern bool jet_rt_handle_eq_FieldError(Field *,Field *);
-extern Text *jet_rt_record_get_FieldError_path(Field *);
-extern Text *jet_rt_record_get_FieldError_reason(Field *);
-extern Text *jet_rt_handle_show_FieldError(Field *);
-extern Text *jet_rt_handle_display_FieldError(Field *);
-extern Text *jet_rt_handle_debug_FieldError(Field *);
-extern Flags *jet_rt_record_new_RegexFlags(uint8_t,uint8_t,uint8_t);
-extern Flags *jet_rt_handle_clone_RegexFlags(Flags *);
-extern void jet_rt_handle_drop_RegexFlags(Flags *);
-extern bool jet_rt_handle_eq_RegexFlags(Flags *,Flags *);
-extern bool jet_rt_record_get_RegexFlags_case_insensitive(Flags *);
-extern bool jet_rt_record_get_RegexFlags_multiline(Flags *);
-extern bool jet_rt_record_get_RegexFlags_dotall(Flags *);
-extern Text *jet_rt_handle_show_RegexFlags(Flags *);
+extern Field *jet_rt_record_new_field_error(Text *,Text *);
+extern Field *jet_rt_handle_clone_field_error(Field *);
+extern void jet_rt_handle_drop_field_error(Field *);
+extern bool jet_rt_handle_eq_field_error(Field *,Field *);
+extern Text *jet_rt_record_get_field_error_path(Field *);
+extern Text *jet_rt_record_get_field_error_reason(Field *);
+extern Text *jet_rt_handle_show_field_error(Field *);
+extern Text *jet_rt_handle_display_field_error(Field *);
+extern Text *jet_rt_handle_debug_field_error(Field *);
+extern Flags *jet_rt_record_new_regex_flags(uint8_t,uint8_t,uint8_t);
+extern Flags *jet_rt_handle_clone_regex_flags(Flags *);
+extern void jet_rt_handle_drop_regex_flags(Flags *);
+extern bool jet_rt_handle_eq_regex_flags(Flags *,Flags *);
+extern bool jet_rt_record_get_regex_flags_case_insensitive(Flags *);
+extern bool jet_rt_record_get_regex_flags_multiline(Flags *);
+extern bool jet_rt_record_get_regex_flags_dotall(Flags *);
+extern Text *jet_rt_handle_show_regex_flags(Flags *);
 static struct { void *pointer; int64_t bytes,align; unsigned frees; } watched[40];
 static size_t count;
 static unsigned intercepted;
@@ -91,42 +91,42 @@ static void fields(void) {
     const char *paths[]={"","x.y","items[0]","\xcf\x80`\n"};
     const char *goldens[]={"bad","at `x.y`: bad","at `items[0]`: bad","at `\xcf\x80`\n`: bad"};
     for(size_t i=0;i<4;++i) {
-        Text *p=text(paths[i]), *r=text("bad"); Field *a=jet_rt_record_new_FieldError(p,r), *b=jet_rt_handle_clone_FieldError(a);
+        Text *p=text(paths[i]), *r=text("bad"); Field *a=jet_rt_record_new_field_error(p,r), *b=jet_rt_handle_clone_field_error(a);
         assert(a!=b && a->path!=p && a->reason!=r && a->path!=b->path && a->reason!=b->reason);
-        jet_rt_string_drop(p); jet_rt_string_drop(r); assert(jet_rt_handle_eq_FieldError(a,b));
-        Text *gp=jet_rt_record_get_FieldError_path(a), *gr=jet_rt_record_get_FieldError_reason(a);
+        jet_rt_string_drop(p); jet_rt_string_drop(r); assert(jet_rt_handle_eq_field_error(a,b));
+        Text *gp=jet_rt_record_get_field_error_path(a), *gr=jet_rt_record_get_field_error_reason(a);
         assert(gp!=a->path && gr!=a->reason);
-        Text *s=jet_rt_handle_show_FieldError(a), *d=jet_rt_handle_display_FieldError(a), *dbg=jet_rt_handle_debug_FieldError(a);
+        Text *s=jet_rt_handle_show_field_error(a), *d=jet_rt_handle_display_field_error(a), *dbg=jet_rt_handle_debug_field_error(a);
         assert(s!=d && s!=dbg && d!=dbg); text_is(s,goldens[i]); text_is(d,goldens[i]); text_is(dbg,goldens[i]);
-        Text *old=b->path; b->path=text("changed"); assert(!jet_rt_handle_eq_FieldError(a,b)); jet_rt_string_drop(b->path); b->path=old;
-        b->reason->data[0]^=1; assert(!jet_rt_handle_eq_FieldError(a,b)); b->reason->data[0]^=1;
+        Text *old=b->path; b->path=text("changed"); assert(!jet_rt_handle_eq_field_error(a,b)); jet_rt_string_drop(b->path); b->path=old;
+        b->reason->data[0]^=1; assert(!jet_rt_handle_eq_field_error(a,b)); b->reason->data[0]^=1;
         watch(a,16,8); watch_text(a->path); watch_text(a->reason); watch(b,16,8); watch_text(b->path); watch_text(b->reason);
-        jet_rt_handle_drop_FieldError(a); jet_rt_handle_drop_FieldError(b); done();
+        jet_rt_handle_drop_field_error(a); jet_rt_handle_drop_field_error(b); done();
         text_is(gp,paths[i]); text_is(gr,"bad");
         watch_text(gp); watch_text(gr); watch_text(s); watch_text(d); watch_text(dbg);
         jet_rt_string_drop(gp); jet_rt_string_drop(gr); jet_rt_string_drop(s); jet_rt_string_drop(d); jet_rt_string_drop(dbg); done();
     }
-    jet_rt_handle_drop_FieldError(NULL);
+    jet_rt_handle_drop_field_error(NULL);
 }
 static void flags(void) {
     const char *goldens[]={"RegexFlags()","RegexFlags(i)","RegexFlags(m)","RegexFlags(im)","RegexFlags(s)","RegexFlags(is)","RegexFlags(ms)","RegexFlags(ims)"};
     for(unsigned mask=0;mask<8;++mask) {
-        Flags *a=jet_rt_record_new_RegexFlags((mask&1)?255:0,(mask&2)?128:0,(mask&4)?2:0), *b=jet_rt_handle_clone_RegexFlags(a);
-        assert(a!=b && jet_rt_handle_eq_RegexFlags(a,b));
+        Flags *a=jet_rt_record_new_regex_flags((mask&1)?255:0,(mask&2)?128:0,(mask&4)?2:0), *b=jet_rt_handle_clone_regex_flags(a);
+        assert(a!=b && jet_rt_handle_eq_regex_flags(a,b));
         assert(a->insensitive==((mask&1)!=0) && a->multiline==((mask&2)!=0) && a->dotall==((mask&4)!=0));
-        assert(jet_rt_record_get_RegexFlags_case_insensitive(a)==((mask&1)!=0));
-        assert(jet_rt_record_get_RegexFlags_multiline(a)==((mask&2)!=0));
-        assert(jet_rt_record_get_RegexFlags_dotall(a)==((mask&4)!=0));
+        assert(jet_rt_record_get_regex_flags_case_insensitive(a)==((mask&1)!=0));
+        assert(jet_rt_record_get_regex_flags_multiline(a)==((mask&2)!=0));
+        assert(jet_rt_record_get_regex_flags_dotall(a)==((mask&4)!=0));
         int64_t *slots[]={&b->insensitive,&b->multiline,&b->dotall};
         for(size_t i=0;i<3;++i) {
-            *slots[i]^=1; assert(!jet_rt_handle_eq_RegexFlags(a,b)); *slots[i]^=1;
-            *slots[i]^=INT64_C(0x100); assert(jet_rt_handle_eq_RegexFlags(a,b)); *slots[i]^=INT64_C(0x100);
+            *slots[i]^=1; assert(!jet_rt_handle_eq_regex_flags(a,b)); *slots[i]^=1;
+            *slots[i]^=INT64_C(0x100); assert(jet_rt_handle_eq_regex_flags(a,b)); *slots[i]^=INT64_C(0x100);
         }
-        Text *shown=jet_rt_handle_show_RegexFlags(a); text_is(shown,goldens[mask]);
+        Text *shown=jet_rt_handle_show_regex_flags(a); text_is(shown,goldens[mask]);
         watch(a,24,8); watch(b,24,8); watch_text(shown);
-        jet_rt_handle_drop_RegexFlags(a); jet_rt_handle_drop_RegexFlags(b); jet_rt_string_drop(shown); done();
+        jet_rt_handle_drop_regex_flags(a); jet_rt_handle_drop_regex_flags(b); jet_rt_string_drop(shown); done();
     }
-    jet_rt_handle_drop_RegexFlags(NULL);
+    jet_rt_handle_drop_regex_flags(NULL);
 }
 int main(void) {
     jet_rt_alloc_init();

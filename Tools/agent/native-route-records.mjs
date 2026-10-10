@@ -1,3 +1,4 @@
+import { runtimeAbiAtom } from "./runtime-abi-symbols.mjs";
 // Native record ABI metadata. Lower uses the declaration's real layout;
 // these descriptors never define another header or duplicate the carrier codec.
 const identifier = /^[A-Za-z_]\w*$/;
@@ -27,19 +28,19 @@ export function nativeRecordExports(types) {
         if (type.record.kind === 'struct' && member.kind === null) throw new Error(`native record ${type.runtime}.${member.name}: stored member has no carrier`);
       }
       if (type.record.kind === 'struct') {
-        add(type, `jet_rt_record_new_${type.runtime}`, 'record.new');
-        for (const member of members) add(type, `jet_rt_record_get_${type.runtime}_${member.name}`, 'record.get', member.name);
+        add(type, `jet_rt_record_new_${runtimeAbiAtom(type.runtime)}`, 'record.new');
+        for (const member of members) add(type, `jet_rt_record_get_${runtimeAbiAtom(type.runtime)}_${runtimeAbiAtom(member.name)}`, 'record.get', member.name);
       } else {
-        add(type, `jet_rt_record_tag_${type.runtime}`, 'record.tag');
+        add(type, `jet_rt_record_tag_${runtimeAbiAtom(type.runtime)}`, 'record.tag');
         for (const member of members) {
-          add(type, `jet_rt_record_new_${type.runtime}_${member.name}`, 'record.new', member.name);
-          if (member.kind !== null) add(type, `jet_rt_record_get_${type.runtime}_${member.name}`, 'record.get', member.name);
+          add(type, `jet_rt_record_new_${runtimeAbiAtom(type.runtime)}_${runtimeAbiAtom(member.name)}`, 'record.new', member.name);
+          if (member.kind !== null) add(type, `jet_rt_record_get_${runtimeAbiAtom(type.runtime)}_${runtimeAbiAtom(member.name)}`, 'record.get', member.name);
         }
       }
     }
     for (const field of type.fields ?? []) {
       if (!identifier.test(field.name) || !/^(?:Text|Float|Flag|Handle\.[A-Za-z_]\w*)$/.test(field.kind)) throw new Error(`native field ${type.runtime}.${field.name}: unsupported address carrier ${field.kind}`);
-      add(type, `jet_rt_handle_field_${type.runtime}_${field.name}`, 'record.field', field.name);
+      add(type, `jet_rt_handle_field_${runtimeAbiAtom(type.runtime)}_${runtimeAbiAtom(field.name)}`, 'record.field', field.name);
     }
   }
   // A collection holder has one owner regardless of how many records use it.
@@ -53,7 +54,7 @@ export function nativeRecordExports(types) {
     }
   }
   for (const [kind, type] of [...sequences].sort(([a], [b]) => a.localeCompare(b))) {
-    const prefix = `jet_rt_record_seq_${kind.replaceAll('.', '_')}`;
+    const prefix = `jet_rt_record_seq_${runtimeAbiAtom(kind.replaceAll('.', '_'))}`;
     for (const op of ['new', 'drop', 'len', 'push', 'get']) add(type, `${prefix}_${op}`, `record.seq.${op}`, kind);
     if (kind.startsWith('Entries.')) add(type, `${prefix}_key`, 'record.seq.key', kind);
   }

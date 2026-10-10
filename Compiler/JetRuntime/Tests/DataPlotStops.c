@@ -4,18 +4,18 @@
 #include <stdint.h>
 #include <string.h>
 extern void jet_rt_alloc_init(void);
-extern int64_t jet_rt_record_new_JetDataPlotAxis(int64_t, int64_t, uint8_t, uint8_t, int64_t);
-extern int64_t jet_rt_record_new_JetDataPlotValue_Null(void);
-extern int64_t jet_rt_record_get_JetDataPlotValue_Integer(int64_t);
+extern int64_t jet_rt_record_new_jet_data_plot_axis(int64_t, int64_t, uint8_t, uint8_t, int64_t);
+extern int64_t jet_rt_record_new_jet_data_plot_value_null(void);
+extern int64_t jet_rt_record_get_jet_data_plot_value_integer(int64_t);
 int main(int argc, char **argv) {
     if (argc != 2) return 64;
     jet_rt_alloc_init();
     if (strcmp(argv[1], "ctor-range") == 0) {
         /* No text or Int conversion/allocation may occur before ordinal stop. */
-        (void)jet_rt_record_new_JetDataPlotAxis(6, 0, 0, 0, 0);
+        (void)jet_rt_record_new_jet_data_plot_axis(6, 0, 0, 0, 0);
     } else if (strcmp(argv[1], "getter-variant") == 0) {
-        int64_t null_value = jet_rt_record_new_JetDataPlotValue_Null();
-        (void)jet_rt_record_get_JetDataPlotValue_Integer(null_value);
+        int64_t null_value = jet_rt_record_new_jet_data_plot_value_null();
+        (void)jet_rt_record_get_jet_data_plot_value_integer(null_value);
     } else return 64;
     return 99; /* Reaching this is a real provider failure, not a fallback. */
 }

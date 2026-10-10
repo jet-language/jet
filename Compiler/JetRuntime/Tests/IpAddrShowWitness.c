@@ -12,10 +12,10 @@ _Static_assert(sizeof(IP) == 24 && offsetof(IP, octets) == 8, "canonical IP24");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t, int64_t);
 extern void __real_jet_rt_free(void *, int64_t, int64_t);
-extern IP *jet_rt_handle_clone_JetIpAddr(IP *);
-extern void jet_rt_handle_drop_JetIpAddr(IP *);
-extern bool jet_rt_handle_eq_JetIpAddr(IP *, IP *);
-extern Text *jet_rt_handle_show_JetIpAddr(IP *);
+extern IP *jet_rt_handle_clone_jet_ip_addr(IP *);
+extern void jet_rt_handle_drop_jet_ip_addr(IP *);
+extern bool jet_rt_handle_eq_jet_ip_addr(IP *, IP *);
+extern Text *jet_rt_handle_show_jet_ip_addr(IP *);
 extern void jet_rt_string_drop(Text *);
 static struct { void *pointer; int64_t size, align; unsigned frees; } watched[4];
 static size_t count;
@@ -43,7 +43,7 @@ static void done(unsigned before) {
 }
 static void expect(IP *ip, const char *expected) {
     IP saved = *ip;
-    Text *text = jet_rt_handle_show_JetIpAddr(ip);
+    Text *text = jet_rt_handle_show_jet_ip_addr(ip);
     assert(text->length == (int64_t)strlen(expected));
     assert(memcmp(text->data, expected, (size_t)text->length) == 0);
     assert(memcmp(ip, &saved, sizeof saved) == 0);
@@ -57,12 +57,12 @@ static void address_case(int64_t family, const unsigned char octets[16], const c
     IP *ip = jet_rt_alloc(24, 8);
     ip->family = family;
     memcpy(ip->octets, octets, 16);
-    IP *copy = jet_rt_handle_clone_JetIpAddr(ip);
-    assert(ip != copy && jet_rt_handle_eq_JetIpAddr(ip, copy));
+    IP *copy = jet_rt_handle_clone_jet_ip_addr(ip);
+    assert(ip != copy && jet_rt_handle_eq_jet_ip_addr(ip, copy));
     expect(ip, expected); expect(copy, expected);
     watch(ip, 24, 8); watch(copy, 24, 8);
     unsigned before = intercepted;
-    jet_rt_handle_drop_JetIpAddr(ip); jet_rt_handle_drop_JetIpAddr(copy);
+    jet_rt_handle_drop_jet_ip_addr(ip); jet_rt_handle_drop_jet_ip_addr(copy);
     done(before);
 }
 static void v6_case(const uint16_t segments[8], const char *expected) {

@@ -14,9 +14,9 @@ extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
 extern void __real_jet_rt_free(void *,int64_t,int64_t);
 extern Text *jet_rt_string_new(unsigned char *,int64_t);
-extern Row *jet_rt_handle_clone_CSVRow(Row *);
-extern void jet_rt_handle_drop_CSVRow(Row *);
-extern bool jet_rt_handle_eq_CSVRow(Row *,Row *);
+extern Row *jet_rt_handle_clone_csv_row(Row *);
+extern void jet_rt_handle_drop_csv_row(Row *);
+extern bool jet_rt_handle_eq_csv_row(Row *,Row *);
 static struct { void *p; int64_t bytes,align; unsigned frees; } watched[48];
 static size_t count;
 static unsigned intercepted;
@@ -53,31 +53,31 @@ static Row *row(int64_t length,int64_t spare,int64_t line) {
     return r;
 }
 static void check(int64_t length,int64_t spare,int64_t line) {
-    Row *a=row(length,spare,line),*b=jet_rt_handle_clone_CSVRow(a);
+    Row *a=row(length,spare,line),*b=jet_rt_handle_clone_csv_row(a);
     assert(a!=b && a->fields!=b->fields && b->line==line);
     assert(b->fields->length==length && b->fields->capacity==length);
-    assert(jet_rt_handle_eq_CSVRow(a,a) && jet_rt_handle_eq_CSVRow(a,b));
+    assert(jet_rt_handle_eq_csv_row(a,a) && jet_rt_handle_eq_csv_row(a,b));
     if(length) assert(a->fields->data!=b->fields->data);
     for(int64_t i=0;i<length;++i) {
         Text *first=a->fields->data[i],*second=b->fields->data[i];
         assert(first!=second && first->length==second->length);
         if(first->length) {
             assert(first->data!=second->data && memcmp(first->data,second->data,(size_t)first->length)==0);
-            second->data[0]^=1; assert(!jet_rt_handle_eq_CSVRow(a,b)); second->data[0]^=1;
+            second->data[0]^=1; assert(!jet_rt_handle_eq_csv_row(a,b)); second->data[0]^=1;
         }
     }
-    b->line^=1; assert(!jet_rt_handle_eq_CSVRow(a,b)); b->line^=1;
-    if(length) { --b->fields->length; assert(!jet_rt_handle_eq_CSVRow(a,b)); ++b->fields->length; }
+    b->line^=1; assert(!jet_rt_handle_eq_csv_row(a,b)); b->line^=1;
+    if(length) { --b->fields->length; assert(!jet_rt_handle_eq_csv_row(a,b)); ++b->fields->length; }
     if(length>3) {
         Text *saved=b->fields->data[1]; b->fields->data[1]=b->fields->data[3]; b->fields->data[3]=saved;
-        assert(!jet_rt_handle_eq_CSVRow(a,b)); saved=b->fields->data[1]; b->fields->data[1]=b->fields->data[3]; b->fields->data[3]=saved;
+        assert(!jet_rt_handle_eq_csv_row(a,b)); saved=b->fields->data[1]; b->fields->data[1]=b->fields->data[3]; b->fields->data[3]=saved;
     }
-    watch_row(a); jet_rt_handle_drop_CSVRow(a); done();
-    assert(jet_rt_handle_eq_CSVRow(b,b) && b->line==line);
+    watch_row(a); jet_rt_handle_drop_csv_row(a); done();
+    assert(jet_rt_handle_eq_csv_row(b,b) && b->line==line);
     if(length==5) assert(b->fields->data[4]->length==3 && b->fields->data[4]->data[1]==0);
-    watch_row(b); jet_rt_handle_drop_CSVRow(b); done();
+    watch_row(b); jet_rt_handle_drop_csv_row(b); done();
 }
 int main(void) {
     jet_rt_alloc_init(); check(0,0,INT64_MIN); check(0,4,INT64_MAX); check(1,0,-1); check(5,3,INT64_MAX);
-    jet_rt_handle_drop_CSVRow(NULL); puts("CSVGlue recursive ownership/equality OK"); return 0;
+    jet_rt_handle_drop_csv_row(NULL); puts("CSVGlue recursive ownership/equality OK"); return 0;
 }

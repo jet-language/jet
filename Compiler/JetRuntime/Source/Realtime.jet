@@ -122,12 +122,12 @@ fn realtime_join(stream: I64) {
     }
     sync_mutex_unlock(stream + RT_JOIN_MUTEX)
 }
-#Export(c) fn jet_rt_handle_clone_JetRealtimeStream(stream: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_realtime_stream(stream: I64) -> I64 {
     _ := sync_add(stream + RT_REFS, I64{1})
     _ := sync_add(stream + RT_HANDLES, I64{1})
     stream
 }
-#Export(c) fn jet_rt_handle_drop_JetRealtimeStream(stream: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_realtime_stream(stream: I64) {
     if (stream == I64{0}) -> return
     if (sync_add(stream + RT_HANDLES, I64{-1}) == I64{1}) {
         scheduler_control_cancel(sync_load(stream + RT_CONTROL))
@@ -309,8 +309,8 @@ fn realtime_join(stream: I64) {
     I64{0}
 }
 // Raw native receipt snapshots bridge the ordinary source struct. No Rust glue.
-#Export(c) fn jet_rt_handle_drop_JetRealtimeReceipt(receipt: I64) { jet_rt_free(receipt, RT_RECEIPT_BYTES, I64{8}) }
-#Export(c) fn jet_rt_handle_clone_JetRealtimeReceipt(receipt: I64) -> I64 {
+#Export(c) fn jet_rt_handle_drop_jet_realtime_receipt(receipt: I64) { jet_rt_free(receipt, RT_RECEIPT_BYTES, I64{8}) }
+#Export(c) fn jet_rt_handle_clone_jet_realtime_receipt(receipt: I64) -> I64 {
     result :: jet_rt_alloc(RT_RECEIPT_BYTES, I64{8})
     offset := I64{0}
     loop offset < RT_RECEIPT_BYTES {
@@ -319,7 +319,7 @@ fn realtime_join(stream: I64) {
     }
     result
 }
-#Export(c) fn jet_rt_handle_eq_JetRealtimeReceipt(left: I64, right: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_realtime_receipt(left: I64, right: I64) -> Bool {
     offset := I64{0}
     loop offset < RT_RECEIPT_BYTES {
         if (sync_load(left + offset) != sync_load(right + offset)) -> return false
@@ -330,7 +330,7 @@ fn realtime_join(stream: I64) {
 
 // CAbiRoutes.rs:11063-11112: parameters/results are canonical exact-Int words,
 // but the native snapshot stores eight bounded raw i64 facts in source order.
-#Export(c) fn jet_rt_record_new_JetRealtimeReceipt(rate: I64, frames: I64, callbacks: I64, completed: I64, missed: I64, lateness: I64, start: I64, end: I64) -> I64 {
+#Export(c) fn jet_rt_record_new_jet_realtime_receipt(rate: I64, frames: I64, callbacks: I64, completed: I64, missed: I64, lateness: I64, start: I64, end: I64) -> I64 {
     a :: jet_int_owned_to_i64(rate)
     b :: jet_int_owned_to_i64(frames)
     c :: jet_int_owned_to_i64(callbacks)
@@ -350,11 +350,11 @@ fn realtime_join(stream: I64) {
     sync_store(receipt + I64{56}, h)
     receipt
 }
-#Export(c) fn jet_rt_record_get_JetRealtimeReceipt_requested_rate_hz(receipt: I64) -> I64 { jet_int_owned_from_i64(sync_load(receipt)) }
-#Export(c) fn jet_rt_record_get_JetRealtimeReceipt_requested_frames(receipt: I64) -> I64 { jet_int_owned_from_i64(sync_load(receipt + I64{8})) }
-#Export(c) fn jet_rt_record_get_JetRealtimeReceipt_completed_callbacks(receipt: I64) -> I64 { jet_int_owned_from_i64(sync_load(receipt + I64{16})) }
-#Export(c) fn jet_rt_record_get_JetRealtimeReceipt_completed_frames(receipt: I64) -> I64 { jet_int_owned_from_i64(sync_load(receipt + I64{24})) }
-#Export(c) fn jet_rt_record_get_JetRealtimeReceipt_missed(receipt: I64) -> I64 { jet_int_owned_from_i64(sync_load(receipt + I64{32})) }
-#Export(c) fn jet_rt_record_get_JetRealtimeReceipt_max_lateness_ns(receipt: I64) -> I64 { jet_int_owned_from_i64(sync_load(receipt + I64{40})) }
-#Export(c) fn jet_rt_record_get_JetRealtimeReceipt_start_identity(receipt: I64) -> I64 { jet_int_owned_from_i64(sync_load(receipt + I64{48})) }
-#Export(c) fn jet_rt_record_get_JetRealtimeReceipt_end_identity(receipt: I64) -> I64 { jet_int_owned_from_i64(sync_load(receipt + I64{56})) }
+#Export(c) fn jet_rt_record_get_jet_realtime_receipt_requested_rate_hz(receipt: I64) -> I64 { jet_int_owned_from_i64(sync_load(receipt)) }
+#Export(c) fn jet_rt_record_get_jet_realtime_receipt_requested_frames(receipt: I64) -> I64 { jet_int_owned_from_i64(sync_load(receipt + I64{8})) }
+#Export(c) fn jet_rt_record_get_jet_realtime_receipt_completed_callbacks(receipt: I64) -> I64 { jet_int_owned_from_i64(sync_load(receipt + I64{16})) }
+#Export(c) fn jet_rt_record_get_jet_realtime_receipt_completed_frames(receipt: I64) -> I64 { jet_int_owned_from_i64(sync_load(receipt + I64{24})) }
+#Export(c) fn jet_rt_record_get_jet_realtime_receipt_missed(receipt: I64) -> I64 { jet_int_owned_from_i64(sync_load(receipt + I64{32})) }
+#Export(c) fn jet_rt_record_get_jet_realtime_receipt_max_lateness_ns(receipt: I64) -> I64 { jet_int_owned_from_i64(sync_load(receipt + I64{40})) }
+#Export(c) fn jet_rt_record_get_jet_realtime_receipt_start_identity(receipt: I64) -> I64 { jet_int_owned_from_i64(sync_load(receipt + I64{48})) }
+#Export(c) fn jet_rt_record_get_jet_realtime_receipt_end_identity(receipt: I64) -> I64 { jet_int_owned_from_i64(sync_load(receipt + I64{56})) }

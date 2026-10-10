@@ -18,8 +18,8 @@ fn net_stream_drop(value: I64) {
     jet_fd_drop_raw(net_word(value, I64{0}))
     jet_rt_free(value, I64{56}, I64{8})
 }
-#Export(c) fn jet_rt_handle_drop_JetTCPStream(value: I64) { net_stream_drop(value) }
-#Export(c) fn jet_rt_handle_drop_JetUnixStream(value: I64) { net_stream_drop(value) }
+#Export(c) fn jet_rt_handle_drop_jet_tcp_stream(value: I64) { net_stream_drop(value) }
+#Export(c) fn jet_rt_handle_drop_jet_unix_stream(value: I64) { net_stream_drop(value) }
 #Export(c) fn jet_socket_stream_fd_raw(value: I64) -> I64 { net_word(value, I64{0}) }
 #Export(c) fn jet_socket_stream_flags_raw(value: I64) -> I64 {
     mutex :: wrapping(value + I64{48})
@@ -77,14 +77,14 @@ fn net_listener_drop(value: I64) {
     jet_fd_drop_raw(net_word(value, I64{0}))
     jet_rt_free(value, I64{8}, I64{8})
 }
-#Export(c) fn jet_rt_handle_drop_JetTCPListener(value: I64) { net_listener_drop(value) }
-#Export(c) fn jet_rt_handle_drop_JetUnixListener(value: I64) { net_listener_drop(value) }
+#Export(c) fn jet_rt_handle_drop_jet_tcp_listener(value: I64) { net_listener_drop(value) }
+#Export(c) fn jet_rt_handle_drop_jet_unix_listener(value: I64) { net_listener_drop(value) }
 #Export(c) fn jet_socket_listener_fd_raw(value: I64) -> I64 { net_word(value, I64{0}) }
 #Export(c) fn jet_tcp_listener_clone_raw(value: I64, error: I64) -> I64 {
     state :: jet_fd_dup_raw(net_word(value, I64{0}), error)
     if (state == I64{0}) -> I64{0} else -> jet_socket_listener_from_fd_raw(state)
 }
-#Export(c) fn jet_rt_handle_clone_JetUnixListener(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_unix_listener(value: I64) -> I64 {
     jet_socket_listener_from_fd_raw(jet_fd_retain_raw(net_word(value, I64{0})))
 }
 
@@ -98,7 +98,7 @@ fn net_listener_drop(value: I64) {
     net_put(value, I64{0}, state)
     value
 }
-#Export(c) fn jet_rt_handle_clone_JetUDPSocket(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_udp_socket(value: I64) -> I64 {
     state :: net_word(value, I64{0})
     mutex :: wrapping(state + I64{8})
     sync_mutex_lock(mutex)
@@ -108,7 +108,7 @@ fn net_listener_drop(value: I64) {
     net_put(cloned, I64{0}, state)
     cloned
 }
-#Export(c) fn jet_rt_handle_drop_JetUDPSocket(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_udp_socket(value: I64) {
     if (value == I64{0}) -> return
     state :: net_word(value, I64{0})
     mutex :: wrapping(state + I64{8})

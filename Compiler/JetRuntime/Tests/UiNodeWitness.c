@@ -15,12 +15,12 @@ extern void jet_rt_free(uintptr_t, int64_t, int64_t);
 extern uintptr_t jet_ui_raw_node_transfer(uintptr_t, double, double, int64_t,
     int64_t, const uintptr_t *, int64_t, uint8_t, uintptr_t, int64_t, uint8_t,
     int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, uintptr_t, uintptr_t);
-extern uintptr_t jet_rt_handle_clone_JetUiNode(uintptr_t);
-extern void jet_rt_handle_drop_JetUiNode(uintptr_t);
-extern bool jet_rt_handle_eq_JetUiNode(uintptr_t, uintptr_t);
-extern void jet_rt_handle_field_JetUiNode_label(uintptr_t, uintptr_t);
-extern uintptr_t jet_rt_handle_field_JetUiNode_width(uintptr_t);
-extern uintptr_t jet_rt_handle_field_JetUiNode_height(uintptr_t);
+extern uintptr_t jet_rt_handle_clone_jet_ui_node(uintptr_t);
+extern void jet_rt_handle_drop_jet_ui_node(uintptr_t);
+extern bool jet_rt_handle_eq_jet_ui_node(uintptr_t, uintptr_t);
+extern void jet_rt_handle_field_jet_ui_node_label(uintptr_t, uintptr_t);
+extern uintptr_t jet_rt_handle_field_jet_ui_node_width(uintptr_t);
+extern uintptr_t jet_rt_handle_field_jet_ui_node_height(uintptr_t);
 extern void jet_rt_native_closure_retain(uintptr_t);
 extern bool jet_rt_native_closure_unref(uintptr_t);
 extern void jet_rt_thread_attach(void);
@@ -81,7 +81,7 @@ static void label_getter(uintptr_t node, const struct Text *expected) {
     memset(&frame, 0, sizeof(frame));
     frame.before = 0xfeed;
     frame.after = 0xbeef;
-    jet_rt_handle_field_JetUiNode_label(node, (uintptr_t)&frame.out);
+    jet_rt_handle_field_jet_ui_node_label(node, (uintptr_t)&frame.out);
     assert(frame.before == 0xfeed && frame.after == 0xbeef);
     text_equal((uintptr_t)&frame.out, expected);
     assert(frame.out.data == ((const struct Text *)word(node, 8))->data);
@@ -108,8 +108,8 @@ static void absent_golden(uintptr_t node, const struct Text *label) {
     for (size_t offset = 120; offset < 160; offset += 8)
         assert(word(node, offset) == 0);
     label_getter(node, label);
-    assert(jet_rt_handle_field_JetUiNode_width(node) == node + 16);
-    assert(jet_rt_handle_field_JetUiNode_height(node) == node + 24);
+    assert(jet_rt_handle_field_jet_ui_node_width(node) == node + 16);
+    assert(jet_rt_handle_field_jet_ui_node_height(node) == node + 24);
     assert(signbit(real(node, 16)) && real(node, 24) == 1.5);
 }
 static void populated_golden(uintptr_t node, uintptr_t child,
@@ -123,7 +123,7 @@ static void populated_golden(uintptr_t node, uintptr_t child,
     const uint64_t *children = (const void *)word(node, 48);
     assert(children[0] == 1 && children[1] == 1 && children[2] != 0);
     uintptr_t kept_child = *(const uintptr_t *)children[2];
-    assert(kept_child != child && jet_rt_handle_eq_JetUiNode(kept_child, child));
+    assert(kept_child != child && jet_rt_handle_eq_jet_ui_node(kept_child, child));
     text_equal(word(node, 56), color);
     const uint64_t expected[] = {1, 3, 0x12abff, 2, 200, 7, 37, 1};
     for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i)
@@ -138,13 +138,13 @@ struct ThreadCase { uintptr_t node; struct Closure *click, *drop; };
 static void *clone_on_thread(void *argument) {
     jet_rt_thread_attach();
     struct ThreadCase *test = argument;
-    uintptr_t copy = jet_rt_handle_clone_JetUiNode(test->node);
-    assert(copy != test->node && jet_rt_handle_eq_JetUiNode(copy, test->node));
+    uintptr_t copy = jet_rt_handle_clone_jet_ui_node(test->node);
+    assert(copy != test->node && jet_rt_handle_eq_jet_ui_node(copy, test->node));
     assert(atomic_load_explicit(&test->click->refs, memory_order_relaxed) == 2);
     assert(atomic_load_explicit(&test->drop->refs, memory_order_relaxed) == 2);
     ((struct Closure *)word(copy, 128))->invoke(test->click, 7);
     ((struct Closure *)word(copy, 136))->invoke(test->drop, 7);
-    jet_rt_handle_drop_JetUiNode(copy);
+    jet_rt_handle_drop_jet_ui_node(copy);
     jet_rt_thread_detach();
     return NULL;
 }
@@ -166,17 +166,17 @@ int main(void) {
     const struct Text color = {(const unsigned char *)"", 0, 0};
     uintptr_t child = absent(&label);
     absent_golden(child, &label);
-    uintptr_t copy = jet_rt_handle_clone_JetUiNode(child);
-    assert(copy != child && jet_rt_handle_eq_JetUiNode(copy, child));
+    uintptr_t copy = jet_rt_handle_clone_jet_ui_node(child);
+    assert(copy != child && jet_rt_handle_eq_jet_ui_node(copy, child));
     absent_golden(copy, &label);
     // Float PartialEq is semantic, not bitwise: signed zero equals zero,
     // while even a node compared to itself is unequal when it contains NaN.
     uint64_t positive_zero = 0, quiet_nan = UINT64_C(0x7ff8000000000001);
     memcpy((unsigned char *)copy + 16, &positive_zero, sizeof(positive_zero));
-    assert(jet_rt_handle_eq_JetUiNode(copy, child));
+    assert(jet_rt_handle_eq_jet_ui_node(copy, child));
     memcpy((unsigned char *)copy + 16, &quiet_nan, sizeof(quiet_nan));
-    assert(!jet_rt_handle_eq_JetUiNode(copy, copy));
-    jet_rt_handle_drop_JetUiNode(copy);
+    assert(!jet_rt_handle_eq_jet_ui_node(copy, copy));
+    jet_rt_handle_drop_jet_ui_node(copy);
     puts("absent: refs=1;width=-0;height=1.5;role=-1;kind=0;children=0;color=none;style=none;mask=63;ime=none;click=none;drop=none;a11y=none;shortcut=none");
 
     _Atomic unsigned click_finalized = 0, drop_finalized = 0;
@@ -208,7 +208,7 @@ int main(void) {
         assert(word(combination, 120) == 0); // present Native vs absent via mask
         assert(word(combination, 128) == (click_present ? (uintptr_t)click : 0));
         assert(word(combination, 136) == (drop_present ? (uintptr_t)drop : 0));
-        jet_rt_handle_drop_JetUiNode(combination);
+        jet_rt_handle_drop_jet_ui_node(combination);
     }
 
     struct ThreadCase test = {node, click, drop};
@@ -224,9 +224,9 @@ int main(void) {
     assert(atomic_load_explicit(&drop->refs, memory_order_relaxed) == 1);
     assert(atomic_load_explicit(&click_finalized, memory_order_relaxed) == 0);
     assert(atomic_load_explicit(&drop_finalized, memory_order_relaxed) == 0);
-    jet_rt_handle_drop_JetUiNode(node);
-    jet_rt_handle_drop_JetUiNode(child);
-    jet_rt_handle_drop_JetUiNode(0);
+    jet_rt_handle_drop_jet_ui_node(node);
+    jet_rt_handle_drop_jet_ui_node(child);
+    jet_rt_handle_drop_jet_ui_node(0);
     assert(atomic_load_explicit(&click_finalized, memory_order_relaxed) == 1);
     assert(atomic_load_explicit(&drop_finalized, memory_order_relaxed) == 1);
     assert(atomic_load_explicit(&click_invocations, memory_order_relaxed) == 1);

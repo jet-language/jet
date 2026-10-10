@@ -142,7 +142,7 @@ fn journey_trim_newlines(text: I64) -> I64 {
     if (sync_load(journey_report_wire_word) != I64{0}) {
         error :: jet_err_from_message(trimmed)
         report :: jet_error_report(error)
-        jet_rt_handle_drop_JetErr(error)
+        jet_rt_handle_drop_jet_err(error)
         jet_rt_string_drop(trimmed)
         return report
     }
@@ -162,7 +162,7 @@ fn journey_entry_write_take(report: I64) {
 }
 #Export(c) fn jet_entry_error_exit_jet(error: I64) {
     report :: jet_error_report(error)
-    jet_rt_handle_drop_JetErr(error)
+    jet_rt_handle_drop_jet_err(error)
     journey_entry_write_take(report)
 }
 #Export(c) fn jet_rt_entry_error_exit_err(error: I64) { jet_entry_error_exit_jet(error) }

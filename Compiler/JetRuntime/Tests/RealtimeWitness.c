@@ -18,28 +18,28 @@ extern uintptr_t jet_rt_native_realtime_start(int64_t, int64_t, uintptr_t,
 extern uintptr_t jet_rt_native_realtime_worker(uintptr_t);
 extern int64_t jet_rt_native_realtime_deadline_offset(int64_t, int64_t,
     int64_t, int64_t, uintptr_t);
-extern uintptr_t jet_rt_handle_clone_JetRealtimeStream(uintptr_t);
-extern void jet_rt_handle_drop_JetRealtimeStream(uintptr_t);
+extern uintptr_t jet_rt_handle_clone_jet_realtime_stream(uintptr_t);
+extern void jet_rt_handle_drop_jet_realtime_stream(uintptr_t);
 extern void jet_rt_cancel(uintptr_t);
 extern bool jet_rt_is_cancelled(uintptr_t);
 extern int64_t jet_rt_next_deadline(uintptr_t);
 extern uintptr_t jet_rt_receipt(uintptr_t);
-extern uintptr_t jet_rt_handle_clone_JetRealtimeReceipt(uintptr_t);
-extern void jet_rt_handle_drop_JetRealtimeReceipt(uintptr_t);
-extern bool jet_rt_handle_eq_JetRealtimeReceipt(uintptr_t, uintptr_t);
+extern uintptr_t jet_rt_handle_clone_jet_realtime_receipt(uintptr_t);
+extern void jet_rt_handle_drop_jet_realtime_receipt(uintptr_t);
+extern bool jet_rt_handle_eq_jet_realtime_receipt(uintptr_t, uintptr_t);
 extern int64_t jet_int_owned_to_i64(int64_t);
 extern void jet_rt_int_drop(int64_t);
 extern int64_t jet_int_owned_from_i64(int64_t);
-extern uintptr_t jet_rt_record_new_JetRealtimeReceipt(int64_t, int64_t, int64_t,
+extern uintptr_t jet_rt_record_new_jet_realtime_receipt(int64_t, int64_t, int64_t,
     int64_t, int64_t, int64_t, int64_t, int64_t);
-extern int64_t jet_rt_record_get_JetRealtimeReceipt_requested_rate_hz(uintptr_t);
-extern int64_t jet_rt_record_get_JetRealtimeReceipt_requested_frames(uintptr_t);
-extern int64_t jet_rt_record_get_JetRealtimeReceipt_completed_callbacks(uintptr_t);
-extern int64_t jet_rt_record_get_JetRealtimeReceipt_completed_frames(uintptr_t);
-extern int64_t jet_rt_record_get_JetRealtimeReceipt_missed(uintptr_t);
-extern int64_t jet_rt_record_get_JetRealtimeReceipt_max_lateness_ns(uintptr_t);
-extern int64_t jet_rt_record_get_JetRealtimeReceipt_start_identity(uintptr_t);
-extern int64_t jet_rt_record_get_JetRealtimeReceipt_end_identity(uintptr_t);
+extern int64_t jet_rt_record_get_jet_realtime_receipt_requested_rate_hz(uintptr_t);
+extern int64_t jet_rt_record_get_jet_realtime_receipt_requested_frames(uintptr_t);
+extern int64_t jet_rt_record_get_jet_realtime_receipt_completed_callbacks(uintptr_t);
+extern int64_t jet_rt_record_get_jet_realtime_receipt_completed_frames(uintptr_t);
+extern int64_t jet_rt_record_get_jet_realtime_receipt_missed(uintptr_t);
+extern int64_t jet_rt_record_get_jet_realtime_receipt_max_lateness_ns(uintptr_t);
+extern int64_t jet_rt_record_get_jet_realtime_receipt_start_identity(uintptr_t);
+extern int64_t jet_rt_record_get_jet_realtime_receipt_end_identity(uintptr_t);
 extern int64_t jet_time_raw_host_monotonic_ns(void);
 extern uintptr_t jet_rt_time_monotonic_provider_set(uintptr_t);
 extern void jet_rt_panic_message(uintptr_t, int64_t);
@@ -47,7 +47,7 @@ extern uintptr_t jet_rt_native_realtime_ring_new(int64_t);
 extern bool jet_rt_native_realtime_ring_publish(uintptr_t, uintptr_t, int64_t);
 extern bool jet_rt_native_realtime_ring_publish_zeroed(uintptr_t);
 extern bool jet_rt_native_realtime_ring_pop(uintptr_t, uintptr_t, uintptr_t);
-extern void jet_rt_handle_drop_JetRealtimeSampleRing(uintptr_t);
+extern void jet_rt_handle_drop_jet_realtime_sample_ring(uintptr_t);
 extern void jet_rt_thread_attach(void);
 extern void jet_rt_thread_detach(void);
 struct List { uint64_t len, cap; uintptr_t data; };
@@ -137,7 +137,7 @@ static void ring(void) {
     assert(memcmp((const void *)data, samples, 16) == 0);
     jet_rt_free(data, 16, 8);
     watch(value); watch(word(value, 24)); watch(word(value, 32));
-    jet_rt_handle_drop_JetRealtimeSampleRing(value);
+    jet_rt_handle_drop_jet_realtime_sample_ring(value);
     releases();
     puts("Realtime ring: two slots, length rejection, Float bits, zero fill, wrap and exact frees ok");
 }
@@ -196,25 +196,25 @@ static void concurrent_ring(void) {
     assert(pthread_create(&reader, NULL, ring_reader, &context) == 0);
     assert(pthread_join(writer, NULL) == 0 && pthread_join(reader, NULL) == 0);
     watch(context.ring); watch(word(context.ring, 24)); watch(word(context.ring, 32));
-    jet_rt_handle_drop_JetRealtimeSampleRing(context.ring);
+    jet_rt_handle_drop_jet_realtime_sample_ring(context.ring);
     releases();
 }
 static void receipt_carriers(void) {
     const int64_t values[] = {INT64_MAX, INT64_MIN, 3, 4, 5, 6, 7, 8};
     int64_t words[8];
     for (unsigned i = 0; i < 8; ++i) words[i] = jet_int_owned_from_i64(values[i]);
-    uintptr_t receipt = jet_rt_record_new_JetRealtimeReceipt(words[0], words[1],
+    uintptr_t receipt = jet_rt_record_new_jet_realtime_receipt(words[0], words[1],
         words[2], words[3], words[4], words[5], words[6], words[7]);
     for (unsigned i = 0; i < 8; ++i) jet_rt_int_drop(words[i]);
     int64_t (*getters[])(uintptr_t) = {
-        jet_rt_record_get_JetRealtimeReceipt_requested_rate_hz,
-        jet_rt_record_get_JetRealtimeReceipt_requested_frames,
-        jet_rt_record_get_JetRealtimeReceipt_completed_callbacks,
-        jet_rt_record_get_JetRealtimeReceipt_completed_frames,
-        jet_rt_record_get_JetRealtimeReceipt_missed,
-        jet_rt_record_get_JetRealtimeReceipt_max_lateness_ns,
-        jet_rt_record_get_JetRealtimeReceipt_start_identity,
-        jet_rt_record_get_JetRealtimeReceipt_end_identity};
+        jet_rt_record_get_jet_realtime_receipt_requested_rate_hz,
+        jet_rt_record_get_jet_realtime_receipt_requested_frames,
+        jet_rt_record_get_jet_realtime_receipt_completed_callbacks,
+        jet_rt_record_get_jet_realtime_receipt_completed_frames,
+        jet_rt_record_get_jet_realtime_receipt_missed,
+        jet_rt_record_get_jet_realtime_receipt_max_lateness_ns,
+        jet_rt_record_get_jet_realtime_receipt_start_identity,
+        jet_rt_record_get_jet_realtime_receipt_end_identity};
     for (unsigned i = 0; i < 8; ++i) {
         assert(word(receipt, i * 8) == (uint64_t)values[i]);
         int64_t field = getters[i](receipt);
@@ -222,7 +222,7 @@ static void receipt_carriers(void) {
         jet_rt_int_drop(field);
     }
     watch(receipt);
-    jet_rt_handle_drop_JetRealtimeReceipt(receipt);
+    jet_rt_handle_drop_jet_realtime_receipt(receipt);
     releases();
     puts("Realtime receipt: native constructor and all eight canonical Int getters preserve i64 extrema");
 }
@@ -262,9 +262,9 @@ static void stream_case(unsigned mode, bool last_drop) {
     assert(jet_int_owned_to_i64(deadline) == clock_base + 5333333);
     jet_rt_int_drop(deadline);
     atomic_store_explicit(&stats.stream, stream, memory_order_release);
-    uintptr_t clone = jet_rt_handle_clone_JetRealtimeStream(stream);
+    uintptr_t clone = jet_rt_handle_clone_jet_realtime_stream(stream);
     assert(clone == stream && word(stream, 8) == 2);
-    jet_rt_handle_drop_JetRealtimeStream(clone);
+    jet_rt_handle_drop_jet_realtime_stream(clone);
     assert(!jet_rt_is_cancelled(stream));
     atomic_store_explicit(&stats.ready, 1, memory_order_release);
     if (mode == 0) {
@@ -281,11 +281,11 @@ static void stream_case(unsigned mode, bool last_drop) {
         jet_rt_cancel(stream);
         assert(jet_rt_is_cancelled(stream));
         uintptr_t receipt = jet_rt_receipt(stream);
-        uintptr_t copy = jet_rt_handle_clone_JetRealtimeReceipt(receipt);
-        assert(copy != receipt && jet_rt_handle_eq_JetRealtimeReceipt(copy, receipt));
+        uintptr_t copy = jet_rt_handle_clone_jet_realtime_receipt(receipt);
+        assert(copy != receipt && jet_rt_handle_eq_jet_realtime_receipt(copy, receipt));
         for (unsigned i = 0; i < 8; ++i) {
             ((uint64_t *)copy)[i] ^= 1;
-            assert(!jet_rt_handle_eq_JetRealtimeReceipt(copy, receipt));
+            assert(!jet_rt_handle_eq_jet_realtime_receipt(copy, receipt));
             ((uint64_t *)copy)[i] ^= 1;
         }
         unsigned calls = atomic_load_explicit(&stats.calls, memory_order_acquire);
@@ -295,10 +295,10 @@ static void stream_case(unsigned mode, bool last_drop) {
         assert(word(receipt, 32) <= calls);
         assert(word(receipt, 48) == (uint64_t)(clock_base + 1));
         assert(word(receipt, 56) >= word(receipt, 48));
-        jet_rt_handle_drop_JetRealtimeReceipt(copy);
-        jet_rt_handle_drop_JetRealtimeReceipt(receipt);
+        jet_rt_handle_drop_jet_realtime_receipt(copy);
+        jet_rt_handle_drop_jet_realtime_receipt(receipt);
     }
-    jet_rt_handle_drop_JetRealtimeStream(stream);
+    jet_rt_handle_drop_jet_realtime_stream(stream);
     assert(atomic_load_explicit(&stats.finalized, memory_order_acquire) == 1);
     assert(atomic_load_explicit(&clock_calls, memory_order_relaxed) == 2); // no inheritance
     unsigned calls = atomic_load_explicit(&stats.calls, memory_order_acquire);

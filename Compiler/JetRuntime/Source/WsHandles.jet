@@ -1,5 +1,5 @@
 // WsClient.rs:10-19,57-61 Clone/PartialEq. Native-private carriers in WsABI.
-#Export(c) fn jet_rt_handle_clone_JetWsError(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_ws_error(value: I64) -> I64 {
     kind :: data_tree_word(value + WS_ERROR_TAG)
     result :: jet_rt_alloc(WS_ERROR_BYTES, I64{8})
     data_tree_store(result + WS_ERROR_TAG, kind)
@@ -7,12 +7,12 @@
     data_tree_store(result + WS_ERROR_OPERATION, if (kind == I64{4}) -> jet_rt_string_clone(data_tree_word(value + WS_ERROR_OPERATION)) else -> I64{0})
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetWsError(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_ws_error(value: I64) {
     if (value == I64{0}) -> return
     if (data_tree_word(value + WS_ERROR_TAG) == I64{4}) -> jet_rt_string_drop(data_tree_word(value + WS_ERROR_OPERATION))
     jet_rt_free(value, WS_ERROR_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetWsError(left: I64, right: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_ws_error(left: I64, right: I64) -> Bool {
     kind :: data_tree_word(left + WS_ERROR_TAG)
     if kind != data_tree_word(right + WS_ERROR_TAG) -> return false
     if (kind == I64{3}) -> return data_tree_word(left + WS_ERROR_LIMIT) == data_tree_word(right + WS_ERROR_LIMIT)
@@ -21,7 +21,7 @@
 }
 // Custom show/debug/display are identical, never Rust derived Debug:
 // WsClient.rs:22-52. IO operation is raw text, MessageTooLarge is signed i64.
-#Export(c) fn jet_rt_handle_show_JetWsError(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_show_jet_ws_error(value: I64) -> I64 {
     kind :: data_tree_word(value + WS_ERROR_TAG)
     result :: jet_rt_string_builder_new()
     if (kind == I64{8}) {
@@ -76,9 +76,9 @@
     }
     result
 }
-#Export(c) fn jet_rt_handle_debug_JetWsError(value: I64) -> I64 { jet_rt_handle_show_JetWsError(value) }
-#Export(c) fn jet_rt_handle_display_JetWsError(value: I64) -> I64 { jet_rt_handle_show_JetWsError(value) }
-#Export(c) fn jet_rt_handle_clone_JetWsMessage(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_debug_jet_ws_error(value: I64) -> I64 { jet_rt_handle_show_jet_ws_error(value) }
+#Export(c) fn jet_rt_handle_display_jet_ws_error(value: I64) -> I64 { jet_rt_handle_show_jet_ws_error(value) }
+#Export(c) fn jet_rt_handle_clone_jet_ws_message(value: I64) -> I64 {
     kind :: data_tree_word(value + WS_MESSAGE_TAG)
     payload := data_tree_word(value + WS_MESSAGE_PAYLOAD)
     reason := I64{0}
@@ -89,14 +89,14 @@
     data_tree_store(result + WS_MESSAGE_REASON, reason)
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetWsMessage(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_ws_message(value: I64) {
     if (value == I64{0}) -> return
     kind :: data_tree_word(value + WS_MESSAGE_TAG)
     payload :: data_tree_word(value + WS_MESSAGE_PAYLOAD)
     if (kind == I64{0}) { jet_rt_string_drop(payload) } else if (kind == I64{1}) { data_sequence_drop(payload, DATA_TREE_BYTE_LIST) } else { jet_rt_string_drop(data_tree_word(value + WS_MESSAGE_REASON)) }
     jet_rt_free(value, WS_MESSAGE_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetWsMessage(left: I64, right: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_ws_message(left: I64, right: I64) -> Bool {
     kind :: data_tree_word(left + WS_MESSAGE_TAG)
     if kind != data_tree_word(right + WS_MESSAGE_TAG) -> return false
     a :: data_tree_word(left + WS_MESSAGE_PAYLOAD)

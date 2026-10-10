@@ -8,19 +8,19 @@ fn env_overlay_error_new(kind: I64) -> I64 {
     value
 }
 
-#Export(c) fn jet_rt_record_new_EnvError_InvalidName() -> I64 {
+#Export(c) fn jet_rt_record_new_env_error_invalid_name() -> I64 {
     env_overlay_error_new(I64{0})
 }
 
-#Export(c) fn jet_rt_record_new_EnvError_InvalidValue() -> I64 {
+#Export(c) fn jet_rt_record_new_env_error_invalid_value() -> I64 {
     env_overlay_error_new(I64{1})
 }
 
-#Export(c) fn jet_rt_record_new_EnvError_NonUnicode() -> I64 {
+#Export(c) fn jet_rt_record_new_env_error_non_unicode() -> I64 {
     env_overlay_error_new(I64{2})
 }
 
-#Export(c) fn jet_rt_record_tag_EnvError(value: I64) -> I64 {
+#Export(c) fn jet_rt_record_tag_env_error(value: I64) -> I64 {
     encoding_word(value + ENCODING_ENUM_TAG)
 }
 
@@ -176,11 +176,11 @@ fn env_overlay_value_valid(value: I64) -> Bool {
 fn env_overlay_try_set(name: I64, value: I64, error_out: I64) -> I64 {
     encoding_store(error_out, I64{0})
     if !env_overlay_name_valid(name) {
-        encoding_store(error_out, jet_rt_record_new_EnvError_InvalidName())
+        encoding_store(error_out, jet_rt_record_new_env_error_invalid_name())
         return I64{0}
     }
     if !env_overlay_value_valid(value) {
-        encoding_store(error_out, jet_rt_record_new_EnvError_InvalidValue())
+        encoding_store(error_out, jet_rt_record_new_env_error_invalid_value())
         return I64{0}
     }
     if !env_overlay_begin() -> return I64{0}
@@ -229,7 +229,7 @@ fn env_overlay_try_set(name: I64, value: I64, error_out: I64) -> I64 {
 fn env_overlay_try_remove(name: I64, removed_out: I64, error_out: I64) -> I64 {
     encoding_store(error_out, I64{0})
     if !env_overlay_name_valid(name) {
-        encoding_store(error_out, jet_rt_record_new_EnvError_InvalidName())
+        encoding_store(error_out, jet_rt_record_new_env_error_invalid_name())
         return I64{0}
     }
     if !env_overlay_begin() -> return I64{0}

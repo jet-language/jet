@@ -8,10 +8,10 @@ typedef struct { const char *data; int64_t len, capacity; } Text;
 typedef struct { int64_t refs, mutex; uint8_t registers[256]; } HLL;
 _Static_assert(sizeof(HLL) == 272, "canonical HLL272 packed U8 stride1");
 extern void jet_rt_alloc_init(void);
-extern HLL *JetHyperLogLog_new(void);
-extern HLL *jet_rt_handle_clone_JetHyperLogLog(HLL *);
-extern void jet_rt_handle_drop_JetHyperLogLog(HLL *);
-extern Text *jet_rt_handle_show_JetHyperLogLog(const HLL *);
+extern HLL *jet_hyper_log_log_new(void);
+extern HLL *jet_rt_handle_clone_jet_hyper_log_log(HLL *);
+extern void jet_rt_handle_drop_jet_hyper_log_log(HLL *);
+extern Text *jet_rt_handle_show_jet_hyper_log_log(const HLL *);
 extern void jet_rt_native_hll_add(HLL *, const Text *);
 extern int64_t jet_rt_native_hll_count(HLL *);
 extern int64_t jet_int_owned_to_i64(int64_t);
@@ -29,7 +29,7 @@ static void count(HLL *value, int64_t expected) {
     assert(jet_int_owned_to_i64(result) == expected); jet_rt_int_drop(result);
 }
 static void show(HLL *value, const char *expected) {
-    Text *text = jet_rt_handle_show_JetHyperLogLog(value);
+    Text *text = jet_rt_handle_show_jet_hyper_log_log(value);
     assert(text->len == (int64_t)strlen(expected));
     assert(memcmp(text->data, expected, (size_t)text->len) == 0); jet_rt_string_drop(text);
 }
@@ -75,15 +75,15 @@ int main(void) {
     static const char snow[] = "snow\0\xe9\x9b\xaa";
     static const Text keys[] = {{"",0,0},{"alpha",5,5},{"beta",4,4},{snow,sizeof(snow)-1,sizeof(snow)-1}};
     jet_rt_alloc_init();
-    HLL *owner = JetHyperLogLog_new(); watched = owner;
+    HLL *owner = jet_hyper_log_log_new(); watched = owner;
     assert(owner->refs == 1 && owner->mutex == 0);
     for (unsigned i = 0; i < 256; ++i) assert(owner->registers[i] == 0);
     count(owner,0); show(owner,"HyperLogLog(count=0)");
-    HLL *a = jet_rt_handle_clone_JetHyperLogLog(owner), *b = jet_rt_handle_clone_JetHyperLogLog(a);
+    HLL *a = jet_rt_handle_clone_jet_hyper_log_log(owner), *b = jet_rt_handle_clone_jet_hyper_log_log(a);
     assert(owner == a && a == b && owner->refs == 3);
     for (unsigned i = 0; i < 4; ++i) {jet_rt_native_hll_add(a,&keys[i]); count(b,i+1);}
     assert(memcmp(owner->registers,four,256) == 0); show(b,"HyperLogLog(count=4)");
-    jet_rt_handle_drop_JetHyperLogLog(owner); assert(frees == 0 && a->refs == 2);
+    jet_rt_handle_drop_jet_hyper_log_log(owner); assert(frees == 0 && a->refs == 2);
     pthread_t threads[3];
     for (unsigned i = 0; i < 3; ++i) assert(pthread_create(&threads[i],NULL,adds,a) == 0);
     for (unsigned i = 0; i < 3; ++i) assert(pthread_join(threads[i],NULL) == 0);
@@ -98,8 +98,8 @@ int main(void) {
     show(a,"HyperLogLog(count=9223372036854775807)");
     for (unsigned i = 0; i < 256; ++i) a->registers[i] = (uint8_t)(1 + (i*37)%255);
     count(b,31382); show(a,"HyperLogLog(count=31382)");
-    jet_rt_handle_drop_JetHyperLogLog(a); assert(frees == 0 && b->refs == 1);
-    jet_rt_handle_drop_JetHyperLogLog(NULL); assert(frees == 0);
-    jet_rt_handle_drop_JetHyperLogLog(b); assert(frees == 1); watched = NULL;
+    jet_rt_handle_drop_jet_hyper_log_log(a); assert(frees == 0 && b->refs == 1);
+    jet_rt_handle_drop_jet_hyper_log_log(NULL); assert(frees == 0);
+    jet_rt_handle_drop_jet_hyper_log_log(b); assert(frees == 1); watched = NULL;
     puts("HLL shared registers/estimators/show/drop OK");
 }

@@ -13,8 +13,8 @@ extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
 extern void __real_jet_rt_free(void *,int64_t,int64_t);
 extern Text *jet_rt_string_from_static(const void *,int64_t);
-extern Origins *jet_rt_handle_clone_JetHTTPCorsOrigins(Origins *);
-extern void jet_rt_handle_drop_JetHTTPCorsOrigins(Origins *);
+extern Origins *jet_rt_handle_clone_jet_http_cors_origins(Origins *);
+extern void jet_rt_handle_drop_jet_http_cors_origins(Origins *);
 static struct { void *p; int64_t n,a; unsigned freed; } watched[32];
 static size_t count;
 void __wrap_jet_rt_free(void *p,int64_t n,int64_t a) {
@@ -39,18 +39,18 @@ static Origins *origins(int64_t ordinal,int64_t length,int64_t capacity) {
 }
 int main(void) {
     jet_rt_alloc_init();
-    Origins *a=origins(0,0,0),*b=jet_rt_handle_clone_JetHTTPCorsOrigins(a);
+    Origins *a=origins(0,0,0),*b=jet_rt_handle_clone_jet_http_cors_origins(a);
     assert(a!=b && b->ordinal==0 && !b->payload); watch_origins(a); watch_origins(b);
-    jet_rt_handle_drop_JetHTTPCorsOrigins(a); jet_rt_handle_drop_JetHTTPCorsOrigins(b); all_freed();
-    a=origins(1,0,0); b=jet_rt_handle_clone_JetHTTPCorsOrigins(a);
+    jet_rt_handle_drop_jet_http_cors_origins(a); jet_rt_handle_drop_jet_http_cors_origins(b); all_freed();
+    a=origins(1,0,0); b=jet_rt_handle_clone_jet_http_cors_origins(a);
     assert(b!=a && b->payload!=a->payload && b->payload->length==0 && b->payload->capacity==0);
-    watch_origins(a); watch_origins(b); jet_rt_handle_drop_JetHTTPCorsOrigins(a); jet_rt_handle_drop_JetHTTPCorsOrigins(b); all_freed();
+    watch_origins(a); watch_origins(b); jet_rt_handle_drop_jet_http_cors_origins(a); jet_rt_handle_drop_jet_http_cors_origins(b); all_freed();
     a=origins(1,3,7); a->payload->data[0]=text("https://example.com"); a->payload->data[1]=text(""); a->payload->data[2]=text("https://example.com");
-    b=jet_rt_handle_clone_JetHTTPCorsOrigins(a);
+    b=jet_rt_handle_clone_jet_http_cors_origins(a);
     assert(b!=a && b->payload!=a->payload && b->payload->data!=a->payload->data && b->payload->capacity==3 && b->payload->length==3);
     for(int i=0;i<3;i++) assert(a->payload->data[i]!=b->payload->data[i]);
-    watch_origins(a); watch_origins(b); jet_rt_handle_drop_JetHTTPCorsOrigins(a);
+    watch_origins(a); watch_origins(b); jet_rt_handle_drop_jet_http_cors_origins(a);
     text_is(b->payload->data[0],"https://example.com"); text_is(b->payload->data[1],""); text_is(b->payload->data[2],"https://example.com");
-    jet_rt_handle_drop_JetHTTPCorsOrigins(b); jet_rt_handle_drop_JetHTTPCorsOrigins(NULL); all_freed();
+    jet_rt_handle_drop_jet_http_cors_origins(b); jet_rt_handle_drop_jet_http_cors_origins(NULL); all_freed();
     puts("http cors origins: Any + empty/repeated List ownership ok"); return 0;
 }

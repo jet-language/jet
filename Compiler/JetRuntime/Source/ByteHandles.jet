@@ -1,12 +1,12 @@
 // CAbiRoutes.rs:945-955,2747-2757,5631-5645,6051-6065.
 // Byte lists use the composed U8 stride; a cursor is an unsigned raw word.
-#Export(c) fn jet_rt_handle_clone_JetByteBuffer(buffer: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_byte_buffer(buffer: I64) -> I64 {
     result :: jet_rt_alloc(BYTE_BUFFER_BYTES, I64{8})
     data_tree_store(result + BYTE_BUFFER_SEQUENCE, data_sequence_clone(data_tree_word(buffer + BYTE_BUFFER_SEQUENCE), DATA_TREE_BYTE_LIST))
     data_tree_store(result + BYTE_BUFFER_POSITION, data_tree_word(buffer + BYTE_BUFFER_POSITION))
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetByteBuffer(buffer: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_byte_buffer(buffer: I64) {
     if (buffer == I64{0}) -> return
     data_sequence_drop(data_tree_word(buffer + BYTE_BUFFER_SEQUENCE), DATA_TREE_BYTE_LIST)
     jet_rt_free(buffer, BYTE_BUFFER_BYTES, I64{8})
@@ -34,15 +34,15 @@ fn byte_buffer_render(buffer: I64) -> I64 {
     rt_text_push_word(result, I64{93}, I64{1})
     jet_rt_string_builder_finish(result)
 }
-#Export(c) fn jet_rt_handle_show_JetByteBuffer(buffer: I64) -> I64 { byte_buffer_render(buffer) }
-#Export(c) fn jet_rt_handle_display_JetByteBuffer(buffer: I64) -> I64 { byte_buffer_render(buffer) }
-#Export(c) fn jet_rt_handle_debug_JetByteBuffer(buffer: I64) -> I64 { byte_buffer_render(buffer) }
-#Export(c) fn jet_rt_handle_clone_JetPath(path: I64) -> I64 {
+#Export(c) fn jet_rt_handle_show_jet_byte_buffer(buffer: I64) -> I64 { byte_buffer_render(buffer) }
+#Export(c) fn jet_rt_handle_display_jet_byte_buffer(buffer: I64) -> I64 { byte_buffer_render(buffer) }
+#Export(c) fn jet_rt_handle_debug_jet_byte_buffer(buffer: I64) -> I64 { byte_buffer_render(buffer) }
+#Export(c) fn jet_rt_handle_clone_jet_path(path: I64) -> I64 {
     result :: jet_rt_alloc(PATH_HANDLE_BYTES, I64{8})
     data_tree_store(result + PATH_HANDLE_SEQUENCE, data_sequence_clone(data_tree_word(path + PATH_HANDLE_SEQUENCE), DATA_TREE_BYTE_LIST))
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetPath(path: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_path(path: I64) {
     if (path == I64{0}) -> return
     data_sequence_drop(data_tree_word(path + PATH_HANDLE_SEQUENCE), DATA_TREE_BYTE_LIST)
     jet_rt_free(path, PATH_HANDLE_BYTES, I64{8})
@@ -64,6 +64,6 @@ fn path_handle_render(path: I64) -> I64 {
     if (length != I64{0}) -> jet_rt_free(packed, length, I64{1})
     result
 }
-#Export(c) fn jet_rt_handle_show_JetPath(path: I64) -> I64 { path_handle_render(path) }
-#Export(c) fn jet_rt_handle_display_JetPath(path: I64) -> I64 { path_handle_render(path) }
-#Export(c) fn jet_rt_handle_debug_JetPath(path: I64) -> I64 { path_handle_render(path) }
+#Export(c) fn jet_rt_handle_show_jet_path(path: I64) -> I64 { path_handle_render(path) }
+#Export(c) fn jet_rt_handle_display_jet_path(path: I64) -> I64 { path_handle_render(path) }
+#Export(c) fn jet_rt_handle_debug_jet_path(path: I64) -> I64 { path_handle_render(path) }

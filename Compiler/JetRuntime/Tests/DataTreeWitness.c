@@ -28,38 +28,38 @@ extern int64_t jet_int_owned_from_i64(int64_t);
 extern int64_t jet_int_owned_to_i64(int64_t);
 extern int64_t jet_int_add(int64_t, int64_t);
 extern void jet_rt_int_drop(int64_t);
-extern Tree *jet_rt_handle_clone_Dyn(Tree *);
-extern void jet_rt_handle_drop_Dyn(Tree *);
-extern bool jet_rt_handle_eq_Dyn(Tree *, Tree *);
-extern Text *jet_rt_handle_show_Dyn(Tree *);
-extern Text *jet_rt_handle_display_Dyn(Tree *);
-extern Text *jet_rt_handle_debug_Dyn(Tree *);
-extern int64_t jet_rt_record_tag_Dyn(Tree *);
-extern Tree *jet_rt_record_new_Dyn_Null(void);
-extern Tree *jet_rt_record_new_Dyn_Bool(uint8_t);
-extern Tree *jet_rt_record_new_Dyn_Int(int64_t);
-extern Tree *jet_rt_record_new_Dyn_Float(double);
-extern Tree *jet_rt_record_new_Dyn_Number(Text *);
-extern Tree *jet_rt_record_new_Dyn_Text(Text *);
-extern Tree *jet_rt_record_new_Dyn_Bytes(Sequence *);
-extern Tree *jet_rt_record_new_Dyn_Array(Sequence *);
-extern Tree *jet_rt_record_new_Dyn_Object(Sequence *);
-extern bool jet_rt_record_get_Dyn_Bool(Tree *);
-extern int64_t jet_rt_record_get_Dyn_Int(Tree *);
-extern double jet_rt_record_get_Dyn_Float(Tree *);
-extern Text *jet_rt_record_get_Dyn_Number(Tree *);
-extern Text *jet_rt_record_get_Dyn_Text(Tree *);
-extern Sequence *jet_rt_record_get_Dyn_Bytes(Tree *);
-extern Sequence *jet_rt_record_get_Dyn_Array(Tree *);
-extern Sequence *jet_rt_record_get_Dyn_Object(Tree *);
-extern Sequence *jet_rt_record_seq_List_Rec_Dyn_new(int64_t);
-extern int64_t jet_rt_record_seq_List_Rec_Dyn_len(Sequence *);
-extern Tree *jet_rt_record_seq_List_Rec_Dyn_get(Sequence *, int64_t);
-extern void jet_rt_record_seq_List_Rec_Dyn_push(Sequence *, Tree *);
-extern Sequence *jet_rt_record_seq_Entries_Rec_Dyn_new(int64_t);
-extern int64_t jet_rt_record_seq_Entries_Rec_Dyn_len(Sequence *);
-extern Tree *jet_rt_record_seq_Entries_Rec_Dyn_get(Sequence *, int64_t, Text **);
-extern void jet_rt_record_seq_Entries_Rec_Dyn_push(Sequence *, Text *, Tree *);
+extern Tree *jet_rt_handle_clone_dyn(Tree *);
+extern void jet_rt_handle_drop_dyn(Tree *);
+extern bool jet_rt_handle_eq_dyn(Tree *, Tree *);
+extern Text *jet_rt_handle_show_dyn(Tree *);
+extern Text *jet_rt_handle_display_dyn(Tree *);
+extern Text *jet_rt_handle_debug_dyn(Tree *);
+extern int64_t jet_rt_record_tag_dyn(Tree *);
+extern Tree *jet_rt_record_new_dyn_null(void);
+extern Tree *jet_rt_record_new_dyn_bool(uint8_t);
+extern Tree *jet_rt_record_new_dyn_int(int64_t);
+extern Tree *jet_rt_record_new_dyn_float(double);
+extern Tree *jet_rt_record_new_dyn_number(Text *);
+extern Tree *jet_rt_record_new_dyn_text(Text *);
+extern Tree *jet_rt_record_new_dyn_bytes(Sequence *);
+extern Tree *jet_rt_record_new_dyn_array(Sequence *);
+extern Tree *jet_rt_record_new_dyn_object(Sequence *);
+extern bool jet_rt_record_get_dyn_bool(Tree *);
+extern int64_t jet_rt_record_get_dyn_int(Tree *);
+extern double jet_rt_record_get_dyn_float(Tree *);
+extern Text *jet_rt_record_get_dyn_number(Tree *);
+extern Text *jet_rt_record_get_dyn_text(Tree *);
+extern Sequence *jet_rt_record_get_dyn_bytes(Tree *);
+extern Sequence *jet_rt_record_get_dyn_array(Tree *);
+extern Sequence *jet_rt_record_get_dyn_object(Tree *);
+extern Sequence *jet_rt_record_seq_list_rec_dyn_new(int64_t);
+extern int64_t jet_rt_record_seq_list_rec_dyn_len(Sequence *);
+extern Tree *jet_rt_record_seq_list_rec_dyn_get(Sequence *, int64_t);
+extern void jet_rt_record_seq_list_rec_dyn_push(Sequence *, Tree *);
+extern Sequence *jet_rt_record_seq_entries_rec_dyn_new(int64_t);
+extern int64_t jet_rt_record_seq_entries_rec_dyn_len(Sequence *);
+extern Tree *jet_rt_record_seq_entries_rec_dyn_get(Sequence *, int64_t, Text **);
+extern void jet_rt_record_seq_entries_rec_dyn_push(Sequence *, Text *, Tree *);
 static struct { void *pointer; int64_t size, align; unsigned frees; } watched[256];
 static size_t watched_count;
 static unsigned intercepted;
@@ -102,7 +102,7 @@ static void drop_pair(Tree *a, Tree *b) {
     watched_count = 0;
     watch_tree(a); watch_tree(b);
     unsigned before = intercepted;
-    jet_rt_handle_drop_Dyn(a); jet_rt_handle_drop_Dyn(b);
+    jet_rt_handle_drop_dyn(a); jet_rt_handle_drop_dyn(b);
     assert(intercepted > before); // A link missing --wrap cannot silently pass.
     for (size_t i = 0; i < watched_count; ++i) assert(watched[i].frees == 1);
     watched_count = 0;
@@ -114,116 +114,116 @@ static void expect(Text *actual, const char *expected) {
     jet_rt_string_drop(actual);
 }
 static void scalar_cases(void) {
-    Tree *a = jet_rt_record_new_Dyn_Null(), *b = jet_rt_handle_clone_Dyn(a);
-    assert(jet_rt_record_tag_Dyn(a) == 0 && jet_rt_handle_eq_Dyn(a,b));
-    expect(jet_rt_handle_show_Dyn(a), "null"); drop_pair(a,b);
-    a = jet_rt_record_new_Dyn_Bool(255); b = jet_rt_record_new_Dyn_Bool(0);
-    assert(jet_rt_record_get_Dyn_Bool(a) && !jet_rt_record_get_Dyn_Bool(b));
-    assert(!jet_rt_handle_eq_Dyn(a,b)); expect(jet_rt_handle_show_Dyn(a), "true"); drop_pair(a,b);
-    a = jet_rt_record_new_Dyn_Int(42); b = jet_rt_handle_clone_Dyn(a);
-    int64_t integer = jet_rt_record_get_Dyn_Int(a); assert(integer == 42); jet_rt_int_drop(integer);
-    assert(jet_rt_handle_eq_Dyn(a,b)); expect(jet_rt_handle_show_Dyn(a), "42"); drop_pair(a,b);
+    Tree *a = jet_rt_record_new_dyn_null(), *b = jet_rt_handle_clone_dyn(a);
+    assert(jet_rt_record_tag_dyn(a) == 0 && jet_rt_handle_eq_dyn(a,b));
+    expect(jet_rt_handle_show_dyn(a), "null"); drop_pair(a,b);
+    a = jet_rt_record_new_dyn_bool(255); b = jet_rt_record_new_dyn_bool(0);
+    assert(jet_rt_record_get_dyn_bool(a) && !jet_rt_record_get_dyn_bool(b));
+    assert(!jet_rt_handle_eq_dyn(a,b)); expect(jet_rt_handle_show_dyn(a), "true"); drop_pair(a,b);
+    a = jet_rt_record_new_dyn_int(42); b = jet_rt_handle_clone_dyn(a);
+    int64_t integer = jet_rt_record_get_dyn_int(a); assert(integer == 42); jet_rt_int_drop(integer);
+    assert(jet_rt_handle_eq_dyn(a,b)); expect(jet_rt_handle_show_dyn(a), "42"); drop_pair(a,b);
     // Canonical Dyn retains a borrowed exact Int owner; clones and getters
     // acquire references to that immutable value, including both i64 edges.
     const int64_t edges[] = {INT64_MAX, INT64_MIN};
     const char *decimal[] = {"9223372036854775807", "-9223372036854775808"};
     for (size_t i = 0; i < 2; ++i) {
         integer = jet_int_owned_from_i64(edges[i]);
-        a = jet_rt_record_new_Dyn_Int(integer); b = jet_rt_handle_clone_Dyn(a);
+        a = jet_rt_record_new_dyn_int(integer); b = jet_rt_handle_clone_dyn(a);
         assert((int64_t)a->payload == integer && a->payload == b->payload);
-        int64_t first = jet_rt_record_get_Dyn_Int(a);
-        int64_t second = jet_rt_record_get_Dyn_Int(a);
+        int64_t first = jet_rt_record_get_dyn_int(a);
+        int64_t second = jet_rt_record_get_dyn_int(a);
         assert(first == integer && second == integer);
         assert(jet_int_owned_to_i64(first) == edges[i] && jet_int_owned_to_i64(second) == edges[i]);
         jet_rt_int_drop(integer); jet_rt_int_drop(first); jet_rt_int_drop(second);
-        assert(jet_rt_handle_eq_Dyn(a,b));
-        expect(jet_rt_handle_show_Dyn(b), decimal[i]); drop_pair(a,b);
+        assert(jet_rt_handle_eq_dyn(a,b));
+        expect(jet_rt_handle_show_dyn(b), decimal[i]); drop_pair(a,b);
     }
-    a = jet_rt_record_new_Dyn_Float(-0.0); b = jet_rt_record_new_Dyn_Float(0.0);
-    assert(jet_rt_handle_eq_Dyn(a,b)); expect(jet_rt_handle_show_Dyn(a), "-0.0"); drop_pair(a,b);
+    a = jet_rt_record_new_dyn_float(-0.0); b = jet_rt_record_new_dyn_float(0.0);
+    assert(jet_rt_handle_eq_dyn(a,b)); expect(jet_rt_handle_show_dyn(a), "-0.0"); drop_pair(a,b);
     union { uint64_t bits; double value; } nan = { UINT64_C(0x7ff8000000000001) };
-    a = jet_rt_record_new_Dyn_Float(nan.value); b = jet_rt_handle_clone_Dyn(a);
-    assert(!jet_rt_handle_eq_Dyn(a,a) && !jet_rt_handle_eq_Dyn(a,b)); drop_pair(a,b);
-    a = jet_rt_record_new_Dyn_Float(5.0); b = jet_rt_record_new_Dyn_Int(5);
-    assert(jet_rt_record_get_Dyn_Float(a) == 5.0 && !jet_rt_handle_eq_Dyn(a,b));
-    expect(jet_rt_handle_show_Dyn(a), "5.0"); drop_pair(a,b);
+    a = jet_rt_record_new_dyn_float(nan.value); b = jet_rt_handle_clone_dyn(a);
+    assert(!jet_rt_handle_eq_dyn(a,a) && !jet_rt_handle_eq_dyn(a,b)); drop_pair(a,b);
+    a = jet_rt_record_new_dyn_float(5.0); b = jet_rt_record_new_dyn_int(5);
+    assert(jet_rt_record_get_dyn_float(a) == 5.0 && !jet_rt_handle_eq_dyn(a,b));
+    expect(jet_rt_handle_show_dyn(a), "5.0"); drop_pair(a,b);
 }
 static void text_cases(void) {
     Text *input = text("\"\\\b\t\n\f\r\001\037 snow \xc3\xa9");
-    Tree *a = jet_rt_record_new_Dyn_Text(input), *b = jet_rt_handle_clone_Dyn(a);
+    Tree *a = jet_rt_record_new_dyn_text(input), *b = jet_rt_handle_clone_dyn(a);
     assert(a->payload != (uintptr_t)input && b->payload != a->payload);
     jet_rt_string_drop(input);
-    expect(jet_rt_handle_show_Dyn(a), "\"\\\b\t\n\f\r\001\037 snow \xc3\xa9");
-    Text *got = jet_rt_record_get_Dyn_Text(b); assert((uintptr_t)got != b->payload); jet_rt_string_drop(got);
-    ((Text *)b->payload)->data[0] = 'x'; assert(!jet_rt_handle_eq_Dyn(a,b)); drop_pair(a,b);
-    input = text("1.2300e+09"); a = jet_rt_record_new_Dyn_Number(input); b = jet_rt_record_new_Dyn_Text(input);
+    expect(jet_rt_handle_show_dyn(a), "\"\\\b\t\n\f\r\001\037 snow \xc3\xa9");
+    Text *got = jet_rt_record_get_dyn_text(b); assert((uintptr_t)got != b->payload); jet_rt_string_drop(got);
+    ((Text *)b->payload)->data[0] = 'x'; assert(!jet_rt_handle_eq_dyn(a,b)); drop_pair(a,b);
+    input = text("1.2300e+09"); a = jet_rt_record_new_dyn_number(input); b = jet_rt_record_new_dyn_text(input);
     jet_rt_string_drop(input);
-    expect(jet_rt_record_get_Dyn_Number(a), "1.2300e+09");
-    expect(jet_rt_record_get_Dyn_Text(b), "1.2300e+09");
-    expect(jet_rt_handle_display_Dyn(a), "1.2300e+09");
-    expect(jet_rt_handle_debug_Dyn(b), "\"1.2300e+09\"");
-    assert(!jet_rt_handle_eq_Dyn(a,b)); drop_pair(a,b);
+    expect(jet_rt_record_get_dyn_number(a), "1.2300e+09");
+    expect(jet_rt_record_get_dyn_text(b), "1.2300e+09");
+    expect(jet_rt_handle_display_dyn(a), "1.2300e+09");
+    expect(jet_rt_handle_debug_dyn(b), "\"1.2300e+09\"");
+    assert(!jet_rt_handle_eq_dyn(a,b)); drop_pair(a,b);
 }
 static Tree *object(const char *first, const char *second) {
-    Sequence *sequence = jet_rt_record_seq_Entries_Rec_Dyn_new(0);
-    Text *k = text(first); jet_rt_record_seq_Entries_Rec_Dyn_push(sequence,k,jet_rt_record_new_Dyn_Int(1)); jet_rt_string_drop(k);
-    k = text(second); jet_rt_record_seq_Entries_Rec_Dyn_push(sequence,k,jet_rt_record_new_Dyn_Int(2)); jet_rt_string_drop(k);
-    return jet_rt_record_new_Dyn_Object(sequence);
+    Sequence *sequence = jet_rt_record_seq_entries_rec_dyn_new(0);
+    Text *k = text(first); jet_rt_record_seq_entries_rec_dyn_push(sequence,k,jet_rt_record_new_dyn_int(1)); jet_rt_string_drop(k);
+    k = text(second); jet_rt_record_seq_entries_rec_dyn_push(sequence,k,jet_rt_record_new_dyn_int(2)); jet_rt_string_drop(k);
+    return jet_rt_record_new_dyn_object(sequence);
 }
 static void sequence_cases(void) {
-    Tree *a = object("z", "a"), *b = jet_rt_handle_clone_Dyn(a);
-    assert(jet_rt_handle_eq_Dyn(a,b)); expect(jet_rt_handle_show_Dyn(a), "{\"z\":1,\"a\":2}");
-    Sequence *seq = jet_rt_record_get_Dyn_Object(b); assert(jet_rt_record_seq_Entries_Rec_Dyn_len(seq) == 2);
-    Text *key = NULL; Tree *child = jet_rt_record_seq_Entries_Rec_Dyn_get(seq,0,&key);
+    Tree *a = object("z", "a"), *b = jet_rt_handle_clone_dyn(a);
+    assert(jet_rt_handle_eq_dyn(a,b)); expect(jet_rt_handle_show_dyn(a), "{\"z\":1,\"a\":2}");
+    Sequence *seq = jet_rt_record_get_dyn_object(b); assert(jet_rt_record_seq_entries_rec_dyn_len(seq) == 2);
+    Text *key = NULL; Tree *child = jet_rt_record_seq_entries_rec_dyn_get(seq,0,&key);
     assert(child == ((Entry *)seq->data)[0].value && key != ((Entry *)seq->data)[0].key);
     expect(key,"z"); ((Entry *)seq->data)[0].key->data[0] = 'q';
-    assert(!jet_rt_handle_eq_Dyn(a,b)); drop_pair(a,b);
+    assert(!jet_rt_handle_eq_dyn(a,b)); drop_pair(a,b);
     a = object("x", "x"); b = object("x", "y");
-    expect(jet_rt_handle_show_Dyn(a), "{\"x\":1,\"x\":2}"); assert(!jet_rt_handle_eq_Dyn(a,b)); drop_pair(a,b);
-    a = object("z", "a"); b = object("a", "z"); assert(!jet_rt_handle_eq_Dyn(a,b)); drop_pair(a,b);
-    seq = jet_rt_record_seq_List_Rec_Dyn_new(0);
-    for (int64_t i = 0; i < 7; ++i) jet_rt_record_seq_List_Rec_Dyn_push(seq,jet_rt_record_new_Dyn_Int(i));
-    jet_rt_record_seq_List_Rec_Dyn_push(seq,object("z","a"));
-    a = jet_rt_record_new_Dyn_Array(seq); b = jet_rt_handle_clone_Dyn(a);
-    assert(jet_rt_record_get_Dyn_Array(a) == seq && jet_rt_record_seq_List_Rec_Dyn_len(seq) == 8);
-    assert(jet_rt_record_seq_List_Rec_Dyn_get(seq,0) == ((Tree **)seq->data)[0]);
-    expect(jet_rt_handle_show_Dyn(a), "[0,1,2,3,4,5,6,{\"z\":1,\"a\":2}]");
-    assert(jet_rt_handle_eq_Dyn(a,b));
+    expect(jet_rt_handle_show_dyn(a), "{\"x\":1,\"x\":2}"); assert(!jet_rt_handle_eq_dyn(a,b)); drop_pair(a,b);
+    a = object("z", "a"); b = object("a", "z"); assert(!jet_rt_handle_eq_dyn(a,b)); drop_pair(a,b);
+    seq = jet_rt_record_seq_list_rec_dyn_new(0);
+    for (int64_t i = 0; i < 7; ++i) jet_rt_record_seq_list_rec_dyn_push(seq,jet_rt_record_new_dyn_int(i));
+    jet_rt_record_seq_list_rec_dyn_push(seq,object("z","a"));
+    a = jet_rt_record_new_dyn_array(seq); b = jet_rt_handle_clone_dyn(a);
+    assert(jet_rt_record_get_dyn_array(a) == seq && jet_rt_record_seq_list_rec_dyn_len(seq) == 8);
+    assert(jet_rt_record_seq_list_rec_dyn_get(seq,0) == ((Tree **)seq->data)[0]);
+    expect(jet_rt_handle_show_dyn(a), "[0,1,2,3,4,5,6,{\"z\":1,\"a\":2}]");
+    assert(jet_rt_handle_eq_dyn(a,b));
     ((Tree **)((Sequence *)b->payload)->data)[0]->payload = 77;
-    assert(!jet_rt_handle_eq_Dyn(a,b)); drop_pair(a,b);
-    a = jet_rt_record_new_Dyn_Array(jet_rt_record_seq_List_Rec_Dyn_new(0)); b = jet_rt_handle_clone_Dyn(a);
-    expect(jet_rt_handle_show_Dyn(a), "[]"); assert(jet_rt_handle_eq_Dyn(a,b)); drop_pair(a,b);
-    a = jet_rt_record_new_Dyn_Object(jet_rt_record_seq_Entries_Rec_Dyn_new(0)); b = jet_rt_handle_clone_Dyn(a);
-    expect(jet_rt_handle_show_Dyn(a), "{}"); drop_pair(a,b);
+    assert(!jet_rt_handle_eq_dyn(a,b)); drop_pair(a,b);
+    a = jet_rt_record_new_dyn_array(jet_rt_record_seq_list_rec_dyn_new(0)); b = jet_rt_handle_clone_dyn(a);
+    expect(jet_rt_handle_show_dyn(a), "[]"); assert(jet_rt_handle_eq_dyn(a,b)); drop_pair(a,b);
+    a = jet_rt_record_new_dyn_object(jet_rt_record_seq_entries_rec_dyn_new(0)); b = jet_rt_handle_clone_dyn(a);
+    expect(jet_rt_handle_show_dyn(a), "{}"); drop_pair(a,b);
     seq = jet_rt_alloc(24,8); seq->length = seq->capacity = 3; seq->data = jet_rt_alloc(3 * DATA_TREE_U8_STRIDE,8);
     memset(seq->data,0,3 * DATA_TREE_U8_STRIDE);
     unsigned char *bytes = seq->data; bytes[0] = 0; bytes[DATA_TREE_U8_STRIDE] = 127; bytes[2 * DATA_TREE_U8_STRIDE] = 255;
-    a = jet_rt_record_new_Dyn_Bytes(seq); b = jet_rt_handle_clone_Dyn(a);
-    assert(jet_rt_record_get_Dyn_Bytes(a) == seq && jet_rt_handle_eq_Dyn(a,b));
-    expect(jet_rt_handle_show_Dyn(a), "AH//");
-    ((unsigned char *)((Sequence *)b->payload)->data)[0] = 1; assert(!jet_rt_handle_eq_Dyn(a,b)); drop_pair(a,b);
+    a = jet_rt_record_new_dyn_bytes(seq); b = jet_rt_handle_clone_dyn(a);
+    assert(jet_rt_record_get_dyn_bytes(a) == seq && jet_rt_handle_eq_dyn(a,b));
+    expect(jet_rt_handle_show_dyn(a), "AH//");
+    ((unsigned char *)((Sequence *)b->payload)->data)[0] = 1; assert(!jet_rt_handle_eq_dyn(a,b)); drop_pair(a,b);
 }
 int main(int argc, char **argv) {
     jet_rt_alloc_init();
     if (argc > 1 && (strcmp(argv[1], "list-capacity-negative") == 0 || strcmp(argv[1], "list-capacity-overflow") == 0)) {
         int64_t capacity = strcmp(argv[1], "list-capacity-negative") == 0 ? -1 : INT64_MAX / 8 + 1;
-        (void)jet_rt_record_seq_List_Rec_Dyn_new(capacity);
+        (void)jet_rt_record_seq_list_rec_dyn_new(capacity);
         assert(!"std Vec capacity overflow must stop");
     }
     if (argc > 1 && (strcmp(argv[1], "entries-capacity-negative") == 0 || strcmp(argv[1], "entries-capacity-overflow") == 0)) {
         int64_t capacity = strcmp(argv[1], "entries-capacity-negative") == 0 ? -1 : INT64_MAX / 16 + 1;
-        (void)jet_rt_record_seq_Entries_Rec_Dyn_new(capacity);
+        (void)jet_rt_record_seq_entries_rec_dyn_new(capacity);
         assert(!"std Vec capacity overflow must stop");
     }
     if (argc > 1 && (strcmp(argv[1], "list-oob") == 0 || strcmp(argv[1], "list-negative") == 0)) {
         int64_t index = strcmp(argv[1], "list-negative") == 0 ? -1 : 0;
-        (void)jet_rt_record_seq_List_Rec_Dyn_get(jet_rt_record_seq_List_Rec_Dyn_new(0),index);
+        (void)jet_rt_record_seq_list_rec_dyn_get(jet_rt_record_seq_list_rec_dyn_new(0),index);
         assert(!"std Vec bounds must stop");
     }
     if (argc > 1 && (strcmp(argv[1], "entries-oob") == 0 || strcmp(argv[1], "entries-negative") == 0)) {
         int64_t index = strcmp(argv[1], "entries-negative") == 0 ? -1 : 0;
         Text *key = NULL;
-        (void)jet_rt_record_seq_Entries_Rec_Dyn_get(jet_rt_record_seq_Entries_Rec_Dyn_new(0),index,&key);
+        (void)jet_rt_record_seq_entries_rec_dyn_get(jet_rt_record_seq_entries_rec_dyn_new(0),index,&key);
         assert(!"std Vec bounds must stop");
     }
     if (argc > 1 && strcmp(argv[1], "panic-reference") == 0) {
@@ -232,24 +232,24 @@ int main(int argc, char **argv) {
         assert(!"jet_panic reference must stop");
     }
     if (argc > 1 && strcmp(argv[1], "wrong-variant") == 0) {
-        (void)jet_rt_record_get_Dyn_Int(jet_rt_record_new_Dyn_Null());
+        (void)jet_rt_record_get_dyn_int(jet_rt_record_new_dyn_null());
         assert(!"record variant index out of range must stop");
     }
     if (argc > 1 && strcmp(argv[1], "nonfinite") == 0) {
         union { uint64_t bits; double value; } infinity = { UINT64_C(0x7ff0000000000000) };
-        Tree *tree = jet_rt_record_new_Dyn_Float(infinity.value);
-        (void)jet_rt_handle_show_Dyn(tree);
+        Tree *tree = jet_rt_record_new_dyn_float(infinity.value);
+        (void)jet_rt_handle_show_dyn(tree);
         assert(!"non-finite JSON render must stop");
     }
     if (argc > 1 && strcmp(argv[1], "exact-int-large") == 0) {
         int64_t edge = jet_int_owned_from_i64(INT64_MAX);
         int64_t too_big = jet_int_add(edge, 1);
         jet_rt_int_drop(edge);
-        Tree *tree = jet_rt_record_new_Dyn_Int(too_big);
+        Tree *tree = jet_rt_record_new_dyn_int(too_big);
         assert((int64_t)tree->payload == too_big);
         jet_rt_int_drop(too_big);
-        expect(jet_rt_handle_show_Dyn(tree), "9223372036854775808");
-        jet_rt_handle_drop_Dyn(tree);
+        expect(jet_rt_handle_show_dyn(tree), "9223372036854775808");
+        jet_rt_handle_drop_dyn(tree);
         return 0;
     }
     scalar_cases(); text_cases(); sequence_cases();

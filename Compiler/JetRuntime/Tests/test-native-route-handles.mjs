@@ -21,7 +21,7 @@ assert.equal(descriptors.length, 35);
 assert.equal(descriptors.filter(({ op }) => op === "drop").length, 10);
 assert.ok(descriptors.every(({ runtime }) => runtime !== "RustOnly"));
 assert.deepEqual(descriptors[0], {
-  name: "jet_rt_handle_drop_Source0", runtime: "Source0", jetName: types[0].jetName, op: "drop",
+  name: "jet_rt_handle_drop_source0", runtime: "Source0", jetName: types[0].jetName, op: "drop",
 });
 assert.equal(descriptors.filter(({ op }) => op === "clone").length, 5);
 assert.equal(descriptors.filter(({ op }) => op === "eq").length, 4);
@@ -29,9 +29,9 @@ assert.equal(descriptors.filter(({ op }) => op === "display").length, 10);
 assert.equal(descriptors.filter(({ op }) => op === "show").length, 5);
 assert.equal(descriptors.filter(({ op }) => op === "debug").length, 1);
 const callers = new Map([
-  ["jet_rt_handle_clone_Source0", ["source:route-a", "source:route-a"]],
-  ["jet_rt_handle_eq_Source3", ["source:route-b", "source:route-c"]],
-  ["jet_rt_handle_drop_RustOnly", ["seed:rust-only"]],
+  ["jet_rt_handle_clone_source0", ["source:route-a", "source:route-a"]],
+  ["jet_rt_handle_eq_source3", ["source:route-b", "source:route-c"]],
+  ["jet_rt_handle_drop_rust_only", ["seed:rust-only"]],
 ]);
 const partition = partitionNativeHandleExports([...types, rustOnly], callers);
 assert.equal(partition.synthesized.length, 2);
@@ -41,7 +41,7 @@ assert.deepEqual(partition.synthesized[1].callers, ["source:route-b", "source:ro
 assert.ok(partition.deleted.every(({ name }) => !callers.has(name)));
 assert.throws(() => nativeHandleExports([types[0], types[0]]), /duplicate native handle export/);
 assert.throws(() => nativeHandleExports([{ ...types[0], source: {} }]), /actual source declaration/);
-assert.throws(() => partitionNativeHandleExports(types, new Map([["jet_rt_handle_drop_Source0", [""]]])), /invalid caller sites/);
+assert.throws(() => partitionNativeHandleExports(types, new Map([["jet_rt_handle_drop_source0", [""]]])), /invalid caller sites/);
 assert.throws(() => partitionNativeHandleExports(types, []), /keyed by exact C symbol/);
 // Argument lists are already injectively keyed by G1; do not deduce layout
 // from a generic name or require private-member projection codecs here.

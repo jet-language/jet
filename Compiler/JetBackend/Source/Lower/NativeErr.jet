@@ -22,7 +22,7 @@ fn lower_native_err_field(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     }
     slot :: lower_pointer(&f)
     lower_emit(&f, LIRInst.StackSlot{dst: slot, size: 8, align: 8})
-    lower_record_load_value(p, &m, &f, handle, "jet_rt_record_get_JetErr_{field.name}", field.ty, slot, 0)
+    lower_record_load_value(p, &m, &f, handle, "jet_rt_record_get_jet_err_{runtime_abi_atom(field.name)}", field.ty, slot, 0)
     lower_emit(&f, LIRInst.Load{dst: dst, base: slot, offset: 0})
 }
 // Borrowed projection exposes only the public fields; metadata remains opaque.
@@ -88,7 +88,7 @@ fn lower_native_err_construct(p: MIRProgram, c: LowerContext, m: &LowerModule, f
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{cause})})
     transferred :: lower_pointer(&f)
     lower_start(&f, done, [LIRValueID]{transferred})
-    lower_call_runtime(&m, &f, "jet_rt_record_new_JetErr", [LIRValueID]{args[0], args[1], transferred}, Val(dst))
+    lower_call_runtime(&m, &f, "jet_rt_record_new_jet_err", [LIRValueID]{args[0], args[1], transferred}, Val(dst))
     // Constructor borrows+clones text/code, whereas MIR Struct transfers them.
     lower_emit(&f, LIRInst.Drop{value: args[0]})
     lower_emit(&f, LIRInst.Drop{value: args[1]})

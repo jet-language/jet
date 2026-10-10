@@ -11,10 +11,10 @@ fn receipt_push_bool(target: I64, word: I64) {
 fn receipt_append_text(target: I64, text: I64) {
     rt_text_append(target, rt_text_data(text), rt_text_len(text))
 }
-#Export(c) fn jet_rt_handle_clone_JetDbPoolLifecycle(value: I64) -> I64 { encoding_enum_clone(value) }
-#Export(c) fn jet_rt_handle_drop_JetDbPoolLifecycle(value: I64) { encoding_enum_drop(value) }
-#Export(c) fn jet_rt_handle_eq_JetDbPoolLifecycle(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
-#Export(c) fn jet_rt_record_new_JetDbPoolReceipt(lifecycle: I64, max: I64, available: I64, leased: I64, opening: I64, ready: U8, acquires: I64, releases: I64, timeouts: I64, open_failures: I64, unhealthy: I64, replacements: I64, replacement_failures: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_db_pool_lifecycle(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_db_pool_lifecycle(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_db_pool_lifecycle(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+#Export(c) fn jet_rt_record_new_jet_db_pool_receipt(lifecycle: I64, max: I64, available: I64, leased: I64, opening: I64, ready: U8, acquires: I64, releases: I64, timeouts: I64, open_failures: I64, unhealthy: I64, replacements: I64, replacement_failures: I64) -> I64 {
     if (lifecycle < I64{0} || lifecycle > I64{2}) -> trap_native_index_range_stop()
     result :: jet_rt_alloc(DB_RECEIPT_BYTES, I64{8})
     encoding_store(result + DB_RECEIPT_LIFECYCLE, lifecycle)
@@ -32,7 +32,7 @@ fn receipt_append_text(target: I64, text: I64) {
     encoding_store(result + DB_RECEIPT_REPLACEMENT_FAILURES, jet_int_owned_to_i64(replacement_failures))
     result
 }
-#Export(c) fn jet_rt_handle_clone_JetDbPoolReceipt(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_db_pool_receipt(value: I64) -> I64 {
     result :: jet_rt_alloc(DB_RECEIPT_BYTES, I64{8})
     offset := I64{0}
     loop offset < DB_RECEIPT_BYTES {
@@ -42,10 +42,10 @@ fn receipt_append_text(target: I64, text: I64) {
     }
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetDbPoolReceipt(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_db_pool_receipt(value: I64) {
     if (value != I64{0}) -> jet_rt_free(value, DB_RECEIPT_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetDbPoolReceipt(left: I64, right: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_db_pool_receipt(left: I64, right: I64) -> Bool {
     offset := I64{0}
     loop offset < DB_RECEIPT_BYTES {
         a :: encoding_word(left + offset)
@@ -59,19 +59,19 @@ fn receipt_append_text(target: I64, text: I64) {
     }
     true
 }
-#Export(c) fn jet_rt_record_get_JetDbPoolReceipt_lifecycle(value: I64) -> I64 { encoding_word(value + DB_RECEIPT_LIFECYCLE) }
-#Export(c) fn jet_rt_record_get_JetDbPoolReceipt_max(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_MAX)) }
-#Export(c) fn jet_rt_record_get_JetDbPoolReceipt_available(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_AVAILABLE)) }
-#Export(c) fn jet_rt_record_get_JetDbPoolReceipt_leased(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_LEASED)) }
-#Export(c) fn jet_rt_record_get_JetDbPoolReceipt_opening(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_OPENING)) }
-#Export(c) fn jet_rt_record_get_JetDbPoolReceipt_ready(value: I64) -> Bool { receipt_bool(encoding_word(value + DB_RECEIPT_READY)) }
-#Export(c) fn jet_rt_record_get_JetDbPoolReceipt_acquires(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_ACQUIRES)) }
-#Export(c) fn jet_rt_record_get_JetDbPoolReceipt_releases(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_RELEASES)) }
-#Export(c) fn jet_rt_record_get_JetDbPoolReceipt_timeouts(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_TIMEOUTS)) }
-#Export(c) fn jet_rt_record_get_JetDbPoolReceipt_open_failures(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_OPEN_FAILURES)) }
-#Export(c) fn jet_rt_record_get_JetDbPoolReceipt_unhealthy(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_UNHEALTHY)) }
-#Export(c) fn jet_rt_record_get_JetDbPoolReceipt_replacements(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_REPLACEMENTS)) }
-#Export(c) fn jet_rt_record_get_JetDbPoolReceipt_replacement_failures(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_REPLACEMENT_FAILURES)) }
+#Export(c) fn jet_rt_record_get_jet_db_pool_receipt_lifecycle(value: I64) -> I64 { encoding_word(value + DB_RECEIPT_LIFECYCLE) }
+#Export(c) fn jet_rt_record_get_jet_db_pool_receipt_max(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_MAX)) }
+#Export(c) fn jet_rt_record_get_jet_db_pool_receipt_available(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_AVAILABLE)) }
+#Export(c) fn jet_rt_record_get_jet_db_pool_receipt_leased(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_LEASED)) }
+#Export(c) fn jet_rt_record_get_jet_db_pool_receipt_opening(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_OPENING)) }
+#Export(c) fn jet_rt_record_get_jet_db_pool_receipt_ready(value: I64) -> Bool { receipt_bool(encoding_word(value + DB_RECEIPT_READY)) }
+#Export(c) fn jet_rt_record_get_jet_db_pool_receipt_acquires(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_ACQUIRES)) }
+#Export(c) fn jet_rt_record_get_jet_db_pool_receipt_releases(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_RELEASES)) }
+#Export(c) fn jet_rt_record_get_jet_db_pool_receipt_timeouts(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_TIMEOUTS)) }
+#Export(c) fn jet_rt_record_get_jet_db_pool_receipt_open_failures(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_OPEN_FAILURES)) }
+#Export(c) fn jet_rt_record_get_jet_db_pool_receipt_unhealthy(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_UNHEALTHY)) }
+#Export(c) fn jet_rt_record_get_jet_db_pool_receipt_replacements(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_REPLACEMENTS)) }
+#Export(c) fn jet_rt_record_get_jet_db_pool_receipt_replacement_failures(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_REPLACEMENT_FAILURES)) }
 fn db_receipt_render(value: I64) -> I64 {
     target :: rt_text_builder(I64{256})
     rt_text_push_word(target, I64{2336364831112585828}, I64{8}) // db.pool lifecycle=
@@ -120,12 +120,12 @@ fn db_receipt_render(value: I64) -> I64 {
     rt_text_push_number(target, encoding_word(value + DB_RECEIPT_REPLACEMENT_FAILURES))
     target
 }
-#Export(c) fn jet_rt_handle_show_JetDbPoolReceipt(value: I64) -> I64 { db_receipt_render(value) }
-#Export(c) fn jet_rt_handle_display_JetDbPoolReceipt(value: I64) -> I64 { db_receipt_render(value) }
-#Export(c) fn jet_rt_handle_debug_JetDbPoolReceipt(value: I64) -> I64 { db_receipt_render(value) }
-#Export(c) fn jet_rt_handle_clone_JetDeliveryState(value: I64) -> I64 { encoding_enum_clone(value) }
-#Export(c) fn jet_rt_handle_drop_JetDeliveryState(value: I64) { encoding_enum_drop(value) }
-#Export(c) fn jet_rt_handle_eq_JetDeliveryState(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_show_jet_db_pool_receipt(value: I64) -> I64 { db_receipt_render(value) }
+#Export(c) fn jet_rt_handle_display_jet_db_pool_receipt(value: I64) -> I64 { db_receipt_render(value) }
+#Export(c) fn jet_rt_handle_debug_jet_db_pool_receipt(value: I64) -> I64 { db_receipt_render(value) }
+#Export(c) fn jet_rt_handle_clone_jet_delivery_state(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_delivery_state(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_delivery_state(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
 fn delivery_state_label(target: I64, ordinal: I64) {
     if {
         (ordinal == I64{0}) -> rt_text_push_word(target, I64{29113321536775504}, I64{7})
@@ -149,12 +149,12 @@ fn delivery_state_label(target: I64, ordinal: I64) {
         else -> trap_native_index_range_stop()
     }
 }
-#Export(c) fn jet_rt_handle_show_JetDeliveryState(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_show_jet_delivery_state(value: I64) -> I64 {
     target :: rt_text_builder(I64{12})
     delivery_state_label(target, encoding_word(value))
     target
 }
-#Export(c) fn jet_rt_record_new_JetDeliveryReceipt(id: I64, state: I64, attempts: I64, retention_until: I64, deadline: I64, key: I64, duplicate: U8, authority: I64, generation: I64, signature: I64) -> I64 {
+#Export(c) fn jet_rt_record_new_jet_delivery_receipt(id: I64, state: I64, attempts: I64, retention_until: I64, deadline: I64, key: I64, duplicate: U8, authority: I64, generation: I64, signature: I64) -> I64 {
     if (state < I64{0} || state > I64{5}) -> trap_native_index_range_stop()
     result :: jet_rt_alloc(DELIVERY_RECEIPT_BYTES, I64{8})
     encoding_store(result + DELIVERY_RECEIPT_ID, jet_rt_string_clone(id))
@@ -169,7 +169,7 @@ fn delivery_state_label(target: I64, ordinal: I64) {
     encoding_store(result + DELIVERY_RECEIPT_SIGNATURE, jet_rt_string_clone(signature))
     result
 }
-#Export(c) fn jet_rt_handle_clone_JetDeliveryReceipt(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_delivery_receipt(value: I64) -> I64 {
     result :: jet_rt_alloc(DELIVERY_RECEIPT_BYTES, I64{8})
     offset := I64{0}
     loop offset < DELIVERY_RECEIPT_BYTES {
@@ -184,7 +184,7 @@ fn delivery_state_label(target: I64, ordinal: I64) {
     }
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetDeliveryReceipt(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_delivery_receipt(value: I64) {
     if (value == I64{0}) -> return
     jet_rt_string_drop(encoding_word(value + DELIVERY_RECEIPT_ID))
     jet_rt_string_drop(encoding_word(value + DELIVERY_RECEIPT_KEY))
@@ -192,7 +192,7 @@ fn delivery_state_label(target: I64, ordinal: I64) {
     jet_rt_string_drop(encoding_word(value + DELIVERY_RECEIPT_SIGNATURE))
     jet_rt_free(value, DELIVERY_RECEIPT_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetDeliveryReceipt(left: I64, right: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_delivery_receipt(left: I64, right: I64) -> Bool {
     offset := I64{0}
     loop offset < DELIVERY_RECEIPT_BYTES {
         a :: encoding_word(left + offset)
@@ -212,17 +212,17 @@ fn delivery_state_label(target: I64, ordinal: I64) {
     }
     true
 }
-#Export(c) fn jet_rt_record_get_JetDeliveryReceipt_id(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DELIVERY_RECEIPT_ID)) }
-#Export(c) fn jet_rt_record_get_JetDeliveryReceipt_state(value: I64) -> I64 { encoding_word(value + DELIVERY_RECEIPT_STATE) }
-#Export(c) fn jet_rt_record_get_JetDeliveryReceipt_attempts(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DELIVERY_RECEIPT_ATTEMPTS)) }
-#Export(c) fn jet_rt_record_get_JetDeliveryReceipt_retention_until(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DELIVERY_RECEIPT_RETENTION)) }
-#Export(c) fn jet_rt_record_get_JetDeliveryReceipt_deadline(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DELIVERY_RECEIPT_DEADLINE)) }
-#Export(c) fn jet_rt_record_get_JetDeliveryReceipt_idempotency_key(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DELIVERY_RECEIPT_KEY)) }
-#Export(c) fn jet_rt_record_get_JetDeliveryReceipt_duplicate(value: I64) -> Bool { receipt_bool(encoding_word(value + DELIVERY_RECEIPT_DUPLICATE)) }
-#Export(c) fn jet_rt_record_get_JetDeliveryReceipt_authority(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DELIVERY_RECEIPT_AUTHORITY)) }
-#Export(c) fn jet_rt_record_get_JetDeliveryReceipt_generation(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DELIVERY_RECEIPT_GENERATION)) }
-#Export(c) fn jet_rt_record_get_JetDeliveryReceipt_signature(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DELIVERY_RECEIPT_SIGNATURE)) }
-#Export(c) fn jet_rt_handle_show_JetDeliveryReceipt(value: I64) -> I64 {
+#Export(c) fn jet_rt_record_get_jet_delivery_receipt_id(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DELIVERY_RECEIPT_ID)) }
+#Export(c) fn jet_rt_record_get_jet_delivery_receipt_state(value: I64) -> I64 { encoding_word(value + DELIVERY_RECEIPT_STATE) }
+#Export(c) fn jet_rt_record_get_jet_delivery_receipt_attempts(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DELIVERY_RECEIPT_ATTEMPTS)) }
+#Export(c) fn jet_rt_record_get_jet_delivery_receipt_retention_until(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DELIVERY_RECEIPT_RETENTION)) }
+#Export(c) fn jet_rt_record_get_jet_delivery_receipt_deadline(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DELIVERY_RECEIPT_DEADLINE)) }
+#Export(c) fn jet_rt_record_get_jet_delivery_receipt_idempotency_key(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DELIVERY_RECEIPT_KEY)) }
+#Export(c) fn jet_rt_record_get_jet_delivery_receipt_duplicate(value: I64) -> Bool { receipt_bool(encoding_word(value + DELIVERY_RECEIPT_DUPLICATE)) }
+#Export(c) fn jet_rt_record_get_jet_delivery_receipt_authority(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DELIVERY_RECEIPT_AUTHORITY)) }
+#Export(c) fn jet_rt_record_get_jet_delivery_receipt_generation(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DELIVERY_RECEIPT_GENERATION)) }
+#Export(c) fn jet_rt_record_get_jet_delivery_receipt_signature(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DELIVERY_RECEIPT_SIGNATURE)) }
+#Export(c) fn jet_rt_handle_show_jet_delivery_receipt(value: I64) -> I64 {
     target :: rt_text_builder(I64{256})
     rt_text_push_word(target, I64{8751168585183552836}, I64{8}) // DeliveryReceipt(id=
     rt_text_push_word(target, I64{2915078456790443346}, I64{8})

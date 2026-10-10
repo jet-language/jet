@@ -8,21 +8,21 @@ fn ui_raylib_window_new(width: I64, height: I64, title: I64, native: I64) -> I64
     ui_carrier_store(result + UI_RAYLIB_WINDOW_NATIVE, native)
     result
 }
-#Export(c) fn jet_rt_record_new_RaylibWindow(m0: I64, m1: I64, m2: I64, m3: U8) -> I64 {
+#Export(c) fn jet_rt_record_new_raylib_window(m0: I64, m1: I64, m2: I64, m3: U8) -> I64 {
     ui_raylib_window_new(jet_int_owned_to_i64(m0), jet_int_owned_to_i64(m1), m2, if (m3 != U8{0}) -> I64{1} else -> I64{0})
 }
-#Export(c) fn jet_rt_handle_clone_RaylibWindow(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_raylib_window(value: I64) -> I64 {
     ui_raylib_window_new(ui_carrier_word(value + UI_RAYLIB_WINDOW_WIDTH), ui_carrier_word(value + UI_RAYLIB_WINDOW_HEIGHT), ui_carrier_word(value + UI_RAYLIB_WINDOW_TITLE), ui_carrier_bool(value + UI_RAYLIB_WINDOW_NATIVE))
 }
-#Export(c) fn jet_rt_handle_drop_RaylibWindow(value: I64) {
+#Export(c) fn jet_rt_handle_drop_raylib_window(value: I64) {
     if (value == I64{0}) -> return
     jet_rt_string_drop(ui_carrier_word(value + UI_RAYLIB_WINDOW_TITLE))
     jet_rt_free(value, UI_RAYLIB_WINDOW_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_record_get_RaylibWindow_width(value: I64) -> I64 { jet_int_owned_from_i64(ui_carrier_word(value + UI_RAYLIB_WINDOW_WIDTH)) }
-#Export(c) fn jet_rt_record_get_RaylibWindow_height(value: I64) -> I64 { jet_int_owned_from_i64(ui_carrier_word(value + UI_RAYLIB_WINDOW_HEIGHT)) }
-#Export(c) fn jet_rt_record_get_RaylibWindow_title(value: I64) -> I64 { jet_rt_string_clone(ui_carrier_word(value + UI_RAYLIB_WINDOW_TITLE)) }
-#Export(c) fn jet_rt_record_get_RaylibWindow_native(value: I64) -> Bool { ui_carrier_bool(value + UI_RAYLIB_WINDOW_NATIVE) != I64{0} }
+#Export(c) fn jet_rt_record_get_raylib_window_width(value: I64) -> I64 { jet_int_owned_from_i64(ui_carrier_word(value + UI_RAYLIB_WINDOW_WIDTH)) }
+#Export(c) fn jet_rt_record_get_raylib_window_height(value: I64) -> I64 { jet_int_owned_from_i64(ui_carrier_word(value + UI_RAYLIB_WINDOW_HEIGHT)) }
+#Export(c) fn jet_rt_record_get_raylib_window_title(value: I64) -> I64 { jet_rt_string_clone(ui_carrier_word(value + UI_RAYLIB_WINDOW_TITLE)) }
+#Export(c) fn jet_rt_record_get_raylib_window_native(value: I64) -> Bool { ui_carrier_bool(value + UI_RAYLIB_WINDOW_NATIVE) != I64{0} }
 fn ui_raylib_regions_clone(value: I64) -> I64 {
     length :: ui_carrier_word(value + DATA_SEQUENCE_LENGTH)
     result :: data_sequence_new(length, UI_RAYLIB_REGION_BYTES)
@@ -54,7 +54,7 @@ fn ui_raylib_regions_drop(value: I64) {
     if (capacity != I64{0}) -> jet_rt_free(data, capacity * UI_RAYLIB_REGION_BYTES, I64{8})
     jet_rt_free(value, DATA_SEQUENCE_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_clone_RaylibTextureAtlas(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_raylib_texture_atlas(value: I64) -> I64 {
     result :: jet_rt_alloc(UI_RAYLIB_ATLAS_BYTES, I64{8})
     ui_carrier_store(result + UI_RAYLIB_ATLAS_PATH, jet_rt_string_clone(ui_carrier_word(value + UI_RAYLIB_ATLAS_PATH)))
     ui_carrier_store(result + UI_RAYLIB_ATLAS_NAME, jet_rt_string_clone(ui_carrier_word(value + UI_RAYLIB_ATLAS_NAME)))
@@ -67,7 +67,7 @@ fn ui_raylib_regions_drop(value: I64) {
     ui_carrier_store(result + UI_RAYLIB_ATLAS_TEXTURE_LAST, if (present != I64{0}) -> ui_carrier_word(value + UI_RAYLIB_ATLAS_TEXTURE_LAST).bit_and(I64{4294967295}) else -> I64{0})
     result
 }
-#Export(c) fn jet_rt_handle_drop_RaylibTextureAtlas(value: I64) {
+#Export(c) fn jet_rt_handle_drop_raylib_texture_atlas(value: I64) {
     if (value == I64{0}) -> return
     jet_rt_string_drop(ui_carrier_word(value + UI_RAYLIB_ATLAS_PATH))
     jet_rt_string_drop(ui_carrier_word(value + UI_RAYLIB_ATLAS_NAME))
@@ -75,9 +75,9 @@ fn ui_raylib_regions_drop(value: I64) {
     ui_raylib_regions_drop(ui_carrier_word(value + UI_RAYLIB_ATLAS_REGIONS))
     jet_rt_free(value, UI_RAYLIB_ATLAS_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_field_RaylibTextureAtlas_path(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_RAYLIB_ATLAS_PATH), out) }
-#Export(c) fn jet_rt_handle_field_RaylibTextureAtlas_name(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_RAYLIB_ATLAS_NAME), out) }
-#Export(c) fn jet_rt_handle_show_RaylibTextureAtlas(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_field_raylib_texture_atlas_path(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_RAYLIB_ATLAS_PATH), out) }
+#Export(c) fn jet_rt_handle_field_raylib_texture_atlas_name(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_RAYLIB_ATLAS_NAME), out) }
+#Export(c) fn jet_rt_handle_show_raylib_texture_atlas(value: I64) -> I64 {
     target :: jet_rt_string_builder_new()
     rt_text_push_word(target, I64{7301569100805398866}, I64{8}) // RaylibTe
     rt_text_push_word(target, I64{7814943157362455672}, I64{8}) // xtureAtl
@@ -87,4 +87,4 @@ fn ui_raylib_regions_drop(value: I64) {
     rt_text_push_word(target, I64{41}, I64{1})
     jet_rt_string_builder_finish(target)
 }
-#Export(c) fn jet_rt_handle_debug_RaylibTextureAtlas(value: I64) -> I64 { jet_rt_handle_show_RaylibTextureAtlas(value) }
+#Export(c) fn jet_rt_handle_debug_raylib_texture_atlas(value: I64) -> I64 { jet_rt_handle_show_raylib_texture_atlas(value) }

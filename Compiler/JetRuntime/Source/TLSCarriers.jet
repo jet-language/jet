@@ -2,26 +2,26 @@
 // preregeneration-runtime.rs:106776-106791; CAbiRoutes.rs:11413-11453.
 // Root24 is inline List24 [len,capacity,data]. Trust32=[tag,inline Root24].
 // Byte buffers use the canonical host U8 stride, never a Rust Vec layout.
-#Export(c) fn jet_rt_handle_clone_JetTLSRootCertificates(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_tls_root_certificates(value: I64) -> I64 {
     result :: jet_rt_alloc(I64{24}, I64{8})
     data_u8_list_copy_into(value, result)
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetTLSRootCertificates(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_tls_root_certificates(value: I64) {
     if (value == I64{0}) -> return
     data_u8_list_drop_fields(value)
     jet_rt_free(value, I64{24}, I64{8})
 }
-#Export(c) fn jet_rt_record_new_JetTLSRootCertificates(pem: I64) -> I64 {
+#Export(c) fn jet_rt_record_new_jet_tls_root_certificates(pem: I64) -> I64 {
     result :: jet_rt_alloc(I64{24}, I64{8})
     coll_copy(pem, result, I64{24})
     jet_rt_free(pem, I64{24}, I64{8})
     result
 }
 // The field lends the parent's inline header; no independent owner is created.
-#Export(c) fn jet_rt_record_get_JetTLSRootCertificates_pem(value: I64) -> I64 { value }
-#Export(c) fn jet_rt_record_tag_JetTLSTrust(value: I64) -> I64 { rt_text_word(value) }
-#Export(c) fn jet_rt_record_new_JetTLSTrust_System() -> I64 {
+#Export(c) fn jet_rt_record_get_jet_tls_root_certificates_pem(value: I64) -> I64 { value }
+#Export(c) fn jet_rt_record_tag_jet_tls_trust(value: I64) -> I64 { rt_text_word(value) }
+#Export(c) fn jet_rt_record_new_jet_tls_trust_system() -> I64 {
     result :: jet_rt_alloc(I64{32}, I64{8})
     coll_zero(result, I64{32})
     result
@@ -33,17 +33,17 @@ fn tls_trust_take(kind: I64, roots: I64) -> I64 {
     jet_rt_free(roots, I64{24}, I64{8})
     result
 }
-#Export(c) fn jet_rt_record_new_JetTLSTrust_SystemPlus(roots: I64) -> I64 { tls_trust_take(I64{1}, roots) }
-#Export(c) fn jet_rt_record_new_JetTLSTrust_CustomOnly(roots: I64) -> I64 { tls_trust_take(I64{2}, roots) }
+#Export(c) fn jet_rt_record_new_jet_tls_trust_system_plus(roots: I64) -> I64 { tls_trust_take(I64{1}, roots) }
+#Export(c) fn jet_rt_record_new_jet_tls_trust_custom_only(roots: I64) -> I64 { tls_trust_take(I64{2}, roots) }
 fn tls_trust_get(value: I64, kind: I64) -> I64 {
     if (rt_text_word(value) != kind) {
         rt_record_variant_panic()
         if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     }
-    jet_rt_handle_clone_JetTLSRootCertificates(value + I64{8})
+    jet_rt_handle_clone_jet_tls_root_certificates(value + I64{8})
 }
-#Export(c) fn jet_rt_record_get_JetTLSTrust_SystemPlus(value: I64) -> I64 { tls_trust_get(value, I64{1}) }
-#Export(c) fn jet_rt_record_get_JetTLSTrust_CustomOnly(value: I64) -> I64 { tls_trust_get(value, I64{2}) }
+#Export(c) fn jet_rt_record_get_jet_tls_trust_system_plus(value: I64) -> I64 { tls_trust_get(value, I64{1}) }
+#Export(c) fn jet_rt_record_get_jet_tls_trust_custom_only(value: I64) -> I64 { tls_trust_get(value, I64{2}) }
 fn tls_trust_copy_into(source: I64, target: I64) {
     coll_zero(target, I64{32})
     kind :: rt_text_word(source)
@@ -53,12 +53,12 @@ fn tls_trust_copy_into(source: I64, target: I64) {
 fn tls_trust_drop_fields(value: I64) {
     if (rt_text_word(value) != I64{0}) -> data_u8_list_drop_fields(value + I64{8})
 }
-#Export(c) fn jet_rt_handle_clone_JetTLSTrust(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_tls_trust(value: I64) -> I64 {
     result :: jet_rt_alloc(I64{32}, I64{8})
     tls_trust_copy_into(value, result)
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetTLSTrust(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_tls_trust(value: I64) {
     if (value == I64{0}) -> return
     tls_trust_drop_fields(value)
     jet_rt_free(value, I64{32}, I64{8})
@@ -86,12 +86,12 @@ fn tls_cert_drop_fields(value: I64) {
     jet_rt_string_drop(rt_text_word(value + I64{112}))
     jet_rt_string_drop(rt_text_word(value + I64{120}))
 }
-#Export(c) fn jet_rt_handle_clone_JetTLSCertificate(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_tls_certificate(value: I64) -> I64 {
     result :: jet_rt_alloc(TLS_CERT_BYTES, I64{8})
     tls_cert_clone_into(value, result)
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetTLSCertificate(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_tls_certificate(value: I64) {
     if (value == I64{0}) -> return
     tls_cert_drop_fields(value)
     jet_rt_free(value, TLS_CERT_BYTES, I64{8})
@@ -101,14 +101,14 @@ fn tls_cert_drop_fields(value: I64) {
 fn tls_borrow_text_out(value: I64, offset: I64, output: I64) {
     coll_copy(rt_text_word(value + offset), output, I64{24})
 }
-#Export(c) fn jet_rt_handle_field_JetTLSCertificate_subject(value: I64, output: I64) { tls_borrow_text_out(value, I64{112}, output) }
-#Export(c) fn jet_rt_handle_field_JetTLSCertificate_issuer(value: I64, output: I64) { tls_borrow_text_out(value, I64{120}, output) }
+#Export(c) fn jet_rt_handle_field_jet_tls_certificate_subject(value: I64, output: I64) { tls_borrow_text_out(value, I64{112}, output) }
+#Export(c) fn jet_rt_handle_field_jet_tls_certificate_issuer(value: I64, output: I64) { tls_borrow_text_out(value, I64{120}, output) }
 
 // CAbiRoutes.rs:8431-8440: capacities/indices are raw C i64, not exact Int.
-#Export(c) fn jet_rt_record_seq_List_Rec_JetTLSCertificate_new(capacity: I64) -> I64 { data_sequence_new(capacity, TLS_CERT_BYTES) }
-#Export(c) fn jet_rt_record_seq_List_Rec_JetTLSCertificate_len(value: I64) -> I64 { rt_text_word(value) }
-#Export(c) fn jet_rt_record_seq_List_Rec_JetTLSCertificate_get(value: I64, index: I64) -> I64 { data_sequence_slot(value, index, TLS_CERT_BYTES) }
-#Export(c) fn jet_rt_record_seq_List_Rec_JetTLSCertificate_push(value: I64, item: I64) {
+#Export(c) fn jet_rt_record_seq_list_rec_jet_tls_certificate_new(capacity: I64) -> I64 { data_sequence_new(capacity, TLS_CERT_BYTES) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_tls_certificate_len(value: I64) -> I64 { rt_text_word(value) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_tls_certificate_get(value: I64, index: I64) -> I64 { data_sequence_slot(value, index, TLS_CERT_BYTES) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_tls_certificate_push(value: I64, item: I64) {
     target :: data_sequence_reserve(value, TLS_CERT_BYTES)
     coll_copy(item, target, TLS_CERT_BYTES)
     jet_rt_free(item, TLS_CERT_BYTES, I64{8})
@@ -138,7 +138,7 @@ fn tls_cert_list_drop_fields(value: I64) {
     capacity :: rt_text_word(value + I64{8})
     if (capacity != I64{0}) -> jet_rt_free(data, capacity * TLS_CERT_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_clone_JetTLSPeerIdentity(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_tls_peer_identity(value: I64) -> I64 {
     result :: jet_rt_alloc(TLS_PEER_BYTES, I64{8})
     rt_text_store(result, jet_rt_string_clone(rt_text_word(value)))
     tls_cert_clone_into(value + I64{8}, result + I64{8})
@@ -147,7 +147,7 @@ fn tls_cert_list_drop_fields(value: I64) {
     rt_text_store(result + I64{168}, rt_text_word(value + I64{168}))
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetTLSPeerIdentity(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_tls_peer_identity(value: I64) {
     if (value == I64{0}) -> return
     jet_rt_string_drop(rt_text_word(value))
     tls_cert_drop_fields(value + I64{8})
@@ -155,9 +155,9 @@ fn tls_cert_list_drop_fields(value: I64) {
     jet_rt_string_drop(rt_text_word(value + I64{160}))
     jet_rt_free(value, TLS_PEER_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_field_JetTLSPeerIdentity_verified_server_name(value: I64, output: I64) { tls_borrow_text_out(value, I64{0}, output) }
-#Export(c) fn jet_rt_handle_field_JetTLSPeerIdentity_leaf(value: I64) -> I64 { value + I64{8} }
-#Export(c) fn jet_rt_handle_field_JetTLSPeerIdentity_cipher_suite(value: I64, output: I64) { tls_borrow_text_out(value, I64{160}, output) }
+#Export(c) fn jet_rt_handle_field_jet_tls_peer_identity_verified_server_name(value: I64, output: I64) { tls_borrow_text_out(value, I64{0}, output) }
+#Export(c) fn jet_rt_handle_field_jet_tls_peer_identity_leaf(value: I64) -> I64 { value + I64{8} }
+#Export(c) fn jet_rt_handle_field_jet_tls_peer_identity_cipher_suite(value: I64, output: I64) { tls_borrow_text_out(value, I64{160}, output) }
 
 // Frozen seed:106780-106828; CAbiRoutes.rs:3354-3379,12994-12996.
 // Identity32 owns an inline PEM U8 List24 and a native Secret owner at24.
@@ -167,35 +167,35 @@ fn tls_secret_copy(value: I64) -> I64 {
     data_u8_list_copy_into(value, result)
     result
 }
-#Export(c) fn jet_rt_handle_clone_JetTLSClientIdentity(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_tls_client_identity(value: I64) -> I64 {
     result :: jet_rt_alloc(I64{32}, I64{8})
     data_u8_list_copy_into(value, result)
     rt_text_store(result + I64{24}, tls_secret_copy(rt_text_word(value + I64{24})))
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetTLSClientIdentity(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_tls_client_identity(value: I64) {
     if (value == I64{0}) -> return
     data_u8_list_drop_fields(value)
     jet_rt_secret_drop(rt_text_word(value + I64{24}))
     jet_rt_free(value, I64{32}, I64{8})
 }
-#Export(c) fn jet_rt_handle_clone_JetTLSClientConfig(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_tls_client_config(value: I64) -> I64 {
     result :: jet_rt_alloc(I64{80}, I64{8})
     tls_trust_copy_into(value, result)
     identity :: rt_text_word(value + I64{32})
-    cloned_identity :: if (identity == I64{0}) -> I64{0} else -> jet_rt_handle_clone_JetTLSClientIdentity(identity)
+    cloned_identity :: if (identity == I64{0}) -> I64{0} else -> jet_rt_handle_clone_jet_tls_client_identity(identity)
     rt_text_store(result + I64{32}, cloned_identity)
     rt_text_store(result + I64{40}, rt_text_word(value + I64{40}))
     rt_text_store(result + I64{48}, rt_text_word(value + I64{48}))
     data_text_list_copy_into(value + I64{56}, result + I64{56})
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetTLSClientConfig(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_tls_client_config(value: I64) {
     if (value == I64{0}) -> return
     tls_trust_drop_fields(value)
-    jet_rt_handle_drop_JetTLSClientIdentity(rt_text_word(value + I64{32}))
+    jet_rt_handle_drop_jet_tls_client_identity(rt_text_word(value + I64{32}))
     coll_text_list_drop(value + I64{56}, true)
     jet_rt_free(value, I64{80}, I64{8})
 }
 // This projection borrows the parent's inline trust, never an owning clone.
-#Export(c) fn jet_rt_handle_field_JetTLSClientConfig_trust(value: I64) -> I64 { value }
+#Export(c) fn jet_rt_handle_field_jet_tls_client_config_trust(value: I64) -> I64 { value }

@@ -19,8 +19,8 @@ fn compiler_json_fixture_error(text: I64, reason: I64, line: I64) -> Bool {
             rt_text_len(encoding_word(error + ENCODING_ERROR_PATH)) == I64{0} &&
             jet_rt_string_eq(encoding_word(error + ENCODING_ERROR_REASON), reason) &&
             encoding_word(error + ENCODING_ERROR_CAUSE) == I64{0}
-        jet_rt_handle_drop_EncodingError(error)
-    } else { jet_rt_handle_drop_Dyn(rt_text_word(slots)) }
+        jet_rt_handle_drop_encoding_error(error)
+    } else { jet_rt_handle_drop_dyn(rt_text_word(slots)) }
     jet_rt_free(slots, I64{16}, I64{8})
     result
 }
@@ -32,12 +32,12 @@ fn compiler_json_fixture_value(text: I64, kind: I64, payload: I64, rendered: I64
     result := false
     if (status == I64{1}) {
         tree :: rt_text_word(slots)
-        show :: jet_rt_handle_debug_Dyn(tree)
+        show :: jet_rt_handle_debug_dyn(tree)
         result = rt_text_word(slots + I64{8}) == I64{724} && data_tree_word(tree + DATA_TREE_TAG) == kind &&
             (kind > DATA_TREE_FLOAT || data_tree_word(tree + DATA_TREE_PAYLOAD) == payload) && jet_rt_string_eq(show, rendered)
         jet_rt_string_drop(show)
-        jet_rt_handle_drop_Dyn(tree)
-    } else { jet_rt_handle_drop_EncodingError(rt_text_word(slots + I64{8})) }
+        jet_rt_handle_drop_dyn(tree)
+    } else { jet_rt_handle_drop_encoding_error(rt_text_word(slots + I64{8})) }
     jet_rt_free(slots, I64{16}, I64{8})
     result
 }
@@ -143,15 +143,15 @@ fn compiler_json_fixture_value(text: I64, kind: I64, payload: I64, rendered: I64
 #Export(c) fn jet_rt_compiler_needed_dyn_fixture() -> I64 {
     decimal :: rt_static_text("123456789012345678901234567890")
     exact :: jet_rt_int_from_static(rt_text_data(decimal), rt_text_len(decimal))
-    integer :: jet_rt_record_new_Dyn_Int(exact)
+    integer :: jet_rt_record_new_dyn_int(exact)
     jet_rt_int_drop(exact)
-    cloned_dyn :: jet_rt_handle_clone_Dyn(integer)
-    projected :: jet_rt_record_get_Dyn_Int(cloned_dyn)
-    rendered :: jet_rt_handle_show_Dyn(cloned_dyn)
-    int_ok :: jet_rt_handle_eq_Dyn(integer, cloned_dyn) && jet_rt_string_eq(rendered, decimal)
+    cloned_dyn :: jet_rt_handle_clone_dyn(integer)
+    projected :: jet_rt_record_get_dyn_int(cloned_dyn)
+    rendered :: jet_rt_handle_show_dyn(cloned_dyn)
+    int_ok :: jet_rt_handle_eq_dyn(integer, cloned_dyn) && jet_rt_string_eq(rendered, decimal)
     jet_rt_string_drop(rendered)
-    jet_rt_handle_drop_Dyn(integer)
-    jet_rt_handle_drop_Dyn(cloned_dyn)
+    jet_rt_handle_drop_dyn(integer)
+    jet_rt_handle_drop_dyn(cloned_dyn)
     projected_text :: jet_rt_int_to_string(projected)
     projection_ok :: jet_rt_string_eq(projected_text, decimal)
     jet_rt_string_drop(projected_text)
@@ -161,43 +161,43 @@ fn compiler_json_fixture_value(text: I64, kind: I64, payload: I64, rendered: I64
     host_u8_put(data_tree_word(bytes + DATA_SEQUENCE_DATA), I64{0}, I64{0})
     host_u8_put(data_tree_word(bytes + DATA_SEQUENCE_DATA), I64{1}, I64{255})
     data_tree_store(bytes + DATA_SEQUENCE_LENGTH, I64{2})
-    binary :: jet_rt_record_new_Dyn_Bytes(bytes)
-    binary_copy :: jet_rt_handle_clone_Dyn(binary)
-    binary_text :: jet_rt_handle_show_Dyn(binary_copy)
-    binary_ok :: jet_rt_handle_eq_Dyn(binary, binary_copy) && jet_rt_string_eq(binary_text, rt_static_text("AP8="))
+    binary :: jet_rt_record_new_dyn_bytes(bytes)
+    binary_copy :: jet_rt_handle_clone_dyn(binary)
+    binary_text :: jet_rt_handle_show_dyn(binary_copy)
+    binary_ok :: jet_rt_handle_eq_dyn(binary, binary_copy) && jet_rt_string_eq(binary_text, rt_static_text("AP8="))
     jet_rt_string_drop(binary_text)
-    jet_rt_handle_drop_Dyn(binary)
-    jet_rt_handle_drop_Dyn(binary_copy)
+    jet_rt_handle_drop_dyn(binary)
+    jet_rt_handle_drop_dyn(binary_copy)
     if !binary_ok -> return I64{2}
     stamp :: jet_rt_alloc(DYN_DATETIME_BYTES, I64{8})
     data_tree_store(stamp + DYN_DATETIME_SECS, I64{-1})
     data_tree_store(stamp + DYN_DATETIME_NANOS, I64{120000000})
     data_tree_store(stamp + DYN_DATETIME_LEAP, I64{0})
     data_tree_store(stamp + DYN_DATETIME_OFFSET, I64{19800})
-    date :: jet_rt_record_new_Dyn_DateTime(stamp)
-    date_copy :: jet_rt_handle_clone_Dyn(date)
-    date_text :: jet_rt_handle_show_Dyn(date_copy)
-    date_ok :: jet_rt_handle_eq_Dyn(date, date_copy) && jet_rt_string_eq(date_text, rt_static_text("1970-01-01T05:29:59.12+05:30"))
+    date :: jet_rt_record_new_dyn_date_time(stamp)
+    date_copy :: jet_rt_handle_clone_dyn(date)
+    date_text :: jet_rt_handle_show_dyn(date_copy)
+    date_ok :: jet_rt_handle_eq_dyn(date, date_copy) && jet_rt_string_eq(date_text, rt_static_text("1970-01-01T05:29:59.12+05:30"))
     data_tree_store(stamp + DYN_DATETIME_OFFSET, I64{0})
-    utc :: jet_rt_record_new_Dyn_DateTime(stamp)
-    offsets_differ :: !jet_rt_handle_eq_Dyn(date, utc)
+    utc :: jet_rt_record_new_dyn_date_time(stamp)
+    offsets_differ :: !jet_rt_handle_eq_dyn(date, utc)
     data_tree_store(stamp + DYN_DATETIME_LEAP, I64{1})
-    leap :: jet_rt_record_new_Dyn_DateTime(stamp)
-    leap_text :: jet_rt_handle_show_Dyn(leap)
+    leap :: jet_rt_record_new_dyn_date_time(stamp)
+    leap_text :: jet_rt_handle_show_dyn(leap)
     leap_ok :: jet_rt_string_eq(leap_text, rt_static_text("1969-12-31T23:59:60.12Z"))
     jet_rt_string_drop(date_text)
     jet_rt_string_drop(leap_text)
-    jet_rt_handle_drop_Dyn(date)
-    jet_rt_handle_drop_Dyn(date_copy)
-    jet_rt_handle_drop_Dyn(utc)
-    jet_rt_handle_drop_Dyn(leap)
+    jet_rt_handle_drop_dyn(date)
+    jet_rt_handle_drop_dyn(date_copy)
+    jet_rt_handle_drop_dyn(utc)
+    jet_rt_handle_drop_dyn(leap)
     jet_rt_free(stamp, DYN_DATETIME_BYTES, I64{8})
     if !date_ok || !offsets_differ || !leap_ok -> return I64{3}
-    nan :: jet_rt_record_new_Dyn_Float(rt_f64_from_bits(I64{9221120237041090560}))
-    nan_copy :: jet_rt_handle_clone_Dyn(nan)
-    nan_distinct :: !jet_rt_handle_eq_Dyn(nan, nan_copy) && !jet_rt_handle_eq_Dyn(nan, nan)
-    jet_rt_handle_drop_Dyn(nan)
-    jet_rt_handle_drop_Dyn(nan_copy)
+    nan :: jet_rt_record_new_dyn_float(rt_f64_from_bits(I64{9221120237041090560}))
+    nan_copy :: jet_rt_handle_clone_dyn(nan)
+    nan_distinct :: !jet_rt_handle_eq_dyn(nan, nan_copy) && !jet_rt_handle_eq_dyn(nan, nan)
+    jet_rt_handle_drop_dyn(nan)
+    jet_rt_handle_drop_dyn(nan_copy)
     if !nan_distinct -> return I64{4}
     I64{0}
 }

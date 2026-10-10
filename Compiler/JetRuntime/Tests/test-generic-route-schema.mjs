@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { runtimeAbiAtom } from "../../../Tools/agent/runtime-abi-symbols.mjs";
 import assert from "node:assert/strict";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -41,8 +42,8 @@ assert.deepEqual(recordApplicationsIn("fn x(v: crate::module::Pair<f64,bool>) ->
   ["crate::module::Pair<f64,bool>", "super::Pair<f64,bool>"]);
 
 const pipeDefinitions = ["ProcessStdoutStream", "ProcessStderrStream"].flatMap((type) => [
-  `#Export(c) fn jet_rt_handle_clone_${type}(value: I64) -> I64 { value }`,
-  `#Export(c) fn jet_rt_handle_drop_${type}(value: I64) {}`,
+  `#Export(c) fn jet_rt_handle_clone_${runtimeAbiAtom(type)}(value: I64) -> I64 { value }`,
+  `#Export(c) fn jet_rt_handle_drop_${runtimeAbiAtom(type)}(value: I64) {}`,
 ]).concat([
   "#Export(c) fn jet_process_pipe_take_raw(fd: I64) -> I64 { fd }",
   "#Export(c) fn jet_process_stream_line_bytes_raw(pipe: I64, data: I64, len: I64, error: I64) -> I64 { I64{1} }",
@@ -51,17 +52,18 @@ const pipeAbi = parseRuntimeExports(pipeDefinitions, "PipeFixture.jet");
 assert.deepEqual(nativeProviderHandles(new Map()), []);
 assert.equal(nativeProviderHandles(pipeAbi).length, 4);
 const incompletePipe = new Map(pipeAbi);
-incompletePipe.delete("jet_rt_handle_drop_ProcessStderrStream");
-assert.throws(() => nativeProviderHandles(incompletePipe), /native Pipe24 provider requires jet_rt_handle_drop_ProcessStderrStream/);
-const wrongPipe = parseRuntimeExports(pipeDefinitions.replace("len: I64", "len: F64"), "PipeFixture.jet");
+incompletePipe.delete("jet_rt_handle_drop_process_stderr_stream");
+assert.throws(() => nativeProviderHandles(incompletePipe), /native Pipe24 provider requires jet_rt_handle_drop_process_stderr_stream/);
+const wrongPipe = parseRuntimeExports(pipeDefinitions.replace("len: I64", "len: Float"), "PipeFixture.jet");
 assert.throws(() => nativeProviderHandles(wrongPipe), /line_bytes_raw.*does not match C ABI/);
 
 try {
-  for (const name of ["gen-c-abi-routes.mjs", "runtime-route-abi.mjs", "native-route-handles.mjs", "native-route-records.mjs"]) {
+  for (const name of ["gen-c-abi-routes.mjs", "runtime-route-abi.mjs", "runtime-abi-symbols.mjs", "native-route-handles.mjs", "native-route-records.mjs", "native-route-environment.mjs", "native-route-partition.mjs"]) {
     const path = `Tools/agent/${name}`;
     mkdirSync(dirname(join(fixture, path)), { recursive: true });
     cpSync(join(root, path), join(fixture, path));
   }
+  put("crates/jet-foundation/src/CoreModuleExports.rs", readFileSync(join(root, "crates/jet-foundation/src/CoreModuleExports.rs"), "utf8"));
   put("crates/jet-codegen/src/Codegen/MIRRust.rs", `
 fn core_call() { if row.module == "core.fixture" && row.member == "indirect" {} }
 fn source_math_call() { if row.module != "core.math" && !matches!(row.member.as_str(), "abs") {} }
@@ -79,10 +81,10 @@ fn is_source_owned_core_web_query_shape() {}
   put("crates/jet-codegen/src/Codegen/TIR/routes.rs", "");
   put("crates/jet-codegen/src/Prelude/Core/CAbi.rs", "");
   put("Compiler/JetRuntime/sources.list", "Compiler/JetRuntime/Source/Fixture.jet\n");
-  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n");
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: Float) -> Float { value }\n");
   put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\n");
   put("Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet", "");
-  put("Core/units/units.jet", "pub struct Measurement<T> { value: T, uncertainty: T }\npub struct Pair<A,B> { first: A, second: B }\n");
+  put("Core/units/units.jet", "struct Measurement<T> { value: T, uncertainty: T }\nstruct Pair<A,B> { first: A, second: B }\n");
   const registry = (extra) => `CoreCallRecord::new("core.fixture", "scalar", "jet_fixture_scalar", true)\nCoreCallRecord::new("core.fixture", "plain", "jet_fixture_plain", true)\n${extra}`;
   // Canonical scalar codec adapters also require the real FieldError Clone
   // declaration (Prelude/CoreLib/JetStd/Dyn.rs:11-15), even in this
@@ -114,9 +116,9 @@ ${fieldErrorDeclaration}
   put("runtime.rs", borrowed);
   success(run());
   const borrowedRust = readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
-  assert.ok(borrowedRust.includes("jet_rt_handle_drop_JetBinMatchPart"));
+  assert.ok(borrowedRust.includes("jet_rt_handle_drop_jet_bin_match_part"));
   assert.ok(borrowedRust.includes("crate::JetBinMatchPart<'_>"));
-  assert.ok(!borrowedRust.includes("jet_rt_record_new_JetBinMatchPart"));
+  assert.ok(!borrowedRust.includes("jet_rt_record_new_jet_bin_match_part"));
   const borrowedList = spawnSync(process.execPath, [join(fixture, "Tools/agent/gen-c-abi-routes.mjs"), join(fixture, "runtime.rs"), "--native-list-only"], { encoding: "utf8" });
   success(borrowedList);
   const borrowedInventory = JSON.parse(borrowedList.stdout);
@@ -163,7 +165,7 @@ pub mod globbed {
   assert.ok(aliasRust.includes("Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }"));
   assert.ok(aliasRust.includes("Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }"));
   assert.ok(aliasJet.includes('LowerRouteResult.Result{ok: LowerRouteCarrier.Handle{name: "JetFixture"}, err: LowerRouteCarrier.Handle{name: "JetAliasError"}}'));
-  assert.ok(!aliasRust.includes("jet_rt_handle_drop_JetUiServiceResult"), "a Result alias must never invent ownership exports");
+  assert.ok(!aliasRust.includes("jet_rt_handle_drop_jet_ui_service_result"), "a Result alias must never invent ownership exports");
   put("crates/jet-foundation/src/Syntax/core_calls.rs", registry('CoreCallRecord::new("core.fixture", "tuple", "jet_fixture_tuple", true)\n'));
   put("runtime.rs", declarations + "#[derive(Clone,PartialEq)]\npub struct JetOutcome<T,E> { pub value: T, pub error: E }\npub fn jet_fixture_tuple(value: crate::JetOutcome<f64,bool>) -> f64 { 0.0 }\n");
   success(run());
@@ -193,7 +195,7 @@ pub mod globbed {
   assert.ok(JSON.parse(boxList.stdout).unsupportedRustCarriers.some((row) => row.qualified === "std::boxed::Box<dynFnOnce()>"));
   put("runtime.rs", declarations + "#[derive(Clone,PartialEq)]\npub struct Box<T> { pub value: T }\npub fn jet_fixture_box(value: Box<f64>) -> f64 { 0.0 }\n");
   success(run());
-  assert.ok(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8").includes(`jet_rt_record_new_${recordInstanceName("Box", ["f64"])}`), "local Box shadows the Rust prelude");
+  assert.ok(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8").includes(`jet_rt_record_new_${runtimeAbiAtom(recordInstanceName("Box", ["f64"]))}`), "local Box shadows the Rust prelude");
   for (const [prefix, type] of [["#![no_implicit_prelude]\n", "Box"], ["#![no_std]\n", "Box"], ["", "crate::Box"]]) {
     put("runtime.rs", prefix + declarations + `pub fn jet_fixture_box(value: ${type}<f64>) -> f64 { 0.0 }\n`);
     assert.match(run().stderr, /unresolved or ambiguous declaration/);
@@ -266,51 +268,53 @@ pub mod globbed {
   const inventory = JSON.parse(listed.stdout);
   assert.equal(inventory.mode, "native-pack-descriptors");
   assert.match(inventory.provenance.runtimeSha256, /^[0-9a-f]{64}$/u);
-  assert.ok(inventory.seedHelperNames.some((name) => name === "jet_rt_handle_drop_JetFixture"));
+  assert.ok(inventory.seedHelperNames.some((name) => name === "jet_rt_handle_drop_jet_fixture"));
   assert.deepEqual(inventory.nativeExports, []);
   assert.equal(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8"), baselineRust);
   assert.equal(readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8"), baselineJet);
-  // A provider changes the representation of the whole type. Partial helper
-  // ownership must fail before either generated output can be overwritten.
-  const providedGlue = "#Export(c) fn jet_rt_handle_drop_JetFixture(value: I64) {}\n#Export(c) fn jet_rt_handle_eq_JetFixture(left: I64, right: I64) -> Bool { true }\n";
-  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + providedGlue);
-  put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\njet_rt_handle_drop_JetFixture\njet_rt_handle_eq_JetFixture\n");
+  // Ownership is per exact symbol: proven Jet providers replace their bodies,
+  // while unported helpers stay excluded from native packs, not fabricated.
+  const providedGlue = "#Export(c) fn jet_rt_handle_drop_jet_fixture(value: I64) {}\n#Export(c) fn jet_rt_handle_eq_jet_fixture(left: I64, right: I64) -> Bool { true }\n";
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: Float) -> Float { value }\n" + providedGlue);
+  put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\njet_rt_handle_drop_jet_fixture\njet_rt_handle_eq_jet_fixture\n");
   const partialGlue = run();
-  assert.notEqual(partialGlue.status, 0);
-  assert.match(partialGlue.stderr, /all-or-none ownership for JetFixture.*jet_rt_handle_clone_JetFixture/);
-  assert.equal(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8"), baselineRust);
-  assert.equal(readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8"), baselineJet);
+  success(partialGlue);
+  const partialRust = readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
+  assert.ok(!partialRust.includes("fn jet_rt_handle_drop_jet_fixture("));
+  assert.ok(partialRust.includes('#[cfg(not(jet_native_pack))]\n    #[no_mangle]\n    pub extern "C" fn jet_rt_handle_clone_jet_fixture('));
   const completeGlue = providedGlue +
-    "#Export(c) fn jet_rt_handle_clone_JetFixture(value: I64) -> I64 { value }\n" +
-    "#Export(c) fn jet_rt_record_get_JetFixture_value(value: I64) -> F64 { F64{0} }\n" +
-    "#Export(c) fn jet_rt_record_new_JetFixture(value: F64) -> I64 { I64{0} }\n" +
+    "#Export(c) fn jet_rt_handle_clone_jet_fixture(value: I64) -> I64 { value }\n" +
+    "#Export(c) fn jet_rt_record_get_jet_fixture_value(value: I64) -> Float { Float{0} }\n" +
+    "#Export(c) fn jet_rt_record_new_jet_fixture(value: Float) -> I64 { I64{0} }\n" +
     "#Export(c) fn jet_fixture_plain(value: I64) -> I64 { value }\n";
   const completeNames = [...completeGlue.matchAll(/fn (\w+)\(/g)].map((match) => match[1]);
   const composeGlue = (names) => {
-    put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" +
+    put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: Float) -> Float { value }\n" +
       completeGlue.split("\n").filter((line) => names.some((name) => line.includes(`fn ${name}(`))).join("\n"));
     put("Compiler/JetRuntime/exports.list", ["jet_fixture_scalar", ...names].join("\n") + "\n");
   };
-  // Clone/drop alone are insufficient: record constructors/projections still
-  // dereference Box storage even when lifecycle helpers have all moved.
+  // Moving lifecycle helpers does not classify the remaining record/route
+  // bodies as native. Each unprovided body retains its seed-only gate.
   composeGlue(completeNames.filter((name) => name.startsWith("jet_rt_handle_")));
-  assert.match(run().stderr, /all-or-none ownership for JetFixture.*jet_rt_record_get_JetFixture_value/);
+  success(run());
+  assert.ok(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8").includes('#[cfg(not(jet_native_pack))]\n    #[no_mangle]\n    pub extern "C" fn jet_rt_record_get_jet_fixture_value('));
   composeGlue(completeNames.filter((name) => name !== "jet_fixture_plain"));
-  assert.match(run().stderr, /all-or-none ownership for JetFixture.*jet_fixture_plain/);
+  success(run());
+  assert.ok(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8").includes('#[cfg(not(jet_native_pack))]\n    #[no_mangle]\n    pub extern "C" fn jet_fixture_plain('));
   composeGlue(completeNames);
   success(run());
   success(run(true));
   const ownedRust = readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
-  assert.ok(!ownedRust.includes("fn jet_rt_handle_clone_JetFixture("));
-  for (const name of ["jet_rt_record_get_JetFixture_value", "jet_rt_record_new_JetFixture", "jet_fixture_plain"]) {
+  assert.ok(!ownedRust.includes("fn jet_rt_handle_clone_jet_fixture("));
+  for (const name of ["jet_rt_record_get_jet_fixture_value", "jet_rt_record_new_jet_fixture", "jet_fixture_plain"]) {
     assert.ok(ownedRust.includes(`#[cfg(not(jet_native_pack))]\n    #[no_mangle]\n    pub extern "C" fn ${name}(`));
   }
-  put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\njet_rt_handle_drop_JetFixture\njet_rt_handle_eq_JetFixture\n");
-  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + providedGlue.replace("left: I64", "left: F64"));
+  put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\njet_rt_handle_drop_jet_fixture\njet_rt_handle_eq_jet_fixture\n");
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: Float) -> Float { value }\n" + providedGlue.replace("left: I64", "left: Float"));
   const mismatchedGlue = run();
   assert.notEqual(mismatchedGlue.status, 0);
-  assert.match(mismatchedGlue.stderr, /jet_rt_handle_eq_JetFixture.*does not match C ABI/);
-  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n");
+  assert.match(mismatchedGlue.stderr, /jet_rt_handle_eq_jet_fixture.*does not match C ABI/);
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: Float) -> Float { value }\n");
   put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\n");
   // Single-Int records cross scalar routes as exact words, without a Box.
   // A mutable borrow or a different declaration keeps its existing carrier.
@@ -350,17 +354,20 @@ pub mod shadow {
   const jet = readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8");
   assert.ok(jet.includes(`LowerRecordSchema{jet_name: "${measurement}", variants: "", fields: "value=Float,uncertainty=Float"}`));
   assert.ok(jet.includes(`LowerRecordSchema{jet_name: "${pair}", variants: "", fields: "first=Float,second=Flag"}`));
-  assert.ok(jet.includes(`jet_name: "<corelib>/Core/units::Core/units/units.jet::Measurement<Float>", runtime: "${measurement}"`));
+  // Measurement is source-owned; a seed JetMeasurement carrier is not that
+  // authored declaration and must not manufacture a canonical layout alias.
+  assert.ok(!jet.includes(`jet_name: "<corelib>/Core/units::Core/units/units.jet::Measurement<Float>", runtime: "${measurement}"`));
+  assert.ok(!jet.includes('LowerNativeType{jet_name: "<corelib>/Core/units::Core/units/units.jet::Measurement<Float>"'));
   assert.ok(jet.includes(`jet_name: "<corelib>/Core/units::Core/units/units.jet::Pair<Float,Bool>", runtime: "${pair}"`));
-  assert.ok(rust.includes(`jet_rt_record_new_${measurement}(m0: f64, m1: f64)`));
+  assert.ok(rust.includes(`jet_rt_record_new_${runtimeAbiAtom(measurement)}(m0: f64, m1: f64)`));
   assert.ok(rust.includes("crate::JetMeasurement::<f64> { value: m0, uncertainty: m1 }"));
   // Existing schema, handle and helper definitions remain byte-identical.
   for (const row of baselineJet.split("\n").filter((line) => /Lower(?:RuntimeHandle|RecordSchema)\{/.test(line))) assert.ok(jet.includes(row));
-  const helper = (source) => [...source.matchAll(/    #\[no_mangle\]\n    pub extern "C" fn jet_rt_(?:handle|record)_\w*JetFixture\w*\([^]*?\n    \}/g)].map((match) => match[0]);
+  const helper = (source) => [...source.matchAll(/    #\[no_mangle\]\n    pub extern "C" fn jet_rt_(?:handle|record)_\w*jet_fixture\w*\([^]*?\n    \}/g)].map((match) => match[0]);
   assert.deepEqual(helper(rust), helper(baselineRust));
   assert.ok(helper(baselineRust).length > 0, "non-generic helper comparison must exercise real definitions");
   // No source declaration or Rust carrier is needed for an opaque provider.
-  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + pipeDefinitions);
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: Float) -> Float { value }\n" + pipeDefinitions);
   put("Compiler/JetRuntime/exports.list", ["jet_fixture_scalar", ...pipeAbi.keys()].join("\n") + "\n");
   success(run());
   success(run(true));
@@ -373,12 +380,12 @@ pub mod shadow {
     assert.ok(!pipeJet.includes(`LowerRecordSchema{jet_name: "${type}"`));
     assert.ok(!pipeJet.includes(`LowerNativeType{jet_name: "${type}"`));
   }
-  const lookup = pipeJet.slice(pipeJet.indexOf("pub fn lower_runtime_handle("));
+  const lookup = pipeJet.slice(pipeJet.indexOf("fn lower_runtime_handle("));
   assert.ok(lookup.indexOf("loop handle in LOWER_RUNTIME_HANDLES") < lookup.indexOf("loop handle in LOWER_NATIVE_PROVIDER_HANDLES"), "seed lookup must never override an existing Rust row");
-  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n");
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: Float) -> Float { value }\n");
   put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\n");
   const bitsDefinitions = "#Export(c) fn jet_rt_native_bits_new() -> I64 { I64{0} }\n#Export(c) fn jet_rt_native_bits_clear(bits: I64) {}\n";
-  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + bitsDefinitions);
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: Float) -> Float { value }\n" + bitsDefinitions);
   put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\njet_rt_native_bits_new\njet_rt_native_bits_clear\n");
   success(run());
   success(run(true));
@@ -387,9 +394,9 @@ pub mod shadow {
   assert.ok(bitsJet.includes('export: "jet_rt_native_bits_new", native_lists: true, params: [LowerRouteCarrier]{}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Handle{name: "JetBitSet"}}'));
   assert.ok(bitsJet.includes('export: "jet_rt_native_bits_clear", native_lists: true, params: [LowerRouteCarrier]{LowerRouteCarrier.HandleMut{name: "JetBitSet"}}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Unit}'));
   assert.ok(!bitsRust.includes("fn jet_rt_native_bits_"), "native-only providers must not invent seed kernels");
-  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + bitsDefinitions.replace("bits: I64", "bits: F64"));
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: Float) -> Float { value }\n" + bitsDefinitions.replace("bits: I64", "bits: Float"));
   assert.match(run().stderr, /bits_clear.*does not match C ABI/);
-  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n");
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: Float) -> Float { value }\n");
   put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\n");
   const weakDefinitions = [
     "#Export(c) fn jet_rt_native_shared_downgrade(shared: I64) -> I64 { shared }",
@@ -397,7 +404,7 @@ pub mod shadow {
     "#Export(c) fn jet_rt_native_shared_weak_drop(weak: I64) {}",
   ].join("\n") + "\n";
   const weakNames = [...weakDefinitions.matchAll(/fn (\w+)\(/g)].map((match) => match[1]);
-  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + weakDefinitions);
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: Float) -> Float { value }\n" + weakDefinitions);
   put("Compiler/JetRuntime/exports.list", ["jet_fixture_scalar", ...weakNames].join("\n") + "\n");
   success(run());
   success(run(true));
@@ -420,28 +427,28 @@ pub mod shadow {
     ["guard_reacquire_and_refresh", 2, "Bool"], ["guard_drop", 1, ""],
     ["guard_wait_once", 2, "I64"],
   ];
-  const physicalNames = physicalShared.map(([op]) => `jet_rt_shared_${op}`);
+  const physicalNames = physicalShared.map(([op]) => `jet_rt_shared_${runtimeAbiAtom(op)}`);
   const physicalDefinitions = physicalShared.map(([op, arity, result]) =>
-    `#Export(c) fn jet_rt_shared_${op}(${Array.from({length: arity}, (_, i) => `a${i}: I64`).join(", ")})${result ? ` -> ${result}` : ""} {${result === "I64" ? " a0 " : result === "Bool" ? " a0 != I64{0} " : ""}}`).join("\n");
-  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + weakDefinitions + physicalDefinitions);
+    `#Export(c) fn jet_rt_shared_${runtimeAbiAtom(op)}(${Array.from({length: arity}, (_, i) => `a${i}: I64`).join(", ")})${result ? ` -> ${result}` : ""} {${result === "I64" ? " a0 " : result === "Bool" ? " a0 != I64{0} " : ""}}`).join("\n");
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: Float) -> Float { value }\n" + weakDefinitions + physicalDefinitions);
   put("Compiler/JetRuntime/exports.list", ["jet_fixture_scalar", ...weakNames, ...physicalNames].join("\n") + "\n");
   success(run());
   const physicalJet = readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8");
   const physicalRust = readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
   for (const [op, arity, result] of physicalShared) {
-    const name = `jet_rt_shared_${op}`;
+    const name = `jet_rt_shared_${runtimeAbiAtom(op)}`;
     assert.ok(!physicalRust.includes(`fn ${name}(`));
     assert.ok(physicalJet.includes(`export: "${name}", native_lists: true, params: [LowerRouteCarrier]{${Array.from({length: arity}, () => "LowerRouteCarrier.Word").join(", ")}}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.${result === "I64" ? "Word" : result === "Bool" ? "Flag" : "Unit"}}`));
   }
-  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + weakDefinitions + physicalDefinitions.replace("a1: I64", "a1: F64"));
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: Float) -> Float { value }\n" + weakDefinitions + physicalDefinitions.replace("a1: I64", "a1: Float"));
   assert.match(run().stderr, /owner_pin.*does not match C ABI/);
-  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + weakDefinitions);
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: Float) -> Float { value }\n" + weakDefinitions);
   put("Compiler/JetRuntime/exports.list", ["jet_fixture_scalar", ...weakNames].join("\n") + "\n");
   success(run());
   assert.ok(!readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8").includes('export: "jet_rt_shared_owner_pin"'));
-  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + weakDefinitions.replace("out: I64", "out: F64"));
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: Float) -> Float { value }\n" + weakDefinitions.replace("out: I64", "out: Float"));
   assert.match(run().stderr, /weak_upgrade.*does not match C ABI/);
-  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n");
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: Float) -> Float { value }\n");
   put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\n");
   // Source-owned generics have actual mangled declarations and private,
   // mangled fields, not a historical native carrier name or a C route.
@@ -475,10 +482,10 @@ pub fn source_pair(first: f64, second: bool) -> ${pairSource}<f64,bool> { ${pair
   assert.ok(sourceJet.includes(`jet_name: "${sampleKey}<Float>", runtime: "${sampleInstance}"`));
   assert.ok(sourceJet.includes(`jet_name: "${pairKey}<Float,Bool>", runtime: "${pairInstance}"`));
   assert.ok(sourceJet.includes(`LowerNativeType{jet_name: "${sampleKey}<Float>", declaration: "${sampleKey}", arguments: "Float"}`));
-  assert.ok(sourceJet.includes(`LowerNativeExport{symbol: "jet_rt_handle_clone_${sampleInstance}", jet_name: "${sampleKey}<Float>", op: "handle.clone", member: ""}`));
-  assert.ok(sourceJet.includes(`LowerNativeExport{symbol: "jet_rt_record_new_${sampleInstance}", jet_name: "${sampleKey}<Float>", op: "record.new", member: ""}`));
-  assert.ok(sourceJet.includes(`LowerNativeExport{symbol: "jet_rt_record_get_${sampleInstance}_uncertainty", jet_name: "${sampleKey}<Float>", op: "record.get", member: "uncertainty"}`));
-  assert.ok(sourceRust.includes(`#[cfg(not(jet_native_pack))]\n    #[no_mangle]\n    pub extern "C" fn jet_rt_record_new_${sampleInstance}(`));
+  assert.ok(sourceJet.includes(`LowerNativeExport{symbol: "jet_rt_handle_clone_${runtimeAbiAtom(sampleInstance)}", jet_name: "${sampleKey}<Float>", op: "handle.clone", member: ""}`));
+  assert.ok(sourceJet.includes(`LowerNativeExport{symbol: "jet_rt_record_new_${runtimeAbiAtom(sampleInstance)}", jet_name: "${sampleKey}<Float>", op: "record.new", member: ""}`));
+  assert.ok(sourceJet.includes(`LowerNativeExport{symbol: "jet_rt_record_get_${runtimeAbiAtom(sampleInstance)}_uncertainty", jet_name: "${sampleKey}<Float>", op: "record.get", member: "uncertainty"}`));
+  assert.ok(sourceRust.includes(`#[cfg(not(jet_native_pack))]\n    #[no_mangle]\n    pub extern "C" fn jet_rt_record_new_${runtimeAbiAtom(sampleInstance)}(`));
   const treeKey = "<corelib>/Core/fixture::Core/fixture/fixture.jet::Tree";
   const treeSource = generatedRecordPath(treeKey);
   put("Core/fixture/fixture.jet", readFileSync(join(fixture, "Core/fixture/fixture.jet"), "utf8") + "pub enum Tree { Empty, Bytes([u8]), Number(Float) }\n");
@@ -490,9 +497,9 @@ pub fn source_tree() -> ${treeSource} { ${treeSource}::__jet_Empty }
   success(run());
   success(run(true));
   const treeJet = readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8");
-  assert.ok(treeJet.includes(`LowerNativeExport{symbol: "jet_rt_record_new_${treeSource}_Bytes", jet_name: "${treeKey}", op: "record.new", member: "Bytes"}`));
-  assert.ok(treeJet.includes(`LowerNativeExport{symbol: "jet_rt_record_seq_List_Byte_get", jet_name: "${treeKey}", op: "record.seq.get", member: "List.Byte"}`));
-  assert.ok(!treeJet.includes('symbol: "jet_rt_record_seq_List_Byte_key"'), "descriptors cannot invent a C symbol absent from the seed ABI");
+  assert.ok(treeJet.includes(`LowerNativeExport{symbol: "jet_rt_record_new_${runtimeAbiAtom(treeSource)}_bytes", jet_name: "${treeKey}", op: "record.new", member: "Bytes"}`));
+  assert.ok(treeJet.includes(`LowerNativeExport{symbol: "jet_rt_record_seq_list_byte_get", jet_name: "${treeKey}", op: "record.seq.get", member: "List.Byte"}`));
+  assert.ok(!treeJet.includes('symbol: "jet_rt_record_seq_list_byte_key"'), "descriptors cannot invent a C symbol absent from the seed ABI");
   assert.ok(sourceRust.includes(`${sampleSource}::<f64> { __jet_value: m0, __jet_uncertainty: m1 }`));
   assert.ok(sourceJet.includes(`LowerNativeType{jet_name: "${scalarKey}", declaration: "${scalarKey}", arguments: ""}`));
   assert.ok(sourceJet.includes(`LowerRecordSchema{jet_name: "${scalarSource}", variants: "", fields: "value=Float"}`));
@@ -553,10 +560,10 @@ pub fn source_tree() -> ${treeSource} { ${treeSource}::__jet_Empty }
     return [name, "handle: I64, ok: I64, error: I64", "I64"];
   });
   for (const type of ["JetReader", "JetCursor"]) {
-    streamDefinitions.push([`jet_rt_handle_clone_${type}`, "handle: I64", "I64"], [`jet_rt_handle_drop_${type}`, "handle: I64", ""]);
+    streamDefinitions.push([`jet_rt_handle_clone_${runtimeAbiAtom(type)}`, "handle: I64", "I64"], [`jet_rt_handle_drop_${runtimeAbiAtom(type)}`, "handle: I64", ""]);
   }
-  streamDefinitions.push(["jet_rt_handle_field_JetCursor_buf", "handle: I64, output: I64", ""]);
-  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" +
+  streamDefinitions.push(["jet_rt_handle_field_jet_cursor_buf", "handle: I64, output: I64", ""]);
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: Float) -> Float { value }\n" +
     streamDefinitions.map(([name, params, ret]) => `#Export(c) fn ${name}(${params})${ret ? ` -> ${ret}` : ""} {}`).join("\n"));
   put("Compiler/JetRuntime/exports.list", ["jet_fixture_scalar", ...streamDefinitions.map(([name]) => name)].join("\n") + "\n");
   success(run());
@@ -575,10 +582,11 @@ pub fn source_tree() -> ${treeSource} { ${treeSource}::__jet_Empty }
   const streamMetadata = readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8");
   assert.match(streamMetadata, /export: "jet_reader_over", native_lists: true, params: \[LowerRouteCarrier\]\{LowerRouteCarrier.List\{elem: LowerRouteCarrier.Word\}\}/);
   assert.match(streamMetadata, /export: "jet_reader_take", native_lists: true, params: \[LowerRouteCarrier\]\{LowerRouteCarrier.HandleMut\{name: "JetReader"\}, LowerRouteCarrier.Word\}/);
-  put("Compiler/JetRuntime/exports.list", ["jet_fixture_scalar", ...streamDefinitions.map(([name]) => name).filter((name) => name !== "jet_rt_handle_clone_JetReader")].join("\n") + "\n");
+  put("Compiler/JetRuntime/exports.list", ["jet_fixture_scalar", ...streamDefinitions.map(([name]) => name).filter((name) => name !== "jet_rt_handle_clone_jet_reader")].join("\n") + "\n");
+  put("Compiler/JetRuntime/Source/Fixture.jet", readFileSync(join(fixture, "Compiler/JetRuntime/Source/Fixture.jet"), "utf8").replace(/^#Export\(c\) fn jet_rt_handle_clone_jet_reader[^\n]*\n/gm, ""));
   const partial = run();
   assert.notEqual(partial.status, 0);
-  assert.match(partial.stderr, /StreamCursor32 cutover.*missing jet_rt_handle_clone_JetReader/);
+  assert.match(partial.stderr, /StreamCursor32 cutover.*missing jet_rt_handle_clone_jet_reader/);
   console.log("CHECK OK — generic schemas, typed stream ABI and generator --check fixtures");
 } finally {
   rmSync(fixture, { recursive: true, force: true });

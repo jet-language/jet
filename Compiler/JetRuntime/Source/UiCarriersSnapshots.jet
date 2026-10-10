@@ -1,7 +1,7 @@
 // Pure owned snapshots only, not live Web resource state/host callbacks.
 // Pinned WebForms1657-1662, WebQuery303-315/376-383, WebStore242-249.
 // Raw u64/usize bits remain raw words; bool loads mask and normalize low byte.
-#Export(c) fn jet_rt_handle_clone_JetWebFormLifecycle(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_web_form_lifecycle(value: I64) -> I64 {
     result :: jet_rt_alloc(UI_FORM_LIFECYCLE_BYTES, I64{8})
     ui_carrier_store(result + UI_FORM_LIFECYCLE_STATUS, ui_carrier_word(value + UI_FORM_LIFECYCLE_STATUS))
     ui_carrier_store(result + UI_FORM_LIFECYCLE_RESULT, jet_rt_string_clone(ui_carrier_word(value + UI_FORM_LIFECYCLE_RESULT)))
@@ -9,18 +9,18 @@
     ui_carrier_store(result + UI_FORM_LIFECYCLE_GENERATION, ui_carrier_word(value + UI_FORM_LIFECYCLE_GENERATION))
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetWebFormLifecycle(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_web_form_lifecycle(value: I64) {
     if (value == I64{0}) -> return
     jet_rt_string_drop(ui_carrier_word(value + UI_FORM_LIFECYCLE_RESULT))
     jet_rt_string_drop(ui_carrier_word(value + UI_FORM_LIFECYCLE_ERROR))
     jet_rt_free(value, UI_FORM_LIFECYCLE_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetWebFormLifecycle(a: I64, b: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_web_form_lifecycle(a: I64, b: I64) -> Bool {
     ui_carrier_word(a + UI_FORM_LIFECYCLE_STATUS) == ui_carrier_word(b + UI_FORM_LIFECYCLE_STATUS) && jet_rt_string_eq(ui_carrier_word(a + UI_FORM_LIFECYCLE_RESULT), ui_carrier_word(b + UI_FORM_LIFECYCLE_RESULT)) && jet_rt_string_eq(ui_carrier_word(a + UI_FORM_LIFECYCLE_ERROR), ui_carrier_word(b + UI_FORM_LIFECYCLE_ERROR)) && ui_carrier_word(a + UI_FORM_LIFECYCLE_GENERATION) == ui_carrier_word(b + UI_FORM_LIFECYCLE_GENERATION)
 }
-#Export(c) fn jet_rt_handle_field_JetWebFormLifecycle_result(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_FORM_LIFECYCLE_RESULT), out) }
-#Export(c) fn jet_rt_handle_field_JetWebFormLifecycle_error(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_FORM_LIFECYCLE_ERROR), out) }
-#Export(c) fn jet_rt_handle_clone_JetWebMutationState(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_field_jet_web_form_lifecycle_result(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_FORM_LIFECYCLE_RESULT), out) }
+#Export(c) fn jet_rt_handle_field_jet_web_form_lifecycle_error(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_FORM_LIFECYCLE_ERROR), out) }
+#Export(c) fn jet_rt_handle_clone_jet_web_mutation_state(value: I64) -> I64 {
     result :: jet_rt_alloc(UI_MUTATION_BYTES, I64{8})
     ui_carrier_store(result + UI_MUTATION_STATUS, ui_carrier_word(value + UI_MUTATION_STATUS))
     ui_carrier_store(result + UI_MUTATION_GENERATION, ui_carrier_word(value + UI_MUTATION_GENERATION))
@@ -35,7 +35,7 @@
     ui_carrier_store(result + UI_MUTATION_REPLAYED, ui_carrier_word(value + UI_MUTATION_REPLAYED))
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetWebMutationState(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_web_mutation_state(value: I64) {
     if (value == I64{0}) -> return
     jet_rt_string_drop(ui_carrier_word(value + UI_MUTATION_VALUE))
     jet_rt_string_drop(ui_carrier_word(value + UI_MUTATION_RESULT))
@@ -43,7 +43,7 @@
     jet_rt_string_drop(ui_carrier_word(value + UI_MUTATION_CONTEXT))
     jet_rt_free(value, UI_MUTATION_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetWebMutationState(a: I64, b: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_web_mutation_state(a: I64, b: I64) -> Bool {
     if (ui_carrier_word(a + UI_MUTATION_STATUS) != ui_carrier_word(b + UI_MUTATION_STATUS)) -> return false
     if (ui_carrier_word(a + UI_MUTATION_GENERATION) != ui_carrier_word(b + UI_MUTATION_GENERATION)) -> return false
     if (ui_carrier_bool(a + UI_MUTATION_OPTIMISTIC) != ui_carrier_bool(b + UI_MUTATION_OPTIMISTIC)) -> return false
@@ -55,14 +55,14 @@
     if (ui_carrier_bool(a + UI_MUTATION_PAUSED) != ui_carrier_bool(b + UI_MUTATION_PAUSED)) -> return false
     ui_carrier_word(a + UI_MUTATION_QUEUED) == ui_carrier_word(b + UI_MUTATION_QUEUED) && ui_carrier_word(a + UI_MUTATION_REPLAYED) == ui_carrier_word(b + UI_MUTATION_REPLAYED)
 }
-#Export(c) fn jet_rt_handle_field_JetWebMutationState_optimistic(value: I64) -> I64 { value + UI_MUTATION_OPTIMISTIC }
-#Export(c) fn jet_rt_handle_field_JetWebMutationState_value(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_MUTATION_VALUE), out) }
-#Export(c) fn jet_rt_handle_field_JetWebMutationState_result(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_MUTATION_RESULT), out) }
-#Export(c) fn jet_rt_handle_field_JetWebMutationState_error(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_MUTATION_ERROR), out) }
-#Export(c) fn jet_rt_handle_field_JetWebMutationState_context(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_MUTATION_CONTEXT), out) }
-#Export(c) fn jet_rt_handle_field_JetWebMutationState_rollback(value: I64) -> I64 { value + UI_MUTATION_ROLLBACK }
-#Export(c) fn jet_rt_handle_field_JetWebMutationState_paused(value: I64) -> I64 { value + UI_MUTATION_PAUSED }
-#Export(c) fn jet_rt_handle_clone_JetWebQueryState(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_field_jet_web_mutation_state_optimistic(value: I64) -> I64 { value + UI_MUTATION_OPTIMISTIC }
+#Export(c) fn jet_rt_handle_field_jet_web_mutation_state_value(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_MUTATION_VALUE), out) }
+#Export(c) fn jet_rt_handle_field_jet_web_mutation_state_result(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_MUTATION_RESULT), out) }
+#Export(c) fn jet_rt_handle_field_jet_web_mutation_state_error(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_MUTATION_ERROR), out) }
+#Export(c) fn jet_rt_handle_field_jet_web_mutation_state_context(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_MUTATION_CONTEXT), out) }
+#Export(c) fn jet_rt_handle_field_jet_web_mutation_state_rollback(value: I64) -> I64 { value + UI_MUTATION_ROLLBACK }
+#Export(c) fn jet_rt_handle_field_jet_web_mutation_state_paused(value: I64) -> I64 { value + UI_MUTATION_PAUSED }
+#Export(c) fn jet_rt_handle_clone_jet_web_query_state(value: I64) -> I64 {
     result :: jet_rt_alloc(UI_QUERY_STATE_BYTES, I64{8})
     ui_carrier_store(result + UI_QUERY_STATE_STATUS, ui_carrier_word(value + UI_QUERY_STATE_STATUS))
     ui_carrier_store(result + UI_QUERY_STATE_VALUE, jet_rt_string_clone(ui_carrier_word(value + UI_QUERY_STATE_VALUE)))
@@ -72,13 +72,13 @@
     ui_carrier_store(result + UI_QUERY_STATE_OFFLINE, ui_carrier_bool(value + UI_QUERY_STATE_OFFLINE))
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetWebQueryState(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_web_query_state(value: I64) {
     if (value == I64{0}) -> return
     jet_rt_string_drop(ui_carrier_word(value + UI_QUERY_STATE_VALUE))
     jet_rt_string_drop(ui_carrier_word(value + UI_QUERY_STATE_ERROR))
     jet_rt_free(value, UI_QUERY_STATE_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetWebQueryState(a: I64, b: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_web_query_state(a: I64, b: I64) -> Bool {
     if (ui_carrier_word(a + UI_QUERY_STATE_STATUS) != ui_carrier_word(b + UI_QUERY_STATE_STATUS)) -> return false
     if !jet_rt_string_eq(ui_carrier_word(a + UI_QUERY_STATE_VALUE), ui_carrier_word(b + UI_QUERY_STATE_VALUE)) -> return false
     if !jet_rt_string_eq(ui_carrier_word(a + UI_QUERY_STATE_ERROR), ui_carrier_word(b + UI_QUERY_STATE_ERROR)) -> return false
@@ -86,10 +86,10 @@
     if (ui_carrier_word(a + UI_QUERY_STATE_QUEUED) != ui_carrier_word(b + UI_QUERY_STATE_QUEUED)) -> return false
     ui_carrier_bool(a + UI_QUERY_STATE_OFFLINE) == ui_carrier_bool(b + UI_QUERY_STATE_OFFLINE)
 }
-#Export(c) fn jet_rt_handle_field_JetWebQueryState_value(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_QUERY_STATE_VALUE), out) }
-#Export(c) fn jet_rt_handle_field_JetWebQueryState_error(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_QUERY_STATE_ERROR), out) }
-#Export(c) fn jet_rt_handle_field_JetWebQueryState_offline(value: I64) -> I64 { value + UI_QUERY_STATE_OFFLINE }
-#Export(c) fn jet_rt_handle_clone_JetWebStoreEvent(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_field_jet_web_query_state_value(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_QUERY_STATE_VALUE), out) }
+#Export(c) fn jet_rt_handle_field_jet_web_query_state_error(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_QUERY_STATE_ERROR), out) }
+#Export(c) fn jet_rt_handle_field_jet_web_query_state_offline(value: I64) -> I64 { value + UI_QUERY_STATE_OFFLINE }
+#Export(c) fn jet_rt_handle_clone_jet_web_store_event(value: I64) -> I64 {
     result :: jet_rt_alloc(UI_STORE_EVENT_BYTES, I64{8})
     ui_carrier_store(result + UI_STORE_EVENT_SEQUENCE, ui_carrier_word(value + UI_STORE_EVENT_SEQUENCE))
     ui_carrier_store(result + UI_STORE_EVENT_GENERATION, ui_carrier_word(value + UI_STORE_EVENT_GENERATION))
@@ -99,17 +99,17 @@
     ui_carrier_store(result + UI_STORE_EVENT_KIND, ui_carrier_word(value + UI_STORE_EVENT_KIND))
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetWebStoreEvent(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_web_store_event(value: I64) {
     if (value == I64{0}) -> return
     jet_rt_string_drop(ui_carrier_word(value + UI_STORE_EVENT_ACTION))
     data_plot_texts_drop(ui_carrier_word(value + UI_STORE_EVENT_CHANGED_FIELDS))
     jet_rt_free(value, UI_STORE_EVENT_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetWebStoreEvent(a: I64, b: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_web_store_event(a: I64, b: I64) -> Bool {
     if (ui_carrier_word(a + UI_STORE_EVENT_SEQUENCE) != ui_carrier_word(b + UI_STORE_EVENT_SEQUENCE)) -> return false
     if (ui_carrier_word(a + UI_STORE_EVENT_GENERATION) != ui_carrier_word(b + UI_STORE_EVENT_GENERATION)) -> return false
     if !jet_rt_string_eq(ui_carrier_word(a + UI_STORE_EVENT_ACTION), ui_carrier_word(b + UI_STORE_EVENT_ACTION)) -> return false
     if !data_plot_texts_eq(ui_carrier_word(a + UI_STORE_EVENT_CHANGED_FIELDS), ui_carrier_word(b + UI_STORE_EVENT_CHANGED_FIELDS)) -> return false
     ui_carrier_word(a + UI_STORE_EVENT_CURSOR) == ui_carrier_word(b + UI_STORE_EVENT_CURSOR) && ui_carrier_word(a + UI_STORE_EVENT_KIND) == ui_carrier_word(b + UI_STORE_EVENT_KIND)
 }
-#Export(c) fn jet_rt_handle_field_JetWebStoreEvent_action(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_STORE_EVENT_ACTION), out) }
+#Export(c) fn jet_rt_handle_field_jet_web_store_event_action(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_STORE_EVENT_ACTION), out) }

@@ -18,9 +18,9 @@ extern void jet_test_suite_install(Word);
 extern Word jet_test_suite_new(void);
 extern Word jet_test_suite_run(Word);
 extern Word jet_test_suite_status(void);
-extern Word jet_rt_handle_clone_JetTestSuite(Word);
-extern void jet_rt_handle_drop_JetTestSuite(Word);
-extern Word jet_rt_handle_show_JetTestSuite(Word);
+extern Word jet_rt_handle_clone_jet_test_suite(Word);
+extern void jet_rt_handle_drop_jet_test_suite(Word);
+extern Word jet_rt_handle_show_jet_test_suite(Word);
 extern void jet_rt_string_drop(Word);
 extern Word jet_rt_test_suite_fixture_first(Word, Word);
 extern Word jet_rt_test_suite_fixture_second(Word, Word);
@@ -40,9 +40,9 @@ static Runner *runner(Word (*code)(Word, Word)) {
     return box;
 }
 static Suite *snapshot(void) { return (Suite *)(uintptr_t)jet_test_suite_new(); }
-static void drop(Suite *suite) { jet_rt_handle_drop_JetTestSuite(address(suite)); }
+static void drop(Suite *suite) { jet_rt_handle_drop_jet_test_suite(address(suite)); }
 static void show(Suite *suite, const char *expected) {
-    Word value = jet_rt_handle_show_JetTestSuite(address(suite));
+    Word value = jet_rt_handle_show_jet_test_suite(address(suite));
     Text *text = (Text *)(uintptr_t)value;
     assert(text->len == (Word)strlen(expected));
     assert(memcmp(text->data, expected, (size_t)text->len) == 0);
@@ -83,7 +83,7 @@ int main(void) {
     assert(first->refs == 2);
     Suite *old = snapshot();
     assert(old->iteration == 0 && old->result == 0 && old->runner == address(first));
-    Suite *copy = (Suite *)(uintptr_t)jet_rt_handle_clone_JetTestSuite(address(old));
+    Suite *copy = (Suite *)(uintptr_t)jet_rt_handle_clone_jet_test_suite(address(old));
     assert(copy != old && memcmp(copy, old, sizeof(*old)) == 0 && first->refs == 2);
     jet_test_suite_install(address(second));
     assert(first->refs == 2 && second->refs == 2 && jet_test_suite_status() == 0);
@@ -113,7 +113,7 @@ int main(void) {
     Word live = jet_rt_program_allocator_fact(2);
     Suite *counted = snapshot();
     assert(jet_rt_program_allocator_fact(2) == live + 24);
-    Suite *counted_copy = (Suite *)(uintptr_t)jet_rt_handle_clone_JetTestSuite(address(counted));
+    Suite *counted_copy = (Suite *)(uintptr_t)jet_rt_handle_clone_jet_test_suite(address(counted));
     assert(jet_rt_program_allocator_fact(2) == live + 48);
     drop(counted); drop(counted_copy);
     assert(jet_rt_program_allocator_fact(2) == live);

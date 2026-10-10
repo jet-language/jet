@@ -4,6 +4,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runtimeAbiAtom } from './runtime-abi-symbols.mjs';
 
 export function classifyNativeInventory(inventory, routes, source) {
   const types = new Map();
@@ -13,7 +14,7 @@ export function classifyNativeInventory(inventory, routes, source) {
     types.set(match[2], list);
   }
   const schemas = new Set([...routes.matchAll(/LowerRecordSchema\{jet_name: "([^"]+)"/g)].map((match) => match[1]));
-  const names = [...types.keys()].sort((a, b) => b.length - a.length || a.localeCompare(b));
+  const names = [...types.keys()].sort((a, b) => runtimeAbiAtom(b).length - runtimeAbiAtom(a).length || a.localeCompare(b));
   const rows = new Map();
   const unclassified = [];
   const inventoryLines = inventory.trimEnd().split('\n');
@@ -26,7 +27,7 @@ export function classifyNativeInventory(inventory, routes, source) {
     const symbol = fields[symbolColumn];
     if (!/^jet_rt_(?:handle|record)_/.test(symbol)) continue;
     const family = /^jet_rt_(?:handle_(?:clone|drop|eq|display|show|debug|field)|record_(?:new|get|tag))_(.*)$/.exec(symbol);
-    const runtime = family ? names.find((name) => family[1] === name || family[1].startsWith(`${name}_`)) : null;
+    const runtime = family ? names.find((name) => family[1] === runtimeAbiAtom(name) || family[1].startsWith(`${runtimeAbiAtom(name)}_`)) : null;
     if (!runtime) { unclassified.push(symbol); continue; }
     let row = rows.get(runtime);
     if (!row) {

@@ -24,7 +24,7 @@ extern uint64_t jet_rt_session_status(void);
 extern bool jet_rt_control_publish_stop(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_rt_native_task_spawn(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_rt_native_task_join(int64_t, int64_t, int64_t);
-extern void jet_rt_handle_drop_JetTaskFailure(int64_t);
+extern void jet_rt_handle_drop_jet_task_failure(int64_t);
 extern void jet_stdio_stdout_write_raw(int64_t, bool, int64_t, int64_t);
 
 static uint64_t write_comptime(void) { return jet_rt_comptime_stop_write(); }
@@ -138,7 +138,7 @@ static uint64_t panic_emit(void) {
     int64_t failure = 0;
     assert(jet_rt_native_task_join(child, 0, (int64_t)(intptr_t)&failure) == 0);
     assert(failure != 0);
-    jet_rt_handle_drop_JetTaskFailure(failure);
+    jet_rt_handle_drop_jet_task_failure(failure);
     return 1;
 }
 static void panic_case(void) {

@@ -22,9 +22,9 @@ extern void jet_rt_layout_suggest(Handle *,Expr *,double);
 extern double jet_rt_layout_value(Handle *,Expr *);
 extern bool jet_rt_layout_is_feasible(Handle *);
 extern TextList *jet_rt_layout_conflict(Handle *);
-extern Handle *jet_rt_handle_clone_Handle(Handle *),*jet_rt_handle_clone_Constraint(Handle *);
-extern Expr *jet_rt_handle_clone_LinExpr(Expr *);
-extern void jet_rt_handle_drop_Handle(Handle *),jet_rt_handle_drop_Constraint(Handle *),jet_rt_handle_drop_LinExpr(Expr *);
+extern Handle *jet_rt_handle_clone_handle(Handle *),*jet_rt_handle_clone_constraint(Handle *);
+extern Expr *jet_rt_handle_clone_lin_expr(Expr *);
+extern void jet_rt_handle_drop_handle(Handle *),jet_rt_handle_drop_constraint(Handle *),jet_rt_handle_drop_lin_expr(Expr *);
 static void *watched[128];
 static unsigned watches,frees;
 void __wrap_jet_rt_free(void *p,int64_t bytes,int64_t align) {
@@ -54,12 +54,12 @@ static void ownership(void) {
     Expr *x=variable(h,0),*again=variable(h,0),*ten=jet_rt_layout_constant(10);
     assert(x->count==1 && again->terms[0].index==x->terms[0].index && x->present==1);
     for(unsigned i=1;i<16;++i) assert(x->terms[i].index==0 && x->terms[i].coefficient==0);
-    Expr *xc=jet_rt_handle_clone_LinExpr(x); assert(xc!=x && !memcmp(xc,x,288));
-    Handle *hc=jet_rt_handle_clone_Handle(h); assert(hc!=h && hc->inner==h->inner && hc->index==h->index);
-    Handle *c=jet_rt_layout_compare(x,ten,2),*cc=jet_rt_handle_clone_Constraint(c);
+    Expr *xc=jet_rt_handle_clone_lin_expr(x); assert(xc!=x && !memcmp(xc,x,288));
+    Handle *hc=jet_rt_handle_clone_handle(h); assert(hc!=h && hc->inner==h->inner && hc->index==h->index);
+    Handle *c=jet_rt_layout_compare(x,ten,2),*cc=jet_rt_handle_clone_constraint(c);
     assert(c!=cc && c->inner==cc->inner && c->index==cc->index);
-    jet_rt_handle_drop_Handle(h); jet_rt_handle_drop_LinExpr(x); jet_rt_handle_drop_LinExpr(again);
-    jet_rt_handle_drop_Constraint(c); jet_rt_handle_drop_LinExpr(ten);
+    jet_rt_handle_drop_handle(h); jet_rt_handle_drop_lin_expr(x); jet_rt_handle_drop_lin_expr(again);
+    jet_rt_handle_drop_constraint(c); jet_rt_handle_drop_lin_expr(ten);
     assert(fabs(jet_rt_layout_value(hc,xc)-10)<1e-7);
     assert(jet_rt_layout_strength(cc,3)==cc);
     jet_rt_layout_suggest(hc,xc,27); assert(fabs(jet_rt_layout_value(hc,xc)-27)<1e-7);
@@ -67,19 +67,19 @@ static void ownership(void) {
     // Registry releases its ref at thread exit, independently retained owners survive.
     unsigned before=frees; jet_rt_thread_detach(); assert(frees==before);
     jet_rt_thread_attach(); assert(fabs(jet_rt_layout_value(hc,xc)-27)<1e-7);
-    jet_rt_handle_drop_Handle(hc); assert(frees==before);
-    jet_rt_handle_drop_Constraint(cc); assert(frees==before+1);
-    jet_rt_handle_drop_LinExpr(xc);
+    jet_rt_handle_drop_handle(hc); assert(frees==before);
+    jet_rt_handle_drop_constraint(cc); assert(frees==before+1);
+    jet_rt_handle_drop_lin_expr(xc);
 }
 static void fatal(const char *mode) {
     Text *name=text("fatal"); Handle *h=jet_rt_layout_new(name); jet_rt_string_drop(name);
     Expr *x=variable(h,0);
     if(!strcmp(mode,"overflow-add") || !strcmp(mode,"overflow-compare")) {
-        Expr *sum=jet_rt_handle_clone_LinExpr(x);
+        Expr *sum=jet_rt_handle_clone_lin_expr(x);
         for(int i=1;i<17;++i) {
             Expr *v=variable(h,i);
             if(i==16 && !strcmp(mode,"overflow-compare")) { (void)jet_rt_layout_compare(sum,v,2); exit(9); }
-            Expr *next=jet_rt_layout_add(sum,v); jet_rt_handle_drop_LinExpr(sum); jet_rt_handle_drop_LinExpr(v); sum=next;
+            Expr *next=jet_rt_layout_add(sum,v); jet_rt_handle_drop_lin_expr(sum); jet_rt_handle_drop_lin_expr(v); sum=next;
         }
         exit(9);
     }
@@ -111,9 +111,9 @@ static void multi_edit(void) {
         assert(fabs(solved[reversed][2]-4)<1e-7);
         assert(fabs(solved[reversed][3]-6)<1e-7);
         assert(jet_rt_layout_is_feasible(h));
-        jet_rt_handle_drop_Constraint(constraint); jet_rt_handle_drop_Handle(h);
-        jet_rt_handle_drop_LinExpr(x); jet_rt_handle_drop_LinExpr(y);
-        jet_rt_handle_drop_LinExpr(sum); jet_rt_handle_drop_LinExpr(ten);
+        jet_rt_handle_drop_constraint(constraint); jet_rt_handle_drop_handle(h);
+        jet_rt_handle_drop_lin_expr(x); jet_rt_handle_drop_lin_expr(y);
+        jet_rt_handle_drop_lin_expr(sum); jet_rt_handle_drop_lin_expr(ten);
     }
     for(unsigned i=0;i<4;++i) assert(fabs(solved[0][i]-solved[1][i])<1e-7);
 }
@@ -142,8 +142,8 @@ int main(int argc,char **argv) {
         } else if(!strcmp(op,"constraint_feasible")) { assert(sscanf(line,"%*s %d",&a)==1); printf("f %s %d\n",name,jet_rt_layout_is_feasible(c[a]));
         } else if(!strcmp(op,"constraint_conflict")) { assert(sscanf(line,"%*s %d",&a)==1); conflict(name,c[a]);
         } else { assert(!strcmp(op,"end"));
-            for(unsigned i=0;i<64;++i) { if(e[i]) jet_rt_handle_drop_LinExpr(e[i]); if(c[i]) jet_rt_handle_drop_Constraint(c[i]); e[i]=NULL; c[i]=NULL; }
-            unsigned before=frees; jet_rt_handle_drop_Handle(h); h=NULL; assert(frees==before);
+            for(unsigned i=0;i<64;++i) { if(e[i]) jet_rt_handle_drop_lin_expr(e[i]); if(c[i]) jet_rt_handle_drop_constraint(c[i]); e[i]=NULL; c[i]=NULL; }
+            unsigned before=frees; jet_rt_handle_drop_handle(h); h=NULL; assert(frees==before);
         }
     }
     assert(!h && !ferror(in)); fclose(in);

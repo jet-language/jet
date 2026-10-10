@@ -24,7 +24,7 @@ fn net_os_kind(errno: I64) -> I64 {
     I64{0}
 }
 fn net_resolve_error(kind: I64, present: I64, code: I64, message: I64) -> I64 {
-    value :: jet_rt_record_new_Jet__ResolveError(kind, present, code, message)
+    value :: jet_rt_record_new_jet_resolve_error(kind, present, code, message)
     jet_rt_string_drop(message)
     value
 }
@@ -48,7 +48,7 @@ fn net_resolver_job_drop(job: I64) {
     jet_rt_free(net_word(job, I64{24}), net_word(job, I64{32}) + I64{1}, I64{1})
     rows :: net_word(job, I64{48})
     if (rows != I64{0}) -> jet_rt_free(rows, net_word(job, I64{56}) * I64{56}, I64{8})
-    jet_rt_handle_drop_Jet__ResolveError(net_word(job, I64{64}))
+    jet_rt_handle_drop_jet_resolve_error(net_word(job, I64{64}))
     sync_park_drop(net_word(job, I64{72}))
     jet_rt_free(job, I64{136}, I64{8})
 }

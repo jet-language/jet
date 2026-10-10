@@ -166,7 +166,7 @@ fn net_route_resolve(host: I64, port: I64, operation: I64, wait_operation: I64, 
                 jet_rt_string_builder_push(text, net_word(failure, I64{24}))
                 code :: if (net_word(failure, I64{8}) != I64{0}) -> host_native_int(net_word(failure, I64{16})) else -> I64{0}
                 _ := net_route_fail_take(ordinal, operation, address, jet_rt_string_builder_finish(text), code, error)
-                jet_rt_handle_drop_Jet__ResolveError(failure)
+                jet_rt_handle_drop_jet_resolve_error(failure)
             }
         }
     }
@@ -392,7 +392,7 @@ fn net_route_connect_one(address: I64, output: I64, error: I64) -> I64 {
         detail :: net_word(net_word(error, I64{0}), NET_ERROR_PAYLOAD)
         if (net_word(detail, NET_DETAIL_ADDRESS) == I64{0}) -> break
         if (at + I64{1} < count) {
-            jet_rt_handle_drop_JetNetError(net_word(error, I64{0}))
+            jet_rt_handle_drop_jet_net_error(net_word(error, I64{0}))
             net_put(error, I64{0}, I64{0})
         }
         at += I64{1}

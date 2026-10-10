@@ -212,7 +212,7 @@ fn lower_route_layout(carrier: LowerRouteCarrier) -> LIRLayout Never! {
 fn lower_route_drop(carrier: LowerRouteCarrier) -> LIRDrop Never! {
     if carrier == {
         .Text -> LIRDrop.Runtime{symbol: "jet_rt_string_drop"}
-        .Handle(name) -> LIRDrop.Runtime{symbol: "jet_rt_handle_drop_{name}"}
+        .Handle(name) -> LIRDrop.Runtime{symbol: "jet_rt_handle_drop_{runtime_abi_atom(name)}"}
         else -> LIRDrop.Trivial
     }
 }
@@ -488,7 +488,7 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
                     return
                 }
                 if lower_route_record(p, ty, carrier) == .Val(runtime) {
-                    handle :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_{runtime}"}, None)
+                    handle :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_{runtime_abi_atom(runtime)}"}, None)
                     lower_call_runtime(&m, &f, route.export, lowered, Val(handle))
                     return lower_record_from_runtime(p, &m, &f, ty, handle, dst)
                 }

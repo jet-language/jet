@@ -721,7 +721,7 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             if runtime == None && lower_runtime_missing_application(ty, &LOWER_RUNTIME_HANDLES) == .Val(failure) -> return failure
             schema :: lower_record_schema_with_handle(p, ty, runtime)
             if p.native_pack && runtime == .Val(handle) {
-                if handle.runtime == "JetErr" && schema != None -> return LowerRepr.Handle{drop: "jet_rt_handle_drop_JetErr", clone: "jet_rt_handle_clone_JetErr"}
+                if handle.runtime == "JetErr" && schema != None -> return LowerRepr.Handle{drop: "jet_rt_handle_drop_jet_err", clone: "jet_rt_handle_clone_jet_err"}
             }
             // The canonical runtime name table excludes source-owned Core
             // shapes. Only exact Core paths may override their MIR definition,
@@ -729,16 +729,16 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             // fields read natively and it converts only at a route boundary.
             if name.name.starts_with("<corelib>/") && schema == None {
                 if runtime == .Val(handle) {
-                    clone :: if handle.clone -> "jet_rt_handle_clone_{handle.runtime}" else -> ""
-                    return LowerRepr.Handle{drop: "jet_rt_handle_drop_{handle.runtime}", clone: clone}
+                    clone :: if handle.clone -> "jet_rt_handle_clone_{runtime_abi_atom(handle.runtime)}" else -> ""
+                    return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime_abi_atom(handle.runtime)}", clone: clone}
                 }
             }
             definition :: lower_type_def(p, ty) ?? {
                 // A Core type with no Jet definition is the runtime's own
                 // value behind an owned handle (RuntimeRoutes.jet).
                 handle :: runtime ?? return LowerRepr.Unsupported{reason: "type {name.name} without a definition"}
-                clone :: if handle.clone -> "jet_rt_handle_clone_{handle.runtime}" else -> ""
-                return LowerRepr.Handle{drop: "jet_rt_handle_drop_{handle.runtime}", clone: clone}
+                clone :: if handle.clone -> "jet_rt_handle_clone_{runtime_abi_atom(handle.runtime)}" else -> ""
+                return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime_abi_atom(handle.runtime)}", clone: clone}
             }
             if definition.kind == {
                 .Struct(_, _) -> LowerRepr.Inline{ty: ty}
@@ -749,8 +749,8 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
                     // their native layout at runtime boundaries.
                     if definition.key.starts_with("<corelib>/") && schema == None {
                         if runtime == .Val(handle) {
-                            clone :: if handle.clone -> "jet_rt_handle_clone_{handle.runtime}" else -> ""
-                            return LowerRepr.Handle{drop: "jet_rt_handle_drop_{handle.runtime}", clone: clone}
+                            clone :: if handle.clone -> "jet_rt_handle_clone_{runtime_abi_atom(handle.runtime)}" else -> ""
+                            return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime_abi_atom(handle.runtime)}", clone: clone}
                         }
                     }
                     if lower_enum_is_tag(variants) -> LowerRepr.Discriminant else -> LowerRepr.Boxed{ty: ty}
@@ -3688,8 +3688,8 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
 fn lower_reflect_record(m: &LowerModule, f: &LowerFunction, type_name: String, path: String, display: LIRValueID, fields: LIRValueID) -> LIRValueID Never! {
     type_text :: lower_require_literal(&m, &f, type_name)
     path_text :: lower_require_literal(&m, &f, path)
-    value :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_JetReflectValue"}, None)
-    lower_call_runtime(&m, &f, "jet_rt_record_new_JetReflectValue", [LIRValueID]{type_text, path_text, display, fields}, Val(value))
+    value :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_jet_reflect_value"}, None)
+    lower_call_runtime(&m, &f, "jet_rt_record_new_jet_reflect_value", [LIRValueID]{type_text, path_text, display, fields}, Val(value))
     lower_emit(&f, LIRInst.Drop{value: type_text})
     lower_emit(&f, LIRInst.Drop{value: path_text})
     value
@@ -3700,25 +3700,25 @@ fn lower_reflect_of(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     dst :: lower_result(p, c, &m, &f, instruction)
     rows :: lower_pointer(&f)
     count :: lower_const(&f, fields.len())
-    lower_call_runtime(&m, &f, "jet_rt_record_seq_List_Rec_JetReflectField_new", [LIRValueID]{count}, Val(rows))
+    lower_call_runtime(&m, &f, "jet_rt_record_seq_list_rec_jet_reflect_field_new", [LIRValueID]{count}, Val(rows))
     loop field in fields {
         text :: lower_show(p, c, &m, &f, field.value) ?? return
         empty :: lower_pointer(&f)
         zero :: lower_const(&f, 0)
-        lower_call_runtime(&m, &f, "jet_rt_record_seq_List_Rec_JetReflectField_new", [LIRValueID]{zero}, Val(empty))
+        lower_call_runtime(&m, &f, "jet_rt_record_seq_list_rec_jet_reflect_field_new", [LIRValueID]{zero}, Val(empty))
         value :: lower_reflect_record(&m, &f, field.type_name, field.path, text.value, empty)
         if text.owned -> lower_emit(&f, LIRInst.Drop{value: text.value})
         name :: lower_require_literal(&m, &f, field.name)
         row :: lower_pointer(&f)
-        lower_call_runtime(&m, &f, "jet_rt_record_new_JetReflectField", [LIRValueID]{name, value}, Val(row))
+        lower_call_runtime(&m, &f, "jet_rt_record_new_jet_reflect_field", [LIRValueID]{name, value}, Val(row))
         lower_emit(&f, LIRInst.Drop{value: name})
-        lower_call_runtime(&m, &f, "jet_rt_record_seq_List_Rec_JetReflectField_push", [LIRValueID]{rows, row}, None)
+        lower_call_runtime(&m, &f, "jet_rt_record_seq_list_rec_jet_reflect_field_push", [LIRValueID]{rows, row}, None)
     }
     display_text :: lower_use(&m, &f, display) ?? return
     value :: lower_reflect_record(&m, &f, type_name, path, display_text, rows)
     if lower_value_owned(c, display) -> lower_drop_value(p, c, &m, &f, display)
     if lower_record_handle(p, result_ty) != None -> return lower_record_from_runtime(p, &m, &f, result_ty, value, dst)
-    expected :: LowerRepr.Handle{drop: "jet_rt_handle_drop_JetReflectValue", clone: "jet_rt_handle_clone_JetReflectValue"}
+    expected :: LowerRepr.Handle{drop: "jet_rt_handle_drop_jet_reflect_value", clone: "jet_rt_handle_clone_jet_reflect_value"}
     if lower_repr(p, result_ty) != expected -> return lower_fail(&m, &f, "ReflectOf result has no checked reflection record layout")
     if dst == .Val(kept) {
         lower_emit(&f, LIRInst.Move{dst: kept, src: value})

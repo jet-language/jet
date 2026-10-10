@@ -31,7 +31,7 @@ fn data_plot_texts_eq(a: I64, b: I64) -> Bool {
     }
     true
 }
-#Export(c) fn jet_rt_handle_clone_JetDataPlotDomain(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_domain(value: I64) -> I64 {
     kind :: data_tree_word(value + DP_DOMAIN_TAG)
     result :: jet_rt_alloc(DP_DOMAIN_BYTES, I64{8})
     data_tree_store(result + DP_DOMAIN_TAG, kind)
@@ -45,12 +45,12 @@ fn data_plot_texts_eq(a: I64, b: I64) -> Bool {
     data_tree_store(result + DP_DOMAIN_SECOND, second)
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetDataPlotDomain(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_domain(value: I64) {
     if (value == I64{0}) -> return
     if data_tree_word(value + DP_DOMAIN_TAG) == DP_DOMAIN_CATEGORIES -> data_plot_texts_drop(data_tree_word(value + DP_DOMAIN_FIRST))
     jet_rt_free(value, DP_DOMAIN_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetDataPlotDomain(a: I64, b: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_domain(a: I64, b: I64) -> Bool {
     kind :: data_tree_word(a + DP_DOMAIN_TAG)
     if kind != data_tree_word(b + DP_DOMAIN_TAG) -> return false
     if kind == DP_DOMAIN_AUTO -> return true
@@ -68,11 +68,11 @@ fn data_plot_transform_clone(value: I64) -> I64 {
     third := I64{0}
     if kind == DP_TRANSFORM_AGGREGATE {
         first = data_plot_fields_clone(first)
-        second = jet_rt_handle_clone_JetDataPlotField(second)
+        second = jet_rt_handle_clone_jet_data_plot_field(second)
         third = data_tree_word(value + DP_TRANSFORM_THIRD)
     } else {
-        first = jet_rt_handle_clone_JetDataPlotField(first)
-        if kind == DP_TRANSFORM_FILTER { third = jet_rt_handle_clone_JetDataPlotValue(data_tree_word(value + DP_TRANSFORM_THIRD)) }
+        first = jet_rt_handle_clone_jet_data_plot_field(first)
+        if kind == DP_TRANSFORM_FILTER { third = jet_rt_handle_clone_jet_data_plot_value(data_tree_word(value + DP_TRANSFORM_THIRD)) }
     }
     data_tree_store(result + DP_TRANSFORM_FIRST, first)
     data_tree_store(result + DP_TRANSFORM_SECOND, second)
@@ -83,22 +83,22 @@ fn data_plot_transform_drop(value: I64) {
     kind :: data_tree_word(value + DP_TRANSFORM_TAG)
     if kind == DP_TRANSFORM_AGGREGATE {
         data_plot_fields_drop(data_tree_word(value + DP_TRANSFORM_FIRST))
-        jet_rt_handle_drop_JetDataPlotField(data_tree_word(value + DP_TRANSFORM_SECOND))
+        jet_rt_handle_drop_jet_data_plot_field(data_tree_word(value + DP_TRANSFORM_SECOND))
     } else {
-        jet_rt_handle_drop_JetDataPlotField(data_tree_word(value + DP_TRANSFORM_FIRST))
-        if kind == DP_TRANSFORM_FILTER { jet_rt_handle_drop_JetDataPlotValue(data_tree_word(value + DP_TRANSFORM_THIRD)) }
+        jet_rt_handle_drop_jet_data_plot_field(data_tree_word(value + DP_TRANSFORM_FIRST))
+        if kind == DP_TRANSFORM_FILTER { jet_rt_handle_drop_jet_data_plot_value(data_tree_word(value + DP_TRANSFORM_THIRD)) }
     }
     jet_rt_free(value, DP_TRANSFORM_BYTES, I64{8})
 }
 fn data_plot_transform_eq(a: I64, b: I64) -> Bool {
     kind :: data_tree_word(a + DP_TRANSFORM_TAG)
     if kind != data_tree_word(b + DP_TRANSFORM_TAG) -> return false
-    if kind == DP_TRANSFORM_AGGREGATE -> return data_plot_fields_eq(data_tree_word(a + DP_TRANSFORM_FIRST), data_tree_word(b + DP_TRANSFORM_FIRST)) && jet_rt_handle_eq_JetDataPlotField(data_tree_word(a + DP_TRANSFORM_SECOND), data_tree_word(b + DP_TRANSFORM_SECOND)) && data_tree_word(a + DP_TRANSFORM_THIRD) == data_tree_word(b + DP_TRANSFORM_THIRD)
-    if !jet_rt_handle_eq_JetDataPlotField(data_tree_word(a + DP_TRANSFORM_FIRST), data_tree_word(b + DP_TRANSFORM_FIRST)) -> return false
+    if kind == DP_TRANSFORM_AGGREGATE -> return data_plot_fields_eq(data_tree_word(a + DP_TRANSFORM_FIRST), data_tree_word(b + DP_TRANSFORM_FIRST)) && jet_rt_handle_eq_jet_data_plot_field(data_tree_word(a + DP_TRANSFORM_SECOND), data_tree_word(b + DP_TRANSFORM_SECOND)) && data_tree_word(a + DP_TRANSFORM_THIRD) == data_tree_word(b + DP_TRANSFORM_THIRD)
+    if !jet_rt_handle_eq_jet_data_plot_field(data_tree_word(a + DP_TRANSFORM_FIRST), data_tree_word(b + DP_TRANSFORM_FIRST)) -> return false
     if kind == DP_TRANSFORM_BIN -> return rt_f64_from_bits(data_tree_word(a + DP_TRANSFORM_SECOND)) == rt_f64_from_bits(data_tree_word(b + DP_TRANSFORM_SECOND))
     if kind == DP_TRANSFORM_SORT -> return (data_tree_word(a + DP_TRANSFORM_SECOND).bit_and(I64{255})) == (data_tree_word(b + DP_TRANSFORM_SECOND).bit_and(I64{255}))
     if data_tree_word(a + DP_TRANSFORM_SECOND) != data_tree_word(b + DP_TRANSFORM_SECOND) -> return false
-    if kind == DP_TRANSFORM_FILTER -> return jet_rt_handle_eq_JetDataPlotValue(data_tree_word(a + DP_TRANSFORM_THIRD), data_tree_word(b + DP_TRANSFORM_THIRD))
+    if kind == DP_TRANSFORM_FILTER -> return jet_rt_handle_eq_jet_data_plot_value(data_tree_word(a + DP_TRANSFORM_THIRD), data_tree_word(b + DP_TRANSFORM_THIRD))
     true
 }
 fn data_plot_transforms_clone(sequence: I64) -> I64 {
@@ -130,30 +130,30 @@ fn data_plot_transforms_eq(a: I64, b: I64) -> Bool {
     }
     true
 }
-#Export(c) fn jet_rt_handle_clone_JetDataPlotScale(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_scale(value: I64) -> I64 {
     result :: jet_rt_alloc(DP_SCALE_BYTES, I64{8})
     coll_copy(value, result, DP_SCALE_BYTES)
-    data_tree_store(result + DP_SCALE_DOMAIN, jet_rt_handle_clone_JetDataPlotDomain(data_tree_word(value + DP_SCALE_DOMAIN)))
+    data_tree_store(result + DP_SCALE_DOMAIN, jet_rt_handle_clone_jet_data_plot_domain(data_tree_word(value + DP_SCALE_DOMAIN)))
     data_tree_store(result + DP_SCALE_CLAMP, data_tree_word(value + DP_SCALE_CLAMP).bit_and(I64{255}))
     data_tree_store(result + DP_SCALE_REVERSE, data_tree_word(value + DP_SCALE_REVERSE).bit_and(I64{255}))
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetDataPlotScale(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_scale(value: I64) {
     if (value == I64{0}) -> return
-    jet_rt_handle_drop_JetDataPlotDomain(data_tree_word(value + DP_SCALE_DOMAIN))
+    jet_rt_handle_drop_jet_data_plot_domain(data_tree_word(value + DP_SCALE_DOMAIN))
     jet_rt_free(value, DP_SCALE_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetDataPlotScale(a: I64, b: I64) -> Bool {
-    data_tree_word(a + DP_SCALE_CHANNEL) == data_tree_word(b + DP_SCALE_CHANNEL) && data_tree_word(a + DP_SCALE_KIND) == data_tree_word(b + DP_SCALE_KIND) && jet_rt_handle_eq_JetDataPlotDomain(data_tree_word(a + DP_SCALE_DOMAIN), data_tree_word(b + DP_SCALE_DOMAIN)) && (data_tree_word(a + DP_SCALE_CLAMP).bit_and(I64{255})) == (data_tree_word(b + DP_SCALE_CLAMP).bit_and(I64{255})) && (data_tree_word(a + DP_SCALE_REVERSE).bit_and(I64{255})) == (data_tree_word(b + DP_SCALE_REVERSE).bit_and(I64{255}))
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_scale(a: I64, b: I64) -> Bool {
+    data_tree_word(a + DP_SCALE_CHANNEL) == data_tree_word(b + DP_SCALE_CHANNEL) && data_tree_word(a + DP_SCALE_KIND) == data_tree_word(b + DP_SCALE_KIND) && jet_rt_handle_eq_jet_data_plot_domain(data_tree_word(a + DP_SCALE_DOMAIN), data_tree_word(b + DP_SCALE_DOMAIN)) && (data_tree_word(a + DP_SCALE_CLAMP).bit_and(I64{255})) == (data_tree_word(b + DP_SCALE_CLAMP).bit_and(I64{255})) && (data_tree_word(a + DP_SCALE_REVERSE).bit_and(I64{255})) == (data_tree_word(b + DP_SCALE_REVERSE).bit_and(I64{255}))
 }
-#Export(c) fn jet_rt_handle_field_JetDataPlotScale_domain(value: I64) -> I64 { data_tree_word(value + DP_SCALE_DOMAIN) }
-#Export(c) fn jet_rt_handle_field_JetDataPlotScale_clamp(value: I64) -> I64 { value + DP_SCALE_CLAMP }
-#Export(c) fn jet_rt_handle_field_JetDataPlotScale_reverse(value: I64) -> I64 { value + DP_SCALE_REVERSE }
-#Export(c) fn jet_rt_record_seq_List_Rec_JetDataPlotScale_new(capacity: I64) -> I64 { data_sequence_new(capacity, DATA_TREE_ELEMENT_BYTES) }
-#Export(c) fn jet_rt_record_seq_List_Rec_JetDataPlotScale_len(value: I64) -> I64 { data_tree_word(value + DATA_SEQUENCE_LENGTH) }
-#Export(c) fn jet_rt_record_seq_List_Rec_JetDataPlotScale_get(value: I64, index: I64) -> I64 { data_tree_word(data_sequence_slot(value, index, DATA_TREE_ELEMENT_BYTES)) }
-#Export(c) fn jet_rt_record_seq_List_Rec_JetDataPlotScale_push(value: I64, item: I64) { data_plot_sequence_push(value, item) }
-#Export(c) fn jet_rt_handle_clone_JetDataPlotLayer(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_field_jet_data_plot_scale_domain(value: I64) -> I64 { data_tree_word(value + DP_SCALE_DOMAIN) }
+#Export(c) fn jet_rt_handle_field_jet_data_plot_scale_clamp(value: I64) -> I64 { value + DP_SCALE_CLAMP }
+#Export(c) fn jet_rt_handle_field_jet_data_plot_scale_reverse(value: I64) -> I64 { value + DP_SCALE_REVERSE }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_scale_new(capacity: I64) -> I64 { data_sequence_new(capacity, DATA_TREE_ELEMENT_BYTES) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_scale_len(value: I64) -> I64 { data_tree_word(value + DATA_SEQUENCE_LENGTH) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_scale_get(value: I64, index: I64) -> I64 { data_tree_word(data_sequence_slot(value, index, DATA_TREE_ELEMENT_BYTES)) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_scale_push(value: I64, item: I64) { data_plot_sequence_push(value, item) }
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_layer(value: I64) -> I64 {
     result :: jet_rt_alloc(DP_LAYER_BYTES, I64{8})
     data_tree_store(result + DP_LAYER_NAME, jet_rt_string_clone(data_tree_word(value + DP_LAYER_NAME)))
     data_tree_store(result + DP_LAYER_MARK, data_tree_word(value + DP_LAYER_MARK))
@@ -162,19 +162,19 @@ fn data_plot_transforms_eq(a: I64, b: I64) -> Bool {
     data_tree_store(result + DP_LAYER_OPACITY, data_tree_word(value + DP_LAYER_OPACITY))
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetDataPlotLayer(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_layer(value: I64) {
     if (value == I64{0}) -> return
     jet_rt_string_drop(data_tree_word(value + DP_LAYER_NAME))
     data_plot_encodings_drop(data_tree_word(value + DP_LAYER_ENCODINGS))
     data_plot_transforms_drop(data_tree_word(value + DP_LAYER_TRANSFORMS))
     jet_rt_free(value, DP_LAYER_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetDataPlotLayer(a: I64, b: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_layer(a: I64, b: I64) -> Bool {
     jet_rt_string_eq(data_tree_word(a + DP_LAYER_NAME), data_tree_word(b + DP_LAYER_NAME)) && data_tree_word(a + DP_LAYER_MARK) == data_tree_word(b + DP_LAYER_MARK) && data_plot_encodings_eq(data_tree_word(a + DP_LAYER_ENCODINGS), data_tree_word(b + DP_LAYER_ENCODINGS)) && data_plot_transforms_eq(data_tree_word(a + DP_LAYER_TRANSFORMS), data_tree_word(b + DP_LAYER_TRANSFORMS)) && rt_f64_from_bits(data_tree_word(a + DP_LAYER_OPACITY)) == rt_f64_from_bits(data_tree_word(b + DP_LAYER_OPACITY))
 }
-#Export(c) fn jet_rt_handle_field_JetDataPlotLayer_name(value: I64, out: I64) { data_plot_text_header(data_tree_word(value + DP_LAYER_NAME), out) }
-#Export(c) fn jet_rt_handle_field_JetDataPlotLayer_opacity(value: I64) -> I64 { value + DP_LAYER_OPACITY }
-#Export(c) fn jet_rt_record_seq_List_Rec_JetDataPlotLayer_new(capacity: I64) -> I64 { data_sequence_new(capacity, DATA_TREE_ELEMENT_BYTES) }
-#Export(c) fn jet_rt_record_seq_List_Rec_JetDataPlotLayer_len(value: I64) -> I64 { data_tree_word(value + DATA_SEQUENCE_LENGTH) }
-#Export(c) fn jet_rt_record_seq_List_Rec_JetDataPlotLayer_get(value: I64, index: I64) -> I64 { data_tree_word(data_sequence_slot(value, index, DATA_TREE_ELEMENT_BYTES)) }
-#Export(c) fn jet_rt_record_seq_List_Rec_JetDataPlotLayer_push(value: I64, item: I64) { data_plot_sequence_push(value, item) }
+#Export(c) fn jet_rt_handle_field_jet_data_plot_layer_name(value: I64, out: I64) { data_plot_text_header(data_tree_word(value + DP_LAYER_NAME), out) }
+#Export(c) fn jet_rt_handle_field_jet_data_plot_layer_opacity(value: I64) -> I64 { value + DP_LAYER_OPACITY }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_layer_new(capacity: I64) -> I64 { data_sequence_new(capacity, DATA_TREE_ELEMENT_BYTES) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_layer_len(value: I64) -> I64 { data_tree_word(value + DATA_SEQUENCE_LENGTH) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_layer_get(value: I64, index: I64) -> I64 { data_tree_word(data_sequence_slot(value, index, DATA_TREE_ELEMENT_BYTES)) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_layer_push(value: I64, item: I64) { data_plot_sequence_push(value, item) }

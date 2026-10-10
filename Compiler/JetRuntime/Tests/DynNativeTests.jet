@@ -26,9 +26,9 @@ fn compiler_dyn_fixture_roundtrip(schema: I64, tree: I64) -> Bool {
     cloned :: jet_rt_dyn_from_native(schema, native)
     compiler_dyn_native_drop(schema, native)
     // Both raw outputs are still valid after freeing every native owner.
-    same :: jet_rt_handle_eq_Dyn(tree, cloned)
-    jet_rt_handle_drop_Dyn(cloned)
-    jet_rt_handle_drop_Dyn(tree)
+    same :: jet_rt_handle_eq_dyn(tree, cloned)
+    jet_rt_handle_drop_dyn(cloned)
+    jet_rt_handle_drop_dyn(tree)
     same
 }
 #Export(c) fn jet_rt_dyn_native_fixture() -> I64 {
@@ -39,17 +39,17 @@ fn compiler_dyn_fixture_roundtrip(schema: I64, tree: I64) -> Bool {
     jet_rt_free(slots, I64{16}, I64{8})
     if !compiler_dyn_fixture_roundtrip(schema, tree) -> return I64{2}
     exact :: jet_int_owned_from_i64(I64{-9223372036854775808})
-    int_tree :: jet_rt_record_new_Dyn_Int(exact)
+    int_tree :: jet_rt_record_new_dyn_int(exact)
     jet_rt_int_drop(exact)
     if !compiler_dyn_fixture_roundtrip(schema, int_tree) -> return I64{3}
-    if !compiler_dyn_fixture_roundtrip(schema, jet_rt_record_new_Dyn_Float(Float{-0.0})) -> return I64{4}
+    if !compiler_dyn_fixture_roundtrip(schema, jet_rt_record_new_dyn_float(Float{-0.0})) -> return I64{4}
     bytes :: data_sequence_new(I64{3}, RT_HOST_U8_STRIDE)
     data :: data_tree_word(bytes + DATA_SEQUENCE_DATA)
     host_u8_put(data, I64{0}, I64{0})
     host_u8_put(data, I64{1}, I64{128})
     host_u8_put(data, I64{2}, I64{255})
     data_tree_store(bytes + DATA_SEQUENCE_LENGTH, I64{3})
-    if !compiler_dyn_fixture_roundtrip(schema, jet_rt_record_new_Dyn_Bytes(bytes)) -> return I64{5}
+    if !compiler_dyn_fixture_roundtrip(schema, jet_rt_record_new_dyn_bytes(bytes)) -> return I64{5}
     jet_rt_free(schema, I64{656}, I64{8})
     I64{0}
 }

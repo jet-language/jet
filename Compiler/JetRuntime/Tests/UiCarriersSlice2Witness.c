@@ -26,24 +26,24 @@ DECLARE(JetUiNode); DECLARE(JetUiAccessibility); DECLARE(JetUiShortcut);
 DECLARE(JetTuiColor); DECLARE(JetTuiConstraint); DECLARE(JetTuiListState);
 DECLARE(JetTuiStyle); DECLARE(JetTuiCapabilities); DECLARE(JetUiFsRights);
 DECLARE(JetUiFsGrant);
-extern void jet_rt_handle_field_JetUiNode_label(H, Text *);
-extern H jet_rt_handle_field_JetUiNode_width(H);
-extern H jet_rt_handle_field_JetUiNode_height(H);
-extern void jet_rt_handle_field_JetUiShortcut_key(H, Text *);
-extern H jet_rt_handle_field_JetTuiStyle_bold(H);
-extern H jet_rt_handle_field_JetTuiStyle_dim(H);
-extern H jet_rt_handle_field_JetTuiStyle_underline(H);
-extern H jet_rt_handle_field_JetTuiCapabilities_color(H);
-extern H jet_rt_handle_field_JetTuiCapabilities_unicode(H);
-extern H jet_rt_handle_field_JetTuiCapabilities_mouse(H);
-extern H jet_rt_handle_field_JetTuiCapabilities_resize(H);
-extern H jet_rt_handle_field_JetTuiCapabilities_clipboard(H);
-extern void jet_rt_handle_field_JetUiFsGrant_root(H, Text *);
-extern H jet_rt_handle_field_JetUiFsGrant_rights(H);
-extern H jet_rt_record_seq_List_Rec_JetUiNode_new(H);
-extern H jet_rt_record_seq_List_Rec_JetUiNode_len(H);
-extern H jet_rt_record_seq_List_Rec_JetUiNode_get(H, H);
-extern void jet_rt_record_seq_List_Rec_JetUiNode_push(H, H);
+extern void jet_rt_handle_field_jet_ui_node_label(H, Text *);
+extern H jet_rt_handle_field_jet_ui_node_width(H);
+extern H jet_rt_handle_field_jet_ui_node_height(H);
+extern void jet_rt_handle_field_jet_ui_shortcut_key(H, Text *);
+extern H jet_rt_handle_field_jet_tui_style_bold(H);
+extern H jet_rt_handle_field_jet_tui_style_dim(H);
+extern H jet_rt_handle_field_jet_tui_style_underline(H);
+extern H jet_rt_handle_field_jet_tui_capabilities_color(H);
+extern H jet_rt_handle_field_jet_tui_capabilities_unicode(H);
+extern H jet_rt_handle_field_jet_tui_capabilities_mouse(H);
+extern H jet_rt_handle_field_jet_tui_capabilities_resize(H);
+extern H jet_rt_handle_field_jet_tui_capabilities_clipboard(H);
+extern void jet_rt_handle_field_jet_ui_fs_grant_root(H, Text *);
+extern H jet_rt_handle_field_jet_ui_fs_grant_rights(H);
+extern H jet_rt_record_seq_list_rec_jet_ui_node_new(H);
+extern H jet_rt_record_seq_list_rec_jet_ui_node_len(H);
+extern H jet_rt_record_seq_list_rec_jet_ui_node_get(H, H);
+extern void jet_rt_record_seq_list_rec_jet_ui_node_push(H, H);
 
 /* Observer reused from UiCarriersBasicWitness; forwards every real call. */
 static struct { H address, bytes, alignment; bool live; } ledger[16384];
@@ -94,7 +94,7 @@ static H leaf(const char *s) {
     H h = boxed(160);
     words(h)[0] = (uint64_t)text(s);
     words(h)[3] = UINT64_MAX; /* role None */
-    words(h)[5] = (uint64_t)jet_rt_record_seq_List_Rec_JetUiNode_new(0);
+    words(h)[5] = (uint64_t)jet_rt_record_seq_list_rec_jet_ui_node_new(0);
     words(h)[13] = 26; /* IME/click/drop None */
     return h;
 }
@@ -111,26 +111,26 @@ static void node_cases(void) {
         if (mask & 64) words(a)[13] &= ~UINT64_C(8);
         if (mask & 128) words(a)[13] &= ~UINT64_C(16);
         if (mask & 256) { H shortcut = boxed(16); words(shortcut)[0] = (uint64_t)text(""); words(a)[18] = (uint64_t)shortcut; }
-        H b = jet_rt_handle_clone_JetUiNode(a);
-        assert(a != b && jet_rt_handle_eq_JetUiNode(a, b));
+        H b = jet_rt_handle_clone_jet_ui_node(a);
+        assert(a != b && jet_rt_handle_eq_jet_ui_node(a, b));
         for (unsigned slot = 2; slot <= 16; slot *= 2) {
             if (slot == 4) continue;
             words(b)[13] ^= slot;
-            assert(!jet_rt_handle_eq_JetUiNode(a, b));
+            assert(!jet_rt_handle_eq_jet_ui_node(a, b));
             words(b)[13] ^= slot;
         }
         uint64_t saved = words(b)[19];
         words(b)[19] = saved ? 0 : (uint64_t)text("");
-        assert(!jet_rt_handle_eq_JetUiNode(a, b));
+        assert(!jet_rt_handle_eq_jet_ui_node(a, b));
         if (!saved) jet_rt_string_drop((Text *)(uintptr_t)words(b)[19]);
         words(b)[19] = saved;
         /* Optional-style absent payload never contributes to equality. */
-        if (!(mask & 16)) { words(b)[8] = UINT64_MAX; words(b)[9] = UINT64_MAX; assert(jet_rt_handle_eq_JetUiNode(a,b)); }
-        jet_rt_handle_drop_JetUiNode(a); jet_rt_handle_drop_JetUiNode(b);
+        if (!(mask & 16)) { words(b)[8] = UINT64_MAX; words(b)[9] = UINT64_MAX; assert(jet_rt_handle_eq_jet_ui_node(a,b)); }
+        jet_rt_handle_drop_jet_ui_node(a); jet_rt_handle_drop_jet_ui_node(b);
     }
     H a = leaf("parent"), children = (H)words(a)[5];
-    for (unsigned i = 0; i < 11; ++i) jet_rt_record_seq_List_Rec_JetUiNode_push(children, leaf(i & 1 ? "odd" : "even"));
-    assert(jet_rt_record_seq_List_Rec_JetUiNode_len(children) == 11 && words(children)[1] >= 11);
+    for (unsigned i = 0; i < 11; ++i) jet_rt_record_seq_list_rec_jet_ui_node_push(children, leaf(i & 1 ? "odd" : "even"));
+    assert(jet_rt_record_seq_list_rec_jet_ui_node_len(children) == 11 && words(children)[1] >= 11);
     H meta = boxed(40), states = boxed(7*16), shortcut = boxed(16);
     words(meta)[0] = (uint64_t)text("name"); words(meta)[1] = (uint64_t)text("");
     words(meta)[2] = words(meta)[3] = 7; words(meta)[4] = (uint64_t)states;
@@ -142,42 +142,42 @@ static void node_cases(void) {
     words(a)[7] = UINT64_C(0xbeef000001); words(a)[8] = 3; words(a)[9] = UINT64_C(0xabcd123456);
     words(a)[10] = 1; words(a)[11] = UINT64_C(0xbeef000055); words(a)[12] = UINT64_MAX;
     words(a)[13] = 0; words(a)[14] = 1; words(a)[15] = UINT64_MAX; words(a)[16] = 0;
-    H b = jet_rt_handle_clone_JetUiNode(a), bc = (H)words(b)[5];
-    assert(jet_rt_handle_eq_JetUiNode(a,b));
+    H b = jet_rt_handle_clone_jet_ui_node(a), bc = (H)words(b)[5];
+    assert(jet_rt_handle_eq_jet_ui_node(a,b));
     assert(words(b)[0] != words(a)[0] && words(b)[19] != words(a)[19]);
     assert(words(b)[17] != words(a)[17] && words(b)[18] != words(a)[18]);
     assert(words((H)words(b)[17])[4] != (uint64_t)states);
     assert(words((H)words(b)[18])[0] != words(shortcut)[0]);
     assert(words(b)[7] == 1 && words(b)[9] == 0x123456 && words(b)[11] == 0x55 && words(b)[12] == 7);
-    H child = jet_rt_record_seq_List_Rec_JetUiNode_get(bc,0);
-    assert(child != jet_rt_record_seq_List_Rec_JetUiNode_get(children,0));
+    H child = jet_rt_record_seq_list_rec_jet_ui_node_get(bc,0);
+    assert(child != jet_rt_record_seq_list_rec_jet_ui_node_get(children,0));
     uint64_t *slots = words((H)words(bc)[2]), saved = slots[0]; slots[0] = slots[1]; slots[1] = saved;
-    assert(!jet_rt_handle_eq_JetUiNode(a,b)); saved = slots[0]; slots[0] = slots[1]; slots[1] = saved;
+    assert(!jet_rt_handle_eq_jet_ui_node(a,b)); saved = slots[0]; slots[0] = slots[1]; slots[1] = saved;
     words(child)[1] = UINT64_C(0x7ff8000000000001);
-    assert(!jet_rt_handle_eq_JetUiNode(b,b)); words(child)[1] = 0;
-    words(b)[1] = bits(-0.0); assert(jet_rt_handle_eq_JetUiNode(a,b));
-    words(b)[2] = UINT64_C(0x7ff8000000000001); assert(!jet_rt_handle_eq_JetUiNode(b,b)); words(b)[2] = 0;
-    Text view; jet_rt_handle_field_JetUiNode_label(b,&view); header_is(&view,(H)words(b)[0]);
-    assert(jet_rt_handle_field_JetUiNode_width(b) == b+8 && jet_rt_handle_field_JetUiNode_height(b) == b+16);
-    jet_rt_handle_field_JetUiShortcut_key((H)words(b)[18],&view); header_is(&view,(H)words((H)words(b)[18])[0]);
+    assert(!jet_rt_handle_eq_jet_ui_node(b,b)); words(child)[1] = 0;
+    words(b)[1] = bits(-0.0); assert(jet_rt_handle_eq_jet_ui_node(a,b));
+    words(b)[2] = UINT64_C(0x7ff8000000000001); assert(!jet_rt_handle_eq_jet_ui_node(b,b)); words(b)[2] = 0;
+    Text view; jet_rt_handle_field_jet_ui_node_label(b,&view); header_is(&view,(H)words(b)[0]);
+    assert(jet_rt_handle_field_jet_ui_node_width(b) == b+8 && jet_rt_handle_field_jet_ui_node_height(b) == b+16);
+    jet_rt_handle_field_jet_ui_shortcut_key((H)words(b)[18],&view); header_is(&view,(H)words((H)words(b)[18])[0]);
     H bs = (H)words((H)words(b)[17])[4];
-    for (unsigned i=2;i<=4;++i) { words(bs)[2*i+1] ^= 1; assert(!jet_rt_handle_eq_JetUiNode(a,b)); words(bs)[2*i+1] ^= 1; }
-    words(bs)[0] = 1; assert(!jet_rt_handle_eq_JetUiNode(a,b)); words(bs)[0] = 0;
-    words(bs)[1] = 0; assert(jet_rt_handle_eq_JetUiNode(a,b));
-    words((H)words(b)[18])[1] ^= 1; assert(!jet_rt_handle_eq_JetUiNode(a,b)); words((H)words(b)[18])[1] ^= 1;
-    jet_rt_handle_drop_JetUiNode(a);
+    for (unsigned i=2;i<=4;++i) { words(bs)[2*i+1] ^= 1; assert(!jet_rt_handle_eq_jet_ui_node(a,b)); words(bs)[2*i+1] ^= 1; }
+    words(bs)[0] = 1; assert(!jet_rt_handle_eq_jet_ui_node(a,b)); words(bs)[0] = 0;
+    words(bs)[1] = 0; assert(jet_rt_handle_eq_jet_ui_node(a,b));
+    words((H)words(b)[18])[1] ^= 1; assert(!jet_rt_handle_eq_jet_ui_node(a,b)); words((H)words(b)[18])[1] ^= 1;
+    jet_rt_handle_drop_jet_ui_node(a);
     assert(view.len == 3 && memcmp(view.data,"key",3) == 0);
-    jet_rt_handle_drop_JetUiNode(b);
-    jet_rt_handle_drop_JetUiNode(0); jet_rt_handle_drop_JetUiAccessibility(0); jet_rt_handle_drop_JetUiShortcut(0);
+    jet_rt_handle_drop_jet_ui_node(b);
+    jet_rt_handle_drop_jet_ui_node(0); jet_rt_handle_drop_jet_ui_accessibility(0); jet_rt_handle_drop_jet_ui_shortcut(0);
 }
 static void scalar_cases(void) {
     for (unsigned tag=0;tag<3;++tag) {
         H a=boxed(16); words(a)[0]=tag; words(a)[1]=UINT64_C(0xabcdef123456);
-        H b=jet_rt_handle_clone_JetTuiColor(a);
-        assert(jet_rt_handle_eq_JetTuiColor(a,b));
+        H b=jet_rt_handle_clone_jet_tui_color(a);
+        assert(jet_rt_handle_eq_jet_tui_color(a,b));
         assert(words(b)[1] == (tag==2 ? 0x123456 : 0x56));
-        words(b)[1]^=1; assert(!jet_rt_handle_eq_JetTuiColor(a,b));
-        jet_rt_handle_drop_JetTuiColor(a); jet_rt_handle_drop_JetTuiColor(b);
+        words(b)[1]^=1; assert(!jet_rt_handle_eq_jet_tui_color(a,b));
+        jet_rt_handle_drop_jet_tui_color(a); jet_rt_handle_drop_jet_tui_color(b);
     }
     const uint64_t floats[]={0,UINT64_C(0x8000000000000000),UINT64_C(0x7ff8000000000001),UINT64_C(0x3ff0000000000000),UINT64_C(0x7ff0000000000000)};
     for (unsigned tag=0;tag<5;++tag) {
@@ -186,56 +186,56 @@ static void scalar_cases(void) {
             bool expected;
             if(tag==4) expected=(floats[i]&65535)==(floats[j]&65535);
             else { double x,y; memcpy(&x,&floats[i],8); memcpy(&y,&floats[j],8); expected=x==y; }
-            assert(jet_rt_handle_eq_JetTuiConstraint(a,b)==expected);
-            H c=jet_rt_handle_clone_JetTuiConstraint(a);
+            assert(jet_rt_handle_eq_jet_tui_constraint(a,b)==expected);
+            H c=jet_rt_handle_clone_jet_tui_constraint(a);
             assert(words(c)[1]==(tag==4 ? floats[i]&65535 : floats[i]));
-            words(b)[0]=(tag+1)%5; assert(!jet_rt_handle_eq_JetTuiConstraint(a,b));
-            jet_rt_handle_drop_JetTuiConstraint(a); jet_rt_handle_drop_JetTuiConstraint(b); jet_rt_handle_drop_JetTuiConstraint(c);
+            words(b)[0]=(tag+1)%5; assert(!jet_rt_handle_eq_jet_tui_constraint(a,b));
+            jet_rt_handle_drop_jet_tui_constraint(a); jet_rt_handle_drop_jet_tui_constraint(b); jet_rt_handle_drop_jet_tui_constraint(c);
         }
     }
     H state=boxed(16); words(state)[0]=UINT64_MAX; words(state)[1]=UINT64_C(0x8000000000000000);
-    H copy=jet_rt_handle_clone_JetTuiListState(state); assert(jet_rt_handle_eq_JetTuiListState(state,copy));
-    words(copy)[1]^=1; assert(!jet_rt_handle_eq_JetTuiListState(state,copy));
-    jet_rt_handle_drop_JetTuiListState(state); jet_rt_handle_drop_JetTuiListState(copy);
+    H copy=jet_rt_handle_clone_jet_tui_list_state(state); assert(jet_rt_handle_eq_jet_tui_list_state(state,copy));
+    words(copy)[1]^=1; assert(!jet_rt_handle_eq_jet_tui_list_state(state,copy));
+    jet_rt_handle_drop_jet_tui_list_state(state); jet_rt_handle_drop_jet_tui_list_state(copy);
     for(unsigned opts=0;opts<4;++opts) {
         H a=boxed(72); words(a)[0]=opts&1; words(a)[3]=(opts>>1)&1;
         words(a)[1]=2; words(a)[2]=UINT64_MAX; words(a)[4]=1; words(a)[5]=UINT64_MAX;
         words(a)[6]=UINT64_C(0xaaaa000001); words(a)[7]=UINT64_C(0xaaaa000000); words(a)[8]=1;
-        H b=jet_rt_handle_clone_JetTuiStyle(a); assert(jet_rt_handle_eq_JetTuiStyle(a,b));
+        H b=jet_rt_handle_clone_jet_tui_style(a); assert(jet_rt_handle_eq_jet_tui_style(a,b));
         if(!(opts&1)) assert(words(b)[1]==0&&words(b)[2]==0);
         if(!(opts&2)) assert(words(b)[4]==0&&words(b)[5]==0);
-        H (*fields[])(H)={jet_rt_handle_field_JetTuiStyle_bold,jet_rt_handle_field_JetTuiStyle_dim,jet_rt_handle_field_JetTuiStyle_underline};
-        for(unsigned i=0;i<3;++i){ assert(fields[i](b)==b+48+8*i); *(unsigned char *)(uintptr_t)fields[i](b)^=1; assert(!jet_rt_handle_eq_JetTuiStyle(a,b)); *(unsigned char *)(uintptr_t)fields[i](b)^=1; }
-        jet_rt_handle_drop_JetTuiStyle(a); jet_rt_handle_drop_JetTuiStyle(b);
+        H (*fields[])(H)={jet_rt_handle_field_jet_tui_style_bold,jet_rt_handle_field_jet_tui_style_dim,jet_rt_handle_field_jet_tui_style_underline};
+        for(unsigned i=0;i<3;++i){ assert(fields[i](b)==b+48+8*i); *(unsigned char *)(uintptr_t)fields[i](b)^=1; assert(!jet_rt_handle_eq_jet_tui_style(a,b)); *(unsigned char *)(uintptr_t)fields[i](b)^=1; }
+        jet_rt_handle_drop_jet_tui_style(a); jet_rt_handle_drop_jet_tui_style(b);
     }
     H caps=boxed(64); words(caps)[0]=2;
     for(unsigned i=1;i<6;++i) words(caps)[i]=UINT64_C(0xbeef000000)|(i&1);
     words(caps)[6]=UINT64_MAX; words(caps)[7]=UINT64_C(0x8000000000000000);
-    copy=jet_rt_handle_clone_JetTuiCapabilities(caps); assert(jet_rt_handle_eq_JetTuiCapabilities(caps,copy));
-    H (*fields[])(H)={jet_rt_handle_field_JetTuiCapabilities_color,jet_rt_handle_field_JetTuiCapabilities_unicode,jet_rt_handle_field_JetTuiCapabilities_mouse,jet_rt_handle_field_JetTuiCapabilities_resize,jet_rt_handle_field_JetTuiCapabilities_clipboard};
-    for(unsigned i=0;i<5;++i) { assert(fields[i](copy)==copy+8+8*i); *(unsigned char *)(uintptr_t)fields[i](copy)^=1; assert(!jet_rt_handle_eq_JetTuiCapabilities(caps,copy)); *(unsigned char *)(uintptr_t)fields[i](copy)^=1; }
-    words(copy)[6]^=1; assert(!jet_rt_handle_eq_JetTuiCapabilities(caps,copy)); words(copy)[6]^=1;
-    jet_rt_handle_drop_JetTuiCapabilities(caps); jet_rt_handle_drop_JetTuiCapabilities(copy);
+    copy=jet_rt_handle_clone_jet_tui_capabilities(caps); assert(jet_rt_handle_eq_jet_tui_capabilities(caps,copy));
+    H (*fields[])(H)={jet_rt_handle_field_jet_tui_capabilities_color,jet_rt_handle_field_jet_tui_capabilities_unicode,jet_rt_handle_field_jet_tui_capabilities_mouse,jet_rt_handle_field_jet_tui_capabilities_resize,jet_rt_handle_field_jet_tui_capabilities_clipboard};
+    for(unsigned i=0;i<5;++i) { assert(fields[i](copy)==copy+8+8*i); *(unsigned char *)(uintptr_t)fields[i](copy)^=1; assert(!jet_rt_handle_eq_jet_tui_capabilities(caps,copy)); *(unsigned char *)(uintptr_t)fields[i](copy)^=1; }
+    words(copy)[6]^=1; assert(!jet_rt_handle_eq_jet_tui_capabilities(caps,copy)); words(copy)[6]^=1;
+    jet_rt_handle_drop_jet_tui_capabilities(caps); jet_rt_handle_drop_jet_tui_capabilities(copy);
     H rights=boxed(8); words(rights)[0]=UINT64_C(0xabcdefff);
-    copy=jet_rt_handle_clone_JetUiFsRights(rights); assert(words(copy)[0]==255&&jet_rt_handle_eq_JetUiFsRights(rights,copy));
-    words(copy)[0]^=128; assert(!jet_rt_handle_eq_JetUiFsRights(rights,copy));
-    jet_rt_handle_drop_JetUiFsRights(rights); jet_rt_handle_drop_JetUiFsRights(copy);
+    copy=jet_rt_handle_clone_jet_ui_fs_rights(rights); assert(words(copy)[0]==255&&jet_rt_handle_eq_jet_ui_fs_rights(rights,copy));
+    words(copy)[0]^=128; assert(!jet_rt_handle_eq_jet_ui_fs_rights(rights,copy));
+    jet_rt_handle_drop_jet_ui_fs_rights(rights); jet_rt_handle_drop_jet_ui_fs_rights(copy);
     H grant=boxed(16); words(grant)[0]=(uint64_t)text("root"); words(grant)[1]=UINT64_C(0xabcdef00fe);
-    copy=jet_rt_handle_clone_JetUiFsGrant(grant); assert(jet_rt_handle_eq_JetUiFsGrant(grant,copy));
-    assert(words(copy)[0]!=words(grant)[0] && jet_rt_handle_field_JetUiFsGrant_rights(copy)==copy+8);
-    Text view; jet_rt_handle_field_JetUiFsGrant_root(copy,&view); header_is(&view,(H)words(copy)[0]);
-    jet_rt_handle_drop_JetUiFsGrant(grant); assert(view.len==4&&memcmp(view.data,"root",4)==0);
-    jet_rt_handle_drop_JetUiFsGrant(copy);
-    jet_rt_handle_drop_JetTuiColor(0); jet_rt_handle_drop_JetTuiConstraint(0); jet_rt_handle_drop_JetTuiListState(0);
-    jet_rt_handle_drop_JetTuiStyle(0); jet_rt_handle_drop_JetTuiCapabilities(0); jet_rt_handle_drop_JetUiFsRights(0); jet_rt_handle_drop_JetUiFsGrant(0);
+    copy=jet_rt_handle_clone_jet_ui_fs_grant(grant); assert(jet_rt_handle_eq_jet_ui_fs_grant(grant,copy));
+    assert(words(copy)[0]!=words(grant)[0] && jet_rt_handle_field_jet_ui_fs_grant_rights(copy)==copy+8);
+    Text view; jet_rt_handle_field_jet_ui_fs_grant_root(copy,&view); header_is(&view,(H)words(copy)[0]);
+    jet_rt_handle_drop_jet_ui_fs_grant(grant); assert(view.len==4&&memcmp(view.data,"root",4)==0);
+    jet_rt_handle_drop_jet_ui_fs_grant(copy);
+    jet_rt_handle_drop_jet_tui_color(0); jet_rt_handle_drop_jet_tui_constraint(0); jet_rt_handle_drop_jet_tui_list_state(0);
+    jet_rt_handle_drop_jet_tui_style(0); jet_rt_handle_drop_jet_tui_capabilities(0); jet_rt_handle_drop_jet_ui_fs_rights(0); jet_rt_handle_drop_jet_ui_fs_grant(0);
 }
 int main(int argc,char **argv) {
     jet_rt_alloc_init();
     if(argc==2) {
-        if(!strcmp(argv[1],"negative-capacity")) jet_rt_record_seq_List_Rec_JetUiNode_new(-1);
-        else if(!strcmp(argv[1],"oversize-capacity")) jet_rt_record_seq_List_Rec_JetUiNode_new(INT64_MAX);
-        else if(!strcmp(argv[1],"index-zero")) jet_rt_record_seq_List_Rec_JetUiNode_get(jet_rt_record_seq_List_Rec_JetUiNode_new(0),0);
-        else if(!strcmp(argv[1],"index-negative")) jet_rt_record_seq_List_Rec_JetUiNode_get(jet_rt_record_seq_List_Rec_JetUiNode_new(0),-1);
+        if(!strcmp(argv[1],"negative-capacity")) jet_rt_record_seq_list_rec_jet_ui_node_new(-1);
+        else if(!strcmp(argv[1],"oversize-capacity")) jet_rt_record_seq_list_rec_jet_ui_node_new(INT64_MAX);
+        else if(!strcmp(argv[1],"index-zero")) jet_rt_record_seq_list_rec_jet_ui_node_get(jet_rt_record_seq_list_rec_jet_ui_node_new(0),0);
+        else if(!strcmp(argv[1],"index-negative")) jet_rt_record_seq_list_rec_jet_ui_node_get(jet_rt_record_seq_list_rec_jet_ui_node_new(0),-1);
         else return 2;
         return 99;
     }

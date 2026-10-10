@@ -70,7 +70,7 @@ static void invalid_version(void) {
     int fd[2]; assert(pipe(fd)==0); pid_t pid=fork(); assert(pid>=0);
     if(!pid) {
         close(fd[0]); assert(dup2(fd[1],STDERR_FILENO)>=0); close(fd[1]);
-        Word invalid={3}; (void)jet_rt_handle_show_JetHTTPVersion(&invalid); _exit(99);
+        Word invalid={3}; (void)jet_rt_handle_show_jet_http_version(&invalid); _exit(99);
     }
     close(fd[1]); char output[256]; size_t used=0; ssize_t n;
     while((n=read(fd[0],output+used,sizeof(output)-1-used))>0) { used+=(size_t)n; assert(used<sizeof(output)-1); }

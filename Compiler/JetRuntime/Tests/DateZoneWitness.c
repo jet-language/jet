@@ -30,10 +30,10 @@ extern Text *jet_rt_handle_show_##name(type *); \
 extern Text *jet_rt_handle_display_##name(type *); \
 extern Text *jet_rt_handle_debug_##name(type *)
 API(DateTime,JetDateTime); API(Zone,JetZone); API(Zoned,JetZonedDateTime);
-extern unsigned char *jet_rt_handle_field_JetDateTime_leap_second(DateTime *);
-extern void jet_rt_handle_field_JetZone_name(Zone *,Text *);
-extern DateTime *jet_rt_handle_field_JetZonedDateTime_instant(Zoned *);
-extern Zone *jet_rt_handle_field_JetZonedDateTime_zone(Zoned *);
+extern unsigned char *jet_rt_handle_field_jet_date_time_leap_second(DateTime *);
+extern void jet_rt_handle_field_jet_zone_name(Zone *,Text *);
+extern DateTime *jet_rt_handle_field_jet_zoned_date_time_instant(Zoned *);
+extern Zone *jet_rt_handle_field_jet_zoned_date_time_zone(Zoned *);
 static struct { void *p; int64_t bytes,align; unsigned frees; } watched[48];
 static size_t count;
 static unsigned intercepted;
@@ -76,73 +76,73 @@ static void check_texts(Text *s,Text *d,Text *g,const char *expected) {
     watch_text(s); watch_text(d); watch_text(g); jet_rt_string_drop(s); jet_rt_string_drop(d); jet_rt_string_drop(g); done();
 }
 static void date_render(int64_t seconds,uint64_t nanos,uint64_t leap,const char *expected) {
-    DateTime *a=datetime(seconds,nanos,leap),*b=jet_rt_handle_clone_JetDateTime(a);
+    DateTime *a=datetime(seconds,nanos,leap),*b=jet_rt_handle_clone_jet_date_time(a);
     assert(a!=b && b->seconds==seconds && b->nanos==(nanos&UINT64_C(0xffffffff)) && b->leap==((leap&255)!=0));
-    unsigned char *field=jet_rt_handle_field_JetDateTime_leap_second(a);
+    unsigned char *field=jet_rt_handle_field_jet_date_time_leap_second(a);
     assert(field==(unsigned char *)&a->leap && *field==(unsigned char)leap);
-    assert(jet_rt_handle_eq_JetDateTime(a,b));
-    Text *s=jet_rt_handle_show_JetDateTime(a),*d=jet_rt_handle_display_JetDateTime(a),*g=jet_rt_handle_debug_JetDateTime(a);
-    watch(a,24,8); watch(b,24,8); jet_rt_handle_drop_JetDateTime(a); jet_rt_handle_drop_JetDateTime(b); done();
+    assert(jet_rt_handle_eq_jet_date_time(a,b));
+    Text *s=jet_rt_handle_show_jet_date_time(a),*d=jet_rt_handle_display_jet_date_time(a),*g=jet_rt_handle_debug_jet_date_time(a);
+    watch(a,24,8); watch(b,24,8); jet_rt_handle_drop_jet_date_time(a); jet_rt_handle_drop_jet_date_time(b); done();
     check_texts(s,d,g,expected);
 }
 static void zoned_render(int64_t seconds,uint64_t nanos,uint64_t leap,const char *name,int64_t offset,const char *expected) {
-    Zoned *a=zoned(seconds,nanos,leap,name,offset),*b=jet_rt_handle_clone_JetZonedDateTime(a);
-    assert(a!=b && a->instant!=b->instant && a->zone!=b->zone && jet_rt_handle_eq_JetZonedDateTime(a,b));
-    assert(jet_rt_handle_field_JetZonedDateTime_instant(a)==a->instant && jet_rt_handle_field_JetZonedDateTime_zone(a)==a->zone);
-    Text *s=jet_rt_handle_show_JetZonedDateTime(a),*d=jet_rt_handle_display_JetZonedDateTime(a),*g=jet_rt_handle_debug_JetZonedDateTime(a);
-    watch_zoned(a); jet_rt_handle_drop_JetZonedDateTime(a); done();
-    Text *survivor=jet_rt_handle_show_JetZonedDateTime(b); text_is(survivor,expected);
+    Zoned *a=zoned(seconds,nanos,leap,name,offset),*b=jet_rt_handle_clone_jet_zoned_date_time(a);
+    assert(a!=b && a->instant!=b->instant && a->zone!=b->zone && jet_rt_handle_eq_jet_zoned_date_time(a,b));
+    assert(jet_rt_handle_field_jet_zoned_date_time_instant(a)==a->instant && jet_rt_handle_field_jet_zoned_date_time_zone(a)==a->zone);
+    Text *s=jet_rt_handle_show_jet_zoned_date_time(a),*d=jet_rt_handle_display_jet_zoned_date_time(a),*g=jet_rt_handle_debug_jet_zoned_date_time(a);
+    watch_zoned(a); jet_rt_handle_drop_jet_zoned_date_time(a); done();
+    Text *survivor=jet_rt_handle_show_jet_zoned_date_time(b); text_is(survivor,expected);
     watch_text(survivor); jet_rt_string_drop(survivor); done();
-    watch_zoned(b); jet_rt_handle_drop_JetZonedDateTime(b); done(); check_texts(s,d,g,expected);
+    watch_zoned(b); jet_rt_handle_drop_jet_zoned_date_time(b); done(); check_texts(s,d,g,expected);
 }
 static void equality(void) {
-    DateTime *a=datetime(1,UINT64_C(0xabcdef000000007b),UINT64_C(0xabcdef0000000080)),*b=jet_rt_handle_clone_JetDateTime(a);
-    assert(b->nanos==123 && b->leap==1 && jet_rt_handle_eq_JetDateTime(a,b));
-    ++b->seconds; assert(!jet_rt_handle_eq_JetDateTime(a,b)); --b->seconds;
-    ++b->nanos; assert(!jet_rt_handle_eq_JetDateTime(a,b)); --b->nanos;
-    b->leap=0; assert(!jet_rt_handle_eq_JetDateTime(a,b)); b->leap=255;
-    assert(jet_rt_handle_eq_JetDateTime(a,b));
-    watch(a,24,8); watch(b,24,8); jet_rt_handle_drop_JetDateTime(a); jet_rt_handle_drop_JetDateTime(b); done();
-    Zoned *x=zoned(1,2,0,"same",20700),*y=jet_rt_handle_clone_JetZonedDateTime(x);
+    DateTime *a=datetime(1,UINT64_C(0xabcdef000000007b),UINT64_C(0xabcdef0000000080)),*b=jet_rt_handle_clone_jet_date_time(a);
+    assert(b->nanos==123 && b->leap==1 && jet_rt_handle_eq_jet_date_time(a,b));
+    ++b->seconds; assert(!jet_rt_handle_eq_jet_date_time(a,b)); --b->seconds;
+    ++b->nanos; assert(!jet_rt_handle_eq_jet_date_time(a,b)); --b->nanos;
+    b->leap=0; assert(!jet_rt_handle_eq_jet_date_time(a,b)); b->leap=255;
+    assert(jet_rt_handle_eq_jet_date_time(a,b));
+    watch(a,24,8); watch(b,24,8); jet_rt_handle_drop_jet_date_time(a); jet_rt_handle_drop_jet_date_time(b); done();
+    Zoned *x=zoned(1,2,0,"same",20700),*y=jet_rt_handle_clone_jet_zoned_date_time(x);
     y->zone->infos->data[0].first=-12600;
-    assert(!jet_rt_handle_eq_JetZone(x->zone,y->zone) && jet_rt_handle_eq_JetZonedDateTime(x,y));
-    y->zone->name->data[0]^=1; assert(!jet_rt_handle_eq_JetZonedDateTime(x,y)); y->zone->name->data[0]^=1;
-    ++y->instant->seconds; assert(!jet_rt_handle_eq_JetZonedDateTime(x,y)); --y->instant->seconds;
-    watch_zoned(x); watch_zoned(y); jet_rt_handle_drop_JetZonedDateTime(x); jet_rt_handle_drop_JetZonedDateTime(y); done();
+    assert(!jet_rt_handle_eq_jet_zone(x->zone,y->zone) && jet_rt_handle_eq_jet_zoned_date_time(x,y));
+    y->zone->name->data[0]^=1; assert(!jet_rt_handle_eq_jet_zoned_date_time(x,y)); y->zone->name->data[0]^=1;
+    ++y->instant->seconds; assert(!jet_rt_handle_eq_jet_zoned_date_time(x,y)); --y->instant->seconds;
+    watch_zoned(x); watch_zoned(y); jet_rt_handle_drop_jet_zoned_date_time(x); jet_rt_handle_drop_jet_zoned_date_time(y); done();
 }
 static void zones(void) {
     Zone *a=zone("\xcf\x80\n",0);
     Pair transitions[]={{0,1},{10,2},{10,0},{20,2}},infos[]={{0,0},{20700,UINT64_C(0xabcdef0000000080)},{-12600,1}};
     watch_rows(a->transitions); __wrap_jet_rt_free(a->transitions,24,8); done(); a->transitions=rows(transitions,4,2);
     watch_rows(a->infos); __wrap_jet_rt_free(a->infos->data,a->infos->capacity*16,8); __wrap_jet_rt_free(a->infos,24,8); done(); a->infos=rows(infos,3,1);
-    Zone *b=jet_rt_handle_clone_JetZone(a); assert(a!=b && a->name!=b->name && a->transitions!=b->transitions && a->infos!=b->infos);
+    Zone *b=jet_rt_handle_clone_jet_zone(a); assert(a!=b && a->name!=b->name && a->transitions!=b->transitions && a->infos!=b->infos);
     assert(a->transitions->data!=b->transitions->data && a->infos->data!=b->infos->data && b->infos->data[1].second==1);
-    assert(jet_rt_handle_eq_JetZone(a,b));
-    Text field={0}; jet_rt_handle_field_JetZone_name(a,&field);
+    assert(jet_rt_handle_eq_jet_zone(a,b));
+    Text field={0}; jet_rt_handle_field_jet_zone_name(a,&field);
     assert(field.data==a->name->data && field.length==a->name->length && field.capacity==a->name->capacity);
     Text *owned=jet_rt_string_clone(&field); assert(owned!=a->name && owned->data!=a->name->data);
-    Text *s=jet_rt_handle_show_JetZone(a),*d=jet_rt_handle_display_JetZone(a),*g=jet_rt_handle_debug_JetZone(a);
+    Text *s=jet_rt_handle_show_jet_zone(a),*d=jet_rt_handle_display_jet_zone(a),*g=jet_rt_handle_debug_jet_zone(a);
     for(int64_t i=0;i<4;++i) {
-        ++b->transitions->data[i].first; assert(!jet_rt_handle_eq_JetZone(a,b)); --b->transitions->data[i].first;
-        b->transitions->data[i].second^=1; assert(!jet_rt_handle_eq_JetZone(a,b)); b->transitions->data[i].second^=1;
+        ++b->transitions->data[i].first; assert(!jet_rt_handle_eq_jet_zone(a,b)); --b->transitions->data[i].first;
+        b->transitions->data[i].second^=1; assert(!jet_rt_handle_eq_jet_zone(a,b)); b->transitions->data[i].second^=1;
     }
     for(int64_t i=0;i<3;++i) {
-        ++b->infos->data[i].first; assert(!jet_rt_handle_eq_JetZone(a,b)); --b->infos->data[i].first;
+        ++b->infos->data[i].first; assert(!jet_rt_handle_eq_jet_zone(a,b)); --b->infos->data[i].first;
         uint64_t saved=b->infos->data[i].second; b->infos->data[i].second=(saved&255)?0:1;
-        assert(!jet_rt_handle_eq_JetZone(a,b)); b->infos->data[i].second=saved;
+        assert(!jet_rt_handle_eq_jet_zone(a,b)); b->infos->data[i].second=saved;
     }
-    --b->transitions->length; assert(!jet_rt_handle_eq_JetZone(a,b)); ++b->transitions->length;
-    --b->infos->length; assert(!jet_rt_handle_eq_JetZone(a,b)); ++b->infos->length;
-    b->name->data[0]^=1; assert(!jet_rt_handle_eq_JetZone(a,b)); b->name->data[0]^=1;
-    watch_zone(b); jet_rt_handle_drop_JetZone(b); done();
+    --b->transitions->length; assert(!jet_rt_handle_eq_jet_zone(a,b)); ++b->transitions->length;
+    --b->infos->length; assert(!jet_rt_handle_eq_jet_zone(a,b)); ++b->infos->length;
+    b->name->data[0]^=1; assert(!jet_rt_handle_eq_jet_zone(a,b)); b->name->data[0]^=1;
+    watch_zone(b); jet_rt_handle_drop_jet_zone(b); done();
     const int64_t seconds[]={-1,0,9,10,19,20};
     const char *expected[]={"1969-12-31 23:59:59 \xcf\x80\n (+00:00)","1970-01-01 05:45:00 \xcf\x80\n (+05:45)","1970-01-01 05:45:09 \xcf\x80\n (+05:45)","1970-01-01 00:00:10 \xcf\x80\n (+00:00)","1970-01-01 00:00:19 \xcf\x80\n (+00:00)","1969-12-31 20:30:20 \xcf\x80\n (-03:30)"};
     for(size_t i=0;i<6;++i) {
-        Zoned *z=jet_rt_alloc(16,8); z->instant=datetime(seconds[i],123,0); z->zone=jet_rt_handle_clone_JetZone(a);
-        Text *render=jet_rt_handle_show_JetZonedDateTime(z); text_is(render,expected[i]); watch_text(render); jet_rt_string_drop(render); done();
-        watch_zoned(z); jet_rt_handle_drop_JetZonedDateTime(z); done();
+        Zoned *z=jet_rt_alloc(16,8); z->instant=datetime(seconds[i],123,0); z->zone=jet_rt_handle_clone_jet_zone(a);
+        Text *render=jet_rt_handle_show_jet_zoned_date_time(z); text_is(render,expected[i]); watch_text(render); jet_rt_string_drop(render); done();
+        watch_zoned(z); jet_rt_handle_drop_jet_zoned_date_time(z); done();
     }
-    watch_zone(a); jet_rt_handle_drop_JetZone(a); done();
+    watch_zone(a); jet_rt_handle_drop_jet_zone(a); done();
     text_is(owned,"\xcf\x80\n"); watch_text(owned); jet_rt_string_drop(owned); done(); check_texts(s,d,g,"\xcf\x80\n");
 }
 int main(int argc,char **argv) {
@@ -157,7 +157,7 @@ int main(int argc,char **argv) {
             watch_rows(z->zone->transitions); __wrap_jet_rt_free(z->zone->transitions,24,8); done();
             z->zone->transitions=rows(&transition,1,0);
         }
-        (void)jet_rt_handle_show_JetZonedDateTime(z);
+        (void)jet_rt_handle_show_jet_zoned_date_time(z);
         assert(!"invalid zone-info index unexpectedly returned"); return 1;
     }
     assert(argc==1); equality(); zones();
@@ -174,6 +174,6 @@ int main(int argc,char **argv) {
     zoned_render(INT64_MIN,0,0,"West",-12600,"-292277022657-01-27 08:29:52 West (-03:30)");
     zoned_render(-62167219200LL,0,0,"West",-12600,"-0001-12-31 20:30:00 West (-03:30)");
     zoned_render(0,123456789,0,"UTC",0,"1970-01-01 00:00:00 UTC (+00:00)");
-    jet_rt_handle_drop_JetDateTime(NULL); jet_rt_handle_drop_JetZone(NULL); jet_rt_handle_drop_JetZonedDateTime(NULL);
+    jet_rt_handle_drop_jet_date_time(NULL); jet_rt_handle_drop_jet_zone(NULL); jet_rt_handle_drop_jet_zoned_date_time(NULL);
     puts("DateZone ownership/equality/render OK"); return 0;
 }

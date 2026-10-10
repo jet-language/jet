@@ -5,7 +5,7 @@
 HTTP_HEADER_ENTRY_BYTES :: prep { I64{16} }
 HTTP_HEADER_NAME :: prep { I64{0} }
 HTTP_HEADER_VALUE :: prep { I64{8} }
-#Export(c) fn jet_rt_handle_clone_JetHTTPHeaders(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_http_headers(value: I64) -> I64 {
     length :: data_tree_word(value + DATA_SEQUENCE_LENGTH)
     result :: data_sequence_new(length, HTTP_HEADER_ENTRY_BYTES)
     source :: data_tree_word(value + DATA_SEQUENCE_DATA)
@@ -21,7 +21,7 @@ HTTP_HEADER_VALUE :: prep { I64{8} }
     data_tree_store(result + DATA_SEQUENCE_LENGTH, length)
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetHTTPHeaders(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_http_headers(value: I64) {
     if (value == I64{0}) -> return
     length :: data_tree_word(value + DATA_SEQUENCE_LENGTH)
     capacity :: data_tree_word(value + DATA_SEQUENCE_CAPACITY)
@@ -36,7 +36,7 @@ HTTP_HEADER_VALUE :: prep { I64{8} }
     if (capacity != I64{0}) -> jet_rt_free(data, capacity * HTTP_HEADER_ENTRY_BYTES, I64{8})
     jet_rt_free(value, DATA_SEQUENCE_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetHTTPHeaders(left: I64, right: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_http_headers(left: I64, right: I64) -> Bool {
     length :: data_tree_word(left + DATA_SEQUENCE_LENGTH)
     if (length != data_tree_word(right + DATA_SEQUENCE_LENGTH)) -> return false
     a :: data_tree_word(left + DATA_SEQUENCE_DATA)

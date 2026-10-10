@@ -12,29 +12,29 @@ types[5].record = { kind: 'enum', members: [{ name: 'Absent', kind: null }, { na
 types[0].fields = [{ name: 'label', kind: 'Text' }];
 const descriptors = nativeRecordExports(types);
 assert.equal(descriptors.length, 34);
-assert.ok(descriptors.some((row) => row.name === 'jet_rt_record_new_Record5_Absent'));
-assert.ok(!descriptors.some((row) => row.name === 'jet_rt_record_get_Record5_Absent'));
-assert.ok(descriptors.some((row) => row.name === 'jet_rt_record_seq_Entries_Rec_Record0_key'));
-assert.ok(descriptors.some((row) => row.name === 'jet_rt_handle_field_Record0_label'));
+assert.ok(descriptors.some((row) => row.name === 'jet_rt_record_new_record5_absent'));
+assert.ok(!descriptors.some((row) => row.name === 'jet_rt_record_get_record5_absent'));
+assert.ok(descriptors.some((row) => row.name === 'jet_rt_record_seq_entries_rec_record0_key'));
+assert.ok(descriptors.some((row) => row.name === 'jet_rt_handle_field_record0_label'));
 const repeated = nativeRecordExports([...types, { ...types[8], runtime: 'Another', record: types[8].record }]);
-assert.equal(repeated.filter((row) => row.name === 'jet_rt_record_seq_List_Byte_new').length, 1);
+assert.equal(repeated.filter((row) => row.name === 'jet_rt_record_seq_list_byte_new').length, 1);
 assert.deepEqual(nativeRecordExports([{ runtime: 'RustOnly', jetName: 'RustOnly' }]), []);
 const callers = new Map([
-  ['jet_rt_record_get_Record0_value', ['native.external.read', 'native.external.read']],
-  ['jet_rt_record_new_Record5_Present', ['native.leaf.create']],
+  ['jet_rt_record_get_record0_value', ['native.external.read', 'native.external.read']],
+  ['jet_rt_record_new_record5_present', ['native.leaf.create']],
 ]);
 const partition = partitionNativeRecordExports(types, callers);
 assert.equal(partition.synthesized.length, 2);
 assert.equal(partition.deleted.length, 32);
 assert.deepEqual(partition.synthesized.find((row) => row.op === 'record.get').callers, ['native.external.read']);
-assert.throws(() => partitionNativeRecordExports(types, new Map([['jet_rt_record_new_Record0', ['']]])), /caller witness/);
+assert.throws(() => partitionNativeRecordExports(types, new Map([['jet_rt_record_new_record0', ['']]])), /caller witness/);
 assert.throws(() => nativeRecordExports([types[0], types[0]]), /duplicate ownership/);
 assert.throws(() => nativeRecordExports([{ ...types[0], record: { kind: 'struct', members: [{ name: 'bad', kind: 'Entries.Byte' }] } }]), /unsupported carrier/);
 assert.throws(() => nativeRecordExports([{ ...types[0], record: { kind: 'struct', members: [{ name: 'bad', kind: null }] } }]), /no carrier/);
 
 const source = types.map((type, index) => `pub struct Record${index} { value: Int }`).join('\n');
 const routes = types.map((type) => `LowerRuntimeHandle{jet_name: "${type.jetName}", runtime: "${type.runtime}"},\nLowerRecordSchema{jet_name: "${type.runtime}", variants: "", fields: "value=Int"},`).join('\n') + '\nLowerRuntimeHandle{jet_name: "RustOnly", runtime: "RustOnly"},';
-const inventory = 'symbol\tlayer\n' + descriptors.map((row) => `${row.name}\tcabi-glue`).join('\n') + '\njet_rt_handle_drop_RustOnly\tcabi-glue\n';
+const inventory = 'symbol\tlayer\n' + descriptors.map((row) => `${row.name}\tcabi-glue`).join('\n') + '\njet_rt_handle_drop_rust_only\tcabi-glue\n';
 const report = classifyNativeInventory(inventory, routes, (path) => path === 'Core/fixture/fixture.jet' ? source : null);
 assert.equal(report.counts.types, 11);
 assert.equal(report.counts.sourceRecordCandidates, 10);

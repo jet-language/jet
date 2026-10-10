@@ -19,27 +19,27 @@ extern void __real_jet_rt_free(void *,int64_t,int64_t);
 extern void jet_rt_string_drop(Text *);
 extern Text *jet_rt_float_debug(double);
 extern Text *jet_rt_float_to_string(double);
-extern Complex *jet_rt_record_new_JetComplex(double,double);
-extern Complex *jet_rt_handle_clone_JetComplex(Complex *);
-extern void jet_rt_handle_drop_JetComplex(Complex *);
-extern bool jet_rt_handle_eq_JetComplex(Complex *,Complex *);
-extern double jet_rt_record_get_JetComplex_real(Complex *);
-extern double jet_rt_record_get_JetComplex_imaginary(Complex *);
-extern Text *jet_rt_handle_show_JetComplex(Complex *);
-extern Text *jet_rt_handle_display_JetComplex(Complex *);
-extern Text *jet_rt_handle_debug_JetComplex(Complex *);
-extern Size *jet_rt_record_new_JetSizeConstraint(double,double,double,double);
-extern Size *jet_rt_handle_clone_JetSizeConstraint(Size *);
-extern void jet_rt_handle_drop_JetSizeConstraint(Size *);
-extern bool jet_rt_handle_eq_JetSizeConstraint(Size *,Size *);
-extern double jet_rt_record_get_JetSizeConstraint_min_width(Size *);
-extern double jet_rt_record_get_JetSizeConstraint_min_height(Size *);
-extern double jet_rt_record_get_JetSizeConstraint_max_width(Size *);
-extern double jet_rt_record_get_JetSizeConstraint_max_height(Size *);
-extern Rng *jet_rt_handle_clone_Rng(Rng *);
-extern void jet_rt_handle_drop_Rng(Rng *);
-extern bool jet_rt_handle_eq_Rng(Rng *,Rng *);
-extern Text *jet_rt_handle_show_Rng(Rng *);
+extern Complex *jet_rt_record_new_jet_complex(double,double);
+extern Complex *jet_rt_handle_clone_jet_complex(Complex *);
+extern void jet_rt_handle_drop_jet_complex(Complex *);
+extern bool jet_rt_handle_eq_jet_complex(Complex *,Complex *);
+extern double jet_rt_record_get_jet_complex_real(Complex *);
+extern double jet_rt_record_get_jet_complex_imaginary(Complex *);
+extern Text *jet_rt_handle_show_jet_complex(Complex *);
+extern Text *jet_rt_handle_display_jet_complex(Complex *);
+extern Text *jet_rt_handle_debug_jet_complex(Complex *);
+extern Size *jet_rt_record_new_jet_size_constraint(double,double,double,double);
+extern Size *jet_rt_handle_clone_jet_size_constraint(Size *);
+extern void jet_rt_handle_drop_jet_size_constraint(Size *);
+extern bool jet_rt_handle_eq_jet_size_constraint(Size *,Size *);
+extern double jet_rt_record_get_jet_size_constraint_min_width(Size *);
+extern double jet_rt_record_get_jet_size_constraint_min_height(Size *);
+extern double jet_rt_record_get_jet_size_constraint_max_width(Size *);
+extern double jet_rt_record_get_jet_size_constraint_max_height(Size *);
+extern Rng *jet_rt_handle_clone_rng(Rng *);
+extern void jet_rt_handle_drop_rng(Rng *);
+extern bool jet_rt_handle_eq_rng(Rng *,Rng *);
+extern Text *jet_rt_handle_show_rng(Rng *);
 static struct { void *p; int64_t bytes,align; unsigned frees; } watched[24];
 static size_t count;
 static unsigned interceptions;
@@ -66,58 +66,58 @@ static void text_is(Text *t,const char *expected) {
 static double from_bits(uint64_t bits) { double d; memcpy(&d,&bits,8); return d; }
 static uint64_t bits(double d) { uint64_t b; memcpy(&b,&d,8); return b; }
 static void complex_render(double real,double imaginary,const char *expected) {
-    Complex *a=jet_rt_record_new_JetComplex(real,imaginary),*b=jet_rt_handle_clone_JetComplex(a);
+    Complex *a=jet_rt_record_new_jet_complex(real,imaginary),*b=jet_rt_handle_clone_jet_complex(a);
     assert(a!=b && memcmp(a,b,16)==0);
-    assert(bits(jet_rt_record_get_JetComplex_real(a))==bits(real));
-    assert(bits(jet_rt_record_get_JetComplex_imaginary(a))==bits(imaginary));
-    Text *s=jet_rt_handle_show_JetComplex(a),*d=jet_rt_handle_display_JetComplex(a),*g=jet_rt_handle_debug_JetComplex(a);
+    assert(bits(jet_rt_record_get_jet_complex_real(a))==bits(real));
+    assert(bits(jet_rt_record_get_jet_complex_imaginary(a))==bits(imaginary));
+    Text *s=jet_rt_handle_show_jet_complex(a),*d=jet_rt_handle_display_jet_complex(a),*g=jet_rt_handle_debug_jet_complex(a);
     assert(s!=d && s!=g && d!=g);
     text_is(s,expected); text_is(d,expected); text_is(g,expected);
-    watch(a,16,8); watch(b,16,8); jet_rt_handle_drop_JetComplex(a); jet_rt_handle_drop_JetComplex(b); done();
+    watch(a,16,8); watch(b,16,8); jet_rt_handle_drop_jet_complex(a); jet_rt_handle_drop_jet_complex(b); done();
     text_is(s,expected); watch_text(s); watch_text(d); watch_text(g);
     jet_rt_string_drop(s); jet_rt_string_drop(d); jet_rt_string_drop(g); done();
 }
 static void equality(void) {
-    Complex *a=jet_rt_record_new_JetComplex(1,2),*b=jet_rt_handle_clone_JetComplex(a);
-    Size *s=jet_rt_record_new_JetSizeConstraint(1,2,3,4),*t=jet_rt_handle_clone_JetSizeConstraint(s);
+    Complex *a=jet_rt_record_new_jet_complex(1,2),*b=jet_rt_handle_clone_jet_complex(a);
+    Size *s=jet_rt_record_new_jet_size_constraint(1,2,3,4),*t=jet_rt_handle_clone_jet_size_constraint(s);
     assert(s!=t && memcmp(s,t,32)==0);
-    assert(jet_rt_record_get_JetSizeConstraint_min_width(s)==1 && jet_rt_record_get_JetSizeConstraint_min_height(s)==2);
-    assert(jet_rt_record_get_JetSizeConstraint_max_width(s)==3 && jet_rt_record_get_JetSizeConstraint_max_height(s)==4);
-    assert(jet_rt_handle_eq_JetComplex(a,b) && jet_rt_handle_eq_JetSizeConstraint(s,t));
+    assert(jet_rt_record_get_jet_size_constraint_min_width(s)==1 && jet_rt_record_get_jet_size_constraint_min_height(s)==2);
+    assert(jet_rt_record_get_jet_size_constraint_max_width(s)==3 && jet_rt_record_get_jet_size_constraint_max_height(s)==4);
+    assert(jet_rt_handle_eq_jet_complex(a,b) && jet_rt_handle_eq_jet_size_constraint(s,t));
     double *af[]={&a->real,&a->imaginary},*bf[]={&b->real,&b->imaginary};
     double *sf[]={&s->min_width,&s->min_height,&s->max_width,&s->max_height};
     double *tf[]={&t->min_width,&t->min_height,&t->max_width,&t->max_height};
     for(size_t i=0;i<2;++i) {
-        double saved=*af[i]; *bf[i]+=1; assert(!jet_rt_handle_eq_JetComplex(a,b));
+        double saved=*af[i]; *bf[i]+=1; assert(!jet_rt_handle_eq_jet_complex(a,b));
         *af[i]=from_bits(UINT64_C(0xfff8000000000123)); *bf[i]=*af[i];
-        assert(!jet_rt_handle_eq_JetComplex(a,a) && !jet_rt_handle_eq_JetComplex(a,b));
-        *af[i]=-0.0; *bf[i]=0.0; assert(jet_rt_handle_eq_JetComplex(a,b)); *af[i]=saved; *bf[i]=saved;
+        assert(!jet_rt_handle_eq_jet_complex(a,a) && !jet_rt_handle_eq_jet_complex(a,b));
+        *af[i]=-0.0; *bf[i]=0.0; assert(jet_rt_handle_eq_jet_complex(a,b)); *af[i]=saved; *bf[i]=saved;
     }
     for(size_t i=0;i<4;++i) {
-        double saved=*sf[i]; *tf[i]+=1; assert(!jet_rt_handle_eq_JetSizeConstraint(s,t));
+        double saved=*sf[i]; *tf[i]+=1; assert(!jet_rt_handle_eq_jet_size_constraint(s,t));
         *sf[i]=from_bits(UINT64_C(0x7ff8000000000123)); *tf[i]=*sf[i];
-        assert(!jet_rt_handle_eq_JetSizeConstraint(s,s) && !jet_rt_handle_eq_JetSizeConstraint(s,t));
-        *sf[i]=-0.0; *tf[i]=0.0; assert(jet_rt_handle_eq_JetSizeConstraint(s,t)); *sf[i]=saved; *tf[i]=saved;
+        assert(!jet_rt_handle_eq_jet_size_constraint(s,s) && !jet_rt_handle_eq_jet_size_constraint(s,t));
+        *sf[i]=-0.0; *tf[i]=0.0; assert(jet_rt_handle_eq_jet_size_constraint(s,t)); *sf[i]=saved; *tf[i]=saved;
     }
     s->max_height=from_bits(UINT64_C(0xfff8000000000456));
-    Size *u=jet_rt_handle_clone_JetSizeConstraint(s);
-    assert(u!=s && memcmp(s,u,32)==0 && bits(jet_rt_record_get_JetSizeConstraint_max_height(u))==UINT64_C(0xfff8000000000456));
+    Size *u=jet_rt_handle_clone_jet_size_constraint(s);
+    assert(u!=s && memcmp(s,u,32)==0 && bits(jet_rt_record_get_jet_size_constraint_max_height(u))==UINT64_C(0xfff8000000000456));
     watch(a,16,8); watch(b,16,8); watch(s,32,8); watch(t,32,8); watch(u,32,8);
-    jet_rt_handle_drop_JetComplex(a); jet_rt_handle_drop_JetComplex(b);
-    jet_rt_handle_drop_JetSizeConstraint(s); jet_rt_handle_drop_JetSizeConstraint(t); jet_rt_handle_drop_JetSizeConstraint(u); done();
-    jet_rt_handle_drop_JetComplex(NULL); jet_rt_handle_drop_JetSizeConstraint(NULL);
+    jet_rt_handle_drop_jet_complex(a); jet_rt_handle_drop_jet_complex(b);
+    jet_rt_handle_drop_jet_size_constraint(s); jet_rt_handle_drop_jet_size_constraint(t); jet_rt_handle_drop_jet_size_constraint(u); done();
+    jet_rt_handle_drop_jet_complex(NULL); jet_rt_handle_drop_jet_size_constraint(NULL);
 }
 static void rngs(void) {
     const uint64_t states[]={0,1,UINT64_C(0x8000000000000000),UINT64_MAX};
     for(size_t i=0;i<4;++i) {
-        Rng *a=jet_rt_alloc(8,8); a->state=states[i]; Rng *b=jet_rt_handle_clone_Rng(a);
-        assert(a!=b && b->state==states[i] && jet_rt_handle_eq_Rng(a,b));
-        b->state^=1; assert(!jet_rt_handle_eq_Rng(a,b)); b->state^=1;
-        Text *s=jet_rt_handle_show_Rng(a); text_is(s,"RNG { .. }");
+        Rng *a=jet_rt_alloc(8,8); a->state=states[i]; Rng *b=jet_rt_handle_clone_rng(a);
+        assert(a!=b && b->state==states[i] && jet_rt_handle_eq_rng(a,b));
+        b->state^=1; assert(!jet_rt_handle_eq_rng(a,b)); b->state^=1;
+        Text *s=jet_rt_handle_show_rng(a); text_is(s,"RNG { .. }");
         watch(a,8,8); watch(b,8,8); watch_text(s);
-        jet_rt_handle_drop_Rng(a); jet_rt_handle_drop_Rng(b); jet_rt_string_drop(s); done();
+        jet_rt_handle_drop_rng(a); jet_rt_handle_drop_rng(b); jet_rt_string_drop(s); done();
     }
-    jet_rt_handle_drop_Rng(NULL);
+    jet_rt_handle_drop_rng(NULL);
 }
 static void old_debug(double value,const char *expected) {
     Text *a=jet_rt_float_to_string(value),*b=jet_rt_float_debug(value);

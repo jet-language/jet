@@ -22,9 +22,9 @@ extern int64_t jet_int_sub(int64_t, int64_t);
 extern int64_t jet_int_compare(int64_t, int64_t);
 extern int64_t jet_rt_int_clone(int64_t);
 extern void jet_rt_int_drop(int64_t);
-extern Error *jet_rt_handle_clone_Error(const Error *);
-extern void jet_rt_handle_drop_Error(Error *);
-extern bool jet_rt_handle_eq_Error(const Error *, const Error *);
+extern Error *jet_rt_handle_clone_error(const Error *);
+extern void jet_rt_handle_drop_error(Error *);
+extern bool jet_rt_handle_eq_error(const Error *, const Error *);
 static struct { const void *pointer; int64_t bytes, align; unsigned frees; } watched[9];
 static unsigned nwatched;
 void __wrap_jet_rt_free(void *pointer, int64_t bytes, int64_t align) {
@@ -69,25 +69,25 @@ static void text(const Text *value, const Text *expected) {
 static void different_fields(Error *a, Error *b, int64_t zero, int64_t one) {
     Text changed = {"changed", 7, 0};
     Text *saved_text = b->operation; b->operation = jet_rt_string_clone(&changed);
-    assert(!jet_rt_handle_eq_Error(a, b)); jet_rt_string_drop(b->operation); b->operation = saved_text;
+    assert(!jet_rt_handle_eq_error(a, b)); jet_rt_string_drop(b->operation); b->operation = saved_text;
     Text **saved_server = b->server;
-    b->server = NULL; if (saved_server) assert(!jet_rt_handle_eq_Error(a, b));
+    b->server = NULL; if (saved_server) assert(!jet_rt_handle_eq_error(a, b));
     else { b->server = jet_rt_alloc(8, 8); *b->server = jet_rt_string_clone(&changed);
-           assert(!jet_rt_handle_eq_Error(a, b)); jet_rt_string_drop(*b->server);
+           assert(!jet_rt_handle_eq_error(a, b)); jet_rt_string_drop(*b->server);
            __real_jet_rt_free(b->server, 8, 8); }
     b->server = saved_server;
     if (saved_server) {
         Text *saved_payload = *saved_server; *saved_server = jet_rt_string_clone(&changed);
-        assert(!jet_rt_handle_eq_Error(a, b)); jet_rt_string_drop(*saved_server);
+        assert(!jet_rt_handle_eq_error(a, b)); jet_rt_string_drop(*saved_server);
         *saved_server = saved_payload;
     }
     int64_t *saved_code = b->code; int64_t altered = one;
-    if (saved_code) { b->code = NULL; assert(!jet_rt_handle_eq_Error(a, b)); b->code = saved_code; }
+    if (saved_code) { b->code = NULL; assert(!jet_rt_handle_eq_error(a, b)); b->code = saved_code; }
     if (saved_code && jet_int_compare(*saved_code, one) == 0) altered = zero;
-    b->code = &altered; assert(!jet_rt_handle_eq_Error(a, b)); b->code = saved_code;
+    b->code = &altered; assert(!jet_rt_handle_eq_error(a, b)); b->code = saved_code;
     saved_text = b->reason; b->reason = jet_rt_string_clone(&changed);
-    assert(!jet_rt_handle_eq_Error(a, b)); jet_rt_string_drop(b->reason); b->reason = saved_text;
-    assert(jet_rt_handle_eq_Error(a, b));
+    assert(!jet_rt_handle_eq_error(a, b)); jet_rt_string_drop(b->reason); b->reason = saved_text;
+    assert(jet_rt_handle_eq_error(a, b));
 }
 int main(int argc, char **argv) {
     jet_rt_alloc_init();
@@ -96,10 +96,10 @@ int main(int argc, char **argv) {
     if (argc > 1) {
         Error *bad = literal(strstr(argv[1], "-negative") ? -1 : 11, &empty, NULL, false, 0, &empty);
         Error *good = literal(0, &empty, NULL, false, 0, &empty);
-        if (strncmp(argv[1], "bad-clone", 9) == 0) (void)jet_rt_handle_clone_Error(bad);
-        else if (strncmp(argv[1], "bad-drop", 8) == 0) jet_rt_handle_drop_Error(bad);
-        else if (strncmp(argv[1], "bad-eq-left", 11) == 0) (void)jet_rt_handle_eq_Error(bad, good);
-        else if (strncmp(argv[1], "bad-eq-right", 12) == 0) (void)jet_rt_handle_eq_Error(good, bad);
+        if (strncmp(argv[1], "bad-clone", 9) == 0) (void)jet_rt_handle_clone_error(bad);
+        else if (strncmp(argv[1], "bad-drop", 8) == 0) jet_rt_handle_drop_error(bad);
+        else if (strncmp(argv[1], "bad-eq-left", 11) == 0) (void)jet_rt_handle_eq_error(bad, good);
+        else if (strncmp(argv[1], "bad-eq-right", 12) == 0) (void)jet_rt_handle_eq_error(good, bad);
         else return 2;
         assert(!"bad variant must stop"); return 1;
     }
@@ -110,28 +110,28 @@ int main(int argc, char **argv) {
         const Text *srv = (mode & 1) ? ((tag & 1) ? &empty : &server) : NULL;
         int64_t code = tag % 3 == 0 ? zero : tag % 3 == 1 ? big : negative;
         Error *a = literal(tag, &raw, srv, (mode & 2) != 0, code, &reason);
-        Error *b = jet_rt_handle_clone_Error(a);
-        assert(a != b && b->tag == tag && jet_rt_handle_eq_Error(a, b));
+        Error *b = jet_rt_handle_clone_error(a);
+        assert(a != b && b->tag == tag && jet_rt_handle_eq_error(a, b));
         assert(a->operation != b->operation && a->reason != b->reason);
         if (srv) assert(a->server != b->server && *a->server != *b->server);
         if (mode & 2) assert(a->code != b->code && jet_int_compare(*b->code, code) == 0);
-        b->tag = (tag + 1) % 11; assert(!jet_rt_handle_eq_Error(a, b)); b->tag = tag;
+        b->tag = (tag + 1) % 11; assert(!jet_rt_handle_eq_error(a, b)); b->tag = tag;
         different_fields(a, b, zero, one);
-        watch(a); jet_rt_handle_drop_Error(a); done();
+        watch(a); jet_rt_handle_drop_error(a); done();
         text(b->operation, &raw); text(b->reason, &reason);
         if (srv) text(*b->server, srv);
         if (mode & 2) assert(jet_int_compare(*b->code, code) == 0);
-        watch(b); jet_rt_handle_drop_Error(b); done();
+        watch(b); jet_rt_handle_drop_error(b); done();
     }
     // Identical arbitrary-precision codes in distinct real Int allocations compare by value.
     int64_t other_big = jet_int_add(max, max);
     Error *a = literal(0, &empty, NULL, true, big, &empty);
     Error *b = literal(0, &empty, NULL, true, other_big, &empty);
-    assert(jet_rt_handle_eq_Error(a, b));
-    watch(a); jet_rt_handle_drop_Error(a); done();
-    watch(b); jet_rt_handle_drop_Error(b); done();
+    assert(jet_rt_handle_eq_error(a, b));
+    watch(a); jet_rt_handle_drop_error(a); done();
+    watch(b); jet_rt_handle_drop_error(b); done();
     jet_rt_int_drop(other_big); jet_rt_int_drop(negative); jet_rt_int_drop(big); jet_rt_int_drop(max);
     jet_rt_int_drop(one); jet_rt_int_drop(zero);
-    jet_rt_handle_drop_Error(NULL); assert(nwatched == 0);
+    jet_rt_handle_drop_error(NULL); assert(nwatched == 0);
     puts("EmailError canonical40/eleven tags/deep owners/exact codes OK");
 }

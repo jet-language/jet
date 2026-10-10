@@ -41,7 +41,7 @@ use jet_foundation.[MIRScopeID, MIRScopeKind, MIRScopeFact, MIRTestScopeMember]
 // expect-task-message expect-own-close: "own close stop"
 
 fn fx_expect_control(b: &FxBuilder, member: String, _symbol: String, ty: MIRType, args: [MIRValueID]) -> MIRValueID Never! {
-    expected :: if member == "cleanup_enter" || member == "cleanup_leave" -> "jet_rt_{member}" else -> "jet_rt_test_{member}"
+    expected :: if member == "cleanup_enter" || member == "cleanup_leave" -> "jet_rt_{runtime_abi_atom(member)}" else -> "jet_rt_test_{runtime_abi_atom(member)}"
     if _symbol != expected -> panic("expectation fixture raw route identity mismatch")
     fx_copy(&b, ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("core.testing", member), args: loop value in args -> fx_arg(value, MIRAccess.Read), owner_type_args: [MIRType]{}, type_args: [MIRType]{}}})
 }
@@ -145,7 +145,7 @@ fn fx_expect_fail(mode: String) -> MIRProgram Never! {
     if mode == "own-close" -> &program.functions.push(fx_expect_close("own close"))
     routes :: [String]{"catch_for_scope", "catch_boundary", "cleanup_enter", "cleanup_leave"}
     loop route in routes {
-        symbol :: if route == "cleanup_enter" || route == "cleanup_leave" -> "jet_rt_{route}" else -> "jet_rt_test_{route}"
+        symbol :: if route == "cleanup_enter" || route == "cleanup_leave" -> "jet_rt_{runtime_abi_atom(route)}" else -> "jet_rt_test_{runtime_abi_atom(route)}"
         arity :: if route == "cleanup_enter" -> 0 else -> 1
         &program.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "core.testing", route, symbol, arity, MIRPreludeABI.Value))
     }

@@ -10,16 +10,16 @@ _Static_assert(sizeof(Enum) == 8, "canonical native enum8");
 extern void jet_rt_alloc_init(void);
 extern void __real_jet_rt_free(void *, int64_t, int64_t);
 extern void jet_rt_string_drop(Text *);
-extern Enum *jet_rt_handle_clone_JetServiceRestart(const Enum *);
-extern void jet_rt_handle_drop_JetServiceRestart(Enum *);
-extern bool jet_rt_handle_eq_JetServiceRestart(const Enum *, const Enum *);
-extern Text *jet_rt_handle_show_JetServiceRestart(const Enum *);
-extern Text *jet_rt_handle_display_JetServiceRestart(const Enum *);
-extern Enum *jet_rt_handle_clone_JetServiceDelivery(const Enum *);
-extern void jet_rt_handle_drop_JetServiceDelivery(Enum *);
-extern bool jet_rt_handle_eq_JetServiceDelivery(const Enum *, const Enum *);
-extern Text *jet_rt_handle_show_JetServiceDelivery(const Enum *);
-extern Text *jet_rt_handle_display_JetServiceDelivery(const Enum *);
+extern Enum *jet_rt_handle_clone_jet_service_restart(const Enum *);
+extern void jet_rt_handle_drop_jet_service_restart(Enum *);
+extern bool jet_rt_handle_eq_jet_service_restart(const Enum *, const Enum *);
+extern Text *jet_rt_handle_show_jet_service_restart(const Enum *);
+extern Text *jet_rt_handle_display_jet_service_restart(const Enum *);
+extern Enum *jet_rt_handle_clone_jet_service_delivery(const Enum *);
+extern void jet_rt_handle_drop_jet_service_delivery(Enum *);
+extern bool jet_rt_handle_eq_jet_service_delivery(const Enum *, const Enum *);
+extern Text *jet_rt_handle_show_jet_service_delivery(const Enum *);
+extern Text *jet_rt_handle_display_jet_service_delivery(const Enum *);
 static void *watched;
 static unsigned frees, intercepted;
 void __wrap_jet_rt_free(void *pointer, int64_t bytes, int64_t align) {
@@ -59,10 +59,10 @@ int main(void) {
     static const char *const restart[] = {"OneForOne", "OneForAll", "RestForOne"};
     static const char *const delivery[] = {"AtMostOnce", "DurableAtLeastOnce"};
     jet_rt_alloc_init();
-    family(3, restart, jet_rt_handle_clone_JetServiceRestart, jet_rt_handle_drop_JetServiceRestart,
-           jet_rt_handle_eq_JetServiceRestart, jet_rt_handle_show_JetServiceRestart, jet_rt_handle_display_JetServiceRestart);
-    family(2, delivery, jet_rt_handle_clone_JetServiceDelivery, jet_rt_handle_drop_JetServiceDelivery,
-           jet_rt_handle_eq_JetServiceDelivery, jet_rt_handle_show_JetServiceDelivery, jet_rt_handle_display_JetServiceDelivery);
+    family(3, restart, jet_rt_handle_clone_jet_service_restart, jet_rt_handle_drop_jet_service_restart,
+           jet_rt_handle_eq_jet_service_restart, jet_rt_handle_show_jet_service_restart, jet_rt_handle_display_jet_service_restart);
+    family(2, delivery, jet_rt_handle_clone_jet_service_delivery, jet_rt_handle_drop_jet_service_delivery,
+           jet_rt_handle_eq_jet_service_delivery, jet_rt_handle_show_jet_service_delivery, jet_rt_handle_display_jet_service_delivery);
     assert(intercepted > 0);
     puts("ServiceEnums ownership/equality/render OK");
 }

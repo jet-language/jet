@@ -14,7 +14,7 @@
 // layout. IOError tags are the CoreEnumPayloadRows declaration-order ordinals.
 // IOError: [kind, operation, resource-text?, has-os-code, os-code, cause-text?,
 // limit]. Text children use the one E4 carrier and are independently owned.
-#Export(c) fn jet_rt_handle_drop_IOError(value: I64) {
+#Export(c) fn jet_rt_handle_drop_io_error(value: I64) {
     if (value == I64{0}) {
         return
     }
@@ -27,7 +27,7 @@
     jet_rt_free(value, I64{56}, I64{8})
 }
 
-#Export(c) fn jet_rt_handle_clone_IOError(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_io_error(value: I64) -> I64 {
     result :: jet_rt_alloc(I64{56}, I64{8})
     #Unsafe("value borrows the complete error header; result exclusively owns 56 fresh bytes") {
         offset := I64{0}
@@ -91,9 +91,9 @@ fn host_context_copy(value: I64) -> I64 {
     result
 }
 
-#Export(c) fn jet_rt_handle_clone_IOContext(value: I64) -> I64 { host_context_copy(value) }
+#Export(c) fn jet_rt_handle_clone_io_context(value: I64) -> I64 { host_context_copy(value) }
 
-#Export(c) fn jet_rt_handle_drop_IOContext(value: I64) {
+#Export(c) fn jet_rt_handle_drop_io_context(value: I64) {
     if (value == I64{0}) -> return
     #Unsafe("value transfers its 40-byte header and two independently owned nullable text children") {
         resource :: os_load_i64(wrapping(value + I64{8}))
@@ -104,7 +104,7 @@ fn host_context_copy(value: I64) -> I64 {
     jet_rt_free(value, I64{40}, I64{8})
 }
 
-#Export(c) fn jet_rt_record_new_IOContext(operation: I64, resource: I64, os_code: I64, cause: I64) -> I64 {
+#Export(c) fn jet_rt_record_new_io_context(operation: I64, resource: I64, os_code: I64, cause: I64) -> I64 {
     if (operation < I64{0} || operation >= HOST_IO_OP_COUNT) {
         host_record_index_refused()
         return I64{0}
@@ -127,7 +127,7 @@ fn host_context_copy(value: I64) -> I64 {
     value
 }
 
-#Export(c) fn jet_rt_record_get_IOContext_operation(value: I64) -> I64 {
+#Export(c) fn jet_rt_record_get_io_context_operation(value: I64) -> I64 {
     #Unsafe("value borrows an initialized context header") { return os_load_i64(value) }
 }
 
@@ -140,10 +140,10 @@ fn host_context_text(value: I64, offset: I64, some: I64) -> I64 {
     I64{1}
 }
 
-#Export(c) fn jet_rt_record_get_IOContext_resource(value: I64, some: I64) -> I64 { host_context_text(value, I64{8}, some) }
-#Export(c) fn jet_rt_record_get_IOContext_cause(value: I64, some: I64) -> I64 { host_context_text(value, I64{32}, some) }
+#Export(c) fn jet_rt_record_get_io_context_resource(value: I64, some: I64) -> I64 { host_context_text(value, I64{8}, some) }
+#Export(c) fn jet_rt_record_get_io_context_cause(value: I64, some: I64) -> I64 { host_context_text(value, I64{32}, some) }
 
-#Export(c) fn jet_rt_record_get_IOContext_os_code(value: I64, some: I64) -> I64 {
+#Export(c) fn jet_rt_record_get_io_context_os_code(value: I64, some: I64) -> I64 {
     #Unsafe("value borrows a context; some lends the writable exact-Int word output for a present field") {
         if (os_load_i64(wrapping(value + I64{16})) == I64{0}) -> return I64{0}
         os_store_i64(some, jet_int_owned_from_i64(os_load_i64(wrapping(value + I64{24}))))
@@ -151,7 +151,7 @@ fn host_context_text(value: I64, offset: I64, some: I64) -> I64 {
     I64{1}
 }
 
-#Export(c) fn jet_rt_record_tag_IOError(value: I64) -> I64 {
+#Export(c) fn jet_rt_record_tag_io_error(value: I64) -> I64 {
     #Unsafe("value borrows an initialized error header") { return os_load_i64(value) }
 }
 
@@ -180,7 +180,7 @@ fn host_error_with_context(context: I64, kind: I64) -> I64 {
     value
 }
 
-#Export(c) fn jet_rt_record_get_IOError_ResourceLimit(value: I64) -> I64 {
+#Export(c) fn jet_rt_record_get_io_error_resource_limit(value: I64) -> I64 {
     #Unsafe("value borrows an initialized ResourceLimit error") {
         if (os_load_i64(value) != HOST_IO_KIND_RESOURCE_LIMIT) {
             host_record_index_refused()
@@ -190,7 +190,7 @@ fn host_error_with_context(context: I64, kind: I64) -> I64 {
     }
 }
 
-#Export(c) fn jet_rt_record_new_IOError_ResourceLimit(limit: I64) -> I64 {
+#Export(c) fn jet_rt_record_new_io_error_resource_limit(limit: I64) -> I64 {
     if (limit < I64{0} || limit >= HOST_PROCESS_LIMIT_COUNT) {
         host_record_index_refused()
         return I64{0}
@@ -224,20 +224,20 @@ fn host_optional_text_equal(left: I64, right: I64) -> Bool {
     return jet_rt_string_compare(left, right) == I64{0}
 }
 
-#Export(c) fn jet_rt_handle_eq_IOContext(left: I64, right: I64) -> Bool { host_context_equal(left, right) }
+#Export(c) fn jet_rt_handle_eq_io_context(left: I64, right: I64) -> Bool { host_context_equal(left, right) }
 
-#Export(c) fn jet_rt_handle_eq_IOError(left: I64, right: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_io_error(left: I64, right: I64) -> Bool {
     kind :: rt_text_word(left)
     if (kind != rt_text_word(right)) -> return false
     if (kind == HOST_IO_KIND_RESOURCE_LIMIT) -> return rt_text_word(left + I64{48}) == rt_text_word(right + I64{48})
     host_context_equal(left + I64{8}, right + I64{8})
 }
 
-#Export(c) fn jet_rt_handle_clone_IOOperation(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_clone_io_operation(value: I64) -> I64 { encoding_enum_clone(value) }
 
-#Export(c) fn jet_rt_handle_drop_IOOperation(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_drop_io_operation(value: I64) { encoding_enum_drop(value) }
 
-#Export(c) fn jet_rt_handle_eq_IOOperation(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_eq_io_operation(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
 
 // Streaming labels follow StructuralDebug.rs:182-228 and the seed's custom
 // JetDebug implementations at preregeneration-runtime.rs:72109-72218.
@@ -393,13 +393,13 @@ fn host_context_debug_into(target: I64, value: I64) {
     rt_text_push_word(target, I64{32032}, I64{2}) // " }"
 }
 
-#Export(c) fn jet_rt_handle_debug_IOContext(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_debug_io_context(value: I64) -> I64 {
     result :: jet_rt_string_builder_new()
     host_context_debug_into(result, value)
     jet_rt_string_builder_finish(result)
 }
 
-#Export(c) fn jet_rt_handle_debug_IOError(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_debug_io_error(value: I64) -> I64 {
     result :: jet_rt_string_builder_new()
     kind :: rt_text_word(value)
     host_io_kind_debug(result, kind)
@@ -410,7 +410,7 @@ fn host_context_debug_into(target: I64, value: I64) {
     jet_rt_string_builder_finish(result)
 }
 
-#Export(c) fn jet_rt_handle_show_IOError(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_show_io_error(value: I64) -> I64 {
     result :: jet_rt_string_builder_new()
     kind :: rt_text_word(value)
     if (kind == HOST_IO_KIND_RESOURCE_LIMIT) {
@@ -439,4 +439,4 @@ fn host_context_debug_into(target: I64, value: I64) {
     jet_rt_string_builder_finish(result)
 }
 
-#Export(c) fn jet_rt_handle_display_IOError(value: I64) -> I64 { jet_rt_handle_show_IOError(value) }
+#Export(c) fn jet_rt_handle_display_io_error(value: I64) -> I64 { jet_rt_handle_show_io_error(value) }

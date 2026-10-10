@@ -23,12 +23,12 @@ extern void jet_rt_native_task_cancel(int64_t);
 extern int64_t jet_scheduler_native_propagate(void);
 extern void jet_scheduler_shield_enter(void);
 extern void jet_scheduler_shield_leave(void);
-extern int64_t jet_rt_record_new_Dyn_Null(void);
-extern Text *jet_rt_record_get_Dyn_Text(int64_t);
-extern void jet_rt_handle_drop_Dyn(int64_t);
-extern int64_t jet_rt_record_tag_JetTaskFailure(int64_t);
-extern Text *jet_rt_record_get_JetTaskFailure_Panicked(int64_t);
-extern void jet_rt_handle_drop_JetTaskFailure(int64_t);
+extern int64_t jet_rt_record_new_dyn_null(void);
+extern Text *jet_rt_record_get_dyn_text(int64_t);
+extern void jet_rt_handle_drop_dyn(int64_t);
+extern int64_t jet_rt_record_tag_jet_task_failure(int64_t);
+extern Text *jet_rt_record_get_jet_task_failure_panicked(int64_t);
+extern void jet_rt_handle_drop_jet_task_failure(int64_t);
 extern void jet_rt_string_drop(Text *);
 extern Text *jet_rt_string_clone(Text *);
 extern void jet_panic(Text *, int64_t, Text *);
@@ -40,23 +40,23 @@ extern int64_t jet_int_owned_from_i64(int64_t);
 extern int64_t jet_int_owned_to_i64(int64_t);
 extern int64_t jet_int_mul(int64_t, int64_t);
 extern void jet_rt_int_drop(int64_t);
-extern int64_t jet_rt_record_new_JetAsyncPolicy(int64_t, int64_t);
-extern int64_t jet_rt_record_new_EncodingError(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
-extern int64_t jet_rt_record_new_EncodingCause(int64_t, int64_t, int64_t);
-extern int64_t jet_rt_record_new_WatchEvent(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
+extern int64_t jet_rt_record_new_jet_async_policy(int64_t, int64_t);
+extern int64_t jet_rt_record_new_encoding_error(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
+extern int64_t jet_rt_record_new_encoding_cause(int64_t, int64_t, int64_t);
+extern int64_t jet_rt_record_new_watch_event(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_std_process_cmd(int64_t, int64_t);
 extern int64_t jet_process_spec_stdin(int64_t, int64_t);
 extern int64_t jet_process_spec_stdout(int64_t, int64_t);
 extern int64_t jet_process_spec_stderr(int64_t, int64_t);
-extern void jet_rt_handle_drop_ProcessSpec(int64_t);
-extern int64_t jet_rt_record_new_TerminalSize(int64_t, int64_t);
-extern int64_t jet_rt_record_new_TerminalPolicy(int64_t, int64_t);
-extern int64_t jet_rt_record_new_TextWidth(int64_t, int64_t);
+extern void jet_rt_handle_drop_process_spec(int64_t);
+extern int64_t jet_rt_record_new_terminal_size(int64_t, int64_t);
+extern int64_t jet_rt_record_new_terminal_policy(int64_t, int64_t);
+extern int64_t jet_rt_record_new_text_width(int64_t, int64_t);
 extern int64_t jet_string_slice(int64_t, int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_rt_native_bits_new(void);
 extern bool jet_bitset_add(int64_t, int64_t);
 extern int64_t jet_bit_set_len(int64_t);
-extern void jet_rt_handle_drop_JetBitSet(int64_t);
+extern void jet_rt_handle_drop_jet_bit_set(int64_t);
 extern int64_t jet_coll_counter(void);
 extern int64_t jet_coll_counter_add(int64_t, int64_t, int64_t);
 extern int64_t jet_coll_counter_inc(int64_t, int64_t);
@@ -67,12 +67,12 @@ extern int64_t jet_coll_counter_total(int64_t);
 extern int64_t jet_coll_counter_elements(int64_t, int64_t);
 extern int64_t jet_coll_counter_merge_add(int64_t, int64_t);
 extern int64_t jet_coll_counter_subtract(int64_t, int64_t);
-extern void jet_rt_handle_drop_JetCounter(int64_t);
+extern void jet_rt_handle_drop_jet_counter(int64_t);
 extern int64_t jet_coll_chain(void);
 extern int64_t jet_coll_chain_push(int64_t, int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_coll_chain_get(int64_t, int64_t, int64_t);
 extern bool jet_coll_chain_contains(int64_t, int64_t);
-extern void jet_rt_handle_drop_JetChain(int64_t);
+extern void jet_rt_handle_drop_jet_chain(int64_t);
 extern int64_t jet_int_div(int64_t, int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_int_rem(int64_t, int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_int_floor_div(int64_t, int64_t, int64_t, int64_t, int64_t);
@@ -87,22 +87,22 @@ extern int64_t jet_rt_int_clone(int64_t);
 extern bool jet_bit_set_has(int64_t, int64_t);
 extern void jet_bitset_remove(int64_t, int64_t);
 extern int64_t jet_loop_range_init(int64_t, int64_t, int64_t, uint8_t, uint8_t);
-extern int64_t jet_rt_record_new_DataEvent_Int(int64_t);
-extern int64_t jet_rt_record_new_Dyn_Int(int64_t);
-extern int64_t jet_rt_record_get_Dyn_Int(int64_t);
-extern int64_t jet_rt_record_new_Duration(int64_t);
-extern int64_t jet_rt_record_new_EncodingLimits(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
-extern int64_t jet_rt_record_new_DataLimits(int64_t, int64_t, int64_t, int64_t, int64_t);
-extern int64_t jet_rt_record_new_IOContext(int64_t, int64_t, int64_t, int64_t);
-extern int64_t jet_rt_record_new_JetBrowserLocked(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
-extern int64_t jet_rt_record_new_JetBrowserTimeout(int64_t);
-extern int64_t jet_rt_record_new_JetDate(int64_t, int64_t, int64_t);
-extern int64_t jet_rt_record_new_JetPeriod(int64_t, int64_t, int64_t);
-extern int64_t jet_rt_record_new_JetDelivery(int64_t, int64_t, uint8_t, int64_t, int64_t);
-extern int64_t jet_rt_record_new_JetMemoStats(int64_t, int64_t, int64_t, int64_t);
-extern int64_t jet_rt_record_new_Limits(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
-extern int64_t jet_rt_record_new_LogSpan(int64_t, int64_t);
-extern int64_t jet_rt_record_new_PluginFrame(int64_t, int64_t, int64_t);
+extern int64_t jet_rt_record_new_data_event_int(int64_t);
+extern int64_t jet_rt_record_new_dyn_int(int64_t);
+extern int64_t jet_rt_record_get_dyn_int(int64_t);
+extern int64_t jet_rt_record_new_duration(int64_t);
+extern int64_t jet_rt_record_new_encoding_limits(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
+extern int64_t jet_rt_record_new_data_limits(int64_t, int64_t, int64_t, int64_t, int64_t);
+extern int64_t jet_rt_record_new_io_context(int64_t, int64_t, int64_t, int64_t);
+extern int64_t jet_rt_record_new_jet_browser_locked(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
+extern int64_t jet_rt_record_new_jet_browser_timeout(int64_t);
+extern int64_t jet_rt_record_new_jet_date(int64_t, int64_t, int64_t);
+extern int64_t jet_rt_record_new_jet_period(int64_t, int64_t, int64_t);
+extern int64_t jet_rt_record_new_jet_delivery(int64_t, int64_t, uint8_t, int64_t, int64_t);
+extern int64_t jet_rt_record_new_jet_memo_stats(int64_t, int64_t, int64_t, int64_t);
+extern int64_t jet_rt_record_new_limits(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
+extern int64_t jet_rt_record_new_log_span(int64_t, int64_t);
+extern int64_t jet_rt_record_new_plugin_frame(int64_t, int64_t, int64_t);
 extern int64_t message_parts(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_string_repeat(int64_t, int64_t);
 extern int64_t jet_string_slice_builtin(int64_t, int64_t, int64_t);
@@ -190,7 +190,7 @@ static const char *expected_reason(int64_t mode) {
 static int64_t counter_with(Text *key, int64_t count) {
     int64_t empty = jet_coll_counter();
     int64_t result = jet_coll_counter_add(empty, WORD(key), count);
-    jet_rt_handle_drop_JetCounter(empty);
+    jet_rt_handle_drop_jet_counter(empty);
     return result;
 }
 static void assert_count(int64_t counter, Text *key, int64_t count) {
@@ -227,50 +227,50 @@ static void run_int_stop(int64_t test) {
         if (test == 16) assert(!jet_bit_set_has(bits, big));
         if (test == 17) assert(!jet_bitset_add(bits, big));
         if (test == 18) jet_bitset_remove(bits, big);
-        jet_rt_handle_drop_JetBitSet(bits);
+        jet_rt_handle_drop_jet_bit_set(bits);
     } else if (test >= 19 && test <= 21) {
         assert(jet_loop_range_init(test == 20 ? big : 0, test == 21 ? big : 1, test == 19 ? big : 1, 1, 0) == 0);
-    } else if (test == 22) assert(jet_rt_record_new_JetAsyncPolicy(big, 0) == 0);
-    else if (test == 23) assert(jet_rt_record_new_DataEvent_Int(big) == 0);
+    } else if (test == 22) assert(jet_rt_record_new_jet_async_policy(big, 0) == 0);
+    else if (test == 23) assert(jet_rt_record_new_data_event_int(big) == 0);
     else if (test == 24) {
         /* Canonical Dyn keeps large exact Int instead of narrowing it. */
-        int64_t tree = jet_rt_record_new_Dyn_Int(big);
+        int64_t tree = jet_rt_record_new_dyn_int(big);
         assert(tree != 0 && jet_scheduler_native_propagate() == 0);
-        int64_t retained = jet_rt_record_get_Dyn_Int(tree);
+        int64_t retained = jet_rt_record_get_dyn_int(tree);
         assert(retained == big);
         jet_rt_int_drop(retained);
         /* Exercise the real variant guard after the successful owner path. */
-        assert(jet_rt_record_get_Dyn_Text(tree) == NULL);
-        jet_rt_handle_drop_Dyn(tree);
+        assert(jet_rt_record_get_dyn_text(tree) == NULL);
+        jet_rt_handle_drop_dyn(tree);
     }
-    else if (test == 25) assert(jet_rt_record_new_Duration(big) == 0);
-    else if (test == 26) assert(jet_rt_record_new_EncodingCause(WORD(&key), WORD(&big), WORD(&key)) == 0);
+    else if (test == 25) assert(jet_rt_record_new_duration(big) == 0);
+    else if (test == 26) assert(jet_rt_record_new_encoding_cause(WORD(&key), WORD(&big), WORD(&key)) == 0);
     else if (test >= 27 && test <= 29) {
-        int64_t cause = jet_rt_record_new_EncodingCause(WORD(&key), 0, WORD(&key));
+        int64_t cause = jet_rt_record_new_encoding_cause(WORD(&key), 0, WORD(&key));
         /* Cause is adopted even when a later optional narrowing stops. */
-        assert(jet_rt_record_new_EncodingError(0, 0, test == 27 ? big : 0,
+        assert(jet_rt_record_new_encoding_error(0, 0, test == 27 ? big : 0,
             test == 28 ? WORD(&big) : 0, test == 29 ? WORD(&big) : 0, WORD(&key), WORD(&key), cause) == 0);
     } else if (test >= 30 && test <= 35) {
         int64_t args[6] = {1, 1, 1, 0, 1, 1};
         args[test - 30] = test == 33 ? WORD(&big) : big;
-        assert(jet_rt_record_new_EncodingLimits(args[0], args[1], args[2], args[3], args[4], args[5]) == 0);
+        assert(jet_rt_record_new_encoding_limits(args[0], args[1], args[2], args[3], args[4], args[5]) == 0);
     } else if (test >= 36 && test <= 39) {
-        int64_t encoding = jet_rt_record_new_EncodingLimits(1, 1, 1, 0, 1, 1);
+        int64_t encoding = jet_rt_record_new_encoding_limits(1, 1, 1, 0, 1, 1);
         int64_t args[4] = {1, 1, 1, 1};
         args[test - 36] = big;
-        assert(jet_rt_record_new_DataLimits(encoding, args[0], args[1], args[2], args[3]) == 0);
-    } else if (test == 40) assert(jet_rt_record_new_IOContext(0, 0, WORD(&big), 0) == 0);
-    else if (test == 41) assert(jet_rt_record_new_JetBrowserLocked(0, 0, 0, 0, big, 0) == 0);
-    else if (test == 42) assert(jet_rt_record_new_JetBrowserTimeout(big) == 0);
-    else if (test == 43) assert(jet_rt_record_new_JetDate(2026, 10, big) == 0);
-    else if (test == 44) assert(jet_rt_record_new_JetPeriod(1, 1, big) == 0);
-    else if (test == 45) assert(jet_rt_record_new_JetDelivery(WORD(&key), WORD(&key), 0, 0, big) == 0);
-    else if (test == 46) assert(jet_rt_record_new_JetMemoStats(1, 1, big, 0) == 0);
-    else if (test == 47) assert(jet_rt_record_new_Limits(1, 1, 1, 1, 1, big) == 0);
-    else if (test == 48) assert(jet_rt_record_new_LogSpan(big, WORD(&key)) == 0);
-    else if (test == 49) assert(jet_rt_record_new_PluginFrame(WORD(&key), WORD(&key), big) == 0);
-    else if (test == 50) assert(jet_rt_record_new_TerminalSize(80, big) == 0);
-    else if (test == 51) assert(jet_rt_record_new_WatchEvent(0, 0, WORD(&key), WORD(&key), 0, big) == 0);
+        assert(jet_rt_record_new_data_limits(encoding, args[0], args[1], args[2], args[3]) == 0);
+    } else if (test == 40) assert(jet_rt_record_new_io_context(0, 0, WORD(&big), 0) == 0);
+    else if (test == 41) assert(jet_rt_record_new_jet_browser_locked(0, 0, 0, 0, big, 0) == 0);
+    else if (test == 42) assert(jet_rt_record_new_jet_browser_timeout(big) == 0);
+    else if (test == 43) assert(jet_rt_record_new_jet_date(2026, 10, big) == 0);
+    else if (test == 44) assert(jet_rt_record_new_jet_period(1, 1, big) == 0);
+    else if (test == 45) assert(jet_rt_record_new_jet_delivery(WORD(&key), WORD(&key), 0, 0, big) == 0);
+    else if (test == 46) assert(jet_rt_record_new_jet_memo_stats(1, 1, big, 0) == 0);
+    else if (test == 47) assert(jet_rt_record_new_limits(1, 1, 1, 1, 1, big) == 0);
+    else if (test == 48) assert(jet_rt_record_new_log_span(big, WORD(&key)) == 0);
+    else if (test == 49) assert(jet_rt_record_new_plugin_frame(WORD(&key), WORD(&key), big) == 0);
+    else if (test == 50) assert(jet_rt_record_new_terminal_size(80, big) == 0);
+    else if (test == 51) assert(jet_rt_record_new_watch_event(0, 0, WORD(&key), WORD(&key), 0, big) == 0);
     else if (test == 52) assert(message_parts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, big) == 0);
     else if (test == 53) assert(jet_string_repeat(WORD(&key), big) == 0);
     else if (test >= 54 && test <= 56) {
@@ -377,10 +377,10 @@ static void run_stop(int64_t mode) {
         return;
     }
     if (mode == 0) {
-        int64_t tree = jet_rt_record_new_Dyn_Null();
+        int64_t tree = jet_rt_record_new_dyn_null();
         /* Nested payload -> clone chain must stop before cloning NULL. */
-        assert(jet_rt_record_get_Dyn_Text(tree) == NULL);
-        jet_rt_handle_drop_Dyn(tree);
+        assert(jet_rt_record_get_dyn_text(tree) == NULL);
+        jet_rt_handle_drop_dyn(tree);
     } else if (mode == 1 || mode == 28) {
         Text file = {(unsigned char *)"<core.prelude>", 14, 0};
         Text message = {(unsigned char *)reason, sizeof(reason) - 1, 0};
@@ -403,28 +403,28 @@ static void run_stop(int64_t mode) {
         jet_rt_panic_list_bounds(length, index);
         jet_rt_int_drop(index);
     } else if (mode == 6) {
-        assert(jet_rt_record_new_JetAsyncPolicy(1, 3) == 0);
+        assert(jet_rt_record_new_jet_async_policy(1, 3) == 0);
     } else if (mode == 7 || mode == 8) {
         /* Reject tags before touching borrowed text or optional slots. */
         /* Error adopts a real cause even when its tag validation fails. */
-        int64_t cause = mode == 7 ? jet_rt_record_new_EncodingCause(WORD(&key), 0, WORD(&other)) : 0;
-        assert(jet_rt_record_new_EncodingError(mode == 7 ? 7 : 0, mode == 8 ? 6 : 0,
+        int64_t cause = mode == 7 ? jet_rt_record_new_encoding_cause(WORD(&key), 0, WORD(&other)) : 0;
+        assert(jet_rt_record_new_encoding_error(mode == 7 ? 7 : 0, mode == 8 ? 6 : 0,
             0, 0, 0, WORD(&key), WORD(&other), cause) == 0);
     } else if (mode == 9 || mode == 10) {
-        assert(jet_rt_record_new_WatchEvent(mode == 9 ? 3 : 0, mode == 10 ? 6 : 0,
+        assert(jet_rt_record_new_watch_event(mode == 9 ? 3 : 0, mode == 10 ? 6 : 0,
             WORD(&key), WORD(&other), 0, 0) == 0);
     } else if (mode >= 11 && mode <= 13) {
         int64_t spec = jet_std_process_cmd(0, 0);
         int64_t result = mode == 11 ? jet_process_spec_stdin(spec, -1) :
             mode == 12 ? jet_process_spec_stdout(spec, -1) : jet_process_spec_stderr(spec, -1);
         assert(result == 0);
-        jet_rt_handle_drop_ProcessSpec(spec);
+        jet_rt_handle_drop_process_spec(spec);
     } else if (mode == 14) {
-        int64_t size = jet_rt_record_new_TerminalSize(80, 24);
+        int64_t size = jet_rt_record_new_terminal_size(80, 24);
         /* Constructor consumes Size before tag rejection, just like seed. */
-        assert(jet_rt_record_new_TerminalPolicy(size, 2) == 0);
+        assert(jet_rt_record_new_terminal_policy(size, 2) == 0);
     } else if (mode == 15 || mode == 16) {
-        assert(jet_rt_record_new_TextWidth(mode == 15 ? 2 : 0, mode == 16 ? 2 : 0) == 0);
+        assert(jet_rt_record_new_text_width(mode == 15 ? 2 : 0, mode == 16 ? 2 : 0) == 0);
     } else if (mode == 17) {
         assert(jet_string_slice(WORD(&key), 0, 1, WORD(&other), -1) == 0);
     } else if (mode == 18) {
@@ -433,7 +433,7 @@ static void run_stop(int64_t mode) {
         assert(jet_bitset_add(bits, last));
         jet_rt_int_drop(last);
         assert(jet_bit_set_len(bits) == 0);
-        jet_rt_handle_drop_JetBitSet(bits);
+        jet_rt_handle_drop_jet_bit_set(bits);
     } else if ((mode >= 19 && mode <= 25) || mode == 30 || mode == 31) {
         int64_t initial = mode == 20 || mode == 31 ? INT64_MIN : INT64_MAX;
         int64_t counter = counter_with(&key, initial);
@@ -444,7 +444,7 @@ static void run_stop(int64_t mode) {
         if (mode == 31) result = jet_coll_counter_dec(counter, WORD(&key));
         if (mode == 21 || mode == 22) {
             int64_t with_other = jet_coll_counter_add(counter, WORD(&other), 1);
-            jet_rt_handle_drop_JetCounter(counter);
+            jet_rt_handle_drop_jet_counter(counter);
             counter = with_other;
             int64_t sentinel = INT64_C(0x12345678);
             result = mode == 21 ? jet_coll_counter_total(counter) :
@@ -459,18 +459,18 @@ static void run_stop(int64_t mode) {
         assert(result == 0);
         /* Borrowed inputs must remain intact; only the partial copy is freed. */
         assert_count(counter, &key, initial);
-        if (right != 0) jet_rt_handle_drop_JetCounter(right);
-        jet_rt_handle_drop_JetCounter(counter);
+        if (right != 0) jet_rt_handle_drop_jet_counter(right);
+        jet_rt_handle_drop_jet_counter(counter);
     } else if (mode == 26 || mode == 27) {
         int64_t empty = jet_coll_chain();
         int64_t keys[1] = {WORD(&key)};
         int64_t chain = jet_coll_chain_push(empty, WORD(keys), 1, 0, 0);
-        jet_rt_handle_drop_JetChain(empty);
+        jet_rt_handle_drop_jet_chain(empty);
         int64_t sentinel = INT64_C(0x12345678);
         if (mode == 26) assert(jet_coll_chain_get(chain, WORD(&key), WORD(&sentinel)) == 0);
         else assert(!jet_coll_chain_contains(chain, WORD(&key)));
         assert(sentinel == INT64_C(0x12345678));
-        jet_rt_handle_drop_JetChain(chain);
+        jet_rt_handle_drop_jet_chain(chain);
     } else if (mode >= 101 && mode <= 105) {
         /* Actual task cleanup carries an already-delivered stop. */
         assert(jet_rt_control_publish_stop(mode - 100, -1, -1, -1, -1, WORD(reason), sizeof(reason) - 1, 0));
@@ -547,8 +547,8 @@ int main(int argc, char **argv, char **envp) {
         Text *identity = jet_rt_string_clone(*(Text **)((unsigned char *)(uintptr_t)task + 128));
         int64_t out[4] = {0};
         assert(jet_rt_native_task_join(task, 0, WORD(out)) == 0);
-        assert(jet_rt_record_tag_JetTaskFailure(out[0]) == 2);
-        Text *text = jet_rt_record_get_JetTaskFailure_Panicked(out[0]);
+        assert(jet_rt_record_tag_jet_task_failure(out[0]) == 2);
+        Text *text = jet_rt_record_get_jet_task_failure_panicked(out[0]);
         const char *expected = expected_reason(mode);
         assert(text->length == identity->length + 2 + (int64_t)strlen(expected));
         assert(memcmp(text->data, identity->data, (size_t)identity->length) == 0);
@@ -556,7 +556,7 @@ int main(int argc, char **argv, char **envp) {
         assert(memcmp(text->data + identity->length + 2, expected, strlen(expected)) == 0);
         jet_rt_string_drop(identity);
         jet_rt_string_drop(text);
-        jet_rt_handle_drop_JetTaskFailure(out[0]);
+        jet_rt_handle_drop_jet_task_failure(out[0]);
         assert(jet_scheduler_native_propagate() == 0);
     }
     assert(released == MODE_COUNT + INT_MODE_COUNT);

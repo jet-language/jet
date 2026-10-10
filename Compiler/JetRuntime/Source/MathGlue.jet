@@ -1,17 +1,17 @@
 // MathGlueABI owns offsets. Clone/drop/ordered IEEE equality reuse geometry.
 // CAbiRoutes.rs:9659-9674,11351-11378 borrow scalar inputs, return Float lanes.
-#Export(c) fn jet_rt_record_new_JetComplex(real: Float, imaginary: Float) -> I64 {
+#Export(c) fn jet_rt_record_new_jet_complex(real: Float, imaginary: Float) -> I64 {
     result :: jet_rt_alloc(MATH_COMPLEX_BYTES, I64{8})
     geometry_store(result + MATH_COMPLEX_REAL, rt_f64_bits(real))
     geometry_store(result + MATH_COMPLEX_IMAGINARY, rt_f64_bits(imaginary))
     result
 }
-#Export(c) fn jet_rt_handle_clone_JetComplex(value: I64) -> I64 { geometry_clone(value, MATH_COMPLEX_BYTES) }
-#Export(c) fn jet_rt_handle_drop_JetComplex(value: I64) { geometry_drop(value, MATH_COMPLEX_BYTES) }
-#Export(c) fn jet_rt_handle_eq_JetComplex(left: I64, right: I64) -> Bool { geometry_float_equal(left, right, MATH_COMPLEX_BYTES) }
-#Export(c) fn jet_rt_record_get_JetComplex_real(value: I64) -> Float { rt_f64_from_bits(geometry_word(value + MATH_COMPLEX_REAL)) }
-#Export(c) fn jet_rt_record_get_JetComplex_imaginary(value: I64) -> Float { rt_f64_from_bits(geometry_word(value + MATH_COMPLEX_IMAGINARY)) }
-#Export(c) fn jet_rt_handle_show_JetComplex(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_complex(value: I64) -> I64 { geometry_clone(value, MATH_COMPLEX_BYTES) }
+#Export(c) fn jet_rt_handle_drop_jet_complex(value: I64) { geometry_drop(value, MATH_COMPLEX_BYTES) }
+#Export(c) fn jet_rt_handle_eq_jet_complex(left: I64, right: I64) -> Bool { geometry_float_equal(left, right, MATH_COMPLEX_BYTES) }
+#Export(c) fn jet_rt_record_get_jet_complex_real(value: I64) -> Float { rt_f64_from_bits(geometry_word(value + MATH_COMPLEX_REAL)) }
+#Export(c) fn jet_rt_record_get_jet_complex_imaginary(value: I64) -> Float { rt_f64_from_bits(geometry_word(value + MATH_COMPLEX_IMAGINARY)) }
+#Export(c) fn jet_rt_handle_show_jet_complex(value: I64) -> I64 {
     // MathLibPure45-47 / MathComplexTraits4-18: all modes use f64 Display.
     // Select sign from the original imaginary bits, including -0 and -NaN.
     imaginary :: geometry_word(value + MATH_COMPLEX_IMAGINARY)
@@ -26,9 +26,9 @@
     jet_rt_string_drop(imaginary_text)
     jet_rt_string_builder_finish(target)
 }
-#Export(c) fn jet_rt_handle_display_JetComplex(value: I64) -> I64 { jet_rt_handle_show_JetComplex(value) }
-#Export(c) fn jet_rt_handle_debug_JetComplex(value: I64) -> I64 { jet_rt_handle_show_JetComplex(value) }
-#Export(c) fn jet_rt_record_new_JetSizeConstraint(min_width: Float, min_height: Float, max_width: Float, max_height: Float) -> I64 {
+#Export(c) fn jet_rt_handle_display_jet_complex(value: I64) -> I64 { jet_rt_handle_show_jet_complex(value) }
+#Export(c) fn jet_rt_handle_debug_jet_complex(value: I64) -> I64 { jet_rt_handle_show_jet_complex(value) }
+#Export(c) fn jet_rt_record_new_jet_size_constraint(min_width: Float, min_height: Float, max_width: Float, max_height: Float) -> I64 {
     result :: jet_rt_alloc(MATH_SIZE_BYTES, I64{8})
     geometry_store(result + MATH_SIZE_MIN_WIDTH, rt_f64_bits(min_width))
     geometry_store(result + MATH_SIZE_MIN_HEIGHT, rt_f64_bits(min_height))
@@ -36,17 +36,17 @@
     geometry_store(result + MATH_SIZE_MAX_HEIGHT, rt_f64_bits(max_height))
     result
 }
-#Export(c) fn jet_rt_handle_clone_JetSizeConstraint(value: I64) -> I64 { geometry_clone(value, MATH_SIZE_BYTES) }
-#Export(c) fn jet_rt_handle_drop_JetSizeConstraint(value: I64) { geometry_drop(value, MATH_SIZE_BYTES) }
-#Export(c) fn jet_rt_handle_eq_JetSizeConstraint(left: I64, right: I64) -> Bool { geometry_float_equal(left, right, MATH_SIZE_BYTES) }
-#Export(c) fn jet_rt_record_get_JetSizeConstraint_min_width(value: I64) -> Float { rt_f64_from_bits(geometry_word(value + MATH_SIZE_MIN_WIDTH)) }
-#Export(c) fn jet_rt_record_get_JetSizeConstraint_min_height(value: I64) -> Float { rt_f64_from_bits(geometry_word(value + MATH_SIZE_MIN_HEIGHT)) }
-#Export(c) fn jet_rt_record_get_JetSizeConstraint_max_width(value: I64) -> Float { rt_f64_from_bits(geometry_word(value + MATH_SIZE_MAX_WIDTH)) }
-#Export(c) fn jet_rt_record_get_JetSizeConstraint_max_height(value: I64) -> Float { rt_f64_from_bits(geometry_word(value + MATH_SIZE_MAX_HEIGHT)) }
-#Export(c) fn jet_rt_handle_clone_Rng(value: I64) -> I64 { geometry_clone(value, MATH_RNG_BYTES) }
-#Export(c) fn jet_rt_handle_drop_Rng(value: I64) { geometry_drop(value, MATH_RNG_BYTES) }
-#Export(c) fn jet_rt_handle_eq_Rng(left: I64, right: I64) -> Bool { geometry_word(left + MATH_RNG_STATE) == geometry_word(right + MATH_RNG_STATE) }
-#Export(c) fn jet_rt_handle_show_Rng(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_size_constraint(value: I64) -> I64 { geometry_clone(value, MATH_SIZE_BYTES) }
+#Export(c) fn jet_rt_handle_drop_jet_size_constraint(value: I64) { geometry_drop(value, MATH_SIZE_BYTES) }
+#Export(c) fn jet_rt_handle_eq_jet_size_constraint(left: I64, right: I64) -> Bool { geometry_float_equal(left, right, MATH_SIZE_BYTES) }
+#Export(c) fn jet_rt_record_get_jet_size_constraint_min_width(value: I64) -> Float { rt_f64_from_bits(geometry_word(value + MATH_SIZE_MIN_WIDTH)) }
+#Export(c) fn jet_rt_record_get_jet_size_constraint_min_height(value: I64) -> Float { rt_f64_from_bits(geometry_word(value + MATH_SIZE_MIN_HEIGHT)) }
+#Export(c) fn jet_rt_record_get_jet_size_constraint_max_width(value: I64) -> Float { rt_f64_from_bits(geometry_word(value + MATH_SIZE_MAX_WIDTH)) }
+#Export(c) fn jet_rt_record_get_jet_size_constraint_max_height(value: I64) -> Float { rt_f64_from_bits(geometry_word(value + MATH_SIZE_MAX_HEIGHT)) }
+#Export(c) fn jet_rt_handle_clone_rng(value: I64) -> I64 { geometry_clone(value, MATH_RNG_BYTES) }
+#Export(c) fn jet_rt_handle_drop_rng(value: I64) { geometry_drop(value, MATH_RNG_BYTES) }
+#Export(c) fn jet_rt_handle_eq_rng(left: I64, right: I64) -> Bool { geometry_word(left + MATH_RNG_STATE) == geometry_word(right + MATH_RNG_STATE) }
+#Export(c) fn jet_rt_handle_show_rng(value: I64) -> I64 {
     // CommonTypes6809-6811 hides state; there is no Rng ctor/getter census.
     target :: jet_rt_string_builder_new()
     rt_text_push_word(target, I64{3327632887867985490}, I64{8}) // "RNG { .."

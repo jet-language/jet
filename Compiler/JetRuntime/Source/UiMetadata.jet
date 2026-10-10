@@ -41,7 +41,7 @@ fn ui_accessibility_copy(value: I64, result: I64) {
     ui_carrier_store(result + UI_ACCESSIBILITY_CAPACITY, length)
     ui_carrier_store(result + UI_ACCESSIBILITY_DATA, data)
 }
-#Export(c) fn jet_rt_handle_clone_JetUiAccessibility(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_ui_accessibility(value: I64) -> I64 {
     result :: jet_rt_alloc(UI_ACCESSIBILITY_BYTES, I64{8})
     ui_accessibility_copy(value, result)
     result
@@ -60,12 +60,12 @@ fn ui_accessibility_fields_drop(value: I64) {
     }
     if (capacity != I64{0}) -> jet_rt_free(data, capacity * UI_STATE_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_drop_JetUiAccessibility(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_ui_accessibility(value: I64) {
     if (value == I64{0}) -> return
     ui_accessibility_fields_drop(value)
     jet_rt_free(value, UI_ACCESSIBILITY_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetUiAccessibility(left: I64, right: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_ui_accessibility(left: I64, right: I64) -> Bool {
     if !ui_optional_text_eq(ui_carrier_word(left + UI_ACCESSIBILITY_NAME), ui_carrier_word(right + UI_ACCESSIBILITY_NAME)) -> return false
     if !ui_optional_text_eq(ui_carrier_word(left + UI_ACCESSIBILITY_DESCRIPTION), ui_carrier_word(right + UI_ACCESSIBILITY_DESCRIPTION)) -> return false
     length :: ui_carrier_word(left + UI_ACCESSIBILITY_LENGTH)
@@ -97,17 +97,17 @@ fn ui_shortcut_copy(value: I64, result: I64) {
 fn ui_shortcut_fields_drop(value: I64) {
     jet_rt_string_drop(ui_carrier_word(value + UI_SHORTCUT_KEY))
 }
-#Export(c) fn jet_rt_handle_clone_JetUiShortcut(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_jet_ui_shortcut(value: I64) -> I64 {
     result :: jet_rt_alloc(UI_SHORTCUT_BYTES, I64{8})
     ui_shortcut_copy(value, result)
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetUiShortcut(value: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_ui_shortcut(value: I64) {
     if (value == I64{0}) -> return
     ui_shortcut_fields_drop(value)
     jet_rt_free(value, UI_SHORTCUT_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetUiShortcut(left: I64, right: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_ui_shortcut(left: I64, right: I64) -> Bool {
     jet_rt_string_eq(ui_carrier_word(left + UI_SHORTCUT_KEY), ui_carrier_word(right + UI_SHORTCUT_KEY)) && (ui_carrier_word(left + UI_SHORTCUT_MODIFIERS).bit_and(I64{255})) == (ui_carrier_word(right + UI_SHORTCUT_MODIFIERS).bit_and(I64{255}))
 }
-#Export(c) fn jet_rt_handle_field_JetUiShortcut_key(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_SHORTCUT_KEY), out) }
+#Export(c) fn jet_rt_handle_field_jet_ui_shortcut_key(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_SHORTCUT_KEY), out) }

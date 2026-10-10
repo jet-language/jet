@@ -69,17 +69,17 @@ mod jet_c_abi_host {
     unsafe extern "C" {
         fn jet_rt_alloc(size: usize, align: usize) -> *mut u8;
         #[cfg(jet_native_pack)]
-        fn jet_rt_handle_drop_IOError(value: *mut JetCIOError);
+        fn jet_rt_handle_drop_io_error(value: *mut JetCIOError);
         #[cfg(jet_native_pack)]
-        fn jet_rt_handle_drop_IOContext(value: *mut JetCIOContext);
+        fn jet_rt_handle_drop_io_context(value: *mut JetCIOContext);
         #[cfg(jet_native_pack)]
-        fn jet_rt_handle_drop_JetTaskFailure(value: *mut JetCTaskFailure);
+        fn jet_rt_handle_drop_jet_task_failure(value: *mut JetCTaskFailure);
         #[cfg(jet_native_pack)]
-        fn jet_rt_handle_drop_Jet__ResolveError(value: *mut JetCResolveError);
+        fn jet_rt_handle_drop_jet_resolve_error(value: *mut JetCResolveError);
         #[cfg(jet_native_pack)]
-        fn jet_rt_handle_drop_JetIpAddr(value: *mut JetCIpAddr);
+        fn jet_rt_handle_drop_jet_ip_addr(value: *mut JetCIpAddr);
         #[cfg(jet_native_pack)]
-        fn jet_rt_handle_drop_JetSocketAddr(value: *mut JetCSocketAddr);
+        fn jet_rt_handle_drop_jet_socket_addr(value: *mut JetCSocketAddr);
         #[cfg(not(jet_native_pack))]
         fn jet_rt_free(pointer: *mut u8, size: usize, align: usize);
     }
@@ -170,7 +170,7 @@ mod jet_c_abi_host {
     pub(crate) fn error_drop(pointer: *mut JetCIOError) {
         #[cfg(jet_native_pack)]
         // SAFETY: this boundary consumes one carrier allocated by Jet.
-        unsafe { jet_rt_handle_drop_IOError(pointer) };
+        unsafe { jet_rt_handle_drop_io_error(pointer) };
         #[cfg(not(jet_native_pack))]
         {
             if pointer.is_null() { return; }
@@ -231,7 +231,7 @@ mod jet_c_abi_host {
     pub(crate) fn context_drop(pointer: *mut JetCIOContext) {
         #[cfg(jet_native_pack)]
         // SAFETY: consumes the one reviewed Jet carrier.
-        unsafe { jet_rt_handle_drop_IOContext(pointer) };
+        unsafe { jet_rt_handle_drop_io_context(pointer) };
         #[cfg(not(jet_native_pack))]
         {
             if pointer.is_null() { return; }
@@ -278,7 +278,7 @@ mod jet_c_abi_host {
     pub(crate) fn failure_drop(pointer: *mut JetCTaskFailure) {
         #[cfg(jet_native_pack)]
         // SAFETY: consume the canonical Jet carrier, not a Rust Box.
-        unsafe { jet_rt_handle_drop_JetTaskFailure(pointer) };
+        unsafe { jet_rt_handle_drop_jet_task_failure(pointer) };
         #[cfg(not(jet_native_pack))]
         {
             if pointer.is_null() { return; }
@@ -323,7 +323,7 @@ mod jet_c_abi_host {
     pub(crate) fn resolve_error_drop(pointer: *mut JetCResolveError) {
         #[cfg(jet_native_pack)]
         // SAFETY: one owned canonical C carrier goes to its Jet owner.
-        unsafe { jet_rt_handle_drop_Jet__ResolveError(pointer) };
+        unsafe { jet_rt_handle_drop_jet_resolve_error(pointer) };
         #[cfg(not(jet_native_pack))]
         {
             if pointer.is_null() { return; }
@@ -385,7 +385,7 @@ mod jet_c_abi_host {
     }
     pub(crate) fn ip_drop(pointer: *mut JetCIpAddr) {
         #[cfg(jet_native_pack)]
-        unsafe { jet_rt_handle_drop_JetIpAddr(pointer) };
+        unsafe { jet_rt_handle_drop_jet_ip_addr(pointer) };
         #[cfg(not(jet_native_pack))]
         if !pointer.is_null() { unsafe { jet_rt_free(pointer.cast(), 24, 8) }; }
     }
@@ -421,7 +421,7 @@ mod jet_c_abi_host {
     }
     pub(crate) fn socket_drop(pointer: *mut JetCSocketAddr) {
         #[cfg(jet_native_pack)]
-        unsafe { jet_rt_handle_drop_JetSocketAddr(pointer) };
+        unsafe { jet_rt_handle_drop_jet_socket_addr(pointer) };
         #[cfg(not(jet_native_pack))]
         if !pointer.is_null() { unsafe { jet_rt_free(pointer.cast(), 56, 8) }; }
     }

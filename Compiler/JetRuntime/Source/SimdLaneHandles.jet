@@ -1,13 +1,13 @@
 // MathTaskMem.rs:33 Clone, :397-423 array-backed debug and IEEE PartialEq.
-#Export(c) fn jet_rt_handle_clone_F64x4(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_clone_f64x4(value: I64) -> I64 {
     result :: jet_rt_alloc(F64X4_BYTES, I64{8})
     coll_copy(value, result, F64X4_BYTES)
     result
 }
-#Export(c) fn jet_rt_handle_drop_F64x4(value: I64) {
+#Export(c) fn jet_rt_handle_drop_f64x4(value: I64) {
     if (value != I64{0}) -> jet_rt_free(value, F64X4_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_F64x4(left: I64, right: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_f64x4(left: I64, right: I64) -> Bool {
     at := I64{0}
     loop at < F64X4_LANES {
         // No pointer-identity shortcut: NaN != itself, -0 == +0.
@@ -18,7 +18,7 @@
     }
     true
 }
-#Export(c) fn jet_rt_handle_debug_F64x4(value: I64) -> I64 {
+#Export(c) fn jet_rt_handle_debug_f64x4(value: I64) -> I64 {
     result :: jet_rt_string_builder_new()
     rt_text_push_word(result, I64{25658428700767814}, I64{7}) // "F64x4(["
     at := I64{0}
@@ -32,5 +32,5 @@
     rt_text_push_word(result, I64{10589}, I64{2}) // "])"
     result
 }
-#Export(c) fn jet_rt_handle_show_F64x4(value: I64) -> I64 { jet_rt_handle_debug_F64x4(value) }
-#Export(c) fn jet_rt_handle_display_F64x4(value: I64) -> I64 { jet_rt_handle_debug_F64x4(value) }
+#Export(c) fn jet_rt_handle_show_f64x4(value: I64) -> I64 { jet_rt_handle_debug_f64x4(value) }
+#Export(c) fn jet_rt_handle_display_f64x4(value: I64) -> I64 { jet_rt_handle_debug_f64x4(value) }

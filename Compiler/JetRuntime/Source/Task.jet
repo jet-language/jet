@@ -10,28 +10,28 @@ fn task_failure_new(kind: I64, owned_reason: I64) -> I64 {
     sync_store(failure + TASK_FAILURE_REASON, owned_reason)
     failure
 }
-#Export(c) fn jet_rt_record_tag_JetTaskFailure(failure: I64) -> I64 { sync_load(failure + TASK_FAILURE_TAG) }
-#Export(c) fn jet_rt_record_get_JetTaskFailure_Panicked(failure: I64) -> I64 {
+#Export(c) fn jet_rt_record_tag_jet_task_failure(failure: I64) -> I64 { sync_load(failure + TASK_FAILURE_TAG) }
+#Export(c) fn jet_rt_record_get_jet_task_failure_panicked(failure: I64) -> I64 {
     if sync_load(failure + TASK_FAILURE_TAG) != TASK_FAILURE_PANICKED {
         rt_record_variant_panic()
         if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     }
     jet_rt_string_clone(sync_load(failure + TASK_FAILURE_REASON))
 }
-#Export(c) fn jet_rt_record_new_JetTaskFailure_Cancelled() -> I64 { task_failure_new(TASK_FAILURE_CANCELLED, I64{0}) }
-#Export(c) fn jet_rt_record_new_JetTaskFailure_DeadlineBlown() -> I64 { task_failure_new(TASK_FAILURE_DEADLINE, I64{0}) }
-#Export(c) fn jet_rt_record_new_JetTaskFailure_Panicked(reason: I64) -> I64 { task_failure_new(TASK_FAILURE_PANICKED, jet_rt_string_clone(reason)) }
-#Export(c) fn jet_rt_handle_clone_JetTaskFailure(failure: I64) -> I64 {
+#Export(c) fn jet_rt_record_new_jet_task_failure_cancelled() -> I64 { task_failure_new(TASK_FAILURE_CANCELLED, I64{0}) }
+#Export(c) fn jet_rt_record_new_jet_task_failure_deadline_blown() -> I64 { task_failure_new(TASK_FAILURE_DEADLINE, I64{0}) }
+#Export(c) fn jet_rt_record_new_jet_task_failure_panicked(reason: I64) -> I64 { task_failure_new(TASK_FAILURE_PANICKED, jet_rt_string_clone(reason)) }
+#Export(c) fn jet_rt_handle_clone_jet_task_failure(failure: I64) -> I64 {
     kind :: sync_load(failure + TASK_FAILURE_TAG)
     reason :: if kind == TASK_FAILURE_PANICKED -> jet_rt_string_clone(sync_load(failure + TASK_FAILURE_REASON)) else -> I64{0}
     task_failure_new(kind, reason)
 }
-#Export(c) fn jet_rt_handle_drop_JetTaskFailure(failure: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_task_failure(failure: I64) {
     if (failure == I64{0}) -> return
     if sync_load(failure + TASK_FAILURE_TAG) == TASK_FAILURE_PANICKED -> jet_rt_string_drop(sync_load(failure + TASK_FAILURE_REASON))
     jet_rt_free(failure, TASK_FAILURE_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetTaskFailure(left: I64, right: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_task_failure(left: I64, right: I64) -> Bool {
     kind :: sync_load(left + TASK_FAILURE_TAG)
     if kind != sync_load(right + TASK_FAILURE_TAG) -> return false
     if kind != TASK_FAILURE_PANICKED -> return true
@@ -61,9 +61,9 @@ fn task_failure_render(failure: I64, debug: Bool) -> I64 {
     task_terminal_render(result, kind, reason, debug)
     result
 }
-#Export(c) fn jet_rt_handle_show_JetTaskFailure(failure: I64) -> I64 { task_failure_render(failure, false) }
-#Export(c) fn jet_rt_handle_display_JetTaskFailure(failure: I64) -> I64 { task_failure_render(failure, false) }
-#Export(c) fn jet_rt_handle_debug_JetTaskFailure(failure: I64) -> I64 { task_failure_render(failure, true) }
+#Export(c) fn jet_rt_handle_show_jet_task_failure(failure: I64) -> I64 { task_failure_render(failure, false) }
+#Export(c) fn jet_rt_handle_display_jet_task_failure(failure: I64) -> I64 { task_failure_render(failure, false) }
+#Export(c) fn jet_rt_handle_debug_jet_task_failure(failure: I64) -> I64 { task_failure_render(failure, true) }
 
 // Service TaskOutcome is a distinct registry-owned carrier, not TaskFailure.
 // Services.rs:102-106 / CAbiRoutes.rs:11381-11409 fix these four ordinals.
@@ -73,29 +73,29 @@ fn task_outcome_new(kind: I64, owned_reason: I64) -> I64 {
     sync_store(outcome + TASK_OUTCOME_REASON, owned_reason)
     outcome
 }
-#Export(c) fn jet_rt_record_tag_JetTaskOutcome(outcome: I64) -> I64 { sync_load(outcome + TASK_OUTCOME_TAG) }
-#Export(c) fn jet_rt_record_get_JetTaskOutcome_Panicked(outcome: I64) -> I64 {
+#Export(c) fn jet_rt_record_tag_jet_task_outcome(outcome: I64) -> I64 { sync_load(outcome + TASK_OUTCOME_TAG) }
+#Export(c) fn jet_rt_record_get_jet_task_outcome_panicked(outcome: I64) -> I64 {
     if sync_load(outcome + TASK_OUTCOME_TAG) != TASK_OUTCOME_PANICKED {
         rt_record_variant_panic()
         return I64{0}
     }
     jet_rt_string_clone(sync_load(outcome + TASK_OUTCOME_REASON))
 }
-#Export(c) fn jet_rt_record_new_JetTaskOutcome_Finished() -> I64 { task_outcome_new(TASK_OUTCOME_FINISHED, I64{0}) }
-#Export(c) fn jet_rt_record_new_JetTaskOutcome_Panicked(reason: I64) -> I64 { task_outcome_new(TASK_OUTCOME_PANICKED, jet_rt_string_clone(reason)) }
-#Export(c) fn jet_rt_record_new_JetTaskOutcome_Cancelled() -> I64 { task_outcome_new(TASK_OUTCOME_CANCELLED, I64{0}) }
-#Export(c) fn jet_rt_record_new_JetTaskOutcome_DeadlineBlown() -> I64 { task_outcome_new(TASK_OUTCOME_DEADLINE, I64{0}) }
-#Export(c) fn jet_rt_handle_clone_JetTaskOutcome(outcome: I64) -> I64 {
+#Export(c) fn jet_rt_record_new_jet_task_outcome_finished() -> I64 { task_outcome_new(TASK_OUTCOME_FINISHED, I64{0}) }
+#Export(c) fn jet_rt_record_new_jet_task_outcome_panicked(reason: I64) -> I64 { task_outcome_new(TASK_OUTCOME_PANICKED, jet_rt_string_clone(reason)) }
+#Export(c) fn jet_rt_record_new_jet_task_outcome_cancelled() -> I64 { task_outcome_new(TASK_OUTCOME_CANCELLED, I64{0}) }
+#Export(c) fn jet_rt_record_new_jet_task_outcome_deadline_blown() -> I64 { task_outcome_new(TASK_OUTCOME_DEADLINE, I64{0}) }
+#Export(c) fn jet_rt_handle_clone_jet_task_outcome(outcome: I64) -> I64 {
     kind :: sync_load(outcome + TASK_OUTCOME_TAG)
     reason :: if kind == TASK_OUTCOME_PANICKED -> jet_rt_string_clone(sync_load(outcome + TASK_OUTCOME_REASON)) else -> I64{0}
     task_outcome_new(kind, reason)
 }
-#Export(c) fn jet_rt_handle_drop_JetTaskOutcome(outcome: I64) {
+#Export(c) fn jet_rt_handle_drop_jet_task_outcome(outcome: I64) {
     if (outcome == I64{0}) -> return
     if sync_load(outcome + TASK_OUTCOME_TAG) == TASK_OUTCOME_PANICKED -> jet_rt_string_drop(sync_load(outcome + TASK_OUTCOME_REASON))
     jet_rt_free(outcome, TASK_OUTCOME_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_JetTaskOutcome(left: I64, right: I64) -> Bool {
+#Export(c) fn jet_rt_handle_eq_jet_task_outcome(left: I64, right: I64) -> Bool {
     kind :: sync_load(left + TASK_OUTCOME_TAG)
     if kind != sync_load(right + TASK_OUTCOME_TAG) -> return false
     if kind != TASK_OUTCOME_PANICKED -> return true
@@ -114,9 +114,9 @@ fn task_outcome_render(outcome: I64, debug: Bool) -> I64 {
     }
     result
 }
-#Export(c) fn jet_rt_handle_show_JetTaskOutcome(outcome: I64) -> I64 { task_outcome_render(outcome, false) }
-#Export(c) fn jet_rt_handle_display_JetTaskOutcome(outcome: I64) -> I64 { task_outcome_render(outcome, false) }
-#Export(c) fn jet_rt_handle_debug_JetTaskOutcome(outcome: I64) -> I64 { task_outcome_render(outcome, true) }
+#Export(c) fn jet_rt_handle_show_jet_task_outcome(outcome: I64) -> I64 { task_outcome_render(outcome, false) }
+#Export(c) fn jet_rt_handle_display_jet_task_outcome(outcome: I64) -> I64 { task_outcome_render(outcome, false) }
+#Export(c) fn jet_rt_handle_debug_jet_task_outcome(outcome: I64) -> I64 { task_outcome_render(outcome, true) }
 
 fn task_retain(child: I64) { _ := sync_add(child, I64{1}) }
 fn task_drop(child: I64) {

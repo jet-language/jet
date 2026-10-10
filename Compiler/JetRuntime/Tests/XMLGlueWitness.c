@@ -26,34 +26,34 @@ extern int64_t jet_int_owned_from_i64(int64_t);
 extern int64_t jet_int_owned_to_i64(int64_t);
 extern int64_t jet_int_add(int64_t,int64_t);
 extern void jet_rt_int_drop(int64_t);
-extern Enum *jet_rt_handle_clone_XMLReason(Enum *);
-extern void jet_rt_handle_drop_XMLReason(Enum *);
-extern bool jet_rt_handle_eq_XMLReason(Enum *,Enum *);
-extern Enum *jet_rt_handle_clone_XMLEncoding(Enum *);
-extern void jet_rt_handle_drop_XMLEncoding(Enum *);
-extern bool jet_rt_handle_eq_XMLEncoding(Enum *,Enum *);
-extern Enum *jet_rt_handle_clone_XMLLexicalPolicy(Enum *);
-extern void jet_rt_handle_drop_XMLLexicalPolicy(Enum *);
-extern bool jet_rt_handle_eq_XMLLexicalPolicy(Enum *,Enum *);
-extern Error *jet_rt_record_new_XMLError(int64_t,const int64_t *,const int64_t *,const int64_t *,Text *,Text *);
-extern Error *jet_rt_handle_clone_XMLError(Error *);
-extern void jet_rt_handle_drop_XMLError(Error *);
-extern bool jet_rt_handle_eq_XMLError(Error *,Error *);
-extern int64_t jet_rt_record_get_XMLError_kind(Error *);
-extern int64_t jet_rt_record_get_XMLError_byte_offset(Error *,int64_t *);
-extern int64_t jet_rt_record_get_XMLError_line(Error *,int64_t *);
-extern int64_t jet_rt_record_get_XMLError_column(Error *,int64_t *);
-extern Text *jet_rt_record_get_XMLError_path(Error *);
-extern Text *jet_rt_record_get_XMLError_reason(Error *);
-extern Text *jet_rt_handle_show_XMLError(Error *);
-extern Text *jet_rt_handle_display_XMLError(Error *);
-extern Text *jet_rt_handle_debug_XMLError(Error *);
-extern Render *jet_rt_record_new_XMLRenderOptions(int64_t,int64_t);
-extern Render *jet_rt_handle_clone_XMLRenderOptions(Render *);
-extern void jet_rt_handle_drop_XMLRenderOptions(Render *);
-extern bool jet_rt_handle_eq_XMLRenderOptions(Render *,Render *);
-extern int64_t jet_rt_record_get_XMLRenderOptions_encoding(Render *);
-extern int64_t jet_rt_record_get_XMLRenderOptions_lexical(Render *);
+extern Enum *jet_rt_handle_clone_xml_reason(Enum *);
+extern void jet_rt_handle_drop_xml_reason(Enum *);
+extern bool jet_rt_handle_eq_xml_reason(Enum *,Enum *);
+extern Enum *jet_rt_handle_clone_xml_encoding(Enum *);
+extern void jet_rt_handle_drop_xml_encoding(Enum *);
+extern bool jet_rt_handle_eq_xml_encoding(Enum *,Enum *);
+extern Enum *jet_rt_handle_clone_xml_lexical_policy(Enum *);
+extern void jet_rt_handle_drop_xml_lexical_policy(Enum *);
+extern bool jet_rt_handle_eq_xml_lexical_policy(Enum *,Enum *);
+extern Error *jet_rt_record_new_xml_error(int64_t,const int64_t *,const int64_t *,const int64_t *,Text *,Text *);
+extern Error *jet_rt_handle_clone_xml_error(Error *);
+extern void jet_rt_handle_drop_xml_error(Error *);
+extern bool jet_rt_handle_eq_xml_error(Error *,Error *);
+extern int64_t jet_rt_record_get_xml_error_kind(Error *);
+extern int64_t jet_rt_record_get_xml_error_byte_offset(Error *,int64_t *);
+extern int64_t jet_rt_record_get_xml_error_line(Error *,int64_t *);
+extern int64_t jet_rt_record_get_xml_error_column(Error *,int64_t *);
+extern Text *jet_rt_record_get_xml_error_path(Error *);
+extern Text *jet_rt_record_get_xml_error_reason(Error *);
+extern Text *jet_rt_handle_show_xml_error(Error *);
+extern Text *jet_rt_handle_display_xml_error(Error *);
+extern Text *jet_rt_handle_debug_xml_error(Error *);
+extern Render *jet_rt_record_new_xml_render_options(int64_t,int64_t);
+extern Render *jet_rt_handle_clone_xml_render_options(Render *);
+extern void jet_rt_handle_drop_xml_render_options(Render *);
+extern bool jet_rt_handle_eq_xml_render_options(Render *,Render *);
+extern int64_t jet_rt_record_get_xml_render_options_encoding(Render *);
+extern int64_t jet_rt_record_get_xml_render_options_lexical(Render *);
 static struct { void *pointer; int64_t bytes, align; unsigned frees; } watched[64];
 static size_t count;
 static unsigned intercepted;
@@ -85,13 +85,13 @@ static void text_is(Text *t,const char *s) {
 }
 static Error *error(int64_t kind,const int64_t *offset,const int64_t *line,const int64_t *column,const char *path,const char *reason) {
     Text *p=text(path), *r=text(reason);
-    Error *e=jet_rt_record_new_XMLError(kind,offset,line,column,p,r);
+    Error *e=jet_rt_record_new_xml_error(kind,offset,line,column,p,r);
     assert(e->path!=p && e->reason!=r);
     jet_rt_string_drop(p); jet_rt_string_drop(r);
     return e;
 }
 static void rendered(Error *e,const char *golden) {
-    Text *a=jet_rt_handle_show_XMLError(e), *b=jet_rt_handle_display_XMLError(e), *c=jet_rt_handle_debug_XMLError(e);
+    Text *a=jet_rt_handle_show_xml_error(e), *b=jet_rt_handle_display_xml_error(e), *c=jet_rt_handle_debug_xml_error(e);
     assert(a!=b && a!=c && b!=c);
     text_is(a,golden); text_is(b,golden); text_is(c,golden);
     watch_text(a); watch_text(b); watch_text(c);
@@ -109,54 +109,54 @@ static void enum_cases(int64_t variants,Enum *(*clone)(Enum *),void (*drop)(Enum
 }
 static void render_options(void) {
     for(int64_t i=0;i<4;++i) for(int64_t j=0;j<2;++j) {
-        Render *a=jet_rt_record_new_XMLRenderOptions(i,j), *b=jet_rt_handle_clone_XMLRenderOptions(a);
-        assert(a!=b && jet_rt_handle_eq_XMLRenderOptions(a,b));
-        assert(jet_rt_record_get_XMLRenderOptions_encoding(a)==i && jet_rt_record_get_XMLRenderOptions_lexical(a)==j);
-        b->encoding^=1; assert(!jet_rt_handle_eq_XMLRenderOptions(a,b)); b->encoding^=1;
-        b->lexical^=1; assert(!jet_rt_handle_eq_XMLRenderOptions(a,b)); b->lexical^=1;
+        Render *a=jet_rt_record_new_xml_render_options(i,j), *b=jet_rt_handle_clone_xml_render_options(a);
+        assert(a!=b && jet_rt_handle_eq_xml_render_options(a,b));
+        assert(jet_rt_record_get_xml_render_options_encoding(a)==i && jet_rt_record_get_xml_render_options_lexical(a)==j);
+        b->encoding^=1; assert(!jet_rt_handle_eq_xml_render_options(a,b)); b->encoding^=1;
+        b->lexical^=1; assert(!jet_rt_handle_eq_xml_render_options(a,b)); b->lexical^=1;
         watch(a,16,8); watch(b,16,8);
-        jet_rt_handle_drop_XMLRenderOptions(a); jet_rt_handle_drop_XMLRenderOptions(b); done();
+        jet_rt_handle_drop_xml_render_options(a); jet_rt_handle_drop_xml_render_options(b); done();
     }
-    jet_rt_handle_drop_XMLRenderOptions(NULL);
+    jet_rt_handle_drop_xml_render_options(NULL);
 }
 static void error_cases(void) {
     int64_t hi=jet_int_owned_from_i64(INT64_MAX), lo=jet_int_owned_from_i64(INT64_MIN);
-    Error *a=error(2,&hi,&lo,&hi,"/\xcf\x80","oops"), *b=jet_rt_handle_clone_XMLError(a);
+    Error *a=error(2,&hi,&lo,&hi,"/\xcf\x80","oops"), *b=jet_rt_handle_clone_xml_error(a);
     assert(a!=b && a->path!=b->path && a->reason!=b->reason);
     assert(a->path->data!=b->path->data && a->reason->data!=b->reason->data);
-    assert(jet_rt_handle_eq_XMLError(a,a) && jet_rt_handle_eq_XMLError(a,b));
+    assert(jet_rt_handle_eq_xml_error(a,a) && jet_rt_handle_eq_xml_error(a,b));
     assert(a->byte_offset==INT64_MAX && a->line==INT64_MIN && a->column==INT64_MAX);
     int64_t out1, out2, line, column;
-    assert(jet_rt_record_get_XMLError_byte_offset(a,&out1)==1);
-    assert(jet_rt_record_get_XMLError_byte_offset(a,&out2)==1);
+    assert(jet_rt_record_get_xml_error_byte_offset(a,&out1)==1);
+    assert(jet_rt_record_get_xml_error_byte_offset(a,&out2)==1);
     assert(out1!=hi && out2!=hi && out1!=out2);
-    assert(jet_rt_record_get_XMLError_line(a,&line)==1 && line!=lo);
-    assert(jet_rt_record_get_XMLError_column(a,&column)==1 && column!=hi);
+    assert(jet_rt_record_get_xml_error_line(a,&line)==1 && line!=lo);
+    assert(jet_rt_record_get_xml_error_column(a,&column)==1 && column!=hi);
     jet_rt_int_drop(hi); jet_rt_int_drop(lo);
     assert(jet_int_owned_to_i64(out1)==INT64_MAX && jet_int_owned_to_i64(out2)==INT64_MAX);
     assert(jet_int_owned_to_i64(line)==INT64_MIN && jet_int_owned_to_i64(column)==INT64_MAX);
     jet_rt_int_drop(out1); jet_rt_int_drop(out2); jet_rt_int_drop(line); jet_rt_int_drop(column);
-    assert(jet_rt_record_get_XMLError_kind(a)==2);
-    Text *p=jet_rt_record_get_XMLError_path(a), *r=jet_rt_record_get_XMLError_reason(a);
+    assert(jet_rt_record_get_xml_error_kind(a)==2);
+    Text *p=jet_rt_record_get_xml_error_path(a), *r=jet_rt_record_get_xml_error_reason(a);
     assert(p!=a->path && p!=b->path && r!=a->reason && r!=b->reason);
     int64_t *fields[]={&b->kind,&b->byte_present,&b->byte_offset,&b->line_present,&b->line,&b->column_present,&b->column};
-    for(size_t i=0;i<7;++i) { *fields[i]^=1; assert(!jet_rt_handle_eq_XMLError(a,b)); *fields[i]^=1; }
-    b->path->data[0]^=1; assert(!jet_rt_handle_eq_XMLError(a,b)); b->path->data[0]^=1;
-    b->reason->data[0]^=1; assert(!jet_rt_handle_eq_XMLError(a,b)); b->reason->data[0]^=1;
+    for(size_t i=0;i<7;++i) { *fields[i]^=1; assert(!jet_rt_handle_eq_xml_error(a,b)); *fields[i]^=1; }
+    b->path->data[0]^=1; assert(!jet_rt_handle_eq_xml_error(a,b)); b->path->data[0]^=1;
+    b->reason->data[0]^=1; assert(!jet_rt_handle_eq_xml_error(a,b)); b->reason->data[0]^=1;
     rendered(a,"XML MismatchedTag at byte 9223372036854775807, line -9223372036854775808, column 9223372036854775807, path /\xcf\x80: oops");
-    watch_error(a); watch_error(b); jet_rt_handle_drop_XMLError(a); jet_rt_handle_drop_XMLError(b); done();
+    watch_error(a); watch_error(b); jet_rt_handle_drop_xml_error(a); jet_rt_handle_drop_xml_error(b); done();
     text_is(p,"/\xcf\x80"); text_is(r,"oops");
     watch_text(p); watch_text(r); jet_rt_string_drop(p); jet_rt_string_drop(r); done();
     int64_t zero=0;
     a=error(0,NULL,NULL,NULL,"","x"); b=error(0,&zero,NULL,NULL,"","x");
-    assert(!jet_rt_handle_eq_XMLError(a,b));
+    assert(!jet_rt_handle_eq_xml_error(a,b));
     int64_t out=42;
-    assert(jet_rt_record_get_XMLError_byte_offset(a,&out)==0 && out==42);
-    assert(jet_rt_record_get_XMLError_line(a,&out)==0 && out==42);
-    assert(jet_rt_record_get_XMLError_column(a,&out)==0 && out==42);
-    jet_rt_handle_drop_XMLError(b); b=jet_rt_handle_clone_XMLError(a);
-    b->byte_offset=99; b->line=99; b->column=99; assert(jet_rt_handle_eq_XMLError(a,b));
-    watch_error(a); watch_error(b); jet_rt_handle_drop_XMLError(a); jet_rt_handle_drop_XMLError(b); done();
+    assert(jet_rt_record_get_xml_error_byte_offset(a,&out)==0 && out==42);
+    assert(jet_rt_record_get_xml_error_line(a,&out)==0 && out==42);
+    assert(jet_rt_record_get_xml_error_column(a,&out)==0 && out==42);
+    jet_rt_handle_drop_xml_error(b); b=jet_rt_handle_clone_xml_error(a);
+    b->byte_offset=99; b->line=99; b->column=99; assert(jet_rt_handle_eq_xml_error(a,b));
+    watch_error(a); watch_error(b); jet_rt_handle_drop_xml_error(a); jet_rt_handle_drop_xml_error(b); done();
     const char *names[]={"InvalidEncoding","Malformed","MismatchedTag","InvalidName","Namespace","DuplicateAttribute","Entity","EntityCycle","Limit","Canonicalization","Shape","Unsupported"};
     for(int64_t i=0;i<12;++i) for(unsigned mask=0;mask<8;++mask) {
         int64_t offset=-7, l=0, c=-3;
@@ -164,15 +164,15 @@ static void error_cases(void) {
         char golden[256];
         int n=snprintf(golden,sizeof(golden),"XML %s at byte %d%s%s%s: bad",names[i],(mask&1)?-7:0,(mask&2)?", line 0":"",(mask&4)?", column -3":"",(mask&1)?", path /p":"");
         assert(n>=0 && (size_t)n<sizeof(golden)); rendered(a,golden);
-        watch_error(a); jet_rt_handle_drop_XMLError(a); done();
+        watch_error(a); jet_rt_handle_drop_xml_error(a); done();
     }
-    jet_rt_handle_drop_XMLError(NULL);
+    jet_rt_handle_drop_xml_error(NULL);
 }
 int main(int argc,char **argv) {
     jet_rt_alloc_init();
     if(argc>1) {
-        if(strcmp(argv[1],"encoding-range")==0) { (void)jet_rt_record_new_XMLRenderOptions(4,0); }
-        else if(strcmp(argv[1],"lexical-range")==0) { (void)jet_rt_record_new_XMLRenderOptions(0,-1); }
+        if(strcmp(argv[1],"encoding-range")==0) { (void)jet_rt_record_new_xml_render_options(4,0); }
+        else if(strcmp(argv[1],"lexical-range")==0) { (void)jet_rt_record_new_xml_render_options(0,-1); }
         else if(strcmp(argv[1],"kind-range")==0) { (void)error(12,NULL,NULL,NULL,"","x"); }
         else if(strcmp(argv[1],"native-overflow")==0) {
             int64_t hi=jet_int_owned_from_i64(INT64_MAX), over=jet_int_add(hi,1);
@@ -180,8 +180,8 @@ int main(int argc,char **argv) {
         } else return 2;
         assert(!"range/overflow mode returned"); return 1;
     }
-    enum_cases(12,jet_rt_handle_clone_XMLReason,jet_rt_handle_drop_XMLReason,jet_rt_handle_eq_XMLReason);
-    enum_cases(4,jet_rt_handle_clone_XMLEncoding,jet_rt_handle_drop_XMLEncoding,jet_rt_handle_eq_XMLEncoding);
-    enum_cases(2,jet_rt_handle_clone_XMLLexicalPolicy,jet_rt_handle_drop_XMLLexicalPolicy,jet_rt_handle_eq_XMLLexicalPolicy);
+    enum_cases(12,jet_rt_handle_clone_xml_reason,jet_rt_handle_drop_xml_reason,jet_rt_handle_eq_xml_reason);
+    enum_cases(4,jet_rt_handle_clone_xml_encoding,jet_rt_handle_drop_xml_encoding,jet_rt_handle_eq_xml_encoding);
+    enum_cases(2,jet_rt_handle_clone_xml_lexical_policy,jet_rt_handle_drop_xml_lexical_policy,jet_rt_handle_eq_xml_lexical_policy);
     render_options(); error_cases(); puts("XMLGlue ownership/equality/render OK"); return 0;
 }

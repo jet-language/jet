@@ -17,10 +17,10 @@ _Static_assert(sizeof(Event)==24,"UiABI Event24");
 extern void jet_rt_alloc_init(void);
 extern H jet_rt_alloc(H,H),__real_jet_rt_alloc(H,H);
 extern void __real_jet_rt_free(H,H,H);
-extern H jet_rt_handle_clone_JetInputEvent(H),jet_rt_handle_clone_JetTuiEvent(H);
+extern H jet_rt_handle_clone_jet_input_event(H),jet_rt_handle_clone_jet_tui_event(H);
 extern Text *jet_rt_string_from_static(const void *,H);
-extern void jet_rt_handle_drop_JetInputEvent(H),jet_rt_handle_drop_JetTuiEvent(H);
-extern bool jet_rt_handle_eq_JetInputEvent(H,H),jet_rt_handle_eq_JetTuiEvent(H,H);
+extern void jet_rt_handle_drop_jet_input_event(H),jet_rt_handle_drop_jet_tui_event(H);
+extern bool jet_rt_handle_eq_jet_input_event(H,H),jet_rt_handle_eq_jet_tui_event(H,H);
 static struct { H address,bytes,align; bool live; } ledger[512];
 static size_t allocations,frees;
 static bool tracking;
@@ -60,9 +60,9 @@ static Event *event(bool tui,H kind,size_t n) {
     return e;
 }
 static void cases(bool tui,H kind,size_t n) {
-    H (*clone)(H)=tui?jet_rt_handle_clone_JetTuiEvent:jet_rt_handle_clone_JetInputEvent;
-    void (*drop)(H)=tui?jet_rt_handle_drop_JetTuiEvent:jet_rt_handle_drop_JetInputEvent;
-    bool (*eq)(H,H)=tui?jet_rt_handle_eq_JetTuiEvent:jet_rt_handle_eq_JetInputEvent;
+    H (*clone)(H)=tui?jet_rt_handle_clone_jet_tui_event:jet_rt_handle_clone_jet_input_event;
+    void (*drop)(H)=tui?jet_rt_handle_drop_jet_tui_event:jet_rt_handle_drop_jet_input_event;
+    bool (*eq)(H,H)=tui?jet_rt_handle_eq_jet_tui_event:jet_rt_handle_eq_jet_input_event;
     Event *a=event(tui,kind,n),*b=(Event *)(uintptr_t)clone((H)(uintptr_t)a);H ah=(H)(uintptr_t)a,bh=(H)(uintptr_t)b;
     assert(a!=b&&eq(ah,bh));
     if(kind==0||(tui&&(kind==2||kind==3))) {
@@ -90,6 +90,6 @@ int main(void) {
     for(H kind=0;kind<2;++kind)cases(false,kind,0);
     for(H kind=0;kind<7;++kind)cases(true,kind,0);
     cases(true,3,1);cases(true,3,17);cases(true,3,257);
-    jet_rt_handle_drop_JetInputEvent(0);jet_rt_handle_drop_JetTuiEvent(0);balanced();
+    jet_rt_handle_drop_jet_input_event(0);jet_rt_handle_drop_jet_tui_event(0);balanced();
     puts("UI events: all variants, IEEE size equality, raw fields, packed IO ownership and exact-once frees ok");return 0;
 }
