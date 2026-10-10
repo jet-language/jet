@@ -65,4 +65,17 @@ fn run() {
     declared := [JetDriverAuthorizedSourceRoot]{manifest}
     assert(jet_cli_script_dependency_roots(&declared, "{path}/stats.jet", &rejected, false) == None)
     assert(declared.len() == 1 && rejected.len() == 0)
+
+    // A valid carrier is a package, not a manifestless script; malformed
+    // carriers must reach the package loader without an inline-dep refusal.
+    inline_sources :: [String]{
+        "package {{\nname: \"script-package\"\n}}\nuse textkit#9.9.9\nfn run() {{}}\n",
+        "package {{\nname: 17\n}}\nuse textkit#9.9.9\nfn run() {{}}\n",
+    }
+    loop inline_source in inline_sources {
+        inline_roots := [JetDriverAuthorizedSourceRoot]{script_deps_test_root(path, inline_source)}
+        inline_admitted := [JetDriverScriptDependency]{}
+        assert(jet_cli_script_dependency_roots(&inline_roots, "{path}/stats.jet", &inline_admitted, false) == None)
+        assert(inline_roots.len() == 1 && inline_admitted.len() == 0)
+    }
 }

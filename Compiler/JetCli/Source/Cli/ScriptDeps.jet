@@ -36,7 +36,13 @@ fn jet_cli_script_dependency_roots(roots: &[JetDriverAuthorizedSourceRoot], entr
     loop file in entry_root.files {
         if file.relative_path == "package.jet" -> return None
         if file.path == entry_path || JET_CLI_STOCK_ENTRIES.contains(file.relative_path) {
-            if PackageFacts.parse_inline(file.source, file.path) == .Val(_) -> return None
+            // The normal package loader owns malformed-carrier diagnostics;
+            // do not attempt manifestless resolution before it reports them.
+            inline :: if PackageFacts.parse_inline(file.source, file.path) == {
+                .Ok(value) -> { value }
+                .Err(_) -> { return None }
+            }
+            if inline == .Val(_) -> return None
         }
     }
     entry :: loop file in entry_root.files { if file.path == entry_path -> break file } ?? return None

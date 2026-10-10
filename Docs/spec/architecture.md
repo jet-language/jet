@@ -1113,6 +1113,10 @@ The CLI snapshots the selected no-follow authority root; the Driver binds its
 recorded name, selector, selected version, and content digest into the source
 and package receipts. Loose selectors retain `L0203`, unresolved dependencies
 retain `E1253`, and neither resolution path invokes Cargo or rustc.
+Admission explicitly handles the fallible optional inline-Package parse before
+choosing the manifestless path. Both a present carrier and a malformed carrier
+remain owned by the normal package loader; inline-dependency resolution must
+not replace malformed-package diagnostics with a dependency refusal.
 
 Checked `#Layout(c)` records preserve native address-sized raw pointer fields
 in their generated `repr(C)` definitions. A `Ptr<T>` field lowers to

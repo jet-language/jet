@@ -303,14 +303,14 @@ fn jet_driver_rust_foreign_facts(graph: SemaRegistrationGraph) -> JetDriverRustF
         repr :: if record.alignment == .Val(alignment) -> "#[repr(C, align({alignment}))]" else -> "#[repr(C)]"
         &source.push("{repr}\nstruct {record.rust_name} {{\n")
         loop field in record.fields {
-            ty :: jet_driver_rust_foreign_record_type(field.ty, records, []) ?? panic("checked C record field `{field.name}` has no native Rust representation")
+            ty :: jet_driver_rust_foreign_record_type(field.ty, records, [String]{}) ?? panic("checked C record field `{field.name}` has no native Rust representation")
             &source.push("    {jet_driver_rust_foreign_mangle(field.name)}: {ty},\n")
         }
         &source.push("}}\n\n")
     }
     // Alias record names use the same checked representation, not opaque handles.
     loop (name, _) in records.aliases {
-        ty :: jet_driver_rust_foreign_record_type(Type.Named{name: name}, records, []) ?? next
+        ty :: jet_driver_rust_foreign_record_type(Type.Named{name: name}, records, [String]{}) ?? next
         if ty.starts_with("__JetCRecord_") -> records.names[name] = ty
     }
     JetDriverRustForeignFacts{entries: entries, record_source: source.join(""), record_names: records.names}
