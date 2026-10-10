@@ -206,12 +206,26 @@ fn lower_route_word_getter(p: MIRProgram, ty: MIRType) -> String? {
     if lower_type_def(p, ty) != None -> return None
     member :: lower_route_word_field(p, ty) ?? return None
     runtime :: lower_runtime_handle_type(p, ty) ?? return None
+    // A string literal right of `==` in a condition is a pattern; bind it.
+    fields :: "{member}=Int"
     loop schema in LOWER_GENERATED_RECORDS {
-        if schema.jet_name == runtime.runtime && schema.variants == "" && schema.fields == "{member}=Int" {
+        if schema.jet_name == runtime.runtime && schema.variants == "" && schema.fields == fields {
             return Val("jet_rt_record_get_{runtime_abi_atom(runtime.runtime)}_{runtime_abi_atom(member)}")
         }
     }
     None
+}
+
+// The same handle-native scalar record leaves a route as its word (CAbiRoutes
+// `jet_int_from_i64(d.ns)`): the record constructor borrows that owned word.
+fn lower_route_word_constructor(p: MIRProgram, ty: MIRType) -> String? {
+    if lower_route_word_getter(p, ty) == None -> return None
+    runtime :: lower_runtime_handle_type(p, ty) ?? return None
+    Val("jet_rt_record_new_{runtime_abi_atom(runtime.runtime)}")
+}
+
+fn lower_route_word_handle(p: MIRProgram, ty: MIRType, carrier: LowerRouteCarrier) -> Bool Never! {
+    carrier == .Word && lower_route_word_constructor(p, ty) != None
 }
 
 fn lower_route_type_name(p: MIRProgram, ty: MIRType) -> String Never! {
@@ -586,6 +600,13 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
                 return
             }
             if result_ty == .Val(ty) {
+                if carrier == .Word && lower_route_word_constructor(p, ty) == .Val(constructor) {
+                    word :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
+                    lower_call_runtime(&m, &f, route.export, lowered, Val(word))
+                    if dst == .Val(kept) -> lower_call_runtime(&m, &f, constructor, [LIRValueID]{word}, Val(kept))
+                    lower_emit(&f, LIRInst.Drop{value: word})
+                    return
+                }
                 if carrier == .Word && lower_route_word_record(p, ty) == .Val(info) {
                     word :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, info.ty.identity)
                     lower_call_runtime(&m, &f, route.export, lowered, Val(word))
@@ -675,7 +696,7 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
             lower_alloc(&m, &f, box, lower_box_size(p, ty))
             lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: out.word})
             // A List, a Core record or a Dyn payload is built on its own edge.
-            branched :: list_payload || lower_route_record(p, ok_ty, ok) != None || lower_route_record(p, err_ty, err) != None || lower_route_dyn(p, ok_ty, ok) || lower_route_dyn(p, err_ty, err)
+            branched :: list_payload || lower_route_record(p, ok_ty, ok) != None || lower_route_record(p, err_ty, err) != None || lower_route_dyn(p, ok_ty, ok) || lower_route_dyn(p, err_ty, err) || lower_route_word_handle(p, ok_ty, ok) || lower_route_word_handle(p, err_ty, err)
             if branched {
                 zero :: lower_const(&f, 0)
                 succeeded :: lower_flag(&f)
@@ -756,10 +777,7 @@ fn lower_route_shape_matches(p: MIRProgram, ty: MIRType, result: LowerRouteResul
 
 // Seed lists of record handles are rebuilt into native element storage.
 // Jet-owned lists already carry the native inline buffer (Records.jet).
-// A handle-native scalar record is admitted only as an argument word: its
-// result word has no native handle constructor on this rail.
 fn lower_route_result_matches(p: MIRProgram, ty: MIRType, carrier: LowerRouteCarrier) -> Bool Never! {
-    if carrier == .Word && lower_route_word_getter(p, ty) != None -> return false
     lower_route_carrier_matches(p, ty, carrier)
 }
 
@@ -834,6 +852,14 @@ fn lower_route_store_payload(p: MIRProgram, m: &LowerModule, f: &LowerFunction, 
         native :: lower_pointer(&f)
         lower_dyn_from_runtime(p, &m, &f, ty, tree, native)
         return lower_write_at(p, &f, box, offset, native, ty)
+    }
+    if carrier == .Word && lower_route_word_constructor(p, ty) == .Val(constructor) {
+        word :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
+        lower_emit(&f, LIRInst.Load{dst: word, base: slot, offset: 0})
+        handle :: lower_pointer(&f)
+        lower_call_runtime(&m, &f, constructor, [LIRValueID]{word}, Val(handle))
+        lower_emit(&f, LIRInst.Drop{value: word})
+        return lower_write_at(p, &f, box, offset, handle, ty)
     }
     if carrier == .Word && lower_route_word_record(p, ty) == .Val(info) {
         word :: lower_word(&f)

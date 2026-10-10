@@ -5,6 +5,7 @@
 // the call (lower_dyn_field, lower_route_dyn). A mismatched checked type
 // is still refused. Lowering witnesses: Jet lowering and LIR lint only.
 use jet_foundation.[
+MIRCallArg,
 MIRConstant,
 MIRDropKind,
 MIREnumArg,
@@ -14,10 +15,12 @@ MIRFunctionID,
 MIROperation,
 MIRPreludeABI,
 MIRPreludeFamily,
+MIRPreludeTypeArg,
 MIRProgram,
 MIRSemanticOp,
 MIRTerminator,
 MIRTupleField,
+MIRType,
 MIRTypeDef,
 MIRTypeDefKind,
 MIRTypeKind,
@@ -76,6 +79,27 @@ fn fx_route_carriers_duration() -> MIRProgram Never! {
     fx_block(&b, 0, MIRTerminator.Return{value: Val(ns)})
     p := fx_route_carriers_program(fx_builder())
     p.functions = [MIRFunction]{fx_function("ns", b, fx_int())}
+    p
+}
+
+// `duration_from_int(5, .Nanoseconds)`: the adapter's ok word (CAbiRoutes
+// `jet_int_from_i64(d.ns)`) becomes the native Duration handle through the
+// record constructor on the success edge only.
+fn fx_route_carriers_duration_new() -> MIRProgram Never! {
+    b := fx_builder()
+    integer :: fx_int_const(&b, 5)
+    unit :: fx_copy(&b, fx_named("DurationUnit"), MIROperation.Enum{type_id: mir_type_id("DurationUnit"), variant: "Nanoseconds", args: [MIREnumArg]{}})
+    result :: mir_type_from_kind(MIRTypeKind.Result{ok: fx_named("Duration"), err: fx_named("RangeError")})
+    made :: fx_owned(&b, result, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("core.time", "duration_from_int"), args: [MIRCallArg]{fx_arg(integer, .Read), fx_arg(unit, .Read)}, owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
+    loop value in ([MIRValueID]{made, integer}) {
+        fx_do(&b, MIROperation.Drop{value: value, kind: MIRDropKind.Value})
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    variants := [MIRVariant]{}
+    loop name in ([String]{"Nanoseconds", "Microseconds", "Milliseconds", "Seconds", "Minutes", "Hours"}) -> &variants.push(fx_variant(name, MIRVariantPayload.Unit))
+    definition :: fx_type_def("DurationUnit", MIRTypeDefKind.Enum{variants: variants, methods: [MIRFunctionID]{}})
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{definition})
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "core.time", "duration_from_int", "jet_duration_from_int", 2, MIRPreludeABI.Value))
     p
 }
 
@@ -175,6 +199,24 @@ fn fx_route_carrier_checks() -> Bool {
     }
     if !getter {
         print("route-carriers: Duration did not cross as its record getter word ({duration_calls.join(",")})")
+        clean = false
+    }
+    made :: lir_lower_entry(fx_route_carriers_duration_new(), mir_function_id("run"))
+    loop issue in made.issues -> print("route-carriers duration_from_int: {issue.message}")
+    if made.issues.len() != 0 -> clean = false
+    loop issue in lir_lint_module(made.lir) {
+        print("route-carriers duration_from_int: {issue.message}")
+        clean = false
+    }
+    made_calls :: fx_route_carrier_runtime_calls(made.lir)
+    called := false
+    constructed := false
+    loop symbol in made_calls {
+        if symbol == "jet_duration_from_int" -> called = true
+        if called && symbol == "jet_rt_record_new_duration" -> constructed = true
+    }
+    if !constructed {
+        print("route-carriers: Duration result word was not rebuilt by its record constructor ({made_calls.join(",")})")
         clean = false
     }
     refused :: lir_lower_entry(fx_route_carriers_refused(), mir_function_id("run"))
