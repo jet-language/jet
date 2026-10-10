@@ -29,6 +29,7 @@ use jet_foundation.[
     tir_call_arg_copy_fact,
     tir_symbol_local,
     type_identity_equal,
+    type_name,
 ]
 
 struct SemaCallTypedArguments {
@@ -356,6 +357,25 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         value :: if self_typed -> sema_stmt_numeric_slot_value(checked_value, required, environment, program, &diagnostics) ?? return None else -> checked_value
         compatible :: if trait_parameter && parameter.convention == AccessConvention.Write -> type_identity_equal(required, sema_call_resolved_type(value.ty, environment, program)) else -> sema_call_type_assignable(required_declared, value.ty, environment, program) ?? return None
         if !compatible {
+            // D-ANY-JAI1 / D-VARARGBOUND1 (Rust `check_variadic_bound_tail`,
+            // E1313): a trait-bounded variadic argument is checked against
+            // each bound trait it fails to implement. A builtin trait stays a
+            // named bound after resolution.
+            bounds := [String]{}
+            if required == .TraitObject(list) {
+                bounds = list
+            } else if required_declared == .Named(trait_name) && sema_type_builtin_trait_symbol(trait_name) != None {
+                bounds = [String]{trait_name}
+            }
+            if parameter.variadic && !args[index].spread && bounds.len() > 0 {
+                arg_name :: type_name(value.ty)
+                loop bound in bounds {
+                    if bounds.len() > 1 && sema_call_type_assignable(Type.TraitObject{bounds: [String]{bound}}, value.ty, environment, program) == .Val(true) -> next
+                    shown :: sema_error_conversion_leaf(bound)
+                    &diagnostics.push(sema_error("E1313", expr_span(args[index].expr), "`{arg_name}` doesn't implement `{shown}`", "`{parameter.name}: ...{shown}` checks every argument against `{shown}` — that's how `{callee}` accepts a mix of types safely", "implement `{shown}` for `{arg_name}`'s type, or drop the value from this call"))
+                }
+                return None
+            }
             &diagnostics.push(sema_type_mismatch(required, value.ty, args[index].span))
             return None
         }
