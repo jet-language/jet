@@ -1,12 +1,27 @@
-// Core registry tuples meet parsed signatures in canonical field order.
-fn line_from_raw() -[IO, Time.Wait]> (cause: String?, eof: Bool, line: String) Never! {
-    core.term.__terminal8_line()
+// Inspect the real registry metadata without invoking Core-private terminals.
+use jet_foundation.[core_platform_fixed_signature, type_identity_equal, Type, TypeTupleField]
+
+fn named_tuple_identity_registry_return(member: String) -> Type Never! {
+    signature :: core_platform_fixed_signature("core.term", member) ?? panic("missing terminal tuple signature")
+    signature.return_type ?? panic("terminal tuple signature has no return type")
 }
-// The tuple must normalize even when nested under an optional container.
-fn size_from_raw() -[IO, Time.Wait]> (h: Int, w: Int)? Never! {
-    core.term.__terminal8_stty()
-}
-fn line_from_source() -> (cause: String?, eof: Bool, line: String) {
+
+fn named_tuple_identity_line_from_source() -> (cause: String?, eof: Bool, line: String) {
     (eof: false, line: "", cause: None)
 }
-fn run() {}
+
+fn named_tuple_identity_fixture() {
+    line_type :: Type.Tuple{fields: [TypeTupleField]{
+        TypeTupleField{name: "cause", ty: Type.Option{inner: Type.String}},
+        TypeTupleField{name: "eof", ty: Type.Bool},
+        TypeTupleField{name: "line", ty: Type.String},
+    }}
+    size_type :: Type.Option{inner: Type.Tuple{fields: [TypeTupleField]{
+        TypeTupleField{name: "h", ty: Type.Int},
+        TypeTupleField{name: "w", ty: Type.Int},
+    }}}
+    assert(type_identity_equal(named_tuple_identity_registry_return("__terminal8_line"), line_type))
+    assert(type_identity_equal(named_tuple_identity_registry_return("__terminal8_stty"), size_type))
+    line :: named_tuple_identity_line_from_source()
+    assert(!line.eof && line.line == "" && line.cause == None)
+}

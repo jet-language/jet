@@ -48,6 +48,10 @@ parameter order alongside its fields, preserving `os_code: Int?` and
 Core `IOContext` construction narrows present OS codes exactly once through the
 generic native optional-slot adapter, not a second record-specific conversion.
 The Phi ownership and drop-compatibility guards remain unchanged.
+The named-tuple registry fixture queries the real terminal signature metadata
+instead of calling Core-private terminal members. The gate fixture assembler
+isolates this Foundation registry witness and its canonical authority closure
+from the other fixtures' entry points.
 Ordered or-patterns stop at the first matching alternative; failed nested
 carrier probes leave the subject available for subsequent alternatives. The
 Rust reference now mirrors native Sema's recursive Result-carrier admission and
