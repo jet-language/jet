@@ -168,7 +168,7 @@ fn x64_address_folds(function: LIRFunction) -> X64AddressFolds Never! {
             if inst == .Binary(dst, op, left, rhs) && op == .Add && function.values[dst.value].layout == lir_layout_word() {
                 if (overflow_at.get(left.value * count + rhs.value) ?? -1) > position -> next
                 address := x64_address_parts(left, rhs, definitions, uses)
-                if address.index == Val(rhs) {
+                if address.index == (Val(rhs)) {
                     swapped :: x64_address_parts(rhs, left, definitions, uses)
                     if swapped.index == None || swapped.index != Val(left) -> address = swapped
                 }
