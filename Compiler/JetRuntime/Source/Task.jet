@@ -154,9 +154,9 @@ fn task_spawn_state(site: I64, label: I64, env: I64, invoke: I64, release: I64, 
     sync_store(child + I64{104}, sync_park_new())
     sync_store(child + I64{136}, group)
     sync_store(child + I64{144}, permit)
-    id :: scheduler_observe_register(control, site, label)
+    id :: jet_rt_observe_task_register(control, site, label)
     sync_store(control + I64{56}, id)
-    sync_store(child + I64{128}, scheduler_observe_identity(id))
+    sync_store(child + I64{128}, jet_rt_observe_task_identity(id))
     if (group != I64{0}) -> task_group_register(group, child)
     world :: world_current()
     if (world != I64{0}) {
@@ -217,7 +217,7 @@ fn task_run(child: I64) {
     sync_store(base + I64{64}, I64{0})
     sync_store(thread_base() + I64{48}, sync_load(child + I64{88}))
     sync_store(thread_base() + I64{56}, sync_load(child + I64{96}))
-    scheduler_observe_enter(sync_load(control + I64{56}))
+    jet_rt_observe_task_enter(sync_load(control + I64{56}))
     _ := scheduler_wait_while_paused()
     aborted :: sync_load(control + I64{8}) != I64{0} && sync_load(control + I64{16}) != I64{0}
     if aborted -> scheduler_deliver_cancel()
@@ -249,7 +249,7 @@ fn task_run(child: I64) {
     }
     sync_store(child + I64{32}, jet_scheduler_native_status())
     jet_rt_session_cleanup_leave(cleanup)
-    scheduler_observe_finish(sync_load(control + I64{56}))
+    jet_rt_observe_task_finish(sync_load(control + I64{56}))
     if (world != I64{0}) {
         world_task_finished(world)
         _ := rt_time_monotonic_provider_set(saved_provider)

@@ -59,6 +59,11 @@ Isolated runtime-generator fixtures copy that shared projection module alongside
 the real generator and registry inputs; they do not replace its module boundary.
 Providers, generated adapters and compiler callers use one spelling, with
 collision rejection before a symbol cutover.
+Inside the runtime's assembled source unit, calls use existing Jet provider
+definitions directly instead of importing their own exported C addresses.
+External C addresses retain one declaration owner, including the libc errno
+seam shared by resolver and process code. This preserves strict C-symbol
+collision admission; it does not grant import/export aliases.
 
 Bootstrap Rust nominal carriers use their exact Prelude declaration spelling,
 including acronym case; the ABI atom projection never supplies a type name.

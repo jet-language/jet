@@ -718,8 +718,6 @@ fn spawn_stream_io(child: I64, stream: I64, bytes: I64, length: I64, number: I64
 // caller-owned Jet memory, never libc malloc, so allocator domains cannot mix.
 #Import(c) fn process_realpath(path: I64, buffer: I64) -> I64 = "realpath"
 
-#Import(c) fn process_errno_location() -> I64 = "__errno_location"
-
 #Export(c) fn jet_process_path_stat_raw(path: I64, facts: I64, error: I64) {
     result := I64{0}
     #Unsafe("source lends a NUL-terminated raw path including non-Unicode bytes and a writable 128-byte stat fact row") {
@@ -739,7 +737,7 @@ fn spawn_stream_io(child: I64, stream: I64, bytes: I64, length: I64, number: I64
     if (result == I64{0}) {
         errno := I64{0}
         #Unsafe("libc __errno_location returns this calling thread's live errno int; read only its initialized four bytes") {
-            at :: process_errno_location()
+            at :: net_errno_location()
             errno = os_load_u8(at).bit_or((os_load_u8(wrapping(at + I64{1})) << I64{8})).bit_or((os_load_u8(wrapping(at + I64{2})) << I64{16})).bit_or((os_load_u8(wrapping(at + I64{3})) << I64{24}))
         }
         jet_rt_free(buffer, I64{4096}, I64{1})

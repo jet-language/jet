@@ -4,9 +4,6 @@
 // start-id48, identity56..88, directory96, path104, periodic-started112.
 // Value48: next0, canonical five E4 fields8..40 (rendered0 means None).
 // Event128: next0, canonical fifteen fields8..120, five owned E4 strings.
-#Import(c) fn observe_mem_resources(out: I64) = "jet_rt_mem_resources"
-#Import(c) fn observe_env_get(key: I64) -> I64 = "jet_rt_logical_env_get"
-#Import(c) fn observe_env_get_os(key: I64, data_out: I64, len_out: I64) -> I64 = "jet_rt_logical_env_get_os"
 fn observe_text_clone(value: I64) -> I64 {
     if value == (I64{0}) -> return I64{0}
     rt_text_copy(rt_text_data(value), rt_text_len(value))
@@ -491,7 +488,7 @@ fn observe_snapshot(writer: I64, exit: I64) -> I64 {
     sync_mutex_unlock(observe_root)
     // These are the canonical Mem/Arena producer's three actual counters,
     // not program allocation counts or inferred registry cardinalities.
-    observe_mem_resources(scratch)
+    jet_rt_mem_resources(scratch)
     observe_msg_live_arenas(text)
     observe_decimal_unsigned(text, sync_load(scratch))
     observe_msg_live_allocs(text)
@@ -664,7 +661,7 @@ fn observe_env_key(index: I64) -> I64 {
 #Export(c) fn jet_rt_observe_runtime_start_from_env() {
     key :: jet_rt_string_builder_new()
     observe_msg_env_observe(key)
-    enabled :: observe_env_get(key)
+    enabled :: jet_rt_logical_env_get(key)
     jet_rt_string_drop(key)
     if enabled == (I64{0}) -> return
     live :: rt_text_len(enabled) == I64{1} && trap_byte(rt_text_data(enabled)) == I64{49}
@@ -676,7 +673,7 @@ fn observe_env_key(index: I64) -> I64 {
     valid := true
     loop at < (I64{5}) {
         name :: observe_env_key(at)
-        value :: observe_env_get(name)
+        value :: jet_rt_logical_env_get(name)
         jet_rt_string_drop(name)
         sync_store(inputs + at * I64{8}, value)
         if {
@@ -690,7 +687,7 @@ fn observe_env_key(index: I64) -> I64 {
     if valid {
         name :: jet_rt_string_builder_new()
         observe_msg_env_tmpdir(name)
-        present :: observe_env_get_os(name, inputs + I64{40}, inputs + I64{48})
+        present :: jet_rt_logical_env_get_os(name, inputs + I64{40}, inputs + I64{48})
         jet_rt_string_drop(name)
         directory := I64{0}
         if {

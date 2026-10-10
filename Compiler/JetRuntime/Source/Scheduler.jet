@@ -5,16 +5,6 @@
 // requestedRootCode112 capture120. StopCleanup's opaque token owns old flags.
 // Stop56: kind0 jct8 owner16 start24 end32 owned E4 message40 form48 (0 raw,
 // 1 rendered diagnostic); -1 denotes absent optional comptime metadata.
-// The interim Observe imports die when Observe ports; they contain no scheduler.
-#Import(c) fn scheduler_observe_register(control: I64, site: I64, label: I64) -> I64 = "jet_rt_observe_task_register"
-#Import(c) fn scheduler_observe_enter(id: I64) = "jet_rt_observe_task_enter"
-#Import(c) fn scheduler_observe_finish(id: I64) = "jet_rt_observe_task_finish"
-#Import(c) fn scheduler_observe_control(id: I64, state: I64, cancelled: I64) = "jet_rt_observe_task_control"
-#Import(c) fn scheduler_observe_wait(state: I64, wait: I64, present: I64, remaining: I64) = "jet_rt_observe_task_wait"
-#Import(c) fn scheduler_observe_identity(id: I64) -> I64 = "jet_rt_observe_task_identity"
-#Import(c) fn scheduler_observe_parked() -> Bool = "jet_rt_observe_has_parked_tasks"
-#Import(c) fn scheduler_observe_pool(workers: I64, queued_delta: I64) = "jet_rt_observe_pool"
-#Import(c) fn scheduler_observe_quiescent() -> Bool = "jet_rt_observe_io_quiescent"
 
 // #4890: role facts belong to the real current control, never Rust TLS.
 SCHEDULER_SCOPE_ROOT :: prep { I64{1} }
@@ -512,7 +502,7 @@ fn scheduler_cancel_callback_remove(control: I64, node: I64) {
 fn scheduler_control_cancel(control: I64) {
     scheduler_assert_not_root_cancel(control)
     sync_store(control + I64{16}, I64{1})
-    scheduler_observe_control(sync_load(control + I64{56}), I64{-1}, I64{1})
+    jet_rt_observe_task_control(sync_load(control + I64{56}), I64{-1}, I64{1})
     sync_park_wake(sync_load(control + I64{64}))
     sync_mutex_lock(control + I64{72})
     waiter := sync_load(control + I64{80})
@@ -554,11 +544,11 @@ fn scheduler_control_interrupt(control: I64) {
 fn scheduler_control_pause(control: I64, mode: I64) {
     sync_store(control + I64{24}, if (mode == I64{1}) -> I64{1} else -> I64{0})
     sync_store(control + I64{8}, I64{1})
-    scheduler_observe_control(sync_load(control + I64{56}), I64{3}, I64{-1})
+    jet_rt_observe_task_control(sync_load(control + I64{56}), I64{3}, I64{-1})
 }
 fn scheduler_control_resume(control: I64) {
     sync_store(control + I64{8}, I64{0})
-    scheduler_observe_control(sync_load(control + I64{56}), I64{1}, I64{-1})
+    jet_rt_observe_task_control(sync_load(control + I64{56}), I64{1}, I64{-1})
     sync_park_wake(sync_load(control + I64{64}))
 }
 
@@ -591,7 +581,7 @@ fn scheduler_wait_point_cancel_check() -> I64 {
 }
 
 fn scheduler_observe_update(state: I64, wait: I64) {
-    scheduler_observe_wait(state, wait, if jet_ctx_deadline_present() -> I64{1} else -> I64{0}, jet_deadline_remaining_ms())
+    jet_rt_observe_task_wait(state, wait, if jet_ctx_deadline_present() -> I64{1} else -> I64{0}, jet_deadline_remaining_ms())
 }
 
 // Mirrors Scheduler.rs:1879-1967, including its per-site interrupt order.
@@ -759,7 +749,7 @@ fn scheduler_get() -> I64 {
     if {
         (sync_cas(root + I64{112}, I64{0}, I64{-1}) == I64{0}) -> {
             count :: scheduler_worker_count()
-            scheduler_observe_pool(count, I64{0})
+            jet_rt_observe_pool(count, I64{0})
             at := I64{0}
             // Unsigned usize values above i64::MAX cannot be serviced on Linux;
             // attempt worker creation just as Rust does, failing at pthread_create.
@@ -789,7 +779,7 @@ fn scheduler_submit(code: I64, argument: I64, blocking: Bool) {
     tail :: sync_load(root + I64{16})
     if (tail == I64{0}) -> sync_store(root + I64{8}, job) else -> sync_store(tail, job)
     sync_store(root + I64{16}, job)
-    scheduler_observe_pool(I64{-1}, I64{1})
+    jet_rt_observe_pool(I64{-1}, I64{1})
     sync_cond_notify_one(root + I64{24})
     sync_cond_notify_one(root + I64{32})
     sync_mutex_unlock(root)
@@ -831,7 +821,7 @@ fn scheduler_pop(root: I64, allow_blocking: Bool) -> I64 {
             next
         }
         sync_mutex_unlock(root)
-        scheduler_observe_pool(I64{-1}, I64{-1})
+        jet_rt_observe_pool(I64{-1}, I64{-1})
         code :: sync_load(job + I64{8})
         arg :: sync_load(job + I64{16})
         alloc_release_valid(job, I64{32}, I64{8})
@@ -923,7 +913,7 @@ fn scheduler_completion_order(out: I64) {
     at := I64{0}
     slot :: sync_park_new()
     loop at < (I64{5000}) {
-        if scheduler_observe_parked() -> break
+        if jet_rt_observe_has_parked_tasks() -> break
         sync_mutex_lock(root)
         idle :: sync_load(root + I64{8}) == I64{0} && sync_load(root + I64{40}) == I64{0}
         sync_mutex_unlock(root)
