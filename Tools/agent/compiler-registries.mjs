@@ -148,14 +148,16 @@ function testkitInventory() {
         .map(name => `Tools/testkit/${name}`);
     const retirementPath = 'Tools/testkit/retired-with-rust.tsv';
     sources.push('Tools/testkit/package.jet', retirementPath);
-    const retiredCases = retirements().filter(row => row.path.startsWith('tests/cases/'));
+    const table = retirements();
+    const retiredCases = table.filter(row => row.path.startsWith('tests/cases/') && row.reason.startsWith('Retired with Rust:'));
+    const pendingProductInterop = table.filter(row => row.path.startsWith('tests/cases/') && row.reason.startsWith('PRODUCT INTEROP RED:')).map(row => ({ ...row, status: 'RED' }));
     const retiredIds = new Set(retiredCases.map(row => row.path));
     const cases = filesUnder(join(repo, 'tests/cases'), '.case').map(path => relative(repo, path)).filter(path => !retiredIds.has(path));
     const rustToolRequirements = cases.flatMap(path => readFileSync(join(repo, path), 'utf8').split('\n')
         .flatMap((line, index) => /^(?:requires: tool:|when tool |step(?: [^:]+)?: )/.test(line) && /\b(?:cargo|rustc|rustup)\b/.test(line)
             ? [{ path, line: index + 1, source: line }] : []));
     return { sources: sources.map(path => ({ path, sha256: hash(readFileSync(join(repo, path))) })),
-        cases: cases.map(path => ({ path, sha256: hash(readFileSync(join(repo, path))) })), retiredCases, rustToolRequirements };
+        cases: cases.map(path => ({ path, sha256: hash(readFileSync(join(repo, path))) })), retiredCases, pendingProductInterop, rustToolRequirements };
 }
 function retiredBootstrapTests() {
     const path = 'Compiler/Bootstrap/Tests.rs';
@@ -254,8 +256,10 @@ function generate() {
         stdout: JSON.stringify({ PASS: kit.cases.length, FAIL: 0, 'KNOWN-FAILING': 0, 'UNEXPECTED-PASS': 0,
             UNSUPPORTED: 0, 'SKIP-HOST': 0, 'OPT-IN': 0, REFUSED: 0, ERROR: 0, TIMEOUT: 0, suites: ['cases'] }) + '\n',
         testCount: kit.cases.length, sources: kit.sources.map(source => source.path), caseNames: kit.cases.map(source => source.path),
-        ...(kit.rustToolRequirements.length ? { status: 'BLOCKED',
-            reason: `full testkit cases have ${kit.rustToolRequirements.length} active Rust tool requirements/guards; removing Rust would skip required case branches. See testkit.rustToolRequirements for exact paths/lines` } : {}) });
+        ...(kit.pendingProductInterop.length || kit.rustToolRequirements.length ? { status: 'BLOCKED',
+            reason: kit.pendingProductInterop.length
+                ? `${kit.pendingProductInterop.length} mandatory user Rust product cases remain RED; see testkit.pendingProductInterop (not retired or excluded)`
+                : `full testkit cases have ${kit.rustToolRequirements.length} active Rust tool requirements/guards; removing Rust would skip required case branches. See testkit.rustToolRequirements for exact paths/lines` } : {}) });
     if (options.head !== currentHead()) throw Error('pinned source changed during assembly');
     const sourceProof = { path: proofPath, sha256: hash(readFileSync(proofPath)), tree: JSON.parse(readFileSync(proofPath, 'utf8')).tree };
     const manifest = { head: options.head, completeCompilerRegistries: true, repo, sourceProof, sourceManifests: manifests,
