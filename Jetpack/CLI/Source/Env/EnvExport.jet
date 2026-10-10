@@ -118,7 +118,7 @@ fn cli_env_export_activate(verification: &StoreVerification, cache: &WorkspaceDe
     sensitive :: trust_is_typed_environment(plan.environment) || trust_is_trust_sensitive_ext(plan.refs, plan.secrets.len() > 0)
     trusted :: !sensitive || trust_is_environment_trusted(store, root, hash, plan.refs, plan.secrets, plan.environment)
     if !trusted {
-        if term.stdin().is_terminal() || parsed.flags.trust {
+        if term.stdin().is_tty() || parsed.flags.trust {
             if trust_gate_with_environment(theme, store, root, plan.refs, plan.table, plan.secrets, plan.environment, parsed.flags.trust) != None -> return Err(keep)
         } else {
             theme.detail("{ENV_FILE} here is not trusted — run `jet env` to approve it once")

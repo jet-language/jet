@@ -596,7 +596,7 @@ struct Theme {
             self.status("applying plan (--yes)")
             return true
         }
-        if !term.stdin().is_terminal() {
+        if !term.stdin().is_tty() {
             self.status("plan only; pass -y or --yes to apply in a non-interactive shell.")
             return false
         }
@@ -623,7 +623,7 @@ struct Theme {
                 self.status("using and remembering the detected local catalog (--yes)")
                 return Val(path)
             }
-            if !term.stdin().is_terminal() {
+            if !term.stdin().is_tty() {
                 self.error_coded("E1340", "the detected local catalog needs approval and cannot prompt here", "local-unofficial catalogs require an explicit first-use choice", "rerun in a terminal, pass -y, or pass --local-nix-catalog <dir>")
                 return None
             }
@@ -637,7 +637,7 @@ struct Theme {
             self.status("catalog setup cancelled.")
             return None
         }
-        if assume_yes || !term.stdin().is_terminal() {
+        if assume_yes || !term.stdin().is_tty() {
             self.error_coded("E1340", "this environment needs a package catalog", "no official signed registry or local catalog was found", "run in a terminal to choose a local catalog, or pass --local-nix-catalog <dir>")
             return None
         }

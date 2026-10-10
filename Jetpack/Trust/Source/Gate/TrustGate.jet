@@ -52,7 +52,7 @@ fn trust_gate_build_identity(theme: Theme, store: String, project_dir: String, i
         theme.error_coded("E1255", "this build hook is not approved for CI", "CI accepts only an exact repository-scoped grant for the complete package, provider/source, staged source, platform, recipe, and ability identity", "add the exact repository grant: `jet trust grant build:{identity} --scope repo`.")
         return Val(TRUST_GATE_REFUSED)
     }
-    if !term.stdin().is_terminal() {
+    if !term.stdin().is_tty() {
         theme.error_coded("E1255", "this build hook is not trusted yet", "the build action graph has a new source, recipe, platform, or ability identity and stdin is not a terminal to ask interactively", "pass `--trust` for this build, or pre-authorize the exact build identity with `jet trust grant`.")
         return Val(TRUST_GATE_REFUSED)
     }
@@ -84,7 +84,7 @@ fn trust_gate_with_hash(theme: Theme, store: String, project_dir: String, refs: 
             return Val(TRUST_GATE_REFUSED)
         }
     }
-    if !term.stdin().is_terminal() {
+    if !term.stdin().is_tty() {
         theme.error_coded("E1255", "this project's environment isn't trusted yet", "entering this project realizes {refs.len()} package(s) it declares; a first entry needs a trust decision, and stdin isn't a terminal to ask interactively", "pass `--trust` for this one run, or pre-authorize with `jetpack config trust add <pattern>`.")
         return Val(TRUST_GATE_REFUSED)
     }
@@ -133,7 +133,7 @@ fn trust_gate_flake(theme: Theme, store: String, project_dir: String, flake_path
     content :: files.read(flake_path) ?? ""
     hash :: trust_flake_definition_hash(content)
     if bypass || trust_is_trusted(store, project_dir, hash) -> return None
-    if !term.stdin().is_terminal() {
+    if !term.stdin().is_tty() {
         theme.error_coded("E1255", "this project's environment isn't trusted yet", "entering `{flake_path}` evaluates a foreign flake this project didn't declare through `env.*`; a first entry needs a trust decision, and stdin isn't a terminal to ask interactively", "pass `--trust` for this one run, or pre-authorize with `jetpack config trust add <pattern>`.")
         return Val(TRUST_GATE_REFUSED)
     }

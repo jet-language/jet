@@ -108,7 +108,7 @@ fn nix_fallback_decide(offline: Bool, ci: Bool, interactive: Bool, policy: Strin
 // The policy decision for this process's environment and terminals.
 fn nix_fallback_authorize_from_environment(offline: Bool) -[Env]> NixFallbackPolicyReceipt NixError! {
     ci :: (sys.get("CI") ?? "") != ""
-    interactive :: term.stdin().is_terminal() && term.stdout().is_tty()
+    interactive :: term.stdin().is_tty() && term.stdout().is_tty()
     policy :: sys.get(NIX_FALLBACK_POLICY_ENV) ?? ""
     receipt :: nix_fallback_decide(offline, ci, interactive, policy)
     if !receipt.allowed -> return Err(receipt.refusal())
