@@ -821,8 +821,10 @@ fn kit_execute_suites(options: KitOptions, root: String) -> Int {
             &results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: outcome.tier, status: outcome.verdict.status, detail: outcome.verdict.detail, exit: outcome.run.code})
             if outcome.verdict.diff != "" -> print(outcome.verdict.diff)
         }
-        files.remove_all(scratch) ?? {
-            &results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "remove case scratch: {err}", exit: -1})
+        if env.trace_node == "" {
+            files.remove_all(scratch) ?? {
+                &results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "remove case scratch: {err}", exit: -1})
+            }
         }
     }
     kit_golden_mark_tier_splits(&results)

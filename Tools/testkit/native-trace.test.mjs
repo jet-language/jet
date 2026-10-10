@@ -10,6 +10,7 @@ import { auditNativeTrace, ffiCaseCachePath, readUserRustAllowlist } from './nat
 const reason = 'user Rust crate via FFI (E0703 class)';
 const declared = { base64: '0.22' };
 const quote = JSON.stringify;
+const allowRow = (name, deps = declared, sources = [name]) => `${name}\t${reason}\t${JSON.stringify(sources)}\t${JSON.stringify(deps)}\n`;
 const argv = values => `[${values.map(quote).join(', ')}]`;
 const exec = (pid, binary, args = [binary], result = '0', env = '0xabcdef /* 20 vars */') => `${pid} execve(${quote(binary)}, ${argv(args)}, ${env}) = ${result}`;
 const fork = (parent, child, flags = 'SIGCHLD') => `${parent} clone(child_stack=NULL, flags=${flags}) = ${child}`;
@@ -25,17 +26,17 @@ function fixture(t) {
     const peer = put(join(root, 'Tools/ci/compiled-workload-runner.mjs'));
     const perf = put(join(root, 'Tools/perf/nested/workload.mjs'));
     const jet = put(join(home, 'tools/jet'));
-    const tools = Object.fromEntries(['cargo', 'rustc', 'rustup', 'ld.lld', 'clang', 'clang++', 'opt', 'llc'].map(name => [name, put(join(home, 'tools', name))]));
+    const tools = Object.fromEntries(['cargo', 'rustc', 'rustup', 'ld.lld', 'clang', 'clang++', 'opt', 'llc', 'bwrap'].map(name => [name, put(join(home, 'tools', name))]));
     const name = 'Examples/features/lowlevel/ffi.jet', zero = 'Examples/zero.jet';
     put(join(root, name), 'extern rust "base64@0.22" { fn encode(s: String) -> String = "base64::encode" }\n');
     put(join(root, zero), 'fn run() { print("zero") }\n');
-    const allowlistText = `${name}\t${reason}\t${JSON.stringify(declared)}\n`;
+    const allowlistText = allowRow(name);
     const cache = ffiCaseCachePath(cacheRoot, name, declared);
     const contents = '[package]\nname = "jet_ffi_bridge"\nversion = "0.0.0"\nedition = "2021"\n\n[lib]\ncrate-type = ["staticlib"]\npath = "src/lib.rs"\n\n[dependencies]\nbase64 = "0.22"\n\n[profile.release]\nopt-level = 3\n';
     const manifest = put(join(cache, 'helper/Cargo.toml'), contents);
     put(join(dirname(manifest), 'src/lib.rs'), '// synthetic bytes; never compiled\n');
     const mark = (pid = 10, casePath = name, overrides = {}) => {
-        const options = { '--case': casePath, '--root': root, '--cwd': root, '--jet': jet, '--cache-root': cacheRoot, ...overrides };
+        const options = { '--case': casePath, '--root': root, '--cwd': root, '--jet': jet, '--cache-root': cacheRoot, '--ffi-cache': '', ...overrides };
         return exec(pid, process.execPath, [process.execPath, wrapper, ...Object.entries(options).flat(), '--', jet, 'run', join(root, casePath)]);
     };
     const jetExec = (pid = 10, command = 'run', extra = []) => exec(pid, jet, [jet, command, join(root, name), ...extra]);
@@ -51,16 +52,122 @@ function fail(receipt, code = 'forbidden-execution') { assert.equal(receipt.stat
 
 test('allowlist validates canonical source declarations and exact reason/dependencies', t => {
     const f = fixture(t);
-    assert.deepEqual(readUserRustAllowlist(f.allowlistText, f.root).get(f.name), declared);
+    assert.deepEqual(readUserRustAllowlist(f.allowlistText, f.root).get(f.name).dependencies, declared);
     assert.throws(() => readUserRustAllowlist(f.allowlistText.replace(reason, 'compiler implementation'), f.root));
     assert.throws(() => readUserRustAllowlist(f.allowlistText.replace('0.22', '0.23'), f.root));
     assert.throws(() => readUserRustAllowlist(f.allowlistText + f.allowlistText, f.root));
     assert.throws(() => readUserRustAllowlist(f.allowlistText.replace(f.name, `./${f.name}`), f.root));
-    assert.throws(() => readUserRustAllowlist(`${f.name}\t${reason}\t{}\n`, f.root));
+    assert.throws(() => readUserRustAllowlist(allowRow(f.name, {}), f.root));
     f.put(join(f.root, f.name), '// extern rust "fake@1"\nextern rust "base64@0.22" {}\n');
-    assert.deepEqual(readUserRustAllowlist(f.allowlistText, f.root).get(f.name), declared);
+    assert.deepEqual(readUserRustAllowlist(f.allowlistText, f.root).get(f.name).dependencies, declared);
     f.put(join(f.root, f.name), 'extern rust "base64@0.22" {}\nextern rust "other@1" {}\n');
     assert.throws(() => readUserRustAllowlist(f.allowlistText, f.root));
+});
+
+test('case allowlist proves compiled fixture provenance and exact dependency union', t => {
+    const f = fixture(t), name = 'tests/cases/cffi/shared.case';
+    const sources = ['tests/cases/cffi/shared.fixture/w0/main.jet', 'tests/cases/cffi/shared.fixture/w1/main.jet'];
+    f.put(join(f.root, name), 'fixture: shared.fixture\nspawn first: jet build main.jet\n  cwd: w0\nspawn second: jet build main.jet\n  cwd: w1\n');
+    for (const source of sources) f.put(join(f.root, source), 'extern rust "base64@0.22" {}\n');
+    const row = allowRow(name, declared, sources), declaration = readUserRustAllowlist(row, f.root).get(name);
+    assert.deepEqual(declaration.dependencies, declared);
+    assert.deepEqual(declaration.provenance, sources.map(path => ({ path, sha256: createHash('sha256').update(readFileSync(join(f.root, path))).digest('hex') })));
+    assert.throws(() => readUserRustAllowlist(allowRow(name, declared, [sources[0]]), f.root));
+    assert.throws(() => readUserRustAllowlist(allowRow(name, declared, [...sources, f.name]), f.root));
+    assert.throws(() => readUserRustAllowlist(allowRow(name, declared, [name]), f.root));
+    f.put(join(f.root, sources[1]), 'extern rust "base64@0.23" {}\n');
+    assert.throws(() => readUserRustAllowlist(row, f.root));
+    for (const source of sources) f.put(join(f.root, source), 'fn run() {}\n');
+    assert.throws(() => readUserRustAllowlist(allowRow(name, {}, sources), f.root));
+});
+
+test('explicit private cache binds both concurrent branches and rejects a different helper cache', t => {
+    const f = fixture(t), cache = join(f.home, 'shared-case', 'ffi-cache');
+    const manifest = f.put(join(cache, 'helper/Cargo.toml'), f.contents);
+    f.put(join(dirname(manifest), 'src/lib.rs'), '// synthetic\n');
+    const branch = pid => [f.mark(pid, f.name, { '--ffi-cache': cache }), f.jetExec(pid), fork(pid, pid + 1), f.cargo(pid + 1, manifest)];
+    const receipt = f.audit([...branch(10), ...branch(30)]);
+    pass(receipt);
+    assert.equal(receipt.allowedFfiBuilds.length, 2);
+    for (const build of receipt.allowedFfiBuilds) {
+        assert.equal(build.cachePath, cache);
+        assert.equal(build.cacheSource, 'explicit');
+        assert.equal(build.provenance[0].path, f.name);
+    }
+    fail(f.audit([f.mark(10, f.name, { '--ffi-cache': cache }), f.jetExec(), fork(10, 20), f.cargo()]));
+    fail(f.audit([f.mark(10, f.name, { '--ffi-cache': cache }), f.jetExec(), fork(10, 20), exec(20, f.tools.cargo, [f.tools.cargo, 'build', '--manifest-path', manifest], '0', argv([`JET_FFI_CACHE_DIR=${f.cache}`]))]));
+    const query = f.audit([f.mark(10, f.name, { '--ffi-cache': cache }), f.jetExec(), fork(10, 20), exec(20, f.tools.rustc, [f.tools.rustc, '-vV'])]);
+    pass(query);
+    assert.equal(query.allowedFfiQueries[0].cachePath, cache);
+    const relativeCache = f.audit([f.mark(10, f.name, { '--cwd': dirname(cache), '--ffi-cache': 'ffi-cache' }), f.jetExec(), fork(10, 20), exec(20, f.tools.cargo, [f.tools.cargo, 'build', '--manifest-path', manifest], '0', argv(['JET_FFI_CACHE_DIR=ffi-cache']))]);
+    pass(relativeCache);
+    assert.equal(relativeCache.allowedFfiBuilds[0].cachePath, cache);
+});
+
+test('wrapper preserves an explicit cache verbatim and enables retention only for user Rust', t => {
+    const f = fixture(t), cacheRoot = realpathSync(mkdtempSync(join(homedir(), '.jet-native-ffi-unit-')));
+    t.after(() => rmSync(cacheRoot, { recursive: true, force: true }));
+    const cwd = join(cacheRoot, 'case-work'), override = 'ffi-cache';
+    mkdirSync(cwd);
+    f.put(join(f.root, 'Tools/testkit/user-rust-ffi.allow'), f.allowlistText);
+    const probe = 'console.log(JSON.stringify({cache:process.env.JET_FFI_CACHE_DIR,retain:process.env.JET_FFI_TRACE_WORKSPACE??null}));';
+    const run = name => spawnSync(process.execPath, [
+        new URL('./native-command.mjs', import.meta.url).pathname,
+        '--case', name, '--root', f.root, '--cwd', cwd, '--jet', process.execPath,
+        '--cache-root', cacheRoot, '--ffi-cache', override, '--', process.execPath, '-e', probe,
+    ], { env: { ...process.env, JET_FFI_CACHE_DIR: override, JET_FFI_TRACE_WORKSPACE: '1' }, encoding: 'utf8', timeout: 10000 });
+    const rust = run(f.name);
+    assert.equal(rust.status, 0, rust.stderr);
+    assert.deepEqual(JSON.parse(rust.stdout), { cache: override, retain: '1' });
+    const pure = run(f.zero);
+    assert.equal(pure.status, 0, pure.stderr);
+    assert.deepEqual(JSON.parse(pure.stdout), { cache: override, retain: null });
+});
+
+test('metadata admits only exact format-version 1 for the generated helper', t => {
+    const f = fixture(t);
+    const branch = args => [f.mark(), f.jetExec(), fork(10, 20), exec(20, f.tools.cargo, [f.tools.cargo, ...args])];
+    const receipt = f.audit(branch(['metadata', '--format-version', '1', '--manifest-path', f.manifest]));
+    pass(receipt);
+    assert.equal(receipt.allowedFfiBuilds[0].command, 'metadata');
+    pass(f.audit(branch(['metadata', '--format-version', '1', `--manifest-path=${f.manifest}`])));
+    for (const args of [
+        ['metadata', '--format-version', '2', '--manifest-path', f.manifest],
+        ['metadata', '--format-version', '1', '--manifest-path', f.manifest, '--no-deps'],
+        ['metadata', '--format-version', '1'],
+        ['metadata', '--format-version', '1', '--manifest-path', f.manifest, '--config', 'foo=1'],
+    ]) fail(f.audit(branch(args)));
+});
+
+test('retained sandbox binds exact readonly helper and writable output for build and metadata', t => {
+    const f = fixture(t), workspace = join(f.cache, 'a'.repeat(64), '.trace-workspaces', '20-0');
+    const source = join(workspace, 'source'), output = join(workspace, 'output');
+    const manifest = f.put(join(source, 'Cargo.toml'), f.contents);
+    f.put(join(source, 'src/lib.rs'), '// synthetic\n');
+    const metadata = f.put(join(output, 'metadata-source/Cargo.toml'), f.contents);
+    f.put(join(output, 'metadata-source/src/lib.rs'), '// synthetic\n');
+    const bwrap = (changes = {}) => exec(20, f.tools.bwrap, [f.tools.bwrap, '--clearenv',
+        changes.sourceMode ?? '--ro-bind', changes.source ?? source, '/work/source',
+        '--bind', changes.output ?? output, '/work/output', '--chdir', '/work/source',
+        ...(changes.extra ?? []), '--', f.tools.cargo]);
+    const branch = (command = 'build', changes = {}) => [f.mark(), f.jetExec(), fork(10, 20), bwrap(changes), chdir(20, '/work/source'), exec(20, f.tools.cargo,
+        [f.tools.cargo, command, ...(command === 'metadata' ? ['--format-version', '1'] : []), '--manifest-path', command === 'metadata' ? '/work/output/metadata-source/Cargo.toml' : '/work/source/Cargo.toml']), fork(20, 30), f.rustc()];
+    const build = f.audit(branch());
+    pass(build);
+    assert.equal(build.allowedFfiBuilds[0].manifestPath, manifest);
+    assert.equal(build.allowedFfiBuilds[0].sandbox.source, source);
+    const inspection = f.audit(branch('metadata'));
+    pass(inspection);
+    assert.equal(inspection.allowedFfiBuilds[0].manifestPath, metadata);
+    assert.equal(inspection.allowedFfiBuilds[0].manifestSha256, createHash('sha256').update(f.contents).digest('hex'));
+    for (const changes of [
+        { sourceMode: '--bind' }, { source: join(f.home, 'outside') },
+        { output: source }, { output: join(workspace, 'other') },
+        { extra: ['--bind', output, '/work/source/src'] },
+        { extra: ['--tmpfs', '/work/output/metadata-source'] },
+    ]) fail(f.audit(branch('build', changes)), 'invalid-foreign-sandbox');
+    f.put(manifest, f.contents.replace('0.22', '0.23'));
+    fail(f.audit(branch()));
 });
 
 test('std-only fixed companions require their own marker and empty-dependency helper', t => {
@@ -68,12 +175,12 @@ test('std-only fixed companions require their own marker and empty-dependency he
     const source = 'extern rust "std" { fn identity(s: String) -> String = "std::convert::identity" }\n';
     f.put(join(f.root, f.name), source);
     f.put(join(f.root, companion), source);
-    const allowlistText = `${companion}\t${reason}\t{}\n`;
-    assert.deepEqual(readUserRustAllowlist(allowlistText, f.root).get(companion), {});
-    assert.throws(() => readUserRustAllowlist(`${f.zero}\t${reason}\t{}\n`, f.root));
+    const allowlistText = allowRow(companion, {});
+    assert.deepEqual(readUserRustAllowlist(allowlistText, f.root).get(companion).dependencies, {});
+    assert.throws(() => readUserRustAllowlist(allowRow(f.zero, {}), f.root));
     f.put(join(f.root, companion), `${source}extern rust "base64@0.22" {}\n`);
     assert.throws(() => readUserRustAllowlist(allowlistText, f.root));
-    assert.deepEqual(readUserRustAllowlist(`${companion}\t${reason}\t{"base64":"0.22"}\n`, f.root).get(companion), declared);
+    assert.deepEqual(readUserRustAllowlist(allowRow(companion), f.root).get(companion).dependencies, declared);
     f.put(join(f.root, companion), source);
     const cache = ffiCaseCachePath(f.cacheRoot, companion, {});
     const contents = f.contents.replace('base64 = "0.22"\n', '');
@@ -97,7 +204,7 @@ test('missing-Cargo marker clears only its private warmed helper and preserves P
     const cacheRoot = realpathSync(mkdtempSync(join(homedir(), '.jet-native-ffi-unit-')));
     t.after(() => rmSync(cacheRoot, { recursive: true, force: true }));
     f.put(join(f.root, name), 'extern rust "base64@0.22" { fn encode(s: String) -> String = "base64::encode" }\n');
-    f.put(join(f.root, 'Tools/testkit/user-rust-ffi.allow'), `${name}\t${reason}\t${JSON.stringify(declared)}\n`);
+    f.put(join(f.root, 'Tools/testkit/user-rust-ffi.allow'), allowRow(name));
     const cache = ffiCaseCachePath(cacheRoot, name, declared);
     const warmed = f.put(join(cache, 'helper/Cargo.toml'), f.contents);
     const otherCache = ffiCaseCachePath(cacheRoot, f.name, declared);
@@ -108,8 +215,8 @@ test('missing-Cargo marker clears only its private warmed helper and preserves P
     const result = spawnSync(process.execPath, [
         new URL('./native-command.mjs', import.meta.url).pathname,
         '--case', name, '--root', f.root, '--cwd', f.root, '--jet', process.execPath,
-        '--cache-root', cacheRoot, '--', process.execPath, '-e', probe, warmed, other,
-    ], { env: { ...process.env, PATH: path, JET_FFI_CACHE_DIR: otherCache }, encoding: 'utf8', timeout: 10000 });
+        '--cache-root', cacheRoot, '--ffi-cache', '', '--', process.execPath, '-e', probe, warmed, other,
+    ], { env: { ...process.env, PATH: path, JET_FFI_CACHE_DIR: '' }, encoding: 'utf8', timeout: 10000 });
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout), { path, cache, warm: false, other: true });
 });
@@ -213,7 +320,7 @@ test('wrong manifest, dependencies, case cache, digest and symlink escapes fail 
     }
     f.put(f.manifest, f.contents);
     const other = 'Examples/other-ffi.jet'; f.put(join(f.root, other), 'extern rust "base64@0.22" {}');
-    fail(f.audit([f.mark(10, other), f.jetExec(), fork(10, 20), f.cargo()], { allowlistText: f.allowlistText + `${other}\t${reason}\t${JSON.stringify(declared)}\n` }));
+    fail(f.audit([f.mark(10, other), f.jetExec(), fork(10, 20), f.cargo()], { allowlistText: f.allowlistText + allowRow(other) }));
 });
 
 test('manifest workspace, build-script, library path and package overrides are rejected', t => {

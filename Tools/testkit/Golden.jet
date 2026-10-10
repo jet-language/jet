@@ -254,9 +254,11 @@ fn kit_golden_run_suite(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
         bless.first_tier = index == 0
         outcome := kit_golden_run_entry(entry, tier, context.env, scratch, bless)
         outcome.tier = if independent -> "-" else -> tier_name
-        files.remove_all(scratch) ?? {
-            outcome.verdict = kit_expect_verdict("ERROR", "remove tier scratch: {err}")
-            ()
+        if context.env.trace_node == "" {
+            files.remove_all(scratch) ?? {
+                outcome.verdict = kit_expect_verdict("ERROR", "remove tier scratch: {err}")
+                ()
+            }
         }
         &results.push(kit_cases_known_verdict(outcome, annotation))
     }

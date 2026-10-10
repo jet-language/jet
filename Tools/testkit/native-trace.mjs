@@ -36,30 +36,82 @@ function caseName(name, root) {
     return name;
 }
 
+function caseWords(text) {
+    const words = text.match(/"(?:\\.|[^"\\])*"|'[^']*'|[^\s]+/g) ?? [];
+    return words.map(word => word.startsWith('"') ? JSON.parse(word) : word.startsWith("'") ? word.slice(1, -1) : word);
+}
+
+function caseSourcePaths(name, root) {
+    if (name.endsWith('.jet')) return [name];
+    if (!name.endsWith('.case')) throw Error(`unsupported user Rust source identity: ${name}`);
+    const fixtures = [], commands = [];
+    let current = null;
+    for (let line of readFileSync(resolve(root, name), 'utf8').split(/\r?\n/)) {
+        line = line.replace(/"(?:\\.|[^"\\])*"|'[^']*'|#.*$/g, token => token.startsWith('#') ? '' : token).trim();
+        const fixture = /^fixture:\s*(.+)$/.exec(line);
+        if (fixture) {
+            const words = caseWords(fixture[1]);
+            if (words.length !== 1) throw Error(`ambiguous case fixture: ${name}`);
+            fixtures.push(words[0]);
+        }
+        const command = /^(?:step(?:\s+[^:]+)?|spawn\s+[^:]+):\s*(.*)$/.exec(line);
+        if (command) {
+            current = { argv: caseWords(command[1]), cwd: '' };
+            commands.push(current);
+        } else if (current && line.startsWith('cwd:')) {
+            const words = caseWords(line.slice(4));
+            if (words.length !== 1) throw Error(`ambiguous case cwd: ${name}`);
+            current.cwd = words[0];
+        }
+    }
+    if (fixtures.length !== 1 || isAbsolute(fixtures[0])) throw Error(`case needs one relative fixture: ${name}`);
+    const fixtureRoot = resolve(root, dirname(name), fixtures[0]);
+    if (!inside(root, realpathSync(fixtureRoot))) throw Error(`case fixture escapes source root: ${name}`);
+    const sources = new Set();
+    for (const command of commands) {
+        if (command.argv[0] !== 'jet' || !['check', 'run', 'build', 'test'].includes(command.argv[1])) continue;
+        const entries = command.argv.slice(2).filter(word => word.endsWith('.jet') && !word.startsWith('-'));
+        if (entries.length !== 1 || isAbsolute(command.cwd) || isAbsolute(entries[0])) throw Error(`case needs one literal fixture entry per Jet command: ${name}`);
+        const path = resolve(fixtureRoot, command.cwd, entries[0]);
+        if (!inside(fixtureRoot, path) || !inside(realpathSync(fixtureRoot), realpathSync(path))) throw Error(`case entry escapes fixture: ${name}`);
+        sources.add(caseName(relative(root, path).split(sep).join('/'), root));
+    }
+    if (!sources.size) throw Error(`case has no compiled fixture entries: ${name}`);
+    return [...sources].sort();
+}
+
 export function readUserRustAllowlist(text, root) {
     root = realpathSync(root);
     const result = new Map();
     for (const [index, line] of String(text ?? '').split(/\r?\n/).entries()) {
         if (!line.trim() || line.trimStart().startsWith('#')) continue;
         const fields = line.split('\t');
-        if (fields.length !== 3 || fields[1] !== REASON) throw Error(`invalid user Rust allowlist row ${index + 1}`);
+        if (fields.length !== 4 || fields[1] !== REASON) throw Error(`invalid user Rust allowlist row ${index + 1}`);
         const name = caseName(fields[0], root);
         if (result.has(name)) throw Error(`duplicate user Rust case: ${name}`);
-        const declared = dependencies(JSON.parse(fields[2]));
-        const source = sourceWithoutComments(readFileSync(resolve(root, name), 'utf8'));
+        const declared = dependencies(JSON.parse(fields[3]));
+        const sources = JSON.parse(fields[2]);
+        if (!Array.isArray(sources) || !sources.length || new Set(sources).size !== sources.length) throw Error(`invalid source provenance: ${name}`);
+        const expected = caseSourcePaths(name, root);
+        const names = sources.map(source => caseName(source, root)).sort();
+        if (JSON.stringify(names) !== JSON.stringify(expected)) throw Error(`source provenance differs from case entries: ${name}`);
+        const provenance = names.map(path => ({ path, sha256: hash(readFileSync(resolve(root, path))) }));
         let hasExternRust = false;
         const observed = {};
-        for (const match of source.matchAll(/\bextern\s+rust\s+"([^"\n]*)"/g)) {
-            hasExternRust = true;
-            if (match[1] === 'std') continue;
-            const declaration = /^([A-Za-z][A-Za-z0-9_-]*)@([^@\s]+)$/.exec(match[1]);
-            if (!declaration) throw Error(`noncanonical extern rust declaration: ${name}`);
-            if (Object.hasOwn(observed, declaration[1]) && observed[declaration[1]] !== declaration[2]) throw Error(`conflicting extern rust declaration: ${name}`);
-            observed[declaration[1]] = declaration[2];
+        for (const file of names) {
+            const source = sourceWithoutComments(readFileSync(resolve(root, file), 'utf8'));
+            for (const match of source.matchAll(/\bextern\s+rust\s+"([^"\n]*)"/g)) {
+                hasExternRust = true;
+                if (match[1] === 'std') continue;
+                const declaration = /^([A-Za-z][A-Za-z0-9_-]*)@([^@\s]+)$/.exec(match[1]);
+                if (!declaration) throw Error(`noncanonical extern rust declaration: ${file}`);
+                if (Object.hasOwn(observed, declaration[1]) && observed[declaration[1]] !== declaration[2]) throw Error(`conflicting extern rust declaration: ${name}`);
+                observed[declaration[1]] = declaration[2];
+            }
         }
         if (!hasExternRust) throw Error(`no extern rust declaration: ${name}`);
         if (!equalDependencies(observed, declared)) throw Error(`extern rust declarations differ from allowlist: ${name}`);
-        result.set(name, declared);
+        result.set(name, { dependencies: declared, provenance });
     }
     return result;
 }
@@ -190,15 +242,63 @@ function nodeScript(exec, cwd) {
     return { path: canonical(exec.argv[index], cwd), args: exec.argv.slice(index + 1) };
 }
 
+export function ffiRunCachePath(context, casePath, declared) {
+    const expected = context.ffiCache ? resolve(context.cwd, context.ffiCache) : ffiCaseCachePath(context.cacheRoot, casePath, declared);
+    const cache = canonical(expected);
+    if (cache !== expected || inside(context.root, cache) || inside(cache, context.root)) throw Error('foreign cache aliases or overlaps source root');
+    if (!context.ffiCache && !inside(context.cacheRoot, cache)) throw Error('case cache escapes the exact external digest namespace');
+    return cache;
+}
+
+function sandboxMounts(exec, cwd, context, declared) {
+    if (exec.argv.filter(arg => arg === '--clearenv').length !== 1) throw Error('foreign sandbox must clear its environment');
+    const mounts = [], directories = [];
+    for (let i = 1; i < exec.argv.length; i++) {
+        const arg = exec.argv[i];
+        if (arg === '--') break;
+        if (['--ro-bind', '--ro-bind-try', '--bind', '--bind-try'].includes(arg)) {
+            if (!exec.argv[i + 1] || !exec.argv[i + 2]) throw Error('incomplete sandbox bind');
+            const host = canonical(exec.argv[++i], cwd), path = exec.argv[++i];
+            mounts.push({ host, path, readonly: arg.startsWith('--ro-') });
+        } else if (arg === '--chdir') {
+            directories.push(exec.argv[++i]);
+        } else if (['--tmpfs', '--proc', '--dev'].includes(arg)) {
+            const path = exec.argv[++i];
+            if (inside('/work/source', path) || inside(path, '/work/source') || inside('/work/output', path) || inside(path, '/work/output')) throw Error('sandbox overlay obscures helper mounts');
+        }
+    }
+    const source = mounts.filter(mount => mount.path === '/work/source');
+    const output = mounts.filter(mount => mount.path === '/work/output');
+    if (source.length !== 1 || !source[0].readonly || output.length !== 1 || output[0].readonly || directories.length !== 1 || directories[0] !== '/work/source') throw Error('foreign sandbox source/output/chdir differs from generated helper contract');
+    const cache = ffiRunCachePath(context, context.case, declared);
+    const workspace = relative(cache, dirname(source[0].host)).split(sep).join('/');
+    if (!/^[0-9a-f]{64}\/\.trace-workspaces\/\d+-\d+$/.test(workspace) || basename(source[0].host) !== 'source' || output[0].host !== resolve(dirname(source[0].host), 'output')) throw Error('sandbox helper is outside the retained full-key workspace contract');
+    for (const mount of [source[0], output[0]]) if (!inside(cache, mount.host)) throw Error('sandbox helper mount is outside the actual foreign cache');
+    for (const mount of mounts) {
+        if (mount === source[0] || mount === output[0]) continue;
+        if (inside('/work/source', mount.path) || inside(mount.path, '/work/source') || inside('/work/output/metadata-source', mount.path) || inside(mount.path, '/work/output/metadata-source')) throw Error('sandbox bind obscures generated helper source');
+    }
+    return { source: source[0].host, output: output[0].host };
+}
+
+function sandboxPath(path, cwd, sandbox) {
+    const absolute = resolve(cwd ?? '/', path);
+    if (!sandbox) return canonical(absolute);
+    for (const [virtual, host] of [['/work/source', sandbox.source], ['/work/output', sandbox.output]]) {
+        if (inside(virtual, absolute)) return canonical(resolve(host, relative(virtual, absolute)));
+    }
+    throw Error('foreign sandbox manifest is outside its source/output mounts');
+}
+
 function marker(script, root, jet) {
     const args = script.args, divider = args.indexOf('--');
     if (divider < 0 || !args.slice(divider + 1).length) throw Error('marker has no command');
     const values = new Map();
     for (let i = 0; i < divider; i += 2) {
-        if (!['--case', '--root', '--cwd', '--jet', '--cache-root'].includes(args[i]) || !args[i + 1] || values.has(args[i])) throw Error('invalid marker arguments');
+        if (!['--case', '--root', '--cwd', '--jet', '--cache-root', '--ffi-cache'].includes(args[i]) || args[i + 1] === undefined || args[i] !== '--ffi-cache' && !args[i + 1] || values.has(args[i])) throw Error('invalid marker arguments');
         values.set(args[i], args[i + 1]);
     }
-    if (values.size !== 5) throw Error('incomplete marker');
+    if (values.size !== 6) throw Error('incomplete marker');
     for (const key of ['--root', '--cwd', '--jet', '--cache-root']) if (!isAbsolute(values.get(key))) throw Error(`marker ${key} must be absolute`);
     if (realpathSync(values.get('--root')) !== root || realpathSync(values.get('--jet')) !== jet) throw Error('marker root or jet differs from admitted identity');
     // The immutable wrapper validates cwd before exec; completed cases can
@@ -206,7 +306,7 @@ function marker(script, root, jet) {
     const cwd = canonical(values.get('--cwd'));
     const cacheRoot = realpathSync(values.get('--cache-root'));
     if (inside(root, cacheRoot) || inside(cacheRoot, root)) throw Error('marker cache must be an external namespace');
-    return { case: caseName(values.get('--case'), root), cwd, cacheRoot, command: args.slice(divider + 1) };
+    return { case: caseName(values.get('--case'), root), root, cwd, cacheRoot, ffiCache: values.get('--ffi-cache'), command: args.slice(divider + 1) };
 }
 
 // A deliberately small, fail-closed TOML subset matching generated FFI helpers.
@@ -253,7 +353,7 @@ function manifestDependencies(contents, path, cache) {
     return dependencies(declared);
 }
 
-function cargoManifest(exec, cwd, context, declared) {
+function cargoManifest(exec, cwd, context, declared, sandbox) {
     const manifestArgs = [];
     for (let i = 1; i < exec.argv.length; i++) {
         if (exec.argv[i] === '--manifest-path') {
@@ -263,21 +363,20 @@ function cargoManifest(exec, cwd, context, declared) {
         else if (/^(?:--config|--manifest-path)/.test(exec.argv[i])) throw Error('unsupported Cargo manifest/config override');
     }
     if (manifestArgs.length > 1) throw Error('ambiguous Cargo manifest path');
-    if (!['build', 'check', 'rustc'].includes(exec.argv[1])) throw Error('Cargo command is not a foreign build');
+    if (!['build', 'check', 'rustc', 'metadata'].includes(exec.argv[1])) throw Error('Cargo command is not a foreign build');
+    if (exec.argv[1] === 'metadata' && (manifestArgs.length !== 1 || exec.argv[2] !== '--format-version' || exec.argv[3] !== '1' || !(exec.argv.length === 6 && exec.argv[4] === '--manifest-path' || exec.argv.length === 5 && exec.argv[4].startsWith('--manifest-path=')))) throw Error('only exact generated-helper metadata format-version 1 is admitted');
     if (exec.argv.includes('--') || exec.argv.some(arg => /^--(?:workspace|all|package|exclude|example|test|bench|bin)(?:=|$)/.test(arg)) || exec.argv.some(arg => /^-(?:p|C)/.test(arg))) throw Error('Cargo target/workspace/directory override');
-    const expectedCache = ffiCaseCachePath(context.cacheRoot, context.case, declared);
-    const cache = canonical(expectedCache);
-    if (cache !== expectedCache || !inside(context.cacheRoot, cache)) throw Error('case cache escapes the exact external digest namespace');
-    const path = realpathSync(canonical(manifestArgs[0] ?? 'Cargo.toml', cwd));
-    if (!inside(cache, path)) throw Error('manifest is outside the case/dependency digest cache');
+    const cache = ffiRunCachePath(context, context.case, declared);
+    const path = realpathSync(sandboxPath(manifestArgs[0] ?? 'Cargo.toml', cwd, sandbox));
+    if (!inside(cache, path)) throw Error('manifest is outside the actual foreign cache');
     const bytes = readFileSync(path), contents = bytes.toString('utf8');
     if (!Buffer.from(contents).equals(bytes)) throw Error('manifest is not UTF8');
     if (!equalDependencies(manifestDependencies(contents, path, cache), declared)) throw Error('manifest dependencies differ from declared user crates');
-    if (exec.env?.startsWith('[')) {
+    if (!sandbox && exec.env?.startsWith('[')) {
         const environment = stringArray(exec.env).filter(value => value.startsWith('JET_FFI_CACHE_DIR='));
-        if (environment.length !== 1 || canonical(environment[0].slice(18)) !== cache) throw Error('JET_FFI_CACHE_DIR differs from case cache');
+        if (environment.length !== 1 || canonical(environment[0].slice(18), context.cwd) !== cache) throw Error('JET_FFI_CACHE_DIR differs from case cache');
     }
-    return { manifestPath: path, manifestSha256: hash(bytes), manifestContents: contents, cachePath: cache, dependencies: declared };
+    return { manifestPath: path, manifestSha256: hash(bytes), manifestContents: contents, cachePath: cache, cacheSource: context.ffiCache ? 'explicit' : 'case-digest', dependencies: declared, command: exec.argv[1], sandbox: sandbox ?? null };
 }
 
 export function auditNativeTrace({ text, root, jet, allowlistText = '', tracePath = null }) {
@@ -310,7 +409,7 @@ export function auditNativeTrace({ text, root, jet, allowlistText = '', tracePat
     }
     events.sort((a, b) => a.order - b.order || a.line - b.line);
     const process = pid => {
-        if (!processes.has(pid)) processes.set(pid, { fs: { cwd: null }, history: [], context: null, approvedCargo: null, approvedRustc: null });
+        if (!processes.has(pid)) processes.set(pid, { fs: { cwd: null }, history: [], context: null, approvedCargo: null, approvedRustc: null, sandbox: null });
         return processes.get(pid);
     };
     const violate = (event, state, code, detail, exec = null) => receipt.violations.push({ code, pid: event.pid, line: event.line, case: state.context?.case ?? null, executable: exec?.path ?? null, detail, ancestry: state.history });
@@ -321,7 +420,7 @@ export function auditNativeTrace({ text, root, jet, allowlistText = '', tracePat
             if (result && Number(result[1]) > 0) {
                 const child = Number(result[1]);
                 if (processes.has(child)) violate(event, state, 'ambiguous-birth', 'child state existed before reconstructed birth');
-                processes.set(child, { fs: /\bCLONE_FS\b/.test(event.args.join(',')) ? state.fs : { ...state.fs }, history: [...state.history], context: state.context, approvedCargo: state.approvedCargo, approvedRustc: state.approvedRustc });
+                processes.set(child, { fs: /\bCLONE_FS\b/.test(event.args.join(',')) ? state.fs : { ...state.fs }, history: [...state.history], context: state.context, approvedCargo: state.approvedCargo, approvedRustc: state.approvedRustc, sandbox: state.sandbox });
             } else if (!result) violate(event, state, 'ambiguous-fork', event.result);
             continue;
         }
@@ -361,7 +460,7 @@ export function auditNativeTrace({ text, root, jet, allowlistText = '', tracePat
         try {
             script = nodeScript(exec, state.fs.cwd);
             if (script && basename(script.path) === 'native-command.mjs') {
-                state.context = null; state.approvedCargo = null; state.approvedRustc = null;
+                state.context = null; state.approvedCargo = null; state.approvedRustc = null; state.sandbox = null;
                 if (script.path !== realpathSync(resolve(root, 'Tools/testkit/native-command.mjs'))) throw Error('marker script is not the immutable source-root wrapper');
                 state.context = { ...marker(script, root, jet), markerLine: event.line, markerPid: event.pid };
                 // The immutable wrapper promises this cwd before its command exec.
@@ -373,19 +472,31 @@ export function auditNativeTrace({ text, root, jet, allowlistText = '', tracePat
         if (state.context) cases.get(state.context.case).executions++;
         const entry = { pid: event.pid, executable: exec.path, argv: exec.argv, case: state.context?.case ?? null, markerLine: state.context?.markerLine ?? null };
         if (exec.path === jet) {
-            state.approvedCargo = null; state.approvedRustc = null;
+            state.approvedCargo = null; state.approvedRustc = null; state.sandbox = null;
             entry.admittedJet = true;
             entry.foreignBuild = !!state.context && ['build', 'run', 'check', 'test'].includes(exec.argv[1]) && !exec.argv.some((arg, index) => /^--(?:emit|rust)(?:=|$)/.test(arg) || /^(?:--backend|--codegen)=rust$/.test(arg) || ['--backend', '--codegen'].includes(arg) && exec.argv[index + 1] === 'rust');
         }
+        if (basename(exec.path) === 'bwrap' && exec.argv.includes('/work/source')) {
+            try {
+                const declared = state.context && allowlist.get(state.context.case)?.dependencies;
+                const latest = state.history.at(-1);
+                if (!declared || !latest?.admittedJet || !latest.foreignBuild || latest.case !== state.context.case || latest.markerLine !== state.context.markerLine) throw Error('sandbox helper requires the same admitted Jet foreign branch');
+                state.sandbox = { ...sandboxMounts(exec, state.fs.cwd, state.context, declared), pid: event.pid };
+            } catch (error) {
+                state.sandbox = null;
+                violate(event, state, 'invalid-foreign-sandbox', error.message, exec);
+            }
+        }
         if (exec.kind) {
             if (state.context) rustCases.add(state.context.case);
-            const declared = state.context && allowlist.get(state.context.case);
+            const declaration = state.context && allowlist.get(state.context.case);
+            const declared = declaration?.dependencies;
             try {
                 if (exec.kind === 'cargo') {
                     const admitted = [...state.history].reverse().find(item => item.admittedJet);
                     if (!state.context || !declared || !admitted?.foreignBuild || admitted.case !== state.context.case || admitted.markerLine !== state.context.markerLine) throw Error('Cargo requires allowlisted case and admitted Jet foreign-build ancestry in the same marker branch');
-                    const manifest = cargoManifest(exec, state.fs.cwd, state.context, declared);
-                    const build = { case: state.context.case, reason: REASON, ...manifest, cargoPid: event.pid, jetPid: admitted.pid, pids: [event.pid], ancestry: [...state.history, entry], executions: [{ ...entry, ancestry: [...state.history] }] };
+                    const manifest = cargoManifest(exec, state.fs.cwd, state.context, declared, state.sandbox);
+                    const build = { case: state.context.case, reason: REASON, provenance: declaration.provenance, ...manifest, cargoPid: event.pid, jetPid: admitted.pid, pids: [event.pid], ancestry: [...state.history, entry], executions: [{ ...entry, ancestry: [...state.history] }] };
                     receipt.allowedFfiBuilds.push(build); state.approvedCargo = build; state.approvedRustc = null;
                 } else if (exec.kind === 'rustc') {
                     const latest = state.history.at(-1);
@@ -396,9 +507,8 @@ export function auditNativeTrace({ text, root, jet, allowlistText = '', tracePat
                         if (!state.approvedCargo.pids.includes(event.pid)) state.approvedCargo.pids.push(event.pid);
                         state.approvedCargo.executions.push({ ...entry, ancestry: [...state.history] });
                     } else if (declared && latest?.admittedJet && latest.foreignBuild && latest.case === state.context.case && latest.markerLine === state.context.markerLine && exec.argv.length === 2 && exec.argv[1] === '-vV') {
-                        const cachePath = ffiCaseCachePath(state.context.cacheRoot, state.context.case, declared);
-                        if (canonical(cachePath) !== cachePath || !inside(state.context.cacheRoot, cachePath)) throw Error('toolchain query cache escapes the case/dependency namespace');
-                        receipt.allowedFfiQueries.push({ case: state.context.case, kind: 'rustc-toolchain-identity', dependencies: declared, cachePath, pid: event.pid, jetPid: latest.pid, argv: exec.argv, ancestry: [...state.history, entry] });
+                        const cachePath = ffiRunCachePath(state.context, state.context.case, declared);
+                        receipt.allowedFfiQueries.push({ case: state.context.case, kind: 'rustc-toolchain-identity', dependencies: declared, provenance: declaration.provenance, cachePath, cacheSource: state.context.ffiCache ? 'explicit' : 'case-digest', pid: event.pid, jetPid: latest.pid, argv: exec.argv, ancestry: [...state.history, entry] });
                     } else if (latest?.performancePeer) {
                         receipt.excludedPerformancePeers.push({ pid: event.pid, case: state.context?.case ?? null, executable: exec.path, launcher: latest.executable, script: latest.performancePeer, ancestry: [...state.history, entry], reason: 'direct Rust performance peer' });
                     } else throw Error('Rustc is not a declared Cargo foreign build or direct performance peer');
