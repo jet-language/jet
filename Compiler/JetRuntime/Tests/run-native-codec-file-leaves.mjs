@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// First-RC witness: fresh C assertions against the admitted standalone Jet
-// object and its exact C platform. Never reassemble/rebake any runtime source.
+// First-RC witness against the admitted standalone Jet object and C platform.
+// --test executes a named Jet test hook in a fresh native runtime library.
 import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -8,9 +8,13 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nativePackHash, readNativeRuntimePack } from '../../../Tools/packaging/runtime-pack-cache.mjs';
 import { fileObject } from '../../../Tools/packaging/publish-native-runtime-pack.mjs';
+import { runNativeLibrary } from '../../../Tools/agent/compiler-native-transport.mjs';
+import { parseRuntimeExports, runtimeLifecycleList } from '../../../Tools/agent/runtime-route-abi.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, compiler, runtime, ...extra] = process.argv.slice(2);
-if (!output || !compiler || !runtime || extra.length) throw Error('usage: run-native-codec-file-leaves.mjs OUT STAGE2_JET RC_RUNTIME_DIR');
+const test = extra.length === 2 && extra[0] === '--test' ? extra[1] : null;
+const fixtures = { CodecCSV: 'jet_rt_codec_csv_fixture', CodecEnv: 'jet_rt_codec_env_fixture', DynCodec: 'jet_rt_dyn_codec_fixture', CompilerFileLeaves: 'jet_rt_compiler_file_leaves_fixture' };
+if (!output || !compiler || !runtime || (extra.length && (!test || !fixtures[test]))) throw Error('usage: run-native-codec-file-leaves.mjs OUT STAGE2_JET RC_RUNTIME_DIR [--test CodecCSV|CodecEnv|DynCodec|CompilerFileLeaves]');
 const musl = process.env.JET_PACK_MUSL_LIB;
 if (!musl) throw Error('JET_PACK_MUSL_LIB must name the admitted static musl directory');
 const out = resolve(output), jet = resolve(compiler), runtimeDirectory = resolve(runtime);
@@ -39,6 +43,36 @@ for (const row of archives) {
   const path = basename(row.path) === 'libc.a' ? libc : resolve(row.path), handle = fileObject(path);
   if (handle.split(':')[0] !== row.sha256) throw Error(`C platform archive differs from runtime provenance: ${path}`);
   archiveInputs.push({ path, handle });
+}
+if (test) {
+  const unit = join(out, 'unit');
+  command('assemble-fixture', process.execPath, [join(root, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), unit, '--assemble-only', '--test', test]);
+  const file = join(unit, 'unit.jet'), text = readFileSync(file, 'utf8'), prefix = join(unit, 'fixture');
+  const lifecycle = join(unit, 'lifecycle.list');
+  writeFileSync(lifecycle, runtimeLifecycleList(parseRuntimeExports(text, 'unit.jet')));
+  const lowered = runNativeLibrary({ jet, file, prefix, lifecycle, env: { ...process.env, JET_TOOLCHAIN_ROOT: root, JET_STORE_DIR: join(out, 'store') } });
+  receipt('lower-fixture.json', lowered);
+  if (lowered.problem) throw Error(`native ${test} fixture: ${lowered.problem.detail}`);
+  const source = join(out, 'fixture-driver.c');
+  const signature = test === 'CompilerFileLeaves' ? 'int64_t' : 'void';
+  const call = test === 'CompilerFileLeaves'
+    ? `Text *path = jet_rt_string_from_static(fixture_path, (int64_t)strlen(fixture_path));\nfixture_result = ${fixtures[test]}((int64_t)(intptr_t)path);\njet_rt_string_drop(path);`
+    : `fixture_result = ${fixtures[test]}();`;
+  const pathDeclaration = test === 'CompilerFileLeaves' ? 'static char *fixture_path;\n' : '';
+  const pathSetup = test === 'CompilerFileLeaves' ? 'if (argc != 2) return 99;\nfixture_path = argv[1];\n' : '';
+  const pathCleanup = test === 'CompilerFileLeaves' ? 'if (unlink(fixture_path) != 0 && fixture_result == 0 && status == 0) return 98;\n' : '';
+  writeFileSync(source, `#include <stdint.h>\n#include <string.h>\n#include <unistd.h>\ntypedef struct Text Text;\nextern char **environ;\nextern void jet_rt_host_arguments(int64_t, char **, char **);\nextern int32_t jet_rt_main(void (*body)(void));\nextern Text *jet_rt_string_from_static(const void *, int64_t);\nextern void jet_rt_string_drop(Text *);\nextern int64_t ${fixtures[test]}(${signature});\nstatic int64_t fixture_result;\n${pathDeclaration}static void exercise(void) {\n${call}\n}\nint main(int argc, char **argv) {\n${pathSetup}jet_rt_host_arguments(argc, argv, environ);\nint32_t status = jet_rt_main(exercise);\n${pathCleanup}return status != 0 ? status : (int)fixture_result;\n}\n`);
+  const cObject = join(out, 'fixture-driver.o'), executable = join(out, 'fixture-driver'), fixtureObject = `${prefix}.o`;
+  const crt = ['crt1.o', 'crti.o', 'crtn.o'].map(name => resolve(musl, name));
+  const inputs = [...archiveInputs, ...crt.map(path => ({ path, handle: fileObject(path) })), { path: fixtureObject, handle: fileObject(fixtureObject) }, { path: file, handle: fileObject(file) }];
+  command('compile-fixture-driver', join(root, 'Tools/agent/jet-env'), [nativeCCompiler, '-std=c11', '-O1', '-fno-stack-protector', '-fno-PIE', '-fno-builtin', '-Wall', '-Wextra', '-Werror', '-c', source, '-o', cObject]);
+  command('link-fixture-driver', join(root, 'Tools/agent/jet-env'), [nativeCCompiler, '-nostdlib', '-static', '-no-pie', crt[0], crt[1], cObject, '-Wl,--start-group', fixtureObject, ...archiveInputs.map(row => row.path), '-Wl,--end-group', crt[2], '-o', executable]);
+  for (const row of inputs) if (fileObject(row.path) !== row.handle) throw Error(`fixture input changed: ${row.path}`);
+  const result = command('run-fixture', executable, test === 'CompilerFileLeaves' ? [join(out, 'file-leaves.data')] : []);
+  if (result.signal || result.stdout !== '' || result.stderr !== '') throw Error(`native ${test} fixture output differs`);
+  receipt('fixture-result.json', { status: 0, test, export: fixtures[test], compiler: fileObject(jet), object: fileObject(fixtureObject), source: fileObject(source), executable: fileObject(executable), stdout: result.stdout, stderr: result.stderr });
+  console.log(`native runtime Jet fixture ${test}: ok`);
+  process.exit(0);
 }
 function pinnedSource(path) {
   const row = admitted.provenance.source.files.find(row => row.path === path), bytes = readFileSync(join(root, path));

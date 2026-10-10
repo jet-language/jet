@@ -154,6 +154,14 @@ otherwise the compiler's adjacent `jet-runtime` is used. Missing prerequisites
 are recorded as blocked/skipped, never as passes. Native-only transports and
 host-specific fixtures therefore remain visible when a Rust host is selected.
 
+The codec/file runner's `--test CodecCSV|CodecEnv|DynCodec|CompilerFileLeaves`
+mode assembles the selected Jet test with the canonical runtime sources,
+lowers a fresh native library, and calls its exported fixture inside
+`jet_rt_main` from a C driver. Every fixture must return zero with empty output;
+receipts preserve its actual compiler, object, driver and executable identities.
+The default admitted-pack C witness remains separate and does not replace
+the compiler-file fixture's write/read/refill assertions.
+
 Evidence goes into a unique `census-*` directory below
 `~/.cache/jet-dev/scratch/GoldensCensus` (or `--scratch DIR`). `census.tsv` records
 the test, kind, pass/fail/skip, and first diff/error lines; JSON retains raw

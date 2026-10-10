@@ -43,6 +43,7 @@ function specification(id) {
         const name = id.slice('JetRuntime/Tests/'.length).replace(/Tests$/, '');
         if (crypto.has(name)) return { type: 'suite', runner: rt + 'run-crypto-fixtures.mjs', modes: ['assemble', 'lower', 'link', 'run'], crypto: true };
         if (plain[name]) return { type: 'plain', name, call: plain[name][0], expected: plain[name][1], runner: rt + 'check-runtime.mjs' };
+        if (['CodecCSV', 'CodecEnv', 'DynCodec', 'CompilerFileLeaves'].includes(name)) return { type: 'codec-fixture', name, runner: rt + 'run-native-codec-file-leaves.mjs' };
         if (suites[name]) return { type: 'suite', runner: rt + suites[name][0], modes: suites[name][1], name };
         if (['EnvironmentLeaves', 'FaultSchedule', 'IterCharge', 'ProgressState', 'HostFault', 'FloatBits', 'TerminalColor', 'TrapReport', 'VaultHooks', 'VaultProvider', 'Thread', 'HostSpawn', 'CompilerEnv', 'CompilerRoutes', 'CompilerNeededJSON', 'CompilerNeededURL', 'CompilerNeededMathText', 'DynNative'].includes(name)) return { type: 'c', name, runner: be + 'run-runtime.mjs' };
         if (name === 'GenericRouteSchema') return { type: 'direct', runner: 'Compiler/JetRuntime/Tests/GenericRouteSchema.jet', expected: '' };
@@ -106,6 +107,9 @@ export function planTransport(entry, { jet, repo, runtimePack }) {
         steps.push({ action: 'assemble canonical compiler plus explicit checked-MIR Jet transport entry', source: join(out, 'mir-transport/transport.jet') });
         build(join(out, 'mir-transport/transport.jet')); run(join(out, 'mir-transport/transport.exe'), [file, output], { code: 0, stdout: 'checked registry MIR: pass\n', stderr: '' });
     };
+    if (spec.type === 'codec-fixture') {
+        node(spec.runner, out, jet, runtimePack, '--test', spec.name);
+    } else
     if (spec.type === 'suite') {
         node(spec.runner, out, spec.modes[0]);
         const library = suiteLibrary(spec, out); checkLibrary(library.file, library.prefix, library.lifecycle, library.exports);
@@ -248,6 +252,11 @@ export async function runTransport(entry, { jet, repo, logDir, runtimePack, runt
         return assembleNativeCompiler({ repo, out, env, execute });
     }
     try {
+        if (spec.type === 'codec-fixture') {
+            node(spec.runner, out, nativeJet, runtimePack, '--test', spec.name);
+            const result = JSON.parse(readFileSync(join(out, 'fixture-result.json'), 'utf8'));
+            if (result.status !== 0 || result.test !== spec.name || result.stdout !== '' || result.stderr !== '') throw Error('named native codec/file fixture receipt differs');
+        } else
         if (spec.type === 'suite') {
             node(spec.runner, out, spec.modes[0]);
             const selected = suiteLibrary(spec, out);
