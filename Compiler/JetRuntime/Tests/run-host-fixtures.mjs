@@ -13,7 +13,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'audit', 'compile', 'link', 'run'].includes(mode)) throw Error('usage: run-host-fixtures.mjs OUT assemble|lower|audit|compile|link|run');
 const out = resolve(output), dir = join(out, 'unit');
-const fixtures = [['files', 'HostFilesTests.c', 'files raw: ok\n'], ['process', 'HostSpawnTests.c', 'process raw: ok\n'], ['root-stdio', 'RootStdioWitness.c', 'root stdio: ok\n'], ['tcp-routes', 'TCPRoutesWitness.c', 'tcp routes: ok\n']];
+const fixtures = [['files', 'HostFilesTests.c', 'files raw: ok\n'], ['process', 'HostSpawnTests.c', 'process raw: ok\n'], ['root-stdio', 'RootStdioWitness.c', 'root stdio: ok\n'], ['tcp-routes', 'TCPRoutesWitness.c', 'tcp routes: ok\n'], ['build-http', 'HostBuildHTTPWitness.c', 'build http: ok\n']];
 function command(bin, args, options = {}) {
   const result = spawnSync(bin, args, { encoding: 'utf8', maxBuffer: 1 << 27, cwd: root, ...options });
   if (result.error || result.status !== 0) throw Error(`${bin}: ${result.error?.message ?? result.status}\n${result.stdout ?? ''}${result.stderr ?? ''}`);
@@ -47,7 +47,7 @@ if (mode === 'assemble') {
   const collections = readFileSync(join(root, 'Compiler/JetRuntime/Source/Collections.jet'), 'utf8');
   const stride = /RT_HOST_U8_STRIDE\s*::\s*prep\s*\{\s*I64\{(1|8)\}\s*\}/.exec(collections)?.[1];
   if (!stride) throw Error('TCP witness requires the canonical native U8 epoch');
-  for (const [name, source] of fixtures) command(join(root, 'Tools/agent/jet-env'), [nativeCCompiler, '-std=c11', '-O1', '-fno-stack-protector', '-fno-PIE', '-fno-builtin', '-Wall', '-Wextra', '-Werror', ...(name === 'tcp-routes' ? [`-DJET_TCP_U8_STRIDE=${stride}`] : []), '-c', join(root, 'Compiler/JetRuntime/Tests', source), '-o', join(out, `${name}.o`)]);
+  for (const [name, source] of fixtures) command(join(root, 'Tools/agent/jet-env'), [nativeCCompiler, '-std=c11', '-O1', '-fno-stack-protector', '-fno-PIE', '-fno-builtin', '-Wall', '-Wextra', '-Werror', ...(name === 'tcp-routes' ? [`-DJET_TCP_U8_STRIDE=${stride}`] : name === 'build-http' ? [`-DJET_U8_STRIDE=${stride}`] : []), '-c', join(root, 'Compiler/JetRuntime/Tests', source), '-o', join(out, `${name}.o`)]);
 } else if (mode === 'link') {
   const musl = process.env.JET_PACK_MUSL_LIB, compiler = process.env.JET;
   if (!musl || !compiler) throw Error('JET_PACK_MUSL_LIB and matching FINAL E2 JET are required; fixture.o supplies the Jet-only runtime');

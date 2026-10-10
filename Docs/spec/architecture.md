@@ -219,6 +219,19 @@ HTTP Body chunk buffers use the same layout, including borrowed input windows.
 that checks all 256 byte values through List pack/unpack and multi-chunk HTTP
 Body transfer; it rejects an object whose pinned source declares another stride.
 
+A nested `List<List<U8>>` crosses a route only to a Jet runtime provider: the
+outer data pointer and length address native 24-byte `[len, cap, data]` headers
+over packed bytes, and a result returns such a buffer with exact capacities.
+`&mut Vec<u8>` kernels likewise lend the caller's own data and length for an
+in-place write. Seed Rust adapters have no nested-slot or write-back codec, so
+`gen-c-abi-routes.mjs` emits these rows without a Rust body, keeps the old skip
+for non-Jet routes, and Lower refuses a nested carrier without `native_lists`.
+The checked-build transport (`HostBuildHTTP.jet`, HTTP.rs:5536-5712) uses this
+carrier for its DNS answers and response rows; plain `http://` runs over the
+native socket and readiness providers, while the `https://` branch connects and
+then returns the runtime's canonical TLS refusal text (D-NATIVE-TLS1=B) as its
+String error without sending a request.
+
 Native C consumers and pack/link drivers invoke the shared
 `Tools/packaging/native-c-compiler.mjs` policy. It appends
 `-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0` and removes only Nix's `fortify` and
