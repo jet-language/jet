@@ -2214,10 +2214,10 @@ fn sema_registration_cli_items(items: [Item], diagnostics: &[Diagnostic]) {
 fn sema_registration_cli_short_name(field: Field, seen: &[String:String], diagnostics: &[Diagnostic]) {
     marker_value :: sema_registration_cli_marker(field.serde_markers, "Short")
     if marker_value == None -> return
-    marker :: marker_value ?? panic("checked #Short marker disappeared")
+    marker :: marker_value
     short_value :: sema_registration_cli_marker_string(marker)
     if short_value == None -> return
-    short :: short_value ?? panic("checked #Short literal disappeared")
+    short :: short_value
     bytes :: short.bytes()
     letter := false
     if bytes.len() == 1 {
@@ -2251,7 +2251,8 @@ fn sema_registration_cli_callable_params(function: Func, command: String, shared
     shared_slots := [Int]{}
     if shared_type == .Val(shared_name) {
         loop (index, param) in function.params {
-            if sema_registration_cli_named_leaf(param.ty) == Val(shared_name) -> &shared_slots.push(index)
+            leaf :: sema_registration_cli_named_leaf(param.ty) ?? next
+            if leaf == shared_name -> &shared_slots.push(index)
         }
         if shared_slots.len() > 1 || (shared_slots.len() == 1 && shared_slots[0] != 0) {
             &diagnostics.push(sema_registration_e1345(command, function.name_span, "a bound function may receive the shared program struct only once, as its first parameter"))

@@ -370,7 +370,7 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
             if parameter.variadic && !args[index].spread && bounds.len() > 0 {
                 arg_name :: type_name(value.ty)
                 loop bound in bounds {
-                    if bounds.len() > 1 && sema_call_type_assignable(Type.TraitObject{bounds: [String]{bound}}, value.ty, environment, program) == .Val(true) -> next
+                    if bounds.len() > 1 && sema_call_type_assignable(Type.TraitObject{bounds: [String]{bound}}, value.ty, environment, program) == (Val(true)) -> next
                     shown :: sema_error_conversion_leaf(bound)
                     &diagnostics.push(sema_error("E1313", expr_span(args[index].expr), "`{arg_name}` doesn't implement `{shown}`", "`{parameter.name}: ...{shown}` checks every argument against `{shown}` — that's how `{callee}` accepts a mix of types safely", "implement `{shown}` for `{arg_name}`'s type, or drop the value from this call"))
                 }
