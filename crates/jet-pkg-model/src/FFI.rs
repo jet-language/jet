@@ -185,6 +185,13 @@ impl CRecordDefinitions {
                 stack.remove(name);
                 resolved
             }
+            // A checked raw pointer has native address layout independently
+            // of its pointee (which may be an opaque, non-C Jet type).
+            Type::Apply { name, args }
+                if name == crate::Syntax::TYPE_PTR && args.len() == 1 =>
+            {
+                Some("*mut core::ffi::c_void".to_string())
+            }
             // `Atomic<T>` is one lock-free 64-bit word in every checked C
             // record (Layout::atomic_layout), whatever the scalar `T`.
             Type::Apply { name, args }
@@ -7566,6 +7573,29 @@ dependencies = [
         assert_eq!(rust_type(&Type::Int, &empty), "i64");
         assert_eq!(rust_type(&Type::Float, &empty), "f64");
         assert_eq!(rust_type(&Type::Float32, &empty), "f32");
+    }
+
+    #[test]
+    fn c_record_raw_pointers_use_native_pointer_types() {
+        let definitions = CRecordDefinitions::default();
+        for pointee in [Type::Int, Type::Named("Opaque".to_string())] {
+            let pointer = Type::Apply {
+                name: crate::Syntax::TYPE_PTR.to_string(),
+                args: vec![pointee],
+            };
+            assert_eq!(
+                definitions.rust_type(&pointer).as_deref(),
+                Some("*mut core::ffi::c_void"),
+            );
+            let array = Type::FixedList {
+                elem: Box::new(pointer),
+                len: crate::AST::Measure::literal("length", 2),
+            };
+            assert_eq!(
+                definitions.rust_type(&array).as_deref(),
+                Some("[*mut core::ffi::c_void; 2]"),
+            );
+        }
     }
 
     #[test]

@@ -2034,6 +2034,29 @@ fn imported_error_conversions_lower_once_with_checked_mir_targets() {
 }
 
 #[test]
+fn checked_c_record_raw_pointers_prepare_without_native_repr_ice() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let source = "struct Opaque { values: [Int] }\n\
+                      #Layout(c)\nstruct PointerRecord { pointer: *Int, opaque: *Opaque }\n\
+                      fn run() {}\n";
+        let (bundle, _) = checked_bundle(source);
+        let record = bundle.modules[bundle.entry].items.iter().find_map(|item| match item {
+            Item::Struct(record) if record.name == "PointerRecord" => Some(record),
+            _ => None,
+        }).expect("checked pointer record");
+        assert!(
+            record.layout.as_ref().is_some_and(crate::AST::StructLayout::is_c),
+            "the regression must exercise an actual checked C-layout record",
+        );
+        // Preparation collects native record definitions before noticing that
+        // this fixture needs no foreign bridge. No Cargo or rustc runs here.
+        assert!(jet_pkg_model::FFI::prepare(&bundle)
+            .expect("checked raw pointer fields must have a native Rust representation")
+            .is_none());
+    });
+}
+
+#[test]
 fn native_stop_producer_checks_entry_calls_loops_and_panic_cleanup() {
     use jet_foundation::MIR::{MirPollKind, MirTerminator};
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {

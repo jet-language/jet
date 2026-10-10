@@ -979,6 +979,11 @@ and include their checked signature, target, raw body, and schema in the cache
 identity. C/C++ wrappers and asm lower only after sema proves their boundary
 contracts.
 
+Checked `#Layout(c)` records preserve native address-sized raw pointer fields
+in their generated `repr(C)` definitions. A `Ptr<T>` field lowers to
+`*mut core::ffi::c_void`; its pointee need not itself have a C representation.
+Fixed-size lists of pointers use that same element representation.
+
 The native C path consumes the same checked direct/transitive library closure
 and object/archive link units. A local `c@path` source directory is realized
 with the installed C toolchain into a content-addressed static archive; source
