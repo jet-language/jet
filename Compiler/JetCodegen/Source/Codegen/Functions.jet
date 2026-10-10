@@ -1,6 +1,9 @@
 // Complete checked top-level TIR functions into backend-neutral MIR.
 use jet_foundation.[
     mir_integer_constant,
+    mir_function_id,
+    MIRBlockID,
+    MIRInstruction,
     AccessConvention,
     CORE_CALLS,
     CORE_ENUM_ROWS,
@@ -224,6 +227,10 @@ struct JetCodegenForeignArtifacts {
     foreign: [MIRForeign]
     links: [MIRLinkUnit]
     handles: [MIRHandleLifecycle]
+    // Rust `function_foreign_provenance`: one body-less `asm` leaf per
+    // checked `#FFI(asm)` row, keyed like its foreign row, so native
+    // lowering binds the foreign call to the declaration's inline body.
+    functions: [MIRFunction]
 }
 fn jet_codegen_lower_declaration_ownership_mode(ownership: TDeclarationOwnership) -> MIROwnershipMode Never! {
     if ownership == {
@@ -4262,7 +4269,7 @@ fn lower_foreign_artifacts(modules: [SemaGraphModuleResult], package_facts: MIRP
             loop library in provider.transitive_links -> jet_codegen_foreign_push_unique_string(&transitive_links, library)
         }
     }
-    if !has_foreign_data -> return JetCodegenForeignArtifacts{foreign: [MIRForeign]{}, links: [MIRLinkUnit]{}, handles: [MIRHandleLifecycle]{}}
+    if !has_foreign_data -> return JetCodegenForeignArtifacts{foreign: [MIRForeign]{}, links: [MIRLinkUnit]{}, handles: [MIRHandleLifecycle]{}, functions: [MIRFunction]{}}
     target :: package_facts.artifact_target ?? panic("checked foreign artifact lowering has no selected package target")
     applicability := jet_codegen_foreign_target_applicability(target)
     jet_codegen_foreign_sort_strings(&direct_links)
@@ -4284,6 +4291,7 @@ fn lower_foreign_artifacts(modules: [SemaGraphModuleResult], package_facts: MIRP
     loop library in libraries -> &links.push(jet_codegen_foreign_link_row(library, cache_identity, applicability, &direct_links, &transitive_links, &libraries))
     foreign := [MIRForeign]{}
     hooks := jet_codegen_foreign_hook_index(modules)
+    asm_functions := [MIRFunction]{}
     loop semantic_module in modules {
         loop row in semantic_module.foreign_functions {
             if row.owner == SemaCheckedForeignOwner.CModule {
@@ -4300,6 +4308,7 @@ fn lower_foreign_artifacts(modules: [SemaGraphModuleResult], package_facts: MIRP
                 if existing.id == lowered.id -> panic("duplicate or colliding checked foreign function identity")
             }
             &foreign.push(lowered)
+            if row.language == "asm" -> &asm_functions.push(jet_codegen_lower_asm_leaf(row, modules, applicability))
         }
     }
     handles := [MIRHandleLifecycle]{}
@@ -4339,5 +4348,65 @@ fn lower_foreign_artifacts(modules: [SemaGraphModuleResult], package_facts: MIRP
     jet_codegen_foreign_sort_rows(&foreign)
     jet_codegen_foreign_sort_links(&links)
     jet_codegen_foreign_sort_handles(&handles)
-    JetCodegenForeignArtifacts{foreign: foreign, links: links, handles: handles}
+    JetCodegenForeignArtifacts{foreign: foreign, links: links, handles: handles, functions: asm_functions}
+}
+
+// Rust `function_foreign_provenance` (TIR/mod.rs): an `#FFI(asm)` function
+// is a foreign leaf whose code is its inline source. It keeps the checked
+// foreign row's key, parameters, return and declaration span; the native
+// backend lowers it from that span (InlineAsm.jet) and never runs a body,
+// so its one block is unreachable.
+fn jet_codegen_lower_asm_leaf(row: SemaCheckedForeignFunction, modules: [SemaGraphModuleResult], applicability: MIRTargetApplicability) -> MIRFunction Never! {
+    unit :: Type.Named{name: "Unit"}
+    return_type :: jet_codegen_lower_type_with_modules(row.return_type ?? unit, modules, row.module_identity, [String]{})
+    entry :: MIRBlockID{value: U64{0}}
+    declared_return := MIRType?{None}
+    if row.return_type != None -> declared_return = Val(return_type)
+    MIRFunction{
+        id: mir_function_id("{row.key}|{row.source_file}|{row.span.start}|{row.span.end}|asm"),
+        module_id: mir_module_id(row.module_identity),
+        source_file: mir_source_file_id(row.source_file),
+        key: row.key,
+        module_name: row.module_name,
+        name: row.name,
+        span: row.span,
+        kind: MIRFunctionKind.Foreign,
+        form: MIRFunctionForm.TopLevel,
+        visibility: MIRVisibility.Private,
+        target_applicability: applicability,
+        web_bucket: None,
+        web_marker: None,
+        generic_params: [MIRGenericParam]{},
+        capture_params: [MIRCaptureParam]{},
+        params: jet_codegen_lower_foreign_params(row.params, modules, row.module_identity),
+        declared_return: declared_return,
+        return_type: return_type,
+        failure: MIRFailureCarrier.Infallible,
+        effects: jet_codegen_foreign_effects(row.effect_root, row.span),
+        captures: None,
+        generator: None,
+        optimization: mir_empty_optimization_facts(),
+        is_unsafe: true,
+        unsafe_gate: jet_codegen_lower_unsafe_gate(row.unsafe_gate),
+        is_pure: false,
+        memo_bound: None,
+        memo_unbounded: false,
+        is_reactive: false,
+        reactive_upgrades: [String]{},
+        is_inline: false,
+        is_inline_always: false,
+        is_scalar: false,
+        kernel_proof: None,
+        gc_return: false,
+        return_view_provenance: None,
+        web_param_reconstructions: [MIRWebParamReconstruction]{},
+        blocks: [MIRBasicBlock]{MIRBasicBlock{id: entry, span: row.span, instructions: [MIRInstruction]{}, terminator: MIRTerminator.Unreachable{reason: "inline asm leaf lowers from its source span"}}},
+        entry: entry,
+        locals: [MIRLocal]{},
+        values: [MIRValueFact]{},
+        places: [MIRPlace]{},
+        scopes: [MIRScope]{},
+        drops: [MIRDropAction]{},
+        foreign_language: Val("asm"),
+    }
 }

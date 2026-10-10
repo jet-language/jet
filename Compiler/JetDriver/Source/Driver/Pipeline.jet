@@ -2122,6 +2122,9 @@ fn jet_driver_assemble_mir(
     all_functions := [MIRFunction]{}
     compiler_transfer_rows<MIRFunction>(&all_functions, &lowered.functions)
     compiler_transfer_rows<MIRFunction>(&all_functions, &lowered.nested_functions)
+    // Rust `function_foreign_provenance`: each checked `#FFI(asm)` row's
+    // body-less leaf joins the functions, keyed like its foreign row.
+    loop leaf in foreign_artifacts.functions -> &all_functions.push(leaf)
     // Next-equal chains preserve the old pairwise diagnostic order without
     // visiting unrelated functions. Duplicate-heavy input costs only its output.
     id_heads := [U64:Int]{}
