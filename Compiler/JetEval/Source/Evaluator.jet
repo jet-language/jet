@@ -128,6 +128,10 @@ fn jet_eval_runtime_config(config: JetEvalConfig) -> JetEvalConfig {
         None -> None
         Val(adapter) -> Val(adapter.clone_adapter())
     }
+    build_host_adapter :: if config.build_host_adapter == {
+        None -> None
+        Val(adapter) -> Val(adapter.clone_adapter())
+    }
     JetEvalConfig{
         fuel: config.fuel,
         max_call_depth: config.max_call_depth,
@@ -135,7 +139,7 @@ fn jet_eval_runtime_config(config: JetEvalConfig) -> JetEvalConfig {
         globals: config.globals,
         runtime_execution: true,
         host_adapter: host_adapter,
-        build_host_adapter: config.build_host_adapter,
+        build_host_adapter: build_host_adapter,
         output_context: config.output_context,
         host_hooks: config.host_hooks,
     }
@@ -217,7 +221,7 @@ fn jet_eval_owned_root_machine(root: JetEvalOwnedRoot, adapter: JetEvalHostAdapt
 }
 fn jet_eval_owned_root_drop_result(machine: &JetEvalMachine, cleaned: Bool, span: Span) -> JetEvalOwnedRootDropResult Never! {
     disposition := JetEvalOwnedRootDropDisposition.ConsumedFailure
-    if cleaned && !jet_eval_has_failure(&machine) -> disposition = JetEvalOwnedRootDropDisposition.Cleaned
+    if cleaned && !jet_eval_has_failure(machine) -> disposition = JetEvalOwnedRootDropDisposition.Cleaned
     internal_problem := machine.internal_problem
     if disposition == JetEvalOwnedRootDropDisposition.ConsumedFailure && machine.failure == None && internal_problem == None {
         internal_problem = Val(JetEvalInternalProblem{span: Val(span), message: "native owned-root cleanup failed without a diagnostic"})
@@ -665,7 +669,7 @@ fn jet_eval_retire_in_place(result: &JetEvalResult, span: Span) -> Bool? {
                 result.stderr = session.machine.stderr
                 result.output_context = session.machine.config.output_context
                 session.retired = true
-                ok = ok && !jet_eval_has_failure(&session.machine)
+                ok = ok && !jet_eval_has_failure(session.machine)
             }
         }
     }
@@ -1936,7 +1940,7 @@ fn jet_eval_capture(machine: &JetEvalMachine, frame_index: Int, slot: Int, span:
     }
     if machine.program.functions[function].capture_params[slot].place_only {
         // This is the existing place address, not the cell's uninitialized value.
-        anchor :: machine.frames[frame_index].captures[slot]
+        anchor :: machine.frames[frame_index].captures[slot].copy()
         if anchor == .Address(_, _, _) -> return jet_eval_borrow_value(anchor, &machine, span)
         jet_eval_compiler_fail(&machine, span, "place-only MIR capture must retain an actual place address")
         return None
@@ -2501,7 +2505,7 @@ fn jet_eval_call(machine: &JetEvalMachine, frame_index: Int, callee: MIRCallee, 
                 if native_binding != None {
                     return jet_eval_native_call(&machine, native_binding ?? return None, values, prepared.move_permissions, result_ty, span)
                 }
-                if jet_eval_has_failure(&machine) {
+                if jet_eval_has_failure(machine) {
                     jet_eval_drop_call_values(&machine, values, prepared.move_permissions, span)
                     return None
                 }
@@ -8005,7 +8009,7 @@ fn jet_eval_host_fixed_backing_transfer_validate(machine: &JetEvalMachine, reque
             return false
         }
     }
-    if !jet_eval_host_fixed_backing_outcome_owner_matches(&outcome, transfer.owner_handle, transfer.owner_raw) {
+    if !jet_eval_host_fixed_backing_outcome_owner_matches(outcome, transfer.owner_handle, transfer.owner_raw) {
         jet_eval_compiler_fail(&machine, span, "native Fixed backing lease is not attached to the exact returned allocator owner")
         return false
     }
@@ -8054,7 +8058,7 @@ fn jet_eval_host_fixed_backing_receipts_cleanup(machine: &JetEvalMachine, reques
         attached := false
         loop candidate in transfers {
             if candidate.lease == transfer.lease
-                && jet_eval_host_fixed_backing_outcome_owner_matches(&outcome, candidate.owner_handle, candidate.owner_raw) -> attached = true
+                && jet_eval_host_fixed_backing_outcome_owner_matches(outcome, candidate.owner_handle, candidate.owner_raw) -> attached = true
         }
         if !attached
             && !jet_eval_host_fixed_backing_release(&machine, transfer.backing_handle, transfer.backing_raw, Val(transfer.lease), span) -> ok = false

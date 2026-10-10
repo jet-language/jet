@@ -1,5 +1,7 @@
 // Actual Core typed error -> evaluator failed value -> structured diagnostic.
 // This fixture does not claim that an unavailable host service was executed.
+use core.build.[BuildSessionPolicy, BuildSessionError, build_session_new, build_session_error_projection, build_session_error_diag, build_session_error_json_text, build_key_debug_text, build_session_impure]
+use jet_foundation.Span
 fn build_services_require(ok: Bool, message: String) Never! {
     if !ok -> panic("BuildServices: {message}")
 }
@@ -9,19 +11,19 @@ fn run() {
     state :: session.storage.guard_read().value
     errors :: [BuildSessionError]{
         .EmptyTargetName, .EmptyActionName, .EmptyToolchainName, .EmptySigningIdentityName, .EmptyProbeName,
-        .DuplicateTargetName("target"), .DuplicateActionName("action"), .CompilerPackageDependencyMissing("pkg", "dep"),
-        .DuplicateToolchainName("tool"), .DuplicateSigningIdentityName("sign"), .DuplicateProbeName("probe"),
-        .EmptyPath, .InvalidPath("../bad"), .EmptyToolchainTriple("tool"), .EmptyIdentityField("identity"),
-        .MissingLockedProvenance("probe"), .EmptyProbeField("probe"), .EmptyActionArgv("action"), .EmptyEnvName("action"),
-        .UndeclaredEnvName("action", "KEY"), .CachedActionWithoutOutputs("action"), .PhonyActionWithoutCaps("action"), .PhonyActionWithOutputs("action"),
-        .DuplicateActionOutput("action", "output"), .DuplicateBuildOutput("output", "first", "second"),
-        .UnknownTarget(3), .UnknownAction(4), .UnknownToolchain(5), .UnknownSigningIdentity(6), .UnknownProbe(7),
-        .LegacyWrapperWithoutInputs("make"), .LegacyWrapperWithoutOutputs("make"), .LegacyWrapperWithoutCaps("make"),
-        .LegacyWrapperCommandMismatch("make", "other"), .LegacyProjectFileMissing("make"), .LegacyProjectFileInvalid("Makefile"),
-        .PolicyDenied("plugin", false, "denied", []), .EmptyPluginField("plugin"), .InvalidPluginDigest("digest"), .PackagedPlugin("reason"),
-        .PluginVersionMismatch("plugin", "1", "2"), .EmptyGeneratedModuleField("module"), .InvalidGeneratedModulePath("path"),
-        .DuplicateGeneratedModuleName("module"), .DuplicateGeneratedModulePath("path"), .GeneratedModuleCycle("module", "path"),
-        .TargetDependencyCycle([String]{"a", "b", "a"}), .ActionDependencyCycle([String]{"c", "d", "c"}),
+        .DuplicateTargetName{value: "target"}, .DuplicateActionName{value: "action"}, .CompilerPackageDependencyMissing{package: "pkg", dependency: "dep"},
+        .DuplicateToolchainName{value: "tool"}, .DuplicateSigningIdentityName{value: "sign"}, .DuplicateProbeName{value: "probe"},
+        .EmptyPath, .InvalidPath{value: "../bad"}, .EmptyToolchainTriple{value: "tool"}, .EmptyIdentityField{value: "identity"},
+        .MissingLockedProvenance{value: "probe"}, .EmptyProbeField{value: "probe"}, .EmptyActionArgv{value: "action"}, .EmptyEnvName{value: "action"},
+        .UndeclaredEnvName{action: "action", key: "KEY"}, .CachedActionWithoutOutputs{value: "action"}, .PhonyActionWithoutCaps{value: "action"}, .PhonyActionWithOutputs{value: "action"},
+        .DuplicateActionOutput{action: "action", output: "output"}, .DuplicateBuildOutput{output: "output", first_action: "first", second_action: "second"},
+        .UnknownTarget{id: 3}, .UnknownAction{id: 4}, .UnknownToolchain{id: 5}, .UnknownSigningIdentity{id: 6}, .UnknownProbe{id: 7},
+        .LegacyWrapperWithoutInputs{kind: "make"}, .LegacyWrapperWithoutOutputs{kind: "make"}, .LegacyWrapperWithoutCaps{kind: "make"},
+        .LegacyWrapperCommandMismatch{wrapper: "make", actual: "other"}, .LegacyProjectFileMissing{kind: "make"}, .LegacyProjectFileInvalid{value: "Makefile"},
+        .PolicyDenied{subject: "plugin", allowed: false, reason: "denied", required_caps: []}, .EmptyPluginField{value: "plugin"}, .InvalidPluginDigest{value: "digest"}, .PackagedPlugin{value: "reason"},
+        .PluginVersionMismatch{plugin: "plugin", expected: "1", actual: "2"}, .EmptyGeneratedModuleField{value: "module"}, .InvalidGeneratedModulePath{value: "path"},
+        .DuplicateGeneratedModuleName{value: "module"}, .DuplicateGeneratedModulePath{value: "path"}, .GeneratedModuleCycle{name: "module", path: "path"},
+        .TargetDependencyCycle{nodes: [String]{"a", "b", "a"}}, .ActionDependencyCycle{nodes: [String]{"c", "d", "c"}},
     }
     variants :: [String]{
         "EmptyTargetName", "EmptyActionName", "EmptyToolchainName", "EmptySigningIdentityName", "EmptyProbeName",
@@ -55,10 +57,10 @@ fn run() {
             }
         } else { panic("typed error lost structured report") }
     }
-    build_services_require(build_session_error_projection(.EmptyActionArgv("compile")).text == "EmptyActionArgv(\"compile\")", "Rust Debug default")
-    build_services_require(build_session_error_projection(.UnknownAction(17)).text == "UnknownAction(ActionId(17))", "nominal ID Debug")
-    build_services_require(build_session_error_projection(.DuplicateTargetName("app")).text == "target name `app` is registered twice", "named target text")
-    build_services_require(build_session_error_projection(.TargetDependencyCycle([String]{"a", "b", "a"})).fields[0].value == "[\"a\",\"b\",\"a\"]", "cycle is structured ordered nodes")
+    build_services_require(build_session_error_projection(.EmptyActionArgv{value: "compile"}).text == "EmptyActionArgv(\"compile\")", "Rust Debug default")
+    build_services_require(build_session_error_projection(.UnknownAction{id: 17}).text == "UnknownAction(ActionId(17))", "nominal ID Debug")
+    build_services_require(build_session_error_projection(.DuplicateTargetName{value: "app"}).text == "target name `app` is registered twice", "named target text")
+    build_services_require(build_session_error_projection(.TargetDependencyCycle{nodes: [String]{"a", "b", "a"}}).fields[0].value == "[\"a\",\"b\",\"a\"]", "cycle is structured ordered nodes")
     build_services_require(build_session_error_json_text("quote\"\\\n\t") == "\"quote\\\"\\\\\\n\\t\"", "JSON field escaping")
     build_services_require(build_key_debug_text("é") == "\"é\"", "printable Unicode Debug")
     build_services_require(build_key_debug_text("é") == "\"e\\u{{301}}\"", "grapheme extender uses canonical Rust Debug table")

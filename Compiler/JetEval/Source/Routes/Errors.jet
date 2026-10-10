@@ -90,14 +90,14 @@ fn jet_eval_error_metadata_new() -> TComptimeValue Never! {
         {name: "typed_identity", value: jet_eval_error_optional_text(None)},
         {name: "context_frames", value: TComptimeValue.List{values: []}},
         {name: "conversion_history", value: TComptimeValue.List{values: []}},
-        {name: "details", value: TComptimeValue.Failed{report: .Clean(Type.Named{name: "__jet_ErrorDetails"})}},
+        {name: "details", value: TComptimeValue.Failed{report: .Clean{ty: Type.Named{name: "__jet_ErrorDetails"}}}},
     }}
 }
 fn jet_eval_error_from_message(message: String) -> TComptimeValue Never! {
     TComptimeValue.Struct{type_name: "Err", fields: [TComptimeField]{
         {name: "message", value: TComptimeValue.String{value: message}},
-        {name: "code", value: TComptimeValue.Failed{report: .Clean(Type.String)}},
-        {name: "cause", value: TComptimeValue.Failed{report: .Clean(Type.Named{name: "Err"})}},
+        {name: "code", value: TComptimeValue.Failed{report: .Clean{ty: Type.String}}},
+        {name: "cause", value: TComptimeValue.Failed{report: .Clean{ty: Type.Named{name: "Err"}}}},
         {name: "__jet___memo_error_metadata", value: jet_eval_error_metadata_new()},
     }}
 }
@@ -325,7 +325,7 @@ fn jet_eval_error_capture_data(value: TComptimeValue, span: Span) -> JetEvalDefa
 // Report projection is deliberately not an error reconstruction codec.
 fn jet_eval_error_optional_text(value: String?) -> TComptimeValue Never! {
     if value == .Val(text) -> return TComptimeValue.Present{value: TComptimeValue.String{value: text}}
-    TComptimeValue.Failed{report: .Clean(Type.String)}
+    TComptimeValue.Failed{report: .Clean{ty: Type.String}}
 }
 
 enum JetEvalErrorOperation {

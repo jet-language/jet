@@ -2,6 +2,7 @@
 // The bootstrap unit includes that kernel beside these helpers. No graph
 // validation, policy, defaulting or key recipe is implemented at this boundary.
 use jet_foundation.[Diagnostic, DiagnosticStructured, DiagnosticBuildError, DiagnosticErrorDetails, DiagnosticErrorField, DiagnosticErrorSpan, Span, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, Type, diagnostic_from_registry]
+use core.build.[BuildSessionValue, BuildSessionDiagnostic, BuildGraph, BuildGraphAction, BuildGraphFile, build_session_error_projection]
 
 fn jet_eval_build_field(data: TComptimeValue, name: String) -> TComptimeValue? Never! {
     if data == .Struct(_, fields) {
@@ -26,7 +27,7 @@ fn jet_eval_build_context_id(data: TComptimeValue) -> Int? Never! {
     None
 }
 
-fn jet_eval_build_session_input(data: TComptimeValue) -> BuildSessionValue? {
+fn jet_eval_build_session_input(data: TComptimeValue) -> BuildSessionValue? Never! {
     if data == {
         .Unit -> return Val(BuildSessionValue.Unit)
         .String(value) -> return Val(BuildSessionValue.Text{value: value})
@@ -65,7 +66,7 @@ fn jet_eval_build_session_input(data: TComptimeValue) -> BuildSessionValue? {
 
 // A closed host packet has no owner leases to transfer. Refuse closures,
 // Shared, resource handles and cursor requests rather than fabricating data.
-fn jet_eval_build_host_data(value: JetEvalHostValue) -> TComptimeValue? {
+fn jet_eval_build_host_data(value: JetEvalHostValue) -> TComptimeValue? Never! {
     if value == {
         .Data(data) -> return Val(data)
         .Present(inner) -> return Val(TComptimeValue.Present{value: jet_eval_build_host_data(inner) ?? return None})
@@ -88,15 +89,15 @@ fn jet_eval_build_host_data(value: JetEvalHostValue) -> TComptimeValue? {
     }
 }
 
-fn jet_eval_build_session_host_input(value: JetEvalHostValue) -> BuildSessionValue? {
+fn jet_eval_build_session_host_input(value: JetEvalHostValue) -> BuildSessionValue? Never! {
     jet_eval_build_session_input(jet_eval_build_host_data(value) ?? return None)
 }
 
-fn jet_eval_build_context_host_id(value: JetEvalHostValue) -> Int? {
+fn jet_eval_build_context_host_id(value: JetEvalHostValue) -> Int? Never! {
     jet_eval_build_context_id(jet_eval_build_host_data(value) ?? return None)
 }
 
-fn jet_eval_build_session_output(value: BuildSessionValue) -> TComptimeValue {
+fn jet_eval_build_session_output(value: BuildSessionValue) -> TComptimeValue Never! {
     if value == {
         .Unit -> TComptimeValue.Unit
         .Text(text) -> TComptimeValue.String{value: text}
@@ -116,7 +117,7 @@ fn jet_eval_build_session_output(value: BuildSessionValue) -> TComptimeValue {
     }
 }
 
-fn jet_eval_build_session_diagnostic(error: BuildSessionDiagnostic) -> Diagnostic {
+fn jet_eval_build_session_diagnostic(error: BuildSessionDiagnostic) -> Diagnostic Never! {
     diagnostic := diagnostic_from_registry(error.code, Val(Span{start: error.start, end: error.end}), error.what, error.why, error.fix)
     if error.error == .Val(typed) {
         projection :: build_session_error_projection(typed)
@@ -155,7 +156,7 @@ fn jet_eval_build_failed_value(error: BuildSessionDiagnostic) -> TComptimeValue?
     value :: TComptimeValue.Struct{type_name: "Err", fields: [TComptimeField]{
         {name: "message", value: jet_eval_build_graph_text(projection.text)},
         {name: "code", value: TComptimeValue.Present{value: jet_eval_build_graph_text("E3502")}},
-        {name: "cause", value: TComptimeValue.Failed{report: .Clean(Type.Named{name: "Err"})}},
+        {name: "cause", value: TComptimeValue.Failed{report: .Clean{ty: Type.Named{name: "Err"}}}},
         {name: "__jet___memo_error_metadata", value: metadata},
     }}
     Val(TComptimeValue.Failed{report: TComptimeReport.Told{value: value}})
@@ -225,13 +226,13 @@ fn jet_eval_build_graph_text(value: String) -> TComptimeValue Never! { TComptime
 fn jet_eval_build_graph_ints(values: [Int]) -> TComptimeValue Never! { TComptimeValue.List{values: loop value in values -> jet_eval_build_graph_int(value)} }
 fn jet_eval_build_graph_texts(values: [String]) -> TComptimeValue Never! { TComptimeValue.List{values: loop value in values -> jet_eval_build_graph_text(value)} }
 fn jet_eval_build_graph_optional_int(value: Int?) -> TComptimeValue Never! {
-    if value == {.Val(number) -> TComptimeValue.Present{value: jet_eval_build_graph_int(number)} else -> TComptimeValue.Failed{report: .Clean(Type.Int)}}
+    if value == {.Val(number) -> TComptimeValue.Present{value: jet_eval_build_graph_int(number)} else -> TComptimeValue.Failed{report: .Clean{ty: Type.Int}}}
 }
 fn jet_eval_build_graph_optional_text(value: String?) -> TComptimeValue Never! {
-    if value == {.Val(text) -> TComptimeValue.Present{value: jet_eval_build_graph_text(text)} else -> TComptimeValue.Failed{report: .Clean(Type.String)}}
+    if value == {.Val(text) -> TComptimeValue.Present{value: jet_eval_build_graph_text(text)} else -> TComptimeValue.Failed{report: .Clean{ty: Type.String}}}
 }
 fn jet_eval_build_graph_optional_bool(value: Bool?) -> TComptimeValue Never! {
-    if value == {.Val(flag) -> TComptimeValue.Present{value: TComptimeValue.Bool{value: flag}} else -> TComptimeValue.Failed{report: .Clean(Type.Bool)}}
+    if value == {.Val(flag) -> TComptimeValue.Present{value: TComptimeValue.Bool{value: flag}} else -> TComptimeValue.Failed{report: .Clean{ty: Type.Bool}}}
 }
 
 fn jet_eval_build_graph_action(value: BuildGraphAction) -> TComptimeValue Never! {

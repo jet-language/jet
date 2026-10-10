@@ -15,10 +15,11 @@ struct JetEvalStringHomeProjection { frame: Int, projection: MIRProjection }
 // Resolve provenance before call-argument materialization. The host receives
 // only a checked machine root and selectors, never a copied String payload.
 // Numeric selectors address the existing slots that these read views validate.
-fn jet_eval_string_home_data(value: TComptimeValue, path: [JetEvalStringHomeProjection], position: Int, frame: Int, request: ^JetEvalStringHomeRequest, machine: &JetEvalMachine, span: Span) -> JetEvalStringHome? {
+fn jet_eval_string_home_data(value: TComptimeValue, path: [JetEvalStringHomeProjection], position: Int, frame: Int, owned_request: ^JetEvalStringHomeRequest, machine: &JetEvalMachine, span: Span) -> JetEvalStringHome? {
+    request := ^owned_request
     if position == path.len() {
         if value == .String(_) {
-            adapter :: machine.config.host_adapter ?? {
+            adapter :: (if machine.config.host_adapter == {.Val(host) -> Val(host.clone_adapter()) else -> None}) ?? {
                 jet_eval_compiler_fail(&machine, span, "core.mem.__string_data/__string_byte_len: physical loan requires the evaluator host adapter")
                 return None
             }
@@ -52,7 +53,8 @@ fn jet_eval_string_home_data(value: TComptimeValue, path: [JetEvalStringHomeProj
             }
         }
         .Index(_, index, _, _, _, _, _) -> {
-            wanted :: jet_eval_data(machine.frames[path[position].frame].values[index.value], &machine, span) ?? return None
+            index_value :: machine.frames[path[position].frame].values[index.value].copy()
+            wanted :: jet_eval_data(index_value, &machine, span) ?? return None
             if value == .List(items) {
                 at :: jet_eval_route_int_value(wanted, &machine, span) ?? return None
                 if at >= 0 && at < items.len() {
@@ -71,7 +73,7 @@ fn jet_eval_string_home_data(value: TComptimeValue, path: [JetEvalStringHomeProj
             }
         }
         .Payload(kind, _) -> {
-            if kind == .Option || (kind == .Result(ok) && ok) {
+            if kind == .Option || kind == .Result(true) {
                 if value == .Present(inner) {
                     &request.selectors.push(JetEvalStringHomeSelector.Present)
                     return jet_eval_string_home_data(inner, path, position + 1, frame, ^request, &machine, span)
@@ -101,7 +103,8 @@ fn jet_eval_string_home_data(value: TComptimeValue, path: [JetEvalStringHomeProj
     None
 }
 
-fn jet_eval_string_home_runtime(value: JetEvalRuntimeValue, path: [JetEvalStringHomeProjection], position: Int, frame: Int, request: ^JetEvalStringHomeRequest, machine: &JetEvalMachine, span: Span) -> JetEvalStringHome? {
+fn jet_eval_string_home_runtime(value: JetEvalRuntimeValue, path: [JetEvalStringHomeProjection], position: Int, frame: Int, owned_request: ^JetEvalStringHomeRequest, machine: &JetEvalMachine, span: Span) -> JetEvalStringHome? {
+    request := ^owned_request
     if value == {
         .Data(data) -> return jet_eval_string_home_data(data, path, position, frame, ^request, &machine, span)
         .Address(target_frame, place, access) -> {
@@ -140,7 +143,8 @@ fn jet_eval_string_home_runtime(value: JetEvalRuntimeValue, path: [JetEvalString
                 }
             }
             if position < path.len() && path[position].projection == .Index(_, index, _, _, _, _, _) {
-                wanted :: jet_eval_data(machine.frames[path[position].frame].values[index.value], &machine, span) ?? return None
+                index_value :: machine.frames[path[position].frame].values[index.value].copy()
+                wanted :: jet_eval_data(index_value, &machine, span) ?? return None
                 if aggregate == .List(items) {
                     at :: jet_eval_route_int_value(wanted, &machine, span) ?? return None
                     if at >= 0 && at < items.len() {
@@ -180,10 +184,16 @@ fn jet_eval_string_home_place(frame: Int, id: MIRPlaceID, tail: [JetEvalStringHo
     loop projection in place.projections -> &path.push(JetEvalStringHomeProjection{frame: frame, projection: projection})
     loop index in position..<tail.len() -> &path.push(tail[index])
     if place.base == {
-        .Local(local) -> return jet_eval_string_home_runtime(machine.frames[frame].locals[local.value], path, 0, frame, ^JetEvalStringHomeRequest{root: JetEvalStringHomeRoot.Local{frame: frame, local: local.value}, selectors: [JetEvalStringHomeSelector]{}}, &machine, span)
+        .Local(local) -> {
+            value :: machine.frames[frame].locals[local.value].copy()
+            return jet_eval_string_home_runtime(value, path, 0, frame, ^JetEvalStringHomeRequest{root: JetEvalStringHomeRoot.Local{frame: frame, local: local.value}, selectors: [JetEvalStringHomeSelector]{}}, &machine, span)
+        }
         .Parameter(value) | .Capture(value) | .Temporary(value) -> return jet_eval_string_home_value(frame, value, path, &machine, span)
         .Static(name) -> {
-            if machine.config.globals.get(name) != None -> return jet_eval_string_home_data(machine.config.globals[name], path, 0, frame, ^JetEvalStringHomeRequest{root: JetEvalStringHomeRoot.Global{name: name}, selectors: [JetEvalStringHomeSelector]{}}, &machine, span)
+            if machine.config.globals.get(name) != None {
+                value :: machine.config.globals[name].copy()
+                return jet_eval_string_home_data(value, path, 0, frame, ^JetEvalStringHomeRequest{root: JetEvalStringHomeRoot.Global{name: name}, selectors: [JetEvalStringHomeSelector]{}}, &machine, span)
+            }
             jet_eval_compiler_fail(&machine, span, "core.mem.__string_data/__string_byte_len: borrowed C byte carrier needs a retained static home")
             return None
         }
@@ -229,22 +239,30 @@ fn jet_eval_string_home_value(frame: Int, id: MIRValueID, tail: [JetEvalStringHo
                             else -> {}
                         }
                     }
-                    return jet_eval_string_home_runtime(machine.frames[frame].params[index], tail, 0, frame, ^JetEvalStringHomeRequest{root: JetEvalStringHomeRoot.Parameter{frame: frame, index: index}, selectors: [JetEvalStringHomeSelector]{}}, &machine, span)
+                    value :: machine.frames[frame].params[index].copy()
+                    return jet_eval_string_home_runtime(value, tail, 0, frame, ^JetEvalStringHomeRequest{root: JetEvalStringHomeRoot.Parameter{frame: frame, index: index}, selectors: [JetEvalStringHomeSelector]{}}, &machine, span)
                 }
-                .Capture(index) -> return jet_eval_string_home_runtime(machine.frames[frame].captures[index], tail, 0, frame, ^JetEvalStringHomeRequest{root: JetEvalStringHomeRoot.Capture{frame: frame, index: index}, selectors: [JetEvalStringHomeSelector]{}}, &machine, span)
+                .Capture(index) -> {
+                    value :: machine.frames[frame].captures[index].copy()
+                    return jet_eval_string_home_runtime(value, tail, 0, frame, ^JetEvalStringHomeRequest{root: JetEvalStringHomeRoot.Capture{frame: frame, index: index}, selectors: [JetEvalStringHomeSelector]{}}, &machine, span)
+                }
                 .Global(name) -> {
-                    if machine.config.globals.get(name) != None -> return jet_eval_string_home_data(machine.config.globals[name], tail, 0, frame, ^JetEvalStringHomeRequest{root: JetEvalStringHomeRoot.Global{name: name}, selectors: [JetEvalStringHomeSelector]{}}, &machine, span)
+                    if machine.config.globals.get(name) != None {
+                        value :: machine.config.globals[name].copy()
+                        return jet_eval_string_home_data(value, tail, 0, frame, ^JetEvalStringHomeRequest{root: JetEvalStringHomeRoot.Global{name: name}, selectors: [JetEvalStringHomeSelector]{}}, &machine, span)
+                    }
                 }
                 else -> {}
             }
         }
     }
-    jet_eval_string_home_runtime(machine.frames[frame].values[id.value], tail, 0, frame, ^JetEvalStringHomeRequest{root: JetEvalStringHomeRoot.Value{frame: frame, value: id.value}, selectors: [JetEvalStringHomeSelector]{}}, &machine, span)
+    value :: machine.frames[frame].values[id.value].copy()
+    jet_eval_string_home_runtime(value, tail, 0, frame, ^JetEvalStringHomeRequest{root: JetEvalStringHomeRoot.Value{frame: frame, value: id.value}, selectors: [JetEvalStringHomeSelector]{}}, &machine, span)
 }
 
 fn jet_eval_string_home_call(machine: &JetEvalMachine, frame: Int, call: MIRCoreCallID, route: MIRPreludeCallID, args: [MIRCallArg], span: Span) -> JetEvalRuntimeValue? {
     row :: jet_eval_route_core_row(&machine, call, span) ?? return None
-    route_row :: jet_eval_prelude_row(&machine, route) ?? return None
+    route_row :: jet_eval_route_prelude_row(&machine, route, span) ?? return None
     if row.module_name != "core.mem" || (row.member != "__string_data" && row.member != "__string_byte_len") || args.len() != 1 || route_row.member != row.member {
         jet_eval_compiler_fail(&machine, span, "MIR String loan disagrees with its checked Core row")
         return None
@@ -256,7 +274,7 @@ fn jet_eval_string_home_call(machine: &JetEvalMachine, frame: Int, call: MIRCore
 
 fn jet_eval_foreign_bytes_core(machine: &JetEvalMachine, member: String, args: [JetEvalRuntimeValue], span: Span) -> JetEvalRuntimeValue? {
     data :: jet_eval_route_args(args, &machine, span) ?? return None
-    adapter :: machine.config.host_adapter ?? {
+    adapter :: (if machine.config.host_adapter == {.Val(host) -> Val(host.clone_adapter()) else -> None}) ?? {
         jet_eval_compiler_fail(&machine, span, "private C byte span requires the evaluator host adapter")
         return None
     }
