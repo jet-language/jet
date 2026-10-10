@@ -1700,7 +1700,11 @@ fn sema_stmt_for_in_decl_loop_local(name: String, name_span: Span, ty: Type?, en
 // Rust lends each ViewMut item for one iteration; the descriptor may not
 // escape, and its source still participates in the ordinary view ledger.
 fn sema_stmt_for_in_lend_view_item(local: TLocal?, ty: Type, collection: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext) {
-    if !(ty == .Apply("ViewMut", args) && args.len() == 1) -> return
+    if ty == .Apply("ViewMut", item_args) {
+        if item_args.len() != 1 -> return
+    } else {
+        return
+    }
     variable :: local ?? return
     symbol :: variable.symbol_id ?? return
     facts :: sema_stmt_local_view_facts_for_expr(collection, scopes, &state, context)

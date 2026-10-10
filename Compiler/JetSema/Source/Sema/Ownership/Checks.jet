@@ -4126,8 +4126,8 @@ fn sema_ownership_carries_lending_view(expr: Expr, name: String) -> Bool {
             }
         }
         .If(_, _, _, _, _, _) -> return sema_expression_lambda_bound_expr_use(expr, name)
-        .OrFallback(value, fallback, _, _) -> {
-            if sema_expression_lambda_bound_expr_use(value, name) -> return true
+        .OrFallback(source_value, fallback, _, _) -> {
+            if sema_expression_lambda_bound_expr_use(source_value, name) -> return true
             if fallback == {
                 .Value(value) -> return sema_expression_lambda_bound_expr_use(value, name)
                 .Return(value, _) -> return sema_expression_lambda_bound_optional_expr(value, name)

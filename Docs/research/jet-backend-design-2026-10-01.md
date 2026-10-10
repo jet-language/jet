@@ -36,6 +36,10 @@ precedence, backing-store mutation, endpoints, and empty selection.
 The `run-lower-fixtures.mjs --disjoint-lowering` mode lowers and lints those
 same MIR programs without a pack; it does not stand in for executing their
 native outputs with the admitted runtime pack.
+Native Sema keeps fallback payload bindings distinct from their outer source
+expression and binds a loop item's `ViewMut` arguments only on the successful
+positive type match. This preserves the lending-view escape and arity checks
+without relying on names outside their pattern scope.
 
 The existing TLS transport refusal runs before route lookup on both the
 argument-validation and direct-call lowering paths. Pure TLS configuration
