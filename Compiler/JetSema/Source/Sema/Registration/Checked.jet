@@ -1060,7 +1060,7 @@ fn sema_checked_foreign_signature(graph: SemaRegistrationGraph, module_identity:
     valid
 }
 
-fn sema_checked_foreign_abi(registered: SemaRegistrationForeignFunction, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_checked_foreign_abi(graph: SemaRegistrationGraph, registered: SemaRegistrationForeignFunction, diagnostics: &[Diagnostic]) -> Bool {
     if registered.owner == SemaRegistrationForeignOwner.ExternRust {
         if registered.declaration.abi == .Val(abi) {
             &diagnostics.push(sema_error("E3212", abi.span, "`#ABI` only applies to C declarations", "Rust FFI uses its declared Rust ABI and cannot select a C calling convention", "remove `#ABI` from the `extern rust` function"))
@@ -1069,13 +1069,39 @@ fn sema_checked_foreign_abi(registered: SemaRegistrationForeignFunction, diagnos
         return true
     }
     abi :: registered.declaration.abi ?? return true
-    if abi.name == {
+    known :: if abi.name == {
         "system" | "cdecl" | "stdcall" | "fastcall" | "win64" | "sysv64" -> true
-        else -> {
-            &diagnostics.push(sema_error("E3212", abi.span, "`{abi.name}` is not a known C calling convention", "`#ABI` accepts only the ratified native ABI names", "use `system`, `cdecl`, `stdcall`, `fastcall`, `win64`, or `sysv64`"))
-            false
-        }
+        else -> false
     }
+    if !known {
+        &diagnostics.push(sema_error("E3212", abi.span, "`{abi.name}` is not a known C calling convention", "`#ABI` accepts only the ratified native ABI names", "use `system`, `cdecl`, `stdcall`, `fastcall`, `win64`, or `sysv64`"))
+        return false
+    }
+    // D-CABI-PLATFORM1=A: admissibility follows the selected target, not the compiler host.
+    windows :: graph.target_machine.triple.contains("windows")
+    x86 :: graph.target_machine.triple.starts_with("i686-")
+    x64 :: graph.target_machine.triple.starts_with("x86_64-")
+    available :: if abi.name == {
+        "system" -> true
+        "cdecl" | "stdcall" | "fastcall" -> windows && x86
+        "win64" -> windows && x64
+        "sysv64" -> !windows && x64
+        else -> false
+    }
+    valid := true
+    if !available {
+        &diagnostics.push(sema_error("E3213", abi.span, "`{abi.name}` is not available on this target", "native calling conventions are restricted by operating system and architecture", "use the default C ABI or `system` for portable declarations"))
+        valid = false
+    }
+    variadic := false
+    loop param in registered.declaration.params {
+        if param.variadic -> variadic = true
+    }
+    if variadic && !(abi.name == "cdecl" && windows && x86) {
+        &diagnostics.push(sema_error("E3214", abi.span, "variadic C function `{registered.declaration.name}` cannot use `{abi.name}`", "variadics allow only the default C ABI, or cdecl on Windows x86", "remove `#ABI`, or use `#ABI(cdecl)` on Windows x86"))
+        valid = false
+    }
+    valid
 }
 
 fn sema_checked_foreign_access_keyword(convention: AccessConvention) -> String Never! {
@@ -1411,7 +1437,7 @@ fn sema_checked_foreign_row(graph: SemaRegistrationGraph, module_row: SemaRegist
         }
     }
     if rust_owner && sema_checked_foreign_first_library(module_row, registered) && !sema_checked_foreign_crate_version(registered.foreign_library, registered.foreign_library_span, &diagnostics) -> valid = false
-    if !sema_checked_foreign_abi(registered, &diagnostics) -> valid = false
+    if !sema_checked_foreign_abi(graph, registered, &diagnostics) -> valid = false
     if !sema_checked_foreign_signature(graph, module_row.module_identity, registered, c_abi, handles, &diagnostics) -> valid = false
     if !sema_checked_foreign_close(graph, module_row, registered, scoped_providers, &diagnostics) -> valid = false
     if !sema_checked_foreign_undo(graph, module_row, registered, &diagnostics) -> valid = false
