@@ -204,7 +204,7 @@ fn sentry_test_report_exit() {
     scheduler_control_enter(root, save)
     body :: scheduler_body_enter()
     #Unsafe("the checked Source callback uses the exact two-word native ABI") {
-        _ := os_call_i64_2(callback, I64{0}, I64{0})
+        _ := os_call2_i64(callback, I64{0}, I64{0})
     }
     sentry_test_require(jet_rt_session_status() == I64{5})
     sentry_test_require(sync_load(sentry_root + I64{88}) == I64{0})
