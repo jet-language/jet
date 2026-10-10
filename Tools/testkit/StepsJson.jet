@@ -71,6 +71,11 @@ fn kit_steps_json_path(path: String) -> [String]? {
     Val(parts)
 }
 
+fn kit_steps_json_integer(text: String) -> Int? {
+    value :: Int.parse(text) ?? { return None }
+    Val(value)
+}
+
 // Like the standard JSON patch test operation, object key order is immaterial.
 // Do not serialize/canonicalize: canonical numbers have a narrower domain than
 // exact JSON integers, and comparing trees avoids an extra rendered copy.
@@ -81,7 +86,7 @@ fn kit_steps_json_equal(left: Dyn, right: Dyn) -> Bool Never! {
                 .Object(b) -> {
                     if a.len() != b.len() -> return false
                     loop pair in a {
-                        other :: b.get(pair.key) ?? return false
+                        other :: right.get(pair.key) ?? return false
                         if !kit_steps_json_equal(pair.value, other) -> return false
                     }
                     return true
@@ -121,8 +126,8 @@ fn kit_steps_json_equal(left: Dyn, right: Dyn) -> Bool Never! {
             if right == {
                 .Number(b) -> {
                     if a == b -> return true
-                    left_int :: Int.parse(a)
-                    right_int :: Int.parse(b)
+                    left_int :: kit_steps_json_integer(a)
+                    right_int :: kit_steps_json_integer(b)
                     if left_int == .Val(integer) {
                         if right_int == .Val(other) -> return integer == other
                     }
@@ -132,7 +137,7 @@ fn kit_steps_json_equal(left: Dyn, right: Dyn) -> Bool Never! {
                     return (Float.parse(a) ?? return false) == (Float.parse(b) ?? return false)
                 }
                 .Int(b) -> {
-                    if Int.parse(a) == .Val(integer) -> return integer == b
+                    if kit_steps_json_integer(a) == .Val(integer) -> return integer == b
                     if !a.contains(".") && !a.contains("e") && !a.contains("E") -> return false
                     return (Float.parse(a) ?? return false) == Float{b}
                 }
@@ -168,7 +173,7 @@ fn kit_steps_json_type(value: Dyn) -> String Never! {
         .Bool(_) -> "bool"
         .Int(_) -> "int"
         .Float(_) -> "number"
-        .Number(text) -> if Int.parse(text) != None -> "int" else -> "number"
+        .Number(text) -> if kit_steps_json_integer(text) != None -> "int" else -> "number"
         .Text(_) -> "string"
         .Array(_) -> "array"
         .Object(_) -> "object"
@@ -191,7 +196,7 @@ fn kit_steps_json_has(value: Dyn, expected: Dyn) -> String? {
     if expected == {
         .Text(key) -> {
             if value == {
-                .Object(fields) -> { if fields.get(key) == None -> return Val("JSON object key missing: {key}") }
+                .Object(_) -> { if value.get(key) == None -> return Val("JSON object key missing: {key}") }
                 else -> return Val("JSON key presence needs an object")
             }
             return None
@@ -205,7 +210,7 @@ fn kit_steps_json_has(value: Dyn, expected: Dyn) -> String? {
                             .Object(fields) -> {
                                 matches := true
                                 loop pair in wanted {
-                                    actual :: fields.get(pair.key)
+                                    actual :: item.get(pair.key)
                                     if actual == {
                                         .Val(child) -> {
                                             if !kit_steps_json_equal(child, pair.value) -> matches = false
@@ -219,7 +224,8 @@ fn kit_steps_json_has(value: Dyn, expected: Dyn) -> String? {
                             else -> {}
                         }
                     }
-                    return Val("JSON array has no object matching {json.to_string(expected)}")
+                    shown :: json.to_string(expected) ?? { return Val("JSON expected value could not be encoded: {err}") }
+                    return Val("JSON array has no object matching {shown}")
                 }
                 else -> return Val("JSON has needs an array")
             }
@@ -236,7 +242,7 @@ fn kit_steps_json_leaf(value: Dyn, op: String, expected: Dyn, expected_type: Str
             .Text(key) -> {
                 if value == {
                     .Object(fields) -> {
-                        if fields.get(key) == {
+                        if value.get(key) == {
                             .Val(_) -> return Val("JSON object contains forbidden key: {key}")
                             .None -> {}
                         }
@@ -289,7 +295,9 @@ fn kit_steps_json_leaf(value: Dyn, op: String, expected: Dyn, expected_type: Str
     }
     if op == "=" {
         if kit_steps_json_equal(value, expected) -> return None
-        return Val("JSON value differs: expected {json.to_string(expected)}, got {json.to_string(value)}")
+        wanted :: json.to_string(expected) ?? { return Val("JSON expected value could not be encoded: {err}") }
+        actual :: json.to_string(value) ?? { return Val("JSON actual value could not be encoded: {err}") }
+        return Val("JSON value differs: expected {wanted}, got {actual}")
     }
     if op == ":" {
         actual :: kit_steps_json_type(value)

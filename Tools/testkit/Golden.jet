@@ -46,6 +46,24 @@ fn kit_golden_discover(root: String) -> [KitEntry] {
     all
 }
 
+// Same D-FAIL-EXIT1 oracle as the native comparator; unknown reports fail.
+fn kit_golden_failure_exit(expected: String, report: String) -> Int? {
+    if report.starts_with("Stop [") || report.starts_with("Error [E3003]:") -> return Val(70)
+    if report.starts_with("Runtime fault [R0801]:") || report.starts_with("Runtime fault [R0802]:") {
+        loop raw in report.split("\n") {
+            line :: raw.trim().copy()
+            if line.starts_with("exit:") && kit_steps_byte_slice(line, 5, line.count_bytes()).trim() != "70" -> return None
+        }
+        return Val(70)
+    }
+    prefix :: "Examples/features/expected/"
+    start :: expected.index(prefix) ?? return None
+    stem :: kit_steps_byte_slice(expected, start + prefix.count_bytes(), expected.count_bytes())
+    if report == "" -> return if stem == "io/log_fatal" -> Val(1) else -> None
+    if kit_expect_named(["errors/propagation_journey", "errors/propagation_journey_direct", "errors/propagation_journey_one_hop", "errors/propagation_journey_core", "errors/error_context", "errors/default_error_conversion", "errors/default_err_edge", "errors/fatal_exit", "serde/decode_error_exit", "crypto/crypto_error_run"], stem) -> return Val(1)
+    None
+}
+
 fn kit_golden_stream_verdict(id: String, expected: String, result: KitRun, bless: KitBless, argv0: String, source_name: String) -> KitVerdict {
     failure :: kit_exec_process_failure(result)
     if failure == {
@@ -53,8 +71,12 @@ fn kit_golden_stream_verdict(id: String, expected: String, result: KitRun, bless
         .None -> {}
     }
     error :: kit_exec_optional("{expected}.err.out")
-    if error != None {
-        if result.code != 1 && result.code != 70 -> return kit_expect_verdict("FAIL", "exit {result.code}; expected 1 or 70")
+    if error == .Val(report) {
+        code :: kit_golden_failure_exit(expected, report) ?? return kit_expect_verdict("FAIL", "failure report has no exact exit oracle")
+        if result.code != code -> return kit_expect_verdict("FAIL", "exit {result.code}; expected {code}")
+        stdout :: kit_exec_optional("{expected}.out") ?? ""
+        output :: kit_expect_exact(id, "{expected}.out", Val(stdout), result.stdout, bless, false)
+        if output.status != "PASS" -> return output
         return kit_expect_exact(id, "{expected}.err.out", error, result.stderr, bless, false)
     }
     if result.code != 0 -> return kit_expect_verdict("FAIL", "exit {result.code}; expected 0")

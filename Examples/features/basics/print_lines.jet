@@ -1,11 +1,12 @@
-// D-VERDICT-1321-1: `print` is variadic — each argument writes on its own
-// line. One argument with interpolation keeps everything on a single line,
-// so both shapes stay a one-liner.
+// D-VERDICT-1321-1: builtin `print` is variadic; each argument writes its
+// own line. Interpolation keeps one argument on one line. The Core term
+// function takes one line at a time.
 use core.term as io
 
 fn run() {
     count :: 3
     print("first", "second", count)
     print("one line: {count} items")
-    io.print("io first", "io second")
+    io.print("io first")
+    io.print("io second")
 }

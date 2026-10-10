@@ -35,9 +35,18 @@ fn kit_test_golden_env(root: String) -> KitEnv {
     assert(mismatch.diff.contains("--- expected/"))
     assert_eq(kit_golden_stream_verdict("case", error, kit_test_golden_run("", "Stop [E3003]: expected stop\n", 70), kit_test_golden_bless(), "", "").status, "PASS")
     assert_eq(kit_golden_stream_verdict("case", error, kit_test_golden_run("", "Stop [E3003]: expected stop\n", 0), kit_test_golden_bless(), "", "").status, "FAIL")
+    assert_eq(kit_golden_stream_verdict("case", error, kit_test_golden_run("", "Stop [E3003]: expected stop\n", 1), kit_test_golden_bless(), "", "").status, "FAIL")
+    assert_eq(kit_golden_stream_verdict("case", error, kit_test_golden_run("unexpected\n", "Stop [E3003]: expected stop\n", 70), kit_test_golden_bless(), "", "").status, "FAIL")
     assert_eq(kit_golden_stream_verdict("case", stderr, kit_test_golden_run("hello\n", "notice\n", 0), kit_test_golden_bless(), "", "").status, "PASS")
     assert_eq(kit_golden_stream_verdict("case", stderr, kit_test_golden_run("hello\n", "wrong\n", 0), kit_test_golden_bless(), "", "").status, "FAIL")
     assert_eq(kit_golden_stream_verdict("case", kit_test_golden_fixture("missing"), kit_test_golden_run("", "", 0), kit_test_golden_bless(), "", "").status, "FAIL")
+}
+
+#Test("golden failure reports require the exact registered exit oracle") {
+    assert_eq(kit_golden_failure_exit("unknown", "Stop [E3001]: panic\n"), Val(70))
+    assert_eq(kit_golden_failure_exit("unknown", "Runtime fault [R0801]: bad pointer\nexit: 1\n"), None)
+    assert_eq(kit_golden_failure_exit("Examples/features/expected/errors/fatal_exit", "entry report\n"), Val(1))
+    assert_eq(kit_golden_failure_exit("Examples/features/expected/unknown", "unregistered report\n"), None)
 }
 
 #Test("golden driver handles missing stream, compile-only, stdin, stderr and tier split") {
