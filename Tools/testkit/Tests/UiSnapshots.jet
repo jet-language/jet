@@ -61,6 +61,8 @@ fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
 #Test("UI discovery walks groups but stops at project entries and excludes fixed companions") {
     root :: kit_ui_test_scratch("discover")
     loop path in ["tests/ui/a.jet", "tests/ui/a.fixed.jet", "tests/ui/group/nested.jet", "tests/ui/group/project/run.jet", "tests/ui/group/project/helper.jet", "tests/ui/main/main.jet", "tests/ui/workspace/workspace.jet", "tests/ui/workspace/member/run.jet", "tests/ui_lint/group/lint.jet"] -> kit_exec_write(files.join(root, path), "fn run() {{}}\n")
+    kit_exec_write(files.join(root, "tests/ui/group/support.jet"), "// @fixture_module\nfn helper() {{}}\n")
+    kit_exec_write(files.join(root, "tests/ui/route.jet"), "// @fixture_module\nfn page() {{}}\n")
     entries :: kit_ui_discover(kit_ui_test_context(root, "scratch"))
     assert_eq(entries.len(), 6)
     assert_eq(entries[0].path, "tests/ui/a.jet")
@@ -69,6 +71,8 @@ fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
     assert(entries.any(entry -> entry.expected == "tests/ui/workspace.stderr"))
     assert(entries.any(entry -> entry.expected == "tests/ui_lint/group/lint.warn"))
     assert(!entries.any(entry -> entry.path.ends_with("helper.jet") || entry.path.ends_with(".fixed.jet") || entry.path.contains("member")))
+    assert(!entries.any(entry -> entry.path.ends_with("support.jet") || entry.path.ends_with("route.jet")))
+    assert(entries.any(entry -> entry.path == "tests/ui/group/nested.jet"))
     coverage := kit_ui_test_context(root, "coverage")
     coverage.options.coverage = true
     assert_eq(kit_ui_discover(coverage)[0].mode, "coverage")
@@ -86,6 +90,7 @@ fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
     loop path in ["tests/ui/bad.stderr", "tests/ui/project/stderr"] -> kit_exec_write(files.join(root, path), "Error [E0109]: mismatch\n")
     loop path in ["tests/ui/clean.stderr", "tests/ui/published.stderr", "tests/ui/extension.stderr"] -> kit_exec_write(files.join(root, path), "(no errors)\n")
     kit_exec_write(files.join(root, "tests/ui_lint/lint.warn"), "Warning [L0302]: lint\n")
+    kit_ui_stage(root, files.join(root, "ui-source"))
     entries :: kit_ui_discover(kit_ui_test_context(root, "discovery"))
     loop (index, entry) in entries {
         outcomes :: kit_ui_run(entry, kit_ui_test_context(root, "case-{index}"))
@@ -97,6 +102,26 @@ fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
         }
     }
     files.remove_all(root) ?? panic("remove UI driver scratch: {err}")
+}
+
+#Test("UI shared staging preserves imported modules and route trees without discovering them") {
+    root :: kit_ui_test_scratch("imports")
+    main :: "use \"./modules/helper\" as helper\nfn run() {{ print(helper.value()) }}\n"
+    helper :: "fn value() -> Int {{ 7 }}\n// @fixture_module\n"
+    kit_exec_write(files.join(root, "tests/ui/clean_import.jet"), main)
+    kit_exec_write(files.join(root, "tests/ui/clean_import.stderr"), "(no errors)\n")
+    kit_exec_write(files.join(root, "tests/ui/modules/helper.jet"), helper)
+    kit_exec_write(files.join(root, "tests/ui/routes/Index.jet"), "fn page() {{}}\n// @fixture_module\n")
+    context :: kit_ui_test_context(root, "case")
+    source :: files.join(root, "ui-source")
+    kit_ui_stage(root, source)
+    assert_eq(files.read(files.join(source, "tests/ui/clean_import.jet")) ?? panic("staged entry"), main)
+    assert_eq(files.read(files.join(source, "tests/ui/modules/helper.jet")) ?? panic("staged module"), helper)
+    assert(files.exists(files.join(source, "tests/ui/routes/Index.jet")))
+    entries :: kit_ui_discover(context)
+    assert_eq(entries.len(), 1)
+    assert_eq(kit_ui_run(entries[0], context)[0].verdict.status, "PASS")
+    files.remove_all(root) ?? panic("remove imported UI scratch: {err}")
 }
 
 #Test("UI lint acceptance and diagnostic shrink guard cannot be blessed away") {

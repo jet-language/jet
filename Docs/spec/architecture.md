@@ -1806,6 +1806,19 @@ The missing-Cargo fixture always runs with a case-local PATH containing no
 Cargo or rustup shim and a cleared case-private foreign cache. Installed tools
 or a warmed helper cannot turn its E0703 contract into a skipped observation.
 
+Proven UI support modules and route fixtures use `// @fixture_module`.
+Only testkit's collection reads this marker; it is neither language syntax nor
+a runtime directive. Collection excludes these files while preserving their
+names and imports for the real parent fixtures. An absent expected-output file
+never causes exclusion: unmarked UI fixtures remain discovered and require an
+owner-reviewed snapshot.
+The runner stages the complete `tests/ui` and `tests/ui_lint` trees once per run
+in external scratch, then checks each case in that shared source tree. Sibling
+imports, convention route roots and authored fixture state therefore resolve
+as in the original Rust runner, without per-case same-stem copy gaps. When outer
+tracing is enabled, run-wide scratch also remains until the final trace audit;
+ordinary runs remove it after reporting.
+
 Pending user-Rust interoperability acceptance rows use `PRODUCT INTEROP RED:`
 in the existing case-disposition table. They remain in the active testkit corpus
 and block registry closure; they are not Rust implementation retirements.

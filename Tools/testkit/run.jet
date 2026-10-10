@@ -798,6 +798,7 @@ fn kit_execute_suites(options: KitOptions, root: String) -> Int {
             return 2
         }
     }
+    if entries.any(item -> item.suite == "ui" && item.entry.mode != "coverage") -> kit_ui_stage(root, files.join(run_scratch, "ui-source"))
     version_run :: kit_exec_invoke(env, [jet, "--version"], root, run_scratch, "")
     if version_run.code == 0 && kit_exec_process_failure(version_run) == None {
         env.version = kit_steps_version(version_run.stdout) ?? ""
@@ -830,9 +831,11 @@ fn kit_execute_suites(options: KitOptions, root: String) -> Int {
     kit_golden_mark_tier_splits(&results)
     loop result in results -> kit_report_row(result)
     if options.bless.ids.len() > 0 || options.bless.all -> print("bless: ids={options.bless.ids} all={options.bless.all} reason={options.bless.reason}")
-    files.remove_all(run_scratch) ?? {
-        &results.push(KitCaseResult{suite: "kit", case: "cleanup", tier: "-", status: "ERROR", detail: "{err}", exit: -1})
-        kit_report_row(results[results.len() - 1])
+    if env.trace_node == "" {
+        files.remove_all(run_scratch) ?? {
+            &results.push(KitCaseResult{suite: "kit", case: "cleanup", tier: "-", status: "ERROR", detail: "{err}", exit: -1})
+            kit_report_row(results[results.len() - 1])
+        }
     }
     kit_report_finish(jet, results, options.results, ran_suites)
 }

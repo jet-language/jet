@@ -153,17 +153,6 @@ fn kit_exec_copy_file(source: String, destination: String) {
     files.chmod(destination, info.mode % 512) ?? panic("copy mode {source}: {err}")
 }
 
-fn kit_exec_copy_siblings(source: String, destination: String) {
-    parent :: files.dirname(source)
-    name :: files.basename(source)
-    stem :: if name.ends_with(".jet") -> name.slice(0, name.len() - 4) else -> name
-    files.create_dir_all(destination) ?? panic("mkdir {destination}: {err}")
-    loop entry in (files.list_dir(parent) ?? panic("list {parent}: {err}")) {
-        if !entry.is_dir && (entry.name == name || entry.name.starts_with("{stem}.")) {
-            kit_exec_copy_file(entry.path, files.join(destination, entry.name))
-        }
-    }
-}
 
 fn kit_exec_optional(path: String) -> String? {
     if !files.exists(path) -> return None

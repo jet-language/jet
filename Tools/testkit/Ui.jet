@@ -117,6 +117,8 @@ fn kit_ui_collect(root: String, directory: String, lint: Bool) -> [KitEntry] {
                 loop item in kit_ui_collect(root, shown, lint) -> &entries.push(item)
             }
         } else if child.name.ends_with(".jet") && !child.name.ends_with(".fixed.jet") && child.name != "package.jet" && child.name != "workspace.jet" {
+            source :: files.read(child.path) ?? panic("read UI fixture {shown}: {err}")
+            if kit_ui_arg(source, "fixture_module") != None -> next
             stem :: kit_steps_byte_slice(shown, 0, shown.count_bytes() - 4)
             &entries.push(KitEntry{path: shown, expected: "{stem}{if lint -> ".warn" else -> ".stderr"}", project: directory, suite: "ui", mode: if lint -> "lint" else -> "plain"})
         }
@@ -206,6 +208,14 @@ fn kit_ui_fixed(entry: KitEntry, ctx: KitCtx, source: String, overlay: [KitEnvVa
     outcomes
 }
 
+// Preserve the real UI module/route tree once, just as the original runner did.
+fn kit_ui_stage(root: String, source: String) {
+    loop directory in ["tests/ui", "tests/ui_lint"] {
+        original :: files.join(root, directory)
+        if files.exists(original) -> kit_exec_copy_tree(original, files.join(source, directory), true)
+    }
+}
+
 fn kit_ui_run(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
     if entry.mode == "coverage" -> return [KitOutcome{verdict: kit_ui_coverage(ctx.root), run: KitRun{stdout: "", stderr: "", code: 0, signal: None, timed_out: false, error: ""}, tier: "-"}]
     original :: files.join(ctx.root, entry.path)
@@ -213,10 +223,8 @@ fn kit_ui_run(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
     lint :: entry.mode.starts_with("lint")
     call :: kit_ui_invocation(text, entry.path, lint)
     if call.refused != "" -> return [KitOutcome{verdict: kit_expect_verdict("REFUSED", call.refused), run: kit_exec_failed(call.refused), tier: "-"}]
-    source :: files.join(ctx.scratch, "source")
+    source :: files.join(ctx.env.scratch, "ui-source")
     work :: files.join(source, entry.project)
-    if entry.mode.ends_with("project") -> kit_exec_copy_tree(files.join(ctx.root, entry.project), work, true)
-    else -> kit_exec_copy_siblings(original, work)
     overlay := [KitEnvVar]{KitEnvVar{name: "JET_SCHEMA_CACHE_DIR", value: None}}
     if entry.path == "tests/ui/ffi_no_cargo.jet" {
         // Invoke absolute Jet/trace executables with no Cargo or rustup shims.
