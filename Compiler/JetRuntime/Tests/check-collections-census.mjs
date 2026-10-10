@@ -3,6 +3,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runtimeExportSignatures } from '../../../Tools/agent/runtime-route-abi.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 // Rust provenance checks are retired; independent Jet ownership checks stay live.
 console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
@@ -31,7 +32,7 @@ const lowerPaths = readdirSync(join(root, lower)).filter(file => file.endsWith('
 for (const path of lowerPaths) collect(path);
 const runtimePaths = read('Compiler/JetRuntime/sources.list').split('\n').map(x => x.trim()).filter(x => x && !x.startsWith('#'));
 for (const path of runtimePaths) collect(path);
-const exported = new Set(read('Compiler/JetRuntime/exports.list').split('\n').map(line => line.split(' ')[0]));
+const exported = new Set(runtimeExportSignatures(root).keys());
 const literalCalls = lowerPaths.flatMap(path => [...read(path).matchAll(/(?:lower_call_runtime|lower_noreturn_call)\(\s*&m,\s*&f,\s*"([^"]+)"/g)].map(match => [path, match[1]]));
 const reachable = new Set([...functions.keys()].filter(site => site.startsWith(lower + 'Lower.jet:')));
 let changed = true;

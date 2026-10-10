@@ -458,7 +458,7 @@ pub mod shadow {
   const markerKey = "<corelib>/Core/fixture::Core/fixture/fixture.jet::Marker";
   const scalarSource = generatedRecordPath(scalarKey), markerSource = generatedRecordPath(markerKey);
   const sampleSource = generatedRecordPath(sampleKey), pairSource = generatedRecordPath(pairKey);
-  put("Core/fixture/fixture.jet", "pub struct Sample<T> { value: T, uncertainty: T }\npub struct Pair<A,B> { first: A, second: B }\npub struct Scalar { value: Float }\npub struct Marker {}\n");
+  put("Core/fixture/fixture.jet", "struct Sample<T> { value: T, uncertainty: T }\nstruct Pair<A,B> { first: A, second: B }\nstruct Scalar { value: Float }\nstruct Marker {}\n");
   put("runtime.rs", declarations + `
 #[derive(Clone)]
 pub struct ${sampleSource}<T> { __jet_value: T, __jet_uncertainty: T }
@@ -488,7 +488,7 @@ pub fn source_pair(first: f64, second: bool) -> ${pairSource}<f64,bool> { ${pair
   assert.ok(sourceRust.includes(`#[cfg(not(jet_native_pack))]\n    #[no_mangle]\n    pub extern "C" fn jet_rt_record_new_${runtimeAbiAtom(sampleInstance)}(`));
   const treeKey = "<corelib>/Core/fixture::Core/fixture/fixture.jet::Tree";
   const treeSource = generatedRecordPath(treeKey);
-  put("Core/fixture/fixture.jet", readFileSync(join(fixture, "Core/fixture/fixture.jet"), "utf8") + "pub enum Tree { Empty, Bytes([u8]), Number(Float) }\n");
+  put("Core/fixture/fixture.jet", readFileSync(join(fixture, "Core/fixture/fixture.jet"), "utf8") + "enum Tree { Empty, Bytes([U8]), Number(Float) }\n");
   put("runtime.rs", readFileSync(join(fixture, "runtime.rs"), "utf8") + `
 #[derive(Clone)]
 pub enum ${treeSource} { __jet_Empty, __jet_Bytes(Vec<u8>), __jet_Number(f64) }
@@ -585,8 +585,9 @@ pub fn source_tree() -> ${treeSource} { ${treeSource}::__jet_Empty }
   put("Compiler/JetRuntime/exports.list", ["jet_fixture_scalar", ...streamDefinitions.map(([name]) => name).filter((name) => name !== "jet_rt_handle_clone_jet_reader")].join("\n") + "\n");
   put("Compiler/JetRuntime/Source/Fixture.jet", readFileSync(join(fixture, "Compiler/JetRuntime/Source/Fixture.jet"), "utf8").replace(/^#Export\(c\) fn jet_rt_handle_clone_jet_reader[^\n]*\n/gm, ""));
   const partial = run();
-  assert.notEqual(partial.status, 0);
-  assert.match(partial.stderr, /StreamCursor32 cutover.*missing jet_rt_handle_clone_jet_reader/);
+  success(partial);
+  const partialStreamRust = readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
+  assert.ok(partialStreamRust.includes('#[cfg(not(jet_native_pack))]\n    #[no_mangle]\n    pub extern "C" fn jet_rt_handle_clone_jet_reader('), "an unported clone must remain seed-only, never acquire a native implementation");
   console.log("CHECK OK — generic schemas, typed stream ABI and generator --check fixtures");
 } finally {
   rmSync(fixture, { recursive: true, force: true });
