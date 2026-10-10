@@ -1670,7 +1670,8 @@ fn lower_function_body(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
     // a Write parameter's entry value is the caller's place, not the value.
     loop (index, param) in c.mir.params {
         if param.access == .Write -> next
-        if f.params[index] == .Val(value) -> lower_debug_bind_variable(&f, index, value)
+        param_value :: f.params[index].copy()
+        if param_value == .Val(value) -> lower_debug_bind_variable(&f, index, value)
     }
     current := [LIRValueID?]{}
     loop _ in c.slots -> &current.push(None)
@@ -1998,7 +1999,8 @@ fn lower_terminator(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
                 lower_close_transfer(c, &f, returned)
             }
             lower_sentry_function_leave(&m, &f)
-            if f.result_storage == .Val(storage) {
+            result_storage :: f.result_storage.copy()
+            if result_storage == .Val(storage) {
                 // An inline aggregate result moves into the caller's storage.
                 returned :: value ?? return lower_fail(&m, &f, "return without a value from a function returning {mir_type_display_name(c.mir.return_type)}")
                 lowered :: lower_use(&m, &f, returned) ?? return

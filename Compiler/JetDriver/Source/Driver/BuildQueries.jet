@@ -33,10 +33,9 @@ fn jet_driver_build_compiler_nodes(request: JetDriverCompileRequest, load: JetDr
         } else {
             // Only exact declared build outputs belong to the user's bundle.
             // Foreign adapter/Core/effect synthetic text is not a source node.
-            generated_match :: loop row in request.generated_modules {
+            generated :: loop row in request.generated_modules {
                 if row.package_identity == unit.package_identity && row.relative_path == unit.relative_path && jet_driver_generated_module_path(row.package_identity, row.relative_path) == unit.path -> break row
-            }
-            generated :: generated_match ?? next
+            } ?? next
             source = generated.source.copy()
             owner :: loop package in load.packages {
                 if package.identity == generated.package_identity -> break package.root_index

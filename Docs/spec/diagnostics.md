@@ -254,3 +254,16 @@ Core receiver types have a closed method surface. Their fallback fixes may
 name a documented operation or a safe spelling edit, but must not suggest
 adding an `impl` to a protected Core type. A user-defined type wins the
 reserved-name guard and retains the ordinary user-type fix.
+
+## Compiler ownership consumers
+
+Native lowering and code generation detach copyable scalar IDs from owner
+projections before requesting write access to that owner. A detached scalar
+does not allocate or duplicate an aggregate. This keeps parameter debug binds,
+result storage writes, reachability requests, sentry exits, and pattern-cache
+block switching within the existing read/write loan contract.
+
+Compiler comparisons against an already-bound optional ID or interpolated
+symbol use parenthesized value expressions, not capture patterns. Decision
+hashing passes byte ranges as `View<U8>` and projects only runtime-part variants
+present in the canonical MIR inventory.

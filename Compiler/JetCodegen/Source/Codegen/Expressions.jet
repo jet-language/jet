@@ -6679,7 +6679,8 @@ fn jet_codegen_pattern_lookup_cache(builder: &JetCodegenBuilder, program: JetCod
     local :: tir_generated_local("pattern_lookup_cache_{builder.locals.len()}", span)
     cache :: jet_codegen_bind_local(&builder, program, local, cache_ty, true, None, None, false)
     current := builder.current
-    if builder.pattern_lookup_head == .Val(head) -> jet_codegen_switch_block(&builder, program, head)
+    lookup_block :: builder.pattern_lookup_head.copy()
+    if lookup_block == .Val(head) -> jet_codegen_switch_block(&builder, program, head)
     absent :: jet_codegen_emit_value(&builder, program, span, cache_ty, MIROperation.Absent)
     _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: cache, value: absent})
     jet_codegen_switch_block(&builder, program, current)

@@ -41,7 +41,6 @@ fn mir_decision_runtime_name(part: MIRRuntimePartID) -> String Never! {
         .Browser -> "browser"
         .Args -> "args"
         .Reflect -> "reflect"
-        .AuthTokens -> "auth-tokens"
         .AuthSession -> "auth-session"
         .Sync -> "sync"
         .Services -> "services"
@@ -93,7 +92,7 @@ fn mir_decision_identity(program: MIRProgram, artifact: MIRArtifactID?, profile:
     closure :: if plan == .Val(value) -> value.closure_identity else -> dossier.closure_identity
     artifact_identity :: if plan == .Val(value) -> if value.artifact_identity != "" -> value.artifact_identity else -> "artifact:{value.id.value}" else -> if artifact == .Val(id) -> "artifact:{id.value}" else -> "unavailable"
     MIRDecisionIdentity{
-        source: mir_sha256_hex_bytes(mir_sha256_bytes(source_material)),
+        source: mir_sha256_hex_bytes(mir_sha256_bytes(source_material[0..<source_material.len()])),
         configuration: "package={program.package_identity};edition={facts.edition};os={facts.active_os};layer={facts.inferred_layer};allocator={facts.allocator};runtime={runtime.join(",")};arrow={if facts.uses_arrow -> "true" else -> "false"};hardware={facts.hardware_profile_id}",
         profile: selected_profile,
         target: "triple={machine_triple};artifact={target};machine={machine_name}",
@@ -104,7 +103,7 @@ fn mir_decision_identity(program: MIRProgram, artifact: MIRArtifactID?, profile:
 fn mir_decision_derivation_identity(identity: MIRDecisionIdentity) -> DerivationIdentity Never! {
     build := [U8]{}
     loop value in [identity.configuration, identity.profile, identity.implementation, identity.artifact] -> mir_decision_frame(&build, value)
-    derivation_identity(identity.source, mir_sha256_hex_bytes(mir_sha256_bytes(build)), identity.run, identity.target)
+    derivation_identity(identity.source, mir_sha256_hex_bytes(mir_sha256_bytes(build[0..<build.len()])), identity.run, identity.target)
 }
 fn mir_decision_ledger_from_rows(identity: MIRDecisionIdentity, rows: [MIRDecisionRow]) -> MIRDecisionLedger Never! {
     canonical := [MIRDecisionRow]{}

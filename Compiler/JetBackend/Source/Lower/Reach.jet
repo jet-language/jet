@@ -448,7 +448,7 @@ fn lower_reach_edges(p: MIRProgram, q: &LowerPrepared, first: Int, parent: Int, 
         cursor += 1
         if edge < 0 || q.edges_seen.get(edge) != None -> next
         &q.edges_seen.add(edge, true).drop("checked absent above")
-        function :: q.edges[edge].function
+        function :: q.edges[edge].function.copy()
         branch :: q.edges[edge].branch
         following :: q.edges[edge].next
         if following >= 0 -> &pending.push(following)

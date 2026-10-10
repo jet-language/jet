@@ -177,7 +177,8 @@ fn lower_frame_cells(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
                 } else {
                     index :: lower_param_index(c.mir, value)
                     if index >= 0 && index < f.params.len() {
-                        if f.params[index] == .Val(param) {
+                        param_value :: f.params[index].copy()
+                        if param_value == .Val(param) {
                             if lower_is_inline(p, row.ty) {
                                 cell = Val(param)
                             } else {

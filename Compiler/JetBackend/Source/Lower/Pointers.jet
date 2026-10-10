@@ -153,8 +153,10 @@ fn lower_sentry_frame(c: LowerContext, m: &LowerModule, f: &LowerFunction) Never
 }
 
 fn lower_sentry_function_leave(m: &LowerModule, f: &LowerFunction) Never! {
-    if f.sentry_stack_frame == .Val(frame) -> lower_call_runtime(&m, &f, "jet_rt_sentry_frame_leave", [LIRValueID]{frame}, None)
-    if f.sentry_function == .Val(save) -> lower_call_runtime(&m, &f, "jet_rt_sentry_scope_leave", [LIRValueID]{save}, None)
+    stack_frame :: f.sentry_stack_frame.copy()
+    if stack_frame == .Val(frame) -> lower_call_runtime(&m, &f, "jet_rt_sentry_frame_leave", [LIRValueID]{frame}, None)
+    function_save :: f.sentry_function.copy()
+    if function_save == .Val(save) -> lower_call_runtime(&m, &f, "jet_rt_sentry_scope_leave", [LIRValueID]{save}, None)
 }
 
 fn lower_sentry_scope(c: LowerContext, m: &LowerModule, f: &LowerFunction, row: MIRScope, enter: Bool) Never! {
