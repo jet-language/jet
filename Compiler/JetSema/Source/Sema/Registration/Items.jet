@@ -66,6 +66,7 @@ use jet_foundation.[
     core_enum_variant_payload,
     core_module_export,
     core_module_has_type,
+    core_record_literal_fields,
     core_source_owns_type,
     expr_span,
     mir_builtin_codec_trait_ref,
@@ -674,6 +675,7 @@ fn sema_registration_package_is_namespace(package_identity: String) -> Bool Neve
 fn sema_registration_visible(visibility: Int, source_module: String, source_package: String, owner_module: String, owner_package: String) -> Bool Never! {
     if {
         source_module == owner_module -> true
+        source_module.starts_with("<corelib>/") && owner_module.starts_with("<corelib>/") -> true
         visibility >= 2 -> true
         source_package != owner_package -> false
         else -> visibility >= 1 || sema_registration_package_is_namespace(owner_package)
@@ -2189,7 +2191,8 @@ fn sema_registration_resolve_export(graph: SemaRegistrationGraph, module_index: 
     // Core's authoritative export ledger also owns runtime builtin carriers
     // that have no source nominal declaration. Keep their builtin identity,
     // and never apply this rule to a user module with a Core-like name.
-    if module_row.module_identity.starts_with("<corelib>/") && core_module_has_type(module_row.module_name, name) {
+    private_native :: requester_module.starts_with("<corelib>/") && (sema_reserved_type_name(name) || core_record_literal_fields(name) != None)
+    if module_row.module_identity.starts_with("<corelib>/") && (core_module_has_type(module_row.module_name, name) || private_native) {
         symbol :: sema_registration_named_symbol(module_row.module_identity, name, Span{start: 0, end: 0}, SymbolKind.Type, Val(Type.Named{name: name}), true, false)
         return Val(SemaRegistrationExport{name: name, symbol: symbol, declaration: None, source_module_identity: module_row.module_identity, visibility: 2})
     }

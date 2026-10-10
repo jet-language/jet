@@ -429,15 +429,11 @@ impl<'a> Checker<'a> {
             let is_pub = self
                 .name_ledger
                 .visible(self.module_idx, mod_idx, &semantic_name);
-            // Reuse the source JSON lexer for typed core.data rows without
-            // making its private entry point an application-visible API.
-            let private_typed_json_seam = semantic_name == "__parse_typed"
-                && jet_foundation::CoreModuleExports::core_source_module_by_alias(&target.module_alias)
-                    .is_some_and(|source| source.module == "core.encoding.json")
-                && self.name_ledger.module_alias(self.module_idx)
-                    .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
-                    .is_some_and(|source| source.module == "core.data");
-            if !is_pub && mod_idx != self.module_idx && !private_typed_json_seam {
+            // Canonical Core sources share private implementation seams;
+            // neither a user import nor a public export acquires that authority.
+            let core_private_seam = self.module_is_core_source(self.module_idx)
+                && target.is_core_source;
+            if !is_pub && mod_idx != self.module_idx && !core_private_seam {
                 self.diags.push(private_item(name, span));
                 for a in args.iter_mut() {
                     self.infer(&mut a.expr);

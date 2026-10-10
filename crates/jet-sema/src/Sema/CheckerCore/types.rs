@@ -17,7 +17,7 @@ impl<'a> Checker<'a> {
     }
 
     /// A loaded Core declaration owns its methods even when its carrier has
-    /// not crossed the nominal ownership ledger (for example `Clock`).
+    /// not crossed the nominal ownership ledger.
     pub(crate) fn core_source_declares_method(&self, name: &str, method: &str) -> bool {
         let (namespace, leaf) = self.struct_type_name_parts(name);
         let Some(owner) = self.struct_owner_module(leaf, namespace) else { return false };
@@ -28,6 +28,13 @@ impl<'a> Checker<'a> {
             &module.registry
         };
         registry.core_source_module.is_some() && registry.method(leaf, method).is_some()
+    }
+
+    /// Qualified native carriers are an internal Core vocabulary, not exports.
+    pub(crate) fn core_private_native_type(&self, module: &str, leaf: &str) -> bool {
+        self.module_is_core_source(self.module_idx)
+            && jet_foundation::CoreModuleExports::core_source_module(module).is_some()
+            && crate::Sema::CheckerCoreLib::core_type_known(leaf)
     }
 
     /// A raw projection uses the base registered by the declaring module, not
@@ -432,6 +439,7 @@ impl<'a> Checker<'a> {
                 if n.rsplit_once('.').is_some_and(|(alias, leaf)| {
                     self.core_imports.get(alias).is_some_and(|module| {
                         jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf).is_some()
+                            || self.core_private_native_type(module, leaf)
                     })
                 }) =>
             {

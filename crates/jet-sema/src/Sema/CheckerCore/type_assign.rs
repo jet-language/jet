@@ -396,6 +396,12 @@ impl<'a> Checker<'a> {
                 if core_type_known(n) {
                     return;
                 }
+                if n.rsplit_once('.').is_some_and(|(alias, leaf)|
+                    self.core_imports.get(alias)
+                        .is_some_and(|module| self.core_private_native_type(module, leaf)))
+                {
+                    return;
+                }
                 // Compiler-owned IO annotations are internal to vetted Core,
                 // just like Core-only failure record literals; no export is added.
                 if matches!(n.as_str(), Syntax::TYPE_IO_OPERATION | "IOContext")

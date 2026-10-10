@@ -2127,7 +2127,8 @@ impl<'a> Checker<'a> {
             }
         }
         if let Some(module) = import_ns.and_then(|namespace| self.core_imports.get(namespace)) {
-            if jet_foundation::CoreModuleExports::core_leaf_kind(module, type_name).is_some() {
+            if jet_foundation::CoreModuleExports::core_leaf_kind(module, type_name).is_some()
+                || self.module_is_core_source(self.module_idx) {
                 // Source-owned Core records use the ordinary registry for fields
                 // and visibility; fall back to the generated view only when no
                 // source owner is loaded.
@@ -3131,6 +3132,9 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn type_is_pub_in(&self, owner_mod: usize, type_name: &str) -> bool {
         if owner_mod == self.module_idx {
+            return true;
+        }
+        if self.module_is_core_source(self.module_idx) && self.module_is_core_source(owner_mod) {
             return true;
         }
         self.name_ledger

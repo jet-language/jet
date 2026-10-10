@@ -9330,9 +9330,15 @@ D-EXPOP1, D-XORSPELL1, D-BITNOT1 and D-BITOREXPR1; shifts are unchanged.
 
 
 **2026-10-09 — Core time checker roots:** Loaded Core declaration methods
-take precedence over native method fallbacks, including carriers such as
-`Clock` that have not crossed the nominal ownership ledger. This preserves
+take precedence over native method fallbacks. `Clock` retains the source
+ownership introduced with its canonical declaration and lost in the Clock
+branch collapse; restoring that row also prevents native trait seeding.
+This preserves
 the source method's result, receiver convention, and effect row rather than
 substituting the native time contract. The owner-only `__clock_mono_ns` seam
 retains its pure zero-argument `Int` signature; labeled Clock state variants
 construct with `System.{started_ns: ..., offset_ms: ...}`.
+Canonical Core sources may name another Core source's private declarations
+and native carriers without making them public. Source-only functions resolve
+through the loaded declaration and its signature even without a native
+catalog row; native provider rows retain their existing dispatch.

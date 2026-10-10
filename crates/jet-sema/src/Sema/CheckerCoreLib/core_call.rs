@@ -2570,6 +2570,9 @@ impl<'a> Checker<'a> {
             || checked_testing_text_source(source_alias, module, name)
             || source_alias == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_CBOR_STREAM_ALIAS)
             || source_alias == Some("__core_encoding_xml_engine")
+            || (module == "core.mem"
+                && name == "__list_reserve_exact"
+                && source_alias == Some("__core_crypto_ct"))
             || ((module == "core.mem" || (module == "core.encoding" && name == "__utf8_validate"))
                 && source_alias == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_CBOR_PARSE_ALIAS));
         if encoding_backing_leaf && !checked_backing_source {
@@ -2794,10 +2797,17 @@ impl<'a> Checker<'a> {
         if let Some(source) =
             jet_foundation::CoreModuleExports::core_source_module(module)
         {
+            let source_idx = self.name_ledger.module_by_alias(source.alias)
+                .filter(|&index| self.modules.is_some_and(|modules|
+                    modules[index].registry.core_source_module
+                        .is_some_and(|loaded| loaded.path == source.path)));
+            let declared_source_call = crate::Syntax::core_call(module, name).is_none()
+                && source_idx.is_some_and(|index| self.modules
+                    .is_some_and(|modules| modules[index].funcs.contains_key(name)));
             if (jet_foundation::CoreModuleExports::core_source_owns_call(
                 module, name, args.len(),
                 args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),
-            ) || (module == "core.encoding.json" && name == "__parse_typed"))
+            ) || declared_source_call)
                 && (self.name_ledger.module_alias(self.module_idx) != Some(source.alias)
                     || crate::Syntax::core_call(module, name)
                         .is_none_or(|row| row.source_member().is_some()))
@@ -2813,12 +2823,6 @@ impl<'a> Checker<'a> {
                 // source-forward boundary; its source slot is an opaque fn pointer.
                 && !(module == "core.service" && name == "worker")
             {
-                let source_idx = self.modules.and_then(|modules| {
-                    modules
-                        .iter()
-                        .position(|candidate| candidate.registry.core_source_module
-                            .is_some_and(|loaded| loaded.alias == source.alias && loaded.path == source.path))
-                });
                 if let (Some(alias), Some(source_idx)) = (alias, source_idx) {
                     return self.infer_import_call(
                         alias,
