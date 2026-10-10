@@ -551,6 +551,31 @@ fn lower_shared_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     true
 }
 
+// `Shared.same(a, b)`: Rust JetShared::same is Arc::ptr_eq. A native Shared
+// handle is its cell address (jet_rt_native_shared_clone returns the same
+// cell), so identity is equality of the two borrowed handle words.
+fn lower_shared_same(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
+    row :: lower_prelude_row(p, call) ?? return false
+    if mir_symbol_name(row.symbol) != "jet_shared_same" -> return false
+    if args.len() != 2 {
+        lower_fail(&m, &f, "Shared.same requires two checked Shared operands")
+        return true
+    }
+    shared_repr :: LowerRepr.Handle{drop: "jet_rt_native_shared_drop", clone: "jet_rt_native_shared_clone"}
+    loop arg in args {
+        ty :: lower_value_type(c, arg.value) ?? return true
+        if lower_repr(p, ty) != shared_repr {
+            lower_fail(&m, &f, "Shared.same over {mir_type_display_name(ty)} has no native Shared handle")
+            return true
+        }
+    }
+    left :: lower_use(&m, &f, args[0].value) ?? return true
+    right :: lower_use(&m, &f, args[1].value) ?? return true
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Eq, left: left, right: right})
+    true
+}
+
 // `Shared.read(shared, callback)` / `Shared.edit(shared, callback)`: the
 // callback (LazyIter.jet "lazy.callback.owned": a Write parameter receives the
 // cell's slot itself) runs under the lock and writes its result to `out`.

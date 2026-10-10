@@ -3640,6 +3640,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if semantic == .HostCall(call, args) {
         if lower_shared_guard_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_shared_access(p, c, &m, &f, instruction, call, args) -> return
+        if lower_shared_same(p, c, &m, &f, instruction, call, args) -> return
         values :: lower_route_values(p, &m, &f, call, args, "HostCall") ?? return
         return lower_route_call(p, c, &m, &f, instruction, call, values, "HostCall")
     }
