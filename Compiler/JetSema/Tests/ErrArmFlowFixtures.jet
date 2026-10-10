@@ -26,6 +26,21 @@ fn local_ticket(flag: Bool) -> Int {
         .Err(error) -> 0
     }
 }
+// Coverage and each arm must share the one checked taking call.
+fn counted_ticket_payload(ticket: ^Ticket, calls: &Int) -> (value: Int, tag: Int) Err! {
+    calls += 1
+    ticket_payload(^ticket)
+}
+fn taking_variant_subject_once() -> Int Never! {
+    calls := 0
+    ticket :: Ticket{message: "once"}
+    value :: if counted_ticket_payload(^ticket, &calls) == {
+        .Err(error) -> 0
+        .Ok(payload) -> payload.value
+    }
+    if calls != 1 || value != 4 -> panic("taking variant subject ran more than once")
+    value
+}
 fn run() {
     first :: Ticket{message: "bad"}
     second :: Ticket{message: "good"}
@@ -33,4 +48,5 @@ fn run() {
     print(outer_ticket(false, ^second))
     print(local_ticket(true))
     print(local_ticket(false))
+    _ := taking_variant_subject_once()
 }

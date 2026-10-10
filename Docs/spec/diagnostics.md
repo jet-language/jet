@@ -293,3 +293,21 @@ their stable collection owner. Rust emission references the selected element's
 payload instead of cloning it; the existing owner-invalidation rules still
 govern the view. The recursive noncopy-owner regression compiles and executes
 the generated Rust in addition to validating MIR.
+
+An exhaustive value-form Result dispatch checks its subject once, including
+when coverage visits an `.Err` arm before an `.Ok` arm. The ordinary condition
+walk reuses the already checked carrier and its elaborated expression; coverage
+must not repeat ownership effects and manufacture an earlier-loop E0121.
+Native Jet already hoists dispatch subjects into one checked compiler local.
+The regression restores the original Core service rollback body and executes
+an Err-first taking subject with a single-use owner and a call counter.
+
+Converting a checked String failure payload into the canonical Prelude `Err`
+record also retains that checked message. The record checker still supplies
+private defaults and applies visibility, field-type and view-escape rules;
+it must not re-infer a taking call inside the synthesized message field.
+Native Jet constructs the default-error record before checking its fields.
+The same runtime regression exercises both outer and branch-local single-use
+owners in deferred Err arms before the new taking dispatch.
+When lowering such a value-if, the Err literal's absent success slot takes the
+live sibling's checked carrier type, not the enclosing function's return type.

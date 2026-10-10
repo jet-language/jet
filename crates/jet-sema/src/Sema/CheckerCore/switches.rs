@@ -2549,13 +2549,12 @@ impl<'a> Checker<'a> {
             }
             return;
         };
-        // An exhaustive owned table's coverage walk has already checked the
-        // one subject transfer. Reuse that checked subject in the per-arm
-        // walk, just as the Result handler reuses its carrier, rather than
-        // consuming the source a second time before its first arm.
+        // Coverage has already checked this carrier or owned transfer once.
+        // Retain both the type and elaborated subject for the condition walk,
+        // which must not repeat a taking call just to validate its patterns.
         if !has_else && !self.compiler_generated
-            && matches!(subj.without_parens(),
-                Expr::Place(_, crate::AST::PlaceAccess::Take, _))
+            && (preserve_result_carrier || matches!(subj.without_parens(),
+                Expr::Place(_, crate::AST::PlaceAccess::Take, _)))
         {
             self.result_handler_subject_types.insert(
                 subj.span().start, (st.clone(), subj.clone()));

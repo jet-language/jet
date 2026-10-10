@@ -5968,3 +5968,52 @@ fn nested_pure_closure_never_carriers_compile_and_run() {
         std::fs::remove_dir_all(directory).unwrap();
     });
 }
+
+#[test]
+fn taking_result_subject_coverage_checks_and_runs_the_call_once() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (bundle, nominals) = checked_bundle(include_str!(
+            "../../../../../Compiler/JetSema/Tests/ErrArmFlowFixtures.jet"
+        ));
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("taking Result subjects lower to MIR");
+        mir.validate().expect("taking Result subjects have valid MIR");
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("taking-result-subject-proof"))
+            .join(format!("once-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("taking_result_subject.rs");
+        let executable = directory.join(format!("taking_result_subject{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, &rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=taking_result_subject", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("taking Result subject proof requires rustc");
+        assert!(compiled.status.success(),
+            "taking Result subject must compile without a repeated move:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("taking Result subject proof must run");
+        assert!(executed.status.success(),
+            "taking Result subject must retain one call and one owner transfer:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        assert_eq!(String::from_utf8_lossy(&executed.stdout), "0\n4\n0\n4\n");
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}

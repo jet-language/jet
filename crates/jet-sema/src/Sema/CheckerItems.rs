@@ -3256,6 +3256,22 @@ impl<'a> Checker<'a> {
         fields: &mut Vec<(String, Span, Expr)>,
         span: Span,
     ) -> Type {
+        self.check_struct_lit_with_checked_field(
+            type_name, type_args, import_ns, fields, span, None,
+        )
+    }
+
+    /// Synthesized records can retain one field's checked expression and type
+    /// without replaying its ownership effects. All record checks still run.
+    pub(super) fn check_struct_lit_with_checked_field(
+        &mut self,
+        type_name: &str,
+        type_args: &[Type],
+        import_ns: Option<&str>,
+        fields: &mut Vec<(String, Span, Expr)>,
+        span: Span,
+        checked_field: Option<(&str, &Type)>,
+    ) -> Type {
         // A canonical nominal arrives here from an expected type as
         // `package::path::Type`. Field registries and visibility tables are
         // keyed by the owner-local leaf, while the returned type below keeps
@@ -3464,7 +3480,10 @@ impl<'a> Checker<'a> {
             if string_view_field {
                 self.allow_string_view_read = true;
             }
-            let et = self.infer(expr);
+            let et = checked_field
+                .filter(|(checked_name, _)| *checked_name == name.as_str())
+                .map(|(_, ty)| ty.clone())
+                .or_else(|| self.infer(expr));
             self.allow_string_view_read = saved_string_view_read;
             self.expected_type = saved_expected;
             self.lambda_escapes = saved_esc;

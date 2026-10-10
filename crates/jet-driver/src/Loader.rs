@@ -6443,6 +6443,53 @@ mod stale_manifest_name_tests {
     }
 
     #[test]
+    fn taking_service_variant_subject_retains_single_evaluation() {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let root = tempdir("taking-service-variant-subject");
+            let entry = root.join("main.jet");
+            fs::write(&entry, "use core.service as service\nfn receive(tree: &service.ServiceTree, endpoint: service.ServiceEndpoint) -> String service.ServiceError! { service.receive(&tree, endpoint) }\nfn run() {}\n").unwrap();
+            let mut bundle = load_entry(entry.to_str().unwrap()).expect("service import closure loads");
+            let module = bundle.modules.iter_mut()
+                .find(|module| module.display.ends_with("Core/service/service.jet"))
+                .expect("service source is retained");
+            let start = module.source.find("fn pending_delivery_rollback(").unwrap();
+            let end = module.source[start..].find("fn pending_rollback_error(").unwrap() + start;
+            let original = r#"fn pending_delivery_rollback(tree: &ServiceTree, endpoint: ServiceEndpoint, index: Int, remaining: ^[(id: String, message: String, store: String)], before: ^[String], draining: Bool, error: ServiceError) -> ServiceError Never! {
+    #Unsafe("Services2693-2762: retain authority requeue then mailbox-restore ordering and both failure texts") {
+        if core.service.__requeue_pending(endpoint, ^remaining) == {
+            .Err(rollback_error) -> {
+                if core.service.__mailbox_restore(&tree, index, ^before, draining) == {
+                    .Err(mailbox_error) -> return pending_rollback_error(error, Val(rollback_error), Val(mailbox_error))
+                    .Ok(_) -> return pending_rollback_error(error, Val(rollback_error), None)
+                }
+            }
+            .Ok(_) -> {
+                if core.service.__mailbox_restore(&tree, index, ^before, draining) == {
+                    .Err(rollback_error) -> return pending_rollback_error(error, None, Val(rollback_error))
+                    .Ok(_) -> return pending_rollback_error(error, None, None)
+                }
+            }
+        }
+    }
+}
+
+"#;
+            let source = format!("{}{}{}", &module.source[..start], original, &module.source[end..]);
+            let masked = crate::Package::mask_inline_package_source(&source).unwrap().0;
+            let (tokens, lexical) = Lexer::lex_generated(&masked);
+            let (program, _) = parse_frontend_tokens(&tokens, &masked, lexical)
+                .expect("original rollback parses");
+            module.items = program.items;
+            module.source = source.into();
+            let diagnostics = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Eval);
+            let errors: Vec<_> = diagnostics.iter()
+                .filter(|diagnostic| diagnostic.severity == crate::Diagnostics::Severity::Error).collect();
+            assert!(errors.is_empty(), "{errors:#?}");
+            fs::remove_dir_all(root).unwrap();
+        });
+    }
+
+    #[test]
     fn core_text_runtime_imports_keep_aliases_and_load_each_unit_once() {
         let root = tempdir("core-text-runtime-imports");
         let entry = root.join("main.jet");

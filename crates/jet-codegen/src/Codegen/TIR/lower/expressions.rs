@@ -3358,6 +3358,26 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
                 let else_reaches_merge =
                     tir_if_branch_reaches_merge(&state.else_lowered, &else_value);
                 if then_reaches_merge && else_reaches_merge {
+                    // An Err literal has no success payload. Sema inferred
+                    // that phantom slot from the live carrier-valued sibling,
+                    // not from this function's unrelated return type.
+                    if matches!(&then_value.kind, TExprKind::Err(..))
+                        && !matches!(&else_value.kind, TExprKind::Err(..))
+                    {
+                        if let (Type::Result { ok, .. }, Type::Result { ok: peer, .. }) =
+                            (&mut then_value.ty, &else_value.ty)
+                        {
+                            *ok = peer.clone();
+                        }
+                    } else if matches!(&else_value.kind, TExprKind::Err(..))
+                        && !matches!(&then_value.kind, TExprKind::Err(..))
+                    {
+                        if let (Type::Result { ok, .. }, Type::Result { ok: peer, .. }) =
+                            (&mut else_value.ty, &then_value.ty)
+                        {
+                            *ok = peer.clone();
+                        }
+                    }
                     let then_absent = matches!(&then_value.kind, TExprKind::Absent);
                     let else_absent = matches!(&else_value.kind, TExprKind::Absent);
                     // `None` has no payload from which to infer its option type.

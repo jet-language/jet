@@ -198,12 +198,18 @@ impl<'a> Checker<'a> {
                     widen_approx: false,
                 };
                 *inner = Box::new(self.default_err_value(call, false));
-                // The synthesized literal must pass the normal record checker:
-                // it supplies canonical private field defaults from the Prelude.
-                payload = self.infer_with_expected(
-                    inner,
-                    &Type::Named(Syntax::TYPE_ERR.to_string()),
-                )?;
+                // Preserve the checked message while the canonical record
+                // checker supplies private defaults and validates every field.
+                // Re-inferring it would repeat taking calls and propagation.
+                let Expr::StructLit {
+                    type_name, type_args, import_ns, fields, span, ..
+                } = inner.as_mut() else {
+                    unreachable!("the default error constructor builds a record")
+                };
+                payload = self.check_struct_lit_with_checked_field(
+                    type_name, type_args, import_ns.as_deref(), fields, *span,
+                    Some(("message", &payload)),
+                );
             }
             let ok_payload = self.nominal_type_identity(&payload, &err_ty)
                 || matches!(&err_ty, Type::Union(members) if members.iter()
