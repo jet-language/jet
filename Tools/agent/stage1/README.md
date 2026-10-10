@@ -20,7 +20,10 @@ They require the matching `host3.path`/`host4.path` cache file and overlay check
 Linux systemd user scopes, flock, Node, Python runners and the project devshell are required.
 
 `ladder.mjs rungs SOURCE_TREE RUNGS_DIR` assembles the selected tree's manifest
-sources without rewriting their bodies. Each subset keeps the manifest-listed
+sources without rewriting their bodies. Staged sources have independent inodes
+(copy-on-write extents where supported), never hard links: creating a rung must
+not invalidate the original package's single-link authority or let private
+rung edits change the checkout. Each subset keeps the manifest-listed
 shared sources outside `Compiler/`, including Jetpack's canonical syntax names,
 in manifest order. Keep its entry anchors aligned with the package APIs; the
 lowering anchor borrows the checked rows and uses a single

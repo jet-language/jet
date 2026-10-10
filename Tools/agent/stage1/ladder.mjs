@@ -5,7 +5,7 @@
 //
 //   ladder.mjs rungs SOURCE_TREE RUNGS_DIR
 //     For L1..L4, a private tree holding the rung's packages and the manifest's
-//     shared sources (hard links to SOURCE_TREE's files), SOURCE_TREE's own
+//     shared sources (independent copies of SOURCE_TREE's files), SOURCE_TREE's own
 //     assemble.mjs, sources.list filtered in its canonical order, and
 //     an anchor file (Compiler/Bootstrap/Host/LadderAnchor.jet, outside the
 //     inventory like Host/Entry.jet); that tree's assemble.mjs writes
@@ -23,7 +23,7 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
-  copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync,
+  constants, copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -129,11 +129,9 @@ function assemble(tree, dir) {
 
 function place(source, target) {
   mkdirSync(dirname(target), { recursive: true });
-  try {
-    linkSync(source, target);
-  } catch {
-    copyFileSync(source, target);
-  }
+  // A rung must not add writable aliases to package authority sources.
+  // Prefer copy-on-write extents where available, but always a fresh inode.
+  copyFileSync(source, target, constants.COPYFILE_FICLONE);
 }
 
 function rungs(sourceTree, rungsDir) {
