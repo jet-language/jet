@@ -1592,7 +1592,8 @@ fn canonical_leaf(value: Dyn, kind: String, output: &String) XMLFault! {
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2694
 fn normalize_lines(value: String) -> String Never! {
-    value.replace("\r\n", "\n").replace("\r", "\n")
+    cr :: unicode.encode_cp(13) ?? panic("carriage return is a Unicode scalar")
+    value.replace("{cr}\n", "\n").replace(cr, "\n")
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2697
 fn canonical_text_escape(value: String) -> String Never! {
@@ -1600,7 +1601,8 @@ fn canonical_text_escape(value: String) -> String Never! {
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2703
 fn canonical_attr_escape(value: String) -> String Never! {
-    value.replace("&", "&amp;").replace("<", "&lt;").replace("\"", "&quot;").replace("\t", "&#x9;").replace("\n", "&#xA;").replace("\r", "&#xD;")
+    cr :: unicode.encode_cp(13) ?? panic("carriage return is a Unicode scalar")
+    value.replace("&", "&amp;").replace("<", "&lt;").replace("\"", "&quot;").replace("\t", "&#x9;").replace("\n", "&#xA;").replace(cr, "&#xD;")
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2714
 fn xml_tag_of(value: Dyn) -> String? Never! {
@@ -3269,7 +3271,7 @@ impl Scanner {
 #Test("XML quote delimiters and CR policy retain their literal semantics") {
     assert_eq(escape_attribute("a'b", "'"), "a&apos;b")
     assert_eq(escape_attribute("a\"b", "\""), "a&quot;b")
-    cr :: "\r"
+    cr :: unicode.encode_cp(13) ?? panic("carriage return is a Unicode scalar")
     assert_eq(normalize_lines("a{cr}\nb{cr}c"), "a\nb\nc")
     assert_eq(canonical_attr_escape(cr), "&#xD;")
 }

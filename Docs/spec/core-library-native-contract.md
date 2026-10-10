@@ -257,10 +257,12 @@ Core runtime source contracts use the ratified ownership and failure spellings:
   Close consumes the storage owner, and live callbacks retain a read guard.
   Callbacks are non-failing (`Never!`); expiry is the wrapper's typed failure.
   Shared handle operations never copy credential material.
-- XML CR normalization uses literal text; code-point encoding at the byte-token
-  boundary handles failure as `InvalidEncoding`. Public `Float` and `Bytes`
-  patterns reject non-XML values. Private `Number` carriers fall through the
-  invalid-carrier arm without borrowing their payload outside the stream owner.
+- XML CR normalization encodes U+000D through the canonical Unicode scalar
+  encoder, since plain Jet text has no carriage-return escape. Code-point
+  encoding at the byte-token boundary handles failure as `InvalidEncoding`.
+  Public `Float` and `Bytes` patterns reject non-XML values. Private `Number`
+  carriers fall through the invalid-carrier arm without borrowing their payload
+  outside the stream owner.
 - `FileCryptoError.SealFailed` is a unit variant, like the other file-error
   cases, under D-CRYPTO-ERRFAM1. Core maps primitive seal failures to that case
   rather than attaching a retired crypto-error payload.
