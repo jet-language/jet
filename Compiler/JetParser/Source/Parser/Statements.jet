@@ -504,6 +504,7 @@ fn parser_parse_statement(state: &JetParserState) -> Stmt {
             if parser_prep_verb_ahead(&state, 0, TOKEN_KW_LOOP) -> return parser_parse_prep_loop(&state)
             if parser_prep_verb_ahead(&state, 0, TOKEN_LBRACE) -> return parser_parse_prep_block(&state)
             if parser_kind_at(&state, 1) == TOKEN_COLON_COLON && parser_kind_at(&state, 2) == TOKEN_KW_LOOP && !parser_named_loop_is_value(&state) -> return parser_parse_labeled_loop(&state)
+            if parser_kind_at(&state, 2) == TOKEN_KW_LOOP && (parser_kind_at(&state, 1) == TOKEN_COLON_EQ || parser_kind_at(&state, 1) == TOKEN_AT) -> return parser_parse_retired_labeled_loop(&state)
             binding_kind :: parser_kind_at(&state, 1)
             if {
                 binding_kind == TOKEN_COLON_EQ || binding_kind == TOKEN_COLON_COLON || binding_kind == TOKEN_COLON -> parser_parse_binding_statement(&state)
@@ -512,6 +513,7 @@ fn parser_parse_statement(state: &JetParserState) -> Stmt {
             }
         }
         TOKEN_AT -> {
+            if parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_KW_LOOP -> return parser_parse_retired_labeled_loop(&state)
             if parser_kind_at(&state, 1) == TOKEN_KW_IF -> return parser_parse_prep_if(&state)
             if parser_kind_at(&state, 1) == TOKEN_KW_LOOP -> return parser_parse_prep_loop(&state)
             if parser_kind_at(&state, 1) == TOKEN_LBRACE -> return parser_parse_prep_block(&state)
@@ -611,12 +613,16 @@ fn parser_next_statement_ahead(state: &JetParserState) -> Bool Never! {
     token :: parser_current(&state)
     if token.kind != TOKEN_IDENT || parser_value(state, token) != "next" -> return false
     following :: parser_kind_at(&state, 1)
-    following == TOKEN_SEMI || following == TOKEN_RBRACE || (following == TOKEN_LPAREN && parser_kind_at(&state, 2) == TOKEN_IDENT && parser_kind_at(&state, 3) == TOKEN_RPAREN)
+    following == TOKEN_SEMI || following == TOKEN_RBRACE || following == TOKEN_AT || (following == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_AT) || (following == TOKEN_LPAREN && parser_kind_at(&state, 2) == TOKEN_IDENT && parser_kind_at(&state, 3) == TOKEN_RPAREN)
 }
 
 // `next` or `next(name)`: continue the innermost or the named loop.
 fn parser_parse_next_statement(state: &JetParserState) -> Stmt {
     start :: parser_bump(&state)
+    if parser_take_retired_loop_target(&state, "next") == .Val(name) {
+        parser_finish_statement(&state)
+        return Stmt.ContinueLabel{name: name, span: start.span}
+    }
     if parser_current_kind(&state) == TOKEN_LPAREN {
         parser_bump(&state)
         name :: parser_expect_name(&state, "as the loop name in `next(name)`")
@@ -1183,6 +1189,38 @@ fn parser_parse_labeled_loop(state: &JetParserState) -> Stmt {
     parser_parse_loop_after_keyword(&state, name.span, Val(label))
 }
 
+// Rust stmt recovery for the retired prefix/suffix label forms. A mutable
+// label is fatal; the retired @ forms retain the canonical labelled loop AST.
+fn parser_parse_retired_labeled_loop(state: &JetParserState) -> Stmt {
+    first :: parser_bump(&state)
+    prefix :: first.kind == TOKEN_AT
+    name :: if prefix -> parser_expect_name(&state, "for the loop label after `@`") else -> first
+    mark :: if prefix -> first else -> parser_bump(&state)
+    keyword :: parser_expect(&state, TOKEN_KW_LOOP, "`loop` after the loop label")
+    label :: parser_value(state, name)
+    if mark.kind == TOKEN_COLON_EQ {
+        parser_add_fatal_code(&state, "E0988", parser_cover(name.span, keyword.span), "a loop name is compile-time, not mutable state", "`:=` creates a runtime binding; a loop name only targets control flow", "write `{label} :: loop {{ … }}`")
+        return Stmt.Loop{body: [Stmt]{}, span: keyword.span, arrow_body: false, label: None}
+    }
+    span :: if prefix -> parser_cover(mark.span, name.span) else -> parser_cover(name.span, mark.span)
+    parser_add_error_code(&state, "E0988", span, "named loops use `::`, not `@`", "prefix `@` is for compile-time names and fact reads, not loop labels (D-LOOPLABEL3, D-ONCE-AT1=D)", "write `{label} :: loop {{ … }}`")
+    parser_parse_loop_after_keyword(&state, name.span, Val(NamedSpan{name: label, span: name.span}))
+}
+
+// Rust break/next preserve named control flow while teaching target arguments.
+fn parser_take_retired_loop_target(state: &JetParserState, verb: String) -> String? {
+    prefix :: parser_current_kind(&state) == TOKEN_AT
+    suffix :: parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_AT
+    if !prefix && !suffix -> return None
+    first :: parser_bump(&state)
+    name :: if prefix -> parser_expect_name(&state, "after `@` for the loop label") else -> first
+    mark :: if prefix -> first else -> parser_bump(&state)
+    span :: if prefix -> parser_cover(mark.span, name.span) else -> parser_cover(name.span, mark.span)
+    label :: parser_value(state, name)
+    parser_add_error_code(&state, "E0988", span, "named loop exits use target arguments", "prefix `@` is for compile-time names and fact reads, not loop labels (D-LOOPLABEL3, D-ONCE-AT1=D)", "write `{verb}({label})`")
+    Val(label)
+}
+
 // Rust `named_loop_is_value`: `name :: loop …` binds a loop value when an
 // item arrow follows the header outside any group, or when a payload `break`
 // leaves this loop (labelled, or bare and not under a nested loop); otherwise
@@ -1271,6 +1309,10 @@ fn parser_parse_return_statement(state: &JetParserState) -> Stmt {
 
 fn parser_parse_break_statement(state: &JetParserState) -> Stmt {
     start :: parser_bump(&state)
+    if parser_take_retired_loop_target(&state, "break") == .Val(name) {
+        parser_finish_statement(&state)
+        return Stmt.BreakLabel{name: name, span: start.span}
+    }
     if parser_current_kind(&state) == TOKEN_LPAREN {
         parser_bump(&state)
         name :: parser_expect_name(&state, "as a loop label")

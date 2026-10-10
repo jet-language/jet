@@ -3035,6 +3035,10 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
 
 
 fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if sema_scope_has_loop_label(scopes, name) {
+        &diagnostics.push(sema_error("E0988", span, "loop label `{name}` is not a runtime value", "a loop label names a control-flow destination, so it cannot be read, passed, or stored", "use `break({name})` or `next({name})` to control the loop"))
+        return None
+    }
     if name == "err" && context.fallback_err_denial == .Val(code) {
         &diagnostics.push(sema_fallback_err_denied(code, span))
         return None

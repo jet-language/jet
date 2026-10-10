@@ -417,6 +417,8 @@ registered lint. Bind a collecting loop with `::`, or use a write handle for an
 in-place update. A value loop returns a final value only through `break value`
 or `break(name, value)`; all exits unify. A collecting loop returns its partial
 list and rejects payload breaks (D-COMPREHENSION1).
+A collecting expression needs a finite source or explicit-state exhaustion
+edge; bare infinite and condition-only headers are rejected with E0072.
 
 `break` and `next` are legal only inside loops (E0115). A loop may have an
 ordinary-name label, `outer :: loop … { … }`; `break(outer)`,

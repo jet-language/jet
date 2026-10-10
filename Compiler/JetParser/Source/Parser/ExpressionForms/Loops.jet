@@ -25,6 +25,7 @@ use jet_lexer.[
     TOKEN_KW_IF,
     TOKEN_KW_IN,
     TOKEN_KW_IT,
+    TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
     TOKEN_LPAREN,
     TOKEN_RPAREN,
@@ -276,6 +277,16 @@ fn parser_expression_form_parse_loop(state: &JetParserState, depth: Int) -> Pars
         end :: block.span
         loop_stmt :: Stmt.Loop{body: block.statements, span: parser_cover(start.span, end), arrow_body: false, label: None}
         return parser_expression_form_make_loop_lambda(body: [Stmt]{loop_stmt}, start: start.span, end: end, result_loop: true, collecting_loop: false, requires_exhaustion_route: false, exhaustion_span: None)
+    }
+    // Rust yielding_loop_expr accepts only the header shapes with an
+    // exhaustion edge before attempting the collecting expression.
+    head :: parser_current_kind(&state)
+    following :: parser_kind_at(&state, 1)
+    binding_head :: head == TOKEN_IDENT || head == TOKEN_KW_IT
+    finite_header :: head == TOKEN_LPAREN || (binding_head && (following == TOKEN_COLON_EQ || following == TOKEN_SEMI || following == TOKEN_COMMA || following == TOKEN_KW_IF || following == TOKEN_KW_IN || following == TOKEN_UNIFIED_ARROW || following == TOKEN_LAMBDA_ARROW))
+    if !finite_header {
+        parser_add_fatal_code(&state, "E0072", start.span, "this collecting loop cannot return a List because it has no finite exhaustion edge", "a collecting loop must finish after a statically finite source or C-style condition; bare infinite and condition-only loops do not provide that boundary", "remove `->`, or iterate a finite source; return one final value from an ordinary loop with `break value`")
+        return ParsedExpr{expr: Expr.Unit{span: start.span}, span: start.span}
     }
     bindingless :: (parser_current_kind(&state) == TOKEN_IDENT || parser_current_kind(&state) == TOKEN_KW_IT) && (parser_kind_at(&state, 1) == TOKEN_UNIFIED_ARROW || parser_kind_at(&state, 1) == TOKEN_KW_IF)
     counted := ParserExpressionFormCountedLoop?{None}
