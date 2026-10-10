@@ -199,6 +199,13 @@ projected into both Core inventories. Its four diagnostic fields remain in
 that order; the evaluator reports the registered project diagnostic rather
 than treating a missing row as an unsupported construct.
 
+Callable-tail, value-block and fallback-block parsing first distinguishes
+guard tables with direct `-> return` or `-> break` statement arms from value
+tables. Such arms are checked by the ordinary statement parser without a
+doomed value parse; braced control arms remain valid value branches. This
+shared Rust/Jet lexical distinction prevents recursively balanced generated
+tables from being reparsed exponentially without weakening their diagnostics.
+
 Native compiler call images retain their runtime and writable static storage
 until all calls and owning argument/result carriers have retired. Scalar
 decoding detaches the compiler value; it does not consume the native owner.

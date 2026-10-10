@@ -101,3 +101,43 @@ fn run() {
     }
     assert(degree && dalton && mmhg && square && cubic)
 }
+
+fn parser_test_statement_guard_tree(depth: Int) -> String Never! {
+    if depth == 0 {
+        return `if {
+(cp < I64{0}) -> return cp
+(cp > I64{1}) -> return cp
+else -> return cp
+}
+`
+    }
+    child :: parser_test_statement_guard_tree(depth - 1)
+    "if {{\n(cp < I64{{0}}) -> {{\n{child}}}\n(cp > I64{{1}}) -> {{\n{child}}}\nelse -> return cp\n}}\n"
+}
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs
+#Test("statement_guard_tables_do_not_reparse_as_tail_values") {
+    table :: parser_test_statement_guard_tree(10)
+    parsed :: parser_test_program("fn mapping(cp: I64) -> I64 Never! {{\n{table}}}\n")
+    body :: parser_test_function(parsed, "mapping").body
+    assert_eq(body.len(), 1)
+    assert(if body[0] == { .Switch(_, _, _, _) -> true else -> false })
+    _ :: parser_test_diagnostic(parser_test_errors(`fn run() { value :: if { true -> return 1 else -> 2 } }`), "E0003")
+}
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs
+#Test("statement_guard_tables_in_value_and_fallback_blocks_parse_once") {
+    table :: parser_test_statement_guard_tree(8)
+    parsed :: parser_test_program("fn mapping(cp: I64) -> I64 Never! {{\nvalue :: if true -> {{\n{table}cp\n}} else -> cp\nother :: None ?? {{\n{table}cp\n}}\nvalue\n}}\n")
+    _ :: parser_test_binding(parser_test_function(parsed, "mapping"))
+}
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs
+#Test("braced_control_arms_remain_value_branches") {
+    parsed :: parser_test_program(`fn mapping(cp: I64) -> I64 Never! {
+    if { (cp < I64{0}) -> { return cp } else -> cp }
+}
+`)
+    body :: parser_test_function(parsed, "mapping").body
+    assert(if body[body.len() - 1] == { .Expr(.If(_, _, _, _, _, _)) -> true else -> false })
+}

@@ -19,6 +19,7 @@ use jet_foundation.[
 ]
 use jet_lexer.[
     TOKEN_AND_AND,
+    TOKEN_BREAK,
     TOKEN_EOF,
     TOKEN_EQ_EQ,
     TOKEN_GE,
@@ -40,6 +41,7 @@ use jet_lexer.[
     TOKEN_RBRACE,
     TOKEN_RBRACKET,
     TOKEN_RPAREN,
+    TOKEN_RETURN,
     TOKEN_SEMI,
     TOKEN_UNIFIED_ARROW,
 ]
@@ -60,9 +62,40 @@ fn parser_expression_form_error(state: &JetParserState, code: String, span: Span
     parser_add_error_code(&state, code, span, what, why, fix)
 }
 
+// A direct control statement cannot be a value arm. Decide that from tokens
+// before callable-tail speculation; recursively reparsing such guard tables
+// as values and then statements makes a balanced table exponentially costly.
+// Braced control arms still participate in ordinary value parsing.
+fn parser_guard_table_has_statement_arm(state: JetParserState) -> Bool Never! {
+    if parser_current_kind(state) != TOKEN_KW_IF || parser_kind_at(state, 1) != TOKEN_LBRACE -> return false
+    braces := 1
+    parens := 0
+    brackets := 0
+    index := state.position + 2
+    loop index < state.tokens.len() {
+        kind :: state.tokens[index].kind
+        if braces == 1 && parens == 0 && brackets == 0 && (kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_LAMBDA_ARROW) {
+            next_kind :: if index + 1 < state.tokens.len() -> state.tokens[index + 1].kind else -> TOKEN_EOF
+            if next_kind == TOKEN_RETURN || next_kind == TOKEN_BREAK -> return true
+        }
+        if kind == TOKEN_LBRACE -> braces += 1
+        if kind == TOKEN_RBRACE {
+            braces -= 1
+            if braces == 0 -> return false
+        }
+        if kind == TOKEN_LPAREN -> parens += 1
+        if kind == TOKEN_RPAREN && parens > 0 -> parens -= 1
+        if kind == TOKEN_LBRACKET -> brackets += 1
+        if kind == TOKEN_RBRACKET && brackets > 0 -> brackets -= 1
+        if kind == TOKEN_EOF -> return false
+        index += 1
+    }
+    false
+}
+
 fn parser_expression_form_if_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_KW_IF -> return false
-    if parser_kind_at(&state, 1) == TOKEN_LBRACE -> return true
+    if parser_kind_at(&state, 1) == TOKEN_LBRACE -> return !parser_guard_table_has_statement_arm(state)
     offset := 1
     parens := 0
     brackets := 0
@@ -264,7 +297,7 @@ fn parser_expression_form_value_block(state: &JetParserState, depth: Int, result
         // tried as the branch value and kept when it parses cleanly; any
         // other line, or a failed try, is an ordinary statement.
         before :: state.position
-        if parser_value_tail_ahead(state) {
+        if !parser_guard_table_has_statement_arm(state) && parser_value_tail_ahead(state) {
             saved_position :: state.position
             saved_diagnostics :: state.diagnostics.len()
             saved_blocks :: state.block_spans.len()

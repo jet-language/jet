@@ -2544,6 +2544,9 @@ impl<'a> Parser<'a> {
                 // callable keeps its trailing `if` a statement, so arm-tail
                 // loops stay effect loops. Keep ordinary statement `if`
                 // parsing as the fallback.
+                if self.guard_table_has_statement_arm() {
+                    return self.if_or_dispatch();
+                }
                 let save = self.pos;
                 let saved_diags = self.diags.len();
                 if let Ok(expr) = self.expr() {

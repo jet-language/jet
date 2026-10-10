@@ -434,7 +434,7 @@ fn parser_parse_value_lines(state: &JetParserState, depth: Int, prepared_value: 
             return ParsedBlock{span: Span{start: open.span.start, end: binding.span.start}, statements: [Stmt]{}, tail: Val(Expr.Unit{span: open.span})}
         }
         if {
-            parser_statement_is_keyword(&state) || !parser_value_tail_ahead(state) -> &statements.push(parser_parse_statement(&state))
+            parser_statement_is_keyword(&state) || parser_guard_table_has_statement_arm(state) || !parser_value_tail_ahead(state) -> &statements.push(parser_parse_statement(&state))
             else -> {
                 // As in Rust's value blocks: speculate on a tail value (a zero-width
                 // line terminator may sit before `}`), else reparse as a statement.

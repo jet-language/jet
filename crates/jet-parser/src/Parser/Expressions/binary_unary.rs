@@ -339,6 +339,17 @@ impl<'a> Parser<'a> {
                 self.diags.truncate(saved_diags);
             }
 
+            if self.guard_table_has_statement_arm() {
+                match self.stmt() {
+                    Ok(statement) => body.push(statement),
+                    Err(diagnostic) => {
+                        self.diags.push(diagnostic);
+                        self.sync_stmt();
+                    }
+                }
+                continue;
+            }
+
             // As with value-if blocks, speculate on a trailing ordinary
             // expression before parsing a statement.
             let save = self.pos;
