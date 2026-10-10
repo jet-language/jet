@@ -133,6 +133,10 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
                 "days_in_month",
                 "is_leap_year",
                 "__embedded_zone_bytes",
+                // D-DET1: the source Clock owns its manual/system state.
+                // System construction requires Time; its private raw sample
+                // must not grant ambient Time to an injected manual clock.
+                "__clock_mono_ns",
             ],
         ))
         || (same_text(module, "core.math.random") && same_text(method, "rng"))
@@ -4359,6 +4363,22 @@ pub fn core_call_mismatch(
 mod tests {
     use super::{core_call, CoreCapabilityKind};
     use crate::Effects::Effect;
+
+    #[test]
+    fn injected_clock_raw_sample_does_not_acquire_ambient_time() {
+        let sample = core_call("core.time", "__clock_mono_ns")
+            .expect("checked Clock raw monotonic seam");
+        assert_eq!(sample.effect(), None);
+        assert_eq!(sample.effect_leaf(), None);
+        assert_eq!(sample.capability().kind, CoreCapabilityKind::Pure);
+        assert!(sample.capability().is_well_formed());
+        for method in ["now", "__host_monotonic_ns"] {
+            let ambient = core_call("core.time", method)
+                .expect("ambient wall/host clock row");
+            assert_eq!(ambient.effect(), Some(Effect::Time), "{method}");
+            assert_eq!(ambient.capability().kind, CoreCapabilityKind::NativeRequired);
+        }
+    }
 
     #[test]
     fn rng_int_returns_an_owned_exact_int_carrier() {

@@ -471,6 +471,10 @@ their native bridges use those declared bounds, not invented Printable or Debug
 bounds. Method emission inherits owner binders from the impl instead of
 redeclaring them. ExpiringValue's Show-only hook can therefore render its
 deadline without requiring its untouched payload to implement Printable.
+Clock's private raw monotonic sample has a pure Core-call row, matching the
+checked source signature: injected manual clocks do not acquire ambient Time
+through their shared helper. Ambient wall/host sampling and system Clock
+construction keep their Time authority; this is not a package-budget grant.
 
 The Jet Driver carries each installed Core row's runtime classification into
 its parse job. Runtime dependencies retain all functions but omit their test
