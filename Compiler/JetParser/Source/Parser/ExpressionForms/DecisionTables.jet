@@ -67,15 +67,24 @@ fn parser_expression_form_error(state: &JetParserState, code: String, span: Span
 // as values and then statements makes a balanced table exponentially costly.
 // Braced control arms still participate in ordinary value parsing.
 fn parser_guard_table_has_statement_arm(state: JetParserState) -> Bool Never! {
-    if parser_current_kind(state) != TOKEN_KW_IF || parser_kind_at(state, 1) != TOKEN_LBRACE -> return false
+    // Unlike cursor queries, this lexical probe must not normalize state.
+    if state.pending_type_gt || state.position < 0 -> return false
+    index := state.position
+    loop index < state.tokens.len() && parser_is_trivia(state.tokens[index].kind) -> index += 1
+    if index >= state.tokens.len() || state.tokens[index].kind != TOKEN_KW_IF -> return false
+    index += 1
+    loop index < state.tokens.len() && parser_is_trivia(state.tokens[index].kind) -> index += 1
+    if index >= state.tokens.len() || state.tokens[index].kind != TOKEN_LBRACE -> return false
+    index += 1
     braces := 1
     parens := 0
     brackets := 0
-    index := state.position + 2
     loop index < state.tokens.len() {
         kind :: state.tokens[index].kind
         if braces == 1 && parens == 0 && brackets == 0 && (kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_LAMBDA_ARROW) {
-            next_kind :: if index + 1 < state.tokens.len() -> state.tokens[index + 1].kind else -> TOKEN_EOF
+            next_index := index + 1
+            loop next_index < state.tokens.len() && parser_is_trivia(state.tokens[next_index].kind) -> next_index += 1
+            next_kind :: if next_index < state.tokens.len() -> state.tokens[next_index].kind else -> TOKEN_EOF
             if next_kind == TOKEN_RETURN || next_kind == TOKEN_BREAK -> return true
         }
         if kind == TOKEN_LBRACE -> braces += 1
