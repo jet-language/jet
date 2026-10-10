@@ -20,7 +20,8 @@ fn kit_ui_directives() -> [KitUIDirective] {
         KitUIDirective{name: "dev_interpreter", argv: ["run", "--interpret", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
         KitUIDirective{name: "complexity_cli", argv: ["lint", "--complexity", "$file", "--max=$max"], parent: false, exit: "any", streams: "both", capability: ""},
         KitUIDirective{name: "repl_deny", argv: ["repl", "--deny=FS"], parent: false, exit: "nonzero", streams: "stderr", capability: ""},
-        KitUIDirective{name: "compiler_extension", argv: [], parent: false, exit: "any", streams: "", capability: ""}
+        KitUIDirective{name: "compiler_extension", argv: [], parent: false, exit: "any", streams: "", capability: ""},
+        KitUIDirective{name: "runtime_ffi", argv: [], parent: false, exit: "any", streams: "", capability: ""}
     }
     loop name in ["lint_policy_config", "env_facet_missing", "workspace_lock_e1202", "jetlib_version_mismatch", "jetlib_effect_refused", "library_invalid_binding", "command_override_conflict", "parent_control_cancel", "ambiguous_call", "generated_source", "no-os", "gate", "build_grants", "build_locked", "sandbox_missing_wasm_tools", "jetpack_hangar_digest_mismatch", "jetpack_e1250", "jetpack_retired_environment_flag", "jetpack_retired_store_verbs", "programmable_build", "plugin_target", "web_target", "target", "cost_cli"] {
         &rows.push(KitUIDirective{name: name, argv: [], parent: false, exit: "any", streams: "", capability: "missing CLI fixture API: {name}"})
@@ -180,13 +181,15 @@ fn kit_ui_fixed(entry: KitEntry, ctx: KitCtx, source: String, overlay: [KitEnvVa
     outcomes := [KitOutcome]{}
     fixed :: "{kit_steps_byte_slice(entry.path, 0, entry.path.count_bytes() - 4)}.fixed.jet"
     if !files.exists(files.join(ctx.root, fixed)) -> return outcomes
-    checked :: kit_exec_invoke_with_env(ctx.env, [ctx.env.jet, "check", fixed], source, ctx.scratch, "", overlay)
+    fixed_env := ctx.env.copy()
+    fixed_env.trace_case = fixed
+    checked :: kit_exec_invoke_with_env(fixed_env, [fixed_env.jet, "check", fixed], source, ctx.scratch, "", overlay)
     verdict :: kit_exec_process_failure(checked) ?? kit_expect_verdict(if checked.code == 0 && kit_expect_diagnostics(checked.stderr) == 0 -> "PASS" else -> "FAIL", "fixed companion must check clean")
     if verdict.status != "PASS" -> return [KitOutcome{verdict: verdict, run: checked, tier: "fixed-check"}]
     loop tier in ctx.options.tiers {
-        args := [String]{ctx.env.jet, if tier == "o0" -> "run" else -> "build", fixed}
+        args := [String]{fixed_env.jet, if tier == "o0" -> "run" else -> "build", fixed}
         if tier == "o2" -> &args.push("--release")
-        built :: kit_exec_invoke_with_env(ctx.env, args, source, ctx.scratch, "", overlay)
+        built :: kit_exec_invoke_with_env(fixed_env, args, source, ctx.scratch, "", overlay)
         failure :: kit_exec_process_failure(built) ?? kit_expect_verdict(if built.code == 0 -> "PASS" else -> "FAIL", "fixed companion build/run exit {built.code}")
         if failure.status != "PASS" || tier == "o0" {
             &outcomes.push(KitOutcome{verdict: failure, run: built, tier: tier})
@@ -197,7 +200,7 @@ fn kit_ui_fixed(entry: KitEntry, ctx: KitCtx, source: String, overlay: [KitEnvVa
             &outcomes.push(KitOutcome{verdict: kit_expect_verdict("ERROR", "fixed companion build did not report artifact"), run: built, tier: tier})
             next
         }
-        ran :: kit_exec_invoke_with_env(ctx.env, [binary], source, ctx.scratch, "", overlay)
+        ran :: kit_exec_invoke_with_env(fixed_env, [binary], source, ctx.scratch, "", overlay)
         &outcomes.push(KitOutcome{verdict: kit_exec_process_failure(ran) ?? kit_expect_verdict(if ran.code == 0 -> "PASS" else -> "FAIL", "fixed companion run exit {ran.code}"), run: ran, tier: tier})
     }
     outcomes
@@ -215,6 +218,14 @@ fn kit_ui_run(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
     if entry.mode.ends_with("project") -> kit_exec_copy_tree(files.join(ctx.root, entry.project), work, true)
     else -> kit_exec_copy_siblings(original, work)
     overlay := [KitEnvVar]{KitEnvVar{name: "JET_SCHEMA_CACHE_DIR", value: None}}
+    if entry.path == "tests/ui/ffi_no_cargo.jet" {
+        // Invoke absolute Jet/trace executables with no Cargo or rustup shims.
+        unavailable :: files.join(ctx.scratch, "no-cargo-path")
+        files.remove_all(unavailable) ?? panic("reset no-Cargo case: {err}")
+        kit_exec_write(files.join(unavailable, ".case"), "ffi_no_cargo\n")
+        &overlay.push(KitEnvVar{name: "PATH", value: Val(unavailable)})
+        &overlay.push(KitEnvVar{name: "JET_FFI_CACHE_DIR", value: Val(unavailable)})
+    }
     if call.extension != "" -> &overlay.push(KitEnvVar{name: "JET_COMPILER_EXTENSION", value: Val(files.join(ctx.root, call.extension))})
     published :: "{kit_steps_byte_slice(original, 0, original.count_bytes() - 4)}.published.snapshot"
     if kit_exec_optional(published) == .Val(snapshot) {

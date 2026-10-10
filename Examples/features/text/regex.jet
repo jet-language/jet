@@ -18,8 +18,8 @@ fn run() {
     print(nums.len())
     m :: re.match(shipment, text)
     if m == .Val(mat) {
-        print(mat.group(0) ?? panic("whole match"))
-        print(mat.group(1) ?? panic("first capture"))
+        print(mat.text)
+        print(mat.groups[0])
     }
     print(re.replace(digits, text, "#"))
     print(re.replace(single_a, "a-a-a", "x"))
@@ -34,10 +34,10 @@ fn run() {
     print(re.matches(rx, "Ada lovelace").len())
     first_word :: re.match(rx, "Ada lovelace")
     if first_word == .Val(mat) {
-        print(mat.group(1) ?? panic("word capture"))
-        print(mat.start())
-        print(mat.end())
-        print(mat.group(2) == None)
+        print(mat.groups[0])
+        print(mat.start)
+        print(mat.end)
+        print(mat.groups.len() < 2)
     }
     word :: re.compile("\\w+") ?? panic("words")
     print(re.replace(word, "a b", "hit"))
@@ -45,9 +45,9 @@ fn run() {
     print(re.expand(pair, "$2 $1"))
     sep :: re.compile(",\\s*") ?? panic("separator")
     print(re.split_limit(sep, "a, b, c", 2)[1])
-    print(rx.source())
+    print(rx.pattern)
     print(re.join(rx))
-    print(rx.flags())
+    print(rx.flags)
     print(re.matches(rx, "Ada lovelace").len())
     print(re.escape("a+b?"))
     print(re.replace(empty, "aé", "x"))

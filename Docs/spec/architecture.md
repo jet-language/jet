@@ -444,6 +444,20 @@ native carrier, or retired helper; source receiver impls may still extend native
 nominals. Generated Core tables preserve that distinction rather than inventing
 source shadows for compiler-provided operations.
 
+Source-owned Core value hooks are also checked capability providers. MIR resolves
+each private hook by the exact nominal identity and read-access method, never a
+short name. Native emission selects those manual Clone/Debug implementations
+before considering structural derives; enclosing rows inherit their real
+capabilities without treating private Shared or opaque state as Debug-capable.
+For example, Clock's `__fork` preserves semantic-copy isolation and `__show`
+preserves its nominal rendering. Show and Debug routes are independent; a
+Show-only hook does not grant Debug, and native bridges do not introduce public
+Jet trait implementations. A missing or ambiguous hook remains a schema failure,
+not a reason to fall back to a structural derive.
+Executable reachability roots these exact registered private methods and retains
+their ordinary checked callee closure. It does not rely on an explicit formatting
+or aggregate-copy call in the user's AST, nor retain unrelated Core free functions.
+
 The Jet Driver carries each installed Core row's runtime classification into
 its parse job. Runtime dependencies retain all functions but omit their test
 controls; only an entry with the installed unit's exact path and bytes keeps
@@ -998,6 +1012,38 @@ host proc-macro directory. Inline `#FFI(c|cpp|asm)` bodies use the same bridge
 and include their checked signature, target, raw body, and schema in the cache
 identity. C/C++ wrappers and asm lower only after sema proves their boundary
 contracts.
+
+The Nix shell keeps ordinary Jet compilation and hosted runtime Rust on the
+existing nixpkgs compiler. Native user-Rust helpers have a separate pinned
+upstream sysroot including `x86_64-unknown-linux-musl`, exposed only through
+`JET_RUST_MUSL_TOOLCHAIN`, `JET_RUST_MUSL_LINKER`, and `JET_RUST_MUSL_AR`.
+These opt-in paths do not change `PATH`, `RUSTC`, or the default Cargo target;
+only a declared user-Rust helper build selects them. A native helper is a musl
+`staticlib`, with its explicit artifact mode included in the content key, never
+a GNU Rust archive mixed into Jet's static-musl executable.
+
+The Jet Driver retains the checked user-Rust declarations in source order.
+Its pure planner emits the manifest, safe wrappers, descriptor slot adapters,
+and ordered length-delimited bridge key; the CLI realizes that helper before
+native lowering and attaches its exact static archive to the checked MIR link
+unit without rewriting the foreign symbol. The 24-byte slot ABI, caught-panic
+markers, UTF-8 String lengths, and returned-buffer free operation match the
+hosted bridge. Direct C scalar lowering remains a separate unchanged path.
+Cargo metadata and the helper build run under the mandatory Linux native
+sandbox, never an unsandboxed fallback. Input manifests/source, descriptor,
+toolchain, target, artifact mode, native tools/link inputs, artifact digest,
+and provenance govern cache reuse. A per-key OS lock outside the key directory
+and a shared-output publication lock retain one helper build under concurrency.
+`run` and `build` share this realization and its `E0703`/`E0704`/`E0705` errors;
+programs without Rust declarations perform no helper or toolchain probes.
+
+Manifest-less `use package#version` admission reuses the package model's local,
+offline inline-dependency resolver: `.jet/inline-deps` is authoritative, with
+the explicit fixture root as a fallback only when the package is absent.
+The CLI snapshots the selected no-follow authority root; the Driver binds its
+recorded name, selector, selected version, and content digest into the source
+and package receipts. Loose selectors retain `L0203`, unresolved dependencies
+retain `E1253`, and neither resolution path invokes Cargo or rustc.
 
 Checked `#Layout(c)` records preserve native address-sized raw pointer fields
 in their generated `repr(C)` definitions. A `Ptr<T>` field lowers to
@@ -1704,6 +1750,19 @@ probes do not inherit that exception. Jet program compilation/linking/running
 never gets a Rust
 exception. Receipts distinguish zero-Rust cases, observed user-FFI builds and
 violations; performance peers remain separate product comparisons.
+
+UI `.fixed.jet` companions carry their own case marker and exact allowlist row,
+not the negative fixture's identity. A source-declared `extern rust "std"`
+uses the generated Cargo staticlib helper with an empty dependency set; it is
+not a zero-Rust case. Empty sets are admitted only for actual extern-Rust source.
+The missing-Cargo fixture always runs with a case-local PATH containing no
+Cargo or rustup shim and a cleared case-private foreign cache. Installed tools
+or a warmed helper cannot turn its E0703 contract into a skipped observation.
+
+Pending user-Rust interoperability acceptance rows use `PRODUCT INTEROP RED:`
+in the existing case-disposition table. They remain in the active testkit corpus
+and block registry closure; they are not Rust implementation retirements.
+Remove their pending rows only after the native acceptance verdicts pass.
 Retired Rust oracle/witness modes report nonzero `UNCOVERED` with
 `cardRequired=true`; native witnesses remain mandatory. Rust performance peers
 and historical fixture provenance are not Jet implementation dependencies.

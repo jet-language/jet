@@ -46,15 +46,18 @@ export function readUserRustAllowlist(text, root) {
         const name = caseName(fields[0], root);
         if (result.has(name)) throw Error(`duplicate user Rust case: ${name}`);
         const declared = dependencies(JSON.parse(fields[2]));
-        if (!Object.keys(declared).length) throw Error(`empty user Rust declaration: ${name}`);
         const source = sourceWithoutComments(readFileSync(resolve(root, name), 'utf8'));
+        let hasExternRust = false;
         const observed = {};
         for (const match of source.matchAll(/\bextern\s+rust\s+"([^"\n]*)"/g)) {
+            hasExternRust = true;
+            if (match[1] === 'std') continue;
             const declaration = /^([A-Za-z][A-Za-z0-9_-]*)@([^@\s]+)$/.exec(match[1]);
             if (!declaration) throw Error(`noncanonical extern rust declaration: ${name}`);
             if (Object.hasOwn(observed, declaration[1]) && observed[declaration[1]] !== declaration[2]) throw Error(`conflicting extern rust declaration: ${name}`);
             observed[declaration[1]] = declaration[2];
         }
+        if (!hasExternRust) throw Error(`no extern rust declaration: ${name}`);
         if (!equalDependencies(observed, declared)) throw Error(`extern rust declarations differ from allowlist: ${name}`);
         result.set(name, declared);
     }

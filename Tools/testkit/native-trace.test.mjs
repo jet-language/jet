@@ -62,6 +62,35 @@ test('allowlist validates canonical source declarations and exact reason/depende
     assert.throws(() => readUserRustAllowlist(f.allowlistText, f.root));
 });
 
+test('std-only fixed companions require their own marker and empty-dependency helper', t => {
+    const f = fixture(t), companion = 'tests/ui/ffi_bad_type.fixed.jet';
+    const source = 'extern rust "std" { fn identity(s: String) -> String = "std::convert::identity" }\n';
+    f.put(join(f.root, f.name), source);
+    f.put(join(f.root, companion), source);
+    const allowlistText = `${companion}\t${reason}\t{}\n`;
+    assert.deepEqual(readUserRustAllowlist(allowlistText, f.root).get(companion), {});
+    assert.throws(() => readUserRustAllowlist(`${f.zero}\t${reason}\t{}\n`, f.root));
+    f.put(join(f.root, companion), `${source}extern rust "base64@0.22" {}\n`);
+    assert.throws(() => readUserRustAllowlist(allowlistText, f.root));
+    assert.deepEqual(readUserRustAllowlist(`${companion}\t${reason}\t{"base64":"0.22"}\n`, f.root).get(companion), declared);
+    f.put(join(f.root, companion), source);
+    const cache = ffiCaseCachePath(f.cacheRoot, companion, {});
+    const contents = f.contents.replace('base64 = "0.22"\n', '');
+    const manifest = f.put(join(cache, 'helper/Cargo.toml'), contents);
+    f.put(join(dirname(manifest), 'src/lib.rs'), '// synthetic bytes; never compiled\n');
+    const branch = marker => [
+        f.mark(10, marker),
+        exec(10, f.jet, [f.jet, 'run', join(f.root, companion)]),
+        fork(10, 20), f.cargo(20, manifest), fork(20, 30), f.rustc(),
+    ];
+    const receipt = f.audit(branch(companion), { allowlistText });
+    pass(receipt);
+    assert.deepEqual(receipt.allowedFfiBuilds[0].dependencies, {});
+    fail(f.audit(branch(f.name), { allowlistText }));
+    f.put(manifest, f.contents);
+    fail(f.audit(branch(companion), { allowlistText }));
+});
+
 test('cache hash includes the canonical case and sorted dependency entries', t => {
     const f = fixture(t), deps = { zed: '2', alpha: '1' };
     const digest = createHash('sha256').update(`${f.name}\n${JSON.stringify([['alpha', '1'], ['zed', '2']])}`).digest('hex');

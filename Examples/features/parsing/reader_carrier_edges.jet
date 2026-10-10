@@ -10,30 +10,30 @@ fn run() {
 
     empty :: Reader.over([U8]{})
     if empty.read_u8() == {
-        Err(error) -> print(error)
-        Ok(_) -> panic("empty read succeeded")
+        .Err(error) -> print(error)
+        .Ok(_) -> panic("empty read succeeded")
     }
     if empty.seek(-1) == {
-        Err(error) -> print(error)
-        Ok(_) -> panic("negative seek succeeded")
+        .Err(error) -> print(error)
+        .Ok(_) -> panic("negative seek succeeded")
     }
     if empty.seek(1) == {
-        Err(error) -> print(error)
-        Ok(_) -> panic("past-end seek succeeded")
+        .Err(error) -> print(error)
+        .Ok(_) -> panic("past-end seek succeeded")
     }
     if empty.skip(-1) == {
-        Err(error) -> print(error)
-        Ok(_) -> panic("negative skip succeeded")
+        .Err(error) -> print(error)
+        .Ok(_) -> panic("negative skip succeeded")
     }
     if empty.take(-1) == {
-        Err(error) -> print(error)
-        Ok(_) -> panic("negative take succeeded")
+        .Err(error) -> print(error)
+        .Ok(_) -> panic("negative take succeeded")
     }
     print("empty={empty.remaining()}/{empty.is_at_end()}")
     cursor :: Cursor.over("abc")
     if cursor.take_until("\n") == {
-        Err(error) -> print(error)
-        Ok(_) -> panic("missing delimiter matched")
+        .Err(error) -> print(error)
+        .Ok(_) -> panic("missing delimiter matched")
     }
     preserved :: cursor.take_pattern("{raw:String}") ?? panic("delimiter miss consumed cursor")
     print(preserved.raw)

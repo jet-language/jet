@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // An exec-only case marker for the single outer native-suite strace. Replacing
 // this process preserves the command PID, process group, stdio and exit status.
-import { accessSync, constants, mkdirSync, readFileSync, realpathSync } from 'node:fs';
+import { accessSync, constants, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { delimiter, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { ffiCaseCachePath, readUserRustAllowlist } from './native-trace.mjs';
 
@@ -26,6 +26,8 @@ const dependencies = declarations.get(options.get('--case'));
 const env = { ...process.env };
 if (dependencies) {
     env.JET_FFI_CACHE_DIR = ffiCaseCachePath(canonicalCache, options.get('--case'), dependencies);
+    // This availability-negative must not reuse a previously generated helper.
+    if (options.get('--case') === 'tests/ui/ffi_no_cargo.jet') rmSync(env.JET_FFI_CACHE_DIR, { recursive: true, force: true });
     mkdirSync(env.JET_FFI_CACHE_DIR, { recursive: true });
 }
 process.chdir(cwd);

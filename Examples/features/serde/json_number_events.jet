@@ -13,7 +13,7 @@ use core.files as files
 
 fn reject_json(path: Path, canonical: Bool, text: String) (EncodingError | IOError)! {
     output :: files.create(path)
-    writer :: json.writer(^output, canonical: canonical)
+    writer := json.writer(^output, canonical: canonical)
     if &writer.write(encoding.DataEvent.Number(text)) == {
         .Ok(_) -> panic("JSON writer accepted Number")
         .Err(first) -> {
@@ -29,7 +29,7 @@ fn reject_json(path: Path, canonical: Bool, text: String) (EncodingError | IOErr
 
 fn reject_cbor(path: Path, text: String) (EncodingError | IOError)! {
     output :: files.create(path)
-    writer :: cbor.writer(^output)
+    writer := cbor.writer(^output)
     if &writer.write(encoding.DataEvent.Number(text)) == {
         .Ok(_) -> panic("CBOR writer accepted Number")
         .Err(error) -> {
@@ -54,9 +54,9 @@ fn run() (DataError | EncodingError | IOError)! {
     loop text in ([String]{"abc", "123"}) {
         loop canonical in ([Bool]{false, true}) {
             reject_json(path, canonical, text)
-            print((files.read(path)).count_bytes())
+            print((files.read(path.to_string())).count_bytes())
         }
         reject_cbor(path, text)
-        print((files.read_bytes(path)).len())
+        print((files.read_bytes(path.to_string())).len())
     }
 }
