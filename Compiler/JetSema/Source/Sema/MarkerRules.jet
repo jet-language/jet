@@ -1391,12 +1391,6 @@ fn sema_marker_rules_validate_vocabulary(registry: SemaScopeMembersMarkerRegistr
         if sema_marker_rules_is_guest_marker(marker, site) {
             next
         }
-        // Rust CheckerMarkers.rs: a field `#Default(expr)` reports its own
-        // retirement code instead of the generic retired-rule error.
-        if marker.name == "Default" && site == .Val(RuleSite.Field) {
-            &diagnostics.push(sema_error("E0375", marker.span, "`#Default` on a field is retired.", "Field absence and construction defaults ride the field's type as `field: T{{expr}}` (D-DEFAULT-SHAPE1=B).", "Write `field: T{{expr}}` instead of `#Default(expr)`."))
-            next
-        }
         if marker.name == "Align" {
             &diagnostics.push(diagnostic_from_registry("E1118", Val(marker.span), "`#Align(…)` is not a supported layout marker.", "D-PLACE1=A puts alignment in the registered `#Layout(c, align(N))` rule so the layout kind and alignment remain one declaration fact.", "Replace `#Align(64)` with `#Layout(c, align(64))` on the struct declaration."))
             next
