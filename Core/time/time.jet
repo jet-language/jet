@@ -88,7 +88,7 @@ impl Clock {
         Clock{state: shared __ClockState.Manual(seed)}
     }
     fn system() -[Time]> Clock Never! {
-        Clock{state: shared __ClockState.System.{started_ns: core.time.__clock_mono_ns(), offset_ms: 0}}
+        Clock{state: shared __ClockState.System{started_ns: core.time.__clock_mono_ns(), offset_ms: 0}}
     }
     fn now(self) -> Int Never! {
         guard :: self.state.guard_read()
@@ -102,7 +102,7 @@ impl Clock {
                 current :: clock_state_now(guard.value)
                 started :: core.time.__clock_mono_ns()
                 offset :: if value > current -> value else -> current
-                guard.value = __ClockState.System.{started_ns: started, offset_ms: offset}
+                guard.value = __ClockState.System{started_ns: started, offset_ms: offset}
             }
         }
     }
@@ -132,7 +132,7 @@ impl Clock {
             .System(_, _) -> {
                 started :: core.time.__clock_mono_ns()
                 offset :: clock_state_now(guard.value)
-                Clock{state: shared __ClockState.System.{started_ns: started, offset_ms: offset}}
+                Clock{state: shared __ClockState.System{started_ns: started, offset_ms: offset}}
             }
         }
     }

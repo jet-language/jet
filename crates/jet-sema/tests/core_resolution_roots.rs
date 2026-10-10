@@ -80,7 +80,7 @@ fn imported_signatures_and_fields_resolve_in_the_declarers_import_scope() {
 fn sealed_part_grouped_import_does_not_require_its_reserved_module_alias() {
     let part = jet_foundation::CoreSourceParts::core_private_source_part_by_alias("__core_files_path_components").unwrap();
     let errors = check_sources(&[
-        (&format!("<corelib>/{}", part.source.path), part.source.alias, "enum PathPlatform { Posix, Windows }\n", &[]),
+        (&format!("<corelib>/{}", part.source.path), part.source.alias, "enum PathPlatform { Posix Windows }\n", &[]),
         ("<corelib>/Core/sys/sys.jet", "core_core_sys", "use __core_files_path_components as host_path\nuse __core_files_path_components.[PathPlatform]\nfn platform(value: PathPlatform) -> PathPlatform Never! { value.copy() }\n", &[]),
         ("pkg/main.jet", "main", "fn run() {}\n", &[]),
     ]);
@@ -149,30 +149,31 @@ fn run() {}
 }
 
 #[test]
-fn csv_internal_report_is_handled_without_public_error_domain_validation() {
+fn csv_public_reader_report_is_handled_in_value_and_statement_matches() {
     let source = r#"
-use core.encoding as encoding
+use core.encoding.csv as csv
+use core.encoding.csv.[CSVReader]
+use core.encoding.[EncodingError, EncodingLimits]
 use core.files.[FileReader]
-#Error enum StreamError { IO(String) }
-fn byte(input: &FileReader) -> U8? StreamError! {
-    byte :: if encoding.__read_byte(&input) == {
-        .Ok(value) -> value
-        .Err(cause) -> { return Err(StreamError.IO(cause.message)) }
+fn reader(input: ^FileReader, limits: EncodingLimits) -[FS]> CSVReader? EncodingError! {
+    row :: if csv.reader(^input, limits, ",", false, false) == {
+        .Ok(value) -> Val(^value)
+        .Err(cause) -> { return Err(cause.copy()) }
     }
-    byte
+    row
 }
-fn statement_byte(input: &FileReader) -> U8? StreamError! {
-    byte := U8?{None}
-    if encoding.__read_byte(&input) == {
-        .Ok(value) -> { byte = value }
-        .Err(cause) -> { return Err(StreamError.IO(cause.message)) }
+fn statement_reader(input: ^FileReader, limits: EncodingLimits) -[FS]> CSVReader? EncodingError! {
+    row := CSVReader?{None}
+    if csv.reader(^input, limits, ",", false, false) == {
+        .Ok(value) -> { row = Val(^value) }
+        .Err(cause) -> { return Err(cause.copy()) }
     }
-    byte
+    row
 }
+fn run() {}
 "#;
     let errors = check_sources(&[
-        ("<corelib>/Core/encoding/csv.jet", "core_csv", source, &[]),
-        ("pkg/main.jet", "main", "fn run() {}\n", &[]),
+        ("pkg/main.jet", "main", source, &[]),
     ]);
     assert!(errors.is_empty(), "{errors:?}");
 }
@@ -278,7 +279,7 @@ fn retained_core_arguments_accept_fresh_values_but_not_unmarked_places() {
 #[test]
 fn private_xml_alias_keeps_the_engine_enum_owner() {
     let errors = check_sources(&[
-        ("<corelib>/Core/encoding/xml_engine.jet", "__core_encoding_xml_engine", "enum EntityPolicy { Preserve, Expand }\nenum RenderEncoding { UTF8, UTF16 }\n", &[]),
+        ("<corelib>/Core/encoding/xml_engine.jet", "__core_encoding_xml_engine", "enum EntityPolicy { Preserve Expand }\nenum RenderEncoding { UTF8 UTF16 }\n", &[]),
         ("<corelib>/Core/encoding/xml.jet", "core_xml", "struct XMLReader {}\n", &[]),
         ("<corelib>/Core/encoding/xml_kernel.jet", "__core_encoding_xml_kernel", "use __core_encoding_xml_engine as xml\nfn policy() -> xml.EntityPolicy Never! { xml.EntityPolicy.Preserve }\nfn encoding() -> xml.RenderEncoding Never! { xml.RenderEncoding.UTF8 }\n", &[]),
         ("pkg/main.jet", "main", "fn run() {}\n", &[]),
@@ -302,7 +303,7 @@ fn same_named_source_records_keep_their_declared_fields_and_nominal_owner() {
         ("pkg/second.jet", "second", "struct Limits { value: Int }\n", &[]),
         ("pkg/main.jet", "main", "use first as first\nuse second as second\nfn mismatch(value: first.Limits) -> second.Limits Never! { value.copy() }\nfn run() {}\n", &[("first", 0), ("second", 1)]),
     ]);
-    assert!(errors.iter().any(|error| error.starts_with("E0201:")), "{errors:?}");
+    assert!(errors.iter().any(|error| error.starts_with("E0113:")), "{errors:?}");
 }
 
 #[test]
@@ -325,7 +326,7 @@ fn temporary_list_and_call_ranges_are_owned_not_place_views() {
     for value in ["[U8]{1, 2}[0..<1]", "bytes()[0..<1]"] {
         let source = format!("{source}\nfn temporary() Never! {{ need({value}) }}\n");
         let errors = check_sources(&[("pkg/main.jet", "main", &source, &[])]);
-        assert!(errors.iter().any(|error| error.starts_with("E0201:")), "{errors:?}");
+        assert!(errors.iter().any(|error| error.starts_with("E0112:")), "{errors:?}");
     }
 }
 
@@ -398,4 +399,20 @@ fn private_crypto_preallocation_admits_only_exact_reserve() {
         ]);
         assert!(errors.iter().any(|error| error.starts_with("E0510:")), "{errors:?}");
     }
+}
+
+#[test]
+fn clock_labeled_state_constructs_and_updates_inside_shared_values() {
+    let source = r#"
+enum ClockState { System(started_ns: Int, offset_ms: Int) }
+struct ClockStateOwner { state: Shared<ClockState> }
+fn make() -> ClockStateOwner Never! {
+    state := ClockState.System{started_ns: 1, offset_ms: 0}
+    state = ClockState.System{started_ns: 2, offset_ms: 1}
+    ClockStateOwner{state: shared state}
+}
+fn run() {}
+"#;
+    let errors = check_sources(&[("pkg/main.jet", "main", source, &[])]);
+    assert!(errors.is_empty(), "{errors:?}");
 }
