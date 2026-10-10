@@ -29,8 +29,11 @@ fn jet_cli_comparison_error(message: String) -> JetCLIComparisonError Never! {
     JetCLIComparisonError{message: message}
 }
 
+// Dyn.Object exposes ordered entry tuples, not a String-keyed Map.
 fn jet_cli_comparison_value(value: Dyn, key: String) -> Dyn? Never! {
-    if value == .Object(fields) -> return fields.get(key)
+    if value == Dyn.Object(fields) {
+        loop field in fields { if field.key == key -> return Val(field.value) }
+    }
     None
 }
 
@@ -72,17 +75,17 @@ fn jet_cli_comparison_strings(value: Dyn, key: String) -> [String] JetCLICompari
 fn jet_cli_comparison_binding(root: Dyn) -> JetCLIComparisonBinding JetCLIComparisonError! {
     retired :: [String]{"foreign", "foreign-binding", "boundary_digest", "boundary-digest", "boundary", "source_identity", "source-identity", "replacement_identity", "replacement-identity", "tool_identity", "tool-identity", "target_identity", "target-identity", "coverage_digest", "coverage-digest", "coverage", "assumptions"}
     loop key in retired {
-        if jet_cli_comparison_value(root, key) != None {
+        if jet_cli_comparison_value(root, key) == .Val(_) {
             return Err(jet_cli_comparison_error("foreign binding field `{key}` must be nested under `foreign_binding`"))
         }
     }
     binding :: jet_cli_comparison_value(root, "foreign_binding") ?? return Err(jet_cli_comparison_error("`foreign_binding` requires boundary_digest, source_identity, replacement_identity, tool_identity, target_identity, and coverage_digest"))
-    if binding != .Object(_) {
+    if binding == Dyn.Object(_) {} else {
         return Err(jet_cli_comparison_error("`foreign_binding` must be an object"))
     }
     aliases :: [String]{"foreign", "foreign-binding", "foreign_binding", "boundary-digest", "boundary", "source-identity", "source", "replacement-identity", "replacement", "tool-identity", "tool", "target-identity", "target", "coverage-digest", "coverage"}
     loop key in aliases {
-        if jet_cli_comparison_value(binding, key) != None {
+        if jet_cli_comparison_value(binding, key) == .Val(_) {
             return Err(jet_cli_comparison_error("foreign binding field `{key}` is not a canonical snake_case field"))
         }
     }
@@ -128,14 +131,17 @@ fn jet_cli_comparison_binding(root: Dyn) -> JetCLIComparisonBinding JetCLICompar
 }
 
 // CmdTest.rs::canonical_dyn keeps object insertion order.
+// Keep the public Number/DateTime carriers in the Rust canonical observation.
 fn jet_cli_comparison_canonical_data(value: Dyn) -> String Never! {
     if value == {
         .Null -> "null"
         .Bool(flag) -> if flag -> "true" else -> "false"
         .Int(number) -> "{number}"
         .Float(number) -> "{number}"
+        .Number(number) -> number.copy()
         .Text(text) -> foundation_json_quote(text)
         .Bytes(bytes) -> "bytes:{bytes.len()}"
+        .DateTime(datetime) -> foundation_json_quote(datetime.format_rfc3339())
         .Array(values) -> {
             items :: loop child in values -> jet_cli_comparison_canonical_data(child)
             "[{items.join(",")}]"
@@ -159,8 +165,8 @@ fn jet_cli_comparison_observation(value: Dyn, prefix: String, relation: Observat
 }
 
 fn jet_cli_comparison_seed(value: Dyn, inherited: U64?) -> U64? Never! {
-    number :: jet_cli_comparison_int(value, "seed") ?? return inherited
-    if number < 0 -> return inherited
+    number :: jet_cli_comparison_int(value, "seed") ?? return inherited.copy()
+    if number < 0 -> return inherited.copy()
     Val(U64{number})
 }
 
@@ -172,10 +178,10 @@ fn jet_cli_comparison_sample(value: Dyn, index: Int, seed: U64?, source: String,
     candidate :: jet_cli_comparison_observation(value, "candidate", relation)
     reference_replay := ComparisonObservation?{None}
     candidate_replay := ComparisonObservation?{None}
-    if jet_cli_comparison_value(value, "reference_replay") != None {
+    if jet_cli_comparison_value(value, "reference_replay") == .Val(_) {
         reference_replay = Val(jet_cli_comparison_observation(value, "reference_replay", relation))
     }
-    if jet_cli_comparison_value(value, "candidate_replay") != None {
+    if jet_cli_comparison_value(value, "candidate_replay") == .Val(_) {
         candidate_replay = Val(jet_cli_comparison_observation(value, "candidate_replay", relation))
     }
     if (reference_replay != None) != (candidate_replay != None) {
@@ -200,7 +206,7 @@ fn jet_cli_comparison_terminal(value: String) -> ComparisonStatus? Never! {
 fn jet_cli_comparison_parse(input: String, relation_override: String?) -> JetCLIComparisonRun JetCLIComparisonError! {
     root :: foundation_parse_protocol_json(input) ?? return Err(jet_cli_comparison_error("record is not valid JSON"))
     binding :: jet_cli_comparison_binding(root)
-    if root != .Object(_) -> return Err(jet_cli_comparison_error("record root must be an object"))
+    if root == Dyn.Object(_) {} else { return Err(jet_cli_comparison_error("record root must be an object")) }
     relation_name :: relation_override ?? jet_cli_comparison_text(root, "relation") ?? "typed_equality"
     relation :: if relation_name == {
         "typed_equality" -> ObservationRelation.TypedEquality
