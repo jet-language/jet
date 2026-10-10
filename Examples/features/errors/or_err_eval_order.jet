@@ -19,7 +19,9 @@ fn borrowed(value: &String?) -> String Err! {
 }
 
 fn propagate(value: String?) -> String Err! {
-    payload :: value.or_err("propagated absence")?
+    payload :: value.or_err("propagated absence") ?? {
+        return err
+    }
     return Ok(payload)
 }
 
