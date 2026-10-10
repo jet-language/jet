@@ -1587,6 +1587,16 @@ fn parser_literal_head_path(expr: Expr) -> String Never! {
     }
 }
 
+// Rust `is_adjacent_call_result`: a call result (through parentheses) that a
+// following `(` would invoke with the retired adjacent-call spelling.
+fn parser_is_adjacent_call_result(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Paren(inner, _) -> parser_is_adjacent_call_result(inner)
+        .Call(_) | .CallValue(_, _, _) | .MethodCall(_, _, _, _, _, _, _, _, _, _, _) -> true
+        else -> false
+    }
+}
+
 fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int, allow_struct_lit: Bool) -> ParsedExpr {
     expression := initial
     // Rust `expr_primary`: a capitalized name's own `<…>` (`Pool<T>.new()`)
@@ -1616,6 +1626,13 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
             break
         }
         if kind == TOKEN_LPAREN {
+            // D-CALLVALUE1=B (E-CALL-VALUE): a returned call result is
+            // invoked with `.call(…)`, never `f()(…)`.
+            if parser_is_adjacent_call_result(expression.expr) {
+                open :: parser_current(&state).span
+                parser_add_fatal_code_structured_edit(&state, "E-CALL-VALUE", open, "a function value is invoked with the retired adjacent-call spelling", "named functions and direct field, index, or lambda calls keep their spelling; a returned call result uses `.call(…)` so the value and invocation stay explicit (D-CALLVALUE1=B)", "write `callee.call(…)`", TextEdit{span: Span{start: open.start, end: open.start}, new_text: ".call"})
+                break
+            }
             method_name :: if expression.expr == {
                 .Field(_, method, _) -> method
                 else -> ""

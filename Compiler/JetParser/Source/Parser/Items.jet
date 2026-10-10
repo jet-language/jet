@@ -313,7 +313,7 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
         }
         token.kind == TOKEN_KW_EXTERN -> return ParsedItemOrImport{item: Val(parser_parse_extern_rust(&state)), import: None, handled: true}
         token.kind == TOKEN_KW_DERIVE -> {
-            value :: parser_parse_user_derive(&state)
+            value :: parser_parse_user_derive(&state) ?? return ParsedItemOrImport{item: None, import: None, handled: true}
             return ParsedItemOrImport{item: Val(Item.UserDerive{value: value}), import: None, handled: true}
         }
         token.kind == TOKEN_IDENT && parser_value(state, token) == "alias" -> {
@@ -2531,9 +2531,18 @@ fn parser_parse_tag_decl(state: &JetParserState, modifiers: ParsedItemModifiers)
     TagDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, deny: deny, from: from, span: parser_cover(start.span, end)}
 }
 
-fn parser_parse_user_derive(state: &JetParserState) -> DeriveDef {
+// D-METADERIVE1=A: `derive T.Trait { … }`. The retired `derive Trait for T`
+// spelling teaches the dot form (E2714) and yields no item.
+fn parser_parse_user_derive(state: &JetParserState) -> DeriveDef? {
     start :: parser_bump(&state)
     type_name :: parser_expect_name(&state, "after `derive`")
+    old_for :: parser_current(&state)
+    if old_for.kind == TOKEN_IDENT && parser_value(state, old_for) == "for" {
+        // Old spelling `derive Trait for T`: the first name was the trait.
+        written :: parser_value(state, type_name)
+        parser_add_fatal_code(&state, "E2714", type_name.span, "a user derive is written `derive T.{written}`", "the type parameter comes first, joined to the trait name with a dot; `derive Trait for T` was retired", "write `derive T.{written} {{ … }}`")
+        return None
+    }
     parser_expect(&state, TOKEN_DOT, "`.` between a type and derive trait")
     trait_token :: parser_expect_name(&state, "after `.` in a derive declaration")
     parser_expect(&state, TOKEN_LBRACE, "`{{` before derive methods")
@@ -2558,5 +2567,5 @@ fn parser_parse_user_derive(state: &JetParserState) -> DeriveDef {
     }
     state.derive_template_depth -= 1
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after derive methods")
-    DeriveDef{trait_name: parser_value(state, trait_token), trait_span: trait_token.span, type_param: parser_value(state, type_name), body: body, span: parser_cover(start.span, close.span)}
+    Val(DeriveDef{trait_name: parser_value(state, trait_token), trait_span: trait_token.span, type_param: parser_value(state, type_name), body: body, span: parser_cover(start.span, close.span)})
 }
