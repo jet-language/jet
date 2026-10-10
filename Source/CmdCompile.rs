@@ -3736,42 +3736,6 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             invocation_authority,
         );
     }
-    // D-EFFBUDGET1's summary is a projection of the checked program, so project
-    // it from the front end above rather than running a third one for it. Taken
-    // before the compile consumes the bundle; printed in its original place.
-    //
-    // `emitted_program`, not `runtime_program`: when a `fn build` is selected
-    // the emitted program is the planned bundle (with generated modules), and
-    // the historic check-only pass ran after the build, so only a build that
-    // never planned may reuse this bundle and still print the same summary.
-    let reused_package_effects = build_front_end.as_ref().and_then(|prepared| {
-        let program = prepared.emitted_program()?;
-        let facts = prepared.effect_facts();
-        let (projection, delegations) = native_effect_projection(
-            program,
-            &facts.summaries,
-            entry_fn,
-            package_manifest.as_ref().map(|(_, manifest)| manifest),
-        );
-        Some((
-            jet::EffectBudget::compute_package_effects(program, &facts.solved, &facts.summaries),
-            facts.fact_registry.clone(),
-            jet::EffectBudget::summary_line_for_program_with_authority(
-                program,
-                &facts.summaries,
-                entry_fn.unwrap_or("run"),
-                package_manifest.as_ref().map(|(_, manifest)| manifest),
-            ),
-            jet::EffectBudget::summary_json_for_program_with_authority(
-                program,
-                &facts.summaries,
-                entry_fn.unwrap_or("run"),
-                package_manifest.as_ref().map(|(_, manifest)| manifest),
-            ),
-            projection,
-            delegations,
-        ))
-    });
     // S59: same story for the C link flags — resolve them from the one loaded
     // program instead of reopening and re-parsing it. E3201 still surfaces from
     // its original place, after the compile succeeds.
@@ -3824,6 +3788,8 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     let mut visible_lints: Vec<jet::Diagnostics::Diagnostic> = Vec::new();
     let execution_lints: Vec<jet::Diagnostics::Diagnostic>;
     let mut checked_runtime: Option<jet::Driver::CheckedSourceBundle> = None;
+    // Rust emission only needs the transferred graph/facts, not another source snapshot.
+    let mut retained_effect_source = None;
     let mut programmable_build_target: Option<String> = None;
     progress.major("Generating", "native code");
 
@@ -3946,7 +3912,11 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         ) {
             Ok(mut output) => {
                 programmable_build_target = programmable_build_target_name(&output);
-                checked_runtime = if !emit_rust { output.take_checked_runtime() } else { None };
+                if emit_rust {
+                    retained_effect_source = output.runtime.take().zip(output.runtime_effect_facts.take());
+                } else {
+                    checked_runtime = output.take_checked_runtime();
+                }
                 Ok(output.compile)
             }
             Err(diags) => Err(diags),
@@ -3975,7 +3945,11 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         ) {
             Ok(mut output) => {
                 programmable_build_target = programmable_build_target_name(&output);
-                checked_runtime = if !emit_rust { output.take_checked_runtime() } else { None };
+                if emit_rust {
+                    retained_effect_source = output.runtime.take().zip(output.runtime_effect_facts.take());
+                } else {
+                    checked_runtime = output.take_checked_runtime();
+                }
                 Ok(output.compile)
             }
             Err(diags) => Err(diags),
@@ -4004,7 +3978,11 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         ) {
             Ok(mut output) => {
                 programmable_build_target = programmable_build_target_name(&output);
-                checked_runtime = if !emit_rust { output.take_checked_runtime() } else { None };
+                if emit_rust {
+                    retained_effect_source = output.runtime.take().zip(output.runtime_effect_facts.take());
+                } else {
+                    checked_runtime = output.take_checked_runtime();
+                }
                 Ok(output.compile)
             }
             Err(diags) => Err(diags),
@@ -4145,9 +4123,44 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     // build Receipt so a replay prints the one this terminal asks for.
     let mut recorded_effects: Option<(String, String)> = None;
     if cmd == "build" || cmd == "run" {
-        // #2083: reuse the fixpoint the build front end already solved. Only
-        // the paths that never ran it — a plain `jet run`, a library or named
-        // output, a package build entry — still pay a check-only pass here.
+        // #2083: project only after compilation transfers the checked graph.
+        // Witness sources borrow that graph through authority enforcement.
+        let effect_source = checked_runtime
+            .as_ref()
+            .map(|checked| (&checked.bundle, &checked.effect_facts))
+            .or_else(|| retained_effect_source.as_ref().map(|(bundle, facts)| (bundle, facts)))
+            .or_else(|| {
+                build_front_end.as_ref().and_then(|prepared| {
+                    Some((prepared.emitted_program()?, prepared.effect_facts()))
+                })
+            });
+        let reused_package_effects = effect_source.map(|(program, facts)| {
+            let (projection, delegations) = native_effect_projection(
+                program,
+                &facts.summaries,
+                entry_fn,
+                package_manifest.as_ref().map(|(_, manifest)| manifest),
+            );
+            (
+                jet::EffectBudget::compute_package_effects(program, &facts.solved, &facts.summaries),
+                facts.fact_registry.clone(),
+                jet::EffectBudget::summary_line_for_program_with_authority(
+                    program,
+                    &facts.summaries,
+                    entry_fn.unwrap_or("run"),
+                    package_manifest.as_ref().map(|(_, manifest)| manifest),
+                ),
+                jet::EffectBudget::summary_json_for_program_with_authority(
+                    program,
+                    &facts.summaries,
+                    entry_fn.unwrap_or("run"),
+                    package_manifest.as_ref().map(|(_, manifest)| manifest),
+                ),
+                projection,
+                delegations,
+            )
+        });
+        let fallback_effect_bundle;
         let effect_view = match reused_package_effects {
             Some(view) => Some(view),
             None => {
@@ -4186,7 +4199,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                     report_problems(mode, file, &src, &diagnostics);
                     exit(ExitCodes::USER_ERROR);
                 }
-                let Some(bundle) = bundle else {
+                let Some(checked_effect_bundle) = bundle else {
                     let diagnostic = jet::Diagnostics::Diagnostic::error(
                         "E2105",
                         "could not obtain the checked effect view".to_string(),
@@ -4198,6 +4211,8 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                     report_problems(mode, file, &src, &[diagnostic]);
                     exit(ExitCodes::USER_ERROR);
                 };
+                fallback_effect_bundle = checked_effect_bundle;
+                let bundle = &fallback_effect_bundle;
                 let (projection, delegations) = native_effect_projection(
                     &bundle,
                     &facts.summaries,

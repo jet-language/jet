@@ -95,6 +95,10 @@ Rust-oracle modes (owner #38(b)/#59), not native-suite failures. Report their
 individual rows as `UNCOVERED`, print them, and require a Tower card; never label
 them PASS. The native golden union and `run-crypto-fixtures` AGE decoder/sealer
 tests remain mandatory and their failures still block the final native gate.
+Effect-budget witness origins borrow the checked graph until enforcement
+materializes denied-module diagnostics. Project effects after the compile
+transfers that graph, and retain fallback checked bundles through enforcement;
+do not clone a whole program merely to extend the witness lifetime.
 
 Use fresh artifacts for runtime claims. A source check, worker receipt, or stale
 binary cannot establish runtime, tier, snapshot, golden, or I9 evidence.
