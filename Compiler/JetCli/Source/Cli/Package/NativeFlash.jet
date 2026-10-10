@@ -58,10 +58,10 @@ fn jet_cli_flash_execute(plan: JetCLIFlashPlan) -[FS, Env, Exec, Time.Wait]> Jet
         }
     }
 }
-fn jet_cli_flash_publish(receipt_root: String, args: [String], terminal: [U8], receipt: JetCLIFlashReceipt, secret_values: [String]) -[FS, Env, Time.Wait]> String String! {
+fn jet_cli_flash_publish(receipt_root: String, args: [String], terminal: [U8], receipt: JetCLIFlashReceipt, secret_values: [String]) -[FS, Env, Time.Wait]> String JetCLIReadError! {
     claim :: jet_cli_receipt_claim("flash", [String]{receipt.plan.image.raw, receipt.plan.audit.raw}, args, terminal)
     section :: jet_cli_flash_receipt_section(receipt)
     stored :: jet_cli_receipt_prepare(claim, if receipt.success -> 0 else -> 1, canonical_json_bytes(jet_cli_flash_receipt_to_json(receipt)), [U8]{}, [JetCLIReceiptSection]{section}, [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, secret_values)
-    if !jet_cli_receipt_publish(receipt_root, stored) -> return Err("flash inputs changed before receipt publication")
+    if !jet_cli_receipt_publish(receipt_root, stored) -> return Err(jet_cli_read_error("flash inputs changed before receipt publication"))
     Ok(stored.digest)
 }
