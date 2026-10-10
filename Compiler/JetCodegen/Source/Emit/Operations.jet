@@ -2294,12 +2294,13 @@ fn jet_rust_emit_associated_dispatch(ctx: &JetRustEmitContext, id: MIRFunctionID
                     return "{jet_rust_emit_type(&ctx, owner)}::{jet_rust_emit_inherent_method_symbol(ctx.program.functions[candidate_index].name)}{generic}({rendered_args})"
                 }
                 .TraitMethod(declared_owner, trait_ref, self_access, _) -> {
+                    trait_id :: trait_ref.id.copy()
                     if self_access != None || !mir_type_same_checked_type(declared_owner, owner) {
                         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait-associated dispatch owner/access is invalid", "trait-associated calls must target the checked owner without a receiver", Val(span))
                         return "unreachable!(\"invalid trait associated dispatch\")"
                     }
                     method_name :: ctx.program.functions[candidate_index].name.copy()
-                    return "<{jet_rust_emit_type(&ctx, owner)} as {jet_rust_emit_trait_name(&ctx, trait_ref.id)}>::{jet_rust_emit_trait_impl_method_symbol(&ctx, trait_ref.id, method_name)}{generic}({rendered_args})"
+                    return "<{jet_rust_emit_type(&ctx, owner)} as {jet_rust_emit_trait_name(&ctx, trait_id)}>::{jet_rust_emit_trait_impl_method_symbol(&ctx, trait_id, method_name)}{generic}({rendered_args})"
                 }
                 .TopLevel -> {
                     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR associated dispatch targets a top-level function", "associated calls require a checked method or trait-method function form", Val(span))

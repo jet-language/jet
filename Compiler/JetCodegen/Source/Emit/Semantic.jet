@@ -940,7 +940,10 @@ fn jet_rust_emit_plugin_type(ctx: &JetRustEmitContext, source: MIRType) -> MIRTy
         .InlineRange(inner, _, _) | .Tagged(_, inner) -> return jet_rust_emit_plugin_type(&ctx, inner)
         .Apply(name, _) -> {
             row :: jet_rust_emit_type_index(ctx, name.id) ?? return source
-            if ctx.program.types[row].kind == .Alias(target) -> return jet_rust_emit_plugin_type(&ctx, target)
+            if ctx.program.types[row].kind == .Alias(target) {
+                aliased :: target.copy()
+                return jet_rust_emit_plugin_type(&ctx, aliased)
+            }
         }
         else -> {}
     }

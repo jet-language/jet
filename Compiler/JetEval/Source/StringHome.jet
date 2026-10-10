@@ -229,12 +229,18 @@ fn jet_eval_string_home_value(frame: Int, id: MIRValueID, tail: [JetEvalStringHo
                 .ResultValue(base, ok) -> return jet_eval_string_home_value(frame, base, jet_eval_string_home_prepend(frame, MIRProjection.Payload{kind: MIRPayloadKind.Result{ok: ok}, span: span}, tail), &machine, span)
                 .Parameter(index, _) -> {
                     if machine.frames[frame].caller_site == Val(site) {
-                        caller_function :: jet_eval_function_row(machine, machine.frames[site.frame].function) ?? return None
-                        block_row :: jet_eval_function_block_row(&machine, caller_function, site.block) ?? return None
-                        operation :: machine.program.functions[caller_function].blocks[block_row].instructions[site.ip].operation
+                        site_frame := site.frame
+                        site_block := site.block.copy()
+                        site_ip := site.ip
+                        caller_function :: jet_eval_function_row(machine, machine.frames[site_frame].function) ?? return None
+                        block_row :: jet_eval_function_block_row(&machine, caller_function, site_block) ?? return None
+                        operation :: machine.program.functions[caller_function].blocks[block_row].instructions[site_ip].operation
                         if operation == {
                             .Call(_, args, _) | .IndirectCall(_, args, _) -> {
-                                if index >= 0 && index < args.len() && args[index].access == MIRAccess.Read -> return jet_eval_string_home_argument(site.frame, args[index], tail, &machine, span)
+                                if index >= 0 && index < args.len() && args[index].access == MIRAccess.Read {
+                                    arg := args[index].copy()
+                                    return jet_eval_string_home_argument(site_frame, arg, tail, &machine, span)
+                                }
                             }
                             else -> {}
                         }

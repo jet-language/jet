@@ -904,8 +904,14 @@ fn jet_rust_emit_collect_c_abi_types(ctx: &JetRustEmitContext, ty: MIRType, need
                         }
                     }
                 }
-                .Alias(target) -> jet_rust_emit_collect_c_abi_types(&ctx, target, &needed)
-                .Distinct(base, _) -> jet_rust_emit_collect_c_abi_types(&ctx, base, &needed)
+                .Alias(target) -> {
+                    target_ty :: target.copy()
+                    jet_rust_emit_collect_c_abi_types(&ctx, target_ty, &needed)
+                }
+                .Distinct(base, _) -> {
+                    base_ty :: base.copy()
+                    jet_rust_emit_collect_c_abi_types(&ctx, base_ty, &needed)
+                }
                 else -> {}
             }
         }
