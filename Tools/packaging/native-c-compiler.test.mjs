@@ -28,6 +28,14 @@ test('native C policy keeps other hardening and never changes the parent environ
   assert.deepEqual(nativeCEnvironment({ KEEP: 'unchanged' }), { KEEP: 'unchanged' });
 });
 
+test('the Jet CLI embeds the same single native C policy rows', () => {
+  const result = spawnSync(process.execPath, [join(root, 'Compiler/Bootstrap/generate-native-c-policy.mjs'), '--check'], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const embedded = readFileSync(join(root, 'Compiler/JetCli/Source/Cli/NativeCPolicy.jet'), 'utf8');
+  assert.match(embedded, /JET_CLI_NATIVE_C_FLAGS :: prep \{ \[String\]\{"-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0"\} \}/u);
+  assert.match(embedded, /JET_CLI_NATIVE_C_HARDENING_REMOVED :: prep \{ \[String\]\{"fortify", "fortify3"\} \}/u);
+});
+
 test('native fixture and packaging drivers have no independent C compiler policy', () => {
   for (const directory of ['Compiler/JetRuntime/Tests', 'Compiler/JetBackend/Tests', 'Tools/packaging']) {
     for (const name of readdirSync(join(root, directory))) {
