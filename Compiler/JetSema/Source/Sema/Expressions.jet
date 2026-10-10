@@ -3172,20 +3172,11 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
         &diagnostics.push(sema_dyn_condition_error(span))
         return None
     }
-    if sema_dyn_is_type(sema_expr_expected_type(value.ty, environment, program)) {
-        &diagnostics.push(sema_dyn_condition_error(span))
-        return None
-    }
-    if sema_dyn_is_type(sema_expr_expected_type(value.ty, environment, program)) {
-        &diagnostics.push(sema_dyn_condition_error(span))
-        return None
-    }
-    if value.ty == Type.Bool || sema_expr_is_integer(value.ty) {
-        result_ty := if value.ty == Type.Bool -> Type.Bool else -> sema_expr_numeric_base(value.ty)
-        return sema_expr_expected(sema_tir_expr(result_ty, TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span), expected, environment, program, &diagnostics)
+    if value.ty == Type.Bool {
+        return sema_expr_expected(sema_tir_expr(Type.Bool, TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span), expected, environment, program, &diagnostics)
     }
     if sema_expr_is_integer(value.ty) {
-        &diagnostics.push(sema_retired_integer_not(span, Span{start: span.start + 1, end: span.end}))
+        &diagnostics.push(sema_error("E0398", span, "`!` needs Bool; use `bit_not` to flip integer bits", "marks express ownership and outcomes; arithmetic uses named methods (D-SIGIL-ALGEBRA1=B)", "write `value.bit_not()` for an integer, or compare the value to produce Bool"))
         return None
     }
     &diagnostics.push(sema_error("E0109", span, "logical `!` needs Bool", "arithmetic uses named methods (D-SIGIL-ALGEBRA1=B)", "compare the value to produce Bool; use `value.bit_not()` for an integer"))
@@ -3439,7 +3430,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
             CallArg{convention: AccessConvention.Read, expr: left, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false},
             CallArg{convention: AccessConvention.Read, expr: right, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
         }
-        constructor :: Expr.MethodCall{receiver: Expr.Ident{name: "Instant", span: span}, method: point_method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: arguments, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
+        constructor :: Expr.MethodCall{receiver: Expr.Ident{name: "Instant", span: span}, method: point_method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: arguments, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false, checked_callee: None}
         return sema_check_expression(constructor, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     if (op == BinOp.Add && left_point && right_point) || (op == BinOp.Sub && left_delta && right_point) {

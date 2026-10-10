@@ -1485,15 +1485,48 @@ fn sema_effect_locate_dispatch(site: SemaEffectDispatchSite, inputs: [SemaEffect
     ^located
 }
 
+// Nodes from which some unbounded trait dispatch is reachable through the
+// call graph (the node itself included): one reverse walk from every node
+// that dispatches.
+fn sema_effect_dispatch_reach(nodes: [SemaEffectNode], node_by_key: [String:Int]) -> [Bool] Never! {
+    reach := (loop _ in nodes -> false)
+    callers := (loop _ in nodes -> [Int]{})
+    pending := [Int]{}
+    loop (index, node) in nodes {
+        loop edge in node.call_edges {
+            target :: sema_effect_node_index(node_by_key, edge) ?? next
+            &callers[target].push(index)
+        }
+        if node.dispatches.len() > 0 {
+            reach[index] = true
+            &pending.push(index)
+        }
+    }
+    cursor := 0
+    loop cursor < pending.len() {
+        incoming :: pending[cursor].copy()
+        cursor += 1
+        loop caller in callers[incoming] {
+            if reach[caller] -> next
+            reach[caller] = true
+            &pending.push(caller)
+        }
+    }
+    reach
+}
+
 // The first unbounded trait dispatch reachable from `index` through the call
-// graph, the function's own calls first.
-fn sema_effect_find_dispatch(nodes: [SemaEffectNode], node_by_key: [String:Int], index: Int, seen: &[Bool]) -> SemaEffectDispatchSite? {
+// graph, the function's own calls first. `reach` skips dispatch-free callees;
+// `visited` records the rows to clear before the next root.
+fn sema_effect_find_dispatch(nodes: [SemaEffectNode], node_by_key: [String:Int], reach: [Bool], index: Int, seen: &[Bool], visited: &[Int]) -> SemaEffectDispatchSite? {
     if seen[index] -> return None
     seen[index] = true
+    &visited.push(index)
     if nodes[index].dispatches.len() > 0 -> return Val(SemaEffectDispatchSite{dispatch: nodes[index].dispatches[0], module_index: nodes[index].module_index})
     loop edge in nodes[index].call_edges {
         target :: sema_effect_node_index(node_by_key, edge) ?? next
-        found :: sema_effect_find_dispatch(nodes, node_by_key, target, &seen)
+        if !reach[target] -> next
+        found :: sema_effect_find_dispatch(nodes, node_by_key, reach, target, &seen, &visited)
         if found != None -> return found
     }
     None
@@ -1907,7 +1940,8 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
                     break
                 }
             }
-            conflicting :: sites.get(initializer.key).map((previous) -> previous != lifetime) ?? false
+            conflicting := false
+            if sites.get(initializer.key) == .Val(previous) -> conflicting = previous != lifetime
             if impure || conflicting -> &site_diagnostics.push(sema_call_core_shared_diagnostic(fact.shared_member, fact.span))
             if sites.get(initializer.key) == None -> sites[initializer.key] = lifetime
         }
@@ -1919,9 +1953,10 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
     loop node_index in 0..<nodes.len() {
         function_diagnostics := [Diagnostic]{}
         dispatch := Diagnostic?{None}
-        if nodes[node_index].has_declared_row || nodes[node_index].is_pure {
-            seen := (loop _ in nodes -> false)
-            site :: sema_effect_find_dispatch(nodes, node_by_key, node_index, &seen)
+        if (nodes[node_index].has_declared_row || nodes[node_index].is_pure) && dispatch_reach[node_index] {
+            visited := [Int]{}
+            site :: sema_effect_find_dispatch(nodes, node_by_key, dispatch_reach, node_index, &dispatch_seen, &visited)
+            loop row in visited -> dispatch_seen[row] = false
             if site == .Val(found) {
                 dispatch = Val(sema_effect_locate_dispatch(found, inputs))
             }
@@ -2086,7 +2121,7 @@ fn sema_effect_walk_visit(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts:
 // add it here in the order TIR.jet's child functions give it.
 fn sema_effect_walk_expr_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, expression: TExpr) {
     if expression.kind == {
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .DefaultLit | .Uninit | .CtLit(_) | .ConstRef(_) | .ResourceTake(_) | .DataEntriesToMap(_) | .Todo(_) | .InvariantViolation(_, _) | .Unreachable(_) | .Absent | .SelectStart | .Never(_) -> {}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .DefaultLit | .Uninit | .CtLit(_) | .ConstRef(_) | .GlobalShared(_, _) | .ResourceTake(_) | .Todo(_) | .InvariantViolation(_, _) | .Unreachable(_) | .Absent | .SelectStart | .Never(_) -> {}
         .StrLit(parts) -> loop part in parts {
             if part == {
                 .Interpolation(value, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
@@ -2120,7 +2155,7 @@ fn sema_effect_walk_expr_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode]
         }
         .CompareChain(operands, _, _) -> loop value in operands -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
         .Unary(_, operand) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, operand)
-        .StructLit(fields, _, _) -> loop field in fields -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, field.value)
+        .StructLit(fields, _) -> loop field in fields -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, field.value)
         .Field(receiver, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, receiver)
         .Index(base, index, _, _, _, _) | .IndexRead(base, index, _, _, _) -> {
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, base)
@@ -2460,8 +2495,8 @@ fn sema_effect_walk_if_cond_children(walk: SemaEffectWalk, nodes: &[SemaEffectNo
     }
 }
 
-// tir_pattern_children: only struct field value patterns hold expressions
-// (nested payload patterns are not visited, as there).
+// Visit the canonical tir_pattern_children expressions in place, including
+// nested payloads and map keys, without materializing child lists.
 fn sema_effect_walk_pattern_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, shape: TPatternShape) {
     if shape == {
         .Or(alternatives, _) -> loop alternative in alternatives -> sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller_key, alternative)
@@ -2469,9 +2504,28 @@ fn sema_effect_walk_pattern_children(walk: SemaEffectWalk, nodes: &[SemaEffectNo
             if field == {
                 .Value(_, value, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
                 .Bind(_, _, _) -> {}
+                .Nested(_, inner, _) -> sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller_key, inner.shape)
             }
         }
-        .Variant(_, _, _, _) | .Present(_, _, _, _) | .Absent(_) | .Ok(_, _, _, _) | .Err(_, _, _, _) | .Range(_, _, _) | .Text(_, _) | .Binary(_, _) -> {}
+        .Variant(_, slots, _, _) | .List(slots, _, _) -> loop slot in slots {
+            if slot == {
+                .Value(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+                .Nested(inner) -> sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller_key, inner.shape)
+                else -> {}
+            }
+        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
+            if inner == .Val(nested) -> sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller_key, nested.shape)
+        }
+        .Map(entries, _, _) -> loop entry in entries {
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, entry.key)
+            if entry.slot == {
+                .Value(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+                .Nested(inner) -> sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller_key, inner.shape)
+                else -> {}
+            }
+        }
+        .Absent(_) | .Range(_, _, _) | .Text(_, _) | .Binary(_, _) -> {}
     }
 }
 

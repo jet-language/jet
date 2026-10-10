@@ -252,7 +252,7 @@ fn sema_function_header_check_variadic_bound_shape(function: Func, environment: 
         bounded = list.len() > 0
     } else {
         if last.ty == .Named(trait_name) && trait_name != "" && program.registration_graph == .Val(graph) {
-            bounded = sema_expr_expected_trait_symbol(graph, trait_name, environment.module_identity) != None
+            bounded = sema_type_graph_trait_symbol(graph, environment.module_identity, trait_name) != None
         }
     }
     if !bounded -> return true

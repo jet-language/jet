@@ -379,6 +379,18 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
     Val(SemaCallTypedArguments{values: values, slots: slots, required_types: required_types, source_indices: source_indices, pin_arguments: pin_arguments, binder_site: binder_site})
 }
 
+// Whether an argument other than `own` references the binding `key`;
+// `starts` holds each argument's first name reference and the end.
+fn sema_call_key_named_elsewhere(key: String, own: Int, starts: [Int], context: SemaCheckContext) -> Bool Never! {
+    loop other in 0..<starts.len() - 1 {
+        if other == own -> next
+        loop index in starts[other]..<starts[other + 1] {
+            if index < context.name_references.len() && context.name_references[index].symbol.id.key == key -> return true
+        }
+    }
+    false
+}
+
 fn sema_call_binder_ref_symbol(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: String, site: Int, slot: Int, name: String, ty: Type, span: Span) -> Symbol Never! {
     id :: symbol_id(SymbolKind.Local, environment.module_identity, owner, "binder_ref_{site}_{slot}")
     Symbol{id: id, kind: SymbolKind.Local, name: name, module_name: environment.module_identity, owner: Val(owner), span: span, ty: Val(ty), visibility: 0}
@@ -602,7 +614,7 @@ fn sema_call_pack_variadic_arguments(typed: SemaCallTypedArguments, params: [Sem
             loop argument in tail -> &values.push(argument.value)
             kind = TExprKind.List{values: ^values, trait_coercion: None}
         }
-        value :: sema_tir_expr(list_ty, ^kind, span)
+        value :: sema_tir_expr(list_ty, kind, span)
         &packed.push(TCallArg{
             value: ^value, template_items: [SymbolID]{},
             borrow: params[slot].convention == AccessConvention.Read,

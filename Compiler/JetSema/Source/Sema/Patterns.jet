@@ -664,7 +664,7 @@ fn sema_pattern_struct(subject_ty: Type, fields: [StructPatField], rest: Span?, 
     SemaPatternValidation{shape: TPatternShape.Struct{fields: [TPatternField]{}, rest: rest, span: span}, enum_type: None, bindings: [TPatternBindingFact]{}, complete: false}
 }
 
-fn sema_pattern_list(subject_ty: Type, items: [PatSlot], rest: ListPatRest?, span: Span, env: SemaScopeEnvironment, writes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaPatternValidation {
+fn sema_pattern_list(subject_ty: Type, items: [PatSlot], rest: ListPatRest?, span: Span, env: SemaScopeEnvironment, program: SemaProgramTables, writes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaPatternValidation {
     elem := Type.Named{name: "Never"}
     complete := true
     if sema_pattern_unwrap_tags(subject_ty) == {
@@ -745,7 +745,7 @@ fn sema_pattern_map_resolve_key(key: TExpr, env: SemaScopeEnvironment, program: 
 }
 
 
-fn sema_pattern_map(subject_ty: Type, entries: [MapPatEntry], rest: Span?, span: Span, env: SemaScopeEnvironment, writes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaPatternValidation {
+fn sema_pattern_map(subject_ty: Type, entries: [MapPatEntry], rest: Span?, span: Span, env: SemaScopeEnvironment, program: SemaProgramTables, writes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaPatternValidation {
     key_ty := Type.Named{name: "Never"}
     value_ty := Type.Named{name: "Never"}
     complete := true
@@ -1059,6 +1059,8 @@ fn sema_pattern_validate_internal(subject_ty: Type, pattern: Pattern, env: SemaS
             SemaPatternValidation{shape: TPatternShape.Range{lo: lo, hi: hi, span: span}, enum_type: None, bindings: [TPatternBindingFact]{}, complete: complete}
         }
         .Struct(fields, rest, _, type_head) -> sema_pattern_struct(subject_ty, fields, rest, span, type_head, env, program, &writes, &state, &tail_store, &context, &diagnostics, mutable)
+        .List(items, rest, _) -> sema_pattern_list(subject_ty, items, rest, span, env, program, &writes, &state, &tail_store, &context, &diagnostics)
+        .Map(entries, rest, _) -> sema_pattern_map(subject_ty, entries, rest, span, env, program, &writes, &state, &tail_store, &context, &diagnostics)
         .StrMatch(parts, _) -> sema_pattern_text(subject_ty, parts, span, &diagnostics, mutable, writes, true)
         .BinMatch(parts, _) -> sema_pattern_binary(subject_ty, parts, span, &diagnostics, mutable, writes, true)
         .Variant(variant, slots, leading_dot, _) -> sema_pattern_validate_variant(subject_ty, variant, slots, leading_dot, span, env, program, &writes, &state, &tail_store, &context, &diagnostics, mutable)

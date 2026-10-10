@@ -238,7 +238,7 @@ fn sema_units_resolve(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegist
     }
     at := 0
     loop at < queue.len() {
-        index :: queue[at]
+        index :: queue[at].copy()
         at += 1
         declaration :: declarations[index]
         if declaration.claim == .Derived(expression) {
@@ -262,11 +262,10 @@ fn sema_units_resolve(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegist
             &diagnostics.push(diagnostic)
             sema_attach_diagnostic_source_locations(&diagnostics, start, inputs[declaration.module_index].source_segments)
         }
-        if inputs[declaration.module_index].program.items[declaration.item] == .UnitFamily(definition) {
-            updated := definition
-            updated.resolved_dimension = resolved
-            if updated.resolved_owner == None -> updated.resolved_owner = Val(sema_units_owner(inputs[declaration.module_index]).package)
-            inputs[declaration.module_index].program.items[declaration.item] = Item.UnitFamily{value: updated}
+        owner :: sema_units_owner(inputs[declaration.module_index]).package
+        if &inputs[declaration.module_index].program.items[declaration.item] == .UnitFamily(definition) {
+            definition.resolved_dimension = resolved
+            if definition.resolved_owner == None -> definition.resolved_owner = Val(owner)
         }
     }
     // Open families still carry owner/scale/offset/kind provenance, even
@@ -274,12 +273,8 @@ fn sema_units_resolve(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegist
     loop module_index in 0..<inputs.len() {
         owner :: sema_units_owner(inputs[module_index]).package
         loop item in 0..<inputs[module_index].program.items.len() {
-            if inputs[module_index].program.items[item] == .UnitFamily(definition) {
-                if definition.resolved_owner == None {
-                    updated := definition
-                    updated.resolved_owner = Val(owner)
-                    inputs[module_index].program.items[item] = Item.UnitFamily{value: updated}
-                }
+            if &inputs[module_index].program.items[item] == .UnitFamily(definition) {
+                if definition.resolved_owner == None -> definition.resolved_owner = Val(owner)
             }
         }
     }

@@ -150,9 +150,9 @@ fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr, met
         loop argument in args {
             if argument.flags.template_items == .Val(body) {
                 items :: sema_derive_expand_template_body(body, [NamedCtValue]{}, &diagnostics) ?? return failed
-                program := ast_program()
-                program.items = items
-                source :: jfmt_format_program_with_tokens(program, "", [Token]{}, false)
+                generated_program := ast_program()
+                generated_program.items = items
+                source :: jfmt_format_program_with_tokens(generated_program, "", [Token]{}, false)
                 &values.push(sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: source}}}, argument.span))
             }
         }

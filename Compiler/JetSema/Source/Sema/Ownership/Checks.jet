@@ -966,10 +966,10 @@ fn sema_ownership_anchor_held(merged: [SemaOwnershipReference], anchors: SemaOwn
     false
 }
 
-// Merge only reference anchors from a deferred body.  Moves and write windows
-// in a lambda body belong to the lambda's execution state, not construction.
-fn sema_ownership_merge_references(state: &SemaOwnershipState, deferred: SemaOwnershipState) Never! {
-    loop reference in deferred.references {
+// Merge only reference anchors from a deferred body's added rows. Moves and
+// write windows belong to the lambda's execution state, not construction.
+fn sema_ownership_merge_references(state: &SemaOwnershipState, references: [SemaOwnershipReference]) Never! {
+    loop reference in references {
         if sema_ownership_anchor_held(state.references, state.anchors, state.references.len(), reference) -> next
         sema_ownership_admit_reference(&state, reference)
     }
@@ -2301,12 +2301,12 @@ fn sema_ownership_clear_moved(state: &SemaOwnershipState, place: SemaOwnershipPl
 
 // Field typing supplies prefix facts; never copy the registration graph into
 // per-function ownership state.
-fn sema_ownership_note_close_owner(state: &SemaOwnershipState, expr: Expr, ty: Type, environment: SemaScopeEnvironment, scopes: SemaScopeTable) Never! {
+fn sema_ownership_note_close_owner(state: &SemaOwnershipState, expr: Expr, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) Never! {
     own_close := false
-    if environment.registration_graph == .Val(graph) {
+    if program.registration_graph == .Val(graph) {
         if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) == .Val(row) {
             nominal :: graph.modules[row.module_index].nominals[row.row]
-            own_close = sema_copy_nominal_has_impl(environment.registration_graph, nominal, "Close").value
+            own_close = sema_copy_nominal_has_impl(program.registration_graph, nominal, "Close").value
         }
     }
     if ty == .Named(name) {
@@ -2589,6 +2589,7 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
             }
         }
         mark_implicit_clone := false
+        mark_implicit_take := false
         if decision == SemaCallConventionDecision.NeedsImplicitClone {
             if sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "Unit"}) -> next
             if take_lent {
@@ -2606,26 +2607,26 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
             // D-COPY-DEFAULT1=A (Rust `take_unmarked_last_use`): an eligible
             // unmarked argument moves like `^name`; a later use reports E0209.
             if !binder_rooted && sema_ownership_expr_site_listed(state.implicit_take_ok, arg.expr) {
-                args[index].convention = AccessConvention.Move
+                mark_implicit_take = true
                 if !sema_ownership_mark_implicit_take(&state, arg.expr, scopes, callee, &diagnostics) -> accepted = false
-                next
-            }
-            // Rust `check_take_arg_ownership`: a cloneable value is E0209, any
-            // other is E0201. A nominal `Clone` row is registry-owned and not
-            // visible here, so an unresolved nominal takes the cloneable
-            // diagnostic; both reject the unmarked owning argument.
-            if {
-                sema_ownership_type_cloneable(param.ty ?? Type.Named{name: "Unit"}) ?? true -> {
-                    mark_implicit_clone = true
-                    &diagnostics.push(sema_ownership_call_diag_clone(callee, sema_ownership_argument_name(arg), arg.span))
-                }
-                else -> {
-                    accepted = false
-                    &diagnostics.push(sema_ownership_call_diag_not_copyable(callee, index, sema_ownership_argument_name(arg), arg.span))
+            } else {
+                // Rust `check_take_arg_ownership`: a cloneable value is E0209, any
+                // other is E0201. A nominal `Clone` row is registry-owned and not
+                // visible here, so an unresolved nominal takes the cloneable
+                // diagnostic; both reject the unmarked owning argument.
+                if {
+                    sema_ownership_type_cloneable(param.ty ?? Type.Named{name: "Unit"}) ?? true -> {
+                        mark_implicit_clone = true
+                        &diagnostics.push(sema_ownership_call_diag_clone(callee, sema_ownership_argument_name(arg), arg.span))
+                    }
+                    else -> {
+                        accepted = false
+                        &diagnostics.push(sema_ownership_call_diag_not_copyable(callee, index, sema_ownership_argument_name(arg), arg.span))
+                    }
                 }
             }
         }
-        if param.convention == AccessConvention.Move && arg.convention == AccessConvention.Move && !binder_rooted && sema_ownership_unmarked_moves_name(arg.expr) {
+        if !mark_implicit_take && param.convention == AccessConvention.Move && arg.convention == AccessConvention.Move && !binder_rooted && sema_ownership_unmarked_moves_name(arg.expr) {
             if take_lent {
                 accepted = false
                 &diagnostics.push(sema_ownership_diag_take_while_lent(sema_ownership_argument_name(arg), callee, expr_span(arg.expr)))
@@ -2633,6 +2634,7 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
             }
             if !sema_ownership_mark_move(&state, arg.expr, scopes, "`{callee}`", &diagnostics) -> accepted = false
         }
+        if mark_implicit_take -> args[index].convention = AccessConvention.Move
         if mark_implicit_clone -> args[index].flags.implicit_clone = true
     }
     SemaOwnershipCheckResult{accepted: accepted, complete: complete}
@@ -3531,6 +3533,13 @@ fn sema_ownership_fork_drop(state: &SemaOwnershipState, fork: SemaOwnershipFork,
     loop site in second -> sema_ownership_note_share_found(&state, site)
 }
 
+// Joins two paths after rollback, applies their facts and closes the fork.
+fn sema_ownership_fork_join_close(state: &SemaOwnershipState, fork: SemaOwnershipFork, first: SemaOwnershipPath, second: SemaOwnershipPath, has_else: Bool) Never! {
+    joined :: sema_ownership_path_join(state, fork, first, second, has_else, state.share_found)
+    sema_ownership_fork_apply(&state, joined)
+    sema_ownership_fork_close(&state, fork)
+}
+
 // Appends a joined path to the state of its fork (after the rollback).
 fn sema_ownership_fork_apply(state: &SemaOwnershipState, path: SemaOwnershipPath) Never! {
     state.scope_depth = path.scope_depth
@@ -3594,20 +3603,28 @@ fn sema_ownership_path_join(index: SemaOwnershipState, fork: SemaOwnershipFork, 
     loop (key, _) in then_path.frozen {
         left :: sema_ownership_path_frozen(index, then_path, key)
         right :: if has_else -> sema_ownership_path_frozen(index, else_path, key) else -> sema_ownership_frozen_for_key(index, key)
-        frozen[key] = if left != None && right != None -> left else -> None
+        frozen[key] = if left != None && right != None -> Val(left) else -> None
     }
     loop (key, _) in else_path.frozen {
         if frozen.get(key) != None -> next
         left :: sema_ownership_path_frozen(index, then_path, key)
         right :: if has_else -> sema_ownership_path_frozen(index, else_path, key) else -> sema_ownership_frozen_for_key(index, key)
-        frozen[key] = if left != None && right != None -> left else -> None
+        frozen[key] = if left != None && right != None -> Val(left) else -> None
     }
     freeze_sites := fork.freeze_sites.copy()
     loop site in then_path.freeze_sites {
-        if !freeze_sites.any((known) -> known.span == site.span) -> &freeze_sites.push(site)
+        seen := false
+        loop known in freeze_sites {
+            if known.span == site.span -> seen = true
+        }
+        if !seen -> &freeze_sites.push(site)
     }
     loop site in else_path.freeze_sites {
-        if !freeze_sites.any((known) -> known.span == site.span) -> &freeze_sites.push(site)
+        seen := false
+        loop known in freeze_sites {
+            if known.span == site.span -> seen = true
+        }
+        if !seen -> &freeze_sites.push(site)
     }
 
     merged_moves := [SemaOwnershipMovedPlace]{}

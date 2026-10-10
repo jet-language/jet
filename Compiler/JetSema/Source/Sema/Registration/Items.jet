@@ -1351,7 +1351,8 @@ fn sema_registration_original_error_module(diagnostics: &[Diagnostic]) -> SemaRe
     marked := 0
     loop program.items.len() > 0 {
         item := &program.items.pop() ?? panic("the original Prelude item drain lost a row")
-        if ^item == .Struct(definition) {
+        if ^item == .Struct(source_definition) {
+            definition := ^source_definition
             if definition.name == "Err" {
                 definition.compiler_builtin_error = true
                 marked += 1
@@ -1374,7 +1375,7 @@ fn sema_registration_original_error_module(diagnostics: &[Diagnostic]) -> SemaRe
     Val(SemaRegistrationModuleInput{
         package_identity: "jet:canonical-prelude",
         module_identity: path,
-        module_name: generated_path(path),
+        module_name: sema_inline_generated_path(path),
         core_source_alias: "",
         module_path: "Prelude/Errors.jet",
         source_file: path,
@@ -1956,16 +1957,16 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     diagnostics := [Diagnostic]{}
     owned := ^input
     module_row := SemaRegistrationModule{
-        package_identity: input.package_identity,
-        module_identity: input.module_identity,
-        module_name: input.module_name,
-        core_source_alias: input.core_source_alias,
-        module_path: input.module_path,
-        source_file: input.source_file,
-        source_segments: input.source_segments,
-        source_origin: input.source_origin,
-        program: input.program,
-        source: input.source,
+        package_identity: owned.package_identity,
+        module_identity: owned.module_identity,
+        module_name: owned.module_name,
+        core_source_alias: owned.core_source_alias,
+        module_path: owned.module_path,
+        source_file: owned.source_file,
+        source_segments: owned.source_segments,
+        source_origin: owned.source_origin,
+        program: owned.program,
+        source: owned.source,
         symbols: [Symbol]{},
         declarations: [Item]{},
         symbol_positions: [String:Int]{},
@@ -2443,7 +2444,8 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     module_rows := [String:Int]{}
     generic_module_index :: sema_generic_modules_index(prepared_inputs, edges)
     loop input in prepared_inputs {
-        module_row := sema_registration_prepare_module_row(input, sema_generic_modules_imported(prepared_inputs, edges, generic_module_index, input.module_identity), &diagnostics)
+        imported_templates :: sema_generic_modules_imported(prepared_inputs, edges, generic_module_index, input.module_identity)
+        module_row := sema_registration_prepare_module_row(input, imported_templates, &diagnostics)
         duplicate :: module_rows.get(module_row.module_identity) != None
         if !duplicate -> module_rows[module_row.module_identity] = modules.len()
         if {

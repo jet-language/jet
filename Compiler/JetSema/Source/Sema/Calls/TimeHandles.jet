@@ -127,7 +127,7 @@ fn sema_time_clock_method(receiver: Expr, receiver_value: TExpr, method: String,
     }
     if result == None -> return SemaMethodSpecialCheck{handled: false, value: None}
     effect_name :: if sema_time_clock_is_deterministic(receiver_value.ty) || sema_time_clock_is_system(receiver_value.ty) -> "" else -> "Time"
-    if !sema_time_record_intrinsic(result ?? Type.Int, effect_name, "Clock.{method}", span, environment, program, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_time_record_intrinsic(result, effect_name, "Clock.{method}", span, environment, program, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     value := sema_call_check_method(&state, receiver, method, span, [Type]{}, [Type]{}, args, span, expected, environment, program, &scopes, &tail_store, &context, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: value}
 }

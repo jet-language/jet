@@ -240,18 +240,24 @@ struct SemaGateVisitor {
 }
 
 fn sema_gate_statements(source: String, body: [Stmt], ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
-    visitor := SemaGateVisitor{source: source, ledger: GateLedger{rows: ^ledger.rows}, context: context}
-    ledger.rows = []
+    visitor := SemaGateVisitor{source: source, ledger: GateLedger{rows: []}, context: context}
     loop statement in body -> ast_visit_statement(statement, (expression: Expr) -> &visitor.visit(expression), false)
-    ledger.rows = ^visitor.ledger.rows
+    &visitor.ledger.rows.reverse()
+    loop visitor.ledger.rows.len() > 0 {
+        entry :: &visitor.ledger.rows.pop() ?? break
+        gate_ledger_push(&ledger, ^entry)
+    }
     sema_gate_statement_gates(source, body, &ledger)
 }
 
 fn sema_gate_expression(source: String, expression: Expr, ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
-    visitor := SemaGateVisitor{source: source, ledger: GateLedger{rows: ^ledger.rows}, context: context}
-    ledger.rows = []
+    visitor := SemaGateVisitor{source: source, ledger: GateLedger{rows: []}, context: context}
     ast_visit_expr(expression, (value: Expr) -> &visitor.visit(value))
-    ledger.rows = ^visitor.ledger.rows
+    &visitor.ledger.rows.reverse()
+    loop visitor.ledger.rows.len() > 0 {
+        entry :: &visitor.ledger.rows.pop() ?? break
+        gate_ledger_push(&ledger, ^entry)
+    }
 }
 
 fn sema_gate_expression_value(source: String, expression: Expr, ledger: &GateLedger, context: SemaGateContext) Never! {

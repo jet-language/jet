@@ -1383,7 +1383,9 @@ fn sema_expression_pattern_binding_sources(shape: TPatternShape, subject_ty: Typ
             variant_source :: Expr.Field{base: source, member: variant, span: span}
             loop (index, slot) in slots {
                 field := "{index}"
-                if payload.payload == .Val(VariantPayload.Named(fields)) && index < fields.len() -> field = fields[index].name
+                if payload.payload == .Val(named_payload) {
+                    if named_payload == .Named(fields) && index < fields.len() -> field = fields[index].name
+                }
                 projected :: Expr.Field{base: variant_source, member: field, span: span}
                 ty :: if index < payload.types.len() -> payload.types[index] else -> subject_ty
                 sema_expression_pattern_slot_sources(slot, ty, projected, name, environment, program, &sources, &diagnostics)
@@ -1756,7 +1758,7 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     // a later error arm diverges instead of producing an optional value.
     optional_continuation :: if else_value == .If(_, _, _, _, _, _) -> true else -> sema_expression_bare_absent_arm(else_value, true)
     sibling_expected :: sema_expression_absent_sibling(then_first)
-    else_expected :: if sibling_rule && optional_continuation && sibling_expected != None -> sibling_expected else -> expected
+    else_expected :: if sibling_rule && optional_continuation && sibling_expected != None -> Val(sibling_expected) else -> expected
     else_checked :: sema_check_expression(else_value, else_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
         sema_scope_leave(&scopes, &state)
         sema_scope_rollback(&scopes, else_mark)
