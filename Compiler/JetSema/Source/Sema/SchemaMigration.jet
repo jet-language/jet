@@ -9,34 +9,36 @@ fn sema_schema_published(definition: StructDef) -> Bool Never! {
     false
 }
 
-fn sema_schema_codec(definition: StructDef, codec: String, environment: SemaScopeEnvironment?) -> Bool Never! {
+fn sema_schema_codec(definition: StructDef, codec: String, environment: SemaScopeEnvironment?, program: SemaProgramTables) -> Bool Never! {
     if environment == .Val(scope) {
-        checked :: sema_serde_type_definition(scope, definition.name) ?? return false
+        checked :: sema_serde_type_definition(scope, program, definition.name) ?? return false
         direction :: if codec == "Decode" -> SemaSerdeDirection.Decode else -> SemaSerdeDirection.Encode
-        return sema_serde_implementation(scope, checked, direction)
+        return sema_serde_implementation(scope, program, checked, direction)
     }
     loop derivation in definition.derives { if derivation.name == codec -> return true }
     false
 }
 
-fn sema_schema_decodable(ty: Type, environment: SemaScopeEnvironment?) -> Bool Never! {
-    if environment == .Val(scope) -> return sema_serde_type_is_admissible(scope, ty, SemaSerdeDirection.Decode)
+fn sema_schema_decodable(ty: Type, environment: SemaScopeEnvironment?, program: SemaProgramTables) -> Bool Never! {
+    if environment == .Val(scope) {
+        return sema_serde_type_is_admissible(scope, program, ty, SemaSerdeDirection.Decode)
+    }
     // Empty TraitRegistry trusts named types, but still rejects structural
     // types for which no decoder exists (CmdSchema.rs's advisory contract).
     if ty == {
         .Named(_) -> true
         .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) -> true
-        .List(inner) | .Option(inner) | .Shared(inner) | .FixedList(inner, _) -> sema_schema_decodable(inner, None)
-        .Map(key, _, value) -> key == Type.String && sema_schema_decodable(value, None)
+        .List(inner) | .Option(inner) | .Shared(inner) | .FixedList(inner, _) -> sema_schema_decodable(inner, None, program)
+        .Map(key, _, value) -> key == Type.String && sema_schema_decodable(value, None, program)
         .Union(members) -> {
-            loop member in members { if !sema_schema_decodable(member, None) -> return false }
+            loop member in members { if !sema_schema_decodable(member, None, program) -> return false }
             true
         }
         else -> false
     }
 }
 
-fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot], environment: SemaScopeEnvironment?) -> [Diagnostic] Never! {
+fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot], environment: SemaScopeEnvironment?, program: SemaProgramTables) -> [Diagnostic] Never! {
     diagnostics := [Diagnostic]{}
     migrations := [String:[MigrationOp]]{}
     conversions := [(from_ty: String, to_ty: String)]{}
@@ -77,9 +79,9 @@ fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot], en
                             current.get(field) == .Val(actual) -> {
                                 if {
                                     actual != declared -> &diagnostics.push(sema_schema_add_mismatch(name, field, declared, actual, span))
-                                    sema_schema_codec(definition, "Decode", environment) && !sema_schema_codec(definition, "Encode", environment) -> {
+                                    sema_schema_codec(definition, "Decode", environment, program) && !sema_schema_codec(definition, "Encode", environment, program) -> {
                                         loop added in definition.fields {
-                                            if added.name == field && !sema_schema_decodable(added.ty, environment) -> &diagnostics.push(sema_schema_add_decode(name, field, actual, span))
+                                            if added.name == field && !sema_schema_decodable(added.ty, environment, program) -> &diagnostics.push(sema_schema_add_decode(name, field, actual, span))
                                         }
                                     }
                                 }
@@ -201,19 +203,21 @@ fn sema_schema_unknown(name: String, field: String, verb: String, span: Span) ->
     sema_error("E0910", span, "the `{verb} {field}` migration on `{name}` names a field that doesn't exist", "a migration op must reference a field of this record — either its published shape or its current one", "check the spelling of `{field}`, or remove the `{verb}` op")
 }
 
-fn sema_schema_enter_registered_module(environment: &SemaScopeEnvironment?, module_index: Int) Never! {
+fn sema_schema_enter_registered_module(environment: &SemaScopeEnvironment?, program: &SemaProgramTables, module_index: Int) Never! {
     if &environment == .Val(scope) {
+        scope.registration_graph = ^program.registration_graph
         sema_scope_environment_enter_module(&scope, module_index, SemaComptimeBodyValues{})
+        program.registration_graph = ^scope.registration_graph
         return
     }
     panic("an owning schema pass lost its scope environment")
 }
 
-fn sema_schema_check_registered_module(environment: SemaScopeEnvironment?, module_index: Int, snapshots: [String:SchemaSnapshot], diagnostics: &[Diagnostic]) Never! {
+fn sema_schema_check_registered_module(environment: SemaScopeEnvironment?, program: SemaProgramTables, module_index: Int, snapshots: [String:SchemaSnapshot], diagnostics: &[Diagnostic]) Never! {
     if environment == .Val(scope) {
-        if scope.registration_graph == .Val(graph) {
+        if program.registration_graph == .Val(graph) {
             start :: diagnostics.len()
-            loop diagnostic in check_schema_migrations(graph.modules[module_index].program.items, snapshots, environment) -> &diagnostics.push(diagnostic)
+            loop diagnostic in check_schema_migrations(graph.modules[module_index].program.items, snapshots, environment, program) -> &diagnostics.push(diagnostic)
             sema_attach_diagnostic_source_locations(&diagnostics, start, graph.modules[module_index].source_segments)
             return
         }
@@ -221,24 +225,30 @@ fn sema_schema_check_registered_module(environment: SemaScopeEnvironment?, modul
     panic("an owning schema pass lost its registration graph")
 }
 
-// The populated schema pass temporarily owns the same actual registered graph
-// through the existing scope corridor, then returns it to its genuine caller.
+// The registered schema pass lends one program graph to the newest scope
+// transport for module entry, then moves it back for borrowed codec checks.
 fn sema_check_schema_migration_graph(registration: ^SemaRegistrationGraph, checked: SemaGraphResult, snapshots: [String:SchemaSnapshot]) -> (registration: SemaRegistrationGraph, diagnostics: [Diagnostic]) Never! {
     if snapshots.len() == 0 -> return (registration: ^registration, diagnostics: [Diagnostic]{})
     module_count :: registration.modules.len()
-    types := [jet_foundation.TTypeDef]{}
+    types := [TTypeDef]{}
     loop module_row in checked.modules {
         loop definition in module_row.declarations.type_defs -> &types.push(definition)
     }
     environment := Val(sema_check_pass_environment(^registration, types, SemaComptimeBodyValues{}))
+    program := if &environment == .Val(scope) -> SemaProgramTables{
+        registration_graph: ^scope.registration_graph,
+        checked_types: ^scope.checked_types,
+        checked_type_rows: ^scope.checked_type_rows,
+        checked_type_name_slots: ^scope.checked_type_name_slots,
+        checked_type_name_rows: ^scope.checked_type_name_rows,
+        boxed_edges: ^scope.boxed_edges,
+    } else -> panic("a registered schema pass lost its scope environment")
     diagnostics := [Diagnostic]{}
     loop module_index in 0..<module_count {
-        sema_schema_enter_registered_module(&environment, module_index)
-        sema_schema_check_registered_module(environment, module_index, snapshots, &diagnostics)
+        sema_schema_enter_registered_module(&environment, &program, module_index)
+        sema_schema_check_registered_module(environment, program, module_index, snapshots, &diagnostics)
     }
-    environment_out := ^environment ?? panic("a completed schema pass lost its scope environment")
-    graph_out := ^environment_out.registration_graph
-    environment_out.registration_graph = None
+    graph_out := ^program.registration_graph
     restored :: ^graph_out ?? panic("a completed schema pass lost its registration graph")
     (registration: ^restored, diagnostics: ^diagnostics)
 }

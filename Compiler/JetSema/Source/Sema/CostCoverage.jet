@@ -57,12 +57,16 @@ fn sema_cost_coverage(registration: SemaRegistrationGraph, checked: SemaGraphRes
         &rows.sort_by((left, right) -> (callables[left].span.start <=> callables[right].span.start).then(left <=> right))
         module_rows[module_row.module_identity] = ^rows
     }
-    loop output in registration.output_rows {
-        if !output.fact.selected -> next
-        if output.fact.module_id < 0 || output.fact.module_id >= registration.modules.len() -> next
-        module_identity :: registration.modules[output.fact.module_id].module_identity
-        loop index in (module_rows.get(module_identity) ?? [Int]{}) {
-            if callables[index].definition == output.fact.definition -> callables[index].root = true
+    loop module_row in registration.modules {
+        loop constant in module_row.constants {
+            if constant.declaration.resolved_output == .Val(output) {
+                if !output.selected -> next
+                if output.module_id < 0 || output.module_id >= registration.modules.len() -> next
+                module_identity :: registration.modules[output.module_id].module_identity
+                loop index in (module_rows.get(module_identity) ?? [Int]{}) {
+                    if callables[index].definition == output.definition -> callables[index].root = true
+                }
+            }
         }
     }
     covered := [String:Bool]{}

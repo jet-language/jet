@@ -664,13 +664,13 @@ fn sema_marker_rules_constant_for_reference(symbol: Symbol, references: [SemaNam
             return Val(value.value)
         }
     }
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return None
-    module_index :: sema_registration_module_index(graph, symbol.module_name) ?? return None
-    loop constant in graph.modules[module_index].constants {
-        if constant.symbol.id.key == symbol.id.key {
-            value :: constant.declaration.ct ?? return None
-            return sema_checked_comptime(value)
+    if program.registration_graph == .Val(graph) {
+        module_index :: sema_registration_module_index(graph, symbol.module_name) ?? return None
+        loop constant in graph.modules[module_index].constants {
+            if constant.symbol.id.key == symbol.id.key {
+                value :: constant.declaration.ct ?? return None
+                return sema_checked_comptime(value)
+            }
         }
     }
     None
@@ -703,26 +703,27 @@ fn sema_marker_rules_constant_value(checked: TExpr, marker: Marker, source_index
 // carries `values`, so its constant dependencies come from those references
 // instead of a second check on a copy of the graph.
 fn sema_marker_rules_comptime_source(marker: Marker, source_index: Int, expression: Expr, expected_type: Type?, reference_start: Int, context: SemaCheckContext, environment: SemaScopeEnvironment, program: SemaProgramTables, values: [SemaComptimeItemValue]) -> SemaComptimeItemSource? {
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return None
-    destination_key := "{marker.name}::marker::{marker.name_span.start}::arg::{source_index}"
-    source := SemaComptimeItemSource{
-        module_identity: environment.module_identity,
-        key: "{environment.module_identity}::{destination_key}",
-        destination_key: destination_key,
-        name: "#{marker.name} argument {source_index + 1}",
-        source_file: environment.source_file,
-        kind: SemaComptimeItemKind.MarkerArgument,
-        expression: expression,
-        expected_type: expected_type,
-        span: expr_span(expression),
-        dependencies: [String]{},
-        checked_text: None,
+    if program.registration_graph == .Val(graph) {
+        destination_key := "{marker.name}::marker::{marker.name_span.start}::arg::{source_index}"
+        source := SemaComptimeItemSource{
+            module_identity: environment.module_identity,
+            key: "{environment.module_identity}::{destination_key}",
+            destination_key: destination_key,
+            name: "#{marker.name} argument {source_index + 1}",
+            source_file: environment.source_file,
+            kind: SemaComptimeItemKind.MarkerArgument,
+            expression: expression,
+            expected_type: expected_type,
+            span: expr_span(expression),
+            dependencies: [String]{},
+            checked_text: None,
+        }
+        references := [SemaNameReferenceFact]{}
+        loop index in reference_start..<context.name_references.len() -> &references.push(context.name_references[index])
+        source.dependencies = sema_comptime_dependencies_from_references(graph, references, values)
+        return Val(source)
     }
-    references := [SemaNameReferenceFact]{}
-    loop index in reference_start..<context.name_references.len() -> &references.push(context.name_references[index])
-    source.dependencies = sema_comptime_dependencies_from_references(graph, references, values)
-    Val(source)
+    None
 }
 
 fn sema_marker_rules_observe_argument(marker: Marker, source_index: Int, expected_type: Type?, capture_constant: Bool, argument: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, values: [SemaComptimeItemValue]) -> SemaMarkerRuleArgumentObservation {
@@ -1504,7 +1505,7 @@ fn sema_marker_rules_validate_repeatability(registry: SemaScopeMembersMarkerRegi
 }
 
 fn sema_marker_rules_validate_arguments(registry: SemaScopeMembersMarkerRegistry, source_program: Program, markers: [Marker], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, values: [SemaComptimeItemValue], result: &SemaMarkerRulesCheckResult) {
-    seen := [Span]{}
+    seen := [Marker]{}
     loop marker in markers {
         duplicate := false
         loop occurrence in seen {
@@ -1613,23 +1614,24 @@ fn sema_marker_rules_check_declared_type_argument(argument: SemaScopeMembersDecl
     if builtin != None {
         return SemaMarkerRulesDeclaredTypeCheck{resolved_type: builtin, diagnostics: [Diagnostic]{}, complete: true}
     }
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return SemaMarkerRulesDeclaredTypeCheck{resolved_type: None, diagnostics: [Diagnostic]{}, complete: false}
-    if sema_type_name_is_generic(environment.generic_params, argument.name) {
-        return SemaMarkerRulesDeclaredTypeCheck{resolved_type: Val(argument.ty), diagnostics: [Diagnostic]{}, complete: true}
+    if program.registration_graph == .Val(graph) {
+        if sema_type_name_is_generic(environment.generic_params, argument.name) {
+            return SemaMarkerRulesDeclaredTypeCheck{resolved_type: Val(argument.ty), diagnostics: [Diagnostic]{}, complete: true}
+        }
+        resolved := sema_registration_lookup_name(graph, environment.module_identity, argument.name)
+        if resolved == None {
+            return SemaMarkerRulesDeclaredTypeCheck{resolved_type: None, diagnostics: [Diagnostic]{sema_unknown_name(argument.name, argument.span)}, complete: true}
+        }
+        resolved_value :: resolved ?? return SemaMarkerRulesDeclaredTypeCheck{resolved_type: None, diagnostics: [Diagnostic]{}, complete: false}
+        symbol := resolved_value.symbol
+        if symbol.kind != SymbolKind.Type && symbol.kind != SymbolKind.Trait {
+            diagnostic := sema_error("E0107", argument.span, "`{argument.name}` doesn't name a type", "a checked type argument must resolve to a declared type or trait", "use a type name here")
+            return SemaMarkerRulesDeclaredTypeCheck{resolved_type: None, diagnostics: [Diagnostic]{diagnostic}, complete: true}
+        }
+        resolved_type := sema_type_resolve_declared_with_generics(graph, argument.ty, environment.module_identity, environment.generic_params)
+        return SemaMarkerRulesDeclaredTypeCheck{resolved_type: Val(resolved_type), diagnostics: [Diagnostic]{}, complete: true}
     }
-    resolved := sema_registration_lookup_name(graph, environment.module_identity, argument.name)
-    if resolved == None {
-        return SemaMarkerRulesDeclaredTypeCheck{resolved_type: None, diagnostics: [Diagnostic]{sema_unknown_name(argument.name, argument.span)}, complete: true}
-    }
-    resolved_value :: resolved ?? return SemaMarkerRulesDeclaredTypeCheck{resolved_type: None, diagnostics: [Diagnostic]{}, complete: false}
-    symbol := resolved_value.symbol
-    if symbol.kind != SymbolKind.Type && symbol.kind != SymbolKind.Trait {
-        diagnostic := sema_error("E0107", argument.span, "`{argument.name}` doesn't name a type", "a checked type argument must resolve to a declared type or trait", "use a type name here")
-        return SemaMarkerRulesDeclaredTypeCheck{resolved_type: None, diagnostics: [Diagnostic]{diagnostic}, complete: true}
-    }
-    resolved_type := sema_type_resolve_declared_with_generics(graph, argument.ty, environment.module_identity, environment.generic_params)
-    SemaMarkerRulesDeclaredTypeCheck{resolved_type: Val(resolved_type), diagnostics: [Diagnostic]{}, complete: true}
+    SemaMarkerRulesDeclaredTypeCheck{resolved_type: None, diagnostics: [Diagnostic]{}, complete: false}
 }
 
 // D-METHODMACRO1=A: `#Inline(Always)` is a checked promise. A function that

@@ -86,14 +86,14 @@ fn sema_coverage_payload_type(subject_ty: Type, key: String, environment: SemaSc
             if key == "Err" -> return Val(err)
         }
         .Named(_) | .Apply(_, _) -> {
-            graph_option :: program.registration_graph
-            graph :: graph_option ?? return None
-            nominal_row :: sema_pattern_nominal_row(graph, environment.module_identity, subject_ty) ?? return None
-            nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-            loop row in nominal.variants {
-                if row.symbol.name == key {
-                    types :: sema_pattern_variant_types(row.payload, nominal, subject_ty)
-                    if types.len() == 1 -> return Val(types[0])
+            if program.registration_graph == .Val(graph) {
+                nominal_row :: sema_pattern_nominal_row(graph, environment.module_identity, subject_ty) ?? return None
+                nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+                loop row in nominal.variants {
+                    if row.symbol.name == key {
+                        types :: sema_pattern_variant_types(row.payload, nominal, subject_ty)
+                        if types.len() == 1 -> return Val(types[0])
+                    }
                 }
             }
         }
@@ -149,7 +149,7 @@ fn sema_coverage_keys(subject_ty: Type, shapes: [TPatternShape], environment: Se
         inner :: groups.get(key) ?? [TPatternShape]{}
         if payload_ty == .List(_) || payload_ty == .FixedList(_, _) || payload_ty == .Map(_, _, _) {
             rows :: loop shape in inner -> SemaPatternCoverageRow{cells: [SemaPatternCoverageCell]{SemaPatternCoverageCell.Shape{shape: shape}}}
-            if sema_pattern_matrix_complete(rows, [Type]{payload_ty}, environment) {
+            if sema_pattern_matrix_complete(rows, [Type]{payload_ty}, environment, program) {
                 &keys.push(key)
                 key_set[key] = true
             }
@@ -261,20 +261,20 @@ fn sema_coverage_missing(subject_ty: Type, keys: [String], environment: SemaScop
     missing := [String]{}
     if subject_ty == {
         .Named(_) | .Apply(_, _) -> {
-            graph_option :: program.registration_graph
-            graph :: graph_option ?? return missing
-            nominal_row :: sema_pattern_nominal_row(graph, environment.module_identity, subject_ty) ?? {
-                variants :: sema_coverage_compiler_enum(subject_ty) ?? return missing
-                loop variant in variants {
-                    if !sema_coverage_has_key(keys, variant) -> &missing.push(variant)
+            if program.registration_graph == .Val(graph) {
+                nominal_row :: sema_pattern_nominal_row(graph, environment.module_identity, subject_ty) ?? {
+                    variants :: sema_coverage_compiler_enum(subject_ty) ?? return missing
+                    loop variant in variants {
+                        if !sema_coverage_has_key(keys, variant) -> &missing.push(variant)
+                    }
+                    return missing
                 }
-                return missing
-            }
-            nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-            if nominal.kind != SemaRegistrationNominalKind.Enum -> return missing
-            key_set :: sema_coverage_key_set(keys)
-            loop row in nominal.variants {
-                if !sema_coverage_leaf_covered(key_set, row.symbol.name) -> &missing.push(row.symbol.name)
+                nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+                if nominal.kind != SemaRegistrationNominalKind.Enum -> return missing
+                key_set :: sema_coverage_key_set(keys)
+                loop row in nominal.variants {
+                    if !sema_coverage_leaf_covered(key_set, row.symbol.name) -> &missing.push(row.symbol.name)
+                }
             }
         }
         .Option(_) -> {
@@ -345,8 +345,8 @@ fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, 
     }
     if matrix {
         rows :: loop shape in table.shapes -> SemaPatternCoverageRow{cells: [SemaPatternCoverageCell]{SemaPatternCoverageCell.Shape{shape: shape}}}
-        if sema_pattern_matrix_complete(rows, [Type]{subject_ty}, environment) -> return
-        witness :: sema_pattern_collection_witness(subject_ty, rows, environment)
+        if sema_pattern_matrix_complete(rows, [Type]{subject_ty}, environment, program) -> return
+        witness :: sema_pattern_collection_witness(subject_ty, rows, environment, program)
         &diagnostics.push(sema_error("E0307", span, "this `if` doesn't cover every case — missing: {witness}", "pattern arms must cover every collection shape", "add an arm for `{witness}` or an `else` arm"))
         return
     }
@@ -474,10 +474,11 @@ fn sema_coverage_is_closed_set(ty: Type, environment: SemaScopeEnvironment, prog
         .Named(_) | .Apply(_, _) -> {}
         else -> return false
     }
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return false
-    nominal_row :: sema_pattern_nominal_row(graph, environment.module_identity, ty) ?? return sema_coverage_compiler_enum(ty) != None
-    graph.modules[nominal_row.module_index].nominals[nominal_row.row].kind == SemaRegistrationNominalKind.Enum
+    if program.registration_graph == .Val(graph) {
+        nominal_row :: sema_pattern_nominal_row(graph, environment.module_identity, ty) ?? return sema_coverage_compiler_enum(ty) != None
+        return graph.modules[nominal_row.module_index].nominals[nominal_row.row].kind == SemaRegistrationNominalKind.Enum
+    }
+    false
 }
 
 // The checked arm conditions of a value table with an `else` arm: every level
@@ -634,10 +635,10 @@ fn sema_pattern_matrix_list_rows(rows: [SemaPatternCoverageRow], length: Int, lo
     specialized
 }
 
-fn sema_pattern_matrix_list_complete(rows: [SemaPatternCoverageRow], elem: Type, length: Int, long: Bool, tail: [Type], environment: SemaScopeEnvironment) -> Bool Never! {
+fn sema_pattern_matrix_list_complete(rows: [SemaPatternCoverageRow], elem: Type, length: Int, long: Bool, tail: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     types := (loop _ in 0..<length -> elem)
     loop ty in tail -> &types.push(ty)
-    sema_pattern_matrix_complete(sema_pattern_matrix_list_rows(rows, length, long), types, environment)
+    sema_pattern_matrix_complete(sema_pattern_matrix_list_rows(rows, length, long), types, environment, program)
 }
 
 fn sema_pattern_matrix_list_limit(rows: [SemaPatternCoverageRow]) -> Int Never! {
@@ -661,23 +662,27 @@ fn sema_pattern_matrix_map_total(shape: TPatternShape) -> Bool Never! {
     false
 }
 
-fn sema_pattern_matrix_constructors(ty: Type, environment: SemaScopeEnvironment) -> [SemaPatternCoverageConstructor] Never! {
+fn sema_pattern_matrix_constructors(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [SemaPatternCoverageConstructor] Never! {
     if ty == {
-        .Option(inner) -> return [SemaPatternCoverageConstructor]{
-            SemaPatternCoverageConstructor{name: "Val", payload: [Type]{inner}},
-            SemaPatternCoverageConstructor{name: "None", payload: [Type]{}},
+        .Option(inner) -> {
+            return [SemaPatternCoverageConstructor]{
+                SemaPatternCoverageConstructor{name: "Val", payload: [Type]{inner}},
+                SemaPatternCoverageConstructor{name: "None", payload: [Type]{}},
+            }
         }
-        .Result(ok, err) -> return [SemaPatternCoverageConstructor]{
-            SemaPatternCoverageConstructor{name: "Ok", payload: [Type]{ok}},
-            SemaPatternCoverageConstructor{name: "Err", payload: [Type]{err}},
+        .Result(ok, err) -> {
+            return [SemaPatternCoverageConstructor]{
+                SemaPatternCoverageConstructor{name: "Ok", payload: [Type]{ok}},
+                SemaPatternCoverageConstructor{name: "Err", payload: [Type]{err}},
+            }
         }
         else -> {}
     }
-    names :: sema_coverage_missing(ty, [String]{}, environment)
+    names :: sema_coverage_missing(ty, [String]{}, environment, program)
     constructors := [SemaPatternCoverageConstructor]{}
     ignored := [Diagnostic]{}
     loop name in names {
-        payload :: sema_pattern_payload(ty, name, environment, Span{start: 0, end: 0}, &ignored)
+        payload :: sema_pattern_payload(ty, name, environment, program, Span{start: 0, end: 0}, &ignored)
         &constructors.push(SemaPatternCoverageConstructor{name: name, payload: payload.types})
     }
     constructors
@@ -723,25 +728,25 @@ fn sema_pattern_matrix_constructor_rows(rows: [SemaPatternCoverageRow], construc
     specialized
 }
 
-fn sema_pattern_matrix_complete(written_rows: [SemaPatternCoverageRow], types: [Type], environment: SemaScopeEnvironment) -> Bool Never! {
+fn sema_pattern_matrix_complete(written_rows: [SemaPatternCoverageRow], types: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if types.len() == 0 -> return written_rows.len() > 0
     rows :: sema_pattern_matrix_expand(written_rows)
     if rows.len() == 0 -> return false
     tail :: sema_pattern_matrix_tail(types)
     defaults :: sema_pattern_matrix_default(rows)
-    if sema_pattern_matrix_complete(defaults, tail, environment) -> return true
+    if sema_pattern_matrix_complete(defaults, tail, environment, program) -> return true
     ty :: sema_pattern_unwrap_tags(types[0])
     if ty == {
         .List(elem) -> {
             limit :: sema_pattern_matrix_list_limit(rows)
             loop length in 0..limit {
-                if !sema_pattern_matrix_list_complete(rows, elem, length, false, tail, environment) -> return false
+                if !sema_pattern_matrix_list_complete(rows, elem, length, false, tail, environment, program) -> return false
             }
-            return sema_pattern_matrix_list_complete(rows, elem, limit + 1, true, tail, environment)
+            return sema_pattern_matrix_list_complete(rows, elem, limit + 1, true, tail, environment, program)
         }
         .FixedList(elem, measure) -> {
             length :: measure_literal_value(measure) ?? return false
-            return sema_pattern_matrix_list_complete(rows, elem, length, false, tail, environment)
+            return sema_pattern_matrix_list_complete(rows, elem, length, false, tail, environment, program)
         }
         .Map(_, _, _) -> {
             settled := [SemaPatternCoverageRow]{}
@@ -750,12 +755,11 @@ fn sema_pattern_matrix_complete(written_rows: [SemaPatternCoverageRow], types: [
                     &settled.push(sema_pattern_matrix_append_tail([SemaPatternCoverageCell]{}, row))
                 }
             }
-            return sema_pattern_matrix_complete(settled, tail, environment)
+            return sema_pattern_matrix_complete(settled, tail, environment, program)
         }
         else -> {}
     }
-    graph_option :: environment.registration_graph
-    if graph_option == .Val(graph) && sema_pattern_nominal_row(graph, environment.module_identity, ty) == .Val(owner) {
+    if program.registration_graph == .Val(graph) && sema_pattern_nominal_row(graph, environment.module_identity, ty) == .Val(owner) {
         nominal :: graph.modules[owner.module_index].nominals[owner.row]
         if nominal.kind == SemaRegistrationNominalKind.Struct {
             field_types := [Type]{}
@@ -780,24 +784,24 @@ fn sema_pattern_matrix_complete(written_rows: [SemaPatternCoverageRow], types: [
                 &specialized.push(sema_pattern_matrix_append_tail(cells, row))
             }
             loop rest_ty in tail -> &field_types.push(rest_ty)
-            return sema_pattern_matrix_complete(specialized, field_types, environment)
+            return sema_pattern_matrix_complete(specialized, field_types, environment, program)
         }
     }
-    constructors :: sema_pattern_matrix_constructors(ty, environment)
+    constructors :: sema_pattern_matrix_constructors(ty, environment, program)
     if constructors.len() == 0 -> return false
     loop constructor in constructors {
         payload := constructor.payload
         loop rest_ty in tail -> &payload.push(rest_ty)
-        if !sema_pattern_matrix_complete(sema_pattern_matrix_constructor_rows(rows, constructor), payload, environment) -> return false
+        if !sema_pattern_matrix_complete(sema_pattern_matrix_constructor_rows(rows, constructor), payload, environment, program) -> return false
     }
     true
 }
 
-fn sema_pattern_collection_witness(ty: Type, rows: [SemaPatternCoverageRow], environment: SemaScopeEnvironment) -> String Never! {
+fn sema_pattern_collection_witness(ty: Type, rows: [SemaPatternCoverageRow], environment: SemaScopeEnvironment, program: SemaProgramTables) -> String Never! {
     if ty == .List(elem) {
         limit :: sema_pattern_matrix_list_limit(rows)
         loop length in 0..limit {
-            if !sema_pattern_matrix_list_complete(rows, elem, length, false, [Type]{}, environment) {
+            if !sema_pattern_matrix_list_complete(rows, elem, length, false, [Type]{}, environment, program) {
                 items :: loop _ in 0..<length -> "_"
                 return "[{items.join(", ")}]"
             }

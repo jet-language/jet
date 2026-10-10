@@ -37,13 +37,13 @@ fn sema_must_use_function(call: Call, environment: SemaScopeEnvironment, program
 // Rust `method_is_must_use`: a `#MustUse` method declared on the receiver's
 // nominal type.
 fn sema_must_use_method(type_name: String, method: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return false
-    loop nominal_row in sema_registration_nominal_rows_named(graph, type_name) {
-        methods :: graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods
-        loop method_index in 0..<methods.len() {
-            function :: methods[method_index]
-            if function.symbol.name == method && function.declaration.is_must_use -> return true
+    if program.registration_graph == .Val(graph) {
+        loop nominal_row in sema_registration_nominal_rows_named(graph, type_name) {
+            methods :: graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods
+            loop method_index in 0..<methods.len() {
+                function :: methods[method_index]
+                if function.symbol.name == method && function.declaration.is_must_use -> return true
+            }
         }
     }
     false

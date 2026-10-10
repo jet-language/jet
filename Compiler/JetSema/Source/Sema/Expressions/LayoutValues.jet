@@ -217,8 +217,7 @@ fn sema_call_try_layout_method(receiver: Expr, receiver_value: TExpr, method: St
 }
 
 fn sema_expression_measurement_inner(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return None
+    if program.registration_graph == .Val(graph) {
     resolved :: sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
     name :: if resolved == {
         .Apply(name, args) -> {
@@ -239,20 +238,23 @@ fn sema_expression_measurement_inner(ty: Type, environment: SemaScopeEnvironment
         }
         else -> {}
     }
+    }
     None
 }
 
-fn sema_expression_measurement_source_call(function: String, values: [TExpr], result_type: Type, span: Span, environment: SemaScopeEnvironment) -> TExpr? {
-    source_identity :: sema_call_core_module_identity(environment, "core.units") ?? return None
-    graph :: environment.registration_graph ?? return None
+fn sema_expression_measurement_source_call(function: String, values: [TExpr], result_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
+    source_identity :: sema_call_core_module_identity(environment, program, "core.units") ?? return None
+    if program.registration_graph == .Val(graph) {
     source_index :: sema_registration_module_index(graph, source_identity) ?? return None
     callee :: sema_registration_direct_symbol(graph.modules[source_index], function) ?? return None
     arguments :: loop value in values -> TCallArg{value: value, template_items: [SymbolID]{}, borrow: !sema_call_is_scalar(value.ty), mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
     type_args :: if function == "__measurement_result" && result_type == .Result(_, error) -> [Type]{error} else -> [Type]{}
-    Val(sema_tir_expr(result_type, TExprKind.Call{callee: callee.symbol.id, type_args: type_args, args: arguments}, span))
+    return Val(sema_tir_expr(result_type, TExprKind.Call{callee: callee.symbol.id, type_args: type_args, args: arguments}, span))
+    }
+    None
 }
 
-fn sema_call_try_measurement_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_measurement_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if method != "value" && method != "uncertainty" -> return SemaMethodSpecialCheck{handled: false, value: None}
     _ := sema_expression_measurement_inner(receiver_value.ty, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if args.len() != 0 {
@@ -263,10 +265,10 @@ fn sema_call_try_measurement_method(receiver: Expr, receiver_value: TExpr, metho
     }
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     result_type := Type.Float
-    value :: sema_expression_measurement_source_call("__measurement_{method}", [TExpr]{receiver_value}, result_type, span, environment) ?? {
+    value :: sema_expression_measurement_source_call("__measurement_{method}", [TExpr]{receiver_value}, result_type, span, environment, program) ?? {
         &context.incomplete_reasons.push("checked Measurement accessor has no source declaration")
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !sema_effect_record_intrinsic_fact(environment, &scopes, &context, "Measurement.{method}", span, sema_expression_layout_call_facts(result_type), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
+    if !sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, "Measurement.{method}", span, sema_expression_layout_call_facts(result_type), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }

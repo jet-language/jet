@@ -45,15 +45,15 @@ fn sema_serde_has_name(values: [String], name: String) -> Bool Never! {
 
 fn sema_serde_implementation(environment: SemaScopeEnvironment, program: SemaProgramTables, definition: TTypeDef, direction: SemaSerdeDirection) -> Bool Never! {
     if sema_serde_has_name(definition.derives, sema_serde_codec_name(direction)) || sema_serde_has_name(definition.derives, "Codable") -> return true
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return false
-    wanted :: sema_serde_codec_name(direction)
-    loop module_row in graph.modules {
-        loop implementation in module_row.impls {
-            trait_name :: implementation.trait_name ?? next
-            if sema_serde_named_leaf(trait_name) != wanted -> next
-            target_module := implementation.target_module_identity ?? implementation.source_module_identity
-            if target_module == definition.module_identity && implementation.target_type_name == definition.name -> return true
+    if program.registration_graph == .Val(graph) {
+        wanted :: sema_serde_codec_name(direction)
+        loop module_row in graph.modules {
+            loop implementation in module_row.impls {
+                trait_name :: implementation.trait_name ?? next
+                if sema_serde_named_leaf(trait_name) != wanted -> next
+                target_module := implementation.target_module_identity ?? implementation.source_module_identity
+                if target_module == definition.module_identity && implementation.target_type_name == definition.name -> return true
+            }
         }
     }
     false
@@ -147,10 +147,11 @@ fn sema_serde_core_data_name(environment: SemaScopeEnvironment, program: SemaPro
     if name != "Dyn" && name != "JSON" && name != "TOML" && name != "YAML" && name != "CSV" -> return false
     if direction == SemaSerdeDirection.Decode && name != "Dyn" -> return false
     definition :: sema_serde_type_definition(environment, program, name) ?? return true
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return true
-    module_index :: sema_registration_module_index(graph, definition.module_identity) ?? return false
-    graph.modules[module_index].module_name == "core.data" || graph.modules[module_index].module_name == "core.encoding"
+    if program.registration_graph == .Val(graph) {
+        module_index :: sema_registration_module_index(graph, definition.module_identity) ?? return false
+        return graph.modules[module_index].module_name == "core.data" || graph.modules[module_index].module_name == "core.encoding"
+    }
+    true
 }
 
 fn sema_serde_type_is_admissible(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, direction: SemaSerdeDirection) -> Bool Never! {

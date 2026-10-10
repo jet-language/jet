@@ -117,7 +117,7 @@ fn sema_expression_exact_move(value: Expr, span: Span, expected: Type?, environm
     mark_span :: Span{start: span.start, end: span.start + 1}
     checked :: sema_check_expression(value, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if sema_ownership_type_is_copy(checked.ty) -> return Val(checked)
-    if !sema_copy_site_check_guard_owned(checked, environment, scopes, context, &diagnostics, true) -> return None
+    if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, true) -> return None
     if value == .Index(_, _, _, _) {
         &diagnostics.push(diagnostic_with_edit(sema_error("E0225", mark_span, "the move marker `^` cannot take an element out of its collection", "`^` moves a name or one of its fields; an element stays owned by its collection, which has no hole to leave behind", "remove `^` to copy the element"), TextEdit{span: mark_span, new_text: ""}))
         return None
@@ -233,13 +233,13 @@ fn sema_expression_tuple_field(base: TExpr, member: String, span: Span, diagnost
 // fields resolve through the declaration (Rust `struct_owner_module`).
 fn sema_expression_carrier_type_symbol(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> Symbol? {
     carrier :: mir_boundary_head_carrier_module(name) ?? return None
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return None
+    if program.registration_graph == .Val(graph) {
     loop module_row in graph.modules {
         if module_row.module_name != carrier -> next
         loop nominal in module_row.nominals {
             if nominal.symbol.name == name -> return Val(nominal.symbol)
         }
+    }
     }
     None
 }
@@ -265,11 +265,12 @@ fn sema_expression_shared_guard_value(ty: Type) -> SemaCallMemoryGuard? {
 // owning module sees them, so it resolves there (the owner's type parameters
 // stay parameters) before the owner's type arguments are substituted.
 fn sema_expression_field_owner_type(environment: SemaScopeEnvironment, program: SemaProgramTables, owner_module: String, declared: Type, generic_names: [String]) -> Type Never! {
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return declared.copy()
+    if program.registration_graph == .Val(graph) {
     if owner_module == "" -> return declared.copy()
     generics :: loop name in generic_names -> TGenericParam{name: name, bounds: [SymbolID]{}}
-    sema_type_resolve_declared_with_generics(graph, declared, owner_module, generics)
+    return sema_type_resolve_declared_with_generics(graph, declared, owner_module, generics)
+    }
+    declared.copy()
 }
 
 fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -307,7 +308,7 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
             &context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner_symbol, kind: "type"})
             // The struct's fields, read at the declaration without copying
             // its methods.
-            if sema_scope_declaration_struct(environment, owner_symbol.id) == .Val(struct_def) {
+            if sema_scope_declaration_struct(environment, program, owner_symbol.id) == .Val(struct_def) {
                 if struct_def.type_params.len() != owner_args.len() {
                     &diagnostics.push(sema_error("E0104", span, "struct `{type_name(base.ty)}` has the wrong number of type arguments", "each declared type parameter needs one concrete argument", "provide one type argument for every generic parameter"))
                     return None
@@ -389,9 +390,11 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
         return sema_expression_enum_literal(path.enum_name, [Type]{}, path.variant, [EnumLitArg]{}, false, Val(member_span), span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     if !sema_ownership_check_owner_read(&state, Expr.Field{base: base, member: member, span: member_span}, scopes, &diagnostics) -> return None
-    // Rust `infer_field`: the complete place answers for moves (a moved
-    // sibling leaves this field readable); the base is only its owner.
-    if !sema_ownership_check_moved_place_use(&state, Expr.Field{base: base, member: member, span: span}, scopes, &diagnostics) -> return None
+    // A projected base suppresses descendant moves, but still answers for
+    // moves of itself or its ancestors. The complete place checks all moves.
+    place_expr :: Expr.Field{base: base, member: member, span: span}
+    moved_ok :: if context.suppress_partial_move_root_read -> sema_ownership_check_root_base_use(&state, place_expr, scopes, &diagnostics) else -> sema_ownership_check_moved_place_use(&state, place_expr, scopes, &diagnostics)
+    if !moved_ok -> return None
     // The base is checked once, for real. When it is a shared handle, that
     // check is rolled back and the locked-read rewrite is checked instead.
     // (Probing the base before checking it re-checked every prefix of a field
@@ -419,13 +422,13 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
     }
     sema_scope_commit(&scopes, base_scope_mark)
     checked_base :: checked_base_value ?? return None
-    sema_ownership_note_close_owner(&state, base, checked_base.ty, environment, scopes)
-    if !sema_expression_secret_exposure_allowed(checked_base.ty, member, span, environment, &context, &diagnostics) -> return None
+    sema_ownership_note_close_owner(&state, base, checked_base.ty, environment, program, scopes)
+    if !sema_expression_secret_exposure_allowed(checked_base.ty, member, span, environment, program, &context, &diagnostics) -> return None
     if checked_base.ty == .Named(math_name) {
         swizzle :: sema_expression_math_swizzle(checked_base, math_name, member, span, &diagnostics)
-        if swizzle.handled -> return if swizzle.value == .Val(read) -> sema_expr_expected(read, expected, environment, &diagnostics) else -> None
+        if swizzle.handled -> return if swizzle.value == .Val(read) -> sema_expr_expected(read, expected, environment, program, &diagnostics) else -> None
     }
-    sema_expression_field_checked(checked_base, member, span, expected, environment, &scopes, &context, &diagnostics)
+    sema_expression_field_checked(checked_base, member, span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
 // D-SWIZZLE1 (Rust `infer_field`, `parse_swizzle_member`): `v.xy` names up to
@@ -490,8 +493,7 @@ fn sema_expression_numeric_bound_type(base: Expr, member: String) -> Type? {
 // `core.crypto.expert` exposure functions.
 fn sema_expression_secret_exposure_allowed(ty: Type, member: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if member != "bytes" || context.unsafe_depth > 0 || !sema_call_reflection_secret_bearing(ty) -> return true
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return true
+    if program.registration_graph == .Val(graph) {
     caller_index :: sema_registration_module_index(graph, environment.module_identity) ?? return true
     caller_name :: graph.modules[caller_index].module_name
     if caller_name == "core" || caller_name.starts_with("core.") -> return true
@@ -503,7 +505,9 @@ fn sema_expression_secret_exposure_allowed(ty: Type, member: String, span: Span,
         else -> "secret_bytes"
     }
     &diagnostics.push(sema_error("E0510", span, "reading `{shown}.bytes` exposes secret key material", "secret-bearing values cannot be printed, interpolated, or read as raw bytes outside an audited expert gate (D-CRYPTO-API1)", "keep the value inside `crypto` operations, or call `expert.{exposure}(value)` inside `#Unsafe(\"reason\") {{ … }}`"))
-    false
+    return false
+    }
+    true
 }
 
 // S71 (D-SG6): the chain yields `T?`; an already-optional member flattens, so

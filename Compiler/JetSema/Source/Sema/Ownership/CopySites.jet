@@ -93,9 +93,9 @@ fn sema_copy_site_guard_projection(value: TExpr) -> Bool Never! {
     }
 }
 
-fn sema_copy_site_check_guard_owned(value: TExpr, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic], exact_move: Bool) -> Bool {
+fn sema_copy_site_check_guard_owned(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic], exact_move: Bool) -> Bool {
     if sema_copy_site_guard_projection(value) {
-        facts :: sema_copy_classify(value.ty, SemaCopyIntent.Clone, environment, context.generic_params, false)
+        facts :: sema_copy_classify(value.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
         if facts.copyable -> return true
         if !exact_move && !scopes.copies_explicit && facts.complete && facts.cloneable && !facts.resource -> return true
         diagnostic :: sema_error("E0120", value.span, "this guard lends its value, so it cannot be moved into an owning destination", "the value stays owned by the shared storage; moving it would leave the guard and the destination owning the same data", "copy the value explicitly with `.copy()`, or pass it to a read parameter instead")
@@ -107,10 +107,10 @@ fn sema_copy_site_check_guard_owned(value: TExpr, environment: SemaScopeEnvironm
         return false
     }
     if value.kind == {
-        .Present(inner) | .Ok(inner) | .Err(inner) | .Move(inner) | .TraitBox(inner, _) -> sema_copy_site_check_guard_owned(inner, environment, scopes, context, &diagnostics, exact_move)
+        .Present(inner) | .Ok(inner) | .Err(inner) | .Move(inner) | .TraitBox(inner, _) -> sema_copy_site_check_guard_owned(inner, environment, program, scopes, context, &diagnostics, exact_move)
         .IfExpr(_, _, then_value, _, else_value) -> {
-            left :: sema_copy_site_check_guard_owned(then_value, environment, scopes, context, &diagnostics, exact_move)
-            right :: sema_copy_site_check_guard_owned(else_value, environment, scopes, context, &diagnostics, exact_move)
+            left :: sema_copy_site_check_guard_owned(then_value, environment, program, scopes, context, &diagnostics, exact_move)
+            right :: sema_copy_site_check_guard_owned(else_value, environment, program, scopes, context, &diagnostics, exact_move)
             left && right
         }
         // An authored copy or a window is not a payload move.

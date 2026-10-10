@@ -392,8 +392,7 @@ fn sema_expr_operator_candidate_from_function(function: SemaRegistrationFunction
 fn sema_expr_operator_resolution(op: BinOp, lhs: Type, rhs: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaExprOperatorResolution? {
     trait_name :: sema_expr_operator_trait(op) ?? return None
     method :: sema_expr_operator_method(op) ?? return None
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return None
+    if program.registration_graph == .Val(graph) {
     direct := sema_expr_registration_operator_candidates(graph, lhs, rhs, trait_name, method, false, span, environment, program, &scopes, &diagnostics)
     if direct.len() > 1 {
         &diagnostics.push(sema_error("E0772", span, "this operator matches more than one callable body", "operator dispatch requires one exact registered trait implementation", "remove the duplicate operator implementation or make the right-hand type unambiguous"))
@@ -411,6 +410,7 @@ fn sema_expr_operator_resolution(op: BinOp, lhs: Type, rhs: Type, span: Span, en
             result.receiver_is_left = false
             return Val(result)
         }
+    }
     }
     None
 }
@@ -432,8 +432,7 @@ fn sema_expr_check_operator(op: BinOp, left: Expr, right: Expr, lhs: TExpr, rhs:
     resolution := SemaExprOperatorResolution?{None}
     if {
         op == BinOp.Eq || op == BinOp.Ne -> {
-            graph_option :: program.registration_graph
-            graph :: graph_option ?? return None
+            if program.registration_graph == .Val(graph) {
             comparable := sema_expr_registration_operator_candidates(graph, lhs.ty, rhs.ty, "Comparable", "compare", false, span, environment, program, &scopes, &diagnostics)
             equatable := sema_expr_registration_operator_candidates(graph, lhs.ty, rhs.ty, "Equatable", "equal", false, span, environment, program, &scopes, &diagnostics)
             if {
@@ -443,6 +442,9 @@ fn sema_expr_check_operator(op: BinOp, left: Expr, right: Expr, lhs: TExpr, rhs:
                 else -> {
                     resolution = sema_expr_operator_resolution(op, lhs.ty, rhs.ty, span, environment, program, &scopes, &diagnostics)
                 }
+            }
+            } else {
+                return None
             }
         }
         else -> {
@@ -800,9 +802,8 @@ fn sema_expr_byte_text(value: U8) -> String Never! {
 
 
 fn sema_expr_expected_type(value: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type Never! {
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return value
-    sema_type_resolve_declared_with_generics(graph, value, environment.module_identity, environment.generic_params)
+    if program.registration_graph == .Val(graph) -> return sema_type_resolve_declared_with_generics(graph, value, environment.module_identity, environment.generic_params)
+    value.copy()
 }
 
 fn sema_expr_expected_assignable(required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
@@ -1309,7 +1310,7 @@ fn sema_expr_distinct_facts(ty: Type, environment: SemaScopeEnvironment, program
     if definition_value.quantity != None -> return None
     // Imported projections retain nominal bases from the declaring module.
     base := definition_value.base
-    if environment.registration_graph == .Val(graph) {
+    if program.registration_graph == .Val(graph) {
         base = sema_type_resolve_declared(graph, base, owner.module_name)
     }
     numeric := false
@@ -1361,9 +1362,8 @@ fn sema_expr_check_distinct_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span
 }
 
 fn sema_expr_unit_fact(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationUnitFact? {
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return None
-    sema_registration_unit_fact_for_type(graph, ty)
+    if program.registration_graph == .Val(graph) -> return sema_registration_unit_fact_for_type(graph, ty)
+    None
 }
 
 
@@ -1535,7 +1535,7 @@ fn sema_expr_unit_conversion_is_finite(source: SemaRegistrationUnitFact, destina
     sema_expr_unit_ratio_is_finite(scale) && sema_expr_unit_ratio_is_finite(offset)
 }
 
-fn sema_expr_unit_quantity_base_is_float(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
+fn sema_expr_unit_quantity_base_is_float(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if ty == {
         .Quantity(base, _) -> return base == Type.Float
         else -> {}
@@ -1558,10 +1558,10 @@ fn sema_expr_unit_dimension(ty: Type, environment: SemaScopeEnvironment, program
 }
 
 fn sema_expr_unit_counterpart(fact: SemaRegistrationUnitFact, kind: QuantityKind, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationUnitFact? {
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return None
+    if program.registration_graph == .Val(graph) {
     loop candidate in graph.unit_facts {
         if candidate.package == fact.package && candidate.family == fact.family && candidate.member == fact.member && candidate.kind == kind -> return Val(candidate)
+    }
     }
     None
 }
@@ -2054,8 +2054,8 @@ fn sema_expr_comptime_target(environment: SemaScopeEnvironment, program: SemaPro
 
 // Whether sema_expr_comptime_target's target for `symbol` is declared
 // `comptime`, read in place from the graph rows.
-fn sema_expr_comptime_target_declared(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, symbol: SymbolID) -> Bool {
-    if environment.registration_graph == .Val(graph) {
+fn sema_expr_comptime_target_declared(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, symbol: SymbolID) -> Bool {
+    if program.registration_graph == .Val(graph) {
         row :: graph.callable_rows.get(symbol.key) ?? return false
         return if row == {
             .Function(module_index, index) -> graph.modules[module_index].functions[index].declaration.is_comptime
@@ -2063,7 +2063,7 @@ fn sema_expr_comptime_target_declared(environment: SemaScopeEnvironment, scopes:
             else -> false
         }
     }
-    target :: sema_expr_comptime_target(environment, &scopes, symbol) ?? return false
+    target :: sema_expr_comptime_target(environment, program, &scopes, symbol) ?? return false
     target.declaration.is_comptime
 }
 
@@ -2144,8 +2144,8 @@ fn sema_expr_record_call_fact(environment: SemaScopeEnvironment, program: SemaPr
     // pure, so the cheap tests go first and only a `comptime` target builds
     // its row (whose declaration copy is the callee's whole body).
     if scopes.comptime_execution_depth > 0 -> return true
-    if !sema_expr_comptime_target_declared(environment, &scopes, symbol) -> return true
-    target :: sema_expr_comptime_target(environment, &scopes, symbol) ?? return true
+    if !sema_expr_comptime_target_declared(environment, program, &scopes, symbol) -> return true
+    target :: sema_expr_comptime_target(environment, program, &scopes, symbol) ?? return true
     args :: sema_expr_comptime_call_args(checked.value) ?? {
         &diagnostics.push(sema_error("E0956", span, "compile-time call `{target.path}` needs compile-time value arguments", "the deferred MIR evaluator receives only canonical TComptimeValue arguments", "pass supported compile-time values to this call"))
         return false
@@ -2180,7 +2180,7 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
             loop function in implementation.methods {
                 if function.symbol.name != method || function.parameters.len() == 0 -> next
                 method_ref :: TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
-                candidate :: sema_call_method_candidate_from_registration(function.signature, function.generic_params, environment.registration_graph, caller_module, caller_package, environment.generic_params, Val(lookup_type), function.parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
+                candidate :: sema_call_method_candidate_from_registration(function.signature, function.generic_params, program.registration_graph, caller_module, caller_package, environment.generic_params, Val(lookup_type), function.parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
                 &candidates.push(candidate)
             }
         }
@@ -2220,9 +2220,9 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
 
 // Resolve the method owner's home through the declaration index, without
 // changing the annotation's public spelling or inventing a Core alias table.
-fn sema_expr_receiver_nominal_identity(environment: SemaScopeEnvironment, receiver_type: Type) -> String Never! {
+fn sema_expr_receiver_nominal_identity(environment: SemaScopeEnvironment, program: SemaProgramTables, receiver_type: Type) -> String Never! {
     base_name :: sema_expr_type_base_name(receiver_type) ?? return type_name(receiver_type)
-    graph :: environment.registration_graph ?? return base_name
+    if program.registration_graph == .Val(graph) {
     if sema_type_resolve_nominal_row(graph, receiver_type, environment.module_identity) == .Val(row) {
         nominal :: graph.modules[row.module_index].nominals[row.row]
         return "{nominal.symbol.module_name}::{nominal.symbol.name}"
@@ -2236,16 +2236,17 @@ fn sema_expr_receiver_nominal_identity(environment: SemaScopeEnvironment, receiv
         if found != None -> return base_name
         found = Val(identity)
     }
-    found ?? base_name
+    return found ?? base_name
+    }
+    base_name
 }
 
 // True only when a declared nominal method collides with a builtin handle
 // method of the same owner leaf and name (Core's `URL`/`MIME`, or a user type
 // spelled like a handle carrier); every other declared method keeps the
 // special routes, as in the Rust TIR lowering's handle_method_op gate.
-fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, receiver_type: Type, method: String, needs_receiver: Bool) -> Bool Never! {
-    graph_option :: environment.registration_graph
-    graph :: graph_option ?? return false
+fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, program: SemaProgramTables, receiver_type: Type, method: String, needs_receiver: Bool) -> Bool Never! {
+    if program.registration_graph == .Val(graph) {
     // A resolved receiver carries its canonical identity (`module::URL`).
     base_name :: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver_type)) ?? return false
     loop owner_row in graph.modules {
@@ -2275,6 +2276,7 @@ fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, receiver
             if function.symbol.name == method && (!needs_receiver || function.parameters.len() > 0) -> return true
         }
     }
+    }
     false
 }
 
@@ -2288,10 +2290,10 @@ fn sema_expr_declared_function_named(scopes: SemaScopeTable, name: String) -> Bo
     false
 }
 
-fn sema_expr_check_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expr_check_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     // A loaded declaration owns the call even when Core also imports the name.
     if sema_expr_declared_function_named(scopes, call.name) {
-        return sema_expr_check_declared_direct_call(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return sema_expr_check_declared_direct_call(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     if sema_expression_zip_family_name(call.name) && sema_scope_resolve_index(scopes, call.name) == None {
         return sema_expression_zip_free_call(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2325,10 +2327,10 @@ fn sema_expr_check_direct_call(call: Call, expected: Type?, environment: SemaSco
         value :: checked_default ?? return None
         return Val(value)
     }
-    sema_expr_check_declared_direct_call(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    sema_expr_check_declared_direct_call(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
-fn sema_expr_check_declared_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expr_check_declared_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     scopes.ownership_call_depth += 1
     target :: sema_call_resolve_direct(call.name, call.type_args, environment, program, &scopes, call.name_span, &diagnostics) ?? {
         scopes.ownership_call_depth -= 1
@@ -2497,9 +2499,9 @@ fn sema_expr_try_explicit_unit_method(receiver: Expr, method: String, method_spa
     value := sema_tir_expr(scalar_ty, TExprKind.UnitConvert{destination: destination_symbol, argument: source_value, scale: sema_expr_unit_ratio_text(scale), offset: sema_expr_unit_ratio_text(offset), rounding: rounding, fallible: true, relative_uncertainty: None, file: environment.source_file, line: line}, conversion_span)
     if measured_crossing {
         relative :: sema_tir_expr(Type.Float, TExprKind.FloatLit{value: relative_uncertainty ?? 0.0}, conversion_span)
-        value = sema_expression_measurement_source_call("__measurement_result", [TExpr]{value, relative}, result_ty, conversion_span, environment) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        value = sema_expression_measurement_source_call("__measurement_result", [TExpr]{value, relative}, result_ty, conversion_span, environment, program) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    checked := sema_expr_expected(value, expected, environment, &diagnostics)
+    checked := sema_expr_expected(value, expected, environment, program, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked}
 }
 
@@ -2631,13 +2633,13 @@ fn sema_expr_try_core_module_method(receiver: Expr, method: String, method_span:
         .None -> {}
     }
     diagnostics_before := diagnostics.len()
-    route := if nested -> sema_call_core_resolve_import_path_route(environment, scopes, alias, module_name, method, type_args, expected_type_arg_count, true, args.len(), sema_call_core_first_is_move(args), method_span, alias_span, &context, &diagnostics) else -> sema_call_core_resolve_import_route(environment, scopes, alias, method, type_args, expected_type_arg_count, true, args.len(), sema_call_core_first_is_move(args), method_span, alias_span, &context, &diagnostics)
+    route := if nested -> sema_call_core_resolve_import_path_route(environment, program, scopes, alias, module_name, method, type_args, expected_type_arg_count, true, args.len(), sema_call_core_first_is_move(args), method_span, alias_span, &context, &diagnostics) else -> sema_call_core_resolve_import_route(environment, program, scopes, alias, method, type_args, expected_type_arg_count, true, args.len(), sema_call_core_first_is_move(args), method_span, alias_span, &context, &diagnostics)
     route_value :: route ?? {
         if diagnostics.len() != diagnostics_before -> return SemaMethodSpecialCheck{handled: true, value: None}
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
     if route_value == {
-        .SharedSite(lifetime) -> return SemaMethodSpecialCheck{handled: true, value: sema_call_core_global_shared(lifetime, method, type_args, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)}
+        .SharedSite(lifetime) -> return SemaMethodSpecialCheck{handled: true, value: sema_call_core_global_shared(lifetime, method, type_args, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)}
         .Source(target) -> {
             scopes.ownership_call_depth += 1
             value := sema_call_core_check_source_owned(target, "{module_name}.{method}", type_args, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2742,10 +2744,10 @@ fn sema_expr_try_method_special_routes(receiver: Expr, receiver_value: TExpr, me
     compiler_value := sema_call_try_compiler_value_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if compiler_value.handled -> return compiler_value
 
-    queue := sema_call_try_job_queue_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    queue := sema_call_try_job_queue_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if queue.handled -> return queue
 
-    tree := sema_check_service_tree_method(method, receiver, receiver_value, args, expected, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    tree := sema_check_service_tree_method(method, receiver, receiver_value, args, expected, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if tree == .Val(check) {
         if check.handled -> return check
     }
@@ -2825,21 +2827,21 @@ fn sema_expr_inferred_new_owner(expected: Type?) -> Type? {
 // A callable field is the direct-call route only in the absence of a method.
 // Query declaration identity before visibility, inference, or argument shape:
 // a rejected method call must never become a successful field call.
-fn sema_expr_function_field(receiver: Type, name: String, method_name: String, environment: SemaScopeEnvironment) -> Bool {
+fn sema_expr_function_field(receiver: Type, name: String, method_name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     type_name :: sema_type_graph_base_name(sema_expr_unwrap_tag(receiver)) ?? return false
-    definition :: sema_serde_type_definition(environment, type_name) ?? return false
+    definition :: sema_serde_type_definition(environment, program, type_name) ?? return false
     callable := false
     if definition.kind == .Struct(fields, _) {
         loop field in fields {
             if field.name == name {
-                callable = sema_call_type_is_function(sema_call_resolved_type(field.ty, environment))
+                callable = sema_call_type_is_function(sema_call_resolved_type(field.ty, environment, program))
                 break
             }
         }
     }
     if !callable -> return false
-    if sema_expr_declares_nominal_method(environment, sema_expr_unwrap_tag(receiver), method_name, false) -> return false
-    if environment.registration_graph == .Val(graph) {
+    if sema_expr_declares_nominal_method(environment, program, sema_expr_unwrap_tag(receiver), method_name, false) -> return false
+    if program.registration_graph == .Val(graph) {
         if sema_type_resolve_nominal_row(graph, receiver, environment.module_identity) == .Val(row) {
             nominal :: graph.modules[row.module_index].nominals[row.row]
             loop implementation_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
@@ -2925,9 +2927,9 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     if exempt_view_receiver -> context.allow_string_view_read = true
     receiver_checked := TExpr?{None}
     if !exempt_view_receiver && method != "starts_with" && method != "ends_with" && method != "contains" && sema_string_view_owning_read(receiver, Type.String, scopes) && receiver == .Ident(view_name, view_span) {
-        receiver_checked = sema_string_view_materialize(view_name, view_span, None, environment, &scopes, &state, &context, &diagnostics)
+        receiver_checked = sema_string_view_materialize(view_name, view_span, None, environment, program, &scopes, &state, &context, &diagnostics)
     } else {
-        receiver_checked = sema_check_expression(receiver, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        receiver_checked = sema_check_expression(receiver, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     context.allow_string_view_read = previous_string_view_read
     scopes.ownership_call_depth -= 1
@@ -2947,9 +2949,9 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
         if !sema_expr_record_call_fact(environment, program, &scopes, &context, method_span, projected_value, &diagnostics) -> return None
         return Val(projected_value.value)
     }
-    routed_method :: core_source_receiver_method(if method == "bool" && args.len() == 1 -> sema_expr_receiver_nominal_identity(environment, receiver_value.ty) else -> type_name(receiver_value.ty), method, args.len())
+    routed_method :: core_source_receiver_method(if method == "bool" && args.len() == 1 -> sema_expr_receiver_nominal_identity(environment, program, receiver_value.ty) else -> type_name(receiver_value.ty), method, args.len())
     // D-MEMBER-NAMESPACE1=A: only method absence enables the callable field.
-    if sema_expr_function_field(receiver_value.ty, method, routed_method, environment) {
+    if sema_expr_function_field(receiver_value.ty, method, routed_method, environment, program) {
         call_end := method_span.end
         if args.len() > 0 -> call_end = expr_span(args[args.len() - 1].expr).end
         return sema_expr_check_indirect_call(Expr.Field{base: receiver, member: method, span: method_span}, args, Span{start: expr_span(receiver).start, end: call_end}, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2961,8 +2963,8 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     // A declared nominal owns the methods it declares, even when its leaf
     // spells a builtin carrier such as Core's `URL` or `MIME`; builtin handle
     // routes apply only when no declared method matches.
-    if !sema_expr_declares_nominal_method(environment, receiver_value.ty, routed_method, true) {
-        special := sema_expr_try_method_special_routes(receiver, receiver_value, method, owner_type_args, type_args, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if !sema_expr_declares_nominal_method(environment, program, receiver_value.ty, routed_method, true) {
+        special := sema_expr_try_method_special_routes(receiver, receiver_value, method, owner_type_args, type_args, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if special.handled -> return special.value
     }
     operator_trait :: sema_checked_operator_hook_trait(method)
@@ -2992,16 +2994,16 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
         argument_index += 1
     }
     candidates := [SemaCallMethodCandidate]{}
-    if args.len() == 1 && operator_trait == .Val(trait_name) && argument_types[0] == .Val(rhs) && environment.registration_graph == .Val(graph) {
-        loop resolution in sema_expr_registration_operator_candidates(graph, receiver_value.ty, rhs, trait_name, method, false, method_span, environment, &scopes, &diagnostics) -> &candidates.push(resolution.candidate)
+    if args.len() == 1 && operator_trait == .Val(trait_name) && argument_types[0] == .Val(rhs) && program.registration_graph == .Val(graph) {
+        loop resolution in sema_expr_registration_operator_candidates(graph, receiver_value.ty, rhs, trait_name, method, false, method_span, environment, program, &scopes, &diagnostics) -> &candidates.push(resolution.candidate)
     }
     if candidates.len() == 0 {
-        candidates = if environment.registration_graph == {
-            .Val(graph) -> sema_expr_registration_method_candidates(graph, receiver_value.ty, routed_method, owner_type_args, type_args, method_span, environment, &scopes, &diagnostics)
-            .None -> sema_call_local_method_candidates(environment, routed_method, owner_type_args, type_args)
+        candidates = if program.registration_graph == {
+            .Val(graph) -> sema_expr_registration_method_candidates(graph, receiver_value.ty, routed_method, owner_type_args, type_args, method_span, environment, program, &scopes, &diagnostics)
+            .None -> sema_call_local_method_candidates(environment, program, routed_method, owner_type_args, type_args)
         }
     }
-    candidate :: sema_call_resolve_method_with_inference(receiver_value.ty, routed_method, args, argument_types, expected, candidates, environment, &scopes, method_span, &diagnostics) ?? return None
+    candidate :: sema_call_resolve_method_with_inference(receiver_value.ty, routed_method, args, argument_types, expected, candidates, environment, program, &scopes, method_span, &diagnostics) ?? return None
     scopes.ownership_call_depth += 1
     checked := sema_call_check_method_candidate_from_value_owned(&state, receiver, receiver_value, candidate, args, [SemaCallDefaultValue]{}, method_span, expected, environment, program, &scopes, &tail_store, &context, &diagnostics)
     scopes.ownership_call_depth -= 1
@@ -3033,8 +3035,8 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
         if prepared_binding.prepared == .Val(known) {
             prepared_ty :: prepared_binding.symbol.ty ?? return None
             &context.name_references.push(SemaNameReferenceFact{span: span, symbol: prepared_binding.symbol, kind: "local"})
-            prepared :: sema_fact_prepared_expr(known, prepared_ty, span, environment) ?? return None
-            return sema_expr_expected(prepared, expected, environment, &diagnostics)
+            prepared :: sema_fact_prepared_expr(known, prepared_ty, span, environment, program) ?? return None
+            return sema_expr_expected(prepared, expected, environment, program, &diagnostics)
         }
     }
     // D-UNINIT-SENTINEL2 (E0420): a `Type{ uninit }` binding read before
@@ -3097,7 +3099,7 @@ fn sema_expr_check_string(parts: [StrPart], span: Span, expected: Type?, environ
                     return None
                 }
                 if !debug_family && format != StrFormat.Display && !sema_expr_format_supported(checked.ty, format) -> return None
-                formatted :: if format == StrFormat.Display && sema_expr_measurement_type(checked.ty) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked}, Type.String, checked.span, environment) ?? return None else -> checked
+                formatted :: if format == StrFormat.Display && sema_expr_measurement_type(checked.ty) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked}, Type.String, checked.span, environment, program) ?? return None else -> checked
                 &tir_parts.push(TStrPart.Interpolation{value: formatted, format: sema_expr_string_format(format)})
             }
         }
@@ -3166,15 +3168,15 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
         result_ty := sema_expr_numeric_base(value.ty)
         return sema_expr_expected(sema_tir_expr(result_ty, TExprKind.Unary{op: TUnaryOp.Neg, operand: value}, span), expected, environment, program, &diagnostics)
     }
-    if sema_dyn_is_type(sema_expr_expected_type(value.ty, environment)) {
+    if sema_dyn_is_type(sema_expr_expected_type(value.ty, environment, program)) {
         &diagnostics.push(sema_dyn_condition_error(span))
         return None
     }
-    if sema_dyn_is_type(sema_expr_expected_type(value.ty, environment)) {
+    if sema_dyn_is_type(sema_expr_expected_type(value.ty, environment, program)) {
         &diagnostics.push(sema_dyn_condition_error(span))
         return None
     }
-    if sema_dyn_is_type(sema_expr_expected_type(value.ty, environment)) {
+    if sema_dyn_is_type(sema_expr_expected_type(value.ty, environment, program)) {
         &diagnostics.push(sema_dyn_condition_error(span))
         return None
     }
@@ -3330,8 +3332,8 @@ fn sema_expr_missing_operator_hook(op: BinOp, owner: Type, span: Span) -> Diagno
     sema_error("E0360", span, "no `{sema_expr_binary_name(op)}` operator is defined for `{name}`", "user arithmetic dispatches only through one `impl {name}.{trait_name}` hook", "implement `{name}.{trait_name}`, or call a named method")
 }
 
-fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    checked_lhs := sema_check_expression(left, sema_expr_decimal_lhs_expected(op, left, right, expected, environment, &scopes, state, &tail_store, &context), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    checked_lhs := sema_check_expression(left, sema_expr_decimal_lhs_expected(op, left, right, expected, environment, program, &scopes, &state, &tail_store, &context), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     rhs_expected := Type?{None}
     if {
         sema_expr_decimal_literal_operand(right, false) -> rhs_expected = sema_expr_decimal_rhs_expected(op, checked_lhs.ty, environment, program)
@@ -3360,7 +3362,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         return None
     }
     line :: sema_source_line_at(environment.source_segments, span) ?? return None
-    if sema_dyn_is_type(sema_expr_expected_type(lhs.ty, environment)) || sema_dyn_is_type(sema_expr_expected_type(rhs.ty, environment)) {
+    if sema_dyn_is_type(sema_expr_expected_type(lhs.ty, environment, program)) || sema_dyn_is_type(sema_expr_expected_type(rhs.ty, environment, program)) {
         if op == BinOp.And || op == BinOp.Or {
             &diagnostics.push(sema_dyn_condition_error(span))
             return None
@@ -3371,18 +3373,18 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
             &diagnostics.push(sema_error("E0109", span, "`{sema_expr_binary_name(op)}` is not defined for Dyn", "Dyn supports arithmetic, equality and ordered comparisons only", "use a supported Dyn operator"))
             return None
         }
-        dynamic_left :: sema_expr_expected(lhs, Val(sema_dyn_type()), environment, &diagnostics) ?? return None
-        dynamic_right :: sema_expr_expected(rhs, Val(sema_dyn_type()), environment, &diagnostics) ?? return None
+        dynamic_left :: sema_expr_expected(lhs, Val(sema_dyn_type()), environment, program, &diagnostics) ?? return None
+        dynamic_right :: sema_expr_expected(rhs, Val(sema_dyn_type()), environment, program, &diagnostics) ?? return None
         ty :: if arithmetic -> sema_dyn_type() else -> Type.Bool
         if equality {
             value :: sema_tir_expr(ty, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: dynamic_left, rhs: dynamic_right}, span)
-            return sema_expr_expected(value, expected, environment, &diagnostics)
+            return sema_expr_expected(value, expected, environment, program, &diagnostics)
         }
         site :: "{sema_dyn_site(left)} {sema_expr_binary_name(op)} {sema_dyn_site(right)}"
-        location :: sema_expression_panic_location(environment, scopes, span)
+        location :: sema_expression_panic_location(environment, program, scopes, span)
         operation :: if arithmetic -> THandleOp.DynBinary{op: sema_expr_binary_name(op), site: site, location: location} else -> THandleOp.DynCompare{op: sema_expr_binary_name(op), site: site, location: location}
         value :: sema_tir_expr(ty, TExprKind.HandleMethod{receiver: dynamic_left, operation: operation, args: [TExpr]{dynamic_right}}, span)
-        return sema_expr_expected(value, expected, environment, &diagnostics)
+        return sema_expr_expected(value, expected, environment, program, &diagnostics)
     }
     if op == BinOp.And || op == BinOp.Or {
         ty :: sema_expr_binary_type(op, lhs.ty, rhs.ty, span, &diagnostics) ?? return None
@@ -3403,7 +3405,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
             if operand.ty != Type.Float && sema_expr_numeric_widening_to(operand.ty, Type.Float) != None -> operand = sema_expr_numeric_literal_conversion(operand, Type.Float, span, line, &diagnostics) ?? return None
             if operand.ty == Type.Float {
                 zero :: sema_tir_expr(Type.Float, TExprKind.FloatLit{value: 0.0}, span)
-                operand = sema_expression_measurement_source_call("__measurement_new", [TExpr]{operand, zero}, measured_type, span, environment) ?? return None
+                operand = sema_expression_measurement_source_call("__measurement_new", [TExpr]{operand, zero}, measured_type, span, environment, program) ?? return None
             }
             if !type_identity_equal(operand.ty, measured_type) {
                 _ := sema_expr_binary_type(op, lhs.ty, rhs.ty, span, &diagnostics)
@@ -3417,8 +3419,8 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
             .Mul -> "mul"
             else -> "div"
         }
-        value :: sema_expression_measurement_source_call("__measurement_{function}", operands, measured_type, span, environment) ?? return None
-        return sema_expr_expected(value, expected, environment, &diagnostics)
+        value :: sema_expression_measurement_source_call("__measurement_{function}", operands, measured_type, span, environment, program) ?? return None
+        return sema_expr_expected(value, expected, environment, program, &diagnostics)
     }
     left_point :: if lhs.ty == {.Named(name) -> name.ends_with("::Instant") && core_source_owns_type(name) else -> false}
     right_point :: if rhs.ty == {.Named(name) -> name.ends_with("::Instant") && core_source_owns_type(name) else -> false}
@@ -3438,7 +3440,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
             CallArg{convention: AccessConvention.Read, expr: right, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
         }
         constructor :: Expr.MethodCall{receiver: Expr.Ident{name: "Instant", span: span}, method: point_method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: arguments, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
-        return sema_check_expression(constructor, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return sema_check_expression(constructor, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     if (op == BinOp.Add && left_point && right_point) || (op == BinOp.Sub && left_delta && right_point) {
         &diagnostics.push(sema_error("E0127", span, "{sema_expr_binary_name(op)} is not available between `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "Time points are positions; only point + delta, point - delta, point - point, and delta + delta are defined", "subtract two Instants for a Duration, or add a Duration to an Instant"))
@@ -3464,14 +3466,14 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         return None
     }
     source_operator := false
-    if environment.registration_graph == .Val(graph) {
+    if program.registration_graph == .Val(graph) {
         left_name :: sema_expr_type_base_name(lhs.ty) ?? ""
         right_name :: sema_expr_type_base_name(rhs.ty) ?? ""
         source_operator = sema_type_source_owns_nominal(graph, left_name, environment.module_identity) || sema_type_source_owns_nominal(graph, right_name, environment.module_identity)
     }
     if source_operator && sema_expr_operator_trait(op) != None {
         before :: diagnostics.len()
-        value :: sema_expr_check_operator(op, left, right, lhs, rhs, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics, line)
+        value :: sema_expr_check_operator(op, left, right, lhs, rhs, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, line)
         if value != None || diagnostics.len() != before -> return value
         if op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div {
             &diagnostics.push(sema_expr_missing_operator_hook(op, lhs.ty, span))
@@ -3496,10 +3498,10 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         return None
     }
     if sema_expr_has_numeric_overload(lhs.ty) || sema_expr_has_numeric_overload(rhs.ty) {
-        operator_value := sema_expr_check_operator(op, left, right, lhs, rhs, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics, line)
+        operator_value := sema_expr_check_operator(op, left, right, lhs, rhs, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, line)
         if operator_value != None -> return operator_value
     }
-    comparison := sema_comparability_check_binary(op, lhs, rhs, span, line, environment, &diagnostics)
+    comparison := sema_comparability_check_binary(op, lhs, rhs, span, line, environment, program, &diagnostics)
     if comparison.handled {
         compared :: comparison.value ?? return None
         return sema_expr_expected(compared, expected, environment, program, &diagnostics)
@@ -3617,8 +3619,7 @@ fn sema_expr_require_unsafe(operation: String, span: Span, context: &SemaCheckCo
 }
 
 fn sema_expr_core_import_module(environment: SemaScopeEnvironment, program: SemaProgramTables, alias: String) -> String? {
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return None
+    if program.registration_graph == .Val(graph) {
     module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
     imports :: sema_core_registration_imports(graph.modules[module_index])
     imported :: sema_core_import_find(imports, alias) ?? return None
@@ -3627,7 +3628,9 @@ fn sema_expr_core_import_module(environment: SemaScopeEnvironment, program: Sema
         index :: target ?? return None
         return Val(graph.modules[index].module_name)
     }
-    Val(imported.module_name)
+    return Val(imported.module_name)
+    }
+    None
 }
 
 fn sema_expr_check_pointer_from_address(alias: String, alias_span: Span, element: Type, address: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -3657,10 +3660,10 @@ fn sema_expr_check_pointer_from_address(alias: String, alias_span: Span, element
 fn sema_expr_check_comptime_name(name: String, span: Span, embedded: CtValue?, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if embedded == .Val(value) {
         if value == .Int(number) {
-            literal :: sema_expr_int_literal_tir(number, Type.Int, None, span, environment) ?? return None
-            return sema_expr_expected(literal, expected, environment, &diagnostics)
+            literal :: sema_expr_int_literal_tir(number, Type.Int, None, span, environment, program) ?? return None
+            return sema_expr_expected(literal, expected, environment, program, &diagnostics)
         }
-        ty := sema_expr_expected_type(ast_comptime_value_type(value), environment)
+        ty := sema_expr_expected_type(ast_comptime_value_type(value), environment, program)
         kind := if value == {
             .Float(float_value) -> if float_value == {
                 .F32(bits) | .F64(bits) -> TExprKind.FloatLit{value: bits}
@@ -3764,7 +3767,7 @@ fn sema_check_expression_cold(expr: Expr, expected: Type?, environment: SemaScop
             sema_stmt_uninit_write_args(call.args, state, scopes, &diagnostics)
             sema_expr_check_direct_call(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
-        .CallValue(callee, args, span) -> sema_expr_check_indirect_call(callee, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        .CallValue(callee, args, span) -> sema_expr_check_indirect_call(callee, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .ListLit(elements, span) -> {
             expanded := sema_expression_list_member_spreads(elements)
             sema_expression_list(Expr.ListLit{elements: expanded, span: span}, expanded, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)

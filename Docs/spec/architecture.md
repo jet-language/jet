@@ -324,6 +324,22 @@ execution lens. The Rust host is a bootstrap seed: it is frozen once the Jet
 compiler ships with parity and removed once the native back end is complete
 (D-EXEC2, owner directive 19).
 
+The Jet semantic checker separates read-only registration/program tables from
+mutable scope, ownership, and diagnostic state. Read-only graph probes match
+the optional registration graph in place; they do not materialize an owning
+graph snapshot. Ownership branch forks retain indexed declaration/reference
+counts and small path facts. Their undo trail restores binding freeze
+provenance, and a joined binding is frozen only when every reaching path
+proves it; freeze source sites remain available for diagnostics after the join.
+
+Semantic checking APIs thread `SemaProgramTables` explicitly alongside
+`SemaScopeEnvironment`; callers pass the tables rather than shifting mutable
+scope arguments into a missing table slot. Graph-owning staging and module
+retargeting corridors retain their owning transport: the graph moves into the
+program tables for checking, moves back only while a retained environment is
+retargeted, and returns to the tables afterward. These handoffs do not copy the
+registration graph or rebuild its checked-type indexes.
+
 The compiler and runtime aggregates have separate explicit source inventories:
 [`Compiler/Bootstrap/sources.list`](../../Compiler/Bootstrap/sources.list) and
 [`Compiler/JetRuntime/sources.list`](../../Compiler/JetRuntime/sources.list).
@@ -453,6 +469,13 @@ queries can publish their visited rows; a successful cyclic query publishes
 only its root, because an intermediate negative may depend on an ancestor
 cycle cut. Generic cycles with changing arguments retain the nominal recursion
 guard without publishing context-dependent intermediate negatives.
+
+The transitional MIR evaluator's field writeback mirrors field reads through
+successful carriers: it updates the struct payload and preserves the carrier,
+including nested field writes on an owned local moved from a parameter.
+Runtime aggregates retain field IDs and their runtime payload representation;
+materialized `Present` values retain their wrapper. Failed results do not
+expose success fields, and opaque native handles remain non-projectable.
 
 Lowering shares a checked nominal-key index across the frozen program's
 functions and lambdas. Exact-key ambiguity, anonymous-union carriers, Core
@@ -1394,6 +1417,16 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   parity across AOT, interpreter, and web is mandatory. (D-ONECORE1=A, ratified
   2026-07-24; I9 owner-directed 2026-07-29; dumb-adapter rule owner-directed
   2026-07-29; D-EXEC2=A retired the Cranelift JIT.)
+
+  Rust and Jet sema preserve borrowed pattern payload aliases in both ordinary
+  `if` conditions and dispatch tables, while owned or taken subjects keep their
+  payload ownership. Payload-derived views retain the matched parameter's
+  projection origin; local owners and consumed parameters still cannot export
+  those views (E2305). Mutable payloads reborrow only their actual
+  parent capability: a lexical child suspends overlapping parent accesses,
+  unrelated overlapping views remain conflicts, and scope exit restores the
+  parent. Field assignment reinitializes only the written path and its
+  descendants, never a moved ancestor.
 
   Source-owned Core policy must preserve the public provider carrier, including
   methods, nominal traits, ownership conventions, and labeled optional controls.

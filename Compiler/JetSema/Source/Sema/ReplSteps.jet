@@ -47,10 +47,15 @@ fn sema_repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModul
     if !sema_registration_apply_graph_module(graph, root.module_identity, &scopes, &diagnostics) || sema_has_error_since(diagnostics, 0) {
         return Err(ReplSetupError{message: "REPL declaration environment is not a successfully registered module"})
     }
-    // The session keeps the graph for every later turn, so it owns a copy.
-    program := sema_program_tables_init(Val(graph.copy()), checked_types)
-    if !sema_scope_environment_enter_probe_module(&environment, program, root.module_identity, [SemaComptimeBodyValue]{}) {
-        return Err(ReplSetupError{message: "REPL root is not in the canonical registration graph"})
+    // The retained environment has already indexed the session's owned graph.
+    // Hand those same tables to the borrowed statement checker.
+    program := SemaProgramTables{
+        registration_graph: ^environment.registration_graph,
+        checked_types: ^environment.checked_types,
+        checked_type_rows: ^environment.checked_type_rows,
+        checked_type_name_slots: ^environment.checked_type_name_slots,
+        checked_type_name_rows: ^environment.checked_type_name_rows,
+        boxed_edges: ^environment.boxed_edges,
     }
     sema_function_apply_scope_policies(environment, program, &scopes, source.span, source.markers)
     ownership := sema_ownership_state_init()

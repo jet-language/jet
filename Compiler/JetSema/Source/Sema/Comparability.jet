@@ -65,12 +65,13 @@ fn sema_comparability_sealed_crypto_plan(leaf: String) -> Bool Never! {
 // alias types are qualified in their declaring module, so nested lookups pass
 // that module rather than the caller's.
 fn sema_comparability_definition(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, name: String) -> TTypeDef? {
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return sema_serde_type_definition(environment, program, name)
-    resolved :: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? return None
-    if resolved.symbol.kind != SymbolKind.Type -> return None
-    index :: sema_scope_checked_type_row(environment, program, resolved.target_module_identity, resolved.symbol.name) ?? return None
-    Val(program.checked_types[index])
+    if program.registration_graph == .Val(graph) {
+        resolved :: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? return None
+        if resolved.symbol.kind != SymbolKind.Type -> return None
+        index :: sema_scope_checked_type_row(environment, program, resolved.target_module_identity, resolved.symbol.name) ?? return None
+        return Val(program.checked_types[index])
+    }
+    sema_serde_type_definition(environment, program, name)
 }
 
 // A registered `trait_name` implementation, generic bound, or derive. An
@@ -83,22 +84,22 @@ fn sema_comparability_implements(environment: SemaScopeEnvironment, program: Sem
     if ty == .Named(carrier) {
         if sema_derive_builtin_supports(sema_serde_named_leaf(carrier), trait_name) -> return true
     }
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return false
-    bound := sema_type_bound_satisfied_with_generics(graph, ty, trait_name, environment.module_identity, environment.generic_params) ?? false
-    if bound -> return true
-    name :: sema_type_graph_base_name(ty) ?? return false
-    resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return false
-    if resolved.symbol.kind != SymbolKind.Type -> return false
-    if sema_scope_checked_type_row(environment, program, resolved.target_module_identity, resolved.symbol.name) == .Val(checked_row) {
-        if sema_serde_has_name(program.checked_types[checked_row].derives, trait_name) -> return true
+    if program.registration_graph == .Val(graph) {
+        bound := sema_type_bound_satisfied_with_generics(graph, ty, trait_name, environment.module_identity, environment.generic_params) ?? false
+        if bound -> return true
+        name :: sema_type_graph_base_name(ty) ?? return false
+        resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return false
+        if resolved.symbol.kind != SymbolKind.Type -> return false
+        if sema_scope_checked_type_row(environment, program, resolved.target_module_identity, resolved.symbol.name) == .Val(checked_row) {
+            if sema_serde_has_name(program.checked_types[checked_row].derives, trait_name) -> return true
+        }
+        if trait_name != "Equatable" -> return false
+        module_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
+        row :: sema_type_graph_nominal_row(graph, resolved.symbol.id.key) ?? return false
+        // Matched in place: a pattern on the indexed path copies the whole item.
+        nominal :: graph.modules[row.module_index].nominals[row.row]
+        if nominal.source == .SourceAST(item) -> return sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).equatable
     }
-    if trait_name != "Equatable" -> return false
-    module_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
-    row :: sema_type_graph_nominal_row(graph, resolved.symbol.id.key) ?? return false
-    // Matched in place: a pattern on the indexed path copies the whole item.
-    nominal :: graph.modules[row.module_index].nominals[row.row]
-    if nominal.source == .SourceAST(item) -> return sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).equatable
     false
 }
 

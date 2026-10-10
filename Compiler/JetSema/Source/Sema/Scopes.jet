@@ -1701,10 +1701,10 @@ fn sema_scope_declaration_site(environment: SemaScopeEnvironment, program: SemaP
 fn sema_scope_resolve_declaration(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Item? {
     site :: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return Val(environment.declarations[index].item)
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return None
-    if site == .Function(module_index, row) -> return Val(Item.Func{value: graph.modules[module_index].functions[row].declaration})
-    if site == .Nominal(module_index, row) -> return sema_registration_nominal_source_item(graph.modules[module_index].nominals[row].source)
+    if program.registration_graph == .Val(graph) {
+        if site == .Function(module_index, row) -> return Val(Item.Func{value: graph.modules[module_index].functions[row].declaration})
+        if site == .Nominal(module_index, row) -> return sema_registration_nominal_source_item(graph.modules[module_index].nominals[row].source)
+    }
     None
 }
 
@@ -1732,10 +1732,10 @@ fn sema_scope_declaration_kind(environment: SemaScopeEnvironment, program: SemaP
     if site == .Local(index) -> return Val(sema_scope_item_kind(environment.declarations[index].item))
     if site == .Function(_, _) -> return Val(SemaScopeDeclarationKind.Func)
     if site == .Nominal(module_index, row) {
-        graph_option :: program.registration_graph
-        graph :: graph_option ?? return None
-        nominal :: graph.modules[module_index].nominals[row]
-        if nominal.source == .SourceAST(item) -> return Val(sema_scope_item_kind(item))
+        if program.registration_graph == .Val(graph) {
+            nominal :: graph.modules[module_index].nominals[row]
+            if nominal.source == .SourceAST(item) -> return Val(sema_scope_item_kind(item))
+        }
     }
     None
 }
@@ -1761,10 +1761,10 @@ fn sema_scope_declaration_struct(environment: SemaScopeEnvironment, program: Sem
     site :: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return sema_scope_item_struct(environment.declarations[index].item)
     if site == .Nominal(module_index, row) {
-        graph_option :: program.registration_graph
-        graph :: graph_option ?? return None
-        nominal :: graph.modules[module_index].nominals[row]
-        if nominal.source == .SourceAST(item) -> return sema_scope_item_struct(item)
+        if program.registration_graph == .Val(graph) {
+            nominal :: graph.modules[module_index].nominals[row]
+            if nominal.source == .SourceAST(item) -> return sema_scope_item_struct(item)
+        }
     }
     None
 }
@@ -1787,10 +1787,10 @@ fn sema_scope_declaration_enum(environment: SemaScopeEnvironment, program: SemaP
     site :: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return sema_scope_item_enum(environment.declarations[index].item)
     if site == .Nominal(module_index, row) {
-        graph_option :: program.registration_graph
-        graph :: graph_option ?? return None
-        nominal :: graph.modules[module_index].nominals[row]
-        if nominal.source == .SourceAST(item) -> return sema_scope_item_enum(item)
+        if program.registration_graph == .Val(graph) {
+            nominal :: graph.modules[module_index].nominals[row]
+            if nominal.source == .SourceAST(item) -> return sema_scope_item_enum(item)
+        }
     }
     None
 }
@@ -1809,10 +1809,10 @@ fn sema_scope_declaration_enum_declares(environment: SemaScopeEnvironment, progr
     site :: sema_scope_declaration_site(environment, program, id) ?? return false
     if site == .Local(index) -> return sema_scope_item_enum_declares(environment.declarations[index].item, variant)
     if site == .Nominal(module_index, row) {
-        graph_option :: program.registration_graph
-        graph :: graph_option ?? return false
-        nominal :: graph.modules[module_index].nominals[row]
-        if nominal.source == .SourceAST(item) -> return sema_scope_item_enum_declares(item, variant)
+        if program.registration_graph == .Val(graph) {
+            nominal :: graph.modules[module_index].nominals[row]
+            if nominal.source == .SourceAST(item) -> return sema_scope_item_enum_declares(item, variant)
+        }
     }
     false
 }
@@ -1828,10 +1828,10 @@ fn sema_scope_declaration_distinct(environment: SemaScopeEnvironment, program: S
     site :: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return sema_scope_item_distinct(environment.declarations[index].item)
     if site == .Nominal(module_index, row) {
-        graph_option :: program.registration_graph
-        graph :: graph_option ?? return None
-        nominal :: graph.modules[module_index].nominals[row]
-        if nominal.source == .SourceAST(item) -> return sema_scope_item_distinct(item)
+        if program.registration_graph == .Val(graph) {
+            nominal :: graph.modules[module_index].nominals[row]
+            if nominal.source == .SourceAST(item) -> return sema_scope_item_distinct(item)
+        }
     }
     None
 }
@@ -1846,12 +1846,12 @@ fn sema_scope_item_function_type_params(item: Item) -> [TypeParam] Never! {
 fn sema_scope_declaration_function_type_params(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> [TypeParam] {
     site :: sema_scope_declaration_site(environment, program, id) ?? return [TypeParam]{}
     if site == .Local(index) -> return sema_scope_item_function_type_params(environment.declarations[index].item)
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return [TypeParam]{}
-    if site == .Function(module_index, row) -> return graph.modules[module_index].functions[row].declaration.type_params
-    if site == .Nominal(module_index, row) {
-        nominal :: graph.modules[module_index].nominals[row]
-        if nominal.source == .SourceAST(item) -> return sema_scope_item_function_type_params(item)
+    if program.registration_graph == .Val(graph) {
+        if site == .Function(module_index, row) -> return graph.modules[module_index].functions[row].declaration.type_params
+        if site == .Nominal(module_index, row) {
+            nominal :: graph.modules[module_index].nominals[row]
+            if nominal.source == .SourceAST(item) -> return sema_scope_item_function_type_params(item)
+        }
     }
     [TypeParam]{}
 }

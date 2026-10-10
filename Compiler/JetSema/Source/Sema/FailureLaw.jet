@@ -289,10 +289,11 @@ fn sema_prelude_error_conversion(source: Type, diagnostics: &[Diagnostic]) -> Fu
 }
 
 fn sema_module_no_prelude(environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return false
-    module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return false
-    graph.modules[module_index].program.no_prelude
+    if program.registration_graph == .Val(graph) {
+        module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return false
+        return graph.modules[module_index].program.no_prelude
+    }
+    false
 }
 
 // The D-FAIL-CONV2 route of one propagation site: a family member reaching the
@@ -443,16 +444,16 @@ fn sema_failure_items_nominal_is_error(items: [Item], leaf: String, seen: [Strin
 
 // The declaring module wins; other graph modules supply imported nominals.
 fn sema_failure_nominal_is_error(leaf: String, seen: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return None
-    if sema_registration_module_index(graph, environment.module_identity) == .Val(module_index) {
-        local :: sema_failure_items_nominal_is_error(graph.modules[module_index].program.items, leaf, seen, environment, program)
-        if local != None -> return local
-    }
-    loop module_row in graph.modules {
-        if module_row.module_identity == environment.module_identity -> next
-        imported :: sema_failure_items_nominal_is_error(module_row.program.items, leaf, seen, environment, program)
-        if imported != None -> return imported
+    if program.registration_graph == .Val(graph) {
+        if sema_registration_module_index(graph, environment.module_identity) == .Val(module_index) {
+            local :: sema_failure_items_nominal_is_error(graph.modules[module_index].program.items, leaf, seen, environment, program)
+            if local != None -> return local
+        }
+        loop module_row in graph.modules {
+            if module_row.module_identity == environment.module_identity -> next
+            imported :: sema_failure_items_nominal_is_error(module_row.program.items, leaf, seen, environment, program)
+            if imported != None -> return imported
+        }
     }
     None
 }
@@ -507,7 +508,7 @@ fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, gener
             } ?? false
             if owner_annotation {
                 parts :: name.split(".").to_list()
-                if sema_call_core_import_module(environment, parts[0]) == .Val(imported_module) {
+                if sema_call_core_import_module(environment, program, parts[0]) == .Val(imported_module) {
                     module_name := imported_module
                     loop index in 1..<(parts.len() - 1) -> module_name = "{module_name}.{parts[index]}"
                     unresolved = !core_module_has_type(module_name, parts[parts.len() - 1])

@@ -571,7 +571,6 @@ struct SemaRegistrationGraph {
     target_machine: MIRTargetMachine
     build_facts: SemaBuildFacts
     modules: [SemaRegistrationModule]
-    output_rows: [SemaResolvedOutputRow]{[SemaResolvedOutputRow]{}}
     // Module identity -> position in `modules`; fixed at graph construction.
     module_rows: [String:Int]
     edges: [SemaRegistrationImportEdge]
@@ -2322,7 +2321,7 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                     else -> {
                         import_visibility :: graph.modules[module_index].imports[import_index].visibility
                         module_symbol :: Symbol{id: symbol_id(SymbolKind.Import, source_identity, target_identity, declaration.alias), kind: SymbolKind.Import, name: declaration.alias, module_name: target_identity, owner: None, span: declaration.alias_span, ty: None, visibility: import_visibility}
-                        sema_registration_push_import_binding(&graph, module_index, import_index, SemaRegistrationImportBinding{original: target.module_name, local: declaration.alias, symbol: module_symbol, declaration: None, target_module_identity: target_identity, target_module_index: Val(target_index), visibility: import_visibility})
+                        sema_registration_push_import_binding(&graph, module_index, import_index, SemaRegistrationImportBinding{original: target_name, local: declaration.alias, symbol: module_symbol, declaration: None, target_module_identity: target_identity, target_module_index: Val(target_index), visibility: import_visibility})
                     }
                 }
             }
@@ -2442,8 +2441,9 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     // Module identity -> row; duplicates are rejected below, so the first row
     // is the only row (Rust `Bundle/ItemReuse.rs` `by_identity`).
     module_rows := [String:Int]{}
+    generic_module_index :: sema_generic_modules_index(prepared_inputs, edges)
     loop input in prepared_inputs {
-        module_row := sema_registration_prepare_module_row(input, sema_generic_modules_imported(prepared_inputs, edges, input.module_identity), &diagnostics)
+        module_row := sema_registration_prepare_module_row(input, sema_generic_modules_imported(prepared_inputs, edges, generic_module_index, input.module_identity), &diagnostics)
         duplicate :: module_rows.get(module_row.module_identity) != None
         if !duplicate -> module_rows[module_row.module_identity] = modules.len()
         if {

@@ -6,6 +6,7 @@
 // Rust: `Bundle/Pipeline/CheckInner.rs` (user derives, marker bodies) and
 // `Bundle/Pipeline.rs` `expand_item_template_loops`.
 use jet_foundation.[
+    CallLabel,
     CtEnumArg,
     CtFloat,
     CtKey,
@@ -21,6 +22,7 @@ use jet_foundation.[
     Item,
     LValue,
     Marker,
+    MarkerCallArg,
     NamedCtValue,
     NamedType,
     Span,
@@ -447,7 +449,8 @@ fn sema_user_rule_collect_module(graph: SemaRegistrationGraph, module_index: Int
     blocks := [SemaUserTextBlock]{}
     loop item in items -> sema_user_text_blocks_in_item(item, source, block_spans, &blocks)
     loop block in blocks {
-        body :: sema_user_rule_body(declarations, block.name) ?? next
+        marker :: Marker{name: block.name, negated: false, name_span: block.span, args: [MarkerCallArg]{}, arg_labels: [CallLabel?]{}, span: block.span, ct: None}
+        body :: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
         expanded :: sema_derive_expand_provider_body(body, "target", CtValue.Str{value: block.text}, &diagnostics) ?? next
         loop expanded_item in expanded -> &generated.push(expanded_item)
     }

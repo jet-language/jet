@@ -43,7 +43,7 @@ fn sema_single_use_type(ty: Type, environment: SemaScopeEnvironment, program: Se
 // The duty transfers on `y :: x`: the move marks `x` consumed and `y` owns it.
 fn sema_single_use_note_binding(state: &SemaOwnershipState, symbol: Symbol, environment: SemaScopeEnvironment, program: SemaProgramTables) {
     ty :: symbol.ty ?? return
-    if !sema_single_use_type(ty, environment) -> return
+    if !sema_single_use_type(ty, environment, program) -> return
     row :: sema_ownership_last_row(state, symbol.id.key)
     if row >= 0 -> sema_ownership_set_single_use(&state, row)
 }

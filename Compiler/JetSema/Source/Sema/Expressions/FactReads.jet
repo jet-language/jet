@@ -711,19 +711,21 @@ fn sema_fact_build_read(base: Expr, member: String, span: Span, expected: Type?,
         &diagnostics.push(sema_fact_build_setting_undeclared(key, span))
         return sema_fact_read_failed()
     }
-    graph :: program.registration_graph ?? return sema_fact_read_unhandled()
+    if program.registration_graph == .Val(graph) {
     resolved :: sema_fact_build_value(path, graph.build_facts) ?? return sema_fact_read_unhandled()
-    prepared :: sema_fact_prepared_expr(resolved.value, resolved.ty, span, environment) ?? return sema_fact_read_failed()
-    SemaFactReadCheck{handled: true, value: sema_expr_expected(prepared, expected, environment, &diagnostics)}
+    prepared :: sema_fact_prepared_expr(resolved.value, resolved.ty, span, environment, program) ?? return sema_fact_read_failed()
+    return SemaFactReadCheck{handled: true, value: sema_expr_expected(prepared, expected, environment, program, &diagnostics)}
+    }
+    sema_fact_read_unhandled()
 }
 
 // A prepared value as a checked expression: scalars keep their literal forms,
 // records and lists stay one compile-time literal.
-fn sema_fact_prepared_expr(value: TComptimeValue, ty: Type, span: Span, environment: SemaScopeEnvironment) -> TExpr? {
+fn sema_fact_prepared_expr(value: TComptimeValue, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
     if value == .Int(number) {
         width := TIntegerWidth?{None}
         if sema_expr_numeric_base(ty) == .IntN(signed, bits) -> width = Val(TIntegerWidth{signed: signed, bits: bits})
-        return sema_expr_int_literal_tir(number, ty, width, span, environment)
+        return sema_expr_int_literal_tir(number, ty, width, span, environment, program)
     }
     kind :: if value == {
         .Bool(flag) -> TExprKind.BoolLit{value: flag}
@@ -839,8 +841,8 @@ fn sema_fact_subject_item(symbol: Symbol?, environment: SemaScopeEnvironment, pr
 fn sema_fact_type_info(symbol: Symbol?, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TComptimeValue? {
     resolved :: symbol ?? return None
     if resolved.kind != SymbolKind.Type -> return None
-    graph :: program.registration_graph ?? return None
-    sema_comptime_reflection_type_info(graph, resolved.module_name, name, TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}})
+    if program.registration_graph == .Val(graph) -> return sema_comptime_reflection_type_info(graph, resolved.module_name, name, TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}})
+    None
 }
 
 fn sema_fact_state_infos(definition: StructDef, symbol: Symbol, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TComptimeValue? {
@@ -861,8 +863,8 @@ fn sema_fact_state_infos(definition: StructDef, symbol: Symbol, environment: Sem
 }
 
 fn sema_fact_unit(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationUnitFact? {
-    graph :: program.registration_graph ?? return None
-    sema_registration_unit_fact_for_type(graph, Type.Named{name: name})
+    if program.registration_graph == .Val(graph) -> return sema_registration_unit_fact_for_type(graph, Type.Named{name: name})
+    None
 }
 
 // One subject named by a bare identifier that is not a local: a type, a
@@ -996,7 +998,7 @@ fn sema_fact_read_check(base: Expr, member: String, span: Span, expected: Type?,
                 place :: sema_ownership_place_from_expr_inner(base, scopes)
                 if place == .Val(found) && sema_ownership_place_moved(&state, found) != None -> origin = None
                 value :: sema_fact_local_origin(origin)
-                return SemaFactReadCheck{handled: true, value: sema_expr_expected(sema_tir_expr(sema_fact_optional("OriginInfo"), TExprKind.CtLit{value: value}, span), expected, environment, &diagnostics)}
+                return SemaFactReadCheck{handled: true, value: sema_expr_expected(sema_tir_expr(sema_fact_optional("OriginInfo"), TExprKind.CtLit{value: value}, span), expected, environment, program, &diagnostics)}
             }
             if read == "Layout" || read == "Name" || read == "Fields" -> return sema_fact_read_unhandled()
             return sema_fact_read_no_value(member, span, &diagnostics)
