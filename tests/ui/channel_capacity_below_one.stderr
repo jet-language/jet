@@ -1,0 +1,35 @@
+Error [E0395]: A channel capacity must be at least 1, not `0`.
+  --> channel_capacity_below_one.jet:2:36
+    |
+  2 |     zero := channel<Int>(capacity: 0)
+    |                                    ^
+ Why: A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (E3001).
+ Fix: Write `channel<T>(capacity: 1)` or larger, or `channel<T>()` for an unbounded channel.
+More: jet-lang.dev/e/E0395
+
+Error [E0395]: A channel capacity must be at least 1, not `-1`.
+  --> channel_capacity_below_one.jet:3:40
+    |
+  3 |     negative := channel<Int>(capacity: -1)
+    |                                        ^^
+ Why: A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (E3001).
+ Fix: Write `channel<T>(capacity: 1)` or larger, or `channel<T>()` for an unbounded channel.
+More: jet-lang.dev/e/E0395
+
+Error [E0395]: A channel capacity must be at least 1, not `0`.
+  --> channel_capacity_below_one.jet:4:45
+    |
+  4 |     parenthesized := channel<Int>(capacity: ((0)))
+    |                                             ^^^^^
+ Why: A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (E3001).
+ Fix: Write `channel<T>(capacity: 1)` or larger, or `channel<T>()` for an unbounded channel.
+More: jet-lang.dev/e/E0395
+
+Error [E0395]: A channel capacity must be at least 1, not `-9223372036854775809`.
+  --> channel_capacity_below_one.jet:5:46
+    |
+  5 |     exact_negative := channel<Int>(capacity: -(9223372036854775809))
+    |                                              ^^^^^^^^^^^^^^^^^^^^^^
+ Why: A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (E3001).
+ Fix: Write `channel<T>(capacity: 1)` or larger, or `channel<T>()` for an unbounded channel.
+More: jet-lang.dev/e/E0395

@@ -1,0 +1,12 @@
+Error [E0121]: `holder.buf` was consumed by `Buffer.seal`, so it can't be used here
+  --> receiver_take_field_use_after.jet:12:22
+    |
+ 12 |     print(holder.buf.text)
+    |                      ^^^^
+  --> receiver_take_field_use_after.jet:10:6
+    |
+ 10 |     ^holder.buf.seal()
+    |      ^^^^^^^^^^ `holder.buf` moved to `Buffer.seal` here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `holder.buf` after the move, or give `Buffer.seal` a copy with `holder.buf.copy()` where it moved.
+More: jet-lang.dev/e/E0121

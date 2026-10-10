@@ -1,0 +1,17 @@
+Error [E0388]: `@LIMIT` is retired; write `LIMIT :: prep { 1000 }`.
+  --> tests/ui/comptime_constant_at_retired.jet:4:1
+    |
+  4 | @LIMIT :: 1000
+    | ^^^^^^
+ Why: Build-time blocks, branches, loops, functions and values carry the word `prep`, the same word Jet uses for every build-time step, so compile time is always explicit: a constant evaluated while building is `NAME :: prep { value }`, and the case of a name never implies it. A template splices a binding's name with the fact sigil `$`. Prefix `@` now marks a live link. The meaning and the checks are unchanged.
+ Fix: Replace `@LIMIT` with `LIMIT :: prep { 1000 }`.
+More: jet-lang.dev/e/E0388
+
+Error [E0388]: `@LIMIT` is retired; write `LIMIT`.
+  --> tests/ui/comptime_constant_at_retired.jet:7:11
+    |
+  7 |     print(@LIMIT)
+    |           ^^^^^^
+ Why: Build-time blocks, branches, loops, functions and values carry the word `prep`, the same word Jet uses for every build-time step, so compile time is always explicit: a constant evaluated while building is `NAME :: prep { value }`, and the case of a name never implies it. A template splices a binding's name with the fact sigil `$`. Prefix `@` now marks a live link. The meaning and the checks are unchanged.
+ Fix: Replace `@LIMIT` with `LIMIT`.
+More: jet-lang.dev/e/E0388

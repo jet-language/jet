@@ -1,0 +1,13 @@
+Error [E0121]: `evens` was consumed by the binding `first`, so it can't be used here
+  --> share_uncopyable_use_after_move.jet:9:11
+    |
+  9 |     print(evens.to_list())
+    |           ^^^^^
+  --> share_uncopyable_use_after_move.jet:7:14
+    |
+  7 |     first := evens
+    |              ^^^^^ `evens` moved to the binding `first` here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `evens` after the move, or give the binding `first` a copy with `evens.copy()` where it moved.
+ Note: `evens` is one-pass — materialize it first with `evens.to_list()`, or create a fresh source for the second drive
+More: jet-lang.dev/e/E0121
