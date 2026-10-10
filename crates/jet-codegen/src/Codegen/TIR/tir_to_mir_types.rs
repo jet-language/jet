@@ -3013,6 +3013,11 @@ const COMPILER_OWNED_GEOMETRY_RECORDS: &[(&str, &[&str], &[&str])] = &[
 ];
 
 pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
+    // Source ownership is authoritative even when a native carrier shares
+    // the leaf name. Such rows must retain their canonical declarations.
+    if jet_foundation::CoreModuleExports::core_source_owns_type(name) {
+        return false;
+    }
     let source_name = name;
     let name = crate::Codegen::core_source_type_leaf(name);
     COMPILER_OWNED_ENUMS.iter().any(|(owned, _)| *owned == name)
@@ -3907,6 +3912,17 @@ pub(crate) fn is_compiler_owned_trait(name: &str) -> bool {
 #[cfg(test)]
 mod native_encoding_record_tests {
     use super::*;
+
+    #[test]
+    fn source_owned_math_records_keep_canonical_declarations() {
+        for leaf in ["Vec2", "Vec3", "Vec4", "Point2", "Delta2", "Transform", "Transform2"] {
+            let identity = format!("<corelib>/Core/math::Core/math/math.jet::{leaf}");
+            assert!(jet_foundation::CoreModuleExports::core_source_owns_type(&identity));
+            assert!(!is_compiler_owned_type(&identity), "{identity} is source-owned");
+        }
+        assert!(is_compiler_owned_type("Vec3"), "bare native carrier remains runtime-owned");
+        assert!(!is_compiler_owned_type("program::Vec3"), "user nominal keeps its identity");
+    }
 
     #[test]
     fn compiler_owned_core_records_all_have_canonical_fields() {
