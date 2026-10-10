@@ -220,11 +220,13 @@ fn sema_network_handle_is_canonical(receiver_type: Type, owner: String, environm
     if actual != owner -> return false
     expected_module := sema_network_handle_owner_module(owner)
     if expected_module == "" -> return false
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return true
-    resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
-    if resolved == .Val(symbol) -> return symbol.symbol.kind == SymbolKind.Type && (sema_registration_module_name(graph, symbol.symbol.module_name) ?? "") == expected_module
-    false
+    if program.registration_graph == .Val(graph) {
+        resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
+        if resolved == .Val(symbol) -> return symbol.symbol.kind == SymbolKind.Type && (sema_registration_module_name(graph, symbol.symbol.module_name) ?? "") == expected_module
+        return false
+    } else {
+        return true
+    }
 }
 
 fn sema_network_handle_infer_args(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {

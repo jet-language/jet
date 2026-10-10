@@ -88,12 +88,12 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
     }
     // D-CALLSITE-MARK1=A: a lambda that takes a capture with `^` runs once.
     sema_ownership_call_once_lambda(&state, callee, scopes)
-    (lowered, pins) := sema_call_check_bound_arguments_owned(&state, "this function value", params, None, false, resolved_binding, &checked_args, environment, &scopes, &tail_store, &context, span, &diagnostics) ?? return None
+    (lowered, pins) := sema_call_check_bound_arguments_owned(&state, "this function value", params, None, false, resolved_binding, &checked_args, environment, program, &scopes, &tail_store, &context, span, &diagnostics) ?? return None
     call_callee := callee_value
     if pins.len() > 0 {
         owner :: sema_scope_function_owner_key(scopes)
         pin_slot :: -checked_args.len() - 1
-        symbol :: sema_call_binder_ref_symbol(environment, owner, span.start, pin_slot, "callee", callee_value.ty, span)
+        symbol :: sema_call_binder_ref_symbol(environment, program, owner, span.start, pin_slot, "callee", callee_value.ty, span)
         local := tir_symbol_local("binder_ref_{span.start}_{pin_slot}", span, symbol.id)
         local.generated = true
         borrowed :: sema_ownership_places_from_expr_in_state(callee, scopes, &state).len() > 0
@@ -116,7 +116,7 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
             if sema_contract_function_has_pre(environment, program, target.id) -> contract_callee = sema_contract_function_for_symbol(environment, program, target.id)
             if contract_callee == .Val(contract) {
                 slots :: loop slot in 0..<params.len() -> slot
-                checked_contract :: sema_contract_check_call(contract, &lowered, slots, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+                checked_contract :: sema_contract_check_call(contract, &lowered, slots, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 contract_bindings = checked_contract.bindings
                 contract_nodes = checked_contract.contracts
             }

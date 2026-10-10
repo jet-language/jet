@@ -56,11 +56,13 @@ fn sema_geometry_restore_owner(ty: Type, source: Type) -> Type Never! {
 }
 
 fn sema_call_geometry_intrinsic_type(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return false
-    name :: if ty == { .Named(owner) | .Apply(owner, _) -> owner else -> "" }
-    if sema_geometry_nominal_leaf(name) != name -> return true
-    sema_type_resolve_nominal_row(graph, ty, environment.module_identity) == None
+    if program.registration_graph == .Val(graph) {
+        name :: if ty == { .Named(owner) | .Apply(owner, _) -> owner else -> "" }
+        if sema_geometry_nominal_leaf(name) != name -> return true
+        return sema_type_resolve_nominal_row(graph, ty, environment.module_identity) == None
+    } else {
+        return false
+    }
 }
 
 fn sema_call_geometry_transform_parts(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaCallGeometryTransformParts? {
@@ -137,13 +139,13 @@ fn sema_call_geometry_transform_type(parts: SemaCallGeometryTransformParts, from
     }
 }
 
-fn sema_call_geometry_transform_method_return(receiver_type: Type, method: String, args: [Type], environment: SemaScopeEnvironment) -> Type? {
-    result :: sema_call_geometry_transform_method_return_inner(receiver_type, method, args, environment) ?? return None
-    Val(sema_geometry_restore_owner(result, sema_call_resolved_type(receiver_type, environment)))
+fn sema_call_geometry_transform_method_return(receiver_type: Type, method: String, args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
+    result :: sema_call_geometry_transform_method_return_inner(receiver_type, method, args, environment, program) ?? return None
+    Val(sema_geometry_restore_owner(result, sema_call_resolved_type(receiver_type, environment, program)))
 }
 
-fn sema_call_geometry_transform_method_return_inner(receiver_type: Type, method: String, args: [Type], environment: SemaScopeEnvironment) -> Type? {
-    parts :: sema_call_geometry_transform_parts(receiver_type, environment) ?? return None
+fn sema_call_geometry_transform_method_return_inner(receiver_type: Type, method: String, args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
+    parts :: sema_call_geometry_transform_parts(receiver_type, environment, program) ?? return None
     if method == "then" && args.len() == 1 {
         next :: sema_call_geometry_transform_parts(args[0], environment, program) ?? return None
         if !type_identity_equal(parts.scalar, next.scalar) || !type_identity_equal(parts.to, next.from) -> return None
@@ -181,7 +183,7 @@ fn sema_geometry_diagnostic_type(ty: Type) -> Type Never! {
     }
 }
 
-fn sema_call_geometry_report_transform_chain_mismatch(receiver: Type, method: String, args: [Type], span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_call_geometry_report_transform_chain_mismatch(receiver: Type, method: String, args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
     if method != "then" || args.len() != 1 -> return false
     first_type := sema_call_resolved_type(receiver, environment, program)
     second_type := sema_call_resolved_type(args[0], environment, program)

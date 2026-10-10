@@ -241,25 +241,27 @@ fn sema_hardware_import_module(graph: SemaRegistrationGraph, binding: SemaRegist
 fn sema_hardware_board_path(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaHardwareBoardPath? {
     path :: sema_hardware_expr_path(expression) ?? return None
     if path.len() < 1 -> return None
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return None
-    module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
-    alias := path[0]
-    visible_index :: sema_scope_resolve_index(scopes, alias) ?? return None
-    visible := scopes.bindings[visible_index].symbol
-    if visible.kind != SymbolKind.Import {
+    if program.registration_graph == .Val(graph) {
+        module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
+        alias := path[0]
+        visible_index :: sema_scope_resolve_index(scopes, alias) ?? return None
+        visible := scopes.bindings[visible_index].symbol
+        if visible.kind != SymbolKind.Import {
+            return None
+        }
+        registered_module :: graph.modules[module_index]
+        loop import in registered_module.imports {
+            loop binding in import.bindings {
+                if binding.local != alias || binding.symbol.id.key != visible.id.key || binding.symbol.kind != SymbolKind.Import -> next
+                profile_id := sema_hardware_import_module(graph, binding)
+                if !profile_id.starts_with("board.") -> return None
+                return Val(SemaHardwareBoardPath{profile_id: profile_id, segments: path})
+            }
+        }
+        return None
+    } else {
         return None
     }
-    registered_module :: graph.modules[module_index]
-    loop import in registered_module.imports {
-        loop binding in import.bindings {
-            if binding.local != alias || binding.symbol.id.key != visible.id.key || binding.symbol.kind != SymbolKind.Import -> next
-            profile_id := sema_hardware_import_module(graph, binding)
-            if !profile_id.starts_with("board.") -> return None
-            return Val(SemaHardwareBoardPath{profile_id: profile_id, segments: path})
-        }
-    }
-    None
 }
 
 
@@ -282,9 +284,11 @@ fn sema_hardware_dma_buffer_use_fact(buffer_name: String) -> MIRTargetDMAOperati
 }
 
 fn sema_hardware_target_machine(environment: SemaScopeEnvironment, program: SemaProgramTables) -> MIRTargetMachine? {
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return None
-    Val(graph.target_machine)
+    if program.registration_graph == .Val(graph) {
+        return Val(graph.target_machine)
+    } else {
+        return None
+    }
 }
 
 fn sema_hardware_register_block_fact(machine: MIRTargetMachine, block_name: String) -> MIRTargetRegisterBlockFact? {

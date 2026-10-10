@@ -593,25 +593,27 @@ fn sema_call_try_builtin_static_field(base: Expr, owner: String, method: String,
 
 // The ambient Perf type is an alternate spelling of the checked core.perf
 // export, not a second native dispatch surface.
-fn sema_call_perf_static(method: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_perf_static(method: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     failed :: SemaMethodSpecialCheck{handled: true, value: None}
-    graph_option :: environment.registration_graph
-    graph :: graph_option ?? return failed
-    identity :: sema_call_core_module_identity(environment, "core.perf") ?? return failed
-    target :: sema_call_core_source_target(environment, identity, method, type_args, span, false, &diagnostics) ?? return failed
+    if program.registration_graph == .Val(graph) {
+    identity :: sema_call_core_module_identity(environment, program, "core.perf") ?? return failed
+    target :: sema_call_core_source_target(environment, program, identity, method, type_args, span, false, &diagnostics) ?? return failed
     probe_args := args
     binding :: sema_call_bind_direct("Perf.{method}", target.signature, &probe_args, span, &diagnostics) ?? return failed
     defaults :: sema_call_registration_defaults(graph, binding) ?? return failed
     call :: Call{name: "Perf.{method}", name_span: span, type_args: type_args, args: args, resolved_ret: None, range_checked: false, widen_approx: false}
-    checked :: sema_call_check_direct_target_owned(&state, target, call, defaults, expected, environment, &scopes, &tail_store, &context, &diagnostics) ?? return failed
-    if !sema_expr_record_call_fact(environment, &scopes, &context, span, checked, &diagnostics) -> return failed
-    SemaMethodSpecialCheck{handled: true, value: Val(checked.value)}
+    checked :: sema_call_check_direct_target_owned(&state, target, call, defaults, expected, environment, program, &scopes, &tail_store, &context, &diagnostics) ?? return failed
+    if !sema_expr_record_call_fact(environment, program, &scopes, &context, span, checked, &diagnostics) -> return failed
+    return SemaMethodSpecialCheck{handled: true, value: Val(checked.value)}
+    } else {
+        return failed
+    }
 }
 
 // Resolve associated methods through the declaration graph before trying an
 // intrinsic row. Core source carriers use the same SymbolId as imported user
 // carriers; a qualified owner is not a runtime field access.
-fn sema_call_static_source_owner(receiver: Expr, method: String, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Symbol? Never! {
+fn sema_call_static_source_owner(receiver: Expr, method: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Symbol? Never! {
     owner_name :: if receiver == {
         .Ident(name, _) -> {
             if sema_scope_resolve_index(scopes, name) == .Val(index) -> return Val(scopes.bindings[index].symbol)
@@ -624,22 +626,25 @@ fn sema_call_static_source_owner(receiver: Expr, method: String, environment: Se
         }
         else -> { return None }
     }
-    graph :: environment.registration_graph ?? return None
-    resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, owner_name) ?? return None
-    if resolved.symbol.kind != SymbolKind.Type -> return None
-    row :: sema_type_graph_nominal_row(graph, resolved.symbol.id.key) ?? return None
-    nominal :: graph.modules[row.module_index].nominals[row.row]
-    if !sema_call_static_registered_method_exists(graph, nominal, method, environment) -> return None
-    Val(resolved.symbol)
+    if program.registration_graph == .Val(graph) {
+        resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, owner_name) ?? return None
+        if resolved.symbol.kind != SymbolKind.Type -> return None
+        row :: sema_type_graph_nominal_row(graph, resolved.symbol.id.key) ?? return None
+        nominal :: graph.modules[row.module_index].nominals[row.row]
+        if !sema_call_static_registered_method_exists(graph, nominal, method, environment, program) -> return None
+        return Val(resolved.symbol)
+    } else {
+        return None
+    }
 }
 
-fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if receiver == .Call(descriptor) -> return sema_call_try_inline_range_conversion(descriptor, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-    owner_symbol :: sema_call_static_source_owner(receiver, method, environment, scopes) ?? {
-        if receiver == .Field(base, owner_leaf, _) -> return sema_call_try_builtin_static_field(base, owner_leaf, method, owner_type_args, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if receiver == .Call(descriptor) -> return sema_call_try_inline_range_conversion(descriptor, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    owner_symbol :: sema_call_static_source_owner(receiver, method, environment, program, scopes) ?? {
+        if receiver == .Field(base, owner_leaf, _) -> return sema_call_try_builtin_static_field(base, owner_leaf, method, owner_type_args, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if receiver == .Ident(name, _) {
-            if name == "Perf" && sema_scope_resolve_index(scopes, name) == None -> return sema_call_perf_static(method, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-            return sema_call_try_builtin_static(name, "", method, owner_type_args, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            if name == "Perf" && sema_scope_resolve_index(scopes, name) == None -> return sema_call_perf_static(method, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            return sema_call_try_builtin_static(name, "", method, owner_type_args, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
         return SemaMethodSpecialCheck{handled: false, value: None}
     }

@@ -64,14 +64,16 @@ fn sema_call_reflection_core_shown(name: String) -> Bool Never! {
 }
 
 fn sema_call_reflection_bound(ty: Type, bound: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return false
-    if sema_type_bound_satisfied_with_generics(graph, ty, bound, environment.module_identity, environment.generic_params) == (Val(true)) -> return true
-    // Imported nominal capabilities belong to their declaring registry. A
-    // caller need not import the trait name as well as the displayed type.
-    owner :: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return false
-    nominal :: graph.modules[owner.module_index].nominals[owner.row]
-    sema_type_bound_satisfied_with_generics(graph, nominal.ty, bound, nominal.symbol.module_name, environment.generic_params) ?? false
+    if program.registration_graph == .Val(graph) {
+        if sema_type_bound_satisfied_with_generics(graph, ty, bound, environment.module_identity, environment.generic_params) == (Val(true)) -> return true
+        // Imported nominal capabilities belong to their declaring registry. A
+        // caller need not import the trait name as well as the displayed type.
+        owner :: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return false
+        nominal :: graph.modules[owner.module_index].nominals[owner.row]
+        sema_type_bound_satisfied_with_generics(graph, nominal.ty, bound, nominal.symbol.module_name, environment.generic_params) ?? false
+    } else {
+        return false
+    }
 }
 
 fn sema_call_reflection_named_displayable(name: String, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
@@ -92,7 +94,7 @@ fn sema_call_reflection_is_displayable(ty: Type, environment: SemaScopeEnvironme
         .Quantity(_, _) -> return true
         .Apply(name, args) -> {
             leaf :: sema_call_reflection_leaf_name(name)
-            if sema_call_reflection_bound(ty, "Display", environment) -> return true
+            if sema_call_reflection_bound(ty, "Display", environment, program) -> return true
             native_composite :: leaf == "List" || leaf == "Set" || leaf == "Rank" || leaf == "PriorityQueue" || leaf == "Queue" || leaf == "LRU" || leaf == "ExpiringValue" || leaf == "Loadable" || leaf == "View"
             if !native_composite && !sema_call_reflection_named_displayable(name, ty, environment, program) -> return false
             loop argument in args {

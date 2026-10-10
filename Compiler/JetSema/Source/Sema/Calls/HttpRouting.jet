@@ -49,19 +49,20 @@ fn sema_http_route_find_function(environment: SemaScopeEnvironment, program: Sem
     index :: sema_scope_resolve_index(scopes, name) ?? return None
     symbol := scopes.bindings[index].symbol
     if symbol.kind != SymbolKind.Function -> return None
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return None
+    if program.registration_graph == .Val(graph) {
     loop module_row in graph.modules {
         loop function in module_row.functions {
             if function.symbol.id.key == symbol.id.key -> return Val(function)
         }
     }
-    None
+    return None
+    } else {
+        return None
+    }
 }
 
 fn sema_http_route_find_struct(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, module_identity: String) -> StructDef? {
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return None
+    if program.registration_graph == .Val(graph) {
     nominal_row :: sema_type_resolve_nominal_row(graph, ty, module_identity) ?? return None
     nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     if nominal.kind != SemaRegistrationNominalKind.Struct -> return None
@@ -70,14 +71,17 @@ fn sema_http_route_find_struct(environment: SemaScopeEnvironment, program: SemaP
         .Struct(definition) -> { return Val(definition) }
         else -> { return None }
     }
+    } else {
+        return None
+    }
 }
 
-fn sema_http_route_shape(expression: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaHTTPRouteShape? {
+fn sema_http_route_shape(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaHTTPRouteShape? {
     if expression == {
-        .Paren(inner, _) -> return sema_http_route_shape(inner, environment, scopes, host_hooks)
+        .Paren(inner, _) -> return sema_http_route_shape(inner, environment, program, scopes, host_hooks)
         .Lambda(lambda) -> {
             if lambda.meta.http_route_source == .Val(source) {
-                graph :: environment.registration_graph ?? return None
+                if program.registration_graph == .Val(graph) {
                 loop module_row in graph.modules {
                     loop nominal in module_row.nominals {
                         loop method in nominal.methods {
@@ -92,6 +96,9 @@ fn sema_http_route_shape(expression: Expr, environment: SemaScopeEnvironment, sc
                     }
                 }
                 return None
+                } else {
+                    return None
+                }
             }
             params := [SemaHTTPRouteParameter]{}
             loop parameter in lambda.params {
@@ -103,8 +110,7 @@ fn sema_http_route_shape(expression: Expr, environment: SemaScopeEnvironment, sc
         }
         .Ident(name, _) -> {
             function :: sema_http_route_find_function(environment, program, scopes, name) ?? return None
-            graph_option :: program.registration_graph
-            graph :: graph_option ?? return None
+            if program.registration_graph == .Val(graph) {
             params := [SemaHTTPRouteParameter]{}
             loop parameter in function.declaration.params {
                 resolved := sema_type_resolve_declared(graph, parameter.ty, function.symbol.module_name)
@@ -114,6 +120,9 @@ fn sema_http_route_shape(expression: Expr, environment: SemaScopeEnvironment, sc
             // its callable header. The accepted logical query must recompute.
             sema_body_check_mark_foreign_raw_body(host_hooks)
             return Val(SemaHTTPRouteShape{params: params, body: LambdaBody.Block{body: function.declaration.body}, module_identity: function.symbol.module_name})
+            } else {
+                return None
+            }
         }
         else -> return None
     }
@@ -169,8 +178,7 @@ fn sema_http_route_constant_string(expression: Expr, environment: SemaScopeEnvir
             index :: sema_scope_resolve_index(scopes, name) ?? return None
             binding := scopes.bindings[index]
             if binding.symbol.kind != SymbolKind.Constant -> return None
-            graph_option :: program.registration_graph
-            graph :: graph_option ?? return None
+            if program.registration_graph == .Val(graph) {
             loop module_row in graph.modules {
                 loop constant in module_row.constants {
                     if constant.symbol.id.key != binding.symbol.id.key -> next
@@ -186,6 +194,9 @@ fn sema_http_route_constant_string(expression: Expr, environment: SemaScopeEnvir
                 }
             }
             return None
+            } else {
+                return None
+            }
         }
         else -> return None
     }
@@ -391,8 +402,7 @@ fn sema_http_route_schema_type(ty: Type, environment: SemaScopeEnvironment, prog
             if leaf == "Int" || leaf == "I8" || leaf == "I16" || leaf == "I32" || leaf == "I64" || leaf == "I128" || leaf == "U8" || leaf == "U16" || leaf == "U32" || leaf == "U64" || leaf == "U128" -> return Val("{{\"type\":\"integer\",\"format\":\"int64\"}}")
             if leaf == "Float" || leaf == "F32" || leaf == "F64" -> return Val("{{\"type\":\"number\",\"format\":\"double\"}}")
             if sema_serde_type_is_admissible(environment, program, ty, SemaSerdeDirection.Decode) == false -> return None
-            graph_option :: program.registration_graph
-            graph :: graph_option ?? return None
+            if program.registration_graph == .Val(graph) {
             nominal_row :: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
             nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
             if nominal.kind != SemaRegistrationNominalKind.Struct -> return None
@@ -414,6 +424,9 @@ fn sema_http_route_schema_type(ty: Type, environment: SemaScopeEnvironment, prog
             }
             required_json := if required.len() > 0 -> ",\"required\":[{required.join(",")}]" else -> ""
             return Val("{{\"type\":\"object\",\"properties\":{{{properties.join(",")}}},\"additionalProperties\":false{required_json}}}")
+            } else {
+                return None
+            }
         }
         else -> return None
     }
@@ -469,8 +482,7 @@ fn sema_http_route_response_status(expression: Expr, environment: SemaScopeEnvir
             }
         }
         .Ident(name, _) -> {
-            graph_option :: program.registration_graph
-            graph :: graph_option ?? return None
+            if program.registration_graph == .Val(graph) {
             if sema_registration_module_index(graph, module_identity) == .Val(module_index) {
                 loop constant in graph.modules[module_index].constants {
                     if constant.symbol.name == name {
@@ -507,6 +519,9 @@ fn sema_http_route_response_status(expression: Expr, environment: SemaScopeEnvir
                 }
             }
             return None
+            } else {
+                return None
+            }
         }
         else -> return None
     }
@@ -544,9 +559,11 @@ fn sema_http_route_response_local_type(expression: Expr, environment: SemaScopeE
             return None
         }
         .StructLit(type_name, _, _, _, _, _, _) -> {
-            graph_option :: program.registration_graph
-            graph :: graph_option ?? return None
-            return Val(sema_type_resolve_declared(graph, Type.Named{name: type_name}, module_identity))
+            if program.registration_graph == .Val(graph) {
+                return Val(sema_type_resolve_declared(graph, Type.Named{name: type_name}, module_identity))
+            } else {
+                return None
+            }
         }
         .TupleLit(_, _, tuple_ty) -> {
             return tuple_ty
@@ -567,8 +584,7 @@ fn sema_http_route_response_adapter_returns_response(method: String, args: [Call
     updated_scopes := scopes
     builtin_result := sema_call_http_method_result("HTTPResponse", method, updated_args.len())
     if builtin_result == (Val(Type.Named{name: "HTTPResponse"})) -> return true
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return false
+    if program.registration_graph == .Val(graph) {
     response_row :: sema_type_resolve_nominal_row(graph, Type.Named{name: "HTTPResponse"}, module_identity) ?? return false
     response_nominal :: graph.modules[response_row.module_index].nominals[response_row.row]
     handler_environment := sema_http_route_environment_for_module(environment, program, module_identity)
@@ -599,7 +615,10 @@ fn sema_http_route_response_adapter_returns_response(method: String, args: [Call
             }
         }
     }
-    matched && all_return_response
+    return matched && all_return_response
+    } else {
+        return false
+    }
 }
 
 fn sema_http_route_response_expr(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, locals: [SemaHTTPRouteParameter], aliases: [SemaHTTPRouteResponseAlias], module_identity: String) -> [SemaHTTPRouteResponse] {
@@ -625,8 +644,8 @@ fn sema_http_route_response_expr(expression: Expr, environment: SemaScopeEnviron
             if sema_http_route_response_constructor(leaf, call.args, environment, program, scopes, locals, module_identity) == .Val(response) -> return [SemaHTTPRouteResponse]{response}
         }
         .MethodCall(receiver, method, method_span, _, type_args, args, _, resolved_ret, _, _, _) -> {
-            if sema_http_route_response_constructor(method, args, environment, scopes, locals, module_identity) == .Val(response) -> return [SemaHTTPRouteResponse]{response}
-            receiver_responses := sema_http_route_response_expr(receiver, environment, scopes, locals, aliases, module_identity)
+            if sema_http_route_response_constructor(method, args, environment, program, scopes, locals, module_identity) == .Val(response) -> return [SemaHTTPRouteResponse]{response}
+            receiver_responses := sema_http_route_response_expr(receiver, environment, program, scopes, locals, aliases, module_identity)
             if receiver_responses.len() > 0 {
                 if resolved_ret == .Val(ty) && sema_call_http_nominal_leaf(ty) == "HTTPResponse" -> return receiver_responses
                 if sema_http_route_response_adapter_returns_response(method, args, type_args, method_span, environment, program, scopes, module_identity) -> return receiver_responses
@@ -895,7 +914,7 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
     updated_args := args
     receiver_name := sema_call_http_nominal_leaf(receiver_value.ty)
     if receiver_name != "HTTPRouter" && receiver_name != "HTTPMux" -> return SemaMethodSpecialCheck{handled: false, value: None}
-    if receiver_name == "HTTPMux" && method == "mount" -> return sema_call_http_mount(receiver, receiver_value, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if receiver_name == "HTTPMux" && method == "mount" -> return sema_call_http_mount(receiver, receiver_value, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     supported := if receiver_name == "HTTPRouter" -> method == "get" || method == "post" || method == "put" || method == "delete" else -> method == "get" || method == "post" || method == "put" || method == "delete" || method == "patch" || method == "head" || method == "options"
     if !supported -> return SemaMethodSpecialCheck{handled: false, value: None}
     if updated_args.len() != 2 {
@@ -904,8 +923,10 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     path_value :: sema_call_http_check_value(updated_args[0], Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    pattern :: sema_http_route_constant_string(updated_args[0].expr, environment, program, scopes) ?? {
-        &diagnostics.push(sema_error("E2805", updated_args[0].span, "HTTP route path must be a static String", "route patterns are checked at registration and become part of the endpoint contract", "use a literal or compile-time String constant"))
+    static_pattern :: sema_http_route_constant_string(updated_args[0].expr, environment, program, scopes)
+    dynamic :: static_pattern == None
+    if dynamic && receiver_name != "HTTPMux" {
+        &diagnostics.push(sema_error("E2805", updated_args[0].span, "HTTPRouter route path must be a static String", "router endpoint contracts are fully checked while building; mux value routes may be computed at runtime", "use a literal or compile-time String constant, or register the dynamic route on a mux"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     pattern :: static_pattern ?? ""
@@ -922,7 +943,7 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
     pattern_error :: if dynamic -> None else -> sema_http_route_pattern_error(pattern)
     path_error :: pattern_error ?? {
         path_fields :: sema_http_route_path_fields(pattern) ?? [SemaHTTPRoutePathField]{}
-        handler_shape :: sema_http_route_shape(updated_args[1].expr, environment, scopes, context.host_hooks) ?? {
+        handler_shape :: sema_http_route_shape(updated_args[1].expr, environment, program, scopes, context.host_hooks) ?? {
             &diagnostics.push(sema_error("E2805", updated_args[1].span, "HTTP route handler must be a lambda or named function with explicit typed parameters", "route binding needs source parameter names and types before it can define transport inputs", "write `(id: Int, req: HTTPRequest) -> ...` or pass a named function"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
@@ -941,7 +962,7 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
         handler_issue := ""
         if dynamic {
             loop parameter in typed {
-                if !sema_serde_type_is_admissible(environment, parameter.ty, SemaSerdeDirection.Decode) -> handler_issue = "dynamic HTTP route input `{parameter.name}` cannot decode text into handler type `{type_name(parameter.ty)}`"
+                if !sema_serde_type_is_admissible(environment, program, parameter.ty, SemaSerdeDirection.Decode) -> handler_issue = "dynamic HTTP route input `{parameter.name}` cannot decode text into handler type `{type_name(parameter.ty)}`"
             }
         }
         if request_names.len() > 1 -> handler_issue = "HTTP route `{pattern}` has more than one HTTPRequest input"
@@ -960,7 +981,7 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
             loop parameter in typed { if parameter.name == field.name -> matches = matches + 1 }
             if matches != 1 -> handler_issue = "HTTP route `{pattern}` path field `{field.name}` does not have exactly one typed handler input"
             loop parameter in typed {
-                if parameter.name == field.name && !sema_serde_type_is_admissible(environment, parameter.ty, SemaSerdeDirection.Decode) {
+                if parameter.name == field.name && !sema_serde_type_is_admissible(environment, program, parameter.ty, SemaSerdeDirection.Decode) {
                     handler_issue = "HTTP route `{pattern}` path field `{field.name}` cannot decode text into handler type `{type_name(parameter.ty)}`"
                 }
             }

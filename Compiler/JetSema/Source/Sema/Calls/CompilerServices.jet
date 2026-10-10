@@ -165,12 +165,12 @@ fn sema_compiler_services_check_call(module_name: String, member: String, args: 
     SemaCompilerServicesCallCheck{recognized: true, arguments_complete: arguments_complete, module_name: module_name, member: member, arguments: values, result_type: selected.result_type, failure_carrier: selected.failure_carrier}
 }
 
-fn sema_compiler_services_lower_core_call(check: SemaCompilerServicesCallCheck, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_compiler_services_lower_core_call(check: SemaCompilerServicesCallCheck, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if !check.recognized || !check.arguments_complete -> return None
     if check.module_name == "core.build" && check.member == "graph" {
         if check.arguments.len() != 1 -> return None
         call :: THostCall.Method{receiver: check.arguments[0], method: "graph", args: [TExpr]{}}
-        return sema_expr_expected(sema_tir_expr(check.result_type, TExprKind.HostCall{call: call}, span), expected, environment, &diagnostics)
+        return sema_expr_expected(sema_tir_expr(check.result_type, TExprKind.HostCall{call: call}, span), expected, environment, program, &diagnostics)
     }
     if check.module_name != "core.compiler" -> return None
     record :: sema_call_core_record(check.module_name, check.member, check.arguments.len(), span, &diagnostics) ?? return None

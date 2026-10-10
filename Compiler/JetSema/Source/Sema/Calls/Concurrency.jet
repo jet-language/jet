@@ -57,11 +57,13 @@ fn sema_call_concurrency_sender_element(ty: Type) -> Type? {
 
 fn sema_call_concurrency_is_canonical_sender(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if sema_call_concurrency_sender_element(ty) == None -> return false
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return false
-    if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None -> return false
-    owner :: sema_registration_core_builtin_owner(graph, sema_registration_core_builtin_sender_name()) ?? return false
-    owner.ownership == TDeclarationOwnership.Owned
+    if program.registration_graph == .Val(graph) {
+        if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None -> return false
+        owner :: sema_registration_core_builtin_owner(graph, sema_registration_core_builtin_sender_name()) ?? return false
+        return owner.ownership == TDeclarationOwnership.Owned
+    } else {
+        return false
+    }
 }
 
 fn sema_call_concurrency_check_value(argument: CallArg, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -114,7 +116,7 @@ fn sema_call_concurrency_check_parallel_callback(value: TExpr, source: Expr, env
         }
         else -> {}
     }
-    named_function := if source == {.Ident(name, _) -> sema_scope_resolve_index(&scopes, name) == None else -> false}
+    named_function := if source == {.Ident(name, _) -> sema_scope_resolve_index(scopes, name) == None else -> false}
     if !named_function {
         problem := SemaSendabilityProblem{root: None, path: [String]{}, kind: SemaSendProblemKind.ClosureCaptures}
         &diagnostics.push(sema_ownership_crossing_diagnostic("parallel callback", Type.Named{name: "callback"}, problem, SemaSendCrossing.ParallelWorker, value.span))

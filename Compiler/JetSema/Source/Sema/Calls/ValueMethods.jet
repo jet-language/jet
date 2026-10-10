@@ -148,14 +148,14 @@ fn sema_value_method_source_arg(value: TExpr) -> TCallArg Never! {
 // owned TCallArg flags. Only this existing view passes those evaluated copies
 // to its canonical source body's move parameters; it does not move the user
 // place or establish a general Read-checked call to a move parameter.
-fn sema_value_method_option_or_err(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    why :: sema_value_method_argument(args[0], "or_err", 0, Type.String, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+fn sema_value_method_option_or_err(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    why :: sema_value_method_argument(args[0], "or_err", 0, Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     updated_args := args
     params := [SemaCallParam]{SemaCallParam{label: "arg0", name: "arg0", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
     ownership := sema_ownership_check_method_call(&state, "Option.or_err", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_effect_record_intrinsic_effects(environment, &scopes, &context, "Option.or_err", span, [EffectRowEntry]{}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    route :: sema_call_core_resolve_route(environment, "core.prelude", "option_or_err", [Type]{inner}, 1, false, 2, false, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "Option.or_err", span, [EffectRowEntry]{}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    route :: sema_call_core_resolve_route(environment, program, "core.prelude", "option_or_err", [Type]{inner}, 1, false, 2, false, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     target :: if route == {
         .Source(source) -> source
         .Core(_) -> panic("Option.or_err must resolve its canonical Jet source body")

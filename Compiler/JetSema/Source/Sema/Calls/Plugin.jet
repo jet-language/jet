@@ -43,12 +43,14 @@ fn sema_plugin_handle_identity(ty: Type, environment: SemaScopeEnvironment, prog
         else -> None
     }
     value :: identity ?? return None
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return None
-    // A source declaration named Plugin is never the compiler-owned loader
-    // handle, even if it happens to use the same type application spelling.
-    if sema_type_resolve_nominal_row(graph, resolved, environment.module_identity) != None -> return None
-    Val(value)
+    if program.registration_graph == .Val(graph) {
+        // A source declaration named Plugin is never the compiler-owned loader
+        // handle, even if it happens to use the same type application spelling.
+        if sema_type_resolve_nominal_row(graph, resolved, environment.module_identity) != None -> return None
+        return Val(value)
+    } else {
+        return None
+    }
 }
 
 fn sema_plugin_forbidden_component_name(name: String) -> Bool Never! {
@@ -194,8 +196,7 @@ fn sema_call_try_plugin_method(receiver: Expr, receiver_value: TExpr, method: St
         sema_plugin_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if program.registration_graph == .Val(graph) {
     supported := true
     component_params := [MIRComponentTypeDescriptor]{}
     loop index in 0..<export_value.params.len() {
@@ -239,5 +240,8 @@ fn sema_call_try_plugin_method(receiver: Expr, receiver_value: TExpr, method: St
     signature := MIRComponentSignatureDescriptor{params: component_params, result: result_descriptor ?? return SemaMethodSpecialCheck{handled: true, value: None}}
     result := Type.Result{ok: result_type, err: Type.Named{name: "PluginError"}}
     value := sema_tir_expr(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.PluginInvoke{export_name: export_value.name, signature: signature}, args: values}, span)
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+    return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+    } else {
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
 }

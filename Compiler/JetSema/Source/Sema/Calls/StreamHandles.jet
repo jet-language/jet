@@ -76,16 +76,18 @@ fn sema_stream_handle_owner_module(owner: String) -> String Never! {
 fn sema_stream_handle_is_canonical(ty: Type, owner: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     actual :: sema_stream_handle_owner(ty) ?? return false
     if actual != owner -> return false
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return true
-    resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
-    if resolved == .Val(row) {
-        owner_module := sema_stream_handle_owner_module(owner)
-        // A declared or imported type named like a module-less built-in
-        // (`Path`) shadows it; the two never share an identity.
-        return row.symbol.kind == SymbolKind.Type && owner_module != "" && (sema_registration_module_name(graph, row.symbol.module_name) ?? "") == owner_module
+    if program.registration_graph == .Val(graph) {
+        resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
+        if resolved == .Val(row) {
+            owner_module := sema_stream_handle_owner_module(owner)
+            // A declared or imported type named like a module-less built-in
+            // (`Path`) shadows it; the two never share an identity.
+            return row.symbol.kind == SymbolKind.Type && owner_module != "" && (sema_registration_module_name(graph, row.symbol.module_name) ?? "") == owner_module
+        }
+        return true
+    } else {
+        return true
     }
-    true
 }
 
 fn sema_stream_handle_result(ok: Type, error: Type) -> Type Never! {
@@ -335,14 +337,14 @@ fn sema_stream_handle_lines_value(receiver: TExpr, owner: String, span: Span, ex
 // Called before ordinary method lookup for canonical Core handle types.
 fn sema_call_try_stream_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     owner :: sema_stream_handle_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if !sema_stream_handle_is_canonical(receiver_value.ty, owner, environment) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if !sema_stream_handle_is_canonical(receiver_value.ty, owner, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
     source_member := if owner == "FileScope" && method == "read" -> "scoped_read" else if owner == "FileReader" && method == "read_line" -> "__reader_read_line" else -> ""
     if source_member != "" {
-        identity :: sema_call_core_module_identity(environment, "core.files") ?? {
+        identity :: sema_call_core_module_identity(environment, program, "core.files") ?? {
             &diagnostics.push(sema_error("E0003", span, "filesystem source module is not loaded", "receiver policy requires Core/files/files.jet", "load the registered Core source module"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        target :: sema_call_core_source_target(environment, identity, source_member, [Type]{}, span, true, &diagnostics) ?? {
+        target :: sema_call_core_source_target(environment, program, identity, source_member, [Type]{}, span, true, &diagnostics) ?? {
             &diagnostics.push(sema_error("E0003", span, "filesystem source receiver target is missing", "receiver policy requires its canonical source function", "load the registered Core source function"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
@@ -350,7 +352,7 @@ fn sema_call_try_stream_handle_method(receiver: Expr, receiver_value: TExpr, met
         source_args := [CallArg]{CallArg{convention: access, expr: receiver, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
         loop argument in args -> &source_args.push(argument)
         scopes.ownership_call_depth += 1
-        value := sema_call_core_check_source_owned(target, "{owner}.{method}", [Type]{}, source_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        value := sema_call_core_check_source_owned(target, "{owner}.{method}", [Type]{}, source_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         scopes.ownership_call_depth -= 1
         return SemaMethodSpecialCheck{handled: true, value: value}
     }
@@ -392,9 +394,11 @@ fn sema_stream_handle_static_owner_is_canonical(owner: String, scopes: &SemaScop
     if symbol.kind != SymbolKind.Type -> return false
     owner_module := sema_stream_handle_owner_module(owner)
     if owner_module == "" -> return false
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return false
-    (sema_registration_module_name(graph, symbol.module_name) ?? "") == owner_module
+    if program.registration_graph == .Val(graph) {
+        return (sema_registration_module_name(graph, symbol.module_name) ?? "") == owner_module
+    } else {
+        return false
+    }
 }
 
 // Static reserved constructors. Callers must still prefer a shadowing user type.
@@ -460,11 +464,13 @@ fn sema_call_try_stream_handle_static(owner: String, method: String, args: [Call
 }
 
 fn sema_stream_handle_registered_owner(owner: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Symbol? {
-    graph_option :: program.registration_graph
-    graph :: graph_option ?? return None
-    resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, owner)
-    if resolved == .Val(row) && row.symbol.kind == SymbolKind.Type -> return Val(row.symbol)
-    None
+    if program.registration_graph == .Val(graph) {
+        resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, owner)
+        if resolved == .Val(row) && row.symbol.kind == SymbolKind.Type -> return Val(row.symbol)
+        return None
+    } else {
+        return None
+    }
 }
 
 // Core's file handles and temporary filesystem objects expose a checked

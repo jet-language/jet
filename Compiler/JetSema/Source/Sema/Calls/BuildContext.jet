@@ -100,12 +100,12 @@ fn sema_build_context_arity_description(method: String) -> String Never! {
     "2"
 }
 
-fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty != (Type.Named{name: "BuildContext"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
     failed :: SemaMethodSpecialCheck{handled: true, value: None}
     contract :: sema_build_context_method_contract(method, args.len()) ?? {
         loop argument in args {
-            if argument.flags.template_items == None -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            if argument.flags.template_items == None -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
         &diagnostics.push(sema_error("E0104", span, "`BuildContext.{method}` expects {sema_build_context_arity_description(method)} arguments, got {args.len()}", "build methods have one canonical base shape and typed trailing controls", "pass the arguments accepted by `b.{method}`"))
         return failed
@@ -127,9 +127,9 @@ fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr, met
         &ordinary.push(argument)
         required := Type?{None}
         if ordinary.len() <= contract.parameters.len() -> required = Val(contract.parameters[ordinary.len() - 1])
-        value :: sema_check_expression(argument.expr, required, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed
+        value :: sema_check_expression(argument.expr, required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed
         if required == .Val(ty) {
-            compatible :: sema_call_type_assignable(ty, value.ty, environment) ?? return failed
+            compatible :: sema_call_type_assignable(ty, value.ty, environment, program) ?? return failed
             if !compatible {
                 &diagnostics.push(sema_type_mismatch(ty, value.ty, argument.span))
                 return failed
@@ -158,5 +158,5 @@ fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr, met
         }
     }
     value :: sema_tir_expr(contract.result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
