@@ -233,7 +233,6 @@ impl Clock {
         self.now()
     }
     fn wait(&self, duration: Duration) -> Int Never! { &self.tick(duration.ns) }
-    fn equal(self, other: Clock) -> Bool Never! { self.now() == other.now() }
 }
 fn monotonic() -> Int Never! { core.time.__clock_mono_ns() }
 fn sample(clock: &Clock, other: Clock, duration: Duration) -> Int Never! {
@@ -328,4 +327,37 @@ fn temporary_list_and_call_ranges_are_owned_not_place_views() {
         let errors = check_sources(&[("pkg/main.jet", "main", &source, &[])]);
         assert!(errors.iter().any(|error| error.starts_with("E0201:")), "{errors:?}");
     }
+}
+
+#[test]
+fn core_sources_share_private_declarations_without_public_exports() {
+    let time = "fn __expiry_deadline(now_ms: Int, ttl: Duration) -> Int Never! { now_ms + ttl.ns }\nstruct __Observer { value: Int }\n";
+    let core = "use core.time as time\nfn failure() -> Int time.Expired! { Err(time.Expired{}) }\nfn deadline(ttl: Duration) -> Int Never! { time.__expiry_deadline(1, ttl) }\nfn observe(value: time.__Observer) -> Int Never! { value.value }\n";
+    let errors = check_sources(&[
+        ("<corelib>/Core/time/time.jet", "core_time", time, &[]),
+        ("<corelib>/Core/crypto/vault.jet", "core_core_crypto_vault", core, &[]),
+        ("pkg/main.jet", "main", "fn run() {}\n", &[]),
+    ]);
+    assert!(errors.is_empty(), "{errors:?}");
+    for source in [
+        "use core.time as time\nfn failure() -> Int time.Expired! { Err(time.Expired{}) }\nfn run() {}\n",
+        "use core.time as time\nfn deadline(ttl: Duration) -> Int Never! { time.__expiry_deadline(1, ttl) }\nfn run() {}\n",
+        "use core.time as time\nfn observe(value: time.__Observer) -> Int Never! { value.value }\nfn run() {}\n",
+    ] {
+        let errors = check_sources(&[
+            ("<corelib>/Core/time/time.jet", "core_time", time, &[]),
+            ("pkg/main.jet", "main", source, &[]),
+        ]);
+        assert!(!errors.is_empty(), "Core-private declarations leaked to user code");
+    }
+}
+
+#[test]
+fn loaded_core_source_functions_resolve_without_a_native_catalog_row() {
+    let errors = check_sources(&[
+        ("<corelib>/Core/text/text.jet", "core_text", "fn encode_cp(value: Int) -> String Never! { \"scalar\" }\n", &[]),
+        ("<corelib>/Core/encoding/xml_engine.jet", "__core_encoding_xml_engine", "use core.text as unicode\nfn carriage_return() -> String Never! { unicode.encode_cp(13) }\n", &[]),
+        ("pkg/main.jet", "main", "fn run() {}\n", &[]),
+    ]);
+    assert!(errors.is_empty(), "{errors:?}");
 }
