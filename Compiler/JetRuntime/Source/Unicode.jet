@@ -28,11 +28,11 @@ fn unicode_final_sigma_after(data: I64, length: I64, start: I64) -> Bool {
     true
 }
 
-#Export(c) fn jet_unicode_lower(value: I64) -> I64 {
-    data :: rt_text_data(value)
-    length :: rt_text_len(value)
-    builder :: rt_text_builder_with_capacity(length)
-    at := I64{0}
+// Lowercase scalars [start, length) into builder. Final_Sigma's predecessor
+// state starts uncased at start, exactly like lowering that suffix alone; the
+// successor search still reads to length (the suffix's own end).
+fn unicode_lower_append(builder: I64, data: I64, start: I64, length: I64) {
+    at := start
     before_cased := false
     loop at < length {
         address :: wrapping(data + at)
@@ -46,6 +46,12 @@ fn unicode_final_sigma_after(data: I64, length: I64, start: I64) -> Bool {
         if !unicode_is_case_ignorable(cp) -> before_cased = unicode_is_cased(cp)
         at = next_at
     }
+}
+
+#Export(c) fn jet_unicode_lower(value: I64) -> I64 {
+    length :: rt_text_len(value)
+    builder :: rt_text_builder_with_capacity(length)
+    unicode_lower_append(builder, rt_text_data(value), I64{0}, length)
     jet_rt_string_builder_finish(builder)
 }
 
