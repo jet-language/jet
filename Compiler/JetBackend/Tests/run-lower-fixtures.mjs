@@ -13,6 +13,8 @@
 // --disjoint-lowering lowers and lints the production disjoint MIR witnesses
 // without linking; native execution still requires the admitted runtime pack.
 // --tls-refusal checks the canonical TLS transport refusal without a pack.
+// --route-carriers lowers/lints the exact-Int and Dyn route carrier witnesses
+// (Tests/Fixtures/RouteCarriers.jet) without a pack.
 // --list-routes lowers/lints the four stage1-required canonical List witnesses
 // without a pack; the ordinary fixture run executes their native images.
 // then:  cd <outdir> && jet run unit.jet        (writes <fixture>.elf files)
@@ -34,7 +36,7 @@ if (!outDir) {
   process.exit(64);
 }
 const runtimePack = process.env.JET_RUNTIME_PACK;
-if (!sanitizeOnlyArgument() && !process.argv.includes("--foreign-descriptors") && !process.argv.includes("--disjoint-lowering") && !process.argv.includes("--tls-refusal") && !process.argv.includes("--list-routes") && !runtimePack) throw new Error("JET_RUNTIME_PACK must explicitly name an admitted fresh Jet pack");
+if (!sanitizeOnlyArgument() && !process.argv.includes("--foreign-descriptors") && !process.argv.includes("--disjoint-lowering") && !process.argv.includes("--tls-refusal") && !process.argv.includes("--route-carriers") && !process.argv.includes("--list-routes") && !runtimePack) throw new Error("JET_RUNTIME_PACK must explicitly name an admitted fresh Jet pack");
 function sanitizeOnlyArgument() { return process.argv.includes("--sanitize"); }
 // While other edits are in flight: FX_HEAD (comma-separated repo paths) reads
 // those files as committed at HEAD, and FX_EXCLUDE (comma-separated file
@@ -115,6 +117,8 @@ const foreignDescriptors = process.argv.includes("--foreign-descriptors");
 const disjointLowering = process.argv.includes("--disjoint-lowering");
 const tlsRefusal = process.argv.includes("--tls-refusal");
 const listRoutes = process.argv.includes("--list-routes");
+const routeCarriers = process.argv.includes("--route-carriers");
+if (routeCarriers && (abiOnly || sanitizeOnly || callableStatics || foreignDescriptors || disjointLowering || tlsRefusal || listRoutes)) throw new Error("--route-carriers cannot be combined with other focused modes");
 if (listRoutes && (abiOnly || sanitizeOnly || callableStatics || foreignDescriptors || disjointLowering || tlsRefusal)) throw new Error("--list-routes cannot be combined with other focused modes");
 if (tlsRefusal && (abiOnly || sanitizeOnly || callableStatics || foreignDescriptors || disjointLowering)) throw new Error("--tls-refusal cannot be combined with other focused modes");
 if (disjointLowering && (abiOnly || sanitizeOnly || callableStatics || foreignDescriptors)) throw new Error("--disjoint-lowering cannot be combined with other focused modes");
@@ -181,7 +185,7 @@ const parts = [
   body("Compiler/JetBackend/Source/Image/StaticLink.jet"),
   body("Compiler/JetBackend/Source/Image/RuntimePack.jet"),
   ] : []),
-  ...(foreignDescriptors || disjointLowering || tlsRefusal || listRoutes ? [] : [
+  ...(foreignDescriptors || disjointLowering || tlsRefusal || routeCarriers || listRoutes ? [] : [
     body("Compiler/JetBackend/Tests/TestPack.jet"),
     ...(sanitizeOnly ? [body("Compiler/JetBackend/Tests/SanitizeFixtures.jet"), "fn run() { sanitize_fixtures() }"] : [body("Compiler/JetBackend/Tests/AbiFixtures.jet")]),
   ]),
@@ -207,6 +211,11 @@ const parts = [
     body("Compiler/JetBackend/Tests/LowerFixtures.jet").split("fn fx_hello(")[0],
     body("Compiler/JetBackend/Tests/Fixtures/TLSRefusal.jet"),
     'fn run() { assert(fx_report_tls_refusals("tls-refusal")); print("TLS refusal fixtures passed") }',
+  ] : routeCarriers ? [
+    body("Compiler/JetBackend/Tests/LowerFixtures.jet").split("fn fx_hello(")[0],
+    item("Compiler/JetBackend/Tests/Fixtures/Tuple.jet", "fn fx_tuple_type("),
+    body("Compiler/JetBackend/Tests/Fixtures/RouteCarriers.jet"),
+    'fn run() { assert(fx_route_carrier_checks()); print("route carrier fixtures passed") }',
   ] : foreignDescriptors ? [
     body("Compiler/JetBackend/Tests/LowerFixtures.jet").split("fn fx_hello(")[0],
     body("Compiler/JetBackend/Tests/Fixtures/Foreign.jet"),

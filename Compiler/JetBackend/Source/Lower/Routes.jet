@@ -64,7 +64,10 @@ fn lower_bits_clear(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 }
 
 // The carrier a value of `ty` crosses the runtime boundary as, if any. An
-// alias crosses as its target (the seeded `ParseError` is a String).
+// alias crosses as its target (the seeded `ParseError` is a String). An
+// exact Int crosses as its carrier word (gen-c-abi-routes.mjs: "Int is the
+// exact-Int carrier word"; adapters read it with JetInt::clone_from_raw or
+// narrow it, and return one with jet_int_from_i64/into_raw).
 fn lower_route_carrier_of(p: MIRProgram, ty: MIRType) -> LowerRouteCarrier? {
     if lower_text_type(ty) -> return Val(LowerRouteCarrier.Text)
     if lower_type_def(p, ty) == .Val(definition) {
@@ -79,7 +82,7 @@ fn lower_route_carrier_of(p: MIRProgram, ty: MIRType) -> LowerRouteCarrier? {
     }
     if lower_repr(p, ty) == {
         .Absent -> Val(LowerRouteCarrier.Unit)
-        .Word -> Val(LowerRouteCarrier.Word)
+        .ExactInt | .Word -> Val(LowerRouteCarrier.Word)
         .Float32Bits -> Val(LowerRouteCarrier.Word)
         .Flag -> Val(LowerRouteCarrier.Flag)
         .FloatBits -> Val(LowerRouteCarrier.Float)
@@ -162,7 +165,17 @@ fn lower_route_type_name(p: MIRProgram, ty: MIRType) -> String Never! {
     mir_type_display_name(ty)
 }
 
+// The checked Dyn is a native Jet enum (Dyn.jet); a Handle{Dyn} carrier is the
+// runtime's own tree. MIRRust.rs passes the one Dyn value to the kernel, so a
+// route borrows a runtime tree built for the call and returns a tree the
+// lowering converts back (lower_dyn_to_runtime/lower_dyn_from_runtime).
+fn lower_route_dyn(p: MIRProgram, ty: MIRType, carrier: LowerRouteCarrier) -> Bool Never! {
+    if carrier == .Handle(name) -> return name == "Dyn" && lower_dyn_type(p, ty)
+    false
+}
+
 fn lower_route_carrier_matches(p: MIRProgram, ty: MIRType, carrier: LowerRouteCarrier) -> Bool Never! {
+    if lower_route_dyn(p, ty, carrier) -> return true
     if carrier == .Tag(_, variants) -> return lower_route_tag_matches(p, ty, variants)
     if carrier == .Word && lower_route_word_field(p, ty) != None -> return lower_route_word_record(p, ty) != None
     if carrier == .HandleMut(name) {
@@ -302,6 +315,8 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     if route.params.len() != args.len() -> return lower_fail(&m, &f, "{what} {name} passes {args.len()} arguments; its runtime route takes {route.params.len()}")
     lowered := [LIRValueID]{}
     temporaries := [LIRValueID]{}
+    // Runtime Dyn trees built for the call (lower_route_dyn).
+    trees := [LIRValueID]{}
     // Seed routes lend record handles; Jet routes lend native inline storage.
     record_lists := [LowerRecordList]{}
     loop (index, arg) in args {
@@ -356,6 +371,12 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             }
             next
         }
+        if lower_route_dyn(p, ty, route.params[index]) {
+            tree :: lower_dyn_to_runtime(p, &m, &f, ty, value) ?? return
+            &lowered.push(tree)
+            &trees.push(tree)
+            next
+        }
         if lower_route_record(p, ty, route.params[index]) == .Val(runtime) {
             handle :: lower_record_to_runtime(p, &m, &f, ty, runtime, value)
             &lowered.push(handle)
@@ -374,6 +395,7 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     }
     if f.failed -> return
     loop handle in temporaries -> lower_emit(&f, LIRInst.Drop{value: handle})
+    loop tree in trees -> lower_call_runtime(&m, &f, "jet_rt_handle_drop_dyn", [LIRValueID]{tree}, None)
     loop lent in record_lists {
         lower_call_helper(&m, &f, "list.record_handles_free", lent.ty, [LIRValueID]{lent.buffer, lent.length}, None)
     }
@@ -512,6 +534,19 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
                     lower_call_runtime(&m, &f, route.export, lowered, Val(handle))
                     return lower_record_from_runtime(p, &m, &f, ty, handle, dst)
                 }
+                if lower_route_dyn(p, ty, carrier) {
+                    tree :: lower_pointer(&f)
+                    lower_call_runtime(&m, &f, route.export, lowered, Val(tree))
+                    if dst == .Val(kept) -> return lower_dyn_from_runtime(p, &m, &f, ty, tree, kept)
+                    return lower_call_runtime(&m, &f, "jet_rt_handle_drop_dyn", [LIRValueID]{tree}, None)
+                }
+                // An unused exact Int result still owns its carrier word.
+                if dst == None && carrier == .Word && lower_is_exact_int(ty) {
+                    owned :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
+                    lower_call_runtime(&m, &f, route.export, lowered, Val(owned))
+                    lower_emit(&f, LIRInst.Drop{value: owned})
+                    return
+                }
             }
             if dst == .Val(kept) -> return lower_call_runtime(&m, &f, route.export, lowered, Val(kept))
             unused :: lower_new_value(&f, lower_route_layout(carrier), lower_route_drop(carrier), None)
@@ -571,8 +606,8 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
             box :: dst ?? lower_pointer(&f)
             lower_alloc(&m, &f, box, lower_box_size(p, ty))
             lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: out.word})
-            // A List or a Core record payload is built on its own edge.
-            branched :: list_payload || lower_route_record(p, ok_ty, ok) != None || lower_route_record(p, err_ty, err) != None
+            // A List, a Core record or a Dyn payload is built on its own edge.
+            branched :: list_payload || lower_route_record(p, ok_ty, ok) != None || lower_route_record(p, err_ty, err) != None || lower_route_dyn(p, ok_ty, ok) || lower_route_dyn(p, err_ty, err)
             if branched {
                 zero :: lower_const(&f, 0)
                 succeeded :: lower_flag(&f)
@@ -685,6 +720,13 @@ fn lower_route_out_call(m: &LowerModule, f: &LowerFunction, export: String, args
 fn lower_route_store_payload(p: MIRProgram, m: &LowerModule, f: &LowerFunction, box: LIRValueID, offset: Int, ty: MIRType, carrier: LowerRouteCarrier, slot: LIRValueID, native_lists: Bool) Never! {
     if carrier == .Unit -> return
     if lower_route_record(p, ty, carrier) == .Val(runtime) -> return lower_record_store_from_slot(p, &m, &f, ty, runtime, slot, box, offset)
+    if lower_route_dyn(p, ty, carrier) {
+        tree :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Load{dst: tree, base: slot, offset: 0})
+        native :: lower_pointer(&f)
+        lower_dyn_from_runtime(p, &m, &f, ty, tree, native)
+        return lower_write_at(p, &f, box, offset, native, ty)
+    }
     if carrier == .Word && lower_route_word_record(p, ty) == .Val(info) {
         word :: lower_word(&f)
         lower_emit(&f, LIRInst.Load{dst: word, base: slot, offset: 0})

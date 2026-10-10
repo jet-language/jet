@@ -1,0 +1,163 @@
+// Route carriers the compiler's own MIR crosses per call (Routes.jet): an
+// exact Int crosses a Word carrier as its carrier word, and the native Dyn
+// enum crosses a Handle{Dyn} carrier as a runtime tree built for the call and
+// converted back from the result (lower_route_dyn). A mismatched checked type
+// is still refused. Lowering witnesses: Jet lowering and LIR lint only.
+use jet_foundation.[
+MIRConstant,
+MIRDropKind,
+MIREnumArg,
+MIRField,
+MIRFunction,
+MIRFunctionID,
+MIROperation,
+MIRPreludeABI,
+MIRPreludeFamily,
+MIRProgram,
+MIRSemanticOp,
+MIRTerminator,
+MIRTupleField,
+MIRTypeDef,
+MIRTypeDefKind,
+MIRTypeKind,
+MIRValueID,
+MIRVariant,
+MIRVariantPayload,
+mir_function_id,
+mir_type_from_kind,
+mir_type_id,
+]
+
+// The prelude Dyn declaration (key "Dyn", lower_dyn_type) with every variant
+// Dyn.jet lower_dyn_schema marshals; DateTime keeps one word of storage.
+fn fx_route_dyn_definition() -> MIRTypeDef Never! {
+    tree :: fx_named("Dyn")
+    entry :: fx_tuple_type("RouteDynEntry", [MIRTupleField]{MIRTupleField{name: "key", ty: fx_string()}, MIRTupleField{name: "value", ty: tree}})
+    fx_type_def(
+    "Dyn",
+    MIRTypeDefKind.Enum{
+        variants: [MIRVariant]{
+            fx_variant("Null", MIRVariantPayload.Unit),
+            fx_variant("Bool", MIRVariantPayload.Single{value: fx_bool()}),
+            fx_variant("Int", MIRVariantPayload.Single{value: fx_int()}),
+            fx_variant("Float", MIRVariantPayload.Single{value: mir_type_from_kind(MIRTypeKind.Float)}),
+            fx_variant("Number", MIRVariantPayload.Single{value: fx_string()}),
+            fx_variant("Text", MIRVariantPayload.Single{value: fx_string()}),
+            fx_variant("Bytes", MIRVariantPayload.Single{value: mir_type_from_kind(MIRTypeKind.List{inner: mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8})})}),
+            fx_variant("DateTime", MIRVariantPayload.Single{value: fx_string()}),
+            fx_variant("Array", MIRVariantPayload.Single{value: mir_type_from_kind(MIRTypeKind.List{inner: tree})}),
+            fx_variant("Object", MIRVariantPayload.Single{value: mir_type_from_kind(MIRTypeKind.List{inner: entry})}),
+        },
+        methods: [MIRFunctionID]{},
+    },
+    )
+}
+
+fn fx_route_carriers_program(b: FxBuilder) -> MIRProgram Never! {
+    types :: [MIRTypeDef]{
+        fx_route_dyn_definition(),
+        fx_type_def("FieldError", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("FieldError", "path", fx_string()), fx_field("FieldError", "reason", fx_string())}, methods: [MIRFunctionID]{}}),
+    }
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, ^types)
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", "string_slice", "jet_string_slice_builtin", 3, MIRPreludeABI.Value))
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", "find", "jet_text_parse_find", 2, MIRPreludeABI.Value))
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.HandleMethod, "core.encoding.dyn", "field", "jet_dyn_field", 2, MIRPreludeABI.Value))
+    p
+}
+
+fn fx_route_carrier_text(b: &FxBuilder, text: String) -> MIRValueID Never! {
+    fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: text}})
+}
+
+// `"carrier".slice(1, 4)`, `"carrier".find("rr")`, `Dyn.Null.field("x")`.
+fn fx_route_carriers_admitted() -> MIRProgram Never! {
+    b := fx_builder()
+    text :: fx_route_carrier_text(&b, "carrier")
+    start :: fx_int_const(&b, 1)
+    end :: fx_int_const(&b, 4)
+    middle :: fx_owned(&b, fx_string(), MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "string_slice"), receiver: text, receiver_place: None, args: [MIRValueID]{start, end}, aggregate_fields: None}})
+    fx_print(&b, middle)
+    needle :: fx_route_carrier_text(&b, "rr")
+    found :: fx_copy(&b, fx_int(), MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "find"), receiver: text, receiver_place: None, args: [MIRValueID]{needle}, aggregate_fields: None}})
+    fx_print(&b, found)
+    tree_ty :: fx_named("Dyn")
+    tree :: fx_owned(&b, tree_ty, MIROperation.Enum{type_id: mir_type_id("Dyn"), variant: "Null", args: [MIREnumArg]{}})
+    name :: fx_route_carrier_text(&b, "x")
+    errors :: mir_type_from_kind(MIRTypeKind.List{inner: fx_named("FieldError")})
+    field_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: tree_ty, err: errors})
+    field :: fx_owned(&b, field_ty, MIROperation.Semantic{operation: MIRSemanticOp.HandleMethod{call: fx_prelude_id("core.encoding.dyn", "field"), receiver: tree, args: [MIRValueID]{name}, frame_schedule: None, frame_schedule_derivation: None}})
+    loop value in ([MIRValueID]{field, name, tree, needle, middle, text}) {
+        fx_do(&b, MIROperation.Drop{value: value, kind: MIRDropKind.Value})
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_route_carriers_program(b)
+}
+
+// An Int-carrying route checked as Bool does not match its Word carrier.
+fn fx_route_carriers_refused() -> MIRProgram Never! {
+    b := fx_builder()
+    text :: fx_route_carrier_text(&b, "carrier")
+    needle :: fx_route_carrier_text(&b, "rr")
+    found :: fx_copy(&b, fx_bool(), MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "find"), receiver: text, receiver_place: None, args: [MIRValueID]{needle}, aggregate_fields: None}})
+    fx_print(&b, found)
+    loop value in ([MIRValueID]{needle, text}) {
+        fx_do(&b, MIROperation.Drop{value: value, kind: MIRDropKind.Value})
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_route_carriers_program(b)
+}
+
+fn fx_route_carrier_runtime_calls(lir: LIRModule) -> [String] Never! {
+    calls := [String]{}
+    loop function in lir.functions {
+        loop block in function.blocks {
+            loop instruction in block.insts {
+                if instruction == .Call(_, _, .Runtime(symbol), _) -> &calls.push(symbol)
+            }
+        }
+    }
+    calls
+}
+
+// The Dyn receiver becomes a runtime tree before the route, the tree is
+// released after it, and the Ok payload converts back to the native enum.
+fn fx_route_carrier_dyn_order(calls: [String]) -> Bool Never! {
+    expected :: [String]{"jet_rt_dyn_from_native", "jet_dyn_field", "jet_rt_dyn_to_native", "jet_rt_handle_drop_dyn"}
+    at := 0
+    loop symbol in calls {
+        if at < expected.len() && symbol == expected[at] -> at += 1
+    }
+    at == expected.len()
+}
+
+fn fx_route_carrier_checks() -> Bool {
+    clean := true
+    admitted :: lir_lower_entry(fx_route_carriers_admitted(), mir_function_id("run"))
+    loop issue in admitted.issues -> print("route-carriers: {issue.message}")
+    if admitted.issues.len() != 0 -> clean = false
+    lint :: lir_lint_module(admitted.lir)
+    loop issue in lint -> print("route-carriers: {issue.message}")
+    if lint.len() != 0 -> clean = false
+    calls :: fx_route_carrier_runtime_calls(admitted.lir)
+    loop symbol in ([String]{"jet_string_slice_builtin", "jet_text_parse_find"}) {
+        if !calls.contains(symbol) {
+            print("route-carriers: {symbol} was not called")
+            clean = false
+        }
+    }
+    if !fx_route_carrier_dyn_order(calls) {
+        print("route-carriers: Dyn route boundary order {calls.join(",")}")
+        clean = false
+    }
+    refused :: lir_lower_entry(fx_route_carriers_refused(), mir_function_id("run"))
+    matched := false
+    loop issue in refused.issues {
+        if issue.message.contains("does not match its runtime route") -> matched = true
+    }
+    if !matched || refused.entry != None {
+        print("route-carriers: an Int route checked as Bool was not refused")
+        clean = false
+    }
+    print(if clean -> "route-carriers: exact Int and Dyn cross their route carriers" else -> "route-carriers: carrier witnesses failed")
+    clean
+}
