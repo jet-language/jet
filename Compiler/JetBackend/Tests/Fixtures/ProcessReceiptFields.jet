@@ -1,0 +1,23 @@
+// Native ProcessReceipt144 field regression: Int, Option<Int>, List<Text>,
+// and Option<ProcessResourceLimit> use borrowed typed glue, like Text/Bool.
+use core.process as process
+
+fn receipt_fields(receipt: ProcessReceipt) -> Int Never! {
+    total := receipt.code + receipt.pid + receipt.argv.len() + receipt.authority.len() + receipt.limits.len() + receipt.outputs.len()
+    if receipt.signal == .Val(signal) -> total += signal
+    if receipt.limit_hit == .Val(_) -> total += 1
+    if receipt.success -> total += receipt.output.len()
+    if receipt.timed_out || receipt.redacted -> total += receipt.errors.len()
+    total
+}
+
+fn plan_fields(plan: ProcessPlan) -> Int Never! {
+    plan.argv.len() + plan.authority.len() + plan.limits.len() + plan.outputs.len() + plan.backend.len() + plan.executable_identity.len() + plan.input_digest.len() + plan.policy_digest.len() + plan.descendants.len()
+}
+
+fn main() {
+    receipt :: process.cmd([String]{"/bin/sh", "-c", "printf 'fields'"}).run() ?? panic("plain process run failed")
+    assert(receipt_fields(receipt) >= 6)
+    assert(receipt.code == 0 && receipt.signal == None && receipt.argv.len() == 3)
+    print("native process receipt fields: ok")
+}

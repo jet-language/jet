@@ -983,7 +983,7 @@ byte lists; native embedded-zone absence is the platform seed's actual fact
 A Jet type that generated Rust holds as a native runtime type crosses as an owned
 `Box<T>` handle. The generator reads Context.rs and predicates.rs name tables and the
 explicit names in MIRRust `rust_apply_type`, using the same canonical-Core probe as
-MIRRust. Each such type gets `jet_rt_handle_{drop,clone,display,show,debug,eq}_<T>`
+MIRRust. Each such type gets `jet_rt_handle_{drop,clone,display,show,debug,eq}_<snake(T)>`
 adapters where the runtime type supports the operation. A `&mut T` kernel parameter
 takes the caller's handle as `HandleMut`, and the kernel mutates the value inside that
 box. A tuple result is written item by item through one out pointer per item.
@@ -3290,7 +3290,7 @@ is taken from `jet_process_take_stream_raw`, not borrowed from or retained
 through Child. Shared close takes the optional reader, so every clone sees EOF.
 No Rust Box/Rc/RefCell offset and no independently duplicated fd is involved.
 
-The four `jet_rt_handle_{clone,drop}_Process{Stdout,Stderr}Stream` exports use
+The four `jet_rt_handle_{clone,drop}_process_{stdout,stderr}_stream` exports use
 the canonical handle symbol convention. `jet_process_stream_line_bytes_raw`
 borrows the holder and returns `Result<[U8], IOError>` as a native tag plus
 owned compact data/length or an owned error. It shares FD72's refill buffer,
@@ -3882,7 +3882,7 @@ declaration-order row indexing, saturating increment and minimum count.
 Hashing is outside the lock; all four counter reads or mutations are inside
 one unchanged mutex scope. Count returns a fresh exact Int; show is exactly
 `CountMinSketch` (`Core.rs:666-670`) and does not read rows.
-The actual producer `JetCountMinSketch_new` and canonical
+The actual producer `jet_count_min_sketch_new` and canonical
 `jet_rt_native_cms_add`/`jet_rt_native_cms_count` exports serve both runtime
 method callers and `CountMinSketchWitness.c`, without test-only adapters.
 The witness checks deterministic rows, clone-visible mutation, u32 saturation,
@@ -4043,7 +4043,7 @@ admission remain unexercised; parse/C11 syntax receipts are not parity proof.
 ### Native ProcessSpec value and pure producers
 
 `ProcessSpec.jet` implements the six existing handle exports and the existing
-pure C ABI builders over the single private Spec128 layout in `DataABI.jet`.
+pure C ABI builders over the single private Spec136 layout in `DataABI.jet`.
 `jet_std_process_cmd` clones borrowed argv into the internal owned producer;
 every `jet_process_spec_*` C builder borrows the parent and returns a deep
 clone. It never mutates or consumes the caller's spec. Command and removed-name
@@ -4070,8 +4070,35 @@ all equality fields and omitted secrets, limit clamps above both i64 bounds,
 Duration edges, all stream modes, exact render bytes and exact-once frees.
 Separate stdin/stdout/stderr range modes require the native-index stop.
 The expected `.stdout` is not an execution receipt. Native layout/import
-admission and whole-unit seed suppression are required before pack cutover;
-this does not supply Plan/Receipt spawning or public Child lifecycle providers.
+admission and whole-unit seed suppression remain pack gates.
+
+The plain execution providers in `ProcessExecution*.jet` reuse the existing
+`HostSpawn.jet` Spec216/Child72 kernel seam. Preparation snapshots the logical
+environment, validates argv/env/cwd, preserves held directory descriptors and
+packs inherited/pipe/null streams and declared limits. The collector captures
+both streams concurrently, kills and reaps attached process groups on timeout,
+limit exhaustion or last-owner drop, and publishes one owned Receipt144.
+Receipt metadata retains framed SHA256 input/policy digests, secret redaction,
+exact Int status/signal/pid facts and the original typed errors. Native
+ProcessReceipt/Plan field reads validate canonical identity and MIR member types
+before lending the Jet-owned 144/72-byte carrier to typed read/clone glue.
+
+Authority-bound execution stays fail-closed before spawn until the isolation
+engine is ported; unbound `plan()` still requires `.under(...)`. Pipeline launch
+also remains non-native: its shared budgets, direct-pipe versus bounded-relay
+transaction, per-stage group cleanup and cancellation need a separate faithful
+port. Its retained regressions include
+`process_pipeline_streaming_lifecycle_matches_all_execution_tiers.case` and
+`process_pipeline_timeout_reaps_descendants_across_execution_tiers.case`.
+No serial or all-relay substitute is supplied.
+
+`run-process-witnesses.mjs OUT RC-NATIVE-JET RC-RUNTIME-DIR` verifies the admitted
+pack inventories and links fresh C clients to that pack's standalone Jet object
+and admitted musl archives. It covers real-child capture, Inherit, nonzero exit,
+timeout kill, output limits, strict UTF8 errors, last-alias cleanup, controlled
+World refusal, raw directory/env adapters and real PTY resize. It also runs the
+native typed-field regression through the supplied RC Jet. Parse/tiny/C compile
+receipts do not prove execution: native execution is pending the RC pack.
 
 ### Rust-free C ABI conformance clients
 
@@ -4337,7 +4364,7 @@ is taken from `jet_process_take_stream_raw`, not borrowed from or retained
 through Child. Shared close takes the optional reader, so every clone sees EOF.
 No Rust Box/Rc/RefCell offset and no independently duplicated fd is involved.
 
-The four `jet_rt_handle_{clone,drop}_Process{Stdout,Stderr}Stream` exports use
+The four `jet_rt_handle_{clone,drop}_process_{stdout,stderr}_stream` exports use
 the canonical handle symbol convention. `jet_process_stream_line_bytes_raw`
 borrows the holder and returns `Result<[U8], IOError>` as a native tag plus
 owned compact data/length or an owned error. It shares FD72's refill buffer,

@@ -1,0 +1,105 @@
+// Linux parent observations reproduce Process.rs's typed memory/open-file
+// exhaustion classification. Kernel rlimits are installed by HostSpawn.
+fn process_execution_proc_path(child: I64, suffix: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(text, rt_static_text("/proc/"))
+    rt_text_push_number(text, fd_word(process_execution_native(child), I64{8}))
+    jet_rt_string_builder_push(text, suffix)
+    jet_rt_string_builder_finish(text)
+}
+fn process_execution_memory_used(child: I64, scratch: I64) -> I64 {
+    path :: process_execution_proc_path(child, rt_static_text("/status"))
+    name :: fd_c_path(path)
+    file :: host_call(I64{2}, name, I64{524288}, I64{0})
+    jet_rt_free(name, rt_text_len(path) + I64{1}, I64{1})
+    jet_rt_string_drop(path)
+    if (file < I64{0}) -> return I64{-1}
+    text :: jet_rt_string_builder_new()
+    good := true
+    loop {
+        count :: host_call(I64{0}, file, scratch, I64{8192})
+        if (count == I64{-4}) -> next
+        if (count <= I64{0}) {
+            good = count == I64{0}
+            break
+        }
+        rt_text_append(text, scratch, count)
+    }
+    spawn_close(file)
+    used := I64{-1}
+    if good {
+        prefix :: rt_static_text("VmSize:")
+        at := rt_text_find(text, prefix, I64{0}, false)
+        if (at >= I64{0}) {
+            at += rt_text_len(prefix)
+            loop at < rt_text_len(text) && (rt_text_byte(rt_text_data(text) + at) == I64{32} || rt_text_byte(rt_text_data(text) + at) == I64{9}) -> at += I64{1}
+            value := I64{0}
+            digits := I64{0}
+            loop at < rt_text_len(text) {
+                byte :: rt_text_byte(rt_text_data(text) + at)
+                if (byte < I64{48} || byte > I64{57}) -> break
+                if (value > (I64{9223372036854775807} - (byte - I64{48})) /% I64{10}) {
+                    value = I64{9223372036854775807}
+                    break
+                }
+                value = value * I64{10} + byte - I64{48}
+                digits += I64{1}
+                at += I64{1}
+            }
+            if (digits != I64{0}) -> used = (if (value > I64{9007199254740991}) -> { I64{9223372036854775807} } else -> { value * I64{1024} })
+        }
+    }
+    jet_rt_string_drop(text)
+    used
+}
+fn process_execution_files_used(child: I64, scratch: I64) -> I64 {
+    path :: process_execution_proc_path(child, rt_static_text("/fd"))
+    name :: fd_c_path(path)
+    file :: host_call(I64{2}, name, I64{589824}, I64{0})
+    jet_rt_free(name, rt_text_len(path) + I64{1}, I64{1})
+    jet_rt_string_drop(path)
+    if (file < I64{0}) -> return I64{-1}
+    used := I64{0}
+    loop {
+        count :: host_call(I64{217}, file, scratch, I64{8192})
+        if (count == I64{-4}) -> next
+        if (count < I64{0}) {
+            used = I64{-1}
+            break
+        }
+        if (count == I64{0}) -> break
+        at := I64{0}
+        loop at < count {
+            row :: scratch + at
+            length :: rt_text_byte(row + I64{16}).bit_or(rt_text_byte(row + I64{17}) << I64{8})
+            if (length < I64{20} || length > count - at) {
+                used = I64{-1}
+                break
+            }
+            a :: rt_text_byte(row + I64{19})
+            b :: rt_text_byte(row + I64{20})
+            if !(a == I64{46} && (b == I64{0} || (b == I64{46} && rt_text_byte(row + I64{21}) == I64{0}))) -> used += I64{1}
+            at += length
+        }
+        if (used < I64{0}) -> break
+    }
+    spawn_close(file)
+    used
+}
+fn process_execution_live_limit(child: I64, scratch: I64) -> I64 {
+    spec :: fd_word(child, I64{24})
+    memory :: fd_word(spec, PROCESS_SPEC_MEMORY_LIMIT)
+    if (memory != I64{0}) {
+        limit :: fd_word(memory, I64{0})
+        threshold :: if (limit <= I64{1048576}) -> { I64{0} } else -> { limit - I64{1048576} }
+        used :: process_execution_memory_used(child, scratch)
+        if (used >= I64{0} && used >= threshold) -> return PROCESS_RESOURCE_MEMORY
+    }
+    files :: fd_word(spec, PROCESS_SPEC_OPEN_FILE_LIMIT)
+    if (files != I64{0}) {
+        used :: process_execution_files_used(child, scratch)
+        limit :: fd_word(files, I64{0})
+        if (used >= I64{0} && used >= limit) -> return PROCESS_RESOURCE_OPEN_FILES
+    }
+    I64{-1}
+}

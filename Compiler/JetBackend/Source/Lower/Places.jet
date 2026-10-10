@@ -211,6 +211,81 @@ fn lower_walk_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     Val(LowerPlaceAddress{address: LowerFieldAddress{base: base, offset: offset}, ty: ty, borrowed: borrowed})
 }
 
+// ProcessReceipt144/ProcessPlan72 are Jet-owned carriers, never hosted Rust
+// records. Validate canonical identity and actual member types before lending
+// their storage to the existing typed read/clone glue.
+fn lower_native_process_place(p: MIRProgram, f: &LowerFunction, handle: LIRValueID, ty: MIRType, id: MIRFieldID) -> LowerPlaceAddress? {
+    if !p.native_pack -> return None
+    runtime :: lower_runtime_handle_type(p, ty) ?? return None
+    if runtime.runtime != "ProcessReceipt" && runtime.runtime != "ProcessPlan" -> return None
+    definition :: lower_type_def(p, ty) ?? return None
+    if definition.key != runtime.jet_name && !definition.key.starts_with("<corelib>/") -> return None
+    fields :: if definition.kind == { .Struct(stored, _) -> { stored } else -> { return None } }
+    loop field in lower_stored_fields(fields) {
+        if field.id != id -> next
+        offset :: if runtime.runtime == "ProcessReceipt" -> {
+            if field.name == {
+                "code" -> { 0 }
+                "output" -> { 8 }
+                "errors" -> { 16 }
+                "success" -> { 24 }
+                "signal" -> { 32 }
+                "timed_out" -> { 40 }
+                "executable_identity" -> { 48 }
+                "argv" -> { 56 }
+                "input_digest" -> { 64 }
+                "policy_digest" -> { 72 }
+                "backend" -> { 80 }
+                "authority" -> { 88 }
+                "descendants" -> { 96 }
+                "limits" -> { 104 }
+                "outputs" -> { 112 }
+                "redacted" -> { 120 }
+                "pid" -> { 128 }
+                "limit_hit" -> { 136 }
+                else -> { return None }
+            }
+        } else -> {
+            if field.name == {
+                "executable_identity" -> { 0 }
+                "argv" -> { 8 }
+                "input_digest" -> { 16 }
+                "policy_digest" -> { 24 }
+                "backend" -> { 32 }
+                "authority" -> { 40 }
+                "descendants" -> { 48 }
+                "limits" -> { 56 }
+                "outputs" -> { 64 }
+                else -> { return None }
+            }
+        }
+        matches :: if field.name == {
+            "code" | "pid" -> { lower_is_exact_int(field.ty) }
+            "success" | "timed_out" | "redacted" -> { field.ty.kind == .Bool }
+            "argv" | "authority" | "limits" | "outputs" -> {
+                element :: lower_list_element(field.ty) ?? return None
+                element.kind == .String
+            }
+            "signal" -> {
+                if field.ty.kind == { .Option(inner) -> { lower_is_exact_int(inner) } else -> { false } }
+            }
+            "limit_hit" -> {
+                if field.ty.kind == {
+                    .Option(inner) -> {
+                        limit :: lower_runtime_handle_type(p, inner) ?? return None
+                        limit.runtime == "ProcessResourceLimit"
+                    }
+                    else -> { false }
+                }
+            }
+            else -> { field.ty.kind == .String }
+        }
+        if !matches -> return None
+        return Val(LowerPlaceAddress{address: LowerFieldAddress{base: handle, offset: offset}, ty: field.ty, borrowed: true})
+    }
+    None
+}
+
 // Field `id` of a runtime handle (RuntimeRoutes.jet LOWER_HANDLE_FIELDS):
 // Float/Bool and native-layout nested handles lend storage. String and
 // converted canonical carriers write read-only headers into caller stack slots.
@@ -222,6 +297,9 @@ fn lower_handle_field_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, h
         else -> return None
     }
     if m.native_pack && lower_native_err_type(p, ty) -> return lower_native_err_place(p, &f, handle, ty, id)
+    if m.native_pack {
+        if lower_native_process_place(p, &f, handle, ty, id) == .Val(place) -> return Val(place)
+    }
     runtime :: lower_runtime_handle_type(p, ty) ?? return None
     definition :: lower_type_def(p, ty) ?? return None
     fields := [MIRField]{}
@@ -241,9 +319,9 @@ fn lower_handle_field_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, h
         if (lent.kind == "Text" || lent.header_bytes > 0) {
             bytes :: if lent.kind == "Text" -> 24 else -> lent.header_bytes
             lower_emit(&f, LIRInst.StackSlot{dst: address, size: bytes, align: 8})
-            lower_call_runtime(&m, &f, "jet_rt_handle_field_{runtime.runtime}_{field.name}", [LIRValueID]{handle, address}, None)
+            lower_call_runtime(&m, &f, "jet_rt_handle_field_{runtime_abi_atom(runtime.runtime)}_{runtime_abi_atom(field.name)}", [LIRValueID]{handle, address}, None)
         } else {
-            lower_call_runtime(&m, &f, "jet_rt_handle_field_{runtime.runtime}_{field.name}", [LIRValueID]{handle}, Val(address))
+            lower_call_runtime(&m, &f, "jet_rt_handle_field_{runtime_abi_atom(runtime.runtime)}_{runtime_abi_atom(field.name)}", [LIRValueID]{handle}, Val(address))
         }
         if lent.kind == "Float" || lent.kind == "Flag" {
             return Val(LowerPlaceAddress{address: LowerFieldAddress{base: address, offset: 0}, ty: field.ty, borrowed: true})

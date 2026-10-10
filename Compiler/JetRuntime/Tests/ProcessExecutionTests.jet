@@ -1,0 +1,17 @@
+// The witness calls the real launch provider under an isolated controlled
+// World/root. A refusal must publish the scheduler stop before fork/exec and
+// must not fabricate an IOError or consume the borrowed ProcessSpec.
+#Export(c) fn jet_rt_process_execution_controlled_fixture(spec: I64) -> I64 {
+    storage :: jet_rt_alloc(I64{72}, I64{8})
+    world :: jet_rt_world_new()
+    control :: jet_rt_root_begin(storage)
+    world_scope_enter(world, storage + I64{32}, false)
+    fd_put(storage, I64{64}, I64{123})
+    child :: process_execution_launch(spec, false, storage + I64{64})
+    refused :: child == I64{0} && fd_word(storage, I64{64}) == I64{123} && jet_scheduler_native_status() == I64{5}
+    world_scope_leave(storage + I64{32})
+    jet_rt_root_leave(control, storage)
+    jet_rt_world_drop(world)
+    jet_rt_free(storage, I64{72}, I64{8})
+    if refused -> { I64{1} } else -> { I64{0} }
+}

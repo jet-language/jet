@@ -37,6 +37,14 @@ allocator `.init_array` entry. Rust-tier allocator bodies remain only as
 ledgered seed/verification paths that die at Rust cutover; native packs never
 link those bodies.
 
+Internal runtime C symbols use the acronym-aware snake projection owned by
+`Tools/agent/runtime-abi-symbols.mjs`; the route generator emits that same
+projection for Lower. For example, the `HTTPClient` symbol atom is
+`http_client`. Runtime type names, declaration keys, variant identities and
+layout metadata remain nominal: only the ABI symbol atoms are projected.
+Providers, generated adapters and compiler callers use one spelling, with
+collision rejection before a symbol cutover.
+
 The native [Duration constructor](../../Compiler/JetRuntime/Source/Duration.jet)
 borrows the exact-Int input, checks narrowing and nanosecond scaling without a
 panic, and writes only the selected owned Duration or RangeError result. It uses
@@ -743,6 +751,16 @@ The descriptor and attachment rows carry `Int` descriptor/errno facts and the
 existing `ProcessSpec` type, with read-convention inputs. Their named-field type
 projection is not a native-ABI proof: each adapter must also preserve the mapping
 between canonical semantic fields and the kernel's physical tuple slots.
+
+The native process-spec carrier is 136 bytes: the original fields keep their
+offsets, and the private tail at byte 128 owns the inherited-directory rows.
+Cloning retains each descriptor owner; dropping releases it without reopening
+the path. The raw C adapter duplicates a lent descriptor with
+`F_DUPFD_CLOEXEC`, preserving the canonical one-byte Bool outputs and raw I64
+descriptor/errno outputs. Environment result adapters use the existing logical
+environment writer, never a second OS-environment mutation path. Terminal
+sessions retain the same native child descriptor owner and resize its held PTY
+under the child lock, validating dimensions before the ioctl.
 
 Package-to-JetOS projection stays on this split. jet-pkg-model reads the
 canonical Package outputs and computes the semantic graph identity.
