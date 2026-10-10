@@ -729,6 +729,9 @@ fn sema_stmt_check_drop(expr: Expr, environment: SemaScopeEnvironment, program: 
             reason :: sema_drop_reason_problem(args)
             if reason == .Val(problem) -> &diagnostics.push(sema_error("E0407", method_span, problem.what, problem.why, problem.fix))
             checked :: sema_check_expression_carrier(receiver, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDropStatement{handled: true, value: None}
+            // D-CONC-JOIN1 (L1101): `.drop()` on a task discards the handle
+            // without joining it; `.detach()` is the fire-and-forget word.
+            if sema_single_use_is_task(checked.ty) -> &diagnostics.push(sema_single_use_diag_unjoined("this task", "`.drop()` discards the handle without joining it, so the task may outlive the function", expr_span(expr)))
             return SemaDropStatement{handled: true, value: Val(TStmt.ExprStmt{value: checked, span: expr_span(expr)})}
         }
         else -> return SemaDropStatement{handled: false, value: None}

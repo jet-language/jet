@@ -8,8 +8,10 @@
 //   E0141  one path through a branch consumed it and another left it
 //   E0142  a non-owning parameter would borrow or copy it
 //   E0143  `consume(x)` discarded it outside an audited `#Unsafe` region
-// Parameters never own the duty (Rust `single_use_span: None`). Task handles
-// owe `join` instead (L1101), so they are not single-use here.
+// Parameters never own the duty (Rust `single_use_span: None`). A value that
+// holds a task handle owes its job the same way (Rust `type_is_single_use`
+// over `type_requires_owned_iteration`); a bare task's job is `join`, so its
+// undone duty is L1101 rather than E0140 (D-CONC-JOIN1).
 use jet_foundation.[
     AccessConvention,
     Call,
@@ -30,13 +32,21 @@ fn sema_single_use_type_name(ty: Type) -> String? {
     }
 }
 
-// Rust `type_is_single_use` over the registry: a `#SingleUse` struct or enum,
-// or the Core `Delivery` handle (Rust `core_single_use_type`).
+// Rust `type_is_single_use` over the registry: a value holding a task handle,
+// a `#SingleUse` struct or enum, or the Core `Delivery` handle (Rust
+// `core_single_use_type`).
 fn sema_single_use_type(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    if sema_stmt_for_in_type_requires_owned_iteration(ty) -> return true
     name :: sema_single_use_type_name(ty) ?? return false
     if name == "Delivery" -> return true
     definition :: sema_serde_type_definition(environment, program, name) ?? return false
     definition.single_use
+}
+
+// Rust `is_task_type`: the task handle itself.
+fn sema_single_use_is_task(ty: Type) -> Bool Never! {
+    if ty == .Apply(name, _) -> return name == "Task"
+    false
 }
 
 // D-LIN1: a binding that owns a `#SingleUse` value carries the consume duty.
@@ -45,11 +55,19 @@ fn sema_single_use_note_binding(state: &SemaOwnershipState, symbol: Symbol, envi
     ty :: symbol.ty ?? return
     if !sema_single_use_type(ty, environment, program) -> return
     row :: sema_ownership_last_row(state, symbol.id.key)
-    if row >= 0 -> sema_ownership_set_single_use(&state, row)
+    if row < 0 -> return
+    sema_ownership_set_single_use(&state, row)
+    if sema_single_use_is_task(ty) -> state.declarations[row].owes_join = true
 }
 
 // E0140 (D-FACT-WORD1=A): `_ :: value` skips the job of a `#SingleUse` value.
-fn sema_single_use_check_discard(ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+// A discarded task skips its join instead (L1101), except inside a
+// `task.group` spawn, whose group joins it.
+fn sema_single_use_check_discard(ty: Type, span: Span, in_taskgroup_spawn: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+    if sema_single_use_is_task(ty) && !in_taskgroup_spawn {
+        &diagnostics.push(sema_single_use_diag_unjoined("this task", "discarding it into `_` skips the join before the task finishes", span))
+        return
+    }
     if sema_single_use_type(ty, environment, program) -> &diagnostics.push(sema_single_use_diag_discarded(span))
 }
 
@@ -88,12 +106,17 @@ fn sema_single_use_moved_in(moved: [SemaOwnershipMovedPlace], key: String) -> Bo
 }
 
 // Rust `check_single_use_consumed_in_current_scope`: E0140 for each
-// `#SingleUse` binding of the closing scope that is not consumed.
+// `#SingleUse` binding of the closing scope that is not consumed; an unjoined
+// task handle is L1101.
 fn sema_single_use_check_scope_end(state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
     loop row in sema_ownership_single_use_rows(state) {
         fact :: state.declarations[row]
         if fact.active && fact.scope_depth >= state.scope_depth && !sema_single_use_moved(state, fact.key) {
-            &diagnostics.push(sema_single_use_diag_unconsumed(fact.name, fact.span))
+            if fact.owes_join {
+                &diagnostics.push(sema_single_use_diag_unjoined("`{fact.name}`", "the program may end before this task finishes", fact.span))
+            } else {
+                &diagnostics.push(sema_single_use_diag_unconsumed(fact.name, fact.span))
+            }
         }
     }
 }
@@ -165,4 +188,10 @@ fn sema_single_use_diag_aliased(name: String, callee: String, span: Span) -> Dia
 
 fn sema_single_use_diag_unaudited(name: String, span: Span) -> Diagnostic {
     sema_error("E0143", span, "`{name}` is `#SingleUse` — discarding it with `consume` needs an audited reason", "this value's type is `#SingleUse`, so it carries a job that has to be done; deliberately throwing it away skips that job, which is exactly the kind of decision that has to be written down", "wrap it in an audited region: `#Unsafe(\"why discarding this is fine\") {{ consume({name}) }}`")
+}
+
+// D-CONC-JOIN1 / D-FACT-WORD1=A (Rust `l1101_unjoined_task`): one duty voice
+// for every task-owes-join site.
+fn sema_single_use_diag_unjoined(subject: String, why: String, span: Span) -> Diagnostic {
+    sema_error("L1101", span, "`{subject}` still owes `join`", why, "join it with `.join()`, use its result, or write `.detach()` to let it go free")
 }
