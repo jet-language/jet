@@ -35,7 +35,7 @@ fn kit_steps_json_rows(text: String, assertion: KitAssertion) -> String? {
             body = "${kit_steps_byte_slice(body, root.count_bytes(), body.count_bytes())}"
             source = json.to_string(row) ?? return Val("JSON bound row encode: {err}")
         }
-        expanded :: kit_steps_json_row_expand(body, assertion.extra, Val(row), false) ?? return Val(err)
+        expanded :: kit_steps_json_row_expand(body, assertion.extra, Val(row), false) ?? return Val("{err}")
         inner :: kit_steps_json_assertion("stdout {assertion.json_mode} {expanded}") ?? return Val("JSON bound row predicate invalid")
         failure :: kit_steps_json_test(source, inner.json_mode, inner.json_path, inner.json_op, inner.value)
         if failure != None -> return failure
