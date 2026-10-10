@@ -2,9 +2,9 @@
 // the package root through the authority resolver (D-CORE-FILEDIR1). Both
 // Jetpack and the hosted compiler environment evaluator use this sole reader.
 fn envmodel_load_package_root(root: String) -[FS, Env]> EnvModelPackageRoot EnvModelEvalError! {
-    loaded :: PackageFacts.load(root) ?? return Ok(EnvModelPackageRoot.Absent)
-    if loaded == {
-        .Ok(facts) -> Ok(EnvModelPackageRoot.Loaded(facts))
+    if PackageFacts.load(root) == {
+        .None -> Ok(EnvModelPackageRoot.Absent)
+        .Val(facts) -> Ok(EnvModelPackageRoot.Loaded{facts: facts})
         .Err(_) -> Ok(EnvModelPackageRoot.Malformed)
     }
 }

@@ -123,15 +123,15 @@ fn envmodel_files_from_value(value: CtValue) -> [ManagedFile] ManagedFileError! 
         }
         else -> { return Err(ManagedFileError.InvalidEntry("files must be a map or a list of managed file records")) }
     }
-    files := [ManagedFile]{}
-    loop entry in entries -> &files.push(envmodel_managed_file_from_value(entry.destination, entry.value))
-    &files.sort_by(file -> file.destination)
-    loop index in 1..<files.len() {
-        if files[index - 1].destination == files[index].destination {
-            return Err(ManagedFileError.InvalidDestination(files[index - 1].destination))
+    managed := [ManagedFile]{}
+    loop entry in entries -> &managed.push(envmodel_managed_file_from_value(entry.destination, entry.value))
+    &managed.sort_by(file -> file.destination)
+    loop index in 1..<managed.len() {
+        if managed[index - 1].destination == managed[index].destination {
+            return Err(ManagedFileError.InvalidDestination(managed[index - 1].destination))
         }
     }
-    Ok(files)
+    Ok(managed)
 }
 
 fn envmodel_managed_file_from_value(destination: String, value: CtValue) -> ManagedFile ManagedFileError! {
