@@ -1573,7 +1573,14 @@ fn collect_items(
                 }
             }
             Item::Trait(definition) => {
-                out.traits.push(lower_trait(definition, module, &canonical))
+                out.traits.push(lower_trait(
+                    definition,
+                    module,
+                    &canonical,
+                    checked_nominals.and_then(|facts| {
+                        facts.compiler_owned_default_err_identity.as_deref()
+                    }),
+                ))
             }
             Item::Impl(definition) => out.impls.push(lower_impl(
                 definition,
@@ -1957,6 +1964,7 @@ fn lower_trait(
     definition: &TraitDef,
     module: &str,
     qualify_type: &impl Fn(&Type, &[String]) -> Type,
+    default_err_identity: Option<&str>,
 ) -> TirTraitDef {
     TirTraitDef {
         module: module.to_string(),
@@ -1991,6 +1999,14 @@ fn lower_trait(
                     }
                     params.push(lower_trait_param(params.len(), param, qualify_type));
                 }
+                let mut contract = method.failure_contract();
+                // The implicit error domain belongs to the original Prelude
+                // declaration, not to an unresolved (or shadowing) `Err` leaf.
+                if let (crate::AST::FailureContract::Default { error, .. }, Some(identity)) =
+                    (&mut contract, default_err_identity)
+                {
+                    *error = Type::Named(identity.to_owned());
+                }
                 TirTraitMethod {
                     key: qualified_key(module, &method.name),
                     name: method.name.rsplit("::").next().expect("checked trait method name").to_string(),
@@ -1998,8 +2014,8 @@ fn lower_trait(
                     self_access,
                     params,
                     declared_return: method.return_type.as_ref().map(|ty| qualify_type(ty, &[])),
-                    return_type: qualify_type(&method.effective_return_type(), &[]),
-                    failure: super::TFailureCarrier::from_contract(&method.failure_contract())
+                    return_type: qualify_type(&contract.effective_type(), &[]),
+                    failure: super::TFailureCarrier::from_contract(&contract)
                         .map_types(|ty| qualify_type(ty, &[])),
                     is_pure: method.is_pure,
                     declared_effects: method.declared_effects.clone(),

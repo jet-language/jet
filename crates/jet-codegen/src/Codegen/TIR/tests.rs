@@ -1783,6 +1783,91 @@ fn compiler_owned_core_enum_rows_reuse_checked_source_payloads() {
 }
 
 #[test]
+fn implicit_trait_error_retains_prelude_owner_and_runs() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (bundle, nominals) = checked_bundle(r#"
+trait ExecutionHost { fn execute(self, fail: Bool) -> Int }
+#Error
+enum DomainError { Failed }
+trait AuthoredHost { fn execute(self) -> Int DomainError! }
+struct Host {}
+impl Host.ExecutionHost {
+    fn execute(self, fail: Bool) -> Int {
+        if fail { return Err("execution failed") }
+        return Ok(7)
+    }
+}
+fn run() Never! {
+    host :: Host{}
+    if host.execute(false) == {
+        .Ok(value) -> { assert(value == 7) }
+        .Err(_) -> { panic("successful execution failed") }
+    }
+    if host.execute(true) == {
+        .Ok(_) -> { panic("failure disappeared") }
+        .Err(_) -> {}
+    }
+}
+"#);
+        let identity = nominals[bundle.entry].compiler_owned_default_err_identity.as_deref()
+            .expect("trait default error must retain its original checked Prelude owner");
+        let declarations = super::tir_to_mir_types::lower_tir_declarations(
+            &bundle, &nominals, &BTreeMap::new(), &BTreeMap::new(), &BTreeMap::new(),
+        );
+        let method = &declarations.traits.iter().find(|row| row.name == "ExecutionHost")
+            .expect("authored trait row").methods[0];
+        assert!(matches!(&method.failure, super::TFailureCarrier::Result { error: Type::Named(name), .. }
+            if name == identity), "implicit trait failure must not acquire a second bare Err identity");
+        assert!(matches!(&method.return_type, Type::Result { err, .. }
+            if matches!(err.as_ref(), Type::Named(name) if name == identity)));
+        let authored = &declarations.traits.iter().find(|row| row.name == "AuthoredHost")
+            .expect("explicit error trait row").methods[0];
+        let super::TFailureCarrier::Result { error, .. } = &authored.failure else {
+            panic!("authored explicit failure must remain a Result");
+        };
+        assert!(matches!(error, Type::Named(name) if name.ends_with("::DomainError")));
+        assert_ne!(error, &Type::Named(identity.to_owned()));
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("canonical trait failures must retain checked MIR");
+        mir.validate().expect("trait failure MIR must validate");
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("trait-default-error-proof"))
+            .join(format!("checked-owner-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("trait_default_error.rs");
+        let executable = directory.join(format!("trait_default_error{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, &rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=trait_default_error", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("trait default error proof requires rustc");
+        assert!(compiled.status.success(), "default trait and impl error carriers must compile:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("trait default error proof must run");
+        assert!(executed.status.success(), "both success and canonical default failure must execute:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
+
+#[test]
 fn unchecked_declarations_do_not_synthesize_default_err() {
     let declarations = super::tir_to_mir_types::lower_declarations_from_items(
         &[], "", &jet_foundation::Layout::TargetLayout::host(),
