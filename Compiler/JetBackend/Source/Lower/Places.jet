@@ -212,10 +212,14 @@ fn lower_walk_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 }
 
 // ProcessReceipt144/ProcessPlan72 are Jet-owned carriers, never hosted Rust
-// records. Validate canonical identity and actual member types before lending
-// their storage to the existing typed read/clone glue.
+// records, in pack and program lowering alike (lower_repr makes the
+// compiler-owned process records handles). Validate canonical identity and
+// actual member types before lending their storage to the typed read/clone glue.
+fn lower_native_process_carrier(handle: LowerRuntimeHandle, name: String) -> Bool Never! {
+    (handle.runtime == "ProcessReceipt" || handle.runtime == "ProcessPlan" || handle.runtime == "ProcessChild") && name == handle.jet_name
+}
+
 fn lower_native_process_place(p: MIRProgram, f: &LowerFunction, handle: LIRValueID, ty: MIRType, id: MIRFieldID) -> LowerPlaceAddress? {
-    if !p.native_pack -> return None
     runtime :: lower_runtime_handle_type(p, ty) ?? return None
     if runtime.runtime != "ProcessReceipt" && runtime.runtime != "ProcessPlan" -> return None
     definition :: lower_type_def(p, ty) ?? return None
@@ -297,9 +301,7 @@ fn lower_handle_field_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, h
         else -> return None
     }
     if m.native_pack && lower_native_err_type(p, ty) -> return lower_native_err_place(p, &f, handle, ty, id)
-    if m.native_pack {
-        if lower_native_process_place(p, &f, handle, ty, id) == .Val(place) -> return Val(place)
-    }
+    if lower_native_process_place(p, &f, handle, ty, id) == .Val(place) -> return Val(place)
     runtime :: lower_runtime_handle_type(p, ty) ?? return None
     definition :: lower_type_def(p, ty) ?? return None
     fields := [MIRField]{}
