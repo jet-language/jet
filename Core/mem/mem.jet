@@ -32,7 +32,9 @@ struct Pin<T> {}
 
 
 #Unsafe("`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer") fn from_addr<T>(addr: Int) -> *T Never! {
-    mem.Ptr<T>.from_addr(addr)
+    // INTERIM (self-host cut, card #4971): the Jet-authored parser has no
+    // `alias.Ptr<T>.from_addr(addr)` form yet, and the embedded Core must parse.
+    panic("mem.from_addr is unavailable until the native parser reads `mem.Ptr<T>.from_addr` (card #4971)")
 }
 
 #Unsafe("`pointer` names a live, aligned, readable `T` for the whole access") fn volatile_read<T>(pointer: *T) -> T Never! {
