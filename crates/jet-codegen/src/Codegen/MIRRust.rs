@@ -5393,6 +5393,23 @@ mod emit_misc_regression_tests {
         });
     }
 
+    /// A Close impl reads its consumed receiver in place and drops a
+    /// best-effort failure: no second owner re-enters Close at scope end, and
+    /// no failure escapes the infallible cleanup.
+    #[test]
+    fn close_reads_its_receiver_in_place_without_reentering_close() {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let rust = emitted_rust(
+                "struct Temp { fd: Int, path: String? }\nfn remove(path: String) -> Int Err! { Ok(path.len()) }\nimpl Temp.Close {\n    fn close(^self) {\n        if self.path == .Val(path) {\n            remove(path).drop(\"best effort\")\n        }\n    }\n}\nfn run() {\n    t :: Temp{fd: 1, path: Val(\"x\")}\n    print(t.fd)\n}\n",
+            );
+            let start = rust.find("impl __jet_Close for ").expect("Temp Close impl");
+            let body = &rust[start..];
+            let body = &body[..body.find("\n}\n").map_or(body.len(), |end| end)];
+            assert!(!body.contains("as __jet_Close>::close("), "Close re-enters itself:\n{body}");
+            assert!(!body.contains("Some(Err("), "a cleanup failure escapes Close:\n{body}");
+        });
+    }
+
     /// A borrowed String parameter is a Rust `str` and a list element a
     /// `String`; Rust orders `str` only with `str`.
     #[test]

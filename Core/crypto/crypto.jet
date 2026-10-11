@@ -51,18 +51,19 @@ struct __JetcStat {
     mtime: Int, mtime_ns: Int, nlink: Int, is_file: Bool, is_dir: Bool,
 }
 struct JetcFd { fd: Int }
+// Close reads the consumed receiver in place. Rebinding it (`owner :: ^self`)
+// would make a second owner whose scope-end Close re-enters this one.
 impl JetcFd.Close {
     fn close(^self) {
-        owner :: ^self
-        if owner.fd >= 0 -> _ :: core.crypto.__jetc_close(owner.fd)
+        if self.fd >= 0 -> _ :: core.crypto.__jetc_close(self.fd)
     }
 }
 struct JetcTemp { file: JetcFd, path: String? }
 impl JetcTemp.Close {
     fn close(^self) {
-        temp :: ^self
-        if temp.path == .Val(path) {
-            _ :: core.files.__remove_raw(path)
+        // Best-effort cleanup: Close cannot fail, so a removal error is dropped.
+        if self.path == .Val(path) {
+            core.files.__remove_raw(path).drop("temp removal at close is best-effort")
         }
     }
 }
