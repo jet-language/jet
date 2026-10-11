@@ -371,7 +371,9 @@ impl JetDebug for str {
         format!("{self:?}")
     }
 }
-impl<T: JetShow> JetShow for &T {
+// `?Sized`, as for JetDisplay/JetDebug (TextValues.rs): a Core-layer text
+// value is `&'static str`, so a nested `&str` (`String?` field) must render.
+impl<T: JetShow + ?Sized> JetShow for &T {
     fn jet_show(&self) -> String {
         (**self).jet_show()
     }

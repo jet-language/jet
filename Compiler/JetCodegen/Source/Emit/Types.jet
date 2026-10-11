@@ -2018,19 +2018,19 @@ JET_RUST_EMIT_COMPILER_OWNED_ENUMS :: prep { [String]{
     "TaskStatus", "DeliveryState", "IOError", "Key", "IOOperation", "ProcessResourceLimit", "ProcessStreamMode", "TerminalMode", "DurationUnit", "FontStyle",
     "GlyphShaper", "WebFormValueType", "WebFormControl", "DataLoaderKind", "DataErrorKind", "DataFormat", "DataFreshness", "DataInvalidationCause", "Dyn", "DataEvent",
     "XMLCanonicalMode", "EmailError", "SMTPSecurity", "RecipientPolicy", "SMTPAuth", "TLSTrust", "TLSVersion", "TLSClientTrust", "NetDNSError", "NetError",
-    "NetShutdown", "WatchDomain", "WatchKind", "NetReadyInterest", "WsError",
+    "NetShutdown", "WatchDomain", "WatchKind", "LateEventDisposition", "NetReadyInterest", "WsError",
     "PluginLimit", "PluginError",
 } }
 // tir_to_mir_types COMPILER_OWNED_CORE_RECORDS.
 JET_RUST_EMIT_COMPILER_OWNED_CORE_RECORDS :: prep { [String]{
-    "PluginFrame", "PluginFault",
+    "PluginFrame", "PluginFault", "RangeError",
     "__ResolveError",
     "IOContext", "NetErrorDetail", "AsyncPolicy", "CSVRow", "DataLineOptions", "DataLimits", "DataSourceIdentity", "DataAuthority", "DataError", "EncodingCause",
     "EncodingError", "EncodingLimits", "DataProvenance", "DataSchema", "DataSnapshotIdentity", "DataLoaderStatus", "WebFormFieldSpec", "WebFormFieldState", "WebTableState",
     "CBOROptions", "CBORError", "XMLLimits", "XMLParseOptions", "XMLRenderOptions", "XMLCanonical", "XMLError",
     "WebTablePage", "WebVirtualPlan", "MemoStats", "GameScene", "GameFrame", "GameAssets", "GameInputMap", "GameInputSnapshot", "GameBackend", "GameReplay",
     "GameImage", "GameSound", "TestSuite", "TestComparison", "ProcessReceipt", "ProcessPlan", "ProcessChild", "TerminalSize", "TerminalPolicy", "Address",
-    "Message", "Attachment", "RecipientReport", "SendReport", "Limits", "Mailer", "Envelope", "DKIMConfig", "SMTPConfig", "XMLCanonical",
+    "Message", "Attachment", "RecipientReport", "SendReport", "Limits", "Mailer", "Envelope", "DKIMConfig", "SMTPConfig", "RealtimeReceipt", "XMLCanonical",
     "__EmailAddressView", "__EmailAttachmentView", "__EmailMessageView",
     "Size", "UINode", "JSONWriter", "JSONReader", "JSONLWriter", "JSONLReader", "DirEntry", "WalkEntry", "TempDir", "TempFile",
     "FileLock", "WatchEvent", "DataColumn", "DataStatus", "FontFace", "Glyph", "GlyphRun", "UIFileFilter", "UIFSGrant",
@@ -2070,8 +2070,9 @@ fn jet_rust_emit_runtime_declares_type(ctx: &JetRustEmitContext, definition: MIR
 
 // MIRRust runtime_carrier_trait_impl: an impl of a runtime-owned trait on a
 // carrier the runtime or Prelude declares (Core `UIAriaRole` is
-// `JetUiAriaRole`, `Rect` is `JetRect`) breaks Rust's orphan rule in the
-// program (E0117), so it is not emitted and its uses take the structural
+// `JetUiAriaRole`, `Rect` is `JetRect`, the original Prelude `Err` is
+// `JetErr`) breaks Rust's orphan rule in the program (E0117), so it is not
+// emitted and its uses take the runtime's own impl or the structural
 // fallback instead.
 fn jet_rust_emit_runtime_carrier_trait_impl(ctx: &JetRustEmitContext, implementation: MIRImplDef) -> Bool Never! {
     trait_ref :: implementation.trait_ref ?? return false
@@ -2081,7 +2082,7 @@ fn jet_rust_emit_runtime_carrier_trait_impl(ctx: &JetRustEmitContext, implementa
         else -> return false
     }
     definition :: jet_rust_emit_structural_type_def(&ctx, implementation.self_type) ?? return false
-    jet_rust_emit_is_canonical_core_native_type(ctx, definition.key)
+    jet_rust_emit_is_canonical_core_native_type(ctx, definition.key) || definition.compiler_builtin == (Val(MIRCompilerBuiltin.DefaultErr))
 }
 
 // Discover absent declaration parameters once, using the canonical MIR type
