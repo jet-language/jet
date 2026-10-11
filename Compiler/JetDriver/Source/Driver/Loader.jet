@@ -3106,6 +3106,13 @@ fn jet_driver_core_unit(
         target :: jet_driver_add_core_unit(&source_units, &queued, &generated, row.module_name, row.path, row_index, row.source)
         loop (part_index, part) in core_sources {
             if part.owner != module_name -> next
+            // Rust Loader schedules each part module once (`scheduled.insert`):
+            // an alias import may already have cataloged this part.
+            scheduled := false
+            loop unit in source_units {
+                if jet_driver_unit_is_core(unit) && unit.module_name == part.module_name -> scheduled = true
+            }
+            if scheduled -> next
             part_unit :: jet_driver_add_core_unit(&source_units, &queued, &generated, part.module_name, part.path, part_index, part.source)
             queued[part_unit] = true
             &pending.push(part_unit)
