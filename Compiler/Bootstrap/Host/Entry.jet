@@ -17,7 +17,15 @@
 use core.sys as cli_sys
 use core.files as cli_files
 use jet_backend.[CoreSharedParentGetterResult, CoreSharedParentRuntime, CoreSharedRuntimeExportABI, core_shared_runtime_export_abis_decode]
-use jet_cli.[jet_cli_compile_request, jet_cli_runtime_library]
+use jet_cli.[
+    jet_cli_compile_request,
+    jet_cli_runtime_library,
+    jet_cli_native_c_sources,
+    jet_cli_native_executable,
+    jet_cli_native_lowering_rows,
+    jet_cli_runtime_key,
+    JET_CLI_RUNTIME_PACK_FILE,
+]
 use jet_driver.[
     JetDriverCompileRequest,
     JetDriverCompileResult,
@@ -31,7 +39,6 @@ use jet_driver.[
     jet_driver_core_source_parent_attach,
     jet_driver_core_source_parent_getter,
 ]
-use jet_backend.[lir_lower_entry, lir_print_module, x64_relocatable_object, x64_link_executable]
 
 // Self-host inventories observe Jet's checked MIR without entering Rust emit.
 fn jet_bootstrap_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult Never! {
@@ -54,36 +61,43 @@ fn jet_bootstrap_library_object(request: ^JetDriverCompileRequest, prefix: Strin
     jet_cli_runtime_library(^result, prefix) ?? jet_driver_compile_escaped_failure("the runtime library producer failed outside every compile stage")
 }
 
-// Native-feed probes use the same checked driver and linker as the Jet host.
+// The native feed is `jet build`'s own native route (Host.jet
+// `jet_cli_native_executable`) at the dev profile (O0), so the factory's
+// stage1 and the CLI's stage2 get identical link inputs, order and flags.
+// JET_RUNTIME_PACK names `<jet-runtime>/<key>/jet_runtime.pack.o` inside a
+// packaged runtime directory whose `native.key` is `<key>`; that directory
+// is the one `jet build` finds beside `jet`. A program with a C closure links
+// its sibling jet_runtime_jet.o plus the closure, exactly as `jet build` does.
+// Without JET_RUNTIME_PACK the feed still writes `{prefix}.o` (lowering
+// discovery), then refuses to link.
 // Neither an emitted Rust program nor a Rust MIR conversion enters this path.
 fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String) -> JetDriverCompileResult Never! {
+    // Capture only the C declarations before the request moves into the compiler.
+    sources :: jet_cli_native_c_sources(request.authorized_sources) ?? return jet_driver_compile_escaped_failure("native feed cannot resolve C sources: {err.message}")
+    runtime_dir := ""
+    if cli_sys.get("JET_RUNTIME_PACK") == .Val(pack_path) {
+        parts := pack_path.split("/").to_list()
+        file :: &parts.pop() ?? ""
+        key :: &parts.pop() ?? ""
+        runtime_dir = parts.join("/")
+        if file != JET_CLI_RUNTIME_PACK_FILE || runtime_dir == "" || jet_cli_runtime_key(runtime_dir) != .Val(key) -> return jet_driver_compile_escaped_failure("JET_RUNTIME_PACK must name <jet-runtime>/<native.key>/{JET_CLI_RUNTIME_PACK_FILE} in a packaged runtime directory")
+    }
     result := jet_bootstrap_mir(^request) ?? return jet_driver_compile_escaped_failure("the native front end failed outside every compile stage")
     if !result.complete || result.internal_problem != None -> return result
-    program :: result.mir ?? return jet_driver_compile_escaped_failure("the native front end finished without MIR")
-    entry_id :: result.entry_function ?? return jet_driver_compile_escaped_failure("the native front end finished without an entry")
-    lowered :: lir_lower_entry(program, entry_id)
-    if lowered.issues.len() > 0 {
-        lines :: loop issue in lowered.issues -> "{issue.function}\t{issue.message}"
-        cli_files.write("{prefix}.issues", lines.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write native lowering findings")
-        return result
+    if result.mir == None -> return jet_driver_compile_escaped_failure("the native front end finished without MIR")
+    failure :: jet_cli_native_executable(result, sources, false, runtime_dir, "{prefix}.o", "{prefix}.exe") ?? return result
+    if failure == {
+        .Lowering(functions, messages) -> { cli_files.write("{prefix}.issues", jet_cli_native_lowering_rows(functions, messages, "\t").join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write native lowering findings") }
+        .Object(errors) -> { cli_files.write("{prefix}.issues", errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write native object findings") }
+        .Link(errors) -> { cli_files.write("{prefix}.pack-issues", errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write native link findings") }
+        .RustForeign(error) -> { return jet_driver_compile_escaped_failure("native feed foreign Rust: {error.what}") }
+        .NoEntry -> { return jet_driver_compile_escaped_failure("the native front end finished without an entry") }
+        .LostEntry -> { return jet_driver_compile_escaped_failure("native lowering lost its entry") }
+        .Write(what) -> { return jet_driver_compile_escaped_failure("native feed: {what}") }
+        .RuntimeKey(what) -> { return jet_driver_compile_escaped_failure(if runtime_dir == "" -> "native feed requires JET_RUNTIME_PACK" else -> "native feed: {what}") }
+        .Runtime(what) -> { return jet_driver_compile_escaped_failure("native feed: {what}") }
+        .Foreign(message) -> { return jet_driver_compile_escaped_failure("native feed cannot realize C dependencies: {message}") }
     }
-    entry :: lowered.entry ?? return jet_driver_compile_escaped_failure("native lowering lost its entry")
-    cli_files.write("{prefix}.lir", lir_print_module(lowered.lir)) ?? return jet_driver_compile_escaped_failure("cannot write native LIR")
-    object :: x64_relocatable_object(lowered.lir, entry)
-    if object.errors.len() > 0 {
-        cli_files.write("{prefix}.issues", object.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write native object findings")
-        return result
-    }
-    cli_files.write_bytes("{prefix}.o", object.bytes) ?? return jet_driver_compile_escaped_failure("cannot write native object")
-    pack_path :: cli_sys.get("JET_RUNTIME_PACK") ?? return jet_driver_compile_escaped_failure("native feed requires JET_RUNTIME_PACK")
-    pack :: cli_files.read_bytes(pack_path) ?? return jet_driver_compile_escaped_failure("cannot read native runtime pack")
-    linked :: x64_link_executable([String]{"{prefix}.o", pack_path}, ^[[U8]]{object.bytes, pack})
-    if linked.errors.len() > 0 {
-        cli_files.write("{prefix}.pack-issues", linked.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write native link findings")
-        return result
-    }
-    cli_files.write_bytes("{prefix}.exe", linked.bytes) ?? return jet_driver_compile_escaped_failure("cannot write native executable")
-    cli_files.set_mode("{prefix}.exe", 0o755) ?? return jet_driver_compile_escaped_failure("cannot make native executable runnable")
     result
 }
 

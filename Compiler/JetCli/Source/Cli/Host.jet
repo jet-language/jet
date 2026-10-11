@@ -18,6 +18,7 @@ use jet_driver.[
     JetDriverCompileRequest,
     JetDriverCompileResult,
     JetDriverDocModule,
+    JetDriverRustForeignError,
     JetDriverVerbOutput,
     JET_DRIVER_EXIT_OK,
     JET_DRIVER_EXIT_USAGE,
@@ -318,54 +319,90 @@ fn jet_cli_runtime_key(runtime_dir: String) -[FS]> String? Never! {
     Val(key)
 }
 
-// Native builds: lower checked MIR to LIR, apply the existing profile passes,
-// write a relocatable object, and use the in-process linker to bind the runtime
-// pack into a static x86-64 executable (D-EXEC1: the one compiled runtime).
-// Report all native findings without switching to a different backend.
-fn jet_cli_build_native(file: String, command: String, release: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, binary: String, color: Bool) -[FS, Env, Exec, Time.Wait]> JetDriverVerbOutput Never! {
-    raw_program :: result.mir ?? return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
-    unpruned :: jet_cli_rust_foreign_prepare(result.rust_foreign, ^raw_program) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_rust_foreign_report(err, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
-    entry_id :: result.entry_function ?? return jet_cli_build_failed("`{file}` has no `fn run` to build", "an executable starts at the program's `fn run`", "add `fn run()` to the file, or check it with `jet check {file}`", color)
+// Why the one native executable route stopped; each caller reports it.
+enum JetCLINativeFailure {
+    RustForeign(error: JetDriverRustForeignError)
+    NoEntry
+    // One row per lowering finding: its function and its message.
+    Lowering(functions: [String], messages: [String])
+    LostEntry
+    Object(errors: [String])
+    // A build-directory write; `what` names the path and the cause.
+    Write(what: String)
+    RuntimeKey(what: String)
+    Runtime(what: String)
+    Foreign(message: String)
+    Link(errors: [String])
+}
+
+// The lowering findings as "{function}{separator}{message}" rows.
+fn jet_cli_native_lowering_rows(functions: [String], messages: [String], separator: String) -> [String] Never! {
+    loop index in 0..<functions.len() -> "{functions[index]}{separator}{messages[index]}"
+}
+
+// The one native executable route of `jet build` and the bootstrap native
+// feed (Compiler/Bootstrap/Host/Entry.jet): lower checked MIR to LIR, apply
+// the profile passes, write `object_path`, realize the program's C closure
+// (c@path archives, #FFI(c) inline bodies, the musl platform), then use the
+// in-process linker to bind the packaged runtime of `runtime_dir` into a
+// static x86-64 executable at `executable_path` (D-EXEC1: the one compiled
+// runtime). Link inputs are always [object, runtime, C closure...]; a program
+// with a C closure links the Jet-only runtime object instead of the pack.
+fn jet_cli_native_executable(result: JetDriverCompileResult, sources: JetCLIForeignSources, release: Bool, runtime_dir: String, object_path: String, executable_path: String) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
+    raw_program :: result.mir ?? return Val(JetCLINativeFailure.NoEntry)
+    unpruned :: jet_cli_rust_foreign_prepare(result.rust_foreign, ^raw_program) ?? return Val(JetCLINativeFailure.RustForeign{error: err})
+    entry_id :: result.entry_function ?? return Val(JetCLINativeFailure.NoEntry)
     // Only functions the entry reaches are lowered, generic ones per instance.
-    fix :: "correct the reported native backend problems, then retry `jet {command} {file}`"
     lowered :: lir_lower_entry(unpruned, entry_id)
     if lowered.issues.len() > 0 {
-        findings := [String]{}
-        loop issue in lowered.issues -> &findings.push("{issue.function}: {issue.message}")
-        return JetDriverVerbOutput{
-            stdout: "",
-            stderr: jet_cli_report("E2104", "the Jet backend can't build `{file}` yet:\n{findings.join("\n")}", jet_cli_why("E2104"), fix, color),
-            exit_code: JET_DRIVER_EXIT_USER_ERROR,
-        }
+        functions :: loop issue in lowered.issues -> issue.function
+        messages :: loop issue in lowered.issues -> issue.message
+        return Val(JetCLINativeFailure.Lowering{functions: functions, messages: messages})
     }
-    entry :: lowered.entry ?? return jet_cli_ice("the MIR program of `{file}` lost its entry function")
-    // No absolute source root enters DWARF: comp_dir stays "." as on the
-    // bootstrap native feed, so the output never depends on the checkout path.
-    lir :: lir_optimize_module(lowered.lir, if release -> 2 else -> 0)
-    object :: x64_relocatable_object(lir, entry)
-    if object.errors.len() > 0 {
-        return JetDriverVerbOutput{
-            stdout: "",
-            stderr: jet_cli_report("E2104", "the Jet backend can't build `{file}` yet:\n{object.errors.join("\n")}", jet_cli_why("E2104"), fix, color),
-            exit_code: JET_DRIVER_EXIT_USER_ERROR,
-        }
-    }
-    cli_files.write_bytes("{binary}.o", object.bytes) ?? return jet_cli_build_failed("couldn't write {binary}.o: {err}", jet_cli_why("E2105"), "check that the build directory is writable", color)
-    runtime_dir :: jet_cli_runtime_dir()
-    key :: jet_cli_runtime_key(runtime_dir) ?? return jet_cli_build_failed("couldn't read the Jet runtime key {runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}", jet_cli_why("E2105"), "package the runtime beside jet with `Tools/packaging/prebuild-runtime.sh <jet>`, which writes the key and the runtime pack", color)
-    foreign :: jet_cli_native_c_inputs(unpruned, snapshot, runtime_dir) ?? return jet_cli_build_failed("couldn't realize C dependencies for `{file}`: {err.message}", jet_cli_why("E2105"), "check the declared C source/library paths and the installed C toolchain", color)
+    entry :: lowered.entry ?? return Val(JetCLINativeFailure.LostEntry)
+    // No absolute source root enters DWARF: comp_dir stays "." on every
+    // route, so the output never depends on the checkout path. Dev is O0,
+    // which leaves the lowered module unchanged and uncopied.
+    object :: if release -> x64_relocatable_object(lir_optimize_module(lowered.lir, 2), entry) else -> x64_relocatable_object(lowered.lir, entry)
+    if object.errors.len() > 0 -> return Val(JetCLINativeFailure.Object{errors: object.errors})
+    cli_files.write_bytes(object_path, object.bytes) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {object_path}: {err}"})
+    key :: jet_cli_runtime_key(runtime_dir) ?? return Val(JetCLINativeFailure.RuntimeKey{what: "couldn't read the Jet runtime key {runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}"})
+    foreign :: jet_cli_native_c_inputs(unpruned, sources, runtime_dir) ?? return Val(JetCLINativeFailure.Foreign{message: err.message})
     runtime_file :: if foreign.platform -> JET_CLI_RUNTIME_OBJECT_FILE else -> JET_CLI_RUNTIME_PACK_FILE
     runtime_path :: "{runtime_dir}/{key}/{runtime_file}"
-    runtime :: cli_files.read_bytes(runtime_path) ?? return jet_cli_build_failed("couldn't read the Jet runtime {runtime_path}: {err}", jet_cli_why("E2105"), "package the runtime beside jet with `Tools/packaging/prebuild-runtime.sh <jet>`, which writes the runtime pack and object", color)
-    names := [String]{"{binary}.o", runtime_path}
-    bytes := [[U8]]{object.bytes, runtime}
+    runtime :: cli_files.read_bytes(runtime_path) ?? return Val(JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime {runtime_path}: {err}"})
+    // Input names appear only in link diagnostics; the image is a function of
+    // the bytes and their order. The object and runtime move in, uncopied.
+    names := [String]{object_path, runtime_path}
+    bytes := [[U8]]{^object.bytes, ^runtime}
     loop name in foreign.names -> &names.push(name)
     loop input in foreign.bytes -> &bytes.push(input)
     image :: x64_link_executable(names, ^bytes)
-    if image.errors.len() > 0 -> return jet_cli_ice("linking `{file}` with the Jet runtime failed:\n{image.errors.join("\n")}")
-    cli_files.write_bytes(binary, image.bytes) ?? return jet_cli_build_failed("couldn't write {binary}: {err}", jet_cli_why("E2105"), "check that the build directory is writable", color)
-    cli_files.set_mode(binary, 0o755) ?? return jet_cli_build_failed("couldn't make {binary} executable: {err}", jet_cli_why("E2105"), "check that the build directory is writable", color)
-    JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    if image.errors.len() > 0 -> return Val(JetCLINativeFailure.Link{errors: image.errors})
+    cli_files.write_bytes(executable_path, image.bytes) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {executable_path}: {err}"})
+    cli_files.set_mode(executable_path, 0o755) ?? return Val(JetCLINativeFailure.Write{what: "couldn't make {executable_path} executable: {err}"})
+    None
+}
+
+// `jet build`'s report of the native route. Report all native findings
+// without switching to a different backend.
+fn jet_cli_build_native(file: String, command: String, release: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, binary: String, color: Bool) -[FS, Env, Exec, Time.Wait]> JetDriverVerbOutput Never! {
+    if result.mir == None -> return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
+    sources :: jet_cli_native_c_sources(snapshot) ?? return jet_cli_build_failed("couldn't realize C dependencies for `{file}`: {err.message}", jet_cli_why("E2105"), "check the declared C source/library paths and the installed C toolchain", color)
+    fix :: "correct the reported native backend problems, then retry `jet {command} {file}`"
+    failure :: jet_cli_native_executable(result, sources, release, jet_cli_runtime_dir(), "{binary}.o", binary) ?? return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    if failure == {
+        .RustForeign(error) -> JetDriverVerbOutput{stdout: "", stderr: jet_cli_rust_foreign_report(error, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        .NoEntry -> jet_cli_build_failed("`{file}` has no `fn run` to build", "an executable starts at the program's `fn run`", "add `fn run()` to the file, or check it with `jet check {file}`", color)
+        .Lowering(functions, messages) -> JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "the Jet backend can't build `{file}` yet:\n{jet_cli_native_lowering_rows(functions, messages, ": ").join("\n")}", jet_cli_why("E2104"), fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        .LostEntry -> jet_cli_ice("the MIR program of `{file}` lost its entry function")
+        .Object(errors) -> JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "the Jet backend can't build `{file}` yet:\n{errors.join("\n")}", jet_cli_why("E2104"), fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        .Write(what) -> jet_cli_build_failed(what, jet_cli_why("E2105"), "check that the build directory is writable", color)
+        .RuntimeKey(what) -> jet_cli_build_failed(what, jet_cli_why("E2105"), "package the runtime beside jet with `Tools/packaging/prebuild-runtime.sh <jet>`, which writes the key and the runtime pack", color)
+        .Runtime(what) -> jet_cli_build_failed(what, jet_cli_why("E2105"), "package the runtime beside jet with `Tools/packaging/prebuild-runtime.sh <jet>`, which writes the runtime pack and object", color)
+        .Foreign(message) -> jet_cli_build_failed("couldn't realize C dependencies for `{file}`: {message}", jet_cli_why("E2105"), "check the declared C source/library paths and the installed C toolchain", color)
+        .Link(errors) -> jet_cli_ice("linking `{file}` with the Jet runtime failed:\n{errors.join("\n")}")
+    }
 }
 
 

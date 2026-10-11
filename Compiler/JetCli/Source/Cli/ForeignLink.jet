@@ -467,8 +467,7 @@ fn jet_cli_foreign_platform_archive(runtime_dir: String, name: String) -[FS, Env
 // with the Jet-only runtime object. The runtime pack already holds a private,
 // initialized libc; a second libc beside it would be uninitialized.
 // Programs without a foreign closure preserve the original link line exactly.
-fn jet_cli_native_c_inputs(program: MIRProgram, snapshot: JetDriverAuthorizedSourceSnapshot, runtime_dir: String) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs JetCLIForeignLinkError! {
-    sources :: jet_cli_native_c_sources(snapshot) ?? return Err(err)
+fn jet_cli_native_c_inputs(program: MIRProgram, sources: JetCLIForeignSources, runtime_dir: String) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs JetCLIForeignLinkError! {
     inputs := jet_cli_native_c_closure(program, sources, runtime_dir) ?? return Err(err)
     has_c := inputs.names.len() > 0 || program.cffi.libs.len() > 0 || program.cffi.direct_links.len() > 0 || program.cffi.transitive_links.len() > 0
     loop row in program.foreign {
