@@ -515,10 +515,10 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
     // is a Result; a declared enum's `.Ok` / `.Err` remains its own case.
     if type_name == "" && leading_dot && sema_expr_unwrap_tag(expected ?? Type.Named{name: "Never"}) == .Result(_, _) && args.len() == 1 {
         if args[0] == .Positional(value) {
-            if variant == "Ok" -> return sema_expression_result_payload(value, true, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            if variant == "Ok" -> return sema_expression_result_payload(value, true, false, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if variant == "Err" {
                 &context.failure_edges.push("")
-                return sema_expression_result_payload(value, false, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                return sema_expression_result_payload(value, false, false, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             }
         }
     }

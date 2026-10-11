@@ -278,7 +278,14 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
             }
         }
         &required_types.push(required)
-        &typed.push(value)
+        // The parser stores `&xs.push(^x.f)`'s move mark on the CallArg. A
+        // marked field read keeps it as the exact-place move an ordinary
+        // consuming argument gets (Calls/Checking.jet), so the stored value
+        // moves out of its owner instead of materializing a copy (the Rust
+        // reference's `finish_builtin_method`).
+        taken_field :: updated_args[index].convention == AccessConvention.Move && updated_args[index].expr == .Field(_, _, _)
+        stored :: if taken_field -> sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span) else -> value
+        &typed.push(stored)
     }
 
     if !labels_valid -> return SemaMethodSpecialCheck{handled: true, value: None}
@@ -300,10 +307,10 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
     tuple_struct := sema_call_collections_tuple_struct(result_type)
     line :: sema_source_line_at(environment.source_segments, span) ?? 0
     operation := sema_collection_method_operation(contract, updated_args.len(), literal_remove_mode, line, callback_return, callback_mutable, comparator, tuple_struct)
-    // Rust builtin_methods.rs infers every collection argument without a
-    // convention check: `^` on one (`&to.push(^item)`) is neither rejected
-    // (E0203) nor recorded as a move, so the ownership walk reads it like an
-    // unmarked argument.
+    // Rust builtin_methods.rs runs no convention check on a collection
+    // argument: `^` on one (`&to.push(^item)`) is neither rejected (E0203)
+    // nor recorded as a move here, so the ownership walk reads it like an
+    // unmarked argument. A marked field still lowers as its exact-place move.
     loop index in 0..<updated_args.len() {
         if updated_args[index].convention == AccessConvention.Move -> updated_args[index].convention = AccessConvention.Read
     }

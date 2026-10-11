@@ -225,7 +225,15 @@ fn sema_expression_default_err_call(value: Expr, span: Span, expected: Type, env
     sema_call_check_default_err(call, Val(expected), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
-fn sema_expression_result_payload(value: Expr, success: Bool, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+// The parser stores `Ok(^x.f)`'s move mark on the CallArg. A marked field
+// read keeps it as the exact-place move an ordinary consuming argument gets
+// (Calls/Checking.jet), so the payload moves out of its owner instead of
+// materializing a copy (the Rust reference's contextual Ok/Err normalization).
+fn sema_expression_result_call_takes_field(call: Call) -> Bool Never! {
+    call.args.len() == 1 && call.args[0].convention == AccessConvention.Move && call.args[0].expr == .Field(_, _, _)
+}
+
+fn sema_expression_result_payload(value: Expr, success: Bool, take_field: Bool, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     expected_ok := Type?{None}
     expected_err := Type?{None}
     if expected == {
@@ -271,7 +279,8 @@ fn sema_expression_result_payload(value: Expr, success: Bool, span: Span, expect
         expected_err == (Val(Type.Named{name: "Err"})) && !sema_expression_default_err_struct(value) -> Val(Type.String)
         else -> expected_err
     }
-    payload :: sema_check_expression(value, payload_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    checked_payload :: sema_check_expression(value, payload_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    payload :: if take_field -> sema_tir_expr(checked_payload.ty, TExprKind.Move{value: checked_payload}, checked_payload.span) else -> checked_payload
     ok_ty := expected_ok ?? Type.Named{name: "Unit"}
     err_ty := expected_err ?? Type.Named{name: "Err"}
     required :: if success -> ok_ty else -> err_ty
