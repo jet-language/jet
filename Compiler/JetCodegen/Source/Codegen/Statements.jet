@@ -443,7 +443,6 @@ fn jet_codegen_lower_scope_member(builder: &JetCodegenBuilder, program: JetCodeg
     }
 }
 fn jet_codegen_lower_conditional_stop(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, result_type: Type, call: MIRPreludeCallID, kind: MIRRequireKind, condition: MIRValueID, location: MIRPanicLoc, context: MIRPanicContext, values: [MIRValueID], role: String) -> MIRValueID Never! {
-    if result_type != (Type.Named{name: "Unit"}) -> panic("checked conditional stop does not return Unit")
     success := jet_codegen_new_block(&builder, program, span, "{role}-success")
     failure := jet_codegen_new_block(&builder, program, span, "{role}-failure")
     jet_codegen_terminate(&builder, program, MIRTerminator.Branch{condition: condition, then_target: success, else_target: failure})

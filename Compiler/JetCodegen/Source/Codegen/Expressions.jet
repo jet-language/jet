@@ -77,6 +77,7 @@ use jet_foundation.[
     MIRTextHoleKind,
     MIRTextPatternPart,
     MIRTraitMethodID,
+    MIRTraitRef,
     MIRType,
     MIRTypeID,
     MIRTypedHeadKind,
@@ -155,6 +156,7 @@ use jet_foundation.[
     mir_module_id,
     mir_ownership_from_access,
     mir_source_file_id,
+    mir_trait_ref,
     mir_type_id,
     mir_type_identity_key,
     tir_pattern_key_identity,
@@ -176,6 +178,7 @@ use jet_sema.[
 
 struct JetCodegenTraitMethod {
     trait_key: String
+    trait_ref: MIRTraitRef
     method: TTraitMethod
 }
 
@@ -2527,27 +2530,46 @@ fn jet_codegen_symbol_name(builder: JetCodegenBuilder, program: JetCodegenProgra
     jet_codegen_builtin_trait_name(symbol) ?? panic("checked method trait has no registered symbol")
 }
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::trait_method_identity
+// resolves the trait by name (`lower_trait_ref`, then the trait row whose key
+// or name matches) and the method by name. The registered trait symbol
+// selects the row when it names one; a trait owner Sema keyed by the impl's
+// module (Calls/Methods.jet `sema_call_method_candidate_from_func`) names no
+// nominal row, so its trait name resolves as Rust resolves it.
 fn jet_codegen_resolve_trait_method(builder: JetCodegenBuilder, program: JetCodegenProgram, method: TMethodRef) -> JetCodegenTraitMethod Never! {
     symbol :: method.trait_owner ?? panic("checked trait method call has no trait owner")
     selected := JetCodegenTraitMethod?{None}
+    owner_found := false
     loop semantic_module in program.modules {
         loop nominal in semantic_module.nominals {
             if nominal.symbol.id.key != symbol.key -> next
             if nominal.kind != SemaRegistrationNominalKind.Trait -> panic("checked trait method owner is not a trait")
+            owner_found = true
             loop definition in semantic_module.declarations.traits {
                 if definition.name != nominal.symbol.name -> next
                 loop trait_method in definition.methods {
-                    method_symbol := symbol_id(SymbolKind.Function, semantic_module.module_identity, nominal.symbol.id.key, trait_method.name)
-                    if trait_method.name == method.name && method_symbol.key == method.symbol.key {
-                        if selected != None -> panic("checked trait method identity is ambiguous")
-                        selected = Val(JetCodegenTraitMethod{trait_key: definition.key, method: trait_method})
-                    }
+                    if trait_method.name != method.name -> next
+                    if selected != None -> panic("checked trait method identity is ambiguous")
+                    selected = Val(JetCodegenTraitMethod{trait_key: definition.key, trait_ref: jet_codegen_mir_trait_ref_for_symbol(program.modules, symbol), method: trait_method})
                 }
             }
         }
     }
-    if selected == None && jet_codegen_builtin_trait_name(symbol) == .Val(name) -> panic("checked call of builtin trait `{name}` method `{method.name}` has no concrete hook and no trait declaration to dispatch through")
-    selected ?? panic("checked trait method declaration is unreachable")
+    if selected != None || owner_found -> return selected ?? panic("checked trait `{symbol.key}` declares no method `{method.name}`")
+    parts :: symbol.key.split(":").to_list()
+    trait_name :: parts[parts.len() - 1]
+    preferred_module := builder.function.module_identity
+    if parts.len() >= 4 && parts[1] != "" -> preferred_module = parts[1]
+    trait_ref :: jet_codegen_resolve_trait_ref(program.modules, trait_name, preferred_module) ?? panic("checked call of trait `{trait_name}` method `{method.name}` has no trait declaration to dispatch through")
+    loop semantic_module in program.modules {
+        loop definition in semantic_module.declarations.traits {
+            if mir_trait_ref(jet_codegen_canonical_target_type(semantic_module.module_identity, definition.key)).id != trait_ref.id -> next
+            loop trait_method in definition.methods {
+                if trait_method.name == method.name -> return JetCodegenTraitMethod{trait_key: definition.key, trait_ref: trait_ref, method: trait_method}
+            }
+        }
+    }
+    panic("checked trait `{trait_name}` declares no method `{method.name}`")
 }
 
 fn jet_codegen_method_owner_type(kind: TFuncKind) -> Type? Never! {
@@ -2961,13 +2983,13 @@ fn jet_codegen_checked_method_return_type(builder: JetCodegenBuilder, program: J
         &arguments.push(type_args[index])
         index += 1
     }
+    // Rust `method_call_return_type_for`: owner arguments bind only when the
+    // receiver spells the owner's arguments; otherwise (a non-generic owner, a
+    // demanded instance, a receiver the pattern cannot bind) the return type
+    // keeps the owner's binders, substituted by the method's own arguments.
     owner_names := jet_codegen_function_type_generic_names(function, program.owners)
     if owner_names.len() > 0 {
         owner_bindings := jet_codegen_function_owner_bindings(function, jet_codegen_unwrap_pattern_tags(receiver_type), program.owners)
-        if !owner_bindings.complete {
-            owner_pattern :: jet_codegen_function_owner_pattern(function, program.owners) ?? Type.Named{name: "Unit"}
-            panic("checked method receiver has incomplete owner type arguments: `{function.name}` (owner {type_name(owner_pattern)}, generics {owner_names.join(", ")}) on {type_name(receiver_type)}")
-        }
         index = 0
         loop index < owner_bindings.names.len() {
             if !names.contains(owner_bindings.names[index]) {
@@ -3041,8 +3063,7 @@ fn jet_codegen_lower_method_call(builder: &JetCodegenBuilder, program: JetCodege
             call_return_type = trait_method.method.return_type
             trait_access := trait_method.method.self_access ?? panic("checked trait method has no receiver convention")
             access = jet_codegen_lower_access(trait_access)
-            trait_symbol :: method.trait_owner ?? panic("checked trait method call has no owner symbol")
-            trait_ref := jet_codegen_mir_trait_ref_for_symbol(program.modules, trait_symbol)
+            trait_ref := trait_method.trait_ref
             method_id := MIRTraitMethodID{value: stable_id("mir-trait-method", "{trait_method.trait_key}::{trait_method.method.key}")}
             callee = Val(MIRCallee.TraitMethod{method: method_id, trait_ref: trait_ref, receiver: owner})
             &lowered_args.push(jet_codegen_method_receiver_arg(&builder, program, receiver, access))
