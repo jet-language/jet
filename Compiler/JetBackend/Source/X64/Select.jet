@@ -461,9 +461,12 @@ fn x64_selection_gaps(program: LIRModule, function: LIRFunction) -> [String] Nev
     }
     loop block in function.blocks {
         loop inst in block.insts {
-            if inst == .Binary(dst, _, _, _) {
+            if inst == .Binary(dst, op, _, _) {
                 layout :: function.values[dst.value].layout
-                if layout.size != 8 && layout != lir_layout_float32() -> &gaps.push("{function.name}: arithmetic on v{dst.value} is not word-sized")
+                // A Bool is a zero-extended 0/1 word in its register and slot,
+                // so And/Or/Xor of two Bools is the word operator's result.
+                logical :: layout == lir_layout_bool() && (op == .And || op == .Or || op == .Xor)
+                if layout.size != 8 && layout != lir_layout_float32() && !logical -> &gaps.push("{function.name}: arithmetic on v{dst.value} is not word-sized")
             }
         }
     }
