@@ -609,9 +609,10 @@ static JET_COMPILER_ALLOCATOR: jet_class_allocator::JetClassAllocator = jet_clas
 /// (address space, committed page by page). Overflowing it hits the guard
 /// page, and std reports `thread 'jet-bootstrap' has overflowed its stack`
 /// instead of a bare SIGSEGV; a panic keeps its message and exit status 101.
+const BOOTSTRAP_STACK_BYTES: usize = 512 * 1024 * 1024;
+
 #[doc(hidden)]
 fn main() {
-    const BOOTSTRAP_STACK_BYTES: usize = 512 * 1024 * 1024;
     let worker = std::thread::Builder::new()
         .name("jet-bootstrap".to_string())
         .stack_size(BOOTSTRAP_STACK_BYTES)
@@ -624,6 +625,11 @@ fn main() {
 
 #[doc(hidden)]
 fn __jet_bootstrap_harness_main() {
+    // The shared E3012 budget (`JET_RUNTIME_STACK_LIMIT` frames) is sized for
+    // an 8 MiB program stack; the compiler's own recursion over a whole unit
+    // is deeper. This thread's real stack is `BOOTSTRAP_STACK_BYTES`, so its
+    // budget scales with it (64Ki frames) at the same per-frame assumption.
+    jet_runtime_stack_budget_for_stack(BOOTSTRAP_STACK_BYTES);
     let mode = std::env::var("JET_BOOTSTRAP_MODE")
         .unwrap_or_else(|error| panic!("bootstrap mode is unavailable: {error}"));
     let factory_tier_name = std::env::var("JET_BOOTSTRAP_FACTORY_TIER")
