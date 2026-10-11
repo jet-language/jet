@@ -1391,6 +1391,20 @@ fn sema_registration_original_error_module(diagnostics: &[Diagnostic]) -> SemaRe
     })
 }
 
+// Rust `Prelude::retain_error_prelude_module`: append the original error module
+// once per declaration graph; a loaded source already holding its identity is
+// refused rather than trusted as the supplier.
+fn sema_registration_retain_original_error_module(inputs: &[SemaRegistrationModuleInput], diagnostics: &[Diagnostic]) {
+    loop input in inputs {
+        if input.module_identity == SEMA_PRELUDE_ERROR_SOURCE_PATH {
+            &diagnostics.push(sema_error_optional("E0003", None, "an existing source collides with the original Prelude identity", "default-error declarations retain their original compiler-private source owner", "retain the canonical Prelude source and its parsed declaration provenance"))
+            return
+        }
+    }
+    original :: sema_registration_original_error_module(&diagnostics) ?? return
+    &inputs.push(original)
+}
+
 fn sema_registration_compiler_owned_codec_trait(module_identity: String, reference: MIRTraitRef) -> SemaRegistrationNominal {
     span :: Span{start: 0, end: 0}
     ty :: Type.Named{name: reference.name}
@@ -2944,10 +2958,14 @@ fn sema_registration_compiler_builtin_row(graph: SemaRegistrationGraph, name: St
 fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: String, canonical_effect_module_identity: String, foreign_providers: [SemaForeignProviderInput], target_machine: MIRTargetMachine, build_facts: SemaBuildFacts, counting: Bool) -> SemaRegistrationGraph {
     modules := [SemaRegistrationModule]{}
     diagnostics := [Diagnostic]{}
-    // Rust Bundle: inject_units_prelude, then resolve_unit_dimensions, before
-    // any module is registered. The compiler-owned effect module is not a
-    // source module and takes no catalog families.
+    // Rust CheckInner `retain_error_prelude_module` runs first: the original
+    // Prelude error declarations join the graph as their own compiler-generated
+    // module, the only source of the DefaultErr marker. Then Rust Bundle:
+    // inject_units_prelude, then resolve_unit_dimensions, before any module is
+    // registered. The compiler-owned effect module is not a source module and
+    // takes no catalog families.
     prepared_inputs := inputs
+    sema_registration_retain_original_error_module(&prepared_inputs, &diagnostics)
     units_catalog :: sema_units_catalog(&diagnostics)
     loop index in 0..<prepared_inputs.len() {
         if prepared_inputs[index].module_identity == canonical_effect_module_identity -> next
