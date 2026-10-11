@@ -5473,8 +5473,9 @@ pub(super) struct LowerCtx<'a> {
     partial_move_roots: HashSet<String>,
     /// Only these roots use leaf flags; ordinary records keep one root flag.
     split_drop_roots: HashSet<MirPlaceId>,
-    /// Every file-owner leaf place registered for cleanup in this function.
-    pub(super) file_owner_places: Vec<MirPlaceId>,
+    /// Every file-owner leaf place registered for cleanup in this function,
+    /// with the live flag that guards its cleanup.
+    pub(super) file_owner_places: Vec<(MirPlaceId, MirPlaceId)>,
     send_fn_locals: HashSet<String>,
     capture_values: HashMap<String, MirValueId>,
     pub(super) prelude_calls: Vec<MirPreludeCall>,
@@ -7842,7 +7843,7 @@ impl<'a> LowerCtx<'a> {
         if let Some(row) = self.places.iter_mut().find(|row| row.id == place) {
             retain_place_access(row, MirAccess::Move);
         }
-        self.file_owner_places.push(place);
+        self.file_owner_places.push((place, flag));
         self.defer_stack
             .last_mut()
             .expect("function always has a lexical cleanup frame")

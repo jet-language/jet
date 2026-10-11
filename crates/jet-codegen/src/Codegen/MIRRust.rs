@@ -24766,12 +24766,21 @@ impl<'a> RustEmitter<'a> {
                 None
             }
             // A write parameter's place stays as bound when nothing that may
-            // change it can run once its payload or value is read.
+            // change it can run once its payload or value is read, or, for a
+            // binding written where it is read, before the binding's reads.
             MirPlaceBase::Parameter(parameter)
                 if self.parameter_access(function, parameter) == Some(MirAccess::Write) =>
             {
                 let writes = self.parameter_place_writes(function, &index, place)?;
-                Self::unchanged_after(function, &index, &writes, bound_block, bound_position).then_some(None)
+                if bound_block != block {
+                    return Self::unchanged_after(function, &index, &writes, bound_block, bound_position)
+                        .then_some(None);
+                }
+                let (_, uses) = self.binding_reads(function, &index, block, position)?;
+                let origin = self.transparent_read(function, read).unwrap_or(read);
+                let &(read_block, read_position) = index.definitions.get(&origin)?;
+                Self::unchanged_until_positions(function, &index, read_block, read_position, uses.into_iter(), &writes)
+                    .then_some(None)
             }
             MirPlaceBase::Parameter(_) => Some(None),
             MirPlaceBase::Local(root) if bound_block == block => {
@@ -24783,47 +24792,65 @@ impl<'a> RustEmitter<'a> {
                 if changed {
                     return None;
                 }
-                let MirOperation::WritePlace { place: binding, .. } =
-                    function.blocks[block].instructions[position].operation else {
-                        return None;
-                    };
-                let MirPlaceBase::Local(binding) = self.place_row(function, binding)?.base else {
-                    return None;
-                };
                 // An owned collection may also lend its payload. Its owner
-                // must stay unchanged through every use and cleanup of the
-                // binding, not merely through the initial payload read.
-                let uses = function.blocks.iter().enumerate().flat_map(|(block, row)| {
-                    row.instructions.iter().enumerate().filter_map(move |(position, instruction)| {
-                        let place = match instruction.operation {
-                            MirOperation::ReadPlace(place)
-                            | MirOperation::MovePlace { place }
-                            | MirOperation::AddressOf { place, .. } => place,
-                            _ => return None,
-                        };
-                        self.place_row(function, place)
-                            .is_some_and(|place| place.base == MirPlaceBase::Local(binding))
-                            .then_some((block, position, instruction.result))
-                    })
-                }).flat_map(|(block, position, result)| {
-                    std::iter::once((block, Some(position))).chain(
-                        result.into_iter().flat_map(|value| {
-                            index.uses.get(&value).into_iter().flatten().copied()
-                        }),
-                    )
-                });
+                // must stay unchanged through every read of the binding, not
+                // merely through the initial payload read.
+                let (binding, uses) = self.binding_reads(function, &index, block, position)?;
                 let origin = self.transparent_read(function, read).unwrap_or(read);
                 let &(read_block, read_position) = index.definitions.get(&origin)?;
                 let stable_owner = root != binding
                     && !index.escaped_locals.contains(&root)
                     && Self::unchanged_until_positions(
-                        function, &index, read_block, read_position, uses,
+                        function, &index, read_block, read_position, uses.into_iter(),
                         index.local_writes.get(&root).map_or(&[][..], Vec::as_slice),
                     );
                 Some(if stable_owner { None } else { Some(root) })
             }
             _ => None,
         }
+    }
+
+    /// The local the binding write at `(block, position)` names, with every
+    /// position that reads, moves or lends it and every use of what such an
+    /// access yields. A whole move whose every user drops it is the binding's
+    /// own cleanup, which a reference binding emits as clearing its slot
+    /// (`ref_binding_drop`): it reads no referent, so it is not among them.
+    fn binding_reads(
+        &self,
+        function: &MirFunction,
+        index: &FunctionIndex,
+        block: usize,
+        position: usize,
+    ) -> Option<(MirLocalId, Vec<(usize, Option<usize>)>)> {
+        let MirOperation::WritePlace { place: binding, .. } =
+            function.blocks[block].instructions[position].operation else {
+                return None;
+            };
+        let MirPlaceBase::Local(binding) = self.place_row(function, binding)?.base else {
+            return None;
+        };
+        let mut uses = Vec::new();
+        for (block, row) in function.blocks.iter().enumerate() {
+            for (position, instruction) in row.instructions.iter().enumerate() {
+                let place = match instruction.operation {
+                    MirOperation::ReadPlace(place)
+                    | MirOperation::MovePlace { place }
+                    | MirOperation::AddressOf { place, .. } => place,
+                    _ => continue,
+                };
+                if !self.place_row(function, place).is_some_and(|place| place.base == MirPlaceBase::Local(binding)) {
+                    continue;
+                }
+                if instruction.result.is_some_and(|value| self.whole_move_dropped(function, value).is_some()) {
+                    continue;
+                }
+                uses.push((block, Some(position)));
+                uses.extend(instruction.result.into_iter().flat_map(|value| {
+                    index.uses.get(&value).into_iter().flatten().copied()
+                }));
+            }
+        }
+        Some((binding, uses))
     }
 
     /// The Rust pattern binding `payload` to payload `index` of `variant`,
@@ -24956,6 +24983,13 @@ impl<'a> RustEmitter<'a> {
     /// A whole move out of a reference binding whose every user drops it:
     /// the binding owns nothing, so the move and its drops emit no copy.
     fn ref_binding_drop(&self, function: &MirFunction, value: MirValueId) -> Option<MirLocalId> {
+        self.whole_move_dropped(function, value)
+            .filter(|local| self.ref_binding_local(function, *local))
+    }
+
+    /// The local `value` moves whole out of, when every user of `value`
+    /// drops it.
+    fn whole_move_dropped(&self, function: &MirFunction, value: MirValueId) -> Option<MirLocalId> {
         let MirOperation::MovePlace { place } = self.value_definition(function, value)? else {
             return None;
         };
@@ -24963,7 +24997,7 @@ impl<'a> RustEmitter<'a> {
         let MirPlaceBase::Local(local) = place.base else {
             return None;
         };
-        if !place.projections.is_empty() || !self.ref_binding_local(function, local) {
+        if !place.projections.is_empty() {
             return None;
         }
         let users = self.value_users(function, value);

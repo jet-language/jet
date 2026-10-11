@@ -643,6 +643,85 @@ fn run() -[FS]> {
     );
 }
 
+/// A record holding a Core file owner moves out at its last use: the wrap
+/// and the push take the binding and clear its leaf cleanup flags, rather
+/// than cloning a record whose handle has no Rust `Clone`.
+#[test]
+fn file_owner_records_move_at_their_last_use() {
+    hosted_seed_program_runs(
+        "file_owner_last_use",
+        Some("name: \"file_owner_last_use\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS.Read] } }\n"),
+        r#"
+use core.files.[FileReader, open]
+struct Checked { path: String, reader: FileReader }
+fn checked(path: String) -[FS]> Checked IOError! {
+    reader :: open(path) ?? return Err(err)
+    file :: Checked{path: path, reader: reader}
+    Ok(file)
+}
+fn gather(paths: [String]) -[FS]> [Checked] IOError! {
+    found := [Checked]{}
+    loop path in paths {
+        file :: checked(path) ?? return Err(err)
+        &found.push(file)
+    }
+    Ok(found)
+}
+fn run() -[FS]> {
+    files :: gather([String]{"run.jet"}) ?? panic("open")
+    first :: files[0].reader.read(1) ?? panic("read")
+    assert_eq(first[0], U8{10})
+    assert_eq(files[0].path, "run.jet")
+}
+"#,
+    );
+}
+
+/// A trait-object option payload binds by reference while its owner is only
+/// changed after the binding's last read: the binding's own scope-end
+/// cleanup reads no referent, so a later write of a local root (`sink`) or a
+/// later write-borrow of a `&` parameter on another path (`machine`) leaves
+/// the binding a borrow instead of cloning a `Box<dyn …>`.
+#[test]
+fn trait_object_payload_bindings_borrow_past_later_owner_writes() {
+    hosted_seed_program_runs(
+        "trait_payload_binding",
+        None,
+        r#"
+trait Sink { fn note(self) -> Int }
+struct Counter { base: Int }
+impl Counter.Sink { fn note(self) -> Int { self.base + 1 } }
+struct Session { sink: Sink?, level: Int }
+struct Machine { session: Session }
+fn sink_level(config: ^Session) -> Int {
+    session := config
+    total := 0
+    if session.sink == {
+        None -> {}
+        Val(sink) -> {
+            total = sink.note()
+            session.sink = None
+        }
+    }
+    if session.sink == None -> total = total + session.level
+    total
+}
+fn bump(machine: &Machine) { machine.session.level = machine.session.level + 1 }
+fn machine_level(machine: &Machine) -> Int {
+    if machine.session.sink == .Val(sink) -> return sink.note()
+    bump(&machine)
+    machine.session.level
+}
+fn run() {
+    assert_eq(sink_level(Session{sink: Val(Counter{base: 41}), level: 1}), 43)
+    held := Machine{session: Session{sink: Val(Counter{base: 6}), level: 0}}
+    assert_eq(machine_level(&held), 7)
+    bare := Machine{session: Session{sink: None, level: 4}}
+    assert_eq(machine_level(&bare), 5)
+}
+"#,
+    );
+}
 /// Root 2: Core handle ops write through a FileReader/FileWriter reached from
 /// a read binding (a Read parameter, a field of a read `self`). The emitted
 /// Rust lends the interior-mutable carrier by `&`.

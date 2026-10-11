@@ -180,8 +180,9 @@ impl LowerCtx<'_> {
         }
 
         // Owned locals: a whole local place with a drop flag. Places whose
-        // release is observable (a scope-end `close`, a file owner, a
-        // function-level drop row) keep their lexical lifetime.
+        // release is observable (a scope-end `close`, a function-level drop
+        // row) keep their lexical lifetime. A file-owner root moves whole: its
+        // leaf cleanups run under their own live flags, which a move clears.
         let place_rows: HashMap<MirPlaceId, usize> = self
             .places
             .iter()
@@ -189,12 +190,21 @@ impl LowerCtx<'_> {
             .map(|(index, row)| (row.id, index))
             .collect();
         let mut excluded_roots: HashSet<Root> = HashSet::new();
-        for place in self.file_owner_places.iter().chain(self.drops.iter().map(|drop| &drop.place)) {
+        for drop in &self.drops {
             if let Some(root) = place_rows
-                .get(place)
+                .get(&drop.place)
                 .and_then(|row| place_root(&self.places[*row].base))
             {
                 excluded_roots.insert(root);
+            }
+        }
+        let mut file_owner_leaves: HashMap<Root, Vec<(MirPlaceId, MirPlaceId)>> = HashMap::new();
+        for (leaf, flag) in &self.file_owner_places {
+            if let Some(root) = place_rows
+                .get(leaf)
+                .and_then(|row| place_root(&self.places[*row].base))
+            {
+                file_owner_leaves.entry(root).or_default().push((*leaf, *flag));
             }
         }
         let mut owned: Vec<(MirPlaceId, MirPlaceId)> = self
@@ -234,6 +244,20 @@ impl LowerCtx<'_> {
             candidates.push(Candidate::Local { place, flag });
             paths.push(Vec::new());
             rejected.push(false);
+        }
+        // File-owner leaves of a whole candidate: each leaf's cleanup is
+        // guarded by its own live flag, so it is that candidate's cleanup.
+        let mut leaf_candidate: HashMap<MirPlaceId, usize> = HashMap::new();
+        let mut owner_leaves: HashMap<usize, &[(MirPlaceId, MirPlaceId)]> = HashMap::new();
+        for (root, leaves) in &file_owner_leaves {
+            let Some(&candidate) = root_candidate.get(root) else {
+                continue;
+            };
+            for (leaf, flag) in leaves {
+                leaf_candidate.insert(*leaf, candidate);
+                flag_candidate.insert(*flag, candidate);
+            }
+            owner_leaves.insert(candidate, leaves);
         }
         let mut place_candidate: HashMap<MirPlaceId, usize> = HashMap::new();
         for row in &self.places {
@@ -280,11 +304,17 @@ impl LowerCtx<'_> {
                 let candidate = match by_path.get(&(owner, path.clone())) {
                     Some(candidate) => *candidate,
                     None => {
+                        // A field that holds or sits inside a file-owner leaf
+                        // would leave that leaf's live flag naming a moved
+                        // value; it stays a read.
+                        let splits_leaf = owner_leaves.get(&owner).into_iter().flat_map(|leaves| leaves.iter()).any(|(leaf, _)| {
+                            overlaps(&self.places[place_rows[leaf]].projections, &path)
+                        });
                         let candidate = candidates.len();
                         by_path.insert((owner, path.clone()), candidate);
                         candidates.push(Candidate::Field { root: owner });
                         paths.push(path);
-                        rejected.push(false);
+                        rejected.push(splits_leaf);
                         root_fields.entry(owner).or_default().push(candidate);
                         candidate
                     }
@@ -723,8 +753,11 @@ impl LowerCtx<'_> {
                                 {
                                     Some(true)
                                 }
+                                // The candidate's own flag-guarded cleanup:
+                                // its scope-end drop, or a file-owner leaf's.
                                 MirOperation::MovePlace { .. }
-                                    if place == whole && guarded[block] == Some(candidate) =>
+                                    if (place == whole || leaf_candidate.get(&place) == Some(&candidate))
+                                        && guarded[block] == Some(candidate) =>
                                 {
                                     None
                                 }
@@ -1033,14 +1066,22 @@ impl LowerCtx<'_> {
                 MirOperation::Constant(MirConstant::Bool(false)),
             )?;
             let off_value = off.result.expect("constant result");
-            let write = self.last_use_instruction(
-                span,
-                source_line,
-                "owned.local.last-use.update",
-                None,
-                MirOperation::WritePlace { place: flag, value: off_value },
-            )?;
-            inserts.push((block, index + 1, vec![off, write]));
+            // A whole move also takes every file-owner leaf, as an explicit
+            // move clears their cleanup flags.
+            let flags = std::iter::once(flag).chain(
+                owner_leaves.get(&candidate).into_iter().flat_map(|leaves| leaves.iter().map(|(_, live)| *live)),
+            );
+            let mut instructions = vec![off];
+            for flag in flags {
+                instructions.push(self.last_use_instruction(
+                    span,
+                    source_line,
+                    "owned.local.last-use.update",
+                    None,
+                    MirOperation::WritePlace { place: flag, value: off_value },
+                )?);
+            }
+            inserts.push((block, index + 1, instructions));
         }
         inserts.sort_unstable_by(|left, right| (right.0, right.1).cmp(&(left.0, left.1)));
         for (block, position, instructions) in inserts {
