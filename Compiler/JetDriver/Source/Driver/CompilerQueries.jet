@@ -350,6 +350,7 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
     providers := jet_driver_assemble_foreign_providers(input.request.authorized_sources, &load)
     if (!load.complete || jet_driver_has_errors(load.diagnostics)) && !parse_only -> return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
     if !jet_driver_foreign_provider_owners_valid(load.modules, providers, &load.diagnostics) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
+    if !jet_driver_retain_error_prelude_module(&load) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)
     module_sources := [SemaCompilerModuleSource]{}
     if {
         input.retain_projection -> {

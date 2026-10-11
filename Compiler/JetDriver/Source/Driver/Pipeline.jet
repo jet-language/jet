@@ -210,7 +210,9 @@ use jet_sema.[
     sema_name_build_facts,
     sema_name_structure_facts,
     sema_registration_lookup_counts,
+    sema_registration_original_error_module,
     sema_registration_prepare_graph,
+    SEMA_PRELUDE_ERROR_SOURCE_PATH,
     sema_output_resolve,
     sema_registration_callable_declaration,
     sema_marker_is_guest_export,
@@ -1172,6 +1174,10 @@ fn jet_driver_doc_modules(request: JetDriverCompileRequest, load: JetDriverLoadR
                     }
                     source_owner = false
                 }
+            } else if jet_driver_unit_is_error_prelude(unit) {
+                // The retained original Prelude error module: checked with the
+                // graph, not a Review source owner.
+                source_owner = false
             } else {
                 if unit.root_index < 0 || unit.root_index >= request.authorized_sources.roots.len() -> return [JetDriverDocModule]{}
                 root :: request.authorized_sources.roots[unit.root_index]
@@ -3928,6 +3934,41 @@ fn jet_driver_canonical_effect_module(source: String) -> SemaRegistrationModuleI
     })
 }
 
+// Rust CheckInner `retain_error_prelude_module`: the original Prelude error
+// declarations join the load as one compiler-generated source module (source
+// unit, source file, loaded row), as Rust pushes its LoadedModule into the
+// bundle, so registration, checking, assembly, and every loaded-identity check
+// see one module set. A loaded source holding its path, alias, or identity is
+// refused.
+fn jet_driver_retain_error_prelude_module(load: &JetDriverLoadResult) -> Bool {
+    original := sema_registration_original_error_module(&load.diagnostics) ?? return false
+    module_identity :: jet_driver_module_identity(original.package_identity, original.module_path)
+    collides := false
+    loop unit in load.source_units {
+        if unit.path == original.source_file || unit.module_name == original.module_name || jet_driver_module_identity(unit.package_identity, unit.relative_path) == module_identity -> collides = true
+    }
+    loop generated in load.generated_source_files {
+        if generated.path == original.source_file -> collides = true
+    }
+    if collides {
+        &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "an existing source collides with the original Prelude identity", "default-error declarations retain their original compiler-private source owner", "retain the canonical Prelude source and its parsed declaration provenance"))
+        return false
+    }
+    file_diagnostics :: load.diagnostics.len()
+    jet_driver_add_source_file(&load.source_files, MIRSourceFile{id: mir_source_file_id(original.source_file), path: original.source_file, source: original.source}, &load.diagnostics)
+    if load.diagnostics.len() != file_diagnostics -> return false
+    source_unit_index :: load.source_units.len()
+    &load.source_units.push(JetDriverSourceUnit{root_index: -1, file_index: -1, root_identity: original.package_identity, package_identity: original.package_identity, module_name: original.module_name, path: original.source_file, relative_path: original.module_path, source_segments: original.source_segments, source_origin: original.source_origin, in_namespace: false})
+    &load.modules.push(JetDriverLoadedModule{source_unit_index: source_unit_index, source_identity: jet_driver_source_identity(original.package_identity, original.source_file), package_identity: original.package_identity, module_identity: module_identity, module_name: original.module_name, program: ^original.program})
+    true
+}
+
+// The retained original Prelude error unit: compiler-generated, outside every
+// authorized root, and not a Review source owner.
+fn jet_driver_unit_is_error_prelude(unit: JetDriverSourceUnit) -> Bool Never! {
+    unit.root_index == -1 && unit.file_index == -1 && unit.path == SEMA_PRELUDE_ERROR_SOURCE_PATH && unit.package_identity == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY && unit.source_origin == SemaSourceOrigin.CompilerGenerated
+}
+
 fn jet_driver_compile_internal_result(load: JetDriverLoadResult, trace: JetDriverCompileTrace, message: String) -> JetDriverCompileResult Never! {
     result := jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Check), false, trace)
     result.internal_problem = Val(message)
@@ -4801,6 +4842,9 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     }
     if !jet_driver_foreign_provider_owners_valid(load.modules, foreign_provider_inputs, &load.diagnostics) {
         return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Load), false, trace)
+    }
+    if !jet_driver_retain_error_prelude_module(&load) {
+        return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Check), false, trace)
     }
 
     target_machine_option := jet_driver_selected_target_machine(request, &load.diagnostics)

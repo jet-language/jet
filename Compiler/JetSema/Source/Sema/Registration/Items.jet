@@ -1391,18 +1391,44 @@ fn sema_registration_original_error_module(diagnostics: &[Diagnostic]) -> SemaRe
     })
 }
 
-// Rust `Prelude::retain_error_prelude_module`: append the original error module
-// once per declaration graph; a loaded source already holding its identity is
-// refused rather than trusted as the supplier.
+// Rust `Prelude::retain_error_prelude_module`: a graph whose inputs already
+// retain the original error module (the driver loads it as a source module)
+// keeps that one owner after checking its source context; otherwise the
+// original module is appended once. An input holding the original path or
+// alias without the parsed provenance is refused rather than trusted.
 fn sema_registration_retain_original_error_module(inputs: &[SemaRegistrationModuleInput], diagnostics: &[Diagnostic]) {
+    path :: SEMA_PRELUDE_ERROR_SOURCE_PATH
+    alias :: sema_inline_generated_path(path)
+    owners := 0
     loop input in inputs {
-        if input.module_identity == SEMA_PRELUDE_ERROR_SOURCE_PATH {
-            &diagnostics.push(sema_error_optional("E0003", None, "an existing source collides with the original Prelude identity", "default-error declarations retain their original compiler-private source owner", "retain the canonical Prelude source and its parsed declaration provenance"))
+        retained := false
+        loop item in input.program.items {
+            if item == .Struct(definition) && definition.compiler_builtin_error -> retained = true
+        }
+        if !retained -> next
+        owners += 1
+        if owners > 1 {
+            &diagnostics.push(sema_registration_error_supplier_diagnostic("original Prelude declarations have multiple owners"))
+            return
+        }
+        if input.source_file != path || input.package_identity != JET_CANONICAL_EFFECT_PACKAGE_IDENTITY || input.source != SEMA_PRELUDE_ERROR_SOURCE || input.module_name != alias {
+            &diagnostics.push(sema_registration_error_supplier_diagnostic("original Prelude provenance lost its source context"))
+            return
+        }
+    }
+    if owners == 1 -> return
+    loop input in inputs {
+        if input.source_file == path || input.module_identity == path || input.module_name == alias {
+            &diagnostics.push(sema_registration_error_supplier_diagnostic("an existing source collides with the original Prelude identity"))
             return
         }
     }
     original :: sema_registration_original_error_module(&diagnostics) ?? return
     &inputs.push(original)
+}
+
+fn sema_registration_error_supplier_diagnostic(detail: String) -> Diagnostic {
+    sema_error_optional("E0003", None, detail, "default-error declarations retain their original compiler-private source owner", "retain the canonical Prelude source and its parsed declaration provenance")
 }
 
 fn sema_registration_compiler_owned_codec_trait(module_identity: String, reference: MIRTraitRef) -> SemaRegistrationNominal {
