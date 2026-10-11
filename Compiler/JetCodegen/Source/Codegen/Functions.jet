@@ -3023,7 +3023,10 @@ fn jet_codegen_add_needed_trait(reference: MIRTraitRef, known: [MIRTraitID], nee
         if reference.name != "CheckedText" -> panic("CheckedText reference name disagrees with its canonical identity")
         return
     }
-    panic("MIR trait reference has no declared or registered builtin identity")
+    // Rust mir.rs::ensure_referenced_traits: any other referenced trait
+    // without a declaration (a builtin bound such as `Numeric`) gets a
+    // synthesized row under its reference name.
+    &needed.push(reference)
 }
 
 fn jet_codegen_add_needed_derived_trait(id: MIRTraitID, known: [MIRTraitID], needed: &[MIRTraitRef]) Never! {
@@ -3038,7 +3041,12 @@ fn jet_codegen_add_needed_derived_trait(id: MIRTraitID, known: [MIRTraitID], nee
         return
     }
     if jet_codegen_is_checked_text_trait_id(id) -> return
-    panic("MIR derive identity has no declared or registered builtin trait")
+    // Rust mir.rs::ensure_referenced_traits: a derive with a selected impl but
+    // no declaration gets a synthesized `derive#<id>` row.
+    loop prior in needed {
+        if prior.id == id -> return
+    }
+    &needed.push(MIRTraitRef{id: id, name: "derive#{id.value}"})
 }
 
 fn jet_codegen_synthesized_trait_associated_types(name: String) -> [MIRAssociatedTypeDecl] Never! {
@@ -3144,10 +3152,13 @@ fn jet_codegen_ensure_referenced_traits(traits: &[MIRTraitDef], impls: [MIRImplD
     if traits.len() == 0 && impls.len() == 0 && functions.len() > 0 -> module_id = functions[0].module_id
     if traits.len() == 0 && impls.len() == 0 && functions.len() == 0 && nested_functions.len() > 0 -> module_id = nested_functions[0].module_id
     loop reference in needed {
-        name_option := jet_codegen_compiler_owned_trait_name_for_id(reference.id)
-        if name_option == None -> panic("only registered compiler-owned traits may be synthesized without declarations")
-        name :: name_option ?? panic("compiler-owned trait identity disappeared")
-        if reference.name != name -> panic("synthesized trait name disagrees with its canonical identity")
+        // Compiler-owned traits keep their canonical name; any other
+        // reference keeps its own (Rust ensure_referenced_traits).
+        name := reference.name
+        if jet_codegen_compiler_owned_trait_name_for_id(reference.id) == .Val(owned) {
+            if reference.name != owned -> panic("synthesized trait name disagrees with its canonical identity")
+            name = owned
+        }
         &traits.push(MIRTraitDef{
             id: reference.id,
             module_id: module_id,
