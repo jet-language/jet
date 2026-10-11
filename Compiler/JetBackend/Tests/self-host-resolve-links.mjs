@@ -10,7 +10,7 @@ const dev = resolve(devArg), compiler = resolve(compilerArg);
 const read = (repo, path) => readFileSync(join(repo, path), "utf8");
 const routes = new Set([...read(dev, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet").matchAll(/LowerRoute\{symbol: "([^"]+)"/g)].map((match) => match[1]));
 const registry = new Map();
-for (const match of read(dev, "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet").matchAll(/core_call_(?:new|web)\("([^"]+)", "([^"]+)", "([^"]*)"/g)) registry.set(`${match[1]}.${match[2]}`, match[3]);
+for (const match of read(dev, "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet").matchAll(/CoreCallRecord\{module_name: "([^"]+)", member: "([^"]+)", [^\n]*?symbol: CoreCallSymbol\.(?:Prelude|Rust)\{name: "([^"]*)"\}/g)) registry.set(`${match[1]}.${match[2]}`, match[3]);
 const byQualified = new Map(), bySymbol = new Map(), texts = new Map();
 function gather(directory) {
   for (const entry of readdirSync(join(dev, directory), { withFileTypes: true })) {

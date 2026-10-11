@@ -307,12 +307,13 @@ function writeEffects(source, facts) {
   writeFileSync(file(BUILD_EFFECTS_PATH), buildEffects);
 }
 
-// Collection operation rows: one `collection_op(...)` or `collection_law(...)`
-// call per line inside the marked Jet tables. The Jet compiler type-checks the
-// rows; this projection only checks table-level laws (unique receiver/method
-// keys and known laws) and renders the reference tables.
-const OPERATION_ROW = /collection_op\(CollectionReceivers\.(\w+), "(\w+)", (\d+), (\d+), CollectionAccess\.(\w+), \[CollectionArg\]\{([^}]*)\}, CollectionResult\.(\w+), (.+), CollectionLaw\.(\w+), "([^"]*)"\)/;
-const LAW_ROW = /collection_law\(CollectionLaw\.(\w+), "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)"\)/;
+// Collection operation rows: one `CollectionOperationRow{...}` or
+// `CollectionLawFacts{...}` literal per line inside the marked Jet tables. The
+// Jet compiler type-checks the rows; this projection only checks table-level
+// laws (unique receiver/method keys and known laws) and renders the reference
+// tables.
+const OPERATION_ROW = /^CollectionOperationRow\{receivers: CollectionReceivers\.(\w+), name: "(\w+)", minimum_arity: (\d+), maximum_arity: (\d+), access: CollectionAccess\.(\w+), args: \[CollectionArg\]\{([^}]*)\}, result: CollectionResult\.(\w+), op: (.+), law: CollectionLaw\.(\w+), empty: "([^"]*)", status: CollectionStatus\.(\w+)\},?$/;
+const LAW_ROW = /^CollectionLawFacts\{law: CollectionLaw\.(\w+), timing: "([^"]*)", result: "([^"]*)", callbacks: "([^"]*)", stop: "([^"]*)", failure: "([^"]*)", buffering: "([^"]*)"\},?$/;
 const RECEIVER_TEXT = {
   List: "`[T]`", Iter: "`Iter<T>`", View: "`View<T>`", Sequence: "`[T]`, `Iter<T>`",
   Map: "`[K:V]`", Set: "`Set<T>`", Rank: "`Rank<T>`", Bits: "`Bits`", Tally: "`Tally<T>`",
@@ -337,7 +338,7 @@ const STATUS_TEXT = { Current: "current", SourceOnly: "source-only", Proposed: "
 
 function markedLines(source, begin, end) {
   const text = readSection(source, begin, end, OPERATIONS_SOURCE_PATH);
-  return text.split(/\r?\n/).slice(1, -1).map((line) => line.trim()).filter((line) => line.startsWith("collection_"));
+  return text.split(/\r?\n/).slice(1, -1).map((line) => line.trim()).filter((line) => line.startsWith("Collection"));
 }
 
 function parseOperationContract(source) {
@@ -352,8 +353,8 @@ function parseOperationContract(source) {
   const keys = new Set();
   for (const line of markedLines(source, "// BEGIN COLLECTION OPERATIONS", "// END COLLECTION OPERATIONS")) {
     const match = OPERATION_ROW.exec(line) ?? fail(`${OPERATIONS_SOURCE_PATH}: unreadable operation row: ${line}`);
-    const [, receivers, name, minimum, maximum, access, args, , , law, empty] = match;
-    const status = line.startsWith("collection_op_source_only(") ? "SourceOnly" : "Current";
+    const [, receivers, name, minimum, maximum, access, args, , , law, empty, status] = match;
+    if (!(status in STATUS_TEXT)) fail(`${OPERATIONS_SOURCE_PATH}: ${receivers}.${name} has unknown status ${status}`);
     if (!laws.has(law)) fail(`${OPERATIONS_SOURCE_PATH}: ${receivers}.${name} names unknown law ${law}`);
     const families = receivers === "Sequence" ? ["List", "Iter"] : [receivers];
     for (const family of families) {

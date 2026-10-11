@@ -12,11 +12,11 @@ const routeText = read("Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet");
 const routes = new Map([...routeText.matchAll(/LowerRoute\{symbol: "([^"]+)", export: "([^"]+)"/g)].map((match) => [match[1], match[2]]));
 const registry = read("Compiler/JetFoundation/Source/Registry/CoreCallRows.jet");
 const core = new Map();
-for (const match of registry.matchAll(/core_call_(?:new|web)\("([^"]+)", "([^"]+)", "([^"]*)"/g)) core.set(`${match[1]}.${match[2]}`, match[3]);
+for (const match of registry.matchAll(/CoreCallRecord\{module_name: "([^"]+)", member: "([^"]+)", [^\n]*?symbol: CoreCallSymbol\.(?:Prelude|Rust)\{name: "([^"]*)"\}/g)) core.set(`${match[1]}.${match[2]}`, match[3]);
 const receiverCandidates = new Map();
-for (const match of registry.matchAll(/core_call_receiver_with_symbol\(\[String\]\{([^}]*)\}, "([^"]+)", "([^"]*)"/g)) {
-  if (!receiverCandidates.has(match[2])) receiverCandidates.set(match[2], []);
-  receiverCandidates.get(match[2]).push({ receiver: match[1].replace(/"/g, ""), symbol: match[3] });
+for (const match of registry.matchAll(/CoreCallRecord\{module_name: "", member: "([^"]+)", receiver_types: \[String\]\{((?:"[^"]*"(?:, )?)*)\}, [^\n]*?symbol: CoreCallSymbol\.(?:Prelude|Rust)\{name: "([^"]+)"\}/g)) {
+  if (!receiverCandidates.has(match[1])) receiverCandidates.set(match[1], []);
+  receiverCandidates.get(match[1]).push({ receiver: match[2].replace(/"/g, ""), symbol: match[3] });
 }
 import { codeOnly } from "./self-host-source.mjs";
 const rows = new Map();

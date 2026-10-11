@@ -14,7 +14,8 @@ JETLIB_ABI_IDENTITY :: prep { "jet.library.abi.v2;call=extern-c;scalar=homogeneo
 JETLIB_MAX_HEADER_ITEMS :: prep { 4096 }
 JETLIB_MAX_HEADER_FIELD_BYTES :: prep { 1048576 }
 JETLIB_MAX_EXPORT_PARAMS :: prep { 4096 }
-JETLIB_NUL :: prep { String.from_bytes([U8]{0}) ?? panic("NUL is valid UTF-8") }
+// Jet text has no NUL escape; the hostless fold lands this byte spelling.
+JETLIB_NUL :: prep { String.from_bytes([U8]{U8{0}}) ?? "" }
 
 // Actual compiler/host facts are passed by the existing identity provider.
 struct JetLibIdentity {

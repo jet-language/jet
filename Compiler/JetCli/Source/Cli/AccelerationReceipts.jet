@@ -2,7 +2,7 @@
 // Files are read through the one held ReceiptStore/RecordIndex; index rows do
 // not authenticate arbitrary payload paths and never stand in for measurements.
 use jet_driver.[JetDriverCompileRequest, JetDriverCompileMode, JetDriverOptimizationQueryResult]
-use jet_foundation.[CanonicalJSON, CanonicalJSONField, CanonicalJSONError, canonical_json_error, canonical_json_parse, JET_COMPILER_TARGET_USIZE_MAX, MIR_ACCELERATION_RECEIPT_TYPE_NAME, MIR_ACCELERATION_RECEIPT_SECTION_PREFIX, MIR_ACCELERATION_RECEIPT_SCHEMA_DIGEST, mir_acceleration_json_object, mir_acceleration_json_field, mir_acceleration_json_string, mir_acceleration_json_u64, mir_acceleration_json_usize, mir_acceleration_decision_read]
+use jet_foundation.[CanonicalJSON, CanonicalJSONField, CanonicalJSONError, canonical_json_error, canonical_json_parse, jet_compiler_target_usize_max, MIR_ACCELERATION_RECEIPT_TYPE_NAME, MIR_ACCELERATION_RECEIPT_SECTION_PREFIX, MIR_ACCELERATION_RECEIPT_SCHEMA_DIGEST, mir_acceleration_json_object, mir_acceleration_json_field, mir_acceleration_json_string, mir_acceleration_json_u64, mir_acceleration_json_usize, mir_acceleration_decision_read]
 
 fn jet_cli_acceleration_receipt_rows(receipt: JetCLIReceipt, record_sequence: U64, usize_max: U64) -> [JetCLIAccelerationRuntime] CanonicalJSONError! {
     rows := [JetCLIAccelerationRuntime]{}
@@ -195,5 +195,5 @@ fn jet_cli_acceleration_runtime_rows(profile: String, file: String, scope: Strin
             .Err(_) -> {}
         }
     }
-    Ok(jet_cli_acceleration_select_receipt(&cache, for_file, identities, entries, current, JET_COMPILER_TARGET_USIZE_MAX))
+    Ok(jet_cli_acceleration_select_receipt(&cache, for_file, identities, entries, current, jet_compiler_target_usize_max()))
 }

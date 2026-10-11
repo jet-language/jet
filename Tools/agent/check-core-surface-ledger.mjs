@@ -1414,17 +1414,17 @@ function readRustCall(source, start, context) {
   return { name: match[1], args: args, end: close + 1 };
 }
 
-function rustStringExpression(expression, context) {
+function rustStringValue(expression, context) {
   const value = expression.trim();
   const literal = value.match(/^"((?:\\.|[^"\\])*)"$/);
-  if (literal) return jetStringExpression(decodeRustStringContent(literal[1], context));
+  if (literal) return decodeRustStringContent(literal[1], context);
   const symbolic = value.match(/^(?:(?:crate::)?Syntax::|super::)?([A-Z][A-Z0-9_]*)$/);
   if (!symbolic) throw new Error("unsupported Rust string value in " + context + ": " + value);
   const constants = syntaxConstants();
   if (!constants.has(symbolic[1])) {
     throw new Error("unknown Rust string constant `" + value + "` in " + context);
   }
-  return jetStringExpression(constants.get(symbolic[1]));
+  return constants.get(symbolic[1]);
 }
 
 function rustSliceItems(expression, context) {
@@ -1435,36 +1435,41 @@ function rustSliceItems(expression, context) {
   });
 }
 
-function translateRustBool(expression, context) {
+function rustBoolValue(expression, context) {
   const value = expression.trim();
   if (value !== "true" && value !== "false") {
     throw new Error("unsupported Rust boolean in " + context + ": " + value);
   }
-  return value;
+  return value === "true";
 }
 
-function translateRustInteger(expression, context) {
+function rustIntegerValue(expression, context) {
   const value = expression.trim().replace(/_/g, "");
   const match = value.match(/^([0-9]+)(?:usize)?$/);
   if (!match || !Number.isSafeInteger(Number(match[1]))) {
     throw new Error("unsupported Rust integer in " + context + ": " + value);
   }
-  return String(Number(match[1]));
+  return Number(match[1]);
 }
 
-function translateBoolSlice(expression, context) {
-  return "[Bool]{" + rustSliceItems(expression, context).map(function (value) {
-    return translateRustBool(value, context);
-  }).join(", ") + "}";
+function rustBoolSliceValue(expression, context) {
+  return rustSliceItems(expression, context).map(function (value) {
+    return rustBoolValue(value, context);
+  });
 }
 
-function translateStringSlice(expression, context) {
-  return "[String]{" + rustSliceItems(expression, context).map(function (value) {
-    return rustStringExpression(value, context);
-  }).join(", ") + "}";
+function rustStringSliceValue(expression, context) {
+  return rustSliceItems(expression, context).map(function (value) {
+    return rustStringValue(value, context);
+  });
 }
 
-function translatePureRoute(expression, context) {
+// Jet CoreCalls.jet CORE_CALL_COVERAGE_* bits.
+const CORE_CALL_COVERAGE = {
+  SEMA: 1, TIR_SUBSET: 2, TIR_EVAL: 4, AOT: 8, INTERPRETER: 16, COMPTIME: 32, KNOWN: 63,
+};
+
+function corePureRouteValue(expression, context) {
   const match = expression.trim().match(/^CoreCallPureRoute::([A-Za-z][A-Za-z0-9_]*)$/);
   const variants = new Set([
     "None", "Mime", "Email", "EncodingXml", "Time", "Math", "Date",
@@ -1480,10 +1485,10 @@ function translatePureRoute(expression, context) {
     None: "NoPureRoute", Mime: "MIME", EncodingXml: "EncodingXML", SketchHll: "SketchHLL",
     SketchCms: "SketchCMS", Ui: "UI", Io: "IO",
   };
-  return "CoreCallPureRoute." + (jetSpelling[match[1]] ?? match[1]);
+  return jetSpelling[match[1]] ?? match[1];
 }
 
-function translateInterpreterRoute(expression, context) {
+function coreInterpreterRouteValue(expression, context) {
   const value = expression.trim();
   if (value.startsWith("CoreCallInterpreterRoute::Pure(")) {
     const pure = readRustCall(value, 0, context);
@@ -1491,120 +1496,122 @@ function translateInterpreterRoute(expression, context) {
         pure.end !== value.length || pure.args.length !== 1) {
       throw new Error("unsupported CoreCallInterpreterRoute in " + context + ": " + value);
     }
-    return "CoreCallInterpreterRoute.Pure(" +
-      translatePureRoute(pure.args[0], context) + ")";
+    return { kind: "Pure", route: corePureRouteValue(pure.args[0], context) };
   }
   const match = value.match(/^CoreCallInterpreterRoute::(None|Ambient|TypedIntrinsic)$/);
   if (!match) {
     throw new Error("unsupported CoreCallInterpreterRoute in " + context + ": " + value);
   }
-  const variant = match[1] === "None" ? "NoRoute" : match[1];
-  return "CoreCallInterpreterRoute." + variant;
+  return { kind: match[1] === "None" ? "NoRoute" : match[1] };
 }
 
-function translateCoreCoverage(expression, context) {
+function coreCoverageValue(expression, context) {
   const value = expression.trim();
   const call = readRustCall(value, 0, context);
   if (call.name !== "CoreCallCoverage::from_bits" || call.end !== value.length ||
       call.args.length !== 1) {
     throw new Error("unsupported CoreCallCoverage in " + context + ": " + value);
   }
-  const bits = call.args[0].split("|").map(function (raw) {
+  return call.args[0].split("|").reduce(function (bits, raw) {
     const part = raw.trim();
-    const constant = part.match(
-      /^CoreCallCoverage::(SEMA|TIR_SUBSET|TIR_EVAL|AOT|INTERPRETER|COMPTIME|JIT|KNOWN)$/,
-    );
-    if (constant) return "CORE_CALL_COVERAGE_" + constant[1];
-    return translateRustInteger(part, context);
-  });
-  return "CoreCallCoverage{bits: " + bits.slice(1).reduce((left, right) => "(" + left + ").bit_or(" + right + ")", bits[0]) + "}";
+    const constant = part.match(/^CoreCallCoverage::([A-Z_]+)$/);
+    if (constant) {
+      if (!Object.hasOwn(CORE_CALL_COVERAGE, constant[1])) {
+        throw new Error("CoreCallCoverage::" + constant[1] + " has no Jet coverage bit in " + context);
+      }
+      return bits | CORE_CALL_COVERAGE[constant[1]];
+    }
+    return bits | rustIntegerValue(part, context);
+  }, 0);
 }
 
-function translateResourceAccess(expression, context) {
+function coreResourceAccessValue(expression, context) {
   const call = readRustCall(expression.trim(), 0, context);
   if (call.end !== expression.trim().length || call.args.length !== 1) {
     throw new Error("unsupported CoreCallResourceAccess in " + context);
   }
   const mode = {
-    "CoreCallResourceAccess::read": "read",
-    "CoreCallResourceAccess::write": "write",
-    "CoreCallResourceAccess::move_": "move",
+    "CoreCallResourceAccess::read": "Read",
+    "CoreCallResourceAccess::write": "Write",
+    "CoreCallResourceAccess::move_": "Move",
   }[call.name];
   if (!mode) throw new Error("unsupported CoreCallResourceAccess in " + context + ": " + call.name);
-  return "core_call_resource_access_" + mode + "(" +
-    translateRustInteger(call.args[0], context) + ")";
+  return { argument: rustIntegerValue(call.args[0], context), mode: mode };
 }
 
-function translateCompletion(expression, context) {
+function coreCompletionValue(expression, context) {
   const call = readRustCall(expression.trim(), 0, context);
   if (call.end !== expression.trim().length) {
     throw new Error("unsupported CoreCallCompletion in " + context);
   }
   if (call.name === "CoreCallCompletion::synchronous" && call.args.length === 1) {
-    return "core_call_completion_synchronous(" +
-      rustStringExpression(call.args[0], context) + ")";
+    return { kind: "Synchronous", token: null, provider: rustStringValue(call.args[0], context) };
   }
   if (call.name === "CoreCallCompletion::pending" && call.args.length === 2) {
-    return "core_call_completion_pending(" +
-      rustStringExpression(call.args[0], context) + ", " +
-      rustStringExpression(call.args[1], context) + ")";
+    return {
+      kind: "Pending",
+      token: rustStringValue(call.args[0], context),
+      provider: rustStringValue(call.args[1], context),
+    };
   }
   if (call.name === "CoreCallCompletion::event" && call.args.length === 2) {
-    return "core_call_completion_event(" +
-      rustStringExpression(call.args[0], context) + ", " +
-      rustStringExpression(call.args[1], context) + ")";
+    return {
+      kind: "Event",
+      token: rustStringValue(call.args[0], context),
+      provider: rustStringValue(call.args[1], context),
+    };
   }
   throw new Error("unsupported CoreCallCompletion in " + context + ": " + call.name);
 }
 
-function translateCapability(expression, context) {
+function coreCapabilityValue(kind, provider, fallback, failure) {
+  return { kind: kind, provider: provider, fallback: fallback, failure: failure };
+}
+
+function coreCapabilityFromRust(expression, context) {
   const call = readRustCall(expression.trim(), 0, context);
   if (call.end !== expression.trim().length) {
     throw new Error("unsupported CoreCapabilityContract in " + context);
   }
+  const strings = call.args.map(function (value) { return rustStringValue(value, context); });
   if (call.name === "CoreCapabilityContract::pure" && call.args.length === 0) {
-    return "core_capability_pure()";
+    return coreCapabilityValue("Pure", null, null, null);
   }
   if (call.name === "CoreCapabilityContract::native_required" && call.args.length === 2) {
-    return "core_capability_native_required(" +
-      rustStringExpression(call.args[0], context) + ", " +
-      rustStringExpression(call.args[1], context) + ")";
+    return coreCapabilityValue("NativeRequired", strings[0], null, strings[1]);
   }
   if (call.name === "CoreCapabilityContract::portable_fallback" && call.args.length === 3) {
-    return "core_capability_portable_fallback(" +
-      call.args.map(function (value) { return rustStringExpression(value, context); }).join(", ") +
-      ")";
+    return coreCapabilityValue("PortableFallback", strings[0], strings[1], strings[2]);
   }
   if (call.name === "CoreCapabilityContract::explicit_simulation" && call.args.length === 2) {
-    return "core_capability_explicit_simulation(" +
-      call.args.map(function (value) { return rustStringExpression(value, context); }).join(", ") +
-      ")";
+    return coreCapabilityValue("ExplicitSimulation", strings[0], null, strings[1]);
   }
   throw new Error("unsupported CoreCapabilityContract in " + context + ": " + call.name);
 }
 
-function translateOptionalString(expression, context) {
+function rustOptionalStringValue(expression, context) {
   const value = expression.trim();
-  if (value === "None") return "None";
+  if (value === "None") return null;
   const call = readRustCall(value, 0, context);
   if (call.name !== "Some" || call.end !== value.length || call.args.length !== 1) {
     throw new Error("unsupported optional Rust string in " + context + ": " + value);
   }
-  return "Val(" + rustStringExpression(call.args[0], context) + ")";
+  return rustStringValue(call.args[0], context);
 }
 
-function translateMarker(expression, context) {
+function coreMarkerValue(expression, context) {
   const value = expression.trim();
   const call = readRustCall(value, 0, context);
   if (call.name !== "CoreMarkerApplication::deprecated" ||
       call.end !== value.length || call.args.length !== 4) {
     throw new Error("unsupported CoreMarkerApplication in " + context);
   }
-  return "core_marker_deprecated(" +
-    rustStringExpression(call.args[0], context) + ", " +
-    rustStringExpression(call.args[1], context) + ", " +
-    rustStringExpression(call.args[2], context) + ", " +
-    translateOptionalString(call.args[3], context) + ")";
+  return {
+    member: rustStringValue(call.args[0], context),
+    since: rustStringValue(call.args[1], context),
+    replacement: rustStringValue(call.args[2], context),
+    removed_in: rustOptionalStringValue(call.args[3], context),
+  };
 }
 
 function expectRustArgumentCount(name, args, count, context) {
@@ -1613,121 +1620,370 @@ function expectRustArgumentCount(name, args, count, context) {
   }
 }
 
-function translateCoreCallConstructor(name, args, context) {
+// The per-call effect, effect-leaf and sink facts of a plain Core call, keyed
+// by module and member. The Rust reference is jet_foundation::Syntax::core_calls
+// (`CoreCallRecord::new`); CORE_CALLS lands these facts as literal rows so the
+// table needs no compile-time execution host.
+function coreCallOneOf(value, choices) {
+  return choices.includes(value);
+}
+
+function coreCallEffectFor(moduleName, member) {
+  if (moduleName === "core.files" && member === "__temp_path_sample") return "Time";
+  if (moduleName === "core.files" && member === "__temp_directory") return "Env";
+  if (moduleName === "core.files" && coreCallOneOf(member, ["__host_path_is_absolute", "__host_path_join", "__fault_should_fail", "__os_family", "__path_windows", "__atomic_pid", "__scope_roots", "__reader_path"])) return null;
+  if (moduleName === "core.log" && member === "__metric_publish") return null;
+  if (moduleName === "core.devtools" && member === "__publish_payload") return null;
+  if (moduleName === "core.web" && coreCallOneOf(member, ["__openapi_inputs", "__openapi_render", "__contract_stop", "__live_stats_snapshot"])) return null;
+  if (moduleName === "core.web.store" && coreCallOneOf(member, ["__transact", "__facts_snapshot"])) return null;
+  if (moduleName === "core.web.table" && coreCallOneOf(member, ["__columns", "__replace_columns", "__state", "__set_state", "__alias",
+    "__has_loader", "__invoke_loader", "__generation", "__query_facts", "__state_equal", "__page_facts",
+    "__commit_keys", "__loading_store", "__error_store", "__page_store",
+    "__state_store", "__has_key", "__page_accessor_keys", "__page_keys", "__page_replace_keys",
+    "__column_info", "__cell", "__rows", "__row_key", "__make_page"])) return null;
+  if (moduleName === "core.mod" && coreCallOneOf(member, ["__supported", "__os",
+    "__parse_context", "__check_context", "__context_name", "__context_digest", "__exports_count", "__export_info", "__finish_context"])) return null;
+  if (moduleName === "core.mod" && coreCallOneOf(member, ["__read_context", "__stage_context"])) return "FS";
+  if (moduleName === "core.process" && member === "__with_directory_raw") return "FS";
+  if (moduleName === "core.time" && member === "__zone_env") return "Env";
+  if (moduleName === "core.time" && coreCallOneOf(member, ["zone", "parse_zoned", "__zone_file_bytes"])) return "FS";
+  if ((moduleName === "core.time" && coreCallOneOf(member, [
+    "clock", "time", "local_time", "parse_time", "new", "parse", "from_timestamp",
+    "period", "period_days", "period_months", "period_years", "parse_rfc3339",
+    "from_unix_ms", "from_unix_seconds", "from_unix_microseconds", "from_unix_nanoseconds",
+    "parse_iso_week_date", "from_iso_week", "datetime", "utc",
+    "zoned", "zoned_local", "days_in_month", "is_leap_year",
+    "__embedded_zone_bytes", "__clock_mono_ns",
+  ])) || (moduleName === "core.math.random" && member === "rng")) return null;
+  if (moduleName === "core.time" && coreCallOneOf(member, ["now", "now_utc", "today", "instant", "sleep", "sleep_until", "start"])) return "Time";
+  if (moduleName === "core.rt" && member === "callback") return "Time";
+  if (moduleName === "core.math" && member === "random") return "Rand";
+  if ((moduleName === "core.math.random" && coreCallOneOf(member, [
+    "int", "float", "float_range", "bool", "normal", "exponential", "pick", "weighted_pick",
+    "sample", "shuffle", "seed", "split", "bytes",
+  ])) || (moduleName === "core.crypto.random" && member === "bytes")) return "Rand";
+  if (member === "style_force" && moduleName === "core.term") return null;
+  if (moduleName === "core.net" && member === "gethostname") return "Env";
+  if (moduleName === "core.http.server" && member === "__response_parts") return null;
+  if (moduleName === "core.net" && coreCallOneOf(member, [
+    "ip_addr", "ip_to_string", "ip_is_ipv4", "ip", "ipv4", "ipv6", "parse_ip", "is_ipv4",
+    "__ip_from_bytes", "__ip_bytes", "__ip_is_v4", "__socket_from_parts",
+    "__socket_ip", "__socket_port", "__socket_scope", "__udp_packet_addr",
+    "is_ipv6", "socket_addr_parse", "socket_host", "socket_port", "socket_to_string",
+    "ready_readable", "ready_writable", "error_operation", "error_address", "error_name",
+    "error_message", "error_os_code", "dns_srv_target", "dns_srv_port", "dns_srv_priority",
+    "dns_srv_weight", "udp_packet_data", "udp_packet_addr", "udp_packet_bytes",
+    "udp_packet_original_len", "udp_packet_truncated",
+  ])) return null;
+  if (moduleName === "core.watcher") {
+    if (member === "files" || member === "__files") return "FS";
+    if (member === "process_pid" || member === "__process_pid") return "Exec";
+    if (member === "port" || member === "__port") return "Net";
+    return null;
+  }
+  if (moduleName === "core.web.browser") {
+    if (coreCallOneOf(member, ["profile", "timeout", "__path_join", "__html_path",
+      "__report_options", "__report_json", "__report_html", "__report_text", "__write_report_bytes", "__server_stop"])) return null;
+    if (coreCallOneOf(member, ["locked", "__read_text", "__is_file", "__file_size", "__modified_ms"])) return "FS";
+    if (member === "config_from_env") return "Env";
+    return "Net";
+  }
+  if (moduleName === "core.encoding" && coreCallOneOf(member, ["__read_byte", "__read_into", "__write_bytes", "__write_text", "__flush"])) return "IO";
+  // Encoding readers and writers.
+  if ((coreCallOneOf(moduleName, [
+    "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor",
+  ]) && coreCallOneOf(member, ["reader", "writer"])) || (moduleName === "core.encoding.csv" && member === "query")) return "FS";
+  if (moduleName === "core.compute" && member !== "device_cpu") return "GPU";
+  if (moduleName === "core.data" && member === "__host_path_is_file") return "FS";
+  if (moduleName === "core.files") return "FS";
+  if (moduleName === "core.service" && member === "state_store") return "FS";
+  if (moduleName === "core.net" || moduleName === "core.net.tls" || moduleName === "core.http.client" || moduleName === "core.http.server" || moduleName === "core.http.middleware" || (moduleName === "core.http" && coreCallOneOf(member, ["serve", "get"]))) return "Net";
+  if (moduleName === "core.game.raylib") return "GPU";
+  if (moduleName === "core.time") return "Time";
+  // #4652: `core.math.random()` draws from the same ambient stream.
+  if (moduleName === "core.math.random" || moduleName === "core.crypto.random" || (moduleName === "core.math" && member === "random")) return "Rand";
+  // Key generation draws from the OS generator, like crypto.random.bytes.
+  if (moduleName === "core.crypto" && coreCallOneOf(member, ["__x25519_generate", "__signing_generate"])) return "Rand";
+  if (moduleName === "core.perf" && coreCallOneOf(member, ["__read_bits", "__write_bits", "fidelity", "override_fidelity", "reset_fidelity"])) return "Env";
+  if (moduleName === "core.sys" && member === "success") return null;
+  if (moduleName === "core.sys") return "Env";
+  if (moduleName === "core.process" && member === "status_ok") return null;
+  if (moduleName === "core.process") return "Exec";
+  if (moduleName === "core.term" && coreCallOneOf(member, [
+    "__stdio_fault", "__stdout_terminal", "__stderr_terminal",
+  ])) return null;
+  if (moduleName === "core.term") return "IO";
+  if (moduleName === "core.db" || moduleName === "core.jobs") return "DB";
+  if (moduleName === "core.auth" && coreCallOneOf(member, [
+    "register_user", "password_login", "session_validate", "magic_link_issue", "magic_link_consume",
+    "oauth_begin", "oauth_finish", "__store_load", "__store_replace",
+  ])) return "DB";
+  if (moduleName === "core.plugin" || moduleName === "core.mod") return "Exec";
+  if (moduleName === "core.log") return "Log";
+  if (moduleName === "core.ui" || moduleName === "core.web" || moduleName === "core.web.storage.local" || moduleName === "core.web.storage.session") return "Browser";
+  if (moduleName === "core.crypto.vault" && coreCallOneOf(member, [
+    "get", "current", "versions", "load", "status", "prepare_generate", "prepare_store",
+    "prepare_rotate", "prepare_retire", "prepare_revoke", "authorize_write", "commit_generate",
+    "commit_store", "commit_rotate", "commit_retire", "commit_revoke", "export_to_recipients",
+    "export_to_passphrase", "prepare_import_wrapped", "authorize_wrapped_import", "commit_import_wrapped",
+    "prepare_import_signing", "prepare_import_x25519", "commit_import_signing", "commit_import_x25519",
+  ])) return "Secret";
+  return null;
+}
+
+function coreCallEffectLeafFor(moduleName, member) {
+  if ((moduleName === "core.net" && member === "gethostname") || (moduleName === "core.sys" && member === "hostname")) return "FS.Read";
+  if (moduleName === "core.process" && member === "__with_directory_raw") return "FS.Read";
+  if (moduleName === "core.service" && member === "state_store") return "FS.Read";
+  if (moduleName === "core.time" && coreCallOneOf(member, ["zone", "parse_zoned", "__zone_file_bytes"])) return "FS.Read";
+  if (moduleName === "core.time" && coreCallOneOf(member, ["sleep", "sleep_until"])) return "Time.Wait";
+  if (moduleName === "core.tasks" && coreCallOneOf(member, ["yield_now", "__yield_now"])) return "Time.Wait";
+  if (moduleName === "core.files" && member === "scope") return "FS.Read";
+  // A file operation names the one leaf it needs, so `--allow=FS.Read`
+  // covers a read and never a write. `copy` and `copy_dir` both read and
+  // write, so they keep the bare `FS` root.
+  if (moduleName === "core.files" && coreCallOneOf(member, [
+    "read", "read_bytes", "read_at", "read_link", "map", "open", "exists", "is_dir", "is_fifo", "is_socket",
+    "stat", "lstat", "list_dir", "walk", "walk_parallel", "walk_files", "glob", "canonicalize", "absolute",
+    "__read_bytes_os", "__read_at_os", "__read_link_os", "__scope_read_at", "__reader_line_bytes",
+    // #3593 provider leaves behind Core/files/files.jet.
+    "__open_reader", "__open_directory", "__close_directory", "__list_directory", "__stat_at", "__path_kind", "__read_link_at",
+    "__xattr_names", "__xattr_get", "__reader_stat", "__writer_stat", "__metadata_directory", "__directory_fd",
+    "__map_raw", "__list_dir_raw", "__stat_mode_raw", "__canonicalize_raw", "__walk_parallel_raw",
+    "__entries_context", "__entries_close", "__entries_release", "__entries_read_dir",
+    "__entries_next", "__entries_file_type", "__entries_before", "__entries_shown",
+  ])) return "FS.Read";
+  if (moduleName === "core.files" && coreCallOneOf(member, [
+    "write", "write_bytes", "write_at", "write_atomic", "append_all", "create", "append", "fsync", "remove",
+    "remove_dir", "remove_all", "create_dir", "create_dir_all", "rename", "symlink", "hard_link", "chown",
+    "__write_bytes_os", "__append_bytes_os", "__create_dirs_os", "__write_at_os", "__writer_refusal",
+    "__atomic_reserve", "__atomic_finish", "__atomic_remove", "__atomic_rename", "__atomic_sync_parent", "__atomic_close",
+    "jet_files_link_reader_at_raw",
+    "set_mode", "mkdtemp", "mktemp", "temp_dir", "temp_file", "lock", "__open_writer", "__create_directory",
+    "__fsync_directory", "__rename_at", "__remove_at", "__xattr_set", "__writer_set_mode", "__flock",
+    "__remove_raw", "__remove_dir_raw", "__remove_all_raw", "__hard_link_raw", "__fsync_raw", "__chown_raw",
+    "__set_mode_raw", "__symlink_directory_raw", "__symlink_raw", "__mkdtemp_raw", "__temp_dir_raw", "__temp_file_raw",
+    "try_lock", "__lock_open", "__lock_try", "__lock_wait", "__lock_close", "__lock_fd_identity", "__lock_path_identity", "__lock_owner",
+    "__entries_mkdir", "__entries_copy",
+  ])) return "FS.Write";
+  // D-AUTH-AMBIENT1=A: reading the program's own arguments is a leaf of
+  // `Exec` (Syntax::EFFECT_LEAF_EXEC_ARGS); spawning a process keeps the
+  // ungranted `Exec` root.
+  if (moduleName === "core.process" && coreCallOneOf(member, ["argv", "args"])) return rustStringValue("EFFECT_LEAF_EXEC_ARGS", "core.process effect leaf");
+  if (moduleName === "core.term" && coreCallOneOf(member, [
+    "confirm", "choose", "input_secret", "read_all_input", "readline", "read_until", "take", "binread",
+    "binwrite", "progress", "read_key", "__terminal8_line", "__terminal8_write_stdout", "__terminal8_write_stderr", "__terminal8_mode_enter", "__terminal8_mode_leave", "__terminal8_read_all", "__terminal8_read_until", "__terminal8_key_bytes",
+  ])) return "Time.Wait";
+  if (moduleName === "core.sys" && coreCallOneOf(member, ["wait", "waitpid"])) return "Time.Wait";
+  if (moduleName === "core.process" && coreCallOneOf(member, ["run", "pipeline"])) return "Time.Wait";
+  if (moduleName === "core.net" && coreCallOneOf(member, [
+    "__resolve_ordered",
+    "__tcp_accept", "__tcp_connect", "__tcp_connect_addr", "__tcp_connect_timeout", "__tcp_connect_happy",
+    "__tcp_reply",
+    "__udp_send_to", "__udp_recv_from", "__udp_send_bytes_to", "__udp_receive",
+    "__unix_accept", "__unix_read", "__unix_write_all_bytes",
+    "__unix_connect_host", "__unix_connect_deadline_host",
+    "tcp_accept", "tcp_connect", "tcp_connect_addr", "tcp_connect_timeout", "tcp_connect_happy", "tcp_read",
+    "tcp_write", "tcp_read_bytes", "tcp_read_text", "tcp_write_bytes", "tcp_write_all_bytes", "tcp_write_text",
+    "tcp_ready", "sendfile", "tcp_reply", "udp_send_to", "udp_recv_from", "udp_send_bytes_to", "udp_receive",
+    "unix_accept", "unix_connect", "unix_read", "unix_write", "unix_read_bytes", "unix_write_all_bytes",
+    "dns_a", "dns_aaaa", "dns_a_at", "dns_aaaa_at", "dns_txt", "dns_txt_at", "dns_ptr", "dns_srv",
+    "dns_srv_at", "getservbyname", "getservbyport", "tls_connect", "tls_read", "tls_write", "tls_close",
+    "__dns_a_lookup", "__dns_aaaa_lookup", "__dns_a_at_lookup", "__dns_aaaa_at_lookup",
+    "__dns_txt_lookup", "__dns_txt_at_lookup", "__dns_ptr_lookup", "__dns_srv_lookup", "__dns_srv_at_lookup",
+  ])) return "Time.Wait";
+  // TLS waits.
+  if (moduleName === "core.net.tls" && coreCallOneOf(member, ["client", "read", "read_text", "write", "write_all", "write_text", "close", "__read", "__write", "__write_all", "__client_stream", "__client_deadline", "__client_config_deadline"])) return "Time.Wait";
+  // HTTP waits.
+  if ((moduleName === "core.http.client" && coreCallOneOf(member, ["get", "post", "request", "__get", "__post", "__request", "jet_http_build_resolve", "jet_http_build_get"])) || (moduleName === "core.http" && member === "get") || (moduleName === "core.http.server" && coreCallOneOf(member, ["serve", "serve_once", "serve_once_listener", "__serve_once", "__serve_once_listener", "__serve"]))) return "Time.Wait";
+  // Encoding readers and writers.
+  if ((coreCallOneOf(moduleName, [
+    "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor",
+  ]) && coreCallOneOf(member, ["reader", "writer"])) || (moduleName === "core.encoding.csv" && member === "query")) return "Time.Wait";
+  if (moduleName === "core.db" && coreCallOneOf(member, ["transaction", "__transaction", "migrate", "__migrate"])) return "Time.Wait";
+  if (moduleName === "core.jobs" && coreCallOneOf(member, ["wait", "poll"])) return "Time.Wait";
+  if (moduleName === "core.service" && coreCallOneOf(member, [
+    "send", "send_durable", "receive", "endpoint_send", "endpoint_receive", "workflow_sleep",
+    "workflow_activity_wait", "workflow_all",
+  ])) return "Time.Wait";
+  return null;
+}
+
+function coreCallSinkFor(moduleName, member) {
+  if (moduleName === "core.log") return "Credential";
+  if (moduleName === "core.term" && coreCallOneOf(member, ["print", "eprint"])) return "Credential";
+  // Encoding serializers.
+  if ((coreCallOneOf(moduleName, [
+    "core.encoding.json", "core.encoding.csv", "core.encoding.toml", "core.encoding.yaml", "core.encoding.cbor", "core.encoding.xml",
+  ]) && coreCallOneOf(member, ["to_string", "to_string_pretty", "to_bytes", "to_bytes_canonical"])) || (moduleName === "core.encoding.jsonl" && member === "to_string")) return "Credential";
+  return null;
+}
+
+function coreInterpreterRouteIsExecutable(route) {
+  if (route.kind === "NoRoute") return false;
+  if (route.kind === "Pure") return route.route !== "NoPureRoute";
+  return true;
+}
+
+function coreCallRecordNew(moduleName, member, symbol, prelude, borrowMask) {
+  const effectKind = coreCallEffectFor(moduleName, member);
+  const route = { kind: effectKind === null ? "TypedIntrinsic" : "NoRoute" };
+  return {
+    module_name: moduleName,
+    member: member,
+    receiver_types: [],
+    signature: { arity: borrowMask.length, max_arity: borrowMask.length, borrow_mask: borrowMask },
+    frame_accesses: [],
+    frame_completion: null,
+    effect_kind: effectKind,
+    capability: effectKind !== null ?
+      coreCapabilityValue("NativeRequired", moduleName, null, "core.capability.unavailable") :
+      coreCapabilityValue("Pure", null, null, null),
+    effect_leaf: coreCallEffectLeafFor(moduleName, member),
+    sink_class: coreCallSinkFor(moduleName, member),
+    pure_route: "NoPureRoute",
+    interpreter_route: route,
+    symbol: { kind: prelude ? "Prelude" : "Rust", name: symbol },
+    source_target: null,
+    coverage: coreInterpreterRouteIsExecutable(route) ?
+      CORE_CALL_COVERAGE.KNOWN : CORE_CALL_COVERAGE.KNOWN - CORE_CALL_COVERAGE.INTERPRETER,
+    aot_direct: true,
+    native_int_result: false,
+    ui_capabilities: [],
+    marker: null,
+  };
+}
+
+function coreCallRecordReceiver(receiverTypes, member, borrowMask) {
+  return {
+    module_name: "",
+    member: member,
+    receiver_types: receiverTypes,
+    signature: { arity: borrowMask.length, max_arity: borrowMask.length, borrow_mask: borrowMask },
+    frame_accesses: [],
+    frame_completion: null,
+    effect_kind: null,
+    capability: coreCapabilityValue("Pure", null, null, null),
+    effect_leaf: null,
+    sink_class: null,
+    pure_route: "NoPureRoute",
+    interpreter_route: { kind: "TypedIntrinsic" },
+    symbol: { kind: "Rust", name: "" },
+    source_target: null,
+    coverage: CORE_CALL_COVERAGE.KNOWN,
+    aot_direct: false,
+    native_int_result: false,
+    ui_capabilities: [],
+    marker: null,
+  };
+}
+
+function coreCallMarkSourceOwned(record) {
+  record.symbol = { kind: "SourceOwned" };
+  record.coverage = CORE_CALL_COVERAGE.SEMA;
+  record.interpreter_route = { kind: "NoRoute" };
+  record.aot_direct = false;
+}
+
+function coreCallSetInterpreterRoute(record, route) {
+  record.interpreter_route = route;
+  if (coreInterpreterRouteIsExecutable(route)) record.coverage |= CORE_CALL_COVERAGE.INTERPRETER;
+}
+
+function coreCallConstructorRecord(name, args, context) {
   if (name === "CoreCallRecord::source_owned") {
     expectRustArgumentCount(name, args, 3, context);
-    return "core_call_source_owned(" +
-      rustStringExpression(args[0], context) + ", " +
-      rustStringExpression(args[1], context) + ", " +
-      translateBoolSlice(args[2], context) + ")";
+    const member = rustStringValue(args[1], context);
+    const record = coreCallRecordNew(rustStringValue(args[0], context), member, member, false,
+      rustBoolSliceValue(args[2], context));
+    coreCallMarkSourceOwned(record);
+    return record;
   }
   if (name === "sema_web_call") {
     expectRustArgumentCount(name, args, 4, context);
-    return "core_call_web(" +
-      rustStringExpression(args[0], context) + ", " +
-      rustStringExpression(args[1], context) + ", " +
-      rustStringExpression(args[2], context) + ", " +
-      translateBoolSlice(args[3], context) + ")";
+    const record = coreCallRecordNew(rustStringValue(args[0], context), rustStringValue(args[1], context),
+      rustStringValue(args[2], context), true, rustBoolSliceValue(args[3], context));
+    coreCallSetInterpreterRoute(record, { kind: "TypedIntrinsic" });
+    return record;
   }
   if (name === "CoreCallRecord::new" || name === "CoreCallRecord::new_with_coverage") {
     const withCoverage = name.endsWith("new_with_coverage");
     expectRustArgumentCount(name, args, withCoverage ? 6 : 5, context);
-    const translated = [
-      rustStringExpression(args[0], context),
-      rustStringExpression(args[1], context),
-      rustStringExpression(args[2], context),
-      translateRustBool(args[3], context),
-      translateBoolSlice(args[4], context),
-    ];
-    if (withCoverage) translated.push(translateCoreCoverage(args[5], context));
-    return "core_call_" + (withCoverage ? "new_with_coverage" : "new") +
-      "(" + translated.join(", ") + ")";
+    const record = coreCallRecordNew(rustStringValue(args[0], context), rustStringValue(args[1], context),
+      rustStringValue(args[2], context), rustBoolValue(args[3], context), rustBoolSliceValue(args[4], context));
+    if (withCoverage) record.coverage = coreCoverageValue(args[5], context);
+    return record;
   }
   if (name === "CoreCallRecord::receiver" ||
       name === "CoreCallRecord::receiver_with_symbol" ||
       name === "CoreCallRecord::receiver_with_coverage") {
     const withSymbol = name.endsWith("receiver_with_symbol");
     const withCoverage = name.endsWith("receiver_with_coverage");
-    const expected = withSymbol ? 5 : withCoverage ? 4 : 3;
-    expectRustArgumentCount(name, args, expected, context);
-    const translated = [
-      translateStringSlice(args[0], context),
-      rustStringExpression(args[1], context),
-    ];
+    expectRustArgumentCount(name, args, withSymbol ? 5 : withCoverage ? 4 : 3, context);
+    const receiverTypes = rustStringSliceValue(args[0], context);
+    const member = rustStringValue(args[1], context);
     if (withSymbol) {
-      translated.push(
-        rustStringExpression(args[2], context),
-        translateRustBool(args[3], context),
-        translateBoolSlice(args[4], context),
-      );
-    } else if (withCoverage) {
-      translated.push(
-        translateBoolSlice(args[2], context),
-        translateCoreCoverage(args[3], context),
-      );
-    } else {
-      translated.push(translateBoolSlice(args[2], context));
+      const record = coreCallRecordReceiver(receiverTypes, member, rustBoolSliceValue(args[4], context));
+      record.symbol = {
+        kind: rustBoolValue(args[3], context) ? "Prelude" : "Rust",
+        name: rustStringValue(args[2], context),
+      };
+      return record;
     }
-    const suffix = withSymbol ? "receiver_with_symbol" :
-      withCoverage ? "receiver_with_coverage" : "receiver";
-    return "core_call_" + suffix + "(" + translated.join(", ") + ")";
+    if (withCoverage) {
+      const record = coreCallRecordReceiver(receiverTypes, member, rustBoolSliceValue(args[2], context));
+      record.coverage = coreCoverageValue(args[3], context);
+      record.interpreter_route = { kind: "NoRoute" };
+      return record;
+    }
+    return coreCallRecordReceiver(receiverTypes, member, rustBoolSliceValue(args[2], context));
   }
   throw new Error("unsupported CoreCallRecord constructor in " + context + ": " + name);
 }
 
-function translateCoreCallMethod(record, name, args, context) {
+function applyCoreCallMethod(record, name, args, context) {
   if (name === "without_direct_aot" || name === "with_native_int_result" || name === "with_source_owned") {
     expectRustArgumentCount(name, args, 0, context);
-    return "core_call_" + name + "(" + record + ")";
+    if (name === "without_direct_aot") record.aot_direct = false;
+    else if (name === "with_native_int_result") record.native_int_result = true;
+    else coreCallMarkSourceOwned(record);
+    return;
   }
   expectRustArgumentCount(name, args, 1, context);
   const argument = args[0];
   if (name === "with_max_arity") {
-    return "core_call_with_max_arity(" + record + ", " +
-      translateRustInteger(argument, context) + ")";
-  }
-  if (name === "with_pure_route") {
-    return "core_call_with_pure_route(" + record + ", " +
-      translatePureRoute(argument, context) + ")";
-  }
-  if (name === "with_interpreter_route") {
-    return "core_call_with_interpreter_route(" + record + ", " +
-      translateInterpreterRoute(argument, context) + ")";
-  }
-  if (name === "with_frame_accesses") {
-    const accesses = rustSliceItems(argument, context).map(function (value) {
-      return translateResourceAccess(value, context);
+    record.signature.max_arity = rustIntegerValue(argument, context);
+  } else if (name === "with_pure_route") {
+    const route = corePureRouteValue(argument, context);
+    record.pure_route = route;
+    record.interpreter_route = { kind: "Pure", route: route };
+    if (route !== "NoPureRoute") record.coverage |= CORE_CALL_COVERAGE.INTERPRETER;
+  } else if (name === "with_interpreter_route") {
+    coreCallSetInterpreterRoute(record, coreInterpreterRouteValue(argument, context));
+  } else if (name === "with_frame_accesses") {
+    record.frame_accesses = rustSliceItems(argument, context).map(function (value) {
+      return coreResourceAccessValue(value, context);
     });
-    return "core_call_with_frame_accesses(" + record +
-      ", [CoreCallResourceAccess]{" + accesses.join(", ") + "})";
+  } else if (name === "with_frame_completion") {
+    record.frame_completion = coreCompletionValue(argument, context);
+  } else if (name === "with_capability") {
+    record.capability = coreCapabilityFromRust(argument, context);
+  } else if (name === "with_ui_capabilities") {
+    record.ui_capabilities = rustStringSliceValue(argument, context);
+  } else if (name === "with_source_target") {
+    record.source_target = rustStringValue(argument, context);
+  } else if (name === "with_marker") {
+    record.marker = coreMarkerValue(argument, context);
+  } else {
+    throw new Error("unsupported CoreCallRecord builder in " + context + ": " + name);
   }
-  if (name === "with_frame_completion") {
-    return "core_call_with_frame_completion(" + record + ", " +
-      translateCompletion(argument, context) + ")";
-  }
-  if (name === "with_capability") {
-    return "core_call_with_capability(" + record + ", " +
-      translateCapability(argument, context) + ")";
-  }
-  if (name === "with_ui_capabilities") {
-    return "core_call_with_ui_capabilities(" + record + ", " +
-      translateStringSlice(argument, context) + ")";
-  }
-  if (name === "with_source_target") {
-    return "core_call_with_source_target(" + record + ", " +
-      rustStringExpression(argument, context) + ")";
-  }
-  if (name === "with_marker") {
-    return "core_call_with_marker(" + record + ", " +
-      translateMarker(argument, context) + ")";
-  }
-  throw new Error("unsupported CoreCallRecord builder in " + context + ": " + name);
 }
 
-function translateCoreCallExpression(expression, context) {
+// Evaluate one Rust CoreCallRecord builder chain into its record value.
+function coreCallRecordFromRust(expression, context) {
   const value = expression.trim();
   const root = readRustCall(value, 0, context);
-  let translated = translateCoreCallConstructor(root.name, root.args, context);
+  const record = coreCallConstructorRecord(root.name, root.args, context);
   let position = root.end;
   while (position < value.length) {
     while (/\s/.test(value[position] || "")) position += 1;
@@ -1737,10 +1993,70 @@ function translateCoreCallExpression(expression, context) {
     }
     position += 1;
     const method = readRustCall(value, position, context);
-    translated = translateCoreCallMethod(translated, method.name, method.args, context);
+    applyCoreCallMethod(record, method.name, method.args, context);
     position = method.end;
   }
-  return translated;
+  return record;
+}
+
+function jetOptional(value, render) {
+  return value === null ? "None" : "Val(" + render(value) + ")";
+}
+
+function jetStringList(values) {
+  return "[String]{" + values.map(jetStringExpression).join(", ") + "}";
+}
+
+// The CoreCallRecord literal, fields in CoreCalls.jet declaration order.
+function coreCallRecordLiteral(record) {
+  const route = record.interpreter_route;
+  const symbol = record.symbol;
+  const capability = record.capability;
+  const completion = record.frame_completion;
+  const marker = record.marker;
+  return "CoreCallRecord{" + [
+    "module_name: " + jetStringExpression(record.module_name),
+    "member: " + jetStringExpression(record.member),
+    "receiver_types: " + jetStringList(record.receiver_types),
+    "signature: CoreCallSignature{arity: " + record.signature.arity +
+      ", max_arity: " + record.signature.max_arity +
+      ", borrow_mask: [Bool]{" + record.signature.borrow_mask.join(", ") + "}}",
+    "frame_accesses: [CoreCallResourceAccess]{" + record.frame_accesses.map(function (access) {
+      return "CoreCallResourceAccess{argument: " + access.argument + ", mode: CoreCallResourceAccessMode." + access.mode + "}";
+    }).join(", ") + "}",
+    "frame_completion: " + (completion === null ? "None" :
+      "Val(CoreCallCompletion{kind: CoreCallCompletionKind." + completion.kind +
+      ", token: " + jetOptional(completion.token, jetStringExpression) +
+      ", provider: " + jetStringExpression(completion.provider) + "})"),
+    "fallibility: CoreCallFallibility.Sema",
+    "effect_kind: " + jetOptional(record.effect_kind, function (effect) { return "Effect." + effect; }),
+    "capability: CoreCapabilityContract{kind: CoreCapabilityKind." + capability.kind +
+      ", provider: " + jetOptional(capability.provider, jetStringExpression) +
+      ", fallback: " + jetOptional(capability.fallback, jetStringExpression) +
+      ", failure: " + jetOptional(capability.failure, jetStringExpression) + "}",
+    "effect_leaf: " + jetOptional(record.effect_leaf, jetStringExpression),
+    "sink_class: " + jetOptional(record.sink_class, function (sink) { return "SinkClass." + sink; }),
+    "pure_route: CoreCallPureRoute." + record.pure_route,
+    "interpreter_route: CoreCallInterpreterRoute." + route.kind +
+      (route.kind === "Pure" ? "{route: CoreCallPureRoute." + route.route + "}" : ""),
+    "symbol: CoreCallSymbol." + symbol.kind +
+      (symbol.kind === "SourceOwned" ? "" : "{name: " + jetStringExpression(symbol.name) + "}"),
+    "source_target: " + jetOptional(record.source_target, jetStringExpression),
+    "coverage: CoreCallCoverage{bits: " + record.coverage + "}",
+    "aot_direct: " + record.aot_direct,
+    "native_int_result: " + record.native_int_result,
+    "ui_capabilities: " + jetStringList(record.ui_capabilities),
+    "marker: " + (marker === null ? "None" :
+      "Val(CoreMarkerApplication{member: " + jetStringExpression(marker.member) +
+      ", since: " + jetStringExpression(marker.since) +
+      ", replacement: " + jetStringExpression(marker.replacement) +
+      ", removed_in: " + jetOptional(marker.removed_in, jetStringExpression) + "})"),
+    "authority: None",
+  ].join(", ") + "}";
+}
+
+function translateCoreCallExpression(expression, context) {
+  return coreCallRecordLiteral(coreCallRecordFromRust(expression, context));
 }
 
 function rustArrayEntries(source, startToken) {
@@ -2884,6 +3200,8 @@ function generatedCoreCallRegistry(coreSource, tirSource, declarations) {
     "// Source: " + TIR_CORE_CALLS_PATH + " (TIR_CORE_CALL_RECORDS, appended in declaration order)",
     "// Source SHA-256: " + sha256(tirSource),
     "// Core ABI rows keep Core.jet order followed by the TIR extension order.",
+    "// Each row is the evaluated CoreCallRecord literal of its Rust builder chain,",
+    "// so the table lands without a compile-time execution host.",
     "// CoreModuleExportNames is the separate module/export-name projection.",
     "CORE_CALLS :: prep { [CoreCallRecord]{",
   ];
@@ -3001,6 +3319,7 @@ const CORE_TYPES_RS_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/core_types.r
 const CHECKER_ITEMS_RS_PATH = "crates/jet-sema/src/Sema/CheckerItems.rs";
 const SYNTAX_RS_DIR = "crates/jet-foundation/src/Syntax";
 const CORE_ENUM_PAYLOAD_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreEnumPayloadRows.jet";
+const CORE_SOURCE_OWNED_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreSourceOwned.jet";
 
 function rustSyntaxConstants() {
   const strings = new Map();
@@ -3232,10 +3551,39 @@ function coreEnumPayloadFamilies(declarations) {
   return families.filter((family) => !declared.has(family.name) || family.rows.some((row) => row.payload.length));
 }
 
+// Owning an opaque impl or a compiler enum menu does not create an export.
+// The qualified-annotation gate's suffixes come from the same generated
+// ownership rows: CORE_SOURCE_OWNED_ROWS impl types, then the
+// CORE_ENUM_PAYLOAD_ROWS enum names, each once in first-occurrence order.
+function coreOwnerAnnotationSuffixes(families) {
+  const owned = read(CORE_SOURCE_OWNED_ROWS_PATH);
+  const head = "CORE_SOURCE_OWNED_ROWS :: prep { [CoreSourceOwnedRow]{";
+  const start = owned.indexOf(head);
+  const end = owned.indexOf("\n} }", start);
+  if (start < 0 || end < 0) throw new Error(CORE_SOURCE_OWNED_ROWS_PATH + " has no CORE_SOURCE_OWNED_ROWS table");
+  const suffixes = [];
+  const add = function (name) {
+    const suffix = "." + name;
+    if (!suffixes.includes(suffix)) suffixes.push(suffix);
+  };
+  for (const match of owned.slice(start, end).matchAll(/impl_types: \[String\]\{([^}]*)\}/g)) {
+    for (const item of match[1].split(",").map((part) => part.trim()).filter(Boolean)) {
+      const name = item.match(/^"([A-Za-z_][A-Za-z0-9_]*)"$/);
+      if (!name) throw new Error(CORE_SOURCE_OWNED_ROWS_PATH + ": unreadable impl type " + item);
+      add(name[1]);
+    }
+  }
+  for (const family of families) {
+    for (const _row of family.rows) add(family.name);
+  }
+  return suffixes;
+}
+
 function generatedCoreEnumPayloadRows(declarations) {
   const sources = [CHECKER_ITEMS_RS_PATH, CORE_TYPES_RS_PATH];
   const syntax = readdirSync(join(ROOT, SYNTAX_RS_DIR)).filter((name) => name.endsWith(".rs")).sort()
     .map((name) => read(SYNTAX_RS_DIR + "/" + name)).join("");
+  const families = coreEnumPayloadFamilies(declarations);
   const lines = [
     "// BEGIN GENERATED CORE ENUM PAYLOAD ROWS",
     "// Source: " + sources.join(", ") + ", " + SYNTAX_RS_DIR,
@@ -3245,7 +3593,7 @@ function generatedCoreEnumPayloadRows(declarations) {
     "// its positional payload types (none for a unit variant).",
     "CORE_ENUM_PAYLOAD_ROWS :: [CoreEnumPayloadRow]{",
   ];
-  for (const family of coreEnumPayloadFamilies(declarations)) {
+  for (const family of families) {
     for (const row of family.rows) {
       lines.push(
         "    CoreEnumPayloadRow{enum_name: " + jetStringExpression(family.name) +
@@ -3254,7 +3602,18 @@ function generatedCoreEnumPayloadRows(declarations) {
       );
     }
   }
-  lines.push("}", "// END GENERATED CORE ENUM PAYLOAD ROWS", "");
+  lines.push(
+    "}",
+    "",
+    "// Owning an opaque impl or a compiler enum menu does not create an export.",
+    "// Qualified-annotation suffixes: " + CORE_SOURCE_OWNED_ROWS_PATH + " impl types,",
+    "// then the enum names above, each once in first-occurrence order.",
+    "JET_CORE_OWNER_ANNOTATION_SUFFIXES :: [String]{",
+    ...coreOwnerAnnotationSuffixes(families).map((suffix) => "    " + jetStringExpression(suffix) + ","),
+    "}",
+    "// END GENERATED CORE ENUM PAYLOAD ROWS",
+    "",
+  );
   return lines.join("\n");
 }
 function writeCoreEnumPayloadRows(declarations) {
@@ -6076,17 +6435,29 @@ function hostileFixtures() {
     const actual = translateCoreCallExpression(
       'CoreCallRecord::source_owned("core.ui.host", "shortcut", &[false, false]).with_ui_capabilities(&["UI.Shortcuts"])',
       "source-owned constructor fixture");
-    if (actual !== 'core_call_with_ui_capabilities(core_call_source_owned("core.ui.host", "shortcut", [Bool]{false, false}), [String]{"UI.Shortcuts"})') {
+    const expected = 'CoreCallRecord{module_name: "core.ui.host", member: "shortcut", receiver_types: [String]{}, ' +
+      'signature: CoreCallSignature{arity: 2, max_arity: 2, borrow_mask: [Bool]{false, false}}, ' +
+      'frame_accesses: [CoreCallResourceAccess]{}, frame_completion: None, fallibility: CoreCallFallibility.Sema, ' +
+      'effect_kind: None, capability: CoreCapabilityContract{kind: CoreCapabilityKind.Pure, provider: None, fallback: None, failure: None}, ' +
+      'effect_leaf: None, sink_class: None, pure_route: CoreCallPureRoute.NoPureRoute, ' +
+      'interpreter_route: CoreCallInterpreterRoute.NoRoute, symbol: CoreCallSymbol.SourceOwned, source_target: None, ' +
+      'coverage: CoreCallCoverage{bits: 1}, aot_direct: false, native_int_result: false, ' +
+      'ui_capabilities: [String]{"UI.Shortcuts"}, marker: None, authority: None}';
+    if (actual !== expected) {
       throw new Error("source-owned constructor lost its signature or UI capability facts: " + actual);
     }
   }));
   results.push(holds("source-owned builder preserves normalized source targets", function () {
-    const actual = translateCoreCallExpression(
+    const record = coreCallRecordFromRust(
       'CoreCallRecord::new("core.net", "unix_connect", "jet_net_unix_connect", true, &[true]).with_max_arity(2).with_source_owned().with_source_target("__unix_connect_entry")',
       "source-owned builder fixture");
-    const expected = 'core_call_with_source_target(core_call_with_source_owned(core_call_with_max_arity(core_call_new("core.net", "unix_connect", "jet_net_unix_connect", true, [Bool]{true}), 2)), "__unix_connect_entry")';
-    if (actual !== expected) {
-      throw new Error("source-owned builder lost its declaration facts or target: " + actual);
+    if (record.symbol.kind !== "SourceOwned" || record.source_target !== "__unix_connect_entry" ||
+        record.signature.arity !== 1 || record.signature.max_arity !== 2 ||
+        record.effect_kind !== "Net" || record.effect_leaf !== "Time.Wait" ||
+        record.capability.kind !== "NativeRequired" || record.capability.provider !== "core.net" ||
+        record.coverage !== CORE_CALL_COVERAGE.SEMA || record.interpreter_route.kind !== "NoRoute" ||
+        record.aot_direct) {
+      throw new Error("source-owned builder lost its declaration facts or target: " + coreCallRecordLiteral(record));
     }
   }));
   results.push(holds("source-owned targets resolve generically without changing public identity", function () {

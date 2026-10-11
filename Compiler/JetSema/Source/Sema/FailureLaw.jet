@@ -6,8 +6,6 @@
 use jet_foundation.[
     AccessConvention,
     CallArg,
-    CORE_ENUM_PAYLOAD_ROWS,
-    CORE_SOURCE_OWNED_ROWS,
     Diagnostic,
     DiagnosticFixApplicability,
     DiagnosticFixSafety,
@@ -15,6 +13,7 @@ use jet_foundation.[
     Expr,
     Func,
     Item,
+    JET_CORE_OWNER_ANNOTATION_SUFFIXES,
     Marker,
     Param,
     ParamZone,
@@ -63,25 +62,6 @@ JET_CORE_ERROR_TYPES :: prep { [String]{
     "ParseError", "PluginError",
     "TaskFailure", "TextError", "UTF8Error", "VaultError", "WsError", "XMLError", "FieldError",
 } }
-
-// Owning an opaque impl or a compiler enum menu does not create an export.
-// Derive the qualified annotation gate from the same generated ownership rows.
-JET_CORE_OWNER_ANNOTATION_SUFFIXES :: prep { sema_core_owner_annotation_suffixes() }
-
-fn sema_core_owner_annotation_suffixes() -> [String] Never! {
-    suffixes := [String]{}
-    loop row in CORE_SOURCE_OWNED_ROWS {
-        loop name in row.impl_types {
-            suffix :: ".{name}"
-            if !suffixes.contains(suffix) -> &suffixes.push(suffix)
-        }
-    }
-    loop row in CORE_ENUM_PAYLOAD_ROWS {
-        suffix :: ".{row.enum_name}"
-        if !suffixes.contains(suffix) -> &suffixes.push(suffix)
-    }
-    suffixes
-}
 
 // A canonical owner identity (`<corelib>/Core/crypto::Core/crypto/uuid.jet::UUIDError`)
 // reduces to its `::` leaf; a qualified spelling to its `.` leaf.

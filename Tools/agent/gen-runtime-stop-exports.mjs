@@ -166,22 +166,9 @@ export function generatedRuntimeStopRegistry(symbols) {
 // Named-call closure from scheduler_panic_publish_record in JetRuntime/Source/*.jet.
 // Direct named calls only; foreign/dynamic callback effects are separate.
 // Both compiler halves consume these Panic stop facts, not returned Results.
-RUNTIME_STOP_EXPORT_ROWS :: prep { """
-${symbols.map((symbol) => `${symbol} Panic`).join("\n")}
-""" }
-
-fn runtime_stop_export_symbols() -> [String] Never! {
-    symbols := [String]{}
-    loop line in RUNTIME_STOP_EXPORT_ROWS.lines() {
-        if line == "" -> next
-        fields :: line.split(" ").to_list()
-        if fields.len() != 2 || fields[1] != "Panic" -> panic("invalid runtime stop export registry row")
-        &symbols.push(fields[0])
-    }
-    symbols
-}
-
-RUNTIME_STOP_EXPORTS :: prep { runtime_stop_export_symbols() }
+// The symbols land as literal data: no compile-time execution host is needed.
+RUNTIME_STOP_EXPORTS :: prep { [String]{
+${symbols.map((symbol) => `    "${symbol}",\n`).join("")}} }
 
 fn runtime_export_can_stop(symbol: String) -> Bool Never! {
     loop candidate in RUNTIME_STOP_EXPORTS {
