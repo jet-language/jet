@@ -6524,3 +6524,56 @@ fn run() {
         );
     });
 }
+
+/// A `Result` match whose `.Ok` arm comes first: the arm chain re-tests the
+/// arm's own test value after it, so the `.Err` probe is not reachable from
+/// the `.Ok` arm and the non-Clone success payload is taken, not cloned.
+#[test]
+fn first_result_arm_takes_noncloneable_payload() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_mir, rust) = emitted_rust(r#"
+trait Sink {
+    fn note(self, text: String) -> Int
+}
+struct Quiet {
+    level: Int
+}
+impl Quiet.Sink {
+    fn note(self, text: String) -> Int {
+        self.level + text.len()
+    }
+}
+struct Config {
+    fuel: Int
+    sink: Sink?
+}
+#Error
+struct ProbeError {
+    message: String
+}
+fn checked_config(fuel: Int) -> Config ProbeError! {
+    if fuel < 0 -> return Err(ProbeError{message: "negative"})
+    Ok(Config{fuel: fuel, sink: Val(Quiet{level: fuel})})
+}
+fn config_fuel(fuel: Int) -> Int ProbeError! {
+    config :: if checked_config(fuel) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            return Err(error)
+        }
+    }
+    Ok(config.fuel)
+}
+fn run() {
+    print(config_fuel(2) ?? 0)
+}
+"#);
+        let start = rust.find("config_ufuel(").expect("config_fuel emitted");
+        let body = &rust[start..];
+        let body = &body[..body.find("\n}\n").unwrap_or(body.len())];
+        assert!(
+            !body.contains("Ok(value) => value.clone()"),
+            "the `.Ok` arm must take its non-Clone payload:\n{body}"
+        );
+    });
+}

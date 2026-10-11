@@ -22684,6 +22684,10 @@ impl<'a> RustEmitter<'a> {
 
     /// An owning carrier can surrender its payload only at its last reachable
     /// use. Nested pattern probes may fail and continue with another alternative.
+    /// A match arm is entered only on the true edge of its test, and the arm
+    /// chain re-branches on that same test value after the arm; the false
+    /// edge of such a re-test cannot follow the arm, so a later arm's probe
+    /// of the carrier is no later use of this arm's payload.
     fn carrier_has_later_use(
         &self,
         function: &MirFunction,
@@ -22705,6 +22709,53 @@ impl<'a> RustEmitter<'a> {
         }) {
             return false;
         }
+        // The test value every entry into the projection's block has
+        // branched true on. It stays true on every path from the block only
+        // while no such path re-runs its definition (a loop), so a reachable
+        // definition drops the fact.
+        let then_condition = |predecessor: usize| match &function.blocks[predecessor].terminator {
+            MirTerminator::Branch { condition, then_target, else_target }
+                if then_target != else_target
+                    && index.blocks.get(then_target).map(|(target, _)| *target) == Some(block) =>
+            {
+                Some(*condition)
+            }
+            _ => None,
+        };
+        let known = index.predecessors[block].first().and_then(|first| {
+            let condition = then_condition(*first)?;
+            index.predecessors[block]
+                .iter()
+                .all(|predecessor| then_condition(*predecessor) == Some(condition))
+                .then_some(condition)
+        }).filter(|condition| {
+            let Some(&(defined, _)) = index.definitions.get(condition) else { return false };
+            let mut reached = vec![false; function.blocks.len()];
+            let mut pending = vec![block];
+            while let Some(at) = pending.pop() {
+                for target in function.blocks[at].terminator.targets().iter() {
+                    if let Some((target, _)) = index.blocks.get(target) {
+                        if *target == defined {
+                            return false;
+                        }
+                        if !reached[*target] {
+                            reached[*target] = true;
+                            pending.push(*target);
+                        }
+                    }
+                }
+            }
+            true
+        });
+        let infeasible = |predecessor: usize, successor: usize| {
+            known.is_some_and(|known| matches!(
+                &function.blocks[predecessor].terminator,
+                MirTerminator::Branch { condition, then_target, else_target }
+                    if *condition == known
+                        && then_target != else_target
+                        && index.blocks.get(else_target).map(|(target, _)| *target) == Some(successor)
+            ))
+        };
         let mut seen = vec![false; function.blocks.len()];
         let mut pending = Vec::new();
         for &(used_block, _) in uses {
@@ -22720,6 +22771,9 @@ impl<'a> RustEmitter<'a> {
                 continue;
             }
             for &predecessor in &index.predecessors[used_block] {
+                if infeasible(predecessor, used_block) {
+                    continue;
+                }
                 if predecessor == block {
                     return true;
                 }
