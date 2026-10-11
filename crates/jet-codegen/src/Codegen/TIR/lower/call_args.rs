@@ -1127,7 +1127,7 @@ pub(crate) fn lower_call_arg_value(
     // A bare lambda flowing into a user fn-typed parameter takes its param
     // types from that fn-type so codegen emits the Rust closure-param types
     // rustc needs (c142). Other args lower normally.
-    let mut value = match (&a.expr, &conv) {
+    let value = match (&a.expr, &conv) {
         (Expr::Ident(name, _), Some((AccessConvention::Move, ty))) if env.is_resource(name) => {
             TExpr {
                 ty: ty.clone(),
@@ -1204,14 +1204,19 @@ pub(crate) fn lower_call_arg_value(
         }
         _ => lower_expr(&a.expr, cx, env),
     };
-    // `None` carries no payload to type it; the checked parameter does.
+    let value = absent_takes_parameter_type(value, conv.as_ref());
+    env.fallback_subject = fallback_subject;
+    env.binder_refs = saved_binder_refs;
+    value
+}
+
+/// `None` carries no payload to type it; the checked parameter does.
+fn absent_takes_parameter_type(mut value: TExpr, conv: Option<&(AccessConvention, Type)>) -> TExpr {
     if matches!(value.kind, TExprKind::Absent) {
-        if let Some((_, want @ Type::Option(_))) = &conv {
+        if let Some((_, want @ Type::Option(_))) = conv {
             value.ty = want.clone();
         }
     }
-    env.fallback_subject = fallback_subject;
-    env.binder_refs = saved_binder_refs;
     value
 }
 
@@ -1262,6 +1267,9 @@ pub(crate) fn lower_one_call_arg(
         })
         .unwrap_or_else(|| lower_call_arg_value(a, conv.clone(), env, cx))
     };
+    // A worklist-scheduled value skipped `lower_call_arg_value`, which types
+    // a `None` argument from its parameter.
+    let value = absent_takes_parameter_type(value, conv.as_ref());
     // A worklist cache may have lowered a local identifier before an earlier
     // binding's refined type was installed in the sequential environment.
     // Refresh local reads from that environment before resolving boundary
