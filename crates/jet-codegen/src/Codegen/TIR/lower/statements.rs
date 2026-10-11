@@ -2408,6 +2408,14 @@ fn split_view_plan(stmts: &[Stmt], cx: &Cx, env: &LowerEnv) -> HashMap<usize, Pl
     planned
 }
 
+/// A value written to a typed place fills that destination slot exactly as a
+/// struct field initializer does: restore an erased typed-list shape, and box
+/// a present payload meeting a single-trait optional slot (S48).
+fn assigned_slot_value(value: TExpr, want: &Type, cx: &Cx) -> TExpr {
+    let value = preserve_typed_list_shape(value, want, cx);
+    crate::Codegen::TIR::box_present_trait_payload(value, want, cx)
+}
+
 /// A typed list head can reach lowering as a one-element `ListLit` after sema
 /// elaborates the head away. Preserve the asserted list shape:
 /// the value already has the exact expected list type, so the wrapper is not
@@ -3666,7 +3674,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             // A typed empty list has no element type after sema
                             // elaborates its head; assignment supplies the
                             // destination shape.
-                            value_t = preserve_typed_list_shape(value_t, &want, cx);
+                            value_t = assigned_slot_value(value_t, &want, cx);
                         }
                         if env.is_send_fn(name) && matches!(&value_t.ty, Type::Fn { .. }) {
                             // Keep every write to an indirect callback in the same
@@ -3755,7 +3763,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             _ => None,
                         };
                         let value_t = if let Some(want) = target_ty.as_ref() {
-                            preserve_typed_list_shape(value_t, want, cx)
+                            assigned_slot_value(value_t, want, cx)
                         } else {
                             value_t
                         };
@@ -3858,7 +3866,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                         let line = cx.src_line_col(index_span.start).0;
                                         let value_t = lower_expr(value, cx, env);
                                         let value_t =
-                                            preserve_typed_list_shape(value_t, &field_ty, cx);
+                                            assigned_slot_value(value_t, &field_ty, cx);
                                         ready_return!(TStmt::IndexFieldAssign(Box::new(
                                             TIndexFieldAssign {
                                                 base: collection_t,
@@ -3953,7 +3961,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                     false
                                 };
                                 let value_t = lower_expr(value, cx, env);
-                                let value_t = preserve_typed_list_shape(value_t, &field_ty, cx);
+                                let value_t = assigned_slot_value(value_t, &field_ty, cx);
                                 ready_return!(TStmt::Assign {
                                     place,
                                     op: *op,
@@ -3980,7 +3988,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             false
                         };
                         let value_t = lower_expr(value, cx, env);
-                        let value_t = preserve_typed_list_shape(value_t, &field_ty, cx);
+                        let value_t = assigned_slot_value(value_t, &field_ty, cx);
                         TStmt::Assign {
                             place,
                             op: *op,

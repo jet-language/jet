@@ -29,6 +29,19 @@ struct JetFileWriter {
     inner: std::sync::Mutex<std::io::BufWriter<std::fs::File>>,
     path: String,
 }
+// Core declares `FileReader`/`FileWriter` as records of their `path`, so
+// sema's structural `Equatable` derive compares that field; the carrier
+// gives the same answer and never compares the open stream.
+impl PartialEq for JetFileReader {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+    }
+}
+impl PartialEq for JetFileWriter {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+    }
+}
 
 // ── core.db connection handle (D-DBDRIVER1) ──────────────────────────────────
 // The real SQLite connection lives in the FFI bridge crate's thread-local

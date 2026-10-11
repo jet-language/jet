@@ -3783,6 +3783,15 @@ impl<'a> Checker<'a> {
         // optional self-typed field cannot move a local without recording it.
         let payload_ty = Self::owning_field_value_type(expr, ty);
         let payload = Self::owning_field_value_mut(expr);
+        // D-MEM-COPYSEM1=A: a read window (`View<T>`) filling a window slot
+        // shares the borrow. An `Expr::Copy` over it means "materialize an
+        // owned value", which the window slot cannot hold, and would hide the
+        // window from the escape checks that follow.
+        if payload_ty
+            .is_some_and(|ty| crate::Sema::Diagnostics::owned_type_for_read_view(ty).is_some())
+        {
+            return;
+        }
         if self.reject_borrowed_param_subplace(payload, payload_ty, "fill an owned field") {
             return;
         }

@@ -5394,6 +5394,30 @@ mod emit_misc_regression_tests {
             assert!(row.native_int_result, "core.sys.{member}");
         }
     }
+
+    /// A read `View<T>` parameter filling a `View<T>` field shares the
+    /// window; it never materializes an owned list for that slot.
+    #[test]
+    fn view_parameter_fills_view_field_without_materializing() {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let rust = emitted_rust(
+                "struct Reader {\n    bytes: View<U8>\n    at: Int\n}\nfn decode(bytes: View<U8>) -> Int {\n    reader := Reader{bytes: bytes, at: 0}\n    if reader.at != bytes.len() -> return 1\n    0\n}\nfn run() {\n    xs :: [U8]{U8{1}, U8{2}}\n    print(decode(xs[0..<2]))\n}\n",
+            );
+            assert!(!rust.contains("jet_view_copy("), "View field materialized its window:\n{rust}");
+        });
+    }
+
+    /// `slot = Val(concrete)` into a single-trait optional field boxes the
+    /// payload exactly as a struct-literal field does (S48).
+    #[test]
+    fn assigned_present_payload_boxes_into_trait_slot() {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let rust = emitted_rust(
+                "trait Adapter {\n    fn id(self) -> Int\n}\nstruct Concrete {\n    n: Int\n}\nimpl Concrete.Adapter {\n    fn id(self) -> Int { self.n }\n}\nstruct Config {\n    adapter: Adapter?{None}\n}\nfn run() {\n    config := Config{}\n    config.adapter = Val(Concrete{n: 1})\n    print(config.adapter == None)\n}\n",
+            );
+            assert!(rust.contains(") as Box<dyn __jet_Adapter>"), "assignment did not box the trait payload:\n{rust}");
+        });
+    }
 }
 
 pub(crate) fn append_web_time_zones(out: &mut String) -> std::io::Result<()> {
@@ -12505,11 +12529,18 @@ impl<'a> RustEmitter<'a> {
                 // These owned native streams implement neither Clone nor
                 // Debug; an opaque row with no type arguments is not evidence
                 // that its Rust representation supports a structural derive.
+                // Equality is the one exception: the carrier compares its
+                // source-declared `path` field (`HandlesRaylib.rs`), so it has
+                // Rust `PartialEq` exactly when sema's structural `Equatable`
+                // derive holds for the source row.
                 if matches!(
                     crate::Codegen::file_handle_rust_type(&name.name),
                     Some("JetFileReader" | "JetFileWriter")
                 ) {
-                    return false;
+                    return trait_name == "PartialEq"
+                        && self.structural_type_def_for(ty).is_some_and(|def| {
+                            self.derives_trait(def, crate::Generics::EQUATABLE)
+                        });
                 }
                 if self.selected_user_capability_impl(ty, trait_name) {
                     return true;
