@@ -435,6 +435,11 @@ bindings live in their defining lexical scope. Owned handles and shared-capture
 cells retain their existing release rules. Disjoint fields behind an exclusive
 guard project from one reborrow of its referent, not repeated guard dereferences.
 Map-store callbacks capture their owned payload, not the reusable MIR slot.
+An owned callback return does not introduce a caller-supplied capture lifetime
+when no callback-bearing input supplies one. Stored callback handles retain
+their owning lifetime; forwarding a borrowed input retains its capture lifetime.
+Function and trait signatures apply the same rule without wrapping or copying
+the callback environment.
 
 Native lowering must fail closed when a construct cannot preserve the shared
 runtime's ABI, error behavior, or observable output. Report an unsupported

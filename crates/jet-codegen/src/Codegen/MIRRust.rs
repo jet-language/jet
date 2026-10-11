@@ -2991,6 +2991,18 @@ fn plain_callable_type(higher_ranked: &str, params: &str, ret: &str, lifetime: &
     format!("std::rc::Rc<std::cell::RefCell<Option<Box<dyn {higher_ranked}FnMut({params}) -> {ret} + {lifetime}>>>>")
 }
 
+/// A plain Rc/RefCell callable is invariant in its capture lifetime. A
+/// signature can forward a supplied callback lifetime, but a return alone
+/// cannot invent one for an owned callable fetched from nominal storage.
+/// History's covariant Box carrier retains its existing factory contract.
+fn callback_return_lifetime(params: &[String], history: bool) -> &'static str {
+    if history || params.iter().any(|param| param.contains("'__jet_callback")) {
+        "'__jet_callback"
+    } else {
+        "'static"
+    }
+}
+
 fn map_store_callback(value: &str) -> String {
     format!("{{ let __jet_store_value = {value}; move |_| __jet_store_value }}")
 }
@@ -10630,6 +10642,13 @@ impl<'a> RustEmitter<'a> {
         rendered
     }
 
+    fn with_callback_lifetime(&self, lifetime: &'static str, render: impl FnOnce() -> String) -> String {
+        let previous = self.history_callback_lifetime.replace(lifetime);
+        let rendered = render();
+        self.history_callback_lifetime.set(previous);
+        rendered
+    }
+
     /// True when `ty` holds a view, directly or through a declared type
     /// whose Rust declaration takes the `'__jet_view` lifetime parameter.
     fn type_carries_view(&self, ty: &MirType) -> bool {
@@ -11217,7 +11236,10 @@ impl<'a> RustEmitter<'a> {
             &params[receiver_slots..],
             &declared_types,
         );
-        let render_ret = || self.synthetic_rollback_type(definition, &method.return_type);
+        let callback_lifetime = callback_return_lifetime(&params, self.history_runtime_metadata_enabled());
+        let render_ret = || self.with_callback_lifetime(callback_lifetime, || {
+            self.synthetic_rollback_type(definition, &method.return_type)
+        });
         let ret = match &view_lifetime {
             ViewReturnLifetime::Elided => render_ret(),
             ViewReturnLifetime::Static => self.with_view_lifetime("'static", render_ret),
@@ -18636,12 +18658,14 @@ impl<'a> RustEmitter<'a> {
                 &declared_types,
             )
         };
+        let callback_lifetime = callback_return_lifetime(&params, self.history_runtime_metadata_enabled());
+        let render_ret = || self.with_callback_lifetime(callback_lifetime, || self.rust_type(&function.return_type));
         let ret = match &view_lifetime {
             ViewReturnLifetime::Elided => {
-                return_override.unwrap_or_else(|| self.rust_type(&function.return_type))
+                return_override.unwrap_or_else(render_ret)
             }
             ViewReturnLifetime::Static => {
-                self.with_view_lifetime("'static", || self.rust_type(&function.return_type))
+                self.with_view_lifetime("'static", render_ret)
             }
             ViewReturnLifetime::Named {
                 receiver,
@@ -18665,16 +18689,14 @@ impl<'a> RustEmitter<'a> {
                     params[receiver_slots + function.capture_params.len() + owner] =
                         format!("{}{}: {ty}", binding(param), mangle(&param.name));
                 }
-                self.with_view_lifetime(VIEW_RETURN_LIFETIME, || {
-                    self.rust_type(&function.return_type)
-                })
+                self.with_view_lifetime(VIEW_RETURN_LIFETIME, render_ret)
             }
         };
         let params = params.join(", ");
 
         self.history_callback_lifetime.set(previous_lifetime);
-        // Forwarding or returning a callable preserves its capture lifetime.
-        // Owned factories can instantiate this lifetime without borrowing.
+        // Callback inputs supply a capture lifetime for forwarding. An owned
+        // plain callback return cannot manufacture an invariant lifetime.
         let mut lifetimes = Vec::new();
         if matches!(view_lifetime, ViewReturnLifetime::Named { .. }) {
             lifetimes.push(VIEW_RETURN_LIFETIME);
@@ -40350,6 +40372,75 @@ fn main() {{
         assert_eq!(map.last().unwrap().as_ptr(), identity);
     }}
     assert_eq!(map, vec![vec!["0"], vec!["1"], vec!["2"]]);
+}}
+"#));
+    }
+}
+
+#[cfg(test)]
+mod callback_return_regressions {
+    use super::{callback_return_lifetime, plain_callable_type};
+
+    #[test]
+    fn owned_holder_returns_and_borrowed_forwarding_keep_their_storage_lifetimes() {
+        let params = vec!["hooks: &Hooks".to_string()];
+        let owned = callback_return_lifetime(&params, false);
+        assert_eq!(owned, "'static");
+        assert_eq!(callback_return_lifetime(&params, true), "'__jet_callback");
+        let stored_text = plain_callable_type("", "&Kind, &Vec<String>", "Result<String, ()>", "'static");
+        let stored_numeric = plain_callable_type("", "f64, &str, &str, &str, &str", "Result<f64, ()>", "'static");
+        let returned_text = plain_callable_type("", "&Kind, &Vec<String>", "Result<String, ()>", owned);
+        let returned_numeric = plain_callable_type("", "f64, &str, &str, &str, &str", "Result<f64, ()>", owned);
+        let input = plain_callable_type("", "u64", "u64", "'__jet_callback");
+        let forwarded = callback_return_lifetime(&[format!("f: {input}")], false);
+        assert_eq!(forwarded, "'__jet_callback");
+        let output = plain_callable_type("", "u64", "u64", forwarded);
+        let local_input = plain_callable_type("", "u64", "u64", "'_");
+        super::facade_carrier_regressions::compile_run(&format!(r#"
+enum Kind {{ Text }}
+struct Hooks {{
+    text: Option<{stored_text}>,
+    numeric: Option<{stored_numeric}>,
+}}
+trait ReadHooks {{
+    fn text(&self) -> Option<{returned_text}>;
+    fn numeric(&self) -> Option<{returned_numeric}>;
+}}
+impl ReadHooks for Hooks {{
+    fn text(&self) -> Option<{returned_text}> {{ self.text.clone() }}
+    fn numeric(&self) -> Option<{returned_numeric}> {{ self.numeric.clone() }}
+}}
+fn get_text(hooks: &Hooks) -> Option<{returned_text}> {{ hooks.text.clone() }}
+fn get_numeric(hooks: &Hooks) -> Option<{returned_numeric}> {{ hooks.numeric.clone() }}
+fn forward<'__jet_callback>(f: {input}) -> {output} {{ f }}
+fn main() {{
+    let hooks = Hooks {{
+        text: Some(std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new(
+            |_: &Kind, fields: &Vec<String>| Ok(fields.join(":"))
+        ))))),
+        numeric: Some(std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new(
+            |n: f64, _: &str, _: &str, _: &str, _: &str| Ok(n * 2.0)
+        ))))),
+    }};
+    let text = get_text(&hooks).unwrap();
+    let numeric = get_numeric(&hooks).unwrap();
+    assert!(std::rc::Rc::ptr_eq(&text, hooks.text.as_ref().unwrap()));
+    assert!(std::rc::Rc::ptr_eq(&numeric, hooks.numeric.as_ref().unwrap()));
+    assert!(std::rc::Rc::ptr_eq(&hooks.text().unwrap(), &text));
+    assert!(std::rc::Rc::ptr_eq(&hooks.numeric().unwrap(), &numeric));
+    assert_eq!(text.borrow_mut().as_mut().unwrap()(&Kind::Text, &vec!["a".into(), "b".into()]), Ok("a:b".into()));
+    assert_eq!(numeric.borrow_mut().as_mut().unwrap()(3.0, "", "", "", ""), Ok(6.0));
+    let mut count = 0u64;
+    {{
+        let callback: {local_input} = std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new(
+            |n| {{ count += n; count }}
+        ))));
+        let identity = std::rc::Rc::as_ptr(&callback);
+        let forwarded = forward(callback);
+        assert_eq!(std::rc::Rc::as_ptr(&forwarded), identity);
+        assert_eq!(forwarded.borrow_mut().as_mut().unwrap()(7), 7);
+    }}
+    assert_eq!(count, 7);
 }}
 "#));
     }
