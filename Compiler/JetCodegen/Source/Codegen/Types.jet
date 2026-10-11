@@ -414,7 +414,9 @@ fn jet_codegen_qualify_type(ty: Type, modules: [SemaGraphModuleResult], module_i
         .TraitObject(bounds) -> {
             canonical_bounds := [String]{}
             loop name in bounds {
-                trait_ref :: jet_codegen_resolve_trait_ref(modules, name, module_identity) ?? panic("checked trait-object bound has no declared trait identity")
+                // Rust tir_to_mir_types.rs lower_type: an undeclared (builtin)
+                // bound keeps its bare name.
+                trait_ref :: jet_codegen_resolve_trait_ref(modules, name, module_identity) ?? mir_trait_ref(name)
                 &canonical_bounds.push(trait_ref.name)
             }
             Type.TraitObject{bounds: canonical_bounds}
@@ -517,7 +519,7 @@ fn jet_codegen_lower_canonical_type(canonical: Type, modules: [SemaGraphModuleRe
         .TraitObject(bounds) -> {
             lowered_bounds := [MIRTraitRef]{}
             loop name in bounds {
-                trait_ref :: jet_codegen_resolve_trait_ref(modules, name, module_identity) ?? panic("checked trait-object bound has no declared trait identity")
+                trait_ref :: jet_codegen_resolve_trait_ref(modules, name, module_identity) ?? mir_trait_ref(name)
                 &lowered_bounds.push(trait_ref)
             }
             MIRTypeKind.TraitObject{bounds: lowered_bounds}

@@ -467,22 +467,15 @@ fn jet_codegen_trait_bound_is_declared(modules: [SemaGraphModuleResult], name: S
     jet_codegen_resolve_trait_ref(modules, name, preferred_module_identity) != None
 }
 
+// Rust mir.rs call_arg: `box_as_trait` lowers its single-trait target type
+// without requiring a declaration; an undeclared (builtin) trait keeps its
+// bare name (jet_codegen_lower_canonical_type).
 fn jet_codegen_require_trait_box_target(target: Type, builder: JetCodegenBuilder, program: JetCodegenProgram) Never! {
     bounds := if target == {
         .TraitObject(items) -> items
         else -> panic("checked trait coercion target is not a trait object")
     }
     if bounds.len() != 1 -> panic("checked trait coercion target must name exactly one trait")
-    if !jet_codegen_trait_bound_is_declared(program.modules, bounds[0], builder.function.module_identity) -> panic("checked trait coercion target names an undeclared or ambiguous trait")
-}
-
-fn jet_codegen_call_argument_needs_trait_box(argument: TCallArg) -> Bool Never! {
-    if argument.box_as_trait == None -> return false
-    if argument.value.ty == {
-        .TraitObject(_) -> return false
-        .Named(_) | .Apply(_, _) -> return true
-        else -> panic("checked call trait-box source is not nominal")
-    }
 }
 
 fn jet_codegen_call_access(argument: TCallArg, formal: AccessConvention?) -> MIRAccess Never! {
