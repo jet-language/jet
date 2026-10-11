@@ -3915,6 +3915,8 @@ fn jet_driver_comptime_fold(expression: TExpr, values: [SemaComptimeItemValue]) 
             folded :: jet_driver_comptime_fold(operand, values) ?? return None
             if op == TUnaryOp.Neg {
                 if folded == .Int(number) -> return jet_driver_comptime_fold_int(0 - number, expression.ty)
+                // `-170141…728` checks as the negation of a BigInt literal.
+                if folded == .BigInt(decimal) -> return jet_driver_comptime_fold_int(0 - (Int.parse(decimal) ?? return None), expression.ty)
                 if folded == .Float(number, bits) {
                     if bits == 64 && expression.ty == Type.Float -> return Val(TComptimeValue.Float{value: number * -1.0, bits: 64})
                 }
@@ -4116,11 +4118,12 @@ fn jet_driver_comptime_landed(values: [SemaComptimeItemValue], key: String) -> T
     None
 }
 
-// An integer value of checked type `ty` (Int or a fixed width of at most 64
-// bits), only when it lies in that type's range.
+// An integer value of checked type `ty`: any exact Int, or a fixed width of
+// at most 64 bits only when it lies in that type's range.
 fn jet_driver_comptime_fold_int(value: Int, ty: Type) -> TComptimeValue? Never! {
     if ty == Type.Int {
-        if !jet_driver_comptime_small_int(value) -> return None
+        // D-INTBIG1: an exact Int outside the i64 range is a BigInt value.
+        if !jet_driver_comptime_small_int(value) -> return Val(TComptimeValue.BigInt{decimal: "{value}"})
         return Val(TComptimeValue.Int{value: value})
     }
     if ty == .IntN(signed, bits) {
