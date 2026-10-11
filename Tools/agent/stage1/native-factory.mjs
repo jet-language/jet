@@ -33,7 +33,7 @@ export function readStageZeroFactory(recordFile, repo) {
   if (!magic.equals(Buffer.from([127, 69, 76, 70]))) throw Error('retained sharded factory is not ELF');
   return record;
 }
-export function invokeStageZeroFactory({ recordFile, repo, sourceRoot, entry, work, policy }) {
+function runFactoryProtocol({ recordFile, repo, sourceRoot, entry, work, policy }, linkRequired) {
   const record = readStageZeroFactory(recordFile, repo);
   const library = policy.JET_FRONT_LIBRARY_OBJECT_OUTPUT;
   const native = policy.JET_FRONT_NATIVE_OUTPUT;
@@ -41,7 +41,7 @@ export function invokeStageZeroFactory({ recordFile, repo, sourceRoot, entry, wo
   const allowed = new Set(['JET_FRONT_LIBRARY_OBJECT_OUTPUT', 'JET_FRONT_LIBRARY_LIFECYCLE', 'JET_FRONT_RUNTIME_PACK_OUTPUT', 'JET_FRONT_RUNTIME_PLATFORM_INPUTS', 'JET_FRONT_NATIVE_OUTPUT', 'JET_RUNTIME_PACK']);
   for (const key of Object.keys(policy)) if (!allowed.has(key)) throw Error(`unsupported factory policy ${key}`);
   if (library && (!policy.JET_FRONT_LIBRARY_LIFECYCLE || !policy.JET_FRONT_RUNTIME_PACK_OUTPUT || !policy.JET_FRONT_RUNTIME_PLATFORM_INPUTS)) throw Error('real library lifecycle, pack output and platform archives required');
-  if (native && !policy.JET_RUNTIME_PACK) throw Error('native factory request requires the proven runtime pack');
+  if (native && linkRequired && !policy.JET_RUNTIME_PACK) throw Error('native factory request requires the proven runtime pack');
   mkdirSync(work, { recursive: true });
   work = mkdtempSync(join(work, 'request-'));
   const receipt = join(work, 'factory.env');
@@ -53,7 +53,17 @@ export function invokeStageZeroFactory({ recordFile, repo, sourceRoot, entry, wo
   const env = { HOME: home, PATH: process.env.PATH, TMPDIR: process.env.TMPDIR ?? '/tmp', LC_ALL: 'C', RUST_MIN_STACK: '268435456', RUST_BACKTRACE: '1', JET_TOOLCHAIN_ROOT: resolve(repo), JET_BOOTSTRAP_MODE: 'factory', JET_BOOTSTRAP_FACTORY_TIER: 'aot', JET_BOOTSTRAP_SOURCE_ROOT: resolve(sourceRoot), JET_BOOTSTRAP_ENTRY: entry, JET_BOOTSTRAP_OUTPUT: join(work, 'unused-rust-output.rs'), JET_BOOTSTRAP_RECEIPT: receipt, JET_STORE_DIR: store, JET_KEEP_GOING: '1', JET_KEEP_GOING_REPORT: census, ...policy };
   const run = spawnSync(record.factory.path, [], { cwd: sourceRoot, env, stdio: 'inherit' });
   if (run.error) throw run.error;
-  if (run.status !== 0) throw Error(`bootstrap factory exited ${run.status ?? run.signal}`);
-  const admitted = admitFactoryReceipt(readFileSync(receipt, 'utf8'), readFileSync(census, 'utf8'));
-  return { record, receipt, census, admitted, compilerProtocol: 'bootstrap-factory', sourceCommit: record.commit };
+  return { record, receipt, census, rc: run.status ?? 1, signal: run.signal, compilerProtocol: 'bootstrap-factory', sourceCommit: record.commit };
+}
+export function invokeStageZeroFactory(options) {
+  const result = runFactoryProtocol(options, true);
+  if (result.rc !== 0) throw Error(`bootstrap factory exited ${result.rc} ${result.signal ?? ''}`);
+  const admitted = admitFactoryReceipt(readFileSync(result.receipt, 'utf8'), readFileSync(result.census, 'utf8'));
+  return { ...result, admitted };
+}
+export function observeStageZeroNativeLowering(options) {
+  if (Object.keys(options.policy).length !== 1 || !options.policy.JET_FRONT_NATIVE_OUTPUT) throw Error('discovery accepts only an unlinked native output prefix');
+  // Entry.native emits its checked LIR/object before the absent pack stops
+  // linking. This observation can NEVER qualify the whole factory or a CLI.
+  return { ...runFactoryProtocol(options, false), admitted: false, link: 'BLOCKED: runtime pack deliberately absent during parallel discovery' };
 }

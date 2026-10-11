@@ -110,6 +110,13 @@ all-phases censuses must exist and be empty; both objects and ELFs must compare
 byte-identically. No stage 3 is required. Producer/harness hashes are recorded
 separately from the single pinned compiler/runtime source identity.
 
+`native-lowering-census.mjs FACTORY_RECORD PINNED_SOURCE FRESH_OUT` may run in
+parallel with the pack producer. It uses the existing `Entry.native` object
+boundary and deliberately supplies no pack: all front-end TSV and backend
+findings are retained, while linking is **BLOCKED**, never passed. Even a clean
+object census qualifies neither the factory nor a CLI. The real native feed
+runs after the pack and must establish the complete linked fixed point.
+
 ## Compiler-owned registries
 
 `Tools/agent/compiler-registries.mjs` is the canonical census and runner for

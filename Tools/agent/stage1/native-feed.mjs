@@ -55,7 +55,7 @@ try {
   const factory = invokeStageZeroFactory({ recordFile: options.factory, repo, sourceRoot: unit.project, entry: 'selfhost.jet', work: join(out, 'factory-native'), policy: { JET_FRONT_NATIVE_OUTPUT: prefix, JET_RUNTIME_PACK: packPath } });
   for (const suffix of ['.issues', '.pack-issues']) {
     const file = prefix + suffix;
-    if (existsSync(file)) { const issues = JSON.parse(readFileSync(file, 'utf8')); if (!Array.isArray(issues) || issues.length) throw Error(`native stage1 codegen/link failures: ${file}`); }
+    if (existsSync(file) && readFileSync(file, 'utf8').trim()) throw Error(`native stage1 codegen/link findings: ${file}`);
   }
   function publish(directory, binary, object) {
     accessSync(binary, constants.X_OK);
