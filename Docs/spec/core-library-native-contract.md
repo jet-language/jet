@@ -440,6 +440,10 @@ when no callback-bearing input supplies one. Stored callback handles retain
 their owning lifetime; forwarding a borrowed input retains its capture lifetime.
 Function and trait signatures apply the same rule without wrapping or copying
 the callback environment.
+Nested callable results apply that rule independently of their outer callable's
+capture lifetime; argument elision must not turn an owned callback into a view
+of its reader argument. Reference storage initialized by an iteration's `None`
+reset has that iteration's scope, with the same indentation as its instructions.
 
 Native lowering must fail closed when a construct cannot preserve the shared
 runtime's ABI, error behavior, or observable output. Report an unsupported

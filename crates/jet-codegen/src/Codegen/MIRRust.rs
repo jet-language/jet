@@ -2828,9 +2828,11 @@ fn localize_slots(
             continue;
         };
         let line = mention.first_line;
+        let statement = &lines[line][indents[line]..];
         let defines = mention.on_first_line == 1
             && mention.first_column == indents[line]
-            && lines[line][indents[line]..].starts_with(&format!("{prefix}{id} = Some("));
+            && (statement.starts_with(&format!("{prefix}{id} = Some("))
+                || statement.trim_end() == format!("{prefix}{id} = None;"));
         if defines && mention.last_line < scope_end[line] && !pinned.contains(id) {
             localized.insert(line, *id);
             dropped.insert(*id);
@@ -2994,17 +2996,32 @@ fn plain_callable_type(higher_ranked: &str, params: &str, ret: &str, lifetime: &
 /// A plain Rc/RefCell callable is invariant in its capture lifetime. A
 /// signature can forward a supplied callback lifetime, but a return alone
 /// cannot invent one for an owned callable fetched from nominal storage.
-/// History's covariant Box carrier retains its existing factory contract.
-fn callback_return_lifetime(params: &[String], history: bool) -> &'static str {
-    if history || params.iter().any(|param| param.contains("'__jet_callback")) {
-        "'__jet_callback"
+/// History's carrier retains its existing factory contract.
+fn callback_result_lifetime<'a>(
+    mut params: impl Iterator<Item = &'a str>,
+    history: bool,
+    capture_lifetime: &'static str,
+) -> &'static str {
+    if history || params.any(|param| {
+        (param.contains("FnMut(") || param.contains("JetHistoryFn"))
+            && param.contains(capture_lifetime)
+    }) {
+        capture_lifetime
     } else {
         "'static"
     }
 }
 
+fn callback_return_lifetime(params: &[String], history: bool) -> &'static str {
+    callback_result_lifetime(params.iter().map(String::as_str), history, "'__jet_callback")
+}
+
 fn map_store_callback(value: &str) -> String {
     format!("{{ let __jet_store_value = {value}; move |_| __jet_store_value }}")
+}
+
+fn emit_reference_reset(out: &mut String, local: MirLocalId, indent: usize) {
+    let _ = writeln!(out, "{:width$}{} = None;", "", local_slot(local), width = indent);
 }
 
 /// Byte offsets of `name` in `text` as a whole identifier, not a field.
@@ -10293,11 +10310,16 @@ impl<'a> RustEmitter<'a> {
             .map(|(_, callable, _)| callable.as_str())
             .collect::<Vec<_>>()
             .join(", ");
+        let callback_lifetime = callback_result_lifetime(
+            parameter_types.iter().map(|(rendered, _, _)| rendered.as_str()),
+            self.history_runtime_metadata_enabled(),
+            self.history_callback_lifetime.get(),
+        );
         let ret = ret
-            .map(|ret| match &view_owners {
+            .map(|ret| self.with_callback_lifetime(callback_lifetime, || match &view_owners {
                 Some((lifetime, _)) => self.with_view_lifetime(lifetime, || self.rust_type(ret)),
                 None => self.rust_type(ret),
-            })
+            }))
             .unwrap_or_else(|| "()".to_string());
         let higher_ranked = match &view_owners {
             Some((lifetime, _)) if *lifetime == CALLABLE_VIEW_LIFETIME => {
@@ -19254,7 +19276,7 @@ impl<'a> RustEmitter<'a> {
                     {
                         continue;
                     }
-                    let _ = writeln!(out, "{:width$}{} = None;", "", local_slot(*local), width = indent * 4);
+                    emit_reference_reset(out, *local, indent);
                 }
             }
             self.emit_instruction(function, instruction, out, indent, debug_active);
@@ -40440,5 +40462,69 @@ fn main() {{
     assert_eq!(count, 7);
 }}
 "#));
+    }
+}
+
+#[cfg(test)]
+mod nested_callback_scope_regressions {
+    use super::{callback_result_lifetime, emit_reference_reset, localize_slots, plain_callable_type};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn shared_reader_returns_an_owned_callback_independent_of_its_argument() {
+        let arguments = ["Hooks"];
+        let result_lifetime = callback_result_lifetime(arguments.into_iter(), false, "'_");
+        assert_eq!(result_lifetime, "'static");
+        let callback = plain_callable_type("", "u64", "u64", result_lifetime);
+        let result = format!("Result<{callback}, ()>");
+        let reader = plain_callable_type("", "&Hooks", &result, "'_");
+        let borrowed_argument = plain_callable_type("", "u64", "u64", "'_");
+        assert_eq!(callback_result_lifetime([borrowed_argument.as_str()].into_iter(), false, "'_"), "'_");
+        super::facade_carrier_regressions::compile_run(&format!(r#"
+struct Hooks {{ callback: {callback} }}
+fn get(hooks: &Hooks) -> {result} {{ Ok(hooks.callback.clone()) }}
+fn shared_read<R>(hooks: &Hooks, mut f: impl FnMut(&Hooks) -> R) -> R {{ f(hooks) }}
+fn main() {{
+    let hooks = Hooks {{ callback: std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new(|n| n + 2)))) }};
+    let mut slot: Option<{reader}> = Some(std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new(
+        move |shared: &Hooks| get(shared)
+    )))));
+    let result = shared_read(&hooks, {{
+        let callback = slot.take().unwrap();
+        move |shared: &Hooks| {{
+            let handle = callback.clone();
+            let mut function = handle.borrow_mut().take().unwrap();
+            let result = function(shared);
+            handle.borrow_mut().replace(function);
+            result
+        }}
+    }}).unwrap();
+    assert!(std::rc::Rc::ptr_eq(&result, &hooks.callback));
+    assert_eq!(result.borrow_mut().as_mut().unwrap()(5), 7);
+}}
+"#));
+    }
+
+    #[test]
+    fn reset_first_reference_storage_has_the_iteration_scope() {
+        let mut source = "fn main() {\n    let mut owner: Option<Vec<String>> = None;\n    let mut __jet_l_1: Option<&String> = None;\n".to_string();
+        let start = source.find("    let mut owner").unwrap();
+        let end = source.len();
+        source.push_str("    for round in 0..3 {\n");
+        emit_reference_reset(&mut source, jet_foundation::MIR::MirLocalId(1), 8);
+        assert!(source.ends_with("        __jet_l_1 = None;\n"));
+        source.push_str(r#"        owner = Some(vec![round.to_string()]);
+        for index in 0..1 {
+            __jet_l_1 = Some(&owner.as_ref().unwrap()[index]);
+            assert_eq!(__jet_l_1.unwrap(), &round.to_string());
+        }
+        owner.as_mut().unwrap().clear();
+    }
+    assert!(owner.unwrap().is_empty());
+}
+"#);
+        localize_slots(&mut source, start, end, "__jet_l_", &BTreeMap::from([(1, "&String".into())]));
+        assert!(source.contains("        let mut __jet_l_1: Option<&String> = None;"));
+        super::facade_carrier_regressions::compile_run(&source);
     }
 }
