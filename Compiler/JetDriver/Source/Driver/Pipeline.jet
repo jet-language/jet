@@ -3941,9 +3941,80 @@ fn jet_driver_comptime_fold(expression: TExpr, values: [SemaComptimeItemValue]) 
             if coercion == None -> return jet_driver_comptime_fold_list(elements, values)
         }
         .ListLit(elements) -> return jet_driver_comptime_fold_list(elements, values)
+        // An unsuffixed decimal literal checks as `Decimal.from_str("…")`
+        // (sema_expr_decimal_literal); its value is the Core Decimal record.
+        .PreciseBuiltin(type_name, function, args) -> {
+            if type_name == "Decimal" && function == "from_str" && args.len() == 1 {
+                folded :: jet_driver_comptime_fold(args[0], values) ?? return None
+                if folded == .String(text) -> return jet_driver_comptime_decimal(text)
+            }
+        }
         else -> {}
     }
     None
+}
+
+// Core math.jet `__decimal_from_str` over a literal spelling: the record
+// {negative, magnitude, scale} it returns (magnitude unnormalized), or None
+// when it would stop on the text or the exponent is out of reach.
+fn jet_driver_comptime_decimal(text: String) -> TComptimeValue? Never! {
+    bytes :: text.trim().bytes()
+    if bytes.len() == 0 -> return None
+    index := 0
+    negative := false
+    if Int.from_u8(bytes[0]) == 45 || Int.from_u8(bytes[0]) == 43 {
+        negative = Int.from_u8(bytes[0]) == 45
+        index = 1
+    }
+    magnitude := 0
+    digits := 0
+    fractional := 0
+    point := false
+    loop index < bytes.len() && Int.from_u8(bytes[index]) != 101 && Int.from_u8(bytes[index]) != 69 {
+        code :: Int.from_u8(bytes[index])
+        if code == 46 {
+            if point -> return None
+            point = true
+        } else {
+            if code < 48 || code > 57 -> return None
+            digits += 1
+            if digits > 4000 -> return None
+            magnitude = magnitude * 10 + code - 48
+            if point -> fractional += 1
+        }
+        index += 1
+    }
+    if digits == 0 -> return None
+    exponent := 0
+    if index < bytes.len() {
+        index += 1
+        exponent_negative := false
+        if index < bytes.len() && (Int.from_u8(bytes[index]) == 45 || Int.from_u8(bytes[index]) == 43) {
+            exponent_negative = Int.from_u8(bytes[index]) == 45
+            index += 1
+        }
+        start :: index
+        loop index < bytes.len() {
+            code :: Int.from_u8(bytes[index])
+            if code < 48 || code > 57 -> return None
+            exponent = exponent * 10 + code - 48
+            if exponent > 4000 -> return None
+            index += 1
+        }
+        if index == start -> return None
+        if exponent_negative -> exponent = 0 - exponent
+    }
+    places := fractional - exponent
+    loop places < 0 {
+        magnitude = magnitude * 10
+        places += 1
+    }
+    magnitude_value :: if jet_driver_comptime_small_int(magnitude) -> TComptimeValue.Int{value: magnitude} else -> TComptimeValue.BigInt{decimal: "{magnitude}"}
+    Val(TComptimeValue.Struct{type_name: "Decimal", fields: [TComptimeField]{
+        TComptimeField{name: "negative", value: TComptimeValue.Bool{value: negative && magnitude != 0}},
+        TComptimeField{name: "magnitude", value: magnitude_value},
+        TComptimeField{name: "scale", value: TComptimeValue.Int{value: places}},
+    }})
 }
 
 // A landed value is data: no closure anywhere in it.

@@ -3466,12 +3466,20 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
 }
 
 // Rust `is_global_mutable_binding`: this module's own `name := …` binding that
-// is not prepared while building.
+// is not prepared while building. A checker on the registration graph has no
+// local declarations (sema_scope_environment for a graph module), so the
+// binding is read from the module's registered constant rows.
 fn sema_stmt_module_storage_binding(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Bool Never! {
     loop declaration in environment.declarations {
         if declaration.symbol_id.key != id.key -> next
         if declaration.item == .Const(definition) -> return definition.mutable && !definition.is_comptime
         return false
+    }
+    if program.registration_graph == .Val(graph) {
+        module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return false
+        loop constant in graph.modules[module_index].constants {
+            if constant.symbol.id.key == id.key -> return constant.declaration.mutable && !constant.declaration.is_comptime
+        }
     }
     false
 }
