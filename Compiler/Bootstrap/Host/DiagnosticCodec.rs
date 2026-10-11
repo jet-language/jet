@@ -110,7 +110,7 @@ fn __jet_bootstrap_validate_origin(
     source_path: Option<&String>,
     generated_source_files: &[@t.MIRSourceFile@],
     snapshot: &crate::compiler_bootstrap_host::AuthorizedSourceSnapshot,
-) -> Result<bool, String> {
+) -> Result<(), String> {
     let expected_revision = __jet_bootstrap_source_revision(&value.path, &value.source);
     if value.revision != expected_revision {
         return Err(format!("diagnostic origin `{}` has a revision that does not match its exact source bytes", value.path));
@@ -143,7 +143,8 @@ fn __jet_bootstrap_validate_origin(
     if generated.is_some() && selected.is_some() {
         return Err(format!("diagnostic origin path `{}` collides between generated and authorized disk sources", value.path));
     }
-    let generated_origin = generated.is_some();
+    // Generated sidecars (embedded Core, comptime output) are checked exactly
+    // like disk sources: the origin must carry their authorized bytes.
     let expected_source = if let Some(file) = generated {
         file.@f.MIRSourceFile.source@.as_str()
     } else {
@@ -157,7 +158,7 @@ fn __jet_bootstrap_validate_origin(
     }
     // The validated origin joins the shared per-conversion origin list.
     origins.push((value.source.as_ptr() as usize, value.source.len(), ::std::sync::Arc::clone(value)));
-    Ok(generated_origin)
+    Ok(())
 }
 fn __jet_bootstrap_cause_to_host(
     value: &@t.DiagnosticCause@,
@@ -752,9 +753,8 @@ fn __jet_bootstrap_diagnostic_to_host_with_sources(
     let mut origin = source_origin.map(::std::sync::Arc::new);
     let mut aggregate_offset = 0usize;
     let mut raw_source_start = 0usize;
-    let mut generated_origin = false;
     if let Some(explicit) = origin.as_ref() {
-        generated_origin = __jet_bootstrap_validate_origin(explicit, origins, source_path, generated_source_files, snapshot)?;
+        __jet_bootstrap_validate_origin(explicit, origins, source_path, generated_source_files, snapshot)?;
         report_source = explicit.source.as_str();
         if source_path.is_some() {
             let source_offset = source_offset.ok_or_else(|| "Jet diagnostic source path has no aggregate source offset".to_string())?;
@@ -805,7 +805,6 @@ fn __jet_bootstrap_diagnostic_to_host_with_sources(
                 &file.@f.MIRSourceFile.path@,
                 &file.@f.MIRSourceFile.source@,
             ));
-            generated_origin = true;
         } else {
             let file = selected.ok_or_else(|| format!("Jet diagnostic source path `{source_path}` is absent from the authorized snapshot and generated sidecar"))?;
             report_source = file.source.as_str();
@@ -827,11 +826,11 @@ fn __jet_bootstrap_diagnostic_to_host_with_sources(
     };
     let edit = match diagnostic.@f.Diagnostic.edit@.as_ref().ok() {
         Some(edit) => {
+            // The edit stays on the diagnostic, projected into its origin's
+            // exact bytes, as the Rust host's diagnostics carry it for every
+            // origin; whether a target is writable is the fix applier's call.
             if source_path.is_none() && origin.is_none() {
                 return Err("Jet diagnostic has an edit without an exact source origin".to_string());
-            }
-            if generated_origin {
-                return Err("compiler-generated diagnostics cannot propose edits to source files".to_string());
             }
             let aggregate = __jet_bootstrap_span_to_host(&edit.@f.TextEdit.span@)?;
             Some(::jet_foundation::Diagnostics::TextEdit {
