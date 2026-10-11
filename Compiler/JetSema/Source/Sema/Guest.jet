@@ -174,7 +174,7 @@ fn sema_guest_library_component_type(graph: SemaRegistrationGraph, module_identi
 // The `Type::Named` arm: a registered struct, enum, distinct or alias whose
 // every nested payload is itself a closed shape; a recursive name is not.
 fn sema_guest_library_component_named(graph: SemaRegistrationGraph, module_identity: String, ty: Type, name: String, seen: &[String:Bool]) -> Bool {
-    if seen.get(name) == .Val(true) -> return false
+    if seen.get(name) == .Val(seen_before) && seen_before -> return false
     row :: sema_type_resolve_nominal_row(graph, ty, module_identity) ?? return false
     owner :: graph.modules[row.module_index].module_identity
     seen[name] = true
