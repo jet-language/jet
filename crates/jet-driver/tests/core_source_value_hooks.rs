@@ -1045,6 +1045,55 @@ fn run() -[FS, IO]> {
 "#,
     );
 }
+
+/// The full s49 shape: the owner is a match arm's payload of a temporary
+/// result (`if f() == { .Ok(m) -> &xs.push(^m.file) .Err(_) -> {} }`). The
+/// arm binds the non-Clone payload by move (the fall-through re-test after
+/// the arms only reads the discriminant) and pushes its moved field.
+#[test]
+fn builtin_push_of_a_matched_payload_field_moves_it() {
+    hosted_seed_program_runs(
+        "builtin_push_matched_field",
+        None,
+        r#"
+use core.files as files
+struct Held {
+    path: String
+    handle: files.FileReader
+}
+struct Entry {
+    path: String
+    file: Held
+}
+fn entry(path: String) -[FS]> Entry IOError! {
+    handle :: files.open(path) ?? return Err(err)
+    Ok(Entry{path: path, file: Held{path: path, handle: handle}})
+}
+fn collect(seed: ^[Held], path: String, wanted: Bool) -[FS]> [Held] {
+    held := ^seed
+    if wanted {
+        if entry(path) == {
+            .Ok(found) -> {
+                &held.push(^found.file)
+            }
+            .Err(error) -> {
+                if path == "" -> panic("{error}")
+            }
+        }
+    }
+    held
+}
+fn run() -[FS, IO]> {
+    files.write("builtin_push_matched_field.txt", "x") ?? panic("write")
+    held :: collect(^[Held]{}, "builtin_push_matched_field.txt", true)
+    missing :: collect(^[Held]{}, "builtin_push_matched_field.absent", true)
+    print("held {held.len()} {held[0].path} {missing.len()}")
+    files.remove("builtin_push_matched_field.txt") ?? panic("remove")
+}
+"#,
+    );
+}
+
 /// Root 2: Core handle ops write through a FileReader/FileWriter reached from
 /// a read binding (a Read parameter, a field of a read `self`). The emitted
 /// Rust lends the interior-mutable carrier by `&`.
