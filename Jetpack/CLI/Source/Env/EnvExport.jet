@@ -8,7 +8,8 @@
 
 // Rust `print!`: stdout bytes with no added newline.
 fn cli_print_raw(text: String) Never! -[IO]> {
-    term.stdout().write(text).drop("a closed stdout cannot take the shell script")
+    stdout_handle := term.stdout()
+    &stdout_handle.write(text).drop("a closed stdout cannot take the shell script")
 }
 
 // `jet env hook <shell>` — pure text: installing the hook is a safe editor

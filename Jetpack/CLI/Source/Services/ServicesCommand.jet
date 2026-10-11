@@ -395,7 +395,8 @@ fn cli_services_logs(theme: Theme, project_dir: String, name: String?) -[IO, FS,
         theme.error("`jet os services logs` needs a service name", "logs are per service.", "try `jet os services logs <name>`.")
         return EXIT_USAGE
     }
-    term.stdout().write(services_logs(project_dir, service)).drop("a closed stdout cannot take service logs")
+    stdout_handle := term.stdout()
+    &stdout_handle.write(services_logs(project_dir, service)).drop("a closed stdout cannot take service logs")
     EXIT_OK
 }
 

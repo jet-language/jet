@@ -281,7 +281,8 @@ fn provider_report_import_gap(file: String, gap: ImportGap) Never! -[IO]> {
         "the bounded importer could not prove a catalog package for this input",
         "review the generated env.jet and use the nearest catalog candidate `{candidate}` if it fits",
     )
-    term.stderr().write_line("Warning [{diagnostic.code}]: {diagnostic.what}; nearest catalog candidate: `{candidate}`").drop("warnings are best-effort output")
+    stderr_handle := term.stderr()
+    &stderr_handle.write_line("Warning [{diagnostic.code}]: {diagnostic.what}; nearest catalog candidate: `{candidate}`").drop("warnings are best-effort output")
 }
 
 // Carriage returns and newlines as spaces.

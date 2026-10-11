@@ -77,7 +77,8 @@ fn cli_hangar_archive(verification: &StoreVerification, theme: Theme, parsed: CL
             }
             entry :: target ?? return cli_hangar_archive_usage(theme, parsed, "`hangar dump` needs an entry id or reference", "jetpack hangar dump <entry> > closure.hangar")
             exported :: store_export_archive(roots, entry, !parsed.flags.archive_no_deps, key) ?? return cli_hangar_archive_error(theme, parsed, action, err)
-            term.stdout().write_bytes(exported.bytes) ?? return cli_hangar_archive_error(theme, parsed, action, StoreError.IO(err))
+            stdout_handle := term.stdout()
+            &stdout_handle.write_bytes(exported.bytes) ?? return cli_hangar_archive_error(theme, parsed, action, StoreError.IO(err))
             EXIT_OK
         }
         .Restore -> {

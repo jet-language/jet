@@ -59,7 +59,8 @@ struct Stdout {
     fn flush(&self) IOError! -[IO]> {
         stdio_flush(false)
     }
-    fn is_tty(&self) -[IO]> Bool Never! {
+    // A pure query: the read receiver lets a temporary ask (`stdout().is_tty()`).
+    fn is_tty(self) -[IO]> Bool Never! {
         core.term.__stdout_terminal()
     }
 }
@@ -79,7 +80,7 @@ struct Stderr {
     fn flush(&self) IOError! -[IO]> {
         stdio_flush(true)
     }
-    fn is_tty(&self) -[IO]> Bool Never! {
+    fn is_tty(self) -[IO]> Bool Never! {
         core.term.__stderr_terminal()
     }
 }
@@ -101,12 +102,12 @@ enum Key {
     Unknown
 }
 fn print(text: String) Never! -[IO, Time.Wait]> {
-    out :: core.term.stdout()
+    out := stdout()
     &out.write_line(text).drop("stdout write")
 }
 
 fn eprint(text: String) Never! -[IO, Time.Wait]> {
-    out :: stderr()
+    out := stderr()
     &out.write("{text}\n").drop("stderr write")
 }
 

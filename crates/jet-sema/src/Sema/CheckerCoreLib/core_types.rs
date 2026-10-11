@@ -3466,8 +3466,11 @@ pub fn core_file_handle_dispatch_name(handle_ty: &str) -> Option<&'static str> {
         "StdinHandle" | "<corelib>/Core/term::Core/term/term.jet::StdinHandle" => {
             Some("StdinHandle")
         }
-        "Stdout" | "<corelib>/Core/term::Core/term/term.jet::Stdout" => Some("Stdout"),
-        "Stderr" | "<corelib>/Core/term::Core/term/term.jet::Stderr" => Some("Stderr"),
+        // `core.term` declares `Stdout`/`Stderr` with their own methods
+        // (source-owned): their canonical identity dispatches to those Jet
+        // methods, never to the native stdio handle table.
+        "Stdout" => Some("Stdout"),
+        "Stderr" => Some("Stderr"),
         _ => None,
     }
 }

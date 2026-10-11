@@ -6,7 +6,8 @@ fn cli_status_error(theme: Theme, json_output: Bool, action: String, code: Strin
     if json_output {
         report :: cli_diagnostic_report(code, what, why, fix)
         line :: StatusEnvelope.new(action, false).with_reports([ReportEnvelope]{report}).json_line() ?? return cli_status_encoding_error(err)
-        term.stdout().write(line).drop("status output is best-effort")
+        stdout_handle := term.stdout()
+        &stdout_handle.write(line).drop("status output is best-effort")
     } else {
         theme.error_coded(code, what, why, fix)
     }

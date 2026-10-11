@@ -1828,8 +1828,8 @@ fn run() {
     name :: term.input("your name? ") ?? return
     print("hi, {name}")
     term.eprint("(log) done")
-    out :: term.stdout()
-    out.write("done") ?? return
+    out := term.stdout()
+    &out.write("done") ?? return
     &out.flush() ?? return
 }
 ```

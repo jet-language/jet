@@ -479,5 +479,6 @@ fn cli_dashboard_age_label(timestamp: Int, now: Int) -> String Never! {
 
 fn cli_dashboard_print_status_summary(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme) Never! -[IO, FS, Env, Exec, Time, Time.Wait]> {
     snapshot :: cli_dashboard_collect_snapshot(&verification, &cache)
-    term.stdout().write(cli_dashboard_render_status_summary(snapshot, theme)).drop("a closed stdout cannot take the status summary")
+    stdout_handle := term.stdout()
+    &stdout_handle.write(cli_dashboard_render_status_summary(snapshot, theme)).drop("a closed stdout cannot take the status summary")
 }

@@ -145,7 +145,7 @@ fn jet_cli_check_json_outcome(file: String, source: String, diagnostics: [Diagno
 // go out before the compile, ahead of anything the built program writes.
 fn jet_cli_write_notice(notice: String) {
     if notice.len() == 0 -> return
-    stderr_handle :: cli_term.stderr()
+    stderr_handle := cli_term.stderr()
     &stderr_handle.write(notice).drop("jet stderr")
 }
 
@@ -451,7 +451,7 @@ fn jet_cli_write_verbose_lints(file: String, source: String, color: Bool, diagno
     }
     report :: jet_driver_report_problems(file, source, lints, color, true)
     if report.len() > 0 {
-        stderr_handle :: cli_term.stderr()
+        stderr_handle := cli_term.stderr()
         &stderr_handle.write(report).drop("jet stderr")
     }
 }
@@ -540,7 +540,7 @@ fn jet_cli_test_result(file: String, source: String, color: Bool, verbose: Bool,
 
 fn jet_cli_compile_test(file: String, source: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions) -> JetDriverVerbOutput {
     if options.status.len() > 0 {
-        stderr_handle :: cli_term.stderr()
+        stderr_handle := cli_term.stderr()
         &stderr_handle.write(options.status).drop("jet stderr")
     }
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
@@ -1442,11 +1442,11 @@ fn jet_cli_maintenance_host(action: String, args: [String], color: Bool, json: B
 fn jet_cli_main(args: [String]) -> Int {
     output :: jet_cli_execute(jet_cli_front(args))
     if output.stdout.len() > 0 {
-        out :: cli_term.stdout()
+        out := cli_term.stdout()
         &out.write(output.stdout).drop("jet stdout")
     }
     if output.stderr.len() > 0 {
-        stderr_handle :: cli_term.stderr()
+        stderr_handle := cli_term.stderr()
         &stderr_handle.write(output.stderr).drop("jet stderr")
     }
     output.exit_code

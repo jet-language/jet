@@ -158,9 +158,9 @@ fn trust_report_gate_failure(theme: Theme, error: PackageGateError) -[IO, Time.W
 
 // Prompt text on stderr without a newline.
 fn trust_gate_prompt(text: String) Never! -[IO, Time.Wait]> {
-    err_stream :: term.stderr()
-    err_stream.write(text).drop("the trust prompt is best-effort output")
-    err_stream.flush().drop("the trust prompt is best-effort output")
+    err_stream := term.stderr()
+    &err_stream.write(text).drop("the trust prompt is best-effort output")
+    &err_stream.flush().drop("the trust prompt is best-effort output")
 }
 
 // `y`/`yes` in any case is yes.

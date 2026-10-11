@@ -31,7 +31,8 @@ fn cli_cmd_explain(verification: &StoreVerification, theme: Theme, parsed: CLIPa
             text :: StatusEnvelope.new("explain", true).with_field("explain", report_status_object(fields)).json() ?? return cli_status_encoding_error(err)
             print(text)
         } else {
-            term.stdout().write(explain_render(explanation, theme.color)).drop("explain output is best-effort")
+            stdout_handle := term.stdout()
+            &stdout_handle.write(explain_render(explanation, theme.color)).drop("explain output is best-effort")
         }
         return EXIT_OK
     }
@@ -56,7 +57,8 @@ fn cli_cmd_explain(verification: &StoreVerification, theme: Theme, parsed: CLIPa
             if parsed.flags.json {
                 print(explanation.to_json() ?? return cli_status_encoding_error(err))
             } else {
-                term.stdout().write(explanation.text()).drop("explain output is best-effort")
+                stdout_handle := term.stdout()
+                &stdout_handle.write(explanation.text()).drop("explain output is best-effort")
             }
             loop report in explanation.reports {
                 if report.kind == ExplainReportKind.Conflict -> return EXIT_USAGE
@@ -139,7 +141,8 @@ fn cli_explain_workspace_failure(parsed: CLIParsed, diagnostic: Diagnostic) -[IO
     if parsed.flags.json {
         report :: cli_diagnostic_to_report(diagnostic, ReportPath.from_process(WORKSPACE_FILE))
         line :: StatusEnvelope.new("explain", false).with_reports([ReportEnvelope]{report}).json_line() ?? return cli_status_encoding_error(err)
-        term.stdout().write(line).drop("status output is best-effort")
+        stdout_handle := term.stdout()
+        &stdout_handle.write(line).drop("status output is best-effort")
     } else {
         terminal_write_output(diagnostics_render_all(WORKSPACE_FILE, "", [Diagnostic]{diagnostic}))
     }

@@ -227,7 +227,8 @@ fn terminal_columns() -[Env]> Int Never! {
 
 // Every Jetpack stderr transition is one complete write, which may wait for IO.
 fn terminal_write_output(text: String) Never! -[IO, Time.Wait]> {
-    term.stderr().write(text).drop("terminal output is best-effort")
+    stderr_handle := term.stderr()
+    &stderr_handle.write(text).drop("terminal output is best-effort")
 }
 
 // The indent under the gutter that detail and ledger rows share.

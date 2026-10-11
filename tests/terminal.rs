@@ -305,11 +305,12 @@ fn stdout_write_bytes_is_byte_exact_and_ordered_with_print() {
             &source,
             r#"use core.term as term
 fn run() {
-    out :: term.stdout()
+    out := term.stdout()
     print("a")
-    out.write_bytes([U8]{0x42, 0x4D, 0xFF, 0x00, 0x80, 13, 10}) ?? panic("write")
-    out.write_bytes([U8]{0xC3}) ?? panic("write")
-    term.stdout().write_bytes([U8]{0x28}) ?? panic("write")
+    &out.write_bytes([U8]{0x42, 0x4D, 0xFF, 0x00, 0x80, 13, 10}) ?? panic("write")
+    &out.write_bytes([U8]{0xC3}) ?? panic("write")
+    again := term.stdout()
+    &again.write_bytes([U8]{0x28}) ?? panic("write")
     print("z")
 }
 "#,

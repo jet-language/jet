@@ -190,7 +190,8 @@ fn cli_cmd_logs(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time,
         if recipe_debug_latest_json(hangar, package) == {
             .Ok(found) -> {
                 text :: found ?? return cli_missing_logs(theme, package)
-                term.stdout().write(text).drop("log output is best-effort")
+                stdout_handle := term.stdout()
+                &stdout_handle.write(text).drop("log output is best-effort")
                 return EXIT_OK
             }
             .Err(error) -> return cli_read_logs_error(theme, error.message())
@@ -199,7 +200,8 @@ fn cli_cmd_logs(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time,
         if recipe_debug_latest(hangar, package) == {
             .Ok(found) -> {
                 attempt :: found ?? return cli_missing_logs(theme, package)
-                term.stdout().write(recipe_debug_text_logs(attempt)).drop("log output is best-effort")
+                stdout_handle := term.stdout()
+                &stdout_handle.write(recipe_debug_text_logs(attempt)).drop("log output is best-effort")
                 return EXIT_OK
             }
             .Err(error) -> return cli_read_logs_error(theme, error.message())

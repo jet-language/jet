@@ -77,7 +77,8 @@ fn cli_run_build_plugin_host(args: [String]) -[IO, FS, Env, Exec, Time, Time.Wai
         term.eprint("build-plugin response exceeds {BUILD_PLUGIN_MAX_RESPONSE_BYTES} bytes")
         return EXIT_USAGE
     }
-    term.stdout().write_bytes(response) ?? {
+    stdout_handle := term.stdout()
+    &stdout_handle.write_bytes(response) ?? {
         term.eprint("couldn't write build-plugin response: {err}")
         return EXIT_USAGE
     }

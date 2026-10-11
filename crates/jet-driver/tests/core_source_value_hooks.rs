@@ -798,6 +798,33 @@ fn run() {
     );
 }
 
+/// `core.term`'s source-owned `Stdout`/`Stderr` dispatch to their own Jet
+/// methods, not the native stdio handle table: writes take a write receiver
+/// (`h := stdout(); &h.write(…)`), `is_tty` is a read query a temporary can
+/// answer, and `print`/`eprint` reach the same source handles.
+#[test]
+fn source_owned_stdio_handles_dispatch_to_their_methods() {
+    hosted_seed_program_runs_split(
+        "source_owned_stdio",
+        None,
+        r#"
+use core.term as term
+fn run() -[IO, Time.Wait]> {
+    out := term.stdout()
+    &out.write_line("stdout line").drop("stdout")
+    &out.write_bytes([U8]{104, 105, 10}).drop("stdout bytes")
+    &out.flush().drop("stdout flush")
+    err := term.stderr()
+    &err.write("stderr line\n").drop("stderr")
+    &err.flush() ?? panic("stderr flush")
+    tty :: term.stdout().is_tty() || term.stderr().is_tty()
+    print("printed line {tty || !tty}")
+    term.eprint("eprinted line")
+}
+"#,
+    );
+}
+
 /// Root 2: Core handle ops write through a FileReader/FileWriter reached from
 /// a read binding (a Read parameter, a field of a read `self`). The emitted
 /// Rust lends the interior-mutable carrier by `&`.
