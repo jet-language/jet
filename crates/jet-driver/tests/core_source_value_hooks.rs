@@ -804,6 +804,32 @@ fn run() -[Rand]> {
     );
 }
 
+/// Core's Directory and AdvisoryLock owners close by reading the consumed
+/// receiver in place. Rebinding `^self` re-entered the same Close until the
+/// stack overflowed; reacquiring the advisory lock proves the first owner's
+/// descriptor was released, and returning proves no Close re-entered itself.
+#[test]
+fn core_directory_and_lock_owners_close_once_and_return() {
+    hosted_seed_program_runs(
+        "directory_lock_closes",
+        Some("name: \"directory_lock_closes\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS, Env] } }\n"),
+        r#"
+use core.files as files
+fn run() -[FS, Env]> {
+    files.create_dir("held") ?? panic("create held")
+    if true {
+        directory :: files.open_directory("held") ?? panic("open held")
+        advisory :: directory.lock() ?? panic("advisory lock")
+    }
+    if true {
+        directory :: files.open_directory("held") ?? panic("reopen held")
+        advisory :: directory.lock() ?? panic("advisory lock after close")
+    }
+}
+"#,
+    );
+}
+
 /// A trait-object option payload binds by reference while its owner is only
 /// changed after the binding's last read: the binding's own scope-end
 /// cleanup reads no referent, so a later write of a local root (`sink`) or a

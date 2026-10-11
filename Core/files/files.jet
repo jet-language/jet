@@ -180,11 +180,12 @@ struct FileLock {
 
 // The fd is guarded before it becomes the native FileLock carrier. Failed
 // opens, waits and identity checks therefore close without unlinking a name.
+// Close reads the consumed receiver in place. Rebinding it (`held := ^self`)
+// would make a second owner whose scope-end Close re-enters this one.
 struct __LockFd { fd: Int }
 impl __LockFd.Close {
     fn close(^self) {
-        held := ^self
-        result :: core.files.__lock_close(held.fd)
+        _ :: core.files.__lock_close(self.fd)
     }
 }
 
@@ -214,8 +215,7 @@ struct AdvisoryLock {
 
 impl AdvisoryLock.Close {
     fn close(^self) {
-        held := ^self
-        core.files.__close_directory(held.handle)
+        core.files.__close_directory(self.handle)
     }
 }
 
@@ -506,8 +506,7 @@ struct Directory {
 
 impl Directory.Close {
     fn close(^self) {
-        held := ^self
-        core.files.__close_directory(held.handle)
+        core.files.__close_directory(self.handle)
     }
 }
 
