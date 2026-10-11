@@ -1,20 +1,29 @@
 #!/usr/bin/env bash
-# Native bootstrap: h0/seed -> jetc1 -> jetc2 -> jetc3. No Rust emission,
-# release profile, or memory cap here; the caller owns the proofq reservation.
+# Native bootstrap: native CLI seed -> jetc1 -> jetc2 -> jetc3. No Rust
+# emission, release profile, or memory cap here; the caller owns the proofq
+# reservation. The builder must be a real argv CLI with jet-runtime/ beside it
+# (native-feed.mjs stage1/jet or stage2/jet), never the stage-zero factory
+# jetc0, which only speaks the JET_BOOTSTRAP_* protocol.
 # Host.jet writes <source root>/.jet/build/<resolved entry stem>.
 # O1 is not exposed by the hosted CLI yet: build uses its native O0 path.
+# Every stage execs under a 1 GiB RLIMIT_STACK (the native compiler runs on
+# the main thread; O0 frames never share slots) with the factory's compiler
+# identity in JET_COMPILER_IDENTITY (the CLI refuses to compile without it).
 set -euo pipefail
 usage() {
-    printf '%s\n' 'usage: native-fixedpoint.sh --builder PATH --unit FILE.jet|DIR --out DIR [--level o0|o1] [--stages 3]'
+    printf '%s\n' 'usage: native-fixedpoint.sh --builder PATH --unit FILE.jet|DIR --out DIR [--factory-record RECEIPT.json] [--level o0|o1] [--stages 3]' \
+        'identity: factory.compiler_identity of --factory-record, else $JET_COMPILER_IDENTITY (name@version#source-id)' \
+        'NATIVE_FP_TIMEOUT: per-stage seconds; 0 (default) disables the limit'
 }
 fail() { printf 'native-fixedpoint: %s\n' "$*" >&2; exit 2; }
-builder='' unit='' out='' level=o0 stages=3
+builder='' unit='' out='' record='' level=o0 stages=3
 while (( $# )); do
     case $1 in
-        --builder|--unit|--out|--level|--stages)
+        --builder|--unit|--out|--factory-record|--level|--stages)
             (( $# >= 2 )) || fail "missing value for $1"
             case $1 in
                 --builder) builder=$2 ;; --unit) unit=$2 ;; --out) out=$2 ;;
+                --factory-record) record=$2 ;;
                 --level) level=$2 ;; --stages) stages=$2 ;;
             esac
             shift 2 ;;
@@ -26,11 +35,17 @@ done
 [[ $level == o0 || $level == o1 ]] || fail 'level must be o0 or o1'
 [[ $level != o1 ]] || fail 'native O1 not selectable from hosted CLI yet'
 [[ $stages == 3 ]] || fail 'stages must be 3'
-limit=${NATIVE_FP_TIMEOUT:-7200}
-[[ $limit =~ ^[1-9][0-9]*$ ]] || fail 'NATIVE_FP_TIMEOUT must be a positive integer in seconds'
-for tool in realpath timeout node readelf nm objdump cmp sha256sum stat find; do
+# A whole native compile of the compiler has never been timed; no default cap.
+limit=${NATIVE_FP_TIMEOUT:-0}
+[[ $limit =~ ^(0|[1-9][0-9]*)$ ]] || fail 'NATIVE_FP_TIMEOUT must be 0 (no limit) or a positive integer in seconds'
+for tool in realpath timeout prlimit node readelf nm objdump cmp sha256sum stat find; do
     command -v "$tool" >/dev/null || fail "missing tool: $tool"
 done
+if [[ -n $record ]]; then
+    JET_COMPILER_IDENTITY=$(node -e 'const r = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); process.stdout.write(String(r.factory?.compiler_identity ?? ""))' "$record") || fail 'cannot read the factory receipt'
+fi
+[[ ${JET_COMPILER_IDENTITY:-} =~ ^[^@#[:space:]]+@[^@#[:space:]]+#[^@#[:space:]]+$ ]] || fail 'compiler identity (name@version#source-id) is required from --factory-record or JET_COMPILER_IDENTITY; never invented'
+export JET_COMPILER_IDENTITY
 timer=$(type -P time) || fail 'GNU time is required to measure peak RSS'
 "$timer" --version >/dev/null 2>&1 || fail 'GNU time is required'
 builder=$(realpath -e -- "$builder") || fail 'builder does not exist'
@@ -58,13 +73,12 @@ else
 fi
 # Interim runtime pack is located beside the executable. Keep every link on
 # the same pack; do not copy/rebuild it and do not replace a caller's resource.
-if [[ -d ${builder%/*}/jet-runtime ]]; then
-    runtime=$(realpath -e -- "${builder%/*}/jet-runtime")
-    if [[ -e $out/jet-runtime || -L $out/jet-runtime ]]; then
-        [[ $(realpath -e -- "$out/jet-runtime") == "$runtime" ]] || fail 'output runtime differs from builder runtime'
-    else
-        ln -s -- "$runtime" "$out/jet-runtime" || fail 'cannot expose runtime beside stages'
-    fi
+[[ -d ${builder%/*}/jet-runtime ]] || fail "builder has no jet-runtime/ beside it: ${builder%/*}"
+runtime=$(realpath -e -- "${builder%/*}/jet-runtime")
+if [[ -e $out/jet-runtime || -L $out/jet-runtime ]]; then
+    [[ $(realpath -e -- "$out/jet-runtime") == "$runtime" ]] || fail 'output runtime differs from builder runtime'
+else
+    ln -s -- "$runtime" "$out/jet-runtime" || fail 'cannot expose runtime beside stages'
 fi
 printf 'stage\tlevel\tseconds\tpeak_rss_kb\tbytes\tsha256\n' > "$out/stages.tsv"
 printf 'pair\tidentical\n' > "$out/comparisons.tsv"
@@ -73,7 +87,7 @@ for stage in 1 2 3; do
     touch -- "$marker"
     status=0
     "$timer" -f '%e\t%M' -o "$out/stage-$stage.time" \
-        timeout --kill-after=30 "$limit" "$builder" build "$unit" \
+        timeout --kill-after=30 "$limit" prlimit --stack=1073741824:1073741824 -- "$builder" build "$unit" \
         > "$out/stage-$stage.log" 2>&1 || status=$?
     # GNU time adds an exit-status line on failure; its final row is metrics.
     metrics=
