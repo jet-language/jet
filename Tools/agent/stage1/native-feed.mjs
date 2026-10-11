@@ -132,7 +132,9 @@ try {
   json(join(out, 'comparisons.json'), comparisons);
   if (!comparisons.fixedPoint) throw Error('native stage1/stage2 object and ELF fixed point differ (whole-file cmp); see comparisons.json');
   if (!comparisons.selfRebuild.identical) throw Error('native stage2/stage3 self-rebuild differs (whole-file cmp); see comparisons.json');
-  receipt = { schema: 'jet-native-compiler/v1', commit: record.commit, sourceRoot: repo, sourceSha256: unit.sourceSha256, factorySha256: record.factory.sha256, compilerIdentity: identity, runtimePackSha256: hash(runtime.pack), producerSha256: plan.producerSha256, harnessSha256: plan.harnessSha256, backend: 'jet-native', optimization: 'O0', fixedPoint: true, selfRebuild: true, comparisons, stages: [{ stage: 1, ...first, keepGoingReport: factory.census, keepGoingFailures: 0 }, { stage: 2, ...second }, { stage: 3, ...third }], jet: second.binary, runtimeDir: join(out, 'stage2', 'jet-runtime'), stage3: { jet: third.binary, runtimeDir: join(stage3, 'jet-runtime') }, steps, rc: 0, verdict: 'GREEN' };
+  // `stages` stays the stage1/stage2 gate pair (native-smoke.mjs admits exactly
+  // two); the stage3 self-rebuild is recorded beside it.
+  receipt = { schema: 'jet-native-compiler/v1', commit: record.commit, sourceRoot: repo, sourceSha256: unit.sourceSha256, factorySha256: record.factory.sha256, compilerIdentity: identity, runtimePackSha256: hash(runtime.pack), producerSha256: plan.producerSha256, harnessSha256: plan.harnessSha256, backend: 'jet-native', optimization: 'O0', fixedPoint: true, selfRebuild: true, comparisons, stages: [{ stage: 1, ...first, keepGoingReport: factory.census, keepGoingFailures: 0 }, { stage: 2, ...second }], selfRebuildStage: { stage: 3, ...third }, jet: second.binary, runtimeDir: join(out, 'stage2', 'jet-runtime'), stage3: { jet: third.binary, runtimeDir: join(stage3, 'jet-runtime') }, steps, rc: 0, verdict: 'GREEN' };
 } catch (error) {
   receipt = { schema: 'jet-native-feed-failure/v1', plan, steps, rc: 1, verdict: 'RED', error: error.stack, fixedPoint: false };
 }
