@@ -5420,6 +5420,22 @@ mod emit_misc_regression_tests {
         });
     }
 
+    /// A wiping Close takes its field out of the consumed receiver and wipes
+    /// that owner (Core's Secret/SigningKey/X25519SecretKey/SharedSecret): no
+    /// rebinding of `^self` into a second owner that scope-end Close re-enters.
+    #[test]
+    fn close_wipes_a_field_taken_from_its_receiver_without_reentering_close() {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let rust = emitted_rust(
+                "struct Key { bytes: [U8] }\nfn wipe(bytes: &[U8]) {\n    loop index in 0..<bytes.len() -> bytes[index] = U8{0}\n}\nimpl Key.Close {\n    fn close(^self) {\n        bytes := ^self.bytes\n        wipe(&bytes)\n    }\n}\nfn run() {\n    k :: Key{bytes: [U8]{1, 2}}\n    print(k.bytes.len())\n}\n",
+            );
+            let start = rust.find("impl __jet_Close for ").expect("Key Close impl");
+            let body = &rust[start..];
+            let body = &body[..body.find("\n}\n").map_or(body.len(), |end| end)];
+            assert!(!body.contains("as __jet_Close>::close("), "Close re-enters itself:\n{body}");
+        });
+    }
+
     /// A borrowed String parameter is a Rust `str` and a list element a
     /// `String`; Rust orders `str` only with `str`.
     #[test]

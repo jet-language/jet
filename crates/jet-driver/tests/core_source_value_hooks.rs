@@ -780,6 +780,30 @@ fn run() {
     );
 }
 
+/// Core's secret-bearing Close impls wipe a buffer taken from the consumed
+/// receiver. Rebinding `^self` made a second owner whose scope-end Close
+/// re-entered the same impl forever, so a natively closed secret never
+/// returned.
+#[test]
+fn core_secret_closes_wipe_once_and_return() {
+    hosted_seed_program_runs(
+        "secret_closes_return",
+        Some("name: \"secret_closes_return\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Rand] } }\n"),
+        r#"
+use core.crypto as crypto
+fn run() -[Rand]> {
+    if true {
+        secret :: crypto.Secret.from_text("credential")
+    }
+    if true {
+        signing :: crypto.SigningKey.new_random() ?? panic("signing key")
+        exchange :: crypto.X25519SecretKey.new_random() ?? panic("exchange key")
+    }
+}
+"#,
+    );
+}
+
 /// A trait-object option payload binds by reference while its owner is only
 /// changed after the binding's last read: the binding's own scope-end
 /// cleanup reads no referent, so a later write of a local root (`sink`) or a

@@ -86,8 +86,7 @@ struct ExpiryCloseCount { count: Int }
 struct ExpiryCloseProbe { count: Shared<ExpiryCloseCount> }
 impl ExpiryCloseProbe.Close {
     fn close(^self) {
-        probe :: ^self
-        guard := probe.count.guard_edit()
+        guard := self.count.guard_edit()
         guard.value.count += 1
     }
 }
