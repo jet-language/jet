@@ -333,6 +333,24 @@ fn rt_thread_entry_address() -> I64 {
 }
 
 // Rust scheduler worker stack: CompilerStack::COMPILER_STACK_SIZE = 192 MiB.
+// A larger soft RLIMIT_STACK (the native compiler stages run under prlimit,
+// since O0 frames are larger than Rust's) also sizes every runtime thread, so
+// work moved onto a scheduler worker gets the main thread's recursion budget.
+// RLIM_INFINITY and failures keep 192 MiB; the reservation is capped at 8 GiB.
+fn thread_stack_bytes() -> I64 {
+    scratch :: jet_rt_alloc(I64{16}, I64{8})
+    thread_zero(scratch, I64{16})
+    status := I64{-1}
+    #Unsafe("getrlimit(RLIMIT_STACK) writes its two-word record into the owned 16-byte scratch and retains no pointer") {
+        status = os_syscall_i64(I64{97}, I64{3}, scratch, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    soft :: sync_load(scratch)
+    jet_rt_free(scratch, I64{16}, I64{8})
+    if (status != I64{0} || soft <= I64{201326592}) { return I64{201326592} }
+    if (soft > I64{8589934592}) { return I64{8589934592} }
+    soft
+}
+
 // musl pthread_attr_t is 56 bytes on x86-64; 64-byte storage is conservative.
 // Returns pthread_t on success, negative pthread errno on failure.
 fn thread_spawn(entry: I64, argument: I64) -> I64 {
@@ -344,7 +362,7 @@ fn thread_spawn(entry: I64, argument: I64) -> I64 {
         jet_rt_free(storage, I64{72}, I64{8})
         return -status
     }
-    status = thread_pthread_attr_setstacksize(attr, I64{201326592})
+    status = thread_pthread_attr_setstacksize(attr, thread_stack_bytes())
     start := I64{0}
     if (status == I64{0}) {
         start = jet_rt_alloc(I64{16}, I64{8})
