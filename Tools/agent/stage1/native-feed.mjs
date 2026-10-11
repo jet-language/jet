@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { accessSync, chmodSync, closeSync, constants, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { invokeStageZeroFactory, readStageZeroFactory } from './native-factory.mjs';
+import { gnuTime, invokeStageZeroFactory, nativeCToolchain, peakRss, readStageZeroFactory } from './native-factory.mjs';
 import { readNativeRuntimePack } from '../../packaging/runtime-pack-cache.mjs';
 const producerRepo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const options = { repo: producerRepo };
@@ -78,7 +78,7 @@ try {
     return { binary: join(directory, 'jet'), sha256: hash(bytes), objectSha256: hash(objects) };
   }
   const first = publish(stage1, prefix + '.exe', prefix + '.o');
-  steps.push({ name: 'factory-native-stage1', rc: 0, seconds: (Date.now() - start) / 1000, factoryReceipt: factory.receipt, keepGoingReport: factory.census, ...first });
+  steps.push({ name: 'factory-native-stage1', rc: 0, seconds: (Date.now() - start) / 1000, factorySeconds: factory.seconds, peakRssKb: factory.peakRssKb, timing: factory.timing, toolchain: factory.toolchain, factoryReceipt: factory.receipt, keepGoingReport: factory.census, ...first });
   json(join(out, 'steps.json'), steps);
   const artifactsFile = join(dirname(repo), 'ARTIFACTS.json');
   const artifacts = existsSync(artifactsFile) ? JSON.parse(readFileSync(artifactsFile, 'utf8')) : { schema: 'jet-regression-artifacts/v1', regression_role: 'discovery', commit: record.commit, tree: record.tree, source: repo, target_dir: `/mnt/jetscratch/targets/source-${record.commit}`, artifacts: {} };
@@ -90,18 +90,30 @@ try {
   for (const key of Object.keys(env)) if (key.startsWith('JET_FRONT_') || key.startsWith('JET_BOOTSTRAP_') || key === 'JET_DUMP_MIR' || key === 'JET_DEBUG_LOWER_ALL' || key === 'JET_KEEP_GOING_SKIP' || key === 'JET_KEEP_GOING_REPORT') delete env[key];
   // jet_rt_main runs the compiler on the process main thread and O0 frames
   // never share slots, so RLIMIT_STACK bounds recursion depth: every native
-  // CLI stage execs under a 1 GiB stack set before exec.
+  // CLI stage execs under a 1 GiB stack set before exec. GNU time records
+  // elapsed seconds and peak RSS; a whole-compiler stage gets at least 3 h.
   const stack = ['prlimit', '--stack=1073741824:1073741824', '--'];
+  const limit = process.env.NATIVE_STAGE_TIMEOUT ?? '10800';
+  if (!/^[1-9][0-9]*$/.test(limit)) throw Error('NATIVE_STAGE_TIMEOUT must be a positive number of seconds');
+  const timer = gnuTime();
+  const jetEnv = join(repo, 'Tools/agent/jet-env');
+  // The inline-C archive (and so jet/jet.o) depends on the C toolchain the
+  // route selects; a stage whose cc/ar/hardening differ from the factory's
+  // cannot meet the byte gate, so refuse it before spending hours.
+  const sameToolchain = (left, right) => JSON.stringify([left.cc, left.ar, left.nixHardeningEnable]) === JSON.stringify([right.cc, right.ar, right.nixHardeningEnable]);
   const built = join(unit.project, '.jet/build/selfhost');
   // Real argv CLI stage: <builder> build <assembled selfhost.jet>, same source
   // path and cwd every time, empty all-phases census, fresh outputs only.
   function cliStage(stage, builder) {
-    const report = join(out, `stage${stage}-keep-going.tsv`);
+    const report = join(out, `stage${stage}-keep-going.tsv`), timing = join(out, `stage${stage}.time`);
+    const stageEnv = { ...env, JET_KEEP_GOING_REPORT: report };
+    const toolchain = nativeCToolchain(jetEnv, stageEnv, unit.project);
+    if (!sameToolchain(toolchain, factory.toolchain)) throw Error(`stage${stage} C toolchain differs from the factory's: ${JSON.stringify(toolchain)} vs ${JSON.stringify(factory.toolchain)}`);
     rmSync(built, { force: true }); rmSync(`${built}.o`, { force: true });
-    execute(`native-stage${stage}`, [...stack, join(repo, 'Tools/agent/jet-env'), builder, 'build', unit.source], { ...env, JET_KEEP_GOING_REPORT: report }, unit.project);
+    execute(`native-stage${stage}`, [timer, '-v', '-o', timing, 'timeout', '--kill-after=30', limit, ...stack, jetEnv, builder, 'build', unit.source], stageEnv, unit.project);
     const census = readFileSync(report, 'utf8').trim().split('\n');
     if (census.length !== 1 || census[0] !== 'phase\titem\tcode\tmessage\tspan') throw Error(`stage${stage} all-phases census must exist and be empty`);
-    return { ...publish(join(out, `stage${stage}`), built, `${built}.o`), keepGoingReport: report, keepGoingFailures: 0 };
+    return { ...publish(join(out, `stage${stage}`), built, `${built}.o`), keepGoingReport: report, keepGoingFailures: 0, timing, seconds: steps.at(-1).seconds, peakRssKb: peakRss(timing), toolchain };
   }
   // Whole-file byte comparison of jet and jet.o; never a section subset.
   const compare = (left, right) => ['jet', 'jet.o'].map(name => ({ name, equal: readFileSync(join(out, left, name)).equals(readFileSync(join(out, right, name))) }));

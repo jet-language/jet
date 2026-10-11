@@ -1,7 +1,8 @@
 // Admit the retained, source-bound bootstrap factory before feeding real Jet
 // library/native requests. A factory is not an argv CLI or a native candidate.
 import { createHash } from 'node:crypto';
-import { accessSync, constants, mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { assertPinnedSource } from '../proof-source.mjs';
@@ -50,10 +51,49 @@ function runFactoryProtocol({ recordFile, repo, sourceRoot, entry, work, policy 
   const store = join(work, 'store');
   mkdirSync(home, { recursive: true });
   mkdirSync(store, { recursive: true });
-  const env = { HOME: home, PATH: process.env.PATH, TMPDIR: process.env.TMPDIR ?? '/tmp', LC_ALL: 'C', RUST_MIN_STACK: '268435456', RUST_BACKTRACE: '1', JET_TOOLCHAIN_ROOT: resolve(repo), JET_BOOTSTRAP_MODE: 'factory', JET_BOOTSTRAP_FACTORY_TIER: 'aot', JET_BOOTSTRAP_SOURCE_ROOT: resolve(sourceRoot), JET_BOOTSTRAP_ENTRY: entry, JET_BOOTSTRAP_OUTPUT: join(work, 'unused-rust-output.rs'), JET_BOOTSTRAP_RECEIPT: receipt, JET_STORE_DIR: store, JET_KEEP_GOING: '1', JET_KEEP_GOING_REPORT: census, ...policy };
-  const run = spawnSync(record.factory.path, [], { cwd: sourceRoot, env, stdio: 'inherit' });
+  // The native route compiles the compiler's #FFI(c) leaves with the CLI's C
+  // toolchain (JetCli ForeignLink.jet). The factory therefore runs inside the
+  // SAME Tools/agent/jet-env shell, entered from the SAME caller environment
+  // (real HOME, PATH, CC, AR, NIX_* wrapper policy, JET_PACK_MUSL_LIB), as
+  // the native CLI stages, so the inline-C archive is identical at every
+  // stage. Inherited JET_*/RUST_* never leak: only the explicit policy below.
+  // jet-env misresolves the shell under a synthetic HOME, so the private
+  // factory HOME is applied inside it, just before exec.
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('JET_') && !key.startsWith('RUST_')));
+  Object.assign(env, { LC_ALL: 'C', RUST_MIN_STACK: '268435456', RUST_BACKTRACE: '1', JET_TOOLCHAIN_ROOT: resolve(repo), JET_BOOTSTRAP_MODE: 'factory', JET_BOOTSTRAP_FACTORY_TIER: 'aot', JET_BOOTSTRAP_SOURCE_ROOT: resolve(sourceRoot), JET_BOOTSTRAP_ENTRY: entry, JET_BOOTSTRAP_OUTPUT: join(work, 'unused-rust-output.rs'), JET_BOOTSTRAP_RECEIPT: receipt, JET_STORE_DIR: store, JET_KEEP_GOING: '1', JET_KEEP_GOING_REPORT: census, ...policy });
+  if (process.env.JET_PACK_MUSL_LIB) env.JET_PACK_MUSL_LIB = process.env.JET_PACK_MUSL_LIB;
+  const jetEnv = join(resolve(repo), 'Tools/agent/jet-env');
+  const toolchain = nativeCToolchain(jetEnv, env, sourceRoot);
+  // RUST_MIN_STACK covers spawned Rust threads, not the main stack. Native
+  // compiler recursion needs the same explicit 1 GiB main-stack bound as CLI
+  // stages; GNU time records the factory's elapsed time and peak RSS.
+  const timing = join(work, 'factory.time');
+  const start = Date.now();
+  const run = spawnSync(gnuTime(), ['-v', '-o', timing, jetEnv, 'env', `HOME=${home}`, 'prlimit', '--stack=1073741824:1073741824', '--', record.factory.path], { cwd: sourceRoot, env, stdio: 'inherit' });
   if (run.error) throw run.error;
-  return { record, receipt, census, rc: run.status ?? 1, signal: run.signal, compilerProtocol: 'bootstrap-factory', sourceCommit: record.commit };
+  const seconds = (Date.now() - start) / 1000;
+  return { record, receipt, census, rc: run.status ?? 1, signal: run.signal, compilerProtocol: 'bootstrap-factory', sourceCommit: record.commit, toolchain, timing, seconds, peakRssKb: peakRss(timing) };
+}
+// GNU time, never the shell keyword.
+export function gnuTime() {
+  const path = spawnSync('bash', ['-c', 'type -P time'], { encoding: 'utf8' }).stdout.trim();
+  if (!path || !spawnSync(path, ['--version'], { encoding: 'utf8' }).stdout.includes('GNU')) throw Error('GNU time is required to measure native stages');
+  return path;
+}
+export function peakRss(timing) {
+  const text = existsSync(timing) ? readFileSync(timing, 'utf8') : '';
+  const match = /Maximum resident set size \(kbytes\): (\d+)/.exec(text);
+  return match ? Number(match[1]) : null;
+}
+// The C compiler and archiver a native CLI route selects (`$CC`/`$AR`, else
+// cc/ar) inside `jetEnv`, with their resolved paths and version lines.
+export function nativeCToolchain(jetEnv, env, cwd) {
+  const probe = 'for tool in "${CC:-cc}" "${AR:-ar}"; do path=$(command -v -- "$tool") || exit 3; printf "%s\\t%s\\n" "$path" "$("$path" --version 2>&1 | head -n 1)"; done; printf "%s\\n" "${NIX_HARDENING_ENABLE-<unset>}"';
+  const result = spawnSync(jetEnv, ['bash', '-c', probe], { cwd, env, encoding: 'utf8' });
+  const rows = result.stdout.trim().split('\n');
+  if (result.status !== 0 || rows.length !== 3) throw Error(`cannot resolve the native C toolchain through ${jetEnv} (rc ${result.status}): ${result.stdout}${result.stderr}`);
+  const [cc, ar] = rows.slice(0, 2).map(row => { const [path, version] = row.split('\t'); return { path, version }; });
+  return { jetEnv, cc, ar, nixHardeningEnable: rows[2] };
 }
 export function invokeStageZeroFactory(options) {
   const result = runFactoryProtocol(options, true);
