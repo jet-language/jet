@@ -661,7 +661,7 @@ fn file_open(identity: X25519SecretKey, source: Path, destination: Path) FileCry
     header :: jetc_read_exact(input, header_size, "open-input-read", .OpenFailed)
     reader := jetc.reader(identity, fixed.bytes, header.bytes, metadata.len)
     parent :: jetc_parent(destination.to_string())
-    output :: jetc_temp(parent, "jetc-open")
+    output := jetc_temp(parent, "jetc-open")
     jetc_cancel_checkpoint()
     loop reader.remaining > 0 {
         jetc_cancel_checkpoint()
@@ -674,7 +674,7 @@ fn file_open(identity: X25519SecretKey, source: Path, destination: Path) FileCry
     }
     trailing :: jetc_read(input, 1, "open-input-read", .OpenFailed)
     jetc.finish(reader, trailing.bytes)
-    jetc_publish(^output, parent, "open")
+    jetc_publish(&output, parent, "open")
     Ok()
 }
 
@@ -874,8 +874,10 @@ fn jetc_revalidate(parent: JetcParent) FileCryptoError! {
     if before.dev != after.dev || before.ino != after.ino -> return Err(.DestinationIO)
     Ok()
 }
-fn jetc_publish(owned: ^JetcTemp, parent: JetcParent, operation: String) FileCryptoError! {
-    output := ^owned
+// Publishes through the caller's temporary, which stays its one owner: a
+// rebound `^JetcTemp` parameter became a second owner that closed the same
+// descriptor (and removed the same path) again at scope end.
+fn jetc_publish(output: &JetcTemp, parent: JetcParent, operation: String) FileCryptoError! {
     jetc_cancel_checkpoint()
     if parent.linux {
         jetc_sync(output.file, "{operation}-output-fsync")
@@ -888,8 +890,8 @@ fn jetc_publish(owned: ^JetcTemp, parent: JetcParent, operation: String) FileCry
         jetc_sync(parent.directory, "{operation}-directory-fsync")
     } else {
         if core.crypto.__jetc_fsync(output.file.fd).value < 0 -> return Err(.DestinationIO)
-        close(^output.file)
-        output.file = JetcFd{fd: -1}
+        _ :: core.crypto.__jetc_close(output.file.fd)
+        output.file.fd = -1
         jetc_revalidate(parent)
         path :: output.path ?? return Err(.DestinationIO)
         if core.files.__hard_link_raw(path, parent.destination) == {
@@ -916,7 +918,7 @@ fn jetc_seal_stage(recipients: [jetc.Recipient], parent: JetcParent, stage: Jetc
     nonce_prefix :: jetc_random(16)
     writer := jetc.writer(recipients, length, file_id.bytes, ^file_key, ^ephemeral, nonce_prefix.bytes)
     jetc_cancel_checkpoint()
-    output :: jetc_temp(parent, "jetc-output")
+    output := jetc_temp(parent, "jetc-output")
     operation :: if verify -> "migrate" else -> "seal"
     jetc_write_span(output.file, writer.prefix, 0, 20, "{operation}-output-write")
     jetc_write_span(output.file, writer.prefix, 20, writer.prefix.len(), "{operation}-output-write")
@@ -948,7 +950,7 @@ fn jetc_seal_stage(recipients: [jetc.Recipient], parent: JetcParent, stage: Jetc
             }
         }
     }
-    jetc_publish(^output, parent, operation)
+    jetc_publish(&output, parent, operation)
     Ok()
 }
 
