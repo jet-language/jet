@@ -424,6 +424,9 @@ origin variant is the payload of a generated union.
 The Prelude and resident HTTP hosts marshal string-list payloads through the
 same Foundation list-formatting kernel; a host adapter does not choose a
 different container shape.
+Lowering helpers that mutate their builder read retained plain metadata from
+an explicit owned `.copy()` snapshot, not a row still borrowed through that
+builder. This does not copy trait adapters or widen a value's Copy capability.
 
 Native lowering must fail closed when a construct cannot preserve the shared
 runtime's ABI, error behavior, or observable output. Report an unsupported

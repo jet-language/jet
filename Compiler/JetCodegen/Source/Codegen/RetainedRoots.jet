@@ -132,8 +132,11 @@ fn jet_codegen_retain_deferred_call(builder: &JetCodegenBuilder, program: JetCod
 }
 
 fn jet_codegen_emit_retained_deferred(builder: &JetCodegenBuilder, program: JetCodegenProgram, thunk: MIRValueID) -> Bool Never! {
-    loop deferred in builder.retained_deferred {
-        if deferred.thunk != thunk -> next
+    loop deferred_view in builder.retained_deferred {
+        if deferred_view.thunk != thunk -> next
+        // The lowering helpers mutate the builder; read an owned metadata
+        // snapshot, not a retained row borrowed through that same builder.
+        deferred := deferred_view.copy()
         record := JetCodegenDropLive?{None}
         loop live in builder.drop_live_places {
             if live.place == deferred.place -> record = Val(live)
