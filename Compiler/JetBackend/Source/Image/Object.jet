@@ -177,6 +177,9 @@ fn x64_object_functions(program: LIRModule, functions: [X64CompiledFunction], de
     text := [U8]{}
     offsets := [Int]{}
     loop function in functions -> &offsets.push(x64_link_place(&text, function))
+    // Calls between functions are patched below as rel32 without per-site
+    // checks: every distance inside `.text` is below its length.
+    if !x64_fits_i32(text.len()) -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{".text is {text.len()} bytes; calls between its functions are rel32, which reaches at most 2147483647 bytes"}}
     rodata := [U8]{}
     data_offsets := [Int]{}
     rodata_align := 1

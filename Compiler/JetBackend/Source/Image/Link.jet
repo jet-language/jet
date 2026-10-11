@@ -58,6 +58,8 @@ fn x64_link_text(functions: [X64CompiledFunction], runtime: [X64CompiledFunction
         &data_offsets.push(text.len())
         loop byte in object.bytes -> &text.push(byte)
     }
+    // Code and data references are rel32 within this block.
+    if !x64_fits_i32(text.len()) -> &errors.push("the linked block is {text.len()} bytes; its rel32 references reach at most 2147483647 bytes")
     data_relocs := [X64ImageDataReloc]{}
     loop (index, object) in data {
         loop reloc in object.relocs {
