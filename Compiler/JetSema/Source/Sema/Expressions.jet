@@ -409,7 +409,12 @@ struct SemaExprOperatorResolution {
 // registered row itself is only read.
 fn sema_expr_operator_candidate_from_function(function: SemaRegistrationFunction, signature: Type, graph: SemaRegistrationGraph?, owner_type: Type, trait_symbol: Symbol?, trait_name: String, method: String, rhs: Type, span: Span, caller_module: String, caller_package: String, lexical_generic_params: [TGenericParam], diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
     if function.symbol.name != method || function.parameters.len() == 0 -> return None
-    trait_symbol_value :: trait_symbol ?? return None
+    // Rust `is_builtin_trait`: the arithmetic hook traits (`Add`, `Sub`,
+    // `Mul`, `Div`) are compiler-owned and no source module declares them, so
+    // a hook's trait owner is the builtin trait identity when no visible
+    // declaration names it. A missing owner silently dropped every user
+    // operator hook (E0360 on `impl R.Mul(Int)`, Core `impl Float.Mul(Vec3)`).
+    trait_symbol_value :: trait_symbol ?? sema_type_builtin_trait_symbol(trait_name) ?? return None
     method_ref := TMethodRef{symbol: function.symbol.id, name: method, mangled: false, trait_owner: Val(trait_symbol_value.id), operator_identity: Val("{type_name(owner_type)}::{trait_name}::{method}<{type_name(rhs)}>")}
     sema_call_method_candidate_from_registration(signature, function.generic_params, graph, caller_module, caller_package, lexical_generic_params, Val(owner_type), function.parameters[0].convention, 1, method_ref, [Type]{}, span, &diagnostics)
 }
