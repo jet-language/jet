@@ -96,6 +96,7 @@ use jet_foundation.[
     TComptimeValue,
     TEnumPayload,
     TExpr,
+    TIfCond,
     TExprKind,
     TStmt,
     TStrPart,
@@ -3835,11 +3836,16 @@ fn jet_driver_comptime_unstage_bare(staging: &JetDriverComptimeStaging) Never! {
 // literals (sema has already filled each omitted field's default), enum
 // constructors with positional or named payloads, `Val(x)` and `None`,
 // constants that already landed, and integer, Float and Bool arithmetic and
-// comparison over them. Aggregates take the shape the native value boundary
-// lands (`jet_driver_native_value`): the declared type name, field and named
-// payload labels. A value outside its checked type, a division, shift or
-// power, a call, and any other shape is not folded: it is evaluated, and the
-// evaluator reports it.
+// comparison over them. Rust's MIREval reads the same checked facts: a
+// `T.$layout` read is the LayoutInfo sema computed for the selected target
+// (a CtLit) and `.size` its field; `x ?? panic(..)` on a present value is
+// that value; a value `if`/else-if chain takes the arm its folded condition
+// selects; shifts stay within the checked width. Aggregates take the shape
+// the native value boundary lands (`jet_driver_native_value`): the declared
+// type name, field and named payload labels. A value outside its checked
+// type, a selected arm that stops (`panic`), a division or power, a call,
+// and any other shape is not folded: it is evaluated, and the evaluator
+// reports it.
 fn jet_driver_comptime_fold(expression: TExpr, values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
     if expression.kind == {
         .IntLit(value, _) -> return jet_driver_comptime_fold_int(value, expression.ty)
@@ -3854,12 +3860,23 @@ fn jet_driver_comptime_fold(expression: TExpr, values: [SemaComptimeItemValue]) 
             if parts.len() == 1 && parts[0] == .Literal(text) -> return Val(TComptimeValue.String{value: text})
         }
         // A checked literal that already carries its value (D-INTBIG1: an
-        // integer outside the i64 range is a BigInt constant).
+        // integer outside the i64 range is a BigInt constant; a `$` fact read
+        // is its reflection record).
         .CtLit(value) -> {
-            if value == {
-                .Int(_) | .BigInt(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) -> return Val(value)
-                else -> {}
+            if jet_driver_comptime_data(value) -> return Val(value)
+        }
+        .Field(receiver, field) -> {
+            folded :: jet_driver_comptime_fold(receiver, values) ?? return None
+            if folded == .Struct(_, fields) {
+                loop member in fields {
+                    if member.name == field.name -> return Val(member.value)
+                }
             }
+        }
+        .IfExpr(cond, then_body, then_value, else_body, else_value) -> {
+            if then_body.len() != 0 || else_body.len() != 0 -> return None
+            selected :: jet_driver_comptime_fold_condition(cond, values) ?? return None
+            return jet_driver_comptime_fold(if selected -> then_value else -> else_value, values)
         }
         .ConstRef(symbol) -> return jet_driver_comptime_landed(values, symbol.key)
         // Copying a constant's value is that value.
@@ -3883,27 +3900,15 @@ fn jet_driver_comptime_fold(expression: TExpr, values: [SemaComptimeItemValue]) 
         .Absent -> {
             if expression.ty == .Option(inner) -> return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: inner}})
         }
-        // `String.from_bytes([U8]{…}) ?? fallback`, the generators' spelling
-        // of a string holding a control character (no escape spells NUL):
-        // the decoded text when the folded bytes are UTF-8, else the fallback.
+        // `x ?? fallback`: a present value is itself, an absent one takes a
+        // folded value fallback. `String.from_bytes([U8]{…})` is the
+        // generators' spelling of a string holding a control character (no
+        // escape spells NUL): present when the folded bytes are UTF-8.
         .OrFallback(value, fallback, _) -> {
-            if expression.ty != Type.String -> return None
-            if value.kind == .BuiltinMethod(receiver, operation, args) {
-                if operation == TBuiltinOp.StringFromBytes && args.len() == 0 {
-                    folded :: jet_driver_comptime_fold(receiver, values) ?? return None
-                    bytes := [U8]{}
-                    if folded == .List(items) {
-                        loop item in items {
-                            if item == .Int(number) -> &bytes.push(U8.from_int(number) ?? return None)
-                            else -> return None
-                        }
-                    } else { return None }
-                    decoded :: String.from_bytes(bytes) ?? {
-                        if fallback == .Value(otherwise) -> return jet_driver_comptime_fold(otherwise, values)
-                        return None
-                    }
-                    return Val(TComptimeValue.String{value: decoded})
-                }
+            subject :: jet_driver_comptime_fold(value, values) ?? jet_driver_comptime_fold_from_bytes(value, values) ?? return None
+            if subject == .Present(inner) -> return Val(inner)
+            if subject == .Failed(_) {
+                if fallback == .Value(otherwise) -> return jet_driver_comptime_fold(otherwise, values)
             }
         }
         .Unary(op, operand) -> {
@@ -3937,6 +3942,66 @@ fn jet_driver_comptime_fold(expression: TExpr, values: [SemaComptimeItemValue]) 
         }
         .ListLit(elements) -> return jet_driver_comptime_fold_list(elements, values)
         else -> {}
+    }
+    None
+}
+
+// A landed value is data: no closure anywhere in it.
+fn jet_driver_comptime_data(value: TComptimeValue) -> Bool Never! {
+    if value == {
+        .Closure(_) -> return false
+        .List(items) -> loop item in items {
+            if !jet_driver_comptime_data(item) -> return false
+        }
+        .Map(entries) -> loop entry in entries {
+            if !jet_driver_comptime_data(entry.value) -> return false
+        }
+        .Struct(_, fields) -> loop field in fields {
+            if !jet_driver_comptime_data(field.value) -> return false
+        }
+        .Enum(_, _, args) -> loop argument in args {
+            if !jet_driver_comptime_data(argument.value) -> return false
+        }
+        .Present(inner) -> return jet_driver_comptime_data(inner)
+        .Failed(report) -> {
+            if report == .Told(inner) -> return jet_driver_comptime_data(inner)
+        }
+        else -> {}
+    }
+    true
+}
+
+// A value `if` condition: a folded Bool, or both halves of `&&`-joined ones.
+fn jet_driver_comptime_fold_condition(cond: TIfCond, values: [SemaComptimeItemValue]) -> Bool? Never! {
+    if cond == {
+        .Plain(value) -> {
+            folded :: jet_driver_comptime_fold(value, values) ?? return None
+            if folded == .Bool(flag) -> return Val(flag)
+            None
+        }
+        .And(left, right) -> {
+            if !(jet_driver_comptime_fold_condition(left, values) ?? return None) -> return Val(false)
+            jet_driver_comptime_fold_condition(right, values)
+        }
+        else -> None
+    }
+}
+
+// `String.from_bytes(<folded [U8]>)` as its Result: the decoded text, or a
+// clean failure when the bytes are not UTF-8.
+fn jet_driver_comptime_fold_from_bytes(value: TExpr, values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
+    if value.kind == .BuiltinMethod(receiver, operation, args) {
+        if operation != TBuiltinOp.StringFromBytes || args.len() != 0 -> return None
+        folded :: jet_driver_comptime_fold(receiver, values) ?? return None
+        bytes := [U8]{}
+        if folded == .List(items) {
+            loop item in items {
+                if item == .Int(number) -> &bytes.push(U8.from_int(number) ?? return None)
+                else -> return None
+            }
+        } else { return None }
+        decoded :: String.from_bytes(bytes) ?? return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "UTF8Error"}}})
+        return Val(TComptimeValue.Present{value: TComptimeValue.String{value: decoded}})
     }
     None
 }
@@ -4028,6 +4093,16 @@ fn jet_driver_comptime_fold_binary(op: TBinaryOp, ty: Type, left: TComptimeValue
                 .BitAnd -> return jet_driver_comptime_fold_int(a.bit_and(b), ty)
                 .BitOr -> return jet_driver_comptime_fold_int(a.bit_or(b), ty)
                 .BitXor -> return jet_driver_comptime_fold_int(a.bit_xor(b), ty)
+                // A non-negative value shifted by less than its width; the
+                // result must still fit the checked type.
+                .Shl -> {
+                    if a < 0 || b < 0 || b > 63 -> return None
+                    return jet_driver_comptime_fold_int(a * (1 << b), ty)
+                }
+                .Shr -> {
+                    if a < 0 || b < 0 || b > 63 -> return None
+                    return jet_driver_comptime_fold_int(a /% (1 << b), ty)
+                }
                 else -> return None
             }
         }
