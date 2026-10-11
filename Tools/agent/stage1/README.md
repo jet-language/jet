@@ -71,8 +71,19 @@ Builds and full fixed-point runs still require Main's measured proofq admission.
 The sharded stage-zero factory is a separate bootstrap input, not a CLI seed.
 Its explicit `JET_BOOTSTRAP_*` protocol can feed the Jet compiler's own
 `JET_FRONT_LIBRARY_OBJECT_OUTPUT` and `JET_FRONT_NATIVE_OUTPUT` paths. Produce
-the runtime library object first, then supply that real same-source object as
-`JET_RUNTIME_PACK` while lowering the exact assembled CLI unit. `lib.sh` forwards
+and package the runtime first, then set `JET_RUNTIME_PACK` to
+`<jet-runtime>/<key>/jet_runtime.pack.o` inside that packaged runtime directory
+(its `native.key` must name `<key>`) while lowering the exact assembled CLI unit.
+The native feed runs `jet build`'s own native route
+(`jet_cli_native_executable` in `Compiler/JetCli/Source/Cli/Host.jet`) at O0
+with that directory as the runtime directory: the same C closure (inline
+`#FFI(c)` bodies, c@path archives, the musl platform from
+`<jet-runtime>/foreign/platform` or the toolchain), the same runtime object or
+pack, and the same link order, so stage1 matches stage2 when stage1's
+`jet-runtime/` is a copy of that directory. The C closure needs the same C
+toolchain environment as the stage2 `jet build` (`PATH`'s or `CC`'s compiler,
+`AR`, `NIX_HARDENING_ENABLE`, and `JET_PACK_MUSL_LIB` when
+`foreign/platform` is not packaged). `lib.sh` forwards
 these request paths and `JET_KEEP_GOING`, `JET_KEEP_GOING_REPORT`, and
 `JET_KEEP_GOING_SKIP` through its otherwise-clean environment. A factory process
 exit alone admits neither object nor executable: check its reports, the emitted
@@ -105,10 +116,27 @@ Tools/agent/jet-env node Tools/agent/stage1/native-feed.mjs \
 `native-feed.mjs --dry-run` performs only canonical CLI-unit assembly and records
 the future artifact dependencies; it does not admit missing upstream artifacts.
 The real run lowers that exact unit through `Entry.native` to stage 1, then
-uses stage 1's real `build` argv to compile the same unit into stage 2. Both
-all-phases censuses must exist and be empty; both objects and ELFs must compare
-byte-identically. No stage 3 is required. Producer/harness hashes are recorded
-separately from the single pinned compiler/runtime source identity.
+uses stage 1's real `build` argv to compile the same unit into stage 2, then
+stage 2's to compile it into stage 3. Every all-phases census must exist and be
+empty. The gate is whole-file byte identity of the stage 1 and stage 2 objects
+and ELFs (`comparisons.json`, written before stage 3 starts); stage 2 == stage 3
+is the self-rebuild receipt, and GREEN needs both. The receipt's `stages` stay
+the stage 1/2 pair; stage 3 is recorded beside them. Producer/harness hashes are
+recorded separately from the single pinned compiler/runtime source identity.
+
+The factory and every CLI stage run inside the source export's
+`Tools/agent/jet-env` shell entered from the caller's environment (the
+factory's drops inherited `JET_*`/`RUST_*`), so one C toolchain builds the
+inline-C closure; each records its resolved `cc`/`ar` paths, versions and
+`NIX_HARDENING_ENABLE`, and a CLI stage whose toolchain differs from the
+factory's is refused. Each runs under GNU `time -v` (seconds, peak RSS) with a
+1 GiB main stack set by `prlimit` before exec: the native compiler runs on the
+main thread, and the Rust thread-stack variable does not raise it. CLI stages
+get `JET_COMPILER_IDENTITY` from the stage-1 factory receipt's
+`compiler_source_identity` and a `NATIVE_STAGE_TIMEOUT` (default 10800 s).
+`native-fixedpoint.sh` needs a real CLI builder (`stage1/jet` or `stage2/jet`,
+never `jetc0`) with `jet-runtime/` beside it, `JET_TOOLCHAIN_ROOT`, and the
+same identity (`--factory-receipt`); run it through the same `jet-env`.
 
 `native-lowering-census.mjs FACTORY_RECORD PINNED_SOURCE FRESH_OUT` may run in
 parallel with the pack producer. It uses the existing `Entry.native` object
