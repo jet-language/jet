@@ -421,7 +421,13 @@ fn run() -[FS]> {
 /// Check, lower, emit, rustc-compile and run one regression program through
 /// the hosted Rust seed path (the r16 collect-all emission sweep).
 fn hosted_seed_program_runs(label: &str, package: Option<&str>, program: &str) {
-    hosted_seed_program_runs_as(label, package, program, false);
+    hosted_seed_program_runs_as(label, package, &[], program, false);
+}
+
+/// The same regression with sibling module files (`name.jet` loaded by the
+/// entry's `module name`), so an item crosses a module boundary.
+fn hosted_seed_modules_run(label: &str, modules: &[(&str, &str)], program: &str) {
+    hosted_seed_program_runs_as(label, None, modules, program, false);
 }
 
 /// The same regression, then also built the way the bootstrap builds it: the
@@ -429,10 +435,16 @@ fn hosted_seed_program_runs(label: &str, package: Option<&str>, program: &str) {
 /// dependent crate (`jet_store::runtime::split_runtime_crate`), so an item
 /// emitted in the wrong crate (an orphan impl, a crate-private helper) fails.
 fn hosted_seed_program_runs_split(label: &str, package: Option<&str>, program: &str) {
-    hosted_seed_program_runs_as(label, package, program, true);
+    hosted_seed_program_runs_as(label, package, &[], program, true);
 }
 
-fn hosted_seed_program_runs_as(label: &str, package: Option<&str>, program: &str, split: bool) {
+fn hosted_seed_program_runs_as(
+    label: &str,
+    package: Option<&str>,
+    modules: &[(&str, &str)],
+    program: &str,
+    split: bool,
+) {
     jet_driver::run_compiler_work(|| {
         let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
         let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
@@ -442,6 +454,9 @@ fn hosted_seed_program_runs_as(label: &str, package: Option<&str>, program: &str
         std::fs::create_dir_all(&directory).unwrap();
         if let Some(package) = package {
             std::fs::write(directory.join("package.jet"), package).unwrap();
+        }
+        for (name, source) in modules {
+            std::fs::write(directory.join(format!("{name}.jet")), source).unwrap();
         }
         let entry = directory.join("run.jet");
         std::fs::write(&entry, program).unwrap();
@@ -717,6 +732,49 @@ fn run() -[FS]> {
     first :: files[0].reader.read(1) ?? panic("read")
     assert_eq(first[0], U8{10})
     assert_eq(files[0].path, "run.jet")
+}
+"#,
+    );
+}
+
+/// r17g5: `shared ParentAttachment?{None}` whose payload record lives in
+/// another module keeps its `Shared<ParentAttachment?>` payload type, not the
+/// bare `None` placeholder `Int?` (CoreLibrary's `CoreSharedParentAttachment`).
+/// The `None` reaches `Shared.new` from the worklist cache, so the argument
+/// takes its parameter's option type after the cache, not only on a fresh lower.
+#[test]
+fn shared_typed_none_of_an_imported_record_keeps_its_payload_type() {
+    hosted_seed_modules_run(
+        "shared_imported_none",
+        &[("backend", "struct ParentAttachment { manifest_digest: String }\n")],
+        r#"
+module backend
+use backend.[ParentAttachment]
+struct Host {
+    rows: [String]
+    attachment: Shared<ParentAttachment?>
+}
+fn host_new(rows: ^[String]) -> Host Never! {
+    original := ^rows
+    Host{
+        rows: ^original,
+        attachment: shared ParentAttachment?{None},
+    }
+}
+fn attach(host: &Host, digest: String) Never! {
+    guard := host.attachment.guard_edit()
+    guard.value = Val(ParentAttachment{manifest_digest: digest})
+}
+fn digest(host: Host) -> String Never! {
+    guard :: host.attachment.guard_read()
+    attachment :: guard.value ?? return "none"
+    attachment.manifest_digest
+}
+fn run() {
+    host := host_new([String]{"a"})
+    assert_eq(digest(host), "none")
+    attach(&host, "m")
+    assert_eq(digest(host), "m")
 }
 "#,
     );
