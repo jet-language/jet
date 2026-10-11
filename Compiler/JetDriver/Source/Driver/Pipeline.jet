@@ -89,7 +89,11 @@ use jet_foundation.[
     Span,
     SymbolKind,
     TBinaryOp,
+    TComptimeEnumArg,
+    TComptimeField,
+    TComptimeReport,
     TComptimeValue,
+    TEnumPayload,
     TExpr,
     TExprKind,
     TStmt,
@@ -3826,10 +3830,14 @@ fn jet_driver_comptime_unstage_bare(staging: &JetDriverComptimeStaging) Never! {
 // execution child (the bootstrap factory, the native CLI) evaluates nothing.
 // So every value that is literal data folds here: Int, sized-integer
 // (`I64{208}`, `U8{7}`), Float, Bool, Char and string literals, their
-// negation, the checked Int-to-fixed conversion of a literal, lists of them,
+// negation, the checked Int-to-fixed conversion of a literal, lists, struct
+// literals (sema has already filled each omitted field's default), enum
+// constructors with positional or named payloads, `Val(x)` and `None`,
 // constants that already landed, and integer, Float and Bool arithmetic and
-// comparison over them. A value outside its checked type, a division, shift
-// or power, and any other shape is not folded: it is evaluated, and the
+// comparison over them. Aggregates take the shape the native value boundary
+// lands (`jet_driver_native_value`): the declared type name, field and named
+// payload labels. A value outside its checked type, a division, shift or
+// power, a call, and any other shape is not folded: it is evaluated, and the
 // evaluator reports it.
 fn jet_driver_comptime_fold(expression: TExpr, values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
     if expression.kind == {
@@ -3853,6 +3861,27 @@ fn jet_driver_comptime_fold(expression: TExpr, values: [SemaComptimeItemValue]) 
             }
         }
         .ConstRef(symbol) -> return jet_driver_comptime_landed(values, symbol.key)
+        // Copying a constant's value is that value.
+        .Clone(value, _) | .ExplicitCopy(value) -> return jet_driver_comptime_fold(value, values)
+        .StructLit(fields, extra) -> {
+            if extra != None -> return None
+            type_name :: jet_driver_comptime_type_name(expression.ty) ?? return None
+            folded := [TComptimeField]{}
+            loop field in fields -> &folded.push(TComptimeField{name: field.field.name, value: jet_driver_comptime_fold(field.value, values) ?? return None})
+            return Val(TComptimeValue.Struct{type_name: type_name, fields: folded})
+        }
+        .EnumCtor(_, variant, payload) -> {
+            type_name :: jet_driver_comptime_type_name(expression.ty) ?? return None
+            parts :: variant.key.split(":").to_list()
+            return jet_driver_comptime_fold_enum(type_name, parts[parts.len() - 1], payload, values)
+        }
+        .EnumLit(enum_type, variant, payload) -> return jet_driver_comptime_fold_enum(jet_driver_comptime_leaf_name(enum_type), variant, payload, values)
+        .Present(value) -> {
+            if expression.ty == .Option(_) -> return Val(TComptimeValue.Present{value: jet_driver_comptime_fold(value, values) ?? return None})
+        }
+        .Absent -> {
+            if expression.ty == .Option(inner) -> return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: inner}})
+        }
         .Unary(op, operand) -> {
             folded :: jet_driver_comptime_fold(operand, values) ?? return None
             if op == TUnaryOp.Neg {
@@ -3892,6 +3921,31 @@ fn jet_driver_comptime_fold_list(elements: [TExpr], values: [SemaComptimeItemVal
     folded := [TComptimeValue]{}
     loop element in elements -> &folded.push(jet_driver_comptime_fold(element, values) ?? return None)
     Val(TComptimeValue.List{values: folded})
+}
+
+fn jet_driver_comptime_fold_enum(type_name: String, variant: String, payload: TEnumPayload, values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
+    args := [TComptimeEnumArg]{}
+    if payload == {
+        .Unit -> {}
+        .Positional(positional) -> loop argument in positional -> &args.push(TComptimeEnumArg{name: None, value: jet_driver_comptime_fold(argument.value, values) ?? return None})
+        .Named(named) -> loop argument in named -> &args.push(TComptimeEnumArg{name: Val(argument.name), value: jet_driver_comptime_fold(argument.value.value, values) ?? return None})
+    }
+    Val(TComptimeValue.Enum{type_name: type_name, variant: variant, args: args})
+}
+
+// The declared (leaf) name of a nominal checked type, the name a landed
+// aggregate carries and constant lowering resolves against its type.
+fn jet_driver_comptime_type_name(ty: Type) -> String? Never! {
+    if ty == {
+        .Named(name) -> Val(jet_driver_comptime_leaf_name(name))
+        .Apply(name, _) -> Val(jet_driver_comptime_leaf_name(name))
+        else -> None
+    }
+}
+
+fn jet_driver_comptime_leaf_name(name: String) -> String Never! {
+    parts :: name.split("::").to_list()
+    parts[parts.len() - 1]
 }
 
 // The value of a constant that already landed in this run.
