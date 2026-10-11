@@ -4608,6 +4608,7 @@ fn build_backend_artifact_with_native_library(
         .args([
             "cargo",
             "build",
+            "--keep-going",
             "--manifest-path",
             manifest_path.to_str().unwrap_or_else(|| {
                 panic!("backend manifest path is not valid UTF-8: {}", manifest_path.display())

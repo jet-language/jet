@@ -88,6 +88,9 @@ may have zero Rust-source bytes, but must be complete, have zero reports, select
 the AOT factory, and produce an empty all-phases TSV. The library helper uses
 the real lifecycle and platform archive inputs to write ABI JSON and the
 Rust-free pack, not just an unlinked object.
+The canonical sharded backend uses `cargo build --keep-going`, so every reachable
+shard rejection is collected before the bootstrap build stops. Cargo test
+invocations use `--no-fail-fast`, never the build-only `--keep-going` flag.
 
 ```sh
 Tools/agent/jet-env node Tools/packaging/prebuild-runtime.mjs \
