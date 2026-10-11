@@ -1381,7 +1381,7 @@ fn jet_codegen_lower_math_swizzle_assign(builder: &JetCodegenBuilder, program: J
             scalar_ty := jet_codegen_math_scalar_type(right_type_name)
             carrier := jet_codegen_failure_carrier_for_type(scalar_ty)
             source := jet_codegen_source_location_at(&builder, program, span, true)
-            source_line := source.source_line ?? panic("checked swizzle source line disappeared")
+            source_line := source.source_line ?? ""
             location := MIRPanicLoc{file: mir_source_file_id(builder.function.source_file), line: source.line, column: 0}
             context := MIRPanicContext{function: builder.function.name, source_line: source_line, caret: 0, locals: [MIRPanicLocal]{}}
             call := jet_codegen_lane_index_route(&builder, program, right_type_name, scalar_ty, carrier)

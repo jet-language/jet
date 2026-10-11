@@ -506,8 +506,9 @@ fn jet_codegen_source_location_at(builder: &JetCodegenBuilder, program: JetCodeg
 
 // #3713: the 1-based character column of `span` in the function's source,
 // the same fact `Diagnostics::span_line_col` gives the host compiler.
+// A function with no readonly source reports column 1 (Rust unwrap_or_default).
 fn jet_codegen_source_column_at(builder: JetCodegenBuilder, program: JetCodegenProgram, span: Span) -> Int Never! {
-    row :: program.source_index.by_path.get(builder.function.source_file) ?? panic("checked function has no readonly source context")
+    row :: program.source_index.by_path.get(builder.function.source_file) ?? return 1
     jet_codegen_source_column(program.source_index.rows[row].bytes, span)
 }
 
