@@ -1638,7 +1638,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: a9bcbbef008568ac172942de60ee32029b88b77915a569dfc02e16c3c40032e0
+// Source SHA-256: 3d55444a7b90a9a5311af51ac393a296c5491bfa3efe2384f6d639c210f38562
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.crypto", "__jetc_open_directory"),
@@ -2270,14 +2270,14 @@ pub static CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.sys", "__executable", "jet_sys_executable_raw", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.sys", "getpid", "jet_std_os_pid", true, &[]) .with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.sys", "__host_env", "jet_sys_host_env_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.sys", "__getppid", "jet_sys_getppid_raw", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.sys", "__getuid", "jet_sys_getuid_raw", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.sys", "__geteuid", "jet_sys_geteuid_raw", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.sys", "__getgid", "jet_sys_getgid_raw", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.sys", "__getegid", "jet_sys_getegid_raw", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.sys", "__getppid", "jet_sys_getppid_raw", true, &[]) .with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.sys", "__getuid", "jet_sys_getuid_raw", true, &[]) .with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.sys", "__geteuid", "jet_sys_geteuid_raw", true, &[]) .with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.sys", "__getgid", "jet_sys_getgid_raw", true, &[]) .with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.sys", "__getegid", "jet_sys_getegid_raw", true, &[]) .with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.sys", "__groups_count", "jet_sys_groups_count_raw", true, &[]) .with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.sys", "__groups_fill", "jet_sys_groups_fill_raw", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.sys", "__getpgrp", "jet_sys_getpgrp_raw", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.sys", "__getpgrp", "jet_sys_getpgrp_raw", true, &[]) .with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.sys", "__loadavg", "jet_sys_loadavg_raw", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.sys", "__times", "jet_sys_times_raw", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.sys", "sync", "jet_std_os_sync", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
