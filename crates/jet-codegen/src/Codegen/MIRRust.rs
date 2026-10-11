@@ -3024,6 +3024,16 @@ fn emit_reference_reset(out: &mut String, local: MirLocalId, indent: usize) {
     let _ = writeln!(out, "{:width$}{} = None;", "", local_slot(local), width = indent);
 }
 
+fn emit_ref_loan_reset(out: &mut String, node: RefLoanNode, indent: usize) {
+    match node {
+        RefLoanNode::Local(local) => emit_reference_reset(out, local, indent),
+        RefLoanNode::Cursor(cursor) => {
+            let _ = writeln!(out, "{:width$}{} = None;", "", value_slot(cursor), width = indent);
+        }
+        RefLoanNode::Parameter(_) => unreachable!("parameter storage is a loan root, not a slot"),
+    }
+}
+
 /// Byte offsets of `name` in `text` as a whole identifier, not a field.
 fn variable_mentions<'a>(text: &'a str, name: &'a str) -> impl Iterator<Item = usize> + 'a {
     text.match_indices(name).map(|(at, _)| at).filter(move |at| {
@@ -5598,6 +5608,36 @@ enum LoopReserve {
     Counted { list: MirPlaceId, trips: u64 },
 }
 
+/// Storage dependencies of in-place payloads and list cursors. A parameter
+/// retains its projections so disjoint-field writes do not retire live views.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum RefLoanNode {
+    Local(MirLocalId),
+    Parameter(MirPlaceId),
+    Cursor(MirValueId),
+}
+
+fn retire_ref_loan_slots(
+    loans: &BTreeMap<RefLoanNode, BTreeSet<RefLoanNode>>,
+    roots: &BTreeSet<RefLoanNode>,
+) -> Vec<RefLoanNode> {
+    let mut pending = Vec::new();
+    for root in roots {
+        pending.extend(loans.get(root).into_iter().flatten().map(|node| (*node, false)));
+    }
+    let mut visited = BTreeSet::new();
+    let mut slots = Vec::new();
+    while let Some((node, expanded)) = pending.pop() {
+        if expanded {
+            slots.push(node);
+        } else if visited.insert(node) {
+            pending.push((node, true));
+            pending.extend(loans.get(&node).into_iter().flatten().map(|child| (*child, false)));
+        }
+    }
+    slots
+}
+
 /// #4318: pattern binding locals stored as a shared reference to the payload
 /// they bind (`Option<&T>`) instead of a copy of it (`plan_ref_bindings`).
 #[derive(Default)]
@@ -5615,7 +5655,7 @@ struct RefBindings {
     /// Retire dead payload references before an operation changes their
     /// owning storage. The stability proof covers their uses, not the
     /// function-wide lifetime of the hoisted Option<&T> slots.
-    retire: BTreeMap<MirOpId, BTreeSet<MirLocalId>>,
+    retire: BTreeMap<MirOpId, Vec<RefLoanNode>>,
 }
 
 /// #4566 return slot (function-boundary research 4.2, form 2) of a function
@@ -19300,14 +19340,16 @@ impl<'a> RustEmitter<'a> {
                 }
                 _ => {}
             }
-            if let Some(locals) = ref_bindings.retire.get(&instruction.id) {
-                for local in locals {
-                    if return_slot.is_some_and(|slot| slot.exit == Some(*local))
-                        || native.is_some_and(|plan| plan.locals.contains_key(local) && !plan.dual.contains(local))
-                    {
-                        continue;
+            if let Some(slots) = ref_bindings.retire.get(&instruction.id) {
+                for slot in slots {
+                    if let RefLoanNode::Local(local) = *slot {
+                        if return_slot.is_some_and(|slot| slot.exit == Some(local))
+                            || native.is_some_and(|plan| plan.locals.contains_key(&local) && !plan.dual.contains(&local))
+                        {
+                            continue;
+                        }
                     }
-                    emit_reference_reset(out, *local, indent);
+                    emit_ref_loan_reset(out, *slot, indent);
                 }
             }
             self.emit_instruction(function, instruction, out, indent, debug_active);
@@ -24600,54 +24642,74 @@ impl<'a> RustEmitter<'a> {
             bindings.cursors.insert(cursor, place);
             bindings.collections.insert(collection);
         }
-        let mut dependents: BTreeMap<MirLocalId, BTreeSet<MirLocalId>> = BTreeMap::new();
+        let owner = |place: MirPlaceId| {
+            match self.place_row(function, place)?.base {
+                MirPlaceBase::Local(local) => Some(RefLoanNode::Local(local)),
+                MirPlaceBase::Parameter(_) => Some(RefLoanNode::Parameter(place)),
+                _ => None,
+            }
+        };
+        let mut loans: BTreeMap<RefLoanNode, BTreeSet<RefLoanNode>> = BTreeMap::new();
+        for (&cursor, &place) in &bindings.cursors {
+            if let Some(root) = owner(place) {
+                loans.entry(root).or_default().insert(RefLoanNode::Cursor(cursor));
+            }
+        }
         for (local, sources) in &writes {
             for (value, _) in sources {
                 let value = match self.value_definition(function, *value) {
                     Some(MirOperation::Move { value }) => *value,
                     _ => *value,
                 };
-                let read = match self.value_definition(function, value) {
-                    Some(MirOperation::EnumPayload { subject, .. }
-                        | MirOperation::OptionValue { subject }
-                        | MirOperation::ResultValue { subject, .. }) => *subject,
-                    Some(MirOperation::ReadPlace(_)) => value,
-                    _ => continue,
+                let root = match self.value_definition(function, value) {
+                    Some(MirOperation::LoopIterValue { cursor, .. }) => {
+                        Some(RefLoanNode::Cursor(*cursor))
+                    }
+                    operation => {
+                        let read = match operation {
+                            Some(MirOperation::EnumPayload { subject, .. }
+                                | MirOperation::OptionValue { subject }
+                                | MirOperation::ResultValue { subject, .. }) => *subject,
+                            Some(MirOperation::ReadPlace(_)) => value,
+                            _ => continue,
+                        };
+                        self.immutable_read_place(function, read).and_then(owner)
+                    }
                 };
-                if let Some(MirPlaceBase::Local(root)) = self
-                    .immutable_read_place(function, read)
-                    .and_then(|place| self.place_row(function, place))
-                    .map(|place| &place.base)
-                {
-                    dependents.entry(*root).or_default().insert(*local);
+                if let Some(root) = root {
+                    loans.entry(root).or_default().insert(RefLoanNode::Local(*local));
                 }
             }
         }
-        // A field/payload reference through another binding still borrows
-        // that binding's original owner, not its reference-slot storage.
-        for (&root, children) in &dependents {
-            if writes.contains_key(&root) {
-                continue;
-            }
-            let Some(positions) = index.local_writes.get(&root) else {
-                continue;
-            };
-            let mut pending: Vec<_> = children.iter().copied().collect();
-            let mut visited = BTreeSet::new();
-            while let Some(local) = pending.pop() {
-                if !visited.insert(local) {
-                    continue;
-                }
-                if let Some(children) = dependents.get(&local) {
-                    pending.extend(children.iter().copied());
-                }
-            }
+        // Retire the complete loan tree, children before their lender. The
+        // stability proof ends at checked uses; hoisted slots must also stop
+        // retaining those references before a later owner mutation.
+        let mut retirement_roots: BTreeMap<MirOpId, BTreeSet<RefLoanNode>> = BTreeMap::new();
+        let mut record_writes = |root, positions: &[(usize, usize)]| {
             for &(block, position) in positions {
-                bindings.retire
-                    .entry(function.blocks[block].instructions[position].id)
-                    .or_default()
-                    .extend(visited.iter().copied());
+                retirement_roots.entry(function.blocks[block].instructions[position].id)
+                    .or_default().insert(root);
             }
+        };
+        for &root in loans.keys() {
+            match root {
+                RefLoanNode::Local(local) if !writes.contains_key(&local) => {
+                    if let Some(positions) = index.local_writes.get(&local) {
+                        record_writes(root, positions);
+                    }
+                }
+                RefLoanNode::Parameter(place) => {
+                    if let Some(positions) = self.place_row(function, place)
+                        .and_then(|place| self.parameter_place_writes(function, &index, place))
+                    {
+                        record_writes(root, &positions);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (instruction, roots) in retirement_roots {
+            bindings.retire.insert(instruction, retire_ref_loan_slots(&loans, &roots));
         }
         for (local, sources) in writes {
             bindings.locals.insert(local);
@@ -40557,5 +40619,110 @@ fn main() {{
         localize_slots(&mut source, start, end, "__jet_l_", &BTreeMap::from([(1, "&String".into())]));
         assert!(source.contains("        let mut __jet_l_1: Option<&String> = None;"));
         super::facade_carrier_regressions::compile_run(&source);
+    }
+}
+
+#[cfg(test)]
+mod ref_loan_retirement_regressions {
+    use super::{emit_ref_loan_reset, retire_ref_loan_slots, RefLoanNode};
+    use jet_foundation::MIR::{MirLocalId, MirPlaceId, MirValueId};
+    use std::collections::{BTreeMap, BTreeSet};
+
+    fn loan_tree(root: RefLoanNode) -> BTreeMap<RefLoanNode, BTreeSet<RefLoanNode>> {
+        let payload = RefLoanNode::Local(MirLocalId(1));
+        let cursor = RefLoanNode::Cursor(MirValueId(4));
+        let element = RefLoanNode::Local(MirLocalId(2));
+        let field = RefLoanNode::Local(MirLocalId(3));
+        BTreeMap::from([
+            (root, BTreeSet::from([payload])),
+            (payload, BTreeSet::from([cursor])),
+            (cursor, BTreeSet::from([element])),
+            (element, BTreeSet::from([field])),
+        ])
+    }
+
+    fn resets(root: RefLoanNode) -> String {
+        let slots = retire_ref_loan_slots(&loan_tree(root), &BTreeSet::from([root]));
+        assert_eq!(slots, vec![
+            RefLoanNode::Local(MirLocalId(3)),
+            RefLoanNode::Local(MirLocalId(2)),
+            RefLoanNode::Cursor(MirValueId(4)),
+            RefLoanNode::Local(MirLocalId(1)),
+        ]);
+        let mut text = String::new();
+        for slot in slots {
+            emit_ref_loan_reset(&mut text, slot, 8);
+        }
+        text
+    }
+
+    #[test]
+    fn parameter_payload_cursor_and_field_loans_end_before_owner_mutation() {
+        let reset = resets(RefLoanNode::Parameter(MirPlaceId(7)));
+        super::facade_carrier_regressions::compile_run(&format!(r#"
+fn update(rows: &mut Vec<Vec<String>>) {{
+    let mut __jet_l_1: Option<&Vec<String>> = None;
+    let mut __jet_v_4: Option<(&Vec<String>, usize)> = None;
+    let mut __jet_l_2: Option<&String> = None;
+    let mut __jet_l_3: Option<&str> = None;
+    for round in 0..3 {{
+{reset}
+        rows[0].push(round.to_string());
+        __jet_l_1 = Some(&rows[0]);
+        __jet_v_4 = Some((*__jet_l_1.as_ref().unwrap(), round));
+        let (items, at) = *__jet_v_4.as_ref().unwrap();
+        __jet_l_2 = Some(&items[at]);
+        __jet_l_3 = Some(__jet_l_2.as_ref().unwrap().as_str());
+        assert_eq!(__jet_l_3.unwrap(), round.to_string());
+    }}
+{reset}
+    rows.clear();
+}}
+fn main() {{
+    let mut rows = vec![vec![]];
+    update(&mut rows);
+    assert!(rows.is_empty());
+}}
+"#));
+    }
+
+    #[test]
+    fn owned_loop_metadata_can_be_replaced_after_its_nested_loans_end() {
+        let reset = resets(RefLoanNode::Local(MirLocalId(20)));
+        super::facade_carrier_regressions::compile_run(&format!(r#"
+fn main() {{
+    let mut owner: Option<Vec<String>> = None;
+    let mut __jet_l_1: Option<&Vec<String>> = None;
+    let mut __jet_v_4: Option<(&Vec<String>, usize)> = None;
+    let mut __jet_l_2: Option<&String> = None;
+    let mut __jet_l_3: Option<&str> = None;
+    for round in 0..3 {{
+{reset}
+        owner = Some(vec![round.to_string()]);
+        __jet_l_1 = Some(owner.as_ref().unwrap());
+        __jet_v_4 = Some((*__jet_l_1.as_ref().unwrap(), 0));
+        let (items, at) = *__jet_v_4.as_ref().unwrap();
+        __jet_l_2 = Some(&items[at]);
+        __jet_l_3 = Some(__jet_l_2.as_ref().unwrap().as_str());
+        assert_eq!(__jet_l_3.unwrap(), round.to_string());
+    }}
+{reset}
+    assert_eq!(owner.take().unwrap(), vec!["2"]);
+}}
+"#));
+    }
+
+    #[test]
+    fn separate_parameter_places_do_not_retire_each_others_views() {
+        let first = RefLoanNode::Parameter(MirPlaceId(0));
+        let second = RefLoanNode::Parameter(MirPlaceId(1));
+        let one = RefLoanNode::Local(MirLocalId(3));
+        let two = RefLoanNode::Local(MirLocalId(4));
+        let graph = BTreeMap::from([
+            (first, BTreeSet::from([one])),
+            (second, BTreeSet::from([two])),
+        ]);
+        assert_eq!(retire_ref_loan_slots(&graph, &BTreeSet::from([first])), vec![one]);
+        assert_eq!(retire_ref_loan_slots(&graph, &BTreeSet::from([second])), vec![two]);
     }
 }

@@ -447,6 +447,10 @@ Nested callable results apply that rule independently of their outer callable's
 capture lifetime; argument elision must not turn an owned callback into a view
 of its reader argument. Reference storage initialized by an iteration's `None`
 reset has that iteration's scope, with the same indentation as its instructions.
+Before a checked write changes an owner, hosted emission retires its dead
+in-place payload, cursor, and nested-field reference storage, deepest loan
+first. This includes mutable parameter places, preserving their projections
+so a disjoint-field write does not retire a still-live view.
 
 Native lowering must fail closed when a construct cannot preserve the shared
 runtime's ABI, error behavior, or observable output. Report an unsupported
