@@ -405,6 +405,60 @@ fn os_stack_address_i64() -> I64 {
     """
 }
 
+// String moves for the runtime's memmove (Collections.jet jet_rt_mem_move).
+// Ascending copies `count` bytes from `source` to `target` in increasing
+// address order, so an overlap must have target below source.
+#[Unsafe("the caller owns count readable bytes at source and count writable bytes at target; an overlap has target below source"), FFI(asm)]
+fn os_copy_ascending_i64(target: I64, source: I64, count: I64) {
+    """
+    push {target}
+    push {source}
+    push {count}
+    pop rcx
+    pop rsi
+    pop rdi
+    cld
+    rep movsb
+    ; clobbers rcx, rsi, rdi
+    """
+}
+
+// Descending copies `count` bytes (movsb) or 8-byte words (movsq) in
+// decreasing address order from the units starting at `target_last` and
+// `source_last`, then clears the direction flag again: an overlap must have
+// target above source.
+#[Unsafe("the caller owns count readable bytes ending at source_last and count writable bytes ending at target_last; an overlap has target above source"), FFI(asm)]
+fn os_copy_descending_bytes_i64(target_last: I64, source_last: I64, count: I64) {
+    """
+    push {target_last}
+    push {source_last}
+    push {count}
+    pop rcx
+    pop rsi
+    pop rdi
+    std
+    rep movsb
+    cld
+    ; clobbers rcx, rsi, rdi
+    """
+}
+
+#[Unsafe("the caller owns count readable words whose last starts at source_last and count writable words whose last starts at target_last; an overlap has target above source"), FFI(asm)]
+fn os_copy_descending_words_i64(target_last: I64, source_last: I64, count: I64) {
+    """
+    push {target_last}
+    push {source_last}
+    push {count}
+    pop rcx
+    pop rsi
+    pop rdi
+    std
+    rep movsq
+    cld
+    ; clobbers rcx, rsi, rdi
+    """
+}
+
 #[Unsafe("reads one byte from a live readable mapped address supplied by the caller"), FFI(asm)]
 fn os_load_u8(address: I64) -> I64 {
     """

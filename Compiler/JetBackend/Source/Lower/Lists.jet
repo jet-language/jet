@@ -990,24 +990,7 @@ fn lower_list_reserve(p: MIRProgram, m: &LowerModule, f: &LowerFunction, list: L
     new_cap :: lower_word(&f)
     lower_start(&f, allocate, [LIRValueID]{new_cap})
     new_data :: lower_list_buffer(&m, &f, new_cap, stride)
-    at :: lower_word(&f)
-    head :: lower_new_block(&f)
-    body :: lower_new_block(&f)
-    moved :: lower_new_block(&f)
-    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{zero})})
-    lower_start(&f, head, [LIRValueID]{at})
-    more :: lower_flag(&f)
-    lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Lt, left: at, right: length})
-    lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(moved, [LIRValueID]{})})
-    lower_start(&f, body, [LIRValueID]{})
-    from :: lower_list_address(&f, old_data, at, stride)
-    to :: lower_list_address(&f, new_data, at, stride)
-    lower_list_move(p, &f, to, from, elem)
-    next_at :: lower_word(&f)
-    one :: lower_const(&f, 1)
-    lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: one})
-    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{next_at})})
-    lower_start(&f, moved, [LIRValueID]{})
+    lower_list_move_buffer(p, &m, &f, new_data, old_data, length, elem)
     lower_list_free_buffer(&m, &f, old_data, cap, stride)
     lower_emit(&f, LIRInst.Store{base: list, offset: 8, value: new_cap})
     lower_emit(&f, LIRInst.Store{base: list, offset: 16, value: new_data})
@@ -2513,14 +2496,14 @@ fn lower_helper_list_reverse(p: MIRProgram, m: &LowerModule, glue: LowerGlue) ->
     lir_builder_finish(f.builder)
 }
 
-fn lower_list_move_buffer(p: MIRProgram, f: &LowerFunction, to: LIRValueID, from: LIRValueID, count: LIRValueID, elem: MIRType) Never! {
+// Moves `count` elements from `from` to `to` as one byte move of their
+// count * stride bytes (jet_rt_mem_move); the ranges may overlap.
+fn lower_list_move_buffer(p: MIRProgram, m: &LowerModule, f: &LowerFunction, to: LIRValueID, from: LIRValueID, count: LIRValueID, elem: MIRType) Never! {
     if lower_repr(p, elem) == .Absent -> return
-    stride :: lower_list_stride(p, elem)
-    each :: lower_record_loop_start(&f, count)
-    source :: lower_list_address(&f, from, each.index, stride)
-    destination :: lower_list_address(&f, to, each.index, stride)
-    lower_list_move(p, &f, destination, source, elem)
-    lower_record_loop_end(&f, each)
+    stride :: lower_const(&f, lower_list_stride(p, elem))
+    bytes :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: bytes, op: LIRBinaryOp.Mul, left: count, right: stride})
+    lower_call_runtime(&m, &f, "jet_rt_mem_move", [LIRValueID]{to, from, bytes}, None)
 }
 
 // Geometric growth bounded before multiplication, with the requested capacity
@@ -2605,7 +2588,7 @@ fn lower_helper_list_extend(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
     lower_start(&f, allocate, [LIRValueID]{})
     new_cap :: lower_list_growth_capacity(&f, cap, required, limit)
     new_data :: lower_list_buffer(&m, &f, new_cap, stride)
-    lower_list_move_buffer(p, &f, new_data, data, length, elem)
+    lower_list_move_buffer(p, &m, &f, new_data, data, length, elem)
     lower_list_free_buffer(&m, &f, data, cap, stride)
     lower_emit(&f, LIRInst.Store{base: list, offset: 8, value: new_cap})
     lower_emit(&f, LIRInst.Store{base: list, offset: 16, value: new_data})
@@ -2613,7 +2596,7 @@ fn lower_helper_list_extend(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
     target_data :: lower_pointer(&f)
     lower_start(&f, fill, [LIRValueID]{target_data})
     target :: lower_list_address(&f, target_data, length, stride)
-    lower_list_move_buffer(p, &f, target, source_data, added, elem)
+    lower_list_move_buffer(p, &m, &f, target, source_data, added, elem)
     lower_emit(&f, LIRInst.Store{base: list, offset: 0, value: required})
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(retire, [LIRValueID]{})})
     lower_start(&f, retire, [LIRValueID]{})
@@ -2731,7 +2714,7 @@ fn lower_helper_list_try_reserve(p: MIRProgram, m: &LowerModule, glue: LowerGlue
     move :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: no_memory, then_target: lower_target(failed, [LIRValueID]{requested}), else_target: lower_target(move, [LIRValueID]{})})
     lower_start(&f, move, [LIRValueID]{})
-    lower_list_move_buffer(p, &f, new_data, data, length, elem)
+    lower_list_move_buffer(p, &m, &f, new_data, data, length, elem)
     lower_list_free_buffer(&m, &f, data, cap, stride)
     lower_emit(&f, LIRInst.Store{base: list, offset: 8, value: new_cap})
     lower_emit(&f, LIRInst.Store{base: list, offset: 16, value: new_data})

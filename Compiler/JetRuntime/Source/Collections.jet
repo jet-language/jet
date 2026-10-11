@@ -71,6 +71,29 @@ fn coll_copy(source: I64, target: I64, size: I64) {
     }
 }
 
+// memmove for native lowering: moves `count` bytes from `source` to `target`;
+// the ranges may overlap. List growth, Map insertion and Map removal move
+// their entries with one call instead of a per-element LIR loop. A forward
+// move (or a disjoint one) is one ascending string move; a backward overlap
+// moves the bytes above the last whole word, then the words, descending.
+#Export(c) fn jet_rt_mem_move(target: I64, source: I64, count: I64) {
+    if (count <= I64{0} || target == source) -> return
+    #Unsafe("native lowering owns both live ranges of count bytes; the leaves receive the copy order that overlap requires") {
+        if (target < source || target >= wrapping(source + count)) {
+            os_copy_ascending_i64(target, source, count)
+            return
+        }
+        tail :: count.bit_and(I64{7})
+        if (tail > I64{0}) {
+            os_copy_descending_bytes_i64(wrapping(target + count - I64{1}), wrapping(source + count - I64{1}), tail)
+        }
+        words :: count >> I64{3}
+        if (words > I64{0}) {
+            os_copy_descending_words_i64(wrapping(target + count - tail - I64{8}), wrapping(source + count - tail - I64{8}), words)
+        }
+    }
+}
+
 fn coll_meta_copy(source: I64) -> I64 {
     if (source == I64{0}) { return I64{0} }
     target :: jet_rt_alloc(I64{72}, I64{8})
