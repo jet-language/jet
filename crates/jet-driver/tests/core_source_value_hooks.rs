@@ -830,6 +830,30 @@ fn run() -[FS, Env]> {
     );
 }
 
+/// A held FileLock's descriptor has exactly one owner: `lock_owner` consumes
+/// the private `__LockFd` guard into the native FileLock, so the guard does not
+/// close the descriptor the FileLock owns. Closing it twice aborted natively
+/// ("owned file descriptor already closed"); reacquiring proves the release.
+#[test]
+fn core_file_lock_descriptor_closes_once() {
+    hosted_seed_program_runs(
+        "file_lock_closes_once",
+        Some("name: \"file_lock_closes_once\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS, Env] } }\n"),
+        r#"
+use core.files as files
+fn run() -[FS, Env]> {
+    if true {
+        held :: files.lock("lockfile") ?? panic("file lock")
+    }
+    if files.try_lock("lockfile") == {
+        .Val(_) -> {}
+        else -> panic("file lock still held after close")
+    }
+}
+"#,
+    );
+}
+
 /// A trait-object option payload binds by reference while its owner is only
 /// changed after the binding's last read: the binding's own scope-end
 /// cleanup reads no referent, so a later write of a local root (`sink`) or a

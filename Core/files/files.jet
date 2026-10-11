@@ -189,10 +189,12 @@ impl __LockFd.Close {
     }
 }
 
-fn lock_owner(path: ^String, fd: ^__LockFd) -> FileLock Never! {
-    held := ^fd
-    value :: held.fd
-    held.fd = -1
+// The FileLock becomes the descriptor's one owner: the caller's guard is
+// disarmed in place (-1 closes nothing), so its scope-end Close never closes
+// the descriptor the FileLock now holds.
+fn lock_owner(path: ^String, fd: &__LockFd) -> FileLock Never! {
+    value :: fd.fd
+    fd.fd = -1
     core.files.__lock_owner(^path, value)
 }
 
@@ -1605,12 +1607,12 @@ fn lock(path: String | Path, timeout: Duration?{None}) -[FS, Env]> FileLock IOEr
     if timeout == .Val(duration) -> ns = duration.ns
     deadline := 0
     loop {
-        fd :: lock_open(text)
+        fd := lock_open(text)
         waited :: core.files.__lock_wait(fd.fd, ns, bounded, deadline)
         deadline = waited.deadline_ns
         if waited.timed_out -> return Err(lock_timeout(text))
         if !waited.acquired -> return Err(lock_errno(text, waited.errno, waited.platform))
-        if lock_current(text, fd.fd) -> return Ok(lock_owner(^text, ^fd))
+        if lock_current(text, fd.fd) -> return Ok(lock_owner(^text, &fd))
         // A replacement never inherits this claim. Scope exit closes the old
         // inode before the next open; every retry retains the original deadline.
     }
@@ -1623,13 +1625,13 @@ fn try_lock(path: String | Path) -[FS, Env]> FileLock? IOError! {
     files8_preflight("FS.Write", .Write, text)
     lock_path(text)
     loop {
-        fd :: lock_open(text)
+        fd := lock_open(text)
         result :: core.files.__lock_try(fd.fd)
         if result.value != 0 {
             if lock_contended(result.errno, result.platform) -> return Ok(None)
             return Err(lock_errno(text, result.errno, result.platform))
         }
-        if lock_current(text, fd.fd) -> return Ok(Val(lock_owner(^text, ^fd)))
+        if lock_current(text, fd.fd) -> return Ok(Val(lock_owner(^text, &fd)))
     }
 }
 
