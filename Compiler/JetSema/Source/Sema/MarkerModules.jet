@@ -1,5 +1,5 @@
 // D-MARKER-MODULE1=A: canonical identity is (declaring module, name span).
-use jet_foundation.[Diagnostic, Func, Item, Marker, MarkerDecl, Program, Span, TAppliedRuleArgumentMenu]
+use jet_foundation.[Diagnostic, Func, Item, Marker, MarkerDecl, Program, Span, TAppliedRuleArgumentMenu, foundation_core_argument_menus]
 use jet_parser.[parse_generated_source]
 
 struct SemaMarkerModuleResolution {
@@ -377,10 +377,24 @@ fn sema_marker_module_check_groups(graph: SemaRegistrationGraph, module_identity
     }
 }
 
+// The applied-rule argument menus, as Rust RULE_ARG_DECLARATIONS reads them:
+// Core.jet's core.compiler.lang `types { … }` leaves, with `Effect` naming the
+// canonical effect declaration roots (Rust EFFECT_ROOTS: the undotted rows of
+// the pinned Prelude effect module) and `TaintKind` the builtin taint tags.
+fn sema_marker_module_argument_menus(graph: SemaRegistrationGraph) -> [TAppliedRuleArgumentMenu]? {
+    effect_index :: sema_registration_module_index(graph, graph.canonical_effect_module_identity) ?? return None
+    effect_roots := [String]{}
+    loop item in graph.modules[effect_index].program.items {
+        if item == .EffectDecl(declaration) && !declaration.name.contains(".") -> &effect_roots.push(declaration.name)
+    }
+    foundation_core_argument_menus(effect_roots, sema_taint_builtin_tag_names())
+}
+
 fn sema_marker_module_check(graph: SemaRegistrationGraph) -> [Diagnostic]? {
     parsed :: parse_generated_source(SEMA_PRELUDE_MARKER_SOURCE.bytes())
     if parsed.diagnostics.len() > 0 -> return None
-    applied :: sema_marker_rules_build_catalog(parsed.program, SEMA_PRELUDE_MARKER_SOURCE, [TAppliedRuleArgumentMenu]{}) ?? return None
+    argument_menus :: sema_marker_module_argument_menus(graph) ?? return None
+    applied :: sema_marker_rules_build_catalog(parsed.program, SEMA_PRELUDE_MARKER_SOURCE, argument_menus) ?? return None
     catalog := SemaScopeMembersMarkerRegistry{applied_rules: applied.rows, argument_menus: applied.argument_menus, marker_rules: [SemaScopeMembersMarkerRule]{}, known_marker_names: [String]{}, function_allowed_markers: [String]{}, block_allowed_markers: [String]{}, derive_provider_names: [String]{}}
     if !sema_scope_members_registry_add_applied_catalog(&catalog, applied) -> return None
     diagnostics := [Diagnostic]{}

@@ -360,11 +360,14 @@ fn sema_marker_rules_applied_row(declaration: MarkerDecl, source: String) -> TAp
     })
 }
 
+// Rust RULE_ARG_TYPES_WITHOUT_CORE_DECLARATION: `Ident` is a free identifier
+// slot and `Type`/`T.default` are language-checked, so none names a
+// core.compiler.lang menu; every other identifier-kind type is a menu name.
 fn sema_marker_rules_rule_requires_menu(rule: TAppliedRule, source_type: String, kind: TAppliedRuleArgKind) -> String? {
     if source_type == "[Effect]" {
         return Val("Effect")
     }
-    if kind != TAppliedRuleArgKind.Ident || source_type == "Type" || source_type == "T.default" {
+    if kind != TAppliedRuleArgKind.Ident || source_type == "Ident" || source_type == "Type" || source_type == "T.default" {
         return None
     }
     Val(source_type)
