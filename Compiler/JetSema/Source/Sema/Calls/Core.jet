@@ -635,6 +635,10 @@ fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_ar
         return sema_expr_expected(value, expected, environment, program, &diagnostics)
     }
     value := sema_tir_expr(result_type, TExprKind.CoreCall{record: record, args: args, source_span: span, type_args: type_args, widen_to_vec: widen_to_vec, data_plan: data_plan, fallibility: fallibility}, span)
+    // Rust (fallible.rs `infer_or_fallback`) passes the slot type to a call
+    // only as an inference hint: a Core call that returns `Never` produces no
+    // value, and the enclosing `??` or branch accepts its divergence.
+    if result_type == (Type.Named{name: "Never"}) -> return Val(value)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 
