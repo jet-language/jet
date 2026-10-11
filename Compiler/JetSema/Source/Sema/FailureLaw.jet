@@ -676,11 +676,12 @@ fn sema_check_public_failure_carrier_graph(function: String, error_type: Type, g
         checked[key] = true
         nominal :: graph.modules[row.module_index].nominals[row.row]
         if nominal.symbol.name != leaf -> next
-        source :: graph.modules[row.module_index].source
+        // The module source is read in place at the (rare) diagnostic sites;
+        // binding it here copied the whole source text for every carrier.
         if nominal.symbol.visibility < 2 {
             if reported.get(leaf) == None {
                 reported[leaf] = true
-                &diagnostics.push(sema_public_failure_diagnostic(function, leaf, nominal.symbol.span, source))
+                &diagnostics.push(sema_public_failure_diagnostic(function, leaf, nominal.symbol.span, graph.modules[row.module_index].source))
             }
             next
         }
@@ -689,7 +690,7 @@ fn sema_check_public_failure_carrier_graph(function: String, error_type: Type, g
             member :: "{leaf}.{field.symbol.name}"
             if field.symbol.visibility >= 2 || reported.get(member) != None -> next
             reported[member] = true
-            &diagnostics.push(sema_public_failure_diagnostic(function, member, field.symbol.span, source))
+            &diagnostics.push(sema_public_failure_diagnostic(function, member, field.symbol.span, graph.modules[row.module_index].source))
         }
     }
 }
