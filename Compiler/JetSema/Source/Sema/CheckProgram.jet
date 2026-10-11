@@ -1316,7 +1316,7 @@ fn sema_check_view_summary_jobs(environment: SemaScopeEnvironment, program: Sema
     if program.registration_graph == .Val(graph) {
         loop item_index in 0..<graph.modules[module_index].program.items.len() {
             if graph.modules[module_index].program.items[item_index] == .Func(func) {
-                if func.inline_foreign != None -> next
+                if func.inline_foreign != None || sema_function_is_guest_import(func) -> next
                 return_type :: func.return_type ?? next
                 seen := [String:Bool]{}
                 if sema_check_type_contains_view(graph, graph.modules[module_index].module_identity, return_type, &seen) -> &jobs.push(item_index)
@@ -2962,7 +2962,11 @@ fn sema_check_registered_keep_going(environment: SemaScopeEnvironment, program: 
 
 fn sema_check_registered_item_is_jet_function(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, item_index: Int) -> Bool {
     if program.registration_graph == .Val(graph) {
-        if graph.modules[module_index].program.items[item_index] == .Func(func) -> return func.inline_foreign == None
+        // Rust Registration.rs `check_fn`: an `#FFI` tier body is foreign
+        // source and a per-callable `#Import(c)` has no Jet body (its C
+        // signature is checked by sema_guest_check_surfaces); neither is checked
+        // as an empty value body. Both stay registered.
+        if graph.modules[module_index].program.items[item_index] == .Func(func) -> return func.inline_foreign == None && !sema_function_is_guest_import(func)
         return false
     }
     panic("an owning registered-module pass lost its registration graph")
@@ -3536,7 +3540,7 @@ fn sema_check_parallel_jobs(graph: SemaRegistrationGraph, module_index: Int, com
     loop item in source_module.program.items {
         if item == .Func(func) {
             key :: symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name).key
-            if func.inline_foreign == None && func.type_params.len() == 0 && comptime_rows.get("{source_module.module_identity}\n{key}") == None {
+            if func.inline_foreign == None && !sema_function_is_guest_import(func) && func.type_params.len() == 0 && comptime_rows.get("{source_module.module_identity}\n{key}") == None {
                 &jobs.push(SemaBodyJob.TopLevel{item_index: item_index})
                 &weights.push(func.span.end - func.span.start)
             }

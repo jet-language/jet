@@ -3155,6 +3155,10 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     sema_registration_bind_namespaces(&graph, own_symbols, items_after != items_before)
     sema_registration_index_callables(&graph)
     sema_registration_index_impl_traits(&graph)
+    // Rust CheckInner check_guest_import_surface / check_guest_export_surface /
+    // check_guest_symbol_collisions: the C guest boundary is checked once every
+    // declaration is registered, before any body is checked.
+    sema_guest_check_surfaces(&graph)
     graph
 }
 
