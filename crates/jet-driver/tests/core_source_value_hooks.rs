@@ -421,6 +421,18 @@ fn run() -[FS]> {
 /// Check, lower, emit, rustc-compile and run one regression program through
 /// the hosted Rust seed path (the r16 collect-all emission sweep).
 fn hosted_seed_program_runs(label: &str, package: Option<&str>, program: &str) {
+    hosted_seed_program_runs_as(label, package, program, false);
+}
+
+/// The same regression, then also built the way the bootstrap builds it: the
+/// runtime/Core block as its own `jet_runtime` rlib and the program as a
+/// dependent crate (`jet_store::runtime::split_runtime_crate`), so an item
+/// emitted in the wrong crate (an orphan impl, a crate-private helper) fails.
+fn hosted_seed_program_runs_split(label: &str, package: Option<&str>, program: &str) {
+    hosted_seed_program_runs_as(label, package, program, true);
+}
+
+fn hosted_seed_program_runs_as(label: &str, package: Option<&str>, program: &str, split: bool) {
     jet_driver::run_compiler_work(|| {
         let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
         let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
@@ -457,9 +469,15 @@ fn hosted_seed_program_runs(label: &str, package: Option<&str>, program: &str) {
                 execution: Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
             },
         );
+        let run = |executable: &std::path::Path, mode: &str| {
+            let executed = std::process::Command::new(executable).current_dir(&directory)
+                .output().expect("regression must execute");
+            assert!(executed.status.success(), "{label} ({mode}) must run:\n{}",
+                String::from_utf8_lossy(&executed.stderr));
+        };
         let source = directory.join(format!("{label}.rs"));
         let executable = directory.join(format!("{label}{}", std::env::consts::EXE_SUFFIX));
-        std::fs::write(&source, rust).unwrap();
+        std::fs::write(&source, &rust).unwrap();
         let compiled = std::process::Command::new("rustc")
             .args(["--edition=2021", "-Awarnings"])
             .arg(format!("--crate-name={label}"))
@@ -467,10 +485,34 @@ fn hosted_seed_program_runs(label: &str, package: Option<&str>, program: &str) {
             .output().expect("regression requires rustc");
         assert!(compiled.status.success(), "{label} must compile:\n{}",
             String::from_utf8_lossy(&compiled.stderr));
-        let executed = std::process::Command::new(&executable).current_dir(&directory)
-            .output().expect("regression must execute");
-        assert!(executed.status.success(), "{label} must run:\n{}",
-            String::from_utf8_lossy(&executed.stderr));
+        run(&executable, "single file");
+        if split {
+            let split = jet_store::runtime::split_runtime_crate(&rust)
+                .expect("generated runtime markers are valid")
+                .expect("a native program has a runtime block");
+            let runtime_source = directory.join("jet_runtime.rs");
+            let runtime_rlib = directory.join("libjet_runtime.rlib");
+            std::fs::write(&runtime_source, &split.runtime_lib).unwrap();
+            let runtime = std::process::Command::new("rustc")
+                .args(["--edition=2021", "-Awarnings", "--crate-type=rlib", "--crate-name=jet_runtime"])
+                .arg(&runtime_source).arg("-o").arg(&runtime_rlib)
+                .output().expect("regression requires rustc");
+            assert!(runtime.status.success(), "{label} split runtime crate must compile:\n{}",
+                String::from_utf8_lossy(&runtime.stderr));
+            let program_source = directory.join(format!("{label}_program.rs"));
+            let program_executable =
+                directory.join(format!("{label}_program{}", std::env::consts::EXE_SUFFIX));
+            std::fs::write(&program_source, &split.program).unwrap();
+            let program = std::process::Command::new("rustc")
+                .args(["--edition=2021", "-Awarnings"])
+                .arg(format!("--crate-name={label}_program"))
+                .arg("--extern").arg(format!("jet_runtime={}", runtime_rlib.display()))
+                .arg(&program_source).arg("-o").arg(&program_executable)
+                .output().expect("regression requires rustc");
+            assert!(program.status.success(), "{label} split program crate must compile:\n{}",
+                String::from_utf8_lossy(&program.stderr));
+            run(&program_executable, "split runtime/program");
+        }
         std::fs::remove_dir_all(directory).unwrap();
     });
 }
@@ -616,10 +658,12 @@ fn run() -[FS]> {
 
 /// The default `Err`'s declared fields keep their declared types under the
 /// original Prelude identity: `message` is a `String` for a method call, a
-/// comparison and interpolation.
+/// comparison and interpolation. Its derived `Equatable` is the runtime's one
+/// `JetErr` impl, so the program also builds as a split runtime/program pair
+/// (r17g2 E0117: an orphan program impl).
 #[test]
 fn default_err_fields_keep_their_declared_types() {
-    hosted_seed_program_runs(
+    hosted_seed_program_runs_split(
         "default_err_fields",
         Some("name: \"default_err_fields\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS.Read] } }\n"),
         r#"
@@ -636,6 +680,7 @@ fn run() -[FS]> {
             assert(error.message != "")
             shown :: "failed: {error.message}"
             assert(shown.len() > error.message.len())
+            assert(error == error)
         }
     }
 }

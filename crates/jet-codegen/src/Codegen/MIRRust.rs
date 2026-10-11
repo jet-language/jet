@@ -8861,16 +8861,19 @@ impl<'a> RustEmitter<'a> {
 
     /// An impl of a runtime-owned trait (`Equatable`, `Display`, ...) on a
     /// carrier the runtime or Prelude declares (Core `UIAriaRole` is
-    /// `JetUiAriaRole`, `Rect` is `JetRect`). Both live in the runtime crate,
-    /// so Rust's orphan rule rejects the impl in the program (E0117): it is
-    /// not emitted, and its uses take the structural fallback instead.
+    /// `JetUiAriaRole`, `Rect` is `JetRect`, the original Prelude `Err` is
+    /// `JetErr`). Both live in the runtime crate, so Rust's orphan rule
+    /// rejects the impl in the program (E0117): it is not emitted, and its
+    /// uses take the runtime's own impl or the structural fallback instead.
     fn runtime_carrier_trait_impl(&self, implementation: &MirImplDef) -> bool {
         implementation.trait_ref.as_ref().is_some_and(|trait_ref| {
             trait_ref.name != crate::Syntax::TRAIT_ROLLBACK
                 && crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(&trait_ref.name)
-        }) && self
-            .impl_self_type_def(implementation)
-            .is_some_and(|definition| is_canonical_core_native_type(&definition.key))
+        }) && self.impl_self_type_def(implementation).is_some_and(|definition| {
+            is_canonical_core_native_type(&definition.key)
+                || definition.compiler_builtin
+                    == Some(jet_foundation::MIR::MirCompilerBuiltin::DefaultErr)
+        })
     }
 
     /// The first `program.types` row (program order) whose ID is one of
@@ -27952,12 +27955,6 @@ impl<'a> RustEmitter<'a> {
         };
         if has_computed_field {
             return false;
-        }
-        // The original Prelude `Err` is the native `JetErr`: its private
-        // metadata lives in the carrier, so equality is the carrier's own.
-        if definition.compiler_builtin == Some(jet_foundation::MIR::MirCompilerBuiltin::DefaultErr) {
-            let _ = writeln!(out, "fn equal(&self, __jet_rhs: &Self) -> bool {{\n    self == __jet_rhs\n}}\n");
-            return true;
         }
         let mut seen = BTreeSet::from([definition.id]);
         let equal = self.canonical_equality_definition(definition, "self", "__jet_rhs", &mut seen);

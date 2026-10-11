@@ -343,6 +343,14 @@ impl __jet_Equatable for AllocError {
         self == rhs
     }
 }
+// `JetErr` carries the original Prelude `Err`; its derived `Equatable` is the
+// carrier's own equality. One home here: a program impl would be an orphan
+// in a split runtime/program build.
+impl __jet_Equatable for JetErr {
+    fn equal(&self, rhs: &Self) -> bool {
+        self == rhs
+    }
+}
 
 // D-MEM1 stage S5: a string view (`s.trim()`/`.after()`/`.before()` bound to a
 // local, see `jet_string_*_view` below) is a genuine `&str` in generated Rust —
