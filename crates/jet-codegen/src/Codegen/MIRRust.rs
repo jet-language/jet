@@ -2711,7 +2711,10 @@ fn lent_slots(text: &str, body: &str, prefix: &str, candidate: impl Fn(u64) -> b
     let references: BTreeSet<&str> = text
         .lines()
         .filter_map(|line| {
-            let content = line.trim_start_matches(' ');
+            // A block-local reference ends with its own lexical scope; only
+            // references still declared at the function top pin an owner.
+            let content = line.strip_prefix("    ")?;
+            if content.starts_with(' ') { return None; }
             let rest = content.strip_prefix("let ")?;
             let rest = rest.strip_prefix("mut ").unwrap_or(rest);
             let name = rest.bytes().take_while(|byte| is_identifier_byte(*byte)).count();
@@ -2729,8 +2732,9 @@ fn lent_slots(text: &str, body: &str, prefix: &str, candidate: impl Fn(u64) -> b
         if !content[target..].starts_with(" = ") || !references.contains(&content[..target]) {
             continue;
         }
+        let defined = content[..target].strip_prefix(prefix).and_then(|id| id.parse::<u64>().ok());
         for_each_slot_mention(line, prefix, |_, _, id| {
-            if candidate(id) {
+            if Some(id) != defined && candidate(id) {
                 lent.insert(id);
             }
         });
@@ -2973,9 +2977,22 @@ fn pure_slot_expression(expression: &str) -> bool {
 /// its one consumer instead, the borrow ends with the consumer statement.
 fn borrowing_closure_expression(expression: &str) -> bool {
     expression
-        .strip_prefix("std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new({ let __jet_capture_")
-        .and_then(|rest| rest.strip_suffix("}))))"))
-        .is_some_and(|body| body.contains(" = &"))
+        .strip_prefix("std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new({ let ")
+        .map(|body| body.strip_prefix("mut ").unwrap_or(body))
+        .and_then(|body| body.strip_prefix("__jet_capture_"))
+        .and_then(|body| body.strip_suffix("}))))"))
+        .and_then(|body| body.split_once("move |").map(|(setup, _)| setup))
+        .is_some_and(|setup| setup.contains(" = &")
+            || setup.contains(".as_mut().expect(\"MIR local\")")
+            || setup.contains(".as_ref().expect(\"MIR local\")"))
+}
+
+fn plain_callable_type(higher_ranked: &str, params: &str, ret: &str, lifetime: &str) -> String {
+    format!("std::rc::Rc<std::cell::RefCell<Option<Box<dyn {higher_ranked}FnMut({params}) -> {ret} + {lifetime}>>>>")
+}
+
+fn map_store_callback(value: &str) -> String {
+    format!("{{ let __jet_store_value = {value}; move |_| __jet_store_value }}")
 }
 
 /// Byte offsets of `name` in `text` as a whole identifier, not a field.
@@ -3021,10 +3038,21 @@ fn split_local_field_borrows(callee: &str, args: &str) -> String {
     let mut rewritten = args.clone();
     for name in split {
         let binding = format!("__jet_split_{}", &name["__jet_l_".len()..]);
-        let _ = write!(bindings, "let {binding} = {name}{WRITE}; ");
-        rewritten = rewritten
-            .replace(&format!("{name}{WRITE}"), &binding)
-            .replace(&format!("{name}{READ}"), &binding);
+        let write_root = format!("(*(*{name}{WRITE}))");
+        let read_root = format!("(*(*{name}{READ}))");
+        let accesses = rewritten.matches(&format!("{name}{WRITE}")).count()
+            + rewritten.matches(&format!("{name}{READ}")).count();
+        if rewritten.matches(&write_root).count() + rewritten.matches(&read_root).count() == accesses {
+            // Reborrow the guard's referent once. Repeated DerefMut on the
+            // guard would still borrow the whole guard for every argument.
+            let _ = write!(bindings, "let {binding} = &mut **{name}{WRITE}; ");
+            rewritten = rewritten.replace(&write_root, &format!("(*{binding})"))
+                .replace(&read_root, &format!("(*{binding})"));
+        } else {
+            let _ = write!(bindings, "let {binding} = {name}{WRITE}; ");
+            rewritten = rewritten.replace(&format!("{name}{WRITE}"), &binding)
+                .replace(&format!("{name}{READ}"), &binding);
+        }
     }
     format!("{{ {bindings}{callee}({rewritten}) }}")
 }
@@ -10297,9 +10325,7 @@ impl<'a> RustEmitter<'a> {
                 "Box<dyn {callable_name}<{lifetime}, {generic_params}{ret}> + {lifetime}>"
             )
         } else {
-            format!(
-                "std::rc::Rc<std::cell::RefCell<Option<Box<dyn {higher_ranked}FnMut({params}) -> {ret}>>>>"
-            )
+            plain_callable_type(&higher_ranked, &params, &ret, self.history_callback_lifetime.get())
         }
     }
 
@@ -18944,9 +18970,13 @@ impl<'a> RustEmitter<'a> {
         }
         *self.cfg_state.borrow_mut() = previous_cfg;
         if !custom_arms {
+            let references = self.localizable_reference_slots(function);
+            let references_end = localize_slots(out, slots_start, slots_end, "__jet_l_", &references);
             let localizable = self.localizable_value_slots(function);
-            let values_end = localize_slots(out, slots_start, slots_end, "__jet_v_", &localizable);
-            let declarations_end = fold_value_slots(out, slots_start, values_end);
+            // Adjacent borrowing closures must fold while their original
+            // declared dyn type is available; other borrows localize below.
+            let values_end = fold_value_slots(out, slots_start, references_end);
+            let declarations_end = localize_slots(out, slots_start, values_end, "__jet_v_", &localizable);
             unwrap_value_slots(out, slots_start);
             let mut localizable = self.localizable_local_slots(function);
             // The return place borrows caller-owned storage. Leave its
@@ -25392,17 +25422,51 @@ impl<'a> RustEmitter<'a> {
     /// shared count or a view, or its Rust slot type borrows.
     fn localizable_value_slots(&self, function: &MirFunction) -> BTreeMap<u64, String> {
         let plain = |name: &str| self.plain_drop_types.contains(name);
-        function
-            .values
-            .iter()
-            .filter(|(value, ty, _, ownership)| {
-                self.history_binding(*value).is_none()
-                    && matches!(ownership.drop, MirDropKind::None | MirDropKind::Value)
-                    && type_drop_is_plain(ty, &plain)
-            })
-            .map(|(value, ty, _, _)| (value.0, self.rust_local_type(ty)))
-            .filter(|(_, rust)| !rust.contains('&') && !rust.contains('\''))
-            .collect()
+        let mut slots = BTreeMap::new();
+        for (value, ty, _, ownership) in &function.values {
+            if self.history_binding(*value).is_some() { continue; }
+            if let Some(place) = self.borrowed_loop_cursor(function, *value) {
+                let list = self.rust_local_type(&self.place_row(function, place).expect("checked loop place").ty);
+                slots.insert(value.0, format!("(&{list}, usize)"));
+                continue;
+            }
+            if let Some(MirOperation::Closure { function: target, captures, .. }) = self.value_definition(function, *value) {
+                let target = self.function_row(*target);
+                let borrows = target.capture_params.iter().any(|capture| capture.access == MirAccess::Write);
+                let nonowning = captures.len() == target.capture_params.len()
+                    && captures.iter().zip(&target.capture_params).all(|(operand, capture)| {
+                        matches!(operand, MirCaptureOperand::Place(_))
+                            && capture.access != MirAccess::Move
+                            && !self.capture_move_required(target, capture.slot)
+                            && self.shared_capture_local(function, operand).is_none()
+                            && (capture.access == MirAccess::Write || type_drop_is_plain(&capture.ty, &plain))
+                    });
+                if borrows && nonowning {
+                    slots.insert(value.0, self.rust_local_type(ty));
+                    continue;
+                }
+            }
+            if matches!(ownership.drop, MirDropKind::None | MirDropKind::Value)
+                && type_drop_is_plain(ty, &plain) {
+                let rust = self.rust_local_type(ty);
+                if !rust.contains('&') && !rust.contains('\'') { slots.insert(value.0, rust); }
+            }
+        }
+        slots
+    }
+
+    /// Reference bindings own no payload. Localizing their storage prevents
+    /// an inner-loop borrow from surviving the next outer-loop assignment.
+    fn localizable_reference_slots(&self, function: &MirFunction) -> BTreeMap<u64, String> {
+        function.locals.iter().filter(|local| self.ref_binding_local(function, local.id))
+            .map(|local| {
+                let ty = if self.read_text_parameter(&local.ty, MirAccess::Read) {
+                    "str".to_string()
+                } else {
+                    self.read_trait_type(&local.ty).unwrap_or_else(|| self.rust_local_type(&local.ty))
+                };
+                (local.id.0, format!("&{ty}"))
+            }).collect()
     }
 
     /// Local slots declared `Option<T>` (`emit_slots`) whose drop does nothing
@@ -25727,7 +25791,7 @@ impl<'a> RustEmitter<'a> {
                 let args = vec![
                     format!("&mut ({base})"),
                     index,
-                    format!("move |_| {{ {value} }}"),
+                    map_store_callback(&value),
                 ];
                 return self.prelude_call_args_exact(call, &args);
             }
@@ -40051,7 +40115,7 @@ mod facade_carrier_regressions {
     use super::view_owner_borrow;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    fn compile_run(source: &str) {
+    pub(super) fn compile_run(source: &str) {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let dir = std::env::temp_dir().join(format!(
             "jet-facade-carrier-{}-{}",
@@ -40157,5 +40221,102 @@ fn main() {
             let adapter = section(resident, "impl JetShow for Vec<String> {", end);
             compile_run(&source.replace(generic, "").replace(generic_show, adapter));
         }
+    }
+}
+
+#[cfg(test)]
+mod borrow_storage_regressions {
+    use super::{borrowing_closure_expression, fold_value_slots, localize_slots,
+                map_store_callback, plain_callable_type, split_local_field_borrows};
+    use std::collections::BTreeMap;
+
+    fn compile_run(source: &str) {
+        super::facade_carrier_regressions::compile_run(source);
+    }
+
+    #[test]
+    fn adjacent_mutable_capture_is_consumed_before_the_next_owner_use() {
+        let carrier = plain_callable_type("", "u64", "u64", "'_");
+        let bound = plain_callable_type("", "u64", "u64", "'capture");
+        let expression = "std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new({ let mut __jet_capture_0 = __jet_l_0.as_mut().expect(\"MIR local\"); move |n| { *__jet_capture_0 += n; *__jet_capture_0 } }))))";
+        assert!(borrowing_closure_expression(expression));
+        assert!(!borrowing_closure_expression("std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new({ let __jet_capture_0 = 1u64; move |n| n + __jet_capture_0 }))))"));
+        let mut source = format!("fn consume<'capture>(f: {bound}) {{ assert!(f.borrow_mut().as_mut().unwrap()(1) > 0); }}\nfn main() {{\n    let mut __jet_l_0 = Some(0u64);\n    let mut __jet_v_0: Option<{carrier}> = None;\n");
+        let start = source.find("    let mut __jet_l_0").unwrap();
+        let end = source.len();
+        source.push_str(&format!("    for _ in 0..3 {{\n        __jet_v_0 = Some({expression});\n        consume(__jet_v_0.take().expect(\"MIR value\"));\n        *__jet_l_0.as_mut().unwrap() += 10;\n    }}\n    assert_eq!(__jet_l_0, Some(33));\n}}\n"));
+        fold_value_slots(&mut source, start, end);
+        assert!(!source.contains("let mut __jet_v_0"));
+        compile_run(&source);
+    }
+
+    #[test]
+    fn guard_field_arguments_reborrow_the_record_once() {
+        let args = "&mut((*(*__jet_l_0.as_mut().expect(\"MIR local\"))).__jet_a), &mut((*(*__jet_l_0.as_mut().expect(\"MIR local\"))).__jet_b), &((*(*__jet_l_0.as_ref().expect(\"MIR local\"))).__jet_c)";
+        let call = split_local_field_borrows("update", args);
+        assert!(call.contains("= &mut **__jet_l_0"));
+        compile_run(&format!(r#"
+struct Row {{ __jet_a: u64, __jet_b: u64, __jet_c: u64 }}
+fn update(a: &mut u64, b: &mut u64, c: &u64) {{ *a += *c; *b += *c; }}
+fn main() {{
+    let owner = std::sync::Mutex::new(Row {{ __jet_a: 1, __jet_b: 2, __jet_c: 3 }});
+    let mut __jet_l_0 = Some(owner.lock().unwrap());
+    {call};
+    assert_eq!(__jet_l_0.as_ref().unwrap().__jet_a, 4);
+    assert_eq!(__jet_l_0.as_ref().unwrap().__jet_b, 5);
+}}
+"#));
+    }
+
+    #[test]
+    fn policy_callback_and_nested_loop_references_end_with_the_iteration() {
+        let carrier = plain_callable_type("", "", "()", "'_");
+        let mut source = format!("fn main() {{\n    let mut __jet_l_0: Option<Vec<String>> = None;\n    let mut __jet_l_1: Option<&String> = None;\n    let mut __jet_v_0: Option<(&Vec<String>, usize)> = None;\n    let mut __jet_v_1: Option<{carrier}> = None;\n");
+        let start = source.find("    let mut __jet_l_0").unwrap();
+        let end = source.len();
+        source.push_str(r#"    for round in 0..3 {
+        __jet_l_0 = Some(vec![round.to_string()]);
+        __jet_v_0 = Some((__jet_l_0.as_ref().expect("MIR local"), 0));
+        for index in 0..1 {
+            __jet_l_1 = Some(&__jet_v_0.as_ref().unwrap().0[index]);
+            assert_eq!(__jet_l_1.unwrap(), &round.to_string());
+        }
+        __jet_l_0.as_mut().unwrap().clear();
+        __jet_v_1 = Some(std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new({ let mut __jet_capture_0 = __jet_l_0.as_mut().expect("MIR local"); move || { __jet_capture_0.push("seen".into()); } })))));
+        for _ in 0..2 {
+            __jet_v_1.as_ref().unwrap().borrow_mut().as_mut().unwrap()();
+        }
+    }
+    assert_eq!(__jet_l_0.unwrap(), vec!["seen", "seen"]);
+}
+"#);
+        let refs = BTreeMap::from([(1, "&String".into())]);
+        let end = localize_slots(&mut source, start, end, "__jet_l_", &refs);
+        let values = BTreeMap::from([(0, "(&Vec<String>, usize)".into()), (1, carrier)]);
+        localize_slots(&mut source, start, end, "__jet_v_", &values);
+        assert!(source.contains("        let mut __jet_v_1"));
+        assert!(source.contains("            let mut __jet_l_1"));
+        compile_run(&source);
+    }
+
+    #[test]
+    fn map_callback_moves_the_payload_not_its_reused_slot() {
+        let callback = map_store_callback("__jet_v_7.take().expect(\"MIR value\")");
+        compile_run(&format!(r#"
+fn update<F: FnOnce(Option<Vec<String>>) -> Vec<String>>(map: &mut Vec<Vec<String>>, f: F) {{
+    map.push(f(None));
+}}
+fn main() {{
+    let mut __jet_v_7: Option<Vec<String>> = None;
+    let mut map = Vec::new();
+    for n in 0..3 {{
+        __jet_v_7 = Some(vec![n.to_string()]);
+        let identity = __jet_v_7.as_ref().unwrap().as_ptr();
+        update(&mut map, {callback});
+        assert_eq!(map.last().unwrap().as_ptr(), identity);
+    }}
+    assert_eq!(map, vec![vec!["0"], vec!["1"], vec!["2"]]);
+}}
+"#));
     }
 }

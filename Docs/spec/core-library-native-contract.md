@@ -428,6 +428,13 @@ its own module; only separate resident collection modules import it.
 Lowering helpers that mutate their builder read retained plain metadata from
 an explicit owned `.copy()` snapshot, not a row still borrowed through that
 builder. This does not copy trait adapters or widen a value's Copy capability.
+Hosted bootstrap callback carriers preserve their capture lifetime rather than
+implicitly requiring `'static`. A single-use borrowed callback is constructed
+at its consumer; other borrow-only callbacks, iteration cursors, and reference
+bindings live in their defining lexical scope. Owned handles and shared-capture
+cells retain their existing release rules. Disjoint fields behind an exclusive
+guard project from one reborrow of its referent, not repeated guard dereferences.
+Map-store callbacks capture their owned payload, not the reusable MIR slot.
 
 Native lowering must fail closed when a construct cannot preserve the shared
 runtime's ABI, error behavior, or observable output. Report an unsupported
