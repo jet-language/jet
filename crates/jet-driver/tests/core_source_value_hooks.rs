@@ -570,6 +570,35 @@ fn run() -[FS]> {
     );
 }
 
+/// The default `Err`'s declared fields keep their declared types under the
+/// original Prelude identity: `message` is a `String` for a method call, a
+/// comparison and interpolation.
+#[test]
+fn default_err_fields_keep_their_declared_types() {
+    hosted_seed_program_runs(
+        "default_err_fields",
+        Some("name: \"default_err_fields\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS.Read] } }\n"),
+        r#"
+use core.files as files
+fn length(path: String) -[FS]> Int {
+    reader :: files.open(path)
+    reader.path.len()
+}
+fn run() -[FS]> {
+    if length("missing-default-err-fields.txt") == {
+        .Ok(_) -> panic("the input must be missing")
+        .Err(error) -> {
+            assert(error.message.len() > 0)
+            assert(error.message != "")
+            shown :: "failed: {error.message}"
+            assert(shown.len() > error.message.len())
+        }
+    }
+}
+"#,
+    );
+}
+
 /// Root 2: Core handle ops write through a FileReader/FileWriter reached from
 /// a read binding (a Read parameter, a field of a read `self`). The emitted
 /// Rust lends the interior-mutable carrier by `&`.

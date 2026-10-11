@@ -386,6 +386,23 @@ pub(crate) fn register_imported_struct_shapes(
             }
         }
     }
+    // The original Prelude `Err` (and only it) is visible in every module
+    // without an import; its checked identity is the error-prelude row, so
+    // its declared field types answer under that identity everywhere.
+    if let Some(target) = (0..bundle.modules.len()).find(|&target| {
+        target != module_idx
+            && bundle.name_ledger.module(target).is_some_and(|row| {
+                row.package == jet_foundation::Syntax::ERROR_PRELUDE_PACKAGE
+            })
+    }) {
+        for item in &bundle.modules[target].items {
+            if let Item::Struct(definition) = item {
+                if definition.compiler_builtin_error {
+                    imported.push((target, definition.name.clone()));
+                }
+            }
+        }
+    }
     imported.extend(crate::Codegen::Imports::selective_nominal_targets(
         bundle, module_idx,
     ));

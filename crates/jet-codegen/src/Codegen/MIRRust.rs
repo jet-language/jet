@@ -22787,11 +22787,18 @@ impl<'a> RustEmitter<'a> {
     }
 
     /// A shared reference for a consumer that only inspects `value`: the read
-    /// parameter's own place when `value` reads one, else the value slot.
+    /// parameter's own place when `value` reads one, the read's place when
+    /// that read was elided as borrow-only (its slot is never written; e.g. a
+    /// native host record field such as `Err.message`), else the value slot.
     fn inspected_value_reference(&self, function: &MirFunction, value: MirValueId) -> String {
-        match self.immutable_read_place(function, value) {
-            Some(place) => self.place_reference(function, place, MirAccess::Read),
-            None => self.value_slot_reference(value, false),
+        if let Some(place) = self.immutable_read_place(function, value) {
+            return self.place_reference(function, place, MirAccess::Read);
+        }
+        match self.value_definition(function, value) {
+            Some(MirOperation::ReadPlace(place)) if self.direct_borrow_only(function, value) => {
+                self.place_reference(function, *place, MirAccess::Read)
+            }
+            _ => self.value_slot_reference(value, false),
         }
     }
 
