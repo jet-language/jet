@@ -2,7 +2,6 @@
 // CLI assertions live in tests/cases/jetpack_platform. Env-gated; no public API.
 // #4838: invoke THIS FILE with --filter, never the directory.
 use core.encoding.json as platform_json
-use core.encoding.Dyn as PlatformData
 fn store_platform_fixture_meta(verification: &StoreVerification, roots: HangarRoots, id: String, timestamp: Int?) -> String {
     source :: files.join(roots.root, "hangar-meta-src-{id}")
     files.create_dir_all(source) ?? panic("metadata source")
@@ -44,8 +43,8 @@ fn store_platform_setup() {
     files.rename(staging, output) ?? panic("publish native object")
     store_seal_local_output(output) ?? panic("seal published output")
     assert_eq(pkg_try_output_hash_of(output) ?? panic("published digest"), digest, "published fixture must retain its content-addressed identity")
-    files.write(files.join(fixtures, "nixpkgs-native-jetpack.json"), "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-native-jetpack.drv\",\"outputs\":{{\"out\":{platform_json.to_string(PlatformData.Text(output))}}}}}]") ?? panic("provider fixture")
-    files.write(files.join(fixtures, "jetpackage-omp.json"), "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{artifact_digest}\",\"artifact\":{platform_json.to_string(PlatformData.Text(artifact_name))}}}") ?? panic("release fixture")
+    files.write(files.join(fixtures, "nixpkgs-native-jetpack.json"), "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-native-jetpack.drv\",\"outputs\":{{\"out\":{platform_json.to_string(Dyn.Text(output))}}}}}]") ?? panic("provider fixture")
+    files.write(files.join(fixtures, "jetpackage-omp.json"), "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{artifact_digest}\",\"artifact\":{platform_json.to_string(Dyn.Text(artifact_name))}}}") ?? panic("release fixture")
     if mode == "native" -> return
     object :: store_platform_fixture_meta(&verification, roots, "platform-hostile-good", None)
     files.write(files.join(work, "fixture-object"), object) ?? panic("publish setup path")
