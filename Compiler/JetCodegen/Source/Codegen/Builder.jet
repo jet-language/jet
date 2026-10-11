@@ -465,8 +465,13 @@ struct JetCodegenBuilder {
     cleanup_masked: Bool
 }
 
+// Rust LowerCtx::panic_context_at: a function with no readonly source (a
+// synthetic or host-leaf row) and a blank source line both give an empty
+// source line rather than stopping the build.
 fn jet_codegen_source_location(builder: JetCodegenBuilder, program: JetCodegenProgram, include_source_line: Bool) -> JetCodegenSourceLocation Never! {
-    if builder.function.source_file == "" -> panic("checked function has an empty source path")
+    empty_line := String?{None}
+    if include_source_line -> empty_line = Val("")
+    if builder.function.source_file == "" || program.source_index.by_path.get(builder.function.source_file) == None -> return JetCodegenSourceLocation{line: builder.current_line ?? 1, source_line: empty_line}
     row :: jet_codegen_builder_source_row(builder, program, "ambiguous checked function source context", "checked function has no readonly source context")
     if program.source_files[row].id != mir_source_file_id(program.source_files[row].path) -> panic("checked function source context has a conflicting file identity")
     byte_count :: program.source_index.rows[row].bytes.len()
@@ -486,7 +491,6 @@ fn jet_codegen_source_location(builder: JetCodegenBuilder, program: JetCodegenPr
         line_end := jet_codegen_source_line_end(program.source_index.rows[row].bytes, line_start)
         if line_end > line_start && program.source_index.rows[row].bytes[line_end - 1] == (U8{13}) -> line_end -= 1
         line_text := String.from_bytes(jet_codegen_source_byte_range(program.source_index.rows[row].bytes, line_start, line_end)) ?? panic("checked source line is not valid UTF-8")
-        if line_text == "" -> panic("checked source location resolves to an empty source line")
         source_line = Val(line_text)
     }
     JetCodegenSourceLocation{line: line, source_line: source_line}
