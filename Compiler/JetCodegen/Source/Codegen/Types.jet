@@ -237,11 +237,21 @@ fn jet_codegen_is_checked_text_trait_id(id: MIRTraitID) -> Bool Never! {
     id == mir_trait_id("CheckedText")
 }
 
+// Rust mir.rs::lower_impl_rows keys an impl's trait by its written name
+// (`stable_id("mir-trait", name)`) and refuses none: a declared trait keeps
+// its resolved identity, any other name (a builtin bound such as `Serialize`,
+// `Numeric` or `Driver`) its bare one, which ensure_referenced_traits
+// synthesizes a row for.
 fn jet_codegen_lower_declared_or_builtin_trait_ref(names: JetCodegenTraitNames, name: String, module_identity: String) -> MIRTraitRef Never! {
     if jet_codegen_resolve_trait_name(names, name, module_identity) == .Val(resolved) -> return resolved
     if names.candidates.get(name) != None -> panic("checked trait name is ambiguous")
-    if jet_codegen_is_native_rust_derive_name(name) || jet_codegen_is_compiler_owned_trait_name(name) || name == "CheckedText" -> return mir_trait_ref(name)
-    panic("checked trait name has no declared or registered builtin identity")
+    mir_trait_ref(name)
+}
+
+// Rust mir.rs::is_literal_capability_trait: `impl T.Literal.Int` and
+// `impl T.Literal.Float` are inherent blocks of their literal hook.
+fn jet_codegen_is_literal_capability_trait(name: String) -> Bool Never! {
+    name == "Literal.Int" || name == "Literal.Float"
 }
 
 // A checked derive names a declared trait, a native Rust derive, a

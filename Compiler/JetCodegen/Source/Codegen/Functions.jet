@@ -765,7 +765,7 @@ fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: JetCodegen
     }
     trait_ref := if trait_name == {
         None -> None
-        Val(name) -> Val(jet_codegen_lower_declared_or_builtin_trait_ref(trait_names, name, definition.module_identity))
+        Val(name) -> if jet_codegen_is_literal_capability_trait(name) -> None else -> Val(jet_codegen_lower_declared_or_builtin_trait_ref(trait_names, name, definition.module_identity))
     }
     method_ids := [MIRFunctionID]{}
     seen_methods := [U64:Bool]{}
@@ -3995,12 +3995,14 @@ fn jet_codegen_lower_foreign_abi(abi: String) -> MIRForeignABI Never! {
     }
 }
 
+// Rust mir.rs::lower_foreign_language: the language head before any `:`;
+// every other head (an inline body's `rust`, `zig`, ...) is Rust.
 fn jet_codegen_lower_foreign_language(language: String) -> MIRForeignLanguage Never! {
-    if language == "c" -> return MIRForeignLanguage.C
-    if language == "cpp" || language == "c++" -> return MIRForeignLanguage.Cpp
-    if language == "asm" || language == "assembly" -> return MIRForeignLanguage.Assembly
-    if language.starts_with("rust:") || language == "rust" -> return MIRForeignLanguage.Rust
-    panic("checked foreign language has no MIR representation")
+    head :: language.split(":").to_list()[0].lower()
+    if head == "c" -> return MIRForeignLanguage.C
+    if head == "cpp" || head == "c++" -> return MIRForeignLanguage.Cpp
+    if head == "asm" || head == "assembly" -> return MIRForeignLanguage.Assembly
+    MIRForeignLanguage.Rust
 }
 
 fn jet_codegen_foreign_effects(effect_root: String?, span: Span) -> MIREffectFacts Never! {
@@ -4099,13 +4101,16 @@ fn jet_codegen_lower_foreign_row(row: SemaCheckedForeignFunction, modules: [Sema
         None -> None
         Val(key) -> Val(MIRHandleID{value: stable_id("mir-handle", key)})
     }
+    // Rust lower_foreign_rows resolves the close and undo hooks with
+    // `and_then`: a key with no checked TFunc (a host leaf, a foreign row)
+    // leaves the hook unset rather than stopping the build.
     close_function := if row.close_function_key == {
         None -> None
-        Val(key) -> Val(hooks.functions.get(key) ?? panic("checked foreign close adapter has no registered TFunc"))
+        Val(key) -> hooks.functions.get(key)
     }
     close_foreign := if row.close_foreign_key == {
         None -> None
-        Val(key) -> Val(jet_codegen_foreign_lookup_id(hooks, key) ?? panic("checked raw foreign close has no registered foreign row"))
+        Val(key) -> jet_codegen_foreign_lookup_id(hooks, key)
     }
     undo_function := if row.undo_function_key == {
         None -> None
@@ -4171,14 +4176,10 @@ fn jet_codegen_lower_foreign_thread_safety(safety: String) -> MIRFFIThreadSafety
 fn jet_codegen_lower_foreign_handle(handle: SemaCheckedForeignHandle, module_identity: String, modules: [SemaGraphModuleResult], hooks: JetCodegenForeignHookIndex) -> MIRHandleLifecycle Never! {
     close_function := MIRFunctionID?{None}
     close_foreign := MIRForeignID?{None}
-    if handle.close_function_key != None {
-        key :: handle.close_function_key ?? panic("checked foreign handle close function key disappeared")
-        close_function = hooks.functions.get(key) ?? panic("checked foreign handle close adapter does not resolve to a TFunc")
-    }
-    if handle.close_foreign_key != None {
-        key :: handle.close_foreign_key ?? panic("checked foreign handle close foreign key disappeared")
-        close_foreign = jet_codegen_foreign_lookup_id(hooks, key) ?? panic("checked foreign handle fallback does not resolve to a foreign row")
-    }
+    // Rust lower_handle_rows: a close hook resolves to a function when one is
+    // registered, else to the provider's foreign close row, else neither.
+    if handle.close_function_key == .Val(key) -> close_function = hooks.functions.get(key)
+    if close_function == None && handle.close_foreign_key == .Val(key) -> close_foreign = jet_codegen_foreign_lookup_id(hooks, key)
     undo := MIRFunctionID?{None}
     if handle.undo_function_key != None {
         key :: handle.undo_function_key ?? panic("checked foreign handle undo key disappeared")
