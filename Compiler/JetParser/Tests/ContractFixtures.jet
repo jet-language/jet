@@ -490,12 +490,36 @@ fn pc_lexical_and_parser_diagnostics() {
     }
     pc_require(reserved && retired, "parser teaching survives lexical reserved-name errors")
 }
+
+// D-PAT-RECORD1=A: after `==`, `Name{` is a struct pattern only when its
+// brace body reads as pattern entries; typed literals and a constant before
+// an `if` body stay value equality.
+fn pc_named_struct_pattern_rhs_init(source: String, label: String) -> Expr {
+    parsed :: parse_source(source.bytes())
+    pc_require(parsed.diagnostics.len() == 0, "parses without diagnostics: {label}")
+    function :: if parsed.program.items[0] == .Func(value) -> value else -> panic("comparison function: {label}")
+    binding :: if function.body[0] == .Val(value) -> value else -> panic("comparison binding: {label}")
+    binding.init
+}
+
+fn pc_named_struct_pattern_rhs() {
+    loop rhs in ([String]{"I64{{0}}", "I64{{-4}}"}) {
+        init :: pc_named_struct_pattern_rhs_init("fn run() {{ result :: errno == {rhs} }}", rhs)
+        pc_require(if init == .Binary(op, _, _, _) -> op == BinOp.Eq else -> false, "typed literal stays value equality: {rhs}")
+    }
+    constant :: parse_source("fn run() {{\n if kind == CONST {{ print(kind) }}\n if kind == Limit {{ print(kind) }}\n}}\n".bytes())
+    pc_require(constant.diagnostics.len() == 0, "a name compared before an `if` body stays a value")
+    init :: pc_named_struct_pattern_rhs_init("fn run() {{ result :: point == Point{{x, y: 0}} }}", "Point{{x, y: 0}}")
+    shaped :: if init == .PatternTest(_, pattern, _) -> (if pattern == .Struct(fields, _, _, head) -> fields.len() == 2 && (if head == .Val(_) -> true else -> false) else -> false) else -> false
+    pc_require(shaped, "a named struct pattern still binds and compares fields")
+}
 fn run() {
     canonical :: parse_source("fn run() {{\n values :: [JSON]{{JSON.Null}}\n print(values.len())\n}}\n".bytes())
     pc_require(canonical.diagnostics.len() == 0, "canonical newline collection consumer")
     pc_semicolon("fn run() {{ first :: 1; second :: 2; third :: 3\n}}\n", "\n")
     pc_semicolon("fn run() {{\n first :: 1;\n second :: 2;\n third :: 3\n}}\n", "")
     pc_module_markers()
+    pc_named_struct_pattern_rhs()
     pc_lexical_and_parser_diagnostics()
     pc_marker_metadata()
     pc_formatter_edit_boundaries()

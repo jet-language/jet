@@ -21,6 +21,7 @@ use jet_lexer.[
     STRING_PART_INTERPOLATION,
     STRING_PART_TEXT,
     StringPart,
+    TOKEN_AND_AND,
     TOKEN_COLON,
     TOKEN_COLON_COLON,
     TOKEN_COMMA,
@@ -31,6 +32,7 @@ use jet_lexer.[
     TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_INT,
+    TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
     TOKEN_LPAREN,
@@ -402,9 +404,30 @@ fn parser_pattern_rhs_ahead(state: &JetParserState) -> Bool Never! {
         TOKEN_STRING -> parser_string_pattern_ahead(state, token)
         // D-ENUMDOT1: a bare `Variant(…)` or `Variant | …` is a pattern that
         // lacks its leading dot (E0367).
-        TOKEN_IDENT -> parser_typed_pattern_ahead(&state) || parser_bare_variant_head(&state) || (parser_kind_at(&state, 1) == TOKEN_LBRACE && parser_pascal_name(parser_value(state, token)))
+        TOKEN_IDENT -> parser_typed_pattern_ahead(&state) || parser_bare_variant_head(&state) || parser_named_struct_pattern_ahead(&state)
         else -> false
     }
+}
+
+// Rust `named_struct_pattern_ahead` (D-PAT-RECORD1=A): `Point{…}` starts a
+// named struct pattern only when the head is a non-constant type name and
+// its brace body reads as pattern entries: `..`, `field:`, `field,`, or a
+// lone `field}` followed by what ends the pattern. Typed literals such as
+// `I64{0}`, `I64{-4}` and a constant compared before a body (`CONST {`)
+// stay values.
+fn parser_named_struct_pattern_ahead(state: &JetParserState) -> Bool Never! {
+    token :: parser_current(&state)
+    if token.kind != TOKEN_IDENT || parser_kind_at(&state, 1) != TOKEN_LBRACE -> return false
+    name :: parser_value(state, token)
+    if !parser_pascal_name(name) || parser_constant_name(name) || name == "String" -> return false
+    first :: parser_lookahead(&state, 2)
+    if first.kind == TOKEN_DOT_DOT -> return true
+    if first.kind != TOKEN_IDENT || parser_value(state, first) == "_" -> return false
+    second :: parser_kind_at(&state, 3)
+    if second == TOKEN_COLON || second == TOKEN_COMMA -> return true
+    if second != TOKEN_RBRACE -> return false
+    after :: parser_kind_at(&state, 4)
+    after == TOKEN_LBRACE || after == TOKEN_UNIFIED_ARROW || after == TOKEN_LAMBDA_ARROW || after == TOKEN_COMMA || after == TOKEN_RPAREN || after == TOKEN_RBRACKET || after == TOKEN_RBRACE || after == TOKEN_AND_AND
 }
 
 // Rust `try_typed_pattern_str_body`: `[U8]{"…"}`, `[U8#N]{"…"}` or
@@ -705,6 +728,7 @@ fn parser_parse_string_pattern(state: &JetParserState) -> ParsedPattern {
 fn parser_bracket_pattern_ahead(state: &JetParserState) -> Bool Never! {
     offset := 1
     depth := 0
+    parens := 0
     shaped := parser_kind_at(&state, 1) == TOKEN_RBRACKET || (parser_kind_at(&state, 1) == TOKEN_COLON && parser_kind_at(&state, 2) == TOKEN_RBRACKET)
     loop parser_kind_at(&state, offset) != TOKEN_EOF {
         token :: parser_lookahead(&state, offset)
@@ -713,13 +737,27 @@ fn parser_bracket_pattern_ahead(state: &JetParserState) -> Bool Never! {
             return shaped && after != TOKEN_LBRACE && after != TOKEN_HASH
         }
         if token.kind == TOKEN_DOT_DOT || token.kind == TOKEN_QUESTION -> shaped = true
-        if token.kind == TOKEN_IDENT && !parser_pascal_name(parser_value(state, token)) && !parser_constant_name(parser_value(state, token)) -> shaped = true
-        if token.kind == TOKEN_DOT && parser_kind_at(&state, offset + 1) == TOKEN_IDENT -> shaped = true
+        // Rust `pattern_item`: only a bare lowercase slot name directly
+        // closed by `,` `)` `]` `}` binds (never a call argument), and only a
+        // slot-leading `.Variant` nests; `[n - 1]`, `[f(x)]` and `[a.b]` stay
+        // list values.
+        if token.kind == TOKEN_IDENT && parens == 0 && !parser_pascal_name(parser_value(state, token)) && !parser_constant_name(parser_value(state, token)) && parser_slot_start(parser_kind_at(&state, offset - 1)) && parser_bind_slot_end(parser_kind_at(&state, offset + 1)) -> shaped = true
+        if token.kind == TOKEN_DOT && parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_pascal_name(parser_value_at(&state, offset + 1)) && parser_slot_start(parser_kind_at(&state, offset - 1)) -> shaped = true
         if token.kind == TOKEN_LBRACKET || token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACE -> depth += 1
         if token.kind == TOKEN_RBRACKET || token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACE -> depth -= 1
+        if token.kind == TOKEN_LPAREN -> parens += 1
+        if token.kind == TOKEN_RPAREN -> parens -= 1
         offset += 1
     }
     false
+}
+
+fn parser_bind_slot_end(kind: Int) -> Bool Never! {
+    kind == TOKEN_COMMA || kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE || kind == TOKEN_SEMI
+}
+
+fn parser_slot_start(kind: Int) -> Bool Never! {
+    kind == TOKEN_LBRACKET || kind == TOKEN_LPAREN || kind == TOKEN_LBRACE || kind == TOKEN_COMMA || kind == TOKEN_COLON || kind == TOKEN_SEMI
 }
 
 fn parser_map_pattern_entry_ahead(state: &JetParserState) -> Bool Never! {

@@ -172,7 +172,10 @@ fn time_optional_i64(present: Bool, output: I64) -> I64 {
         }
         count :: host_call(I64{0}, fd, wrapping(bytes + used), capacity - used)
         if (count == I64{-4}) { next }
-        if (count < I64{0}) { failed = true; break }
+        if (count < I64{0}) {
+            failed = true
+            break
+        }
         if (count == I64{0}) -> break
         used = used + count
     }
