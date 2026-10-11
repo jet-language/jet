@@ -387,7 +387,15 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
                 &take_keys.push(key)
             }
         }
-        &values.push(value)
+        // Rust `check_call_argument_access`: the parser stores `f(^x.f)`'s
+        // move mark on the CallArg, and a marked field read passed to a
+        // consuming parameter is the exact-place move, so the argument moves
+        // out of its owner instead of materializing a copy. A field of a
+        // borrowed parameter has no storage to give up and keeps its copy.
+        taken_field := parameter.convention == AccessConvention.Move && !parameter.variadic && args[index].convention == AccessConvention.Move && args[index].expr == .Field(_, _, _)
+        if taken_field && sema_ownership_binding_for_expr(&state, args[index].expr, scopes) == .Val(root) -> taken_field = !sema_ownership_binding_is_borrowed_param(root)
+        stored :: if taken_field -> sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span) else -> value
+        &values.push(stored)
         &slots.push(slot)
         &required_types.push(required)
         &source_indices.push(args[index].flags.source_index ?? -1)

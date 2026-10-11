@@ -3843,7 +3843,7 @@ fn sema_check_expression_cold(expr: Expr, expected: Type?, environment: SemaScop
                 if call.args.len() == 1 -> payload = call.args[0].expr
                 span :: Span{start: call.name_span.start, end: expr_span(payload).end}
                 if !success -> &context.failure_edges.push("")
-                return sema_expression_result_payload(payload, success, sema_expression_result_call_takes_field(call), span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                return sema_expression_result_payload(payload, success, sema_expression_result_call_takes_field(call, &state, scopes), span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             }
             sema_stmt_uninit_write_args(call.args, state, scopes, &diagnostics)
             sema_expr_check_direct_call(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -3924,7 +3924,7 @@ fn sema_expr_check_call_expr(call: Call, expected: Type?, environment: SemaScope
         if call.args.len() == 1 -> payload = call.args[0].expr
         span :: Span{start: call.name_span.start, end: expr_span(payload).end}
         if !success -> &context.failure_edges.push("")
-        return sema_expression_result_payload(payload, success, sema_expression_result_call_takes_field(call), span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return sema_expression_result_payload(payload, success, sema_expression_result_call_takes_field(call, &state, scopes), span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     sema_stmt_uninit_write_args(call.args, state, scopes, &diagnostics)
     sema_expr_check_direct_call(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)

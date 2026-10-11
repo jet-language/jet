@@ -229,8 +229,11 @@ fn sema_expression_default_err_call(value: Expr, span: Span, expected: Type, env
 // read keeps it as the exact-place move an ordinary consuming argument gets
 // (Calls/Checking.jet), so the payload moves out of its owner instead of
 // materializing a copy (the Rust reference's contextual Ok/Err normalization).
-fn sema_expression_result_call_takes_field(call: Call) -> Bool Never! {
-    call.args.len() == 1 && call.args[0].convention == AccessConvention.Move && call.args[0].expr == .Field(_, _, _)
+// A field of a borrowed parameter has no storage to give up and keeps its copy.
+fn sema_expression_result_call_takes_field(call: Call, state: &SemaOwnershipState, scopes: SemaScopeTable) -> Bool {
+    if call.args.len() != 1 || call.args[0].convention != AccessConvention.Move || !(call.args[0].expr == .Field(_, _, _)) -> return false
+    root :: sema_ownership_binding_for_expr(&state, call.args[0].expr, scopes) ?? return true
+    !sema_ownership_binding_is_borrowed_param(root)
 }
 
 fn sema_expression_result_payload(value: Expr, success: Bool, take_field: Bool, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
