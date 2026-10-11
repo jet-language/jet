@@ -3148,6 +3148,17 @@ fn jet_driver_comptime_flush(
         }
         &machines.push(^machine)
         jet_driver_record_eval_result(&trace, eval_result)
+        if source.kind == SemaComptimeItemKind.FieldDefault && eval_result.error != None && eval_result.internal_problem == None {
+            // Rust CheckerMarkers (D-SERDE5): an unevaluable field default lands
+            // no value and construction lowers its expression; only a struct
+            // that bakes its defaults needs the value (E2414).
+            if source.baked_default {
+                name_parts := source.name.split(".").to_list()
+                field_name :: &name_parts.pop() ?? source.name
+                &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, "E2414", source.span, "`{field_name}`'s `{{…}}` default must be a compile-time constant", "a decode default is baked into the program, so its value has to be known at compile time; this expression can only be computed at runtime", "use a literal or a `comptime`-evaluable expression — e.g. `port: Int{{8080}}` or `ports: [Int]{{[80, 443]}}`"))
+            }
+            next
+        }
         if eval_result.error != None || eval_result.internal_problem != None {
             if eval_result.error == .Val(eval_error) {
                 &diagnostics.push(jet_driver_attach_registration_source_location(eval_error.diagnostic, graph, comptime_request.module_identity))

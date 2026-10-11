@@ -298,6 +298,9 @@ struct SemaComptimeItemSource {
     span: Span
     dependencies: [String]
     checked_text: SemaCheckedTextEvaluation?
+    // A FieldDefault of a struct that bakes its defaults (Codable, Decode,
+    // Encode, CLI): Rust CheckerMarkers reports E2414 when it cannot evaluate.
+    baked_default: Bool{false}
 }
 
 struct SemaComptimeItemRequest {
@@ -5201,11 +5204,16 @@ fn sema_comptime_add_module_item_sources(sources: &SemaComptimeSourceList, graph
                 }
                 if field_symbol != None {
                     symbol :: field_symbol ?? return
+                    // Rust CheckerMarkers (D-SERDE5) evaluates every `field: T{expr}`
+                    // default opportunistically; construction lowers the default
+                    // expression itself, so only a baked default must evaluate.
                     if field.default != None && field.default_ct == None {
                         expression :: field.default ?? Expr.Unit{span: field.name_span}
                         destination_key := symbol.id.key
                         key := "{destination_key}::default"
+                        added :: sources.items.len()
                         sema_comptime_add_source(&sources, graph, source_module.module_identity, key, destination_key, "{definition.name}.{field.name}", SemaComptimeItemKind.FieldDefault, expression, Val(field.ty))
+                        if sources.items.len() > added -> sources.items[added].baked_default = sema_comptime_struct_bakes_defaults(definition.derives)
                     }
                     // A field marker's argument has its rule's own parameter type
                     // (Rust CheckerMarkers `constant_for_source(0)`), never the field's.
@@ -5259,6 +5267,15 @@ fn sema_comptime_add_module_item_sources(sources: &SemaComptimeSourceList, graph
         }
         else -> {}
     }
+}
+
+// Rust CheckerMarkers `needs_baked_default`: a decode/CLI shape fills a missing
+// field from its compile-time default value.
+fn sema_comptime_struct_bakes_defaults(derives: [NamedSpan]) -> Bool Never! {
+    loop marker in derives {
+        if marker.name == "Codable" || marker.name == "Decode" || marker.name == "Encode" || marker.name == "CLI" -> return true
+    }
+    false
 }
 
 // The comptime sources of `source_module`, in declaration order, their
