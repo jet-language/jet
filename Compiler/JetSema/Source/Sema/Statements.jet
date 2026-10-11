@@ -3415,7 +3415,7 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
         &diagnostics.push(sema_unknown_name(name, name_span))
         return None
     }
-    binding :: scopes.bindings[index].copy()
+    binding :: sema_scope_binding_row(environment, scopes, index)
     if sema_ownership_reject_frozen_write(state, Expr.Ident{name: name, span: name_span}, "be assigned", name_span, scopes, &diagnostics) -> return None
     // Rust `is_global_mutable_binding`: a module-level `name := …` is the one
     // module-level write target; it writes the binding's runtime storage cell.
@@ -4303,7 +4303,7 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
     // D-SOA1 (E1108): `xs[i].field = …` on a columnar list would write a
     // gathered copy, not the column.
     if target == .Field(field_base, field, field_span) && field_base == .Index(indexed_base, _, _, _) && sema_stmt_for_in_expr_root_ident(indexed_base) == .Val(root) {
-        root_type :: sema_stmt_return_known_type(Expr.Ident{name: root, span: field_span}, scopes)
+        root_type :: sema_stmt_return_known_type(Expr.Ident{name: root, span: field_span}, environment, scopes)
         if root_type == .Val(root_ty) && sema_columnar_list_element(environment, program, root_ty) == .Val(element) {
             &diagnostics.push(sema_error("E1108", field_span, "writing `{root}[i].{field}` isn't supported on a columnar list yet", "`#Layout(columnar)` lists support reading a field (`xs[i].f`) in v1; writing one is deferred", "drop `#Layout(columnar)` from `{element}` to write fields in place, or rebuild the element with `push`"))
             return None
@@ -4483,17 +4483,17 @@ fn sema_stmt_return_is_carrier(return_type: Type?) -> Bool Never! {
         else -> return false
     }
 }
-fn sema_stmt_return_known_type(value: Expr, scopes: SemaScopeTable) -> Type? {
+fn sema_stmt_return_known_type(value: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Type? {
     if value == {
-        .Paren(inner, _) | .Tainted(inner, _, _) | .Copy(inner, _) | .Place(inner, _, _) -> return sema_stmt_return_known_type(inner, scopes)
+        .Paren(inner, _) | .Tainted(inner, _, _) | .Copy(inner, _) | .Place(inner, _, _) -> return sema_stmt_return_known_type(inner, environment, scopes)
         .Ident(name, _) -> {
-            symbol :: sema_scope_resolve(scopes, name) ?? return None
-            return symbol.ty
+            index :: sema_scope_resolve_index(scopes, name) ?? return None
+            return sema_scope_binding_type(environment, scopes, index)
         }
         .Call(call) -> {
             if call.resolved_ret != None -> return call.resolved_ret
-            symbol :: sema_scope_resolve(scopes, call.name) ?? return None
-            symbol_type :: symbol.ty ?? return None
+            index :: sema_scope_resolve_index(scopes, call.name) ?? return None
+            symbol_type :: sema_scope_binding_type(environment, scopes, index) ?? return None
             if symbol_type == {
                 .Fn(_, ret, _, _, _, _) -> return ret
                 else -> {}
@@ -4501,7 +4501,7 @@ fn sema_stmt_return_known_type(value: Expr, scopes: SemaScopeTable) -> Type? {
         }
         .MethodCall(_, _, _, _, _, _, _, resolved_ret, _, _, _) -> return resolved_ret
         .CallValue(callee, _, _) -> {
-            callee_ty :: sema_stmt_return_known_type(callee, scopes) ?? return None
+            callee_ty :: sema_stmt_return_known_type(callee, environment, scopes) ?? return None
             if callee_ty == {
                 .Fn(_, ret, _, _, _, _) -> return ret
                 else -> {}
@@ -4531,12 +4531,12 @@ fn sema_stmt_return_types_are_carriers(actual: Type, required: Type) -> Bool Nev
     }
     false
 }
-fn sema_stmt_return_expr_is_carrier(value: Expr, return_type: Type?, scopes: SemaScopeTable) -> Bool {
+fn sema_stmt_return_expr_is_carrier(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool {
     if !sema_stmt_return_is_carrier(return_type) -> return false
     required := sema_stmt_return_required_type(return_type)
     normalized := sema_expr_unwrap_tag(required)
     if value == {
-        .Paren(inner, _) | .Tainted(inner, _, _) | .Copy(inner, _) -> return sema_stmt_return_expr_is_carrier(inner, return_type, scopes)
+        .Paren(inner, _) | .Tainted(inner, _, _) | .Copy(inner, _) -> return sema_stmt_return_expr_is_carrier(inner, return_type, environment, scopes)
         // Rust `check_return_expr` checks a value `if` against the whole
         // return type. A `T?` slot lifts each plain arm itself, so any value
         // `if` there is checked as the carrier (an arm may be a bound `T?`
@@ -4545,7 +4545,7 @@ fn sema_stmt_return_expr_is_carrier(value: Expr, return_type: Type?, scopes: Sem
         // already has the carrier's type (Rust lifts that table into the
         // carrier, so it is this body's own failure source); a table of plain
         // arms and calls takes the payload route, where each call propagates.
-        .If(_, _, _, _, _, _) -> return normalized == .Option(_) || (sema_stmt_return_if_builds_carrier(value, return_type, scopes) && sema_stmt_return_if_arms_fit_carrier(value, return_type, scopes))
+        .If(_, _, _, _, _, _) -> return normalized == .Option(_) || (sema_stmt_return_if_builds_carrier(value, return_type, environment, scopes) && sema_stmt_return_if_arms_fit_carrier(value, return_type, environment, scopes))
         else -> {}
     }
     if normalized == {
@@ -4597,7 +4597,7 @@ fn sema_stmt_return_expr_is_carrier(value: Expr, return_type: Type?, scopes: Sem
         }
         else -> {}
     }
-    known_type :: sema_stmt_return_known_type(value, scopes) ?? return false
+    known_type :: sema_stmt_return_known_type(value, environment, scopes) ?? return false
     if sema_stmt_return_types_are_carriers(known_type, required) -> return true
     // A call root propagates its failure (D-FAILURE-FOUNDATION1=A), so a
     // `T? !E` callee (`T? Never!` included) meets a `T?` slot with its own
@@ -4607,27 +4607,27 @@ fn sema_stmt_return_expr_is_carrier(value: Expr, return_type: Type?, scopes: Sem
 }
 // A value `if` that builds the `T !E` carrier on some arm, through nested
 // decision levels and grouping.
-fn sema_stmt_return_if_builds_carrier(value: Expr, return_type: Type?, scopes: SemaScopeTable) -> Bool {
+fn sema_stmt_return_if_builds_carrier(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool {
     if value == {
-        .Paren(inner, _) | .Tainted(inner, _, _) | .Copy(inner, _) -> return sema_stmt_return_if_builds_carrier(inner, return_type, scopes)
-        .If(_, _, then_value, _, else_value, _) -> return sema_stmt_return_if_builds_carrier(then_value, return_type, scopes) || sema_stmt_return_if_builds_carrier(else_value, return_type, scopes)
+        .Paren(inner, _) | .Tainted(inner, _, _) | .Copy(inner, _) -> return sema_stmt_return_if_builds_carrier(inner, return_type, environment, scopes)
+        .If(_, _, then_value, _, else_value, _) -> return sema_stmt_return_if_builds_carrier(then_value, return_type, environment, scopes) || sema_stmt_return_if_builds_carrier(else_value, return_type, environment, scopes)
         else -> {}
     }
-    sema_stmt_return_expr_is_carrier(value, return_type, scopes)
+    sema_stmt_return_expr_is_carrier(value, return_type, environment, scopes)
 }
 // Every arm of a value `if`, through nested decision levels and grouping, is
 // a carrier or a direct call whose own result already is the carrier. The
 // missing `else` of a covered table never runs, so it fits any slot.
-fn sema_stmt_return_if_arms_fit_carrier(value: Expr, return_type: Type?, scopes: SemaScopeTable) -> Bool {
+fn sema_stmt_return_if_arms_fit_carrier(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool {
     if value == {
-        .Paren(inner, _) | .Tainted(inner, _, _) | .Copy(inner, _) -> return sema_stmt_return_if_arms_fit_carrier(inner, return_type, scopes)
-        .If(_, _, then_value, _, else_value, _) -> return sema_stmt_return_if_arms_fit_carrier(then_value, return_type, scopes) && sema_stmt_return_if_arms_fit_carrier(else_value, return_type, scopes)
+        .Paren(inner, _) | .Tainted(inner, _, _) | .Copy(inner, _) -> return sema_stmt_return_if_arms_fit_carrier(inner, return_type, environment, scopes)
+        .If(_, _, then_value, _, else_value, _) -> return sema_stmt_return_if_arms_fit_carrier(then_value, return_type, environment, scopes) && sema_stmt_return_if_arms_fit_carrier(else_value, return_type, environment, scopes)
         .NoElse(_) -> return true
         else -> {}
     }
-    if sema_stmt_return_expr_is_carrier(value, return_type, scopes) -> return true
+    if sema_stmt_return_expr_is_carrier(value, return_type, environment, scopes) -> return true
     if !sema_expression_propagating_call(value) -> return false
-    known_type :: sema_stmt_return_known_type(value, scopes) ?? return false
+    known_type :: sema_stmt_return_known_type(value, environment, scopes) ?? return false
     sema_stmt_return_types_are_carriers(known_type, sema_stmt_return_required_type(return_type))
 }
 fn sema_stmt_check_return_value(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -4761,7 +4761,7 @@ fn sema_stmt_value_return_mismatch(value: Expr, return_type: Type?, diagnostic_s
 // value calls on the payload route, where their failure propagates.
 fn sema_stmt_return_probed_carrier(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
     if !sema_stmt_return_is_carrier(return_type) -> return false
-    if sema_stmt_return_known_type(value, scopes) != None -> return false
+    if sema_stmt_return_known_type(value, environment, scopes) != None -> return false
     required :: sema_stmt_return_required_type(return_type)
     if !sema_stmt_return_probe_shape(value, sema_expr_unwrap_tag(required) == .Option(_)) -> return false
     probe_diagnostics := [Diagnostic]{}
@@ -4784,7 +4784,7 @@ fn sema_stmt_return_probe_shape(value: Expr, optional_slot: Bool) -> Bool Never!
 
 fn sema_stmt_check_return_value_typed(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     required := sema_stmt_return_required_type(return_type)
-    if sema_stmt_return_expr_is_carrier(value, return_type, scopes) || sema_stmt_return_probed_carrier(value, return_type, environment, program, &scopes, &state, &tail_store, &context) {
+    if sema_stmt_return_expr_is_carrier(value, return_type, environment, scopes) || sema_stmt_return_probed_carrier(value, return_type, environment, program, &scopes, &state, &tail_store, &context) {
         carrier :: sema_check_expression(value, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         // #3708: a fallible value returned as-is (not an `Ok`/`Err` written
         // here) is this body's own failure source.
@@ -4809,7 +4809,7 @@ fn sema_stmt_check_return_value_typed(value: Expr, return_type: Type?, environme
 // Rust `widen_numeric_return` takes any widening (`numeric_widening_to` is
 // Some): a lossless one (U8 into Int) as well as a checked one.
 fn sema_stmt_check_return_payload(value: Expr, success: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    known := sema_stmt_return_numeric_source(value, scopes)
+    known := sema_stmt_return_numeric_source(value, environment, scopes)
     if known == .Val(source) && sema_expr_is_numeric(success) && !type_identity_equal(source, success) && sema_expr_numeric_widening_to(source, success) != None {
         checked :: sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
@@ -4828,22 +4828,22 @@ fn sema_stmt_check_return_payload(value: Expr, success: Type, environment: SemaS
 // an arithmetic value (`return n - 48` with `n: U8` under `-> Int`) widens on
 // its operand carrier: two operands of one type, or one typed operand and a
 // bare integer literal that adopts it.
-fn sema_stmt_return_numeric_source(value: Expr, scopes: SemaScopeTable) -> Type? {
+fn sema_stmt_return_numeric_source(value: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Type? {
     if value == {
-        .Paren(inner, _) -> return sema_stmt_return_numeric_source(inner, scopes)
+        .Paren(inner, _) -> return sema_stmt_return_numeric_source(inner, environment, scopes)
         .Binary(op, left, right, _) -> {
             if op != BinOp.Add && op != BinOp.Sub && op != BinOp.Mul && op != BinOp.Mod && op != BinOp.Rem -> return None
             left_literal :: left == .Int(_, _, _, _)
             right_literal :: right == .Int(_, _, _, _)
             if left_literal && right_literal -> return None
-            if left_literal -> return sema_stmt_return_numeric_source(right, scopes)
-            if right_literal -> return sema_stmt_return_numeric_source(left, scopes)
-            left_type :: sema_stmt_return_numeric_source(left, scopes) ?? return None
-            right_type :: sema_stmt_return_numeric_source(right, scopes) ?? return None
+            if left_literal -> return sema_stmt_return_numeric_source(right, environment, scopes)
+            if right_literal -> return sema_stmt_return_numeric_source(left, environment, scopes)
+            left_type :: sema_stmt_return_numeric_source(left, environment, scopes) ?? return None
+            right_type :: sema_stmt_return_numeric_source(right, environment, scopes) ?? return None
             if type_identity_equal(left_type, right_type) -> return Val(left_type)
             return None
         }
-        else -> return sema_stmt_return_known_type(value, scopes)
+        else -> return sema_stmt_return_known_type(value, environment, scopes)
     }
 }
 fn sema_stmt_return_allows_empty(return_type: Type?) -> Bool Never! {
@@ -5057,7 +5057,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
             .Val(.Result(success, _)) -> success == (Type.Named{name: "Unit"})
             else -> false
         }
-        if index + 1 == statements.len() && statement == .Expr(tail) && (context.value_tail_span == (Val(expr_span(tail))) || (unit_result_return && sema_stmt_return_expr_is_carrier(tail, return_type, scopes))) && !sema_stmt_refutable_expr_diverges(tail) {
+        if index + 1 == statements.len() && statement == .Expr(tail) && (context.value_tail_span == (Val(expr_span(tail))) || (unit_result_return && sema_stmt_return_expr_is_carrier(tail, return_type, environment, scopes))) && !sema_stmt_refutable_expr_diverges(tail) {
             returned :: sema_stmt_check_returned_value(tail, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if returned == {
                 .Val(value) -> &output.push(TStmt.Return{value: Val(value), span: expr_span(tail)})

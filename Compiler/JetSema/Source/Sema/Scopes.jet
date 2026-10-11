@@ -429,6 +429,11 @@ struct SemaScopeEnvironment {
     // The enclosing named callable being checked; panic and propagation
     // locations name it (Rust `capture_panic_loc` `fn_name`).
     function_name: String{""}
+    // The post-summary module scope of a parallel body pass, moved in for
+    // the pass. Each body thread checks against its own light copy of it
+    // (sema_scope_light_copy) and reads the function types that copy leaves
+    // out from here (sema_scope_binding_type). None outside such a pass.
+    module_scope: SemaScopeTable?{None}
 }
 
 // Core's own generic bodies are checked independently of a consumer's target.
@@ -649,6 +654,10 @@ struct SemaScopeTable {
     // which names its panic locations; None names the environment's
     // `function_name`.
     location_function: String?{None}
+    // `light_types[index]`: row `index` is a body thread's copy whose
+    // function type stayed in the environment's `module_scope`
+    // (sema_scope_light_copy). Empty for every other table.
+    light_types: [Bool]{[Bool]{}}
 }
 
 struct SemaScopeBindingUndo {
@@ -1195,6 +1204,7 @@ fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable Never! {
         binding_undo: source.binding_undo.copy(),
         open_marks: source.open_marks,
         location_function: source.location_function,
+        light_types: source.light_types.copy(),
     }
 }
 
@@ -1659,9 +1669,113 @@ fn sema_scope_resolve_index_at(table: SemaScopeTable, name: String, use_span: Sp
     None
 }
 
+// The visible symbol of `name`, for its name, kind, identity and span. On a
+// body thread a module function's symbol holds the empty function type
+// (sema_scope_light_copy): read the signature with sema_scope_binding_type.
 fn sema_scope_resolve(table: SemaScopeTable, name: String) -> Symbol? {
     index :: sema_scope_resolve_index(table, name) ?? return None
     Val(table.bindings[index].symbol)
+}
+
+// A body thread's own copy of the post-summary module scope `source` (the
+// shared read-only module scope of a parallel body pass). Rows, frames, name
+// positions and every small field are copied, but a row's function type is
+// not: it is most of a module row, and it stays in `source`, which the pass
+// moves into the environment's `module_scope` for the threads to read
+// (sema_scope_binding_type). The copied row holds the empty function type
+// instead, so a check that only asks whether a binding is a function, a
+// copy, a view or a guard answers as it would for the real type; a check that
+// reads the signature reads it through the accessors. Body threads never edit
+// a module row's type, so the copy and the source agree for the whole pass.
+fn sema_scope_light_copy(source: SemaScopeTable) -> SemaScopeTable Never! {
+    bindings := [SemaScopeBinding]{}
+    light := [Bool]{}
+    loop binding in source.bindings {
+        function_type := false
+        if binding.symbol.ty == .Val(ty) {
+            if ty == .Fn(_, _, _, _, _, _) -> function_type = true
+        }
+        if function_type {
+            &bindings.push(SemaScopeBinding{
+                frame: binding.frame,
+                symbol: Symbol{id: binding.symbol.id, kind: binding.symbol.kind, name: binding.symbol.name, module_name: binding.symbol.module_name, owner: binding.symbol.owner, span: binding.symbol.span, ty: Val(sema_scope_light_function_type()), visibility: binding.symbol.visibility},
+                mutable: binding.mutable,
+                access: binding.access,
+                integer_bounds: binding.integer_bounds,
+                string_view: binding.string_view,
+                compiler_builtin: binding.compiler_builtin,
+                prepared: binding.prepared,
+                origin: binding.origin,
+            })
+        } else {
+            &bindings.push(binding.copy())
+        }
+        &light.push(function_type)
+    }
+    SemaScopeTable{
+        frames: source.frames.copy(),
+        bindings: ^bindings,
+        name_slots: source.name_slots.copy(),
+        name_positions: source.name_positions.copy(),
+        loop_labels: source.loop_labels.copy(),
+        hardware_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_transfers),
+        hardware_definite_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_definite_transfers),
+        hardware_pending_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_pending_transfers),
+        current: source.current,
+        knowledge_gate: source.knowledge_gate,
+        return_type: source.return_type,
+        failure_carrier: source.failure_carrier,
+        loop_depth: source.loop_depth,
+        ownership_call_depth: source.ownership_call_depth,
+        comptime_execution_depth: source.comptime_execution_depth,
+        transaction_depth: source.transaction_depth,
+        transaction_wall_depth: source.transaction_wall_depth,
+        unit_explicit_units: source.unit_explicit_units,
+        copies_explicit: source.copies_explicit,
+        policy_modules: source.policy_modules.copy(),
+        policy_rows: source.policy_rows.copy(),
+        binding_undo: source.binding_undo.copy(),
+        open_marks: source.open_marks,
+        location_function: source.location_function,
+        light_types: ^light,
+    }
+}
+
+// The function type a light row holds in place of its own
+// (sema_scope_light_copy): no parameters, result, effects or metadata.
+fn sema_scope_light_function_type() -> Type Never! {
+    Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+}
+
+// True when row `index` of `table` left its type in the environment's
+// module scope (sema_scope_light_copy).
+fn sema_scope_binding_is_light(table: SemaScopeTable, index: Int) -> Bool Never! {
+    index < table.light_types.len() && table.light_types[index]
+}
+
+// The checked type of row `index`, wherever the row keeps it.
+fn sema_scope_binding_type(environment: SemaScopeEnvironment, table: SemaScopeTable, index: Int) -> Type? {
+    if sema_scope_binding_is_light(table, index) {
+        source :: environment.module_scope ?? panic("a body thread read a module function type outside its parallel pass")
+        return source.bindings[index].symbol.ty
+    }
+    table.bindings[index].symbol.ty
+}
+
+// Row `index`'s symbol with its checked type.
+fn sema_scope_binding_symbol(environment: SemaScopeEnvironment, table: SemaScopeTable, index: Int) -> Symbol {
+    if sema_scope_binding_is_light(table, index) {
+        source :: environment.module_scope ?? panic("a body thread read a module function symbol outside its parallel pass")
+        return source.bindings[index].symbol
+    }
+    table.bindings[index].symbol
+}
+
+// Row `index` with its checked type.
+fn sema_scope_binding_row(environment: SemaScopeEnvironment, table: SemaScopeTable, index: Int) -> SemaScopeBinding {
+    row := table.bindings[index].copy()
+    if sema_scope_binding_is_light(table, index) -> row.symbol.ty = sema_scope_binding_type(environment, table, index)
+    row
 }
 
 // A false return leaves the old binding visible; this prevents a duplicate
@@ -1684,13 +1798,6 @@ fn sema_scope_declare_local(table: &SemaScopeTable, symbol: Symbol, mutable: Boo
 fn sema_scope_refine_local(table: &SemaScopeTable, symbol: Symbol) Never! {
     frame :: table.current
     sema_scope_push_binding(&table, SemaScopeBinding{frame: frame, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
-}
-
-fn sema_scope_symbol_by_id(table: SemaScopeTable, id: SymbolID) -> Symbol? {
-    loop binding in table.bindings {
-        if binding.symbol.id.key == id.key -> return Val(binding.symbol)
-    }
-    None
 }
 
 // Where sema_scope_resolve_declaration finds the declaration `id` names. A

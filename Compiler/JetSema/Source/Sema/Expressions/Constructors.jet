@@ -61,8 +61,7 @@ use jet_foundation.[
 fn sema_expression_type_symbol(scopes: &SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> Symbol? {
     index := sema_scope_resolve_index(scopes, name)
     if index == .Val(found) {
-        symbol :: scopes.bindings[found].symbol
-        if symbol.kind == SymbolKind.Type -> return Val(symbol)
+        if scopes.bindings[found].symbol.kind == SymbolKind.Type -> return Val(sema_scope_binding_symbol(environment, scopes, found))
     }
     if program.registration_graph == .Val(graph) {
     resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return None
@@ -484,7 +483,7 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
             &diagnostics.push(sema_error("E0119", span, "`{trait_name}` is not a registered trait", "trait coercion must retain the target trait identity", "name a declared trait"))
             return None
         }
-        trait_symbol :: scopes.bindings[trait_symbol_index ?? 0].symbol
+        trait_symbol :: sema_scope_binding_symbol(environment, scopes, trait_symbol_index ?? 0)
         &context.name_references.push(SemaNameReferenceFact{span: span, symbol: trait_symbol, kind: "trait"})
         resolved_trait :: sema_expr_expected_type(Type.Named{name: trait_name}, environment, program)
         target :: if resolved_trait == {

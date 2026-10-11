@@ -745,7 +745,7 @@ fn sema_expression_propagation_taken(context: &SemaCheckContext, conversion: TTr
 }
 
 // A conversion already carried by the AST is validated, never re-derived.
-fn sema_expression_try_declared_conversion(inner: TExpr, conversion: TryConvert, span: Span, scopes: &SemaScopeTable, check_context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TTryConvert? {
+fn sema_expression_try_declared_conversion(inner: TExpr, conversion: TryConvert, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, check_context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TTryConvert? {
     source_error :: if sema_expr_unwrap_tag(inner.ty) == {
         .Result(_, err) -> Val(err)
         else -> None
@@ -781,7 +781,7 @@ fn sema_expression_try_declared_conversion(inner: TExpr, conversion: TryConvert,
                 &diagnostics.push(sema_error("E2402", span, "the declared error conversion `{fn_name}` is not in scope", "a checked conversion must resolve to one registered function", "declare or import the conversion before using `?`"))
                 return None
             }
-            symbol :: scopes.bindings[symbol_index].symbol
+            symbol :: sema_scope_binding_symbol(environment, scopes, symbol_index)
             if symbol.kind != SymbolKind.Function || symbol.ty == None {
                 &diagnostics.push(sema_error("E2402", span, "`{fn_name}` is not a checked error-conversion function", "the conversion route must retain a callable symbol and signature", "declare a function taking the source error and returning the target error"))
                 return None
@@ -856,7 +856,7 @@ fn sema_expression_try(value: Expr, span: Span, conversion: TryConvert, context_
                 else -> false
             }
             if !unreachable_route -> sema_failure_record_edge(sema_failure_callee(Val(value), environment, program, scopes), &check_context)
-            sema_expression_try_declared_conversion(inner, conversion, span, &scopes, &check_context, &diagnostics) ?? return None
+            sema_expression_try_declared_conversion(inner, conversion, span, environment, &scopes, &check_context, &diagnostics) ?? return None
         }
     }
     value_tir := sema_expression_propagated(inner, try_conversion, span) ?? return None

@@ -2445,8 +2445,7 @@ fn sema_expr_check_direct_call(call: Call, expected: Type?, environment: SemaSco
     // parameter or local whose type is a function is called as a value.
     callable_index := sema_scope_resolve_index(scopes, call.name)
     if callable_index == .Val(index) && !sema_expr_declared_function_named(scopes, call.name) {
-        callable :: scopes.bindings[index].symbol
-        if callable.kind != SymbolKind.Function && callable.ty == .Val(callable_ty) && sema_call_type_is_function(callable_ty) {
+        if scopes.bindings[index].symbol.kind != SymbolKind.Function && sema_scope_binding_type(environment, scopes, index) == .Val(callable_ty) && sema_call_type_is_function(callable_ty) {
             value_end := call.name_span.end
             if call.args.len() > 0 -> value_end = expr_span(call.args[call.args.len() - 1].expr).end
             return sema_expr_check_indirect_call(Expr.Ident{name: call.name, span: call.name_span}, call.args, Span{start: call.name_span.start, end: value_end}, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -3176,9 +3175,8 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
     // reads this binding again (sema_expr_check_ident only reads the table).
     unresolved_index :: sema_scope_resolve_index(scopes, name)
     if unresolved_index == .Val(unresolved) {
-        symbol :: scopes.bindings[unresolved].symbol
-        if symbol.kind == SymbolKind.Constant && symbol.ty == None {
-            &context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: "const"})
+        if scopes.bindings[unresolved].symbol.kind == SymbolKind.Constant && sema_scope_binding_type(environment, scopes, unresolved) == None {
+            &context.name_references.push(SemaNameReferenceFact{span: span, symbol: sema_scope_binding_symbol(environment, scopes, unresolved), kind: "const"})
             // A comptime probe reads this reference as a dependency wait; a
             // body check after the comptime run reaches here only when the
             // constant's value never landed, which the reason names.
@@ -3188,15 +3186,17 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
     }
     // D-PREP-SURFACE2=A: a prepared local reads as its compile-time value.
     if unresolved_index == .Val(prepared_index) {
-        prepared_binding :: scopes.bindings[prepared_index]
-        if prepared_binding.prepared == .Val(known) {
-            prepared_ty :: prepared_binding.symbol.ty ?? {
-                sema_check_unsupported(&context, "prepared local `{name}` (read at offset {span.start}) has no checked type")
-                return None
+        if scopes.bindings[prepared_index].prepared != None {
+            prepared_binding :: sema_scope_binding_row(environment, scopes, prepared_index)
+            if prepared_binding.prepared == .Val(known) {
+                prepared_ty :: prepared_binding.symbol.ty ?? {
+                    sema_check_unsupported(&context, "prepared local `{name}` (read at offset {span.start}) has no checked type")
+                    return None
+                }
+                &context.name_references.push(SemaNameReferenceFact{span: span, symbol: prepared_binding.symbol, kind: "local"})
+                prepared :: sema_fact_prepared_expr(known, prepared_ty, span, environment, program) ?? return None
+                return sema_expr_expected(prepared, expected, environment, program, &diagnostics)
             }
-            &context.name_references.push(SemaNameReferenceFact{span: span, symbol: prepared_binding.symbol, kind: "local"})
-            prepared :: sema_fact_prepared_expr(known, prepared_ty, span, environment, program) ?? return None
-            return sema_expr_expected(prepared, expected, environment, program, &diagnostics)
         }
     }
     // D-UNINIT-SENTINEL2 (E0420): a `Type{ uninit }` binding read before
@@ -3220,7 +3220,7 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
     if !sema_hardware_note_cpu_use(expr, scopes, &state, &context, &diagnostics) -> return None
     sema_string_view_check_read(name, span, scopes, state, context, &diagnostics)
     binding_index :: unresolved_index ?? return Val(value)
-    symbol :: scopes.bindings[binding_index].symbol
+    symbol :: sema_scope_binding_symbol(environment, scopes, binding_index)
     reference_kind := "semantic"
     if symbol.kind == {
         .Function -> reference_kind = "function"
@@ -3276,19 +3276,18 @@ fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment:
         &diagnostics.push(sema_unknown_name(name, span))
         return None
     }
-    binding :: scopes.bindings[index]
-    symbol :: binding.symbol
-    ty :: symbol.ty ?? return None
+    ty :: sema_scope_binding_type(environment, scopes, index) ?? return None
+    kind :: scopes.bindings[index].symbol.kind
     result := TExpr?{None}
-    if symbol.kind == SymbolKind.Local || symbol.kind == SymbolKind.Parameter {
-        local := tir_symbol_local(name, symbol.span, symbol.id)
-        local.mutable = binding.mutable
-        local.integer_bounds = binding.integer_bounds
-        value :: TExpr{ty: ty, kind: TExprKind.Local{local: local}, span: span, integer_bounds: binding.integer_bounds, cost: None}
+    if kind == SymbolKind.Local || kind == SymbolKind.Parameter {
+        local := tir_symbol_local(name, scopes.bindings[index].symbol.span, scopes.bindings[index].symbol.id)
+        local.mutable = scopes.bindings[index].mutable
+        local.integer_bounds = scopes.bindings[index].integer_bounds
+        value :: TExpr{ty: ty, kind: TExprKind.Local{local: local}, span: span, integer_bounds: scopes.bindings[index].integer_bounds, cost: None}
         result = sema_expr_expected(value, expected, environment, program, &diagnostics)
     }
-    if symbol.kind == SymbolKind.Constant || symbol.kind == SymbolKind.Function {
-        value :: sema_tir_expr(ty, TExprKind.ConstRef{symbol: symbol.id}, span)
+    if kind == SymbolKind.Constant || kind == SymbolKind.Function {
+        value :: sema_tir_expr(ty, TExprKind.ConstRef{symbol: scopes.bindings[index].symbol.id}, span)
         result = sema_expr_expected(value, expected, environment, program, &diagnostics)
     }
     result

@@ -917,7 +917,7 @@ fn sema_expression_lambda_bound_capture_escapes(lambda: Lambda, environment: Sem
     }
     position := 0
     loop position < used_indexes.len() {
-        candidate :: scopes.bindings[used_indexes[position]]
+        candidate :: sema_scope_binding_row(environment, scopes, used_indexes[position])
         mutated :: mutated_flags[position]
         position += 1
         if candidate.string_view -> return Val(false)
@@ -2053,7 +2053,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         key :: binding.symbol.id.key
         if binding.frame < frame && sema_expression_lambda_name_contains(capture_keys, key) {
             sema_expression_lambda_add_capture_key(&found_capture_keys, key)
-            capture_ty :: binding.symbol.ty ?? return None
+            capture_ty :: sema_scope_binding_type(environment, lambda_scopes, index) ?? return None
             local := tir_symbol_local(binding.symbol.name, binding.symbol.span, binding.symbol.id)
             local.mutable = binding.mutable
             local.integer_bounds = binding.integer_bounds

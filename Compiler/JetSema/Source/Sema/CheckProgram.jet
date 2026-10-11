@@ -1969,7 +1969,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     context.value_tail_span = None
     loop site in state.share_found -> &share_found.push(site)
     if !statements.complete -> complete = false
-    if !sema_check_never_fallthrough(func, scopes, &diagnostics) -> complete = false
+    if !sema_check_never_fallthrough(func, updated, scopes, &diagnostics) -> complete = false
     // Rust `check_value_block` over the body (Registration.rs:937-938): a
     // value body reports E0114 when it can reach its end without a value.
     if returns_value && !sema_stmt_check_value_block_end(func.body, statements.value, Val(effective_return), func.span, context.function_name, &diagnostics) -> complete = false
@@ -3603,12 +3603,14 @@ SEMA_BODY_MIN_BYTES_PER_THREAD :: 32768
 // Estimated bytes of one thread's copy of the module scope, per module item.
 // The comptime probe's scope admission still uses this per-item estimate.
 SEMA_BODY_SCOPE_BYTES_PER_ITEM :: 4096
-// Estimated bytes of one body thread's copy of the module scope, per scope
-// binding row. A row holds a whole Symbol (its checked type included), and
-// the namespace rows make a module scope span its whole package, so this is
-// calibrated from the factory profile: one copy of the whole-compiler scope
-// (about 25k module rows) measured about 0.8 GB.
-SEMA_BODY_SCOPE_BYTES_PER_BINDING :: 32768
+// Estimated bytes of one body thread's light copy of the module scope
+// (sema_scope_light_copy), per scope binding row. A full row measured about
+// 32 KB (one copy of the whole-compiler scope, about 25k module rows, was
+// about 0.8 GB), almost all of it the module functions' types; the light copy
+// leaves those in the shared module scope and keeps each row's identity
+// strings, span, flags and non-function type, a few hundred bytes. The
+// namespace rows still make a module scope span its whole package.
+SEMA_BODY_SCOPE_BYTES_PER_BINDING :: 2048
 
 // The module-level binding rows sema_registration_apply_graph_module gives
 // module `module_index`'s scope: its declarations, import bindings and
@@ -3890,8 +3892,7 @@ fn sema_check_bodies_parallel(shared: Shared<SemaCheckShared>, module_index: Int
         return ^prepared
     }
     bounds :: compiler_threads_partition(weights, workers)
-    source :: shared SemaBodyScopeSource{scopes: [SemaScopeTable]{}}
-    sema_check_body_scope_fill(source, ^scopes)
+    sema_check_shared_lend_scope(shared, ^scopes)
     slots := [Shared<SemaBodyPart>]{}
     loop part in 0..<workers {
         items := [SemaBodyJob]{}
@@ -3907,8 +3908,8 @@ fn sema_check_bodies_parallel(shared: Shared<SemaCheckShared>, module_index: Int
         sema_check_body_part_fill(slot, ^items, ^replay, has_memo)
         &slots.push(slot)
     }
-    _ := sema_check_body_parts(shared, source, slots, 0, module_index)
-    restored := sema_check_body_scope_take(source)
+    _ := sema_check_body_parts(shared, slots, 0, module_index)
+    restored := sema_check_shared_return_scope(shared)
     &prepared.scopes.push(^restored)
     prepared.queries = ^queries
     part := workers
@@ -3919,22 +3920,23 @@ fn sema_check_bodies_parallel(shared: Shared<SemaCheckShared>, module_index: Int
     ^prepared
 }
 
-// The post-summary module scope every body-check thread copies for itself:
-// moved in as the one row of its list before the threads start and moved out
-// after they join, so each thread makes its own copy in parallel instead of
-// the calling thread making all of them one after another.
-struct SemaBodyScopeSource {
-    scopes: [SemaScopeTable]
+// The post-summary module scope is the pass's shared read-only module scope:
+// it moves into the shared environment before the threads start and back
+// out after they join. Each thread makes its own light copy of it on that
+// thread (sema_scope_light_copy) and reads the function types the copy
+// leaves out from it, so no thread copies a module function type.
+fn sema_check_shared_lend_scope(shared: Shared<SemaCheckShared>, scopes: ^SemaScopeTable) {
+    environment := sema_check_shared_take_environment(shared)
+    environment.module_scope = Val(^scopes)
+    sema_check_shared_put_environment(shared, ^environment)
 }
 
-fn sema_check_body_scope_fill(source: Shared<SemaBodyScopeSource>, scopes: ^SemaScopeTable) {
-    permit :: source.guard_edit()
-    &permit.value.scopes.push(^scopes)
-}
-
-fn sema_check_body_scope_take(source: Shared<SemaBodyScopeSource>) -> SemaScopeTable {
-    permit :: source.guard_edit()
-    &permit.value.scopes.pop() ?? panic("the body-check module scope left its shared source")
+fn sema_check_shared_return_scope(shared: Shared<SemaCheckShared>) -> SemaScopeTable {
+    environment := sema_check_shared_take_environment(shared)
+    taken := ^environment.module_scope
+    environment.module_scope = None
+    sema_check_shared_put_environment(shared, ^environment)
+    ^taken ?? panic("the body-check module scope left the shared environment")
 }
 
 // Moves a thread's item indexes into its slot.
@@ -3945,11 +3947,12 @@ fn sema_check_body_part_fill(slot: Shared<SemaBodyPart>, items: ^[SemaBodyJob], 
     permit.value.cache_observe = observe
 }
 
-// Gives a thread's slot its own copy of the module scope, made on that thread.
-fn sema_check_body_part_copy_scope(source: Shared<SemaBodyScopeSource>, slot: Shared<SemaBodyPart>) {
-    scope_permit :: source.guard_read()
+// Gives a thread's slot its own light copy of the shared module scope, made
+// on that thread.
+fn sema_check_body_part_copy_scope(environment: SemaScopeEnvironment, slot: Shared<SemaBodyPart>) {
+    source :: environment.module_scope ?? panic("the body-check module scope left the shared environment")
     permit :: slot.guard_edit()
-    permit.value.scopes = scope_permit.value.scopes[0].copy()
+    permit.value.scopes = sema_scope_light_copy(source)
 }
 
 // Moves a part's bodies onto `bodies`, last item first.
@@ -3963,24 +3966,24 @@ fn sema_check_body_part_drain(slot: Shared<SemaBodyPart>, bodies: &[SemaPrepared
 
 // Checks `slots[from..]`, one task per slot and the last slot on this
 // thread; returns how many bodies they checked.
-fn sema_check_body_parts(shared: Shared<SemaCheckShared>, source: Shared<SemaBodyScopeSource>, slots: [Shared<SemaBodyPart>], from: Int, module_index: Int) -> Int {
-    if from >= slots.len() - 1 -> return sema_check_body_part(shared, source, slots[from], module_index)
+fn sema_check_body_parts(shared: Shared<SemaCheckShared>, slots: [Shared<SemaBodyPart>], from: Int, module_index: Int) -> Int {
+    if from >= slots.len() - 1 -> return sema_check_body_part(shared, slots[from], module_index)
     checked := 0
     task.group sema_threads {
-        head :: task sema_check_body_part(shared, source, slots[from], module_index)
-        checked = sema_check_body_parts(shared, source, slots, from + 1, module_index)
+        head :: task sema_check_body_part(shared, slots[from], module_index)
+        checked = sema_check_body_parts(shared, slots, from + 1, module_index)
         checked += head.join() ?? panic(compiler_threads_failure_text(err))
     }
     checked
 }
 
-// One thread: copies the module scope into its slot, then checks its part's
-// functions in item order on that copy. Host callbacks are withheld; a check
-// that wanted one is marked, and the body loop checks that function again on
-// the calling thread.
-fn sema_check_body_part(shared: Shared<SemaCheckShared>, source: Shared<SemaBodyScopeSource>, slot: Shared<SemaBodyPart>, module_index: Int) -> Int {
-    sema_check_body_part_copy_scope(source, slot)
+// One thread: makes its light copy of the module scope in its slot, then
+// checks its part's functions in item order on that copy. Host callbacks are
+// withheld; a check that wanted one is marked, and the body loop checks that
+// function again on the calling thread.
+fn sema_check_body_part(shared: Shared<SemaCheckShared>, slot: Shared<SemaBodyPart>, module_index: Int) -> Int {
     inputs :: shared.guard_read()
+    sema_check_body_part_copy_scope(inputs.value.environments[0], slot)
     permit := slot.guard_edit()
     // Passed straight through: a local binding of a guarded row would copy it.
     sema_check_body_part_in(inputs.value.environments[0], inputs.value.programs[0], inputs.value.memory_plans[0], &permit.value, module_index)
@@ -6188,6 +6191,12 @@ fn sema_check_module_in_shared(shared_state: Shared<SemaCheckShared>, host_hooks
     restored_memory_plan := ^checked.memory_plan
     sema_check_shared_fill(shared_state, ^restored_environment, ^restored_program, ^restored_memory_plan)
     ^checked.module_result
+}
+
+// Moves the pass environment back into shared state alone.
+fn sema_check_shared_put_environment(shared_state: Shared<SemaCheckShared>, environment: ^SemaScopeEnvironment) {
+    permit :: shared_state.guard_edit()
+    &permit.value.environments.push(^environment)
 }
 
 fn sema_check_shared_take_environment(shared_state: Shared<SemaCheckShared>) -> SemaScopeEnvironment {

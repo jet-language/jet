@@ -802,15 +802,15 @@ fn sema_never_return_is_err(value: Expr) -> Bool {
 }
 
 // D-NEVER2=B (E2423): the declared bottom contract must have no normal exit.
-fn sema_never_expr_diverges(expr: Expr, scopes: SemaScopeTable) -> Bool Never! {
+fn sema_never_expr_diverges(expr: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool Never! {
     if expr == {
-        .Paren(inner, _) -> return sema_never_expr_diverges(inner, scopes)
+        .Paren(inner, _) -> return sema_never_expr_diverges(inner, environment, scopes)
         .Call(call) -> {
             if call.name == "panic" -> return true
-            symbol :: sema_scope_resolve(scopes, call.name) ?? return false
+            index :: sema_scope_resolve_index(scopes, call.name) ?? return false
             // `Never Never!` has no failure route, so its call diverges like
             // `Never`; a fallible `Never E!` call can still return its `Err`.
-            if symbol.ty == .Val(symbol_type) {
+            if sema_scope_binding_type(environment, scopes, index) == .Val(symbol_type) {
                 if symbol_type == .Fn(_, ret, _, _, _, _) {
                     if ret == (Val(Type.Named{name: "Never"})) -> return true
                     return ret == (Val(Type.Result{ok: Type.Named{name: "Never"}, err: Type.Named{name: "Never"}}))
@@ -822,7 +822,7 @@ fn sema_never_expr_diverges(expr: Expr, scopes: SemaScopeTable) -> Bool Never! {
     }
 }
 
-fn sema_check_never_fallthrough(func: Func, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_check_never_fallthrough(func: Func, environment: SemaScopeEnvironment, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     declared :: func.return_type ?? return true
     never_success :: if declared == {
         .Named(name) -> name == "Never"
@@ -832,7 +832,7 @@ fn sema_check_never_fallthrough(func: Func, scopes: SemaScopeTable, diagnostics:
     if !never_success -> return true
     loop statement in func.body {
         if statement == .Expr(expr) {
-            if sema_never_expr_diverges(expr, scopes) -> return true
+            if sema_never_expr_diverges(expr, environment, scopes) -> return true
         }
         if sema_stmt_refutable_statement_exits(statement) -> return true
     }

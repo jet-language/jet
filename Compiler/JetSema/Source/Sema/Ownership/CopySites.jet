@@ -232,7 +232,7 @@ fn sema_copy_site_check_arm(value: Expr, environment: SemaScopeEnvironment, prog
         .If(_, _, _, _, _, _) -> sema_copy_site_check_arms(value, environment, program, scopes, context, &diagnostics)
         .Ident(name, span) -> {
             index :: sema_scope_resolve_index(scopes, name) ?? return
-            ty :: scopes.bindings[index].symbol.ty ?? return
+            ty :: sema_scope_binding_type(environment, scopes, index) ?? return
             if sema_ownership_type_is_copy(ty) -> return
             sema_copy_site_report(SemaCopySite{name: name, span: span, ty: ty, borrowed: false}, "`{name}` was not copied here, so it cannot fill an owned conditional value", "this arm supplies a non-Copy value to an owning conditional result under `copies: .Explicit`", environment, program, context, &diagnostics)
         }

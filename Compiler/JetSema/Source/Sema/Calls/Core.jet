@@ -166,7 +166,7 @@ fn sema_call_core_import_is_unshadowed(environment: SemaScopeEnvironment, progra
 fn sema_call_core_record_import_reference(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, target: SemaCallImportTarget, span: Span, context: &SemaCheckContext) -> Bool Never! {
     if !sema_call_core_import_is_unshadowed(environment, program, scopes, target) -> return false
     index :: sema_scope_resolve_index(scopes, target.alias) ?? return false
-    &context.name_references.push(SemaNameReferenceFact{span: span, symbol: scopes.bindings[index].symbol, kind: "import_alias"})
+    &context.name_references.push(SemaNameReferenceFact{span: span, symbol: sema_scope_binding_symbol(environment, scopes, index), kind: "import_alias"})
     true
 }
 

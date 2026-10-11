@@ -673,7 +673,7 @@ fn sema_call_perf_static(method: String, type_args: [Type], args: [CallArg], spa
 fn sema_call_static_source_owner(receiver: Expr, method: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Symbol? Never! {
     owner_name :: if receiver == {
         .Ident(name, _) -> {
-            if sema_scope_resolve_index(scopes, name) == .Val(index) -> return Val(scopes.bindings[index].symbol)
+            if sema_scope_resolve_index(scopes, name) == .Val(index) -> return Val(sema_scope_binding_symbol(environment, scopes, index))
             name
         }
         .Field(base, leaf, _) -> {

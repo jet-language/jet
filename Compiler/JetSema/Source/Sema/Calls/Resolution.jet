@@ -241,7 +241,7 @@ fn sema_call_resolve_direct(name: String, type_args: [Type], environment: SemaSc
         return None
     }
     index :: if scopes.bindings[nearest].symbol.kind == SymbolKind.Function -> nearest else -> sema_call_declared_function_index(scopes, name) ?? nearest
-    symbol :: scopes.bindings[index].symbol
+    symbol :: sema_scope_binding_symbol(environment, scopes, index)
     if symbol.kind != SymbolKind.Function {
         ty :: symbol.ty ?? {
             &diagnostics.push(sema_call_not_callable(name, Type.Named{name: "Unknown"}, span))

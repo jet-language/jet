@@ -290,8 +290,8 @@ fn sema_shared_access_place_type(value: Expr, environment: SemaScopeEnvironment,
     if value == {
         .Paren(inner, _) -> { return sema_shared_access_place_type(inner, environment, program, &scopes) }
         .Ident(name, _) -> {
-            symbol :: sema_scope_resolve(scopes, name) ?? return None
-            return symbol.ty
+            index :: sema_scope_resolve_index(scopes, name) ?? return None
+            return sema_scope_binding_type(environment, scopes, index)
         }
         .Field(base, member, _) -> {
             owner_ty := sema_shared_access_place_type(base, environment, program, &scopes) ?? return None
@@ -321,7 +321,7 @@ fn sema_shared_access_place_type(value: Expr, environment: SemaScopeEnvironment,
                 else -> {}
             }
         }
-        else -> { return sema_stmt_return_known_type(value, scopes) }
+        else -> { return sema_stmt_return_known_type(value, environment, scopes) }
     }
     None
 }

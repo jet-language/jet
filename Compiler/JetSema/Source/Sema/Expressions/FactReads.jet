@@ -960,7 +960,7 @@ fn sema_fact_read_check(base: Expr, member: String, span: Span, expected: Type?,
     if base == .Ident(name, _) {
         index :: sema_scope_resolve_index(scopes, name)
         symbol := Symbol?{None}
-        if index == .Val(binding_index) -> symbol = Val(scopes.bindings[binding_index].symbol)
+        if index == .Val(binding_index) -> symbol = Val(sema_scope_binding_symbol(environment, scopes, binding_index))
         is_local := false
         is_constant := false
         if symbol == .Val(found) {
