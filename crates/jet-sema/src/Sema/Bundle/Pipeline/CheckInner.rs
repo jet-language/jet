@@ -254,7 +254,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 is_core_source: m.is_core_source(),
                 source: m.source.clone(),
                 package_scope: if module_idx == error_owner {
-                    super::super::Prelude::ERROR_PRELUDE_PACKAGE.to_owned()
+                    crate::Syntax::ERROR_PRELUDE_PACKAGE.to_owned()
                 } else {
                     jet_foundation::Names::package_scope_for(&m.path, &bundle.project_root)
                 },

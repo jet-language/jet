@@ -304,6 +304,11 @@ pub const TYPE_HTML: &str = "HTML";
 /// S80 (ratified; amended by D-FAIL-ERROR1=A): default error type and
 /// constructor share `Err`.
 pub const TYPE_ERR: &str = "Err";
+/// The package that owns the original Prelude `Err` declaration (and its
+/// private error metadata records). Checked identities of its declarations
+/// are `jet:canonical-prelude::<path>::<name>`; like `<corelib>/` Core
+/// identities they reduce to their leaf for native carrier projection.
+pub const ERROR_PRELUDE_PACKAGE: &str = "jet:canonical-prelude";
 /// D-FAILURE-FOUNDATION1=A / D-NEVER2=B: `Never` is the existing bottom
 /// error-domain name and is also legal in callable success-return slots.
 /// It remains uninhabited in every ordinary value position.

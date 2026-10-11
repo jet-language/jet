@@ -545,6 +545,31 @@ fn run() -[Env]> {
     );
 }
 
+/// The original Prelude `Err` keeps its checked identity
+/// (`jet:canonical-prelude::…::Err`) and is carried by the one native
+/// `JetErr`: a typed `IOError` converted into the default error domain flows
+/// through `jet_err_apply_conversion` without a second Rust error type.
+#[test]
+fn default_err_identity_is_the_native_err_carrier() {
+    hosted_seed_program_runs(
+        "default_err_identity",
+        Some("name: \"default_err_identity\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS.Read] } }\n"),
+        r#"
+use core.files as files
+fn length(path: String) -[FS]> Int {
+    reader :: files.open(path)
+    reader.path.len()
+}
+fn run() -[FS]> {
+    if length("missing-default-err-input.txt") == {
+        .Ok(_) -> panic("the input must be missing")
+        .Err(_) -> {}
+    }
+}
+"#,
+    );
+}
+
 /// Root 2: Core handle ops write through a FileReader/FileWriter reached from
 /// a read binding (a Read parameter, a field of a read `self`). The emitted
 /// Rust lends the interior-mutable carrier by `&`.

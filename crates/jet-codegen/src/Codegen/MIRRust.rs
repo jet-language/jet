@@ -4792,6 +4792,13 @@ fn core_native_probe_name(name: &str) -> &str {
         name
     } else if name.starts_with("<corelib>/") {
         crate::Codegen::core_source_type_leaf(name)
+    } else if let Some(rest) = name
+        .strip_prefix(jet_foundation::Syntax::ERROR_PRELUDE_PACKAGE)
+        .and_then(|rest| rest.strip_prefix("::"))
+    {
+        // The original Prelude `Err` keeps its checked identity; its native
+        // carrier is the root Prelude `JetErr`, exactly as for a Core leaf.
+        rest.rsplit("::").next().unwrap_or(name)
     } else {
         name
     }
@@ -8737,8 +8744,10 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
+    /// The original Prelude `Err` row, identified by its declared builtin role
+    /// (its checked identity is `jet:canonical-prelude::…::Err`).
     fn is_default_err_type(&self, id: MirTypeId) -> bool {
-        self.type_def(id).key == jet_foundation::Syntax::TYPE_ERR
+        self.type_def(id).compiler_builtin == Some(jet_foundation::MIR::MirCompilerBuiltin::DefaultErr)
     }
 
     /// `Err.cause`: a field named `cause` on the default `Err` row. A field of
@@ -8746,9 +8755,9 @@ impl<'a> RustEmitter<'a> {
     fn is_default_err_cause_field(&self, id: MirFieldId) -> bool {
         let row = &self.program.fields[self.field_positions[&id]];
         row.field.name == "cause"
-            && self
-                .try_type_def(row.owner)
-                .is_some_and(|definition| definition.key == jet_foundation::Syntax::TYPE_ERR)
+            && self.try_type_def(row.owner).is_some_and(|definition| {
+                definition.compiler_builtin == Some(jet_foundation::MIR::MirCompilerBuiltin::DefaultErr)
+            })
     }
 
     fn named_struct_field_value(
@@ -13025,6 +13034,7 @@ impl<'a> RustEmitter<'a> {
     fn runtime_declares_type(&self, def: &MirTypeDef) -> bool {
         self.is_handle_name(&def.name)
             || self.is_handle_name(&def.key)
+            || def.compiler_builtin == Some(jet_foundation::MIR::MirCompilerBuiltin::DefaultErr)
             || crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_type(&def.key)
     }
 
@@ -13898,7 +13908,7 @@ impl<'a> RustEmitter<'a> {
                                     let fields = fields.iter().filter(|field| !field.computed).map(|field| {
                                         let field_name = self.field_name(field.id);
                                         let raw = format!("value.{field_name}.clone()");
-                                        let converted = if def.key == jet_foundation::Syntax::TYPE_ERR
+                                        let converted = if def.compiler_builtin == Some(jet_foundation::MIR::MirCompilerBuiltin::DefaultErr)
                                             && field.name == "cause"
                                         {
                                             format!(
@@ -16216,8 +16226,9 @@ impl<'a> RustEmitter<'a> {
                 panic!("MIR entry error edge requested for an infallible function")
             }
         };
-        let is_jet_err = function
-            .is_some_and(|ty| ty.nominal_name() == Some(jet_foundation::Syntax::TYPE_ERR));
+        let is_jet_err = function.is_some_and(|ty| {
+            ty.nominal_name().map(core_native_probe_name) == Some(jet_foundation::Syntax::TYPE_ERR)
+        });
         // `[FieldError]` (the typed-decode carrier) has no definition row; it
         // shows through the one Prelude FieldError projection, like `print`.
         // Otherwise only a declared nominal carries the Printable entry voice.
@@ -27565,6 +27576,12 @@ impl<'a> RustEmitter<'a> {
         if has_computed_field {
             return false;
         }
+        // The original Prelude `Err` is the native `JetErr`: its private
+        // metadata lives in the carrier, so equality is the carrier's own.
+        if definition.compiler_builtin == Some(jet_foundation::MIR::MirCompilerBuiltin::DefaultErr) {
+            let _ = writeln!(out, "fn equal(&self, __jet_rhs: &Self) -> bool {{\n    self == __jet_rhs\n}}\n");
+            return true;
+        }
         let mut seen = BTreeSet::from([definition.id]);
         let equal = self.canonical_equality_definition(definition, "self", "__jet_rhs", &mut seen);
         let _ = writeln!(out, "fn equal(&self, __jet_rhs: &Self) -> bool {{\n    {equal}\n}}\n");
@@ -30872,7 +30889,7 @@ impl<'a> RustEmitter<'a> {
         let base_value = if checked_output {
             let error = match return_type.map(MirType::kind) {
                 Some(MirTypeKind::Result { err, .. })
-                    if err.nominal_name() == Some(jet_foundation::Syntax::TYPE_ERR) =>
+                    if err.nominal_name().map(core_native_probe_name) == Some(jet_foundation::Syntax::TYPE_ERR) =>
                 {
                     "__jet_compute_error"
                 }
