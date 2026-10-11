@@ -2475,26 +2475,39 @@ fn sema_checked_shared_reaches(graph: SemaRegistrationGraph, owner: String, call
     }
 }
 
+// One owner's witness search: `stack` holds the struct keys on the current
+// by-value path; `met_path` is set when the walk meets one of them. `clear`
+// holds every struct key whose whole walk found no witness without meeting a
+// key on its path: that walk explored every by-value path below the key, and
+// any later walk from it explores a subset of them (a key on a later path cuts
+// a path short and finds nothing), so it finds no witness either and the walk
+// returns None at once instead of walking the same struct graph again.
+struct SemaSharedWitnessWalk {
+    stack: [String]
+    clear: [String:Bool]
+    met_path: Bool
+}
+
 // Returns the first strong payload that closes a cycle. By-value struct
 // paths can contain the Shared edge; weak handles never contribute one.
-fn sema_checked_shared_witness(graph: SemaRegistrationGraph, owner: String, caller: String, ty: Type, memo: &[String:Bool], stack: &[String]) -> String? Never! {
+fn sema_checked_shared_witness(graph: SemaRegistrationGraph, owner: String, caller: String, ty: Type, memo: &[String:Bool], walk: &SemaSharedWitnessWalk) -> String? Never! {
     if ty == {
         .Shared(inner) -> {
             active := [String:Bool]{}
             result :: sema_checked_shared_reaches(graph, owner, caller, inner, &memo, &active)
             if result.reaches -> Val(type_name(inner)) else -> None
         }
-        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> sema_checked_shared_witness(graph, owner, caller, inner, &memo, &stack)
+        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> sema_checked_shared_witness(graph, owner, caller, inner, &memo, &walk)
         .Map(first, _, second) | .Result(first, second) -> {
-            first_witness :: sema_checked_shared_witness(graph, owner, caller, first, &memo, &stack)
+            first_witness :: sema_checked_shared_witness(graph, owner, caller, first, &memo, &walk)
             if first_witness == {
                 .Val(witness) -> Val(witness)
-                .None -> sema_checked_shared_witness(graph, owner, caller, second, &memo, &stack)
+                .None -> sema_checked_shared_witness(graph, owner, caller, second, &memo, &walk)
             }
         }
         .Tuple(fields) -> {
             loop field in fields {
-                witness :: sema_checked_shared_witness(graph, owner, caller, field.ty, &memo, &stack)
+                witness :: sema_checked_shared_witness(graph, owner, caller, field.ty, &memo, &walk)
                 if witness != None -> return witness
             }
             None
@@ -2502,7 +2515,7 @@ fn sema_checked_shared_witness(graph: SemaRegistrationGraph, owner: String, call
         .Union(members) | .Apply(_, members) -> {
             if ty == .Apply(name, _) && name == "Shared.Weak" -> return None
             loop member in members {
-                witness :: sema_checked_shared_witness(graph, owner, caller, member, &memo, &stack)
+                witness :: sema_checked_shared_witness(graph, owner, caller, member, &memo, &walk)
                 if witness != None -> return witness
             }
             None
@@ -2510,20 +2523,28 @@ fn sema_checked_shared_witness(graph: SemaRegistrationGraph, owner: String, call
         .Named(_) -> {
             row :: sema_type_resolve_nominal_row(graph, ty, caller) ?? return None
             key :: graph.modules[row.module_index].nominals[row.row].symbol.id.key
-            if stack.contains(key) -> return None
+            if walk.clear.has_key(key) -> return None
+            if walk.stack.contains(key) {
+                walk.met_path = true
+                return None
+            }
             // Single-level matches borrow the declaration in place (see
             // sema_checked_shared_reaches); a nested pattern clones the Item.
             if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
                 if item == .Struct(definition) {
-                    &stack.push(key)
+                    &walk.stack.push(key)
+                    outer_met :: walk.met_path
+                    walk.met_path = false
                     witness := String?{None}
                     module_identity :: graph.modules[row.module_index].module_identity
                     loop field in definition.fields {
                         if field.computed != None -> next
-                        witness = sema_checked_shared_witness(graph, owner, module_identity, field.ty, &memo, &stack)
+                        witness = sema_checked_shared_witness(graph, owner, module_identity, field.ty, &memo, &walk)
                         if witness != None -> break
                     }
-                    _ := &stack.pop()
+                    _ := &walk.stack.pop()
+                    if witness == None && !walk.met_path -> walk.clear[key] = true
+                    walk.met_path = walk.met_path || outer_met
                     return witness
                 }
             }
@@ -2536,10 +2557,10 @@ fn sema_checked_shared_witness(graph: SemaRegistrationGraph, owner: String, call
 fn sema_checked_shared_cycles(graph: SemaRegistrationGraph, module_identity: String, nominal: SemaRegistrationNominal, definition: StructDef, diagnostics: &[Diagnostic]) Never! {
     owner :: nominal.symbol.id.key
     memo := [String:Bool]{}
-    stack := [String]{}
+    walk := SemaSharedWitnessWalk{stack: [String]{}, clear: [String:Bool]{}, met_path: false}
     loop field in definition.fields {
         if field.computed != None -> next
-        if sema_checked_shared_witness(graph, owner, module_identity, field.ty, &memo, &stack) == .Val(through) {
+        if sema_checked_shared_witness(graph, owner, module_identity, field.ty, &memo, &walk) == .Val(through) {
             &diagnostics.push(sema_error("E0221", field.name_span, "field `{field.name}` on `{definition.name}` can form a strong `Shared` cycle", "a strong `Shared` edge through `{through}` can point back at `{definition.name}`, so reference counting alone cannot free the graph", "use `Shared.Weak<T>` for intentional back-edges, or store an id instead of a strong `Shared` handle"))
         }
     }
