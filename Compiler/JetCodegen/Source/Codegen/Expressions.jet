@@ -2235,7 +2235,7 @@ fn jet_codegen_geometry_source_target(builder: JetCodegenBuilder, program: JetCo
     }
     selected := TFunc?{None}
     loop function in program.function_index.rows {
-        if function.module_identity != owner.module_identity || function.source_file != "Core/math/math.jet" -> next
+        if function.module_identity != owner.module_identity || !jet_codegen_core_source_path(function.source_file, "Core/math/math.jet") -> next
         if function.kind == .Method(_, _) {} else {
             next
         }
