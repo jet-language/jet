@@ -7885,7 +7885,7 @@ fn find_box_edges_for_names<'a>(
         };
         (owner.to_owned(), edges)
     }).collect::<Vec<_>>();
-    let exact = || {
+    let enumerate = || {
         let mut boxed = HashSet::new();
         for owner in names.clone() {
             let mut stack = vec![owner];
@@ -7906,6 +7906,47 @@ fn find_box_edges_for_names<'a>(
             }
         }
         boxed
+    };
+    // `enumerate` reads exactly the graph spanned from the roots by
+    // `named_edges`, and its union is independent of visit order. That
+    // canonical graph keys a per-thread memo: comptime fragment lowering
+    // rebuilds the same type set once per evaluated item (#4961).
+    let exact = || {
+        let mut roots = names.clone().collect::<Vec<_>>();
+        roots.sort_unstable();
+        roots.dedup();
+        let mut graph = std::collections::BTreeMap::new();
+        let mut pending = roots.iter().map(|root| root.to_string()).collect::<Vec<_>>();
+        while let Some(name) = pending.pop() {
+            if graph.contains_key(&name) {
+                continue;
+            }
+            let mut edges = named_edges(&name);
+            for (_, targets) in &mut edges {
+                targets.sort_unstable();
+            }
+            edges.sort_unstable();
+            pending.extend(edges.iter().flat_map(|(_, targets)| targets.iter().cloned()));
+            graph.insert(name, edges);
+        }
+        let mut key = String::new();
+        for root in roots {
+            key.push('\u{1}');
+            key.push_str(root);
+        }
+        for (name, edges) in graph {
+            key.push('\u{2}');
+            key.push_str(&name);
+            for (edge, targets) in edges {
+                key.push('\u{3}');
+                key.push_str(&edge);
+                for target in targets {
+                    key.push('\u{4}');
+                    key.push_str(&target);
+                }
+            }
+        }
+        memoized_box_edges(key, &enumerate)
     };
     let root_names = roots
         .iter()
@@ -8035,8 +8076,30 @@ fn find_box_edges_for_names<'a>(
     // enough to enumerate.
     #[cfg(debug_assertions)]
     if count <= 64 {
-        debug_assert_eq!(boxed, exact(), "SCC box edges differ from path enumeration");
+        debug_assert_eq!(boxed, enumerate(), "SCC box edges differ from path enumeration");
     }
+    boxed
+}
+
+fn memoized_box_edges(
+    key: String,
+    enumerate: impl FnOnce() -> HashSet<(String, String)>,
+) -> HashSet<(String, String)> {
+    thread_local! {
+        static BOX_EDGES: std::cell::RefCell<HashMap<String, HashSet<(String, String)>>> =
+            std::cell::RefCell::new(HashMap::new());
+    }
+    if let Some(boxed) = BOX_EDGES.with(|memo| memo.borrow().get(&key).cloned()) {
+        return boxed;
+    }
+    let boxed = enumerate();
+    BOX_EDGES.with(|memo| {
+        let mut memo = memo.borrow_mut();
+        if memo.len() >= 16 {
+            memo.clear();
+        }
+        memo.insert(key, boxed.clone());
+    });
     boxed
 }
 
@@ -8100,6 +8163,28 @@ fn walk_type_edge<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn non_root_cycle_box_edges_are_memoized_per_root_set() {
+        // B <-> C is a multi-type cycle; with a single root it goes through
+        // the path-enumeration fallback, whose answer depends on the root.
+        let source = "struct A {\n    b: B?\n}\nstruct B {\n    c: C?\n}\nstruct C {\n    b: B?\n}\n";
+        let (tokens, diagnostics) = crate::Lexer::lex(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let (program, _) = crate::Parser::parse_for_check_with_source(&tokens, source).unwrap();
+        let cx = build_cx_items(&program.items, source, "box-edges.jet", None, &Arc::default(), "2026");
+        let edge = |owner: &str, field: &str| (owner.to_string(), field.to_string());
+        let from_a = HashSet::from([edge("C", "b")]);
+        let from_c = HashSet::from([edge("B", "c")]);
+        for _ in 0..2 {
+            assert_eq!(find_box_edges_for_names(["A"].into_iter(), &cx), from_a);
+            assert_eq!(find_box_edges_for_names(["C"].into_iter(), &cx), from_c);
+        }
+        assert_eq!(
+            find_box_edges(&program.items, &cx),
+            HashSet::from([edge("B", "c"), edge("C", "b")]),
+        );
+    }
 
     #[test]
     fn acronym_nominal_carriers_keep_the_exact_prelude_identity() {
