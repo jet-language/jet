@@ -1734,7 +1734,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             &diagnostics.push(sema_already_defined(parameter.name, parameter.name_span))
             return None
         }
-        if context.lambda_lending_views && parameter_type == .Apply("ViewMut", view_args) && view_args.len() == 1 {
+        if context.lambda_lending_views && parameter_type == .Apply(view_name, view_args) && view_name == "ViewMut" && view_args.len() == 1 {
             sema_ownership_declare_binding(&lambda_state, parameter_symbol, true)
             source :: sema_ownership_place_from_expr_inner(Expr.Ident{name: parameter.name, span: parameter.name_span}, lambda_scopes) ?? return None
             _ := sema_ownership_record_view_fact(&lambda_state, parameter.name, parameter.name_span, source, [String]{}, AccessConvention.Write, lambda_scopes, -1)

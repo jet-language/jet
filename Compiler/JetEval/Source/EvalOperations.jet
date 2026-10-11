@@ -1955,7 +1955,7 @@ fn jet_eval_window_path(machine: &JetEvalMachine, frame_index: Int, projections:
         if projection == .Range(range, _, _) -> source = Val(range)
         if projection == .MapLookup(lookup, _, _) {
             result :: jet_eval_value(&machine, frame_index, lookup, span) ?? return None
-            if result == .Result(false, _) {
+            if result == .Result(lookup_ok, _) && !lookup_ok {
                 ty :: jet_eval_value_type(&machine, frame_index, lookup, span) ?? return None
                 if ty.kind == .Option(pointer) {
                     if pointer.kind == .Apply(_, args) && args.len() > 0 {

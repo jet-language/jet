@@ -73,7 +73,9 @@ fn jet_eval_string_home_data(value: TComptimeValue, path: [JetEvalStringHomeProj
             }
         }
         .Payload(kind, _) -> {
-            if kind == .Option || kind == .Result(true) {
+            present_ok := kind == .Option
+            if kind == .Result(ok_kind) -> present_ok = ok_kind
+            if present_ok {
                 if value == .Present(inner) {
                     &request.selectors.push(JetEvalStringHomeSelector.Present)
                     return jet_eval_string_home_data(inner, path, position + 1, frame, ^request, &machine, span)
