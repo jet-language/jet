@@ -107,6 +107,14 @@ fn jet_cli_foreign_hash_field(identity: &[U8], name: String, value: [U8]) Never!
     loop byte in value -> &identity.push(byte)
 }
 
+// The per-process build directory (`build-<pid>`, `probe-<pid>`) never
+// reaches compiler output: `__FILE__`, the object's file symbol and any debug
+// path name it as `.`, so the preprocessed identity and the archive bytes are
+// the same for every run and every compiler stage.
+fn jet_cli_native_c_build_map(directory: String) -> String Never! {
+    "-ffile-prefix-map={directory}=."
+}
+
 // SQLite is the sanctioned bundled dependency, not the machine's sqlite.
 // These are libsqlite3-sys 0.28.0 build.rs120-141,245-249 on Linux.
 fn jet_cli_sqlite_c_flags() -> [String] Never! {
@@ -140,7 +148,7 @@ fn jet_cli_foreign_compile(lib: String, directory: String, cache: String) -[FS, 
     paths = jet_cli_sorted_set(paths)
     sources := [String]{}
     identity := [U8]{}
-    jet_cli_native_c_identity(&identity, "jet-native-c-v2", tools, flags) ?? return Err(err)
+    jet_cli_native_c_identity(&identity, "jet-native-c-v3", tools, flags) ?? return Err(err)
     loop path in paths {
         content :: cli_files.read_bytes(path) ?? return Err(jet_cli_foreign_link_error("couldn't read C input `{path}`: {err}"))
         relative :: path.removeprefix("{directory}/")
@@ -174,7 +182,7 @@ fn jet_cli_foreign_compile(lib: String, directory: String, cache: String) -[FS, 
         object :: "{temporary}/{index}.o"
         argv := [String]{tools.compiler}
         loop flag in flags -> &argv.push(flag)
-        loop flag in ([String]{"-c", staged_source, "-o", object}) -> &argv.push(flag)
+        loop flag in ([String]{jet_cli_native_c_build_map(temporary), "-c", staged_source, "-o", object}) -> &argv.push(flag)
         receipt :: jet_cli_native_c_command(argv).run() ?? return Err(jet_cli_foreign_link_error("couldn't compile C dependency `{lib}`: {err}"))
         if !receipt.success -> return Err(jet_cli_foreign_link_error("C compiler rejected `{sources[index]}`: {receipt.errors}"))
         &objects.push(object)
@@ -268,7 +276,7 @@ fn jet_cli_native_inline_c(program: MIRProgram, cache: String) -[FS, Env, Exec, 
     // the native static link adds the c@path code-generation constraints.
     flags :: [String]{"-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables", "-fno-unwind-tables"}
     identity := [U8]{}
-    jet_cli_native_c_identity(&identity, "jet-native-inline-c-v1", tools, flags) ?? return Err(err)
+    jet_cli_native_c_identity(&identity, "jet-native-inline-c-v2", tools, flags) ?? return Err(err)
     store_root :: "{cache}/inline"
     cli_files.create_dir_all(store_root) ?? return Err(jet_cli_foreign_link_error("couldn't create inline C cache `{store_root}`: {err}"))
     probe :: "{store_root}/probe-{cli_sys.pid()}"
@@ -279,7 +287,7 @@ fn jet_cli_native_inline_c(program: MIRProgram, cache: String) -[FS, Env, Exec, 
         cli_files.write(source, unit) ?? return Err(jet_cli_foreign_link_error("couldn't stage inline C source: {err}"))
         argv := [String]{tools.compiler}
         loop flag in flags -> &argv.push(flag)
-        loop flag in ([String]{"-E", "-P", source}) -> &argv.push(flag)
+        loop flag in ([String]{jet_cli_native_c_build_map(probe), "-E", "-P", source}) -> &argv.push(flag)
         receipt :: jet_cli_native_c_command(argv).run() ?? return Err(jet_cli_foreign_link_error("couldn't preprocess inline C: {err}"))
         if !receipt.success -> return Err(jet_cli_foreign_link_error("C compiler rejected inline C unit {index}: {receipt.errors}"))
         jet_cli_foreign_hash_field(&identity, "inline_{index}.c", unit.bytes())
@@ -301,7 +309,7 @@ fn jet_cli_native_inline_c(program: MIRProgram, cache: String) -[FS, Env, Exec, 
         object :: "{temporary}/inline_{index}.o"
         argv := [String]{tools.compiler}
         loop flag in flags -> &argv.push(flag)
-        loop flag in ([String]{"-c", source, "-o", object}) -> &argv.push(flag)
+        loop flag in ([String]{jet_cli_native_c_build_map(temporary), "-c", source, "-o", object}) -> &argv.push(flag)
         receipt :: jet_cli_native_c_command(argv).run() ?? return Err(jet_cli_foreign_link_error("couldn't compile inline C: {err}"))
         if !receipt.success -> return Err(jet_cli_foreign_link_error("C compiler rejected inline C unit {index}: {receipt.errors}"))
         &objects.push(object)
