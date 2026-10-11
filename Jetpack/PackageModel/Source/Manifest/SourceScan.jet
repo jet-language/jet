@@ -8,11 +8,13 @@ struct ParsedSource {
     program: Program
 }
 
-// Parse every checked file with the compiler front end (inline package
-// carriers masked); None when any file fails to read, lex, or parse.
+// Parse every checked source file with the compiler front end (inline
+// package carriers masked); None when any file fails to read, lex, or parse.
+// A listing's `package.jet` is the manifest, not a source, and is skipped.
 fn pkg_parse_sources(source_files: [CheckedFile]) -> [ParsedSource]? Never! {
     out := [ParsedSource]{}
     loop file in source_files {
+        if pkg_path_file_name(file.relative) == PACKAGE_FILE -> next
         text :: file.text() ?? return None
         masked :: pkg_mask_inline_package_source(text) ?? return None
         lexed :: lex(masked.source.bytes())

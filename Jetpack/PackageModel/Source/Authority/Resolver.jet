@@ -340,15 +340,14 @@ struct AuthorityResolver {
         self.revalidate_root()
         if malformed_canonical && indexes.len() == 0 -> return Err(AuthorityError.WorkspaceNoModule)
         if indexes.len() > 0 {
-            index :: indexes[indexes.len() - 1]
-            if authorities.len() == 0 -> return Ok(Val(index))
-            paths := [String]{index.path}
+            if authorities.len() == 0 -> return Ok(&indexes.pop())
+            paths := [String]{indexes[indexes.len() - 1].path}
             loop source in authorities -> &paths.push(source.path)
             return Err(AuthorityError.WorkspaceAmbiguous(paths))
         }
         if authorities.len() == {
             0 -> Ok(None)
-            1 -> Ok(Val(authorities[0]))
+            1 -> Ok(&authorities.pop())
             else -> {
                 paths := [String]{}
                 loop source in authorities -> &paths.push(source.path)
