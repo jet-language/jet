@@ -7005,30 +7005,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 if let Some(alias) = import_ns {
                     return in_own_frame(|| {
                         if cx.core_import_module_for_function(&env.fn_name, alias)
-                            == Some("core.encoding")
-                            && matches!(
-                                type_name.as_str(),
-                                "EncodingLimits" | "EncodingCause" | "EncodingError"
-                            )
-                            && type_args.is_empty()
-                        {
-                            return in_own_frame(|| {
-                                let tfields = fields
-                                    .iter()
-                                    .map(|(name, _, value)| {
-                                        (name.clone(), lower_expr(value, cx, env), false)
-                                    })
-                                    .collect();
-                                return TExpr {
-                                    ty: Type::Named(type_name.clone()),
-                                    kind: TExprKind::StructLit {
-                                        fields: tfields,
-                                        extra: None,
-                                    },
-                                };
-                            });
-                        }
-                        if cx.core_import_module_for_function(&env.fn_name, alias)
                             == Some("core.encoding.cbor")
                             && matches!(type_name.as_str(), "CBOROptions" | "CBORError")
                             && type_args.is_empty()

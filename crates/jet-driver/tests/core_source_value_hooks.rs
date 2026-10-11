@@ -767,6 +767,37 @@ fn run() {
 "#,
     );
 }
+/// `core.encoding`'s `EncodingError` is a source-owned Core record: an
+/// `alias.EncodingError{…}` literal builds the source record its signature
+/// names, not the native `jet_std::EncodingError` carrier.
+#[test]
+fn source_owned_encoding_error_literal_keeps_its_identity() {
+    hosted_seed_program_runs_split(
+        "source_owned_encoding_error",
+        None,
+        r#"
+use core.encoding as encoding
+fn unsupported(reason: String) -> encoding.EncodingError Never! {
+    encoding.EncodingError{
+        format: encoding.EncodingFormat.JSON,
+        kind: encoding.EncodingErrorKind.Unsupported,
+        byte_offset: 0,
+        line: None,
+        column: None,
+        path: "$",
+        reason: reason,
+        cause: None,
+    }
+}
+fn run() {
+    error :: unsupported("probe")
+    assert(error.byte_offset == 0)
+    assert(error.kind == encoding.EncodingErrorKind.Unsupported)
+}
+"#,
+    );
+}
+
 /// Root 2: Core handle ops write through a FileReader/FileWriter reached from
 /// a read binding (a Read parameter, a field of a read `self`). The emitted
 /// Rust lends the interior-mutable carrier by `&`.
