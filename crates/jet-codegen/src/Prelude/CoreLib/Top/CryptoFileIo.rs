@@ -14,7 +14,7 @@ pub(crate) struct JetCryptoJetcRaw {
     // Compile-time platform fact; source consumes it only from directory open.
     pub(crate) linux: bool,
 }
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct JetCryptoJetcStat {
     pub(crate) status: i64, pub(crate) errno: i64, pub(crate) dev: i64, pub(crate) ino: i64, pub(crate) len: i64,
     pub(crate) mtime: i64, pub(crate) mtime_ns: i64, pub(crate) nlink: i64, pub(crate) is_file: bool, pub(crate) is_dir: bool,

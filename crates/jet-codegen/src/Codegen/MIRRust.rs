@@ -8985,20 +8985,18 @@ impl<'a> RustEmitter<'a> {
             {
                 format!("{}jet_std::{symbol}", self.config.root_prefix)
             }
+            // Vault kernels and plugin calls live in the FFI bridge crate.
+            // Every `jet_crypto_*` route (JETC fd seeds, `__zeroize`) is a
+            // root Prelude kernel (`CoreCallRecord` prelude provider).
             MirSymbol::Prelude(symbol) => {
-                if symbol == "jet_plugin_call"
-                    || symbol.starts_with("jet_crypto_")
-                    || symbol.starts_with("jet_vault_")
-                {
+                if symbol == "jet_plugin_call" || symbol.starts_with("jet_vault_") {
                     if let Some(link) = self.config.execution.ffi {
                         return format!("{}::{}", link.crate_name, symbol);
                     }
                 }
                 self.resolve_ffi_symbol(&format!("{}{}", self.config.root_prefix, symbol))
             }
-            MirSymbol::Runtime(symbol)
-                if symbol.starts_with("jet_vault_") || symbol.starts_with("jet_crypto_") =>
-            {
+            MirSymbol::Runtime(symbol) if symbol.starts_with("jet_vault_") => {
                 self.resolve_ffi_symbol(&format!("jet_ffi::{symbol}"))
             }
             MirSymbol::Runtime(symbol) => self.resolve_ffi_symbol(symbol),
