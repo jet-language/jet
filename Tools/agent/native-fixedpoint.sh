@@ -47,6 +47,10 @@ if [[ -n $record ]]; then
 fi
 [[ ${JET_COMPILER_IDENTITY:-} =~ ^[^@#[:space:]]+@[^@#[:space:]]+#[^@#[:space:]]+$ ]] || fail 'compiler identity (name@version#source-id) is required from --factory-receipt or JET_COMPILER_IDENTITY; never invented'
 export JET_COMPILER_IDENTITY
+# The native CLI reads Core from JET_TOOLCHAIN_ROOT (JetCli Request.jet
+# jet_cli_core_sources); run under the program export's Tools/agent/jet-env so
+# the inline-C toolchain matches the factory's (stage1/README.md).
+[[ -n ${JET_TOOLCHAIN_ROOT:-} && -d $JET_TOOLCHAIN_ROOT/Core ]] || fail 'JET_TOOLCHAIN_ROOT must name the program source tree (the directory holding Core/)'
 timer=$(type -P time) || fail 'GNU time is required to measure peak RSS'
 "$timer" --version >/dev/null 2>&1 || fail 'GNU time is required'
 builder=$(realpath -e -- "$builder") || fail 'builder does not exist'
