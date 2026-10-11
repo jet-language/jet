@@ -1415,8 +1415,8 @@ fn jet_cli_project_source_request(root: String, command: String, color: Bool) ->
     notices := [String]{}
     if jet_cli_find_project_entry(root, command, color, &notices) == .Entry(found) {
         if jet_cli_prepare_overlays(found.path, found.path, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc) == {
-            .Prepared(request, _) -> return Val(request)
             .Refused(_) -> {}
+            .Prepared(request, _) -> return Val(request)
         }
     }
     None

@@ -84,10 +84,10 @@ fn jet_cli_fill_candidate_checks(file: String, source: String, goal: JetCLIFillG
     replacement :: "{jet_cli_doc_text(bytes, 0, goal.span.start)}{candidate}{jet_cli_doc_text(bytes, goal.span.end, bytes.len())}"
     compiled :: jet_cli_compile_entry(file, false, false, None, JetDriverCompileMode.Doc, Val(replacement)) ?? return Err(jet_cli_read_error("the fill candidate compiler failed before returning diagnostics"))
     if compiled == {
+        .Refused(_) -> return false
         .Compiled(result, _) -> {
             return result.diagnostics.len() == 0 && result.internal_problem == .None
         }
-        .Refused(_) -> return false
     }
 }
 

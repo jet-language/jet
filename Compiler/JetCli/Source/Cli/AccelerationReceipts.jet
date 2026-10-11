@@ -103,6 +103,7 @@ fn jet_cli_acceleration_input_paths(cache: &WorkspaceDeclarationCache, selected:
         // optimization query already took the inspect request.
         prepared :: jet_cli_prepare_overlays(selected, selected, [JetCLIOverlay]{}, false, Val(1), JetDriverCompileMode.Doc)
         if prepared == {
+            .Refused(output) -> { return Err(jet_cli_read_error(output.stderr)) }
             .Prepared(value, _) -> {
                 if jet_cli_watch_discover(&cache, value) == {
                     .Ok(graph) -> { loop path in graph.paths -> &paths.push(path) }
@@ -114,7 +115,6 @@ fn jet_cli_acceleration_input_paths(cache: &WorkspaceDeclarationCache, selected:
                     }
                 }
             }
-            .Refused(output) -> { return Err(jet_cli_read_error(output.stderr)) }
         }
         jet_cli_acceleration_authority_inputs(&cache, selected, verb, &paths)
     }
