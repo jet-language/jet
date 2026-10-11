@@ -444,9 +444,11 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
         }
     }
 
-    // Enum subjects: every use is an EnumIs or an EnumPayload of one
-    // variant, and the payloads (each index once) sit in one block after
-    // every EnumIs of that block.
+    // Enum subjects: every use is an EnumIs or an EnumPayload, and each
+    // block that binds payloads binds those of one variant (each index once)
+    // after every EnumIs of that block. Each such block (one match arm) is
+    // its own payload group; an arm whose bindings are the subject's last
+    // use takes the subject apart there.
     enum_uses := [JetCodegenLastUseEnumUse]{}
     enum_subject := [U64]{}
     other_uses := [U64:Bool]{}
@@ -487,26 +489,34 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
         if other_uses.get(subject) != None -> next
         if uses_by_subject.get(subject) == None -> next
         rows :: uses_by_subject.get(subject) ?? panic("checked last-use row is missing")
-        payloads := [Int]{}
-        first := -1
+        arm_payloads := [Int:[Int]]{}
+        arm_order := [Int]{}
         loop row in rows {
-            if enum_uses[row].payload {
-                if first < 0 -> first = row
-                &payloads.push(row)
+            entry :: enum_uses[row]
+            if entry.payload {
+                arm := arm_payloads.get(entry.block) ?? {
+                    &arm_order.push(entry.block)
+                    [Int]{}
+                }
+                &arm.push(row)
+                _ := &arm_payloads.add(entry.block, arm)
             }
         }
-        if first < 0 -> next
-        head :: enum_uses[first]
-        fields := [Int:Bool]{}
+        if arm_order.len() == 0 -> next
         valid := true
-        loop row in payloads {
-            entry :: enum_uses[row]
-            if entry.block != head.block || entry.owner != head.owner || entry.variant != head.variant || fields.get(entry.field) != None -> valid = false
-            _ := &fields.add(entry.field, true)
-        }
-        loop row in rows {
-            entry :: enum_uses[row]
-            if !entry.payload && entry.block == head.block && entry.index > head.index -> valid = false
+        loop arm_block in arm_order {
+            arm :: arm_payloads.get(arm_block) ?? panic("checked last-use row is missing")
+            head :: enum_uses[arm[0]]
+            fields := [Int:Bool]{}
+            loop row in arm {
+                entry :: enum_uses[row]
+                if entry.owner != head.owner || entry.variant != head.variant || fields.get(entry.field) != None -> valid = false
+                _ := &fields.add(entry.field, true)
+            }
+            loop row in rows {
+                entry :: enum_uses[row]
+                if !entry.payload && entry.block == arm_block && entry.index > head.index -> valid = false
+            }
         }
         if def_block.get(subject) == None -> next
         defined_block :: def_block.get(subject) ?? panic("checked last-use row is missing")
@@ -524,10 +534,13 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
         }
         if jet_codegen_read_window_of(builder, program, MIRValueID{value: subject}) != None -> valid = false
         if !valid -> next
-        indices := [Int]{}
-        loop row in payloads -> &indices.push(enum_uses[row].index)
         _ := &subject_candidate.add(subject, candidates.len())
-        &groups.push(JetCodegenLastUseGroup{candidate: candidates.len(), block: head.block, payloads: indices})
+        loop arm_block in arm_order {
+            arm :: arm_payloads.get(arm_block) ?? panic("checked last-use row is missing")
+            indices := [Int]{}
+            loop row in arm -> &indices.push(enum_uses[row].index)
+            &groups.push(JetCodegenLastUseGroup{candidate: candidates.len(), block: arm_block, payloads: indices})
+        }
         &candidates.push(jet_codegen_last_use_new_candidate(false, false, false, no_place, no_place, MIRValueID{value: subject}, -1, [MIRFieldID]{}))
         &rejected.push(false)
     }

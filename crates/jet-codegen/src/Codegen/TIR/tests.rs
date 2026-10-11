@@ -6455,3 +6455,72 @@ fn global_cli_registry_constants_optimize_once() {
         }
     });
 }
+
+/// A record that holds a trait object has no Rust `Clone` (sema
+/// `is_cloneable`, native `clone: false`). When a match's last arm binds the
+/// payloads of such a subject and nothing reads the subject afterwards, the
+/// MIR last-use pass hands that arm a `Move` of the subject even though an
+/// earlier arm binds another variant's payload, so the arm takes the subject
+/// apart instead of cloning a payload out of it.
+#[test]
+fn later_match_arm_takes_noncloneable_payloads() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (mir, rust) = emitted_rust(r#"
+trait Sink {
+    fn note(self, text: String) -> Int
+}
+struct Quiet {
+    level: Int
+}
+impl Quiet.Sink {
+    fn note(self, text: String) -> Int {
+        self.level + text.len()
+    }
+}
+struct Config {
+    fuel: Int
+    sink: Sink?
+}
+struct Report {
+    config: Config
+    names: [String]
+}
+enum Outcome {
+    Done(report: Report, label: String)
+    Refused(message: String)
+}
+fn make_outcome(fuel: Int) -> Outcome {
+    if fuel > 3 -> return Outcome.Refused{message: "no"}
+    Outcome.Done{report: Report{config: Config{fuel: fuel, sink: Val(Quiet{level: fuel})}, names: [String]{"a"}}, label: "ok"}
+}
+fn outcome_size(fuel: Int) -> Int {
+    out := 0
+    outcome :: make_outcome(fuel)
+    if outcome == {
+        .Refused(message) -> out = message.len()
+        .Done(report, label) -> {
+            out = report.names.len() + label.len() + report.config.fuel
+        }
+    }
+    out
+}
+fn run() {
+    print(outcome_size(2))
+}
+"#);
+        let function = mir.functions.iter().find(|function| function.name == "outcome_size")
+            .expect("outcome_size function");
+        let takes = function.blocks.iter().flat_map(|block| &block.instructions)
+            .filter(|instruction| matches!(instruction.operation, jet_foundation::MIR::MirOperation::Move { .. }))
+            .filter(|instruction| function.blocks.iter().flat_map(|block| &block.instructions).any(|user| {
+                matches!(&user.operation, jet_foundation::MIR::MirOperation::EnumPayload { subject, variant, .. }
+                    if Some(*subject) == instruction.result && variant == "Done")
+            }))
+            .count();
+        assert_eq!(takes, 1, "the `.Done` arm must bind from a Move of its subject:\n{rust}");
+        assert!(
+            !rust.contains("__jet_report: payload, .. } => payload.clone()"),
+            "a non-Clone payload must be taken, not cloned:\n{rust}"
+        );
+    });
+}

@@ -25,7 +25,7 @@
 //! One backward liveness pass over the function's blocks decides all of it;
 //! the pass is linear in instructions times the candidate bitset width.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use jet_foundation::AST::Type;
 use jet_foundation::MIR::{
@@ -357,9 +357,11 @@ impl LowerCtx<'_> {
             }
         }
 
-        // Enum subjects: every use is an EnumIs or an EnumPayload of one
-        // variant, and the payloads (each index once) sit in one block after
-        // every EnumIs of that block.
+        // Enum subjects: every use is an EnumIs or an EnumPayload, and each
+        // block that binds payloads binds those of one variant (each index
+        // once) after every EnumIs of that block. Each such block (one match
+        // arm) is its own payload group; an arm whose bindings are the
+        // subject's last use takes the subject apart there.
         type EnumUse = (usize, usize, Option<(MirTypeId, String, usize)>);
         let mut enum_uses: HashMap<MirValueId, Vec<EnumUse>> = HashMap::new();
         let mut other_uses: HashSet<MirValueId> = HashSet::new();
@@ -394,21 +396,25 @@ impl LowerCtx<'_> {
         let mut subject_candidate: HashMap<MirValueId, usize> = HashMap::new();
         let mut groups: Vec<PayloadGroup> = Vec::new();
         for (value, uses) in subjects {
-            let payloads: Vec<&EnumUse> = uses.iter().filter(|(_, _, payload)| payload.is_some()).collect();
-            let Some(first) = payloads.first() else {
+            let mut arms: BTreeMap<usize, Vec<&EnumUse>> = BTreeMap::new();
+            for row in uses.iter().filter(|(_, _, payload)| payload.is_some()) {
+                arms.entry(row.0).or_default().push(row);
+            }
+            if arms.is_empty() {
                 continue;
-            };
-            let (block, first_index) = (first.0, first.1);
-            let shape = first.2.as_ref().map(|(owner, variant, _)| (*owner, variant.clone()));
-            let mut indices = HashSet::new();
-            let one_block = payloads.iter().all(|(payload_block, _, payload)| {
-                let (owner, variant, index) = payload.as_ref().expect("payload use");
-                *payload_block == block
-                    && shape.as_ref() == Some(&(*owner, variant.clone()))
-                    && indices.insert(*index)
-            });
-            let tests_first = uses.iter().all(|(use_block, index, payload)| {
-                payload.is_some() || *use_block != block || *index < first_index
+            }
+            let arms_ok = arms.iter().all(|(block, payloads)| {
+                let first = payloads[0];
+                let shape = first.2.as_ref().map(|(owner, variant, _)| (*owner, variant.clone()));
+                let mut indices = HashSet::new();
+                let one_variant = payloads.iter().all(|(_, _, payload)| {
+                    let (owner, variant, index) = payload.as_ref().expect("payload use");
+                    shape.as_ref() == Some(&(*owner, variant.clone())) && indices.insert(*index)
+                });
+                let tests_first = uses.iter().all(|(use_block, index, payload)| {
+                    payload.is_some() || use_block != block || *index < first.1
+                });
+                one_variant && tests_first
             });
             let defined = match definitions.get(&value) {
                 Some((def_block, def_index)) => !matches!(
@@ -423,17 +429,17 @@ impl LowerCtx<'_> {
                 mode_of(value),
                 Some(MirOwnershipMode::Owned | MirOwnershipMode::Move)
             );
-            if !one_block || !tests_first || !defined || !owned_value
-                || self.read_window_of(value).is_some()
-            {
+            if !arms_ok || !defined || !owned_value || self.read_window_of(value).is_some() {
                 continue;
             }
             subject_candidate.insert(value, candidates.len());
-            groups.push(PayloadGroup {
-                candidate: candidates.len(),
-                block,
-                payloads: payloads.iter().map(|(_, index, _)| *index).collect(),
-            });
+            for (block, payloads) in arms {
+                groups.push(PayloadGroup {
+                    candidate: candidates.len(),
+                    block,
+                    payloads: payloads.iter().map(|(_, index, _)| *index).collect(),
+                });
+            }
             candidates.push(Candidate::Subject { value });
             paths.push(Vec::new());
             rejected.push(false);
