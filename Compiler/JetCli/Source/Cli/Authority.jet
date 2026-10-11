@@ -17,6 +17,7 @@ use jet_foundation.[
 ]
 use jet_sema.[
     sema_effect_grantable_roots,
+    sema_effect_without_deny_only,
 ]
 
 // D-AUTH-AMBIENT1=A: a program with no authority row may print, allocate, and
@@ -155,11 +156,13 @@ fn jet_cli_application_authority(result: JetDriverCompileResult, invocation: Jet
     authority
 }
 
-// Required rights with no policy verdict; `Panic` is a deny-only stop row.
+// Required rights with no policy verdict. Deny-only rights (the Panic and Mem
+// roots and the Time.Wait leaf; jet-foundation Authority.rs `is_deny_only`)
+// may be denied but never need a grant (Authority.rs `undecided_effects`).
 fn jet_cli_undecided(authority: JetCLIAuthority) -> [String] Never! {
     rights := [String]{}
     loop right in authority.required {
-        if jet_cli_right_root(right) != "Panic" && jet_cli_answer(authority, right) == JetCLIVerdict.Missing -> &rights.push(right)
+        if sema_effect_without_deny_only([String]{right}).len() > 0 && jet_cli_answer(authority, right) == JetCLIVerdict.Missing -> &rights.push(right)
     }
     rights
 }
