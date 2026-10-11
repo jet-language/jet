@@ -529,6 +529,18 @@ impl<'a> Checker<'a> {
             ret
         };
         self.check_builtin_method_labels(method, args);
+        // The parser stores `&xs.push(^x.f)`'s move mark on the CallArg. A
+        // field read keeps it as the exact-place move a consuming call
+        // argument gets (`check_call_argument_access`), so the stored value
+        // moves out of its owner instead of materializing a copy.
+        for arg in args.iter_mut() {
+            if arg.convention == crate::AST::AccessConvention::Move
+                && matches!(arg.expr, Expr::Field(..))
+            {
+                let place = std::mem::replace(&mut arg.expr, Expr::Absent(arg.span));
+                arg.expr = Expr::Place(Box::new(place), crate::AST::PlaceAccess::Take, arg.span);
+            }
+        }
         let mut call_access = self.call_access_frame();
         let receiver_borrow = Collections::builtin_receiver_borrow(recv_ty, method);
         self.with_call_access(&mut call_access, |checker| match receiver_borrow {

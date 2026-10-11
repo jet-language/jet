@@ -2187,12 +2187,15 @@ fn lower_builtin_arg(
     // argument the builtin only reads is never copied here: emission borrows
     // it where the kernel borrows and copies it only where the kernel owns it.
     let resource_take = matches!(&value.kind, TExprKind::ResourceTake(_));
+    // `^x.f` lowers to the exact-place `Move` (sema keeps its take mark): the
+    // builtin stores the moved field, never a copy of it.
     let already_owned = matches!(
         &value.kind,
         TExprKind::Clone(..)
             | TExprKind::ExplicitCopy(_)
             | TExprKind::MaterializeView(_)
             | TExprKind::ResourceTake(_)
+            | TExprKind::Move(_)
     );
     if owns_value
         && !resource_take

@@ -1006,6 +1006,45 @@ fn run() -[FS]> {
 "#,
     );
 }
+
+/// `&xs.push(^owner.field)` moves the field into the list (the s49
+/// `discover_function_entries_from_files` shape): the builtin argument keeps
+/// its move mark, so a non-Clone field (a file handle inside) is moved out
+/// of its matched owner rather than copied.
+#[test]
+fn builtin_push_of_a_moved_field_moves_it() {
+    hosted_seed_program_runs(
+        "builtin_push_moved_field",
+        None,
+        r#"
+use core.files as files
+struct Held {
+    path: String
+    handle: files.FileReader
+}
+struct Entry {
+    path: String
+    file: Held
+}
+fn entry(path: String) -[FS]> Entry IOError! {
+    handle :: files.open(path) ?? return Err(err)
+    Ok(Entry{path: path, file: Held{path: path, handle: handle}})
+}
+fn collect(seed: ^[Held], path: String) -[FS]> [Held] {
+    held := ^seed
+    found :: entry(path) ?? return held
+    &held.push(^found.file)
+    held
+}
+fn run() -[FS, IO]> {
+    files.write("builtin_push_moved_field.txt", "x") ?? panic("write")
+    held :: collect(^[Held]{}, "builtin_push_moved_field.txt")
+    print("held {held.len()} {held[0].path}")
+    files.remove("builtin_push_moved_field.txt") ?? panic("remove")
+}
+"#,
+    );
+}
 /// Root 2: Core handle ops write through a FileReader/FileWriter reached from
 /// a read binding (a Read parameter, a field of a read `self`). The emitted
 /// Rust lends the interior-mutable carrier by `&`.
