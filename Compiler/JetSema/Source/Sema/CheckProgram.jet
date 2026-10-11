@@ -2209,7 +2209,7 @@ fn sema_comptime_owner_generic_params(environment: SemaScopeEnvironment, program
 // instead of calling this again.
 // `probe` is the run's module scope (sema_comptime_probe_init), lent to every
 // item and function check of the run.
-fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &SemaScopeEnvironment, program: &SemaProgramTables, probe: &SemaScopeProbe, available: SemaComptimeAvailableConstants, memory_plan: SemaFunctionMemoryPlan, values: [SemaComptimeItemValue], module_identity: String, function_key: String) -> SemaComptimeFunctionResult {
+fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &SemaScopeEnvironment, program: SemaProgramTables, probe: &SemaScopeProbe, available: SemaComptimeAvailableConstants, memory_plan: SemaFunctionMemoryPlan, values: [SemaComptimeItemValue], module_identity: String, function_key: String) -> SemaComptimeFunctionResult {
     unresolved := SemaComptimeFunctionResult{
         module_identity: module_identity,
         function_key: function_key,
@@ -5475,7 +5475,7 @@ fn sema_collect_comptime_declarations(graph: ^SemaRegistrationGraph, package_pol
 }
 
 // Declaration-only modules against the staging run's existing program owner.
-fn sema_comptime_modules_with_values(program: &SemaProgramTables, values: [SemaComptimeItemValue]) -> [SemaGraphModuleResult] {
+fn sema_comptime_modules_with_values(program: SemaProgramTables, values: [SemaComptimeItemValue]) -> [SemaGraphModuleResult] {
     module_count :: if program.registration_graph == {
         .Val(registered) -> registered.modules.len()
         else -> 0

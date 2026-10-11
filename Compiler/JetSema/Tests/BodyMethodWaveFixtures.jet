@@ -39,7 +39,7 @@ fn method_wave_registration(source: String, keep_going: Bool, effects_source: St
 fn method_wave_comptime_rows(graph: SemaRegistrationGraph, hooks: Shared<SemaRegistrationHostHooks>, negative: Bool) -> [SemaComptimeFunctionResult] {
     memory_plan :: sema_function_memory_plan_from_graph(graph)
     environment := sema_comptime_environment(graph.copy(), [SemaComptimeItemValue]{}, None)
-    program := sema_program_tables_init(^environment.registration_graph, [TTypeDef]{})
+    program :: sema_program_tables_init(^environment.registration_graph, [TTypeDef]{})
     environment.registration_graph = None
     probe := sema_comptime_probe_init(sema_host_hook_access(hooks))
     available :: sema_comptime_available_constants(graph, [SemaComptimeItemValue]{})
@@ -47,7 +47,7 @@ fn method_wave_comptime_rows(graph: SemaRegistrationGraph, hooks: Shared<SemaReg
     loop nominal in graph.modules[0].nominals {
         loop method in nominal.methods {
             if method.declaration.name != name -> next
-            checked :: sema_check_comptime_function(graph, &environment, &program, &probe, available, memory_plan, [SemaComptimeItemValue]{}, graph.modules[0].module_identity, method.symbol.id.key)
+            checked :: sema_check_comptime_function(graph, &environment, program, &probe, available, memory_plan, [SemaComptimeItemValue]{}, graph.modules[0].module_identity, method.symbol.id.key)
             method_wave_require(checked.complete == !negative, "the cached comptime row is a real checker result")
             return [SemaComptimeFunctionResult]{checked}
         }
