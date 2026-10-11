@@ -2669,15 +2669,14 @@ fn jet_codegen_lower_trait_method_args(builder: &JetCodegenBuilder, program: Jet
     lowered
 }
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs::lower_expr
+// (`TExprKind::MethodCall`): the receiver is lowered from its checked
+// convention and every call argument binds the next explicit parameter. A
+// checked instance signature carries its receiver in the function kind, never
+// in `params` (Sema `sema_function_explicit_receiver`), so argument `index`
+// binds `params[index]` at binder slot `index + 1`, after the receiver.
 fn jet_codegen_lower_instance_args(builder: &JetCodegenBuilder, program: JetCodegenProgram, args: [TCallArg], params: [TParameter]) -> [MIRCallArg] {
-    if params.len() == 0 || params[0].name != "self" -> panic("checked instance signature has no canonical receiver")
-    variadic := [Bool]{}
-    conventions := [AccessConvention]{}
-    loop index in 1..<params.len() {
-        &variadic.push(params[index].variadic)
-        &conventions.push(params[index].convention)
-    }
-    lowered := jet_codegen_lower_call_args_for_signature(&builder, program, args, variadic, conventions)
+    lowered := jet_codegen_lower_call_args(&builder, program, args, params)
     loop index in 0..<lowered.len() -> lowered[index].binder_slot = Val(index + 1)
     lowered
 }
