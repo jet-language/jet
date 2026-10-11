@@ -5296,6 +5296,106 @@ fn run() {
     }
 }
 
+#[cfg(test)]
+mod emit_misc_regression_tests {
+    fn emitted_rust(src: &str) -> String {
+        let (bundle, nominal_facts) = crate::Codegen::TIR::tests::checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (program, artifact) =
+            crate::Codegen::TIR::lower_checked_mir_program_for(&bundle, &nominal_facts, request)
+                .expect("checked fixture lowers");
+        let mut execution = super::MirRustExecutionConfig::for_artifact(artifact);
+        execution.emit_types = false;
+        execution.emit_runtime = false;
+        super::emit_mir_program(
+            &program,
+            &super::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: super::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution,
+            },
+        )
+    }
+
+    /// A borrowed String parameter is a Rust `str` and a list element a
+    /// `String`; Rust orders `str` only with `str`.
+    #[test]
+    fn borrowed_text_orders_against_owned_text_as_str() {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let rust = emitted_rust(
+                "fn before(values: [String], value: String) -> Bool { values[0] < value }\nfn run() { print(before([String]{\"b\"}, \"a\")) }\n",
+            );
+            assert!(
+                rust.contains("::std::convert::AsRef::<str>::as_ref("),
+                "text ordering reads both sides as &str:\n{rust}"
+            );
+        });
+    }
+
+    /// `Dyn.DateTime` holds the runtime `DynDateTime`, not Core's
+    /// `ZonedDateTime` record: Dyn equality never reads record fields.
+    #[test]
+    fn dyn_equality_compares_native_payload_slots_with_partial_eq() {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let rust = emitted_rust("fn same(a: Dyn, b: Dyn) -> Bool { a == b }\nfn run() { print(same(Dyn.Null, Dyn.Null)) }\n");
+            assert!(!rust.contains("__jet_instant"), "Dyn equality reads ZonedDateTime fields:\n{rust}");
+            assert!(!rust.contains("__jet_zone_value"), "Dyn equality reads ZonedDateTime fields:\n{rust}");
+        });
+    }
+
+    /// A user `Comparable` impl derives no Rust `PartialOrd`: ordering calls
+    /// the impl.
+    #[test]
+    fn user_comparable_orders_through_its_impl() {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let rust = emitted_rust(
+                "struct Stamp { ns: Int }\nimpl Stamp.Equatable { fn equal(self, rhs: Stamp) -> Bool { self.ns == rhs.ns } }\nimpl Stamp.Comparable { fn compare(self, rhs: Stamp) -> Ordering { self.ns <=> rhs.ns } }\nfn later(a: Stamp, b: Stamp) -> Bool { a >= b }\nfn run() { print(later(Stamp{ns: 2}, Stamp{ns: 1})) }\n",
+            );
+            let call = format!(
+                " as {}>::compare(",
+                crate::Codegen::rust_trait_name(crate::Generics::COMPARABLE)
+            );
+            assert!(rust.contains(&call), "user Comparable ordering calls compare:\n{rust}");
+        });
+    }
+
+    /// A source-owned Core handle is its Jet declaration on every tier.
+    #[test]
+    fn source_owned_core_stream_handles_have_no_native_carrier() {
+        for leaf in ["Stdout", "Stderr", "StdinHandle"] {
+            let key = format!("<corelib>/Core/term::Core/term/term.jet::{leaf}");
+            assert_eq!(crate::Codegen::file_handle_rust_type(&key), None, "{key}");
+        }
+    }
+
+    /// Raw kernels return labeled tuples in declared order; the checked type
+    /// sorts labels, so the emitter needs the uncanonicalized shape.
+    #[test]
+    fn native_tuple_return_keeps_declared_label_order() {
+        let Some(crate::AST::Type::Tuple(fields)) =
+            crate::Sema::core_call_native_return("core.files", "__directory_fd")
+        else {
+            panic!("__directory_fd returns a labeled tuple");
+        };
+        let labels = fields.iter().map(|(label, _)| label.as_str()).collect::<Vec<_>>();
+        assert_eq!(labels, ["available", "held", "fd"]);
+    }
+
+    /// The POSIX identity kernels return `Option<i64>` machine words.
+    #[test]
+    fn sys_identity_rows_widen_native_int_results() {
+        for member in ["__getppid", "__getuid", "__geteuid", "__getgid", "__getegid", "__getpgrp"] {
+            let row = jet_foundation::Syntax::core_call("core.sys", member).expect("core.sys row");
+            assert!(row.native_int_result, "core.sys.{member}");
+        }
+    }
+}
+
 pub(crate) fn append_web_time_zones(out: &mut String) -> std::io::Result<()> {
     RustEmitter::emit_web_time_zones(out)
 }

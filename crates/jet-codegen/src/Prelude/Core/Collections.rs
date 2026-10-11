@@ -1454,7 +1454,7 @@ fn jet_priority_queue_pop_kernel<C: JetPriorityQueuePopKernel>(
     jet_outcome_of(queue.pop_priority_value())
 }
 
-fn jet_map_pop_first_kernel<K: Ord + Clone, V>(
+fn jet_map_pop_first_kernel<K: Ord + Clone, V: Clone>(
     m: &mut JetMap<K, V>,
 ) -> JetOutcome<V, JetAbsent> {
     let Some(key) = m.keys().next().cloned() else {
