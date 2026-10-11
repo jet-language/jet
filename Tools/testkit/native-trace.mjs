@@ -313,8 +313,13 @@ function marker(script, root, jet) {
 function manifestDependencies(contents, path, cache) {
     let section = '', sawPackage = false, sawDependencies = false;
     const declared = {}, seen = new Set();
+    // The native planner's helper is its own empty workspace root and records
+    // its artifact mode (Compiler/JetDriver RustForeign.jet manifest); a
+    // workspace key such as `members` remains an unsupported manifest key.
     const ordinary = {
         package: new Set(['name', 'version', 'edition', 'publish', 'build', 'autobins', 'autoexamples', 'autotests', 'autobenches']),
+        'package.metadata.jet': new Set(['native-helper-artifact-mode']),
+        workspace: new Set(),
         lib: new Set(['name', 'path', 'crate-type']),
         'profile.release': new Set(['opt-level', 'lto', 'codegen-units', 'panic', 'strip', 'debug', 'overflow-checks']),
         'profile.dev': new Set(['opt-level', 'debug', 'overflow-checks']),

@@ -48,7 +48,7 @@ fn jet_cli_rust_foreign_read(directory: cli_files.Directory, name: String) -[FS]
     loop {
         chunk :: reader.read(65536) ?? return Err(jet_cli_rust_foreign_io("couldn't read FFI input `{directory.path}/{name}`: {err}"))
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
+        &bytes.extend(chunk)
     }
     Ok(bytes)
 }
@@ -246,7 +246,9 @@ fn jet_cli_rust_foreign_bwrap(bwrap: String, source: String, output: String, reg
         resolved :: cli_files.canonicalize(directory) ?? return Err(jet_cli_rust_foreign_sandbox_error("couldn't resolve immutable system directory `{directory}`: {err}"))
         jet_cli_rust_foreign_mount(&args, resolved, directory)
     }
-    loop directory in ([String]{"/etc/ssl", "/etc/pki"}) {
+    // NixOS keeps the trust roots behind absolute `/etc/static` links into its
+    // immutable /etc generation; without it Cargo cannot verify the registry.
+    loop directory in ([String]{"/etc/ssl", "/etc/pki", "/etc/static"}) {
         if !cli_files.exists(directory) -> next
         resolved :: cli_files.canonicalize(directory) ?? return Err(jet_cli_rust_foreign_sandbox_error("couldn't resolve immutable system directory `{directory}`: {err}"))
         jet_cli_rust_foreign_mount(&args, resolved, directory)

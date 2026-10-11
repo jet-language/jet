@@ -5,7 +5,7 @@ import { nativeCCompiler } from './native-c-compiler.mjs';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { nativePackRecipe, readNativeRuntimePack } from './runtime-pack-cache.mjs';
@@ -58,11 +58,19 @@ const compilerSha256 = sha256(readFileSync(jet));
 if (factoryRecord && resolve(readStageZeroFactory(factoryRecord, repo).factory.path) !== jet) throw Error('runtime compiler does not match admitted factory');
 const recipeSha256 = nativePackRecipe(source.sha256, backend.sha256, lifecycle.sha256,
   platformInputs.map(row => row.sha256), compilerSha256);
+// User foreign closures link the Jet-only runtime object with these exact
+// platform archives once (Compiler/JetCli ForeignLink.jet); ship them beside it.
+function publishPlatform() {
+  const directory = join(out, 'foreign/platform');
+  mkdirSync(directory, { recursive: true });
+  for (const path of platform) copyFileSync(path, join(directory, basename(path)));
+}
 if (existsSync(join(out, 'native.key'))) {
   try {
     const cached = readNativeRuntimePack(out, recipeSha256);
     noRust(join(out, cached.key, 'jet_runtime_jet.o'));
     noRust(join(out, cached.key, 'jet_runtime.pack.o'));
+    publishPlatform();
     console.log(join(out, cached.key, 'jet_runtime.pack.o'));
     process.exit(0);
   } catch (error) {
@@ -119,6 +127,7 @@ try {
   if (factory) provenance.bootstrapFactory = { sourceCommit: factory.sourceCommit, protocol: factory.compilerProtocol, receipt: factory.receipt, keepGoingReport: factory.census, producerSha256: sha256(readFileSync(fileURLToPath(import.meta.url))), harnessSha256: sha256(readFileSync(new URL('../agent/stage1/native-factory.mjs', import.meta.url))) };
   writeFileSync(join(directory, 'provenance.json'), JSON.stringify(provenance, null, 2) + '\n');
   writeFileSync(join(out, 'provenance.json'), JSON.stringify(provenance, null, 2) + '\n');
+  publishPlatform();
   writeFileSync(join(out, 'native.key.new'), key + '\n');
   renameSync(join(out, 'native.key.new'), join(out, 'native.key'));
   console.log(join(directory, 'jet_runtime.pack.o'));

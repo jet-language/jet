@@ -8,11 +8,13 @@ fn fx_foreign_descriptor_program(ty: MIRType, access: MIRAccess, prepared: Bool,
     signature := fx_builder()
     fx_param(&signature, "value", ty, mir_ownership_from_access(access)).drop("foreign signature only")
     fx_block(&signature, 0, MIRTerminator.Return{value: None})
-    declaration :: fx_function("jet_ffi_fixture", signature, ty)
+    declaration :: fx_function("fixture", signature, ty)
+    // Sema's Rust row symbol is the module-qualified Rust path, never the
+    // helper's exported descriptor name.
     foreign :: MIRForeign{
         id: MIRForeignID{value: U64{9200}}, module_id: declaration.module_id,
         key: declaration.key, module_name: declaration.module_name, name: declaration.name,
-        span: declaration.span, symbol: declaration.name, path: "fixture::identity",
+        span: declaration.span, symbol: "fixture::identity", path: "fixture::identity",
         params: declaration.params, raw_scalar_abi: false, bridge_eligible: true,
         return_type: Val(ty), foreign_abi: MIRForeignABI.Rust, foreign_language: MIRForeignLanguage.Rust,
         target_applicability: declaration.target_applicability, effects: declaration.effects,
@@ -58,7 +60,7 @@ fn fx_foreign_descriptor_checks() -> Bool Never! {
         lowered :: lir_lower_callables(fx_foreign_descriptor_program(ty, .Read, true, false), [MIRFunctionID]{mir_function_id("descriptor")})
         if lowered.issues.len() != 0 || lir_lint_module(lowered.lir).len() != 0 -> return false
         text :: lir_print_module(lowered.lir)
-        if !text.contains("jet_ffi_fixture_cabi") || !text.contains("jet_ffi_take_failure") || !text.contains("stack 24 align 8") -> return false
+        if !text.contains("jet_ffi_fixture_cabi") || text.contains("fixture::identity_cabi") || !text.contains("jet_ffi_take_failure") || !text.contains("stack 24 align 8") -> return false
         if ty.kind == .String {
             if !text.contains("jet_rt_string_data") || !text.contains("jet_rt_string_byte_len") || !text.contains("jet_rt_string_from_static") || !text.contains("jet_ffi_cabi_free") -> return false
             if text.contains("jet_rt_c_string_pack") -> return false

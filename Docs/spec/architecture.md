@@ -1285,9 +1285,10 @@ without retaining default-expression ASTs in helper realization.
 Its pure planner emits the manifest, safe wrappers, descriptor slot adapters,
 and ordered length-delimited bridge key; the CLI realizes that helper before
 native lowering and attaches its exact static archive to the checked MIR link
-unit without rewriting the foreign symbol. The 24-byte slot ABI, caught-panic
-markers, UTF-8 String lengths, and returned-buffer free operation match the
-hosted bridge. Direct C scalar lowering remains a separate unchanged path.
+unit without rewriting the foreign symbol; native lowering calls the helper's
+`jet_ffi_<declared name>_cabi` descriptor adapter. The 24-byte slot ABI,
+caught-panic markers, UTF-8 String lengths, and returned-buffer free operation
+match the hosted bridge. Direct C scalar lowering remains a separate unchanged path.
 Cargo metadata and the helper build run under the mandatory Linux native
 sandbox, never an unsandboxed fallback. Input manifests/source, descriptor,
 toolchain, target, artifact mode, native tools/link inputs, artifact digest,
@@ -1347,10 +1348,14 @@ Packaging ships those sources beside the runtime. User foreign
 dependencies are program link inputs; a runtime pack includes only the foreign
 closure reached by its own declared sources, keeping the shared pack independent
 of user projects.
-User C closures also link the existing toolchain's musl `libc.a` (including
-math and pthread) and C compiler builtins as program-only platform inputs.
-Packaging places them in `jet-runtime/foreign/platform`; a program with no C
-closure receives no additional link inputs. They are never runtime-pack inputs.
+User C closures and prepared user-Rust helper archives also link the existing
+toolchain's musl `libc.a` (including math and pthread), the `libgcc_eh.a`
+unwinder and the C compiler builtins as program-only platform inputs. Packaging
+places them in `jet-runtime/foreign/platform`. Such a program links the Jet-only
+runtime object (`<key>/jet_runtime_jet.o`) with them, not the runtime pack: the
+pack holds its own private, initialized libc, and a second copy beside it would
+run uninitialized. A program with no foreign closure receives no additional link
+inputs and keeps the pack. Platform archives are never runtime-pack exports.
 
 The private `Core.mem.__string_data` / `__string_byte_len` pair lends the
 existing UTF-8 String home, not a NUL-terminated or copied carrier. The caller

@@ -325,9 +325,10 @@ test('wrong manifest, dependencies, case cache, digest and symlink escapes fail 
 
 test('manifest workspace, build-script, library path and package overrides are rejected', t => {
     const f = fixture(t);
-    for (const suffix of ['\n[workspace]\n', '\n[build-dependencies]\ncc = "1"\n', '\n[patch.crates-io]\nbase64 = "0.22"\n', '\n[[bin]]\nname = "compiler"\n']) {
+    for (const suffix of ['\n[workspace]\nmembers = ["../escape"]\n', '\n[package.metadata.jet]\nbuild = "build.rs"\n', '\n[build-dependencies]\ncc = "1"\n', '\n[patch.crates-io]\nbase64 = "0.22"\n', '\n[[bin]]\nname = "compiler"\n']) {
         f.put(f.manifest, f.contents + suffix); fail(f.audit(f.branch()));
     }
+    f.put(f.manifest, f.contents + '\n[workspace]\n\n[package.metadata.jet]\nnative-helper-artifact-mode = "jet-native-rust-staticlib-v1"\n'); pass(f.audit(f.branch()));
     f.put(f.manifest, f.contents.replace('edition = "2021"', 'edition = "2021"\nbuild = "build.rs"')); fail(f.audit(f.branch()));
     const outside = f.put(join(f.home, 'outside.rs'), '// outside');
     f.put(f.manifest, f.contents.replace('path = "src/lib.rs"', `path = ${quote(outside)}`)); fail(f.audit(f.branch()));

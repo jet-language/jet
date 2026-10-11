@@ -16,6 +16,9 @@ struct JetCLIForeignInputs {
     names: [String]
     bytes: [[U8]]
     paths: [String]
+    // The closure carries the program's musl platform archives, so it links
+    // the Jet-only runtime object rather than the pre-resolved runtime pack.
+    platform: Bool{false}
 }
 
 fn jet_cli_foreign_add(inputs: &JetCLIForeignInputs, path: String) JetCLIForeignLinkError! -[FS]> {
@@ -432,31 +435,43 @@ fn jet_cli_native_c_closure(program: MIRProgram, sources: JetCLIForeignSources, 
     Ok(inputs)
 }
 
+// The program-only platform archive `name`: the copy packaging placed beside
+// the runtime, else the development toolchain's (musl's libc.a, or the C
+// compiler's archive, exactly as runtime packaging selects it).
+fn jet_cli_foreign_platform_archive(runtime_dir: String, name: String) -[FS, Env, Exec, Time.Wait]> String JetCLIForeignLinkError! {
+    packaged :: "{runtime_dir}/foreign/platform/{name}"
+    if cli_files.is_file(packaged) -> return Ok(packaged)
+    if name == "libc.a" {
+        musl :: cli_sys.get("JET_PACK_MUSL_LIB") ?? return Err(jet_cli_foreign_link_error("the toolchain's musl libc.a was not packaged for foreign programs"))
+        return Ok("{musl}/libc.a")
+    }
+    compiler :: cli_sys.get("CC") ?? "cc"
+    receipt :: cli_process.cmd([String]{compiler, "-print-file-name={name}"}).run() ?? return Err(jet_cli_foreign_link_error("couldn't locate the C compiler's `{name}`: {err}"))
+    if !receipt.success -> return Err(jet_cli_foreign_link_error("couldn't locate the C compiler's `{name}`: {receipt.errors}"))
+    path :: receipt.output.trim()
+    if path == name || !cli_files.is_file(path) -> return Err(jet_cli_foreign_link_error("the C compiler did not provide `{name}`"))
+    Ok(path)
+}
+
 // C's implicit platform is a program dependency, not a Jet runtime dependency.
-// Programs without a C closure preserve the original link line exactly.
+// A user C closure or prepared Rust helper archive (static musl code with C
+// ABI exports) links musl libc, the unwinder and the compiler builtins once,
+// with the Jet-only runtime object. The runtime pack already holds a private,
+// initialized libc; a second libc beside it would be uninitialized.
+// Programs without a foreign closure preserve the original link line exactly.
 fn jet_cli_native_c_inputs(program: MIRProgram, snapshot: JetDriverAuthorizedSourceSnapshot, runtime_dir: String) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs JetCLIForeignLinkError! {
     sources :: jet_cli_native_c_sources(snapshot) ?? return Err(err)
     inputs := jet_cli_native_c_closure(program, sources, runtime_dir) ?? return Err(err)
     has_c := inputs.names.len() > 0 || program.cffi.libs.len() > 0 || program.cffi.direct_links.len() > 0 || program.cffi.transitive_links.len() > 0
     loop row in program.foreign {
-        if row.foreign_language == .C -> has_c = true
+        if row.foreign_language == .C || row.foreign_language == .Rust -> has_c = true
     }
     if !has_c -> return Ok(inputs)
-    libc := "{runtime_dir}/foreign/platform/libc.a"
-    if !cli_files.is_file(libc) {
-        musl :: cli_sys.get("JET_PACK_MUSL_LIB") ?? return Err(jet_cli_foreign_link_error("the toolchain's musl libc.a was not packaged for C programs"))
-        libc = "{musl}/libc.a"
+    loop name in ([String]{"libc.a", "libgcc_eh.a", "libgcc.a"}) {
+        path :: jet_cli_foreign_platform_archive(runtime_dir, name) ?? return Err(err)
+        jet_cli_foreign_add(&inputs, path) ?? return Err(err)
     }
-    jet_cli_foreign_add(&inputs, libc) ?? return Err(err)
-    builtins := "{runtime_dir}/foreign/platform/libgcc.a"
-    if !cli_files.is_file(builtins) {
-        compiler :: cli_sys.get("CC") ?? "cc"
-        receipt :: cli_process.cmd([String]{compiler, "-print-libgcc-file-name"}).run() ?? return Err(jet_cli_foreign_link_error("couldn't locate the C compiler's builtins archive: {err}"))
-        if !receipt.success -> return Err(jet_cli_foreign_link_error("couldn't locate the C compiler's builtins archive: {receipt.errors}"))
-        builtins = receipt.output.trim()
-        if builtins == "libgcc.a" || !cli_files.is_file(builtins) -> return Err(jet_cli_foreign_link_error("the C compiler did not provide a builtins archive"))
-    }
-    jet_cli_foreign_add(&inputs, builtins) ?? return Err(err)
+    inputs.platform = true
     Ok(inputs)
 }
 
