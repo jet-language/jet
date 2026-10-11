@@ -88,6 +88,7 @@ use jet_foundation.[
     OutputKind,
     Span,
     SymbolKind,
+    TBinaryOp,
     TComptimeValue,
     TExpr,
     TExprKind,
@@ -128,6 +129,8 @@ use jet_foundation.[
     mir_type_same_checked_type,
     stable_id,
     symbol_id,
+    tir_expr_children,
+    tir_stmt_children,
     TTypeDef,
 ]
 use jet_parser.[
@@ -3528,8 +3531,8 @@ fn jet_driver_comptime_run(
                     sema_comptime_body_work_flush(environment.comptime_body_publication, request.trace_sink, "sema.comptime")
                     return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                 }
-                if source.kind == SemaComptimeItemKind.Constant && comptime_request.calls.len() == 0 {
-                    if jet_driver_comptime_plain_literal(comptime_request.expression) == .Val(plain) {
+                if source.kind != SemaComptimeItemKind.CheckedText && comptime_request.calls.len() == 0 {
+                    if jet_driver_comptime_fold(comptime_request.expression, values) == .Val(plain) {
                         // Behind a batch, the literal's value lands in its turn.
                         if batch.entries.len() > 0 {
                             no_functions := [TFunc]{}
@@ -3815,21 +3818,24 @@ fn jet_driver_comptime_unstage_bare(staging: &JetDriverComptimeStaging) Never! {
     staging.bare = false
 }
 
-// Rust `plain_literal_value` (Registration/Items.rs): a constant whose checked
-// initializer is a plain literal (an unsuffixed Int in the evaluator's Int
-// range, optionally negated, a Bool, a Char, or a string without
-// interpolation) is its own value. Evaluating it lowered, assembled and ran a
-// MIR fragment holding every module's declarations once per constant, which
-// made staging quadratic in program size (#3661).
-fn jet_driver_comptime_plain_literal(expression: TExpr) -> TComptimeValue? Never! {
+// Rust `plain_literal_value` (Registration/Items.rs) lands a constant whose
+// checked initializer is a plain literal as its own value, unevaluated
+// (#3661: evaluating one lowered, assembled and ran a MIR fragment holding
+// every module's declarations). Rust evaluates every other initializer with
+// its interpreter; Jet's comptime is native only, and a host with no
+// execution child (the bootstrap factory, the native CLI) evaluates nothing.
+// So every value that is literal data folds here: Int, sized-integer
+// (`I64{208}`, `U8{7}`), Float, Bool, Char and string literals, their
+// negation, the checked Int-to-fixed conversion of a literal, lists of them,
+// constants that already landed, and integer, Float and Bool arithmetic and
+// comparison over them. A value outside its checked type, a division, shift
+// or power, and any other shape is not folded: it is evaluated, and the
+// evaluator reports it.
+fn jet_driver_comptime_fold(expression: TExpr, values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
     if expression.kind == {
-        .IntLit(value, width) -> {
-            if width == None && expression.ty == Type.Int && jet_driver_comptime_small_int(value) -> return Val(TComptimeValue.Int{value: value})
-        }
-        .Unary(op, operand) -> {
-            if op == TUnaryOp.Neg && expression.ty == Type.Int && operand.kind == .IntLit(value, width) {
-                if width == None && jet_driver_comptime_small_int(0 - value) -> return Val(TComptimeValue.Int{value: 0 - value})
-            }
+        .IntLit(value, _) -> return jet_driver_comptime_fold_int(value, expression.ty)
+        .FloatLit(value) -> {
+            if expression.ty == Type.Float -> return Val(TComptimeValue.Float{value: value, bits: 64})
         }
         .BoolLit(value) -> return Val(TComptimeValue.Bool{value: value})
         .CharLit(value) -> return Val(TComptimeValue.Char{value: value})
@@ -3838,7 +3844,152 @@ fn jet_driver_comptime_plain_literal(expression: TExpr) -> TComptimeValue? Never
             if parts.len() == 0 -> return Val(TComptimeValue.String{value: ""})
             if parts.len() == 1 && parts[0] == .Literal(text) -> return Val(TComptimeValue.String{value: text})
         }
+        // A checked literal that already carries its value (D-INTBIG1: an
+        // integer outside the i64 range is a BigInt constant).
+        .CtLit(value) -> {
+            if value == {
+                .Int(_) | .BigInt(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) -> return Val(value)
+                else -> {}
+            }
+        }
+        .ConstRef(symbol) -> return jet_driver_comptime_landed(values, symbol.key)
+        .Unary(op, operand) -> {
+            folded :: jet_driver_comptime_fold(operand, values) ?? return None
+            if op == TUnaryOp.Neg {
+                if folded == .Int(number) -> return jet_driver_comptime_fold_int(0 - number, expression.ty)
+                if folded == .Float(number, bits) {
+                    if bits == 64 && expression.ty == Type.Float -> return Val(TComptimeValue.Float{value: number * -1.0, bits: 64})
+                }
+            }
+            if op == TUnaryOp.Not && expression.ty == Type.Bool {
+                if folded == .Bool(flag) -> return Val(TComptimeValue.Bool{value: !flag})
+            }
+        }
+        // `I64{n}` checked without its head: the checked Int-to-fixed
+        // conversion of a literal, which traps exactly when n is outside.
+        .NumericMethod(receiver, operation) -> {
+            if operation == .CheckedIntToFixed(_, _, _, _) {
+                folded :: jet_driver_comptime_fold(receiver, values) ?? return None
+                if folded == .Int(number) -> return jet_driver_comptime_fold_int(number, expression.ty)
+                if folded == .BigInt(decimal) -> return jet_driver_comptime_fold_int(Int.parse(decimal) ?? return None, expression.ty)
+            }
+        }
+        .Binary(op, _, _, lhs, rhs) -> {
+            left :: jet_driver_comptime_fold(lhs, values) ?? return None
+            right :: jet_driver_comptime_fold(rhs, values) ?? return None
+            return jet_driver_comptime_fold_binary(op, expression.ty, left, right)
+        }
+        .List(elements, coercion) -> {
+            if coercion == None -> return jet_driver_comptime_fold_list(elements, values)
+        }
+        .ListLit(elements) -> return jet_driver_comptime_fold_list(elements, values)
         else -> {}
+    }
+    None
+}
+
+fn jet_driver_comptime_fold_list(elements: [TExpr], values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
+    folded := [TComptimeValue]{}
+    loop element in elements -> &folded.push(jet_driver_comptime_fold(element, values) ?? return None)
+    Val(TComptimeValue.List{values: folded})
+}
+
+// The value of a constant that already landed in this run.
+fn jet_driver_comptime_landed(values: [SemaComptimeItemValue], key: String) -> TComptimeValue? Never! {
+    loop value in values {
+        if value.kind == SemaComptimeItemKind.Constant && value.key == key -> return Val(value.value)
+    }
+    None
+}
+
+// An integer value of checked type `ty` (Int or a fixed width of at most 64
+// bits), only when it lies in that type's range.
+fn jet_driver_comptime_fold_int(value: Int, ty: Type) -> TComptimeValue? Never! {
+    if ty == Type.Int {
+        if !jet_driver_comptime_small_int(value) -> return None
+        return Val(TComptimeValue.Int{value: value})
+    }
+    if ty == .IntN(signed, bits) {
+        if bits < 8 || bits > 64 -> return None
+        low := 0
+        high := 18446744073709551615
+        if bits < 64 {
+            high = (1 << bits) - 1
+            if signed {
+                low = 0 - (1 << (bits - 1))
+                high = (1 << (bits - 1)) - 1
+            }
+        } else if signed {
+            low = -9223372036854775807 - 1
+            high = 9223372036854775807
+        }
+        if value < low || value > high -> return None
+        return Val(TComptimeValue.Int{value: value})
+    }
+    None
+}
+
+fn jet_driver_comptime_fold_binary(op: TBinaryOp, ty: Type, left: TComptimeValue, right: TComptimeValue) -> TComptimeValue? Never! {
+    if left == .Int(a) {
+        if right == .Int(b) {
+            if ty == Type.Bool {
+                if op == {
+                    .Eq -> return Val(TComptimeValue.Bool{value: a == b})
+                    .Ne -> return Val(TComptimeValue.Bool{value: a != b})
+                    .Lt -> return Val(TComptimeValue.Bool{value: a < b})
+                    .Gt -> return Val(TComptimeValue.Bool{value: a > b})
+                    .Le -> return Val(TComptimeValue.Bool{value: a <= b})
+                    .Ge -> return Val(TComptimeValue.Bool{value: a >= b})
+                    else -> return None
+                }
+            }
+            if op == {
+                .Add -> return jet_driver_comptime_fold_int(a + b, ty)
+                .Sub -> return jet_driver_comptime_fold_int(a - b, ty)
+                .Mul -> return jet_driver_comptime_fold_int(a * b, ty)
+                .BitAnd -> return jet_driver_comptime_fold_int(a.bit_and(b), ty)
+                .BitOr -> return jet_driver_comptime_fold_int(a.bit_or(b), ty)
+                .BitXor -> return jet_driver_comptime_fold_int(a.bit_xor(b), ty)
+                else -> return None
+            }
+        }
+        return None
+    }
+    if left == .Float(a, left_bits) {
+        if right == .Float(b, right_bits) {
+            if left_bits != 64 || right_bits != 64 -> return None
+            if ty == Type.Bool {
+                if op == {
+                    .Eq -> return Val(TComptimeValue.Bool{value: a == b})
+                    .Ne -> return Val(TComptimeValue.Bool{value: a != b})
+                    .Lt -> return Val(TComptimeValue.Bool{value: a < b})
+                    .Gt -> return Val(TComptimeValue.Bool{value: a > b})
+                    .Le -> return Val(TComptimeValue.Bool{value: a <= b})
+                    .Ge -> return Val(TComptimeValue.Bool{value: a >= b})
+                    else -> return None
+                }
+            }
+            if ty != Type.Float -> return None
+            if op == {
+                .Add -> return Val(TComptimeValue.Float{value: a + b, bits: 64})
+                .Sub -> return Val(TComptimeValue.Float{value: a - b, bits: 64})
+                .Mul -> return Val(TComptimeValue.Float{value: a * b, bits: 64})
+                else -> return None
+            }
+        }
+        return None
+    }
+    if left == .Bool(a) {
+        if right == .Bool(b) {
+            if ty != Type.Bool -> return None
+            if op == {
+                .And -> return Val(TComptimeValue.Bool{value: a && b})
+                .Or -> return Val(TComptimeValue.Bool{value: a || b})
+                .Eq -> return Val(TComptimeValue.Bool{value: a == b})
+                .Ne -> return Val(TComptimeValue.Bool{value: a != b})
+                else -> return None
+            }
+        }
     }
     None
 }
@@ -4549,6 +4700,49 @@ fn jet_driver_keep_going_trap_lowering(kg: &JetDriverKeepGoingLog, functions: &[
         jet_driver_keep_going_row(&kg, "lower", "{function.name} [{function.key}]", "TRAPPED", "lowered as a trap: an earlier keep-going run crashed lowering it", "{function.source_file}:{function.source_span.start}..{function.source_span.end}")
         functions[position] = jet_driver_keep_going_tir_trap(function, "keep-going trap: lowering this function crashed an earlier run")
     }
+}
+
+// Codegen lowers a checked direct call to its callee's checked function or
+// to a checked foreign row (`jet_codegen_find_function_row`,
+// `jet_codegen_find_checked_foreign_row`); a callee with neither stops it.
+// Under JET_KEEP_GOING a function whose check failed and whose own trap did
+// not check either (sema_keep_going_push_stub) is such a callee: each of its
+// callers lowers as a trap instead, and each is a census row.
+fn jet_driver_keep_going_trap_unresolved_calls(kg: &JetDriverKeepGoingLog, functions: &[TFunc], modules: [SemaGraphModuleResult]) {
+    targets := [String:Bool]{}
+    loop function in functions -> targets[function.key] = true
+    loop semantic_module in modules {
+        loop row in semantic_module.foreign_functions {
+            targets[row.key] = true
+            targets[row.symbol_id.key] = true
+        }
+    }
+    loop position in 0..<functions.len() {
+        missing :: jet_driver_unresolved_direct_call(functions[position], targets) ?? next
+        function :: functions[position].copy()
+        jet_driver_keep_going_row(&kg, "lower", "{function.name} [{function.key}]", "TRAPPED", "lowered as a trap: it calls `{missing}`, which has no checked function or foreign row", "{function.source_file}:{function.source_span.start}..{function.source_span.end}")
+        functions[position] = jet_driver_keep_going_tir_trap(function, "keep-going trap: this function calls `{missing}`, which did not check")
+    }
+}
+
+// The first direct-call callee key in `function` (its body and parameter
+// defaults) that `targets` does not hold.
+fn jet_driver_unresolved_direct_call(function: TFunc, targets: [String:Bool]) -> String? Never! {
+    pending := [TExpr]{}
+    loop parameter in function.params {
+        if parameter.default == Val(value) -> &pending.push(value)
+    }
+    loop statement in function.body {
+        loop child in tir_stmt_children(statement) -> &pending.push(child)
+    }
+    loop pending.len() > 0 {
+        expression :: &pending.pop() ?? return None
+        if expression.kind == .Call(callee, _, _) {
+            if targets.get(callee.key) == None -> return Val(callee.key)
+        }
+        loop child in tir_expr_children(expression) -> &pending.push(child)
+    }
+    None
 }
 
 // `emit:<name>@<position>` skip entries: the function at that position of
@@ -5273,6 +5467,8 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     if kg.enabled {
         jet_driver_keep_going_diagnostics(&kg, "sema", load.diagnostics)
         if kg.skip.len() > 0 -> jet_driver_keep_going_trap_lowering(&kg, &sema_functions)
+        // Only a failed check can leave a callee without a checked function.
+        if kg.rows.len() > 0 -> jet_driver_keep_going_trap_unresolved_calls(&kg, &sema_functions, runtime_semantic_modules)
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
 
