@@ -59,6 +59,32 @@ fn pkg_ffi_test_occurrences(text: String, needle: String) -> Int Never! {
     assert(wrapper.contains("jet_inline_jet_ffi_add_one"))
 }
 
+#Test("over budget asm push rail keeps early clobbers with one memory carrier") {
+    names :: [String]{"address", "a", "b", "c", "d", "e"}
+    params := [(convention: AccessConvention, ty: Type)]{}
+    loop _ in names -> &params.push((convention: AccessConvention.Read, ty: Type.Int))
+    entry := pkg_ffi_test_entry("call5", "", params, names, Val(Type.Int), "audited word call")
+    contract :: InlineAsmContract{target: "x86_64-unknown-linux-gnu", output: Val(InlineAsmOutput.Register{name: "rax"}), clobbers: [String]{"rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"}}
+    source :: "push {{address}}\npush {{a}}\npush {{b}}\npush {{c}}\npush {{d}}\npush {{e}}\npop r8\npop rcx\npop rdx\npop rsi\npop rdi\npop r11\ncall r11\nmov rax, rax ; -> return"
+    inline :: InlineEntry{lang: "asm", source: source, param_names: names, asm_contract: Val(contract)}
+    entry.inline = Val(inline)
+    wrapper :: pkg_ffi_emit_asm_wrapper(entry, inline)
+    assert(wrapper.contains("let __jet_args = [p0 as u64"))
+    assert(wrapper.contains("push qword ptr [{{__jet_args}} + 40]"))
+    assert(wrapper.contains("out(\"rax\") __jet_result"))
+    assert(wrapper.contains("out(\"r11\") _"))
+    assert(!wrapper.contains("lateout"))
+    assert_eq(pkg_ffi_test_occurrences(wrapper, "= in(reg)"), 1)
+}
+
+#Test("asm memory carrier requires every input consumed before a register write") {
+    names :: [String]{"value"}
+    assert(pkg_ffi_asm_stack_inputs([String]{"push rdi", "push {{value}}", "pop rdi"}, names))
+    assert(!pkg_ffi_asm_stack_inputs([String]{"mov rdi, 0", "push {{value}}"}, names))
+    assert(!pkg_ffi_asm_stack_inputs([String]{"push {{value}}", "mov rax, {{value}}"}, names))
+    assert(!pkg_ffi_asm_stack_inputs([String]{"push {{value}}", "push {{value}}"}, names))
+}
+
 #Test("inline asm contract changes invalidate bridge identity") {
     original :: pkg_ffi_test_asm_entry()
     changed := original

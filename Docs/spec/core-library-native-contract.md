@@ -410,6 +410,10 @@ bridge identity fingerprints those spliced bytes as well as the root module.
 Embedded carrier references resolve to their actual bridge-owned module. Entry
 error formatting retains the shared Foundation Registry lookup, bound to that
 dependency rather than assuming a bridge-owned compiler Registry.
+Inline assembly keeps early clobbers on every host profile. A word-input push
+rail that exceeds the allocatable register budget marshals its inputs through
+one read-only stack carrier, consumed before the body can overwrite its
+address; in-budget rails retain register operands.
 
 Native lowering must fail closed when a construct cannot preserve the shared
 runtime's ABI, error behavior, or observable output. Report an unsupported

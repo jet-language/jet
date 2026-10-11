@@ -25,7 +25,7 @@ use std::process::Command;
 // FfiLink struct lives in AST for cross-seam sharing; re-export here.
 pub use crate::AST::FfiLink;
 
-const INLINE_BRIDGE_SCHEMA: &str = "jet-inline-ffi-v10-asm-early-clobber";
+const INLINE_BRIDGE_SCHEMA: &str = "jet-inline-ffi-v11-asm-stack-inputs";
 /// v2: artifact digests are recorded relative to the SHARED Cargo target dir
 /// (#2075), so a v1 manifest's `target/<triple>/release/...` rows no longer
 /// describe where the artifacts are. A v1 sidecar simply fails verification and
@@ -5934,6 +5934,35 @@ fn emit_inline_wrapper_fn(entry: &ExternEntry, inline: &InlineEntry) -> String {
     )
 }
 
+// A memory carrier is safe only while every named input is consumed by the
+// initial push rail, before any instruction can overwrite its address.
+fn inline_asm_stack_inputs(instructions: &[String], names: &[String]) -> bool {
+    let mut seen = vec![false; names.len()];
+    let mut prefix = true;
+    for line in instructions {
+        if !line.starts_with("push ") {
+            prefix = false;
+        }
+        if !line.contains('{') {
+            continue;
+        }
+        let Some(name) = line.strip_prefix("push {").and_then(|tail| tail.strip_suffix('}'))
+            else { return false };
+        let Some(index) = names.iter().position(|input| input == name)
+            else { return false };
+        if !prefix || seen[index] {
+            return false;
+        }
+        seen[index] = true;
+    }
+    seen.into_iter().all(|input| input)
+}
+
+fn inline_asm_general_register(register: &str) -> bool {
+    matches!(register, "rax" | "rbx" | "rcx" | "rdx" | "rsi" | "rdi" | "rbp"
+        | "r8" | "r9" | "r10" | "r11" | "r12" | "r13" | "r14" | "r15")
+}
+
 fn emit_asm_wrapper(entry: &ExternEntry, inline: &InlineEntry) -> String {
     let Some(contract) = inline.asm_contract.as_ref() else {
         return String::new();
@@ -5974,7 +6003,7 @@ fn emit_asm_wrapper(entry: &ExternEntry, inline: &InlineEntry) -> String {
         return String::new();
     }
 
-    let instructions = inline
+    let mut instructions = inline
         .source
         .lines()
         .map(str::trim)
@@ -5998,16 +6027,37 @@ fn emit_asm_wrapper(entry: &ExternEntry, inline: &InlineEntry) -> String {
             result_expr = "__jet_result".to_string();
         }
     }
-    for (index, name) in inline.param_names.iter().enumerate() {
-        if Some(index) != output_param {
-            operands.push(format!("{name} = in(reg) p{index}"));
-        }
-    }
     let mut seen_clobbers = HashSet::new();
     for reg in &contract.clobbers {
         let reg = normalize_register(reg);
         if return_reg.as_deref() != Some(reg.as_str()) && seen_clobbers.insert(reg.clone()) {
             operands.push(format!("out(\"{reg}\") _"));
+        }
+    }
+    // RSP is the stack pointer and RBP may hold the frame on every profile.
+    // Spill only an over-budget word push rail; keep all early clobbers intact.
+    let gp_outputs = seen_clobbers.iter()
+        .filter(|register| inline_asm_general_register(register)).count()
+        + usize::from(return_reg.as_deref().is_some_and(inline_asm_general_register));
+    let memory_inputs = contract.target.starts_with("x86_64")
+        && output_param.is_none()
+        && inline.param_names.len() + gp_outputs > 14
+        && params.iter().all(|param| param.ends_with(": i64") || param.ends_with(": u64"))
+        && inline_asm_stack_inputs(&instructions, &inline.param_names);
+    if memory_inputs {
+        operands.push("__jet_args = in(reg) __jet_args.as_ptr()".into());
+        for line in &mut instructions {
+            if let Some(name) = line.strip_prefix("push {").and_then(|tail| tail.strip_suffix('}')) {
+                let index = inline.param_names.iter().position(|input| input == name)
+                    .expect("stack input proof established the named operand");
+                *line = format!("push qword ptr [{{__jet_args}} + {}]", index * 8);
+            }
+        }
+    } else {
+        for (index, name) in inline.param_names.iter().enumerate() {
+            if Some(index) != output_param {
+                operands.push(format!("{name} = in(reg) p{index}"));
+            }
         }
     }
     let templates = instructions
@@ -6019,6 +6069,11 @@ fn emit_asm_wrapper(entry: &ExternEntry, inline: &InlineEntry) -> String {
         declarations.push_str(&format!("    let __jet_result: {ret};\n"));
     } else if let Some(index) = output_param {
         declarations.push_str(&format!("    let mut p{index} = p{index};\n"));
+    }
+    if memory_inputs {
+        let words = (0..inline.param_names.len()).map(|index| format!("p{index} as u64"))
+            .collect::<Vec<_>>().join(", ");
+        declarations.push_str(&format!("    let __jet_args = [{words}];\n"));
     }
     let all_args = templates
         .into_iter()
@@ -7364,16 +7419,20 @@ mod tests {
             "relocated root modules must not retain source-relative includes");
     }
 
-    fn foundation_clone_asm_wrapper() -> String {
+    fn foundation_linux_asm_wrapper(name: &str) -> String {
         let linux = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../Compiler/JetBackend/Source/OS/Linux.jet")).unwrap();
-        let declaration = linux.split_once("fn os_clone_i64(")
-            .expect("canonical Linux clone declaration").1;
+        let declaration = linux.split_once(&format!("fn {name}("))
+            .expect("canonical Linux assembly declaration").1;
         let source = declaration.split_once("\"\"\"").unwrap().1
             .split_once("\"\"\"").unwrap().0;
         assert!(source.contains("mov rax, rax ; -> return"));
-        let names: Vec<String> = ["flags", "stack", "parent_tid", "child_tid"]
-            .iter().map(|name| (*name).to_owned()).collect();
+        let names: Vec<String> = declaration.split_once(')').unwrap().0.split(',')
+            .map(|parameter| {
+                let (name, ty) = parameter.split_once(':').unwrap();
+                assert_eq!(ty.trim(), "I64", "the preserved rail has word inputs");
+                name.trim().to_owned()
+            }).collect();
         let clobbers = source.split_once("; clobbers ").unwrap().1
             .lines().next().unwrap().split_whitespace()
             .map(|name| name.trim_end_matches(',').to_owned()).collect();
@@ -7385,11 +7444,11 @@ mod tests {
             }),
         };
         let entry = ExternEntry {
-            jet_name: "os_clone_i64".into(), rust_path: String::new(),
-            wrapper_name: "jet_ffi_os_clone_i64".into(),
+            jet_name: name.into(), rust_path: String::new(),
+            wrapper_name: format!("jet_ffi_{name}"),
             params: vec![(AccessConvention::Read, Type::Int); names.len()],
             param_names: names, return_type: Some(Type::Int), crate_spec: "std".into(),
-            line_hint: "canonical OS/Linux.jet clone".into(), inline: Some(inline),
+            line_hint: "canonical OS/Linux.jet assembly".into(), inline: Some(inline),
             c_abi: false, generated: false, c_module: false, close: None,
         };
         emit_asm_wrapper(&entry, entry.inline.as_ref().unwrap())
@@ -7397,17 +7456,42 @@ mod tests {
 
     #[test]
     fn foundation_clone_asm_uses_nonbinary_labels() {
-        let wrapper = foundation_clone_asm_wrapper();
+        let wrapper = foundation_linux_asm_wrapper("os_clone_i64");
         assert!(wrapper.contains("\"jnz 2f\""));
         assert!(wrapper.contains("\"2:\""));
         assert!(!wrapper.contains("\"1:\""));
+    }
+
+    #[test]
+    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+    fn foundation_asm_memory_inputs_preserve_call_abi() {
+        let wrapper = foundation_linux_asm_wrapper("os_call5_i64");
+        assert!(wrapper.contains("let __jet_args = [p0 as u64"));
+        assert!(wrapper.contains("push qword ptr [{__jet_args} + 40]"));
+        assert!(wrapper.contains("out(\"rax\") __jet_result"));
+        assert!(wrapper.contains("out(\"r11\") _"));
+        assert!(!wrapper.contains("lateout"));
+        let short = foundation_linux_asm_wrapper("os_call4_i64");
+        assert!(!short.contains("let __jet_args"), "an in-budget rail needs no spill");
+        let root = std::env::temp_dir().join(format!("jet-asm-memory-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("probe.rs");
+        let executable = root.join("probe");
+        fs::write(&source, format!("{wrapper}\nextern \"C\" fn callback(a:i64,b:i64,c:i64,d:i64,e:i64)->i64{{a+10*b+100*c+1000*d+10000*e}}\nfn main(){{assert_eq!(jet_ffi_os_call5_i64(callback as usize as i64,1,2,3,4,5),54321);}}\n")).unwrap();
+        let built = Command::new(command_path("rustc").unwrap()).args([
+            "--edition=2021", "-C", "opt-level=2", "-C", "force-frame-pointers=yes",
+            "-C", "overflow-checks=yes", "-C", "codegen-units=16",
+        ]).arg(&source).arg("-o").arg(&executable).output().unwrap();
+        assert!(built.status.success(), "factory ASM compile:\n{}", String::from_utf8_lossy(&built.stderr));
+        assert!(Command::new(&executable).status().unwrap().success());
+        fs::remove_dir_all(root).unwrap();
     }
 
     // Select explicitly: this replays the preserved stage0 production bridge,
     // not a reduced synthetic crate or a whole-compiler emission.
     #[test]
     #[ignore = "requires the preserved production bridge source and target"]
-    fn foundation_production_bridge_builds_in_the_exact_sandbox() {
+    fn foundation_production_bridge_builds_under_factory_profile() {
         fn copy_source_tree(source: &Path, destination: &Path) {
             fs::create_dir_all(destination).unwrap();
             for entry in fs::read_dir(source).unwrap() {
@@ -7429,6 +7513,7 @@ mod tests {
         let target_dir = required_path("JET_FFI_PRODUCTION_TARGET_DIR");
         let source_root = required_path("JET_FFI_PRODUCTION_SOURCE_ROOT");
         let proof_root = required_path("JET_FFI_PRODUCTION_PROOF_ROOT");
+        let factory_manifest = required_path("JET_FFI_PRODUCTION_FACTORY_MANIFEST");
         fs::create_dir_all(&proof_root).unwrap();
         let original_source = crate::SHA256::try_tree_hash(&cache_root)
             .expect("fingerprint the preserved production bridge inputs");
@@ -7436,77 +7521,61 @@ mod tests {
         copy_source_tree(&cache_root, &projected_source);
         let library = projected_source.join("src/lib.rs");
         let original_library = fs::read_to_string(&library).unwrap();
-        assert!(original_library.contains(ENCODING_TYPES_INCLUDE)
-            && original_library.contains(ENCODING_ERROR_INCLUDE),
-            "the recovered production source must exercise both actual relocated includes");
-        let projected = strip_outcome_host_wrapper(
-            OUTCOME_RUNTIME, HOST_RUNTIME_STOP_BEGIN, HOST_RUNTIME_STOP_END,
-        );
-        let old_outcome = strip_outcome_host_wrapper(
-            &projected, HOST_RUNTIME_SENTRY_BEGIN, HOST_RUNTIME_SENTRY_END,
-        );
-        assert!(original_library.contains(&old_outcome),
-            "the preserved bridge must use the canonical standalone Outcome projection");
-        let projected_library = splice_encoding_json_includes(&original_library)
-            .replace(&old_outcome, &standalone_outcome_runtime());
-        // Refresh this preserved fixture's audited clone body through the real
-        // ASM emitter and current canonical Jet source, not a Rust lint grant.
-        let clone_start = projected_library.find(
-            "#[no_mangle]\npub unsafe extern \"C\" fn jet_inline_jet_ffi_os_clone_i64(",
-        ).expect("preserved clone ASM wrapper");
-        let clone_end = clone_start + projected_library[clone_start..].find(
-            "#[no_mangle]\npub unsafe extern \"C\" fn jet_ffi_os_clone_i64_cabi(",
-        ).expect("preserved clone C-ABI wrapper boundary");
-        let projected_library = format!("{}{}{}", &projected_library[..clone_start],
-            foundation_clone_asm_wrapper(), &projected_library[clone_end..]);
+        assert!(original_library.contains("jet_foundation::Registry::active_runtime_diagnostic"));
+        assert!(!original_library.contains("crate::Outcome::"));
+        // Re-emit the exact failing rail from its current canonical Jet source.
+        let clone_start = original_library.find(
+            "#[no_mangle]\npub unsafe extern \"C\" fn jet_inline_jet_ffi_os_call5_i64(",
+        ).expect("preserved over-budget ASM wrapper");
+        let clone_end = clone_start + original_library[clone_start..].find(
+            "#[no_mangle]\npub unsafe extern \"C\" fn jet_ffi_os_call5_i64_cabi(",
+        ).expect("preserved C-ABI wrapper boundary");
+        let projected_library = format!("{}{}{}", &original_library[..clone_start],
+            foundation_linux_asm_wrapper("os_call5_i64"), &original_library[clone_end..]);
         assert!(foundation_rust_include_paths(&projected_library, &projected_source)
             .unwrap().is_empty(), "collect-all generated library must have no unresolved include");
         fs::write(&library, projected_library).unwrap();
-        let cargo_home = std::env::var_os("CARGO_HOME")
-            .map(PathBuf::from).unwrap_or_else(|| dirs_home().join(".cargo"));
-        let registry = cargo_home.join("registry").canonicalize()
-            .expect("actual registry used by the canonical materializer");
-        let mut mounts = vec![jet_sema::Comptime::Build::ReadOnlyMount::new(
-            registry, "/work/output/cargo-home/registry",
-        )];
-        let sources = jet_foundation_sources().expect("complete current Foundation source closure");
-        for mount in jet_foundation_mounts(&proof_root, &sources).unwrap() {
-            let relative = mount.destination.strip_prefix(&sources.root)
-                .expect("Foundation source mounts stay within their declared root");
-            mounts.push(jet_sema::Comptime::Build::ReadOnlyMount::new(
-                mount.source, source_root.join(relative),
-            ));
-        }
+        let factory = fs::read_to_string(factory_manifest).unwrap();
+        let profile = factory.split_once("[profile.jet-stage-release]\n")
+            .expect("exact factory profile declaration").1;
+        let manifest = projected_source.join("Cargo.toml");
+        let original_manifest = fs::read_to_string(&manifest).unwrap();
+        fs::write(manifest, format!("{original_manifest}\n[profile.jet-stage-release]\n{profile}")).unwrap();
         let selected_target = host_target();
         assert_eq!(selected_target, "x86_64-unknown-linux-gnu",
             "this receipt replays the recovered stage0 target, not a different platform");
-        let args = cargo_bridge_build_args(&selected_target);
-        let env = cargo_bridge_sandbox_env();
+        let args = vec!["cargo".to_owned(), "build".into(), "--keep-going".into(),
+            "--manifest-path".into(), projected_source.join("Cargo.toml").to_string_lossy().into_owned(),
+            "--profile".into(), "jet-stage-release".into()];
         let start = std::time::Instant::now();
-        let built = jet_sema::Comptime::Build::run_native_sandboxed_with_mounts(
-            &command_path("cargo").expect("canonical Cargo executable"),
-            &args, &projected_source, Some(&target_dir), &env, true, &mounts,
-        ).expect("execute the exact production bridge in the mandatory sandbox");
-        fs::write(proof_root.join("cargo.stdout"), &built.output.stdout).unwrap();
-        fs::write(proof_root.join("cargo.stderr"), &built.output.stderr).unwrap();
+        let built = Command::new(source_root.join("Tools/agent/jet-env"))
+            .args(&args).current_dir(&source_root)
+            .env("JET_TOOLCHAIN_ROOT", &source_root).env("CARGO_TARGET_DIR", &target_dir)
+            .env("CARGO_INCREMENTAL", "0").env("CARGO_BUILD_JOBS", "1")
+            .env("RUSTFLAGS", "-C force-frame-pointers=yes")
+            .env("RUST_MIN_STACK", "268435456").env("JET_NO_SCCACHE", "1")
+            .env_remove("RUSTC_WRAPPER").env_remove("RUSTC_WORKSPACE_WRAPPER")
+            .output().expect("execute the production bridge under the exact factory profile");
+        fs::write(proof_root.join("cargo.stdout"), &built.stdout).unwrap();
+        fs::write(proof_root.join("cargo.stderr"), &built.stderr).unwrap();
         let final_source = crate::SHA256::try_tree_hash(&cache_root)
             .expect("fingerprint the production bridge after its read-only build");
         fs::write(proof_root.join("cargo.receipt.json"), format!(
             "{{\"status\":{},\"seconds\":{},\"args\":{:?},\"sourceUnchanged\":{}}}\n",
-            built.output.status.code().unwrap_or(-1), start.elapsed().as_secs_f64(), args,
+            built.status.code().unwrap_or(-1), start.elapsed().as_secs_f64(), args,
             final_source == original_source,
         )).unwrap();
         assert_eq!(final_source, original_source,
             "the preserved production source inputs must remain unchanged");
-        assert!(built.output.status.success(), "production bridge stderr:\n{}",
-            String::from_utf8_lossy(&built.output.stderr));
-        let release = target_dir.join(&selected_target).join("release");
+        assert!(built.status.success(), "production bridge stderr:\n{}",
+            String::from_utf8_lossy(&built.stderr));
+        let release = target_dir.join("jet-stage-release");
         let key = cache_root.file_name().and_then(|name| name.to_str())
             .expect("the preserved canonical bridge cache has a UTF-8 key");
         let produced = release.join(format!("libjet_ffi_{key}.rlib"));
         assert!(produced.is_file(),
             "the exact production build must produce its own foreign rlib: {}", produced.display());
-        println!("production Foundation bridge: exact Cargo sandbox build passed");
+        println!("production Foundation bridge: exact factory profile build passed");
     }
 
     #[test]
