@@ -11,19 +11,19 @@
 # identity in JET_COMPILER_IDENTITY (the CLI refuses to compile without it).
 set -euo pipefail
 usage() {
-    printf '%s\n' 'usage: native-fixedpoint.sh --builder PATH --unit FILE.jet|DIR --out DIR [--factory-record RECEIPT.json] [--level o0|o1] [--stages 3]' \
-        'identity: factory.compiler_identity of --factory-record, else $JET_COMPILER_IDENTITY (name@version#source-id)' \
+    printf '%s\n' 'usage: native-fixedpoint.sh --builder PATH --unit FILE.jet|DIR --out DIR [--factory-receipt BOOTSTRAP_RECEIPT] [--level o0|o1] [--stages 3]' \
+        'identity: compiler_source_identity= of the stage1 factory bootstrap receipt (native-feed factory-native/), else $JET_COMPILER_IDENTITY (name@version#source-id)' \
         'NATIVE_FP_TIMEOUT: per-stage seconds; 0 (default) disables the limit'
 }
 fail() { printf 'native-fixedpoint: %s\n' "$*" >&2; exit 2; }
 builder='' unit='' out='' record='' level=o0 stages=3
 while (( $# )); do
     case $1 in
-        --builder|--unit|--out|--factory-record|--level|--stages)
+        --builder|--unit|--out|--factory-receipt|--level|--stages)
             (( $# >= 2 )) || fail "missing value for $1"
             case $1 in
                 --builder) builder=$2 ;; --unit) unit=$2 ;; --out) out=$2 ;;
-                --factory-record) record=$2 ;;
+                --factory-receipt) record=$2 ;;
                 --level) level=$2 ;; --stages) stages=$2 ;;
             esac
             shift 2 ;;
@@ -42,9 +42,10 @@ for tool in realpath timeout prlimit node readelf nm objdump cmp sha256sum stat 
     command -v "$tool" >/dev/null || fail "missing tool: $tool"
 done
 if [[ -n $record ]]; then
-    JET_COMPILER_IDENTITY=$(node -e 'const r = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); process.stdout.write(String(r.factory?.compiler_identity ?? ""))' "$record") || fail 'cannot read the factory receipt'
+    [[ -f $record ]] || fail "factory receipt does not exist: $record"
+    JET_COMPILER_IDENTITY=$(sed -n 's/^compiler_source_identity=//p' -- "$record")
 fi
-[[ ${JET_COMPILER_IDENTITY:-} =~ ^[^@#[:space:]]+@[^@#[:space:]]+#[^@#[:space:]]+$ ]] || fail 'compiler identity (name@version#source-id) is required from --factory-record or JET_COMPILER_IDENTITY; never invented'
+[[ ${JET_COMPILER_IDENTITY:-} =~ ^[^@#[:space:]]+@[^@#[:space:]]+#[^@#[:space:]]+$ ]] || fail 'compiler identity (name@version#source-id) is required from --factory-receipt or JET_COMPILER_IDENTITY; never invented'
 export JET_COMPILER_IDENTITY
 timer=$(type -P time) || fail 'GNU time is required to measure peak RSS'
 "$timer" --version >/dev/null 2>&1 || fail 'GNU time is required'

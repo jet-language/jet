@@ -52,9 +52,8 @@ try {
   // The native CLI takes its compiler identity only from the environment
   // (JetCli Request.jet jet_cli_driver_request) and refuses to compile without
   // it (Pipeline.jet E0003). Every native stage must use the identity the
-  // factory baked in (Bootstrap/Host/Native.rs, `jet@<version>#<source id>`).
-  const identity = record.factory.compiler_identity;
-  if (typeof identity !== 'string' || !/^[^@#\s]+@[^@#\s]+#[^@#\s]+$/.test(identity)) throw Error('factory receipt lacks factory.compiler_identity (`name@version#source-id`); refusing to invent one');
+  // factory baked in (Bootstrap/Host/Native.rs, `jet@<version>#<source id>`),
+  // which the factory's own bootstrap receipt records (Bootstrap/Tests.rs).
   const runtime = readNativeRuntimePack(options.runtime);
   if (runtime.provenance.bootstrapFactory?.sourceCommit !== record.commit || runtime.provenance.compilerSha256 !== record.factory.sha256) throw Error('runtime pack must be produced by this same source-bound factory');
   const packPath = join(options.runtime, runtime.key, 'jet_runtime.pack.o');
@@ -65,6 +64,9 @@ try {
     const file = prefix + suffix;
     if (existsSync(file) && readFileSync(file, 'utf8').trim()) throw Error(`native stage1 codegen/link findings: ${file}`);
   }
+  const receiptRows = existsSync(factory.receipt) ? readFileSync(factory.receipt, 'utf8').split('\n') : [];
+  const identity = receiptRows.find(row => row.startsWith('compiler_source_identity='))?.slice('compiler_source_identity='.length);
+  if (typeof identity !== 'string' || !/^[^@#\s]+@[^@#\s]+#[^@#\s]+$/.test(identity)) throw Error(`factory receipt ${factory.receipt} lacks compiler_source_identity (\`name@version#source-id\`); refusing to invent one`);
   function publish(directory, binary, object) {
     accessSync(binary, constants.X_OK);
     const bytes = readFileSync(binary), objects = readFileSync(object);
