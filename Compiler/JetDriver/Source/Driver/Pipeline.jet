@@ -3938,8 +3938,10 @@ fn jet_driver_canonical_effect_module(source: String) -> SemaRegistrationModuleI
 // declarations join the load as one compiler-generated source module (source
 // unit, source file, loaded row), as Rust pushes its LoadedModule into the
 // bundle, so registration, checking, assembly, and every loaded-identity check
-// see one module set. A loaded source holding its path, alias, or identity is
-// refused.
+// see one module set. Like Core, foreign aggregate, and canonical effect
+// sources, its bytes also ride the generated sidecar, so a diagnostic sited in
+// it projects through the host codec. A loaded source holding its path, alias,
+// or identity is refused.
 fn jet_driver_retain_error_prelude_module(load: &JetDriverLoadResult) -> Bool {
     original := sema_registration_original_error_module(&load.diagnostics) ?? return false
     module_identity :: jet_driver_module_identity(original.package_identity, original.module_path)
@@ -3955,7 +3957,9 @@ fn jet_driver_retain_error_prelude_module(load: &JetDriverLoadResult) -> Bool {
         return false
     }
     file_diagnostics :: load.diagnostics.len()
-    jet_driver_add_source_file(&load.source_files, MIRSourceFile{id: mir_source_file_id(original.source_file), path: original.source_file, source: original.source}, &load.diagnostics)
+    file :: MIRSourceFile{id: mir_source_file_id(original.source_file), path: original.source_file, source: original.source}
+    jet_driver_add_source_file(&load.source_files, file, &load.diagnostics)
+    jet_driver_add_source_file(&load.generated_source_files, file, &load.diagnostics)
     if load.diagnostics.len() != file_diagnostics -> return false
     source_unit_index :: load.source_units.len()
     &load.source_units.push(JetDriverSourceUnit{root_index: -1, file_index: -1, root_identity: original.package_identity, package_identity: original.package_identity, module_name: original.module_name, path: original.source_file, relative_path: original.module_path, source_segments: original.source_segments, source_origin: original.source_origin, in_namespace: false})
