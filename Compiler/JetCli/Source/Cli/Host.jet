@@ -339,8 +339,9 @@ fn jet_cli_build_native(file: String, command: String, release: Bool, result: Je
         }
     }
     entry :: lowered.entry ?? return jet_cli_ice("the MIR program of `{file}` lost its entry function")
-    lir := lir_optimize_module(lowered.lir, if release -> 2 else -> 0)
-    lir.debug.directory = snapshot.roots[0].canonical_path
+    // No absolute source root enters DWARF: comp_dir stays "." as on the
+    // bootstrap native feed, so the output never depends on the checkout path.
+    lir :: lir_optimize_module(lowered.lir, if release -> 2 else -> 0)
     object :: x64_relocatable_object(lir, entry)
     if object.errors.len() > 0 {
         return JetDriverVerbOutput{
