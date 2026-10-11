@@ -24,6 +24,10 @@ if (!options.factory || !options.runtime || !options.out) throw Error(usage);
 if (existsSync(options.out)) throw Error(`fresh native-feed output required: ${options.out}`);
 mkdirSync(options.out, { recursive: true });
 const { repo, out } = options;
+// The factory and every CLI stage enter the source export's jet-env, which
+// refuses a CARGO_TARGET_DIR its checkout does not own (e.g. the default one a
+// caller's jet-env set for a different checkout). No stage runs Cargo.
+delete process.env.CARGO_TARGET_DIR;
 const json = (file, value) => writeFileSync(file, JSON.stringify(value, null, 2) + '\n');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const steps = [];
