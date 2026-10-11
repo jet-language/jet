@@ -2,7 +2,8 @@
 // execution seam. Engines may marshal a carrier into these impls, but they do
 // not choose a container shape or re-encode an outcome's clean/told meaning.
 
-use jet_foundation::StructuralDebug::jet_text_list;
+// StructuralDebug is flattened into the same Prelude module. Resident
+// collection modules import its list kernel before including this fragment.
 
 fn jet_text_map<I>(entries: I) -> String
 where

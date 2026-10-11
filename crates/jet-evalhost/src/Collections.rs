@@ -152,6 +152,7 @@ pub(crate) mod collection_semantics {
     // D-DATAFRAME1 / card #2447: the JIT uses the shared typed table-plan
     // kernel; this module only converts resident handles at its ABI boundary.
     include!("../../jet-codegen/src/Prelude/Core/LazyTablePlan.rs");
+    use jet_foundation::StructuralDebug::jet_text_list;
     include!("../../jet-codegen/src/Prelude/Core/TextValues.rs");
     include!("../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs");

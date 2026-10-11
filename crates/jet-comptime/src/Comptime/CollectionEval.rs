@@ -132,6 +132,7 @@ pub(crate) mod collection_semantics {
     // D-DATAFRAME1 / card #2447: comptime evaluation consumes the same typed
     // table-plan fact kernel as AOT and JIT; it owns no alternate plan shape.
     include!("../../../jet-codegen/src/Prelude/Core/LazyTablePlan.rs");
+    use jet_foundation::StructuralDebug::jet_text_list;
     include!("../../../jet-codegen/src/Prelude/Core/TextValues.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs");
     include!("../../../jet-codegen/src/Prelude/Memo.rs");

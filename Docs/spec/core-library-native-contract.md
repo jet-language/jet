@@ -423,7 +423,8 @@ same structural Show/Debug hooks as source-derived enums, including when an
 origin variant is the payload of a generated union.
 The Prelude and resident HTTP hosts marshal string-list payloads through the
 same Foundation list-formatting kernel; a host adapter does not choose a
-different container shape.
+different container shape. The single-file Prelude flattens that kernel into
+its own module; only separate resident collection modules import it.
 Lowering helpers that mutate their builder read retained plain metadata from
 an explicit owned `.copy()` snapshot, not a row still borrowed through that
 builder. This does not copy trait adapters or widen a value's Copy capability.

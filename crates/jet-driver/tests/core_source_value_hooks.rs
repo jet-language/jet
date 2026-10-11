@@ -714,3 +714,14 @@ fn run() -[FS]> {
         std::fs::remove_dir_all(directory).unwrap();
     });
 }
+
+#[test]
+fn single_file_list_formatter_has_one_kernel_definition() {
+    hosted_seed_program_runs("list_formatter_flat", None, r#"
+fn run() Never! {
+    values := [String]{"alpha", "beta"}
+    assert("{values}" == "[alpha, beta]")
+    assert("{values:Debug}" == "[\"alpha\", \"beta\"]")
+}
+"#);
+}
