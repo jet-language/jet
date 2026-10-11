@@ -75,15 +75,34 @@ const unit = join(project, 'selfhost.jet');
 writeFileSync(unit, source);
 // Package dependencies have been flattened by the canonical assembler; their
 // relative paths in JetCli/package.jet must not escape this standalone unit.
-const manifest = readFileSync(join(repo, 'Compiler/JetCli/package.jet'), 'utf8')
+const packageManifest = readFileSync(join(repo, 'Compiler/JetCli/package.jet'), 'utf8')
     .replace(/^deps: \{[\s\S]*?^\}\r?\n/m, '');
+// INTERIM for the D: authority deny-only port gap. The compiler's checked rows
+// carry the deny-only Mem.Rc (visitor callbacks); Rust exempts deny-only
+// rights at the application boundary (jet-foundation Authority.rs
+// `undecided_effects`), but a pinned JetCli Authority.jet whose
+// `jet_cli_undecided` exempts only Panic stops the native `jet build` stage
+// with E1803. Only for such a pin, grant exactly Mem.Rc in the assembled
+// manifest (factory and CLI stages read this same file) and record the patch.
+const authoritySource = readFileSync(join(repo, 'Compiler/JetCli/Source/Cli/Authority.jet'), 'utf8');
+const denyOnlyPorted = /fn jet_cli_undecided[^\n]*\n(?:[^\n]*\n){0,3}[^\n]*sema_effect_without_deny_only\(/.test(authoritySource);
+let manifest = packageManifest, manifestPatch = null;
+if (!denyOnlyPorted) {
+    const holds = /(holds:\s*\{\s*allow:\s*\[)([^\]]*)\]/;
+    const allowed = holds.exec(packageManifest)?.[2].split(',').map(right => right.trim()) ?? null;
+    if (!allowed?.includes('Mem.Alloc')) throw Error('Compiler/JetCli/package.jet authority.holds.allow no longer has the expected Mem.Alloc row');
+    if (!allowed.includes('Mem.Rc')) {
+        manifest = packageManifest.replace(holds, (_, head) => `${head}${allowed.flatMap(right => right === 'Mem.Alloc' ? [right, 'Mem.Rc'] : [right]).join(', ')}]`);
+        manifestPatch = { interim: 'D: authority deny-only port gap (JetCli Authority.jet jet_cli_undecided exempts only Panic)', file: 'package.jet', path: 'authority.holds.allow', added: ['Mem.Rc'], before: holds.exec(packageManifest)[0], after: holds.exec(manifest)[0] };
+    }
+}
 writeFileSync(join(project, 'package.jet'), manifest);
 const map = JSON.parse(readFileSync(join(bootstrap, 'compiler.map.json'), 'utf8'));
 map.source_segments.push({ generated: { start: Buffer.byteLength(aggregate + marker), end: Buffer.byteLength(source) }, source_file: entryPath,
     line_starts: [0, ...[...Buffer.from(entry).entries()].filter(([, byte]) => byte === 10).map(([index]) => index + 1)] });
 json(join(out, 'compiler.map.json'), map);
 if (options.assembleOnly) {
-    const assembly = { schema: 'jet-cli-assembly/v1', sourceRoot: repo, source: unit, sourceSha256: hash(Buffer.from(source)), project, entry: entryPath, map: join(out, 'compiler.map.json') };
+    const assembly = { schema: 'jet-cli-assembly/v1', sourceRoot: repo, source: unit, sourceSha256: hash(Buffer.from(source)), project, entry: entryPath, map: join(out, 'compiler.map.json'), manifestPatch };
     json(join(out, 'plan.json'), assembly);
     console.log(JSON.stringify(assembly, null, 2));
     process.exit(0);
@@ -102,7 +121,7 @@ if (options.seedBuild) {
     const command = [join(repo, 'Tools/agent/jet-env'), options.jet, 'build', '--release', unit];
     const destination = join(out, 'seed/jet');
     const seedPlan = { schema: 'jet-cli-seed-plan/v1', bootstrap: 'rust-emission', command, cwd: project,
-        source: unit, sourceSha256: hash(Buffer.from(source)), entry: entryPath, jet: destination };
+        source: unit, sourceSha256: hash(Buffer.from(source)), entry: entryPath, jet: destination, manifestPatch };
     json(join(out, 'plan.json'), seedPlan);
     if (options.dryRun) {
         console.log(JSON.stringify({ dryRun: true, ...seedPlan }, null, 2));
@@ -132,7 +151,7 @@ const stages = Array.from({ length: options.stages }, (_, index) => {
         destination: join(out, `stage${stage}`, 'jet'), keepGoingReport: join(out, `stage${stage}-keep-going.tsv`) };
 });
 const plan = { schema: 'jet-native-compiler-plan/v1', seed: options.jet, runtimeDir: options.runtime,
-    sourceRoot: repo, source: unit, sourceSha256: hash(Buffer.from(source)), entry: entryPath,
+    sourceRoot: repo, source: unit, sourceSha256: hash(Buffer.from(source)), entry: entryPath, manifestPatch,
     backend: 'jet-native', optimization: 'O0', environment: { JET_TOOLCHAIN_ROOT: repo, JET_KEEP_GOING: '1' },
     lowering: 'lir_lower_entry', objectWriter: 'x64_relocatable_object', linker: 'x64_link_executable',
     stages, comparisons: options.stages === 2 ? ['stage1/jet.o == stage2/jet.o', 'stage1/jet == stage2/jet'] : [] };
