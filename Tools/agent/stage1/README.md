@@ -111,18 +111,23 @@ Tools/agent/jet-env node Tools/agent/stage1/native-feed.mjs \
   --factory-record /disk/stage-zero/receipt.json \
   --runtime-dir /disk/native-runtime --out /disk/native-fixedpoint \
   --repo /disk/pinned-source
+Tools/agent/jet-env node Tools/agent/stage1/native-feed.mjs \
+  --self-rebuild --out /disk/native-fixedpoint
 ```
 
 `native-feed.mjs --dry-run` performs only canonical CLI-unit assembly and records
 the future artifact dependencies; it does not admit missing upstream artifacts.
 The real run lowers that exact unit through `Entry.native` to stage 1, then
-uses stage 1's real `build` argv to compile the same unit into stage 2, then
-stage 2's to compile it into stage 3. Every all-phases census must exist and be
-empty. The gate is whole-file byte identity of the stage 1 and stage 2 objects
-and ELFs (`comparisons.json`, written before stage 3 starts); stage 2 == stage 3
-is the self-rebuild receipt, and GREEN needs both. The receipt's `stages` stay
-the stage 1/2 pair; stage 3 is recorded beside them. Producer/harness hashes are
-recorded separately from the single pinned compiler/runtime source identity.
+uses stage 1's real `build` argv to compile the same unit into stage 2. Every
+all-phases census must exist and be empty. The fixed point is whole-file byte
+identity of the stage 1 and stage 2 objects and ELFs (`comparisons.json`); the
+GREEN `native-compiler.json` (`fixedPoint: true`, `stages` = the stage 1/2
+pair, `jet` = `stage2/jet`) is published as soon as it holds. The stage 3
+self-rebuild is a separate follow-up: `--self-rebuild --out <published dir>`
+has stage 2 compile the same unit into stage 3 and writes `self-rebuild.json`
+(`selfRebuild.identical`: stage 2 == stage 3, whole files); it never gates the
+publication and may run beside smoke. Producer/harness hashes are recorded
+separately from the single pinned compiler/runtime source identity.
 
 The factory and every CLI stage run inside the source export's
 `Tools/agent/jet-env` shell entered from the caller's environment (the
