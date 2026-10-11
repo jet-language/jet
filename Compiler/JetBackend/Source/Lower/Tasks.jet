@@ -9,7 +9,7 @@
 // the box on the thread that ran it. A flattened `T E!` body renders its
 // failure for the TaskFailure reason with "task.debug" (Rust `{:?}`).
 use jet_foundation.[
-    MIRCallee, MIRCallArg, MIRFunctionID, MIRInstruction, MIRLoopSourceKind, MIROperation, MIRPreludeCallID,
+    MIRCallee, MIRCallArg, MIRFunction, MIRFunctionID, MIRInstruction, MIRLoopSourceKind, MIROperation, MIRPreludeCallID,
     MIRProgram, MIRSelectKind, MIRTaskGroupKind, MIRType, MIRTypeKind, MIRValueID, mir_nominal_ref,
     mir_symbol_name, mir_type_display_name, mir_type_from_kind, mir_type_identity_key,
 ]
@@ -68,15 +68,26 @@ fn lower_task_stop_program(p: MIRProgram, prepared: [LowerPreparedFunction]) -> 
     true
 }
 
+fn lower_task_template_source(p: MIRProgram, function: MIRFunctionID) -> MIRFunction? {
+    loop source in p.functions {
+        if source.id == function -> return Val(source.copy())
+    }
+    None
+}
+
 // A cached unwind-based graph may still spawn bodies statically known not to
 // stop. Native instrumented graphs use the runtime rail instead of unwinding.
 fn lower_task_can_stop(p: MIRProgram, m: LowerModule, function: MIRFunctionID, seen: &[U64:Bool]) -> Bool Never! {
     if m.task_stop_points -> return false
     if seen.get(function.value) != None -> return false
     &seen.add(function.value, true).drop("checked absent above")
+    // A generic callee is named by its template ID in the borrowed source
+    // body, while Mono registers only concrete instance IDs. Stop facts do not
+    // depend on type arguments, so the template's own body decides.
     index :: lower_function_index(m, function)
-    if index < 0 -> return true
-    source :: lower_row_source(p, m, index)
+    source :: if index >= 0 -> lower_row_source(p, m, index) else -> {
+        lower_task_template_source(p, function) ?? return true
+    }
     // Core wait points have checked argument guards, not user task stops.
     // Cancellation itself is rejected at Task.cancel and race/any sites.
     if source.key.starts_with("<corelib>") -> return false
