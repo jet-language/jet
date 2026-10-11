@@ -12,9 +12,11 @@ fn jet_driver_cost_query(request: ^JetDriverCompileRequest) -> JetDriverCostQuer
     selected.mode = JetDriverCompileMode.Doc
     selected.capture_cost_report = true
     compile := jet_driver_compile_mir(^selected)
-    report :: ^compile.cost_report
+    // The report rows are plain data: copy them out and clear the fields with
+    // whole assignments, so `compile` stays one owner that moves once below.
+    report := compile.cost_report.copy()
     compile.cost_report = None
-    gaps :: ^compile.cost_gaps
+    gaps := compile.cost_gaps.copy()
     compile.cost_gaps = [String]{}
     JetDriverCostQueryResult{compile: ^compile, report: ^report, gaps: ^gaps}
 }
