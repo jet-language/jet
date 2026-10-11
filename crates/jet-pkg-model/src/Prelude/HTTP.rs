@@ -5536,7 +5536,7 @@ fn encode_multipart(fields: &[String], boundary: &str) -> String {
 // Bootstrap build-input transport. Removal: Jet DNS/TLS/HTTP internals.
 // The caller supplies the DNS answer it checked, transport timeout and byte
 // bound. No lookup, redirects, status policy, pin or diagnostic lives here.
-pub fn jet_http_build_resolve_impl(host: &String, port: i64) -> Result<Vec<Vec<u8>>, String> {
+pub fn jet_http_build_resolve_impl(host: &str, port: i64) -> Result<Vec<Vec<u8>>, String> {
     let port = u16::try_from(port).map_err(|error| error.to_string())?;
     let host = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(host);
     (host, port).to_socket_addrs()
@@ -5773,7 +5773,7 @@ mod build_http_transport_tests {
 
     #[test]
     fn build_http_raw_dns_and_timeout() {
-        let addresses = jet_http_build_resolve_impl(&"127.0.0.1".into(), 80).unwrap();
+        let addresses = jet_http_build_resolve_impl("127.0.0.1", 80).unwrap();
         assert_eq!(addresses, vec![vec![127, 0, 0, 1]]);
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();

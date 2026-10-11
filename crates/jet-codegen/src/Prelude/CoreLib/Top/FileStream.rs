@@ -54,7 +54,7 @@ pub(crate) fn jet_std_files_open_reader(handle: i64, name: &str, links: i64,) ->
 /// no policy). Opens the path for reading without waiting on a FIFO or device
 /// peer; the caller stats the opened reader and reads it with `read(max)`.
 pub(crate) fn jet_std_files_open_reader_nonblocking(
-    path: &String,
+    path: &str,
 ) -> Result<JetFileReader, jet_std::IOError> {
     if jet_fault_should_fail("FS.Read") {
         return Err(jet_std::IOError::other(

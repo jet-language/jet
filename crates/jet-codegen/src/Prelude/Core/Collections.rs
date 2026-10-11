@@ -1227,7 +1227,7 @@ fn jet_map_contains_value_kernel<K: Ord, V: PartialEq<U>, U: ?Sized>(m: &JetMap<
     m.values().any(|value| value == needle)
 }
 
-fn jet_map_pop_kernel<M, K: Ord + Clone + std::borrow::Borrow<Q>, V: Clone, Q: Ord + ?Sized>(m: &mut M, key: &Q) -> JetOutcome<V, JetAbsent>
+fn jet_map_pop_kernel<M, K: Ord + std::borrow::Borrow<Q>, V, Q: Ord + ?Sized>(m: &mut M, key: &Q) -> JetOutcome<V, JetAbsent>
 where
     M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
 {
@@ -1454,7 +1454,7 @@ fn jet_priority_queue_pop_kernel<C: JetPriorityQueuePopKernel>(
     jet_outcome_of(queue.pop_priority_value())
 }
 
-fn jet_map_pop_first_kernel<K: Ord + Clone, V: Clone>(
+fn jet_map_pop_first_kernel<K: Ord + Clone, V>(
     m: &mut JetMap<K, V>,
 ) -> JetOutcome<V, JetAbsent> {
     let Some(key) = m.keys().next().cloned() else {

@@ -54,7 +54,7 @@ mod jet_file_lock_native {
             reparse: false, errno, platform: PLATFORM }
     }
 
-    pub(super) fn open(path: &String) -> JetFsLockCall {
+    pub(super) fn open(path: &str) -> JetFsLockCall {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             use std::os::fd::IntoRawFd;
@@ -201,7 +201,7 @@ mod jet_file_lock_native {
         #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         { let _ = fd; failed_identity(0) }
     }
-    pub(super) fn path_identity(path: &String) -> JetFsLockIdentity {
+    pub(super) fn path_identity(path: &str) -> JetFsLockIdentity {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         { identity(std::fs::symlink_metadata(path)) }
         #[cfg(windows)]
@@ -262,11 +262,11 @@ mod jet_file_lock_native {
 }
 // JET_VETTED_UNSAFE_END: jet_file_lock_native
 
-pub(crate) fn jet_fs_lock_open_raw(path: &String) -> JetFsLockCall { jet_file_lock_native::open(path) }
+pub(crate) fn jet_fs_lock_open_raw(path: &str) -> JetFsLockCall { jet_file_lock_native::open(path) }
 pub(crate) fn jet_fs_lock_try_raw(fd: i64) -> JetFsLockCall { jet_file_lock_native::acquire(fd, true) }
 pub(crate) fn jet_fs_lock_close_raw(fd: i64) -> i64 { jet_file_lock_native::release(fd) }
 pub(crate) fn jet_fs_lock_fd_identity_raw(fd: i64) -> JetFsLockIdentity { jet_file_lock_native::fd_identity(fd) }
-pub(crate) fn jet_fs_lock_path_identity_raw(path: &String) -> JetFsLockIdentity { jet_file_lock_native::path_identity(path) }
+pub(crate) fn jet_fs_lock_path_identity_raw(path: &str) -> JetFsLockIdentity { jet_file_lock_native::path_identity(path) }
 pub(crate) fn jet_fs_lock_wait_raw(fd: i64, timeout_ns: i64, bounded: bool, deadline_ns: i64) -> JetFsLockWait {
     jet_file_lock_native::wait(fd, timeout_ns, bounded, deadline_ns)
 }

@@ -3012,12 +3012,65 @@ where
 {
     xs.iter().map(f).collect()
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct JetMap<K, V>(std::sync::Arc<std::collections::BTreeMap<K, V>>);
+/// A Jet map value: copy-on-write ordered storage. Jet maps may hold values
+/// Rust cannot clone (handles, owned callbacks), so mutation never demands
+/// `V: Clone`. Storage becomes shared only through `JetMap::clone` (or a
+/// values view), which needs `K, V: Clone` and records the entry cloner in the
+/// shared allocation; the first mutation of shared storage copies it with that
+/// cloner. A map whose values are not `Clone` is therefore never shared.
+struct JetMap<K, V>(std::sync::Arc<JetMapStore<K, V>>);
+
+struct JetMapStore<K, V> {
+    map: std::collections::BTreeMap<K, V>,
+    cloner: std::sync::OnceLock<fn(&std::collections::BTreeMap<K, V>) -> std::collections::BTreeMap<K, V>>,
+}
+
+impl<K, V> JetMapStore<K, V> {
+    fn new(map: std::collections::BTreeMap<K, V>) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self { map, cloner: std::sync::OnceLock::new() })
+    }
+}
+
+fn jet_map_clone_entries<K: Clone, V: Clone>(
+    map: &std::collections::BTreeMap<K, V>,
+) -> std::collections::BTreeMap<K, V> {
+    map.clone()
+}
 
 impl<K, V> JetMap<K, V> {
     fn new() -> Self {
-        Self(std::sync::Arc::new(std::collections::BTreeMap::new()))
+        Self(JetMapStore::new(std::collections::BTreeMap::new()))
+    }
+
+    fn from_map(map: std::collections::BTreeMap<K, V>) -> Self {
+        Self(JetMapStore::new(map))
+    }
+
+    /// Share the storage, recording how to copy it on a later mutation.
+    fn share(&self) -> std::sync::Arc<JetMapStore<K, V>>
+    where
+        K: Clone,
+        V: Clone,
+    {
+        self.0.cloner.get_or_init(|| jet_map_clone_entries::<K, V>);
+        std::sync::Arc::clone(&self.0)
+    }
+
+    /// Unique mutable storage: shared storage is copied with the cloner its
+    /// sharing recorded. Shared storage without one is a runtime invariant
+    /// breach and stops loudly.
+    fn storage_mut(&mut self) -> &mut std::collections::BTreeMap<K, V> {
+        if std::sync::Arc::get_mut(&mut self.0).is_none() {
+            let cloner = *self
+                .0
+                .cloner
+                .get()
+                .expect("JetMap storage is shared without an entry cloner");
+            self.0 = JetMapStore::new(cloner(&self.0.map));
+        }
+        &mut std::sync::Arc::get_mut(&mut self.0)
+            .expect("JetMap storage is unique after copy-on-write")
+            .map
     }
 }
 impl<K: Ord, V> JetMap<K, V> {
@@ -3026,15 +3079,33 @@ impl<K: Ord, V> JetMap<K, V> {
     }
 }
 
+impl<K: Clone, V: Clone> Clone for JetMap<K, V> {
+    fn clone(&self) -> Self {
+        Self(self.share())
+    }
+}
+
+impl<K: std::fmt::Debug, V: std::fmt::Debug> std::fmt::Debug for JetMap<K, V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("JetMap").field(&self.0.map).finish()
+    }
+}
+
+impl<K: PartialEq, V: PartialEq> PartialEq for JetMap<K, V> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.map == other.0.map
+    }
+}
+
+impl<K: Eq, V: Eq> Eq for JetMap<K, V> {}
+
 // Codegen lowers map construction from a sequence of pairs to
 // `.into_iter().collect()`, so the map has to be buildable from its own pairs.
 // Without this, decoding a table into a typed map emitted Rust that rustc
 // rejected (I2).
 impl<K: Ord, V> FromIterator<(K, V)> for JetMap<K, V> {
     fn from_iter<I: IntoIterator<Item = (K, V)>>(pairs: I) -> Self {
-        Self(std::sync::Arc::new(
-            pairs.into_iter().collect::<std::collections::BTreeMap<K, V>>(),
-        ))
+        Self::from_map(pairs.into_iter().collect::<std::collections::BTreeMap<K, V>>())
     }
 }
 
@@ -3042,13 +3113,13 @@ impl<K, V> std::ops::Deref for JetMap<K, V> {
     type Target = std::collections::BTreeMap<K, V>;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.0.map
     }
 }
 
-impl<K: Ord + Clone, V: Clone> std::ops::DerefMut for JetMap<K, V> {
+impl<K, V> std::ops::DerefMut for JetMap<K, V> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        std::sync::Arc::make_mut(&mut self.0)
+        self.storage_mut()
     }
 }
 
@@ -3056,10 +3127,10 @@ impl<K: Ord + Clone, V: Clone> std::ops::DerefMut for JetMap<K, V> {
 /// keeps the returned borrow inside that region; ordinary `JetMap` mutation
 /// retains copy-on-write semantics everywhere else.
 #[inline(always)]
-fn jet_map_make_mut<K: Ord + Clone, V: Clone>(
+fn jet_map_make_mut<K: Ord, V>(
     m: &mut JetMap<K, V>,
 ) -> &mut std::collections::BTreeMap<K, V> {
-    std::sync::Arc::make_mut(&mut m.0)
+    m.storage_mut()
 }
 
 impl<'a, K: Ord, V> IntoIterator for &'a JetMap<K, V> {
@@ -3073,14 +3144,14 @@ impl<'a, K: Ord, V> IntoIterator for &'a JetMap<K, V> {
 
 fn jet_map_into_entries<K: Ord + Clone, V: Clone>(m: JetMap<K, V>) -> Vec<(K, V)> {
     match std::sync::Arc::try_unwrap(m.0) {
-        Ok(map) => {
-            let mut entries = Vec::with_capacity(map.len());
-            entries.extend(map);
+        Ok(store) => {
+            let mut entries = Vec::with_capacity(store.map.len());
+            entries.extend(store.map);
             entries
         }
         Err(shared) => {
-            let mut entries = Vec::with_capacity(shared.len());
-            entries.extend(shared.iter().map(|(k, v)| (k.clone(), v.clone())));
+            let mut entries = Vec::with_capacity(shared.map.len());
+            entries.extend(shared.map.iter().map(|(k, v)| (k.clone(), v.clone())));
             entries
         }
     }
@@ -3179,7 +3250,7 @@ where
     }
 }
 #[inline(always)]
-fn jet_map_insert<M, K: Ord + Clone, V: Clone>(
+fn jet_map_insert<M, K: Ord, V>(
     m: &mut M,
     k: K,
     v: V,
@@ -3191,7 +3262,7 @@ where
 }
 
 #[inline(always)]
-fn jet_map_add_new<M, K: Ord + Clone, V: Clone>(m: &mut M, k: K, v: V) -> bool
+fn jet_map_add_new<M, K: Ord, V>(m: &mut M, k: K, v: V) -> bool
 where
     M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
 {
@@ -3257,13 +3328,13 @@ impl<V> JetStringBytesMap<V> for std::collections::BTreeMap<String, V> {
     }
 }
 
-impl<V: Clone> JetStringBytesMap<V> for JetMap<String, V> {
+impl<V> JetStringBytesMap<V> for JetMap<String, V> {
     #[inline(always)]
     fn update_bytes<F>(&mut self, bytes: &[u8], f: F) -> Result<(), ()>
     where
         F: FnOnce(Option<&V>) -> V,
     {
-        std::sync::Arc::make_mut(&mut self.0).update_bytes(bytes, f)
+        self.storage_mut().update_bytes(bytes, f)
     }
 }
 
@@ -3507,34 +3578,12 @@ where
     }
     out
 }
-// D-LISTMAP1: the view owns the map's Arc and advances by key. This keeps the
-// iterator `'static` without copying the BTreeMap (or borrowing through a
-// short-lived local Arc). Each pull clones only the yielded item; the map stays
-// shared and untouched until a mutation triggers Arc::make_mut.
-struct JetMapKeys<K, V> {
-    map: std::sync::Arc<std::collections::BTreeMap<K, V>>,
-    last: Option<K>,
-}
-
-impl<K: Ord + Clone, V> Iterator for JetMapKeys<K, V> {
-    type Item = K;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let next = match self.last.as_ref() {
-            Some(last) => self
-                .map
-                .range((std::ops::Bound::Excluded(last), std::ops::Bound::Unbounded))
-                .next(),
-            None => self.map.iter().next(),
-        }?;
-        let key = next.0.clone();
-        self.last = Some(key.clone());
-        Some(key)
-    }
-}
-
+// D-LISTMAP1: the values view owns the map's storage and advances by key. This
+// keeps the iterator `'static` without copying the BTreeMap (or borrowing
+// through a short-lived local Arc). Each pull clones only the yielded item; the
+// map stays shared and untouched until a mutation copies it on write.
 struct JetMapValues<K, V> {
-    map: std::sync::Arc<std::collections::BTreeMap<K, V>>,
+    map: std::sync::Arc<JetMapStore<K, V>>,
     last: Option<K>,
 }
 
@@ -3545,9 +3594,10 @@ impl<K: Ord + Clone, V: Clone> Iterator for JetMapValues<K, V> {
         let next = match self.last.as_ref() {
             Some(last) => self
                 .map
+                .map
                 .range((std::ops::Bound::Excluded(last), std::ops::Bound::Unbounded))
                 .next(),
-            None => self.map.iter().next(),
+            None => self.map.map.iter().next(),
         }?;
         let key = next.0.clone();
         let value = next.1.clone();
@@ -3556,16 +3606,15 @@ impl<K: Ord + Clone, V: Clone> Iterator for JetMapValues<K, V> {
     }
 }
 
+/// The keys view snapshots the keys: the values may not be `Clone`, so the
+/// view cannot share storage a later mutation would have to copy.
 fn jet_map_keys<K: Ord + Clone + 'static, V: 'static>(m: &JetMap<K, V>) -> JetIter<K> {
-    JetIter(Box::new(JetMapKeys {
-        map: std::sync::Arc::clone(&m.0),
-        last: None,
-    }))
+    JetIter(Box::new(m.keys().cloned().collect::<Vec<_>>().into_iter()))
 }
 
 fn jet_map_values<K: Ord + Clone + 'static, V: Clone + 'static>(m: &JetMap<K, V>) -> JetIter<V> {
     JetIter(Box::new(JetMapValues {
-        map: std::sync::Arc::clone(&m.0),
+        map: m.share(),
         last: None,
     }))
 }
@@ -3836,11 +3885,11 @@ fn jet_map_all<K: Ord, V, F>(m: JetMap<K, V>, mut f: F) -> bool where F: FnMut(&
 }
 fn jet_map_filter<K: Ord + Clone, V: Clone, F>(m: JetMap<K, V>, mut f: F) -> JetMap<K, V>
 where F: FnMut(&K, &V) -> bool {
-    JetMap(std::sync::Arc::new(m.iter().filter(|(k,v)| f(k,v)).map(|(k,v)|(k.clone(),v.clone())).collect()))
+    JetMap::from_map(m.iter().filter(|(k,v)| f(k,v)).map(|(k,v)|(k.clone(),v.clone())).collect())
 }
 fn jet_map_map_values<K: Ord + Clone, V, U, F>(m: JetMap<K, V>, mut f: F) -> JetMap<K, U>
 where F: FnMut(&K, &V) -> U {
-    JetMap(std::sync::Arc::new(m.iter().map(|(k,v)|(k.clone(), f(k,v))).collect()))
+    JetMap::from_map(m.iter().map(|(k,v)|(k.clone(), f(k,v))).collect())
 }
 fn jet_map_fold<K: Ord, V, U, F>(m: JetMap<K, V>, init: U, mut f: F) -> U
 where F: FnMut(&U, &K, &V) -> U {
