@@ -614,6 +614,11 @@ struct SemaRegistrationGraph {
     impl_trait_slots: [String:Int]{[String:Int]{}}
     impl_trait_buckets: [[SemaRegistrationRowRef]]{[[SemaRegistrationRowRef]]{}}
     impl_traits_indexed: Bool{false}
+    // Opaque impl type name -> the Core source modules that own its impls
+    // (`sema_registration_source_owns_impl`), in module order. Built once with
+    // the graph, so method lookup reads only the owning modules instead of
+    // walking CORE_SOURCE_OWNED_ROWS for every module on every call.
+    source_impl_owner_modules: [String:[Int]]{[String:[Int]]{}}
     // JET_KEEP_GOING, the compiler-internal diagnostic mode the driver sets
     // (its output is never shipped): a function whose body check fails is
     // kept as a typed trap of its declared signature instead of being left
@@ -1873,6 +1878,28 @@ fn sema_registration_source_owns_impl(module_row: SemaRegistrationModule, name: 
     false
 }
 
+// The `sema_registration_source_owns_impl` relation for every module and impl
+// type at once: `name` maps to module `m` exactly when
+// `sema_registration_source_owns_impl(graph.modules[m], name)` holds.
+fn sema_registration_index_source_impls(graph: &SemaRegistrationGraph) Never! {
+    owners := [String:[Int]]{}
+    loop module_index in 0..<graph.modules.len() {
+        module_row :: graph.modules[module_index]
+        if !module_row.module_identity.starts_with("<corelib>/") -> next
+        loop row in CORE_SOURCE_OWNED_ROWS {
+            if row.module_name != module_row.module_name || row.alias != module_row.core_source_alias || module_row.source_file != "<corelib>/{row.path}" -> next
+            loop owner in row.impl_types {
+                if !sema_reserved_type_name(owner) && !core_module_has_type(row.module_name, owner) -> next
+                modules := owners.get(owner) ?? [Int]{}
+                if modules.contains(module_index) -> next
+                &modules.push(module_index)
+                owners[owner] = ^modules
+            }
+        }
+    }
+    graph.source_impl_owner_modules = ^owners
+}
+
 // D-OPMIX1 (Rust `opmix_allows_builtin_impl`): an operator hook on a built-in
 // type belongs to the package that declares the other operand, so
 // `impl Int.Mul(Price)` is legal when this module declares `Price`.
@@ -3017,6 +3044,7 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     }
     graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_rows: module_rows, edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, lookup_counters: shared SemaLookupCounters{module_lookups: 0, name_lookups: 0}, counting: counting, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, callable_rows: [String:SemaRegistrationCallableRow]{}, nominal_row_slots: [String:Int]{}, nominal_row_buckets: [[SemaRegistrationRowRef]]{}, impl_row_slots: [String:Int]{}, impl_row_buckets: [[SemaRegistrationRowRef]]{}, nominal_symbol_rows: [String:SemaRegistrationRowRef]{}}
     loop indexed_module in 0..<graph.modules.len() -> sema_registration_index_nominal_rows(&graph, indexed_module, 0)
+    sema_registration_index_source_impls(&graph)
     sema_registration_index_namespaces(&graph)
     if entry_module_identity != "" && sema_registration_module_index(graph, entry_module_identity) == None {
         &graph.diagnostics.push(sema_error_optional("E0003", None, "the declaration graph entry is not loaded", "the entry identity must name one prepared module", "include the entry module in the loader's module inputs"))

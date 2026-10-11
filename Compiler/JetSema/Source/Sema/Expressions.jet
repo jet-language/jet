@@ -2231,16 +2231,18 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
     // Fact tags remain on the checked value, not on declaration lookup.
     lookup_type :: sema_expr_unwrap_tag(receiver_type)
     receiver_name :: sema_expr_type_base_name(lookup_type) ?? return candidates
-    // Native carrier methods live on registered impls, never fake nominals.
-    loop owner_row in graph.modules {
-        if !sema_registration_source_owns_impl(owner_row, receiver_name) -> next
-        loop implementation in owner_row.impls {
-            if implementation.target_type_name != receiver_name -> next
-            loop function in implementation.methods {
-                if function.symbol.name != method || function.parameters.len() == 0 -> next
-                method_ref :: TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
-                candidate :: sema_call_method_candidate_from_registration(function.signature, function.generic_params, program.registration_graph, caller_module, caller_package, environment.generic_params, Val(lookup_type), function.parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
-                &candidates.push(candidate)
+    // Native carrier methods live on registered impls, never fake nominals;
+    // only the Core source modules indexed as owning this name's impls.
+    if graph.source_impl_owner_modules.get(receiver_name) == .Val(owner_modules) {
+        loop owner_index in owner_modules {
+            loop implementation in graph.modules[owner_index].impls {
+                if implementation.target_type_name != receiver_name -> next
+                loop function in implementation.methods {
+                    if function.symbol.name != method || function.parameters.len() == 0 -> next
+                    method_ref :: TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
+                    candidate :: sema_call_method_candidate_from_registration(function.signature, function.generic_params, program.registration_graph, caller_module, caller_package, environment.generic_params, Val(lookup_type), function.parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
+                    &candidates.push(candidate)
+                }
             }
         }
     }
@@ -2308,12 +2310,13 @@ fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, program:
     if program.registration_graph == .Val(graph) {
     // A resolved receiver carries its canonical identity (`module::URL`).
     base_name :: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver_type)) ?? return false
-    loop owner_row in graph.modules {
-        if !sema_registration_source_owns_impl(owner_row, base_name) -> next
-        loop implementation in owner_row.impls {
-            if implementation.target_type_name != base_name -> next
-            loop function in implementation.methods {
-                if function.symbol.name == method && (!needs_receiver || function.parameters.len() > 0) -> return true
+    if graph.source_impl_owner_modules.get(base_name) == .Val(owner_modules) {
+        loop owner_index in owner_modules {
+            loop implementation in graph.modules[owner_index].impls {
+                if implementation.target_type_name != base_name -> next
+                loop function in implementation.methods {
+                    if function.symbol.name == method && (!needs_receiver || function.parameters.len() > 0) -> return true
+                }
             }
         }
     }

@@ -2413,28 +2413,32 @@ fn sema_checked_shared_reaches(graph: SemaRegistrationGraph, owner: String, call
         .Named(_) -> {
             row :: sema_type_resolve_nominal_row(graph, ty, caller) ?? return (reaches: false, cut: false)
             key :: graph.modules[row.module_index].nominals[row.row].symbol.id.key
-            if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(.Struct(definition)) {
-                if key == owner -> return (reaches: true, cut: false)
-                if memo.get(key) == .Val(known) -> return (reaches: known, cut: false)
-                if active.get(key) == (Val(true)) -> return (reaches: false, cut: true)
-                active[key] = true
-                reaches := false
-                cut := false
-                module_identity :: graph.modules[row.module_index].module_identity
-                loop field in definition.fields {
-                    if field.computed != None -> next
-                    result :: sema_checked_shared_reaches(graph, owner, module_identity, field.ty, &memo, &active)
-                    cut = cut || result.cut
-                    if result.reaches {
-                        reaches = true
-                        break
+            // Two single-level matches read the declaration in place; a nested
+            // `.SourceAST(.Struct(definition))` pattern clones the whole Item.
+            if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
+                if item == .Struct(definition) {
+                    if key == owner -> return (reaches: true, cut: false)
+                    if memo.get(key) == .Val(known) -> return (reaches: known, cut: false)
+                    if active.get(key) == (Val(true)) -> return (reaches: false, cut: true)
+                    active[key] = true
+                    reaches := false
+                    cut := false
+                    module_identity :: graph.modules[row.module_index].module_identity
+                    loop field in definition.fields {
+                        if field.computed != None -> next
+                        result :: sema_checked_shared_reaches(graph, owner, module_identity, field.ty, &memo, &active)
+                        cut = cut || result.cut
+                        if result.reaches {
+                            reaches = true
+                            break
+                        }
                     }
+                    active[key] = false
+                    // A negative reached through an active cycle is provisional:
+                    // a later sibling may reach the owner. Never memoize that cut.
+                    if reaches || !cut -> memo[key] = reaches
+                    return (reaches: reaches, cut: cut)
                 }
-                active[key] = false
-                // A negative reached through an active cycle is provisional:
-                // a later sibling may reach the owner. Never memoize that cut.
-                if reaches || !cut -> memo[key] = reaches
-                return (reaches: reaches, cut: cut)
             }
             (reaches: false, cut: false)
         }
@@ -2504,17 +2508,21 @@ fn sema_checked_shared_witness(graph: SemaRegistrationGraph, owner: String, call
             row :: sema_type_resolve_nominal_row(graph, ty, caller) ?? return None
             key :: graph.modules[row.module_index].nominals[row.row].symbol.id.key
             if stack.contains(key) -> return None
-            if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(.Struct(definition)) {
-                &stack.push(key)
-                witness := String?{None}
-                module_identity :: graph.modules[row.module_index].module_identity
-                loop field in definition.fields {
-                    if field.computed != None -> next
-                    witness = sema_checked_shared_witness(graph, owner, module_identity, field.ty, &memo, &stack)
-                    if witness != None -> break
+            // Single-level matches borrow the declaration in place (see
+            // sema_checked_shared_reaches); a nested pattern clones the Item.
+            if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
+                if item == .Struct(definition) {
+                    &stack.push(key)
+                    witness := String?{None}
+                    module_identity :: graph.modules[row.module_index].module_identity
+                    loop field in definition.fields {
+                        if field.computed != None -> next
+                        witness = sema_checked_shared_witness(graph, owner, module_identity, field.ty, &memo, &stack)
+                        if witness != None -> break
+                    }
+                    _ := &stack.pop()
+                    return witness
                 }
-                _ := &stack.pop()
-                return witness
             }
             None
         }

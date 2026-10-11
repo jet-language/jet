@@ -450,9 +450,13 @@ fn sema_type_graph_resolve_named(graph: SemaRegistrationGraph, name: String, cal
         .Type -> {
             if sema_type_graph_nominal_row(graph, resolved.symbol.id.key) == .Val(row) {
                 nominal :: graph.modules[row.module_index].nominals[row.row]
-                if nominal.source == .SourceAST(.TypeAlias(definition)) {
-                    if definition.type_params.len() == 0 && definition.target == .Named(_) {
-                        return sema_type_graph_resolve_named(graph, type_name(definition.target), nominal.symbol.module_name)
+                // Single-level matches read the alias in place; a nested
+                // `.SourceAST(.TypeAlias(definition))` pattern clones the Item.
+                if nominal.source == .SourceAST(item) {
+                    if item == .TypeAlias(definition) {
+                        if definition.type_params.len() == 0 && definition.target == .Named(_) {
+                            return sema_type_graph_resolve_named(graph, type_name(definition.target), nominal.symbol.module_name)
+                        }
                     }
                 }
             }
