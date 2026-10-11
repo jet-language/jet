@@ -3751,6 +3751,8 @@ fn sema_check_bodies_parallel(shared: Shared<SemaCheckShared>, module_index: Int
         return ^prepared
     }
     bounds :: compiler_threads_partition(weights, workers)
+    source :: shared SemaBodyScopeSource{scopes: [SemaScopeTable]{}}
+    sema_check_body_scope_fill(source, ^scopes)
     slots := [Shared<SemaBodyPart>]{}
     loop part in 0..<workers {
         items := [SemaBodyJob]{}
@@ -3763,11 +3765,12 @@ fn sema_check_bodies_parallel(shared: Shared<SemaCheckShared>, module_index: Int
             }
         }
         slot :: shared SemaBodyPart{scopes: sema_scope_init(""), items: [SemaBodyJob]{}, bodies: [SemaPreparedBody]{}}
-        sema_check_body_part_fill(slot, scopes.copy(), ^items, ^replay, has_memo)
+        sema_check_body_part_fill(slot, ^items, ^replay, has_memo)
         &slots.push(slot)
     }
-    _ := sema_check_body_parts(shared, slots, 0, module_index)
-    &prepared.scopes.push(^scopes)
+    _ := sema_check_body_parts(shared, source, slots, 0, module_index)
+    restored := sema_check_body_scope_take(source)
+    &prepared.scopes.push(^restored)
     prepared.queries = ^queries
     part := workers
     loop part > 0 {
@@ -3777,13 +3780,37 @@ fn sema_check_bodies_parallel(shared: Shared<SemaCheckShared>, module_index: Int
     ^prepared
 }
 
-// Moves a thread's scope copy and item indexes into its slot.
-fn sema_check_body_part_fill(slot: Shared<SemaBodyPart>, scopes: ^SemaScopeTable, items: ^[SemaBodyJob], replay: ^[Bool], observe: Bool) {
+// The post-summary module scope every body-check thread copies for itself:
+// moved in as the one row of its list before the threads start and moved out
+// after they join, so each thread makes its own copy in parallel instead of
+// the calling thread making all of them one after another.
+struct SemaBodyScopeSource {
+    scopes: [SemaScopeTable]
+}
+
+fn sema_check_body_scope_fill(source: Shared<SemaBodyScopeSource>, scopes: ^SemaScopeTable) {
+    permit :: source.guard_edit()
+    &permit.value.scopes.push(^scopes)
+}
+
+fn sema_check_body_scope_take(source: Shared<SemaBodyScopeSource>) -> SemaScopeTable {
+    permit :: source.guard_edit()
+    &permit.value.scopes.pop() ?? panic("the body-check module scope left its shared source")
+}
+
+// Moves a thread's item indexes into its slot.
+fn sema_check_body_part_fill(slot: Shared<SemaBodyPart>, items: ^[SemaBodyJob], replay: ^[Bool], observe: Bool) {
     permit :: slot.guard_edit()
-    permit.value.scopes = ^scopes
     permit.value.items = ^items
     permit.value.cache_replay = ^replay
     permit.value.cache_observe = observe
+}
+
+// Gives a thread's slot its own copy of the module scope, made on that thread.
+fn sema_check_body_part_copy_scope(source: Shared<SemaBodyScopeSource>, slot: Shared<SemaBodyPart>) {
+    scope_permit :: source.guard_read()
+    permit :: slot.guard_edit()
+    permit.value.scopes = scope_permit.value.scopes[0].copy()
 }
 
 // Moves a part's bodies onto `bodies`, last item first.
@@ -3797,21 +3824,23 @@ fn sema_check_body_part_drain(slot: Shared<SemaBodyPart>, bodies: &[SemaPrepared
 
 // Checks `slots[from..]`, one task per slot and the last slot on this
 // thread; returns how many bodies they checked.
-fn sema_check_body_parts(shared: Shared<SemaCheckShared>, slots: [Shared<SemaBodyPart>], from: Int, module_index: Int) -> Int {
-    if from >= slots.len() - 1 -> return sema_check_body_part(shared, slots[from], module_index)
+fn sema_check_body_parts(shared: Shared<SemaCheckShared>, source: Shared<SemaBodyScopeSource>, slots: [Shared<SemaBodyPart>], from: Int, module_index: Int) -> Int {
+    if from >= slots.len() - 1 -> return sema_check_body_part(shared, source, slots[from], module_index)
     checked := 0
     task.group sema_threads {
-        head :: task sema_check_body_part(shared, slots[from], module_index)
-        checked = sema_check_body_parts(shared, slots, from + 1, module_index)
+        head :: task sema_check_body_part(shared, source, slots[from], module_index)
+        checked = sema_check_body_parts(shared, source, slots, from + 1, module_index)
         checked += head.join() ?? panic(compiler_threads_failure_text(err))
     }
     checked
 }
 
-// One thread: checks its part's functions in item order on its own scope
-// copy. Host callbacks are withheld; a check that wanted one is marked, and
-// the body loop checks that function again on the calling thread.
-fn sema_check_body_part(shared: Shared<SemaCheckShared>, slot: Shared<SemaBodyPart>, module_index: Int) -> Int {
+// One thread: copies the module scope into its slot, then checks its part's
+// functions in item order on that copy. Host callbacks are withheld; a check
+// that wanted one is marked, and the body loop checks that function again on
+// the calling thread.
+fn sema_check_body_part(shared: Shared<SemaCheckShared>, source: Shared<SemaBodyScopeSource>, slot: Shared<SemaBodyPart>, module_index: Int) -> Int {
+    sema_check_body_part_copy_scope(source, slot)
     inputs :: shared.guard_read()
     permit := slot.guard_edit()
     // Passed straight through: a local binding of a guarded row would copy it.
@@ -5927,7 +5956,7 @@ fn sema_check_module_in_shared(shared_state: Shared<SemaCheckShared>, host_hooks
     environment := sema_check_shared_take_environment(shared_state)
     program := sema_check_shared_take_program(shared_state)
     memory_plan := sema_check_shared_take_memory_plan(shared_state)
-    checked := sema_check_registration_module(^environment, ^program, host_hooks, ^memory_plan, module_index, values, comptime_functions, comptime_rows, true, pending_obligations, ^prepared, None, session, counter_phase, trace_sink)
+    checked := sema_check_registration_module(^environment, ^program, host_hooks, ^memory_plan, module_index, values, comptime_functions, comptime_rows, true, pending_obligations, ^prepared, Val(SemaMethodScheduling{shared_state: shared_state, threads: threads}), session, counter_phase, trace_sink)
     restored_environment := ^checked.environment
     restored_program := ^checked.program
     restored_memory_plan := ^checked.memory_plan
