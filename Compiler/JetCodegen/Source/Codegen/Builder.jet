@@ -454,9 +454,15 @@ struct JetCodegenBuilder {
     // (`jet_codegen_plain_try_identity`), and whether that call took it.
     plain_try_operand: String?
     plain_try_taken: Bool
-    // True only on propagation cleanup: normal-exit cleanup can panic and
-    // propagates through the not-yet-run suffix.
+    // True only on a stop edge's cleanup (Rust `stop_cleanup_active`): each
+    // action there is bracketed by a typed StopCleanup scope.
     stop_cleanup_active: Bool
+    // True while any cleanup frame runs: the native runtime masks stop
+    // delivery for the whole frame (jet_rt_cleanup_enter), so no poll or
+    // propagation edge is lowered inside it. A normal exit's cleanup is not a
+    // stop edge and opens no StopCleanup scope (MIR legality
+    // validate_stop_cleanup_scopes).
+    cleanup_masked: Bool
 }
 
 fn jet_codegen_source_location(builder: JetCodegenBuilder, program: JetCodegenProgram, include_source_line: Bool) -> JetCodegenSourceLocation Never! {
@@ -901,6 +907,7 @@ fn jet_codegen_new_builder(function: TFunc, program: JetCodegenProgram) -> JetCo
         plain_try_operand: None,
         plain_try_taken: false,
         stop_cleanup_active: false,
+        cleanup_masked: false,
     }
     entry := jet_codegen_new_block(&builder, program, function.source_span, "entry")
     builder.entry = entry
@@ -1213,7 +1220,7 @@ fn jet_codegen_switch_block(builder: &JetCodegenBuilder, program: JetCodegenProg
 // have left uninitialized. Shield and transaction masks defer cancellation,
 // never Panic. Only propagation cleanup is already unwinding.
 fn jet_codegen_emit_poll(builder: &JetCodegenBuilder, program: JetCodegenProgram, kind: MIRPollKind, panic_capable: Bool) Never! {
-    if !program.stop_points || builder.stop_cleanup_active -> return
+    if !program.stop_points || builder.stop_cleanup_active || builder.cleanup_masked -> return
     if !panic_capable && (builder.transactions.len() > 0 || jet_codegen_in_shield(builder)) -> return
     if !jet_codegen_current_is_open(builder, program) -> return
     span := builder.current_span
@@ -1232,7 +1239,7 @@ fn jet_codegen_emit_poll(builder: &JetCodegenBuilder, program: JetCodegenProgram
 // Shared with explicit program-side stops: skip pre-call cleanup only when
 // the operation's actual Propagate edge will own the canonical cleanup.
 fn jet_codegen_can_emit_propagate(builder: JetCodegenBuilder, program: JetCodegenProgram) -> Bool Never! {
-    program.stop_points && !builder.stop_cleanup_active && builder.transactions.len() == 0 && jet_codegen_current_is_open(builder, program)
+    program.stop_points && !builder.stop_cleanup_active && !builder.cleanup_masked && builder.transactions.len() == 0 && jet_codegen_current_is_open(builder, program)
 }
 
 fn jet_codegen_terminate_program_stop(builder: &JetCodegenBuilder, program: JetCodegenProgram, propagated: Bool, reason: String) Never! {
@@ -2005,8 +2012,8 @@ fn jet_codegen_emit_cleanup_suffix(builder: &JetCodegenBuilder, program: JetCode
 fn jet_codegen_emit_cleanup_frame(builder: &JetCodegenBuilder, program: JetCodegenProgram, frame_index: Int) Never! {
     if frame_index < 0 || frame_index >= builder.cleanup_frames.len() -> panic("MIR cleanup frame index is outside the active stack")
     frame := builder.cleanup_frames[frame_index]
-    masked :: builder.stop_cleanup_active
-    builder.stop_cleanup_active = true
+    masked :: builder.cleanup_masked
+    builder.cleanup_masked = true
     saved := MIRValueID?{None}
     if program.stop_points && !program.comptime_budget && frame.actions.len() > 0 {
         route :: jet_codegen_static_prelude_call(&builder, program, "core.cleanup", "enter", "jet_rt_cleanup_enter", [Bool]{}, None, TFailureCarrier.Infallible, false)
@@ -2036,7 +2043,7 @@ fn jet_codegen_emit_cleanup_frame(builder: &JetCodegenBuilder, program: JetCodeg
         span := builder.current_span
         _ := jet_codegen_emit_static_prelude_call(&builder, program, span, Type.Named{name: "Unit"}, route, [MIRValueID]{word})
     }
-    builder.stop_cleanup_active = masked
+    builder.cleanup_masked = masked
     if frame.owner != None && jet_codegen_current_is_open(builder, program) {
         scope :: frame.owner ?? panic("owned cleanup frame lost its MIR scope")
         current_span := builder.current_span
