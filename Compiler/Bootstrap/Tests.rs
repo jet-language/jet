@@ -1453,6 +1453,11 @@ fn __jet_bootstrap_harness_entry(
     receipt.push_str("compiler_identity=");
     receipt.push_str(option_env!("JET_COMPILER_BUILD_ID").unwrap_or("unavailable"));
     receipt.push('\n');
+    // The identity the factory's HostFacts carry (Host/Native.rs): native CLI
+    // stages need the same `name@version#source-id` in JET_COMPILER_IDENTITY.
+    receipt.push_str("compiler_source_identity=");
+    receipt.push_str(&option_env!("JET_COMPILER_SOURCE_ID").map(|value| format!("{}@{}#{}", ::jet_foundation::Syntax::BINARY_NAME, ::jet_pkg_model::Manifest::COMPILER_VERSION, value)).unwrap_or_else(|| "unavailable".to_string()));
+    receipt.push('\n');
     std::fs::write(&receipt_path, receipt)
         .unwrap_or_else(|error| panic!("cannot write generated bootstrap receipt: {error}"));
 
