@@ -11,8 +11,7 @@ fn canonical_query_request() -> JetDriverCompileRequest {
     request
 }
 fn run() {
-    request := canonical_query_request()
-    query :: jet_driver_optimization_query(request)
+    query :: jet_driver_optimization_query(canonical_query_request())
     canonical_query_require(query.compile.complete && query.compile.internal_problem == None, "real compiler pipeline completes")
     canonical_query_require(query.canonical_routes.len() > 0, "opt-in capture is produced by actual pass boundaries")
     canonical_query_require(query.compile.emitted_source == None, "inspection does not emit or run")
@@ -42,20 +41,21 @@ fn run() {
     }
     canonical_query_require(fold && pipeline && checked_program, "every requested production boundary is delivered")
     canonical_query_require((occurrences.get("mir.pass-order-facts") ?? 0) > 1, "occurrences are not invented from a phase counter")
-    again :: jet_driver_optimization_query(request)
+    again :: jet_driver_optimization_query(canonical_query_request())
     canonical_query_require(again.canonical_routes.len() == query.canonical_routes.len(), "journal is invocation-owned and drained")
     loop (index, row) in again.canonical_routes {
         first :: query.canonical_routes[index]
         canonical_query_require(row.operation_id == first.operation_id && row.order == first.order && row.occurrence == first.occurrence && row.input_payload == first.input_payload && row.output_payload == first.output_payload, "repeated compilation captures the same real boundaries")
     }
-    request.adapter_mode = ""
-    disabled :: jet_driver_optimization_query(request)
+    disabled_request := canonical_query_request()
+    disabled_request.adapter_mode = ""
+    disabled :: jet_driver_optimization_query(^disabled_request)
     canonical_query_require(disabled.compile.complete && disabled.canonical_routes.len() == 0 && disabled.canonical_route_gaps.len() == 0, "ordinary compile does not capture evidence or project adapter gaps")
     enabled_mir :: query.compile.mir ?? panic("captured query lost MIR")
     disabled_mir :: disabled.compile.mir ?? panic("ordinary query lost MIR")
     canonical_query_require(mir_program_digest(enabled_mir) == mir_program_digest(disabled_mir), "capture does not alter compiler meaning")
-    request.adapter_mode = "canonical-pass"
-    request.authorized_sources.roots[0].files[0].source = "fn run() {{ pirnt(\"hi\") }}"
-    failed :: jet_driver_optimization_query(request)
+    failed_request := canonical_query_request()
+    failed_request.authorized_sources.roots[0].files[0].source = "fn run() {{ pirnt(\"hi\") }}"
+    failed :: jet_driver_optimization_query(^failed_request)
     canonical_query_require(!failed.compile.complete && failed.compile.diagnostics.len() > 0 && failed.canonical_routes.len() == 0, "front-end failure cannot invent optimizer evidence")
 }

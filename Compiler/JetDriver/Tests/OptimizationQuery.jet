@@ -14,14 +14,14 @@ fn run() {
         request := optimization_query_request(triple)
         request.profile = "selected-release"
         request.build_mode = MIRArtifactBuildMode.Release
-        query :: jet_driver_optimization_query(request)
+        query :: jet_driver_optimization_query(^request)
         optimization_query_require(query.compile.complete && query.compile.internal_problem == None, "production check/lower/optimizer completes")
         optimization_query_require(query.compile.emitted_source == None && query.functions.len() > 0, "query never emits or executes")
         optimization_query_require(query.profile == "selected-release" && query.release_build && query.target_triple == triple, "selected profile/target provenance")
         layout :: query.target_layout ?? panic("OptimizationQuery: missing layout")
         optimization_query_require(layout.pointer_size == (if triple.starts_with("i686") -> 4 else -> 8), "selected target layout, not host width")
         ledger :: query.decisions ?? panic("OptimizationQuery: missing decision ledger")
-        optimization_query_require(ledger.identity.profile == request.profile && ledger.identity.run == "not-observed", "no fabricated runtime observation")
+        optimization_query_require(ledger.identity.profile == "selected-release" && ledger.identity.run == "not-observed", "no fabricated runtime observation")
         optimization_query_require(ledger.rows.len() > 0 && ledger.derivations.len() == ledger.rows.len(), "actual compiler decision producers")
         encoded :: mir_decision_ledger_json(ledger)
         decoded :: mir_decision_ledger_read(encoded) ?? panic("OptimizationQuery: canonical transport refused")
@@ -35,6 +35,6 @@ fn run() {
     }
     broken := optimization_query_request("x86_64-unknown-linux-gnu")
     broken.authorized_sources.roots[0].files[0].source = "fn run() {{ missing_callable() }}"
-    failed :: jet_driver_optimization_query(broken)
+    failed :: jet_driver_optimization_query(^broken)
     optimization_query_require(!failed.compile.complete && failed.decisions == None && failed.functions.len() == 0, "failed sema cannot publish plausible decisions")
 }

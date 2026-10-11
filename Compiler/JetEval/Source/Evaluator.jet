@@ -164,7 +164,7 @@ fn jet_eval_owned_root(machine: JetEvalMachine) -> JetEvalOwnedRoot Never! {
         output_context: machine.config.output_context,
         host_hooks: machine.config.host_hooks,
     }
-    jet_eval_owned_root_from_parts(machine.program, machine.registry, config)
+    jet_eval_owned_root_from_parts(machine.program, machine.registry, ^config)
 }
 fn jet_eval_owned_root_new_session(program: ^MIRProgram, config: ^JetEvalConfig) -> JetEvalOwnedRoot {
     machine := jet_eval_machine(^program, ^config)
@@ -185,8 +185,8 @@ fn jet_eval_owned_root_config(root: JetEvalOwnedRoot) -> JetEvalConfig Never! {
         host_hooks: root.config.host_hooks,
     }
 }
-fn jet_eval_owned_root_from_parts(program: MIRProgram, registry: JetEvalRegistry, config: JetEvalConfig) -> JetEvalOwnedRoot Never! {
-    active_config := config
+fn jet_eval_owned_root_from_parts(program: MIRProgram, registry: JetEvalRegistry, config: ^JetEvalConfig) -> JetEvalOwnedRoot Never! {
+    active_config := ^config
     active_config.host_adapter = None
     JetEvalOwnedRoot{program: program, registry: registry, config: active_config}
 }
@@ -196,7 +196,7 @@ fn jet_eval_owned_root_cleanup_clone(root: &JetEvalOwnedRoot) -> JetEvalOwnedRoo
 }
 fn jet_eval_owned_root_machine(root: JetEvalOwnedRoot, adapter: JetEvalHostAdapter) -> JetEvalMachine {
     root_config := jet_eval_owned_root_config(root)
-    root_config.host_adapter = Val(adapter)
+    root_config.host_adapter = Val(adapter.clone_adapter())
     active_config := jet_eval_new_session_config(^root_config)
     identity := jet_eval_registry_machine_identity(root.registry)
     rows := jet_eval_program_rows(root.program)
@@ -872,21 +872,18 @@ fn jet_eval_function_in(machine: &JetEvalMachine, function_id: MIRFunctionID, ar
 // Run each of `function_ids` with no arguments as one pure evaluation on ONE
 // machine (Rust PureFold `evaluate` over one borrowed program): the program
 // and its row index are built once, each evaluation starts from a fresh
-// session, and the program and computed values are returned together once.
+// session under the default pure configuration, and the program and computed
+// values are returned together once.
 // Value `i` is None when evaluation `i` failed, stopped, printed, or left a
 // resource that did not retire cleanly. A machine per function copied the
 // whole program twice per evaluation (a field move clones), and the caller's
 // recursion retained one copy per evaluation.
-fn jet_eval_pure_functions(program: ^MIRProgram, function_ids: [MIRFunctionID], config: JetEvalConfig) -> (program: MIRProgram, values: [TComptimeValue?]) {
+fn jet_eval_pure_functions(program: ^MIRProgram, function_ids: [MIRFunctionID]) -> (program: MIRProgram, values: [TComptimeValue?]) {
     values := [TComptimeValue?]{}
     span := jet_eval_empty_span()
-    first_config := config
-    machine := jet_eval_machine(^program, ^first_config)
+    machine := jet_eval_machine(^program, jet_eval_default_config())
     loop (index, function_id) in function_ids {
-        if index > 0 {
-            session_config := config
-            jet_eval_reset_session(&machine, ^session_config)
-        }
+        if index > 0 -> jet_eval_reset_session(&machine, jet_eval_default_config())
         &values.push(jet_eval_pure_session_value(&machine, function_id, span))
     }
     (program: machine.program, values: ^values)
@@ -972,7 +969,7 @@ fn jet_eval_resume(request: ^JetEvalResumeRequest) -> JetEvalResult {
     machine := JetEvalMachine{
         program: request.program,
         rows: rows,
-        config: request.config,
+        config: ^request.config,
         registry: request.registry,
         identity: identity,
         frames: request.frames,
@@ -1085,7 +1082,7 @@ fn jet_eval_resume_deopt(request: ^JetEvalResumeRequest, deopt: JetEvalDeoptRequ
     machine := JetEvalMachine{
         program: request.program,
         rows: rows,
-        config: request.config,
+        config: ^request.config,
         registry: request.registry,
         identity: identity,
         frames: request.frames,

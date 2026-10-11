@@ -375,9 +375,9 @@ fn jet_cli_decisions_report(ledger: MIRDecisionLedger, scope: String, file: Stri
 // Accel uses its resolved release mode; decisions retains Dev even for --profile release.
 // Query first, then collect its canonical journal and held-store receipt rows,
 // then present. This ordering preserves the journal of this actual invocation.
-fn jet_cli_optimization_host(request: JetDriverCompileRequest, query: JetDriverOptimizationQueryResult, plane: String, scope: String, file: String, runtime: [JetCLIAccelerationRuntime], canonical_routes: [JetCLIStatusValue], color: Bool, json: Bool) -> JetDriverVerbOutput {
+fn jet_cli_optimization_host(sources: JetDriverAuthorizedSourceSnapshot, query: JetDriverOptimizationQueryResult, plane: String, scope: String, file: String, runtime: [JetCLIAccelerationRuntime], canonical_routes: [JetCLIStatusValue], color: Bool, json: Bool) -> JetDriverVerbOutput {
     if !query.compile.complete || query.compile.internal_problem != None {
-        diagnostics :: jet_driver_present_diagnostics(query.compile.diagnostics, request.authorized_sources, [MIRSourceFile]{})
+        diagnostics :: jet_driver_present_diagnostics(query.compile.diagnostics, sources, [MIRSourceFile]{})
         report :: if json -> jet_cli_reports_status_json("inspect", false, jet_cli_report_cwd(), file, "", diagnostics) else -> diagnostic_render_all(file, "", diagnostics, color)
         return JetDriverVerbOutput{stdout: if json -> report else -> "", stderr: if json -> "" else -> report, exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }

@@ -9,7 +9,7 @@ fn run() {
     request.schema_snapshots = Val([String:SchemaSnapshot]{})
     request.adapter_mode = "parity"
     request.adapter_operation_ids = ["mir.exact-constant-folding", "mir.optimize-pipeline"]
-    query :: jet_driver_optimization_query(request)
+    query :: jet_driver_optimization_query(^request)
     inspect_canonical_require(query.compile.complete && query.canonical_routes.len() > 0, "actual compiler boundary journal")
     routes :: jet_cli_canonical_routes(query.canonical_routes, "inspecting-process")
     inspect_canonical_require(routes.len() == query.canonical_routes.len(), "one projection per actual record")

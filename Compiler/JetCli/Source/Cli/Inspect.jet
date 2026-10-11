@@ -1473,17 +1473,18 @@ fn jet_cli_inspect_optimization_host(job: JetCLIInspectJob, source: String) -> J
             request.adapter_mode = cli_sys.get("JET_ADAPTER_MODE") ?? ""
             ids :: cli_sys.get("JET_ADAPTER_OPERATION_IDS") ?? ""
             if ids != "" -> request.adapter_operation_ids = ids.split(",").to_list()
-            query :: jet_driver_optimization_query(request)
-            errors :: jet_cli_errors(jet_driver_present_diagnostics(query.compile.diagnostics, request.authorized_sources, query.compile.generated_source_files))
+            sources := request.authorized_sources
+            query :: jet_driver_optimization_query(^request)
+            errors :: jet_cli_errors(jet_driver_present_diagnostics(query.compile.diagnostics, sources, query.compile.generated_source_files))
             if errors.len() > 0 -> return jet_cli_inspect_check_failed(job, source, errors)
             if query.compile.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
             runtime := [JetCLIAccelerationRuntime]{}
             if job.action == "accel" {
-                runtime = jet_cli_acceleration_runtime_rows(request, query, job.file, job.scope, job.subject) ?? return jet_cli_not_ported_output("inspect accel <runtime receipts: {err.message}>", job.color)
+                runtime = jet_cli_acceleration_runtime_rows(query.profile, job.file, job.scope, job.subject) ?? return jet_cli_not_ported_output("inspect accel <runtime receipts: {err.message}>", job.color)
             }
             process :: cli_sys.get("JET_ADAPTER_CANONICAL_PASS_PROCESS") ?? "inspect"
             routes :: jet_cli_canonical_routes(query.canonical_routes, process)
-            return jet_cli_optimization_host(request, query, job.action, job.scope, job.file, runtime, routes, job.color, job.json)
+            return jet_cli_optimization_host(sources, query, job.action, job.scope, job.file, runtime, routes, job.color, job.json)
         }
     }
 }

@@ -85,7 +85,7 @@ fn jet_cli_build_host(owned_request: ^JetDriverCompileRequest, scope: &JetDriver
     if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(request, query, file, json, color, verbose)
     vector := if json -> "[]" else -> ""
     if query.plan == .Val(_) && subject == None {
-        optimization :: jet_driver_optimization_query(request)
+        optimization :: jet_driver_optimization_query(^request)
         // The reference omits vector rows on failed semantic lowering. An
         // actual completed producer, never an absent provider, supplies [].
         if optimization.compile.complete && optimization.compile.internal_problem == None -> vector = jet_cli_build_vector(optimization, json)

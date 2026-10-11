@@ -60,9 +60,9 @@ fn run() {
         .Prepared(value, _) -> value
         .Refused(output) -> panic("prepare actual query: {output.stderr}")
     }
-    query :: jet_driver_optimization_query(request)
+    query :: jet_driver_optimization_query(^request)
     acceleration_receipt_require(query.compile.complete, "actual compiler query before store collection")
-    hosted :: jet_cli_acceleration_runtime_rows(request, query, file, "target", Val(root)) ?? panic("directory target runtime rows")
+    hosted :: jet_cli_acceleration_runtime_rows(query.profile, file, "target", Val(root)) ?? panic("directory target runtime rows")
     acceleration_receipt_require(hosted.len() == 1 && hosted[0].record_sequence == U64{2}, "directory closure -> authenticated actual host provider")
     sorted :: jet_cli_acceleration_receipt_rows(older, U64{1}, JET_COMPILER_TARGET_USIZE_MAX) ?? panic("decode numeric sequence")
     acceleration_receipt_require(sorted.len() == 2 && sorted[0].sequence == U64{2} && sorted[1].sequence == U64{10}, "numeric rather than lexical section order")
@@ -88,13 +88,13 @@ fn run() {
     malformed :: jet_cli_receipt_prepare(malformed_claim, 0, [], [], [JetCLIReceiptSection]{acceleration_receipt_section("1", acceleration_receipt_payload("unknown"))}, [], [], []) ?? panic("authenticated malformed typed payload")
     _ :: jet_cli_receipt_publish(root, malformed) ?? panic("publish malformed typed payload")
     jet_cli_record_index_publish_and_store(&index, root, acceleration_receipt_entry(malformed, identity, U64{3})) ?? panic("index malformed typed payload")
-    recovered :: jet_cli_acceleration_runtime_rows(request, query, file, "target", Val(root)) ?? panic("newest malformed row fallback")
+    recovered :: jet_cli_acceleration_runtime_rows(query.profile, file, "target", Val(root)) ?? panic("newest malformed row fallback")
     acceleration_receipt_require(recovered.len() == 1 && recovered[0].record_sequence == U64{2}, "invalid typed rows do not become runtime observations")
     empty_claim :: jet_cli_receipt_claim("build", paths, [String]{"build", file, "--profile", "empty"}, terminal) ?? panic("empty receipt claim")
     empty :: jet_cli_receipt_prepare(empty_claim, 0, [], [], [], [], [], []) ?? panic("empty acceleration receipt")
     _ :: jet_cli_receipt_publish(root, empty) ?? panic("publish empty receipt")
     jet_cli_record_index_publish_and_store(&index, root, acceleration_receipt_entry(empty, identity, U64{4})) ?? panic("index empty receipt")
-    no_rows :: jet_cli_acceleration_runtime_rows(request, query, file, "target", Val(root)) ?? panic("empty newest receipt")
+    no_rows :: jet_cli_acceleration_runtime_rows(query.profile, file, "target", Val(root)) ?? panic("empty newest receipt")
     acceleration_receipt_require(no_rows.len() == 0, "valid newest empty receipt does not fall back to older measurements")
     // Currentness is checked by the real held store, not by the index alone.
     cli_files.write(file, "fn run() {{ value :: 1 }}\n") ?? panic("change input")
