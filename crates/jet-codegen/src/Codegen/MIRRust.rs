@@ -1419,13 +1419,10 @@ fn push_runtime_block(
                 uses_arrow,
                 &config.execution.release_devtools_policy,
             );
-            out.push_str(super::CACHED_CORE_END);
-            out.push_str("\n// JET_VETTED_UNSAFE_BEGIN: jet_program_allocator\n\
-                // AUDIT: the shared allocator kernel uses System only for its own\n\
-                // allocation-free bookkeeping; the checked cap is installed by the program.\n\
-                pub mod jet_program_allocator {\n");
-            out.push_str(include_str!("../Prelude/ProgramAllocator.rs"));
-            out.push_str("\n}\n// JET_VETTED_UNSAFE_END: jet_program_allocator\n");
+            // Bridge macros are declared in the Core block, and their concrete
+            // entry points (`jet_http_build_*`) live there too, so they are
+            // realized inside it: the runtime/program split keeps every bridge
+            // item in the `jet_runtime` crate that declares and exports them.
             if let Some(link) = config.execution.ffi {
                 let needs_http_bridge = program.prelude_calls.iter().any(|call| {
                     let symbol = match &call.symbol {
@@ -1436,6 +1433,8 @@ fn push_runtime_block(
                         "jet_http_client_get"
                             | "jet_http_client_post"
                             | "jet_http_client_request_send"
+                            | "jet_http_build_resolve"
+                            | "jet_http_build_get"
                     )
                 });
                 if needs_http_bridge {
@@ -1475,6 +1474,13 @@ fn push_runtime_block(
                     let _ = writeln!(out, "jet_vault_display_bridge!({});", link.crate_name);
                 }
             }
+            out.push_str(super::CACHED_CORE_END);
+            out.push_str("\n// JET_VETTED_UNSAFE_BEGIN: jet_program_allocator\n\
+                // AUDIT: the shared allocator kernel uses System only for its own\n\
+                // allocation-free bookkeeping; the checked cap is installed by the program.\n\
+                pub mod jet_program_allocator {\n");
+            out.push_str(include_str!("../Prelude/ProgramAllocator.rs"));
+            out.push_str("\n}\n// JET_VETTED_UNSAFE_END: jet_program_allocator\n");
             out.push('\n');
         }
     }
