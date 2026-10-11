@@ -915,7 +915,9 @@ fn jet_codegen_lower_precise_builtin(builder: &JetCodegenBuilder, program: JetCo
     if helper == .Val(name) {
         loop semantic_module in program.modules {
             if semantic_module.module_name != "core.math" || (type_name != "Int" && semantic_module.nominal_positions.get(type_name) == None) -> next
-            target :: jet_codegen_find_function_by_key(program.function_index, name, semantic_module.module_identity) ?? panic("checked precise source helper was pruned")
+            // The helper is a top-level function: its checked key is its
+            // registered symbol key, never its bare name.
+            target :: jet_codegen_find_function_by_key(program.function_index, symbol_id(SymbolKind.Function, semantic_module.module_identity, "", name).key, semantic_module.module_identity) ?? panic("checked precise source helper `{name}` is absent from the lowered function set")
             call_args := [MIRCallArg]{}
             loop argument in args {
                 value :: jet_codegen_lower_expr(&builder, program, argument)

@@ -249,6 +249,7 @@ use jet_codegen.[
     jet_codegen_comptime_session_restore,
     jet_codegen_lower_cffi_facts,
     jet_codegen_lower_job_test_artifacts,
+    jet_codegen_precise_helper_names,
     jet_codegen_reachable_core_rows,
     jet_codegen_sorted_order,
     jet_rust_emit_program,
@@ -1647,6 +1648,24 @@ fn jet_driver_comptime_wait_add(dependencies: &[String], key: String) Never! {
     &dependencies.push(key)
 }
 
+// Codegen lowers a precise operation to its `Core/math/math.jet` helper by
+// name (`jet_codegen_lower_precise_builtin`), and Sema records no call fact
+// for it, so the closure queues each helper `roots` and `body` lower to (as
+// Rust `is_core_precise_source_target` roots it): it is checked and lowered
+// with the item, together with its own callees.
+fn jet_driver_comptime_precise_refs(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, roots: [TExpr], body: [TStmt], queue: &[JetDriverComptimeFunctionRef], queued: &[String:Bool]) Never! {
+    names :: jet_codegen_precise_helper_names(roots, body)
+    if names.len() == 0 -> return
+    if !index.owners_built -> jet_driver_comptime_owners_build(graph, &index)
+    loop module_row in graph.modules {
+        if module_row.module_name != "core.math" -> next
+        loop name in names {
+            key :: symbol_id(SymbolKind.Function, module_row.module_identity, "", name).key
+            if jet_driver_comptime_function_owner(index, key) == .Val(owner) -> jet_driver_comptime_function_ref_add(&queue, &queued, owner, key)
+        }
+    }
+}
+
 // `environment` is the run's sema_comptime_environment, `program` its tables
 // (sema_comptime_program) and `available` its constant keys: every function
 // check re-targets the environment instead of copying the graph per function.
@@ -1684,6 +1703,7 @@ fn jet_driver_comptime_function_closure(
         owner_identity :: module_identity ?? return JetDriverComptimeFunctionClosure{functions: [TFunc]{}, waiting_dependencies: [String]{}, complete: false}
         jet_driver_comptime_function_ref_add(&queue, &queued, owner_identity, function_key)
     }
+    jet_driver_comptime_precise_refs(graph, &index, [TExpr]{request.expression}, [TStmt]{}, &queue, &queued)
     functions := [TFunc]{}
     waiting := [String]{}
     complete := true
@@ -1713,6 +1733,11 @@ fn jet_driver_comptime_function_closure(
                     complete = false
                     next
                 }
+                defaults := [TExpr]{}
+                loop parameter in function.params {
+                    if parameter.default == Val(value) -> &defaults.push(value)
+                }
+                jet_driver_comptime_precise_refs(graph, &index, defaults, function.body, &queue, &queued)
                 &functions.push(function)
                 if index.checked_rows.get(checked_key) == None {
                     index.checked_rows[checked_key] = checked_functions.len()
