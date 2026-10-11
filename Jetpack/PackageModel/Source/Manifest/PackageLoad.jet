@@ -437,8 +437,7 @@ impl PackageFacts {
     fn discover_function_entries_from_files(self, resolver: AuthorityResolver, source_files: ^[CheckedFile], wanted: String, exclude_imported: Bool, include_manifest: Bool) -[FS, Env]> [PackageFunctionEntry] AuthorityError! {
         candidates := ^source_files
         if include_manifest {
-            found := resolver.checked_manifest(".")
-            if ^found == {
+            if resolver.checked_manifest(".") == {
                 .Ok(manifest) -> {
                     &candidates.push(^manifest.file)
                 }
