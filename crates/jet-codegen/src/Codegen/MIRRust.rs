@@ -5379,6 +5379,20 @@ mod emit_misc_regression_tests {
         )
     }
 
+    /// `Ok(^entry.file)` moves the field out of its owner. The parser stores
+    /// the move mark on the contextual constructor's CallArg; dropping it
+    /// made the non-Clone payload a `.clone()` of a borrowed field read.
+    #[test]
+    fn ok_payload_field_move_moves_out_of_its_owner() {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let rust = emitted_rust(
+                "use core.files as files\nstruct Held {\n    path: String\n    handle: files.FileReader\n}\nstruct Entry {\n    path: String\n    file: Held?\n}\nfn pick(entries: ^[Entry]) -> Held? Err! {\n    items := ^entries\n    entry :: &items.pop() ?? return Ok(None)\n    Ok(^entry.file)\n}\nfn run() { print(\"x\") }\n",
+            );
+            assert!(!rust.contains(".__jet_file).clone()"), "Ok(^entry.file) copied the field:\n{rust}");
+            assert!(rust.contains("MIR field move"), "Ok(^entry.file) did not move the field:\n{rust}");
+        });
+    }
+
     /// A borrowed String parameter is a Rust `str` and a list element a
     /// `String`; Rust orders `str` only with `str`.
     #[test]

@@ -11436,8 +11436,9 @@ fn collect_trait_impl_callable_groups(
     }
 }
 
-/// Core cleanup and formatting implementations are invoked implicitly, without
-/// an authored method reference. Keep their checked targets and normal callee
+/// Core cleanup, formatting, equality and ordering implementations are invoked
+/// implicitly (scope exit, interpolation, `==`, `<`/`>=`/`<=>`), without an
+/// authored method reference. Keep their checked targets and normal callee
 /// closure, matching the authored Core-method roots in the Jet lowering.
 fn collect_core_implicit_trait_callables(
     items: &[Item],
@@ -11461,6 +11462,8 @@ fn collect_core_implicit_trait_callables(
                 crate::Syntax::TRAIT_CLOSE
                     | crate::Syntax::TRAIT_DISPLAY
                     | crate::Syntax::TRAIT_DEBUG
+                    | crate::Syntax::TRAIT_EQUATABLE
+                    | crate::Syntax::TRAIT_COMPARABLE
             )
         ) {
             return;

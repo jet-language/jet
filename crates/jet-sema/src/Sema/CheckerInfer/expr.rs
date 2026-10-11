@@ -3225,7 +3225,18 @@ impl<'a> Checker<'a> {
                     && call.args[0].label.is_none() =>
             {
                 let is_ok = matches!(contextual_literal(&call.name), Some(ContextualLiteral::Ok));
-                let arg = call.args.pop().unwrap().expr;
+                let arg = call.args.pop().unwrap();
+                // The parser stores `Ok(^x.f)`'s move mark on the CallArg. A
+                // field read keeps it as the exact-place move a consuming call
+                // argument gets (`check_call_argument_access`), so the payload
+                // moves out of its owner instead of materializing a copy.
+                let arg = if arg.convention == AccessConvention::Move
+                    && matches!(arg.expr, Expr::Field(..))
+                {
+                    Expr::Place(Box::new(arg.expr), crate::AST::PlaceAccess::Take, arg.span)
+                } else {
+                    arg.expr
+                };
                 let span = Span::new(call.name_span.start, arg.span().end);
                 Some(if is_ok {
                     Expr::Ok(Box::new(arg), span)
