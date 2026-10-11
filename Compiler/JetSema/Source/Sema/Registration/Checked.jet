@@ -2351,10 +2351,9 @@ fn sema_checked_generic_params(graph: SemaRegistrationGraph, module_row: SemaReg
     loop parameter in params {
         bounds := [SymbolID]{}
         loop bound in parameter.bounds {
-            symbol :: sema_type_graph_bound_symbol(graph, module_row.module_identity, bound) ?? {
-                if graph.complete -> &diagnostics.push(sema_error("E0301", parameter.span, "the generic bound `{bound}` is not registered", "checked generic declarations need a trait identity", "import or declare the trait before using it as a bound"))
-                next
-            }
+            // Rust never rejects an unregistered bound name at the declaration
+            // (`T: Clone`); it carries no trait identity, so it is dropped.
+            symbol :: sema_type_graph_bound_symbol(graph, module_row.module_identity, bound) ?? next
             if symbol.symbol.kind != SymbolKind.Trait {
                 &diagnostics.push(sema_error("E0301", parameter.span, "the generic bound `{bound}` is not a trait", "generic bounds refer to trait contracts", "use a trait name as the generic bound"))
                 next

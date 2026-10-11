@@ -1517,9 +1517,12 @@ fn sema_function_generic_params(func: Func, graph_option: SemaRegistrationGraph?
                 next
             }
             graph :: graph_option
+            // Rust registers a generic bound as its written name and never
+            // rejects an unregistered one at the declaration (tests/ui
+            // embedded_generic_method_scope: `T: Clone`); such a bound has no
+            // trait identity to carry, so a complete graph drops it.
             resolved :: sema_type_graph_bound_symbol(graph, module_identity, bound) ?? {
-                if graph.complete -> &diagnostics.push(sema_error("E0301", parameter.name_span, "the generic bound `{bound}` is not registered", "checked generic declarations need a trait identity", "import or declare the trait before using it as a bound"))
-                complete = false
+                if !graph.complete -> complete = false
                 bound_index += 1
                 next
             }
@@ -1593,11 +1596,9 @@ fn sema_function_owner_generic_params(graph: SemaRegistrationGraph, owner_type: 
         bounds := [SymbolID]{}
         loop bound in parameter.bounds {
             resolved := sema_type_graph_bound_symbol(graph, owner_module.module_identity, bound)
+            // Rust never rejects an unregistered bound name at the declaration.
             if resolved == None {
-                if graph.complete {
-                    &diagnostics.push(sema_error("E0301", parameter.span, "the generic bound `{bound}` is not registered", "checked generic declarations need a trait identity", "import or declare the trait before using it as a bound"))
-                }
-                complete = false
+                if !graph.complete -> complete = false
                 next
             }
             symbol :: resolved ?? {
