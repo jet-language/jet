@@ -84,43 +84,52 @@ fn sema_inference_substitute_type(ty: Type, names: [String], actuals: [Type]) ->
     sema_inference_substitute_type_bindings(ty, bindings)
 }
 
+// Whether `ty`, with the bindings applied once, still mentions the parameter
+// `name`. Substitution already follows binding chains, so the substituted
+// type is walked as written: substituting its parts again would re-expand a
+// name a binding keeps as written (`shared(T?{…})` inside `fn f<T>` binds the
+// builtin's `T` to the caller's `T?`) and never stop, which Rust's single-pass
+// `substitute_type` never does.
 fn sema_inference_type_contains_param(ty: Type, name: String, bindings: [SemaInferenceBinding]) -> Bool Never! {
-    normalized :: sema_inference_substitute_type_bindings(ty, bindings)
-    if normalized == {
+    sema_inference_type_mentions_param(sema_inference_substitute_type_bindings(ty, bindings), name)
+}
+
+fn sema_inference_type_mentions_param(ty: Type, name: String) -> Bool Never! {
+    if ty == {
         .Named(found) -> found == name
-        .List(inner) -> sema_inference_type_contains_param(inner, name, bindings)
-        .Map(key, _, value) -> sema_inference_type_contains_param(key, name, bindings) || sema_inference_type_contains_param(value, name, bindings)
-        .Shared(inner) -> sema_inference_type_contains_param(inner, name, bindings)
-        .Option(inner) -> sema_inference_type_contains_param(inner, name, bindings)
-        .Result(ok, err) -> sema_inference_type_contains_param(ok, name, bindings) || sema_inference_type_contains_param(err, name, bindings)
+        .List(inner) -> sema_inference_type_mentions_param(inner, name)
+        .Map(key, _, value) -> sema_inference_type_mentions_param(key, name) || sema_inference_type_mentions_param(value, name)
+        .Shared(inner) -> sema_inference_type_mentions_param(inner, name)
+        .Option(inner) -> sema_inference_type_mentions_param(inner, name)
+        .Result(ok, err) -> sema_inference_type_mentions_param(ok, name) || sema_inference_type_mentions_param(err, name)
         .Fn(params, ret, _, _, _, _) -> {
             loop param in params {
-                if sema_inference_type_contains_param(param, name, bindings) -> return true
+                if sema_inference_type_mentions_param(param, name) -> return true
             }
-            if ret == .Val(declared) -> sema_inference_type_contains_param(declared, name, bindings) else -> false
+            if ret == .Val(declared) -> sema_inference_type_mentions_param(declared, name) else -> false
         }
         .Apply(_, args) -> {
             loop arg in args {
-                if sema_inference_type_contains_param(arg, name, bindings) -> return true
+                if sema_inference_type_mentions_param(arg, name) -> return true
             }
             false
         }
         .Tuple(fields) -> {
             loop field in fields {
-                if sema_inference_type_contains_param(field.ty, name, bindings) -> return true
+                if sema_inference_type_mentions_param(field.ty, name) -> return true
             }
             false
         }
-        .FixedList(element, _) -> sema_inference_type_contains_param(element, name, bindings)
-        .InlineRange(base, _, _) -> sema_inference_type_contains_param(base, name, bindings)
-        .Tagged(_, inner) -> sema_inference_type_contains_param(inner, name, bindings)
+        .FixedList(element, _) -> sema_inference_type_mentions_param(element, name)
+        .InlineRange(base, _, _) -> sema_inference_type_mentions_param(base, name)
+        .Tagged(_, inner) -> sema_inference_type_mentions_param(inner, name)
         .Union(members) -> {
             loop member in members {
-                if sema_inference_type_contains_param(member, name, bindings) -> return true
+                if sema_inference_type_mentions_param(member, name) -> return true
             }
             false
         }
-        .Quantity(base, _) -> sema_inference_type_contains_param(base, name, bindings)
+        .Quantity(base, _) -> sema_inference_type_mentions_param(base, name)
         else -> false
     }
 }

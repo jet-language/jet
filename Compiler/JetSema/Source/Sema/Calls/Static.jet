@@ -322,9 +322,14 @@ fn sema_call_builtin_static_bound(bindings: [SemaInferenceBinding], name: String
     false
 }
 
+// A row parameter is open while the declared row type names it and no
+// evidence has bound it. A bound value is the caller's type, read once as
+// written (Rust single-pass `substitute_type`): inside `fn f<T>`,
+// `shared (T?{…})` binds the row's `T` to the caller's `T?`, whose `T` is not
+// the row parameter again.
 fn sema_call_builtin_static_open(ty: Type, row: BuiltinStaticRow, bindings: [SemaInferenceBinding]) -> Bool Never! {
     loop name in row.type_params {
-        if sema_inference_type_contains_param(ty, name, bindings) -> return true
+        if !sema_call_builtin_static_bound(bindings, name) && sema_inference_type_mentions_param(ty, name) -> return true
     }
     false
 }
