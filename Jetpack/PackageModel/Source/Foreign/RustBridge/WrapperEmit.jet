@@ -208,7 +208,7 @@ fn pkg_ffi_crypto_modules(needs: RustBridgeNeeds) -> String Never! {
             (name: "jet_encoding_errors", source: FFI_ENCODING_ERRORS_RUNTIME),
             (name: "jet_json_number", source: FFI_JSON_NUMBER_RUNTIME),
             (name: "Dyn", source: FFI_DYN_RUNTIME),
-            (name: "EncodingJson", source: FFI_ENCODING_JSON_RUNTIME),
+            (name: "EncodingJson", source: FFI_ENCODING_JSON_RUNTIME.replace(FFI_ENCODING_TYPES_INCLUDE, FFI_ENCODING_TYPES_RUNTIME).replace(FFI_ENCODING_ERROR_INCLUDE, FFI_ENCODING_ERROR_RUNTIME).replace("crate::Outcome::", "crate::__jet_crypto::")),
             (name: "RuntimeDiagnosticCore", source: FFI_RUNTIME_DIAGNOSTIC_CORE)
         }
         loop root in roots -> out = "{out}mod {root.name} {{\n{root.source}\n}}\n"

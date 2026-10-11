@@ -291,6 +291,52 @@ fn fx_inline_asm_refusals() -> Bool Never! {
     }
     misplaced :: x64_assemble_template("test rax, rax", [String]{}, false)
     if misplaced.error != Val("inline asm: clone child rail requires the audited clone prologue") || misplaced.code.len() != 0 -> return false
+    // LLVM rejects binary-looking numeric labels. The canonical clone label
+    // remains a closed native rail with exactly the same architectural bytes.
+    clone :: x64_assemble_template("""
+        push rdi
+        push rsi
+        push rdx
+        push r10
+        push r8
+        push r9
+        push {{flags}}
+        push {{stack}}
+        push {{parent_tid}}
+        push {{child_tid}}
+        pop r10
+        pop rdx
+        pop rsi
+        pop rdi
+        mov r8, 0
+        mov rax, 56
+        syscall
+        test rax, rax
+        jnz 2f
+        pop rax
+        pop rdi
+        and rsp, -16
+        call rax
+        xor edi, edi
+        mov eax, 60
+        syscall
+        2:
+        pop r9
+        pop r8
+        pop r10
+        pop rdx
+        pop rsi
+        pop rdi
+        mov rax, rax ; -> return
+        ; clobbers rcx, r11
+        """, [String]{"flags", "stack", "parent_tid", "child_tid"}, true)
+    rail :: [U8]{0x48, 0x85, 0xc0, 0x75, 0x11, 0x58, 0x5f, 0x48, 0x83, 0xe4, 0xf0, 0xff, 0xd0, 0x31, 0xff, 0xb8, 0x3c, 0, 0, 0, 0x0f, 0x05}
+    if clone.error != None || clone.code.len() < rail.len() -> return false
+    found_rail := false
+    loop offset in 0..<(clone.code.len() - rail.len() + 1) {
+        if clone.code.slice(offset, offset + rail.len()) == rail -> found_rail = true
+    }
+    if !found_rail -> return false
     gs :: x64_assemble_template("mov rax, qword ptr gs:[0] ; -> return", [String]{}, true)
     if gs.error != None || (gs.code != [U8]{0x65, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0}) -> return false
     xadd :: x64_assemble_template("lock xadd qword ptr [rcx], rax\nmov rax, rax ; -> return", [String]{}, true)

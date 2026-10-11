@@ -258,7 +258,7 @@ fn x64_assemble_template(template: String, names: [String], returns: Bool) -> X6
             // Clone's child stack is not the parent's template stack. Admit
             // only this closed, non-returning child rail, never arbitrary
             // labels/branches or frame mutations. jnz skips all 17 child bytes.
-            child :: [String]{"test rax, rax", "jnz 1f", "pop rax", "pop rdi", "and rsp, -16", "call rax", "xor edi, edi", "mov eax, 60", "syscall", "1:"}
+            child :: [String]{"test rax, rax", "jnz 2f", "pop rax", "pop rdi", "and rsp, -16", "call rax", "xor edi, edi", "mov eax, 60", "syscall", "2:"}
             if i < 3 || lines[i - 3].trim() != "mov r8, 0" || lines[i - 2].trim() != "mov rax, 56" || lines[i - 1].trim() != "syscall" || s.depth != 6 || i + child.len() > lines.len() {
                 return X64AsmResult{code: [U8]{}, regs: regs, result: -1, error: Val("inline asm: clone child rail requires the audited clone prologue")}
             }

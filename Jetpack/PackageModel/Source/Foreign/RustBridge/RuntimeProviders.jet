@@ -91,6 +91,12 @@ FFI_RUNTIME_DIAGNOSTIC_CORE :: prep { embed_file("../../../../../crates/jet-foun
 FFI_ENCODING_ERRORS_RUNTIME :: prep { embed_file("../../../../../crates/jet-foundation/src/EncodingErrors.rs") }
 FFI_DYN_RUNTIME :: prep { embed_file("../../../../../crates/jet-foundation/src/Dyn.rs") }
 FFI_ENCODING_JSON_RUNTIME :: prep { embed_file("../../../../../crates/jet-foundation/src/EncodingJson.rs") }
+// EncodingJson's two `include!` inputs, spliced in place by the emitter: the
+// embedded text lives in the generated bridge crate, not beside these files.
+FFI_ENCODING_TYPES_INCLUDE :: prep { "include!(\"../../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs\");" }
+FFI_ENCODING_TYPES_RUNTIME :: prep { embed_file("../../../../../crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs") }
+FFI_ENCODING_ERROR_INCLUDE :: prep { "include!(\"../../jet-codegen/src/Prelude/Core/EncodingError.rs\");" }
+FFI_ENCODING_ERROR_RUNTIME :: prep { embed_file("../../../../../crates/jet-codegen/src/Prelude/Core/EncodingError.rs") }
 FFI_JSON_NUMBER_RUNTIME :: prep { embed_file("../../../../../crates/jet-foundation/src/JSONNumber.rs") }
 FFI_CRYPTO_ENTROPY_RUNTIME :: prep { embed_file("../../../../../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs") }
 // Application plugin loader (D-PLUGIN1 / D-DEP-WASM1=A).
@@ -108,6 +114,8 @@ FFI_HOST_RUNTIME_STOP_BEGIN :: prep { "// JET_HOST_RUNTIME_STOP_BEGIN" }
 FFI_HOST_RUNTIME_STOP_END :: prep { "// JET_HOST_RUNTIME_STOP_END" }
 FFI_HOST_RUNTIME_SENTRY_BEGIN :: prep { "// JET_HOST_RUNTIME_SENTRY_BEGIN" }
 FFI_HOST_RUNTIME_SENTRY_END :: prep { "// JET_HOST_RUNTIME_SENTRY_END" }
+FFI_HOST_RUNTIME_DIAGNOSTIC_LOOKUP_BEGIN :: prep { "// JET_HOST_RUNTIME_DIAGNOSTIC_LOOKUP_BEGIN" }
+FFI_HOST_RUNTIME_DIAGNOSTIC_LOOKUP_END :: prep { "// JET_HOST_RUNTIME_DIAGNOSTIC_LOOKUP_END" }
 
 // Remove one `begin … end` host-only span, markers included.
 fn pkg_ffi_strip_outcome_host_wrapper(source: String, begin: String, end: String) -> String Never! {
@@ -116,11 +124,15 @@ fn pkg_ffi_strip_outcome_host_wrapper(source: String, begin: String, end: String
     "{head.before}{tail.after}"
 }
 
-// Bridge crates have no compiler Registry: keep the shared carriers and
-// row-driven kernels, drop both foundation-only Registry adapters.
+// The shared entry-error formatter still needs Foundation's canonical lookup,
+// but the bridge's dependency is jet_foundation, not crate::Registry.
 fn pkg_ffi_standalone_outcome_runtime() -> String Never! {
     projected :: pkg_ffi_strip_outcome_host_wrapper(FFI_OUTCOME_RUNTIME, FFI_HOST_RUNTIME_STOP_BEGIN, FFI_HOST_RUNTIME_STOP_END)
-    pkg_ffi_strip_outcome_host_wrapper(projected, FFI_HOST_RUNTIME_SENTRY_BEGIN, FFI_HOST_RUNTIME_SENTRY_END)
+    standalone :: pkg_ffi_strip_outcome_host_wrapper(projected, FFI_HOST_RUNTIME_SENTRY_BEGIN, FFI_HOST_RUNTIME_SENTRY_END)
+    head :: FFI_OUTCOME_RUNTIME.split_once(FFI_HOST_RUNTIME_DIAGNOSTIC_LOOKUP_BEGIN) ?? panic("Outcome diagnostic lookup marker missing")
+    tail :: head.after.split_once(FFI_HOST_RUNTIME_DIAGNOSTIC_LOOKUP_END) ?? panic("Outcome diagnostic lookup end marker missing")
+    lookup :: tail.before.replace("crate::Registry::", "jet_foundation::Registry::")
+    "{standalone}{lookup}"
 }
 
 // Which bridge-backed Core providers one bridge carries. The regex, archive,

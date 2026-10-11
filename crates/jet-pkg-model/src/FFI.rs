@@ -2405,11 +2405,23 @@ const RUNTIME_DIAGNOSTIC_CORE: &str = include_str!("../../jet-foundation/src/Run
 const ENCODING_ERRORS_RUNTIME: &str = include_str!("../../jet-foundation/src/EncodingErrors.rs");
 const DYN_RUNTIME: &str = include_str!("../../jet-foundation/src/Dyn.rs");
 const ENCODING_JSON_RUNTIME: &str = include_str!("../../jet-foundation/src/EncodingJson.rs");
+// The embedded module is relocated into the generated bridge; splice its
+// canonical include inputs rather than resolving them beside that new crate.
+const ENCODING_TYPES_INCLUDE: &str =
+    "include!(\"../../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs\");";
+const ENCODING_TYPES_RUNTIME: &str =
+    include_str!("../../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs");
+const ENCODING_ERROR_INCLUDE: &str =
+    "include!(\"../../jet-codegen/src/Prelude/Core/EncodingError.rs\");";
+const ENCODING_ERROR_RUNTIME: &str =
+    include_str!("../../jet-codegen/src/Prelude/Core/EncodingError.rs");
 const JSON_NUMBER_RUNTIME: &str = include_str!("../../jet-foundation/src/JSONNumber.rs");
 const HOST_RUNTIME_STOP_BEGIN: &str = "// JET_HOST_RUNTIME_STOP_BEGIN";
 const HOST_RUNTIME_STOP_END: &str = "// JET_HOST_RUNTIME_STOP_END";
 const HOST_RUNTIME_SENTRY_BEGIN: &str = "// JET_HOST_RUNTIME_SENTRY_BEGIN";
 const HOST_RUNTIME_SENTRY_END: &str = "// JET_HOST_RUNTIME_SENTRY_END";
+const HOST_RUNTIME_DIAGNOSTIC_LOOKUP_BEGIN: &str = "// JET_HOST_RUNTIME_DIAGNOSTIC_LOOKUP_BEGIN";
+const HOST_RUNTIME_DIAGNOSTIC_LOOKUP_END: &str = "// JET_HOST_RUNTIME_DIAGNOSTIC_LOOKUP_END";
 const CRYPTO_ENTROPY_RUNTIME: &str =
     include_str!("../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
 
@@ -2428,18 +2440,31 @@ fn strip_outcome_host_wrapper(source: &str, begin: &str, end: &str) -> String {
 }
 
 fn standalone_outcome_runtime() -> String {
-    // Bridge crates have no compiler Registry. Keep the shared carriers and
-    // row-driven kernels, but remove both foundation-only Registry adapters.
+    // Bridge crates retain Foundation as a dependency, not as crate::Registry.
+    // Keep its canonical lookup for the shared entry-error report formatter.
     let projected = strip_outcome_host_wrapper(
         OUTCOME_RUNTIME,
         HOST_RUNTIME_STOP_BEGIN,
         HOST_RUNTIME_STOP_END,
     );
-    strip_outcome_host_wrapper(
+    let mut projected = strip_outcome_host_wrapper(
         &projected,
         HOST_RUNTIME_SENTRY_BEGIN,
         HOST_RUNTIME_SENTRY_END,
-    )
+    );
+    let lookup = OUTCOME_RUNTIME
+        .split_once(HOST_RUNTIME_DIAGNOSTIC_LOOKUP_BEGIN)
+        .expect("Outcome diagnostic lookup marker missing").1
+        .split_once(HOST_RUNTIME_DIAGNOSTIC_LOOKUP_END)
+        .expect("Outcome diagnostic lookup end marker missing").0;
+    projected.push_str(&lookup.replace("crate::Registry::", "jet_foundation::Registry::"));
+    projected
+}
+
+fn splice_encoding_json_includes(source: &str) -> String {
+    source.replace(ENCODING_TYPES_INCLUDE, ENCODING_TYPES_RUNTIME)
+        .replace(ENCODING_ERROR_INCLUDE, ENCODING_ERROR_RUNTIME)
+        .replace("crate::Outcome::", "crate::__jet_crypto::")
 }
 
 /// Crate-root modules a crypto bridge needs: Outcome's standalone projection
@@ -2448,11 +2473,12 @@ fn standalone_outcome_runtime() -> String {
 #[doc(hidden)]
 pub fn crypto_bridge_root_modules() -> String {
     let mut out = "use jet_foundation::Numeric;\n".to_string();
+    let encoding_json = splice_encoding_json_includes(ENCODING_JSON_RUNTIME);
     for (name, source) in [
         ("jet_encoding_errors", ENCODING_ERRORS_RUNTIME),
         ("jet_json_number", JSON_NUMBER_RUNTIME),
         ("Dyn", DYN_RUNTIME),
-        ("EncodingJson", ENCODING_JSON_RUNTIME),
+        ("EncodingJson", encoding_json.as_str()),
         ("RuntimeDiagnosticCore", RUNTIME_DIAGNOSTIC_CORE),
     ] {
         out.push_str("mod ");
@@ -3048,6 +3074,18 @@ fn cargo_bridge_sandbox_env() -> BTreeMap<String, String> {
     env
 }
 
+fn cargo_bridge_build_args(selected_target: &str) -> Vec<String> {
+    vec![
+        "build".to_string(),
+        "--keep-going".to_string(),
+        "--release".to_string(),
+        "--target".to_string(),
+        selected_target.to_string(),
+        "--manifest-path".to_string(),
+        "/work/source/Cargo.toml".to_string(),
+    ]
+}
+
 fn build_bridge_full(
     entries: &[ExternEntry],
     needs_regex: bool,
@@ -3503,15 +3541,7 @@ fn build_bridge_full(
     fs::create_dir_all(&target_dir)
         .map_err(|e| tool_error(&format!("couldn't create the FFI target folder: {}", e)))?;
 
-    let cargo_args = vec![
-        "build".to_string(),
-        "--keep-going".to_string(),
-        "--release".to_string(),
-        "--target".to_string(),
-        selected_target.to_string(),
-        "--manifest-path".to_string(),
-        "/work/source/Cargo.toml".to_string(),
-    ];
+    let cargo_args = cargo_bridge_build_args(&selected_target);
     let mut sandbox_env = cargo_bridge_sandbox_env();
 
     let cargo_home = std::env::var_os("CARGO_HOME")
@@ -4166,6 +4196,8 @@ fn cache_key_full(
         );
         identity.field("dyn_runtime", DYN_RUNTIME.as_bytes());
         identity.field("encoding_json_runtime", ENCODING_JSON_RUNTIME.as_bytes());
+        identity.field("encoding_types_runtime", ENCODING_TYPES_RUNTIME.as_bytes());
+        identity.field("encoding_error_runtime", ENCODING_ERROR_RUNTIME.as_bytes());
         identity.field("json_number_runtime", JSON_NUMBER_RUNTIME.as_bytes());
         identity.field("runtime_diagnostic_core", RUNTIME_DIAGNOSTIC_CORE.as_bytes());
         identity.field("crypto_runtime", CRYPTO_RUNTIME.as_bytes());
@@ -7303,6 +7335,7 @@ mod tests {
         for relative in [
             "Compiler/JetFoundation/Source/Registry/PreludeEffects.jet",
             "crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs",
+            "crates/jet-codegen/src/Prelude/Core.jet",
         ] {
             assert!(sources.inputs.contains(&sources.root.join(relative)),
                 "canonical Foundation include closure omitted {relative}");
@@ -7320,6 +7353,160 @@ mod tests {
             sources.unicode.join("Cargo.toml").is_file(),
             "Cargo must resolve the actual Unicode crate, not an empty mount"
         );
+    }
+
+    #[test]
+    fn foundation_embedded_encoding_json_has_closed_source() {
+        let source = crypto_bridge_root_modules();
+        assert!(source.contains(ENCODING_TYPES_RUNTIME));
+        assert!(source.contains(ENCODING_ERROR_RUNTIME));
+        assert!(foundation_rust_include_paths(&source, Path::new("")).unwrap().is_empty(),
+            "relocated root modules must not retain source-relative includes");
+    }
+
+    fn foundation_clone_asm_wrapper() -> String {
+        let linux = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../Compiler/JetBackend/Source/OS/Linux.jet")).unwrap();
+        let declaration = linux.split_once("fn os_clone_i64(")
+            .expect("canonical Linux clone declaration").1;
+        let source = declaration.split_once("\"\"\"").unwrap().1
+            .split_once("\"\"\"").unwrap().0;
+        assert!(source.contains("mov rax, rax ; -> return"));
+        let names: Vec<String> = ["flags", "stack", "parent_tid", "child_tid"]
+            .iter().map(|name| (*name).to_owned()).collect();
+        let clobbers = source.split_once("; clobbers ").unwrap().1
+            .lines().next().unwrap().split_whitespace()
+            .map(|name| name.trim_end_matches(',').to_owned()).collect();
+        let inline = InlineEntry {
+            lang: "asm".into(), source: source.into(), param_names: names.clone(),
+            asm_contract: Some(InlineAsmContract {
+                target: host_target(), output: Some(InlineAsmOutput::Register("rax".into())),
+                clobbers,
+            }),
+        };
+        let entry = ExternEntry {
+            jet_name: "os_clone_i64".into(), rust_path: String::new(),
+            wrapper_name: "jet_ffi_os_clone_i64".into(),
+            params: vec![(AccessConvention::Read, Type::Int); names.len()],
+            param_names: names, return_type: Some(Type::Int), crate_spec: "std".into(),
+            line_hint: "canonical OS/Linux.jet clone".into(), inline: Some(inline),
+            c_abi: false, generated: false, c_module: false, close: None,
+        };
+        emit_asm_wrapper(&entry, entry.inline.as_ref().unwrap())
+    }
+
+    #[test]
+    fn foundation_clone_asm_uses_nonbinary_labels() {
+        let wrapper = foundation_clone_asm_wrapper();
+        assert!(wrapper.contains("\"jnz 2f\""));
+        assert!(wrapper.contains("\"2:\""));
+        assert!(!wrapper.contains("\"1:\""));
+    }
+
+    // Select explicitly: this replays the preserved stage0 production bridge,
+    // not a reduced synthetic crate or a whole-compiler emission.
+    #[test]
+    #[ignore = "requires the preserved production bridge source and target"]
+    fn foundation_production_bridge_builds_in_the_exact_sandbox() {
+        fn copy_source_tree(source: &Path, destination: &Path) {
+            fs::create_dir_all(destination).unwrap();
+            for entry in fs::read_dir(source).unwrap() {
+                let entry = entry.unwrap();
+                let kind = entry.file_type().unwrap();
+                let path = destination.join(entry.file_name());
+                if kind.is_dir() {
+                    copy_source_tree(&entry.path(), &path);
+                } else {
+                    assert!(kind.is_file(), "production source must not contain symlink inputs");
+                    fs::copy(entry.path(), path).unwrap();
+                }
+            }
+        }
+        let required_path = |name: &str| PathBuf::from(
+            std::env::var_os(name).unwrap_or_else(|| panic!("{name} is required")),
+        );
+        let cache_root = required_path("JET_FFI_PRODUCTION_CACHE_ROOT");
+        let target_dir = required_path("JET_FFI_PRODUCTION_TARGET_DIR");
+        let source_root = required_path("JET_FFI_PRODUCTION_SOURCE_ROOT");
+        let proof_root = required_path("JET_FFI_PRODUCTION_PROOF_ROOT");
+        fs::create_dir_all(&proof_root).unwrap();
+        let original_source = crate::SHA256::try_tree_hash(&cache_root)
+            .expect("fingerprint the preserved production bridge inputs");
+        let projected_source = proof_root.join("source");
+        copy_source_tree(&cache_root, &projected_source);
+        let library = projected_source.join("src/lib.rs");
+        let original_library = fs::read_to_string(&library).unwrap();
+        assert!(original_library.contains(ENCODING_TYPES_INCLUDE)
+            && original_library.contains(ENCODING_ERROR_INCLUDE),
+            "the recovered production source must exercise both actual relocated includes");
+        let projected = strip_outcome_host_wrapper(
+            OUTCOME_RUNTIME, HOST_RUNTIME_STOP_BEGIN, HOST_RUNTIME_STOP_END,
+        );
+        let old_outcome = strip_outcome_host_wrapper(
+            &projected, HOST_RUNTIME_SENTRY_BEGIN, HOST_RUNTIME_SENTRY_END,
+        );
+        assert!(original_library.contains(&old_outcome),
+            "the preserved bridge must use the canonical standalone Outcome projection");
+        let projected_library = splice_encoding_json_includes(&original_library)
+            .replace(&old_outcome, &standalone_outcome_runtime());
+        // Refresh this preserved fixture's audited clone body through the real
+        // ASM emitter and current canonical Jet source, not a Rust lint grant.
+        let clone_start = projected_library.find(
+            "#[no_mangle]\npub unsafe extern \"C\" fn jet_inline_jet_ffi_os_clone_i64(",
+        ).expect("preserved clone ASM wrapper");
+        let clone_end = clone_start + projected_library[clone_start..].find(
+            "#[no_mangle]\npub unsafe extern \"C\" fn jet_ffi_os_clone_i64_cabi(",
+        ).expect("preserved clone C-ABI wrapper boundary");
+        let projected_library = format!("{}{}{}", &projected_library[..clone_start],
+            foundation_clone_asm_wrapper(), &projected_library[clone_end..]);
+        assert!(foundation_rust_include_paths(&projected_library, &projected_source)
+            .unwrap().is_empty(), "collect-all generated library must have no unresolved include");
+        fs::write(&library, projected_library).unwrap();
+        let cargo_home = std::env::var_os("CARGO_HOME")
+            .map(PathBuf::from).unwrap_or_else(|| dirs_home().join(".cargo"));
+        let registry = cargo_home.join("registry").canonicalize()
+            .expect("actual registry used by the canonical materializer");
+        let mut mounts = vec![jet_sema::Comptime::Build::ReadOnlyMount::new(
+            registry, "/work/output/cargo-home/registry",
+        )];
+        let sources = jet_foundation_sources().expect("complete current Foundation source closure");
+        for mount in jet_foundation_mounts(&proof_root, &sources).unwrap() {
+            let relative = mount.destination.strip_prefix(&sources.root)
+                .expect("Foundation source mounts stay within their declared root");
+            mounts.push(jet_sema::Comptime::Build::ReadOnlyMount::new(
+                mount.source, source_root.join(relative),
+            ));
+        }
+        let selected_target = host_target();
+        assert_eq!(selected_target, "x86_64-unknown-linux-gnu",
+            "this receipt replays the recovered stage0 target, not a different platform");
+        let args = cargo_bridge_build_args(&selected_target);
+        let env = cargo_bridge_sandbox_env();
+        let start = std::time::Instant::now();
+        let built = jet_sema::Comptime::Build::run_native_sandboxed_with_mounts(
+            &command_path("cargo").expect("canonical Cargo executable"),
+            &args, &projected_source, Some(&target_dir), &env, true, &mounts,
+        ).expect("execute the exact production bridge in the mandatory sandbox");
+        fs::write(proof_root.join("cargo.stdout"), &built.output.stdout).unwrap();
+        fs::write(proof_root.join("cargo.stderr"), &built.output.stderr).unwrap();
+        let final_source = crate::SHA256::try_tree_hash(&cache_root)
+            .expect("fingerprint the production bridge after its read-only build");
+        fs::write(proof_root.join("cargo.receipt.json"), format!(
+            "{{\"status\":{},\"seconds\":{},\"args\":{:?},\"sourceUnchanged\":{}}}\n",
+            built.output.status.code().unwrap_or(-1), start.elapsed().as_secs_f64(), args,
+            final_source == original_source,
+        )).unwrap();
+        assert_eq!(final_source, original_source,
+            "the preserved production source inputs must remain unchanged");
+        assert!(built.output.status.success(), "production bridge stderr:\n{}",
+            String::from_utf8_lossy(&built.output.stderr));
+        let release = target_dir.join(&selected_target).join("release");
+        let key = cache_root.file_name().and_then(|name| name.to_str())
+            .expect("the preserved canonical bridge cache has a UTF-8 key");
+        let produced = release.join(format!("libjet_ffi_{key}.rlib"));
+        assert!(produced.is_file(),
+            "the exact production build must produce its own foreign rlib: {}", produced.display());
+        println!("production Foundation bridge: exact Cargo sandbox build passed");
     }
 
     #[test]
@@ -7380,13 +7567,16 @@ include!(concat!(env!("OUT_DIR"), "/generated.rs"));
         fs::write(foundation.join("src/lib.rs"),
             "include!(\"../../../Compiler/Registry/new.rs\");\n").unwrap();
         fs::write(unicode.join("src/lib.rs"), "").unwrap();
+        fs::write(foundation.join("build.rs"),
+            "fn main() { const DATA: &[u8] = include_bytes!(\"../../Compiler/Registry/build-data.jet\"); assert_eq!(DATA, b\"build data\"); println!(\"cargo:rerun-if-changed=../../Compiler/Registry/build-data.jet\"); }\n").unwrap();
         fs::write(external.join("new.rs"),
             "include!(\"nested.rs\");\npub const LAW: &str = include_str!(\"law.jet\");\npub const BYTES: &[u8] = include_bytes!(\"bytes.bin\");\n").unwrap();
         fs::write(external.join("nested.rs"), "pub fn probe() -> u8 { 7 }\n").unwrap();
         fs::write(external.join("law.jet"), "ratified").unwrap();
         fs::write(external.join("bytes.bin"), [0u8, 1, 255]).unwrap();
+        fs::write(external.join("build-data.jet"), "build data").unwrap();
         let inputs = foundation_include_closure(&root, &foundation, &unicode).unwrap();
-        assert_eq!(inputs, ["bytes.bin", "law.jet", "nested.rs", "new.rs"]
+        assert_eq!(inputs, ["build-data.jet", "bytes.bin", "law.jet", "nested.rs", "new.rs"]
             .map(|name| external.join(name)));
         let sources = JetFoundationSources {
             root: root.clone(), foundation, unicode, inputs, digest: String::new(),
@@ -7758,7 +7948,7 @@ dependencies = [
     }
 
     #[test]
-    fn crypto_bridge_projects_outcome_without_host_runtime_stop_adapter() {
+    fn foundation_crypto_bridge_projects_outcome_without_host_runtime_stop_adapter() {
         let source = emit_wrapper_lib(
             &[],
             false,
@@ -7782,6 +7972,9 @@ dependencies = [
         assert!(source.contains("mod jet_json_number {"));
         assert!(source.contains("mod EncodingJson {"));
         assert!(!source.contains("crate::Registry::active_runtime_diagnostic"));
+        assert!(source.contains("jet_foundation::Registry::active_runtime_diagnostic"));
+        assert!(source.contains("fn jet_runtime_diagnostic_row(code: &str)"));
+        assert!(!source.contains("crate::Outcome::"));
         assert!(!source.contains("JET_HOST_RUNTIME_STOP_BEGIN"));
         assert!(!source.contains("JET_HOST_RUNTIME_STOP_END"));
         assert!(!source.contains("pub fn jet_render_runtime_stop("));

@@ -400,6 +400,16 @@ The Jet bridge and bootstrap Rust bridge derive the same closure rather than
 maintaining separate input lists. Linux projects only these external files at
 their original source root, then mounts the complete Foundation and Unicode
 crates; this does not authorize unrelated directories.
+External build-script hashing inputs are declared with `include_bytes!`, so
+the same closure includes their bytes before Cargo compiles or runs the script.
+Owned-crate source walks and generated-view reads remain inside their complete
+crate mounts; registry build inputs remain inside the admitted registry tree.
+Relocated runtime module text splices its canonical `include!` inputs into the
+generated source instead of resolving them beside the new bridge crate. The
+bridge identity fingerprints those spliced bytes as well as the root module.
+Embedded carrier references resolve to their actual bridge-owned module. Entry
+error formatting retains the shared Foundation Registry lookup, bound to that
+dependency rather than assuming a bridge-owned compiler Registry.
 
 Native lowering must fail closed when a construct cannot preserve the shared
 runtime's ABI, error behavior, or observable output. Report an unsupported

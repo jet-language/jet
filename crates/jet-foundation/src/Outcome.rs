@@ -3019,6 +3019,7 @@ pub fn jet_render_runtime_stop_from_row(
 }
 
 // JET_HOST_RUNTIME_STOP_BEGIN
+// JET_HOST_RUNTIME_DIAGNOSTIC_LOOKUP_BEGIN
 fn jet_runtime_diagnostic_row(code: &str) -> Option<JetRuntimeDiagnosticRow> {
     crate::Registry::active_runtime_diagnostic(code).map(|row| JetRuntimeDiagnosticRow {
         code: row.code,
@@ -3028,6 +3029,7 @@ fn jet_runtime_diagnostic_row(code: &str) -> Option<JetRuntimeDiagnosticRow> {
         template_holes: row.template_holes,
     })
 }
+// JET_HOST_RUNTIME_DIAGNOSTIC_LOOKUP_END
 
 /// Foundation-side adapter. Embedded Preludes strip only this wrapper and
 /// append a generated lookup over the active Registry rows.
