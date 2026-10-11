@@ -1132,3 +1132,12 @@ fn run() Never! {
 }
 "#);
 }
+
+#[test]
+fn payload_and_cursor_loans_end_before_metadata_owner_updates() {
+    hosted_seed_program_runs(
+        "payload_loan_retirement",
+        None,
+        include_str!("../../../tests/ui/compiler_payload_loans_before_owner_updates.jet"),
+    );
+}
