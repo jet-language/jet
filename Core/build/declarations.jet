@@ -73,6 +73,29 @@ fn build_session_add_action(state: &BuildSessionState, method: String, args: [Bu
     build_session_insert_action(&state, action)
 }
 
+#Test("an allowlisted environment name the action does not declare is UndeclaredEnvName") {
+    policy :: BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}
+    session :: build_session_new(73, "envcheck", "fixture-compiler", policy)
+    toolchain_reply :: build_session_call(&session, "toolchain", [BuildSessionValue]{.Text("host"), .Text("x86_64-unknown-linux-gnu")}, None, false, 1, 2)
+    toolchain :: if toolchain_reply == {.Value(value) -> value else -> panic("toolchain declaration failed")}
+    signing_reply :: build_session_call(&session, "signing", [BuildSessionValue]{.Text("dev"), .Text("Developer")}, None, false, 3, 4)
+    signing :: if signing_reply == {.Value(value) -> value else -> panic("signing declaration failed")}
+    empty :: BuildSessionValue.List{values: [BuildSessionValue]{}}
+    outputs :: BuildSessionValue.List{values: [BuildSessionValue]{.Text("generated/env.txt")}}
+    argv :: BuildSessionValue.List{values: [BuildSessionValue]{.Text("env-tool")}}
+    env :: BuildSessionValue.List{values: [BuildSessionValue]{.Text("PATH=/bin")}}
+    base :: [BuildSessionValue]{.Text("env"), empty, outputs, argv, empty, toolchain, empty, signing, .Text("generic"), empty, env}
+    undeclared := base.copy()
+    &undeclared.push(.List([BuildSessionValue]{.Text("HOME")}))
+    refused :: build_session_call(&session, "action", undeclared, None, false, 5, 6)
+    error :: if refused == {.Failure(diagnostic) -> diagnostic.error else -> None}
+    assert_eq(error, Val(BuildSessionError.UndeclaredEnvName{action: "env", key: "HOME"}))
+    declared := base.copy()
+    &declared.push(.List([BuildSessionValue]{.Text("PATH")}))
+    accepted :: build_session_call(&session, "action", declared, None, false, 7, 8)
+    assert(accepted == {.Value(_) -> true else -> false})
+}
+
 fn build_session_insert_action(state: &BuildSessionState, action: BuildSessionAction) -> BuildSessionReply {
     if action.name.trim() == "" -> return build_session_error_fail(state, .EmptyActionName)
     if state.actions.len() >= 100000 -> return build_session_fail(state, "action graph exceeds 100000 actions")
@@ -90,7 +113,7 @@ fn build_session_insert_action(state: &BuildSessionState, action: BuildSessionAc
     loop key in action.env.keys() { if key.trim() == "" -> return build_session_error_fail(state, BuildSessionError.EmptyEnvName{value: action.name}) }
     loop key in action.env_allowlist {
         if key.trim() == "" -> return build_session_error_fail(state, BuildSessionError.EmptyEnvName{value: action.name})
-        if action.env[key] == None -> return build_session_error_fail(state, BuildSessionError.UndeclaredEnvName{action: action.name, key: key})
+        if !action.env.has_key(key) -> return build_session_error_fail(state, BuildSessionError.UndeclaredEnvName{action: action.name, key: key})
     }
     if action.cache == "cached" && action.outputs.len() == 0 -> return build_session_error_fail(state, BuildSessionError.CachedActionWithoutOutputs{value: action.name})
     if action.cache == "uncached-phony" && action.outputs.len() > 0 -> return build_session_error_fail(state, BuildSessionError.PhonyActionWithOutputs{value: action.name})

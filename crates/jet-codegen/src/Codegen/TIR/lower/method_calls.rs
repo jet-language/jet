@@ -1777,7 +1777,7 @@ fn lower_checked_core_source_call(
             (Type::Named(concrete) | Type::Apply { name: concrete, .. }, want) => {
                 let trait_name = match want {
                     Type::TraitObject(names) if names.len() == 1 => names.first(),
-                    Type::Named(name) if cx.trait_names.contains(name) => Some(name),
+                    Type::Named(name) if cx.is_trait_type_name(name) => Some(name),
                     _ => None,
                 };
                 trait_name.filter(|name| *name != concrete).cloned().map(|name| Type::TraitObject(vec![name]))

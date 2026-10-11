@@ -307,6 +307,15 @@ impl BundleCodegenFacts {
             crate::Codegen::TIR::register_own_struct_shapes(&mut metadata, bundle, owner);
             register_module_methods(&mut metadata, bundle, owner, owner);
             register_bundle_erased_nominals(&mut metadata, bundle, owner);
+            // S48 trait slots are named across modules: record each declared
+            // trait under its checked identity (`Cx::is_trait_type_name`).
+            for item in &bundle.modules[owner].items {
+                if let Item::Trait(definition) = item {
+                    if let Some(identity) = bundle.name_ledger.declared_identity(owner, &definition.name) {
+                        metadata.trait_names.insert(identity.to_owned());
+                    }
+                }
+            }
             if let Some(root) = bundle.name_ledger.module_namespace(owner) {
                 for item in &bundle.modules[owner].items {
                     if let Item::Enum(definition) = item {
@@ -2161,6 +2170,40 @@ impl Cx {
             .map(|(name, _)| name.clone());
         let identity = matches.next()?;
         matches.next().is_none().then_some(identity)
+    }
+
+    /// S48: whether a type spelling names a declared trait, local or
+    /// imported. An imported trait resolves through the name ledger to its
+    /// checked identity, exactly as `foreign_type_identity` resolves an
+    /// imported nominal; a local nominal with the same leaf wins.
+    pub(crate) fn is_trait_type_name(&self, name: &str) -> bool {
+        if self.trait_names.contains(name) {
+            return true;
+        }
+        let Some(facts) = self.bundle_facts.as_ref() else {
+            return false;
+        };
+        let traits = &facts.metadata.trait_names;
+        if traits.contains(name) {
+            return true;
+        }
+        let (alias, leaf) = name.split_once('.').unwrap_or(("", name));
+        if alias.is_empty() && self.local_type_names.contains(leaf) {
+            return false;
+        }
+        let target = if alias.is_empty() {
+            facts.names.namespace_owner(self.bundle_module, leaf)
+        } else {
+            facts.names.alias(self.bundle_module, alias).and_then(|binding| binding.target_module)
+                .and_then(|target| {
+                    facts.names.declaration(target, leaf).map(|_| target)
+                        .or_else(|| facts.names.namespace_owner(target, leaf))
+                })
+        };
+        target
+            .filter(|&target| facts.names.visible(self.bundle_module, target, leaf))
+            .and_then(|target| facts.names.declared_identity(target, leaf))
+            .is_some_and(|identity| traits.contains(identity))
     }
 
     pub(crate) fn imported_type_metadata_name(&self, name: &str) -> Option<String> {

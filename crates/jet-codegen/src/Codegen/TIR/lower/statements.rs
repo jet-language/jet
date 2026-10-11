@@ -2490,7 +2490,7 @@ pub(crate) fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -
     }
     let trait_name = match expected_elem {
         Type::TraitObject(names) if names.len() == 1 => names.first(),
-        Type::Named(name) if cx.trait_names.contains(name) => Some(name),
+        Type::Named(name) if cx.is_trait_type_name(name) => Some(name),
         _ => None,
     };
     let Some(trait_name) = trait_name else {

@@ -84,13 +84,13 @@ pub(crate) fn box_present_trait_payload(mut value: TExpr, want: &Type, cx: &Cx) 
     };
     let trait_name = match slot.as_ref() {
         Type::TraitObject(names) if names.len() == 1 => &names[0],
-        Type::Named(name) if cx.trait_names.contains(name) => name,
+        Type::Named(name) if cx.is_trait_type_name(name) => name,
         _ => return value,
     };
     let boxes = match &value.kind {
         TExprKind::Present(payload) => match &payload.ty {
             Type::Named(concrete) | Type::Apply { name: concrete, .. } => {
-                concrete != trait_name && !cx.trait_names.contains(concrete)
+                concrete != trait_name && !cx.is_trait_type_name(concrete)
             }
             _ => false,
         },
@@ -1379,7 +1379,7 @@ pub(crate) fn lower_one_call_arg(
         (Type::Named(concrete) | Type::Apply { name: concrete, .. }, Some(want)) => {
             let trait_name = match want {
                 Type::TraitObject(names) if names.len() == 1 => names.first(),
-                Type::Named(name) if cx.trait_names.contains(name) => Some(name),
+                Type::Named(name) if cx.is_trait_type_name(name) => Some(name),
                 _ => None,
             };
             trait_name
