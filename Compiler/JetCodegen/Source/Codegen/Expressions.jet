@@ -158,7 +158,6 @@ use jet_foundation.[
     mir_type_id,
     mir_type_identity_key,
     tir_pattern_key_identity,
-    mir_type_same_checked_type,
     stable_id,
     symbol_id,
     tir_generated_local,
@@ -4064,6 +4063,17 @@ fn jet_codegen_lower_try_value(builder: &JetCodegenBuilder, program: JetCodegenP
     if !is_result && !is_option -> panic("checked try operand is not a Result or Option")
     context_enabled := file != None
     if context_enabled && (line < 1 || function == None) -> panic("checked try context has incomplete source location data")
+    // Rust `lower_try_value` (#3740): a `T Never!` operand has no failure
+    // value. A site checked before the failure solve, or the propagated
+    // carrier of a trait call, still names a propagating conversion; the
+    // operand proves its failure edge dead.
+    convert := conversion
+    if input_type == {
+        .Result(_, error) -> {
+            if jet_codegen_unwrap_pattern_tags(error) == (Type.Named{name: "Never"}) -> convert = TTryConvert.Never
+        }
+        else -> {}
+    }
 
     success_block := jet_codegen_new_block(&builder, program, expression.span, "try-success")
     failure_block := jet_codegen_new_block(&builder, program, expression.span, "try-failure")
@@ -4097,7 +4107,7 @@ fn jet_codegen_lower_try_value(builder: &JetCodegenBuilder, program: JetCodegenP
         .Result(_, error) -> error
         else -> Type.Named{name: "Unit"}
     }
-    if conversion == {
+    if convert == {
         .Never -> jet_codegen_terminate(&builder, program, MIRTerminator.Unreachable{reason: "checked try conversion is unreachable"})
         .ProtocolExit -> {
             if !is_result -> panic("checked protocol-exit try does not consume a Result")
@@ -4110,16 +4120,17 @@ fn jet_codegen_lower_try_value(builder: &JetCodegenBuilder, program: JetCodegenP
             .Result(success_type, error_type) -> {
                 if !is_result -> panic("checked try Result propagation consumes an Option without a conversion")
                 error := jet_codegen_emit_value(&builder, program, input_span, source_error, MIROperation.ResultValue{subject: input, ok: false})
-                target_error := jet_codegen_try_output_error_type(builder, program, source_error, conversion, carrier)
-                target_error_mir := jet_codegen_lower_type_for_function(target_error, builder, program)
-                carrier_error_mir := jet_codegen_lower_type_for_function(error_type, builder, program)
-                if !mir_type_same_checked_type(target_error_mir, carrier_error_mir) -> panic("checked try conversion target disagrees with the enclosing Result error type")
-                converted := jet_codegen_lower_try_failure_conversion(&builder, program, expression.span, error, source_error, conversion, carrier)
+                target_error := jet_codegen_try_output_error_type(builder, program, source_error, convert, carrier)
+                // Rust `lower_try_failure` hands an unconverted error on as is:
+                // a trait call's propagated carrier (`jet_codegen_trait_call_propagates`)
+                // keeps the trait method's error, which Sema never reconciles
+                // with this function's rail, so no equality is asserted here.
+                converted := jet_codegen_lower_try_failure_conversion(&builder, program, expression.span, error, source_error, convert, carrier)
                 if {
                     context_enabled -> {
                         if fresh_failure -> jet_codegen_lower_journey_reset(&builder, program, expression.span)
                         values := jet_codegen_try_context_values(&builder, program, expression.span, file ?? "", line, function ?? "", note)
-                        converted = jet_codegen_lower_try_context(&builder, program, expression.span, converted, target_error, source_error, conversion, values, note != None)
+                        converted = jet_codegen_lower_try_context(&builder, program, expression.span, converted, target_error, source_error, convert, values, note != None)
                     }
                     note != None -> {
                         panic("checked try note has no source context")
@@ -4137,7 +4148,7 @@ fn jet_codegen_lower_try_value(builder: &JetCodegenBuilder, program: JetCodegenP
                 }
             }
             .Optional(success_type) -> {
-                if conversion != TTryConvert.NoConversion -> panic("checked optional propagation carries a non-optional error conversion")
+                if convert != TTryConvert.NoConversion -> panic("checked optional propagation carries a non-optional error conversion")
                 if context_enabled {
                     if fresh_failure -> jet_codegen_lower_journey_reset(&builder, program, expression.span)
                     values := jet_codegen_try_context_values(&builder, program, expression.span, file ?? "", line, function ?? "", note)
