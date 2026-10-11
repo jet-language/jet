@@ -515,6 +515,12 @@ fn sema_expr_check_operator(op: BinOp, left: Expr, right: Expr, lhs: TExpr, rhs:
     &context.call_return_views.push(SemaCallReturnView{span: span, facts: value_checked.return_view_facts})
     if !sema_expr_record_call_fact(environment, program, &scopes, &context, span, value_checked, &diagnostics) -> return None
     value := value_checked.value
+    // A hook declared `-> T Never!` yields its success value: the uninhabited
+    // failure is erased exactly as the automatic propagation of any other
+    // `Never!` call (`TTryConvert.Never`), so `rhs * self` is a plain `T`.
+    if sema_expr_unwrap_tag(value.ty) == .Result(_, error) && sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) {
+        value = sema_expression_propagated(value, TTryConvert.Never, span) ?? return None
+    }
     if op == BinOp.Compare -> return sema_expr_expected(value, expected, environment, program, &diagnostics)
     if op == BinOp.Eq || op == BinOp.Ne {
         if resolved.candidate.method.name == "compare" {

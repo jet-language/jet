@@ -376,6 +376,11 @@ fn sema_pattern_consumes_result_carrier(pattern: Pattern) -> Bool Never! {
 // success view for this call, a Result result is compared by its success side;
 // `sema_expression_auto_propagate` then inserts the one `Try`.
 fn sema_expression_call_expected(value: TExpr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    // Rust `expr_definitely_diverges` / `infer_or_fallback`: a call whose
+    // checked result is plain `Never` diverges, and the slot type is only an
+    // inference hint for it; its consumer (`??`, a branch) accepts divergence.
+    // This is the fixed Core route of `x ?? core.math.__numeric_stop(...)`.
+    if sema_expr_unwrap_tag(value.ty) == (Type.Named{name: "Never"}) -> return Val(value)
     if context.failure_success_view && expected != None && !sema_expression_failure_carrier_position(expected, value.ty) {
         if sema_expr_unwrap_tag(value.ty) == .Result(success, _) {
             required := sema_expr_expected_type(expected, environment, program)
