@@ -534,6 +534,13 @@ fn sema_call_typecheck_host_bound_arguments(callee: String, params: [SemaCallPar
     Val(SemaCallTypedArguments{values: values, slots: slots, required_types: required_types, source_indices: loop _ in values -> -1})
 }
 
+// Whether `key` is a builtin trait identity (sema_type_builtin_trait_symbol).
+fn sema_call_builtin_trait_key(key: String) -> Bool Never! {
+    parts :: key.split(":").to_list()
+    builtin :: sema_type_builtin_trait_symbol(parts[parts.len() - 1]) ?? return false
+    builtin.id.key == key
+}
+
 fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Expr, receiver_value: TExpr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
     // Declaration existence selects the method namespace. Check the chosen
     // registered identity's visibility here, never while filtering candidates.
@@ -547,8 +554,13 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
                 .ImplMethod(owner, implementation, index) -> sema_registration_visible(graph.modules[owner].impls[implementation].methods[index].symbol.visibility, environment.module_identity, environment.package_identity, graph.modules[owner].module_identity, graph.modules[owner].package_identity)
             })
         } else if candidate.method.trait_owner == .Val(owner) {
-            row :: sema_type_graph_nominal_row(graph, owner.key) ?? panic("selected trait method has no canonical owner row")
-            visible = Val(sema_call_trait_visible(graph, graph.modules[row.module_index].nominals[row.row], environment.module_identity, environment.package_identity))
+            // A builtin trait owner (sema_type_builtin_trait_symbol: `Mul`
+            // on an operator hook) has no row and is visible everywhere.
+            if sema_type_graph_nominal_row(graph, owner.key) == .Val(row) {
+                visible = Val(sema_call_trait_visible(graph, graph.modules[row.module_index].nominals[row.row], environment.module_identity, environment.package_identity))
+            } else if !sema_call_builtin_trait_key(owner.key) {
+                panic("selected trait method has no canonical owner row")
+            }
         } else if candidate.method.mangled {
             panic("selected registered method has no canonical callable row")
         }

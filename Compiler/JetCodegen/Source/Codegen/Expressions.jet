@@ -2525,10 +2525,7 @@ fn jet_codegen_symbol_name(builder: JetCodegenBuilder, program: JetCodegenProgra
     // A builtin trait (Sema `sema_type_builtin_trait_symbol`: an operator hook's
     // `Add`/`Sub`/`Mul`/`Div` owner, or a builtin bound) has no owning module;
     // its identity is the bare trait name, as in `jet_codegen_mir_trait_ref_for_symbol`.
-    parts :: symbol.key.split(":").to_list()
-    name :: parts[parts.len() - 1]
-    if symbol.key == symbol_id(SymbolKind.Trait, "", "", name).key -> return name
-    panic("checked method trait has no registered symbol")
+    jet_codegen_builtin_trait_name(symbol) ?? panic("checked method trait has no registered symbol")
 }
 
 fn jet_codegen_resolve_trait_method(builder: JetCodegenBuilder, program: JetCodegenProgram, method: TMethodRef) -> JetCodegenTraitMethod Never! {
@@ -2550,6 +2547,7 @@ fn jet_codegen_resolve_trait_method(builder: JetCodegenBuilder, program: JetCode
             }
         }
     }
+    if selected == None && jet_codegen_builtin_trait_name(symbol) == .Val(name) -> panic("checked call of builtin trait `{name}` method `{method.name}` has no concrete hook and no trait declaration to dispatch through")
     selected ?? panic("checked trait method declaration is unreachable")
 }
 
@@ -2569,10 +2567,14 @@ fn jet_codegen_type_head_name(ty: Type) -> String? Never! {
 
 fn jet_codegen_method_function(builder: JetCodegenBuilder, program: JetCodegenProgram, method: TMethodRef) -> TFunc? {
     selected := TFunc?{None}
+    keyed := 0
+    only := TFunc?{None}
     row := program.function_index.first_by_key.get(method.symbol.key) ?? -1
     loop row >= 0 {
         function :: program.function_index.rows[row]
         row = program.function_index.next_by_key[row]
+        keyed += 1
+        only = Val(function)
         if method.operator_identity != None {
             owner_type :: jet_codegen_method_owner_type(function.kind) ?? next
             trait_symbol :: method.trait_owner ?? next
@@ -2584,7 +2586,26 @@ fn jet_codegen_method_function(builder: JetCodegenBuilder, program: JetCodegenPr
         if selected != None -> panic("checked method function identity is ambiguous")
         selected = Val(function)
     }
+    // A hook on a builtin arithmetic trait (`impl R.Mul(Int)`) has no trait
+    // declaration to dispatch through (jet_codegen_resolve_trait_method), so
+    // it is never a dynamic trait call: its symbol key already names the
+    // operand pair (Sema `sema_registration_operator_owner`), so the one
+    // function of that key is the hook.
+    if selected == None && keyed == 1 && method.operator_identity != None {
+        if method.trait_owner == .Val(owner) {
+            if jet_codegen_builtin_trait_name(owner) != None -> return only
+        }
+    }
     selected
+}
+
+// The bare name of a builtin trait identity (Sema `sema_type_builtin_trait_symbol`:
+// no owning module), or None for a declared trait.
+fn jet_codegen_builtin_trait_name(symbol: SymbolID) -> String? Never! {
+    parts :: symbol.key.split(":").to_list()
+    name :: parts[parts.len() - 1]
+    if symbol.key == symbol_id(SymbolKind.Trait, "", "", name).key -> return Val(name)
+    None
 }
 
 fn jet_codegen_method_trait_dispatch(builder: JetCodegenBuilder, program: JetCodegenProgram, receiver: TExpr, method: TMethodRef) -> Bool Never! {
