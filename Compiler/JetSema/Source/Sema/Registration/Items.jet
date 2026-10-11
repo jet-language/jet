@@ -67,6 +67,7 @@ use jet_foundation.[
     core_enum_payload_variants,
     core_enum_variant_payload,
     core_module_export,
+    core_module_has_member,
     core_module_has_type,
     core_record_literal_fields,
     core_source_owns_type,
@@ -2882,6 +2883,24 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                         }
                     }
                     .None -> {
+                        // D-CORE-USELIST1=A (Rust CheckInner `core_list_path`
+                        // Item): a Core module's ledger member with no source
+                        // declaration (a host leaf such as
+                        // `core.files.__host_path_join`) binds as a Core item
+                        // import, also inside its own module. Its symbol is
+                        // Foreign (no Jet declaration); calls route through
+                        // the module's Core call records (Calls/Direct.jet).
+                        if (target_name == "core" || target_name.starts_with("core.")) && core_module_has_member(target_name, item.original) && sema_registration_direct_symbol(graph.modules[target_index], item.original) == None {
+                            if sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) || (namespace_binds && sema_registration_namespace_owner(graph, module_index, local) != None) {
+                                sema_registration_push_graph_diagnostic(&graph, module_index, sema_defined_twice(local, "imported names share the module namespace", declaration.span))
+                                next
+                            }
+                            leaf_identity :: graph.modules[target_index].module_identity.copy()
+                            import_visibility :: graph.modules[module_index].imports[import_index].visibility
+                            leaf_symbol :: Symbol{id: symbol_id(SymbolKind.Foreign, leaf_identity, "", item.original), kind: SymbolKind.Foreign, name: local, module_name: leaf_identity, owner: None, span: declaration.span, ty: None, visibility: import_visibility}
+                            sema_registration_push_import_binding(&graph, module_index, import_index, SemaRegistrationImportBinding{original: item.original, local: local, symbol: leaf_symbol, declaration: None, target_module_identity: leaf_identity, target_module_index: Val(target_index), visibility: import_visibility})
+                            next
+                        }
                         direct :: sema_registration_direct_symbol(graph.modules[target_index], item.original)
                         private_template := false
                         if direct == .Val(private_export) {

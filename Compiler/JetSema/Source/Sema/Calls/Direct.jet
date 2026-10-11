@@ -661,11 +661,22 @@ fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg], typ
     SemaDirectSpecialCheck{handled: false, value: None}
 }
 fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
-    if !call.name.contains(".") -> return SemaDirectSpecialCheck{handled: false, value: None}
-    parts := call.name.split(".").to_list()
-    if parts.len() != 2 -> return SemaDirectSpecialCheck{handled: false, value: None}
-    alias := parts[0]
-    member := parts[1]
+    alias := call.name
+    member := ""
+    if call.name.contains(".") {
+        parts := call.name.split(".").to_list()
+        if parts.len() != 2 -> return SemaDirectSpecialCheck{handled: false, value: None}
+        alias = parts[0]
+        member = parts[1]
+    } else {
+        // A Core host-leaf item import (`use core.files.[__host_path_join]`,
+        // registered as a Foreign symbol: no Jet declaration) is called by
+        // its local name; its member is the imported item.
+        visible :: sema_scope_resolve_index(scopes, call.name) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+        if scopes.bindings[visible].symbol.kind != SymbolKind.Foreign -> return SemaDirectSpecialCheck{handled: false, value: None}
+        imported :: sema_call_core_import_target(environment, program, call.name) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+        member = imported.item ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    }
     module_name :: sema_call_core_import_module(environment, program, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
     if sema_call_core_variadic_print(environment, program, scopes, alias, member, call.args.len(), call.name_span, &context) -> return sema_call_check_ambient_print(call, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     expected_type_arg_count := 0
