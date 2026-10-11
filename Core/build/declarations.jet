@@ -93,7 +93,8 @@ fn build_session_add_action(state: &BuildSessionState, method: String, args: [Bu
     declared := base.copy()
     &declared.push(.List([BuildSessionValue]{.Text("PATH")}))
     accepted :: build_session_call(&session, "action", declared, None, false, 7, 8)
-    assert(accepted == {.Value(_) -> true else -> false})
+    accepted_ok :: if accepted == {.Value(_) -> true else -> false}
+    assert(accepted_ok)
 }
 
 fn build_session_insert_action(state: &BuildSessionState, action: BuildSessionAction) -> BuildSessionReply {
