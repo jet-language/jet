@@ -244,22 +244,15 @@ fn jet_codegen_lower_declared_or_builtin_trait_ref(names: JetCodegenTraitNames, 
     panic("checked trait name has no declared or registered builtin identity")
 }
 
-fn jet_codegen_trait_name_has_declaration(modules: [SemaGraphModuleResult], name: String) -> Bool Never! {
-    loop semantic_module in modules {
-        loop definition in semantic_module.declarations.traits {
-            canonical :: jet_codegen_canonical_target_type(semantic_module.module_identity, definition.key)
-            if jet_codegen_trait_spellings(semantic_module.module_name, semantic_module.module_identity, definition.key, definition.name, canonical).contains(name) -> return true
-        }
-    }
-    false
-}
-
+// A checked derive names a declared trait, a native Rust derive, a
+// compiler-owned trait, or any other type marker the parser keeps as a derive
+// (`#SingleUse`, `#Numeric`, ...). Rust keys every derive by its written name
+// (tir_to_mir_types.rs `TirTypeDef::derives` -> `stable_id("mir-trait", name)`)
+// and never refuses one; a declared trait keeps its resolved identity.
 fn jet_codegen_lower_type_derive_trait_id(name: String, modules: [SemaGraphModuleResult], module_identity: String) -> MIRTraitID Never! {
     resolved := jet_codegen_resolve_trait_ref(modules, name, module_identity)
-    if resolved != None -> return (resolved ?? panic("resolved derive trait disappeared")).id
-    if jet_codegen_trait_name_has_declaration(modules, name) -> panic("checked derive trait name is ambiguous")
-    if jet_codegen_is_native_rust_derive_name(name) || jet_codegen_is_compiler_owned_trait_name(name) -> return mir_trait_id(name)
-    panic("checked derive trait has no declared or builtin identity")
+    if resolved == .Val(reference) -> return reference.id
+    mir_trait_id(name)
 }
 
 fn jet_codegen_core_owner_identity(owner: TCoreBuiltinOwner, semantic_module: SemaGraphModuleResult) -> JetCodegenNominalIdentity Never! {

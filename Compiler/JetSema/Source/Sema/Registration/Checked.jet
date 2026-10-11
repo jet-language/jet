@@ -154,8 +154,13 @@ fn sema_checked_marker_text_label(marker: Marker, label: String) -> String? {
     None
 }
 
+// Rust: tir_to_mir_types.rs::lower_derive_names drops the `#CLI` marker; it
+// is a CLI entry fact, not a derived trait.
 fn sema_checked_derive_names(derives: [NamedSpan]) -> [String] Never! {
-    names :: loop derived in derives -> derived.name
+    names := [String]{}
+    loop derived in derives {
+        if derived.name != "CLI" -> &names.push(derived.name)
+    }
     names
 }
 
