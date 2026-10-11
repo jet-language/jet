@@ -3051,6 +3051,16 @@ fn sema_checked_member_names(graph: SemaRegistrationGraph, module_row: SemaRegis
         }
     }
     loop implementation in module_row.impls {
+        // Rust register_impl_methods inserts each impl method into its type's
+        // method table once. An impl attached to a registered nominal row
+        // already contributed its methods to `nominal.methods`, which the
+        // owner module's walk above names; walking it again would see the
+        // same declaration twice. Only unattached impls are named here.
+        if implementation.target_module_identity == .Val(target_module) {
+            if sema_registration_module_index(graph, target_module) == .Val(target_index) {
+                if sema_registration_impl_nominal_index(graph.modules[target_index], implementation.target_type_name) >= 0 -> next
+            }
+        }
         row :: sema_type_resolve_nominal_row(graph, implementation.target_type, module_row.module_identity)
         owner :: if row == .Val(value) -> graph.modules[value.module_index].nominals[value.row].symbol.id.key else -> type_name(implementation.target_type)
         hook :: sema_checked_operator_trait(implementation.trait_name ?? "")
