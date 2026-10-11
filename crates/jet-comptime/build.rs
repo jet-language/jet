@@ -5,6 +5,7 @@ fn main() {
     // cutover cfg with jet-codegen; register it for every generated fragment.
     println!("cargo:rustc-check-cfg=cfg(jet_native_pack)");
     println!("cargo:rustc-check-cfg=cfg(jet_platform_seeds)");
+    println!("cargo:rustc-check-cfg=cfg(jet_codegen_host)");
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     write_web_kernel_std(&manifest);
     write_native_scheduler(&manifest);
@@ -128,7 +129,7 @@ fn write_native_scheduler(manifest: &Path) {
     ));
     body.push_str("\n\n");
     // This crate borrows the scheduler's Rust implementation, not its C ABI.
-    // Seed exports belong to jet-codegen; the native pack has its own owners.
+    // Seed exports belong to the generated runtime; the native pack has its own owners.
     let body = body.replace("#[no_mangle]", "");
 
     let out =

@@ -1044,8 +1044,8 @@ pub extern "C" fn jet_rt_observe_pool(workers: i64, queued_delta: i64) {
     if queued_delta > 0 { JET_OBSERVE_QUEUED.fetch_add(queued_delta as usize, Ordering::Relaxed); }
     if queued_delta < 0 { JET_OBSERVE_QUEUED.fetch_sub(queued_delta.unsigned_abs() as usize, Ordering::Relaxed); }
 }
-// Seed/verification provider; HostIO.jet owns this symbol in the native pack.
-#[cfg(not(jet_native_pack))]
+// Generated-runtime seed provider (HostIO.jet owns it in the native pack); jet-codegen's in-crate copy exports nothing.
+#[cfg(all(not(jet_native_pack), not(jet_codegen_host)))]
 #[no_mangle]
 pub extern "C" fn jet_rt_observe_io_quiescent() -> bool {
     use std::sync::atomic::Ordering;
