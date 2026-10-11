@@ -3630,7 +3630,7 @@ fn jet_list_remove_value<T: Clone + PartialEq>(
 // The out-of-bounds stop names the user's call site, which the MIR adapter
 // passes after the checked operands.
 #[inline(always)]
-fn jet_list_remove_slot<T: Clone>(
+fn jet_list_remove_slot<T>(
     xs: &mut Vec<T>,
     index: i64,
     file: &str,

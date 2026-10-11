@@ -1244,7 +1244,7 @@ fn jet_list_remove_value_kernel<T: Clone + PartialEq>(xs: &mut Vec<T>, value: T)
         .map(|index| xs.remove(index))
 }
 
-fn jet_list_remove_slot_kernel<T: Clone>(xs: &mut Vec<T>, index: i64) -> Result<T, String> {
+fn jet_list_remove_slot_kernel<T>(xs: &mut Vec<T>, index: i64) -> Result<T, String> {
     let len = xs.len() as i64;
     if index < 0 || index >= len {
         return Err(jet_list_bounds_message(len, index));

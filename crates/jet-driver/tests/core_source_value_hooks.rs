@@ -545,6 +545,50 @@ fn run() -[Env]> {
     );
 }
 
+/// A record holding a resource handle cannot be copied. `loop x in ^xs`
+/// takes the list and hands each element out by value, so the body moves it
+/// into another list without a Rust `.clone()` the record lacks; a read-only
+/// loop before the take still walks the list in place.
+#[test]
+fn taken_lists_move_noncloneable_records() {
+    hosted_seed_program_runs(
+        "noncloneable_takes",
+        Some("name: \"noncloneable_takes\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS.Read, FS.Write] } }\n"),
+        r#"
+use core.files.[FileReader, open, create]
+struct Held {
+    name: String
+    handle: FileReader
+}
+fn opened(name: String) -[FS]> Held {
+    writer :: create(name) ?? panic("create")
+    writer.write_all([U8]{65}) ?? panic("write")
+    writer.fsync() ?? panic("fsync")
+    Held{name: name, handle: open(name) ?? panic("open")}
+}
+fn short_ones(listed: ^[Held]) -> [Held] {
+    names := [String]{}
+    loop held in listed -> &names.push(held.name)
+    assert_eq(names.len(), 4)
+    kept := [Held]{}
+    loop held in ^listed {
+        if held.name.len() < 6 -> &kept.push(^held)
+    }
+    kept
+}
+fn run() -[FS]> {
+    held := [Held]{}
+    &held.push(opened("a.txt"))
+    &held.push(opened("bb.txt"))
+    &held.push(opened("c.txt"))
+    &held.push(opened("long-name.txt"))
+    kept := short_ones(^held)
+    assert_eq(kept.len(), 2)
+}
+"#,
+    );
+}
+
 /// The original Prelude `Err` keeps its checked identity
 /// (`jet:canonical-prelude::…::Err`) and is carried by the one native
 /// `JetErr`: a typed `IOError` converted into the default error domain flows

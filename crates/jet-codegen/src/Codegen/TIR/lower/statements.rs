@@ -4359,10 +4359,24 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     let elem_is_cloneable = !coll_elem_ty
                         .as_ref()
                         .is_some_and(crate::Sema::type_requires_owned_iteration);
+                    // `loop x in ^xs` takes the list: sema already recorded the
+                    // move of `xs`, so each step hands out the element itself
+                    // rather than a copy of it. This is the one consuming form
+                    // for a list whose elements cannot be copied (a record that
+                    // holds a resource handle), and it never clones a copyable
+                    // element either.
+                    let taken_list = method_kind.is_none()
+                        && !elem_is_view_mut
+                        && matches!(collection, Expr::Place(_, PlaceAccess::Take, _))
+                        && matches!(&lowered_coll.ty, Type::List(_) | Type::FixedList { .. })
+                        && !coll_elem_ty
+                            .as_ref()
+                            .is_some_and(|t| cx.columnar_list_type(t).is_some());
                     let by_value = matches!(&lowered_coll.ty,
                         Type::Apply { name, .. }
                             if name == Syntax::TYPE_STREAM || name == crate::Syntax::TYPE_ITER
                     ) || matches!(&lowered_coll.ty, Type::Named(name) if name == "HTTPBodyChunks")
+                        || taken_list
                         || (method_kind.is_none()
                             && !elem_is_cloneable
                             && !elem_is_view_mut
