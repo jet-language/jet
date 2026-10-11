@@ -219,7 +219,10 @@ struct JSONPull {
     fn fill(&self) -[IO, Time.Wait]> U8? EncodingError! {
         if self.lookahead != None -> return Ok(self.lookahead)
         if encoding.__read_byte(&self.input) == {
-            .Ok(value) -> { self.lookahead = value; return Ok(value) }
+            .Ok(value) -> {
+                self.lookahead = value
+                return Ok(value)
+            }
             .Err(cause) -> return Err(io_error(self.offset, self.line, self.column, cause))
         }
     }
@@ -580,11 +583,26 @@ struct JSONPull {
             }
         }
         if event == {
-            .Null -> { self.fold_charge(1, &heap); return Ok(Dyn.Null) }
-            .Bool(value) -> { self.fold_charge(1, &heap); return Ok(Dyn.Bool(value)) }
-            .Int(value) -> { self.fold_charge(8, &heap); return Ok(Dyn.Int(value)) }
-            .Float(value) -> { self.fold_charge(8, &heap); return Ok(Dyn.Float(value)) }
-            .Text(value) -> { text :: self.fold_text(^value, &heap); return Ok(Dyn.Text(text)) }
+            .Null -> {
+                self.fold_charge(1, &heap)
+                return Ok(Dyn.Null)
+            }
+            .Bool(value) -> {
+                self.fold_charge(1, &heap)
+                return Ok(Dyn.Bool(value))
+            }
+            .Int(value) -> {
+                self.fold_charge(8, &heap)
+                return Ok(Dyn.Int(value))
+            }
+            .Float(value) -> {
+                self.fold_charge(8, &heap)
+                return Ok(Dyn.Float(value))
+            }
+            .Text(value) -> {
+                text :: self.fold_text(^value, &heap)
+                return Ok(Dyn.Text(text))
+            }
             .ArrayStart -> {
                 values := [Dyn]{}
                 loop {
@@ -1066,7 +1084,10 @@ struct JSONPush {
         if event == {
             .Null -> size = 4
             .Bool(value) -> size = if value -> 4 else -> 5
-            .Int(value) -> { payload = "{value}"; size = payload.count_bytes() }
+            .Int(value) -> {
+                payload = "{value}"
+                size = payload.count_bytes()
+            }
             .Float(value) -> {
                 if !math.is_finite(value) -> return Err(self.error(.Unsupported, "JSON cannot encode a non-finite Float"))
                 payload = wire_float(value)
@@ -1432,7 +1453,10 @@ fn wire_float(value: Float) -> String Never! {
     exponent_at := bytes.len()
     loop i in start..<bytes.len() {
         if bytes[i] == (U8{46}) -> decimal = i - start
-        if bytes[i] == (U8{101}) || bytes[i] == (U8{69}) { exponent_at = i; break }
+        if bytes[i] == (U8{101}) || bytes[i] == (U8{69}) {
+            exponent_at = i
+            break
+        }
     }
     if decimal < 0 -> decimal = exponent_at - start
     exponent := 0
@@ -1452,7 +1476,10 @@ fn wire_float(value: Float) -> String Never! {
     }
     dot := -1
     loop i in start..<bytes.len() {
-        if bytes[i] == (U8{46}) { dot = i; break }
+        if bytes[i] == (U8{46}) {
+            dot = i
+            break
+        }
     }
     if dot >= 0 {
         loop i in dot..<(bytes.len() - 1) -> bytes[i] = bytes[i + 1]
@@ -1466,13 +1493,19 @@ fn wire_float(value: Float) -> String Never! {
     } else if position > 0 {
         &bytes.push(U8{0})
         i := bytes.len() - 1
-        loop i > start + position { bytes[i] = bytes[i - 1]; i -= 1 }
+        loop i > start + position {
+            bytes[i] = bytes[i - 1]
+            i -= 1
+        }
         bytes[start + position] = U8{46}
     } else {
         prefix :: 2 - position
         loop _ in 0..<prefix -> &bytes.push(U8{0})
         i := bytes.len() - 1
-        loop i >= start + prefix { bytes[i] = bytes[i - prefix]; i -= 1 }
+        loop i >= start + prefix {
+            bytes[i] = bytes[i - prefix]
+            i -= 1
+        }
         bytes[start] = U8{48}
         bytes[start + 1] = U8{46}
         loop zero_index in (start + 2)..<(start + prefix) -> bytes[zero_index] = U8{48}

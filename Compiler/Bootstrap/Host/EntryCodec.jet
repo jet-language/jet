@@ -249,7 +249,10 @@ fn bootstrap_native_codec_children(shape: BootstrapNativeCodecShape) -> [Int] Ne
     if shape == {
         .List(child) | .FixedList(child, _) | .Option(child) -> &children.push(child)
         .Tuple(fields) -> loop field in fields -> &children.push(field.child)
-        .Result(ok, err) | .Map(ok, err) -> { &children.push(ok); &children.push(err) }
+        .Result(ok, err) | .Map(ok, err) -> {
+            &children.push(ok)
+            &children.push(err)
+        }
         .Record(_, fields) -> loop field in fields -> &children.push(field.child)
         .Enum(_, variants) -> loop variant in variants { loop field in variant.fields -> &children.push(field.child) }
         else -> {}
@@ -333,12 +336,30 @@ fn bootstrap_native_codec_collect(program: MIRProgram, graph: SemaRegistrationGr
     source := ""
     shape := BootstrapNativeCodecShape{Blocked}
     if ty.kind == {
-        .Int -> { source = "Int"; shape = .Scalar }
-        .Float -> { source = "Float"; shape = .Scalar }
-        .Float32 -> { source = "F32"; shape = .Scalar }
-        .Bool -> { source = "Bool"; shape = .Scalar }
-        .Char -> { source = "Char"; shape = .Scalar }
-        .String -> { source = "String"; shape = .Scalar }
+        .Int -> {
+            source = "Int"
+            shape = .Scalar
+        }
+        .Float -> {
+            source = "Float"
+            shape = .Scalar
+        }
+        .Float32 -> {
+            source = "F32"
+            shape = .Scalar
+        }
+        .Bool -> {
+            source = "Bool"
+            shape = .Scalar
+        }
+        .Char -> {
+            source = "Char"
+            shape = .Scalar
+        }
+        .String -> {
+            source = "String"
+            shape = .Scalar
+        }
         .IntN(signed, bits) -> {
             if bits == 8 || bits == 16 || bits == 32 || bits == 64 {
                 prefix :: if signed -> "I" else -> "U"
@@ -526,10 +547,22 @@ fn bootstrap_native_codec_quote(text: String) -> String Never! {
     escaped := [U8]{U8{34}}
     loop byte in text.bytes() {
         if Int.from_u8(byte) == {
-            34 | 92 -> { &escaped.push(U8{92}); &escaped.push(byte) }
-            10 -> { &escaped.push(U8{92}); &escaped.push(U8{110}) }
-            13 -> { &escaped.push(U8{92}); &escaped.push(U8{114}) }
-            9 -> { &escaped.push(U8{92}); &escaped.push(U8{116}) }
+            34 | 92 -> {
+                &escaped.push(U8{92})
+                &escaped.push(byte)
+            }
+            10 -> {
+                &escaped.push(U8{92})
+                &escaped.push(U8{110})
+            }
+            13 -> {
+                &escaped.push(U8{92})
+                &escaped.push(U8{114})
+            }
+            9 -> {
+                &escaped.push(U8{92})
+                &escaped.push(U8{116})
+            }
             else -> &escaped.push(byte)
         }
     }

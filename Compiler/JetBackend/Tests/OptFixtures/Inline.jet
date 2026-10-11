@@ -215,8 +215,14 @@ fn ofxi_limit(size: Int, calls: Int, expected_sites: Int) -> Bool Never! {
     after :: lir_inline_module(before)
     print("=== {before.functions[0].name} before ===\n{lir_print_module(before)}=== {before.functions[0].name} after ===\n{lir_print_module(after)}")
     passed := true
-    loop issue in lir_lint_module(before) { print("FAIL input lint: {issue.message}"); passed = false }
-    loop issue in lir_lint_module(after) { print("FAIL output lint: {issue.message}"); passed = false }
+    loop issue in lir_lint_module(before) {
+        print("FAIL input lint: {issue.message}")
+        passed = false
+    }
+    loop issue in lir_lint_module(after) {
+        print("FAIL output lint: {issue.message}")
+        passed = false
+    }
     direct := 0
     effects := 0
     loop block in after.functions[0].blocks {

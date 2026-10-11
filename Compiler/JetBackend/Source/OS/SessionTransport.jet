@@ -212,7 +212,10 @@ fn x64_session_read_frame_status(fd: Int, max_length: Int) -> X64SessionFrame {
         byte := 0
         #Unsafe("one byte was read into this owned mapping") { byte = os_load_byte(buffer) }
         if byte == 10 -> break
-        if byte < 48 || byte > 57 || digits >= 10 { valid = false; break }
+        if byte < 48 || byte > 57 || digits >= 10 {
+            valid = false
+            break
+        }
         length = length * 10 + byte - 48
         digits += 1
     }
@@ -223,7 +226,10 @@ fn x64_session_read_frame_status(fd: Int, max_length: Int) -> X64SessionFrame {
         if count > 4096 -> count = 4096
         got :: os_read(fd, buffer, count)
         if got == -4 -> next
-        if got <= 0 { valid = false; break }
+        if got <= 0 {
+            valid = false
+            break
+        }
         loop index in 0..<got {
             byte := 0
             #Unsafe("index is within the bytes just read into this mapping") { byte = os_load_byte(buffer + index) }

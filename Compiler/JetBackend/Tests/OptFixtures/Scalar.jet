@@ -127,8 +127,14 @@ fn oscalar_escape(pointer_add: Bool) -> Bool Never! {
     after.functions = [LIRFunction]{lir_scalar_replace_function(function)}
     print("=== {function.name} before ===\n{lir_print_module(before)}=== {function.name} after ===\n{lir_print_module(after)}")
     passed := lir_print_module(before) == lir_print_module(after)
-    loop issue in lir_lint_module(before) { print("FAIL escape input: {issue.message}"); passed = false }
-    loop issue in lir_lint_module(after) { print("FAIL escape output: {issue.message}"); passed = false }
+    loop issue in lir_lint_module(before) {
+        print("FAIL escape input: {issue.message}")
+        passed = false
+    }
+    loop issue in lir_lint_module(after) {
+        print("FAIL escape output: {issue.message}")
+        passed = false
+    }
     if passed -> print("PASS {function.name}")
     passed
 }

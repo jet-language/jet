@@ -409,7 +409,12 @@ fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputIntent, 
     }
     entry_index :: sema_registration_module_index(graph, graph.entry_module_identity) ?? return ^diagnostics
     legacy := Int?{None}
-    loop (index, function) in graph.modules[entry_index].functions { if function.declaration.name == "run" { legacy = Val(index); break } }
+    loop (index, function) in graph.modules[entry_index].functions {
+        if function.declaration.name == "run" {
+            legacy = Val(index)
+            break
+        }
+    }
     // Validate defaults even when legacy run, one Output, or explicit selection
     // already makes the winner clear.
     default_address :: sema_output_default(graph, entry_index, &diagnostics)

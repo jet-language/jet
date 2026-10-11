@@ -17,10 +17,18 @@ fn opt_scalar_fields(function: LIRFunction, slot: LIRValueID, size: Int, dom: Op
             offset := -1
             value := LIRValueID{value: -1}
             if inst == {
-                .Load(dst, base, at) -> { if base == slot { offset = at; value = dst } }
+                .Load(dst, base, at) -> {
+                    if base == slot {
+                        offset = at
+                        value = dst
+                    }
+                }
                 .Store(base, at, src) -> {
                     if src == slot -> return None
-                    if base == slot { offset = at; value = src }
+                    if base == slot {
+                        offset = at
+                        value = src
+                    }
                 }
                 else -> { loop operand in lir_inst_uses(inst) { if operand == slot -> return None } }
             }
@@ -124,7 +132,10 @@ fn opt_scalar_slot(original: LIRFunction, slot: LIRValueID, fields: [OptScalarFi
                     if dom.parent[predecessor] >= 0 -> incoming = incoming && initialized[predecessor]
                 }
                 outgoing :: incoming || stores[row]
-                if initialized[row] != outgoing { initialized[row] = outgoing; changed = true }
+                if initialized[row] != outgoing {
+                    initialized[row] = outgoing
+                    changed = true
+                }
             }
         }
         loop row in dom.order {
@@ -145,7 +156,10 @@ fn opt_scalar_slot(original: LIRFunction, slot: LIRValueID, fields: [OptScalarFi
                         if successor >= 0 && live[successor] -> needed = true
                     }
                 }
-                if live[row] != needed { live[row] = needed; changed = true }
+                if live[row] != needed {
+                    live[row] = needed
+                    changed = true
+                }
             }
         }
         pending := [Int]{}
@@ -184,7 +198,10 @@ fn opt_scalar_slot(original: LIRFunction, slot: LIRValueID, fields: [OptScalarFi
     saved := [[Int]]{}
     loop _ in function.blocks -> &saved.push([Int]{})
     loop event in opt_dom_events(dom) {
-        if event < 0 { current = saved[-event - 1]; next }
+        if event < 0 {
+            current = saved[-event - 1]
+            next
+        }
         row :: event
         saved[row] = current
         loop (field, phi) in phis[row] { if phi >= 0 -> current[field] = phi }

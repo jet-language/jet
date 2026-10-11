@@ -300,10 +300,22 @@ fn cpu_find_mountpoint(ctx: I64) -> Bool {
         field := start
         loop index < count {
             stop :: cpu_find(data, field, end, I64{32})
-            if (index == I64{3}) { cpu_put(fields, field); cpu_put(fields + I64{8}, stop) }
-            if (index == I64{4}) { cpu_put(fields + I64{16}, field); cpu_put(fields + I64{24}, stop) }
-            if (index == count - I64{3}) { cpu_put(fields + I64{32}, field); cpu_put(fields + I64{40}, stop) }
-            if (index == count - I64{1}) { cpu_put(fields + I64{48}, field); cpu_put(fields + I64{56}, stop) }
+            if (index == I64{3}) {
+                cpu_put(fields, field)
+                cpu_put(fields + I64{8}, stop)
+            }
+            if (index == I64{4}) {
+                cpu_put(fields + I64{16}, field)
+                cpu_put(fields + I64{24}, stop)
+            }
+            if (index == count - I64{3}) {
+                cpu_put(fields + I64{32}, field)
+                cpu_put(fields + I64{40}, stop)
+            }
+            if (index == count - I64{1}) {
+                cpu_put(fields + I64{48}, field)
+                cpu_put(fields + I64{56}, stop)
+            }
             field = stop + I64{1}
             index += I64{1}
         }

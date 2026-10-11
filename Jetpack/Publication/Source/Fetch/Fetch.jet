@@ -28,7 +28,10 @@ fn pkg_fetch(verification: &StoreVerification, project_root: String, manifest: M
     names := resolver.nodes.keys().to_list()
     &names.sort()
     directories := [String: String]{}
-    loop name in names { &lock.packages.push(resolver.nodes[name].package); directories[name] = resolver.nodes[name].directory }
+    loop name in names {
+        &lock.packages.push(resolver.nodes[name].package)
+        directories[name] = resolver.nodes[name].directory
+    }
     if options.update_dep == .Val(target) && existing == .Val(previous) {
         related := pkg_fetch_closure(previous, target)
         loop name in pkg_fetch_closure(lock, target) {

@@ -360,7 +360,10 @@ fn reader(identity: crypto.X25519SecretKey, fixed: [U8], header: [U8], total: In
         }
         previous_id = recipient_id
         previous_public = public
-        if crypto.constant_time_equal_bytes(public, own.bytes) && !matched { selected = i; matched = true }
+        if crypto.constant_time_equal_bytes(public, own.bytes) && !matched {
+            selected = i
+            matched = true
+        }
     }
     // As in the oracle, unmatched identities still perform one unwrap.
     start :: BASE + selected * STANZA
@@ -421,7 +424,10 @@ fn finish(state: Reader, trailing: [U8]) crypto.FileCryptoError! {
     loop case in 0..<lengths.len() {
         identity_bytes := [U8]{}
         other_bytes := [U8]{}
-        loop _ in 0..<32 { &identity_bytes.push(U8{7}); &other_bytes.push(U8{9}) }
+        loop _ in 0..<32 {
+            &identity_bytes.push(U8{7})
+            &other_bytes.push(U8{9})
+        }
         identity :: crypto.X25519SecretKey{bytes: identity_bytes}
         other :: crypto.X25519SecretKey{bytes: other_bytes}
         public :: crypto.x25519_public(identity) ?? panic("identity")

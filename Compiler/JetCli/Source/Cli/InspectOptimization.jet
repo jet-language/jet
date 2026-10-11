@@ -171,7 +171,10 @@ fn jet_cli_acceleration_report(query: JetDriverOptimizationQueryResult, scope: S
     text := if json -> "" else -> "accel: scope={scope} source={file} profile={query.profile} release_build={query.release_build} runtime_profile={runtime_profile}\ngate: static_floor_items={gate.static_floor_items} cache_block_bytes={gate.cache_block_bytes} required_gain={gate.required_gain_numerator}/{gate.required_gain_denominator} measurement_source={measurement_source}\n"
     runtime_values := [JetCLIStatusValue]{}
     loop value in runtime {
-        if json { &runtime_values.push(jet_cli_optimization_runtime(value)); next }
+        if json {
+            &runtime_values.push(jet_cli_optimization_runtime(value))
+            next
+        }
         d :: value.decision
         m :: d.measurement
         text = "{text}runtime acceleration verb={value.receipt_verb} receipt={value.receipt_digest} sequence={value.sequence} function={value.function} loop={value.loop_header} source={value.source.start}-{value.source.end} transform={mir_acceleration_transform_name(d.transform)} status={mir_acceleration_status_name(d.status)} selected={d.status == .Selected} items={m.items} sample_items={m.sample_items} sample_nanos={m.sample_nanos} spawn_nanos={m.spawn_nanos} bandwidth_floor_nanos={m.bandwidth_floor_nanos} floor_nanos={m.floor_nanos} projected_serial_nanos={jet_cli_status_json(jet_cli_optimization_optional_u64(m.projected_serial_nanos))} required_serial_nanos={jet_cli_status_json(jet_cli_optimization_optional_u64(m.required_serial_nanos))}\n"
@@ -184,7 +187,10 @@ fn jet_cli_acceleration_report(query: JetDriverOptimizationQueryResult, scope: S
     loop function in query.functions {
         loop vector in function.vectors {
             vector_count += 1
-            if json { &vectors.push(jet_cli_optimization_vector(function.key, vector)); next }
+            if json {
+                &vectors.push(jet_cli_optimization_vector(function.key, vector))
+                next
+            }
             prefix :: "vector {function.key} loop={vector.loop_header.value} span={vector.span.start}-{vector.span.end} rule={jet_cli_optimization_vector_rule(vector.rule)}"
             if vector.decision == {
                 .Eligible -> text = "{text}{prefix} accepted\n"
@@ -197,7 +203,12 @@ fn jet_cli_acceleration_report(query: JetDriverOptimizationQueryResult, scope: S
         loop fact in function.accelerations {
             acceleration_count += 1
             trip := Int?{None}
-            loop loop_fact in function.loops { if loop_fact.header == fact.loop_header { trip = loop_fact.trip_count; break } }
+            loop loop_fact in function.loops {
+                if loop_fact.header == fact.loop_header {
+                    trip = loop_fact.trip_count
+                    break
+                }
+            }
             parity := false
             loop vector in function.vectors {
                 if vector.loop_header == fact.loop_header {

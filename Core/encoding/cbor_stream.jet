@@ -501,8 +501,14 @@ struct CBORPush {
         payload := 0
         header := 1
         if event == {
-            .Text(text) -> { payload = text.count_bytes(); header = length_size(payload) }
-            .Bytes(bytes) -> { payload = bytes.len(); header = length_size(payload) }
+            .Text(text) -> {
+                payload = text.count_bytes()
+                header = length_size(payload)
+            }
+            .Bytes(bytes) -> {
+                payload = bytes.len()
+                header = length_size(payload)
+            }
             .Float(value) -> payload = float_width(value)
             .Int(value) -> header = length_size(if value >= 0 -> value else -> -(value + 1))
             .Null | .Bool(_) -> {}

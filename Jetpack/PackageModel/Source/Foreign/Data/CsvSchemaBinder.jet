@@ -140,8 +140,14 @@ fn pkg_data_csv_type(values: [String]) -> (ty: BoundType, optional: Bool) Never!
             "true" | "false" | "TRUE" | "FALSE" | "True" | "False" -> {}
             else -> all_bool = false
         }
-        _ :: Int.parse(value) ?? { all_int = false; 0 }
-        _ :: Float.parse(value) ?? { all_float = false; 0.0 }
+        _ :: Int.parse(value) ?? {
+            all_int = false
+            0
+        }
+        _ :: Float.parse(value) ?? {
+            all_float = false
+            0.0
+        }
     }
     if all_bool -> return (ty: BoundType.Scalar("Bool"), optional: optional)
     if all_int -> return (ty: BoundType.Scalar("Int"), optional: optional)

@@ -27,7 +27,10 @@ fn jet_driver_output_query(request: ^JetDriverCompileRequest, address: String?) 
     target_layout := JetTargetLayout?{None}
     if compile.complete && compile.internal_problem == None {
         loop projection in compile.doc_modules {
-            if target_layout == None { target_layout = projection.target_layout; target_triple = projection.target_triple }
+            if target_layout == None {
+                target_layout = projection.target_layout
+                target_triple = projection.target_triple
+            }
             loop item in projection.items { if item == .Const(binding) && binding.resolved_output == .Val(output) -> &outputs.push(output) }
             loop fact in projection.layout_facts -> &layouts.push(JetDriverOutputLayoutRow{module_identity: projection.module_identity, source_path: projection.physical_path, fact: fact})
         }

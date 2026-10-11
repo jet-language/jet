@@ -776,11 +776,26 @@ fn oauth_claims(text: String) -> OAuthClaims {
             pos = value.next
             duplicated := false
             if {
-                name == "alg" -> { duplicated = claims.alg != None; claims.alg = Val(value.text) }
-                name == "nonce" -> { duplicated = claims.nonce != None; claims.nonce = Val(value.text) }
-                name == "iss" -> { duplicated = claims.iss != None; claims.iss = Val(value.text) }
-                name == "aud" -> { duplicated = claims.aud != None; claims.aud = Val(value.text) }
-                else -> { duplicated = claims.sub != None; claims.sub = Val(value.text) }
+                name == "alg" -> {
+                    duplicated = claims.alg != None
+                    claims.alg = Val(value.text)
+                }
+                name == "nonce" -> {
+                    duplicated = claims.nonce != None
+                    claims.nonce = Val(value.text)
+                }
+                name == "iss" -> {
+                    duplicated = claims.iss != None
+                    claims.iss = Val(value.text)
+                }
+                name == "aud" -> {
+                    duplicated = claims.aud != None
+                    claims.aud = Val(value.text)
+                }
+                else -> {
+                    duplicated = claims.sub != None
+                    claims.sub = Val(value.text)
+                }
             }
             if duplicated -> return Err("OAuth claim `{name}` is duplicated")
         } else if name == "exp" || name == "iat" {
