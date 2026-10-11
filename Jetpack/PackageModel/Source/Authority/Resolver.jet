@@ -306,10 +306,13 @@ struct AuthorityResolver {
     // only while a root still waits for its list to fold into package.jet.
     fn resolve_workspace_source(self, cache: &WorkspaceDeclarationCache) -[FS, Env]> WorkspaceSource? AuthorityError! {
         self.revalidate_root()
-        if self.checked_manifest(".") == {
+        found := self.checked_manifest(".")
+        if ^found == {
             .Ok(manifest) -> {
                 if manifest.facts.members.len() > 0 {
-                    source :: WorkspaceSource{path: manifest.file.path, source: manifest.file.text(), role: WorkspaceSourceRole.Index, checked: manifest.file}
+                    path := manifest.file.path
+                    text := manifest.file.text()
+                    source := WorkspaceSource{path: path, source: text, role: WorkspaceSourceRole.Index, checked: ^manifest.file}
                     self.revalidate_source(source)
                     return Ok(Val(source))
                 }
