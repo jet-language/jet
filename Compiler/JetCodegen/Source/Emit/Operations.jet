@@ -994,7 +994,7 @@ fn jet_rust_emit_selected_trait_impl(ctx: &JetRustEmitContext, ty: MIRType, trai
             }
         }
         if matches {
-            implementation :: ctx.program.impls[row].copy()
+            implementation := ctx.program.impls[row].copy()
             if jet_rust_emit_impl_target_enabled(&ctx, implementation) && !jet_rust_emit_runtime_carrier_trait_impl(&ctx, implementation) -> return implementation.trait_ref
         }
     }
@@ -4031,13 +4031,14 @@ fn jet_rust_emit_payload_take(ctx: &JetRustEmitContext, result: MIRValueID, subj
     head :: jet_rust_emit_enum_variant_name(&ctx, owner, variant)
     taken :: jet_rust_emit_value_move(ctx, subject)
     if jet_rust_emit_type_index(ctx, owner) == .Val(definition_index) {
-        if ctx.program.types[definition_index].kind == {
+        definition := ctx.program.types[definition_index].copy()
+        if definition.kind == {
             .Enum(variants, _) -> {
                 loop row in variants {
                     if row.name != variant -> next
                     if row.payload == {
                         .Single(_) -> {
-                            value :: if jet_rust_emit_equality_edge_boxed(ctx.program.types[definition_index], variant) -> "*payload" else -> "payload"
+                            value :: if jet_rust_emit_equality_edge_boxed(definition, variant) -> "*payload" else -> "payload"
                             return Val("match {taken} {{ {head}(payload) => {value}, _ => unreachable!(\"MIR enum payload variant mismatch\") }}")
                         }
                         .Named(fields) -> {
@@ -4048,7 +4049,7 @@ fn jet_rust_emit_payload_take(ctx: &JetRustEmitContext, result: MIRValueID, subj
                                 field :: fields[member.field]
                                 binding :: "__jet_payload_{position}"
                                 &pattern.push("{jet_rust_emit_field_name(&ctx, field.id)}: {binding}")
-                                value :: if jet_rust_emit_equality_edge_boxed(ctx.program.types[definition_index], "{variant}.{field.name}") -> "*{binding}" else -> binding
+                                value :: if jet_rust_emit_equality_edge_boxed(definition, "{variant}.{field.name}") -> "*{binding}" else -> binding
                                 if position == 0 -> first = value else -> parked = "{parked}{jet_rust_emit_payload_slot(member.result)} = Some({value}); "
                             }
                             return Val("match {taken} {{ {head} {{ {pattern.join(", ")}, .. }} => {{ {parked}{first} }}, _ => unreachable!(\"MIR enum payload variant mismatch\") }}")
@@ -4077,8 +4078,9 @@ fn jet_rust_emit_enum_payload(ctx: &JetRustEmitContext, function: MIRFunction, r
     value :: jet_rust_emit_inspected_value_reference(&ctx, function, subject)
     root :: ctx.config.root_prefix.copy()
     if jet_rust_emit_type_index(ctx, owner) == .Val(definition_index) {
-        if ctx.program.types[definition_index].id == owner {
-            if jet_rust_emit_is_core_http_type(ctx.program.types[definition_index], "Body") {
+        definition := ctx.program.types[definition_index].copy()
+        if definition.id == owner {
+            if jet_rust_emit_is_core_http_type(definition, "Body") {
                 if index != 0 -> return "unreachable!(\"MIR single variant payload index out of range\")"
                 if variant == {
                     "Text" -> return "({value}).source_text()"
@@ -4086,10 +4088,10 @@ fn jet_rust_emit_enum_payload(ctx: &JetRustEmitContext, function: MIRFunction, r
                     else -> return "unreachable!(\"Core HTTP Body variant has no native payload projection\")"
                 }
             }
-            native :: jet_rust_emit_has_native_type_projection(ctx, ctx.program.types[definition_index].key)
-            dyn_value :: jet_rust_emit_core_rust_type_name(ctx.program.types[definition_index].key) == (Val("Dyn"))
+            native :: jet_rust_emit_has_native_type_projection(ctx, definition.key)
+            dyn_value :: jet_rust_emit_core_rust_type_name(definition.key) == (Val("Dyn"))
             head :: jet_rust_emit_enum_variant_name(&ctx, owner, variant)
-            if ctx.program.types[definition_index].kind == {
+            if definition.kind == {
                 .Enum(variants, _) -> {
                     loop row in variants {
                         if row.name == variant {
@@ -4101,7 +4103,7 @@ fn jet_rust_emit_enum_payload(ctx: &JetRustEmitContext, function: MIRFunction, r
                                     payload := "payload.clone()"
                                     if native && jet_rust_emit_native_int_result(&ctx, "payload.clone()", payload_type) != None {
                                         payload = jet_rust_emit_native_int_result(&ctx, "payload.clone()", payload_type) ?? payload
-                                    } else if jet_rust_emit_equality_edge_boxed(ctx.program.types[definition_index], variant) {
+                                    } else if jet_rust_emit_equality_edge_boxed(definition, variant) {
                                         payload = "payload.as_ref().clone()"
                                     }
                                     return "match {value} {{ {head}(payload) => {payload}, _ => unreachable!(\"MIR enum payload variant mismatch\") }}"
@@ -4109,7 +4111,7 @@ fn jet_rust_emit_enum_payload(ctx: &JetRustEmitContext, function: MIRFunction, r
                                 .Named(fields) -> {
                                     if index < 0 || index >= fields.len() -> return "unreachable!(\"MIR enum payload index out of range\")"
                                     field :: fields[index]
-                                    payload := if jet_rust_emit_equality_edge_boxed(ctx.program.types[definition_index], "{variant}.{field.name}") -> "payload.as_ref().clone()" else -> "payload.clone()"
+                                    payload := if jet_rust_emit_equality_edge_boxed(definition, "{variant}.{field.name}") -> "payload.as_ref().clone()" else -> "payload.clone()"
                                     if native {
                                         if jet_rust_emit_native_int_result(&ctx, payload, field.ty) == .Val(widened) -> payload = widened
                                     }
@@ -4319,8 +4321,9 @@ fn jet_rust_emit_payload_pattern(ctx: &JetRustEmitContext, kind: MIRPayloadKind)
         .Enum(owner, variant, index) -> {
             head :: jet_rust_emit_enum_variant_name(&ctx, owner, variant)
             if jet_rust_emit_type_index(ctx, owner) == .Val(definition_index) {
-                if ctx.program.types[definition_index].id == owner {
-                    if ctx.program.types[definition_index].kind == {
+                definition := ctx.program.types[definition_index].copy()
+                if definition.id == owner {
+                    if definition.kind == {
                         .Enum(variants, _) -> {
                             loop row in variants {
                                 if row.name == variant {

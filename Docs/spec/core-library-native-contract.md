@@ -428,6 +428,9 @@ its own module; only separate resident collection modules import it.
 Lowering helpers that mutate their builder read retained plain metadata from
 an explicit owned `.copy()` snapshot, not a row still borrowed through that
 builder. This does not copy trait adapters or widen a value's Copy capability.
+The snapshot is bound with `:=`; `::` remains a view even when its initializer
+spells `.copy()`. Enum definitions and selected implementation metadata follow
+the same rule while their emitter context is being updated.
 Hosted bootstrap callback carriers preserve their capture lifetime rather than
 implicitly requiring `'static`. A single-use borrowed callback is constructed
 at its consumer; other borrow-only callbacks, iteration cursors, and reference
