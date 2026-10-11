@@ -2147,6 +2147,7 @@ pub fn __jet_bootstrap_compile_with_native(
             __jet_shared_payload_shapes,
             __jet_completion_scope.clone(),
             __jet_callback_jobs.clone(),
+            __jet_runtime_admission,
             __jet_receiver_type,
             __jet_template,
             vec![__jet_numeric_registration],
@@ -2438,17 +2439,19 @@ fn emit_bootstrap_host_factory(
     let target_type = symbols.type_symbol("JetDriverCompileTarget")?;
     let mir_program_type = symbols.type_symbol("MIRProgram")?;
     let eval_config_type = symbols.type_symbol("JetEvalConfig")?;
-    let snapshot_type = symbols.type_symbol("JetDriverAuthorizedSourceSnapshot")?;
-    let snapshot_roots = symbols.field_symbol(
+    // Checked against the record's declared fields, so a new snapshot field
+    // fails packaging instead of emitting a stale initializer. The bootstrap
+    // compiler has no manifestless entry, so it admits no script dependency:
+    // the field's declared default (`[JetDriverScriptDependency]{}`).
+    let authorized_sources = symbols.struct_value(
         "JetDriverAuthorizedSourceSnapshot",
-        "roots",
+        &[
+            ("roots", "__jet_roots"),
+            ("entry_root_identity", "__jet_snapshot.entry_root_identity.clone()"),
+            ("entry_path", "__jet_snapshot.entry_path.clone()"),
+            ("script_dependencies", "Vec::new()"),
+        ],
     )?;
-    let snapshot_entry_root = symbols.field_symbol(
-        "JetDriverAuthorizedSourceSnapshot",
-        "entry_root_identity",
-    )?;
-    let snapshot_entry_path =
-        symbols.field_symbol("JetDriverAuthorizedSourceSnapshot", "entry_path")?;
     let root_type = symbols.type_symbol("JetDriverAuthorizedSourceRoot")?;
     let root_canonical_path =
         symbols.field_symbol("JetDriverAuthorizedSourceRoot", "canonical_path")?;
@@ -2560,11 +2563,7 @@ fn emit_bootstrap_host_factory(
             "        .map_err(crate::BootstrapHostCodecError::InvalidMetadata)?;\n",
             "    let __jet_eval_config = {default_symbol}();\n",
             "    let __jet_request = {request_type} {{\n",
-            "        {request_sources}: {snapshot_type} {{\n",
-            "            {snapshot_roots}: __jet_roots,\n",
-            "            {snapshot_entry_root}: __jet_snapshot.entry_root_identity.clone(),\n",
-            "            {snapshot_entry_path}: __jet_snapshot.entry_path.clone(),\n",
-            "        }},\n",
+            "        {request_sources}: {authorized_sources},\n",
             "        {request_host_facts}: {host_facts_type} {{\n",
             "            {host_target_triple}: Ok(::jet_foundation::Layout::TargetLayout::host_triple()),\n",
             "            {host_active_os}: Ok(::std::env::consts::OS.to_string()),\n",
@@ -2624,10 +2623,7 @@ fn emit_bootstrap_host_factory(
         request_eval_config = request_eval_config,
         request_target = request_target,
         target_type = target_type,
-        snapshot_type = snapshot_type,
-        snapshot_roots = snapshot_roots,
-        snapshot_entry_root = snapshot_entry_root,
-        snapshot_entry_path = snapshot_entry_path,
+        authorized_sources = authorized_sources,
         root_type = root_type,
         root_canonical_path = root_canonical_path,
         root_identity = root_identity,
@@ -3837,7 +3833,7 @@ fn __jet_bootstrap_eval_to_host_inner(
         @p.JetEvalRuntimeValue.Aggregate@{ value: aggregate } => __jet_bootstrap_eval_aggregate_to_host(aggregate, allow_foreign_handles),
         @p.JetEvalRuntimeValue.RuntimeFailure@{ .. } => Err("terminal runtime failures cannot cross a native host boundary".to_string()),
         @p.JetEvalRuntimeValue.HostCursor@{ .. } | @p.JetEvalRuntimeValue.Stream@{ .. } => Err("native iterator cursors cannot cross a serializable host boundary".to_string()),
-        @p.JetEvalRuntimeValue.Closure@{ .. } | @p.JetEvalRuntimeValue.Address@{ .. } | @p.JetEvalRuntimeValue.SharedCell@{ .. } | @p.JetEvalRuntimeValue.Shared@{ .. } | @p.JetEvalRuntimeValue.SharedWeak@{ .. } | @p.JetEvalRuntimeValue.SharedGuard@{ .. } | @p.JetEvalRuntimeValue.SharedSnapshot@{ .. } | @p.JetEvalRuntimeValue.Condition@{ .. } | @p.JetEvalRuntimeValue.RangeCursor@{ .. } | @p.JetEvalRuntimeValue.ListCursor@{ .. } => Err("runtime handles and closures cannot cross a native host boundary".to_string()),
+        @p.JetEvalRuntimeValue.Closure@{ .. } | @p.JetEvalRuntimeValue.Address@{ .. } | @p.JetEvalRuntimeValue.Window@{ .. } | @p.JetEvalRuntimeValue.SharedCell@{ .. } | @p.JetEvalRuntimeValue.Shared@{ .. } | @p.JetEvalRuntimeValue.SharedWeak@{ .. } | @p.JetEvalRuntimeValue.SharedGuard@{ .. } | @p.JetEvalRuntimeValue.SharedSnapshot@{ .. } | @p.JetEvalRuntimeValue.Condition@{ .. } | @p.JetEvalRuntimeValue.RangeCursor@{ .. } | @p.JetEvalRuntimeValue.ListCursor@{ .. } => Err("runtime handles and closures cannot cross a native host boundary".to_string()),
     }
 }
 fn __jet_bootstrap_eval_to_host(value: &@t.JetEvalRuntimeValue@) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {
@@ -4383,7 +4379,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
          }}
          fn __jet_bootstrap_native_handle_call<T>(
              _machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>,
-             operation: &String,
+             operation: &str,
              handle: &{source_handle},
              raw: &jet_foundation::Numeric::JetInt,
              span: &{span},

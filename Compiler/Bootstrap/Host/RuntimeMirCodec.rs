@@ -37,7 +37,7 @@ const SOURCE_SUPPORT_SCHEMAS: &[(&str, &[&str])] = &[
     ),
     (
         include_str!("../../JetFoundation/Source/Types/Types.jet"),
-        &["ParamZone"],
+        &["ParamZone", "SymbolID"],
     ),
     (
         include_str!("../../JetFoundation/Source/Target/Layout.jet"),
@@ -136,7 +136,9 @@ enum TypeExpr {
 
 /// A Source MIR record that stands for one native tuple: Jet spells a native
 /// `(A, B, ..)` as a record over the same fields in order, and a native map as
-/// a list of two-field key/value records.
+/// a list of two-field key/value records. A one-field record with no native
+/// carrier of its own (`SymbolID { key: String }`) stands for its field's
+/// native value.
 #[derive(Clone, Debug)]
 struct PairRecord {
     symbol: String,
@@ -164,6 +166,7 @@ type PairRecords = BTreeMap<String, PairRecord>;
 
 fn pair_records(
     source: &[Definition],
+    host_by_name: &BTreeMap<String, Definition>,
     symbols: &BootstrapCodecSymbols<'_>,
 ) -> Result<PairRecords, BootstrapHostCodecError> {
     let mut pairs = PairRecords::new();
@@ -171,7 +174,11 @@ fn pair_records(
         let Body::Struct(fields) = &definition.body else {
             continue;
         };
-        if fields.len() < 2 {
+        let field_carrier = fields.len() == 1
+            && !id_newtype(definition)
+            && !custom_source_converter(&definition.name)
+            && native_type_absent(&definition.name, host_by_name);
+        if fields.len() < 2 && !field_carrier {
             continue;
         }
         let field_paths = fields
@@ -200,16 +207,14 @@ fn pair_records(
 }
 
 /// The host element types of a parsed native tuple type `(A, B, ..)` that a
-/// Source record of the same arity stands for, if it is one.
+/// Source record of the same arity stands for, if it is one; for a one-field
+/// record standing for its field's native value, that native type.
 fn host_tuple_types(
     host_type: &TypeExpr,
     record: &PairRecord,
 ) -> Result<Option<Vec<TypeExpr>>, BootstrapHostCodecError> {
-    let TypeExpr::Named(name) = host_type else {
-        return Ok(None);
-    };
-    let Some(inner) = name.strip_prefix('(').and_then(|rest| rest.strip_suffix(')')) else {
-        return Ok(None);
+    let Some(inner) = host_tuple_inner(host_type) else {
+        return Ok((record.fields.len() == 1).then(|| vec![host_type.clone()]));
     };
     let parts = split_top_level(inner, ',')
         .into_iter()
@@ -223,6 +228,14 @@ fn host_tuple_types(
         .map(|part| parse_type(part).map_err(BootstrapHostCodecError::InvalidMetadata))
         .collect::<Result<Vec<_>, _>>()
         .map(Some)
+}
+
+/// The element list of a native tuple type `(A, B, ..)`, if `host_type` is one.
+fn host_tuple_inner(host_type: &TypeExpr) -> Option<&str> {
+    let TypeExpr::Named(name) = host_type else {
+        return None;
+    };
+    name.strip_prefix('(').and_then(|rest| rest.strip_suffix(')'))
 }
 
 /// Append the typed Source-MIR and native-MIR converters to generated host glue.
@@ -279,7 +292,7 @@ pub(crate) fn append_runtime_mir_codec(
             Body::Tuple => {}
         }
     }
-    let pairs = pair_records(&source, symbols)?;
+    let pairs = pair_records(&source, &host_by_name, symbols)?;
 
 
     emit_special_structural_converters(out, symbols)?;
@@ -664,7 +677,7 @@ fn host_shape_empty_field(field: &Field) -> Option<&'static str> {
     }
     match parse_type(&field.ty) {
         Ok(TypeExpr::List(_)) => Some("::std::vec::Vec::new().into()"),
-        Ok(TypeExpr::Map(..)) => Some("::std::collections::HashMap::new()"),
+        Ok(TypeExpr::Map(..)) => Some("crate::JetMap::new()"),
         _ => None,
     }
 }
@@ -819,11 +832,12 @@ fn emit_id_converter(
 
 /// Source MIR identities are single-`value` records named `…ID`; native MIR
 /// carries them as `u64` newtypes. Enums that happen to end in `ID`
-/// (`MIROptimizationPassID`, `MIRRuntimePartID`) convert structurally.
+/// (`MIROptimizationPassID`, `MIRRuntimePartID`) convert structurally, and a
+/// keyed `SymbolID { key: String }` crosses as its key.
 fn id_newtype(definition: &Definition) -> bool {
     definition.name.ends_with("ID")
         && definition.name != "MIRTypeID"
-        && matches!(definition.body, Body::Struct(_))
+        && matches!(&definition.body, Body::Struct(fields) if matches!(fields.as_slice(), [field] if field.name == "value"))
 }
 
 fn custom_source_converter(name: &str) -> bool {
@@ -1337,9 +1351,10 @@ fn convert_from_host_type_expression(
         TypeExpr::Named(name) => {
             if let Some(pair) = pair_record(source_type, pairs) {
                 if let Some(host_types) = host_tuple_types(host_type, pair)? {
-                    let parts = (0..host_types.len())
-                        .map(|index| format!("&__pair.{index}"))
-                        .collect::<Vec<_>>();
+                    let parts = match host_tuple_inner(host_type) {
+                        Some(_) => (0..host_types.len()).map(|index| format!("&__pair.{index}")).collect(),
+                        None => vec!["__pair".to_string()],
+                    };
                     let parts = parts.iter().map(String::as_str).collect::<Vec<_>>();
                     let record = source_record_from_host(pair, &host_types, &parts, pairs)?;
                     return Ok(format!("{{ let __pair = {expression}; {record} }}"));
@@ -2290,8 +2305,8 @@ fn parse_definitions(input: &str, syntax: SchemaSyntax) -> Result<Vec<Definition
 }
 
 /// Parse the body of the `struct`/`enum` declaration `name` whose identifier
-/// ends at `position`; returns it and the offset just past the body. `Self`
-/// in a field type is spelled as the declaring type.
+/// ends at `position`; returns it and the offset just past the body. Every
+/// field type is spelled through [`field_type`].
 fn parse_definition_body(
     input: &str,
     keyword: &str,
@@ -2312,28 +2327,22 @@ fn parse_definition_body(
                         SchemaSyntax::Rust => parse_fields(body)?,
                     }
                         .into_iter()
-                        .map(|field| Field {
-                            ty: spell_self(&field.ty, &name),
-                            ..field
-                        })
-                        .collect(),
+                        .map(|field| Ok(Field { ty: field_type(&field.ty, &name)?, ..field }))
+                        .collect::<Result<_, String>>()?,
                 )
             } else {
                 Body::Enum(
                     parse_variants(body)?
                         .into_iter()
-                        .map(|variant| Variant {
-                            fields: variant
+                        .map(|variant| {
+                            let fields = variant
                                 .fields
                                 .into_iter()
-                                .map(|field| VariantField {
-                                    ty: spell_self(&field.ty, &name),
-                                    ..field
-                                })
-                                .collect(),
-                            ..variant
+                                .map(|field| Ok(VariantField { ty: field_type(&field.ty, &name)?, ..field }))
+                                .collect::<Result<Vec<_>, String>>()?;
+                            Ok(Variant { fields, ..variant })
                         })
-                        .collect(),
+                        .collect::<Result<_, String>>()?,
                 )
             }
         }
@@ -2345,6 +2354,13 @@ fn parse_definition_body(
         _ => return Err(format!("MIR declaration `{name}` has no body")),
     };
     Ok((Definition { name, body }, position))
+}
+
+/// The one spelling of a declared field type in `owner`, whatever the schema
+/// syntax or field form: its declared default dropped, `Self` spelled as
+/// `owner`. Converter names and definitions both read this text.
+fn field_type(ty: &str, owner: &str) -> Result<String, String> {
+    Ok(spell_self(strip_field_default(ty.trim())?, owner))
 }
 
 /// `ty` with each `Self` path segment spelled as `owner`.
@@ -2444,8 +2460,9 @@ fn parse_fields(input: &str) -> Result<Vec<Field>, String> {
         let ty = split_top_level(&field[cursor..], ',')
             .into_iter()
             .next()
-            .unwrap_or_default();
-        let ty = strip_field_default(ty.trim())?.to_string();
+            .unwrap_or_default()
+            .trim()
+            .to_string();
         fields.push(Field { name, ty });
     }
     Ok(fields)
@@ -2699,11 +2716,12 @@ mod tests {
         let definitions = parse_definitions(
             "struct Row {\n    id: Int\n    values: [String]\n    attrs: [String: ?MirType]\n}\n\
              enum Choice { Empty Full(name: String, row: Row) }\n\
-             struct Pair { left: Int, priv right: Int }",
+             struct Pair { left: Int, priv right: Int }\n\
+             struct Named {\n    namespace: String?{None}\n    paths: [Row]{[Row]{}}\n}",
             SchemaSyntax::Jet,
         )
         .expect("schema parser");
-        assert_eq!(definitions.len(), 3);
+        assert_eq!(definitions.len(), 4);
         let Body::Struct(fields) = &definitions[0].body else {
             panic!("expected struct");
         };
@@ -2717,6 +2735,12 @@ mod tests {
             panic!("expected struct");
         };
         assert_eq!(pair[1].name, "right");
+        // A declared default is not part of the field's type spelling.
+        let Body::Struct(named) = &definitions[3].body else {
+            panic!("expected struct");
+        };
+        assert_eq!(named[0].ty, "String?");
+        assert_eq!(named[1].ty, "[Row]");
     }
 
     #[test]

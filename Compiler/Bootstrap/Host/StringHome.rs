@@ -18,13 +18,13 @@ fn __jet_bootstrap_string_home_data<'a>(value: &'a @t.TComptimeValue@, selectors
     let (selector, rest) = selectors.split_first()?;
     match (value, selector) {
         (@p.TComptimeValue.Struct@{type_name: _, fields}, @p.JetEvalStringHomeSelector.Field@{index}) =>
-            __jet_bootstrap_string_home_data(&fields.get(usize::try_from(*index).ok()?)?.@f.TComptimeField.value@, rest),
+            __jet_bootstrap_string_home_data(&fields.get(index.to_usize()?)?.@f.TComptimeField.value@, rest),
         (@p.TComptimeValue.List@{values}, @p.JetEvalStringHomeSelector.List@{index}) =>
-            __jet_bootstrap_string_home_data(values.get(usize::try_from(*index).ok()?)?, rest),
+            __jet_bootstrap_string_home_data(values.get(index.to_usize()?)?, rest),
         (@p.TComptimeValue.Map@{entries}, @p.JetEvalStringHomeSelector.Map@{index}) =>
-            __jet_bootstrap_string_home_data(&entries.get(usize::try_from(*index).ok()?)?.@f.TComptimeMapEntry.value@, rest),
+            __jet_bootstrap_string_home_data(&entries.get(index.to_usize()?)?.@f.TComptimeMapEntry.value@, rest),
         (@p.TComptimeValue.Enum@{type_name: _, variant: _, args}, @p.JetEvalStringHomeSelector.Enum@{index}) =>
-            __jet_bootstrap_string_home_data(&args.get(usize::try_from(*index).ok()?)?.@f.TComptimeEnumArg.value@, rest),
+            __jet_bootstrap_string_home_data(&args.get(index.to_usize()?)?.@f.TComptimeEnumArg.value@, rest),
         (@p.TComptimeValue.Present@{value}, @v.JetEvalStringHomeSelector.Present@) => __jet_bootstrap_string_home_data(value, rest),
         (@p.TComptimeValue.Failed@{report}, @v.JetEvalStringHomeSelector.Told@) => {
             let report: &@t.TComptimeReport@ = report;
@@ -48,13 +48,13 @@ fn __jet_bootstrap_string_home_runtime<'a>(value: &'a @t.JetEvalRuntimeValue@, s
             let value: &@t.JetEvalRuntimeAggregate@ = value;
             match (value, selector) {
             (@p.JetEvalRuntimeAggregate.Struct@{type_name: _, fields}, @p.JetEvalStringHomeSelector.Field@{index}) =>
-                __jet_bootstrap_string_home_runtime(&fields.get(usize::try_from(*index).ok()?)?.@f.JetEvalRuntimeField.value@, rest),
+                __jet_bootstrap_string_home_runtime(&fields.get(index.to_usize()?)?.@f.JetEvalRuntimeField.value@, rest),
             (@p.JetEvalRuntimeAggregate.List@{values}, @p.JetEvalStringHomeSelector.List@{index}) =>
-                __jet_bootstrap_string_home_runtime(values.get(usize::try_from(*index).ok()?)?, rest),
+                __jet_bootstrap_string_home_runtime(values.get(index.to_usize()?)?, rest),
             (@p.JetEvalRuntimeAggregate.Map@{entries}, @p.JetEvalStringHomeSelector.Map@{index}) =>
-                __jet_bootstrap_string_home_runtime(&entries.get(usize::try_from(*index).ok()?)?.@f.JetEvalRuntimeMapEntry.value@, rest),
+                __jet_bootstrap_string_home_runtime(&entries.get(index.to_usize()?)?.@f.JetEvalRuntimeMapEntry.value@, rest),
             (@p.JetEvalRuntimeAggregate.Enum@{type_name: _, variant: _, args}, @p.JetEvalStringHomeSelector.Enum@{index}) =>
-                __jet_bootstrap_string_home_runtime(&args.get(usize::try_from(*index).ok()?)?.@f.JetEvalRuntimeEnumArg.value@, rest),
+                __jet_bootstrap_string_home_runtime(&args.get(index.to_usize()?)?.@f.JetEvalRuntimeEnumArg.value@, rest),
             _ => None,
             }
         },
@@ -65,10 +65,10 @@ fn __jet_bootstrap_string_home_typed<'a>(machine: &'a @t.JetEvalMachine@, reques
     let selectors = &request.@f.JetEvalStringHomeRequest.selectors@;
     match &request.@f.JetEvalStringHomeRequest.root@ {
         @p.JetEvalStringHomeRoot.Global@{name} => __jet_bootstrap_string_home_data(machine.@f.JetEvalMachine.config@.@f.JetEvalConfig.globals@.get(name)?, selectors),
-        @p.JetEvalStringHomeRoot.Local@{frame, local} => __jet_bootstrap_string_home_runtime(machine.@f.JetEvalMachine.frames@.get(usize::try_from(*frame).ok()?)?.@f.JetEvalFrame.locals@.get(local)?, selectors),
-        @p.JetEvalStringHomeRoot.Value@{frame, value} => __jet_bootstrap_string_home_runtime(machine.@f.JetEvalMachine.frames@.get(usize::try_from(*frame).ok()?)?.@f.JetEvalFrame.values@.get(value)?, selectors),
-        @p.JetEvalStringHomeRoot.Parameter@{frame, index} => __jet_bootstrap_string_home_runtime(machine.@f.JetEvalMachine.frames@.get(usize::try_from(*frame).ok()?)?.@f.JetEvalFrame.params@.get(usize::try_from(*index).ok()?)?, selectors),
-        @p.JetEvalStringHomeRoot.Capture@{frame, index} => __jet_bootstrap_string_home_runtime(machine.@f.JetEvalMachine.frames@.get(usize::try_from(*frame).ok()?)?.@f.JetEvalFrame.captures@.get(usize::try_from(*index).ok()?)?, selectors),
+        @p.JetEvalStringHomeRoot.Local@{frame, local} => __jet_bootstrap_string_home_runtime(machine.@f.JetEvalMachine.frames@.get(frame.to_usize()?)?.@f.JetEvalFrame.locals@.get(local)?, selectors),
+        @p.JetEvalStringHomeRoot.Value@{frame, value} => __jet_bootstrap_string_home_runtime(machine.@f.JetEvalMachine.frames@.get(frame.to_usize()?)?.@f.JetEvalFrame.values@.get(value)?, selectors),
+        @p.JetEvalStringHomeRoot.Parameter@{frame, index} => __jet_bootstrap_string_home_runtime(machine.@f.JetEvalMachine.frames@.get(frame.to_usize()?)?.@f.JetEvalFrame.params@.get(index.to_usize()?)?, selectors),
+        @p.JetEvalStringHomeRoot.Capture@{frame, index} => __jet_bootstrap_string_home_runtime(machine.@f.JetEvalMachine.frames@.get(frame.to_usize()?)?.@f.JetEvalFrame.captures@.get(index.to_usize()?)?, selectors),
     }
 }
 // These views are projections of the already shape-checked borrowed Source
@@ -99,10 +99,10 @@ fn __jet_bootstrap_string_home_mir_walk<'a>(mut value: &'a ::jet_foundation::MIR
     }
     let (selector, rest) = selectors.split_first()?;
     let child = match selector {
-        @p.JetEvalStringHomeSelector.Field@{index} => __jet_bootstrap_string_home_field(__jet_bootstrap_string_home_list(__jet_bootstrap_string_home_payload(value, "Struct", "fields")?, usize::try_from(*index).ok()?)?, "value")?,
-        @p.JetEvalStringHomeSelector.List@{index} => __jet_bootstrap_string_home_list(__jet_bootstrap_string_home_payload(value, "List", "values")?, usize::try_from(*index).ok()?)?,
-        @p.JetEvalStringHomeSelector.Map@{index} => __jet_bootstrap_string_home_field(__jet_bootstrap_string_home_list(__jet_bootstrap_string_home_payload(value, "Map", "entries")?, usize::try_from(*index).ok()?)?, "value")?,
-        @p.JetEvalStringHomeSelector.Enum@{index} => __jet_bootstrap_string_home_field(__jet_bootstrap_string_home_list(__jet_bootstrap_string_home_payload(value, "Enum", "args")?, usize::try_from(*index).ok()?)?, "value")?,
+        @p.JetEvalStringHomeSelector.Field@{index} => __jet_bootstrap_string_home_field(__jet_bootstrap_string_home_list(__jet_bootstrap_string_home_payload(value, "Struct", "fields")?, index.to_usize()?)?, "value")?,
+        @p.JetEvalStringHomeSelector.List@{index} => __jet_bootstrap_string_home_list(__jet_bootstrap_string_home_payload(value, "List", "values")?, index.to_usize()?)?,
+        @p.JetEvalStringHomeSelector.Map@{index} => __jet_bootstrap_string_home_field(__jet_bootstrap_string_home_list(__jet_bootstrap_string_home_payload(value, "Map", "entries")?, index.to_usize()?)?, "value")?,
+        @p.JetEvalStringHomeSelector.Enum@{index} => __jet_bootstrap_string_home_field(__jet_bootstrap_string_home_list(__jet_bootstrap_string_home_payload(value, "Enum", "args")?, index.to_usize()?)?, "value")?,
         @v.JetEvalStringHomeSelector.Present@ => __jet_bootstrap_string_home_payload(value, "Present", "value")?,
         @v.JetEvalStringHomeSelector.Told@ => __jet_bootstrap_string_home_payload(__jet_bootstrap_string_home_payload(value, "Failed", "report")?, "Told", "value")?,
         @p.JetEvalStringHomeSelector.Result@{ok: expected} => {
@@ -121,10 +121,10 @@ fn __jet_bootstrap_string_home_mir<'a>(machine: &'a ::jet_foundation::MIR::MirRu
             let ::jet_foundation::MIR::MirRuntimeValue::Map(values) = globals else { return None; };
             values.iter().find(|(key, _)| matches!(key, ::jet_foundation::MIR::MirConstKey::String(actual) if actual == name)).map(|(_, value)| value)?
         },
-        @p.JetEvalStringHomeRoot.Local@{frame, local} => __jet_bootstrap_string_home_word_map(__jet_bootstrap_string_home_field(__jet_bootstrap_string_home_list(__jet_bootstrap_string_home_field(machine, "frames")?, usize::try_from(*frame).ok()?)?, "locals")?, *local)?,
-        @p.JetEvalStringHomeRoot.Value@{frame, value} => __jet_bootstrap_string_home_word_map(__jet_bootstrap_string_home_field(__jet_bootstrap_string_home_list(__jet_bootstrap_string_home_field(machine, "frames")?, usize::try_from(*frame).ok()?)?, "values")?, *value)?,
-        @p.JetEvalStringHomeRoot.Parameter@{frame, index} => __jet_bootstrap_string_home_list(__jet_bootstrap_string_home_field(__jet_bootstrap_string_home_list(__jet_bootstrap_string_home_field(machine, "frames")?, usize::try_from(*frame).ok()?)?, "params")?, usize::try_from(*index).ok()?)?,
-        @p.JetEvalStringHomeRoot.Capture@{frame, index} => __jet_bootstrap_string_home_list(__jet_bootstrap_string_home_field(__jet_bootstrap_string_home_list(__jet_bootstrap_string_home_field(machine, "frames")?, usize::try_from(*frame).ok()?)?, "captures")?, usize::try_from(*index).ok()?)?,
+        @p.JetEvalStringHomeRoot.Local@{frame, local} => __jet_bootstrap_string_home_word_map(__jet_bootstrap_string_home_field(__jet_bootstrap_string_home_list(__jet_bootstrap_string_home_field(machine, "frames")?, frame.to_usize()?)?, "locals")?, *local)?,
+        @p.JetEvalStringHomeRoot.Value@{frame, value} => __jet_bootstrap_string_home_word_map(__jet_bootstrap_string_home_field(__jet_bootstrap_string_home_list(__jet_bootstrap_string_home_field(machine, "frames")?, frame.to_usize()?)?, "values")?, *value)?,
+        @p.JetEvalStringHomeRoot.Parameter@{frame, index} => __jet_bootstrap_string_home_list(__jet_bootstrap_string_home_field(__jet_bootstrap_string_home_list(__jet_bootstrap_string_home_field(machine, "frames")?, frame.to_usize()?)?, "params")?, index.to_usize()?)?,
+        @p.JetEvalStringHomeRoot.Capture@{frame, index} => __jet_bootstrap_string_home_list(__jet_bootstrap_string_home_field(__jet_bootstrap_string_home_list(__jet_bootstrap_string_home_field(machine, "frames")?, frame.to_usize()?)?, "captures")?, index.to_usize()?)?,
     };
     __jet_bootstrap_string_home_mir_walk(value, selectors)
 }
@@ -136,12 +136,12 @@ fn __jet_bootstrap_string_home_mir<'a>(machine: &'a ::jet_foundation::MIR::MirRu
                 crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess::Mir(machine) => __jet_bootstrap_string_home_mir(machine.value(), __jet_arg_1),
             };
             match text {
-                Some(text) => Ok(@s.JetEvalStringHome@{pointer: ::jet_evalhost::Memory::jet_string_data(text), length: ::jet_evalhost::Memory::jet_string_byte_len(text)}),
+                Some(text) => Ok(@s.JetEvalStringHome@{pointer: crate::jet_mem::jet_string_data(text), length: jet_foundation::Numeric::JetInt::from_i64(crate::jet_mem::jet_string_byte_len(text))}),
                 None => Err(Default::default()),
             }"#)?,
-            "bytes_pack" => "Ok(::jet_evalhost::Memory::jet_bytes_pack(__jet_arg_1))".into(),
-            "bytes_free" => "::jet_evalhost::Memory::jet_bytes_free(*__jet_arg_1, __jet_arg_2); true".into(),
-            "bytes_unpack" => "Ok(::jet_evalhost::Memory::jet_bytes_unpack(*__jet_arg_1, __jet_arg_2))".into(),
+            "bytes_pack" => "Ok(crate::jet_mem::jet_bytes_pack(__jet_arg_1))".into(),
+            "bytes_free" => "crate::jet_mem::jet_bytes_free(__jet_arg_1, &__jet_arg_2.to_raw()); true".into(),
+            "bytes_unpack" => "Ok(crate::jet_mem::jet_bytes_unpack(__jet_arg_1, &__jet_arg_2.to_raw()))".into(),
             _ => continue,
         };
         let parameters = metadata.parameter_types.iter().enumerate().skip(1)

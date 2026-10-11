@@ -2373,15 +2373,21 @@ fn emit_to_runtime_converter(
     let id = definition.id.0;
     let body = match &definition.kind {
         MirTypeDefKind::Struct { fields, .. } => {
+            // The default Err is the native `JetErr` carrier, not an emitted
+            // record: it boxes `cause` inside the outcome and keeps the private
+            // error metadata as typed carrier facts, read through its accessors.
+            let default_err = definition.compiler_builtin
+                == Some(jet_foundation::MIR::MirCompilerBuiltin::DefaultErr);
             let mut rows = Vec::with_capacity(fields.len());
             for field in fields {
-                let symbol = symbols.field_symbol(&definition.name, &field.name)?;
                 let field_source = if definition.name == "JetEvalOwnedRoot" && field.name == "config" {
                     format!("&{}", symbols.call("jet_eval_owned_root_config", &[("*value", "value.clone()")])?)
-                } else if BootstrapCodecSymbols::boxed_edge(definition, &field.name) {
-                    format!("&*value.{symbol}")
+                } else if default_err && jet_foundation::Syntax::is_memo_storage_name(&field.name) {
+                    format!("&{}", default_err_metadata_value(symbols)?)
+                } else if !default_err && BootstrapCodecSymbols::boxed_edge(definition, &field.name) {
+                    format!("&*value.{}", symbols.field_symbol(&definition.name, &field.name)?)
                 } else {
-                    format!("&value.{symbol}")
+                    format!("&value.{}", symbols.field_symbol(&definition.name, &field.name)?)
                 };
                 let expr = to_runtime_expression(
                     program,
@@ -2533,6 +2539,40 @@ writeln!(
     id = id,
 )
 .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
+}
+
+/// The checked `__jet_ErrorMetadata` record of a default Err `value`, built
+/// from the `JetErr` carrier's typed facts. Shape-checked literals keep the
+/// Prelude declaration the only field list.
+fn default_err_metadata_value(symbols: &BootstrapCodecSymbols<'_>) -> Result<String, BootstrapHostCodecError> {
+    symbols.render(
+        "@s.__jet_ErrorMetadata@{ \
+            typed_identity: match jet_err_typed_identity(value) { Some(identity) => Ok(identity), None => Err(Default::default()) }, \
+            context_frames: jet_err_context(value).into_iter().map(|frame| @s.__jet_ErrorContextFrame@{ \
+                text: frame.text, \
+                file: frame.file, \
+                line: jet_foundation::Numeric::JetInt::from_i64(i64::from(frame.line)) \
+            }).collect::<Vec<_>>(), \
+            conversion_history: jet_err_conversions(value).into_iter().map(|conversion| @s.__jet_ErrorConversion@{ \
+                source: conversion.source, \
+                target: conversion.target \
+            }).collect::<Vec<_>>(), \
+            details: match jet_err_details(value) { \
+                Some(details) => Ok(@s.__jet_ErrorDetails@{ \
+                    variant: details.variant, \
+                    fields: details.fields.into_iter().map(|field| @s.__jet_ErrorField@{ name: field.name, value: field.value }).collect::<Vec<_>>(), \
+                    source_span: match details.source_span { \
+                        Some(span) => Ok(@s.__jet_ErrorSpan@{ \
+                            start: jet_foundation::Numeric::JetInt::from_i64(span.start as i64), \
+                            end: jet_foundation::Numeric::JetInt::from_i64(span.end as i64) \
+                        }), \
+                        None => Err(Default::default()) \
+                    } \
+                }), \
+                None => Err(Default::default()) \
+            } \
+        }",
+    )
 }
 
 fn emit_from_runtime_converter(

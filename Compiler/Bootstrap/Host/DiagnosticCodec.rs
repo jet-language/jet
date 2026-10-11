@@ -106,7 +106,7 @@ fn __jet_bootstrap_source_revision(path: &str, source: &str) -> String {
 }
 fn __jet_bootstrap_validate_origin(
     value: &::std::sync::Arc<::jet_foundation::Diagnostics::DiagnosticOrigin>,
-    origins: &mut __JetBootstrapDiagnosticOrigins,
+    origins: &mut __JetBootstrapOrigins,
     source_path: Option<&String>,
     generated_source_files: &[@t.MIRSourceFile@],
     snapshot: &crate::compiler_bootstrap_host::AuthorizedSourceSnapshot,
@@ -155,14 +155,15 @@ fn __jet_bootstrap_validate_origin(
     if value.source != expected_source {
         return Err(format!("diagnostic origin `{}` does not carry the authorized source snapshot", value.path));
     }
-    origins.insert(value.path.clone(), ::std::sync::Arc::clone(value));
+    // The validated origin joins the shared per-conversion origin list.
+    origins.push((value.source.as_ptr() as usize, value.source.len(), ::std::sync::Arc::clone(value)));
     Ok(generated_origin)
 }
 fn __jet_bootstrap_cause_to_host(
     value: &@t.DiagnosticCause@,
     generated_source_files: &[@t.MIRSourceFile@],
     snapshot: &crate::compiler_bootstrap_host::AuthorizedSourceSnapshot,
-    origins: &mut __JetBootstrapDiagnosticOrigins,
+    origins: &mut __JetBootstrapOrigins,
 ) -> Result<::jet_foundation::Diagnostics::DiagnosticCause, String> {
     Ok(::jet_foundation::Diagnostics::DiagnosticCause {
         code: value.@f.DiagnosticCause.code@.clone(),

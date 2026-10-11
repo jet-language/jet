@@ -147,7 +147,8 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
                  return Err(\"native adapter receiver type differs from the exact checked JetEvalConfig.host_adapter leaf\".to_string());\n\
              }}\n\
              let template = bindings.create_object(()).map_err(|error| error.to_string())?;\n\
-             // Reuse the identity checked once by the immutable image owner.\n\
+             // Reuse the program and identity checked once by the immutable image owner.\n\
+             let program = image.program.as_ref();\n\
              let artifact = image.header.artifact;\n\
              let execution = image.header.identity.clone();\n"
     )
@@ -219,6 +220,7 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
                  shared_payload_shapes: ::std::collections::BTreeMap<String, crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape>,\n\
                  completion_scope: ::jet_evalhost::SourceExecutionCompletionScope,\n\
                  callback_jobs: ::std::sync::Arc<dyn ::jet_evalhost::SourceCallbacks::SourceCallbackJobOwner>,\n\
+                 runtime_admission: Option<crate::compiler_bootstrap_runner::HostBootstrapRuntimeAdmission>,\n\
                  receiver_type: ::jet_foundation::MIR::MirType,\n\
                  template: ::jet_evalhost::SourceInterfaces::NativeInterfaceObject,\n\
                  native_bindings: Vec<__JetBootstrapNativeBindingRegistration>,\n\
@@ -675,7 +677,6 @@ fn emit_native_interface_helpers(
                     "poll_callbacks" | "drain_callbacks" => format!(
                         "|mut machine| match machine.typed_mut() {{ Some(machine) => Ok(Ok(__jet_bootstrap_native_{name}(&adapter.root, &adapter.callbacks, machine))), None => Err(\"native adapter {name} needs the typed Source machine\".to_string()) }}"
                     ),
-                    "bytes_free" => "|mut machine, pointer, length, span| Ok(Ok(__jet_bootstrap_native_bytes_free(&mut machine, &pointer, &length, &span)))".to_string(),
                     "physical_binding" => {
                         "|| Ok(Ok(__jet_bootstrap_native_adapter_physical_binding(&adapter)))".to_string()
                     }
@@ -690,9 +691,10 @@ fn emit_native_interface_helpers(
                             .collect::<String>();
                         let arguments = native_operation_arguments(metadata, true);
                         let (_, operation) = native_operation(metadata);
-                        format!(
-                            "|machine{parameters}| {{ let mut machine = machine; Ok({operation}(&mut machine{arguments})) }}"
-                        )
+                        // Checked `JetErr` returns are infallible natively (as in the trait impl).
+                        let result = format!("{operation}(&mut machine{arguments})");
+                        let result = if metadata.return_type.ends_with(", JetErr>") { format!("Ok({result})") } else { result };
+                        format!("|machine{parameters}| {{ let mut machine = machine; Ok({result}) }}")
                     }
                 };
                 let compiler_program_binding = if native_operation(metadata).0 {
@@ -1037,7 +1039,7 @@ fn emit_native_binding_helpers(
 
     let generated = r#"
         type __JetBootstrapNativeNumericFn =
-            dyn FnMut(f64, &String, &String, &String, &String)
+            dyn FnMut(f64, &str, &str, &str, &str)
                 -> Result<f64, jet_foundation::Outcome::JetAbsent>;
         type __JetBootstrapNativeNumericInner =
             ::std::cell::RefCell<Option<Box<__JetBootstrapNativeNumericFn>>>;
@@ -1116,16 +1118,16 @@ fn emit_native_binding_helpers(
                 carrier,
                 move |registration| {
                     ::std::rc::Rc::new(::std::cell::RefCell::new(Some(
-                        Box::new(move |value: f64, source_unit: &String, destination_unit: &String, scale_num: &String, scale_den: &String| {
+                        Box::new(move |value: f64, source_unit: &str, destination_unit: &str, scale_num: &str, scale_den: &str| {
                             let _registration = &registration;
                             let _scope = active_bindings.activate_for_execution(active_program.as_ref(), artifact, active_execution.clone())
                                 .unwrap_or_else(|error| panic!("numeric native callable activation failed: {error}"));
                             let values = vec![
                                 ::jet_foundation::MIR::MirRuntimeValue::Float { value, f32: false },
-                                ::jet_foundation::MIR::MirRuntimeValue::String(source_unit.clone()),
-                                ::jet_foundation::MIR::MirRuntimeValue::String(destination_unit.clone()),
-                                ::jet_foundation::MIR::MirRuntimeValue::String(scale_num.clone()),
-                                ::jet_foundation::MIR::MirRuntimeValue::String(scale_den.clone()),
+                                ::jet_foundation::MIR::MirRuntimeValue::String(source_unit.to_owned()),
+                                ::jet_foundation::MIR::MirRuntimeValue::String(destination_unit.to_owned()),
+                                ::jet_foundation::MIR::MirRuntimeValue::String(scale_num.to_owned()),
+                                ::jet_foundation::MIR::MirRuntimeValue::String(scale_den.to_owned()),
                             ];
                             let arguments = signature.parameters.iter().zip(values).enumerate()
                                 .map(|(index, (parameter, value))| ::jet_evalhost::SourceInterfaces::NativeInterfaceArgument {
