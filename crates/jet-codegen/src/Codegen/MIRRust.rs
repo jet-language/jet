@@ -14786,12 +14786,17 @@ impl<'a> RustEmitter<'a> {
             || ("()".to_string(), raw.clone()),
             |ty| (self.rust_type(ty), self.c_abi_decode_owned(ty, &raw)),
         );
+        // One item per line: the split/shard exporter widens a restricted
+        // module item only on its own line, and a sibling shard crate calls
+        // this adapter through the glob import of the crate that owns it.
         let _ = writeln!(out,
             "// AUDIT: value-only C ABI; CString owners live through the call.\n\
              // Scalar narrowing and result validation use shared checked adapters.\n\
              // Pointer/handle/write signatures retain source-authored Unsafe gates.\n\
-             mod {} {{ use super::*; pub(super) fn call({params}) -> {ret} {{\n\
-             {setup}{body}\n}} }}",
+             mod {} {{\n\
+             use super::*;\n\
+             pub(super) fn call({params}) -> {ret} {{\n\
+             {setup}{body}\n}}\n}}",
             self.safe_c_module(foreign),
         );
     }
