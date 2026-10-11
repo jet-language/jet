@@ -2,22 +2,7 @@
 // execution seam. Engines may marshal a carrier into these impls, but they do
 // not choose a container shape or re-encode an outcome's clean/told meaning.
 
-fn jet_text_list<I>(values: I) -> String
-where
-    I: IntoIterator<Item = String>,
-{
-    let mut out = String::from("[");
-    let mut first = true;
-    for value in values {
-        if !first {
-            out.push_str(", ");
-        }
-        out.push_str(&value);
-        first = false;
-    }
-    out.push(']');
-    out
-}
+use jet_foundation::StructuralDebug::jet_text_list;
 
 fn jet_text_map<I>(entries: I) -> String
 where

@@ -407,16 +407,16 @@ fn jet_rust_emit_type_with_view_lifetime(ctx: &JetRustEmitContext, ty: MIRType, 
     rendered
 }
 
-// MIRRust view_owner_parameter_type: a view owner's own shared or exclusive
-// borrow names `'__jet_view` (`rendered` already names it on every view the
-// owner carries); an exclusive borrow of a view carrier keeps its outer
-// lifetime free, since `&mut` is invariant.
+// Name the data lifetime, not the temporary slot holding a shared view.
+// Owning shared borrows keep it outside; shared-view slots and exclusive
+// view-carrier borrows keep it on the inner data.
 fn jet_rust_emit_view_owner_borrow(rendered: String, carries_view: Bool) -> String Never! {
     if rendered.starts_with("&mut ") {
         if carries_view -> return rendered.copy()
         return "&{JET_RUST_EMIT_VIEW_LIFETIME} mut {rendered.slice(5, rendered.len())}"
     }
     if rendered.starts_with("&'") -> return rendered.copy()
+    if rendered.starts_with("&&'") && !rendered.starts_with("&&'__jet_view mut ") -> return rendered.copy()
     if rendered.starts_with("&") -> return "&{JET_RUST_EMIT_VIEW_LIFETIME} {rendered.slice(1, rendered.len())}"
     rendered.copy()
 }

@@ -476,6 +476,27 @@ enum ViewReturnLifetime {
 
 const VIEW_RETURN_LIFETIME: &str = "'__jet_view";
 
+fn view_owner_borrow(rendered: String, carries_view: bool) -> String {
+    if let Some(rest) = rendered.strip_prefix("&mut ") {
+        if carries_view {
+            rendered
+        } else {
+            format!("&{VIEW_RETURN_LIFETIME} mut {rest}")
+        }
+    } else if rendered.starts_with("&'")
+        || rendered
+            .strip_prefix("&&'")
+            .and_then(|inner| inner.split_once(' '))
+            .is_some_and(|(_, pointee)| !pointee.starts_with("mut "))
+    {
+        rendered
+    } else if let Some(rest) = rendered.strip_prefix('&') {
+        format!("&{VIEW_RETURN_LIFETIME} {rest}")
+    } else {
+        rendered
+    }
+}
+
 /// The higher-ranked lifetime a callable type names when its returned view
 /// borrows from its own arguments.
 const CALLABLE_VIEW_LIFETIME: &str = "'__jet_fn";
@@ -10547,10 +10568,9 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
-    /// A view owner's parameter type under `'__jet_view`: its own shared or
-    /// exclusive borrow names the lifetime, and so does every view it carries
-    /// (an exclusive borrow of a view carrier keeps its outer lifetime free,
-    /// since `&mut` is invariant).
+    /// Name the data lifetime, not the temporary slot holding a shared view.
+    /// Owning shared borrows keep that lifetime on their outer reference;
+    /// shared-view slots and exclusive view-carrier borrows keep it inside.
     fn view_owner_parameter_type(&self, ty: &MirType, render: impl FnOnce() -> String) -> String {
         let carries_view = self.type_carries_view(ty);
         let rendered = if carries_view {
@@ -10558,19 +10578,7 @@ impl<'a> RustEmitter<'a> {
         } else {
             render()
         };
-        if let Some(rest) = rendered.strip_prefix("&mut ") {
-            if carries_view {
-                rendered
-            } else {
-                format!("&{VIEW_RETURN_LIFETIME} mut {rest}")
-            }
-        } else if rendered.starts_with("&'") {
-            rendered
-        } else if let Some(rest) = rendered.strip_prefix('&') {
-            format!("&{VIEW_RETURN_LIFETIME} {rest}")
-        } else {
-            rendered
-        }
+        view_owner_borrow(rendered, carries_view)
     }
 
     /// The returned-view provenance a callable's signature states: a trait
@@ -39678,4 +39686,118 @@ fn local_slot(local: jet_foundation::MIR::MirLocalId) -> String {
 
 fn fixed_inline_backing_name(value: MirValueId) -> String {
     format!("__jet_fixed_backing_v{}", value.0)
+}
+
+#[cfg(test)]
+mod facade_carrier_regressions {
+    use super::view_owner_borrow;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn compile_run(source: &str) {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "jet-facade-carrier-{}-{}",
+            std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("main.rs");
+        let output = dir.join("main");
+        std::fs::write(&input, source).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "-Awarnings"])
+            .arg(&input).arg("-o").arg(&output).output().unwrap();
+        assert!(compiled.status.success(), "{}", String::from_utf8_lossy(&compiled.stderr));
+        let ran = std::process::Command::new(&output).output().unwrap();
+        assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn returned_view_temporary_slots_compile_and_run() {
+        let shared = view_owner_borrow("&&'__jet_view [u8]".into(), true);
+        assert_eq!(shared, "&&'__jet_view [u8]");
+        assert_eq!(view_owner_borrow("&mut &'__jet_view [u8]".into(), true),
+                   "&mut &'__jet_view [u8]");
+        assert_eq!(view_owner_borrow("&&'__jet_view mut [u8]".into(), true),
+                   "&'__jet_view &'__jet_view mut [u8]");
+        assert_eq!(view_owner_borrow("&Vec<u8>".into(), false), "&'__jet_view Vec<u8>");
+        assert_eq!(view_owner_borrow("&mut Vec<u8>".into(), false), "&'__jet_view mut Vec<u8>");
+        compile_run(&format!(r#"
+fn bounds<'__jet_view>(bytes: {shared}) -> &'__jet_view [u8] {{ *bytes }}
+fn sections<'__jet_view>(bytes: {shared}) -> Vec<&'__jet_view [u8]> {{
+    let mut slot: Option<&'__jet_view [u8]>;
+    let mut found = Vec::new();
+    for offset in 0..2 {{
+        slot = Some(&(*bytes)[offset..]);
+        found.push(bounds(slot.as_ref().unwrap()));
+    }}
+    found
+}}
+fn nested<'__jet_view>(bytes: {shared}) -> Vec<&'__jet_view [u8]> {{
+    let mut slot: Option<&'__jet_view [u8]>;
+    let mut found = Vec::new();
+    for offset in 0..2 {{
+        slot = Some(&(*bytes)[offset..]);
+        found.extend(sections(slot.as_ref().unwrap()));
+    }}
+    found
+}}
+fn main() {{
+    let bytes = [9u8, 8, 7];
+    let view = bytes.as_slice();
+    let found = nested(&view);
+    assert_eq!(found, vec![&bytes[..], &bytes[1..], &bytes[1..], &bytes[2..]]);
+    assert_eq!(found[0].as_ptr(), bytes.as_ptr());
+    assert_eq!(found[3].as_ptr(), bytes[2..].as_ptr());
+}}
+"#));
+    }
+
+    fn section<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
+        let from = source.find(start).unwrap();
+        let to = from + source[from..].find(end).unwrap();
+        &source[from..to]
+    }
+
+    #[test]
+    fn cors_origins_structural_traits_compile_and_run() {
+        let values = include_str!("../Prelude/Core/Values.rs");
+        let text = include_str!("../Prelude/Core/TextValues.rs");
+        let http = include_str!("../Prelude/CoreLib/Top/HTTPServer.rs");
+        let structural = include_str!("../../../jet-foundation/src/StructuralDebug.rs");
+        let source = [
+            section(values, "trait JetShow {", "/// Shared generic display adapter"),
+            section(values, "impl JetShow for String {", "impl JetDisplay for String {"),
+            section(values, "impl JetDebug for String {", "impl JetShow for AllocError {"),
+            section(values, "impl<T: JetShow> JetShow for Vec<T> {", "// D-FIXARR1"),
+            section(text, "impl<T: JetDebug> JetDebug for [T] {", "impl<T: JetDisplay> JetDisplay for Vec<T>"),
+            section(text, "impl<T: JetDebug> JetDebug for Vec<T> {", "impl<T: JetDisplay, const N: usize>"),
+            "mod jet_foundation { pub mod StructuralDebug {",
+            section(structural, "pub fn jet_debug_variant(", "/// Assemble the canonical Jet optional Debug"),
+            "} }",
+            "use jet_foundation::StructuralDebug::jet_text_list;",
+            section(http, "enum JetHTTPCorsOrigins {", "#[derive(Clone, Debug)]\nstruct JetHTTPCorsPolicy"),
+            r#"fn show<T: JetShow>(x: &T) -> String { x.jet_show() }
+fn debug<T: JetDebug>(x: &T) -> String { x.jet_debug() }
+fn main() {
+    let any = JetHTTPCorsOrigins::Any;
+    let list = JetHTTPCorsOrigins::List(vec!["http://a".into(), "http://b".into()]);
+    assert_eq!(show(&any), "Any");
+    assert_eq!(debug(&any), "Any");
+    assert_eq!(show(&list), "List([http://a, http://b])");
+    assert_eq!(debug(&list), "List([\"http://a\", \"http://b\"])");
+}"#,
+        ].join("\n");
+        compile_run(&source);
+        let generic = section(text, "impl<T: JetDebug> JetDebug for Vec<T> {",
+                              "impl<T: JetDisplay, const N: usize>");
+        let generic_show = section(values, "impl<T: JetShow> JetShow for Vec<T> {", "// D-FIXARR1");
+        for (resident, end) in [
+            (include_str!("../../../jet-comptime/src/Comptime/AppLite.rs"), "fn jet_panic("),
+            (include_str!("../../../jet-evalhost/src/net_http_rt.rs"), "use jet_codegen::scheduler"),
+        ] {
+            let adapter = section(resident, "impl JetShow for Vec<String> {", end);
+            compile_run(&source.replace(generic, "").replace(generic_show, adapter));
+        }
+    }
 }

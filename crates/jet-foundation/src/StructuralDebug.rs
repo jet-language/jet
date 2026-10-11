@@ -167,6 +167,25 @@ pub fn jet_debug_variant(variant: &str, payload: Option<String>) -> String {
     }
 }
 
+/// Assemble the canonical list shape from already-rendered payloads.
+pub fn jet_text_list<I>(values: I) -> String
+where
+    I: IntoIterator,
+    I::Item: AsRef<str>,
+{
+    let mut out = String::from("[");
+    let mut first = true;
+    for value in values {
+        if !first {
+            out.push_str(", ");
+        }
+        out.push_str(value.as_ref());
+        first = false;
+    }
+    out.push(']');
+    out
+}
+
 /// Assemble the canonical Jet optional Debug shape from a rendered payload.
 pub fn jet_debug_optional(payload: Option<String>) -> String {
     match payload {

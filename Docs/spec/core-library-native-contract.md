@@ -414,6 +414,16 @@ Inline assembly keeps early clobbers on every host profile. A word-input push
 rail that exceeds the allocatable register budget marshals its inputs through
 one read-only stack carrier, consumed before the body can overwrite its
 address; in-budget rails retain register operands.
+Returned immutable views name the lifetime of their underlying data, not the
+temporary reference slot used to pass the view. Reusing a loop-local view slot
+must not invalidate a returned section that still borrows the original bytes.
+Shared references to owning values and exclusive view carriers retain their
+existing provenance rules. Runtime-owned CORS origin variants implement the
+same structural Show/Debug hooks as source-derived enums, including when an
+origin variant is the payload of a generated union.
+The Prelude and resident HTTP hosts marshal string-list payloads through the
+same Foundation list-formatting kernel; a host adapter does not choose a
+different container shape.
 
 Native lowering must fail closed when a construct cannot preserve the shared
 runtime's ABI, error behavior, or observable output. Report an unsupported

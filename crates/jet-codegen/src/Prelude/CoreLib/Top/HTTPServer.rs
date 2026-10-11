@@ -6477,6 +6477,24 @@ enum JetHTTPCorsOrigins {
     List(Vec<String>),
 }
 
+impl JetShow for JetHTTPCorsOrigins {
+    fn jet_show(&self) -> String {
+        match self {
+            Self::Any => jet_foundation::StructuralDebug::jet_debug_variant("Any", None),
+            Self::List(origins) => jet_foundation::StructuralDebug::jet_debug_variant("List", Some(origins.jet_show())),
+        }
+    }
+}
+
+impl JetDebug for JetHTTPCorsOrigins {
+    fn jet_debug(&self) -> String {
+        match self {
+            Self::Any => jet_foundation::StructuralDebug::jet_debug_variant("Any", None),
+            Self::List(origins) => jet_foundation::StructuralDebug::jet_debug_variant("List", Some(origins.jet_debug())),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct JetHTTPCorsPolicy {
     origins: JetHTTPCorsOrigins,

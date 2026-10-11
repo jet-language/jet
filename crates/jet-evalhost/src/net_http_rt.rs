@@ -6,6 +6,20 @@ use crate::Crypto::runtime::{
 };
 use crate::Reactive::{jet_app_ws_register, jet_app_ws_unregister};
 use crate::{JetDebug, JetDisplay, JetShow};
+
+impl JetShow for Vec<String> {
+    fn jet_show(&self) -> String {
+        jet_foundation::StructuralDebug::jet_text_list(self)
+    }
+}
+
+impl JetDebug for Vec<String> {
+    fn jet_debug(&self) -> String {
+        jet_foundation::StructuralDebug::jet_text_list(
+            self.iter().map(|origin| format!("{origin:?}")),
+        )
+    }
+}
 use jet_codegen::scheduler::{
     jet_ctx_deadline_ms, jet_ctx_push_deadline, jet_deadline_remaining_ms,
     jet_scheduler_blocking_wait_enter, jet_scheduler_blocking_wait_leave, jet_scheduler_io_wait,

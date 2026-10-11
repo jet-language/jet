@@ -485,6 +485,20 @@ mod http_kernel {
     /// Prelude is one flat namespace, so the interpreter shares it too.
     use crate::Comptime::SyncLite::JetDbRequestScope;
 
+    impl JetShow for Vec<String> {
+        fn jet_show(&self) -> String {
+            jet_foundation::StructuralDebug::jet_text_list(self)
+        }
+    }
+
+    impl JetDebug for Vec<String> {
+        fn jet_debug(&self) -> String {
+            jet_foundation::StructuralDebug::jet_text_list(
+                self.iter().map(|origin| format!("{origin:?}")),
+            )
+        }
+    }
+
     fn jet_panic(file: &str, line: u32, message: &str) -> ! {
         jet_runtime_stop("E3001", file, i64::from(line), message)
     }
