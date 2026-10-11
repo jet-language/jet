@@ -22893,13 +22893,25 @@ impl<'a> RustEmitter<'a> {
         // The test value every entry into the projection's block has
         // branched true on. It stays true on every path from the block only
         // while no such path re-runs its definition (a loop), so a reachable
-        // definition drops the fact.
+        // definition drops the fact. A path that first re-runs the carrier's
+        // own definition carries a fresh carrier on (the walk below stops
+        // there), so it needs no fact. The arm chain's re-test may branch on
+        // a join's trivial phi of that test, which is the same value.
+        let tested = |mut condition: MirValueId| {
+            while let Some(MirOperation::Phi { incoming }) = self.value_definition(function, condition) {
+                if !phi_is_trivial(incoming) {
+                    break;
+                }
+                condition = incoming[0].1;
+            }
+            condition
+        };
         let then_condition = |predecessor: usize| match &function.blocks[predecessor].terminator {
             MirTerminator::Branch { condition, then_target, else_target }
                 if then_target != else_target
                     && index.blocks.get(then_target).map(|(target, _)| *target) == Some(block) =>
             {
-                Some(*condition)
+                Some(tested(*condition))
             }
             _ => None,
         };
@@ -22916,6 +22928,9 @@ impl<'a> RustEmitter<'a> {
             while let Some(at) = pending.pop() {
                 for target in function.blocks[at].terminator.targets().iter() {
                     if let Some((target, _)) = index.blocks.get(target) {
+                        if Some(*target) == definition_block {
+                            continue;
+                        }
                         if *target == defined {
                             return false;
                         }
@@ -22932,7 +22947,7 @@ impl<'a> RustEmitter<'a> {
             known.is_some_and(|known| matches!(
                 &function.blocks[predecessor].terminator,
                 MirTerminator::Branch { condition, then_target, else_target }
-                    if *condition == known
+                    if tested(*condition) == known
                         && then_target != else_target
                         && index.blocks.get(else_target).map(|(target, _)| *target) == Some(successor)
             ))

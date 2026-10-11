@@ -825,6 +825,129 @@ fn run() -[IO, Time.Wait]> {
     );
 }
 
+
+/// A record whose fields were taken and refilled (`^r.f` then `r.f = …`)
+/// still moves whole at its last use, rather than cloning a record that
+/// holds a `Box<dyn …>`.
+#[test]
+fn refilled_records_move_whole_at_their_last_use() {
+    hosted_seed_program_runs(
+        "refilled_record_move",
+        None,
+        r#"
+trait Sink { fn note(self) -> Int }
+struct Counter { base: Int }
+impl Counter.Sink { fn note(self) -> Int { self.base + 1 } }
+struct Report { text: String }
+struct Compiled { sink: Sink?, report: Report?, gaps: [String] }
+struct Query { compile: Compiled, report: Report?, gaps: [String] }
+fn compiled() -> Compiled {
+    Compiled{sink: Val(Counter{base: 1}), report: Val(Report{text: "r"}), gaps: [String]{"g"}}
+}
+fn query() -> Query {
+    compile := compiled()
+    report :: ^compile.report
+    compile.report = None
+    gaps :: ^compile.gaps
+    compile.gaps = [String]{}
+    Query{compile: ^compile, report: ^report, gaps: ^gaps}
+}
+fn run() {
+    result :: query()
+    assert_eq(result.gaps.len(), 1)
+    assert(result.compile.report == None)
+    assert_eq(result.compile.gaps.len(), 0)
+    if result.compile.sink == .Val(sink) -> assert_eq(sink.note(), 2) else -> panic("sink")
+}
+"#,
+    );
+}
+
+/// A non-cloneable success payload binds by move: each match arm is entered
+/// only on its own test, so a later arm's probe of the result is no later
+/// use of the payload (straight-line and loop matches, `? found -> found`
+/// in a loop, and an option payload pushed from a loop). The arm's binding
+/// then moves whole at its last use.
+#[test]
+fn noncloneable_result_payloads_move_into_their_arm() {
+    hosted_seed_program_runs(
+        "noncloneable_payload_arms",
+        Some("name: \"noncloneable_payload_arms\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS.Read] } }\n"),
+        r#"
+use core.files.[FileReader, open]
+struct Checked { path: String, reader: FileReader }
+#Error
+enum Missing { Gone(String) }
+#Error
+enum Wrapped { Failed(String) }
+fn checked(path: String) -[FS]> Checked Missing! {
+    reader :: open(path) ?? return Err(Missing.Gone(path))
+    Ok(Checked{path: path, reader: reader})
+}
+fn probe(path: String) -[FS]> Checked? Missing! {
+    if path == "absent" -> return Ok(None)
+    file :: checked(path) ?? return Err(err)
+    Ok(Val(file))
+}
+fn note(file: Checked) -> Int { file.path.len() }
+fn listed(paths: [String]) -[FS]> [Checked] Missing! {
+    found := [Checked]{}
+    loop path in paths {
+        if checked(path) == {
+            .Ok(file) -> {
+                note(file)
+                &found.push(file)
+            }
+            .Err(error) -> return Err(error)
+        }
+    }
+    Ok(found)
+}
+fn wrapped(paths: [String]) -[FS]> [Checked] Wrapped! {
+    if listed(paths) == {
+        .Ok(found) -> Ok(found)
+        .Err(_) -> Err(Wrapped.Failed("missing"))
+    }
+}
+fn first_path(path: String) -[FS]> String? Wrapped! {
+    if checked(path) == {
+        .Ok(file) -> {
+            note(file)
+            Ok(Val(file.path))
+        }
+        .Err(_) -> {
+            if path == "" -> return Ok(None)
+            Err(Wrapped.Failed("missing"))
+        }
+    }
+}
+fn present(paths: [String]) -[FS]> Bool Missing! {
+    loop path in paths {
+        probed :: probe(path) ? found -> found ! error -> return Err(error)
+        if probed != None -> return Ok(true)
+    }
+    Ok(false)
+}
+fn kept(paths: [String]) -[FS]> [Checked] {
+    out := [Checked]{}
+    loop path in paths {
+        maybe :: probe(path) ? found -> found ! error -> panic("probe")
+        if maybe == {
+            .Val(found) -> &out.push(found)
+            .None -> {}
+        }
+    }
+    out
+}
+fn run() -[FS]> {
+    assert_eq((wrapped([String]{"run.jet"}) ?? panic("wrapped")).len(), 1)
+    assert_eq(first_path("run.jet") ?? panic("first"), "run.jet")
+    assert(present([String]{"absent", "run.jet"}) ?? panic("present"))
+    assert_eq(kept([String]{"absent", "run.jet"}).len(), 1)
+}
+"#,
+    );
+}
 /// Root 2: Core handle ops write through a FileReader/FileWriter reached from
 /// a read binding (a Read parameter, a field of a read `self`). The emitted
 /// Rust lends the interior-mutable carrier by `&`.

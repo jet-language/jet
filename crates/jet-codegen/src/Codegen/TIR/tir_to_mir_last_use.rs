@@ -39,8 +39,9 @@ use super::mir::{LowerCtx, LowerError, checked_operation_place_refs, retain_plac
 
 #[derive(Clone, Copy)]
 enum Candidate {
-    /// An owned local: its whole place and its drop flag.
-    Local { place: MirPlaceId, flag: MirPlaceId },
+    /// An owned local: its whole place and its drop flag. A split root
+    /// (`split_drop_roots`) has no whole flag; its leaves carry theirs.
+    Local { place: MirPlaceId, flag: Option<MirPlaceId> },
     /// A field path (`paths`) of the owned local candidate `root`.
     Field { root: usize },
     /// An enum subject value whose payloads one block binds.
@@ -179,10 +180,12 @@ impl LowerCtx<'_> {
             }
         }
 
-        // Owned locals: a whole local place with a drop flag. Places whose
-        // release is observable (a scope-end `close`, a function-level drop
-        // row) keep their lexical lifetime. A file-owner root moves whole: its
-        // leaf cleanups run under their own live flags, which a move clears.
+        // Owned locals: a whole local place with a drop flag, or a split
+        // root whose leaves each carry one. Places whose release is
+        // observable (a scope-end `close`, a function-level drop row) keep
+        // their lexical lifetime. A file-owner root moves whole: its leaf
+        // cleanups run under their own live flags, which a move clears; a
+        // split root's leaf cleanups likewise.
         let place_rows: HashMap<MirPlaceId, usize> = self
             .places
             .iter()
@@ -207,10 +210,11 @@ impl LowerCtx<'_> {
                 file_owner_leaves.entry(root).or_default().push((*leaf, *flag));
             }
         }
-        let mut owned: Vec<(MirPlaceId, MirPlaceId)> = self
+        let mut owned: Vec<(MirPlaceId, Option<MirPlaceId>)> = self
             .drop_live_places
             .iter()
-            .map(|(place, flag)| (*place, *flag))
+            .map(|(place, flag)| (*place, Some(*flag)))
+            .chain(self.split_drop_roots.iter().map(|place| (*place, None)))
             .collect();
         owned.sort_unstable_by_key(|(place, _)| place.0);
         let mut candidates: Vec<Candidate> = Vec::new();
@@ -240,7 +244,9 @@ impl LowerCtx<'_> {
                 continue;
             }
             root_candidate.insert(root, candidates.len());
-            flag_candidate.insert(flag, candidates.len());
+            if let Some(flag) = flag {
+                flag_candidate.insert(flag, candidates.len());
+            }
             candidates.push(Candidate::Local { place, flag });
             paths.push(Vec::new());
             rejected.push(false);
@@ -258,6 +264,28 @@ impl LowerCtx<'_> {
                 flag_candidate.insert(*flag, candidate);
             }
             owner_leaves.insert(candidate, leaves);
+        }
+        // The flagged leaves of a split candidate are its cleanup the same
+        // way; moving it whole clears every one of their flags.
+        let mut split_leaves: HashMap<usize, Vec<MirPlaceId>> = HashMap::new();
+        for (leaf, flag) in &self.drop_live_places {
+            let Some(row) = place_rows.get(leaf).map(|row| &self.places[*row]) else {
+                continue;
+            };
+            if row.projections.is_empty() {
+                continue;
+            }
+            let Some(&candidate) = place_root(&row.base).and_then(|root| root_candidate.get(&root)) else {
+                continue;
+            };
+            if matches!(candidates[candidate], Candidate::Local { flag: None, .. }) {
+                leaf_candidate.insert(*leaf, candidate);
+                flag_candidate.insert(*flag, candidate);
+                split_leaves.entry(candidate).or_default().push(*flag);
+            }
+        }
+        for flags in split_leaves.values_mut() {
+            flags.sort_unstable_by_key(|flag| flag.0);
         }
         let mut place_candidate: HashMap<MirPlaceId, usize> = HashMap::new();
         for row in &self.places {
@@ -541,6 +569,72 @@ impl LowerCtx<'_> {
                 && preds.iter().all(|pred| flag_guard(*pred) == guard && then_target(*pred) == Some(block))
             {
                 guarded[block] = guard;
+            }
+        }
+        // A match arm chain binds an arm's payloads on the true edge of its
+        // test, joins, and re-branches on that same test (or a trivial phi of
+        // it) to enter the arm. An edge into such a re-test whose source
+        // already decided the test can only continue to that test's own
+        // successor: `correlated` maps the edge to it, and liveness follows
+        // only that successor through the join.
+        let tested = |mut value: MirValueId| {
+            while let Some(&(block, index)) = definitions.get(&value) {
+                match &self.blocks[block].instructions[index].operation {
+                    MirOperation::Phi { incoming }
+                        if incoming.split_first().is_some_and(|((_, first), rest)| {
+                            rest.iter().all(|(_, other)| other == first)
+                        }) =>
+                    {
+                        value = incoming[0].1;
+                    }
+                    _ => break,
+                }
+            }
+            value
+        };
+        let test_of = |block: usize| match &self.blocks[block].terminator {
+            MirTerminator::Branch { condition, then_target, else_target } if then_target != else_target => Some((
+                tested(*condition),
+                block_index.get(then_target).copied()?,
+                block_index.get(else_target).copied()?,
+            )),
+            _ => None,
+        };
+        // The outcome of `condition` along the edge `from -> to`, when `from`
+        // branches on it.
+        let edge_outcome = |from: usize, to: usize, condition: MirValueId| match test_of(from) {
+            Some((tested, then_block, _)) if tested == condition && then_block == to => Some(true),
+            Some((tested, _, else_block)) if tested == condition && else_block == to => Some(false),
+            _ => None,
+        };
+        let mut correlated: HashMap<(usize, usize), usize> = HashMap::new();
+        for (join, preds) in predecessors.iter().enumerate() {
+            let Some((condition, then_block, else_block)) = test_of(join) else {
+                continue;
+            };
+            let Some(&(defined, _)) = definitions.get(&condition) else {
+                continue;
+            };
+            if defined == join {
+                continue;
+            }
+            for &pred in preds {
+                // The source branches on the test itself, or (not defining
+                // it) is entered only along one outcome of it.
+                let outcome = match test_of(pred) {
+                    Some(_) => edge_outcome(pred, join, condition),
+                    None if defined != pred => {
+                        let entries = &predecessors[pred];
+                        let first = entries.first().and_then(|entry| edge_outcome(*entry, pred, condition));
+                        first.filter(|outcome| {
+                            entries.iter().all(|entry| edge_outcome(*entry, pred, condition) == Some(*outcome))
+                        })
+                    }
+                    None => None,
+                };
+                if let Some(outcome) = outcome {
+                    correlated.insert((pred, join), if outcome { then_block } else { else_block });
+                }
             }
         }
 
@@ -853,6 +947,14 @@ impl LowerCtx<'_> {
                 }
             }
         }
+        // A subject's payload take is a value `Move`, which MIR legality
+        // checks path-insensitively; its liveness keeps every edge.
+        let mut subject_bits = vec![0u64; words];
+        for (candidate, row) in candidates.iter().enumerate() {
+            if matches!(row, Candidate::Subject { .. }) {
+                bit_set(&mut subject_bits, candidate);
+            }
+        }
         let mut live_in = vec![0u64; block_count * words];
         let mut live_out = vec![0u64; block_count * words];
         let mut changed = true;
@@ -861,9 +963,19 @@ impl LowerCtx<'_> {
             for block in (0..block_count).rev() {
                 let range = block * words..(block + 1) * words;
                 for word in 0..words {
-                    let out = successors[block]
-                        .iter()
-                        .fold(0u64, |acc, target| acc | live_in[target * words + word]);
+                    let out = successors[block].iter().fold(0u64, |acc, target| {
+                        let all = live_in[target * words + word];
+                        acc | match correlated.get(&(block, *target)) {
+                            // Through a re-test this edge already decided.
+                            Some(next) => {
+                                ((generated[target * words + word]
+                                    | (live_in[next * words + word] & !killed[target * words + word]))
+                                    & !subject_bits[word])
+                                    | (all & subject_bits[word])
+                            }
+                            None => all,
+                        }
+                    });
                     live_out[range.start + word] = out;
                     let input = generated[range.start + word] | (out & !killed[range.start + word]);
                     if input != live_in[range.start + word] {
@@ -1066,11 +1178,12 @@ impl LowerCtx<'_> {
                 MirOperation::Constant(MirConstant::Bool(false)),
             )?;
             let off_value = off.result.expect("constant result");
-            // A whole move also takes every file-owner leaf, as an explicit
-            // move clears their cleanup flags.
-            let flags = std::iter::once(flag).chain(
-                owner_leaves.get(&candidate).into_iter().flat_map(|leaves| leaves.iter().map(|(_, live)| *live)),
-            );
+            // A whole move also takes every file-owner leaf and every split
+            // leaf, as an explicit move clears their cleanup flags.
+            let flags = flag
+                .into_iter()
+                .chain(owner_leaves.get(&candidate).into_iter().flat_map(|leaves| leaves.iter().map(|(_, live)| *live)))
+                .chain(split_leaves.get(&candidate).into_iter().flatten().copied());
             let mut instructions = vec![off];
             for flag in flags {
                 instructions.push(self.last_use_instruction(

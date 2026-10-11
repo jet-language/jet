@@ -5472,7 +5472,7 @@ pub(super) struct LowerCtx<'a> {
     /// Source roots of projected, consuming moves, collected before emission.
     partial_move_roots: HashSet<String>,
     /// Only these roots use leaf flags; ordinary records keep one root flag.
-    split_drop_roots: HashSet<MirPlaceId>,
+    pub(super) split_drop_roots: HashSet<MirPlaceId>,
     /// Every file-owner leaf place registered for cleanup in this function,
     /// with the live flag that guards its cleanup.
     pub(super) file_owner_places: Vec<(MirPlaceId, MirPlaceId)>,
