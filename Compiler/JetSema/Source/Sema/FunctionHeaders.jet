@@ -229,7 +229,10 @@ fn sema_function_header_supported(function: Func, context: &SemaCheckContext) ->
         supported = false
     }
     loop marker in function.markers {
-        if sema_function_header_marker_projected(marker.name) || (marker.name == "Reactive" && function.is_reactive) -> next
+        // Rust Guest.rs `is_guest_export_marker`: an `#Export(c)` function is an
+        // ordinary Jet body; the export row is read after checking
+        // (jet_driver_c_exports), so the marker adds nothing to the body check.
+        if sema_function_header_marker_projected(marker.name) || (marker.name == "Reactive" && function.is_reactive) || sema_marker_is_guest_export(marker) -> next
         sema_check_unsupported(&context, "the function marker `#{marker.name}` is not supported by the self-hosted checker yet")
         supported = false
     }
