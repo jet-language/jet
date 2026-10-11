@@ -396,6 +396,10 @@ inside the build target. Missing includes or includes escaping the repository
 fail the preparation. The bridge identity fingerprints both crate trees and
 the sorted include closure, so changing or adding an included registry or
 Unicode table invalidates a previously prepared bridge.
+The Jet bridge and bootstrap Rust bridge derive the same closure rather than
+maintaining separate input lists. Linux projects only these external files at
+their original source root, then mounts the complete Foundation and Unicode
+crates; this does not authorize unrelated directories.
 
 Native lowering must fail closed when a construct cannot preserve the shared
 runtime's ABI, error behavior, or observable output. Report an unsupported

@@ -439,6 +439,13 @@ include!(concat!(env!("OUT_DIR"), "/generated.rs"));
         staged :: files.join(root, "cache/.jet-foundation-source-closure/Compiler/Registry")
         assert_eq(files.read(files.join(staged, "law.jet")) ?? panic("staged law"), "ratified")
         assert_eq(mounts[0].destination, root)
+        closure :: files.join(root, "cache/.jet-foundation-source-closure")
+        foundation_stage :: files.join(closure, "crates/foundation")
+        unicode_stage :: files.join(closure, "crates/unicode")
+        assert((files.stat(foundation_stage) ?? panic("foundation mount point")).is_dir)
+        assert((files.stat(unicode_stage) ?? panic("unicode mount point")).is_dir)
+        assert(!files.lexists(files.join(foundation_stage, "src/lib.rs")))
+        assert(!files.lexists(files.join(unicode_stage, "src/lib.rs")))
     }
     files.write(files.join(external, "nested.rs"), `include!("missing.rs");`) ?? panic("missing input")
     assert(pkg_ffi_foundation_include_closure(root, foundation, unicode) == .Err(_))

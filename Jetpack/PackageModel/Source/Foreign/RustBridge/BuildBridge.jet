@@ -266,7 +266,7 @@ fn pkg_ffi_plugin_authority_source(authority_needs: [String]) -> String Never! {
 // Run `cargo build --release --target <t>` in the native sandbox, with the
 // user's Cargo registry and the jet-foundation sources mounted read-only.
 fn pkg_ffi_run_sandboxed_cargo(cargo_path: String, selected_target: String, paths: BridgePaths, native_link_args: [String], foundation_sources: JetFoundationSources?) -[FS, Env, Exec, Time.Wait]> NativeSandboxOutput RustBridgeError! {
-    cargo_args :: [String]{"build", "--release", "--target", selected_target, "--manifest-path", "/work/source/Cargo.toml"}
+    cargo_args :: [String]{"build", "--keep-going", "--release", "--target", selected_target, "--manifest-path", "/work/source/Cargo.toml"}
     sandbox_env := [String: String]{}
     sandbox_env["CARGO_HOME"] = "/work/output/cargo-home"
     sandbox_env["CARGO_TARGET_DIR"] = "/work/output"

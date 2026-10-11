@@ -711,6 +711,10 @@ fn pkg_ffi_jet_foundation_mounts(cache_root: String, sources: JetFoundationSourc
             loop path in sources.inputs {
                 pkg_ffi_stage_foundation_input(sources.root, path.removeprefix("{sources.root}/"), closure_root, "include")
             }
+            // Parent is read-only before the two crate binds: precreate only
+            // their empty destinations, never copy or expose unrelated inputs.
+            files.create_dir_all(files.join(closure_root, sources.foundation.removeprefix("{sources.root}/"))) ?? return Err(pkg_bridge_error("create foundation crate mount point: {err}"))
+            files.create_dir_all(files.join(closure_root, sources.unicode.removeprefix("{sources.root}/"))) ?? return Err(pkg_bridge_error("create unicode crate mount point: {err}"))
             &mounts.push(NativeSandboxMount{source: closure_root, destination: sources.root})
         }
         else -> {

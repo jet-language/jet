@@ -2490,38 +2490,15 @@ pub const WASMTIME_CRATE_SPEC: (&str, &str) = ("wasmtime", "25");
 const JET_FOUNDATION_CRATE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-foundation");
 /// Foundation's own path dependency; Cargo reads it at its host path too.
 const JET_UNICODE_CRATE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-unicode");
-const JET_FOUNDATION_SOURCE_SCHEMA: &str = "jet-ffi-foundation-source-v3";
-const JET_FOUNDATION_CODEGEN_PRELUDE_PATH: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-codegen/src/Prelude");
-const JET_FOUNDATION_ARCHIVE_SOURCE_PATH: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../../Core/archive");
-const JET_FOUNDATION_TEXT_SOURCE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../Core/text");
-const JET_FOUNDATION_TESTS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests");
-const JET_FOUNDATION_CODEGEN_INPUTS: &[&str] = &[
-    "Effects.jet",
-    "Core.jet",
-    "core/prelude.jet",
-    "Facts.jet",
-    "Diagnostics.jet",
-    "Core/InlineRange.rs",
-    "Core/TimeMonotonic.rs",
-    "Core/MapKey.rs",
-    "Markers.jet",
-    // jet-unicode (Foundation's path dependency) includes the generated tables.
-    "CoreLib/Top/UnicodeTables.rs",
-];
-const JET_FOUNDATION_ARCHIVE_INPUTS: &[&str] = &["archive.jet", "gzip.jet", "zstd.jet"];
-const JET_FOUNDATION_TEXT_INPUTS: &[&str] = &["string.jet"];
-const JET_FOUNDATION_TEST_INPUTS: &[&str] = &["diagnostics_coverage_baseline.txt"];
+// Matches the Jet bridge's derived include closure and cache identity.
+const JET_FOUNDATION_SOURCE_SCHEMA: &str = "jet-ffi-foundation-source-v4";
 
 #[derive(Debug)]
 struct JetFoundationSources {
+    root: PathBuf,
     foundation: PathBuf,
     unicode: PathBuf,
-    codegen_prelude: PathBuf,
-    archive_source: PathBuf,
-    text_source: PathBuf,
-    tests: PathBuf,
+    inputs: Vec<PathBuf>,
     digest: String,
 }
 
@@ -2548,7 +2525,7 @@ fn verified_source_directory(path: &Path, label: &str) -> Result<PathBuf, String
 
 fn foundation_input_digest(
     root: &Path,
-    relative: &str,
+    relative: &Path,
     label: &str,
 ) -> Result<String, String> {
     let path = root.join(relative);
@@ -2567,16 +2544,251 @@ fn foundation_input_digest(
     crate::ForeignBridge::sha_file(&path)
 }
 
+// Literal tokens are distinct from identifiers: comments and string contents
+// cannot manufacture an include, and Rust lifetimes are not character literals.
+#[derive(Debug)]
+enum FoundationIncludeToken<'a> {
+    Word(&'a str),
+    Literal(String),
+    Symbol(u8),
+}
+
+fn foundation_include_tokens(source: &str) -> Vec<FoundationIncludeToken<'_>> {
+    let raw = source.as_bytes();
+    let mut tokens = Vec::new();
+    let mut i = 0;
+    while i < raw.len() {
+        let byte = raw[i];
+        if byte <= b' ' {
+            i += 1;
+            continue;
+        }
+        if raw[i..].starts_with(b"//") {
+            while i < raw.len() && raw[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if raw[i..].starts_with(b"/*") {
+            i += 2;
+            let mut depth = 1;
+            while i < raw.len() && depth > 0 {
+                if raw[i..].starts_with(b"/*") {
+                    depth += 1;
+                    i += 2;
+                } else if raw[i..].starts_with(b"*/") {
+                    depth -= 1;
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            continue;
+        }
+        let mut quote = i;
+        let mut hashes = 0;
+        if byte == b'r' {
+            quote += 1;
+            while quote < raw.len() && raw[quote] == b'#' {
+                hashes += 1;
+                quote += 1;
+            }
+        }
+        if raw.get(quote) == Some(&b'"') && (quote == i || byte == b'r') {
+            let mut value = Vec::new();
+            i = quote + 1;
+            while i < raw.len() {
+                if raw[i] == b'"' {
+                    let mut end = i + 1;
+                    while end < raw.len() && end < i + 1 + hashes && raw[end] == b'#' {
+                        end += 1;
+                    }
+                    if end == i + 1 + hashes {
+                        i = end;
+                        break;
+                    }
+                }
+                if byte == b'"' && raw[i] == b'\\' && i + 1 < raw.len() {
+                    i += 1;
+                    value.push(match raw[i] {
+                        b'n' => b'\n',
+                        b'r' => b'\r',
+                        b't' => b'\t',
+                        escaped => escaped,
+                    });
+                } else {
+                    value.push(raw[i]);
+                }
+                i += 1;
+            }
+            tokens.push(FoundationIncludeToken::Literal(
+                String::from_utf8(value).unwrap_or_default(),
+            ));
+            continue;
+        }
+        if byte == b'\'' {
+            let end = i + 1 + if raw.get(i + 1) == Some(&b'\\') { 2 } else { 1 };
+            if raw.get(end) == Some(&b'\'') {
+                i = end + 1;
+                continue;
+            }
+        }
+        if byte.is_ascii_alphabetic() || byte == b'_' {
+            let start = i;
+            while i < raw.len() && (raw[i].is_ascii_alphanumeric() || raw[i] == b'_') {
+                i += 1;
+            }
+            tokens.push(FoundationIncludeToken::Word(&source[start..i]));
+        } else {
+            tokens.push(FoundationIncludeToken::Symbol(byte));
+            i += 1;
+        }
+    }
+    tokens
+}
+
+fn foundation_rust_include_paths(source: &str, manifest: &Path) -> Result<Vec<PathBuf>, String> {
+    use FoundationIncludeToken::{Literal, Symbol, Word};
+    if !source.contains("include") {
+        return Ok(Vec::new());
+    }
+    let tokens = foundation_include_tokens(source);
+    let mut paths = Vec::new();
+    let mut i = 0;
+    while i + 2 < tokens.len() {
+        if !matches!(tokens[i], Word("include" | "include_str" | "include_bytes"))
+            || !matches!(tokens[i + 1], Symbol(b'!'))
+            || !matches!(tokens[i + 2], Symbol(b'('))
+        {
+            i += 1;
+            continue;
+        }
+        i += 3;
+        let mut path = String::new();
+        let mut generated = false;
+        let mut depth = 1;
+        while i < tokens.len() && depth > 0 {
+            if matches!(tokens[i], Word("env"))
+                && i + 4 < tokens.len()
+                && matches!(tokens[i + 1], Symbol(b'!'))
+                && matches!(tokens[i + 2], Symbol(b'('))
+                && matches!(tokens[i + 4], Symbol(b')'))
+            {
+                let Literal(variable) = &tokens[i + 3] else {
+                    return Err("unsupported Rust include environment expression".into());
+                };
+                match variable.as_str() {
+                    "CARGO_MANIFEST_DIR" => path.push_str(manifest.to_str().ok_or_else(|| {
+                        "Rust include manifest is not UTF-8".to_string()
+                    })?),
+                    "OUT_DIR" => generated = true,
+                    _ => return Err(format!("unsupported Rust include environment `{variable}`")),
+                }
+                i += 5;
+                continue;
+            }
+            match &tokens[i] {
+                Literal(value) => path.push_str(value),
+                Symbol(b'(') => depth += 1,
+                Symbol(b')') => depth -= 1,
+                Word("concat") | Symbol(b'!' | b',') => {}
+                token => return Err(format!("unsupported Rust include expression `{token:?}`")),
+            }
+            i += 1;
+        }
+        if depth != 0 || path.is_empty() {
+            return Err("incomplete Rust include expression".into());
+        }
+        // Build-script outputs are generated inside Cargo's writable target.
+        if !generated {
+            paths.push(PathBuf::from(path));
+        }
+    }
+    Ok(paths)
+}
+
+fn foundation_rust_sources(directory: &Path, paths: &mut Vec<PathBuf>) -> Result<(), String> {
+    let entries = fs::read_dir(directory)
+        .map_err(|error| format!("read foundation sources `{}`: {error}", directory.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("read foundation source entry: {error}"))?;
+        let name = entry.file_name();
+        if name.to_string_lossy().starts_with('.') || name == "target" {
+            continue;
+        }
+        let kind = entry.file_type().map_err(|error| {
+            format!("read foundation source type `{}`: {error}", entry.path().display())
+        })?;
+        if kind.is_dir() {
+            foundation_rust_sources(&entry.path(), paths)?;
+        } else if entry.path().extension().is_some_and(|extension| extension == "rs") {
+            paths.push(entry.path());
+        }
+    }
+    Ok(())
+}
+
+fn foundation_include_closure(
+    root: &Path,
+    foundation: &Path,
+    unicode: &Path,
+) -> Result<Vec<PathBuf>, String> {
+    let mut pending = std::collections::VecDeque::new();
+    for manifest in [foundation, unicode] {
+        let mut paths = Vec::new();
+        foundation_rust_sources(manifest, &mut paths)?;
+        paths.sort();
+        pending.extend(paths.into_iter().map(|source| (source, manifest)));
+    }
+    let mut seen = HashSet::new();
+    let mut external = BTreeSet::new();
+    while let Some((source, manifest)) = pending.pop_front() {
+        if !seen.insert((source.clone(), manifest))
+            || !source.extension().is_some_and(|extension| extension == "rs")
+        {
+            continue;
+        }
+        let text = fs::read_to_string(&source)
+            .map_err(|error| format!("read Rust include source `{}`: {error}", source.display()))?;
+        for include in foundation_rust_include_paths(&text, manifest)? {
+            let candidate = if include.is_absolute() {
+                include
+            } else {
+                source.parent().expect("source file has a parent").join(include)
+            };
+            let metadata = fs::symlink_metadata(&candidate).map_err(|error| {
+                format!("Rust include `{}` is unavailable: {error}", candidate.display())
+            })?;
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(format!("Rust include `{}` is not a regular file", candidate.display()));
+            }
+            let path = candidate.canonicalize().map_err(|error| {
+                format!("canonicalize Rust include `{}`: {error}", candidate.display())
+            })?;
+            if !path.starts_with(root) {
+                return Err(format!("Rust include `{}` escapes the source root", path.display()));
+            }
+            if !path.starts_with(foundation) && !path.starts_with(unicode) {
+                external.insert(path.clone());
+            }
+            if !seen.contains(&(path.clone(), manifest)) {
+                pending.push_back((path, manifest));
+            }
+        }
+    }
+    Ok(external.into_iter().collect())
+}
+
 fn jet_foundation_sources() -> Result<JetFoundationSources, String> {
     let foundation = verified_source_directory(Path::new(JET_FOUNDATION_CRATE_PATH), "crate")?;
     let unicode = verified_source_directory(Path::new(JET_UNICODE_CRATE_PATH), "unicode crate")?;
-    let codegen_prelude =
-        verified_source_directory(Path::new(JET_FOUNDATION_CODEGEN_PRELUDE_PATH), "codegen")?;
-    let archive_source =
-        verified_source_directory(Path::new(JET_FOUNDATION_ARCHIVE_SOURCE_PATH), "archive")?;
-    let text_source =
-        verified_source_directory(Path::new(JET_FOUNDATION_TEXT_SOURCE_PATH), "text")?;
-    let tests = verified_source_directory(Path::new(JET_FOUNDATION_TESTS_PATH), "tests")?;
+    let root = verified_source_directory(
+        foundation.parent().and_then(Path::parent).ok_or_else(|| {
+            "jet-foundation crate has no source root".to_string()
+        })?,
+        "root",
+    )?;
+    let inputs = foundation_include_closure(&root, &foundation, &unicode)?;
 
     let foundation_tree = crate::SHA256::try_tree_hash(&foundation)
         .map_err(|error| format!("could not fingerprint jet-foundation source: {error}"))?;
@@ -2586,36 +2798,21 @@ fn jet_foundation_sources() -> Result<JetFoundationSources, String> {
         crate::ForeignBridge::IdentityBuilder::new(JET_FOUNDATION_SOURCE_SCHEMA);
     identity.field("foundation-tree", foundation_tree.as_bytes());
     identity.field("unicode-tree", unicode_tree.as_bytes());
-    for relative in JET_FOUNDATION_CODEGEN_INPUTS {
-        let digest = foundation_input_digest(&codegen_prelude, relative, "codegen")?;
+    for path in &inputs {
+        let relative = path.strip_prefix(&root)
+            .expect("include closure paths stay inside the source root");
+        let digest = foundation_input_digest(&root, relative, "include")?;
         identity.field(
-            "codegen-input",
-            format!("{relative}\0{digest}").as_bytes(),
+            "include-input",
+            format!("{}\0{digest}", relative.display()).as_bytes(),
         );
-    }
-    for relative in JET_FOUNDATION_ARCHIVE_INPUTS {
-        let digest = foundation_input_digest(&archive_source, relative, "archive")?;
-        identity.field(
-            "archive-input",
-            format!("{relative}\0{digest}").as_bytes(),
-        );
-    }
-    for relative in JET_FOUNDATION_TEXT_INPUTS {
-        let digest = foundation_input_digest(&text_source, relative, "text")?;
-        identity.field("text-input", format!("{relative}\0{digest}").as_bytes());
-    }
-    for relative in JET_FOUNDATION_TEST_INPUTS {
-        let digest = foundation_input_digest(&tests, relative, "tests")?;
-        identity.field("tests-input", format!("{relative}\0{digest}").as_bytes());
     }
 
     Ok(JetFoundationSources {
+        root,
         foundation,
         unicode,
-        codegen_prelude,
-        archive_source,
-        text_source,
-        tests,
+        inputs,
         digest: identity.finish(),
     })
 }
@@ -2623,7 +2820,7 @@ fn jet_foundation_sources() -> Result<JetFoundationSources, String> {
 #[cfg(target_os = "linux")]
 fn stage_foundation_input(
     source_root: &Path,
-    relative: &str,
+    relative: &Path,
     destination_root: &Path,
     label: &str,
 ) -> Result<(), String> {
@@ -2650,25 +2847,13 @@ fn stage_foundation_input(
     Ok(())
 }
 
-// The generated manifest keeps Cargo's host path dependency, so native Cargo
-// must see that canonical path and Foundation's Unicode path dependency inside
-// its namespace. Linux stages only the external include files; other adapters
-// expose those source directories directly without remapping destinations.
+// Project only the discovered external include inputs at their original root,
+// then mount the two complete path crates. Non-Linux adapters cannot remap paths.
 fn jet_foundation_mounts(
     _cache_root: &Path,
     sources: &JetFoundationSources,
 ) -> Result<Vec<jet_sema::Comptime::Build::ReadOnlyMount>, String> {
-    let mut mounts = Vec::with_capacity(6);
-    mounts.extend([
-        jet_sema::Comptime::Build::ReadOnlyMount::new(
-            sources.foundation.clone(),
-            sources.foundation.clone(),
-        ),
-        jet_sema::Comptime::Build::ReadOnlyMount::new(
-            sources.unicode.clone(),
-            sources.unicode.clone(),
-        ),
-    ]);
+    let mut mounts = Vec::new();
     #[cfg(target_os = "linux")]
     {
         let closure_root = _cache_root.join(".jet-foundation-source-closure");
@@ -2682,66 +2867,49 @@ fn jet_foundation_mounts(
                 ));
             }
         }
-        let codegen_stage = closure_root.join("codegen/src/Prelude");
-        let archive_stage = closure_root.join("archive/src");
-        let text_stage = closure_root.join("Core/text");
-        let tests_stage = closure_root.join("tests");
-        for relative in JET_FOUNDATION_CODEGEN_INPUTS {
-            stage_foundation_input(
-                &sources.codegen_prelude,
-                relative,
-                &codegen_stage,
-                "codegen",
-            )?;
+        fs::create_dir_all(&closure_root).map_err(|error| {
+            format!("create foundation source closure `{}`: {error}", closure_root.display())
+        })?;
+        for path in &sources.inputs {
+            let relative = path.strip_prefix(&sources.root)
+                .expect("include closure paths stay inside the source root");
+            stage_foundation_input(&sources.root, relative, &closure_root, "include")?;
         }
-        for relative in JET_FOUNDATION_ARCHIVE_INPUTS {
-            stage_foundation_input(
-                &sources.archive_source,
-                relative,
-                &archive_stage,
-                "archive",
-            )?;
+        // The parent projection is read-only when the two crate mounts are
+        // installed. Their destinations must already exist, without contents.
+        for crate_path in [&sources.foundation, &sources.unicode] {
+            let relative = crate_path.strip_prefix(&sources.root)
+                .expect("Foundation path crates stay inside the source root");
+            let destination = closure_root.join(relative);
+            fs::create_dir_all(&destination).map_err(|error| {
+                format!("create foundation crate mount point `{}`: {error}", destination.display())
+            })?;
         }
-        for relative in JET_FOUNDATION_TEXT_INPUTS {
-            stage_foundation_input(&sources.text_source, relative, &text_stage, "text")?;
-        }
-        for relative in JET_FOUNDATION_TEST_INPUTS {
-            stage_foundation_input(&sources.tests, relative, &tests_stage, "tests")?;
-        }
-        mounts.extend([
-            jet_sema::Comptime::Build::ReadOnlyMount::new(
-                codegen_stage,
-                sources.codegen_prelude.clone(),
-            ),
-            jet_sema::Comptime::Build::ReadOnlyMount::new(
-                archive_stage,
-                sources.archive_source.clone(),
-            ),
-            jet_sema::Comptime::Build::ReadOnlyMount::new(text_stage, sources.text_source.clone()),
-            jet_sema::Comptime::Build::ReadOnlyMount::new(tests_stage, sources.tests.clone()),
-        ]);
+        mounts.push(jet_sema::Comptime::Build::ReadOnlyMount::new(
+            closure_root,
+            sources.root.clone(),
+        ));
     }
     #[cfg(not(target_os = "linux"))]
     {
-        mounts.extend([
-            jet_sema::Comptime::Build::ReadOnlyMount::new(
-                sources.codegen_prelude.clone(),
-                sources.codegen_prelude.clone(),
-            ),
-            jet_sema::Comptime::Build::ReadOnlyMount::new(
-                sources.archive_source.clone(),
-                sources.archive_source.clone(),
-            ),
-            jet_sema::Comptime::Build::ReadOnlyMount::new(
-                sources.text_source.clone(),
-                sources.text_source.clone(),
-            ),
-            jet_sema::Comptime::Build::ReadOnlyMount::new(
-                sources.tests.clone(),
-                sources.tests.clone(),
-            ),
-        ]);
+        let mut parents = BTreeSet::new();
+        for path in &sources.inputs {
+            let parent = path.parent().expect("included file has a parent");
+            if parents.insert(parent) {
+                mounts.push(jet_sema::Comptime::Build::ReadOnlyMount::new(parent, parent));
+            }
+        }
     }
+    mounts.extend([
+        jet_sema::Comptime::Build::ReadOnlyMount::new(
+            sources.foundation.clone(),
+            sources.foundation.clone(),
+        ),
+        jet_sema::Comptime::Build::ReadOnlyMount::new(
+            sources.unicode.clone(),
+            sources.unicode.clone(),
+        ),
+    ]);
     Ok(mounts)
 }
 
@@ -3337,6 +3505,7 @@ fn build_bridge_full(
 
     let cargo_args = vec![
         "build".to_string(),
+        "--keep-going".to_string(),
         "--release".to_string(),
         "--target".to_string(),
         selected_target.to_string(),
@@ -7131,6 +7300,16 @@ mod tests {
                     .as_nanos()
             ));
         let sources = jet_foundation_sources().expect("verified Foundation source closure");
+        for relative in [
+            "Compiler/JetFoundation/Source/Registry/PreludeEffects.jet",
+            "crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs",
+        ] {
+            assert!(sources.inputs.contains(&sources.root.join(relative)),
+                "canonical Foundation include closure omitted {relative}");
+        }
+        println!("Foundation discovered include inputs: {:?}",
+            sources.inputs.iter().map(|path| path.strip_prefix(&sources.root).unwrap())
+                .collect::<Vec<_>>());
         let mounts = jet_foundation_mounts(&root, &sources)
             .expect("mount the complete Foundation source closure");
         let _ = std::fs::remove_dir_all(&root);
@@ -7141,6 +7320,113 @@ mod tests {
             sources.unicode.join("Cargo.toml").is_file(),
             "Cargo must resolve the actual Unicode crate, not an empty mount"
         );
+    }
+
+    #[test]
+    fn foundation_include_paths_ignore_literals_and_resolve_manifest_concat() {
+        let source = r####"
+// include!("missing-comment.rs");
+/* outer /* include_str!("missing-nested.jet"); */ */
+const TEXT: &str = "include!(\"missing-string.rs\")";
+const RAW: &str = r###"include!("missing-raw.rs");"###;
+fn lifetime<'a>(x: &'a str) -> &'a str { x }
+include!("first.rs");
+include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Compiler/registry.jet"));
+include_bytes!(r#"bytes.bin"#);
+include!(concat!(env!("OUT_DIR"), "/generated.rs"));
+"####;
+        assert_eq!(
+            foundation_rust_include_paths(source, Path::new("/repo/crates/foundation")).unwrap(),
+            ["first.rs", "/repo/crates/foundation/../../Compiler/registry.jet", "bytes.bin"]
+                .map(PathBuf::from),
+        );
+        assert_eq!(
+            foundation_rust_include_paths(
+                r#"include!("escaped\\path.rs"); include!("second.rs");"#,
+                Path::new(""),
+            ).unwrap(),
+            ["escaped\\path.rs", "second.rs"].map(PathBuf::from),
+        );
+        assert!(foundation_rust_include_paths(
+            r#"include!(concat!(env!("UNADMITTED"), "/source.rs"));"#,
+            Path::new("/repo"),
+        ).is_err());
+    }
+
+    #[test]
+    fn foundation_transitive_includes_build_in_the_bridge_sandbox() {
+        let temporary = std::env::temp_dir().join(format!(
+            "jet-foundation-include-bridge-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+        ));
+        fs::create_dir_all(&temporary).unwrap();
+        let root = temporary.canonicalize().unwrap();
+        let foundation = root.join("crates/foundation");
+        let unicode = root.join("crates/unicode");
+        let external = root.join("Compiler/Registry");
+        let bridge = root.join("bridge");
+        let target = root.join("output");
+        for path in [&foundation, &unicode, &bridge] {
+            fs::create_dir_all(path.join("src")).unwrap();
+        }
+        fs::create_dir_all(&external).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        for (path, name) in [(&foundation, "foundation"), (&unicode, "unicode")] {
+            fs::write(path.join("Cargo.toml"), format!(
+                "[package]\nname = \"{name}\"\nversion = \"0.0.1\"\nedition = \"2021\"\n[workspace]\n"
+            )).unwrap();
+        }
+        fs::write(foundation.join("src/lib.rs"),
+            "include!(\"../../../Compiler/Registry/new.rs\");\n").unwrap();
+        fs::write(unicode.join("src/lib.rs"), "").unwrap();
+        fs::write(external.join("new.rs"),
+            "include!(\"nested.rs\");\npub const LAW: &str = include_str!(\"law.jet\");\npub const BYTES: &[u8] = include_bytes!(\"bytes.bin\");\n").unwrap();
+        fs::write(external.join("nested.rs"), "pub fn probe() -> u8 { 7 }\n").unwrap();
+        fs::write(external.join("law.jet"), "ratified").unwrap();
+        fs::write(external.join("bytes.bin"), [0u8, 1, 255]).unwrap();
+        let inputs = foundation_include_closure(&root, &foundation, &unicode).unwrap();
+        assert_eq!(inputs, ["bytes.bin", "law.jet", "nested.rs", "new.rs"]
+            .map(|name| external.join(name)));
+        let sources = JetFoundationSources {
+            root: root.clone(), foundation, unicode, inputs, digest: String::new(),
+        };
+        let mounts = jet_foundation_mounts(&bridge, &sources).unwrap();
+        let mut manifest = emit_cargo_toml("include_closure_bridge", &BTreeMap::new(), false);
+        writeln!(manifest, "[dependencies]\nfoundation = {{ path = {:?} }}", sources.foundation).unwrap();
+        fs::write(bridge.join("Cargo.toml"), manifest).unwrap();
+        fs::write(bridge.join("src/lib.rs"),
+            "pub fn probe() -> u8 { assert_eq!(foundation::LAW, \"ratified\"); assert_eq!(foundation::BYTES, &[0, 1, 255]); foundation::probe() }\n").unwrap();
+        // Like the real bridge materializer, resolve the lock before mounting
+        // Cargo's source directory read-only.
+        let cargo = command_path("cargo").expect("canonical Cargo executable");
+        let locked = Command::new(&cargo)
+            .args(["generate-lockfile", "--offline", "--manifest-path"])
+            .arg(bridge.join("Cargo.toml"))
+            .output().expect("resolve the fixture's actual path dependency lock");
+        assert!(locked.status.success(), "{}", String::from_utf8_lossy(&locked.stderr));
+        let built = jet_sema::Comptime::Build::run_native_sandboxed_with_mounts(
+            &cargo,
+            &["build", "--keep-going", "--offline", "--manifest-path", "/work/source/Cargo.toml"]
+                .map(str::to_string),
+            &bridge,
+            Some(&target),
+            &cargo_bridge_sandbox_env(),
+            false,
+            &mounts,
+        ).expect("build the transitive include bridge in the mandatory sandbox");
+        assert!(built.output.status.success(), "bridge stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&built.output.stdout),
+            String::from_utf8_lossy(&built.output.stderr));
+        assert!(target.join("libinclude_closure_bridge.rlib").is_file()
+            || target.join("debug/libinclude_closure_bridge.rlib").is_file());
+        fs::write(external.join("nested.rs"), "include!(\"new.rs\");\n").unwrap();
+        assert_eq!(foundation_include_closure(&root, &sources.foundation, &sources.unicode).unwrap(),
+            sources.inputs, "include cycles terminate without dropping inputs");
+        fs::write(external.join("nested.rs"), "include!(\"missing.rs\");\n").unwrap();
+        assert!(foundation_include_closure(&root, &sources.foundation, &sources.unicode)
+            .unwrap_err().contains("unavailable"));
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn cargo_metadata_detects_transitive_compile_time_targets() {
