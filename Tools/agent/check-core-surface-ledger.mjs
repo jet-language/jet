@@ -3192,6 +3192,17 @@ function rustDataEventVariantFamily(source, constants) {
   return {name: "DataEvent", rows: variants.map((variant) => ({variant, payload: payloads.get(variant)}))};
 }
 
+// D-REDUCE-VALUE1=A: `core_reduce_op_variants` guards one enum name and maps
+// one literal name list to unit variants.
+function rustGuardedUnitVariantFamily(source, constants, name) {
+  const body = rustFunctionBody(source, name, CORE_TYPES_RS_PATH);
+  const guard = /if enum_name != ((?:crate::)?Syntax::\w+|"\w+") \{\s*return None;\s*\}/.exec(body);
+  if (!guard) throw new Error(CORE_TYPES_RS_PATH + ": " + name + " changed shape; update the payload-row projection");
+  const rows = rustNullaryVariantRows(body, constants, CORE_TYPES_RS_PATH, name);
+  if (!rows.length || rows.some((row) => row.payload.length)) throw new Error(CORE_TYPES_RS_PATH + ": " + name + " is not one unit name list");
+  return { name: rustSyntaxString(guard[1], constants, CORE_TYPES_RS_PATH), rows };
+}
+
 function coreEnumPayloadFamilies(declarations) {
   const constants = rustSyntaxConstants();
   const coreTypes = read(CORE_TYPES_RS_PATH);
@@ -3210,6 +3221,8 @@ function coreEnumPayloadFamilies(declarations) {
   if (!/core_plugin_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": plugin enum resolver is missing");
   families.push(...rustPluginVariantFamilies(coreTypes, constants));
   families.push(rustDataEventVariantFamily(coreTypes, constants));
+  if (!/core_reduce_op_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": resolve_enum_variants_cloned no longer consults core_reduce_op_variants");
+  families.push(rustGuardedUnitVariantFamily(coreTypes, constants, "core_reduce_op_variants"));
   const declared = new Set();
   for (const module of declarations.modules) {
     for (const type of module.types) {
