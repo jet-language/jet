@@ -3,11 +3,7 @@
 #Layout(c)
 struct JetCompilerMetadataPointer { pointer: *Int }
 
-// A function, not a constant: sema folds the `$layout` fact read in a body to a
-// literal, so the bound needs no compile-time execution host.
-fn jet_compiler_target_usize_max() -> U64 Never! {
-    pointer_size :: JetCompilerMetadataPointer.$layout.size ?? panic("compiler target has no concrete pointer layout")
-    if pointer_size <= 0 || pointer_size > 8 -> panic("compiler target pointer width does not fit the U64 metadata carrier")
-    if pointer_size == 8 -> return U64{0xffffffffffffffff}
-    (U64{1} << (8 * pointer_size)) - U64{1}
+TARGET_POINTER_SIZE :: prep { JetCompilerMetadataPointer.$layout.size ?? panic("compiler target has no concrete pointer layout") }
+JET_COMPILER_TARGET_USIZE_MAX :: prep {
+    (if TARGET_POINTER_SIZE <= 0 || TARGET_POINTER_SIZE > 8 -> panic("compiler target pointer width does not fit the U64 metadata carrier") else if TARGET_POINTER_SIZE == 8 -> U64{0xffffffffffffffff} else -> (U64{1} << (8 * TARGET_POINTER_SIZE)) - U64{1})
 }

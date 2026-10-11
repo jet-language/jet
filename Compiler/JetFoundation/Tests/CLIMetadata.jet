@@ -117,7 +117,7 @@ fn cli_metadata_wasm(record: [U8], count: Int) -> [U8] Never! {
     out
 }
 fn cli_metadata_accept(bytes: [U8], expected: CLICommandSchema) Never! {
-    actual :: read_executable(bytes.view(0..<bytes.len()), jet_compiler_target_usize_max()) ?? panic("read fixture")
+    actual :: read_executable(bytes.view(0..<bytes.len()), JET_COMPILER_TARGET_USIZE_MAX) ?? panic("read fixture")
     cli_metadata_require(actual == expected, "cross-format record round trip")
 }
 fn cli_metadata_refuse(bytes: [U8], expected: MetadataError, maximum: U64) Never! {
@@ -151,7 +151,7 @@ fn run() {
     cli_metadata_accept(cli_metadata_pe(record, 1, [U8]{}), schema)
     cli_metadata_accept(cli_metadata_pe(record, 1, [U8]{0, 0}), schema)
     cli_metadata_accept(cli_metadata_wasm(record, 1), schema)
-    max :: jet_compiler_target_usize_max()
+    max :: JET_COMPILER_TARGET_USIZE_MAX
     cli_metadata_refuse("not executable".bytes(), MetadataError.UnknownFormat, max)
     cli_metadata_refuse([U8]{0, 97, 115, 109, 1, 0, 0, 0}, MetadataError.Missing, max)
     cli_metadata_refuse(cli_metadata_pe(record, 2, [U8]{}), MetadataError.Duplicate, max)

@@ -53,7 +53,7 @@ fn run() {
     jet_cli_record_index_publish_and_store(&index, root, acceleration_receipt_entry(newer, identity, U64{2})) ?? panic("index newer")
     loaded :: jet_cli_record_index_load(root) ?? panic("held index load")
     receipts :: jet_cli_receipt_list_current(root) ?? panic("authenticated current receipt load")
-    selected :: jet_cli_acceleration_select_receipt(&cache, file, [String]{identity}, jet_cli_record_index_query_kind(loaded, "receipt", true), receipts, jet_compiler_target_usize_max())
+    selected :: jet_cli_acceleration_select_receipt(&cache, file, [String]{identity}, jet_cli_record_index_query_kind(loaded, "receipt", true), receipts, JET_COMPILER_TARGET_USIZE_MAX)
     acceleration_receipt_require(selected.len() == 1 && selected[0].record_sequence == U64{2} && selected[0].decision.status == .ProofIncomplete, "newest actual record selected")
     prepared :: jet_cli_prepare_overlays(file, file, [], false, Val(1), JetDriverCompileMode.Doc)
     request :: if prepared == {
@@ -64,12 +64,12 @@ fn run() {
     acceleration_receipt_require(query.compile.complete, "actual compiler query before store collection")
     hosted :: jet_cli_acceleration_runtime_rows(query.profile, file, "target", Val(root)) ?? panic("directory target runtime rows")
     acceleration_receipt_require(hosted.len() == 1 && hosted[0].record_sequence == U64{2}, "directory closure -> authenticated actual host provider")
-    sorted :: jet_cli_acceleration_receipt_rows(older, U64{1}, jet_compiler_target_usize_max()) ?? panic("decode numeric sequence")
+    sorted :: jet_cli_acceleration_receipt_rows(older, U64{1}, JET_COMPILER_TARGET_USIZE_MAX) ?? panic("decode numeric sequence")
     acceleration_receipt_require(sorted.len() == 2 && sorted[0].sequence == U64{2} && sorted[1].sequence == U64{10}, "numeric rather than lexical section order")
     acceleration_receipt_require(sorted[0].decision.measurement.sample_nanos == U64.MAX && sorted[0].decision.measurement.required_serial_nanos == None, "full u64 and optional null measurements")
     duplicate := older
     duplicate.sections = [JetCLIReceiptSection]{acceleration_receipt_section("1", payload), acceleration_receipt_section("01", payload)}
-    duplicate_rows :: jet_cli_acceleration_receipt_rows(duplicate, U64{1}, jet_compiler_target_usize_max())
+    duplicate_rows :: jet_cli_acceleration_receipt_rows(duplicate, U64{1}, JET_COMPILER_TARGET_USIZE_MAX)
     acceleration_receipt_require(if duplicate_rows == {.Err(error) -> error.message == "duplicate acceleration receipt sequence" else -> false}, "duplicate numeric sequence rejected with typed error")
     wide_payload :: payload.replace("\"start\":2", "\"start\":18446744073709551614").replace("\"end\":9", "\"end\":18446744073709551615")
     wide := older
