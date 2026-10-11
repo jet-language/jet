@@ -627,9 +627,11 @@ fn main() {
 fn __jet_bootstrap_harness_main() {
     // The shared E3012 budget (`JET_RUNTIME_STACK_LIMIT` frames) is sized for
     // an 8 MiB program stack; the compiler's own recursion over a whole unit
-    // is deeper. This thread's real stack is `BOOTSTRAP_STACK_BYTES`, so its
-    // budget scales with it (64Ki frames) at the same per-frame assumption.
-    jet_runtime_stack_budget_for_stack(BOOTSTRAP_STACK_BYTES);
+    // is deeper. This process is a host that knows its stacks: this thread's
+    // is `BOOTSTRAP_STACK_BYTES` (64Ki frames), and every thread the compiler
+    // spawns (scheduler workers, task groups, para chunks) derives its budget
+    // from its own stack at the same per-frame assumption.
+    jet_runtime_stack_scale_to_host(BOOTSTRAP_STACK_BYTES);
     let mode = std::env::var("JET_BOOTSTRAP_MODE")
         .unwrap_or_else(|error| panic!("bootstrap mode is unavailable: {error}"));
     let factory_tier_name = std::env::var("JET_BOOTSTRAP_FACTORY_TIER")

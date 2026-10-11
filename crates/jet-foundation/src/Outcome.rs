@@ -2971,8 +2971,8 @@ pub fn jet_loop_stride_message() -> &'static str {
 // The evaluator keeps a larger Rust frame than generated Jet code. Keep the
 // shared limit below the smallest native worker stack so it can report the
 // stop before the host stack aborts. This is every program's budget; only a
-// host that spawned a thread with a known larger stack widens that thread's
-// AOT budget (`jet_runtime_stack_budget_for_stack`, Prelude/Core/RuntimeStack.rs).
+// host that knows its threads' real stacks scales each thread's AOT budget to
+// its stack (`jet_runtime_stack_scale_to_host`, Prelude/Core/RuntimeStack.rs).
 pub const JET_RUNTIME_STACK_LIMIT: usize = 1024;
 
 

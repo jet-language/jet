@@ -49,6 +49,7 @@ fn spawn_scheduler_worker(name: String, work: impl FnOnce() + Send + 'static) {
         .name(name.clone())
         .stack_size(jet_foundation::CompilerStack::COMPILER_STACK_SIZE)
         .spawn(move || {
+            jet_runtime_stack_thread_stack(jet_foundation::CompilerStack::COMPILER_STACK_SIZE);
             #[cfg(jet_native_pack)]
             let _jet_thread = crate::JetNativeThreadAttachment::enter();
             work()

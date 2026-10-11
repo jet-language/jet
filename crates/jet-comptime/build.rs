@@ -103,6 +103,7 @@ fn write_native_scheduler(manifest: &Path) {
         (manifest.join("../jet-codegen/src/Prelude/Core/TimeInstant.rs"), false),
         (manifest.join("../jet-codegen/src/Prelude/Core/Realtime.rs"), false),
         (manifest.join("../jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs"), false),
+        (manifest.join("../jet-codegen/src/Prelude/Core/RuntimeStack.rs"), false),
         (manifest.join("../jet-codegen/src/Prelude/Scheduler.rs"), true),
         (manifest.join("../jet-codegen/src/Prelude/CoreLib/Top/WorkflowSleep.rs"), false),
         (manifest.join("../jet-codegen/src/Prelude/Stream.rs"), false),

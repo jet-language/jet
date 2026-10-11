@@ -197,6 +197,8 @@ pub mod scheduler {
         jet_render_runtime_stop, jet_stream_record_failure_report,
         jet_stream_take_failure_report, JetStreamFailure, JetOutcome, JetRuntimeDiagnostic, JetTaskFailure,
     };
+    // Scheduler workers report their explicit stack to the one depth kernel.
+    use crate::runtime_stack::jet_runtime_stack_thread_stack;
     include!("Prelude/Deadline.rs");
     include!("Prelude/WorkflowWait.rs");
     include!("Prelude/Core/NativeTaskBody.rs");

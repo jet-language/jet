@@ -53,6 +53,9 @@ mod web_kernel {
             jet_render_runtime_stop, jet_stream_take_failure_report, JetRuntimeDiagnostic,
             JetTaskFailure, JetStreamFailure,
         };
+        // `Prelude/Core/RuntimeStack.rs` rides in with the scheduler, whose
+        // workers report their stack to it.
+        use jet_foundation::Outcome::JET_RUNTIME_STACK_LIMIT;
 
         pub(crate) fn jet_runtime_stop_with_context(
             code: &'static str,
