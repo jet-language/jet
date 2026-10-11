@@ -1229,24 +1229,42 @@ fn sema_function_view_maps_equal(left: ViewProvenanceMap?, right: ViewProvenance
     true
 }
 
-fn sema_function_publish_return_views(scopes: &SemaScopeTable, function: TFunc) -> Bool Never! {
+// The first frame-0 binding row per symbol key, built by the first publish
+// of a body loop so each later publish does not scan every module binding.
+// Rows are only appended after the module rows, or edited in place without
+// changing their key, so a recorded row that still holds its key is still
+// the first one; any other key falls back to the scan the rows replace.
+fn sema_function_return_view_rows(scopes: SemaScopeTable, rows: &[String:Int]) Never! {
+    loop index in 0..<scopes.bindings.len() {
+        if scopes.bindings[index].frame == 0 && rows.get(scopes.bindings[index].symbol.id.key) == None -> rows[scopes.bindings[index].symbol.id.key] = index
+    }
+}
+
+// The first frame-0 binding of `key`.
+fn sema_function_return_view_row(scopes: SemaScopeTable, rows: &[String:Int], key: String) -> Int? Never! {
+    if rows.len() == 0 -> sema_function_return_view_rows(scopes, &rows)
+    if rows.get(key) == .Val(recorded) {
+        if recorded < scopes.bindings.len() && scopes.bindings[recorded].frame == 0 && scopes.bindings[recorded].symbol.id.key == key -> return Val(recorded)
+    }
+    loop index in 0..<scopes.bindings.len() {
+        if scopes.bindings[index].frame == 0 && scopes.bindings[index].symbol.id.key == key -> return Val(index)
+    }
+    None
+}
+
+// `rows`: the body loop's sema_function_return_view_rows, empty until the
+// first publish fills it.
+fn sema_function_publish_return_views(scopes: &SemaScopeTable, rows: &[String:Int], function: TFunc) -> Bool Never! {
     provenance :: function.return_view_provenance ?? return false
-    index := 0
-    loop index < scopes.bindings.len() {
-        binding :: scopes.bindings[index]
-        if binding.frame == 0 && binding.symbol.id.key == function.key {
-            if binding.symbol.ty == .Val(type_value) {
-                if type_value == .Fn(params, ret, effect_bound, param_contract, metadata, existing) {
-                    next_map := Val(provenance)
-                    if sema_function_view_maps_equal(existing, next_map) -> return false
-                    scopes.bindings[index].symbol.ty = Val(Type.Fn{params: params, ret: ret, effect_bound: effect_bound, param_contract: param_contract, call_metadata: metadata, return_view_provenance: next_map})
-                    return true
-                }
-                return false
-            }
-            return false
+    index :: sema_function_return_view_row(scopes, &rows, function.key) ?? return false
+    binding :: scopes.bindings[index]
+    if binding.symbol.ty == .Val(type_value) {
+        if type_value == .Fn(params, ret, effect_bound, param_contract, metadata, existing) {
+            next_map := Val(provenance)
+            if sema_function_view_maps_equal(existing, next_map) -> return false
+            scopes.bindings[index].symbol.ty = Val(Type.Fn{params: params, ret: ret, effect_bound: effect_bound, param_contract: param_contract, call_metadata: metadata, return_view_provenance: next_map})
+            return true
         }
-        index += 1
     }
     false
 }
@@ -2994,7 +3012,7 @@ fn sema_check_registered_top_level_name(module_index: Int, item_index: Int, envi
 
 // The caller selects ordinary Jet functions in source order. All graph and
 // plan metadata reads finish before a writable checker or trap is entered.
-fn sema_check_registration_top_level(module_index: Int, item_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: &SemaModuleMemo?, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], result: &SemaGraphModuleResult, scopes_changed: &Bool, keep_going: Bool, pending_obligations: Bool, trace_functions: Bool, trace_sink: CompilerTraceSink?, item_count: Int, count_work: Bool, functions_checked: &Int) {
+fn sema_check_registration_top_level(module_index: Int, item_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, return_view_rows: &[String:Int], ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: &SemaModuleMemo?, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], result: &SemaGraphModuleResult, scopes_changed: &Bool, keep_going: Bool, pending_obligations: Bool, trace_functions: Bool, trace_sink: CompilerTraceSink?, item_count: Int, count_work: Bool, functions_checked: &Int) {
     job :: SemaBodyJob.TopLevel{item_index: item_index}
     function_name :: sema_check_registered_top_level_name(module_index, item_index, environment, program)
     owner_id :: sema_check_registered_function_id(job, module_index, environment, program)
@@ -3002,7 +3020,7 @@ fn sema_check_registration_top_level(module_index: Int, item_index: Int, memory_
     if cached == {
         .Val(checked_function) -> {
             if checked_function.function == .Val(function) {
-                if sema_function_publish_return_views(&scopes, function) {
+                if sema_function_publish_return_views(&scopes, &return_view_rows, function) {
                     scopes_changed = true
                     sema_incremental_publication(&memo)
                 }
@@ -3049,7 +3067,7 @@ fn sema_check_registration_top_level(module_index: Int, item_index: Int, memory_
             &result.compute_facts.push(checked.compute_facts)
             if checked.failure == .Val(facts) -> &result.failure_facts.push(facts)
             if checked.value == .Val(function) {
-                if sema_function_publish_return_views(&scopes, function) {
+                if sema_function_publish_return_views(&scopes, &return_view_rows, function) {
                     scopes_changed = true
                     sema_incremental_publication(&memo)
                 }
@@ -3305,6 +3323,7 @@ fn sema_check_view_summaries(environment: &SemaScopeEnvironment, program: SemaPr
     summary_jobs := sema_check_view_summary_jobs(environment, program, module_index)
     sema_check_sort_view_summary_jobs(&summary_jobs, environment, program, module_index)
     summary_functions_checked := 0
+    return_view_rows := [String:Int]{}
     previous_round := [ViewProvenanceMap?]{}
     summary_round := 0
     loop summary_jobs.len() > 0 && summary_round <= summary_jobs.len() {
@@ -3317,7 +3336,7 @@ fn sema_check_view_summaries(environment: &SemaScopeEnvironment, program: SemaPr
             if cached == {
                 .Val(checked_function) -> {
                     if checked_function.function == .Val(function) {
-                        _ := sema_function_publish_return_views(&scopes, function)
+                        _ := sema_function_publish_return_views(&scopes, &return_view_rows, function)
                         provenance = function.return_view_provenance
                     }
                 }
@@ -3330,7 +3349,7 @@ fn sema_check_view_summaries(environment: &SemaScopeEnvironment, program: SemaPr
                     if trace_sink == .Val(_) -> summary_functions_checked += 1
                     checked := sema_function_check_registered(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks, &summary_diagnostics, &summary_calls, &summary_comptime_requests, &summary_name_references)
                     if checked.value == .Val(function) {
-                        _ := sema_function_publish_return_views(&scopes, function)
+                        _ := sema_function_publish_return_views(&scopes, &return_view_rows, function)
                         provenance = function.return_view_provenance
                     }
                 }
@@ -3478,7 +3497,23 @@ fn sema_check_module_function(ready: &[SemaPreparedBody], queries: &[Int:SemaBod
 // source, so a small program checks its bodies on the calling thread.
 SEMA_BODY_MIN_BYTES_PER_THREAD :: 32768
 // Estimated bytes of one thread's copy of the module scope, per module item.
+// The comptime probe's scope admission still uses this per-item estimate.
 SEMA_BODY_SCOPE_BYTES_PER_ITEM :: 4096
+// Estimated bytes of one body thread's copy of the module scope, per scope
+// binding row. A row holds a whole Symbol (its checked type included), and
+// the namespace rows make a module scope span its whole package, so this is
+// calibrated from the factory profile: one copy of the whole-compiler scope
+// (about 25k module rows) measured about 0.8 GB.
+SEMA_BODY_SCOPE_BYTES_PER_BINDING :: 32768
+
+// The module-level binding rows sema_registration_apply_graph_module gives
+// module `module_index`'s scope: its declarations, import bindings and
+// package namespace rows (the compiler builtins are a fixed few more).
+fn sema_check_module_scope_rows(graph: SemaRegistrationGraph, module_index: Int) -> Int Never! {
+    rows := graph.modules[module_index].symbols.len() + graph.modules[module_index].namespace_bindings.len()
+    loop import in graph.modules[module_index].imports -> rows += import.bindings.len()
+    rows
+}
 
 // What every body-check thread reads: the pass environment and memory plan,
 // each moved in as the one row of its list for the pass and moved out
@@ -3909,6 +3944,7 @@ fn sema_check_registration_module(owned_environment: ^SemaScopeEnvironment, owne
         }
         if memo == None -> memo = sema_incremental_module(session, environment, program, &scopes)
         scopes_changed := false
+        return_view_rows := [String:Int]{}
         trace_functions := false
         if trace_sink == .Val(sink) -> trace_functions = sink.functions()
         item_index := 0
@@ -3916,7 +3952,7 @@ fn sema_check_registration_module(owned_environment: ^SemaScopeEnvironment, owne
             if count_work -> items_scanned += 1
             if trace_sink == .Val(sink) -> sink.progress("sema.bodies", item_index, item_count)
             if sema_check_registered_item_is_jet_function(environment, program, module_index, item_index) {
-                sema_check_registration_top_level(module_index, item_index, memory_plan, &environment, program, &scopes, &ready.bodies, &queries, &memo, host_hooks, comptime_functions, comptime_rows, &module_result, &scopes_changed, keep_going, pending_obligations, trace_functions, trace_sink, item_count, count_work, &functions_checked)
+                sema_check_registration_top_level(module_index, item_index, memory_plan, &environment, program, &scopes, &return_view_rows, &ready.bodies, &queries, &memo, host_hooks, comptime_functions, comptime_rows, &module_result, &scopes_changed, keep_going, pending_obligations, trace_functions, trace_sink, item_count, count_work, &functions_checked)
             } else {
                 sema_check_registration_module_test(environment, program, module_index, item_index, scopes, host_hooks, &module_result)
             }
@@ -3930,7 +3966,7 @@ fn sema_check_registration_module(owned_environment: ^SemaScopeEnvironment, owne
             work := 0
             loop weight in weights -> work += weight
             workers := 1
-            if !trace_functions -> workers = compiler_threads_admit(schedule.threads, jobs.len(), work, SEMA_BODY_MIN_BYTES_PER_THREAD, item_count * SEMA_BODY_SCOPE_BYTES_PER_ITEM, 0)
+            if !trace_functions -> workers = compiler_threads_admit(schedule.threads, jobs.len(), work, SEMA_BODY_MIN_BYTES_PER_THREAD, scopes.bindings.len() * SEMA_BODY_SCOPE_BYTES_PER_BINDING, 0)
             if workers > 1 {
                 // All metadata read windows have ended before either owner
                 // moves into its existing shared slot. Recover after every join.
@@ -5898,11 +5934,11 @@ fn sema_finalize_check_modules(graph: ^SemaRegistrationGraph, values: [SemaCompt
     loop module_index in selected {
         weights := [Int]{}
         jobs :: sema_check_parallel_jobs_in_shared(shared_state, module_index, comptime_rows, &weights, phase, trace_sink)
-        item_count :: sema_check_module_item_count_in_shared(shared_state, module_index)
+        scope_rows :: sema_check_module_scope_rows_in_shared(shared_state, module_index)
         body_work := 0
         loop weight in weights -> body_work += weight
         workers := 1
-        if !trace_functions -> workers = compiler_threads_admit(threads, jobs.len(), body_work, SEMA_BODY_MIN_BYTES_PER_THREAD, item_count * SEMA_BODY_SCOPE_BYTES_PER_ITEM, 0)
+        if !trace_functions -> workers = compiler_threads_admit(threads, jobs.len(), body_work, SEMA_BODY_MIN_BYTES_PER_THREAD, scope_rows * SEMA_BODY_SCOPE_BYTES_PER_BINDING, 0)
         prepared := sema_check_prepare_module(shared_state, host_hooks, module_index, values, comptime_functions, comptime_rows, jobs, weights, workers, session, phase, trace_sink)
         checked := sema_check_module_in_shared(shared_state, host_hooks, module_index, values, comptime_functions, comptime_rows, pending_obligations, ^prepared, threads, session, phase, trace_sink)
         if trace_sink == .Val(sink) -> sink.end("sema.module", checked.functions.len())
@@ -5935,9 +5971,14 @@ fn sema_check_parallel_jobs_from_environment(environment: SemaScopeEnvironment, 
     panic("a registered-module scheduler lost its graph")
 }
 
-fn sema_check_module_item_count_in_shared(shared_state: Shared<SemaCheckShared>, module_index: Int) -> Int {
+fn sema_check_module_scope_rows_in_shared(shared_state: Shared<SemaCheckShared>, module_index: Int) -> Int {
     inputs :: shared_state.guard_read()
-    sema_check_registered_module_item_count(inputs.value.environments[0], inputs.value.programs[0], module_index)
+    sema_check_registered_module_scope_rows(inputs.value.environments[0], inputs.value.programs[0], module_index)
+}
+
+fn sema_check_registered_module_scope_rows(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int) -> Int {
+    if program.registration_graph == .Val(graph) -> return sema_check_module_scope_rows(graph, module_index)
+    panic("a registered-module scheduler lost its graph")
 }
 
 fn sema_check_prepare_module(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], jobs: [SemaBodyJob], weights: [Int], workers: Int, session: SemaIncrementalCache?, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaPreparedBodies {
