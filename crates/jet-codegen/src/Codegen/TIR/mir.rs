@@ -6352,12 +6352,19 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(super) fn type_id_for(&self, key: &str) -> Result<MirTypeId, LowerError> {
-        // A bare name declared by the function's own module shadows a
-        // compiler-owned row of the same leaf (a user `Effect` over the Core
-        // export row keyed `Effect`), as `mir_type` resolves the value type.
+        // A bare name resolves in the function's scope first, exactly as
+        // `mir_type` resolves the value type: the module's own declaration
+        // or an import's checked identity shadows a compiler-owned row of the
+        // same leaf (a user `Effect` over the Core export row keyed `Effect`;
+        // Core json's imported source `DataEvent` over the native carrier row).
         let scoped = (!self.function.module.is_empty() && !key.contains("::"))
             .then(|| format!("{}::{key}", self.function.module))
-            .filter(|scoped| self.type_index.declares(scoped, key));
+            .and_then(|scoped| {
+                self.nominal_identities
+                    .get(&scoped)
+                    .cloned()
+                    .or_else(|| self.type_index.declares(&scoped, key).then_some(scoped))
+            });
         let canonical_key = canonical_nominal_name(
             self.type_index,
             scoped.as_deref().unwrap_or(key),

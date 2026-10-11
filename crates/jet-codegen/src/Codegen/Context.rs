@@ -1513,8 +1513,13 @@ pub(crate) struct FileHandleCarrier {
 
 /// E2-M7: file handle types are top-level in the prelude (not in `jet_std`).
 /// The `core.files` and `core.term` source declarations of these handles are
-/// the checked names of the same native carriers.
+/// the checked names of the same native carriers, except a source-owned Core
+/// type (`Stdout`, `Stderr`, `StdinHandle`), which is its Jet declaration on
+/// every tier.
 pub(crate) fn file_handle_carrier(name: &str) -> Option<FileHandleCarrier> {
+    if jet_foundation::CoreModuleExports::core_source_owns_type(name) {
+        return None;
+    }
     let name = if name.starts_with("<corelib>/Core/files::Core/files/files.jet::")
         || name.starts_with("<corelib>/Core/term::Core/term/term.jet::")
     {

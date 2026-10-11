@@ -242,6 +242,13 @@ pub fn core_call_semantic_signature(
         .map(|(params, ret)| (params, ret.unwrap_or_else(unit_ty)))
 }
 
+/// The result shape a Core call's native kernel returns: the registered
+/// signature before tuple canonicalization, so a labeled tuple keeps the
+/// kernel's declared slot order (the checked type sorts it by label).
+pub fn core_call_native_return(module: &str, name: &str) -> Option<Type> {
+    core_fixed_sig_raw(module, name)?.1
+}
+
 /// Complete the signature projection for polymorphic Core spellings whose
 /// ordinary Canvas/default-call shape is still known to sema. The row and
 /// fixed-signature paths remain first; this is only the resolved surface

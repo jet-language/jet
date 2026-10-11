@@ -934,17 +934,21 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     }
                     args.first_mut()
                         .map(|arg| {
-                            let empty_collection = matches!(
+                            // A payload lowered without its context: an
+                            // empty collection or a bare `None` (whose
+                            // placeholder element is `Int`).
+                            let contextless = matches!(
                                 &arg.value.kind,
                                 TExprKind::MapLit(entries) if entries.is_empty()
                             ) || matches!(
                                 &arg.value.kind,
                                 TExprKind::ListLit(items) if items.is_empty()
-                            );
-                            if empty_collection {
+                            ) || (matches!(&arg.value.kind, TExprKind::Absent)
+                                && matches!(&shared_payload, Type::Option(_)));
+                            if contextless {
                                 arg.value.ty = shared_payload.clone();
                             }
-                            empty_collection
+                            contextless
                         })
                         .unwrap_or(false)
                 }

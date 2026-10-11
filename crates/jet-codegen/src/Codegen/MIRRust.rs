@@ -27370,7 +27370,8 @@ impl<'a> RustEmitter<'a> {
                                     self.canonical_equality_field(definition, edge, left, field);
                                 let right_field =
                                     self.canonical_equality_field(definition, edge, right, field);
-                                self.canonical_equality_expression(
+                                self.carrier_slot_equality(
+                                    definition,
                                     &field.ty,
                                     &left_field,
                                     &right_field,
@@ -27418,7 +27419,8 @@ impl<'a> RustEmitter<'a> {
                                         } else {
                                             "__jet_right"
                                         };
-                                        let equal = self.canonical_equality_expression(
+                                        let equal = self.carrier_slot_equality(
+                                            definition,
                                             payload,
                                             left_value,
                                             right_value,
@@ -27479,7 +27481,8 @@ impl<'a> RustEmitter<'a> {
                                                 } else {
                                                     format!("__jet_right_{index}")
                                                 };
-                                                self.canonical_equality_expression(
+                                                self.carrier_slot_equality(
+                                                    definition,
                                                     &field.ty,
                                                     &left_value,
                                                     &right_value,
@@ -27536,6 +27539,68 @@ impl<'a> RustEmitter<'a> {
                     MirTypeDefKind::Alias { target } => {
                         self.canonical_equality_expression(target, left, right, seen)
                     }
+        }
+    }
+
+    /// Equality of one field or payload slot of `definition`. A native
+    /// carrier declares its own Rust slot types, so a slot whose MIR type
+    /// reaches a source-owned nominal holds the runtime's own type instead
+    /// (`Dyn.DateTime` is `DynDateTime`, not Core's `ZonedDateTime` record):
+    /// that slot compares with the carrier type's `PartialEq`.
+    fn carrier_slot_equality(
+        &self,
+        definition: &MirTypeDef,
+        ty: &MirType,
+        left: &str,
+        right: &str,
+        seen: &mut BTreeSet<MirTypeId>,
+    ) -> String {
+        if has_native_type_projection(&definition.key) && self.reaches_source_nominal(ty) {
+            format!("(({left}) == ({right}))")
+        } else {
+            self.canonical_equality_expression(ty, left, right, seen)
+        }
+    }
+
+    /// True when `ty` is or contains a structural nominal that the program
+    /// declares itself (no native carrier projection).
+    fn reaches_source_nominal(&self, ty: &MirType) -> bool {
+        let ty = if ty.identity.is_some() {
+            self.canonical_type(ty)
+        } else {
+            ty
+        };
+        match ty.kind() {
+            MirTypeKind::List(inner)
+            | MirTypeKind::Option(inner)
+            | MirTypeKind::FixedList { elem: inner, .. }
+            | MirTypeKind::InlineRange { base: inner, .. }
+            | MirTypeKind::Tagged { inner, .. }
+            | MirTypeKind::Quantity { base: inner, .. } => self.reaches_source_nominal(inner),
+            MirTypeKind::Map { key, value } => {
+                self.reaches_source_nominal(key) || self.reaches_source_nominal(value)
+            }
+            MirTypeKind::Result { ok, err } => {
+                self.reaches_source_nominal(ok) || self.reaches_source_nominal(err)
+            }
+            MirTypeKind::Tuple(fields) => {
+                fields.iter().any(|(_, field)| self.reaches_source_nominal(field))
+            }
+            MirTypeKind::Apply { .. } | MirTypeKind::Union(_) => self
+                .structural_type_def_for(ty)
+                .is_some_and(|definition| !has_native_type_projection(&definition.key)),
+            MirTypeKind::Int
+            | MirTypeKind::Float
+            | MirTypeKind::Bool
+            | MirTypeKind::String
+            | MirTypeKind::Char
+            | MirTypeKind::Shared(_)
+            | MirTypeKind::Fn(_)
+            | MirTypeKind::SendFn { .. }
+            | MirTypeKind::TraitObject(_)
+            | MirTypeKind::IntN { .. }
+            | MirTypeKind::Float32
+            | MirTypeKind::Measure(_) => false,
         }
     }
 
@@ -28292,13 +28357,14 @@ impl<'a> RustEmitter<'a> {
                 ) {
                     let left_ty = self.value_type(function, left);
                     let right_ty = self.value_type(function, right);
-                    let left_view = is_string_view_type(left_ty);
-                    let right_view = is_string_view_type(right_ty);
-                    if (left_view && matches!(right_ty.kind(), MirTypeKind::String))
-                        || (right_view && matches!(left_ty.kind(), MirTypeKind::String))
-                    {
-                        // A text view against a String: Rust orders `str`
-                        // with `str` only, so both sides read as `&str`.
+                    let text_like = |ty: &MirType| {
+                        is_string_view_type(ty) || matches!(ty.kind(), MirTypeKind::String)
+                    };
+                    if text_like(left_ty) && text_like(right_ty) {
+                        // Text ordering: a borrowed String (parameter or
+                        // view) is a Rust `str` while an owned one is a
+                        // `String`, and Rust orders `str` with `str` only,
+                        // so both sides read as `&str`.
                         let text = |value| {
                             format!(
                                 "::std::convert::AsRef::<str>::as_ref(&({}))",
@@ -28306,6 +28372,33 @@ impl<'a> RustEmitter<'a> {
                             )
                         };
                         return self.binary(op, text(left), text(right));
+                    }
+                    let ordered_ty = if left_ty.identity.is_some() {
+                        self.canonical_type(left_ty)
+                    } else {
+                        left_ty
+                    };
+                    if matches!(ordered_ty.kind(), MirTypeKind::Apply { .. } | MirTypeKind::Union(_))
+                        && self.selected_user_capability_impl(ordered_ty, crate::Generics::COMPARABLE)
+                    {
+                        // A user `Comparable` impl orders by its own body; the
+                        // type derives no Rust `PartialOrd` (`type_derive_capability`).
+                        let root = &self.config.root_prefix;
+                        let compare = format!(
+                            "<{} as {}>::compare({}, {})",
+                            self.rust_type(ordered_ty),
+                            crate::Codegen::rust_trait_name(crate::Generics::COMPARABLE),
+                            self.inspected_value_reference(function, left),
+                            self.inspected_value_reference(function, right),
+                        );
+                        let ordering = |variant: &str| format!("{root}__jet_Ordering::__jet_{variant}");
+                        return match op {
+                            MirBinaryOp::Compare => compare,
+                            MirBinaryOp::Lt => format!("matches!({compare}, {})", ordering("Less")),
+                            MirBinaryOp::Gt => format!("matches!({compare}, {})", ordering("Greater")),
+                            MirBinaryOp::Le => format!("!matches!({compare}, {})", ordering("Greater")),
+                            _ => format!("!matches!({compare}, {})", ordering("Less")),
+                        };
                     }
                 }
                 if self.comparison_by_reference(function, op, left) {
@@ -31306,6 +31399,13 @@ impl<'a> RustEmitter<'a> {
     /// applying a row's recorded machine-word Int widening. The optional
     /// bridge also accepts already-owned carriers without copying.
     fn core_native_result(&self, row: &MirCoreCall, emitted: String, ty: Option<&MirType>) -> String {
+        if let Some(tuple) = ty.and_then(|ty| self.core_native_tuple_result(row, &emitted, ty)) {
+            return tuple;
+        }
+        self.core_native_value(row, emitted, ty)
+    }
+
+    fn core_native_value(&self, row: &MirCoreCall, emitted: String, ty: Option<&MirType>) -> String {
         let emitted = ty.and_then(|ty| self.native_optional_result(&emitted, ty))
             .unwrap_or(emitted);
         if !row.native_int_result {
@@ -31313,6 +31413,55 @@ impl<'a> RustEmitter<'a> {
         }
         ty.and_then(|ty| self.native_int_widening(&emitted, ty, NativeIntSource::MachineWord))
             .unwrap_or(emitted)
+    }
+
+    /// A native kernel returns a labeled tuple in its declared field order,
+    /// while the checked MIR tuple keeps its canonical (label-sorted) order:
+    /// each MIR slot reads the kernel slot of the same label, and converts
+    /// that element like a whole native result (optional carrier, machine
+    /// word Int).
+    fn core_native_tuple_result(&self, row: &MirCoreCall, value: &str, ty: &MirType) -> Option<String> {
+        let MirTypeKind::Tuple(fields) = ty.kind() else {
+            return None;
+        };
+        let Some(crate::AST::Type::Tuple(declared)) =
+            crate::Sema::core_call_native_return(&row.module, &row.member)
+        else {
+            return None;
+        };
+        if declared.len() != fields.len() {
+            return None;
+        }
+        let labeled = fields.iter().all(|(label, _)| {
+            !label.is_empty() && declared.iter().filter(|(name, _)| name == label).count() == 1
+        });
+        let mut converted = false;
+        let values = fields
+            .iter()
+            .enumerate()
+            .map(|(index, (label, field))| {
+                let position = if labeled {
+                    declared
+                        .iter()
+                        .position(|(name, _)| name == label)
+                        .expect("labeled native tuple slot")
+                } else {
+                    index
+                };
+                let slot = format!("__jet_native_tuple.{position}");
+                let element = self.core_native_value(row, slot.clone(), Some(field));
+                converted |= position != index || element != slot;
+                element
+            })
+            .collect::<Vec<_>>();
+        converted.then(|| {
+            let values = if values.len() == 1 {
+                format!("{},", values[0])
+            } else {
+                values.join(", ")
+            };
+            format!("{{ let __jet_native_tuple = {value}; ({values}) }}")
+        })
     }
 
 
