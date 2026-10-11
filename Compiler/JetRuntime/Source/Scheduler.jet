@@ -414,6 +414,16 @@ fn scheduler_delivered_status() -> I64 {
 
 fn scheduler_body_enter() -> I64 { sync_swap(thread_base() + I64{64}, I64{1}) }
 fn scheduler_body_leave(saved: I64) { sync_store(thread_base() + I64{64}, saved) }
+// Lower.jet lower_poll_call_enter/leave bracket a checked operation whose
+// immediate terminator is a Propagate poll: inside a body (bit 1) the call
+// arms bit 2 for its duration; leave restores the caller's word exactly.
+#Export(c) fn jet_rt_poll_call_enter() -> I64 {
+    cell :: thread_base() + I64{64}
+    saved :: sync_load(cell)
+    if (saved.bit_and(I64{1}) != I64{0}) -> sync_store(cell, saved.bit_or(I64{2}))
+    saved
+}
+#Export(c) fn jet_rt_poll_call_leave(saved: I64) { sync_store(thread_base() + I64{64}, saved) }
 fn scheduler_task_cancelled() -> Bool {
     control :: scheduler_control_current()
     control != I64{0} && sync_load(control + I64{16}) != I64{0}

@@ -51,11 +51,14 @@ fn host_stdio_result(failure: I64, operation: I64, stderr: Bool, error: I64) -> 
         stderr -> host_stderr_name()
         else -> host_stdout_name()
     }
-    cause :: if {
-        failure == HOST_WRITE_ZERO -> host_write_zero_text()
-        else -> host_errno_cause(wrapping(I64{0} - failure))
-    }
-    host_io_other_take(operation, resource, cause, error)
+    host_io_other_take(operation, resource, host_stdio_cause(failure), error)
+}
+
+// The owned OS description of a nonzero stdio failure (0, -errno or
+// HOST_WRITE_ZERO): io::Error's Display, as IOError::other's cause carries it.
+fn host_stdio_cause(failure: I64) -> I64 {
+    if (failure == HOST_WRITE_ZERO) -> return host_write_zero_text()
+    host_errno_cause(wrapping(I64{0} - failure))
 }
 
 // Both stdio and buffered process transport take these two owned children.

@@ -17,6 +17,28 @@ fn host_u8_put(data: I64, index: I64, byte: I64) {
     }
 }
 
+// core.mem.__list_reserve_exact (Lists.jet lower_encoding_list_leaf): grow the
+// exclusively lent native List header to exactly len + additional elements of
+// `stride` bytes. Failure (negative/overflowing request, no memory) returns
+// false and keeps the original allocation intact; policy is authored in Jet.
+#Export(c) fn jet_rt_encoding_list_reserve_exact(header: I64, stride: I64, additional: I64) -> Bool {
+    if (additional < I64{0} || stride <= I64{0} || header == I64{0}) -> return false
+    length :: trap_word(header)
+    capacity :: trap_word(header + I64{8})
+    if (additional > I64{9223372036854775807} - length) -> return false
+    required :: length + additional
+    if (required <= capacity) -> return true
+    if (required > I64{9223372036854775807} /% stride) -> return false
+    next :: jet_rt_alloc_try(required * stride, I64{8})
+    if (next == I64{0}) -> return false
+    data :: trap_word(header + I64{16})
+    if (length != I64{0}) -> rt_text_bytes_copy(next, data, length * stride)
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * stride, I64{8})
+    trap_store(header + I64{8}, required)
+    trap_store(header + I64{16}, next)
+    true
+}
+
 fn coll_payload(meta: I64) -> I64 {
     kind :: trap_word(meta + I64{48}).bit_and(I64{4294967295})
     if (kind == I64{11}) { return I64{0} }

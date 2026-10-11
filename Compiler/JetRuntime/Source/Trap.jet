@@ -250,6 +250,26 @@ fn trap_simple(code: I64, file: I64, file_len: I64, line: I64, message: I64, mes
     trap_simple(I64{1}, file, file_len, line, message, message_len)
 }
 
+// FixedArithmetic.rs ShiftOutOfRange: "Shifting {left|right} by {count} bits
+// is out of range (this type is {bits} bits wide)". The count prints in the
+// shifted type's signedness (1 = unsigned), as the seed's i128 operand does.
+#Export(c) fn jet_rt_fixed_shift_stop(direction: I64, count: I64, count_unsigned: I64, bits: I64, file: I64, file_len: I64, line: I64) {
+    message :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(message, rt_static_text("Shifting "))
+    jet_rt_string_builder_push(message, if (direction == I64{0}) -> rt_static_text("left") else -> rt_static_text("right"))
+    jet_rt_string_builder_push(message, rt_static_text(" by "))
+    digits :: if (count_unsigned != I64{0}) -> jet_rt_u64_to_string(count) else -> jet_rt_i64_to_string(count)
+    jet_rt_string_builder_push(message, digits)
+    jet_rt_string_drop(digits)
+    jet_rt_string_builder_push(message, rt_static_text(" bits is out of range (this type is "))
+    width :: jet_rt_i64_to_string(bits)
+    jet_rt_string_builder_push(message, width)
+    jet_rt_string_drop(width)
+    jet_rt_string_builder_push(message, rt_static_text(" bits wide)"))
+    trap_simple(I64{1}, file, file_len, line, rt_text_data(message), rt_text_len(message))
+    jet_rt_string_drop(message)
+}
+
 // CAbiRoutes.rs:11-12: publish the seed's raw native-Int range reason.
 // Root rendering stays separate so task publication never prints a report.
 fn trap_native_index_range_stop() {

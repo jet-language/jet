@@ -1,0 +1,33 @@
+// Core/mem AllocError {requested_bytes: Int, allocator: String}: the record
+// Lower's fallible-capacity helpers build (Builtins.jet, Lists.jet, Atomic.jet)
+// and read back field by field. CAbiRoutes.rs AllocError carrier; Box16 is
+// requested_bytes (i64 word) at 0 and the owned allocator text at 8.
+ALLOC_ERROR_BYTES :: prep { I64{16} }
+ALLOC_ERROR_REQUESTED :: prep { I64{0} }
+ALLOC_ERROR_ALLOCATOR :: prep { I64{8} }
+
+#Export(c) fn jet_rt_record_new_alloc_error(requested_bytes: I64, allocator: I64) -> I64 {
+    raw :: jet_int_owned_to_i64(requested_bytes)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    value :: jet_rt_alloc(ALLOC_ERROR_BYTES, I64{8})
+    data_tree_store(value + ALLOC_ERROR_REQUESTED, raw)
+    data_tree_store(value + ALLOC_ERROR_ALLOCATOR, jet_rt_string_clone(allocator))
+    value
+}
+#Export(c) fn jet_rt_record_get_alloc_error_requested_bytes(value: I64) -> I64 { jet_int_owned_from_i64(data_tree_word(value + ALLOC_ERROR_REQUESTED)) }
+#Export(c) fn jet_rt_record_get_alloc_error_allocator(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + ALLOC_ERROR_ALLOCATOR)) }
+#Export(c) fn jet_rt_handle_clone_alloc_error(value: I64) -> I64 {
+    result :: jet_rt_alloc(ALLOC_ERROR_BYTES, I64{8})
+    data_tree_store(result + ALLOC_ERROR_REQUESTED, data_tree_word(value + ALLOC_ERROR_REQUESTED))
+    data_tree_store(result + ALLOC_ERROR_ALLOCATOR, jet_rt_string_clone(data_tree_word(value + ALLOC_ERROR_ALLOCATOR)))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_alloc_error(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(data_tree_word(value + ALLOC_ERROR_ALLOCATOR))
+    jet_rt_free(value, ALLOC_ERROR_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_alloc_error(left: I64, right: I64) -> Bool {
+    if data_tree_word(left + ALLOC_ERROR_REQUESTED) != data_tree_word(right + ALLOC_ERROR_REQUESTED) -> return false
+    jet_rt_string_eq(data_tree_word(left + ALLOC_ERROR_ALLOCATOR), data_tree_word(right + ALLOC_ERROR_ALLOCATOR))
+}
