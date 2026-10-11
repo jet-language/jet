@@ -2522,6 +2522,12 @@ fn jet_codegen_symbol_name(builder: JetCodegenBuilder, program: JetCodegenProgra
             if nominal.symbol.id.key == symbol.key -> return nominal.symbol.name
         }
     }
+    // A builtin trait (Sema `sema_type_builtin_trait_symbol`: an operator hook's
+    // `Add`/`Sub`/`Mul`/`Div` owner, or a builtin bound) has no owning module;
+    // its identity is the bare trait name, as in `jet_codegen_mir_trait_ref_for_symbol`.
+    parts :: symbol.key.split(":").to_list()
+    name :: parts[parts.len() - 1]
+    if symbol.key == symbol_id(SymbolKind.Trait, "", "", name).key -> return name
     panic("checked method trait has no registered symbol")
 }
 
