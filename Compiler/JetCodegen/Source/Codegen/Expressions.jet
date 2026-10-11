@@ -1,5 +1,6 @@
 // Typed expression lowering preserves checked MIR types and ownership facts.
 // Every produced MIR value retains its checked type, span, and ownership.
+use core.math as math
 use jet_foundation.[
     canonical_pass_debug_snapshot,
     AccessConvention,
@@ -4897,12 +4898,21 @@ fn jet_codegen_lower_union_render(builder: &JetCodegenBuilder, program: JetCodeg
     jet_codegen_emit_value(&builder, program, span, Type.String, MIROperation.Phi{incoming: incoming})
 }
 
+// Rust's f64::NAN, the positive quiet NaN 0x7FF8000000000000, from its bits.
+// `0.0 / 0.0` is not a constant: a compiler built by rustc folds it to this
+// value while a natively built compiler divides at run time and gets x86's
+// negative default NaN 0xFFF8000000000000, so the emitted bits would depend
+// on which compiler built the compiler.
+fn jet_codegen_canonical_nan() -> Float Never! {
+    math.from_bits(0x7FF8000000000000)
+}
+
 
 fn jet_codegen_numeric_bound_constant(ty: Type, member: String) -> MIRConstant? {
     if ty == Type.Float32 {
         if member == "MAX" -> return Val(MIRConstant.Float{value: 3.4028234663852886e38, f32: true, spelling: None})
         if member == "MIN" -> return Val(MIRConstant.Float{value: -3.4028234663852886e38, f32: true, spelling: None})
-        if member == "NAN" -> return Val(MIRConstant.Float{value: 0.0 / 0.0, f32: true, spelling: None})
+        if member == "NAN" -> return Val(MIRConstant.Float{value: jet_codegen_canonical_nan(), f32: true, spelling: None})
         if member == "INFINITY" -> return Val(MIRConstant.Float{value: 1.0 / 0.0, f32: true, spelling: None})
         if member == "NEG_INFINITY" -> return Val(MIRConstant.Float{value: -(1.0 / 0.0), f32: true, spelling: None})
         if member == "EPSILON" -> return Val(MIRConstant.Float{value: 1.1920928955078125e-7, f32: true, spelling: None})
@@ -4910,7 +4920,7 @@ fn jet_codegen_numeric_bound_constant(ty: Type, member: String) -> MIRConstant? 
     if ty == Type.Float {
         if member == "MAX" -> return Val(MIRConstant.Float{value: 1.7976931348623157e308, f32: false, spelling: None})
         if member == "MIN" -> return Val(MIRConstant.Float{value: -1.7976931348623157e308, f32: false, spelling: None})
-        if member == "NAN" -> return Val(MIRConstant.Float{value: 0.0 / 0.0, f32: false, spelling: None})
+        if member == "NAN" -> return Val(MIRConstant.Float{value: jet_codegen_canonical_nan(), f32: false, spelling: None})
         if member == "INFINITY" -> return Val(MIRConstant.Float{value: 1.0 / 0.0, f32: false, spelling: None})
         if member == "NEG_INFINITY" -> return Val(MIRConstant.Float{value: -(1.0 / 0.0), f32: false, spelling: None})
         if member == "EPSILON" -> return Val(MIRConstant.Float{value: 2.220446049250313e-16, f32: false, spelling: None})
