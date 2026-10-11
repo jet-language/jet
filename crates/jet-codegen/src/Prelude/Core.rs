@@ -261,6 +261,22 @@ impl __jet_Comparable for JetDateTime {
     }
 }
 
+// Core watcher's closed unit enums auto-derive `Comparable` in declaration
+// order, and `==` on a type that is both Equatable and Comparable dispatches
+// through `compare`. Their native carriers live in the runtime, so their
+// derived ordering lives here with them (ordinal order, as Derives.jet).
+impl __jet_Comparable for jet_std::WatchDomain {
+    fn compare(&self, rhs: &Self) -> __jet_Ordering {
+        jet_time_ordering((*self as u8).cmp(&(*rhs as u8)))
+    }
+}
+
+impl __jet_Comparable for jet_std::WatchKind {
+    fn compare(&self, rhs: &Self) -> __jet_Ordering {
+        jet_time_ordering((*self as u8).cmp(&(*rhs as u8)))
+    }
+}
+
 // ZonedDateTime `==` is instant plus zone identity. Temporal keeps that
 // value equality distinct from its separate `equals` distinction.
 impl __jet_Equatable for JetZonedDateTime {
