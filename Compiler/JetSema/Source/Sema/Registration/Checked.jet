@@ -82,6 +82,7 @@ use jet_foundation.[
     Variant,
     VariantField,
     VariantPayload,
+    ast_comptime_generated_path,
     comptime_walk_calls,
     comptime_walk_identifiers,
     expr_span,
@@ -318,6 +319,8 @@ enum SemaCheckedForeignOwner {
     Inline
     ExternRust
     CModule
+    // A per-callable `#Import(c)` declaration (Rust `lower_guest_import_foreign`).
+    GuestImport
 }
 
 struct SemaForeignHandleInput {
@@ -1541,6 +1544,58 @@ fn sema_checked_inline_foreign_row(graph: SemaRegistrationGraph, module_row: Sem
     }
 }
 
+// Rust artifact_plan.rs `lower_guest_import_foreign`: one per-callable
+// `#Import(c)` declaration becomes the foreign row its calls bind to. The row
+// keeps the function's symbol identity, so a checked direct call to the
+// declaration lowers as a foreign C call of the marker's symbol; the
+// declaration itself has no Jet body and no TFunc.
+fn sema_checked_guest_import_foreign_row(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, registered: SemaRegistrationFunction) -> SemaCheckedForeignFunction? {
+    symbol :: sema_guest_import_symbol(registered.declaration) ?? return None
+    module_identity :: module_row.module_identity
+    params :: sema_checked_foreign_params(graph, module_identity, registered.parameters)
+    return_type :: sema_checked_foreign_return_type(graph, module_identity, registered.declaration.return_type)
+    bridge_eligible :: sema_guest_import_bridge_compatible(registered.declaration)
+    // A plain written return is the default failure carrier at every call
+    // site; the C value is that carrier's success (Rust `wraps_default_failure`).
+    wraps_default_failure :: if registered.declaration.return_type == {
+        None -> false
+        Val(declared) -> sema_effective_return_type(Val(declared)) != declared
+    }
+    owner :: if module_row.module_name == "" -> "root" else -> module_row.module_name
+    wrapper :: ast_comptime_generated_path("jet_ffi_guest.{owner}.{registered.declaration.name}")
+    SemaCheckedForeignFunction{
+        symbol_id: registered.symbol.id,
+        key: sema_checked_foreign_key(module_identity, wrapper),
+        module_identity: module_identity,
+        module_name: module_row.module_name,
+        module_path: module_row.module_path,
+        source_file: sema_source_file_at(module_row.source_segments, module_row.source_file, module_row.source_origin, registered.declaration.span),
+        name: registered.declaration.name,
+        span: registered.declaration.span,
+        owner: SemaCheckedForeignOwner.GuestImport,
+        symbol: symbol,
+        path: symbol,
+        params: params,
+        raw_scalar_abi: true,
+        bridge_eligible: bridge_eligible,
+        return_type: return_type,
+        abi: "C",
+        language: "c",
+        effect_root: None,
+        callback_transport: if wraps_default_failure -> Val("guest-import-result") else -> None,
+        callback_plan_digest: None,
+        callback_identity: None,
+        link_key: None,
+        callback_key: None,
+        handle_key: None,
+        close_function_key: None,
+        close_foreign_key: None,
+        undo_function_key: None,
+        asm_contract: None,
+        unsafe_gate: sema_checked_inline_foreign_gate(module_row, registered.declaration),
+    }
+}
+
 // The same gate check_function builds for a gated Jet function (CheckProgram):
 // the declaration's source file, the `#Unsafe` marker line, and its reason.
 fn sema_checked_inline_foreign_gate(module_row: SemaRegistrationModule, func: Func) -> TUnsafeGate? {
@@ -1561,8 +1616,12 @@ fn sema_checked_foreign_functions(graph: SemaRegistrationGraph, module_row: Sema
         &result.push(row_value)
     }
     loop registered in module_row.functions {
-        row_value :: sema_checked_inline_foreign_row(graph, module_row, registered, &diagnostics) ?? next
-        &result.push(row_value)
+        if sema_checked_inline_foreign_row(graph, module_row, registered, &diagnostics) == .Val(inline_row) {
+            &result.push(inline_row)
+            next
+        }
+        guest_row :: sema_checked_guest_import_foreign_row(graph, module_row, registered) ?? next
+        &result.push(guest_row)
     }
     result
 }

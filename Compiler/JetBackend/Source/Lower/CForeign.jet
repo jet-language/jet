@@ -265,7 +265,15 @@ fn lower_c_import_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
             &lowered.push(lower_c_encode(&m, &f, ty, value))
         }
     }
-    dst := lower_result(p, c, &m, &f, instruction)
+    // A C function cannot fail. When its call site keeps a failure carrier (a
+    // per-callable `#Import(c)` with a default `!Err` return, Rust
+    // `guest-import-result` emitting `Ok(call)`), the C value is that
+    // carrier's `Ok` payload, boxed below.
+    carrier := MIRType?{None}
+    if lower_checked_type(c, instruction) == .Val(checked) {
+        if checked.kind == .Result(_, _) -> carrier = Val(checked)
+    }
+    dst := if carrier == None -> lower_result(p, c, &m, &f, instruction) else -> LIRValueID?{None}
     return_ty :: row.return_type
     raw := LIRValueID?{None}
     if return_ty == .Val(ty) {
@@ -275,7 +283,10 @@ fn lower_c_import_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
             raw = Val(lower_new_value(&f, layout, LIRDrop.Trivial, None))
             if dst == None {
                 native_layout :: lower_repr_layout(lower_repr(p, ty)) ?? return
-                dst = Val(lower_new_value(&f, native_layout, lower_drop(&m, lower_repr(p, ty), true), ty.identity))
+                // A boxed payload moves into the carrier; only a discarded
+                // result owns its drop.
+                drop :: if carrier == None -> lower_drop(&m, lower_repr(p, ty), true) else -> LIRDrop.Trivial
+                dst = Val(lower_new_value(&f, native_layout, drop, ty.identity))
             }
         }
     }
@@ -287,6 +298,14 @@ fn lower_c_import_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
             lower_call_runtime(&m, &f, "jet_rt_c_string_unpack", [LIRValueID]{value}, Val(output))
         } else {
             lower_c_decode(&m, &f, ty, value, output)
+        }
+    }
+    if carrier == .Val(checked) {
+        if checked.kind == .Result(ok_ty, err_ty) {
+            boxed :: lower_result(p, c, &m, &f, instruction) ?? return
+            lower_alloc(&m, &f, boxed, lower_result_box_size(p, ok_ty, err_ty))
+            lower_store_word(&f, boxed, 0, lower_result_selector(true))
+            if dst == .Val(payload) -> lower_write_at(p, &f, boxed, lower_result_payload_offset(), payload, ok_ty)
         }
     }
     loop write in writes {
