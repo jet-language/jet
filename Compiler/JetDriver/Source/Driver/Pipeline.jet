@@ -88,6 +88,7 @@ use jet_foundation.[
     OutputKind,
     Span,
     SymbolKind,
+    TBuiltinOp,
     TBinaryOp,
     TComptimeEnumArg,
     TComptimeField,
@@ -3881,6 +3882,29 @@ fn jet_driver_comptime_fold(expression: TExpr, values: [SemaComptimeItemValue]) 
         }
         .Absent -> {
             if expression.ty == .Option(inner) -> return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: inner}})
+        }
+        // `String.from_bytes([U8]{…}) ?? fallback`, the generators' spelling
+        // of a string holding a control character (no escape spells NUL):
+        // the decoded text when the folded bytes are UTF-8, else the fallback.
+        .OrFallback(value, fallback, _) -> {
+            if expression.ty != Type.String -> return None
+            if value.kind == .BuiltinMethod(receiver, operation, args) {
+                if operation == TBuiltinOp.StringFromBytes && args.len() == 0 {
+                    folded :: jet_driver_comptime_fold(receiver, values) ?? return None
+                    bytes := [U8]{}
+                    if folded == .List(items) {
+                        loop item in items {
+                            if item == .Int(number) -> &bytes.push(U8.from_int(number) ?? return None)
+                            else -> return None
+                        }
+                    } else { return None }
+                    decoded :: String.from_bytes(bytes) ?? {
+                        if fallback == .Value(otherwise) -> return jet_driver_comptime_fold(otherwise, values)
+                        return None
+                    }
+                    return Val(TComptimeValue.String{value: decoded})
+                }
+            }
         }
         .Unary(op, operand) -> {
             folded :: jet_driver_comptime_fold(operand, values) ?? return None
