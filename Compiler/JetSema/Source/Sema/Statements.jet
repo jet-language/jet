@@ -4717,9 +4717,11 @@ fn sema_stmt_check_return_value_typed(value: Expr, return_type: Type?, environme
 // whose type is already known and widens into the numeric success slot is
 // checked on its own type and then converted, so every tier receives the
 // explicit conversion instead of the source bits under the slot's type.
+// Rust `widen_numeric_return` takes any widening (`numeric_widening_to` is
+// Some): a lossless one (U8 into Int) as well as a checked one.
 fn sema_stmt_check_return_payload(value: Expr, success: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     known := sema_stmt_return_numeric_source(value, scopes)
-    if known == .Val(source) && sema_expr_is_numeric(success) && !type_identity_equal(source, success) && sema_expr_numeric_widening_to(source, success) == (Val(true)) {
+    if known == .Val(source) && sema_expr_is_numeric(success) && !type_identity_equal(source, success) && sema_expr_numeric_widening_to(source, success) != None {
         checked :: sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
         return sema_expr_numeric_literal_conversion(checked, success, checked.span, line, &diagnostics)
