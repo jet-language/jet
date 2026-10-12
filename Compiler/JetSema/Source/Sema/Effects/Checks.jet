@@ -985,18 +985,16 @@ fn sema_effect_is_call(expression: TExpr) -> Bool Never! {
     }
 }
 
-// Compiler-built numeric operations (`1 / 3` as an exact `Fraction`, Decimal
-// and math-type arithmetic, numeric casts, a `60s` Duration literal and
-// Duration scaling) have no callee body. Rust records no effect for them, so
-// one with no recorded call fact is pure, not an unknown callee that forces
-// the maximal row.
-fn sema_effect_is_numeric_builtin(expression: TExpr) -> Bool Never! {
+// Compiler-owned intrinsic operations have no callee body: host calls
+// (Shared access, typed text, `yield`), handle methods (`60s` Duration
+// literals and Duration scaling, Dyn accessors, ...) and compiler-built
+// numeric operations (`1 / 3` as an exact `Fraction`, Decimal and math-type
+// arithmetic, numeric casts). Rust records their effects inline and forces
+// the maximal row only for opaque callees, so one with no recorded call fact
+// contributes no effect; it is not an unknown callee.
+fn sema_effect_is_compiler_intrinsic(expression: TExpr) -> Bool Never! {
     if expression.kind == {
-        .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) -> true
-        .HandleMethod(_, operation, _) -> if operation == {
-            .DurationNew(_, _) | .DurationScale | .DurationDivide -> true
-            else -> false
-        }
+        .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .HostCall(_) | .HandleMethod(_, _, _) -> true
         else -> false
     }
 }
@@ -1073,7 +1071,7 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: 
                     }
                 }
                 .None -> {
-                    if !sema_effect_is_numeric_builtin(expression) -> sema_effect_record_unresolved_call(&nodes, facts.node_by_key, node_index, expression)
+                    if !sema_effect_is_compiler_intrinsic(expression) -> sema_effect_record_unresolved_call(&nodes, facts.node_by_key, node_index, expression)
                 }
             }
         }

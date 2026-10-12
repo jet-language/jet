@@ -37,7 +37,7 @@ fn sema_pure_root_expr(root: String, modules: [SemaGraphModuleResult], positions
                 if site.facts.effect_bound == .Val(row) {
                     names :: loop entry in row -> entry.name
                     denied = sema_effect_without_deny_only(names).len() > 0
-                } else { denied = !sema_effect_is_numeric_builtin(expression) }
+                } else { denied = !sema_effect_is_compiler_intrinsic(expression) }
             } else {
                 // Use the source witnesses already published by the one effect
                 // solver, rather than maintaining another builtin-effect list.
