@@ -347,7 +347,16 @@ fn sema_type_carrier_compatible(required: Type, offered: Type) -> Bool Never! {
             }
             return true
         }
-        .Tagged(required_marker, required_inner) -> if offered == .Tagged(offered_marker, offered_inner) -> return required_marker == offered_marker && sema_type_carrier_compatible(required_inner, offered_inner)
+        // Rust `type_identity_with_callable_values`: two tags of one marker
+        // compare their payloads; a `core.crypto` nominal tag on either side
+        // is that payload against the other type (`&Secret` meets the
+        // tagged `Secret` of a vault row).
+        .Tagged(required_marker, required_inner) -> {
+            if offered == .Tagged(offered_marker, offered_inner) {
+                if required_marker == offered_marker -> return sema_type_carrier_compatible(required_inner, offered_inner)
+            }
+            if required_marker == (TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}) -> return sema_type_carrier_compatible(required_inner, offered)
+        }
         .Quantity(required_base, required_dimension) -> if offered == .Quantity(offered_base, offered_dimension) -> return required_dimension == offered_dimension && sema_type_carrier_compatible(required_base, offered_base)
         .Result(required_ok, required_err) -> if offered == .Result(offered_ok, offered_err) -> return sema_type_carrier_compatible(required_ok, offered_ok) && sema_type_carrier_compatible(required_err, offered_err)
         .Apply(required_name, required_args) -> if offered == .Apply(offered_name, offered_args) {
@@ -361,6 +370,9 @@ fn sema_type_carrier_compatible(required: Type, offered: Type) -> Bool Never! {
             if offered == .Fn(_, _, _, _, _, _) -> return sema_function_types_compatible(required, offered)
         }
         else -> {}
+    }
+    if offered == .Tagged(offered_marker, offered_inner) {
+        if offered_marker == (TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}) -> return sema_type_carrier_compatible(required, offered_inner)
     }
     type_identity_equal(required, offered)
 }
