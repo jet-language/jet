@@ -65,6 +65,14 @@ fn lower_each_end(f: &LowerFunction, each: LowerEach, state: [LIRValueID]) Never
     lower_start(&f, each.done, each.exit)
 }
 
+// The owning result `dst` takes the final state an each loop carried in a
+// trivial word (`each.exit`: block parameters never own); a Move would change
+// its drop glue.
+fn lower_each_result(f: &LowerFunction, dst: LIRValueID, carried: LIRValueID) Never! {
+    if lower_value_drop(f, dst) == lower_value_drop(f, carried) -> return lower_emit(&f, LIRInst.Move{dst: dst, src: carried})
+    lower_adopt(&f, dst, carried)
+}
+
 // Calls the closure box `closure` with `args`; its result of `result_ty`
 // (an inline aggregate's in storage of this frame), None for Unit.
 fn lower_call_closure_box(p: MIRProgram, m: &LowerModule, f: &LowerFunction, closure: LIRValueID, args: [LIRValueID], result_ty: MIRType) -> LIRValueID? {
@@ -428,7 +436,7 @@ fn lower_map_closure_fold(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     if !lower_closure_param_moves(closure_ty, 0) -> lower_map_drop_value(p, &m, &f, current, result_ty)
     if inline -> lower_write_at(p, &f, dst, 0, out, result_ty)
     lower_each_end(&f, each, if inline -> [LIRValueID]{} else -> [LIRValueID]{out})
-    if !inline -> lower_emit(&f, LIRInst.Move{dst: dst, src: each.exit[0]})
+    if !inline -> lower_each_result(&f, dst, each.exit[0])
     if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
 }
 
@@ -695,7 +703,7 @@ fn lower_closure_fold_owned(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
         if !consumed -> lower_map_drop_value(p, &m, &f, current, result_ty)
         lower_each_end(&f, each, [LIRValueID]{stepped})
         dst :: lower_result(p, c, &m, &f, instruction) ?? return
-        lower_emit(&f, LIRInst.Move{dst: dst, src: each.exit[0]})
+        lower_each_result(&f, dst, each.exit[0])
     }
     if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
 }

@@ -991,7 +991,7 @@ fn lower_list_method_more(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     if sum_route || product_route {
         total :: lower_list_reduce_int(p, &m, &f, list, elem, product_route, row.member) ?? return true
         dst :: lower_result(p, c, &m, &f, instruction) ?? return true
-        lower_emit(&f, LIRInst.Move{dst: dst, src: total})
+        lower_each_result(&f, dst, total)
         return true
     }
     other :: lower_use(&m, &f, args[0]) ?? return true

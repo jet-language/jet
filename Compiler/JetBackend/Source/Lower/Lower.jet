@@ -1224,6 +1224,16 @@ fn lower_value_drop(f: LowerFunction, value: LIRValueID) -> LIRDrop Never! {
     f.builder.values[value.value].drop
 }
 
+// The owner `dst` adopts `carried`, a trivial carrier of the same layout, with
+// dst's drop glue. A jump argument binds a block parameter of any drop glue
+// (lower_exact_arithmetic's merge adopts its words this way); a Move may not
+// change drop glue and Reown converts only pointer owners.
+fn lower_adopt(f: &LowerFunction, dst: LIRValueID, carried: LIRValueID) Never! {
+    adopted :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(adopted, [LIRValueID]{carried})})
+    lower_start(&f, adopted, [LIRValueID]{dst})
+}
+
 fn lower_checked_type(c: LowerContext, instruction: MIRInstruction) -> MIRType? {
     result :: instruction.result ?? return None
     if instruction.ty == .Val(ty) -> return Val(ty)

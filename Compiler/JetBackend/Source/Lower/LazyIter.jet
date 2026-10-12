@@ -481,7 +481,7 @@ fn lower_lazy_reduce(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     total :: lower_list_reduce_int(p, &m, &f, list, elem, product, row.member) ?? return true
     lower_map_drop_value(p, &m, &f, list, list_ty)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return true
-    lower_emit(&f, LIRInst.Move{dst: dst, src: total})
+    lower_each_result(&f, dst, total)
     true
 }
 
