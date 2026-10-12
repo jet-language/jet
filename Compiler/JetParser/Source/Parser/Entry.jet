@@ -384,7 +384,7 @@ fn parser_parse_program(state: &JetParserState) -> Program {
                 if destructuring {
                     parser_add_error_code(&state, "E0003", start, "module globals bind one name at a time", "a module binding is a named value available to every function in the file", "write `name :: value` or `name := value`")
                     parser_sync_top(&state)
-                } else if state.diagnostics.len() > errors_before {
+                } else if parser_error_since(state, errors_before) {
                     parser_sync_top(&state)
                 } else if item == .Val(value) {
                     &program.items.push(value)

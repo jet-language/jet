@@ -260,3 +260,18 @@ fn arm_table_fix_all(source: String) -> String {
     }
     assert(found, "the chain still warns")
 }
+// A module binding whose value only lints (L0507) is still a declaration, as
+// Rust `module_binding_def` keeps every binding that parsed without an error.
+#Test("linted_else_if_module_binding_stays_a_declaration") {
+    source :: "LIMIT :: if 1 <= 0 -> 4 else if 2 == 8 -> 5 else -> 6\nNEXT :: LIMIT + 1\n"
+    diagnostics :: arm_table_checked(source)
+    found := false
+    loop diagnostic in diagnostics {
+        if diagnostic.code == "L0507" -> found = true
+    }
+    assert(found, "the chain warns")
+    program :: parser_test_program(source)
+    assert(program.items.len() == 2 && program.script_body.len() == 0, "both bindings are declarations")
+    assert(if program.items[0] == .Const(value) -> value.name == "LIMIT" else -> false, "the linted binding is kept")
+    assert(if program.items[1] == .Const(value) -> value.name == "NEXT" else -> false, "the following binding is kept")
+}
