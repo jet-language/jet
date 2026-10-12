@@ -710,17 +710,23 @@ fn sema_call_try_http_method(
         else -> [Int]{}
     }
     values := [TExpr]{}
+    checked := true
     if {
         args.len() > 0 -> {
-            checked :: sema_call_http_check_values(args, arg_types, moving, "{name}.{method}", receiver, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-            values = checked
+            checked_values := sema_call_http_check_values(args, arg_types, moving, "{name}.{method}", receiver, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics)
+            if checked_values == .Val(found) -> values = found else -> checked = false
         }
         else -> {
             call_args := args.copy()
             ownership := sema_ownership_check_method_call(&state, "{name}.{method}", receiver, AccessConvention.Read, [SemaCallParam]{}, &call_args, scopes, span, &diagnostics)
-            if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
+            if !ownership.accepted || !ownership.complete -> checked = false
         }
     }
+    // Rust `net_method_return` types the request/response/header handle
+    // methods without recording a receiver convention, so a written mark
+    // (`&req.header(name, value)`) has nothing to be compared with.
+    if name == "HTTPRequest" || name == "HTTPResponse" || name == "Headers" -> sema_receiver_mark_forget(&state, receiver)
+    if !checked -> return SemaMethodSpecialCheck{handled: true, value: None}
     tir := sema_call_http_emit_method(receiver_value, name, method, values, result, span)
     if sema_call_http_method_effect(name, method, args.len()) == .Val(effect_name) -> sema_call_http_record_effect(effect_name, "{name}.{method}", tir.ty, span, environment, program, &scopes, &context, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)}
