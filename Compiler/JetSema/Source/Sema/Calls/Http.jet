@@ -649,7 +649,7 @@ fn sema_call_try_http_method(
             if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
             tir := sema_call_http_emit_method(receiver_value, name, method, [TExpr]{value}, Type.Named{name: "HTTPRequest"}, span)
             if sema_call_http_method_effect(name, method, args.len()) == .Val(effect_name) -> sema_call_http_record_effect(effect_name, "{name}.{method}", tir.ty, span, environment, program, &scopes, &context, &diagnostics)
-            return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)}
+            return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(tir, expected, environment, program, context, &diagnostics)}
         }
         count_ok := if {
             name == "HTTPRequest" -> args.len() == 0
@@ -668,7 +668,7 @@ fn sema_call_try_http_method(
         values :: sema_call_http_check_values(args, argument_types, [Int]{}, "{name}.json", receiver, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         tir := sema_call_http_emit_method(receiver_value, name, method, values, decoded, span)
         if sema_call_http_method_effect(name, method, args.len()) == .Val(effect_name) -> sema_call_http_record_effect(effect_name, "{name}.{method}", tir.ty, span, environment, program, &scopes, &context, &diagnostics)
-        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)}
+        return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(tir, expected, environment, program, context, &diagnostics)}
     }
 
     result_type := sema_call_http_method_result(name, method, args.len())
@@ -732,7 +732,10 @@ fn sema_call_try_http_method(
     if !checked -> return SemaMethodSpecialCheck{handled: true, value: None}
     tir := sema_call_http_emit_method(receiver_value, name, method, values, result, span)
     if sema_call_http_method_effect(name, method, args.len()) == .Val(effect_name) -> sema_call_http_record_effect(effect_name, "{name}.{method}", tir.ty, span, environment, program, &scopes, &context, &diagnostics)
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)}
+    // A call checker finishes through the call's success view, so a
+    // `T E!` result in a `T` slot (`req.send()` as a `HTTPResponse
+    // HTTPError!` tail) propagates instead of mismatching (E0401).
+    SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(tir, expected, environment, program, context, &diagnostics)}
 }
 fn sema_call_http_core_signature_type(signature: CoreTypedCallSignature) -> Type Never! {
     parameter_types := [Type]{}
