@@ -176,6 +176,16 @@ fn sema_call_debug_implemented(ty: Type, environment: SemaScopeEnvironment, prog
     }
 }
 
+// Rust `infer_method_call` (D-AUTODERIVE1): `.debug()` with no arguments is
+// the Debug protocol method on every debuggable receiver, auto-derived or
+// handwritten alike; it is the same Debug text `{value:Debug}` renders.
+fn sema_call_try_debug_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if method != "debug" || args.len() != 0 || type_args.len() != 0 || !sema_call_debug_traceable(receiver_value.ty, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    text :: sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Interpolation{value: receiver_value, format: TStrFormat.Debug}}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(text, expected, environment, program, &diagnostics)}
+}
+
 // The `file.jet:LINE` site of a trace (Rust `check_debug_trace`).
 fn sema_call_debug_site(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String Never! {
     path :: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, call.name_span)

@@ -2847,6 +2847,8 @@ fn sema_expr_try_hardware_pre_receiver(receiver: Expr, method: String, args: [Ca
 
 
 fn sema_expr_try_method_special_routes(receiver: Expr, receiver_value: TExpr, method: String, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    debug := sema_call_try_debug_method(receiver, receiver_value, method, args, type_args, span, expected, environment, program, &scopes, &state, &diagnostics)
+    if debug.handled -> return debug
     data := sema_call_try_data_method(receiver, receiver_value, method, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if data.handled -> return data
 
