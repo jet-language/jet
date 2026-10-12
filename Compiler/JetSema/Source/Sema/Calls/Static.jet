@@ -551,17 +551,34 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
         value :: sema_call_builtin_static_argument(args[index], row.parameters[index], row, &bindings, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         &values.push(value)
     }
-    // Rust `finish_builtin_method`: a builtin static has no declared
-    // parameter conventions, so a written `^` (`String.from_bytes(^bytes)`)
-    // is the consuming argument's exact move, never E0203.
+    // Rust `finish_builtin_method` (and `shared x`'s `Shared.new` arm)
+    // declares no parameter conventions for a builtin static: a written `^`
+    // on a field is the consuming argument's exact move, and on a bare name
+    // it is the plain read Rust infers, so neither is E0203. The name still
+    // moves here like an unmarked owning position: a borrowed parameter
+    // keeps its value, and a later use turns the move into a share.
     params := [SemaCallParam]{}
+    ownership_args := args
+    named_moves := [Int]{}
     loop index in 0..<values.len() {
-        convention :: if args[index].convention == AccessConvention.Move -> AccessConvention.Move else -> row.parameter_convention
+        convention := row.parameter_convention
+        if args[index].convention == AccessConvention.Move {
+            if args[index].expr == {
+                .Ident(_, _) -> {
+                    convention = AccessConvention.Read
+                    ownership_args[index].convention = AccessConvention.Read
+                    &named_moves.push(index)
+                }
+                else -> convention = AccessConvention.Move
+            }
+        }
         &params.push(SemaCallParam{label: "arg{index}", name: "arg{index}", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: convention, ty: Val(values[index].ty), variadic: false})
     }
-    ownership_args := args
     ownership := sema_ownership_check_call_arguments(&state, callee, params, &ownership_args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
+    loop index in named_moves {
+        if !sema_ownership_mark_unmarked_move(&state, args[index].expr, scopes, "`{callee}`", &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     loop index in 0..<values.len() {
         if ownership_args[index].flags.implicit_clone || ownership_args[index].flags.shared_auto_clone -> values[index] = sema_tir_expr(values[index].ty, TExprKind.Clone{value: values[index], fact: tir_call_arg_copy_fact(ownership_args[index].flags.shared_auto_clone)}, values[index].span)
     }
