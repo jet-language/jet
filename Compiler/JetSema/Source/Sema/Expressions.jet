@@ -2276,7 +2276,17 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
         if receiver_canonical -> inference_ty = sema_type_resolve_declared(graph, nominal.ty, graph.modules[owner_index].module_identity)
         owner_inference :: sema_infer_registered_nominal(nominal, inference_ty, program.registration_graph, caller_module, caller_package, environment.generic_params, lookup_type, owner_type_args, None, span, &diagnostics) ?? next
         if !owner_inference.complete || !owner_inference.compatible -> next
-        owner_type := sema_inference_substitute_type_bindings(nominal.ty, owner_inference.substitutions)
+        // A canonical receiver meets its owner by identity (Rust
+        // `struct_owner_module` names the owner; the receiver is never
+        // re-read in the caller's module): the candidate's receiver is the
+        // declaration's type as its own module names it, so a bare leaf the
+        // caller cannot see (`core.crypto`'s `Digest256`) still matches.
+        owner_declared := nominal.ty
+        if receiver_canonical {
+            owner_generics :: loop param in nominal.generic_params -> TGenericParam{name: param.name, bounds: [SymbolID]{}}
+            owner_declared = sema_type_resolve_declared_with_generics(graph, nominal.ty, graph.modules[owner_index].module_identity, owner_generics)
+        }
+        owner_type := sema_inference_substitute_type_bindings(owner_declared, owner_inference.substitutions)
         written_before :: candidates.len()
         loop function in nominal.methods {
             if function.symbol.name != method || function.parameters.len() == 0 -> next
