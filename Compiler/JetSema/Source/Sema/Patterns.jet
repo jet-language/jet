@@ -143,19 +143,23 @@ fn sema_pattern_union_tag(ty: Type) -> String Never! {
 }
 
 fn sema_pattern_core_payload(owner: String, variant: String) -> [Type]? {
-    if owner == {
-        "Dyn" | "JSON" -> if variant == {
+    if sema_data_is_json_name(owner) {
+        return if variant == {
             "Null" -> Val([Type]{})
             "Bool" -> Val([Type.Bool])
             "Int" -> Val([Type.Int])
             "Float" -> Val([Type.Float])
             "Text" -> Val([Type.String])
-            "Array" -> Val([Type.List{element: Type.Named{name: "Data"}}])
-            "Object" -> Val([Type.Map{key: Type.String, key_span: None, value: Type.Named{name: "Data"}}])
-            "Number" -> Val([Type.String])
             "Bytes" -> Val([Type.List{element: Type.IntN{signed: false, bits: 8}}])
+            "DateTime" -> Val([Type.Named{name: "ZonedDateTime"}])
+            "Array" -> Val([Type.List{element: sema_dyn_type()}])
+            // D-DATATREE-ORDER1=A: an object is its fields in arrival order.
+            "Object" -> Val([sema_data_object_pairs_type()])
+            "Number" -> Val([Type.String])
             else -> None
         }
+    }
+    if owner == {
         // D-ENCSTREAM-SURFACE1=A: the canonical twelve generated payload rows.
         "DataEvent" -> core_enum_variant_payload(owner, variant)
         "Key" -> if variant == {
@@ -244,7 +248,7 @@ fn sema_pattern_payload(subject_ty: Type, variant: String, env: SemaScopeEnviron
         &diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't match `{type_name(normalized)}`", "variant patterns only work on enum values", "match a value with a pattern for its type"))
         return result
     }
-    if owner_name == "Dyn" || owner_name == "JSON" || owner_name == "DataEvent" || owner_name == "Key" {
+    if sema_data_is_json_name(owner_name) || owner_name == "DataEvent" || owner_name == "Key" {
         result.range_forbidden = true
         core_payload :: sema_pattern_core_payload(owner_name, variant)
         result.types = core_payload ?? [Type]{}
