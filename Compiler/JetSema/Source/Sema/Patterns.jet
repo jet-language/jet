@@ -44,6 +44,7 @@ use jet_foundation.[
     type_identity_equal,
     tir_pattern_key_identity,
     type_name,
+    type_union_member_tag,
 ]
 
 struct SemaCheckedPattern {
@@ -138,8 +139,10 @@ fn sema_pattern_variant_types(payload: VariantPayload, nominal: SemaRegistration
     }
 }
 
+// D-UNIONTYPE1=A (Rust `union_member_tag`): the tag an arm names for one
+// union member, read without module qualifiers (`.LocalDate`, `.M__String_`).
 fn sema_pattern_union_tag(ty: Type) -> String Never! {
-    type_name(sema_pattern_unwrap_tags(ty))
+    type_union_member_tag(sema_pattern_unwrap_tags(ty))
 }
 
 fn sema_pattern_core_payload(owner: String, variant: String) -> [Type]? {
@@ -190,10 +193,10 @@ fn sema_pattern_core_enum_payload(owner_name: String, variant: String, span: Spa
     result
 }
 
-// D-ERR-CASES1=A: the tag of the one union member whose enum declares the
-// case `variant`, when `variant` is not itself a member tag. `None` for an
+// D-ERR-CASES1=A: the one union member whose enum declares the case
+// `variant`, when `variant` is not itself a member tag. `None` for an
 // unknown or ambiguous case, which reaches the ordinary E0305 member check.
-fn sema_pattern_flat_union_owner(carrier: Type, variant: String, env: SemaScopeEnvironment, program: SemaProgramTables, span: Span) -> String? {
+fn sema_pattern_flat_union_owner(carrier: Type, variant: String, env: SemaScopeEnvironment, program: SemaProgramTables, span: Span) -> Type? {
     members :: if carrier == {
         .Union(values) -> values
         else -> [Type]{}
@@ -201,10 +204,10 @@ fn sema_pattern_flat_union_owner(carrier: Type, variant: String, env: SemaScopeE
     loop member in members {
         if sema_pattern_union_tag(member) == variant -> return None
     }
-    owners := [String]{}
+    owners := [Type]{}
     loop member in members {
         probe := [Diagnostic]{}
-        if sema_pattern_payload(member, variant, env, program, span, &probe).known -> &owners.push(sema_pattern_union_tag(member))
+        if sema_pattern_payload(member, variant, env, program, span, &probe).known -> &owners.push(member)
     }
     if owners.len() != 1 -> return None
     Val(owners[0])
@@ -527,9 +530,9 @@ fn sema_pattern_validate_variant(subject_ty: Type, variant: String, written_slot
     // D-ERR-CASES1=A: a case that exactly one union member declares may be
     // matched flat (`.Err(.NotFound(w))` over `FindError | ParseError`); it is
     // checked as the member arm `.FindError(.NotFound(w))`.
-    if sema_pattern_flat_union_owner(carrier, variant, env, program, span) == .Val(owner_tag) {
+    if sema_pattern_flat_union_owner(carrier, variant, env, program, span) == .Val(owner) {
         flat :: Pattern.Variant{variant: variant, bindings: written_slots, leading_dot: leading_dot, span: span}
-        return sema_pattern_validate_variant(subject_ty, owner_tag, [PatSlot.Nested{pattern: flat}], true, span, env, program, &writes, &state, &tail_store, &context, &diagnostics, mutable)
+        return sema_pattern_validate_variant(subject_ty, sema_pattern_union_tag(owner), [PatSlot.Nested{pattern: flat}], true, span, env, program, &writes, &state, &tail_store, &context, &diagnostics, mutable)
     }
     // D-FACT-ENUM-TIR: a compiler-owned fact enum has no registered nominal.
     fact_enum :: sema_fact_enum_pattern(carrier, variant, written_slots, leading_dot, span, env, program, &diagnostics)

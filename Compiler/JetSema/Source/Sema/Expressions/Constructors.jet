@@ -544,7 +544,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
             }
             // D-ERR-CASES1=A: a case that exactly one union member declares
             // builds that member.
-            .Union(_) -> sema_pattern_flat_union_owner(normalized, variant, environment, program, span) ?? ""
+            .Union(_) -> if sema_pattern_flat_union_owner(normalized, variant, environment, program, span) == .Val(owner) -> type_name(sema_pattern_unwrap_tags(owner)) else -> ""
             else -> ""
         }
         if resolved_name == "" {

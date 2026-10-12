@@ -571,6 +571,63 @@ fn type_name(ty: Type) -> String Never! {
     }
 }
 
+// D-UNIONTYPE1=A (Rust `AST::union_member_tag`): the tag a union pattern arm
+// names for one member. Rust spells a declared member by its own name, so
+// every nominal reads without its module qualifier (`module::LocalDate` is
+// `LocalDate`); a compound spelling is sanitized into an identifier
+// (`[String]` is `M__String_`).
+fn type_union_member_tag(ty: Type) -> String Never! {
+    type_union_member_tag_name(type_name(type_unqualified_nominals(ty)))
+}
+
+// Rust `union_member_tag`'s sanitizer over one written spelling.
+fn type_union_member_tag_name(raw: String) -> String Never! {
+    safe := true
+    loop byte in raw.bytes() {
+        value := Int.from_u8(byte)
+        if !((value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) || value == 95) {
+            safe = false
+            break
+        }
+    }
+    if safe && raw.len() > 0 -> return raw.copy()
+    bytes := [U8]{77, 95}
+    loop byte in raw.bytes() {
+        value := Int.from_u8(byte)
+        if {
+            (value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) -> &bytes.push(byte)
+            value < 128 -> &bytes.push(U8{95})
+            value >= 192 -> &bytes.push(U8{95})
+            else -> {}
+        }
+    }
+    String.from_bytes(bytes) ?? "M_"
+}
+
+// `ty` with each nominal head read without its `module::` qualifier.
+fn type_unqualified_nominals(ty: Type) -> Type Never! {
+    if ty == {
+        .Named(name) -> Type.Named{name: type_unqualified_name(name)}
+        .Apply(name, args) -> Type.Apply{name: type_unqualified_name(name), args: loop arg in args -> type_unqualified_nominals(arg)}
+        .List(inner) -> Type.List{element: type_unqualified_nominals(inner)}
+        .Shared(inner) -> Type.Shared{inner: type_unqualified_nominals(inner)}
+        .Option(inner) -> Type.Option{inner: type_unqualified_nominals(inner)}
+        .Map(key, key_span, value) -> Type.Map{key: type_unqualified_nominals(key), key_span: key_span, value: type_unqualified_nominals(value)}
+        .Result(ok, err) -> Type.Result{ok: type_unqualified_nominals(ok), err: type_unqualified_nominals(err)}
+        .FixedList(elem, len) -> Type.FixedList{elem: type_unqualified_nominals(elem), len: len}
+        .Tagged(marker, inner) -> Type.Tagged{marker: marker, inner: type_unqualified_nominals(inner)}
+        .Union(members) -> Type.Union{members: loop member in members -> type_unqualified_nominals(member)}
+        .Tuple(fields) -> Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: type_unqualified_nominals(field.ty)}}
+        else -> ty.copy()
+    }
+}
+
+fn type_unqualified_name(name: String) -> String Never! {
+    leaf := name
+    loop part in name.split("::") -> leaf = part
+    leaf
+}
+
 fn function_parameter_names(params: [Type], param_contract: [CallContractRow]?) -> String Never! {
     names := [String]{}
     contracts :: param_contract ?? [CallContractRow]{}

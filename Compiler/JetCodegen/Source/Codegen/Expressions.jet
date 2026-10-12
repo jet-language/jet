@@ -167,6 +167,8 @@ use jet_foundation.[
     tir_user_local,
     type_identity_key,
     type_name,
+    type_union_member_tag,
+    type_union_member_tag_name,
 ]
 use jet_sema.[
     SemaCheckedForeignParam,
@@ -402,38 +404,8 @@ fn jet_codegen_binary_dispatch(builder: &JetCodegenBuilder, program: JetCodegenP
     MIRBinaryDispatch.Primitive
 }
 
-fn jet_codegen_union_member_tag_name(raw: String) -> String Never! {
-    safe := true
-    loop byte in raw.bytes() {
-        value := Int.from_u8(byte)
-        if {
-            value < 128 && !((value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) || value == 95) -> {
-                safe = false
-                break
-            }
-            value >= 128 -> {
-                safe = false
-                break
-            }
-            else -> {}
-        }
-    }
-    if safe && raw.len() > 0 -> return raw.copy()
-    bytes := [U8]{77, 95}
-    loop byte in raw.bytes() {
-        value := Int.from_u8(byte)
-        if {
-            (value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) -> &bytes.push(byte)
-            value < 128 -> &bytes.push(U8{95})
-            value >= 192 -> &bytes.push(U8{95})
-            else -> {}
-        }
-    }
-    String.from_bytes(bytes) ?? "M_"
-}
-
 fn jet_codegen_union_member_tag(ty: Type) -> String Never! {
-    jet_codegen_union_member_tag_name(type_name(ty))
+    type_union_member_tag_name(type_name(ty))
 }
 
 fn jet_codegen_is_move_kind(kind: TExprKind) -> Bool Never! {
@@ -3963,7 +3935,7 @@ fn jet_codegen_lower_try_failure_conversion(builder: &JetCodegenBuilder, program
                     matched := false
                     loop member in members {
                         if type_identity_key(member) == type_identity_key(source_error) {
-                            if jet_codegen_union_member_tag(member) != jet_codegen_union_member_tag_name(tag_name) -> panic("checked union widening tag disagrees with its source member")
+                            if jet_codegen_union_member_tag(member) != type_union_member_tag_name(tag_name) -> panic("checked union widening tag disagrees with its source member")
                             matched = true
                         }
                     }
@@ -3973,7 +3945,7 @@ fn jet_codegen_lower_try_failure_conversion(builder: &JetCodegenBuilder, program
             }
             union_type := jet_codegen_lower_type_for_function(target, builder, program)
             identity :: union_type.identity ?? panic("checked union widening target has no MIR identity")
-            variant := jet_codegen_union_member_tag_name(tag_name)
+            variant := type_union_member_tag_name(tag_name)
             return jet_codegen_emit_value(&builder, program, span, target, MIROperation.Enum{type_id: identity, variant: variant, args: [MIREnumArg]{MIREnumArg{field: None, value: error, boxed: false}}})
         }
         .Never | .ProtocolExit -> panic("diverging try conversion was lowered through the value conversion path")
@@ -5840,7 +5812,7 @@ fn jet_codegen_pattern_variant_owner(builder: JetCodegenBuilder, program: JetCod
         identity :: jet_codegen_lower_type_for_function(subject_type, builder, program).identity ?? panic("checked union pattern subject has no MIR identity")
         loop member in members {
             member_tag :: jet_codegen_union_member_tag(member)
-            if member_tag == variant || type_name(jet_codegen_unwrap_pattern_tags(member)) == variant -> return JetCodegenVariantOwner{owner: identity, variant: member_tag, union_member: Val(member)}
+            if member_tag == variant || type_union_member_tag(jet_codegen_unwrap_pattern_tags(member)) == variant -> return JetCodegenVariantOwner{owner: identity, variant: member_tag, union_member: Val(member)}
         }
         panic("checked union pattern names no member of its subject")
     }
