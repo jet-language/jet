@@ -168,7 +168,6 @@ use jet_foundation.[
     type_identity_key,
     type_name,
     type_union_member_tag,
-    type_union_member_tag_name,
 ]
 use jet_sema.[
     SemaCheckedForeignParam,
@@ -404,8 +403,11 @@ fn jet_codegen_binary_dispatch(builder: &JetCodegenBuilder, program: JetCodegenP
     MIRBinaryDispatch.Primitive
 }
 
+// Rust `AST::union_member_tag`: one spelling for both the synthetic union
+// definition's variants (jet_codegen_union_mir_member_tag) and every use, so
+// a declared member reads without its module qualifier.
 fn jet_codegen_union_member_tag(ty: Type) -> String Never! {
-    type_union_member_tag_name(type_name(ty))
+    type_union_member_tag(ty)
 }
 
 fn jet_codegen_is_move_kind(kind: TExprKind) -> Bool Never! {
@@ -3929,27 +3931,26 @@ fn jet_codegen_lower_try_failure_conversion(builder: &JetCodegenBuilder, program
             route := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.errors", "apply_conversion", "jet_err_apply_conversion", 3, [Bool]{false, false, false}, None, TFailureCarrier.Infallible, MIRPreludeABI.Value)
             return jet_codegen_emit_static_prelude_call(&builder, program, span, target, route, [MIRValueID]{converted, source_name, target_name})
         }
-        .WidenUnion(_, tag_name) -> {
+        .WidenUnion(_, _) -> {
             target := if carrier == {
                 .Result(_, error_type) -> error_type
                 else -> panic("checked error union widening has no Result failure carrier")
             }
+            variant := ""
             if target == {
                 .Union(members) -> {
-                    matched := false
                     loop member in members {
                         if type_identity_key(member) == type_identity_key(source_error) {
-                            if jet_codegen_union_member_tag(member) != type_union_member_tag_name(tag_name) -> panic("checked union widening tag disagrees with its source member")
-                            matched = true
+                            if variant != "" -> panic("checked union widening source matches two target members")
+                            variant = jet_codegen_union_member_tag(member)
                         }
                     }
-                    if !matched -> panic("checked union widening source is absent from the target union")
+                    if variant == "" -> panic("checked union widening source is absent from the target union")
                 }
                 else -> panic("checked union widening target is not a structural union")
             }
             union_type := jet_codegen_lower_type_for_function(target, builder, program)
             identity :: union_type.identity ?? panic("checked union widening target has no MIR identity")
-            variant := type_union_member_tag_name(tag_name)
             return jet_codegen_emit_value(&builder, program, span, target, MIROperation.Enum{type_id: identity, variant: variant, args: [MIREnumArg]{MIREnumArg{field: None, value: error, boxed: false}}})
         }
         .Never | .ProtocolExit -> panic("diverging try conversion was lowered through the value conversion path")

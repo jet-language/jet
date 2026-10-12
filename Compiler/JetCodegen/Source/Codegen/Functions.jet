@@ -2781,6 +2781,9 @@ fn jet_codegen_union_mir_member_tag(ty: MIRType) -> String {
     base := String.from_bytes(bytes[start..<bytes.len()]) ?? panic("canonical union member name is not valid UTF-8")
     suffix := ""
     if before_args.len() < raw.len() -> suffix = String.from_bytes(raw.bytes()[before_args.bytes().len()..<raw.bytes().len()]) ?? panic("canonical union generic name is not valid UTF-8")
+    // A nominal without arguments displays as `Name<>`; Rust union_member_tag
+    // spells it `Name`, as every use site does.
+    if suffix == "<>" -> suffix = ""
     type_union_member_tag_name("{base}{suffix}")
 }
 
