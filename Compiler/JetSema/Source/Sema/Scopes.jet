@@ -564,6 +564,10 @@ struct SemaCheckContext {
     failure_union_cases: [SemaFailureCase]{[SemaFailureCase]{}}
     failure_union_edges: [String]{[String]{}}
     failure_union_general: Bool{false}
+    // D-CONC-SPAWN1 (Rust `task_body_propagates`): a failure in this lambda
+    // body leaves through the enclosing callable's carrier. Every lambda body
+    // starts it false (a checking snapshot does not copy it) and harvests it.
+    task_body_propagates: Bool{false}
     // Rust `iter_borrowed` (E0507): the collections an active `loop x in xs`
     // reads across its body, so a change to one of them there is rejected.
     iter_borrowed: [String]{[String]{}}
@@ -1063,6 +1067,7 @@ fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Ne
             failure_union_cases: [SemaFailureCase]{},
             failure_union_edges: [String]{},
             failure_union_general: context.failure_union_general,
+            task_body_propagates: context.task_body_propagates,
             iter_borrowed: context.iter_borrowed.copy(),
             binding_initializer: context.binding_initializer,
             source_nesting: context.source_nesting,
@@ -1142,6 +1147,7 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
     context.value_tail_span = saved.value_tail_span
     context.failure_direct_source = saved.failure_direct_source
     context.failure_union_general = saved.failure_union_general
+    context.task_body_propagates = saved.task_body_propagates
     context.iter_borrowed = saved.iter_borrowed.copy()
     context.binding_initializer = saved.binding_initializer
     context.source_nesting = saved.source_nesting

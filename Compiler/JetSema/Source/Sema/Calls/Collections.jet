@@ -291,6 +291,7 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
             // owner from inside a callback (Rust sets `task_body_propagates`).
             if index == 0 && sema_call_collections_callback_takes_default_route(receiver_value.ty, method, value) {
                 context.failure_direct_source = true
+                context.task_body_propagates = true
                 &context.failure_edges.push("")
             }
             callback_mutable = if value.kind == {

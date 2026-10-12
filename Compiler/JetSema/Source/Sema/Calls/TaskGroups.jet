@@ -82,6 +82,9 @@ struct SemaTaskGroupState {
     // or failed sendability another way (E1103 at `.detach()`).
     detach_view_tasks: [String]{[String]{}}
     detach_unsound_tasks: [String]{[String]{}}
+    // D-CONC-SPAWN1: the lambda about to be checked is a `task` body. Its
+    // lambda check consumes the fact, so nested lambdas never see it.
+    spawn_body: Bool{false}
 }
 
 fn sema_taskgroup_state_init() -> SemaTaskGroupState Never! {
@@ -130,6 +133,7 @@ fn sema_taskgroup_state_snapshot(source: SemaTaskGroupState) -> SemaTaskGroupSta
         spawn_binding: source.spawn_binding,
         detach_view_tasks: source.detach_view_tasks.copy(),
         detach_unsound_tasks: source.detach_unsound_tasks.copy(),
+        spawn_body: source.spawn_body,
     }
 }
 
@@ -712,12 +716,15 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
     saved_binding := context.taskgroups.current_binding
     saved_binding_name := context.taskgroups.binding_name
     saved_spawn_binding := context.taskgroups.spawn_binding
+    saved_spawn_body := context.taskgroups.spawn_body
     context.taskgroups.in_spawn = true
     context.taskgroups.spawn_group_floor = context.taskgroups.stack.len()
     context.taskgroups.current_binding = None
     context.taskgroups.spawn_binding = saved_binding_name
     context.taskgroups.binding_name = None
+    context.taskgroups.spawn_body = if args[0].expr == {.Lambda(_) -> true else -> false}
     checked_body := sema_check_expression_with_lambda_escapes(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, Val(true), &diagnostics)
+    context.taskgroups.spawn_body = saved_spawn_body
     context.taskgroups.in_spawn = saved_in_spawn
     context.taskgroups.spawn_group_floor = saved_floor
     context.taskgroups.current_binding = saved_binding

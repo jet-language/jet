@@ -1684,6 +1684,12 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     lambda_parent_state := sema_ownership_state_snapshot(state)
     lambda_state := sema_ownership_state_snapshot(state)
     lambda_context := sema_check_context_snapshot(context)
+    // D-CONC-SPAWN1 (Rust `check_lambda`): this lambda is a `task` body when
+    // the spawn named it and no callable is expected of it. The fact and the
+    // propagation it harvests belong to this body alone, never a nested one.
+    task_body :: !inline_loop && expected == None && context.taskgroups.spawn_body
+    lambda_context.taskgroups.spawn_body = false
+    lambda_context.task_body_propagates = false
     if !inline_loop {
         lambda_context.loop_value_frames = [SemaLoopValueFrame]{}
         lambda_context.loop_break_flows = [SemaLoopBreakFlows]{}
@@ -1756,20 +1762,31 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         }
         else -> {
             lambda_scopes.return_type = child_return
-            // D-FAILURE-FOUNDATION1=A: a callback expected to return a Result
-            // propagates into that carrier. An unannotated callback whose
-            // expected function type returns a plain non-Unit value (or
-            // nothing), or that has no expected function type at all, infers
-            // its carrier from its first propagated call (the Rust reference's
-            // callback failure-carrier inference), so the closure's own type
-            // carries the failure. Every other callback has no failure route:
-            // a fallible call in it is E0403.
-            carrier_source := child_return
-            if expected_ret == .Val(.Result(_, _)) -> carrier_source = expected_ret
-            infers :: expected_ret != (Val(Type.Named{name: "Unit"})) && !sema_expression_lambda_type_is_result(expected_ret ?? Type.Named{name: "Unit"})
-            lambda_scopes.failure_carrier = if infers -> None else -> Val(sema_expression_failure_carrier(carrier_source ?? Type.Named{name: "Unit"}))
-            lambda_context.failure_inference = infers
-            lambda_context.inferred_failure_carrier = None
+            if task_body {
+                // Rust infers a callback carrier only for an expected
+                // callable; a `task` body has none. A failure it propagates
+                // leaves through the enclosing callable's carrier
+                // (`task_body_propagates`), and its Task element stays the
+                // body's success type.
+                lambda_scopes.failure_carrier = outer_failure_carrier
+                lambda_context.failure_inference = false
+                lambda_context.inferred_failure_carrier = None
+            } else {
+                // D-FAILURE-FOUNDATION1=A: a callback expected to return a Result
+                // propagates into that carrier. An unannotated callback whose
+                // expected function type returns a plain non-Unit value (or
+                // nothing), or that has no expected function type at all, infers
+                // its carrier from its first propagated call (the Rust reference's
+                // callback failure-carrier inference), so the closure's own type
+                // carries the failure. Every other callback has no failure route:
+                // a fallible call in it is E0403.
+                carrier_source := child_return
+                if expected_ret == .Val(.Result(_, _)) -> carrier_source = expected_ret
+                infers :: expected_ret != (Val(Type.Named{name: "Unit"})) && !sema_expression_lambda_type_is_result(expected_ret ?? Type.Named{name: "Unit"})
+                lambda_scopes.failure_carrier = if infers -> None else -> Val(sema_expression_failure_carrier(carrier_source ?? Type.Named{name: "Unit"}))
+                lambda_context.failure_inference = infers
+                lambda_context.inferred_failure_carrier = None
+            }
         }
     }
     loop_label := String?{None}
@@ -2063,6 +2080,10 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     }
     }
 
+    // D-CONC-SPAWN1 (Rust `fallible_propagation`): a `task` body that
+    // propagated into the enclosing carrier is not a total lambda, so it keeps
+    // its plain success type rather than taking the Never rail below.
+    if task_body && lambda_context.task_body_propagates -> lambda_work.meta.fallible_propagation = true
     success_ty := body_result_ty
     ret_ty := success_ty
     if expected_ret == {

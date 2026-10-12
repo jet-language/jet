@@ -3360,7 +3360,11 @@ fn jet_codegen_lower_core_closure_call(builder: &JetCodegenBuilder, program: Jet
             label_text = label ?? ""
             &values.push(jet_codegen_emit_value(&builder, program, expression.span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: label_text}}))
             // The checked Task element owns the worker ABI, including Never.
-            // Do not reconstruct it from the lambda body or the caller.
+            // Do not reconstruct it from the lambda body or the caller. A body
+            // that propagated into its enclosing carrier keeps its plain
+            // success element (D-CONC-SPAWN1), so the worker is infallible and
+            // its propagation edges lower as unreachable (Rust
+            // `lower_lambda_expecting_value_with_return` with the element).
             carrier_type := if expression.ty == {
                 .Apply(name, args) -> {
                     if name != "Task" || args.len() != 1 -> panic("checked task spawn in {builder.function.key} at {expression.span.start}..{expression.span.end} has no Task<carrier> type")

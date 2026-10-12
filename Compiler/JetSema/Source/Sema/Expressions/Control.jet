@@ -42,6 +42,7 @@ use jet_foundation.[
     ast_empty_call_arg_flags,
     diagnostic_with_detail,
     expr_span,
+    failure_contract_of_function,
     symbol_id,
     tir_symbol_local,
     type_identity_equal,
@@ -608,6 +609,20 @@ fn sema_failure_defer_obligation(callee: SemaFailureCallee?, diagnostics: &[Diag
     Val(TTryConvert.Never)
 }
 
+// #3708: whether `callee` is an unannotated function the bundle failure solve
+// projected onto its span-less `T Never!` contract ("inferred: none").
+fn sema_failure_callee_inferred_never(callee: SemaFailureCallee?, program: SemaProgramTables) -> Bool Never! {
+    found :: callee ?? return false
+    if program.registration_graph == .Val(graph) {
+        row :: graph.callable_rows.get(found.key) ?? return false
+        if row == .Function(module_index, index) {
+            declaration :: graph.modules[module_index].functions[index].declaration
+            if failure_contract_of_function(declaration.return_type, declaration.return_type_span) == .InferredNever(_) -> return true
+        }
+    }
+    false
+}
+
 // E2404: no declared route from the operand's failure domain to the caller's.
 // The `failure-domain:` detail keys the bundle-level one-root dedupe.
 fn sema_failure_domain_mismatch(expr: Expr?, span: Span, source: Type, target: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext) -> Diagnostic {
@@ -663,8 +678,15 @@ fn sema_expression_propagation_conversion(inner: TExpr, source_expr: Expr?, span
     operand :: sema_expr_unwrap_tag(inner.ty)
     if operand == {
         .Result(_, error) -> {
-            // `Never` is uninhabited whatever the caller's rail.
-            if sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) -> return Val(TTryConvert.Never)
+            // `Never` is uninhabited whatever the caller's rail. A callee the
+            // bundle failure solve projected onto `T Never!` still propagated
+            // the default `Err` in the Rust reference's one body check, which
+            // precedes that projection; a spawned task body records it so a
+            // recheck keeps the task element it was first checked with.
+            if sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) {
+                if context.taskgroups.in_spawn && sema_failure_callee_inferred_never(sema_failure_callee(source_expr, environment, program, scopes), program) -> context.task_body_propagates = true
+                return Val(TTryConvert.Never)
+            }
             callee :: sema_failure_callee(source_expr, environment, program, scopes)
             sema_failure_record_edge(callee, &context)
             target :: sema_failure_parent_error(error, scopes, &context) ?? {
@@ -683,26 +705,26 @@ fn sema_expression_propagation_conversion(inner: TExpr, source_expr: Expr?, span
             // callee may publish its failure by the declared spelling
             // (`NetError`) while the caller's contract carries the canonical
             // identity; both name one nominal type in this module.
-            if type_identity_equal(error, target) || type_identity_equal(sema_expr_expected_type(error, environment, program), sema_expr_expected_type(target, environment, program)) -> return Val(TTryConvert.NoConversion)
-            if normalized_target == (Type.Named{name: "Err"}) && sema_expr_unwrap_tag(error) == Type.String -> return Val(TTryConvert.DefaultErr)
+            if type_identity_equal(error, target) || type_identity_equal(sema_expr_expected_type(error, environment, program), sema_expr_expected_type(target, environment, program)) -> return sema_expression_propagation_taken(&context, TTryConvert.NoConversion)
+            if normalized_target == (Type.Named{name: "Err"}) && sema_expr_unwrap_tag(error) == Type.String -> return sema_expression_propagation_taken(&context, TTryConvert.DefaultErr)
             widened :: sema_expression_try_union_conversion(normalized_target, error)
-            if widened != None -> return widened
-            if sema_failure_declared_conversion(error, target, scopes) == .Val(key) -> return Val(TTryConvert.Typed{fn_name: key, source: error, target: target})
-            if sema_prelude_error_conversion_key(error, target, environment, program) == .Val(key) -> return Val(TTryConvert.Typed{fn_name: key, source: error, target: target})
+            if widened == .Val(widening) -> return sema_expression_propagation_taken(&context, widening)
+            if sema_failure_declared_conversion(error, target, scopes) == .Val(key) -> return sema_expression_propagation_taken(&context, TTryConvert.Typed{fn_name: key, source: error, target: target})
+            if sema_prelude_error_conversion_key(error, target, environment, program) == .Val(key) -> return sema_expression_propagation_taken(&context, TTryConvert.Typed{fn_name: key, source: error, target: target})
             if normalized_target == (Type.Named{name: "Err"}) {
                 &diagnostics.push(sema_failure_no_default_conversion(error, span, implicit))
                 return None
             }
             // D9: a `_` hole domain already has its one E0119 at the
             // signature; keep the success value typed and report nothing more.
-            if normalized_target == (Type.Named{name: "_"}) -> return Val(TTryConvert.NoConversion)
+            if normalized_target == (Type.Named{name: "_"}) -> return sema_expression_propagation_taken(&context, TTryConvert.NoConversion)
             &diagnostics.push(sema_failure_domain_mismatch(source_expr, span, error, target, environment, program, scopes, context))
             return sema_failure_defer_obligation(callee, &diagnostics)
         }
         .Option(value) -> {
             if scopes.failure_carrier == .Val(parent) {
                 if parent == .Optional(target_value) {
-                    if type_identity_equal(value, target_value) -> return Val(TTryConvert.NoConversion)
+                    if type_identity_equal(value, target_value) -> return sema_expression_propagation_taken(&context, TTryConvert.NoConversion)
                 }
             }
             &diagnostics.push(sema_error("E0403", span, "`?` on `{type_name(inner.ty)}` needs a function that returns the same optional type", "propagation passes `None` back to the caller", "declare `{type_name(inner.ty)}` as the optional return type, or handle it with `??`"))
@@ -713,6 +735,13 @@ fn sema_expression_propagation_conversion(inner: TExpr, source_expr: Expr?, span
             return None
         }
     }
+}
+
+// D-CONC-SPAWN1 (Rust `task_body_propagates`): a failure that leaves this
+// body through the enclosing carrier. A lambda scopes and harvests the fact.
+fn sema_expression_propagation_taken(context: &SemaCheckContext, conversion: TTryConvert) -> TTryConvert? Never! {
+    context.task_body_propagates = true
+    Val(conversion)
 }
 
 // A conversion already carried by the AST is validated, never re-derived.
