@@ -5699,8 +5699,10 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
 
-    lowered := lower_functions(&sema_functions, &runtime_semantic_modules, load.source_files, request.compiler_threads, request.trace_sink, request.native_stop_points, jet_driver_resolved_package_edition(load))
+    lowered := lower_functions(&sema_functions, &runtime_semantic_modules, load.source_files, request.compiler_threads, request.trace_sink, request.native_stop_points, jet_driver_resolved_package_edition(load), kg.enabled)
     if request.trace_sink == .Val(sink) -> sink.end("lower", lowered.functions.len())
+    // JET_KEEP_GOING: each function whose lowering stopped lowered as a trap.
+    loop failure in lowered.lowering_failures -> jet_driver_keep_going_row(&kg, "lower", "{failure.name} [{failure.key}]", "TRAPPED", "lowered as a trap: lowering it stopped: {failure.message}", "{failure.source_file}:{failure.span.start}..{failure.span.end}")
     if lowered.functions.len() != sema_functions.len() {
         &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "MIR lowering did not return every checked function", "a successful lowering preserves the complete checked function set", "report this incomplete codegen result as a compiler defect"))
         if !kg.enabled -> return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Lower), false, trace)
