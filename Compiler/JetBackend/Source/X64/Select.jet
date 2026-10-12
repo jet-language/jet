@@ -1002,17 +1002,6 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             x64_select_lea(&emitter, locations, dst, address)
         }
         .Store(base, offset, value) -> {
-            base_reg :: x64_operand(&emitter, locations[base.value], X64_R10)
-            value_reg :: x64_operand(&emitter, locations[value.value], X64_R11)
-            if function.values[value.value].layout.size == 1 {
-                x64_store_u8(&emitter.code, base_reg, offset, value_reg)
-            } else if function.values[value.value].layout.size == 2 {
-                x64_store_u16(&emitter.code, base_reg, offset, value_reg)
-            } else if function.values[value.value].layout.size == 4 {
-                x64_store_u32(&emitter.code, base_reg, offset, value_reg)
-            } else {
-                x64_store(&emitter.code, base_reg, offset, value_reg)
-            }
             stored_reg :: x64_operand(&emitter, locations[value.value], X64_RAX)
             address :: x64_select_address(&emitter, locations, x64_memory_address(folds, base, offset))
             x64_store_indexed(&emitter.code, address.base, address.index, address.scale, address.disp, stored_reg, function.values[value.value].layout.size)

@@ -225,16 +225,22 @@ fn x64_store32(code: &[U8], base: Int, disp: Int, src: Int) Never! {
     x64_modrm_mem(&code, src, base, disp)
 }
 
+// Loads zero-extend into the full register: movzx (REX.W 0F B6/B7 /r) for
+// one and two bytes, mov r32 (8B /r) for four, mov r64 (REX.W 8B /r) for eight.
 fn x64_load_indexed(code: &[U8], dst: Int, base: Int, index: Int, scale: Int, disp: Int, size: Int) Never! {
     wide :: size != 4
     if wide || dst >= 8 || base >= 8 || index >= 8 -> x64_rex_indexed(&code, wide, dst, base, index)
-    if size == 1 -> x64_byte(&code, 0x0f)
-    x64_byte(&code, if size == 1 -> 0xb6 else -> 0x8b)
+    if size == 1 || size == 2 -> x64_byte(&code, 0x0f)
+    x64_byte(&code, if size == 1 -> 0xb6 else if size == 2 -> 0xb7 else -> 0x8b)
     x64_modrm_indexed(&code, dst, base, index, scale, disp)
 }
 
+// Stores write exactly `size` bytes: 88 /r for one (a bare REX selects
+// sil/dil/spl/bpl), the 66 operand-size prefix before any REX for two,
+// 89 /r for four and REX.W 89 /r for eight.
 fn x64_store_indexed(code: &[U8], base: Int, index: Int, scale: Int, disp: Int, src: Int, size: Int) Never! {
     wide :: size == 8
+    if size == 2 -> x64_byte(&code, 0x66)
     if wide || src >= 8 || base >= 8 || index >= 8 || (size == 1 && src >= 4) -> x64_rex_indexed(&code, wide, src, base, index)
     x64_byte(&code, if size == 1 -> 0x88 else -> 0x89)
     x64_modrm_indexed(&code, src, base, index, scale, disp)
@@ -281,19 +287,6 @@ fn x64_load_u32(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
     x64_rex(&code, false, dst, base)
     x64_byte(&code, 0x8b)
     x64_modrm_mem(&code, dst, base, disp)
-}
-
-fn x64_store_u16(code: &[U8], base: Int, disp: Int, src: Int) Never! {
-    x64_byte(&code, 0x66)
-    x64_rex(&code, false, src, base)
-    x64_byte(&code, 0x89)
-    x64_modrm_mem(&code, src, base, disp)
-}
-
-fn x64_store_u32(code: &[U8], base: Int, disp: Int, src: Int) Never! {
-    x64_rex(&code, false, src, base)
-    x64_byte(&code, 0x89)
-    x64_modrm_mem(&code, src, base, disp)
 }
 
 fn x64_integer_width(code: &[U8], dst: Int, src: Int, bytes: Int) Never! {
