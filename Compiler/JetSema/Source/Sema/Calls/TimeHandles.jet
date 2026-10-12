@@ -1,4 +1,4 @@
-// Checked deterministic time/random handles and Duration rounding.
+// Checked deterministic time/random handles and the built-in Duration methods.
 use jet_foundation.[
     AccessConvention,
     CallArg,
@@ -382,7 +382,62 @@ fn sema_call_try_time_handle_method(receiver: Expr, receiver_value: TExpr, metho
     if receiver_name == "Clock" -> return sema_time_clock_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if receiver_name == "RNG" -> return sema_time_rng_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if receiver_name == "Duration" {
+        if method != "round" -> return sema_time_duration_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return sema_time_civil_method(receiver, receiver_value, receiver_name, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     SemaMethodSpecialCheck{handled: false, value: None}
+}
+
+// Rust `duration_method_return` / `builtin_method_arg_types` (D-SHAPE-DURATIONCONVERT1=A,
+// D-TIMERES1=A): the built-in Duration readers. Another name or arity is no
+// Duration method.
+fn sema_time_duration_result(method: String, argc: Int) -> Type? {
+    return if {
+        method == "in" && argc == 1 -> Val(Type.Result{ok: Type.Int, err: sema_time_named("RangeError")})
+        method == "is_zero" && argc == 0 -> Val(Type.Bool)
+        method == "total_seconds" && argc == 0 -> Val(Type.Int)
+        method == "difference" && argc == 1 -> Val(sema_time_named("Duration"))
+        (method == "abs" || method == "negated") && argc == 0 -> Val(sema_time_named("Duration"))
+        method == "sign" && argc == 0 -> Val(Type.Int)
+        method == "total_in" && argc == 1 -> Val(Type.Float)
+        else -> None
+    }
+}
+
+fn sema_time_duration_args(method: String) -> [Type] Never! {
+    return if {
+        method == "in" -> [Type]{sema_time_named("DurationUnit")}
+        method == "difference" -> [Type]{sema_time_named("Duration")}
+        method == "total_in" -> [Type]{Type.String}
+        else -> [Type]{}
+    }
+}
+
+// Rust `handle_method_op`: a written `.Unit` argument of `.in(…)` names its
+// unit on the operation.
+fn sema_time_duration_op(method: String, args: [CallArg]) -> THandleOp Never! {
+    return if {
+        method == "in" -> {
+            unit := String?{None}
+            // The argument has already checked as a `DurationUnit`, so a
+            // written `.Unit` is one of its variants.
+            if args[0].expr == .EnumLit(_, variant, _, _, _, _) -> unit = Val(variant)
+            THandleOp.DurationIn{unit: unit}
+        }
+        method == "is_zero" -> THandleOp.DurationIsZero
+        method == "total_seconds" -> THandleOp.DurationTotalSeconds
+        method == "difference" -> THandleOp.DurationDifference
+        method == "abs" -> THandleOp.DurationAbs
+        method == "negated" -> THandleOp.DurationNegated
+        method == "sign" -> THandleOp.DurationSign
+        else -> THandleOp.DurationTotalIn
+    }
+}
+
+fn sema_time_duration_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    result :: sema_time_duration_result(method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    required :: sema_time_duration_args(method)
+    values :: sema_time_check_values(args, required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_time_check_method_ownership(receiver, method, args, required, AccessConvention.Read, span, &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    sema_time_finish_handle(receiver_value, sema_time_duration_op(method, args), values, result, "", "Duration.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }
