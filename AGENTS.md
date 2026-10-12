@@ -226,9 +226,33 @@ under `.agents/skills` and `Tools/tower/skills`.
 ## Find every issue at once
 
 This is a standing owner order, repeated many times; violating it wastes hours.
-Never discover problems serially, where one blocker is found, fixed and rerun
-to find the next. Before fixing anything, collect every issue in one pass:
+It binds every agent on every step of every effort, whether or not the owner
+repeats it, and nothing overrides it short of an explicit owner instruction to
+rerun one thing. Never discover problems serially, where one blocker is found,
+fixed and rerun to find the next. Before fixing anything, collect every issue
+in one pass:
 
+- **Expensive launches are gated, never bypassed.** A stage0, self-hosting
+  chain, release build or any other run costing more than about 15 minutes
+  starts only through tooling that refuses to launch without a collect-all
+  preflight receipt for that exact commit
+  (`~/.cache/jet-dev/scratch/Main/preflight.mjs`, enforced by
+  `prepare-sharded-chain.mjs`). The receipt runs every later stage's cheap
+  probe on the new sources (parse, generators, comptime-host count, and the
+  last good factory's keep-going censuses of every unit through every phase it
+  can reach). Every row is clean or carries a written disposition naming the
+  commit in this launch that fixes it. Launching to "see what fails next" is
+  forbidden.
+- **Every compiler phase has a collect-all mode, or that is the first defect.**
+  Parse, imports, sema, comptime, codegen lowering, backend lowering, machine
+  emission, object, link and run must each record a failing item as a census
+  row, trap or skip it, and continue. A process-stopping `panic` that guards
+  an assumption about checked input is a collect-all defect: convert it to a
+  keep-going report before relying on that phase to gate anything.
+- **Use waiting time to run later stages early.** While an expensive build
+  runs, probe every later stage with the best available artifact (the last
+  good factory, an older compiler, a dry run) and fix what they find in the
+  same batch.
 - **Run every stage in collect-all mode.** Use the existing keep-going
   mechanisms (`JET_KEEP_GOING=1` all-phases reports,
   `JET_DEBUG_LOWER_ALL=1` lowering sweeps, per-error census scripts) so one run
