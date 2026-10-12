@@ -2012,7 +2012,14 @@ fn jet_codegen_lower_inline_block(builder: &JetCodegenBuilder, program: JetCodeg
             // Unit (at the block's own type it mistypes a non-Unit result).
             jet_codegen_emit_value(&builder, program, expression.span, Type.Named{name: "Unit"}, MIROperation.Constant{value: MIRConstant.Unit})
         }
-        else -> panic("checked inline contract block has no expression tail")
+        else -> {
+            // Rust lower_inline_block: a statement tail can diverge through
+            // an exhaustive table or an if, not only through a syntactic
+            // return/break; a Unit block also ends in a statement.
+            jet_codegen_lower_statement(&builder, program, body[body.len() - 1])
+            if jet_codegen_current_is_open(builder, program) && expression.ty != (Type.Named{name: "Unit"}) -> panic("checked inline contract block has no expression tail")
+            jet_codegen_emit_value(&builder, program, expression.span, Type.Named{name: "Unit"}, MIROperation.Constant{value: MIRConstant.Unit})
+        }
     }
     result
 }
