@@ -2379,6 +2379,7 @@ fn sema_keep_going_stub(func: Func, owner_id: SymbolID, function_kind: TFuncKind
     stub.pre = [ContractClause]{}
     stub.post = [ContractClause]{}
     stub.body = [Stmt]{Stmt.Expr{expr: Expr.Todo{span: func.span, expected_type: None}}}
+    stub.return_type_span = sema_keep_going_trap_return_span(func)
     discarded_diagnostics := [Diagnostic]{}
     discarded_call_facts := [SemaCallSiteFact]{}
     discarded_comptime_requests := [SemaComptimeRequest]{}
@@ -2386,6 +2387,13 @@ fn sema_keep_going_stub(func: Func, owner_id: SymbolID, function_kind: TFuncKind
     checked := sema_function_check(stub, owner_id, function_kind, raw_protocol_return, &environment, program, &scopes, host_hooks, &discarded_diagnostics, &discarded_call_facts, &discarded_comptime_requests, &discarded_name_references)
     if !checked.complete || checked.value == None -> return None
     Val(checked)
+}
+
+// D-DISCARD1 reads a function with no written return type as losing the value
+// of its last line (E0433). A trap's `todo` is a stop, never a value handed
+// to nobody, so the trap's placeholder return position counts as written.
+fn sema_keep_going_trap_return_span(func: Func) -> Span? Never! {
+    if func.return_type_span == None -> Val(func.span) else -> func.return_type_span
 }
 
 // Appends a keep-going trap; a trap that could not be built is one more
@@ -2695,7 +2703,7 @@ fn sema_keep_going_stub_source(func: Func) -> Func {
         head_pattern: func.head_pattern,
         params: func.params,
         return_type: func.return_type,
-        return_type_span: func.return_type_span,
+        return_type_span: sema_keep_going_trap_return_span(func),
         return_view_provenance: func.return_view_provenance,
         declared_return_view_provenance: func.declared_return_view_provenance,
         gc_return: func.gc_return,
