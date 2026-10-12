@@ -4175,6 +4175,12 @@ fn sema_check_expression(expr: Expr, expected: Type?, environment: SemaScopeEnvi
             }
         }
     }
+    // D-MEM-COPYSEM1=A (Rust `infer`, `implicit_copy_target`): a read view
+    // local read where its owned type is expected (`View<T>` at `[T]`)
+    // materializes one owned copy.
+    if expected == .Val(destination) && expr == .Ident(view_name, view_span) {
+        if sema_read_view_owning_read(view_name, destination, scopes, context) -> return sema_string_view_materialize(view_name, view_span, expected, environment, program, &scopes, &state, &context, &diagnostics)
+    }
     // Only a bare member chain can be handled there; testing that here keeps
     // the chain check's frame off every other expression level.
     if sema_expr_is_bare_member_chain(expr) {

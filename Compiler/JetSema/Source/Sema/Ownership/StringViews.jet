@@ -26,6 +26,7 @@ use jet_foundation.[
     ViewProvenanceMap,
     diagnostic_with_edit_grade,
     expr_span,
+    type_identity_equal,
 ]
 
 fn sema_string_view_copies_declaration(declaration: PolicyDeclaration) -> Bool Never! {
@@ -164,8 +165,8 @@ fn sema_string_view_check_read(name: String, span: Span, scopes: SemaScopeTable,
     sema_string_view_unsupported_use(name, "be used directly here", span, scopes, state, &diagnostics)
 }
 
-// D-MEM-COPYSEM1=A: a string view read at an owning `String` destination is
-// materialized into an owned copy (Rust `insert_implicit_copy`).
+// D-MEM-COPYSEM1=A: a string view, or a read view local, read at an owning
+// destination is materialized into an owned copy (Rust `insert_implicit_copy`).
 fn sema_string_view_materialize(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     previous_borrow := context.borrow_ctx
     previous_read := context.allow_string_view_read
@@ -188,6 +189,18 @@ fn sema_string_view_owning_read(value: Expr, destination: Type, scopes: SemaScop
         .Ident(name, _) -> sema_string_view_binding(scopes, name)
         else -> false
     }
+}
+
+// Rust `infer` with `implicit_copy_target`: outside a borrow position and
+// under the default copy policy, a `View<T>` local read where exactly its
+// owned type (`owned_type_for_read_view`: `[T]`, or `String` for
+// `View<str>`) is expected is an owning read.
+fn sema_read_view_owning_read(name: String, destination: Type, scopes: SemaScopeTable, context: SemaCheckContext) -> Bool Never! {
+    if scopes.copies_explicit || context.borrow_ctx -> return false
+    symbol :: sema_scope_resolve(scopes, name) ?? return false
+    source :: symbol.ty ?? return false
+    owned :: sema_copy_owned_view_type(source, false)
+    owned.materialized && type_identity_equal(owned.ty, destination)
 }
 
 // Rust `named_view_has_stable_owner`: the view's owner is a parameter (the
