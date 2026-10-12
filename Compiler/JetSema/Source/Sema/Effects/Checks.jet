@@ -986,12 +986,17 @@ fn sema_effect_is_call(expression: TExpr) -> Bool Never! {
 }
 
 // Compiler-built numeric operations (`1 / 3` as an exact `Fraction`, Decimal
-// and math-type arithmetic, numeric casts) have no callee body. Rust records
-// no effect for them, so one with no recorded call fact is pure, not an
-// unknown callee that forces the maximal row.
+// and math-type arithmetic, numeric casts, a `60s` Duration literal and
+// Duration scaling) have no callee body. Rust records no effect for them, so
+// one with no recorded call fact is pure, not an unknown callee that forces
+// the maximal row.
 fn sema_effect_is_numeric_builtin(expression: TExpr) -> Bool Never! {
     if expression.kind == {
         .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) -> true
+        .HandleMethod(_, operation, _) -> if operation == {
+            .DurationNew(_, _) | .DurationScale | .DurationDivide -> true
+            else -> false
+        }
         else -> false
     }
 }
