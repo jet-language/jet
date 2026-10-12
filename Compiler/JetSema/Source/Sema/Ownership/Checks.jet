@@ -828,6 +828,34 @@ fn sema_ownership_release_dead_views(state: &SemaOwnershipState, statement: Stmt
     state.loans = unbound
 }
 
+// Rust checks an assignment's target change (`check_lvalue_change`) before
+// it infers the value, so a view the value alone reads is not yet "used in
+// this statement": with no later use it is dead at the write. Release such
+// views before the target write check, as `view_is_live_now` would.
+fn sema_ownership_release_value_only_views(state: &SemaOwnershipState, target: LValue, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) {
+    target_expr :: if target == {
+        .Local(name, span) -> Expr.Ident{name: name, span: span}
+        .Field(base, field, span) -> Expr.Field{base: base, member: field, span: span}
+        .Index(base, index, span, kind) -> Expr.Index{base: base, index: index, span: span, kind: kind}
+    }
+    loop index in 0..<state.views.len() {
+        fact :: state.views[index]
+        if !fact.active || fact.lexical -> next
+        if sema_ownership_last_use_expr(target_expr, fact.carrier) || sema_ownership_name_live_after(fact.carrier, &tail_store, &context) -> next
+        descendant_live := false
+        loop child in state.views {
+            if child.active && child.lexical && sema_ownership_view_descends_from(state, child, fact.seq) {
+                descendant_live = true
+                break
+            }
+        }
+        if descendant_live -> next
+        state.views[index].active = false
+        remaining :: loop loan in state.loans if loan.carrier_fact_seq != fact.seq || loan.carrier_key != fact.carrier_key -> loan
+        state.loans = remaining
+    }
+}
+
 fn sema_ownership_declare_binding(state: &SemaOwnershipState, symbol: Symbol, parameter: Bool) Never! {
     if symbol.name == "_" -> return
     depth := state.scope_depth

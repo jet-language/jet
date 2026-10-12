@@ -3452,6 +3452,7 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
         }
         tir_op = Val(sema_stmt_binary_type(operator))
     }
+    sema_ownership_release_value_only_views(&state, LValue.Local{name: name, name_span: name_span}, &tail_store, &context)
     if !sema_ownership_check_lvalue_write(&state, LValue.Local{name: name, name_span: name_span}, scopes, &diagnostics) -> return None
     if !sema_stmt_move_direct(expr, &state, scopes, "the assignment to `{name}`", &diagnostics) -> return None
     if op == None -> sema_ownership_note_frozen_binding(&state, binding.symbol.id.key, expr, scopes)
@@ -4298,6 +4299,7 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
         }
         tir_op = Val(sema_stmt_binary_type(operator))
     }
+    sema_ownership_release_value_only_views(&state, target, &tail_store, &context)
     if !sema_ownership_check_lvalue_write(&state, target, scopes, &diagnostics) -> return None
     if !sema_stmt_move_direct(expr, &state, scopes, "the assignment", &diagnostics) -> return None
     if place.kind == {
