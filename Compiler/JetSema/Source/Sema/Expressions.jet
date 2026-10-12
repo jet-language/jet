@@ -2387,6 +2387,9 @@ fn sema_expr_declared_function_named(scopes: SemaScopeTable, name: String) -> Bo
 }
 
 fn sema_expr_check_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    // D-SHAPE-RESOURCE2=A: `close(^value)` is the ambient `Close` sugar ahead
+    // of every declared function (Rust `check_call_inner`).
+    if call.name == "close" -> return sema_call_check_ambient_close(call, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     // A loaded declaration owns the call even when Core also imports the name.
     if sema_expr_declared_function_named(scopes, call.name) {
         return sema_expr_check_declared_direct_call(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)

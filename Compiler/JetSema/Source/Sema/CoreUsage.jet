@@ -869,6 +869,12 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
                 sema_core_note_usage(&used, &spans, "core.text.fmt::interpolation", Val(call.name_span))
                 sema_core_note_usage(&used, &spans, "core.term::eprint", Val(call.name_span))
             }
+            // The prelude's `eprint` writes through the same `core.term.eprint`
+            // row with no `core.term` import of its own.
+            if call.name == "eprint" && sema_core_import_find(imports, call.name) == None {
+                sema_core_note_usage(&used, &spans, "core.text.fmt::interpolation", Val(call.name_span))
+                sema_core_note_usage(&used, &spans, "core.term::eprint", Val(call.name_span))
+            }
             row :: sema_core_import_find(imports, call.name)
             if row != None {
                 imported := row

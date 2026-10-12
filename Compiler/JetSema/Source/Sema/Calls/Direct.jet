@@ -2,6 +2,7 @@
 // Ordinary local names resolve through SemaScopeTable. Registration may pass a
 // specialized SemaCallDirectTarget for imported, overloaded, or Core routes.
 use jet_foundation.[
+    AccessConvention,
     BinOp,
     Call,
     CallArg,
@@ -279,6 +280,13 @@ fn sema_call_try_ambient_prelude(call: Call, expected: Type?, environment: SemaS
         "panic" -> sema_call_check_ambient_panic(call, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         "assert" -> sema_call_check_ambient_assert(call, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         "assert_eq" -> sema_call_check_ambient_assert_eq(call, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        // The readable prelude's `pub use core.term.[eprint]` (Rust opens it
+        // as a `core.term` item import unless the file is `#NoPrelude`).
+        "eprint" -> {
+            if sema_module_no_prelude(environment, program) -> return SemaDirectSpecialCheck{handled: false, value: None}
+            record :: core_call("core.term", "eprint") ?? return SemaDirectSpecialCheck{handled: false, value: None}
+            sema_call_check_term_eprint(record, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
         "Decimal" -> sema_call_check_value_constructor(call, "Decimal", [Type]{Type.String}, false, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         "Complex" -> sema_call_check_value_constructor(call, "Complex", [Type]{Type.Float, Type.Float}, false, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         else -> {
@@ -288,6 +296,34 @@ fn sema_call_try_ambient_prelude(call: Call, expected: Type?, environment: SemaS
             sema_call_check_value_constructor(call, call.name, components, true, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
     }
+}
+
+// D-SHAPE-RESOURCE2=A (Rust `check_call_inner`): `close(^value)` is ambient
+// sugar for the sole nominal `Close.close(^self)` protocol, ahead of every
+// declared function. It takes exactly one resource through the move marker,
+// whose type must implement `Close`, and produces nothing.
+fn sema_call_check_ambient_close(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if call.args.len() != 1 {
+        &diagnostics.push(sema_error("E0104", call.name_span, "`close` takes exactly one resource, got {call.args.len()}", "`close` consumes one value through its nominal `Close` implementation and the move marker `^`", "write `close(^resource)` with the move marker `^`"))
+        loop argument in call.args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return None
+    }
+    argument :: call.args[0]
+    value :: sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if argument.convention != AccessConvention.Move {
+        &diagnostics.push(sema_error("E0201", argument.span, "`close` takes ownership of its resource", "`Close.close(^self)` is consuming through the move marker `^`, so cleanup runs on exactly one owner", "write `close(^resource)` with the move marker `^`"))
+        return None
+    }
+    if program.registration_graph == .Val(graph) {
+        satisfies_close :: sema_type_bound_satisfied_with_generics(graph, value.ty, "Close", environment.module_identity, context.generic_params) ?? return None
+        if !satisfies_close {
+            shown :: type_name(value.ty)
+            &diagnostics.push(sema_error("E0905", expr_span(argument.expr), "`{shown}` isn't `Close`", "`{shown}` would need to implement `Close` before it can be used here", "write `impl {shown}: Close {{ … }}` with every required method"))
+            return None
+        }
+    }
+    if !sema_stmt_move_direct(argument.expr, &state, scopes, "`close`", &diagnostics) -> return None
+    Val(sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Close{value: value}, call.name_span))
 }
 
 // D-SIMD2 / D-LINALG1: the scalar slots of a built-in math value type's
