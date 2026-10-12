@@ -311,7 +311,7 @@ fn jet_codegen_reachable_core_rows(functions: [TFunc], candidates: ^[Bool], core
     loop pending.len() > 0 {
         caller :: &pending.pop() ?? { break }
         loop key in jet_codegen_core_reach_function_keys(functions[caller], functions, fmt_keys) {
-            target :: by_key.get(key) ?? next
+            target :: by_key.get(key) ?? by_key.get(jet_codegen_core_reach_template_key(key)) ?? next
             if !reachable[target] {
                 reachable[target] = true
                 &pending.push(target)
