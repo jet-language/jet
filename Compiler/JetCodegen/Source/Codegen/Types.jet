@@ -1374,6 +1374,10 @@ fn jet_codegen_resolve_field_by_name(modules: [SemaGraphModuleResult], current_m
             }
         }
     }
+    // A Core runtime record (`TextError`) has no declaration; its canonical
+    // Core field row names the member, keyed by the record's own key as the
+    // owner identity jet_codegen_mir_type_id_for_type gives it.
+    if identity == None && core_record_field(owner_key, member) != None -> return JetCodegenResolvedField{owner_key: owner_key, field_name: member}
     panic(jet_codegen_field_resolution_ice(function_key, owner_type, owner, member, "owner/member has no registered field"))
 }
 
@@ -1423,10 +1427,11 @@ fn jet_codegen_mir_type_id_for_type(modules: [SemaGraphModuleResult], current_mo
         else -> panic("checked declaration owner is not a nominal type")
     }
     identity := jet_codegen_find_nominal_identity(modules, current_module_identity, name, generic_names)
-    // A compiler-owned row (`FieldError`, `ModGrant`, ...) is its bare key.
-    if identity == None && jet_codegen_is_compiler_owned_row(name) -> return mir_type_id(name)
-    value :: identity ?? panic("checked declaration owner `{name}` has no registered nominal identity")
-    mir_type_id(value.key)
+    // Rust type_id_for: a key no declaration registers (a compiler-owned row
+    // such as `FieldError`, or a Core runtime record such as `Expired` and
+    // `TextError`) is the stable identity of its own key.
+    if identity == .Val(value) -> return mir_type_id(value.key)
+    mir_type_id(name)
 }
 
 fn jet_codegen_mir_trait_ref_for_symbol(modules: [SemaGraphModuleResult], symbol: SymbolID) -> MIRTraitRef Never! {
