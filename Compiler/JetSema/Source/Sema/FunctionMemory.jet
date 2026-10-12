@@ -217,7 +217,11 @@ fn sema_function_memory_collect_items(items: [Item], module_identity: String, to
                 }
             }
             .Impl(implementation) -> {
-                loop function in implementation.methods -> sema_function_memory_visit(&walk, module_identity, implementation.type_name, function, false, outer, declarations)
+                // An operator hook on a built-in scalar (`impl Float.Mul(Vec3)`)
+                // registers that scalar as its owner type, which has no nominal
+                // base name, so its rows are found under the free-function owner.
+                owner :: if sema_registration_builtin_scalar(implementation.type_name) == None -> implementation.type_name else -> ""
+                loop function in implementation.methods -> sema_function_memory_visit(&walk, module_identity, owner, function, false, outer, declarations)
             }
             .CodeModule(code_module) -> {
                 if code_module.body == .Val(body) -> sema_function_memory_collect_items(body, module_identity, false, outer, declarations, &walk)
