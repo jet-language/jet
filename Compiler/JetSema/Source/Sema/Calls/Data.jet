@@ -537,6 +537,9 @@ fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], span: 
     }
     expected_payload := sema_data_literal_expected(ty, variant)
     if private_number -> expected_payload = Val(Type.String)
+    // D-DATATREE-ORDER1=A (Rust `is_object_pairs_arg`): a pair-list literal or
+    // local keeps its arrival order; anything else is read as a Map.
+    if variant == "Object" && ty != (Type.Named{name: "DBValue"}) && args.len() == 1 && sema_data_object_pairs_argument(args[0].expr, scopes) -> expected_payload = Val(sema_data_object_pairs_type())
     expected_count := if expected_payload == None -> 0 else -> 1
     if args.len() != expected_count {
         sema_data_arity_diagnostic("{type_name(ty)}.{variant}", expected_count, args.len(), span, &diagnostics)
