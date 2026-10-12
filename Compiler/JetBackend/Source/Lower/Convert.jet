@@ -26,22 +26,26 @@ fn lower_convert_type(ty: MIRType) -> MIRType Never! {
 
 // Like lower_exact_arithmetic, eligibility selects only the machine fast path.
 // The runtime, not lowering, decides what a tagged Int / wide I64 means.
+// An inline Int is its own word, so the fast path passes `value` straight to
+// the merge: a jump argument reads it without consuming it, and an owning
+// exact Int source stays its owner's to drop (a Move would end its life and
+// change its drop glue).
 fn lower_convert_exact(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, value: LIRValueID, symbol: String, to_float: Bool) Never! {
-    fast_block :: lower_new_block(&f)
     slow_block :: lower_new_block(&f)
     merge_block :: lower_new_block(&f)
     no_args :: [LIRValueID]{}
     layout :: lower_value_layout(f, dst)
     fits :: lower_inline_test(&f, [LIRValueID]{value})
-    lower_seal(&f, LIRTerminator.Branch{condition: fits, then_target: lower_target(fast_block, no_args), else_target: lower_target(slow_block, no_args)})
-    lower_start(&f, fast_block, no_args)
-    fast :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
     if to_float {
+        fast_block :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: fits, then_target: lower_target(fast_block, no_args), else_target: lower_target(slow_block, no_args)})
+        lower_start(&f, fast_block, no_args)
+        fast :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
         lower_emit(&f, LIRInst.Convert{dst: fast, src: value})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{fast})})
     } else {
-        lower_emit(&f, LIRInst.Move{dst: fast, src: value})
+        lower_seal(&f, LIRTerminator.Branch{condition: fits, then_target: lower_target(merge_block, [LIRValueID]{value}), else_target: lower_target(slow_block, no_args)})
     }
-    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{fast})})
     lower_start(&f, slow_block, no_args)
     slow :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
     lower_call_runtime(&m, &f, symbol, [LIRValueID]{value}, Val(slow))
