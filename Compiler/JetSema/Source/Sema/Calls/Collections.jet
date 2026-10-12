@@ -59,6 +59,9 @@ fn sema_call_collections_success_type(ty: Type) -> Type Never! {
 // Rust builtin-method argument inference (builtin_methods.rs): every argument is inferred under its
 // contract parameter type, so leading-dot variants and anonymous records
 // (`&rows.push(.Ready)`, `&map.add(key, {x: 1})`) take their type from it.
+// A self-typed numeric read (`map.get(id)` with `id: Int` on a `[U64:V]`)
+// checks on its own and then widens into the slot, as Rust
+// `widen_numeric_argument` does after inference.
 fn sema_call_collections_check_argument(argument: CallArg, required: Type, callback: Bool, lending: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     previous_lending :: context.lambda_lending_views
     context.lambda_lending_views = lending
@@ -74,8 +77,9 @@ fn sema_call_collections_check_argument(argument: CallArg, required: Type, callb
         }
         open_slot = required_ret == None && !is_lambda
     }
+    self_typed :: !callback && sema_stmt_numeric_slot_self_typed(argument.expr, required)
     checked := if {
-        open_slot -> sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        open_slot || self_typed -> sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         callback -> {
             // An open callback result is adopted here and checked below.
             sema_expression_lambda_collection_callback(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -86,6 +90,7 @@ fn sema_call_collections_check_argument(argument: CallArg, required: Type, callb
     }
     context.lambda_lending_views = previous_lending
     value :: checked ?? return None
+    if self_typed -> return sema_stmt_numeric_slot_value(value, required, environment, program, &diagnostics)
     if open_slot {
         if value.ty == .Fn(_, _, _, _, _, _) -> return Val(value)
     }
