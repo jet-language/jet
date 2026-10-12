@@ -228,6 +228,15 @@ fn sema_stream_handle_known_wrong_direction(owner: String, method: String) -> Bo
     (owner == "FileReader" && (method == "write_line" || method == "flush" || method == "write_all" || method == "fsync" || method == "set_mode")) || (owner == "FileWriter" && (method == "lines" || method == "read_line" || method == "read"))
 }
 
+// Rust `file_handle_method_return` (method_calls.rs E2-M7) types the methods
+// of these handles without recording a receiver convention, so an unmarked
+// `reader.read(n)` or `writer.write_all(bytes)` needs no `&`, and a written
+// mark has no convention to be checked against. `Stdout`/`Stderr` dispatch
+// to their `&self` source methods instead.
+fn sema_stream_handle_reports_no_receiver_convention(owner: String) -> Bool Never! {
+    owner == "MappedFile" || owner == "FileScope" || owner == "FileReader" || owner == "FileWriter" || owner == "StdinHandle"
+}
+
 fn sema_stream_handle_infer_args(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 }
@@ -363,6 +372,7 @@ fn sema_call_try_stream_handle_method(receiver: Expr, receiver_value: TExpr, met
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         _ := sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics)
+        if sema_stream_handle_reports_no_receiver_convention(owner) -> sema_receiver_mark_forget(&state, receiver)
         return sema_stream_handle_lines_value(receiver_value, owner, span, expected, environment, program, &scopes, &context, &diagnostics)
     }
     if sema_stream_handle_known_wrong_direction(owner, method) {
@@ -384,7 +394,9 @@ fn sema_call_try_stream_handle_method(receiver: Expr, receiver_value: TExpr, met
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     shift_argument := if owner == "Reader" && (method == "seek" || method == "skip" || method == "take") -> 0 else -> -1
-    typed_args :: sema_stream_handle_checked_args("{owner}.{method}", spec.params, args, Val(receiver), receiver_value, spec.receiver_convention, shift_argument, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    checked_args :: sema_stream_handle_checked_args("{owner}.{method}", spec.params, args, Val(receiver), receiver_value, spec.receiver_convention, shift_argument, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if sema_stream_handle_reports_no_receiver_convention(owner) -> sema_receiver_mark_forget(&state, receiver)
+    typed_args :: checked_args ?? return SemaMethodSpecialCheck{handled: true, value: None}
     sema_stream_handle_finish(receiver_value, spec.operation, typed_args, spec.result_type, spec.effect_name, "{owner}.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
