@@ -353,7 +353,21 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
     // A literal selector is fixed in the removal mode, so the route takes the item alone.
     if literal_remove_mode != None -> _ := &typed.pop()
     value := if operation == {
-        .Builtin(builtin) -> sema_tir_expr(result_type, TExprKind.BuiltinMethod{receiver: receiver_value, operation: builtin, args: typed}, span)
+        .Builtin(builtin) -> {
+            builtin_receiver := receiver_value
+            builtin_args := typed
+            if sema_call_collections_runs_on_iter(builtin) {
+                builtin_receiver = sema_call_collections_list_as_iter(receiver_value, span)
+                if builtin == {
+                    .IterCompare -> {
+                        builtin_args = [TExpr]{}
+                        loop argument in typed -> &builtin_args.push(sema_call_collections_list_as_iter(argument, span))
+                    }
+                    else -> {}
+                }
+            }
+            sema_tir_expr(result_type, TExprKind.BuiltinMethod{receiver: builtin_receiver, operation: builtin, args: builtin_args}, span)
+        }
         .Closure(closure) -> sema_tir_expr(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: closure, args: typed}, span)
         .ListShuffle -> {
             lazy := sema_tir_expr(result_type, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
@@ -395,6 +409,34 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
     }
     checked := sema_expr_expected(value, expected, environment, program, &diagnostics)
     return SemaMethodSpecialCheck{handled: true, value: checked}
+}
+
+// Rust lower_method_call: the lazy and iterator-kernel builtins run on
+// `Iter<T>`, so a List or FixedList receiver (and `compare`'s other side) is
+// wrapped as its `lazy()` iterator (wrap_list_as_iter).
+fn sema_call_collections_runs_on_iter(operation: TBuiltinOp) -> Bool Never! {
+    if operation == {
+        .StepBy | .Take | .Skip | .Dedup | .Chunks | .Windows | .Intersperse | .IterRepeat | .IterCycle | .IterDropLast | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare -> true
+        else -> false
+    }
+}
+
+fn sema_call_collections_list_as_iter(value: TExpr, span: Span) -> TExpr Never! {
+    element :: sema_call_collections_list_element(value.ty) ?? return value
+    sema_tir_expr(Type.Apply{name: "Iter", args: [Type]{element}}, TExprKind.BuiltinMethod{receiver: value, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
+}
+
+// Rust Type::without_user_tags, then a List or FixedList element.
+fn sema_call_collections_list_element(ty: Type) -> Type? Never! {
+    return if ty == {
+        .Tagged(marker, inner) -> if marker == {
+            .User(_) -> sema_call_collections_list_element(inner)
+            else -> None
+        }
+        .List(element) -> Val(element)
+        .FixedList(element, _) -> Val(element)
+        else -> None
+    }
 }
 
 // Rust CheckerOwnership::view_call_sources: a successful runtime proof gives
