@@ -1,5 +1,6 @@
 use jet_foundation.[
     MIRAccess,
+    MIRConstant,
     MIRCopyFact,
     MIREnumArg,
     MIRIndexKind,
@@ -242,6 +243,11 @@ fn jet_codegen_lower_collection_expression(builder: &JetCodegenBuilder, program:
             return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: constant})
         }
         .ListLit(values) | .ColumnarListLit(_, values) -> {
+            // Rust tir_to_mir_expr `constant_byte_list`: a large `[U8]` literal of
+            // plain integer bytes (generated Unicode tables) is one byte constant.
+            if jet_codegen_collection_constant_bytes(expression.ty, values) == .Val(bytes) {
+                return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: MIRConstant.Bytes{value: bytes}})
+            }
             element :: if jet_codegen_unwrap_pattern_tags(expression.ty) == {
                 .List(inner) | .FixedList(inner, _) -> inner
                 else -> panic("checked list literal has a non-list result type")
