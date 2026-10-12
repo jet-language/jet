@@ -162,6 +162,24 @@ fn fx_numeric_i64_truncation() -> MIRProgram Never! {
     fx_numeric_program(b)
 }
 
+// Codegen's synthesized exact Int arithmetic (the read-list walk's index
+// advance, pattern counts) is Primitive, not a Prelude route; it lowers to
+// the same exact jet_int_* arithmetic.
+// expect-stdout numeric-int-primitive: "10\n4\n21\n-4\n"
+fn fx_numeric_int_primitive() -> MIRProgram Never! {
+    b := fx_builder()
+    seven :: fx_int_const(&b, 7)
+    three :: fx_int_const(&b, 3)
+    loop op in ([MIRBinaryOp]{.Add, .Sub, .Mul}) {
+        result :: fx_copy(&b, fx_int(), MIROperation.Binary{op: op, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: seven, right: three})
+        fx_print(&b, result)
+    }
+    negative :: fx_copy(&b, fx_int(), MIROperation.Binary{op: MIRBinaryOp.Sub, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: three, right: seven})
+    fx_print(&b, negative)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_numeric_program(b)
+}
+
 // fn run() {
 //   for x in [0.0, -0.0, 1.0, 1.0/0.0, -1.0/0.0, 0.0/0.0] {
 //     print(x.is_nan()); print(x.is_infinite()); print(x.is_finite())

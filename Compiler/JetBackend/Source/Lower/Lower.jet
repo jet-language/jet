@@ -3479,7 +3479,18 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
     word_op :: if op == .FloorDiv && unsigned && fixed_trap -> LIRBinaryOp.Div else -> {
         lower_word_op(op) ?? return lower_fail(&m, &f, "operator {lower_binary_name(op)} on {mir_type_display_name(left_ty)} is not lowered at O0 yet")
     }
-    if exact -> return lower_fail(&m, &f, "exact Int operator {lower_binary_name(op)} without a Prelude route")
+    // A Primitive exact Int Add, Sub or Mul (codegen's read-list walk index
+    // advance and pattern counts) is Rust's JetInt operator, which is the
+    // jet_int_* route a Prelude dispatch names: the same exact arithmetic.
+    if exact {
+        if op == {
+            .Add -> return lower_exact_arithmetic(&m, &f, dst, word_op, left_value, right_value, "jet_int_add")
+            .Sub -> return lower_exact_arithmetic(&m, &f, dst, word_op, left_value, right_value, "jet_int_sub")
+            .Mul -> return lower_exact_arithmetic(&m, &f, dst, word_op, left_value, right_value, "jet_int_mul")
+            else -> {}
+        }
+        return lower_fail(&m, &f, "exact Int operator {lower_binary_name(op)} without a Prelude route")
+    }
     if left_layout != lir_layout_word() -> return lower_fail(&m, &f, "operator {lower_binary_name(op)} on {mir_type_display_name(left_ty)} is not lowered at O0 yet")
     narrow :: lower_narrow_bits(left_ty)
     checked :: if fixed_trap -> MIRBinaryOverflow.Trap else -> overflow
