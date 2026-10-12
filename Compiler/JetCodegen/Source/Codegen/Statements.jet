@@ -2399,7 +2399,13 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, program: JetCodegenP
                 }
             }
         }
-        .ExprStmt(value, _) -> { _ := jet_codegen_lower_expr(&builder, program, value) }
+        .ExprStmt(value, _) -> {
+            _ := jet_codegen_lower_expr(&builder, program, value)
+            // Sema ends the reachable path at a Never-typed statement and
+            // keeps none of the source after it (Rust keeps the dead `loop
+            // {}` that closes `process.exit`); control never returns here.
+            if value.ty == (Type.Named{name: "Never"}) && jet_codegen_current_is_open(builder, program) -> jet_codegen_terminate(&builder, program, MIRTerminator.Unreachable{reason: "checked statement diverges"})
+        }
         .If(condition, then_body, else_body, _, span) -> jet_codegen_lower_if(&builder, program, condition, then_body, else_body, span)
         .DebugOnly(body, span) -> jet_codegen_lower_debug_only(&builder, program, body, span)
         .Unsafe(gate, body) -> {
