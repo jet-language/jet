@@ -1817,7 +1817,9 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
         deferred_then_scopes = sema_scope_snapshot(scopes)
         deferred_then_state = sema_ownership_state_snapshot(state)
     } else {
-        first :: sema_check_expression(then_value, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+        carrier_sibling :: expected == None && sema_expression_uncontextual_err_arm(else_value, scopes)
+        first_value :: if carrier_sibling -> sema_check_expression_carrier(then_value, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(then_value, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        first :: first_value ?? {
             sema_scope_leave(&scopes, &state)
             sema_scope_rollback(&scopes, then_mark)
             found_sites :: state.share_found.copy()
@@ -1847,8 +1849,13 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     // a later error arm diverges instead of producing an optional value.
     optional_continuation :: if else_value == .If(_, _, _, _, _, _) -> true else -> sema_expression_bare_absent_arm(else_value, true)
     sibling_expected :: sema_expression_absent_sibling(then_first)
-    else_expected :: if sibling_rule && optional_continuation && sibling_expected != None -> Val(sibling_expected) else -> expected
-    else_checked :: sema_check_expression(else_value, else_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+    else_expected :: if {
+        sibling_rule && optional_continuation && sibling_expected != None -> Val(sibling_expected)
+        expected == None && sema_expression_uncontextual_err_arm(else_value, scopes) -> sema_expression_err_sibling(then_first)
+        else -> expected
+    }
+    else_value_checked :: if defer_then_err -> sema_check_expression_carrier(else_value, else_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(else_value, else_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    else_checked :: else_value_checked ?? {
         sema_scope_leave(&scopes, &state)
         sema_scope_rollback(&scopes, else_mark)
         else_found :: state.share_found.copy()
@@ -1862,7 +1869,8 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     sema_ownership_fork_rollback(&state, fork)
 
     then_checked :: then_first ?? {
-        sema_check_expression(then_value, sema_expression_absent_sibling(Val(else_checked)), environment, program, &deferred_then_scopes, &deferred_then_state, &tail_store, &context, &diagnostics) ?? {
+        deferred_expected :: if defer_then_err -> sema_expression_err_sibling(Val(else_checked)) else -> sema_expression_absent_sibling(Val(else_checked))
+        sema_check_expression(then_value, deferred_expected, environment, program, &deferred_then_scopes, &deferred_then_state, &tail_store, &context, &diagnostics) ?? {
             sema_scope_leave(&deferred_then_scopes, &deferred_then_state)
             sema_ownership_fork_drop(&state, fork, deferred_then_state.share_found, else_path.share_found)
             return None
