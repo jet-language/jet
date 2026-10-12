@@ -1073,6 +1073,10 @@ fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified_nam
     }
     call := Call{name: qualified_name, name_span: span, type_args: type_args, args: args, resolved_ret: None, range_checked: false, widen_approx: false}
     checked :: sema_call_check_direct_target_owned(&state, target, call, [SemaCallDefaultValue]{}, expected, environment, program, &scopes, &tail_store, &context, &diagnostics) ?? return None
+    // Rust `record_call_result_views` composes every call's returned views
+    // with its arguments; a source-module call (`stream.object_entries(v)`)
+    // publishes them like a direct call, so a binding keeps the view's owner.
+    &context.call_return_views.push(SemaCallReturnView{span: span, facts: checked.return_view_facts})
     if !sema_expr_record_call_fact(environment, program, &scopes, &context, span, checked, &diagnostics) -> return None
     Val(checked.value)
 }
