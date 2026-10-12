@@ -19,6 +19,7 @@ use jet_foundation.[
     CoreTypedCallSignature,
     Diagnostic,
     Effect,
+    InternalTag,
     EffectRowEntry,
     EnumLitArg,
     Expr,
@@ -35,6 +36,7 @@ use jet_foundation.[
     TFailureCarrier,
     TGenericParam,
     TStmt,
+    TagMarker,
     TextEdit,
     Type,
     ViewProvenance,
@@ -750,6 +752,24 @@ fn sema_call_core_type_constraint_satisfied(constraint: CoreCallTypeConstraint, 
                 return false
             }
         }
+        // Rust `infer_core_call` vault arm: VaultKey is sealed to SigningKey
+        // and X25519SecretKey; a generic body defers the bound to
+        // monomorphization, so a type parameter in scope satisfies it.
+        .VaultKey -> {
+            key := ty
+            if ty == .Tagged(marker, inner) {
+                if marker == (TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}) -> key = inner
+            }
+            if key == .Named(name) {
+                loop parameter in environment.generic_params {
+                    if parameter.name == name -> return true
+                }
+                colon_leaf :: name.slice(name.rfind(":") + 1, name.len())
+                leaf :: colon_leaf.slice(colon_leaf.rfind(".") + 1, colon_leaf.len())
+                return leaf == "SigningKey" || leaf == "X25519SecretKey"
+            }
+            false
+        }
     }
 }
 
@@ -837,6 +857,7 @@ fn sema_call_core_check_type_constraints(signature: CoreTypedCallSignature, type
         parameter :: signature.type_parameters[index]
         if !sema_call_core_type_constraint_satisfied(parameter.constraint, type_args[index], environment, program) {
             comparability := if parameter.constraint == CoreCallTypeConstraint.Comparable && args.len() > 0 -> sema_comparability_core_error(signature.member, expr_span(args[0].expr)) else -> None
+            if parameter.constraint == CoreCallTypeConstraint.VaultKey -> comparability = Val(sema_error("E0905", span, "`{type_name(type_args[index])}` is not a persistent vault key type", "VaultKey is sealed and implemented only by SigningKey and X25519SecretKey", "use `crypto.SigningKey` or `crypto.X25519SecretKey`"))
             &diagnostics.push(comparability ?? sema_error("E0905", span, "`{type_name(type_args[index])}` does not satisfy the canonical Core constraint for type parameter `{parameter.name}`", "Core polymorphic signatures preserve the native type constraint", "pass a value with the required Core numeric or comparison type"))
             return false
         }

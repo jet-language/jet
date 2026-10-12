@@ -12,7 +12,7 @@ enum CoreCallDefault {
     StaticEnum(type_name: String, variant: String)
 }
 
-enum CoreCallTypeConstraint { Any Numeric Integer Floating FloatingOrExact SquareRootInput Comparable Debuggable }
+enum CoreCallTypeConstraint { Any Numeric Integer Floating FloatingOrExact SquareRootInput Comparable Debuggable VaultKey }
 
 enum CoreCallResultRule {
     Declared
@@ -613,9 +613,98 @@ fn core_sig_encoding_backing(request: CoreCallSignatureRequest) -> CoreTypedCall
     None
 }
 
+// Rust `infer_core_call` `core.crypto.vault` typed-provider arm: one sealed
+// vault key type `T` (SigningKey or X25519SecretKey; a generic body defers
+// the bound to monomorphization) shapes every typed operation. Wrapped-key
+// operations fail with KeyWrapError, the rest with VaultError.
+fn core_sig_vault(module_name: String, member: String) -> CoreTypedCallSignature? {
+    if module_name != "core.crypto.vault" -> return None
+    read :: AccessConvention.Read
+    move :: AccessConvention.Move
+    key :: core_sig_named("T")
+    key_ref :: core_sig_apply("KeyRef", key)
+    plan :: core_sig_apply("MutationPlan", key)
+    write :: core_sig_apply("VaultWrite", key)
+    import_plan :: core_sig_apply("WrappedImportPlan", key)
+    wrapped :: core_sig_named("WrappedVaultKey")
+    parameters := [CoreCallTypedParameter]{}
+    ok := Type.Named{name: "Unit"}
+    if member == {
+        "current" -> {
+            parameters = [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}
+            ok = Type.Option{inner: key_ref}
+        }
+        "versions" -> {
+            parameters = [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}
+            ok = Type.List{element: key_ref}
+        }
+        "load" -> {
+            parameters = [CoreCallTypedParameter]{core_sig_positional(key_ref, read)}
+            ok = key
+        }
+        "status" -> {
+            parameters = [CoreCallTypedParameter]{core_sig_positional(key_ref, read)}
+            ok = core_sig_named("KeyStatus")
+        }
+        "prepare_generate" | "prepare_rotate" -> {
+            parameters = [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}
+            ok = plan
+        }
+        "prepare_store" -> {
+            parameters = [CoreCallTypedParameter]{core_sig_positional(Type.String, read), core_sig_positional(key, move)}
+            ok = plan
+        }
+        "prepare_retire" | "prepare_revoke" -> {
+            parameters = [CoreCallTypedParameter]{core_sig_positional(key_ref, read), core_sig_positional(Type.String, read)}
+            ok = plan
+        }
+        "authorize_write" -> {
+            parameters = [CoreCallTypedParameter]{core_sig_positional(plan, read), core_sig_positional(Type.String, read)}
+            ok = write
+        }
+        "export_to_recipients" -> {
+            parameters = [CoreCallTypedParameter]{core_sig_positional(key_ref, read), core_sig_positional(Type.List{element: core_sig_named("X25519PublicKey")}, read)}
+            ok = wrapped
+        }
+        "export_to_passphrase" -> {
+            secret :: Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}, inner: core_sig_named("Secret")}
+            parameters = [CoreCallTypedParameter]{core_sig_positional(key_ref, read), core_sig_positional(secret, read)}
+            ok = wrapped
+        }
+        "prepare_import_wrapped" -> {
+            parameters = [CoreCallTypedParameter]{core_sig_positional(Type.String, read), core_sig_positional(wrapped, read), core_sig_positional(core_sig_named("KeyUnlock"), read)}
+            ok = import_plan
+        }
+        "authorize_wrapped_import" -> {
+            parameters = [CoreCallTypedParameter]{core_sig_positional(import_plan, read), core_sig_positional(Type.String, read)}
+            ok = write
+        }
+        "commit_import_wrapped" -> {
+            parameters = [CoreCallTypedParameter]{core_sig_positional(write, move), core_sig_positional(import_plan, move)}
+            ok = key_ref
+        }
+        "commit_generate" | "commit_store" -> {
+            parameters = [CoreCallTypedParameter]{core_sig_positional(write, move), core_sig_positional(plan, move)}
+            ok = key_ref
+        }
+        "commit_rotate" -> {
+            parameters = [CoreCallTypedParameter]{core_sig_positional(write, move), core_sig_positional(plan, move)}
+            ok = core_sig_apply("Rotation", key)
+        }
+        "commit_retire" | "commit_revoke" -> {
+            parameters = [CoreCallTypedParameter]{core_sig_positional(write, move), core_sig_positional(plan, move)}
+        }
+        else -> return None
+    }
+    wraps :: core_sig_one_of(member, [String]{"export_to_recipients", "export_to_passphrase", "prepare_import_wrapped", "authorize_wrapped_import", "commit_import_wrapped"})
+    err :: core_sig_named(if wraps -> "KeyWrapError" else -> "VaultError")
+    Val(core_sig_generic(module_name, member, parameters, Val(core_sig_result(ok, err)), core_sig_type_parameter("T", CoreCallTypeConstraint.VaultKey)))
+}
+
 fn core_sig_fixed(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
     if core_sig_encoding_backing(request) == Val(backing) -> return Val(backing)
     if request.module_name == "core.encoding" && request.member == "__edition" -> return Val(core_sig(request.module_name, request.member, [CoreCallTypedParameter]{}, Val(Type.Int)))
+    if core_sig_vault(request.module_name, request.member) == Val(vault) -> return Val(vault)
     if core_web_fixed_signature(request.module_name, request.member) == Val(web) -> return Val(web)
     if core_sig_network(request) == Val(network) -> return Val(network)
     if core_sig_text_and_testing(request) == Val(surface) -> return Val(surface)
