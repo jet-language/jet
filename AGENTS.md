@@ -136,9 +136,11 @@ A violation stops the affected work until it is fixed at the root.
   (D-EXEC1). Code generators and hosts only marshal values and call the same
   runtime symbols; they never re-encode validation, defaults, policy, or error
   meaning. Never mark a feature as working on one level only, or defer it to a
-  later level. Until D-EXEC1's retirement step lands, the Cranelift JIT and the
-  interpreter still serve `jet run` and must keep that same meaning; do not
-  extend them. An owner-ratified exception must name the tier it excludes.
+  later level. Until native in-memory O0 lands, `jet run` and `jet dev` use the
+  normal build path and execute the result (D-EXEC2=A); the in-process
+  evaluator serves compile-time code (and the Canvas dev host) and must keep
+  that same meaning; do not extend it. An owner-ratified exception must name
+  the tier it excludes.
 
 ## Performance gate
 
@@ -187,15 +189,22 @@ composed sweep and one fresh-context review; individual cards do not wait for
 that gate.
 
 One implementer owns each coherent patch. Concurrent writers need disjoint
-paths and one named close owner. Default to a single delivery stream, and add
-streams only when paths, integration, tests, and resources stay clean. Use only
-in-repository worktrees under `.claude/worktrees/<name>` or
-`.agent-worktrees/<name>`, use checkout-owned external Cargo targets configured
-through `jet-env` (see the orchestration resource reference), integrate promptly,
-and remove finished worktrees and temporary branches. Never overwrite
-another task's paths. Never run `git add -A`, a broad `git commit -a`,
-`git restore .`, or any equivalent broad operation. Never hand-edit
-`Tools/tower/.tower/`.
+paths and one named close owner. The repository's working branches are
+`master` and `dev`, with one dev worktree. At the Rust cutover, the last
+commit that still contains the Rust implementation becomes the `rust` branch: a
+frozen dead-end leaf kept as a reference and a re-bootstrap safety net. Nobody
+commits to it or merges it into `dev` or `master`. Every agent commits directly
+on `dev` in the dev worktree, in small commits that stage only its own paths.
+Never create any other branch, a worktree, or any other ref (`refs/keep`,
+`refs/salvage`, `refs/archive`, private lineages), for any purpose: experiments,
+candidates, measurements, and proofs included. To build or measure an
+uncommitted change,
+apply a scratch patch to a temporary `git archive` export outside the
+repository. Use checkout-owned external Cargo targets configured through
+`jet-env` (see the orchestration resource reference). Never overwrite another
+task's paths. Never run `git add -A`, a broad `git commit -a`, `git stash`,
+`git restore .`, `git reset --hard`, or any equivalent broad operation. Never
+hand-edit `Tools/tower/.tower/`.
 
 Only the owner starts `tower serve` unless the owner directs otherwise. Agents
 use the non-serve Tower CLI (`node Tools/tower/tower.mjs`) against the main
@@ -213,6 +222,70 @@ proof cadence, recovery, and closure.
 This repository carries no harness-specific configuration. Agent tools use
 their own global settings; Jet contributes only this contract and the skills
 under `.agents/skills` and `Tools/tower/skills`.
+
+## Find every issue at once
+
+This is a standing owner order, repeated many times; violating it wastes hours.
+It binds every agent on every step of every effort, whether or not the owner
+repeats it, and nothing overrides it short of an explicit owner instruction to
+rerun one thing. Never discover problems serially, where one blocker is found,
+fixed and rerun to find the next. Before fixing anything, collect every issue
+in one pass:
+
+- **Expensive launches are gated, never bypassed.** A stage0, self-hosting
+  chain, release build or any other run costing more than about 15 minutes
+  starts only through tooling that refuses to launch without a collect-all
+  preflight receipt for that exact commit
+  (`~/.cache/jet-dev/scratch/Main/preflight.mjs`, enforced by
+  `prepare-sharded-chain.mjs`). The receipt runs every later stage's cheap
+  probe on the new sources (parse, generators, comptime-host count, and the
+  last good factory's keep-going censuses of every unit through every phase it
+  can reach). Every row is clean or carries a written disposition naming the
+  commit in this launch that fixes it. Launching to "see what fails next" is
+  forbidden.
+- **Every compiler phase has a collect-all mode, or that is the first defect.**
+  Parse, imports, sema, comptime, codegen lowering, backend lowering, machine
+  emission, object, link and run must each record a failing item as a census
+  row, trap or skip it, and continue. A process-stopping `panic` that guards
+  an assumption about checked input is a collect-all defect: convert it to a
+  keep-going report before relying on that phase to gate anything.
+- **Use waiting time to run later stages early.** While an expensive build
+  runs, probe every later stage with the best available artifact (the last
+  good factory, an older compiler, a dry run) and fix what they find in the
+  same batch.
+- **Run every stage in collect-all mode.** Use the existing keep-going
+  mechanisms (`JET_KEEP_GOING=1` all-phases reports,
+  `JET_DEBUG_LOWER_ALL=1` lowering sweeps, per-error census scripts) so one run
+  reports all errors in all items, not the first one. A tool that stops at its
+  first failure needs a collect-all mode before it gates anything.
+- **Preflight the whole pipeline end to end first.** Before starting a
+  multi-stage effort (self-hosting, a cutover, a release candidate), dry-run or
+  probe every stage up front: parse, imports, sema, lowering, emission,
+  generated tables, runtime pack, link, run, tests. That maps every blocker,
+  dependency and missing piece before the first fix.
+- **Partition when a run is slow or hangs.** Split the input and check the parts
+  in parallel to localize every failure at once.
+- **Fix the whole list in parallel.** Group the findings by root, give each root
+  one owner, and land them as one batch before the next expensive build or
+  check. A rebuild that exists only to reveal the next error is a process
+  failure.
+- **Gate every commit cheaply first.** Parse and check each touched file,
+  regenerate and commit generated outputs with their sources, and run the
+  generator checks against the exact source a build will use, so no expensive
+  run is lost to a mistake a fast check would catch.
+- **Run independent stages in parallel.** A pipeline's dependency order does not
+  make its probes serial. Start every stage that can run now (a host build
+  beside a sweep, checks of later-stage inputs beside earlier stages), and
+  make each stage keep going past its failures far enough that the next stage's
+  own collect-all census runs in the same cycle (for example, write partial
+  output so a downstream type check reports everything else at once).
+- **A stage only stops at a failure that blocks every later item.** Everywhere
+  else it records the failure, skips the item and continues, then reports the
+  full list and returns the first error.
+- **Never claim a job started until it is observed running.** After releasing
+  queued work, confirm it in the scheduler's actual running state (the real
+  queue path, its start decision, its live process) before reporting it as
+  started; a misplaced job file is a silent day-long stall.
 
 ## Environment and proof
 
