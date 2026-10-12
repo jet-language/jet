@@ -219,6 +219,15 @@ fn sema_expression_default_err_struct(value: Expr) -> Bool Never! {
     }
 }
 
+// Rust `infer_err`: the payload of `Err(x)` toward the default `Err` domain is
+// inferred first, and only a `String` builds the default error from a message;
+// a value that already is an `Err` (`?? return Err(err)`) is the failure itself.
+fn sema_expression_err_payload_is_err(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
+    probe_diagnostics := [Diagnostic]{}
+    probed :: sema_probe_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return false
+    sema_expr_unwrap_tag(probed.ty) == Type.Named{name: "Err"}
+}
+
 fn sema_expression_default_err_call(value: Expr, span: Span, expected: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     argument :: CallArg{convention: AccessConvention.Read, expr: value, span: expr_span(value), flags: ast_empty_call_arg_flags(), label: None, spread: false}
     call :: Call{name: "Err", name_span: span, type_args: [Type]{}, args: [CallArg]{argument}, resolved_ret: None, range_checked: false, widen_approx: false}
@@ -272,16 +281,13 @@ fn sema_expression_result_payload(value: Expr, success: Bool, take_field: Bool, 
             return None
         }
     }
-    if !success && expected_err == (Val(Type.Named{name: "Err"})) && expected != None && !sema_expression_default_err_struct(value) {
+    message_payload :: !success && expected_err == (Val(Type.Named{name: "Err"})) && !sema_expression_default_err_struct(value) && !sema_expression_err_payload_is_err(value, environment, program, &scopes, &state, &tail_store, &context)
+    if message_payload {
         result_type :: Type.Result{ok: expected_ok ?? Type.Named{name: "Unit"}, err: expected_err ?? Type.Named{name: "Err"}}
         checked_default :: sema_expression_default_err_call(value, span, result_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         return Val(checked_default)
     }
-    payload_expected := if {
-        success -> expected_ok
-        expected_err == (Val(Type.Named{name: "Err"})) && !sema_expression_default_err_struct(value) -> Val(Type.String)
-        else -> expected_err
-    }
+    payload_expected := if success -> expected_ok else -> expected_err
     checked_payload :: sema_check_expression(value, payload_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     payload :: if take_field -> sema_tir_expr(checked_payload.ty, TExprKind.Move{value: checked_payload}, checked_payload.span) else -> checked_payload
     ok_ty := expected_ok ?? Type.Named{name: "Unit"}
