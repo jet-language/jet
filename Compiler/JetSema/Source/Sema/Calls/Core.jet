@@ -193,7 +193,10 @@ fn sema_call_core_source_target(environment: SemaScopeEnvironment, program: Sema
     // Module rows are read in place; binding one would copy its whole program.
     source_name :: graph.modules[module_index].module_name
     if sema_call_core_module_identity(environment, program, source_name) != Val(module_identity) -> return None
-    if source_name == "core.http.client" && member == "request" -> return None
+    // `core.http.client.request` is checked by its Core row (Rust
+    // core_call.rs: a `URL` or String target, sema_call_http_transport), and
+    // that checked row then executes the source `request` declaration.
+    if !registered_source_target && source_name == "core.http.client" && member == "request" -> return None
     if source_name == "core.encoding.json" && member == "decode" && type_args.len() != 0 -> return None
     caller_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
     // Same-owner native providers keep their host row. A source-only function
