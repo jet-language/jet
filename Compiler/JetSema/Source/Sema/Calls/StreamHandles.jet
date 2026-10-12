@@ -102,6 +102,10 @@ fn sema_stream_handle_encoding_error() -> Type Never! {
     Type.Named{name: "EncodingError"}
 }
 
+// `effect_name` is Rust's exact handle-method row: `method_calls.rs` records
+// only `receiver_effect_leaf` (`Time.Wait` on the blocking file, stdout and
+// channel methods) for these receivers. Authority is checked where the
+// handle is acquired (`files.open`, `term.stdout`), not on each method.
 fn sema_stream_handle_spec(owner: String, method: String, receiver_type: Type) -> SemaStreamHandleSpec? {
     unit := Type.Named{name: "Unit"}
     string := Type.String
@@ -129,56 +133,56 @@ fn sema_stream_handle_spec(owner: String, method: String, receiver_type: Type) -
         return None
     }
     if owner == "MappedFile" {
-        if method == "window" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindow, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{u8}}, io), params: [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read), sema_stream_handle_param("length", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: "FS"})
-        if method == "window_len" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindowLen, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{u8}}, io), params: [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read), sema_stream_handle_param("length", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: "FS"})
-        if method == "lines" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileLines, result_type: Type.Apply{name: "ViewIter", args: [Type]{Type.Apply{name: "View", args: [Type]{u8}}}}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: "FS"})
+        if method == "window" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindow, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{u8}}, io), params: [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read), sema_stream_handle_param("length", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        if method == "window_len" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindowLen, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{u8}}, io), params: [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read), sema_stream_handle_param("length", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        if method == "lines" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileLines, result_type: Type.Apply{name: "ViewIter", args: [Type]{Type.Apply{name: "View", args: [Type]{u8}}}}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
         if method == "len" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileLen, result_type: Type.Int, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
         if method == "is_empty" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileIsEmpty, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
     }
     if owner == "FileReader" {
-        if method == "read_line" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderReadLine, result_type: sema_stream_handle_result(Type.Option{inner: string}, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "FS"})
-        if method == "read" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderRead, result_type: sema_stream_handle_result(bytes, io), params: [SemaCallParam]{sema_stream_handle_param("max", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "FS"})
+        if method == "read_line" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderReadLine, result_type: sema_stream_handle_result(Type.Option{inner: string}, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
+        if method == "read" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderRead, result_type: sema_stream_handle_result(bytes, io), params: [SemaCallParam]{sema_stream_handle_param("max", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
     }
     if owner == "FileWriter" {
-        if method == "write_line" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterWriteLine, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("text", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "FS"})
-        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterFlush, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "FS"})
-        if method == "write_all" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterWriteAll, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("bytes", bytes, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "FS"})
-        if method == "fsync" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterFsync, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "FS"})
+        if method == "write_line" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterWriteLine, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("text", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
+        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterFlush, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
+        if method == "write_all" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterWriteAll, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("bytes", bytes, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
+        if method == "fsync" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterFsync, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
     }
     if owner == "StdinHandle" {
-        if method == "read_line" -> return Val(SemaStreamHandleSpec{operation: THandleOp.StdinReadLine, result_type: sema_stream_handle_result(Type.Option{inner: string}, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
+        if method == "read_line" -> return Val(SemaStreamHandleSpec{operation: THandleOp.StdinReadLine, result_type: sema_stream_handle_result(Type.Option{inner: string}, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
     }
     if owner == "Stdout" || owner == "Stderr" {
         stdout := owner == "Stdout"
-        if method == "write" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutWrite else -> THandleOp.StderrWrite, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("text", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "write_line" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutWriteLine else -> THandleOp.StderrWriteLine, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("text", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "write_bytes" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutWriteBytes else -> THandleOp.StderrWriteBytes, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("bytes", bytes, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutFlush else -> THandleOp.StderrFlush, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "is_tty" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutIsTTY else -> THandleOp.StderrIsTTY, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: "IO"})
+        if method == "write" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutWrite else -> THandleOp.StderrWrite, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("text", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
+        if method == "write_line" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutWriteLine else -> THandleOp.StderrWriteLine, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("text", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
+        if method == "write_bytes" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutWriteBytes else -> THandleOp.StderrWriteBytes, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("bytes", bytes, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
+        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutFlush else -> THandleOp.StderrFlush, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
+        if method == "is_tty" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutIsTTY else -> THandleOp.StderrIsTTY, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
     }
-    if owner == "JSONReader" && method == "next" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONReaderNext, result_type: sema_stream_handle_result(Type.Option{inner: Type.Named{name: "DataEvent"}}, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
+    if owner == "JSONReader" && method == "next" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONReaderNext, result_type: sema_stream_handle_result(Type.Option{inner: Type.Named{name: "DataEvent"}}, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
     if owner == "JSONWriter" {
-        if method == "write" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONWriterWrite, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{sema_stream_handle_param("event", Type.Named{name: "DataEvent"}, AccessConvention.Move)}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONWriterFlush, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "finish" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONWriterFinish, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
+        if method == "write" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONWriterWrite, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{sema_stream_handle_param("event", Type.Named{name: "DataEvent"}, AccessConvention.Move)}, receiver_convention: AccessConvention.Write, effect_name: ""})
+        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONWriterFlush, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
+        if method == "finish" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONWriterFinish, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
     }
-    if owner == "JSONLReader" && method == "next" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONLReaderNext, result_type: sema_stream_handle_result(Type.Option{inner: Type.Named{name: "Dyn"}}, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
+    if owner == "JSONLReader" && method == "next" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONLReaderNext, result_type: sema_stream_handle_result(Type.Option{inner: Type.Named{name: "Dyn"}}, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
     if owner == "JSONLWriter" {
-        if method == "write" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONLWriterWrite, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{sema_stream_handle_param("tree", Type.Named{name: "Dyn"}, AccessConvention.Move)}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONLWriterFlush, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "finish" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONLWriterFinish, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
+        if method == "write" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONLWriterWrite, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{sema_stream_handle_param("tree", Type.Named{name: "Dyn"}, AccessConvention.Move)}, receiver_convention: AccessConvention.Write, effect_name: ""})
+        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONLWriterFlush, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
+        if method == "finish" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONLWriterFinish, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
     }
-    if owner == "XMLReader" && method == "next" -> return Val(SemaStreamHandleSpec{operation: THandleOp.XMLReaderNext, result_type: sema_stream_handle_result(Type.Option{inner: Type.Named{name: "Dyn"}}, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
+    if owner == "XMLReader" && method == "next" -> return Val(SemaStreamHandleSpec{operation: THandleOp.XMLReaderNext, result_type: sema_stream_handle_result(Type.Option{inner: Type.Named{name: "Dyn"}}, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
     if owner == "XMLWriter" {
-        if method == "write" -> return Val(SemaStreamHandleSpec{operation: THandleOp.XMLWriterWrite, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{sema_stream_handle_param("tree", Type.Named{name: "Dyn"}, AccessConvention.Move)}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.XMLWriterFlush, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "finish" -> return Val(SemaStreamHandleSpec{operation: THandleOp.XMLWriterFinish, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
+        if method == "write" -> return Val(SemaStreamHandleSpec{operation: THandleOp.XMLWriterWrite, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{sema_stream_handle_param("tree", Type.Named{name: "Dyn"}, AccessConvention.Move)}, receiver_convention: AccessConvention.Write, effect_name: ""})
+        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.XMLWriterFlush, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
+        if method == "finish" -> return Val(SemaStreamHandleSpec{operation: THandleOp.XMLWriterFinish, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
     }
-    if owner == "CBORReader" && method == "next" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CBORReaderNext, result_type: sema_stream_handle_result(Type.Option{inner: Type.Named{name: "DataEvent"}}, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
+    if owner == "CBORReader" && method == "next" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CBORReaderNext, result_type: sema_stream_handle_result(Type.Option{inner: Type.Named{name: "DataEvent"}}, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
     if owner == "CBORWriter" {
-        if method == "write" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CBORWriterWrite, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{sema_stream_handle_param("event", Type.Named{name: "DataEvent"}, AccessConvention.Move)}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CBORWriterFlush, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "finish" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CBORWriterFinish, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
+        if method == "write" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CBORWriterWrite, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{sema_stream_handle_param("event", Type.Named{name: "DataEvent"}, AccessConvention.Move)}, receiver_convention: AccessConvention.Write, effect_name: ""})
+        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CBORWriterFlush, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
+        if method == "finish" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CBORWriterFinish, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
     }
     if owner == "Path" {
         if method == "join" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathJoin, result_type: Type.Named{name: "Path"}, params: [SemaCallParam]{sema_stream_handle_param("other", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
@@ -188,8 +192,8 @@ fn sema_stream_handle_spec(owner: String, method: String, receiver_type: Type) -
         if method == "normalize" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathNormalize, result_type: Type.Named{name: "Path"}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
         if method == "is_within" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathIsWithin, result_type: Type.Bool, params: [SemaCallParam]{sema_stream_handle_param("other", Type.Named{name: "Path"}, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
         if method == "to_string" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathToString, result_type: string, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
-        if method == "write_atomic" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathWriteAtomic, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("bytes", bytes, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: "FS"})
-        if method == "walk" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathWalk, result_type: Type.List{element: Type.Named{name: "Path"}}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: "FS"})
+        if method == "write_atomic" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathWriteAtomic, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("bytes", bytes, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        if method == "walk" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathWalk, result_type: Type.List{element: Type.Named{name: "Path"}}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
     }
     if owner == "Cursor" {
         if method == "take_until" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CursorTakeUntil, result_type: sema_stream_handle_result(string, Type.String), params: [SemaCallParam]{sema_stream_handle_param("delimiter", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: ""})
@@ -336,7 +340,9 @@ fn sema_stream_handle_lines_value(receiver: TExpr, owner: String, span: Span, ex
     result_type := if owner == "FileReader" -> Type.Named{name: "FileLines"} else -> Type.Named{name: "StdinLines"}
     value := sema_tir_expr(result_type, TExprKind.MethodCall{receiver: receiver, method: sema_stream_handle_method_ref(owner, "lines"), type_args: [Type]{}, args: [TCallArg]{}}, span)
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    effect_name := if owner == "FileReader" -> "FS" else -> "IO"
+    // Rust `receiver_effect_leaf`: `FileReader.lines` waits; `StdinHandle`
+    // records no handle effect.
+    effect_name := if owner == "FileReader" -> "Time.Wait" else -> ""
     if !sema_stream_handle_effect_fact(environment, program, &scopes, &context, "{owner}.lines", span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }
@@ -526,11 +532,11 @@ fn sema_stream_handle_fact_has_effect(context: &SemaCheckContext, span: Span, ef
 // special stream sources that do not have an intrinsic method-call node.
 fn sema_call_stream_record_for_in_fact(collection: TExpr, method_kind: TForInMethod, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
     effect_name := if method_kind == {
-        .LinesFile -> "FS"
-        .LinesStdin -> "IO"
+        .LinesFile -> "Time.Wait"
+        .LinesStdin -> ""
         .LinesProcessStream -> "Exec"
         .ChannelReceiver -> ""
-        .EncodingReader(_) -> "IO"
+        .EncodingReader(_) -> ""
         else -> { return true }
     }
     if sema_stream_handle_fact_has_effect(&context, collection.span, effect_name) -> return true
