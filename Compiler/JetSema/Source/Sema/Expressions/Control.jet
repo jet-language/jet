@@ -421,12 +421,26 @@ fn sema_failure_conversion_function_name(source: Type, target: Type) -> String N
     "errconv_{sema_failure_conversion_name_part(type_name(source))}_to_{sema_failure_conversion_name_part(type_name(target))}"
 }
 
+// A declared `impl Source -> Target` registers under the leaf names of both
+// sides (the Rust reference names the routine by the declared names), so a
+// site whose failure types are canonical owner identities
+// (`module:…::OuterError`) or qualified spellings finds the same routine.
+fn sema_failure_declared_conversion_name(source_leaf: String, target_leaf: String) -> String Never! {
+    "errconv_{sema_failure_conversion_name_part(source_leaf)}_to_{sema_failure_conversion_name_part(target_leaf)}"
+}
+
+fn sema_failure_conversion_leaf(ty: Type) -> String Never! {
+    normalized :: sema_expr_unwrap_tag(ty)
+    if normalized == .Named(name) -> return sema_error_conversion_leaf(name)
+    type_name(normalized)
+}
+
 // A declared conversion is one registered function under the canonical name;
 // the checked route carries that routine's symbol key, the identity lowering
 // resolves. D-FAIL-CONV2=A's standard-library family takes the same route
 // through `sema_prelude_error_conversion_key`.
 fn sema_failure_declared_conversion(source: Type, target: Type, scopes: SemaScopeTable) -> String? {
-    name :: sema_failure_conversion_function_name(source, target)
+    name :: sema_failure_declared_conversion_name(sema_failure_conversion_leaf(source), sema_failure_conversion_leaf(target))
     index :: sema_scope_resolve_index(scopes, name) ?? return None
     if scopes.bindings[index].symbol.kind != SymbolKind.Function -> return None
     Val(scopes.bindings[index].symbol.id.key)

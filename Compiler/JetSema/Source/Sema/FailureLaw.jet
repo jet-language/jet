@@ -179,8 +179,7 @@ fn sema_error_conversion_local_types(items: [Item]) -> [String] Never! {
 // `impl Source -> Target { body }` checks and lowers as the one routine
 // `fn errconv_Source_to_Target(self: Source) -> Target Never!`: a conversion
 // cannot itself fail, and `Err(...)` in its body builds the default error value.
-fn sema_error_conversion_function(from_ty: String, from_span: Span, to_ty: String, to_span: Span, source: Type, body: [Stmt], body_span: Span) -> Func Never! {
-    name :: sema_failure_conversion_function_name(source, Type.Named{name: to_ty})
+fn sema_error_conversion_function(name: String, from_span: Span, to_ty: String, to_span: Span, source: Type, body: [Stmt], body_span: Span) -> Func Never! {
     function := ast_func(name, from_span, Span{start: from_span.start, end: body_span.end})
     function.params = [Param]{Param{convention: AccessConvention.Move, root: false, name: "self", name_span: from_span, public_label: None, zone: ParamZone.Either, ty: source, ty_span: from_span, default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None, declared_footprint: None}}
     function.return_type = Val(Type.Result{ok: Type.Named{name: to_ty}, err: Type.Named{name: "Never"}})
@@ -245,7 +244,7 @@ fn sema_error_conversion_items(items: &[Item], diagnostics: &[Diagnostic]) {
             &diagnostics.push(sema_error("E2419", span, "Error conversion is ambiguous: `{pair.source}` already reaches `{pair.target}`", "A source and target may have one unique declared conversion route.", "remove the direct edge or remove one of the intermediate conversion edges."))
             next
         }
-        &output.push(Item.Func{value: sema_error_conversion_function(from_ty, definition.from_span, to_ty, definition.to_span, Type.Named{name: from_ty}, definition.body, definition.body_span)})
+        &output.push(Item.Func{value: sema_error_conversion_function(sema_failure_declared_conversion_name(sema_error_conversion_leaf(from_ty), sema_error_conversion_leaf(to_ty)), definition.from_span, to_ty, definition.to_span, Type.Named{name: from_ty}, definition.body, definition.body_span)})
     }
     items = output
 }
@@ -268,7 +267,7 @@ fn sema_prelude_error_conversion(source: Type, diagnostics: &[Diagnostic]) -> Fu
     }
     if parsed.program.items.len() != 1 -> return None
     if parsed.program.items[0] == {
-        .ErrorConv(definition) -> Val(sema_error_conversion_function(definition.from_ty, definition.from_span, definition.to_ty, definition.to_span, source, definition.body, definition.body_span))
+        .ErrorConv(definition) -> Val(sema_error_conversion_function(sema_failure_conversion_function_name(source, Type.Named{name: definition.to_ty}), definition.from_span, definition.to_ty, definition.to_span, source, definition.body, definition.body_span))
         else -> None
     }
 }
