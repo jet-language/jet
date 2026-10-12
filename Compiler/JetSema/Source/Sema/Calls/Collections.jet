@@ -344,7 +344,7 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
     loop index in 0..<updated_args.len() {
         if updated_args[index].convention == AccessConvention.Move -> updated_args[index].convention = AccessConvention.Read
     }
-    ownership := sema_ownership_check_method_call(&state, "collection.{method}", receiver, contract.receiver_access, sema_call_collections_ownership_params(required_types), &updated_args, scopes, span, &diagnostics)
+    ownership := if sema_call_collections_receiver_two_phase(receiver_value.ty, method) -> sema_ownership_check_two_phase_method_call(&state, "collection.{method}", receiver, contract.receiver_access, false, sema_call_collections_ownership_params(required_types), &updated_args, scopes, span, &diagnostics) else -> sema_ownership_check_method_call(&state, "collection.{method}", receiver, contract.receiver_access, sema_call_collections_ownership_params(required_types), &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     effect_row := sema_collection_method_effect_row(contract, span)
     if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "collection.{method}", span, effect_row, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
@@ -431,4 +431,22 @@ fn sema_call_collections_record_disjoint_views(receiver: Expr, method: String, a
         &facts.push(SemaCallReturnViewFact{slot: slots[index], access: AccessConvention.Write, places: places, sources: [ViewSourcePath]{}, temporaries: [Span]{}})
     }
     &context.call_return_views.push(SemaCallReturnView{span: span, facts: facts})
+}
+
+// Rust `builtin_receiver_borrow`: a mutating collection method reserves its
+// receiver two-phase, except iterator `next` and the list helpers lowered
+// with an explicit eager `&mut receiver` first argument.
+fn sema_call_collections_receiver_two_phase(receiver_ty: Type, method: String) -> Bool Never! {
+    if method == "next" -> return false
+    if method == "remove" || method == "sort_by" || method == "sort_desc" || method == "sort_by_desc" || method == "update_first" || method == "edit_disjoint" -> return !sema_call_collections_list_receiver(receiver_ty)
+    true
+}
+
+fn sema_call_collections_list_receiver(ty: Type) -> Bool Never! {
+    if ty == {
+        .List(_) | .FixedList(_, _) -> true
+        .Tagged(_, inner) -> sema_call_collections_list_receiver(inner)
+        .Result(ok, _) -> sema_call_collections_list_receiver(ok)
+        else -> false
+    }
 }
