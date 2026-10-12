@@ -1,5 +1,5 @@
 // D-MARKER-MODULE1=A: canonical identity is (declaring module, name span).
-use jet_foundation.[Diagnostic, Func, Item, Marker, MarkerDecl, Program, Span, TAppliedRuleArgumentMenu, foundation_core_argument_menus]
+use jet_foundation.[Diagnostic, Func, Item, Marker, MarkerDecl, Program, Span, TAppliedRule, TAppliedRuleArgumentMenu, foundation_core_argument_menus]
 use jet_parser.[parse_generated_source]
 
 struct SemaMarkerModuleResolution {
@@ -433,4 +433,44 @@ fn sema_marker_module_check(graph: SemaRegistrationGraph) -> [Diagnostic]? {
         sema_attach_diagnostic_source_locations(&diagnostics, start, module_row.source_segments)
     }
     Val(diagnostics)
+}
+
+// The prelude's applied-rule rows (Rust `Policy::applied_rule`), read from the
+// one marker vocabulary source; empty when that source does not parse.
+fn sema_marker_module_prelude_rules() -> [TAppliedRule] {
+    rows := [TAppliedRule]{}
+    parsed :: parse_generated_source(SEMA_PRELUDE_MARKER_SOURCE.bytes())
+    if parsed.diagnostics.len() > 0 -> return rows
+    loop item in parsed.program.items {
+        if item == .MarkerDecl(declaration) {
+            if sema_marker_rules_applied_row(declaration, SEMA_PRELUDE_MARKER_SOURCE) == .Val(row) -> &rows.push(row)
+        }
+    }
+    rows
+}
+
+// Rust CheckerMarkers `validate_rule_arguments`: an applied rule evaluates an
+// argument only where its binding observes one. A menu word or identifier
+// (`#Layout(c)`), an open value (outside `#Default`), an effect-root list and
+// a duration unit literal are read as written, so the first argument of such
+// a marker stages no compile-time value. A marker no applied rule names keeps
+// its first argument.
+fn sema_marker_module_first_argument_evaluates(rules: [TAppliedRule], marker: Marker) -> Bool {
+    if marker.declaration_module != None -> return true
+    index :: sema_marker_rules_catalog_rule_index(rules, marker.name) ?? return true
+    argument :: sema_marker_rules_marker_expression(marker, 0) ?? return true
+    bindings :: sema_marker_rules_marker_signature_bindings(marker, rules[index].signature) ?? return true
+    loop binding in bindings {
+        if binding.source_index != 0 -> next
+        if binding.kind == {
+            .Ident | .EffectRoots -> return false
+            .Any -> return marker.name == "Default"
+            .DurationOrString -> {
+                if argument == .UnitLit(_, _, _, _, _, _) -> return false
+                return true
+            }
+            else -> return true
+        }
+    }
+    true
 }

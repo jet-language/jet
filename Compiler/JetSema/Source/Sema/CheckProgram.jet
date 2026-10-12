@@ -53,6 +53,7 @@ use jet_foundation.[
     TTargetApplicability,
     TTestFact,
     TTraitDef,
+    TAppliedRule,
     TTypeDef,
     TUnsafeGate,
     TVisibility,
@@ -5216,6 +5217,8 @@ fn sema_comptime_checked_text_source(evaluation: SemaCheckedTextEvaluation) -> S
 struct SemaComptimeSourceList {
     items: [SemaComptimeItemSource]
     keys: [String:Bool]
+    // The prelude's applied rules, read at the module's first marker argument.
+    marker_rules: [TAppliedRule]?
 }
 
 fn sema_comptime_add_source(sources: &SemaComptimeSourceList, graph: SemaRegistrationGraph, module_identity: String, key: String, destination_key: String, name: String, kind: SemaComptimeItemKind, expression: Expr, expected_type: Type?) {
@@ -5242,6 +5245,10 @@ fn sema_comptime_add_source(sources: &SemaComptimeSourceList, graph: SemaRegistr
 
 fn sema_comptime_add_marker_source(sources: &SemaComptimeSourceList, graph: SemaRegistrationGraph, module_identity: String, owner_key: String, marker: Marker, expected_type: Type?) {
     if marker.ct != None || marker.args.len() == 0 -> return
+    if sources.marker_rules == None -> sources.marker_rules = Val(sema_marker_module_prelude_rules())
+    if sources.marker_rules == .Val(rules) {
+        if !sema_marker_module_first_argument_evaluates(rules, marker) -> return
+    }
     if marker.args[0] == {
         .Expr(expression) -> {
             destination_key := "{owner_key}::marker::{marker.name}::{marker.name_span.start}"
@@ -5387,7 +5394,7 @@ fn sema_comptime_struct_bakes_defaults(derives: [NamedSpan]) -> Bool Never! {
 // The comptime sources of `source_module`, in declaration order, their
 // dependencies not yet probed.
 fn sema_comptime_collect_module_sources(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule) -> [SemaComptimeItemSource] {
-    sources := SemaComptimeSourceList{items: [SemaComptimeItemSource]{}, keys: [String:Bool]{}}
+    sources := SemaComptimeSourceList{items: [SemaComptimeItemSource]{}, keys: [String:Bool]{}, marker_rules: None}
     loop constant in source_module.constants {
         if sema_output_metadata_binding(constant.declaration) -> next
         if constant.declaration.ct != None -> next
