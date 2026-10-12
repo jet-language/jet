@@ -213,6 +213,13 @@ fn sema_pattern_flat_union_owner(carrier: Type, variant: String, env: SemaScopeE
     Val(owners[0])
 }
 
+// The flat-case owner's checked type name, which a leading-dot constructor
+// resolves as its enum.
+fn sema_pattern_flat_union_owner_name(carrier: Type, variant: String, env: SemaScopeEnvironment, program: SemaProgramTables, span: Span) -> String? {
+    owner :: sema_pattern_flat_union_owner(carrier, variant, env, program, span) ?? return None
+    Val(type_name(sema_pattern_unwrap_tags(owner)))
+}
+
 fn sema_pattern_payload(subject_ty: Type, variant: String, env: SemaScopeEnvironment, program: SemaProgramTables, span: Span, diagnostics: &[Diagnostic]) -> SemaPatternPayload {
     normalized :: sema_pattern_unwrap_tags(subject_ty)
     result := SemaPatternPayload{types: [Type]{}, owner: None, payload: None, known: false, group: false, range_forbidden: false}
