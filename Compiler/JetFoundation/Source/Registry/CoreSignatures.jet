@@ -458,6 +458,19 @@ fn core_sig_network(request: CoreCallSignatureRequest) -> CoreTypedCallSignature
         if request.actual_arity == 2 -> &parameters.push(core_sig_param_type("deadline", "deadline", ParamZone.LabelOnly, core_sig_named("Duration")))
         return Val(core_sig(request.module_name, request.member, parameters, Val(core_sig_result(core_sig_named("UnixStream"), core_sig_named("NetError")))))
     }
+    // Rust `infer_core_call` D-NETDEP1=A / D-HTTPLIB1=A arms: the HTTP
+    // constructors that keep their native row (`request` is never routed to
+    // its source wrapper). The URL slot also accepts `URL`; the transport
+    // checker widens it from the checked argument.
+    if request.module_name == "core.http.client" {
+        response :: core_sig_result(core_sig_named("HTTPResponse"), core_sig_named("HTTPError"))
+        if request.member == {
+            "get" -> return Val(core_sig(request.module_name, request.member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(response)))
+            "post" -> return Val(core_sig(request.module_name, request.member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read), core_sig_positional(Type.String, read)}, Val(response)))
+            "request" -> return Val(core_sig(request.module_name, request.member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read), core_sig_positional(Type.String, read)}, Val(core_sig_named("HTTPRequest"))))
+            else -> {}
+        }
+    }
     None
 }
 
