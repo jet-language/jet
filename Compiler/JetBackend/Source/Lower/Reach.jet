@@ -332,11 +332,17 @@ fn lower_reach_body(p: MIRProgram, q: &LowerPrepared, function: MIRFunction, bin
 }
 
 // A concrete type's lifecycle edges (handle close/undo functions and their
-// shared close adapters) and its stored components.
+// shared close adapters), its selected Close implementation and its stored
+// components.
 fn lower_reach_concrete_type(p: MIRProgram, q: &LowerPrepared, ty: MIRType, parent: Int) Never! {
     fingerprint :: lower_mono_fingerprint(ty)
     first :: q.lifecycle.get(fingerprint) ?? -1
     lower_reach_edges(p, &q, first, parent, "lifecycle of {mir_type_display_name(ty)}")
+    // Every scope-end, drop glue and partial cleanup of a Close value calls
+    // this instance (lower_close_emit), so it is reachable with the type.
+    if lower_close_method(p, q.close_methods, ty) == .Val(method) {
+        lower_mono_request(p, &q, method, Val(lower_close_type(p, ty)), [MIRType]{}, parent, "Close of {mir_type_display_name(ty)}").drop("Close implementation request")
+    }
     operations :: [String]{"clone", "show", "debug"}
     loop operation in operations {
         if mir_source_value_hook(p, ty, operation) == .Val(id) {
