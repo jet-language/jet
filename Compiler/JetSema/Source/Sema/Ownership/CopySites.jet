@@ -95,11 +95,15 @@ fn sema_copy_site_guard_projection(value: TExpr) -> Bool Never! {
 
 fn sema_copy_site_check_guard_owned(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic], exact_move: Bool) -> Bool {
     if sema_copy_site_guard_projection(value) {
+        // Rust `note_exact_move` has no guard rule: `^guard.value` takes the
+        // payload out of the edit guard (the owner then refills it), so only
+        // an unmarked owning position asks for the explicit copy.
+        if exact_move -> return true
         facts :: sema_copy_classify(value.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
         if facts.copyable -> return true
-        if !exact_move && !scopes.copies_explicit && facts.complete && facts.cloneable && !facts.resource -> return true
+        if !scopes.copies_explicit && facts.complete && facts.cloneable && !facts.resource -> return true
         diagnostic :: sema_error("E0120", value.span, "this guard lends its value, so it cannot be moved into an owning destination", "the value stays owned by the shared storage; moving it would leave the guard and the destination owning the same data", "copy the value explicitly with `.copy()`, or pass it to a read parameter instead")
-        if !exact_move && facts.complete && facts.cloneable && !facts.resource {
+        if facts.complete && facts.cloneable && !facts.resource {
             &diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: value.span.end, end: value.span.end}, new_text: ".copy()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
         } else {
             &diagnostics.push(diagnostic)
