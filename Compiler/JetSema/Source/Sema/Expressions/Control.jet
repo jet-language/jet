@@ -654,7 +654,11 @@ fn sema_expression_propagation_conversion(inner: TExpr, source_expr: Expr?, span
                 &diagnostics.push(sema_failure_domain_mismatch(source_expr, span, error, target, environment, program, scopes, context))
                 return sema_failure_defer_obligation(callee, &diagnostics)
             }
-            if type_identity_equal(error, target) -> return Val(TTryConvert.NoConversion)
+            // Rust `*ret_err == err || nominal_type_identity(ret_err, &err)`: a
+            // callee may publish its failure by the declared spelling
+            // (`NetError`) while the caller's contract carries the canonical
+            // identity; both name one nominal type in this module.
+            if type_identity_equal(error, target) || type_identity_equal(sema_expr_expected_type(error, environment, program), sema_expr_expected_type(target, environment, program)) -> return Val(TTryConvert.NoConversion)
             if normalized_target == (Type.Named{name: "Err"}) && sema_expr_unwrap_tag(error) == Type.String -> return Val(TTryConvert.DefaultErr)
             widened :: sema_expression_try_union_conversion(normalized_target, error)
             if widened != None -> return widened
