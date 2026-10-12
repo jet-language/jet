@@ -405,7 +405,7 @@ fn sema_inject_prelude_error_conversions(module_identity: String, environment: &
 
 // D-FAILURE-FOUNDATION1=A (E2417): an explicit `!` domain names `Err`, a Core
 // error, a type marked `#Error`, an all-error union, or `Never`.
-fn sema_failure_items_nominal_is_error(items: [Item], leaf: String, seen: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
+fn sema_failure_items_nominal_is_error(items: [Item], module_identity: String, leaf: String, seen: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
     loop item in items {
         if item == {
             .Struct(definition) -> if definition.name == leaf -> return Val(sema_failure_markers_name_error(definition.type_markers))
@@ -413,11 +413,19 @@ fn sema_failure_items_nominal_is_error(items: [Item], leaf: String, seen: [Strin
             .Distinct(definition) -> if definition.name == leaf -> return Val(sema_failure_markers_name_error(definition.type_markers))
             .TypeAlias(definition) -> if definition.name == leaf {
                 if definition.type_params.len() != 0 -> return Val(false)
+                seen_key :: "{module_identity}::{leaf}"
                 loop name in seen {
-                    if name == leaf -> return Val(false)
+                    if name == seen_key -> return Val(false)
                 }
                 inner := seen
-                &inner.push(leaf)
+                &inner.push(seen_key)
+                // Rust `resolve_type`: a re-export alias
+                // (`alias HexError :: encoding.HexError`) names its target
+                // from the alias's own module, never this module's leaf.
+                if definition.target == .Named(target_name) && (target_name.contains("::") || target_name.contains(".")) {
+                    home :: sema_failure_alias_target_is_error(target_name, module_identity, inner, environment, program)
+                    if home != None -> return home
+                }
                 return Val(sema_failure_domain_is_error(definition.target, inner, environment, program))
             }
             else -> {}
@@ -426,16 +434,28 @@ fn sema_failure_items_nominal_is_error(items: [Item], leaf: String, seen: [Strin
     None
 }
 
+// The declaration a qualified alias target names, resolved from the module
+// that declares the alias.
+fn sema_failure_alias_target_is_error(target_name: String, module_identity: String, seen: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
+    if program.registration_graph == .Val(graph) {
+        resolved :: sema_type_graph_lookup_symbol(graph, module_identity, target_name) ?? return None
+        row :: sema_type_graph_nominal_row(graph, resolved.symbol.id.key) ?? return None
+        home :: graph.modules[row.module_index]
+        return sema_failure_items_nominal_is_error(home.program.items, home.module_identity, sema_error_conversion_leaf(target_name), seen, environment, program)
+    }
+    None
+}
+
 // The declaring module wins; other graph modules supply imported nominals.
 fn sema_failure_nominal_is_error(leaf: String, seen: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
     if program.registration_graph == .Val(graph) {
         if sema_registration_module_index(graph, environment.module_identity) == .Val(module_index) {
-            local :: sema_failure_items_nominal_is_error(graph.modules[module_index].program.items, leaf, seen, environment, program)
+            local :: sema_failure_items_nominal_is_error(graph.modules[module_index].program.items, environment.module_identity, leaf, seen, environment, program)
             if local != None -> return local
         }
         loop module_row in graph.modules {
             if module_row.module_identity == environment.module_identity -> next
-            imported :: sema_failure_items_nominal_is_error(module_row.program.items, leaf, seen, environment, program)
+            imported :: sema_failure_items_nominal_is_error(module_row.program.items, module_row.module_identity, leaf, seen, environment, program)
             if imported != None -> return imported
         }
     }
