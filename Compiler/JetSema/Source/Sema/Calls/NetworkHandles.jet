@@ -215,18 +215,32 @@ fn sema_network_handle_nominal_owner(ty: Type) -> String? {
     }
 }
 
+// Rust `core_net_handle_dispatch_name`: the canonical `core.net` TCP handle
+// identities and their bare spellings project onto the method table.
+fn sema_network_handle_dispatch_name(name: String) -> String? Never! {
+    if name == "TCPStream" || name == "<corelib>/Core/net::Core/net/net.jet::TCPStream" -> return Val("TCPStream")
+    if name == "TCPListener" || name == "<corelib>/Core/net::Core/net/net.jet::TCPListener" -> return Val("TCPListener")
+    None
+}
+
+// Rust `net_method_return` claims a receiver by its type name alone: the
+// handle owners are Core leaf types with no source declaration, so the bare
+// spelling (or the canonical `core.net` TCP identity) is the Core handle. A
+// bare name the module itself resolves names the Core owner only when that
+// declaration belongs to the owner's Core module.
 fn sema_network_handle_is_canonical(receiver_type: Type, owner: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     actual :: sema_network_handle_nominal_owner(receiver_type) ?? return false
-    if actual != owner -> return false
+    if actual != owner {
+        mapped :: sema_network_handle_dispatch_name(actual) ?? return false
+        return mapped == owner
+    }
     expected_module := sema_network_handle_owner_module(owner)
     if expected_module == "" -> return false
     if program.registration_graph == .Val(graph) {
         resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
         if resolved == .Val(symbol) -> return symbol.symbol.kind == SymbolKind.Type && (sema_registration_module_name(graph, symbol.symbol.module_name) ?? "") == expected_module
-        return false
-    } else {
-        return true
     }
+    true
 }
 
 fn sema_network_handle_infer_args(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
@@ -336,9 +350,11 @@ fn sema_network_handle_finish(receiver: TExpr, operation: THandleOp, args: [TExp
 }
 
 // Called before ordinary method candidate lookup with the already checked
-// receiver. A route is claimed only for the exact registered Core owner.
+// receiver. A route is claimed only for a Core handle owner
+// (sema_network_handle_is_canonical).
 fn sema_call_try_network_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    owner :: sema_network_handle_nominal_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    actual :: sema_network_handle_nominal_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    owner :: sema_network_handle_dispatch_name(actual) ?? actual
     if !sema_network_handle_is_canonical(receiver_value.ty, owner, environment, program) || !sema_network_handle_known_method(owner, method) -> return SemaMethodSpecialCheck{handled: false, value: None}
     spec := sema_network_handle_spec_for(owner, method, args.len())
     if spec == None {
