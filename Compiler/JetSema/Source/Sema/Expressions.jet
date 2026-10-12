@@ -3608,11 +3608,17 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         if distinct != None -> return sema_expr_expected(distinct ?? lhs, expected, environment, program, &diagnostics)
         return None
     }
+    // An exact number (`Decimal`, `Fraction`, `Complex`) mixed with a plain
+    // operand (`0 - span / 2`) takes the precise route below, which lifts an
+    // integer literal (Rust `infer_binary`); the exact type's own `Sub(Self)`
+    // hook does not name the plain operand's type.
     source_operator := false
     if program.registration_graph == .Val(graph) {
-        left_name :: sema_expr_type_base_name(lhs.ty) ?? ""
-        right_name :: sema_expr_type_base_name(rhs.ty) ?? ""
-        source_operator = sema_type_source_owns_nominal(graph, left_name, environment.module_identity) || sema_type_source_owns_nominal(graph, right_name, environment.module_identity)
+        if (sema_expr_precise_name(lhs.ty) == None) == (sema_expr_precise_name(rhs.ty) == None) {
+            left_name :: sema_expr_type_base_name(lhs.ty) ?? ""
+            right_name :: sema_expr_type_base_name(rhs.ty) ?? ""
+            source_operator = sema_type_source_owns_nominal(graph, left_name, environment.module_identity) || sema_type_source_owns_nominal(graph, right_name, environment.module_identity)
+        }
     }
     if source_operator && sema_expr_operator_trait(op) != None {
         before :: diagnostics.len()
