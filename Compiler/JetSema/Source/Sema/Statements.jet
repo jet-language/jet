@@ -4525,11 +4525,13 @@ fn sema_stmt_return_if_builds_carrier(value: Expr, return_type: Type?, scopes: S
     sema_stmt_return_expr_is_carrier(value, return_type, scopes)
 }
 // Every arm of a value `if`, through nested decision levels and grouping, is
-// a carrier or a direct call whose own result already is the carrier.
+// a carrier or a direct call whose own result already is the carrier. The
+// missing `else` of a covered table never runs, so it fits any slot.
 fn sema_stmt_return_if_arms_fit_carrier(value: Expr, return_type: Type?, scopes: SemaScopeTable) -> Bool {
     if value == {
         .Paren(inner, _) | .Tainted(inner, _, _) | .Copy(inner, _) -> return sema_stmt_return_if_arms_fit_carrier(inner, return_type, scopes)
         .If(_, _, then_value, _, else_value, _) -> return sema_stmt_return_if_arms_fit_carrier(then_value, return_type, scopes) && sema_stmt_return_if_arms_fit_carrier(else_value, return_type, scopes)
+        .NoElse(_) -> return true
         else -> {}
     }
     if sema_stmt_return_expr_is_carrier(value, return_type, scopes) -> return true
