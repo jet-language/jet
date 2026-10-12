@@ -307,7 +307,19 @@ fn sema_services_delivery_contract(method: String) -> SemaServiceCoreMethodContr
     None
 }
 
+// Rust `infer_method_call` (method_calls.rs, D-SERVICE) routes a service
+// method only when the receiver is that service handle (`handle_ty ==
+// "ServiceTree"`, …); a user type's `start`, `send` or `show` keeps its own
+// declaration. A canonical Core spelling names the same handle.
+fn sema_services_receiver_is(ty: Type, owner: String) -> Bool Never! {
+    if ty == {
+        .Named(name) -> name == owner || (core_source_owns_type(name) && name.ends_with("::{owner}"))
+        else -> false
+    }
+}
+
 fn sema_check_service_tree_method(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+    if !sema_services_receiver_is(receiver_value.ty, "ServiceTree") -> return None
     updated_args := args
     if method == "worker" {
         if updated_args.len() != 3 {
@@ -409,6 +421,7 @@ fn sema_check_service_tree_method(method: String, receiver: Expr, receiver_value
 }
 
 fn sema_check_service_workflow_method(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+    if !sema_services_receiver_is(receiver_value.ty, "ServiceWorkflow") -> return None
     contract :: sema_services_workflow_contract(method) ?? return None
     result := sema_services_check_core_method("ServiceWorkflow.{method}", contract, receiver, receiver_value, args, [String]{}, expected, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if method == "sleep" -> sema_services_record_direct_effect(environment, program, &scopes, &context, "Time", "ServiceWorkflow.sleep", span, &diagnostics)
@@ -417,22 +430,25 @@ fn sema_check_service_workflow_method(method: String, receiver: Expr, receiver_v
 }
 
 fn sema_check_service_endpoint_method(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+    if !sema_services_receiver_is(receiver_value.ty, "ServiceEndpoint") -> return None
     contract :: sema_services_endpoint_contract(method) ?? return None
     Val(sema_services_check_core_method("ServiceEndpoint.{method}", contract, receiver, receiver_value, args, [String]{}, expected, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics))
 }
 
 fn sema_check_delivery_method(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+    if !sema_services_receiver_is(receiver_value.ty, "Delivery") -> return None
     contract :: sema_services_delivery_contract(method) ?? return None
     Val(sema_services_check_core_method("Delivery.{method}", contract, receiver, receiver_value, args, [String]{}, expected, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics))
 }
 
 fn sema_check_delivery_state_method(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
-    if method != "show" -> return None
+    if !sema_services_receiver_is(receiver_value.ty, "DeliveryState") || method != "show" -> return None
     contract := sema_services_contract("delivery_state_show", [Type]{}, Type.String, AccessConvention.Read)
     Val(sema_services_check_core_method("DeliveryState.show", contract, receiver, receiver_value, args, [String]{}, expected, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics))
 }
 
 fn sema_check_service_runtime_method(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+    if !sema_services_receiver_is(receiver_value.ty, "ServiceRuntime") -> return None
     updated_args := args
     operation := if {
         method == "send" -> THandleOp.ServiceRuntimeSend
