@@ -26,6 +26,7 @@ use jet_foundation.[
     THostCall,
     TMapEntry,
     TMethodRef,
+    TGenericParam,
     TNumericOp,
     TPreludeArg,
     TStaticOwner,
@@ -149,7 +150,14 @@ fn sema_call_static_append_registered(output: &[SemaStaticMethodTarget], graph: 
     if function.parameters.len() > 0 && function.parameters[0].symbol.name == "self" -> return
     if !sema_registration_visible(function.symbol.visibility, environment.module_identity, environment.package_identity, owner_module, owner_package) -> return
 
-    target := sema_call_static_function_target(function.symbol, function.signature, sema_inference_registration_params(function.generic_params), type_args, environment, program, span, &diagnostics) ?? return
+    // Rust `owner_type_for_reader`, as for an exported function: the method
+    // names types as its owning module sees them (`X25519SecretKey` is
+    // `core.crypto`'s own), so it resolves there with every type parameter
+    // kept, before the caller's type arguments are substituted.
+    generics := loop param in nominal.generic_params -> TGenericParam{name: param.name, bounds: [SymbolID]{}}
+    loop param in function.generic_params -> &generics.push(TGenericParam{name: param.name, bounds: [SymbolID]{}})
+    owner_signature :: sema_type_resolve_declared_with_generics(graph, function.signature, owner_module, generics)
+    target := sema_call_static_function_target(function.symbol, owner_signature, sema_inference_registration_params(function.generic_params), type_args, environment, program, span, &diagnostics) ?? return
     owner_params :: sema_inference_registration_params(nominal.generic_params)
     owner_result :: sema_call_static_owner_resolution(owner_params, owner_type_args, target.signature, args, expected, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics) ?? return
     if !owner_result.complete -> return

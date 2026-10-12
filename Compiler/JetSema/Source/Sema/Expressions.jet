@@ -2251,7 +2251,11 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
                 loop function in implementation.methods {
                     if function.symbol.name != method || function.parameters.len() == 0 -> next
                     method_ref :: TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
-                    candidate :: sema_call_method_candidate_from_registration(function.signature, function.generic_params, program.registration_graph, caller_module, caller_package, environment.generic_params, Val(lookup_type), function.parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
+                    // The impl's signature names types as its owning module
+                    // sees them (Rust `owner_type_for_reader`).
+                    generics :: loop param in function.generic_params -> TGenericParam{name: param.name, bounds: [SymbolID]{}}
+                    owner_signature :: sema_type_resolve_declared_with_generics(graph, function.signature, graph.modules[owner_index].module_identity, generics)
+                    candidate :: sema_call_method_candidate_from_registration(owner_signature, function.generic_params, program.registration_graph, caller_module, caller_package, environment.generic_params, Val(lookup_type), function.parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
                     &candidates.push(candidate)
                 }
             }
@@ -2276,7 +2280,15 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
         written_before :: candidates.len()
         loop function in nominal.methods {
             if function.symbol.name != method || function.parameters.len() == 0 -> next
-            method_signature :: sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
+            // Resolve the declared signature in the owner's module, with the
+            // owner's and the method's type parameters kept, before the
+            // receiver's arguments are substituted (Rust
+            // `owner_type_for_reader`): `clock.__observer()` returns
+            // `core.time`'s own `__ClockObserver` in every caller.
+            generics := loop param in nominal.generic_params -> TGenericParam{name: param.name, bounds: [SymbolID]{}}
+            loop param in function.generic_params -> &generics.push(TGenericParam{name: param.name, bounds: [SymbolID]{}})
+            owner_signature :: sema_type_resolve_declared_with_generics(graph, function.signature, graph.modules[owner_index].module_identity, generics)
+            method_signature :: sema_inference_substitute_type_bindings(owner_signature, owner_inference.substitutions)
             method_ref := TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
             candidate :: sema_call_method_candidate_from_registration(method_signature, function.generic_params, program.registration_graph, caller_module, caller_package, environment.generic_params, Val(owner_type), function.parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
             &candidates.push(candidate)
