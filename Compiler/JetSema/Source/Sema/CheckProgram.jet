@@ -1759,6 +1759,42 @@ fn sema_function_resolve_declared(environment: SemaScopeEnvironment, program: Se
     ty.copy()
 }
 
+// Rust `is_consuming_close_body`: `func` is a method of a `Close` impl block,
+// matched by the written trait leaf (`impl Secret.Close`), so a builtin
+// `Close` that no module declares counts too.
+fn sema_function_is_consuming_close_body(func: Func, module_identity: String, program: SemaProgramTables) -> Bool Never! {
+    if program.registration_graph == .Val(graph) {
+        module_index :: sema_registration_module_index(graph, module_identity) ?? return false
+        loop item in graph.modules[module_index].program.items {
+            if item == {
+                .Impl(definition) -> {
+                    if sema_function_close_trait_leaf(definition.trait_name ?? "") && sema_function_declares_span(definition.methods, func.span) -> return true
+                }
+                .Struct(definition) -> loop block in definition.trait_impls {
+                    if sema_function_close_trait_leaf(block.trait_name) && sema_function_declares_span(block.methods, func.span) -> return true
+                }
+                .Enum(definition) -> loop block in definition.trait_impls {
+                    if sema_function_close_trait_leaf(block.trait_name) && sema_function_declares_span(block.methods, func.span) -> return true
+                }
+                else -> {}
+            }
+        }
+    }
+    false
+}
+
+fn sema_function_close_trait_leaf(trait_name: String) -> Bool Never! {
+    parts :: trait_name.split("::").to_list()
+    parts[parts.len() - 1] == "Close"
+}
+
+fn sema_function_declares_span(methods: [Func], span: Span) -> Bool Never! {
+    loop method in methods {
+        if method.span == span -> return true
+    }
+    false
+}
+
 // One check of `func` (sema_function_check_passes). `updated` already carries
 // the function's merged generic parameters (`generics.merged`) and name.
 fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, updated: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, generics: SemaFunctionCheckGenerics, host_hooks: SemaHostHookAccess?, share_known: [Span], share_found: &[SemaOwnershipShareSite], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
@@ -1878,11 +1914,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
             }
             else -> {
                 sema_ownership_declare_binding(&state, param_symbol, true)
-                if param_index == 0 && parameter.name == "self" && parameter.convention == AccessConvention.Move && func.name == "close" {
-                    if function_kind == .TraitMethod(_, self_access, _, trait_id, _) {
-                        if self_access == AccessConvention.Move && trait_id.key.ends_with(":Close") -> state.close_receiver_key = param_symbol.id.key
-                    }
-                }
+                if param_index == 0 && parameter.name == "self" && parameter.convention == AccessConvention.Move && func.name == "close" && sema_function_is_consuming_close_body(func, module_identity, program) -> state.close_receiver_key = param_symbol.id.key
                 if function_kind == {
                     .Method(_, _) | .TraitMethod(_, _, _, _, _) -> {
                         if param_index == 0 && parameter.name == "self" -> context.return_view_receiver_key = param_symbol.id.key
