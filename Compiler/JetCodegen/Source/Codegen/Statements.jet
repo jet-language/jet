@@ -282,20 +282,27 @@ fn jet_codegen_lower_defer_thunk(builder: &JetCodegenBuilder, program: JetCodege
     }
     captured :: binding ?? panic("checked deferred resource has no active Source binding")
     local := tir_symbol_local(captured.name, span, resource)
+    // Rust emit_deferred_close lowers the close at the exit edge and discards
+    // its value: the callee's own checked return (a defaulted `Unit Err!`
+    // Close.close) is not the Unit statement's type, so a Unit close runs as
+    // a statement of a Unit thunk instead of being its returned value.
+    close_type :: close.ty.copy()
+    unit_close :: close_type == Type.Named{name: "Unit"}
+    executable :: if unit_close -> TLambdaBody.Block{body: [TStmt]{TStmt.ExprStmt{value: close.copy(), span: span}}} else -> TLambdaBody.Expr{value: close.copy()}
     lambda := TLambda{
-        executable: TLambdaBody.Expr{value: close},
+        executable: executable,
         source_span: span,
         frame_schedule: None,
         frame_schedule_derivation: None,
         capture_facts: TCaptureFacts{escapes: false, needs_fn_mut: false, mutable: [String]{}, cloned: [String]{}, frozen: [String]{}, materialized: [String]{}, moved: [String]{}},
-        failure_carrier: jet_codegen_failure_carrier_for_type(close.ty),
+        failure_carrier: jet_codegen_failure_carrier_for_type(close_type),
         effects: builder.function.effects,
         host_param_conventions: None,
         source_params: [String]{},
         source_param_symbols: [SymbolID]{},
         jit_name: "jet_defer_{scope_id}",
         param_types: [Type]{},
-        ret: Val(close.ty),
+        ret: Val(close_type),
         is_move: false,
         boxed: false,
         rc: false,
