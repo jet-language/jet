@@ -696,6 +696,14 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
         else -> None
     }
     checked_index :: sema_check_expression(index, index_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    // D-DATATREE-RULES1 (Rust `infer` Index arm): `tree[key]` / `tree[i]` on a
+    // `Dyn` reads an object member or array position as a checked Dyn.
+    if sema_dyn_is_type(sema_expr_expected_type(base_ty, environment, program)) {
+        site :: "{sema_dyn_site(base)}[{sema_dyn_site(index)}]"
+        operation :: sema_dyn_index_operation(checked_index.ty, site, span, environment, program, scopes, &diagnostics) ?? return None
+        value :: sema_tir_expr(sema_dyn_type(), TExprKind.HandleMethod{receiver: checked_base, operation: operation, args: [TExpr]{checked_index}}, span)
+        return sema_expr_expected(value, expected, environment, program, &diagnostics)
+    }
     // Fixed lists refine lists (spec: fixed-size lists), so range selection
     // erases only the length fact. Reuse Slice for read/write window typing.
     if checked_index.ty == (Type.Named{name: "Range"}) {
