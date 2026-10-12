@@ -4209,6 +4209,17 @@ fn sema_stmt_check_assignment_place(target: LValue, compound: Bool, environment:
             checked_base_value :: sema_check_expression(base, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             context.suppress_partial_move_root_read = previous_root_read
             checked_base :: checked_base_value ?? return None
+            // D-DATATREE-RULES1 (Rust `check_stmt` dyn_write_path): a Dyn
+            // member write is a path step, not a field of a nominal owner.
+            if sema_dyn_is_type(sema_expr_expected_type(checked_base.ty, environment, program)) {
+                if sema_dyn_is_member(member) {
+                    &diagnostics.push(sema_dyn_member_error(member, span))
+                    return None
+                }
+                key :: sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: member}}}, span)
+                operation :: THandleOp.DynIndexKey{site: "{sema_dyn_site(base)}.{member}", location: sema_expression_panic_location(environment, program, scopes, span)}
+                return Val(sema_tir_expr(sema_dyn_type(), TExprKind.HandleMethod{receiver: checked_base, operation: operation, args: [TExpr]{key}}, span))
+            }
             // D-SWIZZLE1: authored nominal fields are not builtin math lanes.
             if checked_base.ty == .Named(math_name) {
                 owner := sema_expression_type_symbol(&scopes, environment, program, math_name)
@@ -4235,6 +4246,30 @@ fn sema_stmt_check_assignment_place(target: LValue, compound: Bool, environment:
     }
 }
 
+fn sema_stmt_is_dyn_index(operation: THandleOp) -> Bool Never! {
+    if operation == {
+        .DynIndexKey(_, _) | .DynIndexAt(_, _) -> true
+        else -> false
+    }
+}
+
+// Collect the access chain without materializing intermediate Dyn copies:
+// the runtime setter walks the original root place and never grows prefixes.
+fn sema_stmt_dyn_path_root(place: ^TExpr, keys: &[Bool], steps: &[TExpr]) -> TExpr Never! {
+    if place.kind == .HandleMethod(receiver, operation, args) {
+        if operation == {
+            .DynIndexKey(_, _) | .DynIndexAt(_, _) -> {
+                root :: sema_stmt_dyn_path_root(^receiver, &keys, &steps)
+                &keys.push(if operation == {.DynIndexKey(_, _) -> true else -> false})
+                &steps.push(args[0])
+                return root
+            }
+            else -> {}
+        }
+    }
+    place
+}
+
 fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     // Keep nested fields and indexes below the cell inside its locked edit.
     projected := sema_shared_access_write_place(target, environment, program, &scopes)
@@ -4259,6 +4294,30 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
         }
     }
     place := sema_stmt_check_assignment_place(target, op != None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    // D-DATATREE-RULES1 (Rust `check_stmt` __dyn_set_path): a plain write
+    // through a Dyn member/index chain sets the path on the root in place.
+    if place.kind == .HandleMethod(_, operation, _) && sema_stmt_is_dyn_index(operation) {
+        if op != None {
+            &diagnostics.push(sema_error("E0164", place.span, "compound assignment can't target a Dyn path", "a compound update reads the path before it writes", "write the Dyn path assignment explicitly"))
+            return None
+        }
+        keys := [Bool]{}
+        steps := [TExpr]{}
+        span :: place.span.copy()
+        site :: if operation == {
+            .DynIndexKey(text, _) | .DynIndexAt(text, _) -> text
+            else -> "…"
+        }
+        root :: sema_stmt_dyn_path_root(^place, &keys, &steps)
+        checked :: sema_check_expression(expr, Val(sema_dyn_type()), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+        if sema_copy_site_check_assignment(expr, environment, program, scopes, context, &diagnostics) -> return None
+        if !sema_ownership_check_lvalue_write(&state, target, scopes, &diagnostics) -> return None
+        if !sema_stmt_move_direct(expr, &state, scopes, "the assignment", &diagnostics) -> return None
+        &steps.push(checked)
+        set :: THandleOp.DynSetPath{keys: keys, site: site, location: sema_expression_panic_location(environment, program, scopes, span)}
+        value :: sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: root, operation: set, args: steps}, span)
+        return Val(TStmt.ExprStmt{value: value, span: Span{start: span.start, end: expr_span(expr).end}})
+    }
     // E0362 (Rust statements.rs `compound_nested_hook`): a compound operator
     // hook on a field below a nested owner has no operator-place lowering.
     if op != None && target == .Field(field_base, _, field_span) {

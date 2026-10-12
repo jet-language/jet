@@ -18,8 +18,10 @@ use jet_foundation.[
     TExprKind,
     TFieldRef,
     TGenericParam,
+    THandleOp,
     TIndexKind,
     THostCall,
+    TStrPart,
     TagMarker,
     TextEdit,
     Type,
@@ -430,6 +432,18 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
     }
     sema_scope_commit(&scopes, base_scope_mark)
     checked_base :: checked_base_value ?? return None
+    // D-DATATREE-RULES1 (Rust `infer_field` Dyn arm): `tree.member` on a Dyn
+    // reads the object member as a checked Dyn; method names stay reserved.
+    if sema_dyn_is_type(sema_expr_expected_type(checked_base.ty, environment, program)) {
+        if sema_dyn_is_member(member) {
+            &diagnostics.push(sema_dyn_member_error(member, member_span))
+            return None
+        }
+        key :: sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: member}}}, member_span)
+        operation :: THandleOp.DynIndexKey{site: "{sema_dyn_site(base)}.{member}", location: sema_expression_panic_location(environment, program, scopes, span)}
+        value :: sema_tir_expr(sema_dyn_type(), TExprKind.HandleMethod{receiver: checked_base, operation: operation, args: [TExpr]{key}}, span)
+        return sema_expr_expected(value, expected, environment, program, &diagnostics)
+    }
     sema_ownership_note_close_owner(&state, base, checked_base.ty, environment, program, scopes)
     if !sema_expression_secret_exposure_allowed(checked_base.ty, member, span, environment, program, &context, &diagnostics) -> return None
     if checked_base.ty == .Named(math_name) {
