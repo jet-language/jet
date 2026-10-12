@@ -285,8 +285,15 @@ fn sema_call_try_ambient_prelude(call: Call, expected: Type?, environment: SemaS
         // as a `core.term` item import unless the file is `#NoPrelude`).
         "eprint" -> {
             if sema_module_no_prelude(environment, program) -> return SemaDirectSpecialCheck{handled: false, value: None}
-            record :: core_call("core.term", "eprint") ?? return SemaDirectSpecialCheck{handled: false, value: None}
-            sema_call_check_term_eprint(record, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            if core_call("core.term", "eprint") == .Val(record) -> return sema_call_check_term_eprint(record, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            // A source-owned `core.term.eprint` is called as the item import
+            // the prelude opens: its checked source declaration is the target.
+            module_identity :: sema_call_core_module_identity(environment, program, "core.term") ?? return SemaDirectSpecialCheck{handled: false, value: None}
+            target :: sema_call_core_source_target(environment, program, module_identity, "eprint", call.type_args, call.name_span, false, &diagnostics) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+            scopes.ownership_call_depth += 1
+            value := sema_call_core_check_source_owned(target, call.name, call.type_args, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            scopes.ownership_call_depth -= 1
+            SemaDirectSpecialCheck{handled: true, value: value}
         }
         "Decimal" -> sema_call_check_value_constructor(call, "Decimal", [Type]{Type.String}, false, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         "Complex" -> sema_call_check_value_constructor(call, "Complex", [Type]{Type.Float, Type.Float}, false, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
