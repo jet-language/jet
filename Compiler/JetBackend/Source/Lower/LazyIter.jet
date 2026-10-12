@@ -69,7 +69,7 @@ fn lower_lazy_equal_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> L
 
 fn lower_lazy_show_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
-    result :: lower_pointer(&f)
+    result :: lower_render_string(&f)
     slot :: f.open_params[0].copy()
     value :: lower_read_at(p, &f, slot, 0, glue.ty)
     text :: lower_render_value(p, &m, &f, glue.ty, value, LowerRenderMode.Show) ?? return lir_builder_finish(f.builder)
