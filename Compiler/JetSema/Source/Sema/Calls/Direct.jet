@@ -285,6 +285,7 @@ fn sema_call_try_knowledge_builtin(call: Call, expected: Type?, environment: Sem
 fn sema_call_try_ambient_prelude(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if !sema_call_gate_is_unshadowed(call.name, scopes) -> return SemaDirectSpecialCheck{handled: false, value: None}
     if call.name == {
+        "channel" -> sema_call_check_channel(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         "freeze" -> sema_call_check_freeze(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         "print" -> sema_call_check_ambient_print(call, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         "input" -> sema_call_check_ambient_input(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
