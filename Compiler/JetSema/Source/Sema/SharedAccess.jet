@@ -7,6 +7,7 @@ use jet_foundation.[
     AccessConvention,
     BinOp,
     CallArg,
+    EffectRowEntry,
     Expr,
     LValue,
     Lambda,
@@ -99,6 +100,20 @@ fn sema_shared_access_host_method_name(ty: Type, method: String) -> String Never
         }
         else -> method
     }
+}
+
+// Rust `method_calls.rs` (D-REALTIME1): every `Shared<T>` protocol access
+// blocks on the cell's lock and records `Time.Wait`, except the wait-free
+// scalar `read`/`get`/`set`/`replace` rail. The other Shared owner methods
+// (`capture`, `same`, `downgrade`, …) and the Cell family record no effect.
+// The row is authoritative: a compiler-owned host call is never an unknown
+// callee, so it must not fall back to the maximal effect set.
+fn sema_shared_access_effect_row(ty: Type, method: String, span: Span) -> [EffectRowEntry] Never! {
+    inner :: sema_shared_access_inner(ty) ?? return [EffectRowEntry]{}
+    scalar_atomic :: (method == "read" || method == "get" || method == "set" || method == "replace") && sema_ownership_type_is_scalar(inner)
+    protocol :: method == "get" || method == "set" || method == "replace" || method == "read" || method == "edit" || method == "guard_read" || method == "guard_edit" || method == "read_txn" || method == "edit_txn"
+    if protocol && !scalar_atomic -> return [EffectRowEntry]{EffectRowEntry{name: "Time.Wait", span: span}}
+    [EffectRowEntry]{}
 }
 
 fn sema_shared_access_user_method_forbidden(ty: Type, method: String, args: [CallArg]) -> Bool Never! {

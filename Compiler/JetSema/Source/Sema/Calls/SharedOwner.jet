@@ -4,7 +4,8 @@
 // Methods.jet and projected guard operations stay in Memory.jet.
 //
 // Every accepted call is one checked `THostCall.Method` whose receiver type
-// selects the canonical core.host route in codegen.
+// selects the canonical core.host route in codegen, and records its Rust
+// effect row as an intrinsic call fact.
 use jet_foundation.[
     AccessConvention,
     CallArg,
@@ -35,7 +36,13 @@ fn sema_call_shared_owner_snapshot_type(inner: Type, projection: Type) -> Type N
     Type.Apply{name: SEMA_SHARED_SNAPSHOT_TYPE, args: [Type]{inner, projection}}
 }
 
-fn sema_call_shared_owner_host_value(receiver_value: TExpr, method: String, args: [TExpr], result: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_shared_owner_host_value(receiver_value: TExpr, method: String, args: [TExpr], result: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    owner :: if receiver_value.ty == {
+        .Shared(_) -> "Shared"
+        .Apply(name, _) -> name
+        else -> type_name(receiver_value.ty)
+    }
+    if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "{owner}.{method}", span, sema_shared_access_effect_row(receiver_value.ty, method, span), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     value := sema_tir_expr(result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: args}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
@@ -79,7 +86,7 @@ fn sema_call_shared_owner_capture(receiver: Expr, receiver_value: TExpr, inner: 
         if !sema_call_shared_owner_cloneable(inner, environment, program, context) {
             &diagnostics.push(sema_error("E0112", span, "`Shared<{type_name(inner)}>.capture()` cannot copy its value", "`capture` owns an independent snapshot, so the stored type must support copying", "capture a cloneable projection instead, or add the required copy implementation"))
         }
-        return sema_call_shared_owner_host_value(receiver_value, "capture", [TExpr]{}, sema_call_shared_owner_snapshot_type(inner, inner), span, expected, environment, program, &diagnostics)
+        return sema_call_shared_owner_host_value(receiver_value, "capture", [TExpr]{}, sema_call_shared_owner_snapshot_type(inner, inner), span, expected, environment, program, &scopes, &context, &diagnostics)
     }
     callback_is_lambda :: if args[0].expr == {
         .Lambda(_) -> true
@@ -100,7 +107,7 @@ fn sema_call_shared_owner_capture(receiver: Expr, receiver_value: TExpr, inner: 
         &diagnostics.push(sema_error("E3401", expr_span(args[0].expr), "`Shared.capture` calls the impure function `capture projection`", "`capture projection` is impure, but `Shared.capture` declares `-[]>`", "remove the call from `Shared.capture`, or drop the `-[]>` bound from `Shared.capture` so its effects are inferred"))
     }
     callback.ty = Type.Fn{params: [Type]{inner}, ret: Val(projected), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-    sema_call_shared_owner_host_value(receiver_value, "capture", [TExpr]{callback}, sema_call_shared_owner_snapshot_type(inner, projected), span, expected, environment, program, &diagnostics)
+    sema_call_shared_owner_host_value(receiver_value, "capture", [TExpr]{callback}, sema_call_shared_owner_snapshot_type(inner, projected), span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
 // D-SHARED-REVISION1=A: consume one owner-bound snapshot ticket plus a
@@ -129,7 +136,7 @@ fn sema_call_shared_owner_try_replace(receiver: Expr, receiver_value: TExpr, inn
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     values :: [TExpr]{sema_call_shared_owner_owned_arg(snapshot, updated_args[0]), sema_call_shared_owner_owned_arg(replacement, updated_args[1])}
     result :: Type.Result{ok: Type.Bool, err: Type.Named{name: SEMA_SHARED_REVISION_ERROR_TYPE}}
-    sema_call_shared_owner_host_value(receiver_value, "try_replace", values, result, span, expected, environment, program, &diagnostics)
+    sema_call_shared_owner_host_value(receiver_value, "try_replace", values, result, span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
 // `a.same(b)` asks whether two `Shared<T>` handles name one cell. Identity
@@ -148,12 +155,12 @@ fn sema_call_shared_owner_same(receiver: Expr, receiver_value: TExpr, inner: Typ
     params :: [SemaCallParam]{sema_call_shared_owner_param("other", AccessConvention.Read, shared_type)}
     ownership := sema_ownership_check_method_call(&state, "Shared.same", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_call_shared_owner_host_value(receiver_value, "same", [TExpr]{other}, Type.Bool, span, expected, environment, program, &diagnostics)
+    sema_call_shared_owner_host_value(receiver_value, "same", [TExpr]{other}, Type.Bool, span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
-fn sema_call_shared_owner_nullary(receiver: Expr, receiver_value: TExpr, method: String, result: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_shared_owner_nullary(receiver: Expr, receiver_value: TExpr, method: String, result: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{}, result, span, expected, environment, program, &diagnostics)
+    sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{}, result, span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
 fn sema_call_shared_owner_guard(receiver: Expr, receiver_value: TExpr, inner: Type, method: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -162,7 +169,7 @@ fn sema_call_shared_owner_guard(receiver: Expr, receiver_value: TExpr, inner: Ty
     }
     marker :: TagMarker.Internal{internal_tag: if method == "guard_edit" -> InternalTag.SharedGuardEdit else -> InternalTag.SharedGuardRead}
     result :: Type.Tagged{marker: marker, inner: Type.Apply{name: "SharedGuard", args: [Type]{inner}}}
-    sema_call_shared_owner_nullary(receiver, receiver_value, method, result, span, expected, environment, program, &scopes, &state, &diagnostics)
+    sema_call_shared_owner_nullary(receiver, receiver_value, method, result, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
 }
 
 fn sema_call_try_shared_owner_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -174,13 +181,13 @@ fn sema_call_try_shared_owner_method(receiver: Expr, receiver_value: TExpr, meth
             if args.len() != 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
             if method == "guard_read" || method == "guard_edit" -> return sema_call_shared_owner_guard(receiver, receiver_value, inner, method, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             // D-SHARED-CYCLE1=C: expert weak edge for intentional cycles.
-            if method == "downgrade" -> return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Apply{name: SEMA_SHARED_WEAK_TYPE, args: [Type]{inner}}, span, expected, environment, program, &scopes, &state, &diagnostics)
-            if method == "strong_count" -> return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Int, span, expected, environment, program, &scopes, &state, &diagnostics)
+            if method == "downgrade" -> return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Apply{name: SEMA_SHARED_WEAK_TYPE, args: [Type]{inner}}, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
+            if method == "strong_count" -> return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Int, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
         }
         .Apply(name, type_args) -> {
             if args.len() != 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
-            if name == SEMA_SHARED_SNAPSHOT_TYPE && type_args.len() == 2 && method == "value" -> return sema_call_shared_owner_nullary(receiver, receiver_value, method, type_args[1], span, expected, environment, program, &scopes, &state, &diagnostics)
-            if name == SEMA_SHARED_WEAK_TYPE && type_args.len() == 1 && method == "upgrade" -> return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Option{inner: Type.Shared{inner: type_args[0]}}, span, expected, environment, program, &scopes, &state, &diagnostics)
+            if name == SEMA_SHARED_SNAPSHOT_TYPE && type_args.len() == 2 && method == "value" -> return sema_call_shared_owner_nullary(receiver, receiver_value, method, type_args[1], span, expected, environment, program, &scopes, &state, &context, &diagnostics)
+            if name == SEMA_SHARED_WEAK_TYPE && type_args.len() == 1 && method == "upgrade" -> return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Option{inner: Type.Shared{inner: type_args[0]}}, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
         }
         else -> {}
     }

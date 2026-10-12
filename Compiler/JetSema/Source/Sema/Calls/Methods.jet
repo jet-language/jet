@@ -157,6 +157,7 @@ fn sema_call_try_builtin_host_route(receiver: Expr, receiver_value: TExpr, metho
     }
     callback_value.ty = sema_call_host_callback_type(sema_shared_access_guarded_inner(receiver_value.ty) ?? Type.Named{name: "Unit"}, if sema_shared_access_is_shared_type(receiver_value.ty) -> None else -> Val(callback_result), sema_shared_access_is_shared_type(receiver_value.ty))
     callback_name :: sema_shared_access_host_method_name(receiver_value.ty, method)
+    if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, callback_name, span, sema_shared_access_effect_row(receiver_value.ty, method, span), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     value :: sema_tir_expr(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: callback_name, args: [TExpr]{callback_value}}}, span)
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked}
@@ -698,7 +699,10 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
     }
     value :: sema_call_with_binder_pins(^pins, ^contracted, span)
     checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return None
-    facts :: sema_call_facts(resolved_candidate.signature, resolved_candidate.type_args, resolved_binding) ?? return None
+    facts := sema_call_facts(resolved_candidate.signature, resolved_candidate.type_args, resolved_binding) ?? return None
+    // The host access replaces the declared call, so its row is the host
+    // operation's own (Rust `method_calls.rs`), never the absent callee's.
+    if host_method -> facts.effect_bound = Val(sema_shared_access_effect_row(receiver_value.ty, resolved_candidate.method.name, span))
     return_view_facts :: sema_call_return_view_facts(resolved_candidate.signature, Val(receiver), checked_args, resolved_binding, scopes, &state, span)
     Val(SemaCallChecked{value: checked, binding: resolved_binding, facts: facts, return_view_facts: return_view_facts})
 }
