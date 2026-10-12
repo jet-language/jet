@@ -835,6 +835,18 @@ fn sema_effect_record_intrinsic_effects(environment: SemaScopeEnvironment, progr
 }
 
 fn sema_effect_record_fact(nodes: &[SemaEffectNode], node_by_key: [String:Int], node_index: Int, fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) {
+    // Rust `direct_calls.rs` (D-EFF1): a foreign body with a known effect
+    // root records that root and an open memory dispatch; only an extern with
+    // no root is an unknown callee that forces the maximal set.
+    if fact.foreign_effect_root == .Val(root) {
+        effect_name :: sema_effect_parse_name(root) ?? {
+            &diagnostics.push(sema_effect_unknown(root, fact.span))
+            return
+        }
+        sema_effect_node_add_direct(&nodes, node_index, effect_name, fact.span)
+        sema_effect_record_memory_open(&nodes, node_index, fact.span, "foreign function body")
+        return
+    }
     callee_key :: fact.callee.map((callee) -> callee.key) ?? ""
     known_callee :: callee_key != "" && sema_effect_node_index(node_by_key, callee_key) != None
     if callee_key != "" -> sema_effect_node_add_edge(&nodes, node_index, callee_key)

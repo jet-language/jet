@@ -99,6 +99,9 @@ struct SemaCallSiteFact {
     // carrier can still fail. The bundle failure solve sets `discarded` when
     // it projects the callee onto `T Never!` (#3708, D-DISCARD1=A).
     discarded_if_infallible: Bool{false}
+    // Rust `sig.foreign_effect_root`: the callee is an extern body (an
+    // `#FFI(<lang>)` function or a foreign row) whose effect is this one root.
+    foreign_effect_root: String?{None}
     // A resolved Core lifecycle marker, retained with the checked call site.
     lifecycle: CoreMarkerApplication?{None}
     shared_lifetime: MIRSharedLifetime?{None}

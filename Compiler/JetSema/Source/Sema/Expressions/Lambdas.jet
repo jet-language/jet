@@ -464,6 +464,12 @@ fn sema_expression_lambda_add_effect_facts(source: &SemaCheckContext, first_call
     loop index < source.call_facts.len() {
         fact := source.call_facts[index]
         if {
+            // Rust `direct_calls.rs`: a foreign body adds its one effect root.
+            fact.foreign_effect_root != None -> {
+                root :: fact.foreign_effect_root ?? ""
+                sema_expression_lambda_append_name(&direct, root)
+                &spans.push(TEffectSpan{name: root, span: fact.span})
+            }
             fact.callee != None -> {
                 callee :: fact.callee ?? SymbolID{key: ""}
                 sema_expression_lambda_append_name(&edges, callee.key)

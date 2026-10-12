@@ -2220,12 +2220,14 @@ fn sema_expr_record_call_fact(environment: SemaScopeEnvironment, program: SemaPr
     allowed :: wall ?? return false
     if !allowed -> return false
     callee := sema_expr_call_callee(checked.value)
+    foreign_effect_root :: sema_expr_call_foreign_effect_root(program, callee)
     &context.call_facts.push(SemaCallSiteFact{
         span: span,
         caller_key: sema_scope_function_owner_key(scopes),
         callee: callee,
         facts: checked.facts,
         discarded: false,
+        foreign_effect_root: foreign_effect_root,
     })
     symbol :: callee ?? return true
     // Every early return here is the same `true`, and the target lookup is
@@ -2240,6 +2242,17 @@ fn sema_expr_record_call_fact(environment: SemaScopeEnvironment, program: SemaPr
     }
     &context.comptime_requests.push(SemaComptimeRequest{callee_key: symbol.key, module_identity: target.module_identity, args: args, span: span, checked_text: None})
     true
+}
+
+// Rust `direct_calls.rs` (D-EFF1): an extern callee (`#FFI(<lang>)` body or
+// foreign row) carries its one foreign effect root; a Jet callee has none.
+fn sema_expr_call_foreign_effect_root(program: SemaProgramTables, callee: SymbolID?) -> String? {
+    symbol :: callee ?? return None
+    if program.registration_graph == .Val(graph) {
+        abi :: sema_registration_callable_abi(graph, symbol) ?? return None
+        if abi.is_extern -> return abi.foreign_effect_root
+    }
+    None
 }
 
 fn sema_expr_type_base_name(ty: Type) -> String? {
