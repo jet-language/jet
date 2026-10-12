@@ -513,6 +513,25 @@ fn sema_failure_callee(expr: Expr?, environment: SemaScopeEnvironment, program: 
             inferable :: sema_failure_callee_inferable(environment, program, symbol.id) ?? return None
             return Val(SemaFailureCallee{key: symbol.id.key, inferable: inferable})
         }
+        // Rust `inferable_failure_callee`: `alias.member(...)` through a
+        // whole-module import names that module's source function, which the
+        // bundle solve settles like a same-module callee.
+        .MethodCall(receiver, method, _, _, _, _, _, _, _, _, _) -> {
+            alias :: if receiver == {
+                .Ident(name, _) -> name
+                else -> { return None }
+            }
+            imported :: sema_call_core_import_target(environment, program, alias) ?? sema_call_source_import_target(environment, program, alias) ?? return None
+            if imported.item != None -> return None
+            if program.registration_graph == .Val(graph) {
+                module_index :: sema_registration_module_index(graph, imported.module_identity) ?? return None
+                loop index in 0..<graph.modules[module_index].functions.len() {
+                    if graph.modules[module_index].functions[index].symbol.name != method -> next
+                    return Val(SemaFailureCallee{key: graph.modules[module_index].functions[index].symbol.id.key, inferable: sema_failure_function_inferable(graph.modules[module_index].functions[index].declaration)})
+                }
+            }
+            return None
+        }
         else -> return None
     }
 }
