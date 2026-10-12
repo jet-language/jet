@@ -1237,6 +1237,14 @@ fn mir_lint_effect_covered(row: [String], performed: String) -> Bool Never! {
     false
 }
 
+// Rust `effect_is_deny_only` (Sema/Effects.rs): `Mem`, `Panic` and the exact
+// `Time.Wait` leaf are deny-only. No positive effect row admits or omits
+// them (`effects_uncovered` drops them), so a call performing one is never
+// outside the caller's row.
+fn mir_lint_effect_deny_only(performed: String) -> Bool Never! {
+    performed == "Mem" || performed.starts_with("Mem.") || performed == "Panic" || performed.starts_with("Panic.") || performed == "Time.Wait"
+}
+
 // `call.signature` against the callee row named by ID, then `effect.row`.
 fn mir_lint_call(ctx: MIRLintContext, instruction: MIRInstruction, callee: MIRCallee, args: [MIRCallArg]) -> MIRLintProblem? Never! {
     rule :: MIRLintRule.CallSignature
@@ -1270,7 +1278,7 @@ fn mir_lint_call(ctx: MIRLintContext, instruction: MIRInstruction, callee: MIRCa
     caller :: ctx.function.effects
     if caller.maximal -> return None
     loop performed in target.solved_effects {
-        if !mir_lint_effect_covered(caller.solved, performed) -> return mir_lint_problem(.EffectRow, "call to `{target.key}` performs {performed}, outside the caller's effect row")
+        if !mir_lint_effect_deny_only(performed) && !mir_lint_effect_covered(caller.solved, performed) -> return mir_lint_problem(.EffectRow, "call to `{target.key}` performs {performed}, outside the caller's effect row")
     }
     None
 }

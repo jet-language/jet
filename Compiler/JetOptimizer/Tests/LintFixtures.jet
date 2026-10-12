@@ -369,6 +369,20 @@ fn lf_effect_row(caller_has_effect: Bool) -> MIRProgram Never! {
     fx_program([MIRFunction]{callee, caller}, [MIRTypeDef]{})
 }
 
+// effect.row: a deny-only callee effect (`Mem.Alloc`, `Time.Wait`) is never
+// outside the caller's row, as in Rust `effects_uncovered`.
+fn lf_effect_row_deny_only() -> MIRProgram Never! {
+    c := fx_builder()
+    fx_block(&c, 0, MIRTerminator.Return{value: None})
+    callee := fx_function("format_size", c, fx_unit())
+    callee.effects.solved = [String]{"Mem", "Mem.Alloc", "Time.Wait"}
+    r := fx_builder()
+    _ := fx_copy(&r, fx_unit(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("format_size")}, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    caller := fx_function("run", r, fx_unit())
+    fx_program([MIRFunction]{callee, caller}, [MIRTypeDef]{})
+}
+
 fn lf_list() -> MIRType Never! { mir_type_from_kind(MIRTypeKind.List{inner: fx_int()}) }
 
 // A one-argument nominal type such as `View<Int>` or `Cell<Int>`.
@@ -876,6 +890,7 @@ fn run() {
         lf_expect("ownership.move one-branch move", lf_one_branch_move(), None),
         lf_expect("effect.row clean", lf_effect_row(true), None),
         lf_expect("effect.row planted", lf_effect_row(false), Val(MIRLintRule.EffectRow)),
+        lf_expect("effect.row deny-only callee effects", lf_effect_row_deny_only(), None),
         lf_expect("operation.typing string-view read", lf_string_view(false, false), None),
         lf_expect("operation.typing planted view read", lf_string_view(true, false), Val(MIRLintRule.OperationTyping)),
         lf_expect("operation.typing string-view Option payload", lf_string_view(false, true), None),
