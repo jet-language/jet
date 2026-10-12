@@ -19,6 +19,8 @@ use core.files as cli_files
 use jet_backend.[CoreSharedParentGetterResult, CoreSharedParentRuntime, CoreSharedRuntimeExportABI, core_shared_runtime_export_abis_decode]
 use jet_cli.[
     jet_cli_compile_request,
+    jet_cli_keep_going_enabled,
+    jet_cli_keep_going_report,
     jet_cli_runtime_library,
     jet_cli_native_c_sources,
     jet_cli_native_executable,
@@ -71,6 +73,10 @@ fn jet_bootstrap_library_object(request: ^JetDriverCompileRequest, prefix: Strin
 // Without JET_RUNTIME_PACK the feed still writes `{prefix}.o` (lowering
 // discovery), then refuses to link.
 // Neither an emitted Rust program nor a Rust MIR conversion enters this path.
+// Under JET_KEEP_GOING the feed runs whenever the front end produced MIR, even
+// with census rows: each native lowering, object and link finding is one more
+// row (jet_cli_native_executable `census`), appended to the result's rows and
+// to JET_KEEP_GOING_REPORT, so a failed native step reports every defect.
 fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String) -> JetDriverCompileResult Never! {
     // Capture only the C declarations before the request moves into the compiler.
     sources :: jet_cli_native_c_sources(request.authorized_sources) ?? return jet_driver_compile_escaped_failure("native feed cannot resolve C sources: {err.message}")
@@ -83,9 +89,13 @@ fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String) -> Je
         if file != JET_CLI_RUNTIME_PACK_FILE || runtime_dir == "" || jet_cli_runtime_key(runtime_dir) != .Val(key) -> return jet_driver_compile_escaped_failure("JET_RUNTIME_PACK must name <jet-runtime>/<native.key>/{JET_CLI_RUNTIME_PACK_FILE} in a packaged runtime directory")
     }
     result := jet_bootstrap_mir(^request) ?? return jet_driver_compile_escaped_failure("the native front end failed outside every compile stage")
-    if !result.complete || result.internal_problem != None -> return result
+    keep_going :: jet_cli_keep_going_enabled()
+    if keep_going && result.mir == None -> return result
+    if !keep_going && (!result.complete || result.internal_problem != None) -> return result
     if result.mir == None -> return jet_driver_compile_escaped_failure("the native front end finished without MIR")
-    failure :: jet_cli_native_executable(result, sources, false, runtime_dir, "{prefix}.o", "{prefix}.exe") ?? return result
+    census := [String]{}
+    native :: jet_cli_native_executable(result, sources, false, runtime_dir, "{prefix}.o", "{prefix}.exe", keep_going, &census)
+    failure :: native ?? return jet_bootstrap_native_census(^result, census)
     if failure == {
         .Lowering(functions, messages) -> { cli_files.write("{prefix}.issues", jet_cli_native_lowering_rows(functions, messages, "\t").join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write native lowering findings") }
         .Object(errors) -> { cli_files.write("{prefix}.issues", errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write native object findings") }
@@ -98,7 +108,20 @@ fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String) -> Je
         .Runtime(what) -> { return jet_driver_compile_escaped_failure("native feed: {what}") }
         .Foreign(message) -> { return jet_driver_compile_escaped_failure("native feed cannot realize C dependencies: {message}") }
     }
-    result
+    jet_bootstrap_native_census(^result, census)
+}
+
+// The result with the native census rows after its own; a compile with any
+// row is incomplete, and JET_KEEP_GOING_REPORT is rewritten with every row.
+// With no row (always without JET_KEEP_GOING) the result is unchanged.
+fn jet_bootstrap_native_census(result: ^JetDriverCompileResult, census: [String]) -> JetDriverCompileResult Never! {
+    if census.len() == 0 -> return result
+    kept := ^result
+    loop row in census -> &kept.keep_going_rows.push(row)
+    kept.complete = false
+    problem :: jet_cli_keep_going_report(kept.keep_going_rows) ?? return jet_driver_compile_escaped_failure("the compiler failure census writer failed")
+    if problem != "" -> return jet_driver_compile_escaped_failure(problem)
+    kept
 }
 
 fn jet_bootstrap_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResult Never! {

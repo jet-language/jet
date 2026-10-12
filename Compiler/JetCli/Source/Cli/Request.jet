@@ -45,7 +45,7 @@ use jet_backend.[x64_runtime_library, x64_runtime_export_abi_json, x64_link_runt
 // The production CLI and bootstrap observer share the driver's all-phases
 // implementation. A diagnostic trap is a failed compile, never an artifact.
 fn jet_cli_compile_request(request: ^JetDriverCompileRequest, emit_rust: Bool) -> JetDriverCompileResult {
-    if cli_sys.get("JET_KEEP_GOING") != .Val("1") {
+    if !jet_cli_keep_going_enabled() {
         return if emit_rust -> jet_driver_compile(^request) else -> jet_driver_compile_mir(^request)
     }
     skip := [String]{}
@@ -54,13 +54,26 @@ fn jet_cli_compile_request(request: ^JetDriverCompileRequest, emit_rust: Bool) -
     }
     result := jet_driver_compile_keep_going(^request, JetDriverKeepGoing{skip: skip}, emit_rust)
     if result.keep_going_rows.len() > 0 -> result.complete = false
-    if cli_sys.get("JET_KEEP_GOING_REPORT") == .Val(report) {
-        lines := [String]{"phase\titem\tcode\tmessage\tspan"}
-        loop row in result.keep_going_rows -> &lines.push(row)
-        &lines.push("")
-        cli_files.write(report, lines.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write the compiler failure census: {err}")
-    }
+    problem :: jet_cli_keep_going_report(result.keep_going_rows)
+    if problem != "" -> return jet_driver_compile_escaped_failure(problem)
     result
+}
+
+// JET_KEEP_GOING=1 selects the all-phases collector (here and in the
+// bootstrap native feed, Compiler/Bootstrap/Host/Entry.jet).
+fn jet_cli_keep_going_enabled() -> Bool Never! {
+    cli_sys.get("JET_KEEP_GOING") == .Val("1")
+}
+
+// Writes the TSV failure census `rows` to JET_KEEP_GOING_REPORT when it is
+// set; the write's failure text, else "".
+fn jet_cli_keep_going_report(rows: [String]) -> String {
+    report :: cli_sys.get("JET_KEEP_GOING_REPORT") ?? return ""
+    lines := [String]{"phase\titem\tcode\tmessage\tspan"}
+    loop row in rows -> &lines.push(row)
+    &lines.push("")
+    cli_files.write(report, lines.join("\n")) ?? return "cannot write the compiler failure census: {err}"
+    ""
 }
 
 // Packaging uses the ordinary hosted source loader and checked NativeLibrary

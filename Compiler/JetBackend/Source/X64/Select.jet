@@ -21,6 +21,8 @@
 // and shifts need cl: rdx and rcx are saved around them with push/pop, so the
 // allocator may keep values there.
 
+use jet_foundation.[compiler_take_rows, compiler_threads_failure_text]
+
 enum X64RelocTarget {
     Function(id: LIRFunctionID)
     Runtime(symbol: String)
@@ -1096,4 +1098,145 @@ fn x64_compile_module(program: LIRModule) -> X64ModuleResult Never! {
         }
     }
     X64ModuleResult{functions: functions, debug: debug, errors: errors}
+}
+
+// JET_KEEP_GOING (the bootstrap native feed): x64_compile_module, except that
+// nothing stops it. Every lint finding is an error; a function a lint finding
+// names, whose selection reports gaps, or whose compilation stops (a panic,
+// caught at its task's join) compiles as a trap (x64_trap_function) with one
+// error naming it, so the function table stays whole and the object, link
+// and every later function still run and report. The module moves into the
+// tasks' shared inputs and back out, uncopied. It is never shipped: the
+// caller turns every error into a census row.
+fn x64_compile_module_keep_going(program: ^LIRModule) -> X64KeepGoingModule Never! {
+    errors := [String]{}
+    trapped := [String:Bool]{}
+    loop issue in lir_lint_module(program) {
+        &errors.push("LIR lint: {issue.function} b{issue.block}: {issue.message}")
+        if issue.function != "" -> trapped[issue.function] = true
+    }
+    inputs :: shared X64KeepGoingInputs{programs: [LIRModule]{^program}, trapped: ^trapped}
+    state :: shared X64KeepGoingState{position: 0, functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, errors: ^errors}
+    x64_keep_going_functions(inputs, state) ?? panic("the keep-going x64 compile tasks failed")
+    module_back :: x64_keep_going_take_program(inputs) ?? panic("the keep-going x64 compile inputs were lost")
+    compiled :: x64_keep_going_take(state) ?? panic("the keep-going x64 compile state was lost")
+    X64KeepGoingModule{program: module_back, compiled: compiled}
+}
+
+struct X64KeepGoingModule {
+    program: LIRModule
+    compiled: X64ModuleResult
+}
+
+struct X64KeepGoingInputs {
+    // The one module, moved in for the compile and back out after.
+    programs: [LIRModule]
+    // Functions (by name) a lint finding names.
+    trapped: [String:Bool]
+}
+
+struct X64KeepGoingState {
+    position: Int
+    functions: [X64CompiledFunction]
+    debug: [X64FunctionDebug]
+    errors: [String]
+}
+
+fn x64_keep_going_take_program(inputs: Shared<X64KeepGoingInputs>) -> LIRModule {
+    permit :: inputs.guard_edit()
+    &permit.value.programs.pop() ?? panic("the keep-going x64 module left its shared inputs")
+}
+
+// A function that only stops (ud2), with the identity and name of `function`.
+fn x64_trap_function(function: LIRFunction) -> X64CompiledFunction Never! {
+    code := [U8]{}
+    x64_ud2(&code)
+    X64CompiledFunction{id: function.id, name: function.name, code: code, relocs: [X64Reloc]{}}
+}
+
+fn x64_keep_going_empty_debug() -> X64FunctionDebug Never! {
+    X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}}
+}
+
+fn x64_keep_going_take(state: Shared<X64KeepGoingState>) -> X64ModuleResult {
+    permit :: state.guard_edit()
+    X64ModuleResult{functions: compiler_take_rows<X64CompiledFunction>(&permit.value.functions), debug: compiler_take_rows<X64FunctionDebug>(&permit.value.debug), errors: compiler_take_rows<String>(&permit.value.errors)}
+}
+
+// One task compiles from the current position to the end, writing each
+// function and the next position into `state` as it goes; a stopped task
+// leaves `position` at the function it was compiling, which becomes a trap,
+// and a new task compiles the rest.
+fn x64_keep_going_functions(inputs: Shared<X64KeepGoingInputs>, state: Shared<X64KeepGoingState>) {
+    count :: x64_keep_going_count(inputs)
+    loop {
+        reason :: x64_keep_going_attempt(inputs, state)
+        if x64_keep_going_position(state) >= count -> break
+        x64_keep_going_trap(inputs, state, reason)
+    }
+}
+
+fn x64_keep_going_count(inputs: Shared<X64KeepGoingInputs>) -> Int {
+    permit :: inputs.guard_read()
+    permit.value.programs[0].functions.len()
+}
+
+fn x64_keep_going_position(state: Shared<X64KeepGoingState>) -> Int {
+    permit :: state.guard_read()
+    permit.value.position
+}
+
+// The stop text when the task stopped, else "".
+fn x64_keep_going_attempt(inputs: Shared<X64KeepGoingInputs>, state: Shared<X64KeepGoingState>) -> String {
+    stopped := ""
+    task.group x64_compile {
+        head :: task x64_keep_going_part(inputs, state)
+        stopped = head.join() ?? compiler_threads_failure_text(err)
+    }
+    stopped
+}
+
+fn x64_keep_going_part(inputs: Shared<X64KeepGoingInputs>, state: Shared<X64KeepGoingState>) -> String {
+    read :: inputs.guard_read()
+    permit := state.guard_edit()
+    // Passed straight through: a local binding of the guarded module would copy it.
+    x64_keep_going_rows(read.value.programs[0], read.value.trapped, &permit.value)
+    ""
+}
+
+fn x64_keep_going_rows(program: LIRModule, trapped: [String:Bool], state: &X64KeepGoingState) Never! {
+    loop state.position < program.functions.len() {
+        index :: state.position
+        if trapped.get(program.functions[index].name) != None {
+            &state.functions.push(x64_trap_function(program.functions[index]))
+            &state.debug.push(x64_keep_going_empty_debug())
+            state.position = index + 1
+            next
+        }
+        result :: x64_compile_function(program, program.functions[index])
+        loop error in result.errors -> &state.errors.push(error)
+        if result.function == .Val(compiled) {
+            &state.functions.push(compiled)
+            &state.debug.push(result.debug ?? x64_keep_going_empty_debug())
+        } else {
+            &state.functions.push(x64_trap_function(program.functions[index]))
+            &state.debug.push(x64_keep_going_empty_debug())
+        }
+        state.position = index + 1
+    }
+}
+
+fn x64_keep_going_trap(inputs: Shared<X64KeepGoingInputs>, state: Shared<X64KeepGoingState>, reason: String) {
+    read :: inputs.guard_read()
+    permit := state.guard_edit()
+    x64_keep_going_trap_row(read.value.programs[0], &permit.value, reason)
+}
+
+// The function at `state.position` stopped: one error, and its trap.
+fn x64_keep_going_trap_row(program: LIRModule, state: &X64KeepGoingState, reason: String) Never! {
+    index :: state.position
+    &state.errors.push("x64: {program.functions[index].name}: keep-going trap: compiling it stopped: {reason}")
+    &state.functions.push(x64_trap_function(program.functions[index]))
+    &state.debug.push(x64_keep_going_empty_debug())
+    state.position = index + 1
 }

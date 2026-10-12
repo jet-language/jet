@@ -62,6 +62,8 @@ use jet_foundation.[
     MIRValueID,
     MIRVariant,
     MIRVariantPayload,
+    compiler_take_rows,
+    compiler_threads_failure_text,
     mir_operation_can_stop,
     mir_operation_stop_operand,
     mir_operation_stop_place,
@@ -344,14 +346,24 @@ struct LowerFunction {
 // methods of generic types once per concrete instance) plus their glue.
 fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, [MIRFunctionID]{entry}, true, true, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics)
+    lower_selected(program, [MIRFunctionID]{entry}, true, true, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false)
+}
+
+// JET_KEEP_GOING (the bootstrap native feed): lir_lower_entry, except that a
+// function whose lowering stops is one issue and a trap of its signature
+// (lower_keep_going_functions), and the issues leave the entry and the module
+// in place, so every later phase still runs and reports. The module is never
+// shipped: the caller turns every issue into a census row.
+fn lir_lower_entry_keep_going(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
+    intrinsics :: [U64:LowerRuntimeIntrinsic]{}
+    lower_selected(program, [MIRFunctionID]{entry}, true, true, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, true)
 }
 
 // Compiler and test callbacks retain return carriers; only program entries
 // consume Option/Result success and turn failure into a process exit.
 fn lir_lower_callables(program: MIRProgram, roots: [MIRFunctionID]) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, roots, false, true, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics)
+    lower_selected(program, roots, false, true, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false)
 }
 
 // RuntimeLibrary validates each exact function ID and its signature. Every
@@ -359,12 +371,12 @@ fn lir_lower_callables(program: MIRProgram, roots: [MIRFunctionID]) -> LIRLoweri
 // `export.entry` (Callable.jet).
 // No ordinary program/callback lowering enables runtime-only substitution.
 fn lir_lower_runtime_callables(program: MIRProgram, roots: [MIRFunctionID], intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LIRLowering Never! {
-    lower_selected(program, roots, false, true, program.native_pack, [String]{}, true, None, [MIROutputCheck]{}, ^intrinsics)
+    lower_selected(program, roots, false, true, program.native_pack, [String]{}, true, None, [MIROutputCheck]{}, ^intrinsics, false)
 }
 
 fn lir_lower_core_shared(program: MIRProgram, roots: [MIRFunctionID]) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, roots, false, false, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics)
+    lower_selected(program, roots, false, false, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false)
 }
 
 // Explicit imports are the actual external C consumer closure.
@@ -374,10 +386,10 @@ fn lir_lower_native_callables(program: MIRProgram, roots: [MIRFunctionID]) -> LI
 
 fn lir_lower_native_imports(program: MIRProgram, roots: [MIRFunctionID], imports: [String]) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, roots, false, true, true, imports, true, None, [MIROutputCheck]{}, ^intrinsics)
+    lower_selected(program, roots, false, true, true, imports, true, None, [MIROutputCheck]{}, ^intrinsics, false)
 }
 
-fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, shared_sites_dynamic: Bool, native_pack: Bool, imports: [String], c_exports: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LIRLowering Never! {
+fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, shared_sites_dynamic: Bool, native_pack: Bool, imports: [String], c_exports: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic], keep_going: Bool) -> LIRLowering Never! {
     // The frontend may erase browser init functions before native MIR is
     // serialized. Their host requirement survives in the runtime-part facts.
     browser_hosted := false
@@ -468,20 +480,16 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     }
     functions := [LIRFunction]{}
     failed_functions := prepared.failed_functions.copy()
-    loop (index, descriptor) in prepared.functions {
-        signature :: m.mir_signatures[index].copy()
-        id :: LIRFunctionID{value: index}
-        function :: if failed_functions.get(descriptor.id.value) != None -> {
-            lower_failed_function(m, id, descriptor.name, signature)
-        } else -> {
-            before :: m.issues.len()
-            lowered :: if descriptor.instance_row >= 0 -> lower_function(program, &m, prepared.instances[descriptor.instance_row], id, signature) else -> lower_function(program, &m, program.functions[descriptor.source_row], id, signature)
-            if m.issues.len() > before -> {
-                &failed_functions.add(descriptor.id.value, true).drop("a failed body has one inventory slot")
-                lower_failed_function(m, id, descriptor.name, signature)
-            } else -> lowered
+    if keep_going {
+        kept := lower_keep_going_lower(program, ^m, &prepared, ^failed_functions) ?? panic("the keep-going native lowering tasks failed")
+        m = ^kept.state
+        failed_functions = ^kept.failed
+        functions = ^kept.functions
+    } else {
+        loop (index, descriptor) in prepared.functions {
+            function :: lower_selected_function(program, &m, descriptor, prepared.instances, index, &failed_functions)
+            &functions.push(function)
         }
-        &functions.push(function)
     }
     if !shared_sites_dynamic {
         loop definition in program.constants {
@@ -504,7 +512,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         if callables.get(root.value) != None -> next
         // An absent concrete root already has a preparation diagnostic.
         concrete :: prepared.roots.get(root.value) ?? next
-        if failed_functions.get(concrete.value) != None -> next
+        if failed_functions.get(concrete.value) != None && !keep_going -> next
         row :: m.mir_rows.get(concrete.value) ?? {
             &m.issues.push(LIRLoweringIssue{function: "entry preparation", message: "requested concrete root {concrete.value} is absent from the lowered inventory"})
             next
@@ -601,10 +609,10 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     }
     lowered :: LIRModule{signatures: m.signatures.copy(), functions: functions, data: m.data.copy(), debug: LIRModuleDebug{directory: "", files: m.debug_files.copy(), types: m.debug_types.copy()}}
     issues := m.issues.copy()
-    if issues.len() == 0 {
+    if issues.len() == 0 || keep_going {
         loop issue in lir_lint_module(lowered) -> &issues.push(LIRLoweringIssue{function: issue.function, message: "LIR lint b{issue.block}: {issue.message}"})
     }
-    if issues.len() > 0 {
+    if issues.len() > 0 && !keep_going {
         lowered_entry = None
         finalizer = None
         callables = [U64:LIRFunctionID]{}
@@ -613,6 +621,145 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         m.native_exports = [String:LIRFunctionID]{}
     }
     LIRLowering{lir: lowered, issues: issues, entry: lowered_entry, finalizer: finalizer, callables: callables, value_callables: value_callables, value_releases: value_releases, closures: if issues.len() == 0 -> closures else -> [LIRClosureValueLayout]{}, shared_sites: m.shared_sites, core_callables: if issues.len() == 0 -> core_callables else -> [LIRCoreCallableExport]{}, native_exports: m.native_exports}
+}
+
+// One function row of the inventory: a failed concrete function (or one
+// whose body reports an issue) lowers as a trap of its signature.
+fn lower_selected_function(program: MIRProgram, m: &LowerModule, descriptor: LowerPreparedFunction, instances: [MIRFunction], index: Int, failed_functions: &[U64:Bool]) -> LIRFunction Never! {
+    signature :: m.mir_signatures[index].copy()
+    id :: LIRFunctionID{value: index}
+    if failed_functions.get(descriptor.id.value) != None -> return lower_failed_function(m, id, descriptor.name, signature)
+    before :: m.issues.len()
+    lowered :: if descriptor.instance_row >= 0 -> lower_function(program, &m, instances[descriptor.instance_row], id, signature) else -> lower_function(program, &m, program.functions[descriptor.source_row], id, signature)
+    if m.issues.len() > before {
+        &failed_functions.add(descriptor.id.value, true).drop("a failed body has one inventory slot")
+        return lower_failed_function(m, id, descriptor.name, signature)
+    }
+    lowered
+}
+
+// JET_KEEP_GOING: a lowering that stops (a panic) stops only the task that
+// runs it, and its join is a TaskFailure. The inventory lowers in a task
+// that writes each lowered function, and the position of the next, into
+// `state` as it goes; a stopped task leaves `position` at the function it
+// was lowering, which becomes one issue and a trap of its signature
+// (lower_failed_function), and a new task lowers the rest. The module state
+// keeps what the stopped function registered before it stopped (signatures,
+// data, glue): those rows are complete, and the trap never names them.
+// Without JET_KEEP_GOING lowering never runs here.
+struct LowerKeepGoingInputs {
+    program: MIRProgram
+    functions: [LowerPreparedFunction]
+    instances: [MIRFunction]
+}
+
+struct LowerKeepGoingState {
+    // The one module state, moved in for the lowering and back out after.
+    modules: [LowerModule]
+    failed: [U64:Bool]
+    functions: [LIRFunction]
+    position: Int
+}
+
+struct LowerKeepGoingLowered {
+    state: LowerModule
+    failed: [U64:Bool]
+    functions: [LIRFunction]
+}
+
+// Lowers every inventory function of `prepared` (moved out for the lowering
+// and back in after) against `m`; returns the module state, the failed
+// concrete functions and the lowered functions in inventory order. The
+// program is copied once into the tasks' shared inputs.
+fn lower_keep_going_lower(program: MIRProgram, m: ^LowerModule, prepared: &LowerPrepared, failed: ^[U64:Bool]) -> LowerKeepGoingLowered {
+    inputs :: shared LowerKeepGoingInputs{program: program.copy(), functions: compiler_take_rows<LowerPreparedFunction>(&prepared.functions), instances: compiler_take_rows<MIRFunction>(&prepared.instances)}
+    state :: shared LowerKeepGoingState{modules: [LowerModule]{}, failed: ^failed, functions: [LIRFunction]{}, position: 0}
+    lower_keep_going_fill(state, ^m)
+    lower_keep_going_functions(inputs, state)
+    lower_keep_going_restore(inputs, &prepared)
+    lower_keep_going_take(state)
+}
+
+fn lower_keep_going_fill(state: Shared<LowerKeepGoingState>, m: ^LowerModule) {
+    permit :: state.guard_edit()
+    &permit.value.modules.push(^m)
+}
+
+fn lower_keep_going_take(state: Shared<LowerKeepGoingState>) -> LowerKeepGoingLowered {
+    permit :: state.guard_edit()
+    taken :: &permit.value.modules.pop() ?? panic("the native lowering module left its keep-going state")
+    LowerKeepGoingLowered{state: taken, failed: permit.value.failed.copy(), functions: compiler_take_rows<LIRFunction>(&permit.value.functions)}
+}
+
+fn lower_keep_going_restore(inputs: Shared<LowerKeepGoingInputs>, prepared: &LowerPrepared) {
+    permit :: inputs.guard_edit()
+    prepared.functions = compiler_take_rows<LowerPreparedFunction>(&permit.value.functions)
+    prepared.instances = compiler_take_rows<MIRFunction>(&permit.value.instances)
+}
+
+fn lower_keep_going_functions(inputs: Shared<LowerKeepGoingInputs>, state: Shared<LowerKeepGoingState>) {
+    count :: lower_keep_going_count(inputs)
+    loop {
+        reason :: lower_keep_going_attempt(inputs, state)
+        if lower_keep_going_position(state) >= count -> break
+        lower_keep_going_trap(inputs, state, reason)
+    }
+}
+
+fn lower_keep_going_count(inputs: Shared<LowerKeepGoingInputs>) -> Int {
+    permit :: inputs.guard_read()
+    permit.value.functions.len()
+}
+
+fn lower_keep_going_position(state: Shared<LowerKeepGoingState>) -> Int {
+    permit :: state.guard_read()
+    permit.value.position
+}
+
+// One task lowering from the current position to the end; the stop text
+// when it stopped, else "".
+fn lower_keep_going_attempt(inputs: Shared<LowerKeepGoingInputs>, state: Shared<LowerKeepGoingState>) -> String {
+    stopped := ""
+    task.group lower_native {
+        head :: task lower_keep_going_part(inputs, state)
+        stopped = head.join() ?? compiler_threads_failure_text(err)
+    }
+    stopped
+}
+
+fn lower_keep_going_part(inputs: Shared<LowerKeepGoingInputs>, state: Shared<LowerKeepGoingState>) -> String {
+    read :: inputs.guard_read()
+    permit := state.guard_edit()
+    // Passed straight through: a local binding of the guarded program would copy it.
+    lower_keep_going_rows(read.value.program, read.value.functions, read.value.instances, &permit.value)
+    ""
+}
+
+fn lower_keep_going_rows(program: MIRProgram, functions: [LowerPreparedFunction], instances: [MIRFunction], state: &LowerKeepGoingState) Never! {
+    loop state.position < functions.len() {
+        index :: state.position
+        function :: lower_selected_function(program, &state.modules[0], functions[index], instances, index, &state.failed)
+        &state.functions.push(function)
+        state.position = index + 1
+    }
+}
+
+fn lower_keep_going_trap(inputs: Shared<LowerKeepGoingInputs>, state: Shared<LowerKeepGoingState>, reason: String) {
+    read :: inputs.guard_read()
+    permit := state.guard_edit()
+    lower_keep_going_trap_row(read.value.functions, &permit.value, reason)
+}
+
+// The function at `state.position` stopped: one issue, and its trap.
+fn lower_keep_going_trap_row(functions: [LowerPreparedFunction], state: &LowerKeepGoingState, reason: String) Never! {
+    index :: state.position
+    descriptor :: functions[index]
+    if state.failed.get(descriptor.id.value) == None -> &state.failed.add(descriptor.id.value, true).drop("checked absent above")
+    &state.modules[0].issues.push(LIRLoweringIssue{function: descriptor.name, message: "keep-going trap: native lowering stopped: {reason}"})
+    signature :: state.modules[0].mir_signatures[index].copy()
+    trap :: lower_failed_function(state.modules[0], LIRFunctionID{value: index}, descriptor.name, signature)
+    &state.functions.push(trap)
+    state.position = index + 1
 }
 
 // ---------------------------------------------------------------------------
@@ -1247,7 +1394,8 @@ fn lower_new_function(id: LIRFunctionID, name: String, signature: LIRSignatureID
 }
 
 // Failed bodies retain their registered ABI and inventory identity. They are
-// never callable outputs: lower_selected clears all exports on any issue.
+// never callable outputs: lower_selected clears all exports on any issue
+// (under JET_KEEP_GOING it keeps them, and the module is never shipped).
 fn lower_failed_function(m: LowerModule, id: LIRFunctionID, name: String, signature: LIRSignatureID) -> LIRFunction Never! {
     f := lower_new_function(id, name, signature, MIRBlockID{value: 0})
     params := [LIRValueID]{}

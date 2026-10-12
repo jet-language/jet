@@ -85,7 +85,11 @@ toolchain environment as the stage2 `jet build` (`PATH`'s or `CC`'s compiler,
 `AR`, `NIX_HARDENING_ENABLE`, and `JET_PACK_MUSL_LIB` when
 `foreign/platform` is not packaged). `lib.sh` forwards
 these request paths and `JET_KEEP_GOING`, `JET_KEEP_GOING_REPORT`, and
-`JET_KEEP_GOING_SKIP` through its otherwise-clean environment. A factory process
+`JET_KEEP_GOING_SKIP` through its otherwise-clean environment. Under
+`JET_KEEP_GOING=1` the native feed runs whenever the front end produced MIR:
+each function whose native lowering or x64 compile fails becomes a trap, and
+every lowering, object and link finding is one more `native.*` census row, so
+one run reports every backend defect. A factory process
 exit alone admits neither object nor executable: check its reports, the emitted
 files, their hashes, and the empty all-phases failure census before publishing
 the native CLI. The factory's own Rust sharded build remains the explicit
