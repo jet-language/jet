@@ -36,6 +36,7 @@ use jet_foundation.[
     Measure,
     SymbolID,
     SymbolKind,
+    TCompilerBuiltin,
     TCoreBuiltinOwner,
     TFieldRef,
     TagMarker,
@@ -308,6 +309,9 @@ fn jet_codegen_find_source_nominal_identity(modules: [SemaGraphModuleResult], cu
             }
         }
     }
+    // A bare `Err` the current module does not declare is the one original
+    // Prelude default error, which its own registered module owns.
+    if name == "Err" -> return jet_codegen_default_err_identity(modules)
     // Source nominals outside the current module arrive with their checked
     // module-qualified key. Never resolve them by a leaf from another module.
     found := JetCodegenNominalIdentity?{None}
@@ -346,6 +350,22 @@ fn jet_codegen_find_source_nominal_identity(modules: [SemaGraphModuleResult], cu
             } else {
                 jet_codegen_check_core_owner(owner, semantic_module)
             }
+        }
+    }
+    found
+}
+
+// Rust `CheckedNominalFacts::compiler_owned_default_err_identity`: the unit's
+// one original Prelude `Err`, the type definition carrying the DefaultErr
+// marker, whichever registered module owns it.
+fn jet_codegen_default_err_identity(modules: [SemaGraphModuleResult]) -> JetCodegenNominalIdentity? {
+    found := JetCodegenNominalIdentity?{None}
+    loop semantic_module in modules {
+        loop definition in semantic_module.declarations.type_defs {
+            if definition.compiler_builtin != (Val(TCompilerBuiltin.DefaultErr)) -> next
+            position :: semantic_module.nominal_positions.get(definition.name) ?? panic("the compiler-owned default error has no checked nominal row")
+            key :: jet_codegen_nominal_type_key(semantic_module.module_identity, semantic_module.nominals[position])
+            found = jet_codegen_merge_nominal_identity(found, JetCodegenNominalIdentity{module_identity: semantic_module.module_identity, name: semantic_module.nominals[position].symbol.name, key: key, qualified_name: key})
         }
     }
     found

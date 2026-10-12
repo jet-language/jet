@@ -3795,23 +3795,16 @@ fn jet_codegen_is_default_err_type(builder: JetCodegenBuilder, program: JetCodeg
     false
 }
 
-fn jet_codegen_default_err_type(builder: JetCodegenBuilder, program: JetCodegenProgram) -> Type {
-    selected := Type?{None}
-    loop semantic_module in program.modules {
-        if semantic_module.module_identity != builder.function.module_identity -> next
-        loop definition in semantic_module.declarations.type_defs {
-            if definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr)) {
-                if selected != None -> panic("current module has multiple compiler-owned default error types")
-                selected = Val(Type.Named{name: definition.key})
-            }
-        }
-    }
-    selected ?? panic("checked default-error conversion has no canonical compiler-owned Err")
+// The unit's one original Prelude `Err`; its own registered module owns it,
+// so it is not looked up in the converting function's module.
+fn jet_codegen_default_err_type(program: JetCodegenProgram) -> Type {
+    identity :: jet_codegen_default_err_identity(program.modules) ?? panic("checked default-error conversion has no canonical compiler-owned Err")
+    Type.Named{name: identity.key}
 }
 
 fn jet_codegen_try_output_error_type(builder: JetCodegenBuilder, program: JetCodegenProgram, source_error: Type, conversion: TTryConvert, carrier: TFailureCarrier) -> Type {
     if conversion == {
-        .DefaultErr -> return jet_codegen_default_err_type(builder, program)
+        .DefaultErr -> return jet_codegen_default_err_type(program)
         .Typed(_, _, target) -> return target
         .WidenUnion(_, _) -> {
             if carrier == {
@@ -3925,10 +3918,10 @@ fn jet_codegen_lower_try_failure_conversion(builder: &JetCodegenBuilder, program
     if conversion == {
         .NoConversion -> return error.copy()
         .DefaultErr -> {
-            if !jet_codegen_is_default_err_type(builder, program, jet_codegen_default_err_type(builder, program)) -> panic("checked DefaultErr conversion does not target the canonical compiler-owned error")
+            if !jet_codegen_is_default_err_type(builder, program, jet_codegen_default_err_type(program)) -> panic("checked DefaultErr conversion does not target the canonical compiler-owned error")
             if type_identity_key(source_error) != type_identity_key(Type.String) -> panic("checked DefaultErr conversion source is not String")
             route := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.errors", "from_message", "jet_err_from_message", 1, [Bool]{false}, None, TFailureCarrier.Infallible, MIRPreludeABI.Value)
-            default_err_ty :: jet_codegen_default_err_type(builder, program)
+            default_err_ty :: jet_codegen_default_err_type(program)
             return jet_codegen_emit_static_prelude_call(&builder, program, span, default_err_ty, route, [MIRValueID]{error})
         }
         .Typed(function_name, source, target) -> {
