@@ -211,6 +211,7 @@ fn sema_function_memory_collect_items(items: [Item], module_identity: String, to
                 }
             }
             .Enum(definition) -> {
+                loop function in definition.methods -> sema_function_memory_visit(&walk, module_identity, definition.name, function, false, outer, declarations)
                 loop implementation in definition.trait_impls {
                     loop function in implementation.methods -> sema_function_memory_visit(&walk, module_identity, definition.name, function, false, outer, declarations)
                 }
