@@ -8,7 +8,7 @@
 // or a comma list of positional parameter types, each optionally prefixed `^`
 // (moved) or `&` (written); `return` is `-` (none) or a type; the optional
 // fifth field names the signature's unconstrained type parameters. Types:
-// `String` `Int` `Float` `Bool` `Char`; `u8` / `i32` (IntN); `[T]` list;
+// `String` `Int` `Float` `Bool` `Char`; `u8` / `i32` / `U16` / `I64` (IntN); `[T]` list;
 // `[K:V]` map; `T?` option; `Result<T,E>`; `Union<A,B,…>`; `Name<T,…>`
 // (Apply); `fn(A,B)` and `fn(A,B;R)` (no effect row or call metadata);
 // `(name:T,…)` tuple; `callback` (`core_host_callback_type`); any other name
@@ -182,7 +182,9 @@ fn core_sig_row_atom_at(bytes: [U8], start: Int) -> CoreSigRowType Never! {
         "callback" -> return CoreSigRowType{ty: core_host_callback_type(), next: end}
         else -> {}
     }
-    if (first == 105 || first == 117) && end > start + 1 {
+    // `u16` and the source spelling `U16` both name the fixed-width integer
+    // (Rust `IntN`); a `Named{U16}` matches no checked integer value.
+    if (first == 105 || first == 117 || first == 73 || first == 85) && end > start + 1 {
         bits := 0
         digits := true
         loop byte in bytes.slice(start + 1, end) {
@@ -190,7 +192,7 @@ fn core_sig_row_atom_at(bytes: [U8], start: Int) -> CoreSigRowType Never! {
             if code < 48 || code > 57 -> digits = false
             bits = bits * 10 + code - 48
         }
-        if digits -> return CoreSigRowType{ty: Type.IntN{signed: first == 105, bits: bits}, next: end}
+        if digits -> return CoreSigRowType{ty: Type.IntN{signed: first == 105 || first == 73, bits: bits}, next: end}
     }
     CoreSigRowType{ty: Type.Named{name: name}, next: end}
 }
