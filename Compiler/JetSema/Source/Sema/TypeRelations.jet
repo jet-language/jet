@@ -865,15 +865,7 @@ fn sema_type_bound_satisfied_resolved(graph: SemaRegistrationGraph, actual_resol
     nominal_row :: sema_type_resolve_nominal_row(graph, actual_resolved, caller_module_identity) ?? return None
     nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     trait_symbol :: sema_type_graph_trait_symbol(graph, caller_module_identity, bound_name) ?? return None
-    // These provider-backed Core owners already implement the consuming runtime
-    // Close protocol. Check the declaring identity, never the display path or
-    // an application's same-named struct.
-    if bound_name == "Close" && nominal.symbol.module_name.starts_with("<corelib>/Core/files::") {
-        if nominal.symbol.name == {
-            "FileReader" | "FileWriter" | "FileLock" | "TempDir" | "TempFile" -> return Val(true)
-            else -> {}
-        }
-    }
+    if bound_name == "Close" && sema_type_provider_close_owner(nominal) -> return Val(true)
     unresolved_impl := false
     if graph.impl_traits_indexed {
         // Only the impls of this trait, from the registration index.
@@ -903,6 +895,18 @@ fn sema_type_bound_satisfied_resolved(graph: SemaRegistrationGraph, actual_resol
     if sema_type_graph_inline_impl_matches_trait(graph, nominal, trait_symbol) -> return Val(true)
     if unresolved_impl || !graph.complete -> return None
     return Val(false)
+}
+
+// These provider-backed Core owners already implement the consuming runtime
+// Close protocol (Rust `TraitRegistry::synthetic_close_types`). Check the
+// declaring identity, never the display path or an application's same-named
+// struct.
+fn sema_type_provider_close_owner(nominal: SemaRegistrationNominal) -> Bool Never! {
+    if !nominal.symbol.module_name.starts_with("<corelib>/Core/files::") -> return false
+    if nominal.symbol.name == {
+        "FileReader" | "FileWriter" | "FileLock" | "TempDir" | "TempFile" -> true
+        else -> false
+    }
 }
 
 // Rust `TraitRegistry::type_implements_trait`/`implements_trait` for a bound
@@ -953,6 +957,8 @@ fn sema_type_builtin_bound_satisfied(graph: SemaRegistrationGraph, actual_resolv
     }
     nominal_row :: sema_type_resolve_nominal_row(graph, actual_resolved, caller_module_identity) ?? return None
     nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+    // A caller that sees no declared `Close` reaches the same provider owners.
+    if bound_name == "Close" && sema_type_provider_close_owner(nominal) -> return Val(true)
     unresolved_impl := false
     loop graph_module in graph.modules {
         loop implementation in graph_module.impls {
