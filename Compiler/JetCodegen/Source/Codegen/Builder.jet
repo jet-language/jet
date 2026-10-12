@@ -1172,6 +1172,8 @@ fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, program: JetC
     builder.transaction_cleanup_active = state.transaction_cleanup_active
     builder.drop_live_places = ^state.drop_live_places
     builder.drop_live_all = ^state.drop_live_all
+    builder.partial_move_roots = ^state.partial_move_roots
+    builder.split_drop_roots = ^state.split_drop_roots
     builder.cleanup_frames = ^state.cleanup_frames
     builder.exit_tails = ^state.exit_tails
     builder.exit_value_slots = ^state.exit_value_slots
@@ -1863,6 +1865,18 @@ fn jet_codegen_retain_place_access(builder: &JetCodegenBuilder, program: JetCode
     }
 }
 
+// Rust: register_owned_drop's split test: a whole local or parameter whose
+// source name the partial-move pre-scan recorded.
+fn jet_codegen_partial_move_root(builder: JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID) -> Bool Never! {
+    if builder.partial_move_roots.len() == 0 -> return false
+    owner :: jet_codegen_find_place(builder, program, place) ?? return false
+    if owner.projections.len() != 0 -> return false
+    loop binding in builder.bindings {
+        if binding.place == place && builder.partial_move_roots.get(binding.name) != None -> return true
+    }
+    false
+}
+
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::register_owned_drop
 fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID, ty: Type, ownership: MIROwnership, initialized: Bool) Never! {
     retained :: jet_codegen_retained_cell_index(builder, place) >= 0
@@ -1870,6 +1884,18 @@ fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, program: JetCodeg
     if retained {
         loop record in builder.drop_live_places {
             if record.place == place -> return
+        }
+    }
+    // A root the pre-scan saw lose a projected owning move gets one live flag
+    // per owned leaf, so the move clears exactly the moved leaf and scope end
+    // drops only the remainder. A Close owner (other than the consuming
+    // receiver) and a container, enum or opaque owner stay indivisible.
+    if !retained && jet_codegen_partial_move_root(builder, program, place) {
+        atomic :: jet_codegen_nominal_close_function(builder, program, ty) != None && !jet_codegen_is_consuming_close_receiver(builder, program, place, ty)
+        if !atomic && jet_codegen_drop_field_names(builder, program, ty).len() != 0 {
+            builder.split_drop_roots[place.value] = true
+            jet_codegen_register_drop_leaves(&builder, program, place, ty, initialized, true, [String]{})
+            return
         }
     }
     identity := "{builder.function.key}|drop-live|{place.value}"
@@ -1950,7 +1976,10 @@ fn jet_codegen_emit_drop_cleanup(builder: &JetCodegenBuilder, program: JetCodege
     jet_codegen_retain_place_access(&builder, program, record.place, MIRAccess.Move)
     value := jet_codegen_emit_value(&builder, program, record.span, record.ty, MIROperation.MovePlace{place: record.place})
     builder.retained_grant_context = previous_grant
-    scope_close := jet_codegen_scope_end_close_function(builder, program, record.ty)
+    // A split leaf is never the consuming receiver, so it closes through its
+    // nominal Close; a whole owner skips only its own consuming Close.
+    owner :: jet_codegen_find_place(builder, program, record.place) ?? panic("drop cleanup has no MIR place")
+    scope_close := if owner.projections.len() == 0 -> jet_codegen_scope_end_close_function(builder, program, record.ty) else -> jet_codegen_nominal_close_function(builder, program, record.ty)
     if scope_close == {
         .Val(function) -> jet_codegen_emit_scope_end_close(&builder, program, function, record.ty, value, record.span)
         .None -> _ := jet_codegen_emit(&builder, program, record.span, None, MIROperation.Drop{value: value, kind: record.kind})
