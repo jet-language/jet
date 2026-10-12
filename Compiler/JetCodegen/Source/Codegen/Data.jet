@@ -382,6 +382,16 @@ fn jet_codegen_lower_serde_encode(builder: &JetCodegenBuilder, program: JetCodeg
         else -> {}
     }
     if jet_codegen_typed_codec_target(ty) -> return jet_codegen_lower_typed_encode(&builder, program, expression, receiver, ty)
+    // A bounded generic receiver (`fn to_string<T: Encode>(value: T)`) has
+    // no encode function of its own in the template: the typed codec route
+    // takes `T` as its type argument, which each monomorphized instance
+    // substitutes with the concrete type.
+    if ty == {
+        .Named(name) | .Apply(name, _) -> {
+            if builder.generic_type_names.contains(name) -> return jet_codegen_lower_typed_encode(&builder, program, expression, receiver, ty)
+        }
+        else -> {}
+    }
 
     variant :: jet_codegen_data_encode_variant(ty) ?? panic("checked Serde encode target has no Dyn variant or encode method")
     value := jet_codegen_lower_expr(&builder, program, receiver)
