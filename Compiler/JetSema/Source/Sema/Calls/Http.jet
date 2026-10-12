@@ -426,7 +426,10 @@ fn sema_call_http_client_arg_types(method: String) -> [Type] Never! {
 
 fn sema_call_http_request_arg_types(method: String, count: Int) -> [Type] Never! {
     if method == "param" || method == "header" -> return if count == 2 -> [Type]{Type.String, Type.String} else -> [Type]{Type.String}
-    if method == "body" -> return [Type]{Type.Named{name: "Body"}}
+    // Rust `http_type_method_return` leaves the `body(text)` builder's
+    // argument to inference; its one lowering route
+    // (`jet_http_client_request_body`) takes the request text, a `String`.
+    if method == "body" -> return [Type]{Type.String}
     if method == "timeout" || method == "connect_timeout" || method == "read_timeout" || method == "total_timeout" || method == "dns_timeout" || method == "tls_timeout" || method == "write_timeout" || method == "first_byte_timeout" -> return [Type]{Type.Named{name: "Duration"}}
     if method == "redirects" -> return [Type]{Type.Named{name: "HTTPRedirectPolicy"}}
     if method == "proxy" -> return [Type]{Type.Named{name: "HTTPProxy"}}
