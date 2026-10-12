@@ -23,6 +23,8 @@ use jet_foundation.[
     ViewSourceProjection,
     core_bare_source_module,
     core_module_export,
+    core_root_type,
+    mir_typed_head_kind,
     symbol_id,
     type_identity_equal,
     type_is_unit_callable_return,
@@ -668,18 +670,78 @@ fn sema_type_graph_lookup_symbol(graph: SemaRegistrationGraph, module_identity: 
     }
     // Only the established bare-owner trigger set may supply a global alias.
     // Local declarations and explicit imports have already won above.
-    bare_owner :: core_bare_source_module(name) ?? return None
-    loop row in sema_registration_nominal_rows_named(graph, name) {
-        module_row :: graph.modules[row.module_index]
-        nominal :: module_row.nominals[row.row]
-        if module_row.module_name != bare_owner
-            || !module_row.module_identity.starts_with("<corelib>/")
-            || nominal.kind != SemaRegistrationNominalKind.TypeAlias
-            || nominal.generic_params.len() != 0
-            || nominal.symbol.visibility < 2 -> next
-        return Val(SemaRegistrationResolvedSymbol{symbol: nominal.symbol, source_module_identity: module_row.module_identity, target_module_identity: module_row.module_identity, visibility: nominal.symbol.visibility})
+    bare_owner :: core_bare_source_module(name)
+    if bare_owner == .Val(owner_name) {
+        loop row in sema_registration_nominal_rows_named(graph, name) {
+            module_row :: graph.modules[row.module_index]
+            nominal :: module_row.nominals[row.row]
+            if module_row.module_name != owner_name
+                || !module_row.module_identity.starts_with("<corelib>/")
+                || nominal.kind != SemaRegistrationNominalKind.TypeAlias
+                || nominal.generic_params.len() != 0
+                || nominal.symbol.visibility < 2 -> next
+            return Val(SemaRegistrationResolvedSymbol{symbol: nominal.symbol, source_module_identity: module_row.module_identity, target_module_identity: module_row.module_identity, visibility: nominal.symbol.visibility})
+        }
     }
-    None
+    sema_type_graph_unique_type_owner(graph, module_identity, name)
+}
+
+// Rust `struct_owner_module`'s tail: a bare type name the caller neither
+// declares nor imports names the one type declaration of that name, among the
+// loaded modules, that the caller can see. Two owners leave it unresolved. A
+// built-in typed head (`Path`, `URL`) never takes it, `Limits` is
+// `core.email`'s, and a parameterless Core alias outside the bare-owner and
+// root-type sets is skipped; an alias that re-exports a namespaced type of the
+// same leaf names that type's owner.
+fn sema_type_graph_unique_type_owner(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaRegistrationResolvedSymbol? {
+    rows :: sema_registration_nominal_rows_named(graph, name)
+    if rows.len() == 0 || mir_typed_head_kind(Type.Named{name: name}) != None -> return None
+    caller_index :: sema_registration_module_index(graph, module_identity) ?? return None
+    caller :: graph.modules[caller_index]
+    found := SemaRegistrationRowRef?{None}
+    loop row in rows {
+        owner := row
+        alias_row :: graph.modules[row.module_index]
+        alias :: alias_row.nominals[row.row]
+        if name == "Limits" && (alias_row.module_name != "core.email" || !alias_row.module_identity.starts_with("<corelib>/")) -> next
+        if alias.kind == SemaRegistrationNominalKind.TypeAlias && alias.generic_params.len() == 0 {
+            if alias_row.module_identity.starts_with("<corelib>/") && core_bare_source_module(name) == None && !core_root_type(name) -> next
+            item :: sema_registration_nominal_source_item(alias.source) ?? next
+            if item == .TypeAlias(definition) {
+                if definition.target == .Named(target_name) {
+                    if (target_name.contains("::") || target_name.contains(".")) && sema_type_graph_leaf(target_name) == name {
+                        home :: sema_type_graph_lookup_symbol(graph, alias_row.module_identity, target_name)
+                        if home == .Val(resolved) {
+                            if sema_type_graph_nominal_row(graph, resolved.symbol.id.key) == .Val(home_row) -> owner = home_row
+                        }
+                    }
+                }
+            }
+        }
+        owner_row :: graph.modules[owner.module_index]
+        nominal :: owner_row.nominals[owner.row]
+        if nominal.symbol.name != name -> next
+        if nominal.kind != SemaRegistrationNominalKind.Struct
+            && nominal.kind != SemaRegistrationNominalKind.Enum
+            && nominal.kind != SemaRegistrationNominalKind.Distinct
+            && nominal.kind != SemaRegistrationNominalKind.TypeAlias -> next
+        if !sema_registration_visible(nominal.symbol.visibility, caller.module_identity, caller.package_identity, owner_row.module_identity, owner_row.package_identity) -> next
+        if found == .Val(previous) {
+            if previous.module_index != owner.module_index -> return None
+        }
+        found = Val(owner)
+    }
+    chosen :: found ?? return None
+    owner_row :: graph.modules[chosen.module_index]
+    symbol :: owner_row.nominals[chosen.row].symbol
+    Val(SemaRegistrationResolvedSymbol{symbol: symbol, source_module_identity: owner_row.module_identity, target_module_identity: owner_row.module_identity, visibility: symbol.visibility})
+}
+
+// Rust `split_type_name`'s leaf: after the last `::`, else after the last `.`.
+fn sema_type_graph_leaf(name: String) -> String Never! {
+    separator :: if name.contains("::") -> "::" else -> "."
+    parts :: name.split(separator).to_list()
+    parts[parts.len() - 1]
 }
 
 fn sema_type_graph_base_name(ty: Type) -> String? {

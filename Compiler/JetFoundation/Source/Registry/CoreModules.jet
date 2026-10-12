@@ -260,6 +260,14 @@ fn core_bare_source_module(name: String) -> String? Never! {
     None
 }
 
+// Rust `CoreModuleExports::CORE_ROOT_TYPES`: the Core value types a bare
+// spelling names wherever Core is loaded, so a parameterless Core alias of one
+// of them stays a candidate owner of that bare name.
+CORE_ROOT_TYPES :: [String]{"Date", "LocalDate", "LocalTime", "Decimal", "Fraction", "Duration", "Instant", "Authority"}
+fn core_root_type(name: String) -> Bool Never! {
+    CORE_ROOT_TYPES.contains(name)
+}
+
 // Private semantic routes belong to an exact source declaration, never a
 // short nominal spelling. They do not add public trait implementations.
 fn core_source_value_hook(name: String, operation: String) -> String? Never! {
