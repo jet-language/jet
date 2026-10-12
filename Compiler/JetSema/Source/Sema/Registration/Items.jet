@@ -3047,6 +3047,9 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
         sema_units_inject(&prepared_inputs[index], units_catalog)
     }
     sema_units_resolve(&prepared_inputs, edges, &diagnostics)
+    // Rust CheckInner `bind_marker_applications`: a directly used imported
+    // marker binds to its declaring module before any module registers.
+    loop index in 0..<prepared_inputs.len() -> prepared_inputs[index] = sema_marker_module_bind_input(prepared_inputs, edges, prepared_inputs[index])
     // Module identity -> row; duplicates are rejected below, so the first row
     // is the only row (Rust `Bundle/ItemReuse.rs` `by_identity`).
     module_rows := [String:Int]{}
