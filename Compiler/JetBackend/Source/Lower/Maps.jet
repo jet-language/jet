@@ -165,7 +165,8 @@ fn lower_map_drop_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, value
     if lower_value_drop(f, value) != .Trivial -> return lower_emit(&f, LIRInst.Drop{value: value})
     owned_layout :: lower_value_layout(f, value)
     owned :: lower_new_value(&f, owned_layout, drop, ty.identity)
-    lower_emit(&f, LIRInst.Reown{dst: owned, src: value})
+    if owned_layout == lir_layout_pointer() -> lower_emit(&f, LIRInst.Reown{dst: owned, src: value})
+    else -> lower_adopt(&f, owned, value)
     lower_emit(&f, LIRInst.Drop{value: owned})
 }
 
