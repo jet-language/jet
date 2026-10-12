@@ -550,9 +550,13 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
         value :: sema_call_builtin_static_argument(args[index], row.parameters[index], row, &bindings, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         &values.push(value)
     }
+    // Rust `finish_builtin_method`: a builtin static has no declared
+    // parameter conventions, so a written `^` (`String.from_bytes(^bytes)`)
+    // is the consuming argument's exact move, never E0203.
     params := [SemaCallParam]{}
     loop index in 0..<values.len() {
-        &params.push(SemaCallParam{label: "arg{index}", name: "arg{index}", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: row.parameter_convention, ty: Val(values[index].ty), variadic: false})
+        convention :: if args[index].convention == AccessConvention.Move -> AccessConvention.Move else -> row.parameter_convention
+        &params.push(SemaCallParam{label: "arg{index}", name: "arg{index}", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: convention, ty: Val(values[index].ty), variadic: false})
     }
     ownership_args := args
     ownership := sema_ownership_check_call_arguments(&state, callee, params, &ownership_args, scopes, &diagnostics)
