@@ -16,6 +16,7 @@ use jet_foundation.[
     Span,
     StrPart,
     SymbolKind,
+    TCoreClosureKind,
     TContract,
     TExpr,
     TExprKind,
@@ -658,6 +659,33 @@ fn sema_call_check_ambient_assert_eq(call: Call, environment: SemaScopeEnvironme
     stop := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.RequireStop{kind: TRequireKind.RequireEq{left: left_value, right: right_value}, location: location, always_stops: false}, call.name_span)
     SemaDirectSpecialCheck{handled: true, value: Val(stop)}
 }
+
+// Rust core_call.rs `("core.mem.scope", "guard")` (D-DEFER1 option B): the
+// compiler-owned guard has no registry row. Its one zero-parameter cleanup
+// lambda becomes the `ScopeGuard` whose scope-end drop runs it.
+fn sema_call_try_scope_guard(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if module_name != "core.mem.scope" || member != "guard" -> return SemaDirectSpecialCheck{handled: false, value: None}
+    imported :: sema_call_core_import_target(environment, program, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, &context) -> return SemaDirectSpecialCheck{handled: false, value: None}
+    if args.len() != 1 {
+        &diagnostics.push(sema_error("E0104", span, "`guard` expects 1 argument, got {args.len()}", "every argument must match a standard library function parameter", "check the call to `guard`"))
+        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    callback_type :: Type.Fn{params: [Type]{}, ret: Val(Type.Named{name: "Unit"}), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    callback :: sema_check_expression(args[0].expr, Val(callback_type), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    cleanup :: if callback.kind == {.Lambda(value) -> Val(value) else -> None} ?? {
+        &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`scope.guard` needs a lambda, not {sema_type_show(callback.ty)}", "a scope guard runs a cleanup lambda when the binding goes out of scope", "write `scope.guard(() -> {{ cleanup_code }})`"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    arity :: cleanup.param_types.len()
+    if arity != 0 {
+        &diagnostics.push(sema_error("E0104", expr_span(args[0].expr), "`scope.guard` needs a zero-parameter lambda, got {arity} parameter{if arity == 1 -> "" else -> "s"}", "the guard body takes no arguments — it captures what it needs via closure", "write `scope.guard(() -> {{ cleanup_code }})` with no parameters"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    value :: sema_tir_expr(Type.Named{name: "ScopeGuard"}, TExprKind.CoreClosureCall{kind: TCoreClosureKind.Guard{executable: cleanup}}, span)
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+}
 // Core registry rows are selected by the caller's canonical route.  These
 // source-owned projections run before the generic fixed-row producer; an
 // unhandled projection deliberately leaves the row for that producer.
@@ -714,6 +742,8 @@ fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: Sema
         member = imported.item ?? return SemaDirectSpecialCheck{handled: false, value: None}
     }
     module_name :: sema_call_core_import_module(environment, program, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    guard := sema_call_try_scope_guard(module_name, member, alias, call.name_span, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if guard.handled -> return guard
     if sema_call_core_variadic_print(environment, program, scopes, alias, member, call.args.len(), call.name_span, &context) -> return sema_call_check_ambient_print(call, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     expected_type_arg_count := 0
     if core_call_typed_signature(module_name, member, call.args.len()) == {

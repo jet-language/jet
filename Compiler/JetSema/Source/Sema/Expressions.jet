@@ -2740,6 +2740,8 @@ fn sema_expr_try_core_module_method(receiver: Expr, method: String, method_span:
         if core_module_export(module_name) == None -> return SemaMethodSpecialCheck{handled: false, value: None}
     }
     nested :: path.leaves.len() > 0
+    guard := sema_call_try_scope_guard(module_name, method, alias, alias_span, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if guard.handled -> return SemaMethodSpecialCheck{handled: true, value: guard.value}
     if !nested && sema_call_core_variadic_print(environment, program, scopes, alias, method, args.len(), alias_span, &context) {
         printed := sema_call_check_ambient_print(Call{name: "{alias}.{method}", name_span: method_span, type_args: type_args, args: args, resolved_ret: None, range_checked: false, widen_approx: false}, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: printed.value}
