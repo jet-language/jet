@@ -4716,7 +4716,7 @@ fn sema_stmt_check_return_value_typed(value: Expr, return_type: Type?, environme
 // checked on its own type and then converted, so every tier receives the
 // explicit conversion instead of the source bits under the slot's type.
 fn sema_stmt_check_return_payload(value: Expr, success: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    known := sema_stmt_return_known_type(value, scopes)
+    known := sema_stmt_return_numeric_source(value, scopes)
     if known == .Val(source) && sema_expr_is_numeric(success) && !type_identity_equal(source, success) && sema_expr_numeric_widening_to(source, success) == (Val(true)) {
         checked :: sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
@@ -4729,6 +4729,29 @@ fn sema_stmt_check_return_payload(value: Expr, success: Type, environment: SemaS
         if value == .Ident(name, name_span) -> return sema_string_view_materialize(name, name_span, Val(success), environment, program, &scopes, &state, &context, &diagnostics)
     }
     sema_check_expression(value, Val(success), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+// Rust `widen_numeric_return` widens whatever type the value inferred to, so
+// an arithmetic value (`return n - 48` with `n: U8` under `-> Int`) widens on
+// its operand carrier: two operands of one type, or one typed operand and a
+// bare integer literal that adopts it.
+fn sema_stmt_return_numeric_source(value: Expr, scopes: SemaScopeTable) -> Type? {
+    if value == {
+        .Paren(inner, _) -> return sema_stmt_return_numeric_source(inner, scopes)
+        .Binary(op, left, right, _) -> {
+            if op != BinOp.Add && op != BinOp.Sub && op != BinOp.Mul && op != BinOp.Mod && op != BinOp.Rem -> return None
+            left_literal :: left == .Int(_, _, _, _)
+            right_literal :: right == .Int(_, _, _, _)
+            if left_literal && right_literal -> return None
+            if left_literal -> return sema_stmt_return_numeric_source(right, scopes)
+            if right_literal -> return sema_stmt_return_numeric_source(left, scopes)
+            left_type :: sema_stmt_return_numeric_source(left, scopes) ?? return None
+            right_type :: sema_stmt_return_numeric_source(right, scopes) ?? return None
+            if type_identity_equal(left_type, right_type) -> return Val(left_type)
+            return None
+        }
+        else -> return sema_stmt_return_known_type(value, scopes)
+    }
 }
 fn sema_stmt_return_allows_empty(return_type: Type?) -> Bool Never! {
     if return_type == None -> return true
