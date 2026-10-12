@@ -2700,6 +2700,54 @@ fn sema_check_registered_raw_protocol_return(job: SemaBodyJob, module_index: Int
     panic("a registered Jet body check lost its owning graph")
 }
 
+// Rust TIR `lower_trait_method`: a `Close` or `Rollback` impl method is a raw
+// protocol ABI (`fn close(self)`), so its lowered return is the declared one
+// (Unit when omitted) even though sema checks its body on the failure rail.
+fn sema_check_protocol_unit_trait(trait_name: String?) -> Bool Never! {
+    name :: trait_name ?? return false
+    parts :: name.split(".").to_list()
+    leaf :: parts[parts.len() - 1]
+    leaf == "Close" || leaf == "Rollback"
+}
+
+fn sema_check_registered_protocol_unit_return(job: SemaBodyJob, module_index: Int, program: SemaProgramTables) -> Bool {
+    if program.registration_graph == .Val(graph) {
+        if job == {
+            .ImplMethod(_, owner, row) -> {
+                if graph.modules[module_index].impls[owner].methods[row].declaration.return_type != None -> return false
+                return sema_check_protocol_unit_trait(graph.modules[module_index].impls[owner].declaration.trait_name)
+            }
+            .NominalMethod(_, owner, row) -> {
+                // Read in place: binding the indexed path copies the method.
+                nominal :: graph.modules[module_index].nominals[owner]
+                if nominal.methods[row].declaration.return_type != None -> return false
+                method_span :: nominal.methods[row].declaration.span
+                if nominal.source == .SourceAST(item) {
+                    if item == {
+                        .Struct(definition) -> return sema_check_protocol_unit_block(definition.trait_impls, method_span)
+                        .Enum(definition) -> return sema_check_protocol_unit_block(definition.trait_impls, method_span)
+                        else -> {}
+                    }
+                }
+                return false
+            }
+            .TopLevel(_) -> return false
+        }
+    }
+    false
+}
+
+// Whether the trait block declaring the method at `span` is a raw Close or
+// Rollback protocol.
+fn sema_check_protocol_unit_block(blocks: [TraitImplBlock], span: Span) -> Bool Never! {
+    loop block in blocks {
+        loop method in block.methods {
+            if method.span == span -> return sema_check_protocol_unit_trait(Val(block.trait_name))
+        }
+    }
+    false
+}
+
 fn sema_check_registered_source_span(job: SemaBodyJob, module_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Span {
     if program.registration_graph == .Val(graph) {
         if job == {
@@ -3267,6 +3315,15 @@ fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_pl
         return false
     }
     if keep_going_stub != None -> return sema_keep_going_push_stub(keep_going_stub, label, &functions, &reasons)
+    if checked.value != None && sema_check_registered_protocol_unit_return(job, module_index, program) {
+        taken := ^checked.value
+        checked.value = None
+        rewritten := ^taken ?? panic("a checked Close method lost its lowered function")
+        raw_return :: Type.Named{name: "Unit"}
+        rewritten.ret = Val(raw_return)
+        rewritten.failure_carrier = sema_failure_carrier(Val(raw_return))
+        checked.value = Val(^rewritten)
+    }
     if sema_append_function(&functions, checked) -> return true
     &reasons.push("{label}: checked function could not be recorded")
     false
