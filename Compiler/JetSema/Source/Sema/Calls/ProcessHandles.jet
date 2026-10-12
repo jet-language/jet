@@ -364,10 +364,17 @@ fn sema_process_spec_method(receiver: Expr, receiver_value: TExpr, method: Strin
     }
     required :: sema_process_spec_arg_types(method, args.len())
     values :: sema_process_check_args(args, required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    // Rust types ProcessSpec builders through `process_spec_method_return`
+    // with no receiver convention and no recorded move: a builder on a named
+    // spec read again later (`clean.env(…).run()` in a loop) is no E0121.
+    // The spec still moves like an unmarked owning position, so a later use
+    // turns the move into a share and a borrowed parameter keeps its value.
     known_mutating :: method != "abilities" && method != "plan" && method != "run" && method != "run_checked" && method != "spawn"
-    receiver_access :: if known_mutating -> AccessConvention.Move else -> AccessConvention.Read
-    if !sema_process_check_method_ownership(receiver, "ProcessSpec.{method}", args, required, [Bool]{}, receiver_access, span, &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_process_check_method_ownership(receiver, "ProcessSpec.{method}", args, required, [Bool]{}, AccessConvention.Read, span, &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     sema_receiver_mark_forget(&state, receiver)
+    if known_mutating && receiver == .Ident(_, _) {
+        if !sema_ownership_mark_unmarked_move(&state, receiver, scopes, "`ProcessSpec.{method}`", &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     effect_name :: if method == "run" || method == "run_checked" || method == "spawn" -> "Exec" else -> ""
     sema_process_finish(receiver_value, THandleOp.ProcessSpecMethod{method: method, args_len: args.len()}, values, result, effect_name, "ProcessSpec.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }
