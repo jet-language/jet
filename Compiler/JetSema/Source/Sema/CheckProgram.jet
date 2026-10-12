@@ -1959,6 +1959,11 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     if returns_value && func.body.len() > 0 && func.body[func.body.len() - 1] == .Switch(_, _, _, table_span) {
         context.value_tail_span = Val(table_span)
     }
+    // Rust check_value_tail: a last-line `#Unsafe { … }` region checks its
+    // body as the value block, so the region's own last line is the value.
+    if returns_value && func.body.len() > 0 && func.body[func.body.len() - 1] == .Unsafe(_, _, unsafe_body, _) {
+        context.value_tail_span = sema_stmt_value_tail_marker(unsafe_body)
+    }
     statements := sema_check_statements(func.body, Val(effective_return), updated, program, &scopes, &state, &tail_store, &context, &diagnostics, 0)
     context.lost_tail_span = None
     context.value_tail_span = None
