@@ -324,7 +324,7 @@ fn lower_map_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         length :: lower_list_word(&f, map, 0)
         dst :: lower_result(p, c, &m, &f, instruction) ?? return true
         if symbol == "jet_map_len" {
-            lower_emit(&f, LIRInst.Move{dst: dst, src: length})
+            lower_native_count(p, c, &m, &f, instruction, dst, length)
         } else {
             zero :: lower_const(&f, 0)
             lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Eq, left: length, right: zero})

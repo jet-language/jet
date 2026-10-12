@@ -219,7 +219,8 @@ fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
         }
         lower_each_end(&f, each, [LIRValueID]{stepped})
         dst :: lower_result(p, c, &m, &f, instruction) ?? return
-        lower_emit(&f, LIRInst.Move{dst: dst, src: each.exit[0]})
+        if folds -> lower_emit(&f, LIRInst.Move{dst: dst, src: each.exit[0]})
+        else -> lower_native_count(p, c, &m, &f, instruction, dst, each.exit[0])
         if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
         return
     }

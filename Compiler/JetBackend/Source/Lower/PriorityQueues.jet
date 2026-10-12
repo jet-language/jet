@@ -108,7 +108,7 @@ fn lower_priority_queue_method(p: MIRProgram, c: LowerContext, m: &LowerModule, 
             zero :: lower_const(&f, 0)
             lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Eq, left: length, right: zero})
         } else {
-            lower_emit(&f, LIRInst.Move{dst: dst, src: length})
+            lower_native_count(p, c, &m, &f, instruction, dst, length)
         }
         return true
     }

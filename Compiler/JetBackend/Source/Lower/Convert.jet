@@ -49,6 +49,16 @@ fn lower_convert_exact(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, valu
     lower_start(&f, merge_block, [LIRValueID]{dst})
 }
 
+// A native i64 count read from a collection header (Collections.rs
+// jet_list_len and kin return i64) as the call's checked result. MIRRust.rs
+// native_int_result widens it into an exact Int (JetInt::from_i64); a
+// fixed-width result keeps the word.
+fn lower_native_count(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, dst: LIRValueID, count: LIRValueID) Never! {
+    ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "a native count without a checked result type is not lowered at O0 yet")
+    if lower_repr(p, ty) == .ExactInt -> return lower_convert_exact(&m, &f, dst, count, "jet_int_owned_from_i64", false)
+    lower_emit(&f, LIRInst.Move{dst: dst, src: count})
+}
+
 fn lower_convert_u64_exact(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, value: LIRValueID) Never! {
     no_args :: [LIRValueID]{}
     small_block :: lower_new_block(&f)

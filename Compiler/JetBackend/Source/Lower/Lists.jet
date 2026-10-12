@@ -267,7 +267,7 @@ fn lower_encoding_list_leaf(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
     if row.member == "__list_capacity" {
         list :: lower_use(&m, &f, args[0].value) ?? return true
         capacity :: lower_list_word(&f, list, 8)
-        lower_emit(&f, LIRInst.Move{dst: dst, src: capacity})
+        lower_native_count(p, c, &m, &f, instruction, dst, capacity)
         return true
     }
     list :: lower_receiver_header(p, c, &m, &f, args[0].place, "List") ?? return true
@@ -500,7 +500,7 @@ fn lower_list_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         length :: lower_list_word(&f, list, 0)
         dst :: lower_result(p, c, &m, &f, instruction) ?? return true
         if length_route {
-            lower_emit(&f, LIRInst.Move{dst: dst, src: length})
+            lower_native_count(p, c, &m, &f, instruction, dst, length)
         } else {
             zero :: lower_const(&f, 0)
             lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Eq, left: length, right: zero})
@@ -1489,7 +1489,7 @@ fn lower_list_method_shape(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
         lower_start(&f, join, [LIRValueID]{stepped})
         lower_each_end(&f, each, [LIRValueID]{stepped})
         dst :: lower_result(p, c, &m, &f, instruction) ?? return true
-        lower_emit(&f, LIRInst.Move{dst: dst, src: each.exit[0]})
+        lower_native_count(p, c, &m, &f, instruction, dst, each.exit[0])
         return true
     }
     if flatten_route {
