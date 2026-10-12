@@ -238,28 +238,30 @@ fn lower_scan_match(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     if !tuple -> return lower_fail(&m, &f, "pattern match payload is not a tuple")
     ty :: lower_value_type(c, subject) ?? return lower_fail(&m, &f, "pattern subject has no checked type")
     value :: lower_use(&m, &f, subject) ?? return
-    data := lower_pointer(&f)
-    length := lower_word(&f)
-    stride := 1
-    parts := [LowerScanPart]{}
-    symbol := "jet_rt_text_pattern_match"
     if binary == .Val(pattern) {
         elem :: lower_list_element(ty) ?? return lower_fail(&m, &f, "binary scan subject is not List<U8>")
         byte :: if elem.kind == .IntN(signed, bits) -> !signed && bits == 8 else -> false
         if !byte -> return lower_fail(&m, &f, "binary scan subject is not List<U8>")
-        data = lower_list_data(&f, value)
-        length = lower_list_word(&f, value, 0)
-        stride = lower_list_stride(p, elem)
-        parts = lower_scan_binary_parts(p, &m, &f, payload, pattern, false) ?? return
-        symbol = "jet_rt_binary_pattern_match"
-    } else if text == .Val(pattern) {
+        data :: lower_list_data(&f, value)
+        length :: lower_list_word(&f, value, 0)
+        parts :: lower_scan_binary_parts(p, &m, &f, payload, pattern, false) ?? return
+        return lower_scan_match_call(p, c, &m, &f, instruction, "jet_rt_binary_pattern_match", data, length, lower_list_stride(p, elem), payload, parts)
+    }
+    if text == .Val(pattern) {
         if !lower_text_type(ty) -> return lower_fail(&m, &f, "text scan subject is not the canonical text carrier")
+        data :: lower_pointer(&f)
+        length :: lower_word(&f)
         lower_call_runtime(&m, &f, "jet_rt_string_data", [LIRValueID]{value}, Val(data))
         lower_call_runtime(&m, &f, "jet_rt_string_byte_len", [LIRValueID]{value}, Val(length))
-        parts = lower_scan_text_parts(p, &m, &f, payload, pattern, false) ?? return
-    } else {
-        return lower_fail(&m, &f, "pattern match has no descriptors")
+        parts :: lower_scan_text_parts(p, &m, &f, payload, pattern, false) ?? return
+        return lower_scan_match_call(p, c, &m, &f, instruction, "jet_rt_text_pattern_match", data, length, 1, payload, parts)
     }
+    lower_fail(&m, &f, "pattern match has no descriptors")
+}
+
+// The subject's data/length are defined by the caller for its own carrier: a
+// binary subject reads its List header, a text subject asks the runtime.
+fn lower_scan_match_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, symbol: String, data: LIRValueID, length: LIRValueID, stride: Int, payload: MIRType, parts: [LowerScanPart]) Never! {
     rows :: lower_scan_rows(&f, parts)
     hit :: lower_word(&f)
     input_stride :: lower_const(&f, stride)
