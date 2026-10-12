@@ -2050,6 +2050,7 @@ fn sema_ownership_check_use(state: &SemaOwnershipState, expr: Expr, scopes: Sema
     if sema_ownership_report_invalidated_view(&state, expr, scopes, expr_span(expr), &diagnostics) -> return false
     places := sema_ownership_places_from_expr_in_state(expr, scopes, &state)
     if places.len() == 0 -> return true
+    if sema_ownership_report_own_place_moved(&state, expr, scopes, &diagnostics) -> return false
     loop place in places {
         if sema_ownership_place_moved(&state, place) == .Val(origin) {
             sema_ownership_report_moved(&state, place, origin, expr_span(expr), &diagnostics)
@@ -2068,10 +2069,21 @@ fn sema_ownership_check_use(state: &SemaOwnershipState, expr: Expr, scopes: Sema
     true
 }
 
+// Rust `reject_moved_expr_use` reads the written place without chasing a
+// view alias to its source, so a moved view binding (recorded on itself by
+// `sema_ownership_moved_record_places`) answers for its own later uses.
+fn sema_ownership_report_own_place_moved(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    own :: sema_ownership_place_from_expr_inner(expr, scopes) ?? return false
+    moved :: sema_ownership_place_moved(&state, own) ?? return false
+    sema_ownership_report_moved(&state, own, moved, expr_span(expr), &diagnostics)
+    true
+}
+
 // Rust `reject_moved_expr_use` on a complete projected place (`state.x`):
 // a move of the place, of a part of it, or of an owner it lies in is a use
 // after move. Read windows and loans are judged by the caller's own checks.
 fn sema_ownership_check_moved_place_use(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    if sema_ownership_report_own_place_moved(&state, expr, scopes, &diagnostics) -> return false
     loop place in sema_ownership_places_from_expr_in_state(expr, scopes, &state) {
         if sema_ownership_place_moved(&state, place) == .Val(origin) {
             sema_ownership_report_moved(&state, place, origin, expr_span(expr), &diagnostics)
@@ -2413,6 +2425,7 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
     // borrowed parameter under an exact `^` mark is refused at the mark
     // itself (E0201); a consuming call or receiver records its move like any
     // owner.
+    if sema_ownership_report_own_place_moved(&state, expr, scopes, &diagnostics) -> return false
     borrowed :: sema_ownership_write_view_exists_for_expr(&state, expr, scopes)
     loop place in places {
         if !unmarked && sema_ownership_reject_partial_static_move(&state, place, expr, &diagnostics) -> return false
@@ -2444,10 +2457,29 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
         origin := sema_ownership_move_origin(expr, move_ty, consumer, unmarked)
         // D-LIN1: a `#SingleUse` value keeps its exact move; it never copies.
         if sema_single_use_key(state, places[0].root_key) -> origin.share_ty = None
-        loop place in places -> &state.moved.push(SemaOwnershipMovedPlace{place: place, origin: origin})
+        loop place in sema_ownership_moved_record_places(expr, places, scopes, unmarked) -> &state.moved.push(SemaOwnershipMovedPlace{place: place, origin: origin})
     }
     loop place in places -> sema_ownership_note_place_reference(&state, expr, place, expr_span(expr), scopes, SemaOwnershipReferenceKind.Move)
     true
+}
+
+// Rust `note_move_if_direct_ident` keys an unmarked move on the binding
+// itself (`mark_moved(name)`), never on the storage a view binding reads:
+// moving `input` in `input :: bytes[0..<n]; R{bytes: input}` leaves `bytes`
+// usable. An exact `^place` move keeps the chased source places.
+fn sema_ownership_moved_record_places(expr: Expr, places: [SemaOwnershipPlace], scopes: SemaScopeTable, unmarked: Bool) -> [SemaOwnershipPlace] {
+    if !unmarked -> return places.copy()
+    name :: sema_ownership_moved_name(expr) ?? return places.copy()
+    own :: sema_ownership_place_from_expr_inner(name, scopes) ?? return places.copy()
+    [SemaOwnershipPlace]{own}
+}
+
+fn sema_ownership_moved_name(expr: Expr) -> Expr? Never! {
+    if expr == {
+        .Ident(_, _) -> Val(expr)
+        .Paren(inner, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Tainted(inner, _, _) -> sema_ownership_moved_name(inner)
+        else -> None
+    }
 }
 
 fn sema_ownership_consume_expression(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, consumer: String, diagnostics: &[Diagnostic]) -> Bool {

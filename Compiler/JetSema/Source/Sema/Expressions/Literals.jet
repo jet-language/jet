@@ -225,6 +225,7 @@ fn sema_expression_list_mark_owned_value(value: Expr, state: &SemaOwnershipState
             if sema_ownership_report_invalidated_view(&state, value, scopes, span, &diagnostics) -> return false
             places := sema_ownership_places_from_expr_in_state(value, scopes, &state)
             if places.len() == 0 -> return true
+            if sema_ownership_report_own_place_moved(&state, value, scopes, &diagnostics) -> return false
             loop place in places {
                 if sema_ownership_place_moved(&state, place) == .Val(origin) {
                     sema_ownership_report_moved(&state, place, origin, span, &diagnostics)
@@ -241,7 +242,7 @@ fn sema_expression_list_mark_owned_value(value: Expr, state: &SemaOwnershipState
             }
             if !sema_ownership_type_is_copy(binding.symbol.ty ?? Type.Named{name: "Unit"}) {
                 origin :: sema_ownership_move_origin(value, binding.symbol.ty ?? Type.Named{name: "Unit"}, "the list literal", true)
-                loop place in places {
+                loop place in sema_ownership_moved_record_places(value, places, scopes, true) {
                     &state.moved.push(SemaOwnershipMovedPlace{place: place, origin: origin})
                 }
                 loop place in places {
