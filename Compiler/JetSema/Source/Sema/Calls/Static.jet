@@ -154,7 +154,8 @@ fn sema_call_static_append_registered(output: &[SemaStaticMethodTarget], graph: 
     // names types as its owning module sees them (`X25519SecretKey` is
     // `core.crypto`'s own), so it resolves there with every type parameter
     // kept, before the caller's type arguments are substituted.
-    generics := loop param in nominal.generic_params -> TGenericParam{name: param.name, bounds: [SymbolID]{}}
+    generics := [TGenericParam]{}
+    loop param in nominal.generic_params -> &generics.push(TGenericParam{name: param.name, bounds: [SymbolID]{}})
     loop param in function.generic_params -> &generics.push(TGenericParam{name: param.name, bounds: [SymbolID]{}})
     owner_signature :: sema_type_resolve_declared_with_generics(graph, function.signature, owner_module, generics)
     target := sema_call_static_function_target(function.symbol, owner_signature, sema_inference_registration_params(function.generic_params), type_args, environment, program, span, &diagnostics) ?? return

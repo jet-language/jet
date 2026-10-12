@@ -2285,7 +2285,8 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
             // receiver's arguments are substituted (Rust
             // `owner_type_for_reader`): `clock.__observer()` returns
             // `core.time`'s own `__ClockObserver` in every caller.
-            generics := loop param in nominal.generic_params -> TGenericParam{name: param.name, bounds: [SymbolID]{}}
+            generics := [TGenericParam]{}
+            loop param in nominal.generic_params -> &generics.push(TGenericParam{name: param.name, bounds: [SymbolID]{}})
             loop param in function.generic_params -> &generics.push(TGenericParam{name: param.name, bounds: [SymbolID]{}})
             owner_signature :: sema_type_resolve_declared_with_generics(graph, function.signature, graph.modules[owner_index].module_identity, generics)
             method_signature :: sema_inference_substitute_type_bindings(owner_signature, owner_inference.substitutions)
