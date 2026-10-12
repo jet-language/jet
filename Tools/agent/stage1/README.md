@@ -143,6 +143,14 @@ factory's is refused. Each runs under GNU `time -v` (seconds, peak RSS) with a
 main thread, and the Rust thread-stack variable does not raise it. CLI stages
 get `JET_COMPILER_IDENTITY` from the stage-1 factory receipt's
 `compiler_source_identity` and a `NATIVE_STAGE_TIMEOUT` (default 10800 s).
+Compiler thread admission (`compiler_threads_admit`) starts from the CPUs a
+process may run on. That is its only input the chain can set: the factory
+takes no `--threads` cap. So the stage 1 factory and every CLI stage run
+under `taskset -c 0-(N-1)` with N = `NATIVE_COMPILER_CPUS` (default 4), and
+the receipt records N as `compilerCpus`. A self-rebuild reuses its
+publication's N. The admission's memory term (MemAvailable and cgroup
+headroom) can still lower the worker count below N when free memory cannot
+hold N threads' scratch.
 `native-fixedpoint.sh` needs a real CLI builder (`stage1/jet` or `stage2/jet`,
 never `jetc0`) with `jet-runtime/` beside it, `JET_TOOLCHAIN_ROOT`, and the
 same identity (`--factory-receipt`); run it through the same `jet-env`.

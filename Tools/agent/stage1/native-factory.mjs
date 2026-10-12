@@ -34,7 +34,7 @@ export function readStageZeroFactory(recordFile, repo) {
   if (!magic.equals(Buffer.from([127, 69, 76, 70]))) throw Error('retained sharded factory is not ELF');
   return record;
 }
-function runFactoryProtocol({ recordFile, repo, sourceRoot, entry, work, policy }, linkRequired) {
+function runFactoryProtocol({ recordFile, repo, sourceRoot, entry, work, policy, cpus }, linkRequired) {
   const record = readStageZeroFactory(recordFile, repo);
   const library = policy.JET_FRONT_LIBRARY_OBJECT_OUTPUT;
   const native = policy.JET_FRONT_NATIVE_OUTPUT;
@@ -69,10 +69,25 @@ function runFactoryProtocol({ recordFile, repo, sourceRoot, entry, work, policy 
   // stages; GNU time records the factory's elapsed time and peak RSS.
   const timing = join(work, 'factory.time');
   const start = Date.now();
-  const run = spawnSync(gnuTime(), ['-v', '-o', timing, jetEnv, 'env', `HOME=${home}`, 'prlimit', '--stack=1073741824:1073741824', '--', record.factory.path], { cwd: sourceRoot, env, stdio: 'inherit' });
+  const pin = cpus === undefined ? [] : compilerCpuPin(cpus);
+  const run = spawnSync(gnuTime(), ['-v', '-o', timing, jetEnv, 'env', `HOME=${home}`, 'prlimit', '--stack=1073741824:1073741824', '--', ...pin, record.factory.path], { cwd: sourceRoot, env, stdio: 'inherit' });
   if (run.error) throw run.error;
   const seconds = (Date.now() - start) / 1000;
-  return { record, receipt, census, rc: run.status ?? 1, signal: run.signal, compilerProtocol: 'bootstrap-factory', sourceCommit: record.commit, toolchain, timing, seconds, peakRssKb: peakRss(timing) };
+  return { record, receipt, census, rc: run.status ?? 1, signal: run.signal, compilerProtocol: 'bootstrap-factory', sourceCommit: record.commit, toolchain, timing, seconds, peakRssKb: peakRss(timing), ...(cpus === undefined ? {} : { compilerCpus: cpus }) };
+}
+// Compiler thread admission (JetFoundation Threads.jet compiler_threads_admit)
+// starts at the CPUs the process may run on: the factory's request fills
+// `cores` from Rust std available_parallelism (Bootstrap/Host/Native.rs) and
+// the native CLI's from the runtime's port of it (JetRuntime
+// HostParallelism.jet), both the sched_getaffinity count capped by the cgroup
+// CPU quota. Neither side reads any other thread knob (the factory takes no
+// `--threads` cap), so pinning the affinity to the same `count` CPUs gives
+// every compile that must match byte-for-byte the same worker ceiling. The
+// memory term of admission (MemAvailable / cgroup headroom) still lowers the
+// ceiling when free memory cannot hold `count` threads' scratch.
+export function compilerCpuPin(count) {
+  if (!Number.isInteger(count) || count < 1) throw Error(`compiler CPU count must be a positive integer, not ${count}`);
+  return ['taskset', '-c', count === 1 ? '0' : `0-${count - 1}`];
 }
 // GNU time, never the shell keyword.
 export function gnuTime() {

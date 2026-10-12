@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import { accessSync, chmodSync, closeSync, constants, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { gnuTime, invokeStageZeroFactory, nativeCToolchain, peakRss, readStageZeroFactory } from './native-factory.mjs';
+import { compilerCpuPin, gnuTime, invokeStageZeroFactory, nativeCToolchain, peakRss, readStageZeroFactory } from './native-factory.mjs';
 import { readNativeRuntimePack } from '../../packaging/runtime-pack-cache.mjs';
 const producerRepo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const options = { repo: producerRepo };
@@ -29,6 +29,16 @@ if (options.selfRebuild ? !options.out : (!options.factory || !options.runtime |
 // refuses a CARGO_TARGET_DIR its checkout does not own (e.g. the default one a
 // caller's jet-env set for a different checkout). No stage runs Cargo.
 delete process.env.CARGO_TARGET_DIR;
+// Compiler threads: the factory (stage1) and every native CLI stage admit
+// workers from the CPUs they may run on and nothing else the chain can set
+// (native-factory.mjs compilerCpuPin), so each compile whose output is
+// compared runs pinned to the same NATIVE_COMPILER_CPUS CPUs (default 4: four
+// threads' parse and sema scratch of the whole-compiler unit fit the feed's
+// memory). A self-rebuild reuses the count its publication recorded.
+const cpuCount = text => {
+  if (!/^[1-9][0-9]*$/.test(text)) throw Error(`NATIVE_COMPILER_CPUS must be a positive whole number of CPUs, not ${text}`);
+  return Number(text);
+};
 const json = (file, value) => writeFileSync(file, JSON.stringify(value, null, 2) + '\n');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const steps = [];
@@ -57,7 +67,7 @@ function publish(out, runtimeDir, directory, binary, object) {
 const compare = (out, left, right) => ['jet', 'jet.o'].map(name => ({ name, equal: readFileSync(join(out, left, name)).equals(readFileSync(join(out, right, name))) }));
 // Real argv CLI stage: <builder> build <assembled selfhost.jet>, same source
 // path and cwd every time, empty all-phases census, fresh outputs only.
-function cliStageRunner({ repo, out, unit, identity, referenceToolchain, runtimeDir, stepsFile }) {
+function cliStageRunner({ repo, out, unit, identity, referenceToolchain, runtimeDir, stepsFile, cpus }) {
   const env = { ...process.env, JET_TOOLCHAIN_ROOT: repo, JET_KEEP_GOING: '1', JET_COMPILER_IDENTITY: identity };
   for (const key of Object.keys(env)) if (key.startsWith('JET_FRONT_') || key.startsWith('JET_BOOTSTRAP_') || key === 'JET_DUMP_MIR' || key === 'JET_DEBUG_LOWER_ALL' || key === 'JET_KEEP_GOING_SKIP' || key === 'JET_KEEP_GOING_REPORT') delete env[key];
   // jet_rt_main runs the compiler on the process main thread and O0 frames
@@ -80,10 +90,10 @@ function cliStageRunner({ repo, out, unit, identity, referenceToolchain, runtime
     const toolchain = nativeCToolchain(jetEnv, stageEnv, unit.project);
     if (!sameToolchain(toolchain, referenceToolchain)) throw Error(`stage${stage} C toolchain differs from the factory's: ${JSON.stringify(toolchain)} vs ${JSON.stringify(referenceToolchain)}`);
     rmSync(built, { force: true }); rmSync(`${built}.o`, { force: true });
-    execute(`native-stage${stage}`, [timer, '-v', '-o', timing, 'timeout', '--kill-after=30', limit, ...stack, jetEnv, builder, 'build', unit.source], stageEnv, unit.project, out, stepsFile);
+    execute(`native-stage${stage}`, [timer, '-v', '-o', timing, 'timeout', '--kill-after=30', limit, ...stack, ...compilerCpuPin(cpus), jetEnv, builder, 'build', unit.source], stageEnv, unit.project, out, stepsFile);
     const census = readFileSync(report, 'utf8').trim().split('\n');
     if (census.length !== 1 || census[0] !== 'phase\titem\tcode\tmessage\tspan') throw Error(`stage${stage} all-phases census must exist and be empty`);
-    return { ...publish(out, runtimeDir, join(out, `stage${stage}`), built, `${built}.o`), keepGoingReport: report, keepGoingFailures: 0, timing, seconds: steps.at(-1).seconds, peakRssKb: peakRss(timing), toolchain };
+    return { ...publish(out, runtimeDir, join(out, `stage${stage}`), built, `${built}.o`), keepGoingReport: report, keepGoingFailures: 0, timing, seconds: steps.at(-1).seconds, peakRssKb: peakRss(timing), toolchain, compilerCpus: cpus };
   };
 }
 
@@ -95,12 +105,13 @@ if (options.selfRebuild) {
   if (existsSync(target)) throw Error(`self-rebuild receipt already exists: ${target}`);
   const publication = JSON.parse(readFileSync(join(out, 'native-compiler.json'), 'utf8'));
   if (publication.schema !== 'jet-native-compiler/v1' || publication.verdict !== 'GREEN' || publication.fixedPoint !== true) throw Error('self-rebuild needs a GREEN fixed-point native-compiler.json');
+  if (!Number.isInteger(publication.compilerCpus)) throw Error('self-rebuild needs the compiler CPU count its publication recorded (compilerCpus)');
   const unit = JSON.parse(readFileSync(join(out, 'assembly', 'plan.json'), 'utf8'));
   const second = publication.stages.find(stage => stage.stage === 2);
   let selfReceipt;
   try {
     if (unit.sourceSha256 !== publication.sourceSha256) throw Error('assembled source differs from the published fixed point');
-    const run = cliStageRunner({ repo: publication.sourceRoot, out, unit, identity: publication.compilerIdentity, referenceToolchain: second.toolchain, runtimeDir: publication.runtimeDir, stepsFile: join(out, 'self-rebuild-steps.json') });
+    const run = cliStageRunner({ repo: publication.sourceRoot, out, unit, identity: publication.compilerIdentity, referenceToolchain: second.toolchain, runtimeDir: publication.runtimeDir, stepsFile: join(out, 'self-rebuild-steps.json'), cpus: publication.compilerCpus });
     const third = run(3, second.binary);
     const files = compare(out, 'stage2', 'stage3');
     const identical = files.every(row => row.equal);
@@ -112,6 +123,7 @@ if (options.selfRebuild) {
   writeFileSync(join(out, 'self-rebuild.rc'), String(selfReceipt.rc) + '\n');
   console.log(JSON.stringify(selfReceipt, null, 2)); process.exitCode = selfReceipt.rc;
 } else {
+  const cpus = cpuCount(process.env.NATIVE_COMPILER_CPUS ?? '4');
   if (existsSync(options.out)) throw Error(`fresh native-feed output required: ${options.out}`);
   mkdirSync(options.out, { recursive: true });
   const { repo, out } = options;
@@ -121,7 +133,7 @@ if (options.selfRebuild) {
   const unit = JSON.parse(readFileSync(join(assembly, 'plan.json'), 'utf8'));
   const stage1 = join(out, 'stage1');
   const prefix = join(stage1, 'factory-output');
-  const plan = { schema: 'jet-native-feed-plan/v1', sourceRoot: repo, manifestPatch: unit.manifestPatch ?? null, source: unit.source, sourceSha256: unit.sourceSha256, map: unit.map, entry: unit.entry, factoryRecord: options.factory, runtimeDir: options.runtime, producerSha256: hash(readFileSync(fileURLToPath(import.meta.url))), harnessSha256: hash(readFileSync(new URL('./native-factory.mjs', import.meta.url))), stages: ['source-bound AOT factory -> native stage1', 'native stage1 real argv -> native stage2'], comparisons: ['stage1/jet.o == stage2/jet.o', 'stage1/jet == stage2/jet'], selfRebuild: { followUp: 'native-feed.mjs --self-rebuild --out <this dir>', receipt: 'self-rebuild.json', comparisons: ['stage2/jet.o == stage3/jet.o', 'stage2/jet == stage3/jet'] }, stack: '1 GiB RLIMIT_STACK (prlimit) for every native CLI stage', allPhasesReportsMandatory: true, optimization: 'O0' };
+  const plan = { schema: 'jet-native-feed-plan/v1', sourceRoot: repo, manifestPatch: unit.manifestPatch ?? null, source: unit.source, sourceSha256: unit.sourceSha256, map: unit.map, entry: unit.entry, factoryRecord: options.factory, runtimeDir: options.runtime, producerSha256: hash(readFileSync(fileURLToPath(import.meta.url))), harnessSha256: hash(readFileSync(new URL('./native-factory.mjs', import.meta.url))), stages: ['source-bound AOT factory -> native stage1', 'native stage1 real argv -> native stage2'], comparisons: ['stage1/jet.o == stage2/jet.o', 'stage1/jet == stage2/jet'], selfRebuild: { followUp: 'native-feed.mjs --self-rebuild --out <this dir>', receipt: 'self-rebuild.json', comparisons: ['stage2/jet.o == stage3/jet.o', 'stage2/jet == stage3/jet'] }, stack: '1 GiB RLIMIT_STACK (prlimit) for every native CLI stage', compilerCpus: cpus, allPhasesReportsMandatory: true, optimization: 'O0' };
   json(join(out, 'plan.json'), plan);
   if (options.dryRun) { console.log(JSON.stringify({ ...plan, dryRun: true, upstreamArtifactsNotYetAdmitted: true }, null, 2)); process.exit(0); }
   let receipt;
@@ -137,7 +149,7 @@ if (options.selfRebuild) {
     const packPath = join(options.runtime, runtime.key, 'jet_runtime.pack.o');
     mkdirSync(stage1);
     const start = Date.now();
-    const factory = invokeStageZeroFactory({ recordFile: options.factory, repo, sourceRoot: unit.project, entry: 'selfhost.jet', work: join(out, 'factory-native'), policy: { JET_FRONT_NATIVE_OUTPUT: prefix, JET_RUNTIME_PACK: packPath } });
+    const factory = invokeStageZeroFactory({ recordFile: options.factory, repo, sourceRoot: unit.project, entry: 'selfhost.jet', work: join(out, 'factory-native'), policy: { JET_FRONT_NATIVE_OUTPUT: prefix, JET_RUNTIME_PACK: packPath }, cpus });
     for (const suffix of ['.issues', '.pack-issues']) {
       const file = prefix + suffix;
       if (existsSync(file) && readFileSync(file, 'utf8').trim()) throw Error(`native stage1 codegen/link findings: ${file}`);
@@ -154,7 +166,7 @@ if (options.selfRebuild) {
     artifacts.artifacts.candidate_jetc0 = { path: first.binary, sha256: first.sha256, native: true, runtimeDir: join(stage1, 'jet-runtime'), sourceSha256: unit.sourceSha256 };
     const temporaryArtifacts = `${artifactsFile}.${process.pid}.new`;
     json(temporaryArtifacts, artifacts); renameSync(temporaryArtifacts, artifactsFile);
-    const run = cliStageRunner({ repo, out, unit, identity, referenceToolchain: factory.toolchain, runtimeDir: options.runtime, stepsFile });
+    const run = cliStageRunner({ repo, out, unit, identity, referenceToolchain: factory.toolchain, runtimeDir: options.runtime, stepsFile, cpus });
     const second = run(2, first.binary);
     // The gate: factory stage1 == native stage2, whole files. The stage3
     // self-rebuild is the separate `--self-rebuild` follow-up receipt.
@@ -164,7 +176,7 @@ if (options.selfRebuild) {
     if (!comparisons.fixedPoint) throw Error('native stage1/stage2 object and ELF fixed point differ (whole-file cmp); see comparisons.json');
     // `stages` stays the stage1/stage2 gate pair (native-smoke admits exactly
     // two); smoke uses stage2/jet.
-    receipt = { schema: 'jet-native-compiler/v1', commit: record.commit, sourceRoot: repo, sourceSha256: unit.sourceSha256, manifestPatch: plan.manifestPatch, factorySha256: record.factory.sha256, compilerIdentity: identity, runtimePackSha256: hash(runtime.pack), producerSha256: plan.producerSha256, harnessSha256: plan.harnessSha256, backend: 'jet-native', optimization: 'O0', fixedPoint: true, comparisons, selfRebuildReceipt: join(out, 'self-rebuild.json'), stages: [{ stage: 1, ...first, keepGoingReport: factory.census, keepGoingFailures: 0 }, { stage: 2, ...second }], jet: second.binary, runtimeDir: join(out, 'stage2', 'jet-runtime'), steps, rc: 0, verdict: 'GREEN' };
+    receipt = { schema: 'jet-native-compiler/v1', commit: record.commit, sourceRoot: repo, sourceSha256: unit.sourceSha256, manifestPatch: plan.manifestPatch, factorySha256: record.factory.sha256, compilerIdentity: identity, runtimePackSha256: hash(runtime.pack), producerSha256: plan.producerSha256, harnessSha256: plan.harnessSha256, backend: 'jet-native', optimization: 'O0', compilerCpus: cpus, fixedPoint: true, comparisons, selfRebuildReceipt: join(out, 'self-rebuild.json'), stages: [{ stage: 1, ...first, keepGoingReport: factory.census, keepGoingFailures: 0, compilerCpus: cpus }, { stage: 2, ...second }], jet: second.binary, runtimeDir: join(out, 'stage2', 'jet-runtime'), steps, rc: 0, verdict: 'GREEN' };
   } catch (error) {
     receipt = { schema: 'jet-native-feed-failure/v1', plan, steps, rc: 1, verdict: 'RED', error: error.stack, fixedPoint: false };
   }
