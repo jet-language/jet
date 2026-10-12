@@ -6819,7 +6819,8 @@ fn jet_codegen_lower_map_pattern(builder: &JetCodegenBuilder, program: JetCodege
         if !rest {
             int_ty :: jet_codegen_lower_type_for_function(Type.Int, builder, program)
             increment :: jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Convert{value: present, parameters: [MIRValueID]{}, target: int_ty, conversion: MIRConversion.NumericCast})
-            count = jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Binary{op: MIRBinaryOp.Add, dispatch: jet_codegen_binary_dispatch(&builder, program, TBinaryOp.Add, false, Type.Int, span, 0), overflow: MIRBinaryOverflow.Unchecked, left: count, right: increment})
+            add_dispatch :: jet_codegen_binary_dispatch(&builder, program, TBinaryOp.Add, false, Type.Int, span, 0)
+            count = jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Binary{op: MIRBinaryOp.Add, dispatch: add_dispatch, overflow: MIRBinaryOverflow.Unchecked, left: count, right: increment})
         }
         if entry.optional {
             place :: jet_codegen_project_window_place(&builder, program, root, MIRProjection.MapLookup{lookup: lookup, optional: true, span: span}, optional_ty, span)

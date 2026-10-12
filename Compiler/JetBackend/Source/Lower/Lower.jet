@@ -481,7 +481,9 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     functions := [LIRFunction]{}
     failed_functions := prepared.failed_functions.copy()
     if keep_going {
-        kept := lower_keep_going_lower(program, ^m, &prepared, ^failed_functions) ?? panic("the keep-going native lowering tasks failed")
+        kept := lower_keep_going_lower(program, ^m, ^prepared.functions, ^prepared.instances, ^failed_functions) ?? panic("the keep-going native lowering tasks failed")
+        prepared.functions = ^kept.inventory
+        prepared.instances = ^kept.instances
         m = ^kept.state
         failed_functions = ^kept.failed
         functions = ^kept.functions
@@ -665,19 +667,24 @@ struct LowerKeepGoingLowered {
     state: LowerModule
     failed: [U64:Bool]
     functions: [LIRFunction]
+    // The inventory and instance rows, moved back out of the tasks' inputs.
+    inventory: [LowerPreparedFunction]
+    instances: [MIRFunction]
 }
 
-// Lowers every inventory function of `prepared` (moved out for the lowering
-// and back in after) against `m`; returns the module state, the failed
-// concrete functions and the lowered functions in inventory order. The
-// program is copied once into the tasks' shared inputs.
-fn lower_keep_going_lower(program: MIRProgram, m: ^LowerModule, prepared: &LowerPrepared, failed: ^[U64:Bool]) -> LowerKeepGoingLowered {
-    inputs :: shared LowerKeepGoingInputs{program: program.copy(), functions: compiler_take_rows<LowerPreparedFunction>(&prepared.functions), instances: compiler_take_rows<MIRFunction>(&prepared.instances)}
+// Lowers every inventory function (`functions`, with the instance bodies
+// `instances`, both moved in for the lowering and handed back after) against
+// `m`; returns the module state, the failed concrete functions and the
+// lowered functions in inventory order. The program is copied once into the
+// tasks' shared inputs.
+fn lower_keep_going_lower(program: MIRProgram, m: ^LowerModule, functions: ^[LowerPreparedFunction], instances: ^[MIRFunction], failed: ^[U64:Bool]) -> LowerKeepGoingLowered {
+    inputs :: shared LowerKeepGoingInputs{program: program.copy(), functions: ^functions, instances: ^instances}
     state :: shared LowerKeepGoingState{modules: [LowerModule]{}, failed: ^failed, functions: [LIRFunction]{}, position: 0}
     lower_keep_going_fill(state, ^m)
     lower_keep_going_functions(inputs, state)
-    lower_keep_going_restore(inputs, &prepared)
-    lower_keep_going_take(state)
+    lowered := lower_keep_going_take(state)
+    lower_keep_going_restore(inputs, &lowered)
+    lowered
 }
 
 fn lower_keep_going_fill(state: Shared<LowerKeepGoingState>, m: ^LowerModule) {
@@ -686,15 +693,15 @@ fn lower_keep_going_fill(state: Shared<LowerKeepGoingState>, m: ^LowerModule) {
 }
 
 fn lower_keep_going_take(state: Shared<LowerKeepGoingState>) -> LowerKeepGoingLowered {
-    permit :: state.guard_edit()
+    permit := state.guard_edit()
     taken :: &permit.value.modules.pop() ?? panic("the native lowering module left its keep-going state")
-    LowerKeepGoingLowered{state: taken, failed: permit.value.failed.copy(), functions: compiler_take_rows<LIRFunction>(&permit.value.functions)}
+    LowerKeepGoingLowered{state: taken, failed: permit.value.failed.copy(), functions: compiler_take_rows<LIRFunction>(&permit.value.functions), inventory: [LowerPreparedFunction]{}, instances: [MIRFunction]{}}
 }
 
-fn lower_keep_going_restore(inputs: Shared<LowerKeepGoingInputs>, prepared: &LowerPrepared) {
-    permit :: inputs.guard_edit()
-    prepared.functions = compiler_take_rows<LowerPreparedFunction>(&permit.value.functions)
-    prepared.instances = compiler_take_rows<MIRFunction>(&permit.value.instances)
+fn lower_keep_going_restore(inputs: Shared<LowerKeepGoingInputs>, lowered: &LowerKeepGoingLowered) {
+    permit := inputs.guard_edit()
+    lowered.inventory = compiler_take_rows<LowerPreparedFunction>(&permit.value.functions)
+    lowered.instances = compiler_take_rows<MIRFunction>(&permit.value.instances)
 }
 
 fn lower_keep_going_functions(inputs: Shared<LowerKeepGoingInputs>, state: Shared<LowerKeepGoingState>) {
