@@ -2553,6 +2553,14 @@ fn jet_codegen_lower_fallback_route(builder: &JetCodegenBuilder, program: JetCod
         .Value(value) -> {
             lowered := jet_codegen_lower_expr(&builder, program, value)
             if !jet_codegen_current_is_open(builder, program) -> return None
+            // A diverging fallback value (a call typed plain Never, such as
+            // `core.math.__numeric_stop(...)`) never reaches the join, as in
+            // Rust's lower_fallback_block: close the block as conditional and
+            // Result-handler arms do.
+            if value.ty == (Type.Named{name: "Never"}) {
+                jet_codegen_terminate(&builder, program, MIRTerminator.Unreachable{reason: "checked fallback value diverges"})
+                return None
+            }
             return Val(jet_codegen_fallback_join_value(&builder, program, expression, value.ty, lowered))
         }
         .Return(value) -> jet_codegen_lower_statement(&builder, program, TStmt.Return{value: value, span: expression.span})
