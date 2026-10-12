@@ -288,18 +288,22 @@ fn lower_pattern_capture(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     lower_clone_into(p, &m, &f, source, dst, result_ty)
 }
 
+// A scan carrier tests like its producer: Option<Tuple> is a nullable box
+// (OptionIsSome's pointer compare against a null pointer), Result<Tuple,
+// String> stores its selector word at offset 0.
 fn lower_pattern_matched(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, matched: MIRValueID) Never! {
     ty :: lower_value_type(c, matched) ?? return lower_fail(&m, &f, "pattern test has no producer type")
     value :: lower_use(&m, &f, matched) ?? return
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
-    tested := value
     if ty.kind == .Result(_, _) {
-        tested = lower_word(&f)
-        lower_emit(&f, LIRInst.Load{dst: tested, base: value, offset: 0})
-    } else {
-        optional :: if ty.kind == .Option(_) -> true else -> false
-        if !optional -> return lower_fail(&m, &f, "pattern test producer is not a scan carrier")
+        selector :: lower_word(&f)
+        lower_emit(&f, LIRInst.Load{dst: selector, base: value, offset: 0})
+        failed :: lower_const(&f, lower_result_selector(false))
+        return lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Ne, left: selector, right: failed})
     }
-    zero :: lower_const(&f, if ty.kind == .Result(_, _) -> lower_result_selector(false) else -> 0)
-    lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Ne, left: tested, right: zero})
+    optional :: if ty.kind == .Option(_) -> true else -> false
+    if !optional -> return lower_fail(&m, &f, "pattern test producer is not a scan carrier")
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Ne, left: value, right: null})
 }
