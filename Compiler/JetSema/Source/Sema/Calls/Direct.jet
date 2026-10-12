@@ -1197,6 +1197,10 @@ fn sema_call_check_direct(state: &SemaOwnershipState, call: Call, expected: Type
         value :: sema_expression_measurement_source_call("__measurement_new", values, result, call.name_span, environment, program) ?? return None
         return sema_expr_expected(value, expected, environment, program, &diagnostics)
     }
+    // D-STRUCT-POLICY1=A (Rust check_call_inner `apply`): an unshadowed
+    // `apply(policy..., f)` wraps `f` in its user policy chain.
+    policy :: sema_policy_try_apply(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if policy.handled -> return policy.value
     special :: sema_call_try_knowledge_builtin(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if special.handled -> return special.value
     if sema_call_default_err_candidate(call, expected, scopes) {

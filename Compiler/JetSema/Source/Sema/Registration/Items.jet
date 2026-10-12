@@ -2016,7 +2016,8 @@ fn sema_registration_prepare_module(input: SemaRegistrationModuleInput) -> SemaR
 
 fn sema_registration_prepare_module_with(input: SemaRegistrationModuleInput, templates: [SemaGenericModuleSource]) -> SemaRegistrationModuleResult {
     diagnostics := [Diagnostic]{}
-    module_row := sema_registration_prepare_module_row(input.copy(), templates, &diagnostics)
+    policies :: sema_policy_declarations_checked(input.program.user_policy_declarations, &diagnostics)
+    module_row := sema_registration_prepare_module_row(input.copy(), templates, policies, &diagnostics)
     SemaRegistrationModuleResult{module_row: module_row, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0)}
 }
 
@@ -2024,8 +2025,9 @@ fn sema_registration_prepare_module_with(input: SemaRegistrationModuleInput, tem
 // The row is returned whole, so the graph takes it without a copy. The input
 // is consumed: its program moves into the row instead of being copied.
 // `templates` are the generic-module templates the module imports; its own
-// templates come from its program.
-fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, templates: [SemaGenericModuleSource], reported: &[Diagnostic]) -> SemaRegistrationModule {
+// templates come from its program. `policies` are its package's checked user
+// policy declarations (Rust Registration: one policy set per package).
+fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, templates: [SemaGenericModuleSource], policies: [UserPolicyDecl], reported: &[Diagnostic]) -> SemaRegistrationModule {
     diagnostics := [Diagnostic]{}
     owned := ^input
     module_row := SemaRegistrationModule{
@@ -2092,6 +2094,7 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     // (types beside the module, top-level member functions by member name)
     // and resolve `module.f(...)` and `use module.[f]` before registration.
     module_row.inline_bindings = sema_inline_modules_lower(&module_row.program, &diagnostics)
+    sema_policy_materialize(&module_row.program, policies, module_row.module_identity, module_row.source_file, module_row.source_origin, module_row.source_segments, &diagnostics)
     // D-STRUCT-ONCE1=A: root `prep loop` declarations expand first, so every
     // generated impl, conversion, and test registers as a written item.
     sema_derive_expand_template_loops(&module_row.program.items, &diagnostics)
@@ -3048,9 +3051,16 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     // is the only row (Rust `Bundle/ItemReuse.rs` `by_identity`).
     module_rows := [String:Int]{}
     generic_module_index :: sema_generic_modules_index(prepared_inputs, edges)
+    // D-STRUCT-POLICY1=A: user policies are package-scoped, so every module
+    // of a package materializes the same checked declarations.
+    package_policies := [String:[UserPolicyDecl]]{}
+    loop input in prepared_inputs {
+        if package_policies.get(input.package_identity) == None -> package_policies[input.package_identity] = sema_policy_package_declarations(prepared_inputs, input.package_identity, &diagnostics)
+    }
     loop input in prepared_inputs {
         imported_templates :: sema_generic_modules_imported(prepared_inputs, edges, generic_module_index, input.module_identity)
-        module_row := sema_registration_prepare_module_row(input, imported_templates, &diagnostics)
+        policies :: package_policies.get(input.package_identity) ?? [UserPolicyDecl]{}
+        module_row := sema_registration_prepare_module_row(input, imported_templates, policies, &diagnostics)
         duplicate :: module_rows.get(module_row.module_identity) != None
         if !duplicate -> module_rows[module_row.module_identity] = modules.len()
         if {
