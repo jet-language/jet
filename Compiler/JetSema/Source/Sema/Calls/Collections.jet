@@ -62,7 +62,20 @@ fn sema_call_collections_success_type(ty: Type) -> Type Never! {
 fn sema_call_collections_check_argument(argument: CallArg, required: Type, callback: Bool, lending: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     previous_lending :: context.lambda_lending_views
     context.lambda_lending_views = lending
+    // Rust `open_ret`: a callback slot whose result type is still open
+    // (`fn(T)` with no return) accepts any function value; the method's own
+    // shape rules decide its use (a named `fn(T, T) -> Ordering` is the
+    // `sort_by` comparator). Only a lambda is checked against the slot.
+    open_slot := false
+    if callback && required == .Fn(_, required_ret, _, _, _, _) {
+        is_lambda := if argument.expr == {
+            .Lambda(_) -> true
+            else -> false
+        }
+        open_slot = required_ret == None && !is_lambda
+    }
     checked := if {
+        open_slot -> sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         callback -> {
             // An open callback result is adopted here and checked below.
             sema_expression_lambda_collection_callback(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -73,6 +86,9 @@ fn sema_call_collections_check_argument(argument: CallArg, required: Type, callb
     }
     context.lambda_lending_views = previous_lending
     value :: checked ?? return None
+    if open_slot {
+        if value.ty == .Fn(_, _, _, _, _, _) -> return Val(value)
+    }
     compatible := if required == {
         .Fn(_, fn_result, _, _, _, _) -> {
             if fn_result == None -> sema_call_host_callback_assignable(required, value.ty, environment, program) else -> sema_call_type_assignable(required, value.ty, environment, program)
@@ -276,6 +292,12 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
                 .Lambda(lambda) -> lambda.capture_facts.needs_fn_mut
                 else -> callback_mutable
             }
+        }
+        // D-CMP3WAY1=B: a named binary function given to `sort_by` is its
+        // comparator, like a two-parameter lambda.
+        if callback && index == 0 && contract.accepts_comparator && !comparator && value.ty == .Fn(callback_params, _, _, _, _, _) && callback_params.len() == 2 {
+            comparator = true
+            required = sema_collection_method_argument_type(contract, index, seed, true) ?? required
         }
         &required_types.push(required)
         // The parser stores `&xs.push(^x.f)`'s move mark on the CallArg. A
