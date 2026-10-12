@@ -999,14 +999,18 @@ fn sema_effect_is_call(expression: TExpr) -> Bool Never! {
 
 // Compiler-owned intrinsic operations have no callee body: host calls
 // (Shared access, typed text, `yield`), handle methods (`60s` Duration
-// literals and Duration scaling, Dyn accessors, ...) and compiler-built
+// literals and Duration scaling, Dyn accessors, ...), compiler-built
 // numeric operations (`1 / 3` as an exact `Fraction`, Decimal and math-type
-// arithmetic, numeric casts). Rust records their effects inline and forces
+// arithmetic, numeric casts), the ambient `close(^value)` / `drop(value)`
+// protocol sugar, and closure intrinsics (`scope.guard`, `on_commit`, task
+// spawn), whose lambda bodies the walk visits on their own. Rust records
+// their effects inline (`close`/`drop`/`scope.guard` record none) and forces
 // the maximal row only for opaque callees, so one with no recorded call fact
 // contributes no effect; it is not an unknown callee.
 fn sema_effect_is_compiler_intrinsic(expression: TExpr) -> Bool Never! {
     if expression.kind == {
         .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .HostCall(_) | .HandleMethod(_, _, _) -> true
+        .Close(_) | .Drop(_) | .CoreClosureCall(_) -> true
         else -> false
     }
 }
