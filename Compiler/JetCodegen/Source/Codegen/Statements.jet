@@ -1080,7 +1080,7 @@ fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, program: JetCod
     jet_codegen_switch_block(&builder, program, advance_block)
     current_index := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.ReadPlace{place: index_place})
     one := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: mir_integer_constant(1, None, None)})
-    next_index := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Binary{op: MIRBinaryOp.Add, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: current_index, right: one})
+    next_index := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Binary{op: MIRBinaryOp.Add, dispatch: jet_codegen_binary_dispatch(&builder, program, TBinaryOp.Add, false, Type.Int, span, 0), overflow: MIRBinaryOverflow.Unchecked, left: current_index, right: one})
     _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: index_place, value: next_index})
     jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: condition_block})
     _ := &builder.loops.pop()
@@ -1222,7 +1222,7 @@ fn jet_codegen_lower_for_in(builder: &JetCodegenBuilder, program: JetCodegenProg
                 if type_identity_key(step_expr.ty) == type_identity_key(Type.Int) -> value else -> jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Convert{value: value, parameters: [MIRValueID]{}, target: int_ty, conversion: MIRConversion.NumericCast})
             }
         }
-        next_index := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Binary{op: MIRBinaryOp.Add, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: current_index, right: delta})
+        next_index := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Binary{op: MIRBinaryOp.Add, dispatch: jet_codegen_binary_dispatch(&builder, program, TBinaryOp.Add, false, Type.Int, span, 0), overflow: MIRBinaryOverflow.Unchecked, left: current_index, right: delta})
         _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: index_place, value: next_index})
     }
     if jet_codegen_current_is_open(builder, program) -> jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: condition_block})
