@@ -3160,7 +3160,10 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     view_sources := if binding.mutable -> [SemaOwnershipPlace]{} else -> sema_string_view_call_sources(binding.init, scopes, &state)
     view_init := if view_sources.len() > 0 -> sema_string_view_lower_init(init) else -> None
     string_view := view_init != None
-    if !string_view && !sema_stmt_move_direct(binding_expr, &state, scopes, "the binding `{binding.name}`", &diagnostics) -> return None
+    if !string_view && !sema_stmt_move_direct(binding_expr, &state, scopes, "the binding `{binding.name}`", &diagnostics) {
+        sema_stmt_declare_unchecked_binding(binding, environment, program, &scopes)
+        return None
+    }
     kind :: SymbolKind.Local
     owner := sema_scope_local_owner_key(scopes)
     id :: symbol_id(kind, environment.module_identity, owner, binding.name)

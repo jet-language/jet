@@ -240,7 +240,7 @@ fn sema_expression_list_mark_owned_value(value: Expr, state: &SemaOwnershipState
                 }
             }
             if !sema_ownership_type_is_copy(binding.symbol.ty ?? Type.Named{name: "Unit"}) {
-                origin :: sema_ownership_move_origin(value, places, binding.symbol.ty ?? Type.Named{name: "Unit"}, "the list literal", true)
+                origin :: sema_ownership_move_origin(value, binding.symbol.ty ?? Type.Named{name: "Unit"}, "the list literal", true)
                 loop place in places {
                     &state.moved.push(SemaOwnershipMovedPlace{place: place, origin: origin})
                 }

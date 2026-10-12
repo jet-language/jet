@@ -541,6 +541,13 @@ fn sema_ownership_binding_is_borrowed_param(binding: SemaScopeBinding) -> Bool N
     binding.symbol.kind == SymbolKind.Parameter && (binding.access == AccessConvention.Read || binding.access == AccessConvention.Write)
 }
 
+// Rust `param_conv` is `Read` or `Write`: a borrowed parameter, or a write
+// window bound by a `&place` pattern (Rust `declare_pattern_write_window`).
+// A read pattern payload is an ordinary local there (`param_conv: None`).
+fn sema_ownership_binding_lends(binding: SemaScopeBinding) -> Bool Never! {
+    sema_ownership_binding_is_borrowed_param(binding) || binding.access == AccessConvention.Write
+}
+
 // Rust `is_edit_shared_guard`: a binding holding a `guard_edit()` lease keeps
 // its acquisition-site write capability even when the binding is immutable.
 fn sema_ownership_binding_is_edit_shared_guard(binding: SemaScopeBinding) -> Bool Never! {
@@ -1854,16 +1861,18 @@ fn sema_ownership_is_share_site(state: SemaOwnershipState, span: Span) -> Bool N
     false
 }
 
-// D-COPY-DEFAULT1=A: only a whole binding moved by its plain name, whose
-// type is not known to refuse a copy, can later become a share. The
+// D-COPY-DEFAULT1=A (Rust `move_is_shareable`): only a whole binding moved
+// by its plain name, whose type is not known to refuse a copy, can later
+// become a share. Rust keys that move on the binding itself
+// (`mark_moved(name)`), so a read payload or view binding moved by name
+// qualifies even though its places chase to projections of its source. The
 // function check confirms the copy against the registry before using it.
-fn sema_ownership_move_origin(expr: Expr, places: [SemaOwnershipPlace], ty: Type, consumer: String, unmarked: Bool) -> SemaOwnershipMoveOrigin {
-    whole_name := places.len() == 1 && places[0].projections.len() == 0
+fn sema_ownership_move_origin(expr: Expr, ty: Type, consumer: String, unmarked: Bool) -> SemaOwnershipMoveOrigin {
     plain_name := if expr == {
         .Ident(_, _) -> true
         else -> false
     }
-    share_ty :: if unmarked && whole_name && plain_name && sema_ownership_type_cloneable(ty) != (Val(false)) -> Val(ty) else -> None
+    share_ty :: if unmarked && plain_name && sema_ownership_type_cloneable(ty) != (Val(false)) -> Val(ty) else -> None
     SemaOwnershipMoveOrigin{span: expr_span(expr), consumer: consumer, share_ty: share_ty}
 }
 
@@ -2024,6 +2033,15 @@ fn sema_ownership_view_has_access(state: &SemaOwnershipState, expr: Expr, scopes
 fn sema_ownership_view_exists_for_expr(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable) -> Bool {
     loop view in state.views {
         if view.active && sema_ownership_view_fact_matches_expr(view, expr, scopes) -> return true
+    }
+    false
+}
+
+// A live write view carried by the expression's root name: a `&place`
+// pattern window (Rust `param_conv` `Write`) or a pin.
+fn sema_ownership_write_view_exists_for_expr(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable) -> Bool {
+    loop view in state.views {
+        if view.active && view.access == AccessConvention.Write && sema_ownership_view_fact_matches_expr(view, expr, scopes) -> return true
     }
     false
 }
@@ -2380,18 +2398,22 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
         // Rust moves only non-Copy values: every projection of a Copy root
         // is Copy, so nothing moves and no move conflict exists. Rust
         // `note_move_if_direct_ident`: an unmarked owning position moves a
-        // local only; a read or write parameter keeps its value (the binding
-        // and return audits report E0120 where it would have to copy).
+        // binding without an access convention only; a read or write
+        // parameter or a write window keeps its value (the binding and return
+        // audits report E0120 where it would have to copy).
         root_ty :: info.symbol.ty ?? Type.Named{name: "Unit"}
-        if sema_ownership_type_is_copy(root_ty) || (unmarked && sema_ownership_binding_is_borrowed_param(info)) || (unmarked && !sema_ownership_unmarked_moves_name(expr)) {
+        if sema_ownership_type_is_copy(root_ty) || (unmarked && sema_ownership_binding_lends(info)) || (unmarked && !sema_ownership_unmarked_moves_name(expr)) {
             loop place in places -> sema_ownership_note_place_reference(&state, expr, place, expr_span(expr), scopes, SemaOwnershipReferenceKind.Move)
             return true
         }
     }
-    // Named windows keep ownership with their source. A borrowed parameter
-    // under an exact `^` mark is refused at the mark itself (E0201); a
-    // consuming call or receiver records its move like any owner.
-    borrowed :: sema_ownership_view_exists_for_expr(&state, expr, scopes)
+    // Named write windows keep ownership with their source (Rust
+    // `note_exact_move`: `param_conv` `Write`). A read payload or view
+    // binding is an ordinary local in Rust, so moving it is no E0201. A
+    // borrowed parameter under an exact `^` mark is refused at the mark
+    // itself (E0201); a consuming call or receiver records its move like any
+    // owner.
+    borrowed :: sema_ownership_write_view_exists_for_expr(&state, expr, scopes)
     loop place in places {
         if !unmarked && sema_ownership_reject_partial_static_move(&state, place, expr, &diagnostics) -> return false
         if sema_ownership_place_moved(&state, place) == .Val(origin) {
@@ -2419,7 +2441,7 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
         move_ty = info.symbol.ty ?? Type.Named{name: "Unit"}
     }
     if !sema_ownership_type_is_copy(move_ty) {
-        origin := sema_ownership_move_origin(expr, places, move_ty, consumer, unmarked)
+        origin := sema_ownership_move_origin(expr, move_ty, consumer, unmarked)
         // D-LIN1: a `#SingleUse` value keeps its exact move; it never copies.
         if sema_single_use_key(state, places[0].root_key) -> origin.share_ty = None
         loop place in places -> &state.moved.push(SemaOwnershipMovedPlace{place: place, origin: origin})
