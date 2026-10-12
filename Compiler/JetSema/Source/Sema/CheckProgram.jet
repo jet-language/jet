@@ -5363,7 +5363,10 @@ fn sema_comptime_collect_module_sources(graph: SemaRegistrationGraph, source_mod
         // (E0622); it is never evaluated.
         if !sema_checked_module_value_evaluates(constant.declaration) -> next
         expression := constant.declaration.value
+        // Rust `module_scalar_const_type`: a bare decimal literal binding is a
+        // Float constant, not the expression default Decimal.
         expected := constant.declaration.ty
+        if expected == None && constant.declaration.value == .Float(_, _, _, _) -> expected = Val(Type.Float)
         if expected == None -> expected = constant.ty
         sema_comptime_add_source(&sources, graph, source_module.module_identity, constant.symbol.id.key, constant.symbol.id.key, constant.declaration.name, SemaComptimeItemKind.Constant, expression, expected)
     }
