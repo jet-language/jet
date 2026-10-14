@@ -2,7 +2,9 @@
 // native storage. `*x` takes the address of x's memory cell (Lower.jet makes
 // every raw-addressed root a cell) and registers it with the memory sentries;
 // `p.*` checks the read with the same sentry kernel before it loads, as the
-// generated Rust's jet_sentry_address_of / jet_sentry_read do (Mem.rs).
+// generated Rust's jet_sentry_address_of / jet_sentry_read do (Mem.rs). The
+// runtime library (`m.sentry` false) implements those kernels and, like the
+// Rust runtime, is never instrumented: its addresses and reads are raw.
 use jet_foundation.[MIRInstruction, MIRPlaceID, MIRProgram, MIRScope, MIRType, MIRUnsafeGate, MIRValueID, mir_type_display_name]
 
 fn lower_ptr_element(ty: MIRType) -> MIRType? {
@@ -22,7 +24,11 @@ fn lower_raw_address_of(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     address :: lower_address(&f, walk.base, walk.offset)
     bytes :: lower_const(&f, lower_size(p, row.ty).size)
     raw :: lower_word(&f)
-    lower_call_runtime(&m, &f, "jet_rt_sentry_stack_address_of", [LIRValueID]{address, bytes}, Val(raw))
+    if m.sentry {
+        lower_call_runtime(&m, &f, "jet_rt_sentry_stack_address_of", [LIRValueID]{address, bytes}, Val(raw))
+    } else {
+        lower_emit(&f, LIRInst.Bitcast{dst: raw, src: address})
+    }
     result_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "raw address has no checked type")
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     if lower_is_exact_int(result_ty) -> return lower_convert_exact(&m, &f, dst, raw, "jet_int_owned_from_i64", false)
@@ -51,7 +57,9 @@ fn lower_ptr_deref(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     bytes :: lower_const(&f, size.size)
     align :: lower_const(&f, size.align)
     pointer :: lower_pointer(&f)
-    if m.stop_points && lower_instruction_has_stop_poll(c, f, instruction) {
+    if !m.sentry {
+        lower_emit(&f, LIRInst.Bitcast{dst: pointer, src: address})
+    } else if m.stop_points && lower_instruction_has_stop_poll(c, f, instruction) {
         saved :: lower_poll_call_enter(&m, &f)
         lower_call_runtime(&m, &f, "jet_rt_sentry_read", [LIRValueID]{address, bytes, align}, Val(pointer))
         lower_poll_call_leave(&m, &f, saved)
@@ -128,7 +136,10 @@ fn lower_sentry_bool(row: MIRScope, key: String, fallback: Bool) -> Bool Never! 
     fallback
 }
 
+// The runtime library (`m.sentry` false) has no sentry frame, gate or scope:
+// it implements those hooks, and Rust's runtime never instruments itself.
 fn lower_sentry_frame(c: LowerContext, m: &LowerModule, f: &LowerFunction) Never! {
+    if !m.sentry -> return
     loop scope in c.mir.scopes {
         if scope.kind != .Unsafe && scope.kind != .Policy -> next
         save :: lower_sentry_save(&f)
@@ -160,6 +171,7 @@ fn lower_sentry_function_leave(m: &LowerModule, f: &LowerFunction) Never! {
 }
 
 fn lower_sentry_scope(c: LowerContext, m: &LowerModule, f: &LowerFunction, row: MIRScope, enter: Bool) Never! {
+    if !m.sentry -> return
     index :: f.sentry_scopes.get(row.id.value) ?? return lower_fail(&m, &f, "sentry scope has no frame save slot")
     save :: LIRValueID{value: index}
     if !enter -> return lower_call_runtime(&m, &f, "jet_rt_sentry_scope_leave", [LIRValueID]{save}, None)

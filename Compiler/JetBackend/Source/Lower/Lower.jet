@@ -242,6 +242,12 @@ struct LowerModule {
     // depth through the runtime's budget hooks (lower_comptime_site); program
     // entries, tests, C exports and the runtime library never do.
     comptime_budget: Bool
+    // Jet-compiled code (programs, tests, callables, Core shared and native C
+    // callables) enters the memory sentries around its #Unsafe/#Policy
+    // regions, gates and raw stack addresses (Pointers.jet). The runtime
+    // library never does: it implements those hooks, and Rust's runtime is
+    // plain Rust with no sentry instrumentation of itself.
+    sentry: Bool{true}
     glue_base: Int
     glue: [LowerGlue]
     close_methods: [U64:[LowerCloseImpl]]
@@ -346,7 +352,7 @@ struct LowerFunction {
 // methods of generic types once per concrete instance) plus their glue.
 fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, [MIRFunctionID]{entry}, true, true, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false, false)
+    lower_selected(program, [MIRFunctionID]{entry}, true, true, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false, false, true)
 }
 
 // JET_KEEP_GOING (the bootstrap native feed): lir_lower_entry, except that a
@@ -356,27 +362,28 @@ fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Nev
 // shipped: the caller turns every issue into a census row.
 fn lir_lower_entry_keep_going(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, [MIRFunctionID]{entry}, true, true, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, true, false)
+    lower_selected(program, [MIRFunctionID]{entry}, true, true, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, true, false, true)
 }
 
 // Compiler and test callbacks retain return carriers; only program entries
 // consume Option/Result success and turn failure into a process exit.
 fn lir_lower_callables(program: MIRProgram, roots: [MIRFunctionID]) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, roots, false, true, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false, true)
+    lower_selected(program, roots, false, true, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false, true, true)
 }
 
 // RuntimeLibrary validates each exact function ID and its signature. Every
 // root is a C export, so narrow integer arguments enter through
 // `export.entry` (Callable.jet).
 // No ordinary program/callback lowering enables runtime-only substitution.
+// The runtime library has no sentry instrumentation of its own (`sentry`).
 fn lir_lower_runtime_callables(program: MIRProgram, roots: [MIRFunctionID], intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LIRLowering Never! {
-    lower_selected(program, roots, false, true, program.native_pack, [String]{}, true, None, [MIROutputCheck]{}, ^intrinsics, false, false)
+    lower_selected(program, roots, false, true, program.native_pack, [String]{}, true, None, [MIROutputCheck]{}, ^intrinsics, false, false, false)
 }
 
 fn lir_lower_core_shared(program: MIRProgram, roots: [MIRFunctionID]) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, roots, false, false, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false, false)
+    lower_selected(program, roots, false, false, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false, false, true)
 }
 
 // Explicit imports are the actual external C consumer closure.
@@ -386,7 +393,7 @@ fn lir_lower_native_callables(program: MIRProgram, roots: [MIRFunctionID]) -> LI
 
 fn lir_lower_native_imports(program: MIRProgram, roots: [MIRFunctionID], imports: [String]) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, roots, false, true, true, imports, true, None, [MIROutputCheck]{}, ^intrinsics, false, false)
+    lower_selected(program, roots, false, true, true, imports, true, None, [MIROutputCheck]{}, ^intrinsics, false, false, true)
 }
 
 // `comptime_budget`: only a compiler callable (lir_lower_callables, run by the
@@ -394,7 +401,11 @@ fn lir_lower_native_imports(program: MIRProgram, roots: [MIRFunctionID], imports
 // jet_rt_comptime_enter/step/leave hooks. Program entries, test harnesses, C
 // exports and the runtime library never do: the runtime library implements
 // those hooks, so a hook in it recurses into itself.
-fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, shared_sites_dynamic: Bool, native_pack: Bool, imports: [String], c_exports: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic], keep_going: Bool, comptime_budget: Bool) -> LIRLowering Never! {
+// `sentry`: Jet-compiled code enters the memory sentries around its unsafe
+// regions (as Rust's emitted code does); the runtime library implements the
+// sentry hooks and is never instrumented, else jet_rt_sentry_scope_enter ->
+// sentry_save -> thread_base (#Unsafe) re-enters itself.
+fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, shared_sites_dynamic: Bool, native_pack: Bool, imports: [String], c_exports: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic], keep_going: Bool, comptime_budget: Bool, sentry: Bool) -> LIRLowering Never! {
     // The frontend may erase browser init functions before native MIR is
     // serialized. Their host requirement survives in the runtime-part facts.
     browser_hosted := false
@@ -456,6 +467,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         close_methods: prepared.close_methods.copy(),
         mir_sources: [Int]{},
         comptime_budget: comptime_budget,
+        sentry: sentry,
         mir_signatures: [LIRSignatureID]{},
         mir_results: [Int]{},
         glue_base: prepared.functions.len(),

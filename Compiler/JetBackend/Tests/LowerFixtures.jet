@@ -807,6 +807,10 @@ fn run() {
         print("issue comptime-budget: a runtime callable calls a comptime budget hook, or a compiler callable lost them")
         clean = false
     }
+    if !fx_runtime_sentry_checks() {
+        print("issue runtime-sentry: a runtime callable calls a memory sentry hook, or user #Unsafe lost them")
+        clean = false
+    }
     if !fx_runtime_o1_effects_check() {
         print("issue runtime-o1-effects: OS effects or runtime intrinsic operations changed order/count")
         clean = false
