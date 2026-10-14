@@ -23001,7 +23001,10 @@ impl<'a> RustEmitter<'a> {
     /// A shared reference for a consumer that only inspects `value`: the read
     /// parameter's own place when `value` reads one, the read's place when
     /// that read was elided as borrow-only (its slot is never written; e.g. a
-    /// native host record field such as `Err.message`), else the value slot.
+    /// native host record field such as `Err.message`), the field's place
+    /// when a field read was elided the same way (`emit_instruction` skips a
+    /// `Field` with a place expression whose users all borrow it), else the
+    /// value slot.
     fn inspected_value_reference(&self, function: &MirFunction, value: MirValueId) -> String {
         if let Some(place) = self.immutable_read_place(function, value) {
             return self.place_reference(function, place, MirAccess::Read);
@@ -23010,6 +23013,9 @@ impl<'a> RustEmitter<'a> {
             Some(MirOperation::ReadPlace(place)) if self.direct_borrow_only(function, value) => {
                 self.place_reference(function, *place, MirAccess::Read)
             }
+            Some(MirOperation::Field { .. }) if self.direct_borrow_only(function, value) => self
+                .borrowed_field_reference(function, value)
+                .unwrap_or_else(|| self.value_slot_reference(value, false)),
             _ => self.value_slot_reference(value, false),
         }
     }
