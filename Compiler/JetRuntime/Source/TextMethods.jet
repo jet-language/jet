@@ -117,6 +117,42 @@ fn text_trim_side(value: I64, leading: Bool, trailing: Bool) -> I64 {
     rt_text_store(item2, rt_text_slice(value, found + rt_text_len(separator), rt_text_len(value)))
 }
 
+// str::rfind: the byte offset of the last match, or -1 (an empty needle
+// matches at the end).
+#Export(c) fn jet_text_parse_rfind(value: I64, needle: I64) -> I64 {
+    jet_int_owned_from_i64(rt_text_find(value, needle, I64{0}, true))
+}
+
+// Text.rs jet_text_parse_rpartition: cut at the last separator; a miss keeps
+// the whole text in the third item.
+#Export(c) fn jet_text_parse_rpartition(value: I64, separator: I64, item0: I64, item1: I64, item2: I64) {
+    found :: rt_text_find(value, separator, I64{0}, true)
+    if (found < I64{0}) {
+        rt_text_store(item0, jet_rt_string_builder_new())
+        rt_text_store(item1, jet_rt_string_builder_new())
+        rt_text_store(item2, jet_rt_string_clone(value))
+        return
+    }
+    rt_text_store(item0, rt_text_slice(value, I64{0}, found))
+    rt_text_store(item1, jet_rt_string_clone(separator))
+    rt_text_store(item2, rt_text_slice(value, found + rt_text_len(separator), rt_text_len(value)))
+}
+
+// Text.rs jet_text_parse_split_once: (found, head, tail) at the first
+// separator; a miss is (false, text, "").
+#Export(c) fn jet_text_parse_split_once(value: I64, separator: I64, item0: I64, item1: I64, item2: I64) {
+    found :: rt_text_find(value, separator, I64{0}, false)
+    if (found < I64{0}) {
+        #Unsafe("item0 lends the C-ABI tuple's one writable Bool byte") { os_store_u8(item0, I64{0}) }
+        rt_text_store(item1, jet_rt_string_clone(value))
+        rt_text_store(item2, jet_rt_string_builder_new())
+        return
+    }
+    #Unsafe("item0 lends the C-ABI tuple's one writable Bool byte") { os_store_u8(item0, I64{1}) }
+    rt_text_store(item1, rt_text_slice(value, I64{0}, found))
+    rt_text_store(item2, rt_text_slice(value, found + rt_text_len(separator), rt_text_len(value)))
+}
+
 // Text.rs jet_text_zfill: zeros after a leading '+'/'-' up to width scalars.
 #Export(c) fn jet_text_zfill_ref(value: I64, width: I64) -> I64 {
     if !text_route_fits(width) {
