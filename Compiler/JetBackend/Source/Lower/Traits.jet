@@ -117,7 +117,7 @@ fn lower_trait_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunct
     lower_start(&f, live, [LIRValueID]{})
     key :: lower_list_word(&f, boxed, 0)
     count :: m.glue.len()
-    loop index in 0..count {
+    loop index in 0..<count {
         payload :: m.glue[index].copy()
         if payload.helper != "trait.drop" -> next
         expected :: lower_const(&f, payload.id.value)
@@ -260,7 +260,7 @@ fn lower_helper_trait_render(p: MIRProgram, m: &LowerModule, glue: LowerGlue) ->
     key :: lower_list_word(&f, boxed, 0)
     mode :: if glue.helper == "show" -> LowerRenderMode.Show else if glue.helper == "debug" -> LowerRenderMode.Debug else -> LowerRenderMode.Display
     count :: m.glue.len()
-    loop index in 0..count {
+    loop index in 0..<count {
         payload :: m.glue[index].copy()
         if payload.helper != "trait.drop" -> next
         expected :: lower_const(&f, payload.id.value)
