@@ -4,6 +4,7 @@ use jet_foundation.[
     AccessConvention,
     CallArg,
     Diagnostic,
+    EffectRowEntry,
     Expr,
     Lambda,
     Span,
@@ -134,9 +135,24 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
     }
     value :: sema_call_with_binder_pins(^pins, ^contracted, span)
     checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return None
-    facts :: sema_call_facts(resolved_signature, [Type]{}, resolved_binding) ?? return None
+    facts := sema_call_facts(resolved_signature, [Type]{}, resolved_binding) ?? return None
+    // Rust `helpers_call_values.rs`: a call through a function-typed
+    // parameter with no declared effect row contributes no effect; the
+    // callback's effects are the argument's, accounted where it is passed.
+    // Any other unannotated function value stays an unknown callee.
+    if facts.effect_bound == None && sema_call_value_is_parameter(callee, scopes) -> facts.effect_bound = Val([EffectRowEntry]{})
     return_view_facts :: sema_call_return_view_facts(resolved_signature, None, checked_args, resolved_binding, scopes, &state, span)
     Val(SemaCallChecked{value: checked, binding: resolved_binding, facts: facts, return_view_facts: return_view_facts})
+}
+
+fn sema_call_value_is_parameter(callee: Expr, scopes: SemaScopeTable) -> Bool Never! {
+    if callee == {
+        .Ident(name, _) -> {
+            symbol :: sema_scope_resolve(scopes, name) ?? return false
+            symbol.kind == SymbolKind.Parameter
+        }
+        else -> false
+    }
 }
 
 fn sema_call_value_inline_loop(lambda: Lambda, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
