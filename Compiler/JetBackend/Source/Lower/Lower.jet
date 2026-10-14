@@ -221,8 +221,13 @@ struct LowerModule {
     static_fixups: [LowerStaticFixup]
     // Callable initialization and finalization share this filled-statics flag.
     static_live: LIRDataID?
-    // MIR source file id -> byte offsets of its line starts (Numeric.jet lower_source_line).
-    line_starts: [U64:[Int]]
+    // MIR source file id -> its row in `line_starts`, the byte offsets of the
+    // file's line starts (Numeric.jet lower_source_line).
+    line_rows: [U64:Int]{[U64:Int]{}}
+    line_starts: [[Int]]{[[Int]]{}}
+    // Type identity key -> whether the type reaches a Close owner
+    // (PartialDrop.jet lower_partial_frame), once per module.
+    contains_close: [String:Bool]{[String:Bool]{}}
     // MIR source file id -> its row in program.source_files.
     source_rows: [U64:Int]
     // Shared stop classification indexes checked Prelude effects once.
@@ -459,7 +464,6 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         shared_sites: [LIRSharedSiteExport]{},
         static_fixups: [LowerStaticFixup]{},
         static_live: None,
-        line_starts: [U64:[Int]]{},
         source_rows: [U64:Int]{},
         prelude_positions: [U64:Int]{},
         asm_foreign: prepared.asm_foreign.copy(),
@@ -1884,7 +1888,7 @@ fn lower_function_body(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
         lower_frame_cells(p, c, &m, &f)
         lower_sentry_frame(c, &m, &f)
         lower_deadline_frame(c, &f)
-        lower_partial_frame(p, c, m, &f)
+        lower_partial_frame(p, c, &m, &f)
         lower_close_frame(p, &m, &f)
         f.mir_block = MIRBlockID{value: U64.MAX}
         edge :: lower_edge(p, c, &m, &f, c.mir.entry) ?? return
@@ -1991,7 +1995,7 @@ fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
         lower_frame_cells(p, c, &m, &f)
         lower_sentry_frame(c, &m, &f)
         lower_deadline_frame(c, &f)
-        lower_partial_frame(p, c, m, &f)
+        lower_partial_frame(p, c, &m, &f)
         lower_close_frame(p, &m, &f)
     }
     loop instruction in block.instructions {

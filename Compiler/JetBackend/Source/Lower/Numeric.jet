@@ -220,24 +220,28 @@ fn lower_numeric_choose(f: &LowerFunction, condition: LIRValueID, yes: LIRValueI
 
 // MIRRust.rs:instruction_location (:6016-6032): source_line wins, otherwise
 // locate the span's byte offset. Index each source once for the whole module.
+// The starts are read in place (m.line_starts[row][mid]): a map lookup of the
+// list would copy every line start of the file on each location.
 fn lower_source_line(p: MIRProgram, m: &LowerModule, file: MIRSourceFileID, offset: Int) -> Int Never! {
-    if m.line_starts.get(file.value) == None {
+    row := m.line_rows.get(file.value) ?? -1
+    if row < 0 {
         starts := [Int]{0}
-        if m.source_rows.get(file.value) == .Val(row) {
+        if m.source_rows.get(file.value) == .Val(source) {
             position := 0
-            loop byte in p.source_files[row].source.bytes() {
+            loop byte in p.source_files[source].source.bytes() {
                 position += 1
                 if byte == (U8{10}) -> &starts.push(position)
             }
         }
-        &m.line_starts.add(file.value, starts).drop("checked absent above")
+        row = m.line_starts.len()
+        &m.line_starts.push(starts)
+        &m.line_rows.add(file.value, row).drop("checked absent above")
     }
-    starts :: m.line_starts.get(file.value) ?? return 1
     lo := 0
-    hi := starts.len()
+    hi := m.line_starts[row].len()
     loop lo + 1 < hi {
         mid :: lo + (hi - lo) /% 2
-        if starts[mid] <= offset -> lo = mid
+        if m.line_starts[row][mid] <= offset -> lo = mid
         else -> hi = mid
     }
     lo + 1

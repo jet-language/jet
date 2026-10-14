@@ -123,14 +123,25 @@ fn lower_partial_field_path(p: MIRProgram, ty: MIRType, projections: [MIRProject
     Val(path)
 }
 
-fn lower_partial_frame(p: MIRProgram, c: LowerContext, m: LowerModule, f: &LowerFunction) Never! {
+// Whether `ty` reaches a Close owner, once per type for the whole module.
+// A fresh lower_contains_close walk answers exactly that reachability (its
+// `seen` set only cuts cycles), so the cached answer is the walk's own.
+fn lower_type_contains_close(p: MIRProgram, m: &LowerModule, ty: MIRType) -> Bool Never! {
+    key :: mir_type_identity_key(ty)
+    if m.contains_close.get(key) == .Val(known) -> return known
+    seen := [String:Bool]{}
+    found :: lower_contains_close(p, m, ty, &seen)
+    &m.contains_close.add(key, found).drop("checked absent above")
+    found
+}
+
+fn lower_partial_frame(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction) Never! {
     loop block in c.mir.blocks {
         loop instruction in block.instructions {
             result :: instruction.result ?? next
             ty :: lower_checked_type(c, instruction) ?? next
             if !lower_value_owned(c, result) -> next
-            seen := [String:Bool]{}
-            if !lower_contains_close(p, m, ty, &seen) -> next
+            if !lower_type_contains_close(p, &m, ty) -> next
             owner := ""
             root_ty := ty
             path := [LowerGlueField]{}
