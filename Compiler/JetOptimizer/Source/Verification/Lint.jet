@@ -2529,9 +2529,15 @@ struct MIRLintSafety {
 
 // Whether the result of `operation` is a fresh view of an operand's place,
 // rather than one carried over (a move, join, or read) or materialized (a copy).
+// A view read out of a value that stores it (an Optional/Result/enum payload,
+// a list element, a struct field) is that stored view, carried from the
+// value, not a new view of the value's place: the generated Rust copies the
+// inner `&[T]` with its own lifetime when it matches an `Option<&[T]>` or
+// indexes a `Vec<&[T]>`, so rewriting the holder never invalidates it.
 fn mir_lint_makes_view(operation: MIROperation) -> Bool Never! {
     if operation == {
         .Move(_) | .Phi(_) | .ReadPlace(_) | .MovePlace(_) | .Copy(_, _) | .Parameter(_, _) | .Capture(_) -> false
+        .OptionValue(_) | .ResultValue(_, _) | .EnumPayload(_, _, _, _) | .Field(_, _) | .Index(_, _, _, _, _, _, _) -> false
         else -> true
     }
 }

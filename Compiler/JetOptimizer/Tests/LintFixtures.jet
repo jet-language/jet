@@ -585,6 +585,33 @@ fn lf_view_owner_changed(planted: Bool) -> MIRProgram Never! {
     lf_single(r)
 }
 
+// view.valid: `held := Val(values[..])`, `if held == { .Val(record) ->
+// { held = None; record.len() } }`. The payload is the stored view of
+// `values`, copied out like Rust's `Option<&[T]>` match, so rewriting `held`
+// leaves it valid (the self-host cli_schema_fat_mach_sections shape; before,
+// the payload was taken for a fresh view of `held` and flagged).
+fn lf_view_payload_copy() -> MIRProgram Never! {
+    r := fx_builder()
+    view_type :: lf_generic("View", fx_int())
+    option_type :: mir_type_from_kind(MIRTypeKind.Option{inner: view_type})
+    values :: fx_local(&r, "values", lf_list(), mir_owned_ownership())
+    held :: fx_local(&r, "held", option_type, mir_owned_ownership())
+    record :: fx_local(&r, "record", view_type, mir_owned_ownership())
+    lf_fill(&r, values)
+    source :: fx_owned(&r, lf_list(), MIROperation.ReadPlace{place: values})
+    view :: fx_owned(&r, view_type, MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "list_view"), receiver: source, receiver_place: None, args: [MIRValueID]{}, aggregate_fields: None}})
+    stored :: fx_owned(&r, option_type, MIROperation.Present{value: view})
+    fx_do(&r, MIROperation.WritePlace{place: held, value: stored})
+    subject :: fx_owned(&r, option_type, MIROperation.ReadPlace{place: held})
+    payload :: fx_owned(&r, view_type, MIROperation.OptionValue{subject: subject})
+    fx_do(&r, MIROperation.WritePlace{place: record, value: payload})
+    absent :: fx_owned(&r, option_type, MIROperation.Absent)
+    fx_do(&r, MIROperation.WritePlace{place: held, value: absent})
+    lf_len(&r, record, view_type)
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    lf_single(r)
+}
+
 // view.valid (E2305, tests/ui/view_outlives_owner.jet): `return
 // incidents[0..2]` from a local list; the clean program views a parameter.
 fn lf_view_escape(planted: Bool) -> MIRProgram Never! {
@@ -910,6 +937,7 @@ fn run() {
         lf_expect("view.valid lent owner moved (E1101 taskgroup_lent_owner_moved)", lf_group_lend(0, -1, 1), Val(MIRLintRule.ViewValid)),
         lf_expect("view.valid owner changed after last use", lf_view_owner_changed(false), None),
         lf_expect("view.valid owner changed (E0212 view_owner_changed)", lf_view_owner_changed(true), Val(MIRLintRule.ViewValid)),
+        lf_expect("view.valid Optional payload copy outlives its holder's rewrite", lf_view_payload_copy(), None),
         lf_expect("view.valid return from parameter", lf_view_escape(false), None),
         lf_expect("view.valid return from local (E2305 view_outlives_owner)", lf_view_escape(true), Val(MIRLintRule.ViewValid)),
         lf_expect("send.boundary copied capture", lf_task_capture(false), None),
