@@ -150,7 +150,9 @@ fn sema_expression_enum_variant_path(base: Expr, member: String, environment: Se
     index :: sema_scope_resolve_index(scopes, root)
     if index == .Val(found) {
         kind :: scopes.bindings[found].symbol.kind
-        if kind != SymbolKind.Type && kind != SymbolKind.Module -> return None
+        // A whole-module import binds its alias as an Import symbol
+        // (`use core.encoding as enc` then `enc.EncodingFormat.JSON`).
+        if kind != SymbolKind.Type && kind != SymbolKind.Module && kind != SymbolKind.Import -> return None
     }
     // `use core.encoding.[Dyn as Tree]`: an alias of a Core enum carrier
     // names that enum, whose variants are read by its Core leaf.
