@@ -363,7 +363,12 @@ fn sema_call_try_network_handle_method(receiver: Expr, receiver_value: TExpr, me
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     signature :: spec ?? SemaNetworkHandleSpec{operation: THandleOp.TCPStreamRead, result_type: Type.Named{name: "Unit"}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: None}
-    typed_args :: sema_network_handle_checked_args(method, signature.params, args, Val(receiver), signature.receiver_convention, signature.callback_non_escaping, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    checked_args :: sema_network_handle_checked_args(method, signature.params, args, Val(receiver), signature.receiver_convention, signature.callback_non_escaping, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    // Rust `net_method_return` types the network handle methods without
+    // recording a receiver convention, so a written mark (`&stream.write(…)`)
+    // has nothing to be compared with.
+    sema_receiver_mark_forget(&state, receiver)
+    typed_args :: checked_args ?? return SemaMethodSpecialCheck{handled: true, value: None}
     sema_network_handle_finish(receiver_value, signature.operation, typed_args, signature.result_type, signature.effect_name, "{owner}.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
