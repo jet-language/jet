@@ -9,7 +9,7 @@
 // slot. The lowering builds its own List, Option or Result box from them.
 use jet_foundation.[
     MIRCallArg, MIRInstruction, MIRPreludeCall, MIRPreludeCallID, MIRProgram, MIRType, MIRValueID,
-    mir_symbol_name, mir_type_display_name,
+    core_call_native_return_labels, mir_c_void, mir_symbol_name, mir_type_display_name,
 ]
 
 // The checked frontend uses JetBitSet::new and the generic builtin clear
@@ -70,6 +70,9 @@ fn lower_bits_clear(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 // narrow it, and return one with jet_int_from_i64/into_raw).
 fn lower_route_carrier_of(p: MIRProgram, ty: MIRType) -> LowerRouteCarrier? {
     if lower_text_type(ty) -> return Val(LowerRouteCarrier.Text)
+    // The checked unit value `()` (Result<(), E> rows) is the adapter's
+    // Unit carrier, as `Unit` is: Rust's `()` on both spellings.
+    if mir_c_void(ty) -> return Val(LowerRouteCarrier.Unit)
     if lower_type_def(p, ty) == .Val(definition) {
         if definition.kind == .Alias(target) -> return lower_route_carrier_of(p, target)
     }
@@ -473,12 +476,15 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         &lowered.push(value)
     }
     panic_route :: route.symbol == "jet_panic" || route.symbol == "jet_panic_rich"
+    // A labeled tuple kernel writes its slots in declared order (MIRRust.rs
+    // core_native_tuple_result); the checked tuple sorts its labels.
+    labels :: if route.result == .Tuple(_) -> core_call_native_return_labels(row.module_name, row.member) else -> [String]{}
     if panic_route && m.stop_points && lower_instruction_has_stop_poll(c, f, instruction) {
         saved :: lower_poll_call_enter(&m, &f)
-        lower_route_result(p, c, &m, &f, instruction, route, lowered, what, name)
+        lower_route_result(p, c, &m, &f, instruction, route, lowered, what, name, labels)
         lower_poll_call_leave(&m, &f, saved)
     } else {
-        lower_route_result(p, c, &m, &f, instruction, route, lowered, what, name)
+        lower_route_result(p, c, &m, &f, instruction, route, lowered, what, name, labels)
     }
     if f.failed -> return
     loop handle in temporaries -> lower_emit(&f, LIRInst.Drop{value: handle})
@@ -564,7 +570,9 @@ fn lower_route_int_radix(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     if dst == None -> lower_emit(&f, LIRInst.Drop{value: text})
 }
 
-fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, route: LowerRoute, lowered: [LIRValueID], what: String, name: String) Never! {
+// `labels` names a Tuple result's kernel slots in declared order (empty:
+// positional, the checked order).
+fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, route: LowerRoute, lowered: [LIRValueID], what: String, name: String, labels: [String]) Never! {
     result_ty :: lower_checked_type(c, instruction)
     if result_ty == .Val(ty) && lower_route_contains_float32(p, ty) {
         if !lower_route_float32_result(p, route, ty) -> return lower_fail(&m, &f, "Float32 route results outside the approved reader ABI are not lowered at O0 yet")
@@ -726,12 +734,18 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
         }
         .Tuple(items) -> {
             ty :: result_ty ?? return lower_fail(&m, &f, "{what} {name} tuple result has no checked type")
-            if !lower_route_shape_matches(p, ty, route.result) -> return lower_fail(&m, &f, "{what} {name} result type {mir_type_display_name(ty)} does not match its runtime route")
+            order :: lower_route_tuple_order(ty, items.len(), labels)
+            if !lower_route_tuple_matches(p, ty, items, order) -> return lower_fail(&m, &f, "{what} {name} result type {mir_type_display_name(ty)} does not match its runtime route")
             dst :: lower_result(p, c, &m, &f, instruction)
             if f.failed -> return
             slot :: lower_pointer(&f)
+            // Flattened out-slot start of each declared item.
+            starts := [Int]{}
             slots := 0
-            loop item in items -> slots += lower_route_carrier_slots(item)
+            loop item in items {
+                &starts.push(slots)
+                slots += lower_route_carrier_slots(item)
+            }
             lower_emit(&f, LIRInst.StackSlot{dst: slot, size: 8 * slots, align: 8})
             zero :: lower_const(&f, 0)
             call_args := [LIRValueID]{}
@@ -744,15 +758,47 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
             box :: dst ?? lower_pointer(&f)
             lower_storage_into(p, &f, box, ty)
             members :: lower_inline_members(p, ty)
-            at := 0
-            loop (index, item) in items {
-                address :: lower_address(&f, slot, 8 * at)
-                lower_route_store_payload(p, &m, &f, box, members[index].offset, members[index].ty, item, address, route.native_lists)
-                at += lower_route_carrier_slots(item)
+            loop index in 0..<members.len() {
+                declared :: order[index]
+                address :: lower_address(&f, slot, 8 * starts[declared])
+                lower_route_store_payload(p, &m, &f, box, members[index].offset, members[index].ty, items[declared], address, route.native_lists)
             }
             if dst == None && lower_needs_drop(p, m, ty) -> lower_inline_drop(p, &m, &f, box, ty)
         }
     }
+}
+
+// The declared kernel item each checked tuple member reads: by label when
+// `labels` (declared order) names every checked label exactly once, else
+// positionally (MIRRust.rs core_native_tuple_result).
+fn lower_route_tuple_order(ty: MIRType, count: Int, labels: [String]) -> [Int] Never! {
+    order := [Int]{}
+    loop index in 0..<count -> &order.push(index)
+    elems :: if ty.kind == { .Tuple(fields) -> { fields } else -> { return order } }
+    if labels.len() != count || elems.len() != count -> return order
+    labeled := [Int]{}
+    loop elem in elems {
+        if elem.name == "" -> return order
+        found := -1
+        loop (position, label) in labels {
+            if label == elem.name {
+                if found >= 0 -> return order
+                found = position
+            }
+        }
+        if found < 0 -> return order
+        &labeled.push(found)
+    }
+    labeled
+}
+
+fn lower_route_tuple_matches(p: MIRProgram, ty: MIRType, items: [LowerRouteCarrier], order: [Int]) -> Bool Never! {
+    elems :: if ty.kind == { .Tuple(fields) -> { fields } else -> { return false } }
+    if elems.len() != items.len() || order.len() != items.len() -> return false
+    loop (index, elem) in elems {
+        if !lower_route_result_matches(p, elem.ty, items[order[index]]) -> return false
+    }
+    true
 }
 
 // Whether a checked result type `ty` is what the adapter's result shape builds.

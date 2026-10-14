@@ -70,7 +70,7 @@ fn lower_typed_text_interp(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
     route :: lower_runtime_route(route_symbol) ?? return
     if kind == .Path {
         // The route borrows the text and returns the Path handle.
-        lower_route_result(p, c, &m, &f, instruction, route, [LIRValueID]{text}, what, route_symbol)
+        lower_route_result(p, c, &m, &f, instruction, route, [LIRValueID]{text}, what, route_symbol, [String]{})
         if f.failed -> return
         return lower_emit(&f, LIRInst.Drop{value: text})
     }

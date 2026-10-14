@@ -38,6 +38,7 @@ fn core_sig_row_lookup(rows: String, module_name: String, member: String) -> Cor
         }
         return_type :: if fields[3] == "-" -> Type?{None} else -> Val(core_sig_row_type(fields[3], 0))
         signature := core_sig(module_name, member, parameters, return_type)
+        signature.native_return_labels = core_sig_row_tuple_labels(fields[3])
         if fields.len() == 5 {
             type_parameters := [CoreCallTypeParameter]{}
             loop name in fields[4].split("|") -> &type_parameters.push(core_sig_type_parameter(name, CoreCallTypeConstraint.Any))
@@ -46,6 +47,20 @@ fn core_sig_row_lookup(rows: String, module_name: String, member: String) -> Cor
         return Val(signature)
     }
     None
+}
+
+// A `(name:T,…)` return's labels in row (kernel declaration) order; the
+// parsed Type sorts them canonically. Empty for any other return field.
+fn core_sig_row_tuple_labels(field: String) -> [String] Never! {
+    bytes :: field.bytes()
+    labels := [String]{}
+    if bytes.len() < 2 || core_sig_row_code(bytes, 0) != 40 || core_sig_row_code(bytes, bytes.len() - 1) != 41 -> return labels
+    inner :: String.from_bytes(bytes.slice(1, bytes.len() - 1)) ?? return labels
+    if inner == "" -> return labels
+    loop part in core_sig_row_parameters(inner) {
+        &labels.push(part.split(":").to_list()[0])
+    }
+    labels
 }
 
 // One parsed row type and the byte offset just past it.

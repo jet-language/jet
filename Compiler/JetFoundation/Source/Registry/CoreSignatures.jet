@@ -44,6 +44,10 @@ struct CoreTypedCallSignature {
     return_type: Type?
     type_parameters: [CoreCallTypeParameter]
     result_rule: CoreCallResultRule
+    // A labeled tuple return's labels in the native kernel's declared slot
+    // order (`return_type` keeps the canonical label-sorted tuple); empty
+    // for every other return. Rust `core_call_native_return`.
+    native_return_labels: [String]
 }
 
 struct CoreCallSignatureRequest {
@@ -91,6 +95,7 @@ fn core_sig(module_name: String, member: String, parameters: [CoreCallTypedParam
         return_type: return_type,
         type_parameters: [CoreCallTypeParameter]{},
         result_rule: CoreCallResultRule.Declared,
+        native_return_labels: [String]{},
     }
 }
 
@@ -738,6 +743,17 @@ fn core_call_typed_signature(module_name: String, member: String, actual_arity: 
         actual_accesses: [AccessConvention]{},
         type_args: [Type]{},
     })
+}
+
+// Rust `core_call_native_return` for a labeled tuple: the labels in the
+// kernel's declared slot order, so a native route maps each checked
+// (label-sorted) tuple member to the kernel slot of the same label. Empty
+// when the fixed signature has no labeled tuple return.
+fn core_call_native_return_labels(module_name: String, member: String) -> [String] Never! {
+    request :: CoreCallSignatureRequest{module_name: module_name, member: member, actual_arity: 0, actual_accesses: [AccessConvention]{}, type_args: [Type]{}}
+    signature :: core_sig_fixed(request) ?? return [String]{}
+    if signature.module_name != module_name || signature.member != member -> return [String]{}
+    signature.native_return_labels
 }
 
 fn core_call_label_requirements(module_name: String, member: String, actual_arity: Int) -> [CoreCallLabelRequirement] Never! {
