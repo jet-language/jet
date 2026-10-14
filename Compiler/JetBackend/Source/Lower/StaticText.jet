@@ -34,6 +34,12 @@ fn lower_static_text_facts(m: LowerModule, function: MIRFunction) -> LowerStatic
                 if instruction.operation == .Constant(constant) {
                     if constant == .String(text) -> &literals.add(result.value, text).drop("unique checked literal result")
                 }
+                // Codegen lowers every checked string literal as BuildString
+                // (Rust tir_to_mir StrLit); one with only literal parts is
+                // the same compile-time text as a folded Constant.
+                if instruction.operation == .BuildString(parts) {
+                    if lower_static_text_literal_parts(parts) == .Val(text) -> &literals.add(result.value, text).drop("unique checked literal result")
+                }
             }
             loop value in mir_operation_value_uses(instruction.operation) {
                 if elided.get(value.value) != None -> &uses.add(value.value, (uses.get(value.value) ?? 0) + 1).drop("per-function value uses")
@@ -47,6 +53,19 @@ fn lower_static_text_facts(m: LowerModule, function: MIRFunction) -> LowerStatic
         if (uses.get(value) ?? 0) == 1 -> &elided.add(value, true).drop("sole use is StaticText argument")
     }
     LowerStaticTextFacts{literals: literals, elided: elided}
+}
+
+// The text of a BuildString whose every part is a literal, or None when a
+// part interpolates a runtime value.
+fn lower_static_text_literal_parts(parts: [MIRStringPart]) -> String? Never! {
+    text := ""
+    loop part in parts {
+        if part.kind == {
+            .Literal(piece) -> text = "{text}{piece}"
+            .Interpolation(_, _) -> return None
+        }
+    }
+    Val(text)
 }
 
 fn lower_static_text_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, args: [MIRCallArg]) Never! {

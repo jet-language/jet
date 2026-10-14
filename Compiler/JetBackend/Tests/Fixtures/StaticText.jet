@@ -1,14 +1,16 @@
-// Runtime-only StaticText: actual checked literal call, native header relocation,
-// raw I64 with trivial drop, and a named refusal for a non-literal argument.
+// Runtime-only StaticText: actual checked literal call (a folded Constant and
+// the BuildString codegen emits for a checked literal), native header
+// relocation, raw I64 with trivial drop, and a named refusal for a
+// non-literal argument.
 use jet_backend.[lir_lower_runtime_callables, lir_print_module, x64_runtime_library]
 
-fn fx_static_text_program(dynamic: Bool) -> MIRProgram Never! {
+fn fx_static_text_program(dynamic: Bool, built: Bool) -> MIRProgram Never! {
     a := fx_builder()
     _ := fx_param(&a, "literal", fx_string(), fx_borrow())
     fx_block(&a, 0, MIRTerminator.Unreachable{reason: "runtime literal-only intrinsic"})
     intrinsic := fx_function("rt_static_text", a, fx_i64())
     b := fx_builder()
-    literal :: fx_strings_literal(&b, "héllo\n")
+    literal :: if built -> fx_owned(&b, fx_string(), MIROperation.BuildString{parts: [MIRStringPart]{MIRStringPart{kind: MIRStringPartKind.Literal{text: "héllo\n"}}}}) else -> fx_strings_literal(&b, "héllo\n")
     argument :: if dynamic -> fx_owned(&b, fx_string(), MIROperation.Move{value: literal}) else -> literal
     address :: fx_copy(&b, fx_i64(), MIROperation.Call{callee: MIRCallee.User{function: intrinsic.id}, args: [MIRCallArg]{fx_arg(argument, MIRAccess.Read)}, type_args: [MIRType]{}})
     fx_block(&b, 0, MIRTerminator.Return{value: Val(address)})
@@ -23,13 +25,16 @@ fn fx_static_text_program(dynamic: Bool) -> MIRProgram Never! {
 }
 
 fn fx_static_text_checks() -> Bool Never! {
-    rejected :: x64_runtime_library(fx_static_text_program(true), [String]{"static_text_root"})
+    rejected :: x64_runtime_library(fx_static_text_program(true, false), [String]{"static_text_root"})
     named := false
     loop error in rejected.object.errors {
         if error.contains("rt_static_text requires a literal String argument") -> named = true
     }
     if !named || rejected.object.bytes.len() != 0 -> return false
-    library :: x64_runtime_library(fx_static_text_program(false), [String]{"static_text_root"})
+    built :: x64_runtime_library(fx_static_text_program(false, true), [String]{"static_text_root"})
+    loop error in built.object.errors -> print("static-text built: {error}")
+    if built.object.errors.len() != 0 || built.object.bytes.len() == 0 -> return false
+    library :: x64_runtime_library(fx_static_text_program(false, false), [String]{"static_text_root"})
     loop error in library.object.errors -> print("static-text: {error}")
     if library.object.errors.len() != 0 || library.object.bytes.len() == 0 -> return false
     files.write_bytes("static-text-library.o", library.object.bytes) ?? panic("cannot write static-text object witness")
@@ -38,7 +43,7 @@ fn fx_static_text_checks() -> Bool Never! {
 
 // expect-stdout static-text: "héllo\n"
 fn fx_static_text_module() -> LIRModule Never! {
-    p :: fx_static_text_program(false)
+    p :: fx_static_text_program(false, false)
     roots :: [MIRFunctionID]{p.functions[0].id}
     intrinsics := [U64:LowerRuntimeIntrinsic]{}
     &intrinsics.add(p.functions[1].id.value, LowerRuntimeIntrinsic.StaticText).drop("one checked runtime intrinsic")

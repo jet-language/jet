@@ -3712,6 +3712,10 @@ fn lower_display(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
 }
 
 fn lower_build_string(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, parts: [MIRStringPart]) Never! {
+    // A literal whose sole use is an rt_static_text argument is never built.
+    if instruction.result == .Val(result) {
+        if c.static_text.elided.get(result.value) ?? false -> return lower_alias_absent(&f, instruction)
+    }
     builder :: lower_pointer(&f)
     lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
     loop part in parts {
