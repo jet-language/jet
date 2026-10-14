@@ -79,36 +79,49 @@ fn jet_bootstrap_library_object(request: ^JetDriverCompileRequest, prefix: Strin
 // to JET_KEEP_GOING_REPORT, so a failed native step reports every defect.
 fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String) -> JetDriverCompileResult Never! {
     // Capture only the C declarations before the request moves into the compiler.
-    sources :: jet_cli_native_c_sources(request.authorized_sources) ?? return jet_driver_compile_escaped_failure("native feed cannot resolve C sources: {err.message}")
+    sources :: jet_cli_native_c_sources(request.authorized_sources) ?? return jet_bootstrap_native_escaped([String]{}, "native feed cannot resolve C sources: {err.message}")
     runtime_dir := ""
     if cli_sys.get("JET_RUNTIME_PACK") == .Val(pack_path) {
         parts := pack_path.split("/").to_list()
         file :: &parts.pop() ?? ""
         key :: &parts.pop() ?? ""
         runtime_dir = parts.join("/")
-        if file != JET_CLI_RUNTIME_PACK_FILE || runtime_dir == "" || jet_cli_runtime_key(runtime_dir) != .Val(key) -> return jet_driver_compile_escaped_failure("JET_RUNTIME_PACK must name <jet-runtime>/<native.key>/{JET_CLI_RUNTIME_PACK_FILE} in a packaged runtime directory")
+        if file != JET_CLI_RUNTIME_PACK_FILE || runtime_dir == "" || jet_cli_runtime_key(runtime_dir) != .Val(key) -> return jet_bootstrap_native_escaped([String]{}, "JET_RUNTIME_PACK must name <jet-runtime>/<native.key>/{JET_CLI_RUNTIME_PACK_FILE} in a packaged runtime directory")
     }
-    result := jet_bootstrap_mir(^request) ?? return jet_driver_compile_escaped_failure("the native front end failed outside every compile stage")
+    result := jet_bootstrap_mir(^request) ?? return jet_bootstrap_native_escaped([String]{}, "the native front end failed outside every compile stage")
     keep_going :: jet_cli_keep_going_enabled()
     if keep_going && result.mir == None -> return result
     if !keep_going && (!result.complete || result.internal_problem != None) -> return result
-    if result.mir == None -> return jet_driver_compile_escaped_failure("the native front end finished without MIR")
+    if result.mir == None -> return jet_bootstrap_native_escaped(result.keep_going_rows, "the native front end finished without MIR")
     census := [String]{}
     native :: jet_cli_native_executable(result, sources, false, runtime_dir, "{prefix}.o", "{prefix}.exe", keep_going, &census)
     failure :: native ?? return jet_bootstrap_native_census(^result, census)
     if failure == {
-        .Lowering(functions, messages) -> { cli_files.write("{prefix}.issues", jet_cli_native_lowering_rows(functions, messages, "\t").join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write native lowering findings") }
-        .Object(errors) -> { cli_files.write("{prefix}.issues", errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write native object findings") }
-        .Link(errors) -> { cli_files.write("{prefix}.pack-issues", errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write native link findings") }
-        .RustForeign(error) -> { return jet_driver_compile_escaped_failure("native feed foreign Rust: {error.what}") }
-        .NoEntry -> { return jet_driver_compile_escaped_failure("the native front end finished without an entry") }
-        .LostEntry -> { return jet_driver_compile_escaped_failure("native lowering lost its entry") }
-        .Write(what) -> { return jet_driver_compile_escaped_failure("native feed: {what}") }
-        .RuntimeKey(what) -> { return jet_driver_compile_escaped_failure(if runtime_dir == "" -> "native feed requires JET_RUNTIME_PACK" else -> "native feed: {what}") }
-        .Runtime(what) -> { return jet_driver_compile_escaped_failure("native feed: {what}") }
-        .Foreign(message) -> { return jet_driver_compile_escaped_failure("native feed cannot realize C dependencies: {message}") }
+        .Lowering(functions, messages) -> { cli_files.write("{prefix}.issues", jet_cli_native_lowering_rows(functions, messages, "\t").join("\n")) ?? return jet_bootstrap_native_escaped(result.keep_going_rows, "cannot write native lowering findings") }
+        .Object(errors) -> { cli_files.write("{prefix}.issues", errors.join("\n")) ?? return jet_bootstrap_native_escaped(result.keep_going_rows, "cannot write native object findings") }
+        .Link(errors) -> { cli_files.write("{prefix}.pack-issues", errors.join("\n")) ?? return jet_bootstrap_native_escaped(result.keep_going_rows, "cannot write native link findings") }
+        .RustForeign(error) -> { return jet_bootstrap_native_escaped(result.keep_going_rows, "native feed foreign Rust: {error.what}") }
+        .NoEntry -> { return jet_bootstrap_native_escaped(result.keep_going_rows, "the native front end finished without an entry") }
+        .LostEntry -> { return jet_bootstrap_native_escaped(result.keep_going_rows, "native lowering lost its entry") }
+        .Write(what) -> { return jet_bootstrap_native_escaped(result.keep_going_rows, "native feed: {what}") }
+        .RuntimeKey(what) -> { return jet_bootstrap_native_escaped(result.keep_going_rows, if runtime_dir == "" -> "native feed requires JET_RUNTIME_PACK" else -> "native feed: {what}") }
+        .Runtime(what) -> { return jet_bootstrap_native_escaped(result.keep_going_rows, "native feed: {what}") }
+        .Foreign(message) -> { return jet_bootstrap_native_escaped(result.keep_going_rows, "native feed cannot realize C dependencies: {message}") }
     }
     jet_bootstrap_native_census(^result, census)
+}
+
+// A native-feed failure that escaped every compile stage. It is the
+// result's internal problem (the host receipt and stderr report it) and,
+// under JET_KEEP_GOING, one more census row after the front end's own, so
+// collect-all never loses it.
+fn jet_bootstrap_native_escaped(rows: [String], message: String) -> JetDriverCompileResult Never! {
+    if !jet_cli_keep_going_enabled() -> return jet_driver_compile_escaped_failure(message)
+    census := rows
+    &census.push("native\t-\tESCAPED\t{message.replace("\t", " ").replace("\n", " ")}\t-")
+    problem :: jet_cli_keep_going_report(census) ?? return jet_driver_compile_escaped_failure("{message}; the compiler failure census writer failed")
+    if problem != "" -> return jet_driver_compile_escaped_failure("{message}; {problem}")
+    jet_driver_compile_escaped_failure(message)
 }
 
 // The result with the native census rows after its own; a compile with any

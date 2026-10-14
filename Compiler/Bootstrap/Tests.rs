@@ -1234,6 +1234,9 @@ fn __jet_bootstrap_harness_entry(
         panic!("this compiler artifact was built without the task-root fixture");
     }
     let mut source_retirement_receipt = String::new();
+    // An escaped compiler failure (JetDriverCompileResult.internal_problem)
+    // is reported, never dropped: stderr and one receipt line.
+    let mut internal_problem_receipt = String::new();
     let (complete, source, callable_count, type_count, field_count, variant_count, reports, selected_tier, actual_tier) =
         if mode == "factory" {
             let compiler_image = crate::__jet_bootstrap_compiler_image_envelope()
@@ -1285,6 +1288,10 @@ fn __jet_bootstrap_harness_entry(
                 source_retirement_receipt = format!(
                     "source_retirement_requested={requested}\nsource_resources_retired={retired}\nsource_retained_roots={roots}\n"
                 );
+            }
+            if let Some(problem) = result.internal_problem.as_ref() {
+                eprintln!("jet factory: compiler internal failure: {problem}");
+                internal_problem_receipt = format!("internal_problem={}\n", problem.replace('\n', "\\n"));
             }
             let counts = result.bindings.as_ref().map_or((0, 0, 0, 0), |bindings| {
                 (
@@ -1453,6 +1460,7 @@ fn __jet_bootstrap_harness_entry(
     );
     receipt.push_str(&format!("selected_factory_tier={selected_tier:?}\nactual_factory_tier={actual_tier:?}\n"));
     receipt.push_str(&source_retirement_receipt);
+    receipt.push_str(&internal_problem_receipt);
     for report in reports {
         receipt.push_str("report_json=");
         receipt.push_str(&report.json());
