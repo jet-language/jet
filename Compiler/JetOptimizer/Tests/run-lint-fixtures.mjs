@@ -99,6 +99,9 @@ const parts = [
   item("Compiler/JetFoundation/Source/Types/Types.jet", "enum ParamZone {"),
   item("Compiler/JetFoundation/Source/Types/Types.jet", "fn param_zone_name("),
   item("Compiler/JetFoundation/Source/Registry/CoreModules.jet", "fn core_source_value_hook("),
+  // The Rust emitter behind `jet run` needs a declaration row for every nominal
+  // type the unit names (as in run-lower-fixtures.mjs).
+  item("Compiler/JetFoundation/Source/Types/Types.jet", "struct SymbolID {"),
   ...[
     "struct ByteLayout {",
     "struct FieldLayoutFacts {",
