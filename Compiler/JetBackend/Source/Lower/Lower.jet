@@ -3060,11 +3060,26 @@ fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             walk = walked.address
         }
     }
+    if !moving && !lower_read_owns(p, c, m, instruction, row.ty) {
+        // Neither stored, returned nor consumed: the read borrows the
+        // projected value, exactly as a root read aliases its slot, so its
+        // carrier has no drop glue and only the owner drops it. An Owned
+        // result (a map or list element read for `print(m[k])`) given the
+        // owner's glue here was dropped twice: once at its last use, once
+        // with the owner (MIRRust.rs place_read clones instead).
+        ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "MIR value read from place {place.value} has no checked type")
+        repr :: lower_repr_at(p, &m, ty)
+        if repr == .Unsupported(reason) -> return lower_fail(&m, &f, "{reason} is not lowered at O0 yet")
+        layout :: lower_repr_layout(repr) ?? return
+        borrowed :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
+        lower_read_into(p, &f, borrowed, walk.base, walk.offset, row.ty)
+        return lower_alias(c, &f, instruction, borrowed)
+    }
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     if moving && inline {
         lower_storage_into(p, &f, dst, row.ty)
         lower_copy_bytes(&f, dst, 0, walk.base, walk.offset, lower_size(p, row.ty).size)
-    } else if !moving && lower_read_owns(p, c, m, instruction, row.ty) {
+    } else if !moving {
         layout :: lower_repr_layout(lower_repr(p, row.ty)) ?? return
         held :: lower_new_value(&f, layout, LIRDrop.Trivial, row.ty.identity)
         lower_read_into(p, &f, held, walk.base, walk.offset, row.ty)

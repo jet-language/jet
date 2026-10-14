@@ -149,6 +149,36 @@ fn fx_lists() -> MIRProgram Never! {
     fx_list_program(b)
 }
 
+// fn run() { strings := ["red", "blue"]; print(strings[0]); print("zzz"); print(strings[0]); }
+// The element read for print is Owned in MIR but neither stored nor returned:
+// it borrows the slot (Lower.jet lower_read_place). Before, its carrier kept
+// the String drop, so the print temp freed "red" while the list still held
+// it, and the next String reused the block (the native card2308_int_map exit
+// crash: the list or map drop then frees it again).
+// expect-stdout lists-place-read: "red\nzzz\nred\n"
+fn fx_lists_place_read() -> MIRProgram Never! {
+    b := fx_builder()
+    strings :: fx_list_type(fx_string())
+    root :: fx_local(&b, "strings", strings, mir_owned_ownership())
+    red :: fx_owned(&b, fx_string(), MIROperation.Constant{value: .String{value: "red"}})
+    blue :: fx_owned(&b, fx_string(), MIROperation.Constant{value: .String{value: "blue"}})
+    list :: fx_owned(&b, strings, MIROperation.BuildList{values: [MIRValueID]{red, blue}, trait_coercion: None})
+    fx_do(&b, MIROperation.WritePlace{place: root, value: list})
+    zero :: fx_int_const(&b, 0)
+    slot :: fx_list_index_place(&b, root, zero, fx_string())
+    first :: fx_owned(&b, fx_string(), MIROperation.ReadPlace{place: slot})
+    fx_print(&b, first)
+    other :: fx_owned(&b, fx_string(), MIROperation.Constant{value: .String{value: "zzz"}})
+    fx_print(&b, other)
+    fx_do(&b, MIROperation.Drop{value: other, kind: MIRDropKind.Value})
+    again :: fx_owned(&b, fx_string(), MIROperation.ReadPlace{place: slot})
+    fx_print(&b, again)
+    done :: fx_owned(&b, strings, MIROperation.MovePlace{place: root})
+    fx_do(&b, MIROperation.Drop{value: done, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_list_program(b)
+}
+
 // fn run() { xs :: [3]; print(xs[1]); }
 // expect-stdout lists-oob: ""
 // expect-exit lists-oob: 70
