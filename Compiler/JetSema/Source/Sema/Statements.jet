@@ -1162,6 +1162,12 @@ fn sema_stmt_for_in_source(expression: Expr, collection: TExpr, method_kind: TFo
                 if method == "chars" || method == "lines" {
                     if collection.kind == {
                         .MethodCall(receiver, _, _, _) -> return receiver
+                        // `text.chars()` checks as the String builtin; the
+                        // loop walks its receiver's scalars, as Rust
+                        // lower_forin_collection sources `chars` from it.
+                        .BuiltinMethod(receiver, operation, _) -> {
+                            if operation == .Chars -> return receiver
+                        }
                         else -> {}
                     }
                 }
