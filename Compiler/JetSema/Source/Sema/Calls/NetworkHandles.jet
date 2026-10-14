@@ -87,9 +87,12 @@ fn sema_network_handle_u8_list() -> Type Never! {
     Type.List{element: Type.IntN{signed: false, bits: 8}}
 }
 
+// Rust `net_method_return` infers a handle method's arguments without an
+// access convention: the readiness interest and the shutdown direction are
+// read, never taken from the caller.
 fn sema_network_handle_ready_params() -> [SemaCallParam] Never! {
     [SemaCallParam]{
-        sema_network_handle_argument_move("interest", Type.Named{name: "NetReadyInterest"}),
+        sema_network_handle_argument("interest", Type.Named{name: "NetReadyInterest"}),
         sema_network_handle_deadline(),
     }
 }
@@ -118,7 +121,7 @@ fn sema_network_handle_spec_for(owner: String, method: String, argc: Int) -> Sem
         if method == "write_all" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamWriteAllBytesDeadline, sema_network_handle_net_result(unit), [SemaCallParam]{sema_network_handle_argument("bytes", bytes), sema_network_handle_deadline()}, AccessConvention.Read))
         if method == "write_text" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamWriteText, sema_network_handle_net_result(unit), [SemaCallParam]{sema_network_handle_argument("text", string)}, AccessConvention.Read))
         if method == "write_text" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamWriteTextDeadline, sema_network_handle_net_result(unit), [SemaCallParam]{sema_network_handle_argument("text", string), sema_network_handle_deadline()}, AccessConvention.Read))
-        if method == "shutdown" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamShutdown, sema_network_handle_net_result(unit), [SemaCallParam]{sema_network_handle_argument_move("how", Type.Named{name: "NetShutdown"})}, AccessConvention.Read))
+        if method == "shutdown" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamShutdown, sema_network_handle_net_result(unit), [SemaCallParam]{sema_network_handle_argument("how", Type.Named{name: "NetShutdown"})}, AccessConvention.Read))
         if method == "ready" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamReady, sema_network_handle_net_result(Type.Named{name: "NetReady"}), sema_network_handle_ready_params(), AccessConvention.Read))
         if method == "peer_addr" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamPeerAddr, sema_network_handle_net_result(string), [SemaCallParam]{}, AccessConvention.Read))
         if method == "local_addr" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamLocalAddr, sema_network_handle_net_result(string), [SemaCallParam]{}, AccessConvention.Read))
