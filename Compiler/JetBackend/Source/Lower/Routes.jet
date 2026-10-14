@@ -441,6 +441,23 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             &temporaries.push(word)
             next
         }
+        // A Word parameter is the exact-Int carrier (CAbiRoutes.rs `native` /
+        // `fixed::<T>` read it). A checked fixed-width integer argument (the
+        // MIR narrows an aot-direct kernel's Int to its native width, e.g.
+        // math.from_bits's i64) is a raw machine word, which equals its
+        // carrier only inside the inline range: box it into an owned exact
+        // Int for the call and drop it after.
+        if route.params[index] == .Word && lower_route_fixed_int(p, ty) == .Val(fixed) {
+            exact :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
+            if !fixed.signed && fixed.bits == 64 {
+                lower_convert_u64_exact(&m, &f, exact, value)
+            } else {
+                lower_convert_exact(&m, &f, exact, value, "jet_int_owned_from_i64", false)
+            }
+            &lowered.push(exact)
+            &temporaries.push(exact)
+            next
+        }
         if route.params[index] == .List(_) {
             if !route.native_lists && lower_record_list_element(p, ty, route.params[index]) != None {
                 length :: lower_list_word(&f, value, 0)
@@ -492,6 +509,20 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     loop lent in record_lists {
         lower_call_helper(&m, &f, "list.record_handles_free", lent.ty, [LIRValueID]{lent.buffer, lent.length}, None)
     }
+}
+
+// The fixed-width integer a checked route argument is natively stored as
+// (IntN up to 64 bits, through tags, ranges, quantities and distinct/alias
+// declarations); None for the exact Int and every other type.
+fn lower_route_fixed_int(p: MIRProgram, ty: MIRType) -> (signed: Bool, bits: Int)? {
+    if ty.kind == {
+        .IntN(signed, bits) -> return if bits <= 64 -> Val((signed: signed, bits: bits)) else -> None
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return lower_route_fixed_int(p, inner)
+        else -> {}
+    }
+    definition :: lower_type_def(p, ty) ?? return None
+    if definition.kind == .Alias(inner) | .Distinct(inner, _) -> return lower_route_fixed_int(p, inner)
+    None
 }
 
 // Compiler-owned native control calls use the runtime's raw word ABI, not a
