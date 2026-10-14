@@ -1173,6 +1173,10 @@ fn run() {
         print("issue lazy-clone: lazy descriptor clone reachability is wrong or not linear")
         clean = false
     }
+    if !fx_nested_size_checks() {
+        print("issue nested-size: inline record sizes are wrong or not linear in nesting depth")
+        clean = false
+    }
     print(if clean -> "all fixtures lowered lint-clean and compiled" else -> "FIXTURE ISSUES")
 }
 
@@ -1226,5 +1230,45 @@ fn fx_lazy_clone_checks() -> Bool Never! {
     node :: fx_named("LazyNode")
     recursive :: [MIRTypeDef]{fx_type_def("LazyNode", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("LazyNode", "children", fx_list_type(node)), fx_field("LazyNode", "label", fx_string())}, methods: [MIRFunctionID]{}})}
     if !fx_lazy_clone_case("recursive", fx_lazy_clone_program(recursive), "LazyNode", true) -> passed = false
+    passed
+}
+
+// Nest0 { a: Nest1, b: Nest1, flag: Bool } ... Nest{depth} { n: Int }: every
+// level reaches the next along two member paths. Sizing must not re-walk
+// per path (2^depth); the sizes are s(depth) = 8 and
+// s(i) = align8(2 * s(i + 1) + 1) = 16 * 2^(depth - i) - 8.
+fn fx_nested_records(depth: Int) -> MIRProgram Never! {
+    types := [MIRTypeDef]{}
+    loop level in 0..<depth {
+        owner :: "Nest{level}"
+        next :: fx_named("Nest{level + 1}")
+        &types.push(fx_type_def(owner, MIRTypeDefKind.Struct{fields: [MIRField]{fx_field(owner, "a", next), fx_field(owner, "b", next), fx_field(owner, "flag", fx_bool())}, methods: [MIRFunctionID]{}}))
+    }
+    last :: "Nest{depth}"
+    &types.push(fx_type_def(last, MIRTypeDefKind.Struct{fields: [MIRField]{fx_field(last, "n", fx_int())}, methods: [MIRFunctionID]{}}))
+    b := fx_builder()
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, ^types)
+}
+
+fn fx_nested_size_case(name: String, program: MIRProgram, depth: Int) -> Bool Never! {
+    expected :: 16 * (1 << depth) - 8
+    size :: lower_size(program, fx_named("Nest0"))
+    inline :: lower_inline_size(program, fx_named("Nest0"))
+    members :: lower_inline_members(program, fx_named("Nest0"))
+    end :: lower_members_end(program, members, 0)
+    // b follows a; flag follows b.
+    half :: 16 * (1 << (depth - 1)) - 8
+    placed :: members.len() == 3 && members[0].offset == 0 && members[1].offset == half && members[2].offset == 2 * half
+    passed :: size.size == expected && size.align == 8 && inline == expected && end == 2 * half + 1 && placed
+    print("nested-size {name}: size {size.size}, inline {inline}, end {end}, expected {expected}")
+    passed
+}
+
+fn fx_nested_size_checks() -> Bool Never! {
+    passed := true
+    if !fx_nested_size_case("depth-2", fx_nested_records(2), 2) -> passed = false
+    if !fx_nested_size_case("depth-30", fx_nested_records(30), 30) -> passed = false
+    if !fx_nested_size_case("depth-30-indexed", lower_indexed_program(fx_nested_records(30)), 30) -> passed = false
     passed
 }

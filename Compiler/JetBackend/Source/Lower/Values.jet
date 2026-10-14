@@ -71,11 +71,31 @@ fn lower_packed_storage_layout(p: MIRProgram, ty: MIRType) -> LIRLayout? {
 // Bytes and alignment a value of `ty` occupies in any storage. Inline
 // aggregates are 8-aligned and padded to whole words, so copies move words.
 fn lower_size(p: MIRProgram, ty: MIRType) -> LowerSize Never! {
+    sizes := [String:LowerSize]{}
+    lower_size_in(p, ty, &sizes)
+}
+
+// lower_size, with each nested type sized once per call (`sizes`, keyed
+// exactly by lower_repr_key): a type reached along several member paths
+// (record fan-out) is not re-sized per path, which was exponential in the
+// nesting depth. lower_size is a pure function of (program, type), so a
+// remembered size is the one it would compute.
+fn lower_size_in(p: MIRProgram, ty: MIRType, sizes: &[String:LowerSize]) -> LowerSize Never! {
+    key :: lower_repr_key(ty)
+    if key == .Val(known_key) {
+        if sizes.get(known_key) == .Val(known) -> return known
+    }
+    size :: lower_size_compute(p, ty, &sizes)
+    if key == .Val(new_key) -> _ := &sizes.add(new_key, size.copy())
+    size
+}
+
+fn lower_size_compute(p: MIRProgram, ty: MIRType, sizes: &[String:LowerSize]) -> LowerSize Never! {
     if lower_packed_storage_layout(p, ty) == .Val(layout) -> return LowerSize{size: layout.size, align: layout.align}
     if lower_repr(p, ty) == {
         .Absent -> LowerSize{size: 0, align: 1}
         .Flag -> LowerSize{size: 1, align: 1}
-        .Inline(aggregate) -> LowerSize{size: lower_inline_size(p, aggregate), align: 8}
+        .Inline(aggregate) -> LowerSize{size: lower_inline_size_in(p, aggregate, &sizes), align: 8}
         else -> LowerSize{size: 8, align: 8}
     }
 }
@@ -110,8 +130,8 @@ fn lower_members_end(p: MIRProgram, members: [LowerMember], start: Int) -> Int N
 }
 
 // The stored members of an inline aggregate (a struct's non-computed fields
-// in declaration order, or a tuple's elements), at their offsets.
-fn lower_inline_members(p: MIRProgram, ty: MIRType) -> [LowerMember] Never! {
+// in declaration order, or a tuple's elements), before placement.
+fn lower_inline_member_rows(p: MIRProgram, ty: MIRType) -> [LowerMember] Never! {
     rows := [LowerMember]{}
     if ty.kind == .Tuple(fields) {
         identity :: mir_type_identity_key(ty)
@@ -121,12 +141,25 @@ fn lower_inline_members(p: MIRProgram, ty: MIRType) -> [LowerMember] Never! {
             loop row in lower_stored_fields(fields) -> &rows.push(LowerMember{id: row.id, name: row.name, offset: 0, ty: row.ty, boxed: lower_declared_boxed_edge(definition, row.name)})
         }
     }
-    lower_place_members(p, rows, 0)
+    rows
+}
+
+// The stored members of an inline aggregate at their offsets.
+fn lower_inline_members(p: MIRProgram, ty: MIRType) -> [LowerMember] Never! {
+    lower_place_members(p, lower_inline_member_rows(p, ty), 0)
 }
 
 // A List or Map is an inline [len, cap, data] header (Lists.jet, Maps.jet), a
 // View<T> window the same header borrowing its buffer.
 fn lower_inline_size(p: MIRProgram, ty: MIRType) -> Int Never! {
+    sizes := [String:LowerSize]{}
+    lower_inline_size_in(p, ty, &sizes)
+}
+
+// One placement pass: members only ever move forward, so the end of the
+// last placed member is the end lower_members_end would find over
+// lower_inline_members, without sizing every member twice.
+fn lower_inline_size_in(p: MIRProgram, ty: MIRType, sizes: &[String:LowerSize]) -> Int Never! {
     if lower_atomic_scalar(p, ty) != None -> return 8
     if lower_wide_signed(p, ty) != None -> return 16
     if ty.kind == .List(_) | .Map(_, _) | .FixedList(_, _) -> return 24
@@ -135,7 +168,12 @@ fn lower_inline_size(p: MIRProgram, ty: MIRType) -> Int Never! {
     if lower_tally_element(ty) != None -> return 24
     if lower_queue_element(ty) != None -> return 32
     if lower_priority_queue_element(ty) != None -> return 24
-    lower_align_up(lower_members_end(p, lower_inline_members(p, ty), 0), 8)
+    offset := 0
+    loop member in lower_inline_member_rows(p, ty) {
+        size :: if member.boxed -> LowerSize{size: 8, align: 8} else -> lower_size_in(p, member.ty, &sizes)
+        offset = lower_align_up(offset, size.align) + size.size
+    }
+    lower_align_up(offset, 8)
 }
 
 // A variant's stored payload members, laid out after the discriminant word.
