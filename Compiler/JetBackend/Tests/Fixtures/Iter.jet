@@ -1,8 +1,9 @@
 use jet_foundation.[
     MIRBinaryOp, MIRBlockID, MIRDropKind, MIRFunction, MIRLoopSourceKind, MIRMapEntry,
     MIROperation, MIRPlaceID, MIRPreludeABI, MIRPreludeFamily, MIRProgram,
-    MIRTerminator, MIRType, MIRTypeDef, MIRTypeKind, MIRValueID, mir_nominal_ref, mir_owned_ownership, mir_type_from_kind,
+    MIRTerminator, MIRType, MIRTypeDef, MIRTypeKind, MIRValueID, mir_function_id, mir_nominal_ref, mir_owned_ownership, mir_type_from_kind,
 ]
+use jet_backend.[lir_lower_entry, lir_print_module]
 
 fn fx_iter_program(b: FxBuilder) -> MIRProgram Never! {
     p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
@@ -126,6 +127,41 @@ fn fx_iter_large_step() -> MIRProgram Never! {
     at :: fx_iter_loop(&b, xs, fx_string(), true, Val(step), None, 0)
     fx_block(&b, at, MIRTerminator.Return{value: None})
     fx_iter_program(b)
+}
+
+// fn run() { names :: ["red", "blue"]; loop name in names -> print(name) }
+// with `names` read only by the loop: MIR's read loop (`by_value: false`)
+// over a single-use owned List whose items move out. The cursor takes the
+// List (MIRRust.rs `consumed`) instead of snapshotting it, so no element is
+// cloned: a non-copyable element (a struct holding a FileReader, PackageLoad
+// source_files_checked) never requests clone glue.
+// expect-stdout iter-taken: "red\nblue\n"
+fn fx_iter_taken() -> MIRProgram Never! {
+    b := fx_builder()
+    names :: fx_iter_strings(&b, [String]{"red", "blue"})
+    cursor :: fx_iter_init(&b, names, false, None)
+    fx_block(&b, 0, MIRTerminator.Jump{target: MIRBlockID{value: 1}})
+    more :: fx_copy(&b, fx_bool(), MIROperation.LoopIterHasNext{call: fx_prelude_id("core.loop", "loop_iter_has_next"), cursor: cursor})
+    fx_block(&b, 1, MIRTerminator.Branch{condition: more, then_target: MIRBlockID{value: 2}, else_target: MIRBlockID{value: 3}})
+    item :: fx_iter_value(&b, cursor, fx_string(), true)
+    fx_print(&b, item)
+    fx_do(&b, MIROperation.Drop{value: item, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.LoopIterAdvance{call: fx_prelude_id("core.loop", "loop_iter_advance"), cursor: cursor})
+    fx_block(&b, 2, MIRTerminator.Jump{target: MIRBlockID{value: 1}})
+    fx_do(&b, MIROperation.Drop{value: cursor, kind: MIRDropKind.Value})
+    fx_block(&b, 3, MIRTerminator.Return{value: None})
+    fx_iter_program(b)
+}
+
+// The single-use List is taken: lowering clones no String element.
+fn fx_iter_taken_check() -> Bool Never! {
+    program :: fx_iter_taken()
+    lowered :: lir_lower_entry(program, mir_function_id("run"))
+    if lowered.issues.len() != 0 || lir_print_module(lowered.lir).contains("jet_rt_string_clone") {
+        print("iter-taken: a read loop over a single-use List copied it")
+        return false
+    }
+    fx_report("iter-taken", program)
 }
 
 // fn run() { xs :: ["first", "skip"]; loop n in ^xs by Int{I64{4611686018427387904}} -> print(n); }

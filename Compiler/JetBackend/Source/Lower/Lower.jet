@@ -310,6 +310,9 @@ struct LowerContext {
     // OptionValue/ResultValue results MIRRust.rs moves out of their carrier
     // rather than cloning (lower_payload_takes).
     payload_takes: [U64:Bool]
+    // Collections a read loop's cursor takes instead of snapshotting
+    // (lower_iter_takes): an owned List or Map read only by its LoopIterInit.
+    iter_takes: [U64:Bool]
     // Compile-time exact Int value (constant or its negation) -> its
     // sized-literal word, emitting no code (Convert.jet lower_fixed_literals).
     fixed_literals: [U64:Int]
@@ -2080,6 +2083,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         sunk: sunk,
         moves: moves,
         payload_takes: lower_payload_takes(function, block_index),
+        iter_takes: lower_iter_takes(function),
         fixed_literals: lower_fixed_literals(p, function),
         order: order,
         lir_blocks: lir_blocks,
@@ -3757,6 +3761,85 @@ fn lower_payload_takes(function: MIRFunction, block_index: [U64:Int]) -> [U64:Bo
         }
     }
     takes
+}
+
+// MIRRust.rs loop_iter_init `consumed` with plan_move_facts `single_use`: a
+// plain read loop (`by_value: false`) over a List or Map value read once, in
+// its own block, takes that value instead of copying the whole collection;
+// so its elements move out and a non-copyable element is never cloned
+// (`loop file in ^listed` over a List of structs holding FileReaders). A
+// List of U8 walks the byte cursor and is never taken. Natively only a
+// value that owns its storage can be handed over: a MovePlace result (its
+// slot cleared) or a fresh call or list result; a ReadPlace borrows its place.
+fn lower_iter_takes(function: MIRFunction) -> [U64:Bool] Never! {
+    takes := [U64:Bool]{}
+    if function.optimization.checked_vector_facts.len() > 0 -> return takes
+    candidates := [U64:Bool]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .LoopIterInit(_, collection, _, by_value, source_kind) {
+                if !by_value && source_kind == .Plain -> _ := &candidates.add(collection.value, true)
+            }
+        }
+    }
+    if candidates.len() == 0 -> return takes
+    // Uses as MIRRust.rs plan_move_facts counts them: one per operation
+    // operand, two for a terminator operand or a place rooted at the value.
+    counts := [U64:Int]{}
+    use_blocks := [U64:Int]{}
+    definitions := [U64:Int]{}
+    owning := [U64:Bool]{}
+    loop (at, block) in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.result == .Val(result) {
+                if candidates.get(result.value) != None {
+                    _ := &definitions.add(result.value, at)
+                    if lower_iter_takes_owning(instruction.operation) -> _ := &owning.add(result.value, true)
+                }
+            }
+            loop value in mir_operation_value_uses(instruction.operation) {
+                if candidates.get(value.value) == None -> next
+                _ := &counts.add(value.value, (counts.get(value.value) ?? 0) + 1)
+                _ := &use_blocks.add(value.value, at)
+            }
+        }
+        loop value in mir_terminator_value_uses(block.terminator) {
+            if candidates.get(value.value) == None -> next
+            _ := &counts.add(value.value, (counts.get(value.value) ?? 0) + 2)
+            _ := &use_blocks.add(value.value, at)
+        }
+    }
+    loop place in function.places {
+        if place.base == .Temporary(value) | .Parameter(value) | .Capture(value) {
+            if candidates.get(value.value) != None -> _ := &counts.add(value.value, (counts.get(value.value) ?? 0) + 2)
+        }
+        loop projection in place.projections {
+            if projection == .Index(_, value, _, _, _, _, _) | .MapLookup(value, _, _) | .Range(value, _, _) {
+                if candidates.get(value.value) != None -> _ := &counts.add(value.value, (counts.get(value.value) ?? 0) + 2)
+            }
+        }
+    }
+    loop value in function.values {
+        if candidates.get(value.id.value) == None || owning.get(value.id.value) == None -> next
+        if (counts.get(value.id.value) ?? 0) != 1 || use_blocks.get(value.id.value) != definitions.get(value.id.value) -> next
+        if !lower_is_owned(value.ownership) -> next
+        if value.ty.kind == {
+            .List(inner) -> { if inner.kind == .IntN(signed, bits) && !signed && bits == 8 -> next }
+            .Map(_, _) -> {}
+            else -> next
+        }
+        _ := &takes.add(value.id.value, true)
+    }
+    takes
+}
+
+// Whether the native result of `operation` owns its storage when its MIR
+// value is owned (a read of a place may alias it instead).
+fn lower_iter_takes_owning(operation: MIROperation) -> Bool Never! {
+    if operation == {
+        .MovePlace(_) | .Call(_, _, _) | .IndirectCall(_, _, _) | .BuildList(_, _) | .BuildMap(_) -> true
+        else -> false
+    }
 }
 
 fn lower_option_inner(ty: MIRType) -> MIRType? {

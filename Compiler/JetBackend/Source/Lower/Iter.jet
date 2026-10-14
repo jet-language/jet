@@ -86,7 +86,10 @@ fn lower_iter_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     lower_iter_check(&m, &f, invalid, "iterator loop stride must be positive")
     if range == .Val(members) -> return lower_range_cursor_init(p, c, &m, &f, instruction, ty, source, members, stride)
     list := source
-    if !by_value || lower_view_element(ty) != None {
+    // A read loop over a collection read only here takes it as a by-value
+    // loop does (Lower.jet lower_iter_takes, MIRRust.rs `consumed`).
+    taken :: by_value || c.iter_takes.get(collection.value) != None
+    if !taken || lower_view_element(ty) != None {
         // Materialize a View with List clone glue, as lower_copy does. Cloning
         // a View header would leave Advance/Drop destroying the source owners.
         list = lower_new_storage(p, &f, snapshot_ty)
