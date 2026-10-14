@@ -2,10 +2,10 @@
 // and all 64-bit numeric policies, including unsigned high-bit words. Float NaN
 // and infinities come from arithmetic, not math.to_bits (Tower #4340).
 use jet_foundation.[
-    MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRConstant, MIRDropKind,
+    MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRCallFallibility, MIRConstant, MIRConversion, MIRDropKind,
     MIRCallArg, MIREnumArg, MIRFunction, MIRFunctionID, MIROperation, MIRPanicLoc, MIRPreludeABI, MIRPreludeFamily, MIRPreludeTypeArg,
     MIRProgram, MIRSemanticOp, MIRTerminator, MIRType, MIRTypeDef, MIRTypeDefKind, MIRTypeKind,
-    MIRUnaryOp, MIRValueID, MIRVariant, MIRVariantPayload, mir_function_id, mir_type_from_kind, mir_type_id,
+    MIRUnaryOp, MIRValueID, MIRVariant, MIRVariantPayload, mir_function_id, mir_integer_constant, mir_type_from_kind, mir_type_id,
 ]
 
 fn fx_numeric_program(b: FxBuilder) -> MIRProgram Never! {
@@ -139,6 +139,59 @@ fn fx_numeric_u64_binary_floor_zero() -> MIRProgram Never! { fx_numeric_u64_bina
 // expect-exit numeric-u64-binary-rem-zero: 70
 // expect-stderr numeric-u64-binary-rem-zero: "Stop [E3010]: `divided by zero`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
 fn fx_numeric_u64_binary_rem_zero() -> MIRProgram Never! { fx_numeric_u64_binary_zero(.Rem, "rem") }
+
+// Sized integer literals (`I64{5}`, `U64{18446744073709551615}`): an exact
+// Int constant through the infallible int_checked_fixed route is the fixed
+// word itself (Rust `5i64`), for every width and both signed bounds.
+fn fx_sized_literal(b: &FxBuilder, signed: Bool, bits: Int, constant: MIRConstant) -> MIRValueID Never! {
+    number :: fx_copy(&b, fx_int(), MIROperation.Constant{value: constant})
+    kind :: fx_int_const(&b, 0)
+    target :: fx_narrow(signed, bits)
+    fx_copy(&b, target, MIROperation.Convert{value: number, parameters: [MIRValueID]{kind}, target: target, conversion: MIRConversion.Prelude{
+        call: fx_prelude_id("core.numeric", "int_checked_fixed"),
+        location: MIRPanicLoc{file: fx_source_file(), line: 1, column: 1},
+        fallibility: MIRCallFallibility.Infallible,
+    }})
+}
+
+// expect-stdout sized-literals: "5\n-9223372036854775808\n9223372036854775807\n18446744073709551615\n9223372036854775808\n255\n-128\n-32768\n4294967295\n2147483647\n0\n"
+fn fx_sized_literals() -> MIRProgram Never! {
+    b := fx_builder()
+    rows :: [(signed: Bool, bits: Int, constant: MIRConstant)]{
+        (signed: true, bits: 64, constant: mir_integer_constant(5, None, None)),
+        (signed: true, bits: 64, constant: mir_integer_constant(-9223372036854775808, None, None)),
+        (signed: true, bits: 64, constant: mir_integer_constant(9223372036854775807, None, None)),
+        (signed: false, bits: 64, constant: MIRConstant.BigInt{decimal: "18446744073709551615"}),
+        (signed: false, bits: 64, constant: MIRConstant.BigInt{decimal: "9223372036854775808"}),
+        (signed: false, bits: 8, constant: mir_integer_constant(255, None, None)),
+        (signed: true, bits: 8, constant: mir_integer_constant(-128, None, None)),
+        (signed: true, bits: 16, constant: mir_integer_constant(-32768, None, None)),
+        (signed: false, bits: 32, constant: mir_integer_constant(4294967295, None, None)),
+        (signed: true, bits: 32, constant: mir_integer_constant(2147483647, None, None)),
+        (signed: false, bits: 16, constant: mir_integer_constant(0, None, None)),
+    }
+    loop row in rows {
+        value :: fx_sized_literal(&b, row.signed, row.bits, row.constant)
+        fx_print(&b, value)
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "core.numeric", "int_checked_fixed", "jet_std::jet_int_checked_fixed", 4, MIRPreludeABI.Value))
+    p
+}
+
+// The literals build no exact Int and call no checked conversion: the
+// runtime's own Int kernels are written with them.
+fn fx_sized_literals_check() -> Bool Never! {
+    program :: fx_sized_literals()
+    lowered :: lir_lower_entry(program, mir_function_id("run"))
+    text :: lir_print_module(lowered.lir)
+    if lowered.issues.len() != 0 || text.contains("jet_int_checked_fixed") || text.contains("jet_int_owned_from_i64") || text.contains("jet_rt_int_from_static") {
+        print("sized-literals: a sized literal lowered through a runtime Int conversion")
+        return false
+    }
+    fx_report("sized-literals", program)
+}
 
 // Fixed infix floor division, floored modulo and power are the trapping
 // Prelude routes Core.rs jet_fixed_route_kernels defines for every width

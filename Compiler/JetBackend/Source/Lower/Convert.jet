@@ -4,7 +4,9 @@
 // feed the latter to a machine conversion or reinterpret it as an I64/Char.
 use jet_foundation.[
     MIRCallFallibility,
+    MIRConstant,
     MIRConversion,
+    MIRFunction,
     MIRInstruction,
     MIRPanicLoc,
     MIRPreludeABI,
@@ -12,6 +14,8 @@ use jet_foundation.[
     MIRProgram,
     MIRType,
     MIRValueID,
+    mir_operation_value_uses,
+    mir_terminator_value_uses,
     mir_type_display_name,
 ]
 
@@ -22,6 +26,85 @@ fn lower_convert_type(ty: MIRType) -> MIRType Never! {
         .Quantity(base, _) -> lower_convert_type(base)
         else -> ty
     }
+}
+
+// A sized integer literal (`I64{5}`, `U8{255}`, `U64{18446744073709551615}`)
+// reaches MIR as an exact Int constant converted by the infallible
+// `int_checked_fixed` route. Its value is known here, so it is the fixed
+// word itself (Rust `5i64`): no exact Int is built and no checked conversion
+// runs. That is also what keeps the runtime's own Int kernels, written with
+// sized literals, from calling themselves. A constant outside the target's
+// range keeps the runtime conversion and its stop.
+fn lower_fixed_literal_word(constant: MIRConstant, target: MIRType) -> Int? Never! {
+    if lower_convert_type(target).kind == .IntN(signed, bits) {
+        if bits > 64 -> return None
+        value := 0
+        if constant == {
+            .Int(number, _, _) -> value = number
+            .BigInt(decimal) -> value = Int.parse(decimal) ?? return None
+            else -> return None
+        }
+        lowest :: if signed -> 0 - (1 << (bits - 1)) else -> 0
+        highest :: if signed -> (1 << (bits - 1)) - 1 else -> (1 << bits) - 1
+        if value < lowest || value > highest -> return None
+        return Val(lower_wide_word(value))
+    }
+    None
+}
+
+fn lower_fixed_literal_conversion(p: MIRProgram, conversion: MIRConversion) -> Bool Never! {
+    if conversion == .Prelude(call, _, fallibility) {
+        if fallibility != MIRCallFallibility.Infallible -> return false
+        row :: lower_prelude_row(p, call) ?? return false
+        return row.member == "int_checked_fixed"
+    }
+    false
+}
+
+// MIR exact Int constant -> its fixed word, for the constants whose every
+// use is a sized-literal conversion that fits (lower_fixed_literal_word).
+// Those constants lower to nothing and their conversions to the word.
+fn lower_fixed_literals(p: MIRProgram, function: MIRFunction) -> [U64:Int] Never! {
+    constants := [U64:MIRConstant]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .Constant(constant) {
+                result :: instruction.result ?? next
+                ty :: instruction.ty ?? next
+                if lower_is_exact_int(ty) -> _ := &constants.add(result.value, constant)
+            }
+        }
+    }
+    words := [U64:Int]{}
+    if constants.len() == 0 -> return words
+    blocked := [U64:Bool]{}
+    loop block in function.blocks {
+        loop used in mir_terminator_value_uses(block.terminator) -> _ := &blocked.add(used.value, true)
+        loop instruction in block.instructions {
+            folds := false
+            folded := U64{0}
+            if instruction.operation == .Convert(value, _, target, conversion) {
+                if constants.get(value.value) == .Val(constant) {
+                    if lower_fixed_literal_conversion(p, conversion) {
+                        if lower_fixed_literal_word(constant, target) == .Val(word) {
+                            _ := &words.add(value.value, word)
+                            folds = true
+                            folded = value.value
+                        }
+                    }
+                }
+            }
+            loop used in mir_operation_value_uses(instruction.operation) {
+                if folds && used.value == folded -> next
+                _ := &blocked.add(used.value, true)
+            }
+        }
+    }
+    kept := [U64:Int]{}
+    loop (value, word) in words {
+        if blocked.get(value) == None -> _ := &kept.add(value, word)
+    }
+    kept
 }
 
 // Like lower_exact_arithmetic, eligibility selects only the machine fast path.
@@ -288,6 +371,10 @@ fn lower_convert_fixed(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
 fn lower_convert_prelude(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID, parameters: [MIRValueID], call: MIRPreludeCallID, location: MIRPanicLoc, fallibility: MIRCallFallibility) Never! {
     row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "conversion naming missing Prelude call {call.value} is not lowered at O0 yet")
     if row.member == "int_checked_fixed" {
+        if c.fixed_literals.get(value.value) == .Val(word) {
+            dst :: lower_result(p, c, &m, &f, instruction) ?? return
+            return lower_emit(&f, LIRInst.Const{dst: dst, value: word})
+        }
         target :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "checked wide constructor has no target")
         if lower_wide_signed(p, target) != None -> return lower_wide_checked_construct(p, c, &m, &f, instruction, value, target, location)
     }

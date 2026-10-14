@@ -290,6 +290,8 @@ struct LowerContext {
     sunk: [U64:Bool]
     // MIR value a `Move` defines -> the value it moves.
     moves: [U64:U64]
+    // Exact Int constant -> its sized-literal word (Convert.jet lower_fixed_literals).
+    fixed_literals: [U64:Int]
     order: [Int]
     lir_blocks: [LIRBlockID]
     split_entry: Bool
@@ -1747,6 +1749,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         defined_slots: defined_slots,
         sunk: sunk,
         moves: moves,
+        fixed_literals: lower_fixed_literals(p, function),
         order: order,
         lir_blocks: lir_blocks,
         ranks: ranks,
@@ -2735,6 +2738,7 @@ fn lower_test_scope_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
 fn lower_constant(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, constant: MIRConstant) Never! {
     if instruction.result == .Val(result) {
         if c.static_text.elided.get(result.value) ?? false -> return lower_alias_absent(&f, instruction)
+        if c.fixed_literals.get(result.value) != None -> return lower_alias_absent(&f, instruction)
     }
     if constant == .Unit -> return lower_alias_absent(&f, instruction)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
