@@ -154,7 +154,10 @@ fn fx_sized_literal(b: &FxBuilder, signed: Bool, bits: Int, constant: MIRConstan
     }})
 }
 
-// expect-stdout sized-literals: "5\n-9223372036854775808\n9223372036854775807\n18446744073709551615\n9223372036854775808\n255\n-128\n-32768\n4294967295\n2147483647\n0\n"
+// `I64{-4611686018427387904}` (Int.jet int_inline) reaches MIR as the folded
+// negative constant plus a leftover, unused `4611686018427387904` constant
+// beyond the inline range; the leftover must build nothing.
+// expect-stdout sized-literals: "5\n-9223372036854775808\n9223372036854775807\n18446744073709551615\n9223372036854775808\n255\n-128\n-32768\n4294967295\n2147483647\n0\n-4611686018427387904\n"
 fn fx_sized_literals() -> MIRProgram Never! {
     b := fx_builder()
     rows :: [(signed: Bool, bits: Int, constant: MIRConstant)]{
@@ -174,6 +177,9 @@ fn fx_sized_literals() -> MIRProgram Never! {
         value :: fx_sized_literal(&b, row.signed, row.bits, row.constant)
         fx_print(&b, value)
     }
+    _ := fx_int_const(&b, 4611686018427387904)
+    negative :: fx_sized_literal(&b, true, 64, mir_integer_constant(-4611686018427387904, None, None))
+    fx_print(&b, negative)
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
     &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "core.numeric", "int_checked_fixed", "jet_std::jet_int_checked_fixed", 4, MIRPreludeABI.Value))
