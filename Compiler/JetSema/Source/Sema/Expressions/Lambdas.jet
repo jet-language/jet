@@ -43,7 +43,14 @@ use jet_foundation.[
     type_identity_equal,
 ]
 
-fn sema_expression_lambda_binding_frame(name: String, use_span: Span, scopes: &SemaScopeTable) -> Int Never! {
+// The frame of the binding `name` that a use at `use_span` inside the lambda
+// entered at `frame` reads: the latest-declared one that is either the
+// lambda's own (frame `frame` or deeper) or visible from the lambda's frame.
+// A local of an enclosing block that already closed (a finished loop body
+// keeps its rows in the table) is out of scope at the lambda, as in Rust's
+// lexical `lookup`; counting it made a lambda local of the same name, whose
+// `if` block has since rolled back, read as an outer capture.
+fn sema_expression_lambda_binding_frame(name: String, use_span: Span, frame: Int, scopes: &SemaScopeTable) -> Int Never! {
     selected_frame := -1
     selected_start := -1
     // Only bindings named `name` can match; visit them in table order.
@@ -51,11 +58,23 @@ fn sema_expression_lambda_binding_frame(name: String, use_span: Span, scopes: &S
     loop position in 0..<scopes.name_positions[slot].len() {
         binding :: scopes.bindings[scopes.name_positions[slot][position]]
         if (binding.symbol.kind == SymbolKind.Local || binding.symbol.kind == SymbolKind.Parameter) && binding.symbol.span.start <= use_span.start && binding.symbol.span.start >= selected_start {
+            if binding.frame < frame && !sema_expression_lambda_frame_encloses(binding.frame, frame, &scopes) -> next
             selected_frame = binding.frame
             selected_start = binding.symbol.span.start
         }
     }
     selected_frame
+}
+
+// Whether `ancestor` is `frame` or one of the frames enclosing it.
+fn sema_expression_lambda_frame_encloses(ancestor: Int, frame: Int, scopes: &SemaScopeTable) -> Bool Never! {
+    current := frame
+    loop current >= 0 && current < scopes.frames.len() {
+        if current == ancestor -> return true
+        if current == 0 -> return false
+        current = scopes.frames[current].parent
+    }
+    false
 }
 
 fn sema_expression_lambda_lvalue_use_outer(target: LValue, frame: Int, params: [String], scopes: &SemaScopeTable) -> Bool {
@@ -152,7 +171,7 @@ fn sema_expression_lambda_uses_outer(expr: Expr, frame: Int, params: [String], s
             false
         }
         .Ident(name, span) -> {
-            binding_frame := sema_expression_lambda_binding_frame(name, span, &scopes)
+            binding_frame := sema_expression_lambda_binding_frame(name, span, frame, &scopes)
             if binding_frame >= frame -> return false
             if binding_frame >= 0 -> return true
             index :: sema_scope_resolve_index(scopes, name)
@@ -2002,8 +2021,14 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             sema_expression_lambda_add_capture_key(&mutable_keys, key)
         }
     }
-    if capture_keys.len() == 0 && lambda.body == .Expr(value) && sema_expression_lambda_uses_outer(value, frame, param_names, &lambda_scopes) -> return None
-    if capture_keys.len() == 0 && lambda.body == .Block(statements) && sema_expression_lambda_statements_use_outer(statements, frame, param_names, &lambda_scopes) -> return None
+    uses_outer :: if lambda.body == {
+        .Expr(value) -> sema_expression_lambda_uses_outer(value, frame, param_names, &lambda_scopes)
+        .Block(statements) -> sema_expression_lambda_statements_use_outer(statements, frame, param_names, &lambda_scopes)
+    }
+    if capture_keys.len() == 0 && uses_outer {
+        sema_check_unsupported(&context, "the lambda at offset {lambda.span.start} reads an enclosing local, but no capture was recorded for it")
+        return None
+    }
     loop key in mutable_keys {
         binding_index := sema_expression_lambda_outer_binding_key(key, frame, &lambda_scopes)
         if binding_index != None -> sema_expression_lambda_append_name(&lambda_work.meta.mut_captures, lambda_scopes.bindings[binding_index ?? 0].symbol.name)
