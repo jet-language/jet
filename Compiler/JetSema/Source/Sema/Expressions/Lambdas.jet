@@ -58,7 +58,7 @@ fn sema_expression_lambda_binding_frame(name: String, use_span: Span, frame: Int
     loop position in 0..<scopes.name_positions[slot].len() {
         binding :: scopes.bindings[scopes.name_positions[slot][position]]
         if (binding.symbol.kind == SymbolKind.Local || binding.symbol.kind == SymbolKind.Parameter) && binding.symbol.span.start <= use_span.start && binding.symbol.span.start >= selected_start {
-            if binding.frame < frame && !sema_expression_lambda_frame_encloses(binding.frame, frame, &scopes) -> next
+            if binding.frame < frame && !sema_expression_lambda_frame_encloses(binding.frame, frame, scopes) -> next
             selected_frame = binding.frame
             selected_start = binding.symbol.span.start
         }
@@ -67,7 +67,7 @@ fn sema_expression_lambda_binding_frame(name: String, use_span: Span, frame: Int
 }
 
 // Whether `ancestor` is `frame` or one of the frames enclosing it.
-fn sema_expression_lambda_frame_encloses(ancestor: Int, frame: Int, scopes: &SemaScopeTable) -> Bool Never! {
+fn sema_expression_lambda_frame_encloses(ancestor: Int, frame: Int, scopes: SemaScopeTable) -> Bool Never! {
     current := frame
     loop current >= 0 && current < scopes.frames.len() {
         if current == ancestor -> return true
