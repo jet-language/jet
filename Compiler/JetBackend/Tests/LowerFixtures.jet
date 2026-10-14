@@ -1169,5 +1169,62 @@ fn run() {
         print("issue foreign-descriptor: prepared Rust helper ABI failed lowering/lint/object checks")
         clean = false
     }
+    if !fx_lazy_clone_checks() {
+        print("issue lazy-clone: lazy descriptor clone reachability is wrong or not linear")
+        clean = false
+    }
     print(if clean -> "all fixtures lowered lint-clean and compiled" else -> "FIXTURE ISSUES")
+}
+
+// A diamond chain Lazy0 -> {a, b} -> Lazy1 -> ... -> Lazy{depth}: every level
+// is reachable along 2^level paths. `leaf` is the last level's own field.
+fn fx_lazy_diamond(depth: Int, leaf: MIRType) -> [MIRTypeDef] Never! {
+    types := [MIRTypeDef]{}
+    loop level in 0..<depth {
+        owner :: "Lazy{level}"
+        next :: fx_named("Lazy{level + 1}")
+        &types.push(fx_type_def(owner, MIRTypeDefKind.Struct{fields: [MIRField]{fx_field(owner, "a", next), fx_field(owner, "b", next), fx_field(owner, "label", fx_string())}, methods: [MIRFunctionID]{}}))
+    }
+    last :: "Lazy{depth}"
+    &types.push(fx_type_def(last, MIRTypeDefKind.Struct{fields: [MIRField]{fx_field(last, "leaf", leaf)}, methods: [MIRFunctionID]{}}))
+    types
+}
+
+fn fx_lazy_clone_program(types: ^[MIRTypeDef]) -> MIRProgram Never! {
+    b := fx_builder()
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, ^types)
+}
+
+fn fx_lazy_clone_case(name: String, program: MIRProgram, root: String, expected: Bool) -> Bool Never! {
+    found :: lower_lazy_type_can_clone(program, fx_named(root))
+    if found != expected {
+        print("lazy-clone {name}: {found}, expected {expected}")
+        return false
+    }
+    print("lazy-clone {name}: {found}")
+    true
+}
+
+// lower_lazy_can_clone is the conjunction of every reachable type's own test
+// with cycles answering true. A depth-25 diamond (2^25 paths) finishes, and
+// small cases keep the per-path answers: all-cloneable true, a single-use
+// type anywhere below false, a recursive type true.
+fn fx_lazy_clone_checks() -> Bool Never! {
+    passed := true
+    deep :: fx_lazy_clone_program(fx_lazy_diamond(25, fx_int()))
+    if !fx_lazy_clone_case("diamond-25", deep, "Lazy0", true) -> passed = false
+    sealed := fx_type_def("Sealed", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("Sealed", "token", fx_string())}, methods: [MIRFunctionID]{}})
+    sealed.single_use = true
+    blocked := fx_lazy_diamond(25, fx_named("Sealed"))
+    &blocked.push(sealed.copy())
+    if !fx_lazy_clone_case("diamond-25-single-use", fx_lazy_clone_program(^blocked), "Lazy0", false) -> passed = false
+    small := fx_lazy_diamond(3, fx_named("Sealed"))
+    &small.push(sealed)
+    if !fx_lazy_clone_case("diamond-3-single-use", fx_lazy_clone_program(^small), "Lazy0", false) -> passed = false
+    if !fx_lazy_clone_case("diamond-3", fx_lazy_clone_program(fx_lazy_diamond(3, fx_int())), "Lazy0", true) -> passed = false
+    node :: fx_named("LazyNode")
+    recursive :: [MIRTypeDef]{fx_type_def("LazyNode", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("LazyNode", "children", fx_list_type(node)), fx_field("LazyNode", "label", fx_string())}, methods: [MIRFunctionID]{}})}
+    if !fx_lazy_clone_case("recursive", fx_lazy_clone_program(recursive), "LazyNode", true) -> passed = false
+    passed
 }

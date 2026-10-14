@@ -220,7 +220,7 @@ struct LowerLazyMetaFacts {
 fn lower_lazy_meta_compute(p: MIRProgram, m: LowerModule, ty: MIRType) -> LowerLazyMetaFacts Never! {
     LowerLazyMetaFacts{
         stride: lower_list_stride(p, ty),
-        clone: lower_lazy_can_clone(p, ty, [String]{}),
+        clone: lower_lazy_type_can_clone(p, ty),
         drop: lower_needs_drop(p, m, ty),
         kind: lower_lazy_kind(p, ty),
         storage: lower_lazy_storage_type(p, ty),
@@ -868,33 +868,37 @@ fn lower_lazy_storage_type(p: MIRProgram, ty: MIRType) -> MIRType Never! {
 // The checked declaration fact suppresses clone even when the physical
 // representation has clone glue. A recursive owning edge is a cloneable
 // fixed point unless some field in that cycle is explicitly single-use.
-fn lower_lazy_can_clone(p: MIRProgram, ty: MIRType, seen: [String]) -> Bool Never! {
+//
+// The answer is the conjunction of every reachable type's own test, so one
+// `seen` set shared by the whole walk (not a copy per path) visits each type
+// once: a type already seen, finished or still on the stack, adds nothing
+// new to the conjunction and answers true, as the per-path set answered for
+// a cycle. A per-path copy re-walked every type reachable along two paths,
+// which is exponential on a type graph with shared fan-out.
+fn lower_lazy_can_clone(p: MIRProgram, ty: MIRType, seen: &[String:Bool]) -> Bool Never! {
     if lower_type_def(p, ty) == .Val(definition) {
         if definition.single_use -> return false
         if definition.kind == {
-            .Distinct(base, _) | .Alias(base) -> return lower_lazy_can_clone(p, base, seen)
+            .Distinct(base, _) | .Alias(base) -> return lower_lazy_can_clone(p, base, &seen)
             else -> {}
         }
     }
     if ty.kind == {
-        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return lower_lazy_can_clone(p, inner, seen)
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return lower_lazy_can_clone(p, inner, &seen)
         else -> {}
     }
     if lower_is_iter_cursor(ty) || lower_lazy_element(ty) != None -> return false
     if lower_repr(p, ty) == .Handle(_, clone) -> return clone != ""
     key :: lower_mono_fingerprint(ty)
-    loop previous in seen {
-        if previous == key -> return true
-    }
-    visited := seen.copy()
-    &visited.push(key)
+    if seen.get(key) != None -> return true
+    &seen.add(key, true).drop("checked absent above")
     storage :: lower_lazy_storage_type(p, ty)
     if storage.kind == {
-        .List(inner) | .Option(inner) -> return lower_lazy_can_clone(p, inner, visited)
-        .Map(key_ty, value_ty) | .Result(key_ty, value_ty) -> return lower_lazy_can_clone(p, key_ty, visited) && lower_lazy_can_clone(p, value_ty, visited)
+        .List(inner) | .Option(inner) -> return lower_lazy_can_clone(p, inner, &seen)
+        .Map(key_ty, value_ty) | .Result(key_ty, value_ty) -> return lower_lazy_can_clone(p, key_ty, &seen) && lower_lazy_can_clone(p, value_ty, &seen)
         .Tuple(fields) -> {
             loop field in fields {
-                if !lower_lazy_can_clone(p, field.ty, visited) -> return false
+                if !lower_lazy_can_clone(p, field.ty, &seen) -> return false
             }
         }
         else -> {}
@@ -903,16 +907,16 @@ fn lower_lazy_can_clone(p: MIRProgram, ty: MIRType, seen: [String]) -> Bool Neve
         if definition.kind == {
             .Struct(fields, _) -> {
                 loop field in lower_stored_fields(fields) {
-                    if !lower_lazy_can_clone(p, field.ty, visited) -> return false
+                    if !lower_lazy_can_clone(p, field.ty, &seen) -> return false
                 }
             }
             .Enum(variants, _) -> {
                 loop variant in variants {
                     if variant.payload == {
-                        .Single(inner) -> { if !lower_lazy_can_clone(p, inner, visited) -> return false }
+                        .Single(inner) -> { if !lower_lazy_can_clone(p, inner, &seen) -> return false }
                         .Named(fields) -> {
                             loop field in lower_stored_fields(fields) {
-                                if !lower_lazy_can_clone(p, field.ty, visited) -> return false
+                                if !lower_lazy_can_clone(p, field.ty, &seen) -> return false
                             }
                         }
                         .Unit -> {}
@@ -923,6 +927,13 @@ fn lower_lazy_can_clone(p: MIRProgram, ty: MIRType, seen: [String]) -> Bool Neve
         }
     }
     true
+}
+
+// Whether `ty`'s lazy descriptor has clone glue (lower_lazy_can_clone from a
+// fresh walk).
+fn lower_lazy_type_can_clone(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    seen := [String:Bool]{}
+    lower_lazy_can_clone(p, ty, &seen)
 }
 
 fn lower_lazy_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {

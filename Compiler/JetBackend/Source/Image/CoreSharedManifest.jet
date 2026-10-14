@@ -94,7 +94,7 @@ fn core_shared_layout_visit(program: MIRProgram, state: &CoreSharedLayoutBuilder
     at :: state.layouts.len()
     &state.rows.add(key, at).drop("checked absent above")
     size :: lower_size(program, ty)
-    clone :: if lower_lazy_can_clone(program, ty, [String]{}) -> "lazy.clone:{key}" else -> ""
+    clone :: if lower_lazy_type_can_clone(program, ty) -> "lazy.clone:{key}" else -> ""
     drop :: if lower_needs_drop_index(program, state.close_methods, ty) -> "lazy.drop:{key}" else -> ""
     row := CoreSharedNativeLayout{type_key: key, nominal_key: "", display_name: mir_type_display_name(ty), representation: "", kind: lower_lazy_kind(program, ty), stride: lower_list_stride(program, ty), payload_size: size.size, align: size.align, box_size: lower_box_size(program, ty), clone_identity: clone, drop_identity: drop, child_keys: [String]{}, members: [CoreSharedLayoutMember]{}, variants: [CoreSharedLayoutVariant]{}}
     // Reserve before visiting owning/recursive nominal edges.
