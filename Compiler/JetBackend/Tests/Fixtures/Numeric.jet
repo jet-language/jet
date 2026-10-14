@@ -227,6 +227,84 @@ fn fx_sized_literals_check() -> Bool Never! {
     fx_report("sized-literals", program)
 }
 
+// `Float{n}` of a fixed integer: the checked_widen route
+// (jet_numeric_checked_widen_at, arity 5: value, signed, target_f32, file,
+// line) lowered inline, never as a runtime call (the runtime's own widen
+// would call itself). Exact values cross; one that loses precision stops.
+fn fx_widen_fixed(b: &FxBuilder, signed: Bool, bits: Int, value: Int, single: Bool) -> MIRValueID Never! {
+    source :: fx_narrow_const(&b, signed, bits, value)
+    signed_flag :: fx_copy(&b, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: signed}})
+    single_flag :: fx_copy(&b, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: single}})
+    target :: mir_type_from_kind(if single -> MIRTypeKind.Float32 else -> MIRTypeKind.Float)
+    fx_copy(&b, target, MIROperation.Convert{value: source, parameters: [MIRValueID]{signed_flag, single_flag}, target: target, conversion: MIRConversion.Prelude{
+        call: fx_prelude_id("core.numeric", "checked_widen"),
+        location: MIRPanicLoc{file: fx_source_file(), line: 3, column: 0},
+        fallibility: MIRCallFallibility.Infallible,
+    }})
+}
+
+fn fx_widen_program(b: FxBuilder) -> MIRProgram Never! {
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "core.numeric", "checked_widen", "jet_numeric_checked_widen_at", 5, MIRPreludeABI.Value))
+    p
+}
+
+// I64 3, I64 -2^53, I64 MIN, U64 2^63 (its high-bit word), I32 -7 and 0.
+// expect-stdout widen-fixed: "3\n-9007199254740992\n-9223372036854775808\n9223372036854775808\n-7\n0\n"
+fn fx_widen_fixed_values() -> MIRProgram Never! {
+    b := fx_builder()
+    rows :: [(signed: Bool, bits: Int, value: Int)]{
+        (signed: true, bits: 64, value: 3),
+        (signed: true, bits: 64, value: -9007199254740992),
+        (signed: true, bits: 64, value: -9223372036854775808),
+        (signed: false, bits: 64, value: -9223372036854775808),
+        (signed: true, bits: 32, value: -7),
+        (signed: true, bits: 64, value: 0),
+    }
+    loop row in rows {
+        value :: fx_widen_fixed(&b, row.signed, row.bits, row.value, false)
+        fx_print(&b, value)
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_widen_program(b)
+}
+
+// The widen is inline: no runtime widen helper is called.
+fn fx_widen_fixed_check() -> Bool Never! {
+    program :: fx_widen_fixed_values()
+    lowered :: lir_lower_entry(program, mir_function_id("run"))
+    if lowered.issues.len() != 0 || lir_print_module(lowered.lir).contains("jet_numeric_checked_widen_at") {
+        print("widen-fixed: a fixed-width widen lowered through the runtime helper")
+        return false
+    }
+    fx_report("widen-fixed", program)
+}
+
+fn fx_widen_stop(signed: Bool, bits: Int, value: Int, single: Bool) -> MIRProgram Never! {
+    b := fx_builder()
+    _ := fx_widen_fixed(&b, signed, bits, value, single)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_widen_program(b)
+}
+
+// fn run() { Float{I64.MAX} }
+// expect-stdout widen-i64-max-stop: ""
+// expect-exit widen-i64-max-stop: 70
+// expect-stderr widen-i64-max-stop: "Stop [E3010]: `whole number cannot cross into the decimal without losing precision`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_widen_i64_max_stop() -> MIRProgram Never! { fx_widen_stop(true, 64, 9223372036854775807, false) }
+
+// fn run() { Float{U64.MAX} }
+// expect-stdout widen-u64-max-stop: ""
+// expect-exit widen-u64-max-stop: 70
+// expect-stderr widen-u64-max-stop: "Stop [E3010]: `whole number cannot cross into the decimal without losing precision`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_widen_u64_max_stop() -> MIRProgram Never! { fx_widen_stop(false, 64, -1, false) }
+
+// fn run() { Float32{I32{16777217}} }
+// expect-stdout widen-f32-stop: ""
+// expect-exit widen-f32-stop: 70
+// expect-stderr widen-f32-stop: "Stop [E3010]: `whole number cannot cross into the decimal without losing precision`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_widen_f32_stop() -> MIRProgram Never! { fx_widen_stop(true, 32, 16777217, true) }
+
 // Fixed infix floor division, floored modulo and power are the trapping
 // Prelude routes Core.rs jet_fixed_route_kernels defines for every width
 // (FixedArithmetic.rs floor_div / floored_mod, Power.rs jet_pow).

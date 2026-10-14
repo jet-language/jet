@@ -501,24 +501,54 @@ fn lower_convert_prelude(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     lower_call_runtime(&m, &f, symbol, args, dst)
 }
 
-// Numeric.jet's admitted ABI takes an E4 text handle for file context, not
-// the pointer/length pair used by the older generic Prelude C adapters.
+// Checked integer-to-float widening (D-NUMWIDEN-CROSS1=E,
+// NumericConversion.rs jet_numeric_checked_widen): an integer crosses only
+// when the target holds it exactly, i.e. its magnitude without trailing zero
+// bits fits the target precision (53 bits for Float, 24 for Float32);
+// otherwise the program stops with the shared widening message. A fixed
+// source (and an inline exact Int) is checked and converted inline: routing
+// it to the runtime helper made the runtime's own `Float{raw}` widen call
+// that helper, which widens through the same route forever. A big exact Int
+// keeps the runtime route.
 fn lower_convert_checked_widen(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID, parameters: [MIRValueID], symbol: String, location: MIRPanicLoc, fallibility: MIRCallFallibility) Never! {
     unsupported :: "checked integer-to-float widening of this shape is not lowered at O0 yet"
     source :: lower_value_type(c, value) ?? return lower_fail(&m, &f, unsupported)
     target :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, unsupported)
     if fallibility != .Infallible -> return lower_fail(&m, &f, unsupported)
     if lower_convert_scalar(target) != .Float && lower_convert_scalar(target) != .Float32 -> return lower_fail(&m, &f, unsupported)
+    single :: lower_convert_scalar(target) == .Float32
     exact :: lower_is_exact_int(source)
+    signed := true
+    bits := 64
     if !exact {
-        if lower_convert_type(source).kind == .IntN(_, bits) {
-            if bits > 64 -> return lower_fail(&m, &f, unsupported)
+        if lower_convert_type(source).kind == .IntN(source_signed, source_bits) {
+            if source_bits > 64 -> return lower_fail(&m, &f, unsupported)
+            signed = source_signed
+            bits = source_bits
         } else {
             return lower_fail(&m, &f, unsupported)
         }
     }
     if parameters.len() != (if exact -> 1 else -> 2) -> return lower_fail(&m, &f, unsupported)
     operand :: lower_use(&m, &f, value) ?? return
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    stop_at :: lower_location(p, &m, &f, location)
+    // A narrow word is extended by its own signedness and below 2^63, so
+    // only a 64-bit unsigned word needs the unsigned conversion.
+    unsigned_word :: !signed && bits == 64
+    if !exact -> return lower_widen_word(p, c, &m, &f, dst, operand, unsigned_word, single, stop_at)
+    layout :: lower_value_layout(f, dst)
+    no_args :: [LIRValueID]{}
+    fast_block :: lower_new_block(&f)
+    slow_block :: lower_new_block(&f)
+    merge_block :: lower_new_block(&f)
+    fits :: lower_inline_test(&f, [LIRValueID]{operand})
+    lower_seal(&f, LIRTerminator.Branch{condition: fits, then_target: lower_target(fast_block, no_args), else_target: lower_target(slow_block, no_args)})
+    lower_start(&f, fast_block, no_args)
+    fast :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
+    lower_widen_word(p, c, &m, &f, fast, operand, false, single, stop_at)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{fast})})
+    lower_start(&f, slow_block, no_args)
     args := [LIRValueID]{operand}
     loop parameter in parameters {
         flag :: lower_use(&m, &f, parameter) ?? return
@@ -530,16 +560,51 @@ fn lower_convert_checked_widen(p: MIRProgram, c: LowerContext, m: &LowerModule, 
     lower_call_runtime(&m, &f, "jet_rt_string_from_static", path, Val(file))
     &args.push(file)
     &args.push(lower_const(&f, location.line))
-    dst :: lower_result(p, c, &m, &f, instruction) ?? return
-    if lower_convert_scalar(target) == .Float32 {
+    slow :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
+    if single {
         // Precision24 acceptance returns an exactly representable f64 carrier.
         wide :: lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
         lower_call_runtime(&m, &f, symbol, args, Val(wide))
-        lower_convert_f32_result(&f, dst, wide)
+        lower_convert_f32_result(&f, slow, wide)
     } else {
-        lower_call_runtime(&m, &f, symbol, args, Val(dst))
+        lower_call_runtime(&m, &f, symbol, args, Val(slow))
     }
     lower_call_runtime(&m, &f, "jet_rt_string_drop", [LIRValueID]{file}, None)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{slow})})
+    lower_start(&f, merge_block, [LIRValueID]{dst})
+}
+
+// `word` (signed, or the unsigned 64-bit word when `unsigned_word`) widened
+// into `dst` after the exactness check: magnitude m, its lowest set bit
+// m & -m, and m / lowbit (the magnitude without trailing zeros) must be
+// below 2^precision. Zero is exact.
+fn lower_widen_word(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, dst: LIRValueID, word: LIRValueID, unsigned_word: Bool, single: Bool, stop_at: [LIRValueID]) Never! {
+    zero :: lower_const(&f, 0)
+    magnitude := word
+    if !unsigned_word {
+        negative :: lower_numeric_compare(&f, LIRCondition.Lt, word, zero)
+        negated :: lower_numeric_binary(&f, LIRBinaryOp.Sub, zero, word)
+        magnitude = lower_numeric_choose(&f, negative, negated, word)
+    }
+    negated_magnitude :: lower_numeric_binary(&f, LIRBinaryOp.Sub, zero, magnitude)
+    lowest :: lower_numeric_binary(&f, LIRBinaryOp.And, magnitude, negated_magnitude)
+    is_zero :: lower_numeric_compare(&f, LIRCondition.Eq, lowest, zero)
+    one :: lower_const(&f, 1)
+    divisor :: lower_numeric_choose(&f, is_zero, one, lowest)
+    odd :: lower_numeric_binary(&f, LIRBinaryOp.UDiv, magnitude, divisor)
+    limit :: lower_const(&f, if single -> 1 << 24 else -> 1 << 53)
+    inexact :: lower_numeric_compare(&f, LIRCondition.UGe, odd, limit)
+    lower_numeric_check(p, Val(c), &m, &f, inexact, stop_at, "whole number cannot cross into the decimal without losing precision")
+    if single {
+        if unsigned_word {
+            narrow :: lower_new_value(&f, lir_layout_float32(), LIRDrop.Trivial, None)
+            lower_convert_u64_float(&f, narrow, word)
+            return lower_emit(&f, LIRInst.Bitcast{dst: dst, src: narrow})
+        }
+        return lower_convert_f32_result(&f, dst, word)
+    }
+    if unsigned_word -> return lower_convert_u64_float(&f, dst, word)
+    lower_emit(&f, LIRInst.Convert{dst: dst, src: word})
 }
 
 // Shared checked Float policy (NumericConversion.rs:121-141): ordered bounds
