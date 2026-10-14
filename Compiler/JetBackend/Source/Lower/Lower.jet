@@ -3615,15 +3615,15 @@ fn lower_use_index(function: MIRFunction, block_index: [U64:Int]) -> LowerUseInd
 // The test a branch condition names: a trivial phi (every incoming value
 // the same) is that value (MIRRust.rs carrier_has_later_use `tested`).
 fn lower_use_tested(function: MIRFunction, index: LowerUseIndex, condition: MIRValueID) -> MIRValueID Never! {
-    site :: index.definitions.get(condition.value) ?? return condition
+    site :: index.definitions.get(condition.value) ?? return condition.copy()
     if function.blocks[site.block].instructions[site.position].operation == .Phi(incoming) {
-        if incoming.len() == 0 -> return condition
+        if incoming.len() == 0 -> return condition.copy()
         loop row in incoming {
-            if row.value != incoming[0].value -> return condition
+            if row.value != incoming[0].value -> return condition.copy()
         }
         return lower_use_tested(function, index, incoming[0].value)
     }
-    condition
+    condition.copy()
 }
 
 // The tested condition when `predecessor` enters `block` on its true edge.
