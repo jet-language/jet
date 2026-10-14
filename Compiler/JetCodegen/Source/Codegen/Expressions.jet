@@ -1320,11 +1320,13 @@ fn jet_codegen_lower_local_place(builder: &JetCodegenBuilder, program: JetCodege
                 id
             }
         }
-        if local.deref -> return jet_codegen_project_deref_place(&builder, program, place_id, local.persist_ty ?? panic("checked persistent dereference has no checked type"), local.span)
         return place_id
     }
+    // A `deref` local (a contract argument pinned by `&place`, a predicate's
+    // borrowed parameter) names its binding's place itself: the binding is
+    // an alias of the borrowed place, so no Deref projection follows it
+    // (Rust place_for_local ignores TLocal.deref).
     binding :: jet_codegen_find_binding_for_local(builder, program, local) ?? panic("checked TIR local has no MIR place")
-    if local.deref -> return jet_codegen_project_deref_place(&builder, program, binding.place, binding.ty, local.span)
     binding.place
 }
 
