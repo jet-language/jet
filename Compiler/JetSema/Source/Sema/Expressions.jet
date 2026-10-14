@@ -3749,7 +3749,11 @@ fn sema_expr_check_copy_typed(checked: TExpr, span: Span, expected: Type?, envir
     if effect_name != None -> &context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
     if !facts.accepted {
         diagnostic := sema_copy_diagnostic(facts, span)
-        if diagnostic != None -> &diagnostics.push(diagnostic ?? sema_error("E0119", span, "copy facts are incomplete", "the copy classifier could not establish a dependency-closed result", "use a type with a known copy contract"))
+        if diagnostic == .Val(report) {
+            &diagnostics.push(report)
+        } else {
+            sema_check_unsupported(&context, "the copy of `{type_name(checked.ty)}` at offset {span.start} has incomplete copy facts")
+        }
         return None
     }
     if sema_copy_memory_operation(facts) != None && effect_name == None -> &context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
