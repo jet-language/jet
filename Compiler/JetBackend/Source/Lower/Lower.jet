@@ -3124,25 +3124,24 @@ fn lower_drop_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             }
         }
     }
+    owned_ty := MIRType?{None}
     if lower_value_type(c, value) == .Val(ty) {
-        if lower_value_owned(c, value) && lower_partial_drop_value(p, c, &m, &f, value, lowered, ty) {
-            if cell_slot >= 0 -> lower_cell_dropped(p, c, &f, cell_slot, lowered)
-            return
-        }
-        if lower_value_owned(c, value) && lower_close_receiver_value(c, f, value) {
-            lower_close_value_drop(p, &m, &f, lowered, ty, true)
-            if cell_slot >= 0 -> lower_cell_dropped(p, c, &f, cell_slot, lowered)
-            return
-        }
-        if lower_value_owned(c, value) {
-            lower_map_drop_value(p, &m, &f, lowered, ty)
-            if cell_slot >= 0 -> lower_cell_dropped(p, c, &f, cell_slot, lowered)
-            return
-        }
+        if lower_value_owned(c, value) -> owned_ty = Val(ty)
     }
-    if lower_value_drop(f, lowered) == .Trivial -> return
-    if cell_slot >= 0 -> lower_cell_dropped(p, c, &f, cell_slot, lowered)
-    lower_emit(&f, LIRInst.Drop{value: lowered})
+    if owned_ty == None && lower_value_drop(f, lowered) == .Trivial -> return
+    // The cell is cleared while it still holds the value, before the drop
+    // ends the value's life (its comparison reads the value). An inline
+    // aggregate's value is the cell's own storage: that cell clears after.
+    inline_cell :: cell_slot >= 0 && lower_is_inline(p, c.slots[cell_slot].ty)
+    if cell_slot >= 0 && !inline_cell -> lower_cell_dropped(p, c, &f, cell_slot, lowered)
+    if owned_ty == .Val(ty) {
+        if !lower_partial_drop_value(p, c, &m, &f, value, lowered, ty) {
+            if lower_close_receiver_value(c, f, value) -> lower_close_value_drop(p, &m, &f, lowered, ty, true) else -> lower_map_drop_value(p, &m, &f, lowered, ty)
+        }
+    } else {
+        lower_emit(&f, LIRInst.Drop{value: lowered})
+    }
+    if inline_cell -> lower_cell_dropped(p, c, &f, cell_slot, lowered)
 }
 
 // ---------------------------------------------------------------------------
