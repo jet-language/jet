@@ -11,6 +11,7 @@ use jet_foundation.[
     ParamZone,
     Span,
     SymbolKind,
+    TBuiltinOp,
     TExpr,
     TExprKind,
     THandleOp,
@@ -365,14 +366,37 @@ fn sema_call_try_network_handle_method(receiver: Expr, receiver_value: TExpr, me
         sema_network_handle_arity_diagnostic(owner, method, args.len(), span, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    signature :: spec ?? SemaNetworkHandleSpec{operation: THandleOp.TCPStreamRead, result_type: Type.Named{name: "Unit"}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: None}
+    signature := spec ?? SemaNetworkHandleSpec{operation: THandleOp.TCPStreamRead, result_type: Type.Named{name: "Unit"}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: None}
+    // Rust `net_method_return` infers `TCPStream.write`'s data, so a `String`
+    // is written as its UTF-8 bytes (`send(&stream, text)`), as `[U8]` is.
+    text_write :: owner == "TCPStream" && method == "write" && sema_network_handle_text_argument(args, environment, program, &scopes, &state, &tail_store, &context)
+    if text_write -> signature.params = sema_network_handle_text_params(signature.params)
     checked_args :: sema_network_handle_checked_args(method, signature.params, args, Val(receiver), signature.receiver_convention, signature.callback_non_escaping, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     // Rust `net_method_return` types the network handle methods without
     // recording a receiver convention, so a written mark (`&stream.write(…)`)
     // has nothing to be compared with.
     sema_receiver_mark_forget(&state, receiver)
-    typed_args :: checked_args ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    typed_args := checked_args ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if text_write {
+        text :: typed_args[0]
+        typed_args[0] = sema_tir_expr(sema_network_handle_u8_list(), TExprKind.BuiltinMethod{receiver: text, operation: TBuiltinOp.Bytes{owned: false}, args: [TExpr]{}}, text.span)
+    }
     sema_network_handle_finish(receiver_value, signature.operation, typed_args, signature.result_type, signature.effect_name, "{owner}.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
+}
+
+// Whether the first positional argument checks as a `String` on its own.
+fn sema_network_handle_text_argument(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
+    if args.len() == 0 || args[0].label != None -> return false
+    probe_diagnostics := [Diagnostic]{}
+    probed :: sema_probe_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return false
+    sema_expr_unwrap_tag(probed.ty) == Type.String
+}
+
+// The `write` parameters with the data slot typed `String`.
+fn sema_network_handle_text_params(params: [SemaCallParam]) -> [SemaCallParam] Never! {
+    result := params.copy()
+    if result.len() > 0 -> result[0].ty = Val(Type.String)
+    result
 }
 
 fn sema_network_tls_static_target(receiver: Expr, method: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
