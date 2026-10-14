@@ -1,0 +1,123 @@
+// Derived ordering of aggregates, Options and payload enums (`<` and
+// friends): members in declaration order, None before every Some, enum
+// variant ordinal before payload, as the Rust derived PartialOrd.
+use jet_foundation.[
+    MIRBinaryOp, MIRConstant, MIRDropKind, MIREnumArg, MIRField, MIRFieldValue,
+    MIRFunction, MIRFunctionID, MIROperation, MIRProgram, MIRTerminator,
+    MIRType, MIRTypeDef, MIRTypeDefKind, MIRTypeKind, MIRValueID, MIRVariant,
+    MIRVariantPayload, mir_field_id, mir_type_from_kind, mir_type_id,
+]
+
+fn fx_order_span(b: &FxBuilder, start: Int, end: Int) -> MIRValueID Never! {
+    first :: fx_int_const(&b, start)
+    last :: fx_int_const(&b, end)
+    fx_owned(&b, fx_named("OrderSpan"), MIROperation.Struct{type_id: mir_type_id("OrderSpan"), fields: [MIRFieldValue]{
+        MIRFieldValue{field: mir_field_id("OrderSpan.start"), value: first},
+        MIRFieldValue{field: mir_field_id("OrderSpan.end"), value: last},
+    }})
+}
+
+fn fx_order_policy(b: &FxBuilder, variant: String, limit: Int?) -> MIRValueID Never! {
+    args := [MIREnumArg]{}
+    if limit == .Val(count) {
+        value :: fx_int_const(&b, count)
+        &args.push(MIREnumArg{field: Val(mir_field_id("OrderPolicy.Limit.value")), value: value, boxed: false})
+    }
+    fx_owned(&b, fx_named("OrderPolicy"), MIROperation.Enum{type_id: mir_type_id("OrderPolicy"), variant: variant, args: args})
+}
+
+fn fx_order_maybe(b: &FxBuilder, ty: MIRType, value: MIRValueID?) -> MIRValueID Never! {
+    if value == .Val(inner) -> return fx_owned(&b, ty, MIROperation.Present{value: inner})
+    fx_owned(&b, ty, MIROperation.Absent)
+}
+
+fn fx_order_print(b: &FxBuilder, op: MIRBinaryOp, left: MIRValueID, right: MIRValueID) Never! {
+    fx_print(&b, fx_compare(&b, op, left, right))
+}
+
+// struct OrderSpan { start: Int, end: Int }
+// enum OrderPolicy { Enabled, Limit(value: Int), Forbid }
+// fn run() {
+//     print(OrderSpan{1, 5} < OrderSpan{1, 7}); print(OrderSpan{2, 0} <= OrderSpan{1, 9})
+//     print(None < Val(1)); print(Val(2) < Val(1)); print(Val(3) >= Val(3)); print(None > None)
+//     print(Val("a") < Val("b")); print(Val("b") > None)
+//     print(Enabled < Limit(1)); print(Limit(2) > Limit(1)); print(Forbid < Limit(9))
+//     print(Limit(4) <= Limit(4))
+// }
+// expect-stdout order: "true\nfalse\ntrue\nfalse\ntrue\nfalse\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\n"
+fn fx_order() -> MIRProgram Never! {
+    maybe_int :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_int()})
+    maybe_text :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_string()})
+    types :: [MIRTypeDef]{
+        fx_type_def("OrderSpan", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("OrderSpan", "start", fx_int()), fx_field("OrderSpan", "end", fx_int())}, methods: [MIRFunctionID]{}}),
+        fx_type_def("OrderPolicy", MIRTypeDefKind.Enum{variants: [MIRVariant]{
+            fx_variant("Enabled", MIRVariantPayload.Unit),
+            fx_variant("Limit", MIRVariantPayload.Named{fields: [MIRField]{fx_field("OrderPolicy.Limit", "value", fx_int())}}),
+            fx_variant("Forbid", MIRVariantPayload.Unit),
+        }, methods: [MIRFunctionID]{}}),
+    }
+    b := fx_builder()
+    owned := [MIRValueID]{}
+
+    a :: fx_order_span(&b, 1, 5)
+    c :: fx_order_span(&b, 1, 7)
+    fx_order_print(&b, MIRBinaryOp.Lt, a, c)
+    d :: fx_order_span(&b, 2, 0)
+    e :: fx_order_span(&b, 1, 9)
+    fx_order_print(&b, MIRBinaryOp.Le, d, e)
+    &owned.push(a)
+    &owned.push(c)
+    &owned.push(d)
+    &owned.push(e)
+
+    none_a :: fx_order_maybe(&b, maybe_int, None)
+    one :: fx_order_maybe(&b, maybe_int, Val(fx_int_const(&b, 1)))
+    fx_order_print(&b, MIRBinaryOp.Lt, none_a, one)
+    two :: fx_order_maybe(&b, maybe_int, Val(fx_int_const(&b, 2)))
+    fx_order_print(&b, MIRBinaryOp.Lt, two, one)
+    three :: fx_order_maybe(&b, maybe_int, Val(fx_int_const(&b, 3)))
+    three_again :: fx_order_maybe(&b, maybe_int, Val(fx_int_const(&b, 3)))
+    fx_order_print(&b, MIRBinaryOp.Ge, three, three_again)
+    none_b :: fx_order_maybe(&b, maybe_int, None)
+    fx_order_print(&b, MIRBinaryOp.Gt, none_a, none_b)
+    &owned.push(none_a)
+    &owned.push(one)
+    &owned.push(two)
+    &owned.push(three)
+    &owned.push(three_again)
+    &owned.push(none_b)
+
+    text_a :: fx_order_maybe(&b, maybe_text, Val(fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "a"}})))
+    text_b :: fx_order_maybe(&b, maybe_text, Val(fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "b"}})))
+    fx_order_print(&b, MIRBinaryOp.Lt, text_a, text_b)
+    text_none :: fx_order_maybe(&b, maybe_text, None)
+    fx_order_print(&b, MIRBinaryOp.Gt, text_b, text_none)
+    &owned.push(text_a)
+    &owned.push(text_b)
+    &owned.push(text_none)
+
+    enabled :: fx_order_policy(&b, "Enabled", None)
+    limit_one :: fx_order_policy(&b, "Limit", Val(1))
+    fx_order_print(&b, MIRBinaryOp.Lt, enabled, limit_one)
+    limit_two :: fx_order_policy(&b, "Limit", Val(2))
+    fx_order_print(&b, MIRBinaryOp.Gt, limit_two, limit_one)
+    forbid :: fx_order_policy(&b, "Forbid", None)
+    limit_nine :: fx_order_policy(&b, "Limit", Val(9))
+    fx_order_print(&b, MIRBinaryOp.Lt, forbid, limit_nine)
+    limit_four :: fx_order_policy(&b, "Limit", Val(4))
+    limit_four_again :: fx_order_policy(&b, "Limit", Val(4))
+    fx_order_print(&b, MIRBinaryOp.Le, limit_four, limit_four_again)
+    &owned.push(enabled)
+    &owned.push(limit_one)
+    &owned.push(limit_two)
+    &owned.push(forbid)
+    &owned.push(limit_nine)
+    &owned.push(limit_four)
+    &owned.push(limit_four_again)
+
+    loop value in owned {
+        fx_do(&b, MIROperation.Drop{value: value, kind: MIRDropKind.Value})
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, ^types)
+}

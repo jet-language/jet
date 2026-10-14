@@ -7,7 +7,7 @@
 use jet_foundation.[
     MIRAccess, MIRInstruction, MIRLocalID, MIRMapEntry, MIROperation, MIRPlace, MIRPlaceID,
     MIRPreludeCall, MIRProgram, MIRProjection, MIRTupleField, MIRType,
-    MIRTypeKind, MIRValueID, mir_type_display_name, mir_type_from_kind,
+    MIRTypeKind, MIRValueID, mir_type_display_name, mir_type_from_kind, mir_type_same_checked_type,
 ]
 
 // The entry tuple of a Map type, None for any other type.
@@ -34,13 +34,23 @@ fn lower_sequence_element(ty: MIRType) -> MIRType? {
 }
 
 // How two keys are ordered: "int" (exact Int), "string", "word" (signed
-// word or Bool byte), "uword" (unsigned word), "inline" (a tuple or struct of
-// ordered members, D-MAP-KEY1: lexicographic in member order, as the derived
-// Ord of the Rust tuple/struct key), "" (not lowered).
+// word, Bool byte or payload-free enum ordinal), "uword" (unsigned word),
+// "inline" (a tuple or struct of ordered members, D-MAP-KEY1: lexicographic
+// in member order, as the derived Ord of the Rust tuple/struct key), "boxed"
+// (an Option, None before every Some as Rust Option's Ord, or a payload enum
+// of ordered members: variant ordinal first, then the same variant's payload
+// in order, as the Rust derived Ord), "" (not lowered).
 fn lower_map_key_kind(p: MIRProgram, ty: MIRType) -> String Never! {
+    seen := [String]{}
+    lower_order_kind(p, ty, &seen)
+}
+
+// `seen` names the aggregates whose members are being (or were) checked: a
+// recursive type orders through its own helper, so a revisit is ordered.
+fn lower_order_kind(p: MIRProgram, ty: MIRType, seen: &[String]) -> String Never! {
     if ty.kind == {
         .String -> return "string"
-        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return lower_map_key_kind(p, inner)
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return lower_order_kind(p, inner, &seen)
         else -> {}
     }
     if lower_is_exact_int(ty) -> return "int"
@@ -48,7 +58,7 @@ fn lower_map_key_kind(p: MIRProgram, ty: MIRType) -> String Never! {
     if lower_order_runtime(p, ty) != None -> return "runtime"
     if lower_type_def(p, ty) == .Val(definition) {
         if definition.kind == {
-            .Alias(base) | .Distinct(base, _) -> return lower_map_key_kind(p, base)
+            .Alias(base) | .Distinct(base, _) -> return lower_order_kind(p, base, &seen)
             else -> {}
         }
     }
@@ -59,13 +69,58 @@ fn lower_map_key_kind(p: MIRProgram, ty: MIRType) -> String Never! {
             if lower_sequence_element(ty) != None -> return ""
             members :: lower_inline_members(p, ty)
             if members.len() == 0 -> return ""
+            if lower_order_seen(&seen, ty) -> return "inline"
             loop member in members {
-                if lower_map_key_kind(p, member.ty) == "" -> return ""
+                if lower_order_kind(p, member.ty, &seen) == "" -> return ""
             }
             "inline"
         }
+        .Boxed(boxed) -> lower_order_boxed_kind(p, boxed, &seen)
         else -> ""
     }
+}
+
+// True when `ty` was already reached; else records it.
+fn lower_order_seen(seen: &[String], ty: MIRType) -> Bool Never! {
+    key :: mir_type_display_name(ty)
+    loop name in seen {
+        if name == key -> return true
+    }
+    &seen.push(key)
+    false
+}
+
+fn lower_order_boxed_kind(p: MIRProgram, ty: MIRType, seen: &[String]) -> String Never! {
+    if lower_option_inner(ty) == .Val(inner) -> return if lower_order_kind(p, inner, &seen) == "" -> "" else -> "boxed"
+    // A union carrier has no Rust order (type_derive_capability).
+    if ty.kind == .Union(_) -> return ""
+    definition :: lower_type_def(p, ty) ?? return ""
+    variants :: if definition.kind == {
+        .Enum(rows, _) -> rows
+        else -> {
+            return ""
+        }
+    }
+    // A user Comparable impl orders by its own body (MIRRust.rs
+    // type_derive_capability derives no Rust Ord); never substitute the
+    // structural order for it.
+    if lower_order_user_impl(p, ty) -> return ""
+    if lower_order_seen(&seen, ty) -> return "boxed"
+    loop variant in variants {
+        loop member in lower_variant_members(p, definition, variant) {
+            if lower_order_kind(p, member.ty, &seen) == "" -> return ""
+        }
+    }
+    "boxed"
+}
+
+fn lower_order_user_impl(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    loop implementation in p.impls {
+        bound :: implementation.trait_ref ?? next
+        if bound.name != "Comparable" || implementation.compiler_generated -> next
+        if mir_type_same_checked_type(implementation.self_type, ty) || lower_nominal_impl_template(p, implementation.self_type, ty) -> return true
+    }
+    false
 }
 
 fn lower_map_repr(p: MIRProgram, ty: MIRType, key: MIRType, value: MIRType) -> LowerRepr Never! {
@@ -119,9 +174,13 @@ fn lower_map_key_order(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MI
         zero :: lower_const(&f, 0)
         lower_emit(&f, LIRInst.Compare{dst: less, condition: LIRCondition.Lt, left: order, right: zero})
         lower_emit(&f, LIRInst.Compare{dst: equal, condition: LIRCondition.Eq, left: order, right: zero})
-    } else if kind == "inline" {
+    } else if kind == "inline" || kind == "boxed" {
+        // A box helper is keyed by its representation's own type, as the
+        // equality helper is (a distinct or alias enum shares its base's).
+        keyed := ty
+        if lower_repr(p, ty) == .Boxed(boxed) -> keyed = boxed
         order :: lower_word(&f)
-        lower_call_helper(&m, &f, "map.key_compare", ty, [LIRValueID]{left, right}, Val(order))
+        lower_call_helper(&m, &f, "map.key_compare", keyed, [LIRValueID]{left, right}, Val(order))
         zero :: lower_const(&f, 0)
         lower_emit(&f, LIRInst.Compare{dst: less, condition: LIRCondition.Lt, left: order, right: zero})
         lower_emit(&f, LIRInst.Compare{dst: equal, condition: LIRCondition.Eq, left: order, right: zero})
@@ -738,36 +797,109 @@ fn lower_map_method_query(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
 // ---------------------------------------------------------------------------
 // Generated helpers, one per Map type: map.find (the entry index of a key,
 // or -1 - its insertion point), map.set, map.insert, map.get, map.remove;
-// and map.key_compare, one per tuple or struct key type.
+// and map.key_compare, one per tuple, struct, Option or payload enum key type.
 
-// The order of two tuple or struct keys of `glue.ty` (both addresses) as -1,
-// 0 or 1: the first member pair that differs decides (derived Ord).
+// The order of two keys of `glue.ty` (both addresses, or both boxes) as -1, 0
+// or 1: the first member pair that differs decides (derived Ord). An Option
+// orders None before every Some (Rust Option's Ord), then its payloads; a
+// payload enum orders by variant ordinal, then the selected variant's payload
+// members in order (Rust derived Ord).
 fn lower_helper_map_key_compare(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, Val(lir_layout_word()))
     left :: f.open_params[0].copy()
     right :: f.open_params[1].copy()
-    loop member in lower_inline_members(p, glue.ty) {
-        a :: lower_read_at(p, &f, left, member.offset, member.ty) ?? next
-        b :: lower_read_at(p, &f, right, member.offset, member.ty) ?? next
-        order :: lower_map_key_order(p, &m, &f, member.ty, a, b)
-        before :: lower_new_block(&f)
-        differ :: lower_new_block(&f)
-        after :: lower_new_block(&f)
-        same :: lower_new_block(&f)
-        lower_seal(&f, LIRTerminator.Branch{condition: order.same, then_target: lower_target(same, [LIRValueID]{}), else_target: lower_target(differ, [LIRValueID]{})})
-        lower_start(&f, differ, [LIRValueID]{})
-        lower_seal(&f, LIRTerminator.Branch{condition: order.less, then_target: lower_target(before, [LIRValueID]{}), else_target: lower_target(after, [LIRValueID]{})})
-        lower_start(&f, before, [LIRValueID]{})
-        minus_one :: lower_const(&f, -1)
-        lower_seal(&f, LIRTerminator.Return{value: Val(minus_one)})
-        lower_start(&f, after, [LIRValueID]{})
-        plus_one :: lower_const(&f, 1)
-        lower_seal(&f, LIRTerminator.Return{value: Val(plus_one)})
-        lower_start(&f, same, [LIRValueID]{})
+    if lower_option_inner(glue.ty) == .Val(inner) {
+        null :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+        left_absent :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: left_absent, condition: LIRCondition.Eq, left: left, right: null})
+        right_absent :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: right_absent, condition: LIRCondition.Eq, left: right, right: null})
+        // Present-ness orders first: when exactly one is absent, the absent
+        // one is Less.
+        same :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: same, condition: LIRCondition.Eq, left: left_absent, right: right_absent})
+        lower_key_compare_decide(&f, LowerMapOrder{less: left_absent, same: same})
+        both_absent :: lower_new_block(&f)
+        both_present :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: left_absent, then_target: lower_target(both_absent, [LIRValueID]{}), else_target: lower_target(both_present, [LIRValueID]{})})
+        lower_start(&f, both_absent, [LIRValueID]{})
+        equal :: lower_const(&f, 0)
+        lower_seal(&f, LIRTerminator.Return{value: Val(equal)})
+        lower_start(&f, both_present, [LIRValueID]{})
+        lower_key_compare_member(p, &m, &f, inner, left, right, 0, false)
+    } else if lower_is_inline(p, glue.ty) {
+        loop member in lower_inline_members(p, glue.ty) {
+            lower_key_compare_member(p, &m, &f, member.ty, left, right, member.offset, member.boxed)
+        }
+    } else if lower_type_def(p, glue.ty) == .Val(definition) {
+        variants :: if definition.kind == {
+            .Enum(rows, _) -> rows
+            else -> panic("map.key_compare of {mir_type_display_name(glue.ty)} has no ordered definition")
+        }
+        left_tag :: lower_list_word(&f, left, 0)
+        right_tag :: lower_list_word(&f, right, 0)
+        lower_key_compare_step(&f, left_tag, right_tag, LIRCondition.Lt)
+        loop (index, variant) in variants {
+            members :: lower_variant_members(p, definition, variant)
+            if members.len() == 0 -> next
+            expected :: lower_const(&f, lower_discriminant(index))
+            selected :: lower_flag(&f)
+            lower_emit(&f, LIRInst.Compare{dst: selected, condition: LIRCondition.Eq, left: left_tag, right: expected})
+            body :: lower_new_block(&f)
+            next_block :: lower_new_block(&f)
+            lower_seal(&f, LIRTerminator.Branch{condition: selected, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(next_block, [LIRValueID]{})})
+            lower_start(&f, body, [LIRValueID]{})
+            loop member in members {
+                lower_key_compare_member(p, &m, &f, member.ty, left, right, member.offset, member.boxed)
+            }
+            decided :: lower_const(&f, 0)
+            lower_seal(&f, LIRTerminator.Return{value: Val(decided)})
+            lower_start(&f, next_block, [LIRValueID]{})
+        }
+    } else {
+        panic("map.key_compare of {mir_type_display_name(glue.ty)} has no ordered definition")
     }
     zero :: lower_const(&f, 0)
     lower_seal(&f, LIRTerminator.Return{value: Val(zero)})
     lir_builder_finish(f.builder)
+}
+
+// Compare the members of `ty` at `left`/`right` + `offset` (through their
+// recursive-edge wrapper when `boxed`); return -1 or 1 when they differ, else
+// continue in a new block.
+fn lower_key_compare_member(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, left: LIRValueID, right: LIRValueID, offset: Int, boxed: Bool) Never! {
+    a :: lower_render_load(p, &f, left, offset, ty, boxed) ?? return
+    b :: lower_render_load(p, &f, right, offset, ty, boxed) ?? return
+    order :: lower_map_key_order(p, &m, &f, ty, a, b)
+    lower_key_compare_decide(&f, order)
+}
+
+// Two words ordered by `less` (Lt or ULt): return -1 or 1 when they differ,
+// else continue in a new block.
+fn lower_key_compare_step(f: &LowerFunction, a: LIRValueID, b: LIRValueID, less: LIRCondition) Never! {
+    before :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: before, condition: less, left: a, right: b})
+    same :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: same, condition: LIRCondition.Eq, left: a, right: b})
+    lower_key_compare_decide(&f, LowerMapOrder{less: before, same: same})
+}
+
+fn lower_key_compare_decide(f: &LowerFunction, order: LowerMapOrder) Never! {
+    before :: lower_new_block(&f)
+    differ :: lower_new_block(&f)
+    after :: lower_new_block(&f)
+    same :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: order.same, then_target: lower_target(same, [LIRValueID]{}), else_target: lower_target(differ, [LIRValueID]{})})
+    lower_start(&f, differ, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Branch{condition: order.less, then_target: lower_target(before, [LIRValueID]{}), else_target: lower_target(after, [LIRValueID]{})})
+    lower_start(&f, before, [LIRValueID]{})
+    minus_one :: lower_const(&f, -1)
+    lower_seal(&f, LIRTerminator.Return{value: Val(minus_one)})
+    lower_start(&f, after, [LIRValueID]{})
+    plus_one :: lower_const(&f, 1)
+    lower_seal(&f, LIRTerminator.Return{value: Val(plus_one)})
+    lower_start(&f, same, [LIRValueID]{})
 }
 
 fn lower_helper_map(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {

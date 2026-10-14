@@ -3814,6 +3814,14 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
                 return lower_emit(&f, LIRInst.Compare{dst: dst, condition: condition, left: order, right: zero})
             }
         }
+        // A struct, tuple, Option or payload enum of ordered members orders
+        // as its Rust derived PartialOrd (Option: None first; enum: variant
+        // ordinal, then payload; aggregates: members in declaration order).
+        kind :: lower_map_key_kind(p, left_ty)
+        if kind == "inline" || kind == "boxed" {
+            order :: lower_map_key_order(p, &m, &f, left_ty, left_value, right_value)
+            return lower_order_condition(&f, dst, condition, order)
+        }
         if left_layout.class != .Integer && left_layout.class != .Float -> return lower_fail(&m, &f, "comparison of {mir_type_display_name(left_ty)} is not lowered at O0 yet")
         return lower_emit(&f, LIRInst.Compare{dst: dst, condition: if unsigned -> lower_unsigned_condition(condition) else -> condition, left: left_value, right: right_value})
     }
