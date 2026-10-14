@@ -1,6 +1,6 @@
 // Expert guards borrow one canonical Shared payload across ordinary MIR
 // dereferences and addressable field projections. No payload clone is needed.
-use jet_foundation.[MIRAccess, MIRCallArg, MIRDropKind, MIRField, MIRFieldValue, MIRFunctionID, MIRInternalTag, MIROperation, MIRPlace, MIRPlaceBase, MIRPlaceID, MIRPreludeABI, MIRPreludeFamily, MIRProgram, MIRProjection, MIRSemanticOp, MIRTagMarker, MIRTerminator, MIRType, MIRTypeDefKind, MIRTypeKind, MIRValueID, mir_field_id, mir_function_id, mir_nominal_ref, mir_owned_ownership, mir_type_from_kind]
+use jet_foundation.[MIRAccess, MIRCallArg, MIRCallee, MIRDropKind, MIRField, MIRFieldValue, MIRFunctionID, MIRInternalTag, MIROperation, MIRPlace, MIRPlaceBase, MIRPlaceID, MIRPreludeABI, MIRPreludeFamily, MIRProgram, MIRProjection, MIRSemanticOp, MIRTagMarker, MIRTerminator, MIRType, MIRTypeDefKind, MIRTypeKind, MIRValueID, mir_field_id, mir_function_id, mir_nominal_ref, mir_owned_ownership, mir_type_from_kind]
 use jet_backend.[lir_lower_entry, LIRInst, LIRCallee]
 
 fn fx_shared_guard_type(elem: MIRType, editable: Bool) -> MIRType Never! {
@@ -10,6 +10,12 @@ fn fx_shared_guard_type(elem: MIRType, editable: Bool) -> MIRType Never! {
 
 fn fx_shared_guard_acquire(b: &FxBuilder, cell: MIRValueID, elem: MIRType, editable: Bool) -> MIRValueID Never! {
     fx_owned(&b, fx_shared_guard_type(elem, editable), MIROperation.Semantic{operation: MIRSemanticOp.HostCall{call: fx_prelude_id("core.host", if editable -> "Shared.guard_edit" else -> "Shared.guard_read"), args: [MIRCallArg]{fx_arg(cell, MIRAccess.Read)}}})
+}
+
+// JetCodegen (SharedMethods.jet jet_codegen_lower_shared_owner_host_method)
+// emits the owner routes as a Prelude Call, not a HostCall.
+fn fx_shared_guard_acquire_call(b: &FxBuilder, cell: MIRValueID, elem: MIRType, editable: Bool) -> MIRValueID Never! {
+    fx_owned(&b, fx_shared_guard_type(elem, editable), MIROperation.Call{callee: MIRCallee.Prelude{call: fx_prelude_id("core.host", if editable -> "Shared.guard_edit" else -> "Shared.guard_read")}, args: [MIRCallArg]{fx_arg(cell, MIRAccess.Read)}, type_args: [MIRType]{}})
 }
 
 fn fx_shared_guard_field_place(b: &FxBuilder, root: MIRPlaceID, field: String, ty: MIRType) -> MIRPlaceID Never! {
@@ -32,7 +38,9 @@ fn fx_shared_guard_field_place(b: &FxBuilder, root: MIRPlaceID, field: String, t
 //     drop(cell); print(reader.value.count); drop(reader)
 // }
 // expect-stdout shared-guards: "7\n9\n2\n9\n"
-fn fx_shared_guards() -> MIRProgram Never! {
+fn fx_shared_guards() -> MIRProgram Never! { fx_shared_guards_via(false) }
+
+fn fx_shared_guards_via(as_call: Bool) -> MIRProgram Never! {
     elem :: fx_named("GuardState")
     ints :: fx_list_type(fx_int())
     shared_ty :: mir_type_from_kind(MIRTypeKind.Shared{inner: elem})
@@ -42,11 +50,11 @@ fn fx_shared_guards() -> MIRProgram Never! {
     values :: fx_owned(&b, ints, MIROperation.BuildList{values: [MIRValueID]{one}, trait_coercion: None})
     state :: fx_values_struct(&b, "GuardState", [MIRFieldValue]{fx_values_set("GuardState", "count", seven), fx_values_set("GuardState", "values", values)})
     cell :: fx_owned(&b, shared_ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("::JetShared", "new"), args: [MIRCallArg]{fx_arg(state, MIRAccess.Move)}, owner_type_args: [MIRPreludeTypeArg]{MIRPreludeTypeArg.Type{ty: elem}}, type_args: [MIRType]{}}})
-    reader :: fx_shared_guard_acquire(&b, cell, elem, false)
+    reader :: if as_call -> fx_shared_guard_acquire_call(&b, cell, elem, false) else -> fx_shared_guard_acquire(&b, cell, elem, false)
     initial :: fx_value(&b, elem, fx_borrow(), MIROperation.Deref{value: reader})
     fx_values_show(&b, initial, "GuardState", "count", fx_int())
     fx_do(&b, MIROperation.Drop{value: reader, kind: MIRDropKind.Value})
-    editor :: fx_shared_guard_acquire(&b, cell, elem, true)
+    editor :: if as_call -> fx_shared_guard_acquire_call(&b, cell, elem, true) else -> fx_shared_guard_acquire(&b, cell, elem, true)
     editor_ty :: fx_shared_guard_type(elem, true)
     root :: fx_local(&b, "editor", editor_ty, mir_owned_ownership())
     fx_do(&b, MIROperation.WritePlace{place: root, value: editor})
@@ -61,7 +69,7 @@ fn fx_shared_guards() -> MIRProgram Never! {
     fx_print(&b, changed)
     moved :: fx_owned(&b, editor_ty, MIROperation.MovePlace{place: root})
     fx_do(&b, MIROperation.Drop{value: moved, kind: MIRDropKind.Value})
-    final_reader :: fx_shared_guard_acquire(&b, cell, elem, false)
+    final_reader :: if as_call -> fx_shared_guard_acquire_call(&b, cell, elem, false) else -> fx_shared_guard_acquire(&b, cell, elem, false)
     final_state :: fx_value(&b, elem, fx_borrow(), MIROperation.Deref{value: final_reader})
     final_values :: fx_values_field(&b, final_state, "GuardState", "values", ints)
     length :: fx_list_method(&b, "len", final_values, None, [MIRValueID]{}, fx_int(), false)
@@ -107,4 +115,25 @@ fn fx_shared_guards() -> MIRProgram Never! {
     assert(payload)
     assert(read_drop)
     assert(edit_drop)
+}
+
+// The self-hosted front end's Prelude-Call shape reaches the same native
+// guard kernels; the routes never become undefined `jet_shared_guard_*` calls.
+#Test("native Shared guards from Prelude Calls lower to the native guard kernels") {
+    lowered :: lir_lower_entry(fx_shared_guards_via(true), mir_function_id("run"))
+    loop issue in lowered.issues -> eprint("{issue.function}: {issue.message}")
+    assert_eq(lowered.issues.len(), 0)
+    native_guard := false
+    loop function in lowered.lir.functions {
+        loop block in function.blocks {
+            loop instruction in block.insts {
+                if instruction == .Call(_, _, .Runtime(symbol), _) {
+                    assert(symbol != "jet_shared_guard_read")
+                    assert(symbol != "jet_shared_guard_edit")
+                    if symbol == "jet_rt_native_shared_guard_read" || symbol == "jet_rt_native_shared_guard_edit" -> native_guard = true
+                }
+            }
+        }
+    }
+    assert(native_guard)
 }

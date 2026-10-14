@@ -4399,6 +4399,13 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
     if callee == .Prelude(call) {
         if lower_lazy_call(p, c, &m, &f, instruction, call, args) -> return
         if lower_codec_call(p, c, &m, &f, instruction, call, args, type_args) -> return
+        // JetCodegen interns `shared.read` / `shared.edit` (Expressions.jet
+        // jet_codegen_lower_host_method) and the Shared owner routes as a
+        // Prelude Call, not a HostCall: both reach the native Shared kernels,
+        // never an undefined `jet_shared_*` symbol.
+        if lower_shared_guard_new(p, c, &m, &f, instruction, call, args) -> return
+        if lower_shared_access(p, c, &m, &f, instruction, call, args) -> return
+        if lower_shared_same(p, c, &m, &f, instruction, call, args) -> return
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "call names missing Prelude call {call.value}")
         if row.module_name == "core.mem" {
             values := [MIRValueID]{}
