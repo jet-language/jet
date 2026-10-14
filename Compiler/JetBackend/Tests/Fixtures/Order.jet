@@ -42,10 +42,14 @@ fn fx_order_print(b: &FxBuilder, op: MIRBinaryOp, left: MIRValueID, right: MIRVa
 //     print(OrderSpan{1, 5} < OrderSpan{1, 7}); print(OrderSpan{2, 0} <= OrderSpan{1, 9})
 //     print(None < Val(1)); print(Val(2) < Val(1)); print(Val(3) >= Val(3)); print(None > None)
 //     print(Val("a") < Val("b")); print(Val("b") > None)
+//     // [U8]? (Rust Option<Vec<u8>> Ord): elements, then length; None first
+//     print(Val([1, 2]) < Val([1, 3])); print(Val([1, 2]) < Val([1, 2, 0]))
+//     print(Val([2]) > Val([1, 9, 9])); print(None < Val([]))
+//     print(Val([1, 2]) >= Val([1, 2])); print(Val([255]) < Val([1]))
 //     print(Enabled < Limit(1)); print(Limit(2) > Limit(1)); print(Forbid < Limit(9))
 //     print(Limit(4) <= Limit(4))
 // }
-// expect-stdout order: "true\nfalse\ntrue\nfalse\ntrue\nfalse\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\n"
+// expect-stdout order: "true\nfalse\ntrue\nfalse\ntrue\nfalse\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\nfalse\ntrue\n"
 fn fx_order() -> MIRProgram Never! {
     maybe_int :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_int()})
     maybe_text :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_string()})
@@ -102,6 +106,32 @@ fn fx_order() -> MIRProgram Never! {
     &owned.push(text_a)
     &owned.push(text_b)
     &owned.push(text_none)
+
+    byte :: mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8})
+    maybe_bytes :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_list_type(byte)})
+    pairs :: [[[Int]]]{
+        [[Int]]{[Int]{1, 2}, [Int]{1, 3}},
+        [[Int]]{[Int]{1, 2}, [Int]{1, 2, 0}},
+        [[Int]]{[Int]{1, 9, 9}, [Int]{2}},
+        [[Int]]{[Int]{1, 2}, [Int]{1, 2}},
+        [[Int]]{[Int]{255}, [Int]{1}},
+    }
+    ops :: [MIRBinaryOp]{MIRBinaryOp.Lt, MIRBinaryOp.Lt, MIRBinaryOp.Lt, MIRBinaryOp.Ge, MIRBinaryOp.Lt}
+    loop (index, pair) in pairs {
+        left :: fx_order_maybe(&b, maybe_bytes, Val(fx_list_routes_bytes(&b, pair[0])))
+        right :: fx_order_maybe(&b, maybe_bytes, Val(fx_list_routes_bytes(&b, pair[1])))
+        // The third pair prints `[2] > [1, 9, 9]` as Lt with swapped operands.
+        fx_order_print(&b, ops[index], left, right)
+        if index == 2 {
+            bytes_none :: fx_order_maybe(&b, maybe_bytes, None)
+            bytes_empty :: fx_order_maybe(&b, maybe_bytes, Val(fx_list_routes_bytes(&b, [Int]{})))
+            fx_order_print(&b, MIRBinaryOp.Lt, bytes_none, bytes_empty)
+            &owned.push(bytes_none)
+            &owned.push(bytes_empty)
+        }
+        &owned.push(left)
+        &owned.push(right)
+    }
 
     enabled :: fx_order_policy(&b, "Enabled", None)
     limit_one :: fx_order_policy(&b, "Limit", Val(1))

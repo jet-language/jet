@@ -36,10 +36,11 @@ fn lower_sequence_element(ty: MIRType) -> MIRType? {
 // How two keys are ordered: "int" (exact Int), "string", "word" (signed
 // word, Bool byte or payload-free enum ordinal), "uword" (unsigned word),
 // "inline" (a tuple or struct of ordered members, D-MAP-KEY1: lexicographic
-// in member order, as the derived Ord of the Rust tuple/struct key), "boxed"
-// (an Option, None before every Some as Rust Option's Ord, or a payload enum
-// of ordered members: variant ordinal first, then the same variant's payload
-// in order, as the Rust derived Ord), "" (not lowered).
+// in member order, as the derived Ord of the Rust tuple/struct key), "list"
+// (a List of ordered elements: element by element, then by length, as Rust
+// Vec Ord), "boxed" (an Option, None before every Some as Rust Option's Ord,
+// or a payload enum of ordered members: variant ordinal first, then the same
+// variant's payload in order, as the Rust derived Ord), "" (not lowered).
 fn lower_map_key_kind(p: MIRProgram, ty: MIRType) -> String Never! {
     seen := [String]{}
     lower_order_kind(p, ty, &seen)
@@ -66,6 +67,13 @@ fn lower_order_kind(p: MIRProgram, ty: MIRType, seen: &[String]) -> String Never
         .ExactInt -> "int"
         .Word | .Flag | .Discriminant -> "word"
         .Inline(_) -> {
+            // A List orders lexicographically, then by length (Rust Vec Ord),
+            // when its elements are ordered; a View or Map has no order.
+            if lower_list_element(ty) == .Val(elem) {
+                if lower_view_element(ty) != None || lower_map_entry(ty) != None -> return ""
+                if lower_order_seen(&seen, ty) -> return "list"
+                return if lower_order_kind(p, elem, &seen) == "" -> "" else -> "list"
+            }
             if lower_sequence_element(ty) != None -> return ""
             members :: lower_inline_members(p, ty)
             if members.len() == 0 -> return ""
@@ -171,6 +179,14 @@ fn lower_map_key_order(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MI
     } else if kind == "string" {
         order :: lower_word(&f)
         lower_call_runtime(&m, &f, "jet_rt_string_compare", [LIRValueID]{left, right}, Val(order))
+        zero :: lower_const(&f, 0)
+        lower_emit(&f, LIRInst.Compare{dst: less, condition: LIRCondition.Lt, left: order, right: zero})
+        lower_emit(&f, LIRInst.Compare{dst: equal, condition: LIRCondition.Eq, left: order, right: zero})
+    } else if kind == "list" {
+        keyed := ty
+        if lower_repr(p, ty) == .Inline(list) -> keyed = list
+        order :: lower_word(&f)
+        lower_call_helper(&m, &f, "list.compare", keyed, [LIRValueID]{left, right}, Val(order))
         zero :: lower_const(&f, 0)
         lower_emit(&f, LIRInst.Compare{dst: less, condition: LIRCondition.Lt, left: order, right: zero})
         lower_emit(&f, LIRInst.Compare{dst: equal, condition: LIRCondition.Eq, left: order, right: zero})
