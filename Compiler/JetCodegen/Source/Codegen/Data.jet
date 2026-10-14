@@ -115,6 +115,11 @@ fn jet_codegen_lower_json_literal(builder: &JetCodegenBuilder, program: JetCodeg
             .MapLit(entries) -> return jet_codegen_lower_ordered_object_encode(&builder, program, expression, entries)
             else -> {}
         }
+        // Rust tir_to_mir_expr JSONLit: a `[(key: String, value: Dyn)]`
+        // pair list (D-DATATREE-ORDER1=A) is already the Object payload every
+        // engine consumes, so it becomes the payload unchanged instead of
+        // being re-read as a key-ordered map.
+        if value.ty == .List(_) -> return jet_codegen_lower_data_enum(&builder, program, expression, "Dyn", variant, argument, clone_arg)
         return jet_codegen_lower_container_encode(&builder, program, expression, value, jet_codegen_dyn_type(), true)
     }
     jet_codegen_lower_data_enum(&builder, program, expression, "Dyn", variant, argument, clone_arg)
