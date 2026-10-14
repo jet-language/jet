@@ -159,6 +159,12 @@ const parts = [
     body("Compiler/JetFoundation/Source/Text/RustDebug.jet"),
     body("Compiler/JetFoundation/Source/Encoding/Json.jet"),
   ]),
+  // Lower.jet and X64/Select.jet move rows and re-raise worker panics with these
+  // Foundation helpers; their files otherwise hold the Sema collection registry
+  // and the thread-admission policy, so only the named items are copied.
+  "// [unit source: Foundation helpers named by Lower.jet and X64/Select.jet]",
+  item("Compiler/JetFoundation/Source/Collections.jet", "fn compiler_take_rows<"),
+  item("Compiler/JetFoundation/Source/Threads.jet", "fn compiler_threads_failure_text("),
   body("Compiler/JetBackend/Source/LIR/LIR.jet"),
   body("Compiler/JetBackend/Source/LIR/Lint.jet"),
   body("Compiler/JetBackend/Source/UiABI.jet"),
@@ -241,6 +247,9 @@ writeFileSync(`${outDir}/unit.jet`, [...coreUses, "", ...parts].join("\n"));
 // is its own package (load/), run from <outdir> so it finds the images.
 coreUses.clear();
 const loadParts = [
+  // X64MemoryImage.relocs rows are Link.jet's data relocations.
+  "// [unit source: Compiler/JetBackend/Source/Image/Link.jet]",
+  item("Compiler/JetBackend/Source/Image/Link.jet", "struct X64ImageDataReloc "),
   "// [unit source: Compiler/JetBackend/Source/Image/Memory.jet]",
   item("Compiler/JetBackend/Source/Image/Memory.jet", "struct X64MemoryImage {"),
   "",
