@@ -2023,7 +2023,10 @@ JET_RUST_EMIT_COMPILER_OWNED_ENUMS :: prep { [String]{
 } }
 // tir_to_mir_types COMPILER_OWNED_CORE_RECORDS.
 JET_RUST_EMIT_COMPILER_OWNED_CORE_RECORDS :: prep { [String]{
-    "PluginFrame", "PluginFault", "RangeError",
+    // TextError (jet_std Open.rs) joins RangeError: JetCodegen declares it as a
+    // compiler-owned Core record row, so the runtime crate, not the emitted
+    // program, owns its Rust definition.
+    "PluginFrame", "PluginFault", "RangeError", "TextError",
     "__ResolveError",
     "IOContext", "NetErrorDetail", "AsyncPolicy", "CSVRow", "DataLineOptions", "DataLimits", "DataSourceIdentity", "DataAuthority", "DataError", "EncodingCause",
     "EncodingError", "EncodingLimits", "DataProvenance", "DataSchema", "DataSnapshotIdentity", "DataLoaderStatus", "WebFormFieldSpec", "WebFormFieldState", "WebTableState",
