@@ -140,6 +140,114 @@ fn fx_numeric_u64_binary_floor_zero() -> MIRProgram Never! { fx_numeric_u64_bina
 // expect-stderr numeric-u64-binary-rem-zero: "Stop [E3010]: `divided by zero`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
 fn fx_numeric_u64_binary_rem_zero() -> MIRProgram Never! { fx_numeric_u64_binary_zero(.Rem, "rem") }
 
+// Fixed infix floor division, floored modulo and power are the trapping
+// Prelude routes Core.rs jet_fixed_route_kernels defines for every width
+// (FixedArithmetic.rs floor_div / floored_mod, Power.rs jet_pow).
+fn fx_numeric_fixed_trap(b: &FxBuilder, signed: Bool, bits: Int, op: MIRBinaryOp, member: String, left: Int, right: Int) -> MIRValueID Never! {
+    a :: fx_narrow_const(&b, signed, bits, left)
+    c :: fx_narrow_const(&b, signed, bits, right)
+    width :: if signed -> "i{bits}" else -> "u{bits}"
+    location :: MIRPanicLoc{file: fx_source_file(), line: 3, column: 0}
+    fx_copy(&b, fx_narrow(signed, bits), MIROperation.Binary{op: op, dispatch: MIRBinaryDispatch.Prelude{call: fx_prelude_id("core.numeric", "{width}.trap.{member}"), location: Val(location)}, overflow: MIRBinaryOverflow.Trap, left: a, right: c})
+}
+
+fn fx_numeric_fixed_trap_program(b: FxBuilder) -> MIRProgram Never! {
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    loop width in ([String]{"i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"}) {
+        loop member in ([String]{"floor_div", "mod", "pow"}) {
+            &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.Overflow, "core.numeric", "{width}.trap.{member}", "jet_{width}_trap_{member}", 4, MIRPreludeABI.Value))
+        }
+    }
+    p
+}
+
+// Floor division rounds toward negative infinity and the floored remainder
+// takes the divisor's sign (I64 and I8 with negative operands, MIN / 1 and
+// MIN mod -1); unsigned operands divide and take the remainder; a power that
+// lands on the signed MIN still fits.
+// expect-stdout numeric-fixed-floor: "-4\n1\n-4\n-1\n3\n-1\n3\n1\n-9223372036854775808\n0\n-43\n1\n-64\n-1\n127\n1\n9223372036854775807\n1\n-128\n81\n2147483648\n-9223372036854775808\n"
+fn fx_numeric_fixed_floor() -> MIRProgram Never! {
+    b := fx_builder()
+    // -1 as U64 carries U64.MAX's high-bit word, as in Unsigned.jet's fixtures.
+    divisions :: [(signed: Bool, bits: Int, left: Int, right: Int)]{
+        (signed: true, bits: 64, left: -7, right: 2),
+        (signed: true, bits: 64, left: 7, right: -2),
+        (signed: true, bits: 64, left: -7, right: -2),
+        (signed: true, bits: 64, left: 7, right: 2),
+        (signed: true, bits: 8, left: -128, right: 3),
+        (signed: true, bits: 8, left: 127, right: -2),
+        (signed: false, bits: 8, left: 255, right: 2),
+        (signed: false, bits: 64, left: -1, right: 2),
+    }
+    loop (index, row) in divisions {
+        quotient :: fx_numeric_fixed_trap(&b, row.signed, row.bits, .FloorDiv, "floor_div", row.left, row.right)
+        fx_print(&b, quotient)
+        remainder :: fx_numeric_fixed_trap(&b, row.signed, row.bits, .Mod, "mod", row.left, row.right)
+        fx_print(&b, remainder)
+        if index == 3 {
+            minimum :: fx_numeric_fixed_trap(&b, true, 64, .FloorDiv, "floor_div", -9223372036854775808, 1)
+            fx_print(&b, minimum)
+            zero :: fx_numeric_fixed_trap(&b, true, 64, .Mod, "mod", -9223372036854775808, -1)
+            fx_print(&b, zero)
+        }
+    }
+    powers :: [(signed: Bool, bits: Int, left: Int, right: Int)]{
+        (signed: true, bits: 8, left: -2, right: 7),
+        (signed: true, bits: 16, left: 3, right: 4),
+        (signed: false, bits: 32, left: 2, right: 31),
+        (signed: true, bits: 64, left: -2, right: 63),
+    }
+    loop row in powers {
+        power :: fx_numeric_fixed_trap(&b, row.signed, row.bits, .Pow, "pow", row.left, row.right)
+        fx_print(&b, power)
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_numeric_fixed_trap_program(b)
+}
+
+fn fx_numeric_fixed_trap_stop(signed: Bool, bits: Int, op: MIRBinaryOp, member: String, left: Int, right: Int) -> MIRProgram Never! {
+    b := fx_builder()
+    _ := fx_numeric_fixed_trap(&b, signed, bits, op, member, left, right)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_numeric_fixed_trap_program(b)
+}
+
+// fn run() { I64.MIN /% I64{-1} }
+// expect-stdout numeric-floor-min-stop: ""
+// expect-exit numeric-floor-min-stop: 70
+// expect-stderr numeric-floor-min-stop: "Stop [E3010]: `This division overflows the value's type (the result is outside its range)`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_floor_min_stop() -> MIRProgram Never! { fx_numeric_fixed_trap_stop(true, 64, .FloorDiv, "floor_div", -9223372036854775808, -1) }
+
+// fn run() { I8{-128} /% I8{-1} }
+// expect-stdout numeric-floor-i8-min-stop: ""
+// expect-exit numeric-floor-i8-min-stop: 70
+// expect-stderr numeric-floor-i8-min-stop: "Stop [E3010]: `This division overflows the value's type (the result is outside its range)`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_floor_i8_min_stop() -> MIRProgram Never! { fx_numeric_fixed_trap_stop(true, 8, .FloorDiv, "floor_div", -128, -1) }
+
+// Fixed floored modulo by zero (jet_i64_trap_mod).
+// expect-stdout numeric-mod-zero-stop: ""
+// expect-exit numeric-mod-zero-stop: 70
+// expect-stderr numeric-mod-zero-stop: "Stop [E3010]: `divided by zero`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_mod_zero_stop() -> MIRProgram Never! { fx_numeric_fixed_trap_stop(true, 64, .Mod, "mod", -7, 0) }
+
+// fn run() { I8{2}.pow(I8{7}) }
+// expect-stdout numeric-pow-i8-stop: ""
+// expect-exit numeric-pow-i8-stop: 70
+// expect-stderr numeric-pow-i8-stop: "Stop [E3010]: `This power overflows the value's type (the result is outside its range)`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_pow_i8_stop() -> MIRProgram Never! { fx_numeric_fixed_trap_stop(true, 8, .Pow, "pow", 2, 7) }
+
+// fn run() { I64{3}.pow(I64{40}) }
+// expect-stdout numeric-pow-i64-stop: ""
+// expect-exit numeric-pow-i64-stop: 70
+// expect-stderr numeric-pow-i64-stop: "Stop [E3010]: `This power overflows the value's type (the result is outside its range)`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_pow_i64_stop() -> MIRProgram Never! { fx_numeric_fixed_trap_stop(true, 64, .Pow, "pow", 3, 40) }
+
+// fn run() { I16{2}.pow(I16{-1}) }
+// expect-stdout numeric-pow-i16-negative-stop: ""
+// expect-exit numeric-pow-i16-negative-stop: 70
+// expect-stderr numeric-pow-i16-negative-stop: "Stop [E3010]: `A negative exponent has no whole-number result (make the base a Float to raise it to a negative power)`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_pow_i16_negative_stop() -> MIRProgram Never! { fx_numeric_fixed_trap_stop(true, 16, .Pow, "pow", 2, -1) }
+
 // Raw I64 `/` truncates toward zero and `%` keeps the dividend's sign.
 // Negative non-integral cases distinguish these operators from floor division.
 // expect-stdout numeric-i64-truncation: "-2\n-1\n-2\n1\n2\n-1\n2\n1\n0\n-1\n0\n1\n"

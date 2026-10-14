@@ -3491,11 +3491,13 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
         return lower_logic(&f, dst, op == .And, left_value, right_value)
     }
     if left_layout.class == .Float -> return lower_float_binary(&m, &f, dst, op, left_ty, left_layout == lir_layout_float32(), left_value, right_value)
-    // Fixed unsigned floor division is ordinary UDiv (FixedArithmetic.rs).
-    // Signed floor division is not the truncating word operator.
-    word_op :: if op == .FloorDiv && unsigned && fixed_trap -> LIRBinaryOp.Div else -> {
-        lower_word_op(op) ?? return lower_fail(&m, &f, "operator {lower_binary_name(op)} on {mir_type_display_name(left_ty)} is not lowered at O0 yet")
+    // Fixed floor division, floored modulo and power have no word operator.
+    if fixed_trap && (op == .FloorDiv || op == .Mod || op == .Pow) {
+        site :: if dispatch == .Prelude(_, location) -> location else -> MIRPanicLoc?{None}
+        location :: lower_numeric_location(p, c, &m, &f, instruction, site)
+        return lower_fixed_trap_floor(p, c, &m, &f, dst, op, left_ty, left_value, right_value, location)
     }
+    word_op :: lower_word_op(op) ?? return lower_fail(&m, &f, "operator {lower_binary_name(op)} on {mir_type_display_name(left_ty)} is not lowered at O0 yet")
     // A Primitive exact Int Add, Sub or Mul (codegen's read-list walk index
     // advance and pattern counts) is Rust's JetInt operator, which is the
     // jet_int_* route a Prelude dispatch names: the same exact arithmetic.

@@ -2,16 +2,16 @@
 // FixedArithmetic.rs kernel, not Rust's narrower checked_rem, defines the rules.
 use jet_foundation.[
     MIRBinaryOp, MIRBinaryOverflow, MIRInstruction, MIRPanicLoc, MIRPreludeCall, MIRPreludeCallID, MIRProgram, MIRSourceFileID,
-    MIRType, MIRTypeKind, MIRValueID, mir_symbol_name, mir_type_display_name,
+    MIRType, MIRTypeKind, MIRValueID, mir_symbol_name, mir_type_display_name, mir_type_from_kind,
 ]
 
-// Fixed-width trapping arithmetic stays in the native checked operator body.
-// Division/remainder include its zero and signed MIN / -1 checks; unsigned
-// U64 floor division shares ordinary unsigned division.
+// Fixed-width trapping arithmetic stays in the native checked operator body:
+// every `jet_<width>_trap_<op>` Prelude route Core.rs jet_fixed_route_kernels
+// defines. Division/remainder include its zero and signed MIN / -1 checks;
+// floor division, floored modulo and power follow lower_fixed_trap_floor.
 fn lower_fixed_trap_route(symbol: String) -> Bool Never! {
-    if symbol == "jet_u64_trap_floor_div" -> return true
     widths :: [String]{"u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64"}
-    operations :: [String]{"add", "sub", "mul", "div", "rem", "shl", "shr"}
+    operations :: [String]{"add", "sub", "mul", "div", "rem", "floor_div", "mod", "pow", "shl", "shr"}
     loop width in widths {
         loop operation in operations {
             expected :: "jet_{width}_trap_{operation}"
@@ -19,6 +19,72 @@ fn lower_fixed_trap_route(symbol: String) -> Bool Never! {
         }
     }
     false
+}
+
+// `jet_<width>_trap_floor_div`, `_mod` and `_pow` inline: FixedArithmetic.rs
+// floor_div / floored_mod and power in TRAP mode (Core.rs
+// jet_fixed_route_kernels, Power.rs JetPow::jet_pow). A zero divisor stops
+// with "divided by zero"; floor division rounds toward negative infinity and
+// overflows only at the signed MIN / -1 quotient; the floored remainder takes
+// the divisor's sign and never overflows; unsigned operands floor-divide and
+// take the remainder as UDiv / URem. A power goes through the trapping
+// 64-bit pow helper of the same signedness, whose products are exact factors
+// of the result, then a narrow result is range-checked like a product.
+fn lower_fixed_trap_floor(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: MIRBinaryOp, ty: MIRType, left: LIRValueID, right: LIRValueID, location: [LIRValueID]) Never! {
+    narrow :: lower_narrow_bits(ty)
+    bits :: if narrow > 0 -> narrow else -> 64
+    signed :: if narrow > 0 -> lower_narrow_signed(ty) else -> !lower_is_unsigned_word(ty)
+    if op == .Pow {
+        wide :: mir_type_from_kind(MIRTypeKind.IntN{signed: signed, bits: 64})
+        args := [LIRValueID]{left, right}
+        loop value in location -> &args.push(value)
+        if narrow == 0 -> return lower_call_helper(&m, &f, "numeric.pow.checked_policy", wide, args, Val(dst))
+        power :: lower_word(&f)
+        lower_call_helper(&m, &f, "numeric.pow.checked_policy", wide, args, Val(power))
+        lower_narrow_check(p, c, &m, &f, power, signed, bits, location, lower_numeric_overflow_message("pow"))
+        return lower_emit(&f, LIRInst.Move{dst: dst, src: power})
+    }
+    modulo :: op == .Mod
+    zero :: lower_const(&f, 0)
+    is_zero :: lower_numeric_compare(&f, LIRCondition.Eq, right, zero)
+    lower_numeric_check(p, Val(c), &m, &f, is_zero, location, "divided by zero")
+    if !signed -> return lower_emit(&f, LIRInst.Binary{dst: dst, op: if modulo -> LIRBinaryOp.URem else -> LIRBinaryOp.UDiv, left: left, right: right})
+    // A -1 divisor never reaches IDIV (MIN / -1 faults): the floored
+    // quotient is the negation, out of range exactly at the type's MIN, and
+    // the floored remainder is 0.
+    minus_one :: lower_const(&f, -1)
+    is_minus_one :: lower_numeric_compare(&f, LIRCondition.Eq, right, minus_one)
+    negate :: lower_new_block(&f)
+    divide :: lower_new_block(&f)
+    adjust :: lower_new_block(&f)
+    merge :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: is_minus_one, then_target: lower_target(negate, [LIRValueID]{}), else_target: lower_target(divide, [LIRValueID]{})})
+    lower_start(&f, negate, [LIRValueID]{})
+    if modulo {
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{zero})})
+    } else {
+        minimum :: lower_const(&f, -1 - lower_narrow_max(true, bits))
+        overflowed :: lower_numeric_compare(&f, LIRCondition.Eq, left, minimum)
+        lower_numeric_check(p, Val(c), &m, &f, overflowed, location, lower_numeric_overflow_message("div"))
+        negated :: lower_numeric_binary(&f, LIRBinaryOp.Sub, zero, left)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{negated})})
+    }
+    lower_start(&f, divide, [LIRValueID]{})
+    remainder :: lower_numeric_binary(&f, LIRBinaryOp.Rem, left, right)
+    truncated :: if modulo -> remainder else -> lower_numeric_binary(&f, LIRBinaryOp.Div, left, right)
+    // Round toward negative infinity when a nonzero remainder's sign differs
+    // from the divisor's: the quotient steps down, the remainder up by it.
+    inexact :: lower_numeric_compare(&f, LIRCondition.Ne, remainder, zero)
+    signs :: lower_numeric_binary(&f, LIRBinaryOp.Xor, remainder, right)
+    opposite :: lower_numeric_compare(&f, LIRCondition.Lt, signs, zero)
+    floored :: lower_flag(&f)
+    lower_logic(&f, floored, true, inexact, opposite)
+    lower_seal(&f, LIRTerminator.Branch{condition: floored, then_target: lower_target(adjust, [LIRValueID]{}), else_target: lower_target(merge, [LIRValueID]{truncated})})
+    lower_start(&f, adjust, [LIRValueID]{})
+    one :: lower_const(&f, 1)
+    adjusted :: if modulo -> lower_numeric_binary(&f, LIRBinaryOp.Add, remainder, right) else -> lower_numeric_binary(&f, LIRBinaryOp.Sub, truncated, one)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{adjusted})})
+    lower_start(&f, merge, [LIRValueID]{dst})
 }
 
 // A binary operator dispatched to its Prelude route: exact Int `+ - *` have an
