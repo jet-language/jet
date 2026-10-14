@@ -3184,8 +3184,15 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     if binding.name == "_" -> sema_single_use_check_discard(init.ty, binding.name_span, context.taskgroups.in_spawn, environment, program, &diagnostics)
     sema_stmt_track_origin(binding, environment, program, &scopes)
     _ := sema_hardware_bind_pending_dma_transfer(binding_expr, symbol, &scopes)
-    if !sema_stmt_record_binding_views(binding, init.ty, scopes, &state, &context, &diagnostics) -> return None
-    if string_view && !sema_string_view_record_binding(&state, binding.name, binding.name_span, view_sources, scopes) -> return None
+    view_diagnostics_before :: diagnostics.len()
+    if !sema_stmt_record_binding_views(binding, init.ty, scopes, &state, &context, &diagnostics) {
+        if !sema_has_error_since(diagnostics, view_diagnostics_before) -> sema_check_unsupported(&context, "the view held by `{binding.name}` (offset {binding.name_span.start}) could not be recorded")
+        return None
+    }
+    if string_view && !sema_string_view_record_binding(&state, binding.name, binding.name_span, view_sources, scopes) {
+        if !sema_has_error_since(diagnostics, view_diagnostics_before) -> sema_check_unsupported(&context, "the string view held by `{binding.name}` (offset {binding.name_span.start}) could not be recorded")
+        return None
+    }
     sema_function_reactive_record_binding(&context, binding, symbol, init.ty)
     local := tir_symbol_local(binding.name, binding.name_span, symbol.id)
     local.mutable = binding.mutable
