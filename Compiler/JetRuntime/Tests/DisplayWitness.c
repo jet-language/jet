@@ -50,6 +50,16 @@ static void scalars(void) {
     EXPECT(jet_rt_i64_to_string(INT64_MIN), "-9223372036854775808");
     EXPECT(jet_rt_i64_to_string(INT64_MAX), "9223372036854775807");
     EXPECT(jet_rt_i64_to_string(0), "0");
+    // Negative-domain digits: `%`/`/%` floor, so these pin truncated digits.
+    EXPECT(jet_rt_i64_to_string(7), "7");
+    EXPECT(jet_rt_i64_to_string(-7), "-7");
+    EXPECT(jet_rt_i64_to_string(9), "9");
+    EXPECT(jet_rt_i64_to_string(10), "10");
+    EXPECT(jet_rt_i64_to_string(99), "99");
+    EXPECT(jet_rt_i64_to_string(-99), "-99");
+    EXPECT(jet_rt_i64_to_string(100), "100");
+    EXPECT(jet_rt_i64_to_string(-100), "-100");
+    EXPECT(jet_rt_i64_to_string(1234567890123), "1234567890123");
     EXPECT(jet_rt_u64_to_string(UINT64_MAX), "18446744073709551615");
     EXPECT(jet_rt_u64_to_string(UINT64_C(1) << 63), "9223372036854775808");
     EXPECT(jet_rt_u64_to_string(0), "0");
@@ -75,6 +85,10 @@ static void scalars(void) {
     EXPECT(jet_rt_int_to_string(-INT64_C(4611686018427387904)), "-4611686018427387904");
     EXPECT(jet_rt_int_to_string(INT64_C(4611686018427387903)), "4611686018427387903");
     EXPECT(jet_rt_int_to_string(0), "0");
+    EXPECT(jet_rt_int_to_string(7), "7");
+    EXPECT(jet_rt_int_to_string(-7), "-7");
+    EXPECT(jet_rt_int_to_string(99), "99");
+    EXPECT(jet_rt_int_to_string(-99), "-99");
     // A borrowed approved base-1e9 boxed carrier. No Rust JetInt is involved.
     uint32_t limbs[] = {1, 0, 234567890, 1};
     struct { uint64_t refs, retired_next, negative; uint32_t *limbs; uint64_t len, cap; } node = {1, 0, 0, limbs, 4, 4};

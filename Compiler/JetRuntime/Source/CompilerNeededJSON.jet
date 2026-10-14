@@ -172,7 +172,9 @@ fn compiler_json_number(state: I64) -> I64 {
         at = exponent_start
         loop at < end {
             digit :: rt_text_byte(data + at) - I64{48}
-            if (exponent < limit /% I64{10}) -> return compiler_json_error(state, rt_static_text("JSON number exponent is out of range"))
+            // The smallest exponent whose *10 stays >= limit: ceil(limit / 10), i.e. the
+            // truncated quotient. `/%` floors, so divide the negated sign pair.
+            if (exponent < -(limit /% I64{-10})) -> return compiler_json_error(state, rt_static_text("JSON number exponent is out of range"))
             exponent *= I64{10}
             if exponent < limit + digit -> return compiler_json_error(state, rt_static_text("JSON number exponent is out of range"))
             exponent -= digit

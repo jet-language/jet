@@ -50,24 +50,26 @@ fn display_literal(word: I64, length: I64) -> I64 {
     text
 }
 
+// Both work in the negative domain: even i64::MIN has an exact magnitude
+// there. `%` and `/%` floor, so a nonpositive n uses the truncated `%%` digit
+// and divides by -10 before negating (-7 /% -10 is 0), as Int.jet does.
 fn display_integer_length(value: I64) -> I64 Never! {
     n := if (value > I64{0}) -> -value else -> value
     length := I64{1}
     loop n <= (I64{-10}) {
-        n = n /% I64{10}
+        n = -(n /% I64{-10})
         length += I64{1}
     }
     length
 }
 
-// Work in the negative domain: even i64::MIN has an exact magnitude here.
 fn display_integer_digits(data: I64, end: I64, value: I64, width: I64) {
     n := if (value > I64{0}) -> -value else -> value
     i := end
     loop i > end - width {
         i -= I64{1}
-        display_put(data + i, I64{48} - n % I64{10})
-        n = n /% I64{10}
+        display_put(data + i, I64{48} - n %% I64{10})
+        n = -(n /% I64{-10})
     }
 }
 

@@ -14,10 +14,6 @@ fn datetime_nanos(value: I64) -> I64 { time_glue_word(value + DATETIME_NANOS).bi
     time_glue_word(left + DATETIME_SECS) == time_glue_word(right + DATETIME_SECS) && datetime_leap(left) == datetime_leap(right) && datetime_nanos(left) == datetime_nanos(right)
 }
 #Export(c) fn jet_rt_handle_field_jet_date_time_leap_second(value: I64) -> I64 { value + DATETIME_LEAP }
-fn datetime_floor(value: I64, divisor: I64) -> I64 {
-    quotient :: value /% divisor
-    if (value %% divisor < I64{0}) -> quotient - I64{1} else -> quotient
-}
 fn datetime_saturating_add(left: I64, right: I64) -> I64 {
     if (right > I64{0} && left > I64{9223372036854775807} - right) -> return I64{9223372036854775807}
     if (right < I64{0} && left < I64{-9223372036854775808} - right) -> return I64{-9223372036854775808}
@@ -30,15 +26,15 @@ fn datetime_month_days(year: I64, month: I64) -> I64 {
 }
 fn datetime_year_start(year: I64) -> I64 {
     prior :: year - I64{1}
-    I64{365} * prior + datetime_floor(prior, I64{4}) - datetime_floor(prior, I64{100}) + datetime_floor(prior, I64{400})
+    I64{365} * prior + prior /% I64{4} - prior /% I64{100} + prior /% I64{400}
 }
 fn datetime_push_date(target: I64, seconds: I64) {
     // Time51-71's initial estimate/correction/month algorithm, unchanged
     // within a 400-year era. Gregorian leap rules repeat every 400 years
     // (146097 days); Euclidean reduction preserves negative years too and
     // bounds the seed's otherwise ~194M corrections at i64 seconds extremes.
-    number :: datetime_floor(seconds, I64{86400}) + I64{719162}
-    era :: datetime_floor(number, I64{146097})
+    number :: seconds /% I64{86400} + I64{719162}
+    era :: number /% I64{146097}
     day_number := number - era * I64{146097}
     year := day_number /% I64{365} + I64{1}
     loop {

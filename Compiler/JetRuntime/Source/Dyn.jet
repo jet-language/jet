@@ -328,11 +328,11 @@ fn data_dyn_datetime_text(value: I64) -> I64 {
     offset :: data_tree_word(value + DYN_DATETIME_OFFSET)
     remainder :: seconds %% I64{86400}
     local_remainder :: (if (remainder < I64{0}) -> remainder + I64{86400} else -> remainder) + offset
-    days :: datetime_floor(seconds, I64{86400}) + datetime_floor(local_remainder, I64{86400})
+    days :: seconds /% I64{86400} + local_remainder /% I64{86400}
     clock_remainder :: local_remainder %% I64{86400}
     clock :: if (clock_remainder < I64{0}) -> clock_remainder + I64{86400} else -> clock_remainder
     z :: days + I64{719468}
-    era :: datetime_floor(z, I64{146097})
+    era :: z /% I64{146097}
     doe :: z - era * I64{146097}
     yoe :: (doe - doe /% I64{1460} + doe /% I64{36524} - doe /% I64{146096}) /% I64{365}
     doy :: doe - (I64{365} * yoe + yoe /% I64{4} - yoe /% I64{100})

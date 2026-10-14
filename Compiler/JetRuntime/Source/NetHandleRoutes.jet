@@ -21,6 +21,12 @@ fn net_tcp_timeout_valid(milliseconds: I64, operation: I64, error: I64) -> Bool 
     _ := net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("network timeout must be non-negative")), I64{0}, error)
     false
 }
+// CommonTypes.rs Duration::as_millis truncates towards zero (-1ns is 0ms, a
+// valid timeout); `/%` floors, so drop the truncated remainder first.
+fn net_deadline_millis(deadline: I64) -> I64 {
+    nanoseconds :: host_native_int(deadline)
+    (nanoseconds - nanoseconds %% I64{1000000}) /% I64{1000000}
+}
 fn net_tcp_wait(state: I64, interest: I64, operation: I64, scratch: I64, error: I64) -> I64 {
     remaining :: if jet_ctx_deadline_present() -> jet_deadline_remaining_ms() else -> I64{-1}
     if (jet_ctx_deadline_present() && remaining <= I64{0}) -> return net_route_timeout(operation, error)
@@ -150,8 +156,8 @@ fn net_tcp_read_deadline(stream: I64, limit: I64, milliseconds: I64, output: I64
     jet_rt_free(save, I64{16}, I64{8})
     result
 }
-#Export(c) fn jet_net_tcp_read_bytes_deadline(stream: I64, limit: I64, deadline: I64, output: I64, length: I64, error: I64) -> I64 { net_tcp_read_deadline(stream, limit, host_native_int(deadline) /% I64{1000000}, output, length, false, error) }
-#Export(c) fn jet_net_tcp_read_text_deadline(stream: I64, limit: I64, deadline: I64, output: I64, error: I64) -> I64 { net_tcp_read_deadline(stream, limit, host_native_int(deadline) /% I64{1000000}, output, I64{0}, true, error) }
+#Export(c) fn jet_net_tcp_read_bytes_deadline(stream: I64, limit: I64, deadline: I64, output: I64, length: I64, error: I64) -> I64 { net_tcp_read_deadline(stream, limit, net_deadline_millis(deadline), output, length, false, error) }
+#Export(c) fn jet_net_tcp_read_text_deadline(stream: I64, limit: I64, deadline: I64, output: I64, error: I64) -> I64 { net_tcp_read_deadline(stream, limit, net_deadline_millis(deadline), output, I64{0}, true, error) }
 fn net_tcp_write_current(stream: I64, data: I64, length: I64, scratch: I64, error: I64) -> I64 {
     operation :: rt_static_text("tcp write")
     if !net_tcp_direction_open(stream, false, operation, error) -> return I64{-1}
@@ -205,8 +211,8 @@ fn net_tcp_write_deadline(stream: I64, data: I64, length: I64, milliseconds: I64
     jet_rt_free(save, I64{16}, I64{8})
     result
 }
-#Export(c) fn jet_net_tcp_write_bytes_deadline(stream: I64, data: I64, length: I64, deadline: I64, output: I64, error: I64) -> I64 { net_tcp_write_deadline(stream, data, length, host_native_int(deadline) /% I64{1000000}, false, output, error) }
-#Export(c) fn jet_net_tcp_write_all_bytes_deadline(stream: I64, data: I64, length: I64, deadline: I64, error: I64) -> I64 { net_tcp_write_deadline(stream, data, length, host_native_int(deadline) /% I64{1000000}, true, I64{0}, error) }
+#Export(c) fn jet_net_tcp_write_bytes_deadline(stream: I64, data: I64, length: I64, deadline: I64, output: I64, error: I64) -> I64 { net_tcp_write_deadline(stream, data, length, net_deadline_millis(deadline), false, output, error) }
+#Export(c) fn jet_net_tcp_write_all_bytes_deadline(stream: I64, data: I64, length: I64, deadline: I64, error: I64) -> I64 { net_tcp_write_deadline(stream, data, length, net_deadline_millis(deadline), true, I64{0}, error) }
 fn net_tcp_write_text_result(stream: I64, text: I64, explicit: Bool, milliseconds: I64, error: I64) -> I64 {
     if (explicit && jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     length :: rt_text_len(text)
@@ -223,7 +229,7 @@ fn net_tcp_write_text_result(stream: I64, text: I64, explicit: Bool, millisecond
     result
 }
 #Export(c) fn jet_net_tcp_write_text(stream: I64, text: I64, error: I64) -> I64 { net_tcp_write_text_result(stream, text, false, I64{0}, error) }
-#Export(c) fn jet_net_tcp_write_text_deadline(stream: I64, text: I64, deadline: I64, error: I64) -> I64 { net_tcp_write_text_result(stream, text, true, host_native_int(deadline) /% I64{1000000}, error) }
+#Export(c) fn jet_net_tcp_write_text_deadline(stream: I64, text: I64, deadline: I64, error: I64) -> I64 { net_tcp_write_text_result(stream, text, true, net_deadline_millis(deadline), error) }
 #Export(c) fn jet_net_tcp_write(stream: I64, text: I64, error: I64) -> I64 { jet_net_tcp_write_text(stream, text, error) }
 #Export(c) fn jet_net_tcp_shutdown(stream: I64, how: I64, error: I64) -> I64 {
     if (how < I64{0} || how > I64{2}) {
@@ -251,7 +257,7 @@ fn net_tcp_write_text_result(stream: I64, text: I64, explicit: Bool, millisecond
     I64{1}
 }
 #Export(c) fn jet_net_tcp_ready_deadline(stream: I64, interest: I64, deadline: I64, output: I64, error: I64) -> I64 {
-    milliseconds :: host_native_int(deadline) /% I64{1000000}
+    milliseconds :: net_deadline_millis(deadline)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     if (interest < I64{0} || interest > I64{2}) {
         host_record_index_refused()
@@ -274,7 +280,7 @@ fn net_tcp_write_text_result(stream: I64, text: I64, explicit: Bool, millisecond
     I64{1}
 }
 #Export(c) fn jet_net_tcp_accept_deadline(listener: I64, deadline: I64, output: I64, error: I64) -> I64 {
-    milliseconds :: host_native_int(deadline) /% I64{1000000}
+    milliseconds :: net_deadline_millis(deadline)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     if !net_tcp_timeout_valid(milliseconds, rt_static_text("tcp accept"), error) -> return I64{0}
     save :: jet_rt_alloc(I64{16}, I64{8})

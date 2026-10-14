@@ -268,7 +268,8 @@ fn compiler_url_port(value: I64, start: I64, end: I64, output: I64, err: I64) ->
         digit :: byte - I64{48}
         // Accumulate negative to admit i64::MIN just like Rust parse::<i64>.
         limit :: if negative -> I64{-9223372036854775808} else -> I64{-9223372036854775807}
-        if (n < (limit + digit) /% I64{10}) {
+        // n * 10 - digit >= limit needs n >= ceil((limit + digit) / 10); `/%` floors.
+        if (n < -((limit + digit) /% I64{-10})) {
             valid = false
             break
         }
