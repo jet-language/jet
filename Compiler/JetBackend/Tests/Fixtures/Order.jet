@@ -32,7 +32,8 @@ fn fx_order_maybe(b: &FxBuilder, ty: MIRType, value: MIRValueID?) -> MIRValueID 
 }
 
 fn fx_order_print(b: &FxBuilder, op: MIRBinaryOp, left: MIRValueID, right: MIRValueID) Never! {
-    fx_print(&b, fx_compare(&b, op, left, right))
+    compared :: fx_compare(&b, op, left, right)
+    fx_print(&b, compared)
 }
 
 // struct OrderSpan { start: Int, end: Int }
@@ -71,12 +72,16 @@ fn fx_order() -> MIRProgram Never! {
     &owned.push(e)
 
     none_a :: fx_order_maybe(&b, maybe_int, None)
-    one :: fx_order_maybe(&b, maybe_int, Val(fx_int_const(&b, 1)))
+    int_one :: fx_int_const(&b, 1)
+    one :: fx_order_maybe(&b, maybe_int, Val(int_one))
     fx_order_print(&b, MIRBinaryOp.Lt, none_a, one)
-    two :: fx_order_maybe(&b, maybe_int, Val(fx_int_const(&b, 2)))
+    int_two :: fx_int_const(&b, 2)
+    two :: fx_order_maybe(&b, maybe_int, Val(int_two))
     fx_order_print(&b, MIRBinaryOp.Lt, two, one)
-    three :: fx_order_maybe(&b, maybe_int, Val(fx_int_const(&b, 3)))
-    three_again :: fx_order_maybe(&b, maybe_int, Val(fx_int_const(&b, 3)))
+    int_three :: fx_int_const(&b, 3)
+    three :: fx_order_maybe(&b, maybe_int, Val(int_three))
+    int_three_again :: fx_int_const(&b, 3)
+    three_again :: fx_order_maybe(&b, maybe_int, Val(int_three_again))
     fx_order_print(&b, MIRBinaryOp.Ge, three, three_again)
     none_b :: fx_order_maybe(&b, maybe_int, None)
     fx_order_print(&b, MIRBinaryOp.Gt, none_a, none_b)
@@ -87,8 +92,10 @@ fn fx_order() -> MIRProgram Never! {
     &owned.push(three_again)
     &owned.push(none_b)
 
-    text_a :: fx_order_maybe(&b, maybe_text, Val(fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "a"}})))
-    text_b :: fx_order_maybe(&b, maybe_text, Val(fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "b"}})))
+    string_a :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "a"}})
+    text_a :: fx_order_maybe(&b, maybe_text, Val(string_a))
+    string_b :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "b"}})
+    text_b :: fx_order_maybe(&b, maybe_text, Val(string_b))
     fx_order_print(&b, MIRBinaryOp.Lt, text_a, text_b)
     text_none :: fx_order_maybe(&b, maybe_text, None)
     fx_order_print(&b, MIRBinaryOp.Gt, text_b, text_none)

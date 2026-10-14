@@ -183,15 +183,19 @@ fn fx_lists_place_read() -> MIRProgram Never! {
 // One `slot ?? "none"` over a String? list element: the read feeds OptionValue,
 // whose payload a Phi takes. Blocks start at `first`.
 fn fx_lists_coalesce(b: &FxBuilder, slot: MIRPlaceID, first: Int) -> MIRValueID Never! {
+    entry :: fx_word(U64{0}, first)
+    some_block :: entry + U64{1}
+    none_block :: entry + U64{2}
+    join_block :: entry + U64{3}
     optional :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_string()})
     read :: fx_owned(&b, optional, MIROperation.ReadPlace{place: slot})
     some :: fx_copy(&b, fx_bool(), MIROperation.OptionIsSome{subject: read})
-    fx_block(&b, first, MIRTerminator.Branch{condition: some, then_target: MIRBlockID{value: first + 1}, else_target: MIRBlockID{value: first + 2}})
+    fx_block(&b, entry, MIRTerminator.Branch{condition: some, then_target: MIRBlockID{value: some_block}, else_target: MIRBlockID{value: none_block}})
     payload :: fx_owned(&b, fx_string(), MIROperation.OptionValue{subject: read})
-    fx_block(&b, first + 1, MIRTerminator.Jump{target: MIRBlockID{value: first + 3}})
+    fx_block(&b, some_block, MIRTerminator.Jump{target: MIRBlockID{value: join_block}})
     fallback :: fx_owned(&b, fx_string(), MIROperation.Constant{value: .String{value: "none"}})
-    fx_block(&b, first + 2, MIRTerminator.Jump{target: MIRBlockID{value: first + 3}})
-    fx_owned(&b, fx_string(), MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: MIRBlockID{value: first + 1}, value: payload}, MIRPhiIncoming{block: MIRBlockID{value: first + 2}, value: fallback}}})
+    fx_block(&b, none_block, MIRTerminator.Jump{target: MIRBlockID{value: join_block}})
+    fx_owned(&b, fx_string(), MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: MIRBlockID{value: some_block}, value: payload}, MIRPhiIncoming{block: MIRBlockID{value: none_block}, value: fallback}}})
 }
 
 // fn run() { xs := [String?]{Val("red")}; print(xs[0] ?? "none"); print("zzz"); print(xs[0] ?? "none"); }
