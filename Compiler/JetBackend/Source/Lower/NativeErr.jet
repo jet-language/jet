@@ -109,12 +109,13 @@ fn lower_native_err_construct(p: MIRProgram, c: LowerContext, m: &LowerModule, f
     // The default Err's private memoized metadata is the runtime's own Err88
     // state (fresh: no identity, frames, conversions or details), as Rust's
     // `jet_err(message, code, cause)` ignores the declared default; the
-    // checked default value is owned here and released.
+    // checked default value is released through its own type's drop (an
+    // inline record runs its drop glue; it has no LIR drop of its own).
     loop value in fields {
         field :: lower_native_err_member(p, ty, value.field) ?? return lower_fail(&m, &f, "native Err constructor field is missing")
         if field.name == "message" || field.name == "code" || field.name == "cause" -> next
         unused :: lower_use(&m, &f, value.value) ?? return
-        lower_emit(&f, LIRInst.Drop{value: unused})
+        if lower_value_owned(c, value.value) -> lower_map_drop_value(p, &m, &f, unused, field.ty)
     }
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     box :: args[2]
@@ -135,7 +136,8 @@ fn lower_native_err_construct(p: MIRProgram, c: LowerContext, m: &LowerModule, f
     transferred :: lower_pointer(&f)
     lower_start(&f, done, [LIRValueID]{transferred})
     lower_call_runtime(&m, &f, "jet_rt_record_new_jet_err", [LIRValueID]{args[0], args[1], transferred}, Val(dst))
-    // Constructor borrows+clones text/code, whereas MIR Struct transfers them.
-    lower_emit(&f, LIRInst.Drop{value: args[0]})
-    lower_emit(&f, LIRInst.Drop{value: args[1]})
+    // Constructor borrows+clones text/code, whereas MIR Struct transfers them:
+    // an owned operand is released here, a borrowed one stays its owner's.
+    if lower_value_drop(f, args[0]) != .Trivial -> lower_emit(&f, LIRInst.Drop{value: args[0]})
+    if lower_value_drop(f, args[1]) != .Trivial -> lower_emit(&f, LIRInst.Drop{value: args[1]})
 }
