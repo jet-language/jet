@@ -5867,6 +5867,54 @@ fn sema_comptime_policy_deny_diagnostic(package_identity: String, denied: [Strin
     sema_error("E0712", span, "package `{package_identity}` reaches effects denied by `authority.holds.deny`: `{denied_names}`", "denied effects remain prohibited across every reachable call edge", "remove the denied effect or update the package authority policy")
 }
 
+// Rust `program_effects` / EffectBudget `entry_reachable_keys`
+// (D-EFFECT-AUTHORITY1): package authority judges the effects reachable from
+// the selected application entry, not every loaded declaration. A function
+// that entry never calls (a bootstrap host hook, an unused helper) is not
+// application provenance, so its row is not checked against
+// `authority.holds`. The entry is a selected Output, else the entry module's
+// `run`, else its `build(b: BuildContext)`; with none, nothing is checked.
+fn sema_authority_entry_reach(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> [String:Bool] {
+    edges := [String:[String]]{}
+    loop module_result in modules {
+        loop function in module_result.functions -> edges[function.key] = function.effects.call_edges
+    }
+    pending := sema_authority_entry_roots(graph, edges)
+    reach := [String:Bool]{}
+    loop pending.len() > 0 {
+        key :: &pending.pop() ?? break
+        if reach.get(key) != None -> next
+        callees :: edges.get(key) ?? next
+        reach[key] = true
+        loop callee in callees -> &pending.push(callee)
+    }
+    reach
+}
+
+// Rust `entry_candidates`.
+fn sema_authority_entry_roots(graph: SemaRegistrationGraph, edges: [String:[String]]) -> [String] {
+    loop module_row in graph.modules {
+        loop constant in module_row.constants {
+            output :: constant.declaration.resolved_output ?? next
+            if !output.selected -> next
+            if output.module_id < 0 || output.module_id >= graph.modules.len() -> return [String]{}
+            loop function in graph.modules[output.module_id].functions {
+                if function.declaration.name == output.semantic_name && edges.get(function.symbol.id.key) != None -> return [String]{function.symbol.id.key}
+            }
+            return [String]{}
+        }
+    }
+    entry_index :: sema_registration_module_index(graph, graph.entry_module_identity) ?? return [String]{}
+    build := [String]{}
+    loop function in graph.modules[entry_index].functions {
+        key :: function.symbol.id.key
+        if edges.get(key) == None -> next
+        if function.declaration.name == "run" -> return [String]{key}
+        if function.declaration.name == "build" && function.declaration.params.len() == 1 && function.declaration.params[0].ty == (Type.Named{name: "BuildContext"}) -> build = [String]{key}
+    }
+    build
+}
+
 fn sema_comptime_runtime_ceiling_diagnostic(package_identity: String, actual: MIRRuntimeLayer, ceiling: MIRRuntimeLayer, span: Span?) -> Diagnostic {
     actual_name := sema_comptime_layer_name(actual)
     ceiling_name := sema_comptime_layer_name(ceiling)
@@ -6429,6 +6477,7 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
         complete = false
     }
 
+    authority_reach :: sema_authority_entry_reach(final_graph, modules)
     loop module_index in 0..<modules.len() {
         module_result :: modules[module_index]
         source_index :: sema_registration_module_index(final_graph, module_result.module_identity) ?? next
@@ -6437,6 +6486,7 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
         policy :: sema_comptime_policy_for_package(stage.package_policies, module_result.package_identity) ?? next
         loop function_index in 0..<module_result.functions.len() {
             function :: module_result.functions[function_index]
+            if authority_reach.get(function.key) == None -> next
             if policy.authority_allow != None {
                 allowed :: policy.authority_allow ?? [String]{}
                 if !sema_effect_check_scope_caps("authority.holds.allow", allowed, function.effects.solved, function.source_span, &diagnostics) -> complete = false
