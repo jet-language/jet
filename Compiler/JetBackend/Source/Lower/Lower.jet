@@ -36,6 +36,7 @@ use jet_foundation.[
     MIRTestCase,
     MIRInstruction,
     MIRReflectField,
+    MIRLayout,
     MIROperation,
     MIROutputCheck,
     MIROwnership,
@@ -53,6 +54,7 @@ use jet_foundation.[
     MIRTestScopeMember,
     MIRSemanticOp,
     MIRSharedLifetime,
+    MIRSize,
     MIRStringPart,
     MIRType,
     MIRTypeDef,
@@ -228,6 +230,8 @@ struct LowerModule {
     // Type identity key -> whether the type reaches a Close owner
     // (PartialDrop.jet lower_partial_frame), once per module.
     contains_close: [String:Bool]{[String:Bool]{}}
+    // lower_repr_key -> lower_repr of that type (Lower.jet lower_repr_at), once per module.
+    repr_cache: [String:LowerRepr]{[String:LowerRepr]{}}
     // MIR source file id -> its row in program.source_files.
     source_rows: [U64:Int]
     // Shared stop classification indexes checked Prelude effects once.
@@ -845,6 +849,119 @@ fn lower_enum_is_tag(variants: [MIRVariant]) -> Bool Never! {
     true
 }
 
+// An exact key of `ty` for the module's lower_repr cache: every field of the
+// type (kind, nested types, nominal id and name, identity, layout), strings
+// length-prefixed so the encoding is a prefix code. None for the kinds it
+// does not spell out (functions, traits, measures, tags, quantities); those
+// always take lower_repr directly.
+fn lower_repr_key(ty: MIRType) -> String? Never! {
+    parts := [String]{}
+    if !lower_repr_key_into(ty, &parts) -> return None
+    Val(parts.join(""))
+}
+
+fn lower_repr_key_into(ty: MIRType, parts: &[String]) -> Bool Never! {
+    identity :: if ty.identity == .Val(id) -> "i{id.value};" else -> "n;"
+    &parts.push(identity)
+    &parts.push(lower_repr_key_layout(ty.layout))
+    if ty.kind == {
+        .Int -> &parts.push("I;")
+        .Float -> &parts.push("F;")
+        .Bool -> &parts.push("B;")
+        .String -> &parts.push("S;")
+        .Char -> &parts.push("C;")
+        .Float32 -> &parts.push("f;")
+        .IntN(signed, bits) -> &parts.push(if signed -> "s{bits};" else -> "u{bits};")
+        .List(inner) -> {
+            &parts.push("L;")
+            return lower_repr_key_into(inner, &parts)
+        }
+        .Shared(inner) -> {
+            &parts.push("H;")
+            return lower_repr_key_into(inner, &parts)
+        }
+        .Option(inner) -> {
+            &parts.push("O;")
+            return lower_repr_key_into(inner, &parts)
+        }
+        .Map(key, value) -> {
+            &parts.push("M;")
+            return lower_repr_key_into(key, &parts) && lower_repr_key_into(value, &parts)
+        }
+        .Result(ok, err) -> {
+            &parts.push("R;")
+            return lower_repr_key_into(ok, &parts) && lower_repr_key_into(err, &parts)
+        }
+        .InlineRange(base, lo, hi) -> {
+            &parts.push("G{lo},{hi};")
+            return lower_repr_key_into(base, &parts)
+        }
+        .Apply(name, args) -> {
+            &parts.push("A{name.id.value},{name.name.len()}:{name.name}{args.len()};")
+            loop arg in args {
+                if !lower_repr_key_into(arg, &parts) -> return false
+            }
+        }
+        .Tuple(fields) -> {
+            &parts.push("T{fields.len()};")
+            loop field in fields {
+                &parts.push("{field.name.len()}:{field.name}")
+                if !lower_repr_key_into(field.ty, &parts) -> return false
+            }
+        }
+        .Union(members) -> {
+            &parts.push("U{members.len()};")
+            loop member in members {
+                if !lower_repr_key_into(member, &parts) -> return false
+            }
+        }
+        else -> return false
+    }
+    true
+}
+
+fn lower_repr_key_size(size: MIRSize) -> String Never! {
+    if size == .Static(bytes) -> return "{bytes},"
+    "d,"
+}
+
+fn lower_repr_key_scalar(layout: MIRLayout) -> String Never! {
+    if layout.abi == .Scalar(kind) {
+        if kind == {
+            .Int -> return "si"
+            .Float -> return "sf"
+            .Float32 -> return "sg"
+            .Bool -> return "sb"
+            .Char -> return "sc"
+            .Pointer -> return "sp"
+        }
+    }
+    if layout.abi == {
+        .Aggregate -> "a"
+        .Sequence -> "q"
+        .Function -> "fn"
+        .Nominal -> "no"
+        .Dynamic -> "dy"
+        .Never -> "nv"
+        else -> "s?"
+    }
+}
+
+fn lower_repr_key_layout(layout: MIRLayout) -> String Never! {
+    "{lower_repr_key_scalar(layout)},{lower_repr_key_size(layout.size)}{lower_repr_key_size(layout.align)}"
+}
+
+// lower_repr through the module's cache. lower_repr is a pure function of
+// the program and the type (no other input reaches it), and the program is
+// fixed for the module, so the cached answer is the one it would compute.
+fn lower_repr_at(p: MIRProgram, m: &LowerModule, ty: MIRType) -> LowerRepr Never! {
+    key :: lower_repr_key(ty) ?? return lower_repr(p, ty)
+    if m.repr_cache.get(key) == .Val(known) -> return known
+    repr :: lower_repr(p, ty)
+    &m.repr_cache.add(key, repr.copy()).drop("checked absent above")
+    repr
+}
+
 fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
     if lower_shared_guard_repr(ty) == .Val(guard) -> return guard
     if lower_atomic_scalar(p, ty) != None -> return LowerRepr.Inline{ty: ty}
@@ -1281,7 +1398,7 @@ fn lower_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
         lower_fail(&m, &f, "MIR value {result.value} has no checked type")
         return None
     }
-    repr :: lower_repr(p, ty)
+    repr :: lower_repr_at(p, &m, ty)
     if repr == .Absent {
         lower_define_absent(&f, result)
         return None
@@ -1627,7 +1744,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
                 }
                 .Static(_) -> {}
             }
-            repr :: lower_repr(p, ty)
+            repr :: lower_repr_at(p, &m, ty)
             if repr == .Unsupported(reason) {
                 lower_fail(&m, &f, "local of {reason} is not lowered at O0 yet")
                 return None
@@ -1979,7 +2096,7 @@ fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
     if !function_entry {
         loop slot in c.live[position] {
             row :: c.slots[slot]
-            repr :: lower_repr(p, row.ty)
+            repr :: lower_repr_at(p, &m, row.ty)
             layout :: lower_repr_layout(repr) ?? next
             drop :: lower_drop(&m, repr, lower_is_owned(row.ownership))
             param :: lower_new_value(&f, layout, drop, row.ty.identity)
@@ -2794,7 +2911,7 @@ fn lower_copy(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
             }
         }
     }
-    repr :: lower_repr(p, ty)
+    repr :: lower_repr_at(p, &m, ty)
     if repr == {
         .ExactInt | .Handle(_, _) | .Boxed(_) -> { if !lower_value_owned(c, instruction.result ?? value) -> return lower_alias(c, &f, instruction, source) }
         // Dropless inline by-value copies still snapshot their bytes.

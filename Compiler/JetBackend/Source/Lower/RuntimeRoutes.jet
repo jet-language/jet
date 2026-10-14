@@ -2423,13 +2423,17 @@ LOWER_NATIVE_PROVIDER_HANDLES :: prep { [LowerRuntimeHandle]{
     LowerRuntimeHandle{jet_name: "ProcessStderrStream", runtime: "ProcessStderrStream", clone: true, display: false, show: false, debug: false, eq: false},
 } }
 
+// Rows are compared in place and only the match is copied: a `loop row in`
+// over the table copies every row (two Strings each) on every lookup.
 fn lower_runtime_handle(name: String) -> LowerRuntimeHandle? {
-    loop handle in LOWER_RUNTIME_HANDLES {
-        if handle.jet_name == name -> return Val(handle.copy())
+    rows :: LOWER_RUNTIME_HANDLES
+    loop index in 0..<rows.len() {
+        if rows[index].jet_name == name -> return Val(rows[index].copy())
     }
     // Existing Rust rows win in seed mode; absent nominals may use a provider.
-    loop handle in LOWER_NATIVE_PROVIDER_HANDLES {
-        if handle.jet_name == name -> return Val(handle.copy())
+    providers :: LOWER_NATIVE_PROVIDER_HANDLES
+    loop index in 0..<providers.len() {
+        if providers[index].jet_name == name -> return Val(providers[index].copy())
     }
     None
 }
