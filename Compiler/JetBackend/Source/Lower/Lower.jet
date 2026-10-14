@@ -3464,11 +3464,12 @@ fn lower_load_payload(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
 }
 
 // Reads the member of type `ty` at base + offset of the value `owner` (a
-// field, payload or variant payload). An owned member stored into a place or
-// aggregate or returned (lower_read_owns) out of an owner that was not moved
-// out of its place is a copy of its own: the owner (a read place, or the
-// value a `Move` passes on) still owns and drops the original (MIRRust.rs
-// place_read clones the read owner before projecting).
+// field, payload or variant payload). An owned member out of an owner that
+// was not moved out of its place is a copy of its own: the owner (a read
+// place, or the value a `Move` passes on) still owns and drops the original
+// (MIRRust.rs place_read clones the read owner before projecting). That
+// holds whether or not the member is stored: an owned `t.label` printed and
+// then dropped must not release the label `t` still holds.
 // Moving an owned member transfers its bytes before the wrapper can be
 // released. In particular an inline List header must not remain an address
 // into an Option/Result/enum box: a root write can defer reading those bytes
@@ -3478,7 +3479,8 @@ fn lower_read_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     if !lower_atomic_check_offset(p, &m, &f, ty, offset) -> return
     moved := false
     if c.fact_index.get(lower_partial_root_value(c, owner).value) == .Val(index) -> moved = c.mir.values[index].ownership.mode == MIROwnershipMode.Move
-    if !moved && lower_read_owns(p, c, m, instruction, ty) {
+    owned_result :: if instruction.result == .Val(value) -> lower_value_owned(c, value) && lower_needs_drop(p, m, ty) else -> false
+    if !moved && owned_result {
         layout :: lower_repr_layout(lower_repr(p, ty)) ?? return
         held :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
         lower_read_into(p, &f, held, base, offset, ty)

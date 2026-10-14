@@ -27,6 +27,36 @@ fn fx_values_show(b: &FxBuilder, base: MIRValueID, owner: String, name: String, 
     fx_print(&b, value)
 }
 
+// struct Named { label: String }
+// fn run() { t :: Named{label: "red".to_upper()}; print(t.label); print("zzz"); print(t.label); drop(t) }
+// MIR reads `t.label` as an Owned Field of the borrowed `t` read and the
+// lowering drops the print temp: the member must be a copy (MIRRust.rs
+// place_read clones the owner), or the print frees the label `t` holds and
+// the reused block prints "zzz" again (native tuple/struct field prints).
+// expect-stdout values-owned-field: "red\nzzz\nred\n"
+fn fx_values_owned_field() -> MIRProgram Never! {
+    types :: [MIRTypeDef]{fx_type_def("Named", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("Named", "label", fx_string())}, methods: [MIRFunctionID]{}})}
+    b := fx_builder()
+    named :: fx_named("Named")
+    root :: fx_local(&b, "t", named, mir_owned_ownership())
+    label :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "red"}})
+    built :: fx_values_struct(&b, "Named", [MIRFieldValue]{fx_values_set("Named", "label", label)})
+    fx_do(&b, MIROperation.WritePlace{place: root, value: built})
+    first_owner :: fx_owned(&b, named, MIROperation.ReadPlace{place: root})
+    first :: fx_owned(&b, fx_string(), MIROperation.Field{base: first_owner, field: mir_field_id("Named.label")})
+    fx_print(&b, first)
+    other :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "zzz"}})
+    fx_print(&b, other)
+    fx_do(&b, MIROperation.Drop{value: other, kind: MIRDropKind.Value})
+    again_owner :: fx_owned(&b, named, MIROperation.ReadPlace{place: root})
+    again :: fx_owned(&b, fx_string(), MIROperation.Field{base: again_owner, field: mir_field_id("Named.label")})
+    fx_print(&b, again)
+    done :: fx_owned(&b, named, MIROperation.MovePlace{place: root})
+    fx_do(&b, MIROperation.Drop{value: done, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, ^types)
+}
+
 // struct Flags { on: Bool, off: Bool, count: Int, label: String }
 // struct Wrap { inner: Flags, tag: Bool }
 // fn make(n: Int) -> Wrap { Wrap{inner: Flags{on: true, off: false, count: n, label: "wrapped"}, tag: true} }
