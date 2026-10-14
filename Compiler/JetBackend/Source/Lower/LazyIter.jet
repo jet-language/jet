@@ -207,26 +207,59 @@ fn lower_lazy_kind(p: MIRProgram, ty: MIRType) -> Int Never! {
     }
 }
 
+// The type-only facts of one lazy descriptor level: each is a pure function
+// of the program, the module's fixed Close index and the type.
+struct LowerLazyMetaFacts {
+    stride: Int
+    clone: Bool
+    drop: Bool
+    kind: Int
+    storage: MIRType
+}
+
+fn lower_lazy_meta_compute(p: MIRProgram, m: LowerModule, ty: MIRType) -> LowerLazyMetaFacts Never! {
+    LowerLazyMetaFacts{
+        stride: lower_list_stride(p, ty),
+        clone: lower_lazy_can_clone(p, ty, [String]{}),
+        drop: lower_needs_drop(p, m, ty),
+        kind: lower_lazy_kind(p, ty),
+        storage: lower_lazy_storage_type(p, ty),
+    }
+}
+
+// Once per type per module (LowerModule.lazy_meta_facts, keyed exactly by
+// lower_repr_key): every Shared.new / lazy Iter site of the same element type
+// reuses the walk (type definitions, runtime handles, reprs) instead of
+// repeating it per instruction.
+fn lower_lazy_meta_facts(p: MIRProgram, m: &LowerModule, ty: MIRType) -> LowerLazyMetaFacts Never! {
+    key :: lower_repr_key(ty) ?? return lower_lazy_meta_compute(p, m, ty)
+    if m.lazy_meta_facts.get(key) == .Val(known) -> return known
+    facts :: lower_lazy_meta_compute(p, m, ty)
+    &m.lazy_meta_facts.add(key, facts.copy()).drop("checked absent above")
+    facts
+}
+
 // Nine words: stride, clone, drop, show, eq, cmp, kind, child0, child1.
 // Runtime copies the descriptor tree before the lowering frame goes away.
 // Fixed kind 2/3 carries its bit width in the high 32 bits; kind 11 records
 // zero physical payload size even though collection stride is at least 8.
 fn lower_lazy_meta(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType) -> LIRValueID Never! {
+    facts :: lower_lazy_meta_facts(p, &m, ty)
     descriptor :: lower_pointer(&f)
     lower_emit(&f, LIRInst.StackSlot{dst: descriptor, size: 72, align: 8})
     zero :: lower_const(&f, 0)
-    lower_store_word(&f, descriptor, 0, lower_list_stride(p, ty))
-    clone :: if lower_lazy_can_clone(p, ty, [String]{}) -> lower_lazy_helper_address(&m, &f, "lazy.clone", ty) else -> zero
-    drop :: if lower_needs_drop(p, m, ty) -> lower_lazy_helper_address(&m, &f, "lazy.drop", ty) else -> zero
+    lower_store_word(&f, descriptor, 0, facts.stride)
+    clone :: if facts.clone -> lower_lazy_helper_address(&m, &f, "lazy.clone", ty) else -> zero
+    drop :: if facts.drop -> lower_lazy_helper_address(&m, &f, "lazy.drop", ty) else -> zero
     lower_emit(&f, LIRInst.Store{base: descriptor, offset: 8, value: clone})
     lower_emit(&f, LIRInst.Store{base: descriptor, offset: 16, value: drop})
     lower_emit(&f, LIRInst.Store{base: descriptor, offset: 24, value: zero})
     lower_emit(&f, LIRInst.Store{base: descriptor, offset: 32, value: zero})
     lower_emit(&f, LIRInst.Store{base: descriptor, offset: 40, value: zero})
-    lower_store_word(&f, descriptor, 48, lower_lazy_kind(p, ty))
+    lower_store_word(&f, descriptor, 48, facts.kind)
     lower_emit(&f, LIRInst.Store{base: descriptor, offset: 56, value: zero})
     lower_emit(&f, LIRInst.Store{base: descriptor, offset: 64, value: zero})
-    storage :: lower_lazy_storage_type(p, ty)
+    storage :: facts.storage
     if storage.kind == {
         .List(inner) | .Option(inner) -> {
             child :: lower_lazy_meta(p, &m, &f, inner)
