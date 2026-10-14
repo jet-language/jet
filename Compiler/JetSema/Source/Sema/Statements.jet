@@ -4396,6 +4396,18 @@ fn sema_stmt_compound_nested_hook(op: BinOp, base: Expr, field_ty: Type, environ
 }
 
 fn sema_stmt_check_assignment(target: LValue, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
+    diagnostics_before :: diagnostics.len()
+    reasons_before :: context.incomplete_reasons.len()
+    checked := sema_stmt_check_assignment_target(target, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    // Collect-all: an assignment that checks to nothing names its step when
+    // no error report or recorded reason already explains it.
+    if checked == None && !sema_has_error_since(diagnostics, diagnostics_before) && context.incomplete_reasons.len() == reasons_before {
+        sema_check_unsupported(&context, "the assignment at offset {op_span.start} (value at offset {expr_span(expr).start}) checked to no statement without a report")
+    }
+    checked
+}
+
+fn sema_stmt_check_assignment_target(target: LValue, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     if sema_ownership_report_lending_view_escape(expr, "replace another value", scopes, context, &diagnostics) -> return None
     if target == {
         .Local(name, name_span) -> sema_stmt_check_local_assignment(name, name_span, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
