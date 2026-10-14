@@ -2205,6 +2205,9 @@ fn sema_stmt_is_bare_range_place(expr: Expr, scopes: SemaScopeTable, state: &Sem
 
 fn sema_stmt_record_binding_views(binding: Binding, init_ty: Type, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if sema_pin_record_binding(&state, binding, init_ty, scopes) -> return true
+    // `_ :: view_call(..)` discards the value at once: no local holds the
+    // view, so there is no loan to record (and no binding to carry it).
+    if binding.name == "_" -> return true
     call_facts := sema_stmt_call_return_views_for_expr(binding.init, context)
     if sema_stmt_has_struct_view_source(binding.init) {
         loop fact in sema_stmt_local_view_facts_for_expr(binding.init, scopes, &state, context) -> &call_facts.push(fact)
