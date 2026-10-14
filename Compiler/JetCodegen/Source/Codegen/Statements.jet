@@ -2301,16 +2301,26 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, program: JetCodegenP
                     // borrow reads the place itself. A range borrow's write
                     // window over a list or a declared `ViewMut<T>` is the
                     // range place (Rust: the ViewMutNew arm,
-                    // write_window_receiver); any other range borrow, read
-                    // ones included, binds its View value's temporary place,
-                    // which the binding never drops.
+                    // write_window_receiver). Any other range borrow is the
+                    // `View<T>` value it lends (Rust lowers it as ViewNew,
+                    // not a borrow of a slice copy): the binding aliases a
+                    // temporary place of that View, typed as the binding
+                    // reads it and never dropped by the binding.
                     // Rust: tir_to_mir_stmt.rs lower_stmt TStmt::Let alias_place
                     alias_place := MIRPlaceID?{None}
                     write_alias := false
                     if init.kind == .Borrow(borrowed, access) {
                         write_alias = access == AccessConvention.Write
                         borrowed_access :: if write_alias -> MIRAccess.Write else -> MIRAccess.Read
-                        alias_place = Val(jet_codegen_lower_place_for_access(&builder, program, TPlace.Expr{value: borrowed}, borrowed_access))
+                        if borrowed.kind == .Slice(_, _, _, _, _) {
+                            if write_alias -> alias_place = jet_codegen_lower_expression_place(&builder, program, borrowed, MIRAccess.Write)
+                            if alias_place == None {
+                                view := jet_codegen_lower_expr(&builder, program, init)
+                                alias_place = Val(jet_codegen_temporary_place(&builder, program, view, init.ty, span, borrowed_access))
+                            }
+                        } else {
+                            alias_place = Val(jet_codegen_lower_place_for_access(&builder, program, TPlace.Expr{value: borrowed}, borrowed_access))
+                        }
                     }
                     if alias_place == .Val(window) {
                         alias_ty :: if let_ty == {
