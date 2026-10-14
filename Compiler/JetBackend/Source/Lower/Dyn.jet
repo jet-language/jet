@@ -330,7 +330,8 @@ fn lower_dyn_len(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
         if name == "Text" {
             lower_call_runtime(&m, &f, "jet_char_len", [LIRValueID]{value}, Val(length))
         } else {
-            lower_emit(&f, LIRInst.Move{dst: length, src: lower_list_word(&f, value, 0)})
+            count :: lower_list_word(&f, value, 0)
+            lower_emit(&f, LIRInst.Move{dst: length, src: count})
         }
         lower_seal(&f, LIRTerminator.Jump{target: lower_target(counted, [LIRValueID]{length})})
         lower_start(&f, other, [LIRValueID]{})
@@ -360,7 +361,8 @@ fn lower_dyn_len(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
     lower_start(&f, counted, [LIRValueID]{raw})
     success :: lower_pointer(&f)
     lower_alloc(&m, &f, success, lower_box_size(p, result_ty))
-    lower_emit(&f, LIRInst.Store{base: success, offset: 0, value: lower_const(&f, lower_result_selector(true))})
+    ok_tag :: lower_const(&f, lower_result_selector(true))
+    lower_emit(&f, LIRInst.Store{base: success, offset: 0, value: ok_tag})
     exact :: lower_word(&f)
     lower_convert_exact(&m, &f, exact, raw, "jet_int_owned_from_i64", false)
     lower_write_at(p, &f, success, lower_result_payload_offset(), exact, ok_ty)
@@ -370,7 +372,8 @@ fn lower_dyn_len(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
     lower_start(&f, refused, [LIRValueID]{detail_data, detail_length})
     failure :: lower_pointer(&f)
     lower_alloc(&m, &f, failure, lower_box_size(p, result_ty))
-    lower_emit(&f, LIRInst.Store{base: failure, offset: 0, value: lower_const(&f, lower_result_selector(false))})
+    err_tag :: lower_const(&f, lower_result_selector(false))
+    lower_emit(&f, LIRInst.Store{base: failure, offset: 0, value: err_tag})
     message :: lower_pointer(&f)
     lower_call_runtime(&m, &f, "jet_rt_dyn_stop_message", [LIRValueID]{site, detail_data, detail_length}, Val(message))
     lower_write_at(p, &f, failure, lower_result_payload_offset(), message, err_ty)
