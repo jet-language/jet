@@ -1581,6 +1581,18 @@ fn lower_adopt(f: &LowerFunction, dst: LIRValueID, carried: LIRValueID) Never! {
     lower_start(&f, adopted, [LIRValueID]{dst})
 }
 
+// Ends the LIR ownership of `value` without running its drop glue, after the
+// caller has already released its parts by hand (a Close that consumed the
+// owner, a partial drop that freed the remaining fields): Rust's
+// `mem::forget` of a value whose fields were moved out. The value moves into
+// a trivial block parameter of its own layout (lower_adopt); a Reown may only
+// produce a new owning pointer, never discard an obligation.
+fn lower_forget(f: &LowerFunction, value: LIRValueID, identity: MIRTypeID?) Never! {
+    if lower_value_drop(f, value) == .Trivial -> return
+    forgotten :: lower_new_value(&f, lower_value_layout(f, value), LIRDrop.Trivial, identity)
+    lower_adopt(&f, forgotten, value)
+}
+
 fn lower_checked_type(c: LowerContext, instruction: MIRInstruction) -> MIRType? {
     result :: instruction.result ?? return None
     if instruction.ty == .Val(ty) -> return Val(ty)

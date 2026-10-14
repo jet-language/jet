@@ -511,10 +511,7 @@ fn lower_close_value_drop(p: MIRProgram, m: &LowerModule, f: &LowerFunction, val
     }
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
     lower_start(&f, done, [LIRValueID]{})
-    if consume && lower_value_drop(f, value) != .Trivial {
-        released :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Trivial, ty.identity)
-        lower_emit(&f, LIRInst.Reown{dst: released, src: value})
-    }
+    if consume -> lower_forget(&f, value, ty.identity)
 }
 
 // A Distinct owns its transparent base as a member; it does not inherit the

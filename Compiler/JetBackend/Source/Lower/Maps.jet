@@ -227,11 +227,7 @@ fn lower_map_drop_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, value
         } else {
             lower_close_emit(p, &m, &f, value, ty, method)
         }
-        if lower_value_drop(f, value) != .Trivial {
-            consumed_layout :: lower_value_layout(f, value)
-            consumed :: lower_new_value(&f, consumed_layout, LIRDrop.Trivial, ty.identity)
-            lower_emit(&f, LIRInst.Reown{dst: consumed, src: value})
-        }
+        lower_forget(&f, value, ty.identity)
         return
     }
     if repr == .Inline(_) -> return lower_inline_drop(p, &m, &f, value, ty)

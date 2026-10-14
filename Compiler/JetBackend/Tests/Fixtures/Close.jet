@@ -188,7 +188,11 @@ fn fx_close_escape_checks() -> Bool Never! {
 // replacement of the local. The replacement's partial drop of Option<Secret>
 // (lower_partial_drop_node) left an unbranched skip block for its unselected
 // shape, so the LIR lint failed "block bN is unreachable" and the function
-// lowered as a trap. Both arms close each Secret exactly once.
+// lowered as a trap. The same two drops also produced a null check comparing
+// the Option<Secret> pointer with a word constant, and a Reown of the
+// partially released owner into a non-owning value (both LIR lint errors);
+// lowering through fx_report lints the whole function, so all three stay
+// covered. Both arms close each Secret exactly once.
 // expect-stdout close-option-replace: "30\n31\n"
 fn fx_close_option_replace() -> MIRProgram Never! {
     p := fx_close_generic()

@@ -293,7 +293,10 @@ fn lower_partial_drop_node(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ba
             lower_emit(&f, LIRInst.Drop{value: owned})
         }
     } else {
-        zero :: lower_const(&f, 0)
+        // Absence is the null carrier of `base`'s own layout: a boxed or
+        // inline owner is a pointer, and LIR compares pointers only to pointers.
+        zero :: lower_new_value(&f, lower_value_layout(f, base), LIRDrop.Trivial, None)
+        lower_emit(&f, LIRInst.Const{dst: zero, value: 0})
         absent :: lower_flag(&f)
         lower_emit(&f, LIRInst.Compare{dst: absent, condition: .Eq, left: base, right: zero})
         body :: lower_new_block(&f)
@@ -386,12 +389,9 @@ fn lower_partial_drop_owned(p: MIRProgram, m: &LowerModule, f: &LowerFunction, o
     lower_start(&f, partial, [LIRValueID]{})
     if receiver -> lower_close_forget(&f)
     lower_partial_drop_node(p, &m, &f, lowered, ty, rows, prefix.len())
-    if consume && lower_value_drop(f, lowered) != .Trivial {
-        // The inlined drop-rest already released this box. Consume its LIR
-        // ownership without running the ordinary glue a second time.
-        released :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Trivial, ty.identity)
-        lower_emit(&f, LIRInst.Reown{dst: released, src: lowered})
-    }
+    // The inlined drop-rest already released this owner's parts; end its LIR
+    // ownership without running the ordinary glue a second time.
+    if consume -> lower_forget(&f, lowered, ty.identity)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
     lower_start(&f, done, [LIRValueID]{})
     true
