@@ -329,10 +329,22 @@ fn lower_task_spawn(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 
 // `task.group` builds its owning group with `JetTaskGroup.new()` or
 // `.with_limit(limit)`; the group crosses as the runtime JetTaskGroup handle
-// (RuntimeRoutes.jet `Group`), whose drop joins every child.
+// (RuntimeRoutes.jet `Group`), whose drop joins every child. The scope's
+// deferred `JetTaskGroup.close(&group)` (Statements.jet task group) joins them
+// at the scope exit through the borrowed handle, as MathTaskMem.rs close.
 fn lower_task_group_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
     row :: lower_prelude_row(p, call) ?? return false
     symbol :: mir_symbol_name(row.symbol)
+    if symbol == "jet_std::JetTaskGroup::close" {
+        if args.len() != 1 || args[0].access == .Write {
+            lower_fail(&m, &f, "JetTaskGroup.close requires one borrowed group")
+            return true
+        }
+        group :: lower_use(&m, &f, args[0].value) ?? return true
+        lower_call_runtime(&m, &f, "jet_rt_native_task_group_close", [LIRValueID]{group}, None)
+        lower_alias_absent(&f, instruction)
+        return true
+    }
     limited :: symbol == "jet_std::JetTaskGroup::with_limit"
     if symbol != "jet_std::JetTaskGroup::new" && !limited -> return false
     if args.len() != (if limited -> 1 else -> 0) {

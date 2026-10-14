@@ -141,6 +141,10 @@ fn task_group_close(group: I64) {
         jet_rt_free(data, capacity * I64{8}, I64{8})
     }
 }
+// MathTaskMem.rs JetTaskGroup::close(&self): any handle (owner or clone)
+// closes the shared group and joins every registered child, cancelling them
+// first under a pending deadline. Repeated closes (the owner's drop) no-op.
+#Export(c) fn jet_rt_native_task_group_close(handle: I64) { task_group_close(sync_load(handle)) }
 #Export(c) fn jet_rt_handle_clone_jet_task_group(handle: I64) -> I64 {
     state :: sync_load(handle)
     task_group_retain(state)
