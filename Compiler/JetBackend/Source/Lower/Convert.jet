@@ -59,7 +59,10 @@ fn lower_fixed_literal_conversion(p: MIRProgram, conversion: MIRConversion) -> B
 fn lower_exact_constant_value(constant: MIRConstant) -> Int? Never! {
     if constant == {
         .Int(number, _, _) -> Val(number)
-        .BigInt(decimal) -> Int.parse(decimal)
+        .BigInt(decimal) -> {
+            value :: Int.parse(decimal) ?? return None
+            Val(value)
+        }
         else -> None
     }
 }
