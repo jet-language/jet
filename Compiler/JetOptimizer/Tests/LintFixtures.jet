@@ -665,14 +665,20 @@ fn lf_crossing(ty: MIRType) -> MIRProgram Never! {
 }
 
 // send.boundary (E1102, tests/ui/unsendable_send.jet): `sender.send(value)`.
-fn lf_channel_send(ty: MIRType) -> MIRProgram Never! {
+// The route row carries the checked codegen borrow mask (HandleMethods.jet
+// SenderSend: receiver borrowed, value consumed). `receiver_borrowed: false`
+// routes the same send through a receiver-consuming row, so the borrowed
+// Sender parameter is consumed without an owner (ownership.move).
+fn lf_channel_send(ty: MIRType, receiver_borrowed: Bool) -> MIRProgram Never! {
     r := fx_builder()
     sender :: fx_param(&r, "sender", lf_generic("Sender", ty), mir_ownership_from_access(MIRAccess.Read))
     value :: fx_param(&r, "value", ty, mir_ownership_from_access(MIRAccess.Read))
     fx_do(&r, MIROperation.Semantic{operation: MIRSemanticOp.HandleMethod{call: fx_prelude_id("core.channels", "sender.send"), receiver: sender, args: [MIRValueID]{value}, frame_schedule: None, frame_schedule_derivation: None}})
     fx_block(&r, 0, MIRTerminator.Return{value: None})
     program := lf_single(r)
-    &program.prelude_calls.push(fx_prelude(MIRPreludeFamily.HandleMethod, "core.channels", "sender.send", "jet_channel_send", 2, MIRPreludeABI.Effect))
+    route := fx_prelude(MIRPreludeFamily.HandleMethod, "core.channels", "sender.send", "jet_channel_send", 2, MIRPreludeABI.Effect)
+    route.signature.borrow_mask = [Bool]{receiver_borrowed, false}
+    &program.prelude_calls.push(route)
     program
 }
 
@@ -945,8 +951,9 @@ fn run() {
         lf_expect("send.boundary Int crossing", lf_crossing(fx_int()), None),
         lf_expect("send.boundary Cell crossing (E1102 local_cell_crossing)", lf_crossing(lf_generic("Cell", fx_int())), Val(MIRLintRule.SendBoundary)),
         lf_expect("send.boundary view crossing (E1102 string_view_task_capture)", lf_crossing(lf_generic("View", fx_string())), Val(MIRLintRule.SendBoundary)),
-        lf_expect("send.boundary channel send clean", lf_channel_send(fx_int()), None),
-        lf_expect("send.boundary channel send planted (E1102 unsendable_send)", lf_channel_send(lf_fn()), Val(MIRLintRule.SendBoundary)),
+        lf_expect("send.boundary channel send clean", lf_channel_send(fx_int(), true), None),
+        lf_expect("send.boundary channel send planted (E1102 unsendable_send)", lf_channel_send(lf_fn(), true), Val(MIRLintRule.SendBoundary)),
+        lf_expect("ownership.move channel send consumes a borrowed Sender", lf_channel_send(fx_int(), false), Val(MIRLintRule.OwnershipMove)),
         lf_expect("ownership.move consume clean", lf_consume_reuse(false), None),
         lf_expect("ownership.move consume planted (E0121 ownership_call_consume_provenance)", lf_consume_reuse(true), Val(MIRLintRule.OwnershipMove)),
         lf_expect("view.valid branch join clean", lf_view_join(false, false, 0), None),
