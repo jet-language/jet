@@ -1932,9 +1932,14 @@ fn source_field_name(owner: &str, host_field: &str) -> String {
     }
 }
 
-/// A Source field whose native value another field's conversion carries.
+/// A Source field whose native value another field's conversion carries, or a
+/// consumer-built Source-only cache that native MIR never stores (MIRProgram's
+/// type index: empty by default, rebuilt by the lowering that needs it).
 fn source_field_is_host_derived(owner: &str, field: &str) -> bool {
-    matches!((owner, field), ("MIRFunction", "memo_unbounded"))
+    matches!(
+        (owner, field),
+        ("MIRFunction", "memo_unbounded") | ("MIRProgram", "type_id_rows") | ("MIRProgram", "type_key_rows")
+    )
 }
 
 /// Native fields that no single Source field maps onto: a fact the native
@@ -1974,6 +1979,11 @@ fn custom_struct_field_from_host(owner: &str, source_field: &str) -> Option<Stri
             "match &value.memo_bound { Some(Some(__bound)) => Ok(jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_str(&__bound.to_string())?)), _ => Err(jet_foundation::Outcome::JetAbsent) }".to_string(),
         ),
         ("MIRFunction", "memo_unbounded") => Some("matches!(value.memo_bound, Some(None))".to_string()),
+        // The consumer-built type index is never carried natively; it comes back
+        // empty. JetMap has no Default, but collects from its own pairs.
+        ("MIRProgram", "type_id_rows") | ("MIRProgram", "type_key_rows") => {
+            Some("::std::iter::empty().collect()".to_string())
+        }
         _ => None,
     }
 }
