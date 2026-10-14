@@ -302,7 +302,8 @@ struct LowerContext {
     sunk: [U64:Bool]
     // MIR value a `Move` defines -> the value it moves.
     moves: [U64:U64]
-    // Exact Int constant -> its sized-literal word (Convert.jet lower_fixed_literals).
+    // Compile-time exact Int value (constant or its negation) -> its
+    // sized-literal word, emitting no code (Convert.jet lower_fixed_literals).
     fixed_literals: [U64:Int]
     order: [Int]
     lir_blocks: [LIRBlockID]
@@ -3752,6 +3753,9 @@ fn lower_float_binary(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: M
 }
 
 fn lower_unary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, op: MIRUnaryOp, value: MIRValueID) Never! {
+    if instruction.result == .Val(result) {
+        if c.fixed_literals.get(result.value) != None -> return lower_alias_absent(&f, instruction)
+    }
     operand :: lower_use(&m, &f, value) ?? return
     ty :: lower_value_type(c, value) ?? return lower_fail(&m, &f, "operand {value.value} has no checked type")
     dst :: lower_result(p, c, &m, &f, instruction) ?? return lower_fail(&m, &f, "unary operator has no result")

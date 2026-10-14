@@ -13,6 +13,7 @@ use jet_foundation.[
     MIRPreludeCallID,
     MIRProgram,
     MIRType,
+    MIRUnaryOp,
     MIRValueID,
     mir_operation_value_uses,
     mir_terminator_value_uses,
@@ -35,15 +36,9 @@ fn lower_convert_type(ty: MIRType) -> MIRType Never! {
 // runs. That is also what keeps the runtime's own Int kernels, written with
 // sized literals, from calling themselves. A constant outside the target's
 // range keeps the runtime conversion and its stop.
-fn lower_fixed_literal_word(constant: MIRConstant, target: MIRType) -> Int? Never! {
+fn lower_fixed_literal_word(value: Int, target: MIRType) -> Int? Never! {
     if lower_convert_type(target).kind == .IntN(signed, bits) {
         if bits > 64 -> return None
-        value := 0
-        if constant == {
-            .Int(number, _, _) -> value = number
-            .BigInt(decimal) -> value = Int.parse(decimal) ?? return None
-            else -> return None
-        }
         lowest :: if signed -> 0 - (1 << (bits - 1)) else -> 0
         highest :: if signed -> (1 << (bits - 1)) - 1 else -> (1 << bits) - 1
         if value < lowest || value > highest -> return None
@@ -61,28 +56,68 @@ fn lower_fixed_literal_conversion(p: MIRProgram, conversion: MIRConversion) -> B
     false
 }
 
-// MIR exact Int constant -> its fixed word, for the constants whose every
-// use is a sized-literal conversion that fits (lower_fixed_literal_word).
-// Those constants lower to nothing and their conversions to the word.
-// An exact Int constant nothing uses at all (codegen folds `I64{-2^62}` to a
-// negative constant and leaves the operand `2^62` behind) also lowers to
-// nothing: beyond the inline range it would otherwise build a runtime big
-// integer, which inside the runtime's own Int kernels never returns.
-fn lower_fixed_literals(p: MIRProgram, function: MIRFunction) -> [U64:Int] Never! {
-    constants := [U64:MIRConstant]{}
+fn lower_exact_constant_value(constant: MIRConstant) -> Int? Never! {
+    if constant == {
+        .Int(number, _, _) -> Val(number)
+        .BigInt(decimal) -> Int.parse(decimal)
+        else -> None
+    }
+}
+
+// Exact Int values known at compile time: Int / BigInt constants, and
+// negations of such values (`I64{-n}` may reach MIR as Neg(n)).
+fn lower_exact_constants(function: MIRFunction) -> [U64:Int] Never! {
+    values := [U64:Int]{}
     loop block in function.blocks {
         loop instruction in block.instructions {
             if instruction.operation == .Constant(constant) {
                 result :: instruction.result ?? next
                 ty :: instruction.ty ?? next
-                if lower_is_exact_int(ty) -> _ := &constants.add(result.value, constant)
+                if !lower_is_exact_int(ty) -> next
+                if lower_exact_constant_value(constant) == .Val(number) -> _ := &values.add(result.value, number)
             }
         }
     }
+    if values.len() == 0 -> return values
+    // Negations in any block order: repeat until no new value is known.
+    changed := true
+    loop changed {
+        changed = false
+        loop block in function.blocks {
+            loop instruction in block.instructions {
+                if instruction.operation == .Unary(op, source) {
+                    if op != MIRUnaryOp.Neg -> next
+                    result :: instruction.result ?? next
+                    if values.get(result.value) != None -> next
+                    ty :: instruction.ty ?? next
+                    if !lower_is_exact_int(ty) -> next
+                    number :: values.get(source.value) ?? next
+                    _ := &values.add(result.value, 0 - number)
+                    changed = true
+                }
+            }
+        }
+    }
+    values
+}
+
+// MIR value -> its fixed word, for the compile-time exact Int values
+// (lower_exact_constants) whose every use folds: an infallible sized-literal
+// conversion that fits (lower_fixed_literal_word), or a negation that itself
+// folds. Those values lower to nothing (their Constant or Neg emits no code)
+// and their conversions to the word, so a sized literal never calls the Int
+// runtime. A known value nothing uses (codegen folds `I64{-2^62}` and leaves
+// the operand `2^62` behind) also lowers to nothing: beyond the inline range
+// it would otherwise build a runtime big integer for no reader, which inside
+// the runtime's own Int kernels never returns. A value with any other use
+// keeps its ordinary lowering.
+fn lower_fixed_literals(p: MIRProgram, function: MIRFunction) -> [U64:Int] Never! {
+    known :: lower_exact_constants(function)
     words := [U64:Int]{}
-    if constants.len() == 0 -> return words
+    if known.len() == 0 -> return words
     blocked := [U64:Bool]{}
-    used_any := [U64:Bool]{}
+    // Source value -> the negations it defines.
+    derived := [U64:[U64]]{}
     loop place in function.places {
         if place.base == {
             .Parameter(value) | .Temporary(value) | .Capture(value) -> _ := &blocked.add(value.value, true)
@@ -103,33 +138,59 @@ fn lower_fixed_literals(p: MIRProgram, function: MIRFunction) -> [U64:Int] Never
     loop block in function.blocks {
         loop used in mir_terminator_value_uses(block.terminator) -> _ := &blocked.add(used.value, true)
         loop instruction in block.instructions {
-            folds := false
-            folded := U64{0}
+            folded := U64?{None}
             if instruction.operation == .Convert(value, _, target, conversion) {
-                if constants.get(value.value) == .Val(constant) {
+                if known.get(value.value) == .Val(number) {
                     if lower_fixed_literal_conversion(p, conversion) {
-                        if lower_fixed_literal_word(constant, target) == .Val(word) {
-                            _ := &words.add(value.value, word)
-                            folds = true
-                            folded = value.value
+                        if lower_fixed_literal_word(number, target) == .Val(word) {
+                            // Two conversions to different words keep the runtime path.
+                            if (words.get(value.value) ?? word) == word {
+                                _ := &words.add(value.value, word)
+                                folded = Val(value.value)
+                            }
                         }
                     }
                 }
             }
+            if instruction.operation == .Unary(op, source) {
+                if instruction.result == .Val(result) {
+                    if op == MIRUnaryOp.Neg && known.get(result.value) != None && known.get(source.value) != None {
+                        children := derived.get(source.value) ?? [U64]{}
+                        &children.push(result.value)
+                        _ := &derived.add(source.value, children)
+                        folded = Val(source.value)
+                    }
+                }
+            }
             loop used in mir_operation_value_uses(instruction.operation) {
-                _ := &used_any.add(used.value, true)
-                if folds && used.value == folded -> next
+                if folded == .Val(skip) {
+                    if used.value == skip -> next
+                }
                 _ := &blocked.add(used.value, true)
             }
         }
     }
-    kept := [U64:Int]{}
-    loop (value, word) in words {
-        if blocked.get(value) == None -> _ := &kept.add(value, word)
+    // A value whose negation keeps its lowering must exist for that Neg.
+    changed := true
+    loop changed {
+        changed = false
+        loop (source, children) in derived {
+            if blocked.get(source) != None -> next
+            loop child in children {
+                if blocked.get(child) != None {
+                    _ := &blocked.add(source, true)
+                    changed = true
+                    break
+                }
+            }
+        }
     }
-    // Unused constants: never read, so their word is never consulted.
-    loop (value, _) in constants {
-        if used_any.get(value) == None && blocked.get(value) == None && kept.get(value) == None -> _ := &kept.add(value, 0)
+    kept := [U64:Int]{}
+    loop (value, _) in known {
+        if blocked.get(value) != None -> next
+        // Never read as a word (only negated or unused) when it has no
+        // folding conversion of its own.
+        _ := &kept.add(value, words.get(value) ?? 0)
     }
     kept
 }

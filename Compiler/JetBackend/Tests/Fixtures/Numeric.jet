@@ -154,10 +154,25 @@ fn fx_sized_literal(b: &FxBuilder, signed: Bool, bits: Int, constant: MIRConstan
     }})
 }
 
-// `I64{-4611686018427387904}` (Int.jet int_inline) reaches MIR as the folded
-// negative constant plus a leftover, unused `4611686018427387904` constant
-// beyond the inline range; the leftover must build nothing.
-// expect-stdout sized-literals: "5\n-9223372036854775808\n9223372036854775807\n18446744073709551615\n9223372036854775808\n255\n-128\n-32768\n4294967295\n2147483647\n0\n-4611686018427387904\n"
+// `I64{-n}` as MIR may spell it: Neg of the exact constant `n`, then the
+// sized-literal conversion.
+fn fx_sized_negated(b: &FxBuilder, signed: Bool, bits: Int, constant: MIRConstant) -> MIRValueID Never! {
+    number :: fx_copy(&b, fx_int(), MIROperation.Constant{value: constant})
+    negated :: fx_copy(&b, fx_int(), MIROperation.Unary{op: MIRUnaryOp.Neg, value: number})
+    kind :: fx_int_const(&b, 0)
+    target :: fx_narrow(signed, bits)
+    fx_copy(&b, target, MIROperation.Convert{value: negated, parameters: [MIRValueID]{kind}, target: target, conversion: MIRConversion.Prelude{
+        call: fx_prelude_id("core.numeric", "int_checked_fixed"),
+        location: MIRPanicLoc{file: fx_source_file(), line: 1, column: 1},
+        fallibility: MIRCallFallibility.Infallible,
+    }})
+}
+
+// Every width at its bounds, U64 above I64::MAX, I64 MIN, and both shapes of
+// Int.jet int_inline's `value >= I64{-4611686018427387904}`: the folded
+// negative constant plus a leftover unused `2^62`, and Neg(2^62). Neither
+// may build an exact Int (2^62 is beyond the inline range).
+// expect-stdout sized-literals: "5\n-9223372036854775808\n9223372036854775807\n18446744073709551615\n9223372036854775808\n255\n-128\n-32768\n4294967295\n2147483647\n0\n-4611686018427387904\n-4611686018427387904\n-9223372036854775808\n-7\ntrue\nfalse\n"
 fn fx_sized_literals() -> MIRProgram Never! {
     b := fx_builder()
     rows :: [(signed: Bool, bits: Int, constant: MIRConstant)]{
@@ -178,8 +193,21 @@ fn fx_sized_literals() -> MIRProgram Never! {
         fx_print(&b, value)
     }
     _ := fx_int_const(&b, 4611686018427387904)
-    negative :: fx_sized_literal(&b, true, 64, mir_integer_constant(-4611686018427387904, None, None))
-    fx_print(&b, negative)
+    folded :: fx_sized_literal(&b, true, 64, mir_integer_constant(-4611686018427387904, None, None))
+    fx_print(&b, folded)
+    lowest :: fx_sized_negated(&b, true, 64, mir_integer_constant(4611686018427387904, None, None))
+    fx_print(&b, lowest)
+    minimum :: fx_sized_negated(&b, true, 64, MIRConstant.BigInt{decimal: "9223372036854775808"})
+    fx_print(&b, minimum)
+    minus_seven :: fx_sized_negated(&b, true, 8, mir_integer_constant(7, None, None))
+    fx_print(&b, minus_seven)
+    // int_inline: `value >= I64{-2^62}` for an inline and a non-inline word.
+    loop word in ([Int]{5, -4611686018427387905}) {
+        value :: fx_i64_const(&b, word)
+        bound :: fx_sized_negated(&b, true, 64, mir_integer_constant(4611686018427387904, None, None))
+        inline :: fx_compare(&b, MIRBinaryOp.Ge, value, bound)
+        fx_print(&b, inline)
+    }
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
     &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "core.numeric", "int_checked_fixed", "jet_std::jet_int_checked_fixed", 4, MIRPreludeABI.Value))
