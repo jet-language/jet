@@ -200,6 +200,7 @@ use jet_foundation.[
     type_identity_key,
     type_is_unit_callable_return,
     type_union_member_tag_name,
+    type_unqualified_name,
 ]
 use jet_sema.[
     SemaCheckedForeignFunction,
@@ -2761,30 +2762,28 @@ fn jet_codegen_collect_unions_from_function(function: MIRFunction, unions: &JetC
     }
 }
 
+// Rust `AST::union_member_tag` over the member's source spelling, which is
+// what every use site tags (Foundation type_union_member_tag): a declared
+// member is its own unqualified name. The MIR display qualifies the nominal
+// (`<corelib>/Core/time::Core/time/time.jet::LocalDate<>`), so the
+// spelling is rebuilt from the MIR type with each nominal unqualified and an
+// argument-less nominal written without `<>`.
 fn jet_codegen_union_mir_member_tag(ty: MIRType) -> String {
-    raw := mir_type_display_name(ty)
-    before_args := raw.split("<").to_list()[0]
-    bytes := before_args.bytes()
-    last_separator := -1
-    index := 0
-    loop index + 1 < bytes.len() {
-        if {
-            bytes[index] == (U8{58}) && bytes[index + 1] == (U8{58}) -> {
-                last_separator = index + 1
-                index += 2
-            } else -> {
-                index += 1
-            }
+    type_union_member_tag_name(jet_codegen_union_mir_member_spelling(ty))
+}
+
+fn jet_codegen_union_mir_member_spelling(ty: MIRType) -> String Never! {
+    if ty.kind == {
+        .Apply(name, args) -> {
+            leaf :: type_unqualified_name(name.name)
+            if args.len() == 0 -> return leaf
+            names :: loop arg in args -> jet_codegen_union_mir_member_spelling(arg)
+            return "{leaf}<{names.join(", ")}>"
         }
+        .List(inner) -> return "[{jet_codegen_union_mir_member_spelling(inner)}]"
+        .Option(inner) -> return "{jet_codegen_union_mir_member_spelling(inner)}?"
+        else -> return mir_type_display_name(ty)
     }
-    start := if last_separator >= 0 -> last_separator + 1 else -> 0
-    base := String.from_bytes(bytes[start..<bytes.len()]) ?? panic("canonical union member name is not valid UTF-8")
-    suffix := ""
-    if before_args.len() < raw.len() -> suffix = String.from_bytes(raw.bytes()[before_args.bytes().len()..<raw.bytes().len()]) ?? panic("canonical union generic name is not valid UTF-8")
-    // A nominal without arguments displays as `Name<>`; Rust union_member_tag
-    // spells it `Name`, as every use site does.
-    if suffix == "<>" -> suffix = ""
-    type_union_member_tag_name("{base}{suffix}")
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_anonymous_union_type_defs
