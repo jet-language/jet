@@ -175,7 +175,7 @@ fn vault_test_backup_drop(config: I64) {
         sync_store(next + I64{24}, release)
     } else if (entered != I64{0} || release != I64{0}) -> panic("vault test backup barrier root is absent")
     sync_mutex_lock(vault_test_backup_mutex)
-    previous :: vault_test_backup_config
+    previous :: vault_test_backup_config.copy()
     vault_test_backup_config = next
     sync_mutex_unlock(vault_test_backup_mutex)
     vault_test_backup_drop(previous)
