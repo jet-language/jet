@@ -67,6 +67,7 @@ use jet_foundation.[
     MIRVariantPayload,
     compiler_take_rows,
     compiler_threads_failure_text,
+    core_source_owns_type,
     mir_operation_can_stop,
     mir_operation_consumption_route,
     mir_operation_stop_operand,
@@ -926,9 +927,38 @@ fn lower_indexed_program(program: MIRProgram) -> MIRProgram Never! {
         if id_rows.get(definition.id.value) == None -> _ := &id_rows.add(definition.id.value, row)
         if key_rows.get(definition.key) == None -> _ := &key_rows.add(definition.key, row)
     }
+    // A source-owned Core nominal is also spelled bare: the compiler-owned
+    // Dyn.DateTime payload is `ZonedDateTime` (Rust tir_to_mir_types.rs
+    // Dyn payloads, JetCodegen Types.jet), which names the Core declaration
+    // CORE_SOURCE_OWNED_TYPES lists. An exact key wins, and a bare name the
+    // runtime handle table carries stays that handle.
+    bare_rows := [String:Int]{}
+    ambiguous := [String:Bool]{}
+    loop (row, definition) in program.types {
+        if !lower_core_source_bare_name(definition) -> next
+        if bare_rows.get(definition.name) == .Val(seen) {
+            // Two source-owned declarations sharing a bare name name neither.
+            if program.types[seen].key != definition.key && ambiguous.get(definition.name) == None -> _ := &ambiguous.add(definition.name, true)
+            next
+        }
+        _ := &bare_rows.add(definition.name, row)
+    }
+    loop (row, definition) in program.types {
+        first :: bare_rows.get(definition.name) ?? next
+        if first != row || ambiguous.get(definition.name) != None -> next
+        if key_rows.get(definition.name) == None -> _ := &key_rows.add(definition.name, row)
+    }
     indexed.type_id_rows = ^id_rows
     indexed.type_key_rows = ^key_rows
     indexed
+}
+
+// A source-owned Core declaration (CORE_SOURCE_OWNED_TYPES) whose bare name
+// the runtime handle table does not claim: that name may spell it.
+fn lower_core_source_bare_name(definition: MIRTypeDef) -> Bool Never! {
+    if definition.name == "" || definition.name.contains("::") || definition.name == definition.key -> return false
+    if !core_source_owns_type(definition.key) -> return false
+    lower_runtime_handle(definition.name) == None
 }
 
 // The first row of `types` an Apply's nominal names: by declaration id, by
@@ -941,7 +971,15 @@ fn lower_type_row(p: MIRProgram, name: MIRNominalRef, identity: MIRTypeID?) -> I
                 if id == p.types[row].id -> return row
             }
         }
-        return -1
+        // The bare spelling of a unique source-owned Core declaration, as
+        // lower_indexed_program indexes it.
+        bare := -1
+        loop row in 0..<p.types.len() {
+            if p.types[row].name != name.name || !lower_core_source_bare_name(p.types[row]) -> next
+            if bare >= 0 && p.types[bare].key != p.types[row].key -> return -1
+            if bare < 0 -> bare = row
+        }
+        return bare
     }
     best := p.type_id_rows.get(name.id.value) ?? -1
     by_key :: p.type_key_rows.get(name.name) ?? -1

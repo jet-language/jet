@@ -149,6 +149,11 @@ const parts = [
     item("Compiler/JetFoundation/Source/Types/Types.jet", "fn param_zone_name("),
     item("Compiler/JetFoundation/Source/Types/Types.jet", "struct SymbolID {"),
     item("Compiler/JetFoundation/Source/Registry/CoreModules.jet", "fn core_source_value_hook("),
+    // Lower.jet's bare spelling of a source-owned Core nominal.
+    item("Compiler/JetFoundation/Source/Registry/CoreModules.jet", "struct CoreSourceOwnedType {"),
+    item("Compiler/JetFoundation/Source/Registry/CoreModules.jet", "fn core_source_owns_type("),
+    item("Compiler/JetFoundation/Source/Registry/CoreModules.jet", "fn core_source_owns_type_in("),
+    item("Compiler/JetFoundation/Source/Registry/CoreEnumRows.jet", "CORE_SOURCE_OWNED_TYPES ::"),
     ...[
       "struct ByteLayout {",
       "struct FieldLayoutFacts {",
