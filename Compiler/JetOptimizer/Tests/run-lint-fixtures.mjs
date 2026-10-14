@@ -2,9 +2,11 @@
 // Assemble the MIR Lint fixture unit (Tests/LintFixtures.jet) with the sources
 // it needs, as one package-free Jet file.
 //
-// usage: node Compiler/JetOptimizer/Tests/run-lint-fixtures.mjs <outdir>
+// usage: node Compiler/JetOptimizer/Tests/run-lint-fixtures.mjs <outdir> [--canonical-order] [checker]
 // then:  cd <outdir> && jet run unit.jet
 // --canonical-order selects the stable canonical row-sort regression unit.
+// With a checker (a `jet` binary) it also runs the unit and writes
+// <outdir>/receipt.json binding the fixture count to the read sources.
 //
 // The fixtures reuse the MIR builders and example programs of the lowering
 // fixtures (Compiler/JetBackend/Tests/LowerFixtures.jet) without their
@@ -19,14 +21,21 @@ import { fileURLToPath } from "node:url";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const outDir = process.argv[2];
-const checker = process.argv[3];
-if (!outDir) {
-  console.error("usage: run-lint-fixtures.mjs <outdir> [checker]");
+const options = process.argv.slice(3);
+const canonicalOrder = options.includes("--canonical-order");
+const positional = options.filter((option) => option !== "--canonical-order");
+if (!outDir || positional.length > 1 || positional.some((option) => option.startsWith("--"))) {
+  console.error("usage: run-lint-fixtures.mjs <outdir> [--canonical-order] [checker]");
   process.exit(64);
 }
-const read = (path) => readFileSync(`${repo}/${path}`, "utf8");
-const canonicalOrder = process.argv[3] === "--canonical-order";
-if (process.argv[3] && !canonicalOrder) throw new Error("unknown fixture selection");
+const checker = positional[0];
+// Every source the unit reads, with its content hash, for the checker receipt.
+const sources = new Map();
+const read = (path) => {
+  const text = readFileSync(`${repo}/${path}`, "utf8");
+  sources.set(path, createHash("sha256").update(text).digest("hex"));
+  return text;
+};
 
 // The top-level item starting at the line that begins with `head`, through its
 // closing `}` at column 0 (or the line itself for a one-line item).
@@ -40,9 +49,12 @@ function item(path, head) {
 }
 
 // Units are single-package: drop `use jet_*` items, one line or a bracketed
-// block, and the top-level items starting with any of `omit`.
+// block, and the top-level items starting with any of `omit`. Every `omit`
+// head must still name an item, so a renamed or removed item cannot leave a
+// stale list behind.
 function body(path, omit = []) {
   const kept = [];
+  const omitted = new Set();
   let skippingUse = false;
   let skippingItem = false;
   for (const line of read(path).split("\n")) {
@@ -59,12 +71,16 @@ function body(path, omit = []) {
       continue;
     }
     if (/^use jet_\w+/.test(line)) continue;
-    if (omit.some((head) => line.startsWith(head))) {
+    const head = omit.find((prefix) => line.startsWith(prefix));
+    if (head) {
+      omitted.add(head);
       if (line.trimEnd().endsWith("{")) skippingItem = true;
       continue;
     }
     kept.push(line);
   }
+  const stale = omit.filter((head) => !omitted.has(head));
+  if (stale.length) throw new Error(`${path}: no item starting with ${stale.map((head) => JSON.stringify(head)).join(", ")}`);
   return `// [unit source: ${path}]\n${kept.join("\n")}\n`;
 }
 
@@ -82,6 +98,7 @@ const parts = [
   ].map((head) => item("Compiler/JetFoundation/Source/Registry/CoreCalls.jet", head)),
   item("Compiler/JetFoundation/Source/Types/Types.jet", "enum ParamZone {"),
   item("Compiler/JetFoundation/Source/Types/Types.jet", "fn param_zone_name("),
+  item("Compiler/JetFoundation/Source/Registry/CoreModules.jet", "fn core_source_value_hook("),
   ...[
     "struct ByteLayout {",
     "struct FieldLayoutFacts {",
@@ -89,13 +106,30 @@ const parts = [
   ].map((head) => item("Compiler/JetFoundation/Source/Target/Layout.jet", head)),
   "",
   body("Compiler/JetFoundation/Source/DerivationTypes.jet"),
-  body("Compiler/JetFoundation/Source/MIR/MIR.jet"),
+  // mir_typed_head_kind is a Sema-only projection over the semantic Type graph
+  // (as in run-lower-fixtures.mjs); the MIR fixtures never call it.
+  body("Compiler/JetFoundation/Source/MIR/MIR.jet", ["fn mir_typed_head_kind("]),
   body("Compiler/JetOptimizer/Source/Verification/Lint.jet"),
-  body("Compiler/JetBackend/Tests/LowerFixtures.jet", ["fn fx_report(", "fn fx_report_lir(", "fn fx_report_image(", "fn fx_report_executable(", "fn run("]),
+  // Only the MIR builders and example programs: these items lower, link or
+  // report native images, or name lowering-only fixtures (Tests/Fixtures).
+  body("Compiler/JetBackend/Tests/LowerFixtures.jet", [
+    "fn fx_generic_runtime_rejection_checks(",
+    "fn fx_report(",
+    "fn fx_report_runtime(",
+    "fn fx_report_lir(",
+    "fn fx_report_image(",
+    "fn fx_report_executable(",
+    "fn run(",
+    "fn fx_lazy_clone_case(",
+    "fn fx_lazy_clone_checks(",
+  ]),
   ...(canonicalOrder ? [
     item("Compiler/JetFoundation/Source/Collections.jet", "fn compiler_apply_order<T>("),
     item("Compiler/JetFoundation/Source/Collections.jet", "fn compiler_transfer_rows<T>("),
+    item("Compiler/JetOptimizer/Source/Facts/CanonicalOrdering.jet", "fn mir_pass_canonical_order("),
+    item("Compiler/JetOptimizer/Source/Facts/CanonicalOrdering.jet", "fn mir_pass_order_before("),
     item("Compiler/JetOptimizer/Source/Facts/CanonicalOrdering.jet", "fn mir_pass_sort_functions("),
+    item("Compiler/JetOptimizer/Source/Facts/CanonicalOrdering.jet", "fn mir_pass_sort_type_instances("),
     item("Compiler/JetCodegen/Source/Codegen/Functions.jet", "fn jet_codegen_sort_functions("),
     item("Compiler/JetCodegen/Source/Codegen/Functions.jet", "fn jet_codegen_sorted_order("),
     item("Compiler/JetCodegen/Source/Codegen/Functions.jet", "fn jet_codegen_order_before("),
