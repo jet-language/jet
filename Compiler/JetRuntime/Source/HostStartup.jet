@@ -195,6 +195,47 @@ fn host_startup_list(bytes: I64, length: I64, output: I64) {
     }
 }
 
+// FSIoEnvOsTesting.rs jet_std_io_args: std::env::args().collect(), argv[0]
+// first, through the generated list-out ABI (an exact count*8 buffer of owned
+// Text words, 0 when empty). Args::next unwraps into_string, so a non-UTF-8
+// argument panics.
+#Export(c) fn jet_std_io_args(output: I64) -> I64 {
+    host_arguments_require()
+    count :: host_argc
+    index := I64{0}
+    loop index < count {
+        bytes :: host_argument_bytes(index)
+        length :: host_startup_byte_length(bytes)
+        at := I64{0}
+        loop at < length {
+            width :: rt_text_valid_width(wrapping(bytes + at), wrapping(length - at), I64{1})
+            if (width < I64{0}) {
+                message :: rt_static_text("called `Result::unwrap()` on an `Err` value: invalid UTF-8 process argument")
+                jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+                rt_text_store(output, I64{0})
+                return I64{0}
+            }
+            at = wrapping(at + width)
+        }
+        index = wrapping(index + I64{1})
+    }
+    data :: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * I64{8}, I64{8})
+    index = I64{0}
+    loop index < count {
+        bytes :: host_argument_bytes(index)
+        rt_text_store(wrapping(data + index * I64{8}), rt_text_copy(bytes, host_startup_byte_length(bytes)))
+        index = wrapping(index + I64{1})
+    }
+    rt_text_store(output, data)
+    count
+}
+
+fn host_argument_bytes(index: I64) -> I64 {
+    #Unsafe("startup lends argc initialized argv pointers and their immutable NUL strings") {
+        return os_load_i64(wrapping(host_argv + index * I64{8}))
+    }
+}
+
 // Read-only runtime configuration exception: scheduler/deadline bootstrap
 // flags use the immutable host snapshot, not Core's mutable logical overlay.
 // The first matching row wins; this internal lookup lends raw startup bytes.
