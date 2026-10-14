@@ -1553,7 +1553,11 @@ fn sema_checked_guest_import_foreign_row(graph: SemaRegistrationGraph, module_ro
     symbol :: sema_guest_import_symbol(registered.declaration) ?? return None
     module_identity :: module_row.module_identity
     params :: sema_checked_foreign_params(graph, module_identity, registered.parameters)
-    return_type :: sema_checked_foreign_return_type(graph, module_identity, registered.declaration.return_type)
+    // The failure solve projects an unannotated import onto `T Never!` (a C
+    // function cannot fail); the C value is still that plain success.
+    written := registered.declaration.return_type
+    if written == .Val(.Result(ok, err)) && err == (Type.Named{name: "Never"}) -> written = Val(ok)
+    return_type :: sema_checked_foreign_return_type(graph, module_identity, written)
     bridge_eligible :: sema_guest_import_bridge_compatible(registered.declaration)
     // A plain written return is the default failure carrier at every call
     // site; the C value is that carrier's success (Rust `wraps_default_failure`).

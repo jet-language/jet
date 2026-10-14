@@ -5918,6 +5918,20 @@ fn sema_failure_solve(graph: SemaRegistrationGraph, modules: [SemaGraphModuleRes
             inferred[facts.function_key] = true
         }
     }
+    // Rust checks every declared function as a body job; a per-callable
+    // `#Import(c)` declaration returns before its (empty) body, so its summary
+    // has no failure source and no edge. An unannotated import is therefore a
+    // candidate the solve proves infallible (a C function cannot fail) and
+    // projects onto `T Never!`, instead of an edge no fact ever resolves.
+    loop module_index in 0..<graph.modules.len() {
+        loop row in 0..<graph.modules[module_index].functions.len() {
+            if !sema_function_is_guest_import(graph.modules[module_index].functions[row].declaration) -> next
+            key :: graph.modules[module_index].functions[row].symbol.id.key
+            if address_taken.get(key) != None || inferred.get(key) != None || !sema_failure_inference_candidate(graph.modules[module_index].functions[row].declaration) -> next
+            &candidates.push(SemaFunctionFailureFacts{function_key: key, direct: false, edges: [String]{}})
+            inferred[key] = true
+        }
+    }
     // The greatest fixpoint by propagation: a candidate with an edge to a
     // key that is not (or no longer) inferred falls, and its fall reaches
     // every candidate with an edge to it through `dependents`, so each edge
