@@ -246,6 +246,15 @@ fn data_tree_render(target: I64, tree: I64) {
     data_tree_store(some, jet_rt_handle_show_dyn(tree))
     I64{1}
 }
+// Outcome.rs jet_dyn_stop_message: "{site}: {detail}". Native Dyn lowering
+// (Lower/Dyn.jet) lends the borrowed site text and a static detail span.
+#Export(c) fn jet_rt_dyn_stop_message(site: I64, detail: I64, length: I64) -> I64 {
+    target :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(target, site)
+    jet_rt_string_builder_push(target, rt_static_text(": "))
+    rt_text_append(target, detail, length)
+    jet_rt_string_builder_finish(target)
+}
 #Export(c) fn jet_rt_record_tag_dyn(tree: I64) -> I64 { data_tree_word(tree + DATA_TREE_TAG) }
 #Export(c) fn jet_rt_record_new_dyn_null() -> I64 { data_tree_new(DATA_TREE_NULL, I64{0}) }
 #Export(c) fn jet_rt_record_new_dyn_bool(value: Bool) -> I64 { data_tree_new(DATA_TREE_BOOL, if value -> I64{1} else -> I64{0}) }

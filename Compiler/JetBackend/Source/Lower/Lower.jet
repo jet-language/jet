@@ -4168,6 +4168,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if semantic == .HandleMethod(call, receiver, args, frame_schedule, _) {
         if lower_task_method(p, c, &m, &f, instruction, call, receiver, args) -> return
         if lower_transaction_method(p, c, &m, &f, instruction, call, receiver, args) -> return
+        if lower_dyn_len(p, c, &m, &f, instruction, call, receiver, args) -> return
         if frame_schedule != None -> return lower_fail(&m, &f, "frame-scheduled HandleMethod {lower_route_name(p, call)} is not lowered at O0 yet")
         values := [MIRValueID]{receiver}
         loop arg in args -> &values.push(arg)

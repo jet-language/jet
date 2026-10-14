@@ -270,6 +270,116 @@ fn lower_dyn_to_text(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     if dst == None -> lower_map_drop_value(p, &m, &f, joined, result_ty)
     true
 }
+
+// `tree.len()` (DynRuntime.rs jet_dyn_len, MIR HandleMethod
+// core.encoding.dyn.len over the borrowed tree and its site text): the length
+// of an Array/Object/Bytes List or the scalar count of a Text, read in place
+// from the native enum. Any other variant is Err("{site}: {kind} has no
+// length") with DynKind.rs's wording; the MIR branches that Err to its stop.
+// False when the checked types are not Dyn and Result<Int, String>.
+fn lower_dyn_len(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, receiver: MIRValueID, args: [MIRValueID]) -> Bool Never! {
+    row :: lower_prelude_row(p, call) ?? return false
+    if row.module_name != "core.encoding.dyn" || row.member != "len" || lower_route_symbol(row) != "jet_dyn_len" -> return false
+    if args.len() != 1 -> return false
+    ty :: lower_value_type(c, receiver) ?? return false
+    if !lower_dyn_type(p, ty) -> return false
+    site_ty :: lower_value_type(c, args[0]) ?? return false
+    if !lower_text_type(site_ty) -> return false
+    result_ty :: lower_checked_type(c, instruction) ?? return false
+    ok_ty :: if result_ty.kind == { .Result(success, _) -> { success } else -> { return false } }
+    err_ty :: if result_ty.kind == { .Result(_, failure) -> { failure } else -> { return false } }
+    if !lower_is_exact_int(ok_ty) || !lower_text_type(err_ty) -> return false
+    definition :: lower_type_def(p, ty) ?? return false
+    tree :: lower_use(&m, &f, receiver) ?? return true
+    site :: lower_use(&m, &f, args[0]) ?? return true
+    dst :: lower_result(p, c, &m, &f, instruction)
+    if f.failed -> return true
+    selector :: lower_word(&f)
+    lower_emit(&f, LIRInst.Load{dst: selector, base: tree, offset: 0})
+    counted :: lower_new_block(&f)
+    refused :: lower_new_block(&f)
+    merge :: lower_new_block(&f)
+    // Sized variants hand their native i64 length to `counted`.
+    loop name in ([String]{"Array", "Object", "Bytes", "Text"}) {
+        found :: lower_variant(definition, name) ?? {
+            lower_fail(&m, &f, "Dyn.len has no {name} variant")
+            return true
+        }
+        payload :: lower_enum_payload_info(p, definition, found.variant, 0) ?? {
+            lower_fail(&m, &f, "Dyn.{name} has no payload layout")
+            return true
+        }
+        expected :: lower_const(&f, lower_discriminant(found.index))
+        same :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: same, condition: LIRCondition.Eq, left: selector, right: expected})
+        hit :: lower_new_block(&f)
+        other :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: same, then_target: lower_target(hit, [LIRValueID]{}), else_target: lower_target(other, [LIRValueID]{})})
+        lower_start(&f, hit, [LIRValueID]{})
+        holder := tree
+        if payload.boxed {
+            wrapper :: lower_pointer(&f)
+            lower_emit(&f, LIRInst.Load{dst: wrapper, base: tree, offset: payload.offset})
+            holder = wrapper
+        }
+        value :: lower_read_at(p, &f, holder, if payload.boxed -> 0 else -> payload.offset, payload.ty) ?? {
+            lower_fail(&m, &f, "Dyn.{name} payload has no native storage")
+            return true
+        }
+        length :: lower_word(&f)
+        if name == "Text" {
+            lower_call_runtime(&m, &f, "jet_char_len", [LIRValueID]{value}, Val(length))
+        } else {
+            lower_emit(&f, LIRInst.Move{dst: length, src: lower_list_word(&f, value, 0)})
+        }
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(counted, [LIRValueID]{length})})
+        lower_start(&f, other, [LIRValueID]{})
+    }
+    // The remaining variants name their DynKind.rs kind in the stop detail.
+    unsized :: [(name: String, kind: String)]{(name: "Null", kind: "null"), (name: "Bool", kind: "Bool"), (name: "Int", kind: "Int"), (name: "Float", kind: "Float"), (name: "Number", kind: "number")}
+    loop entry in unsized {
+        found :: lower_variant(definition, entry.name) ?? {
+            lower_fail(&m, &f, "Dyn.len has no {entry.name} variant")
+            return true
+        }
+        expected :: lower_const(&f, lower_discriminant(found.index))
+        same :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: same, condition: LIRCondition.Eq, left: selector, right: expected})
+        hit :: lower_new_block(&f)
+        other :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: same, then_target: lower_target(hit, [LIRValueID]{}), else_target: lower_target(other, [LIRValueID]{})})
+        lower_start(&f, hit, [LIRValueID]{})
+        detail :: lower_static_text(&m, &f, "{entry.kind} has no length")
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(refused, detail)})
+        lower_start(&f, other, [LIRValueID]{})
+    }
+    // DateTime is the one variant left.
+    last :: lower_static_text(&m, &f, "DateTime has no length")
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(refused, last)})
+    raw :: lower_word(&f)
+    lower_start(&f, counted, [LIRValueID]{raw})
+    success :: lower_pointer(&f)
+    lower_alloc(&m, &f, success, lower_box_size(p, result_ty))
+    lower_emit(&f, LIRInst.Store{base: success, offset: 0, value: lower_const(&f, lower_result_selector(true))})
+    exact :: lower_word(&f)
+    lower_convert_exact(&m, &f, exact, raw, "jet_int_owned_from_i64", false)
+    lower_write_at(p, &f, success, lower_result_payload_offset(), exact, ok_ty)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{success})})
+    detail_data :: lower_pointer(&f)
+    detail_length :: lower_word(&f)
+    lower_start(&f, refused, [LIRValueID]{detail_data, detail_length})
+    failure :: lower_pointer(&f)
+    lower_alloc(&m, &f, failure, lower_box_size(p, result_ty))
+    lower_emit(&f, LIRInst.Store{base: failure, offset: 0, value: lower_const(&f, lower_result_selector(false))})
+    message :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_dyn_stop_message", [LIRValueID]{site, detail_data, detail_length}, Val(message))
+    lower_write_at(p, &f, failure, lower_result_payload_offset(), message, err_ty)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{failure})})
+    joined :: dst ?? lower_pointer(&f)
+    lower_start(&f, merge, [LIRValueID]{joined})
+    if dst == None -> lower_map_drop_value(p, &m, &f, joined, result_ty)
+    true
+}
 // These kernels already operate on Jet's native value storage. Crossing a
 // Rust Dyn bridge would clone the borrowed Object and lose its view lifetime.
 fn lower_native_value_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
