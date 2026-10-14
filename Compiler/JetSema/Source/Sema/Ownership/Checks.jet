@@ -3288,7 +3288,14 @@ fn sema_ownership_check_expression(state: &SemaOwnershipState, expr: Expr, scope
         .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) -> {
             valid := true
             receiver_places :: sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
-            if receiver_places.len() == 0 {
+            // A receiver that names no binding (`String.from_bytes(..)`,
+            // `Int.parse(..)`) is a type or module path, not a value read
+            // (Rust ownership walks only value receivers).
+            static_receiver := false
+            if receiver == .Ident(receiver_name, receiver_span) {
+                static_receiver = sema_scope_resolve_index_at(scopes, receiver_name, receiver_span) == None
+            }
+            if receiver_places.len() == 0 && !static_receiver {
                 valid = sema_ownership_check_expression(&state, receiver, scopes, &diagnostics)
             }
             loop arg in args {
