@@ -386,3 +386,30 @@ fn fx_raw_pointer_lowering_check() -> Bool Never! {
     print("raw pointer: no jet_rt_sentry_read call in the lowered module")
     false
 }
+
+// A match on an owned Result<FileReader, String> whose carrier has no later
+// use: each arm takes its payload out of the carrier, as MIRRust.rs moves it
+// (carrier_has_later_use; the Err arm's probe is no later use of the Ok
+// payload). FileReader has no clone, so a copy could not lower.
+fn fx_payload_take_handle_check() -> Bool Never! {
+    reader_ty :: fx_named("FileReader")
+    carrier_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: reader_ty, err: fx_string()})
+    b := fx_builder()
+    param :: fx_param(&b, "opened", carrier_ty, mir_owned_ownership())
+    b.params[0].access = MIRAccess.Move
+    carrier :: fx_owned(&b, carrier_ty, MIROperation.Move{value: param})
+    is_ok :: fx_copy(&b, fx_bool(), MIROperation.ResultIsOk{subject: carrier})
+    fx_block(&b, 0, MIRTerminator.Branch{condition: is_ok, then_target: MIRBlockID{value: fx_word(U64{0}, 1)}, else_target: MIRBlockID{value: fx_word(U64{0}, 2)}})
+    reader :: fx_owned(&b, reader_ty, MIROperation.ResultValue{subject: carrier, ok: true})
+    fx_do(&b, MIROperation.Drop{value: reader, kind: MIRDropKind.Value})
+    fx_block(&b, 1, MIRTerminator.Jump{target: MIRBlockID{value: fx_word(U64{0}, 3)}})
+    error :: fx_owned(&b, fx_string(), MIROperation.ResultValue{subject: carrier, ok: false})
+    fx_do(&b, MIROperation.Drop{value: error, kind: MIRDropKind.Value})
+    fx_block(&b, 2, MIRTerminator.Jump{target: MIRBlockID{value: fx_word(U64{0}, 3)}})
+    fx_block(&b, 3, MIRTerminator.Return{value: None})
+    program :: fx_program([MIRFunction]{fx_function("take", b, fx_unit())}, [MIRTypeDef]{})
+    lowered :: lir_lower_callables(program, [MIRFunctionID]{mir_function_id("take")})
+    loop issue in lowered.issues -> print("payload-take-handle: {issue.function}: {issue.message}")
+    loop issue in lir_lint_module(lowered.lir) -> print("payload-take-handle: lint b{issue.block}: {issue.message}")
+    lowered.issues.len() == 0 && lir_lint_module(lowered.lir).len() == 0
+}

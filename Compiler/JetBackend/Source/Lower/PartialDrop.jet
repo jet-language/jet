@@ -171,7 +171,9 @@ fn lower_partial_frame(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
                     &path.push(LowerGlueField{offset: offset, ty: ty})
                     owner = lower_partial_owner(c, lower_partial_root_value(c, value))
                     fact :: c.fact_index.get(lower_partial_root_value(c, value).value) ?? next
-                    if c.mir.values[fact].ownership.mode != MIROwnershipMode.Move -> next
+                    // A taken payload (lower_payload_takes) leaves its carrier
+                    // like a moved one: the carrier's drop skips that member.
+                    if c.mir.values[fact].ownership.mode != MIROwnershipMode.Move && c.payload_takes.get(result.value) == None -> next
                 }
                 .EnumPayload(value, type_id, variant, index) -> {
                     source :: lower_value_type(c, value) ?? next

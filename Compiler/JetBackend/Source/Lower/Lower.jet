@@ -307,6 +307,9 @@ struct LowerContext {
     sunk: [U64:Bool]
     // MIR value a `Move` defines -> the value it moves.
     moves: [U64:U64]
+    // OptionValue/ResultValue results MIRRust.rs moves out of their carrier
+    // rather than cloning (lower_payload_takes).
+    payload_takes: [U64:Bool]
     // Compile-time exact Int value (constant or its negation) -> its
     // sized-literal word, emitting no code (Convert.jet lower_fixed_literals).
     fixed_literals: [U64:Int]
@@ -2076,6 +2079,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         defined_slots: defined_slots,
         sunk: sunk,
         moves: moves,
+        payload_takes: lower_payload_takes(function, block_index),
         fixed_literals: lower_fixed_literals(p, function),
         order: order,
         lir_blocks: lir_blocks,
@@ -3520,6 +3524,11 @@ fn lower_read_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     if !lower_atomic_check_offset(p, &m, &f, ty, offset) -> return
     moved := false
     if c.fact_index.get(lower_partial_root_value(c, owner).value) == .Val(index) -> moved = c.mir.values[index].ownership.mode == MIROwnershipMode.Move
+    // An owned carrier with no later use surrenders its payload, as the
+    // MIRRust.rs payload arm moves it out (a non-Clone handle included).
+    if !moved && instruction.result == .Val(taken) {
+        if c.payload_takes.get(taken.value) != None && lower_value_owned(c, owner) -> moved = true
+    }
     owned_result :: if instruction.result == .Val(value) -> lower_value_owned(c, value) && lower_needs_drop(p, m, ty) else -> false
     if !moved && owned_result {
         layout :: lower_repr_layout(lower_repr(p, ty)) ?? return
@@ -3542,6 +3551,213 @@ fn lower_read_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     lower_read_into(p, &f, dst, base, offset, ty)
 }
 
+// A MIR value's site: block position and instruction position (-1 for the
+// block's terminator).
+struct LowerUseSite {
+    block: Int
+    position: Int
+}
+
+// The MIRRust.rs FunctionIndex rows carrier_has_later_use reads.
+struct LowerUseIndex {
+    definitions: [U64:LowerUseSite]
+    uses: [U64:[LowerUseSite]]
+    predecessors: [[Int]]
+}
+
+fn lower_use_index_add(uses: &[U64:[LowerUseSite]], value: U64, at: LowerUseSite) Never! {
+    rows := uses.get(value) ?? [LowerUseSite]{}
+    if rows.len() > 0 {
+        last :: rows[rows.len() - 1]
+        if last.block == at.block && last.position == at.position -> return
+    }
+    &rows.push(at)
+    _ := &uses.add(value, rows)
+}
+
+// MIRRust.rs FunctionIndex::new: definitions, uses (an SSA-bound local's
+// place read uses its value), and predecessors along terminator edges.
+fn lower_use_index(function: MIRFunction, block_index: [U64:Int]) -> LowerUseIndex Never! {
+    bound_locals := [U64:U64]{}
+    loop local in function.locals {
+        if local.ssa_value == .Val(value) -> _ := &bound_locals.add(local.id.value, value.value)
+    }
+    bound_places := [U64:U64]{}
+    if bound_locals.len() > 0 {
+        loop place in function.places {
+            if place.base == .Local(local) {
+                if bound_locals.get(local.value) == .Val(value) -> _ := &bound_places.add(place.id.value, value)
+            }
+        }
+    }
+    definitions := [U64:LowerUseSite]{}
+    uses := [U64:[LowerUseSite]]{}
+    predecessors := [[Int]]{}
+    loop _ in function.blocks -> &predecessors.push([Int]{})
+    loop (block, row) in function.blocks {
+        loop (position, instruction) in row.instructions {
+            if instruction.result == .Val(result) {
+                if definitions.get(result.value) == None -> _ := &definitions.add(result.value, LowerUseSite{block: block, position: position})
+            }
+            loop value in mir_operation_value_uses(instruction.operation) -> lower_use_index_add(&uses, value.value, LowerUseSite{block: block, position: position})
+            if instruction.operation == .ReadPlace(place) | .MovePlace(place) {
+                if bound_places.get(place.value) == .Val(value) -> lower_use_index_add(&uses, value, LowerUseSite{block: block, position: position})
+            }
+        }
+        loop value in mir_terminator_value_uses(row.terminator) -> lower_use_index_add(&uses, value.value, LowerUseSite{block: block, position: -1})
+        loop target in mir_terminator_targets(row.terminator) {
+            if block_index.get(target.value) == .Val(at) -> &predecessors[at].push(block)
+        }
+    }
+    LowerUseIndex{definitions: definitions, uses: uses, predecessors: predecessors}
+}
+
+// The test a branch condition names: a trivial phi (every incoming value
+// the same) is that value (MIRRust.rs carrier_has_later_use `tested`).
+fn lower_use_tested(function: MIRFunction, index: LowerUseIndex, condition: MIRValueID) -> MIRValueID Never! {
+    site :: index.definitions.get(condition.value) ?? return condition
+    if function.blocks[site.block].instructions[site.position].operation == .Phi(incoming) {
+        if incoming.len() == 0 -> return condition
+        loop row in incoming {
+            if row.value != incoming[0].value -> return condition
+        }
+        return lower_use_tested(function, index, incoming[0].value)
+    }
+    condition
+}
+
+// The tested condition when `predecessor` enters `block` on its true edge.
+fn lower_use_then_condition(function: MIRFunction, index: LowerUseIndex, block_index: [U64:Int], predecessor: Int, block: Int) -> MIRValueID? Never! {
+    if function.blocks[predecessor].terminator == .Branch(condition, then_target, else_target) {
+        if then_target != else_target && (block_index.get(then_target.value) ?? -1) == block -> return Val(lower_use_tested(function, index, condition))
+    }
+    None
+}
+
+// The test every entry into `block` branched true on, while no path from
+// `block` re-runs its definition (a path re-running the carrier's own
+// definition carries a fresh carrier and stops there).
+fn lower_use_known_condition(function: MIRFunction, index: LowerUseIndex, block_index: [U64:Int], block: Int, definition_block: Int) -> MIRValueID? Never! {
+    entries :: index.predecessors[block]
+    if entries.len() == 0 -> return None
+    known :: lower_use_then_condition(function, index, block_index, entries[0], block) ?? return None
+    loop predecessor in entries {
+        condition :: lower_use_then_condition(function, index, block_index, predecessor, block) ?? return None
+        if condition != known -> return None
+    }
+    site :: index.definitions.get(known.value) ?? return None
+    reached := [Bool]{}
+    loop _ in function.blocks -> &reached.push(false)
+    pending := [Int]{block}
+    cursor := 0
+    loop cursor < pending.len() {
+        at :: pending[cursor]
+        cursor += 1
+        loop target in mir_terminator_targets(function.blocks[at].terminator) {
+            position :: block_index.get(target.value) ?? next
+            if position == definition_block -> next
+            if position == site.block -> return None
+            if !reached[position] {
+                reached[position] = true
+                &pending.push(position)
+            }
+        }
+    }
+    Val(known)
+}
+
+// The false edge of a re-test of the known condition cannot follow the arm.
+fn lower_use_infeasible(function: MIRFunction, index: LowerUseIndex, block_index: [U64:Int], known: MIRValueID?, predecessor: Int, successor: Int) -> Bool Never! {
+    tested :: known ?? return false
+    if function.blocks[predecessor].terminator == .Branch(condition, then_target, else_target) {
+        return then_target != else_target && (block_index.get(else_target.value) ?? -1) == successor && lower_use_tested(function, index, condition) == tested
+    }
+    false
+}
+
+// MIRRust.rs carrier_has_later_use: an owning carrier surrenders its payload
+// only at its last reachable use. A match arm is entered only on the true
+// edge of its test and the arm chain re-branches on that same test, so a
+// later arm's probe of the carrier is no later use of this arm's payload.
+fn lower_carrier_has_later_use(function: MIRFunction, index: LowerUseIndex, block_index: [U64:Int], subject: MIRValueID, projection: MIRValueID) -> Bool Never! {
+    site :: index.definitions.get(projection.value) ?? return true
+    block :: site.block
+    uses :: index.uses.get(subject.value) ?? return false
+    loop used in uses {
+        if used.block == block && (used.position < 0 || used.position > site.position) -> return true
+    }
+    definition_block := -1
+    if index.definitions.get(subject.value) == .Val(defined) -> definition_block = defined.block
+    local := true
+    loop used in uses {
+        if used.block != block && used.block != definition_block -> local = false
+    }
+    if local -> return false
+    known :: lower_use_known_condition(function, index, block_index, block, definition_block)
+    seen := [Bool]{}
+    loop _ in function.blocks -> &seen.push(false)
+    pending := [Int]{}
+    loop used in uses {
+        if used.block != block && !seen[used.block] {
+            seen[used.block] = true
+            &pending.push(used.block)
+        }
+    }
+    cursor := 0
+    loop cursor < pending.len() {
+        used_block :: pending[cursor]
+        cursor += 1
+        if used_block == definition_block -> next
+        loop predecessor in index.predecessors[used_block] {
+            if lower_use_infeasible(function, index, block_index, known, predecessor, used_block) -> next
+            if predecessor == block -> return true
+            if !seen[predecessor] {
+                seen[predecessor] = true
+                &pending.push(predecessor)
+            }
+        }
+    }
+    false
+}
+
+// Whether `value` is a place read or a transfer of one (MIRRust.rs
+// transparent_read): the carrier is then the place's own value here (a
+// borrow, or a copy the read owns), so its payload is never taken from it.
+// A value no instruction defines (a parameter) is treated likewise.
+fn lower_payload_place_read(function: MIRFunction, index: LowerUseIndex, value: MIRValueID) -> Bool Never! {
+    site :: index.definitions.get(value.value) ?? return true
+    operation :: function.blocks[site.block].instructions[site.position].operation
+    if operation == .ReadPlace(_) -> return true
+    if operation == .Move(inner) | .Copy(inner, _) {
+        read :: index.definitions.get(inner.value) ?? return false
+        return function.blocks[read.block].instructions[read.position].operation == .ReadPlace(_)
+    }
+    false
+}
+
+// The OptionValue/ResultValue results whose owned carrier MIRRust.rs moves
+// the payload out of (no immutable place read, no later carrier use).
+fn lower_payload_takes(function: MIRFunction, block_index: [U64:Int]) -> [U64:Bool] Never! {
+    takes := [U64:Bool]{}
+    candidate := false
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .OptionValue(_) | .ResultValue(_, _) -> candidate = true
+        }
+    }
+    if !candidate -> return takes
+    index :: lower_use_index(function, block_index)
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            result :: instruction.result ?? next
+            if instruction.operation == .OptionValue(subject) | .ResultValue(subject, _) {
+                if lower_payload_place_read(function, index, subject) -> next
+                if !lower_carrier_has_later_use(function, index, block_index, subject, result) -> _ := &takes.add(result.value, true)
+            }
+        }
+    }
+    takes
+}
 
 fn lower_option_inner(ty: MIRType) -> MIRType? {
     if ty.kind == {
