@@ -204,10 +204,13 @@ fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIR
 fn lower_render_handle_symbol(p: MIRProgram, ty: MIRType, mode: LowerRenderMode) -> String? {
     if ty.kind == .Apply(name, args) {
         if args.len() > 0 -> return None
-        if !name.name.starts_with("<corelib>/") {
+        // The default Err renders through JetErr: Display, Show and Debug are
+        // its message (Rust JetErr; runtime Err.jet).
+        default_err :: lower_default_err_runtime(p, ty)
+        if default_err == None && !name.name.starts_with("<corelib>/") {
             if lower_type_def(p, ty) == .Val(_) -> return None
         }
-        runtime :: lower_runtime_handle(name.name) ?? return None
+        runtime :: default_err ?? lower_runtime_handle(name.name) ?? return None
         if mode == .Show && runtime.show -> return Val("jet_rt_handle_show_{runtime_abi_atom(runtime.runtime)}")
         if mode == .Display && runtime.display -> return Val("jet_rt_handle_display_{runtime_abi_atom(runtime.runtime)}")
         if mode == .Debug && runtime.debug -> return Val("jet_rt_handle_debug_{runtime_abi_atom(runtime.runtime)}")

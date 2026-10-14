@@ -46,6 +46,8 @@ fn lower_runtime_handle_type(p: MIRProgram, ty: MIRType) -> LowerRuntimeHandle? 
     if ty.kind == .Apply(name, args) {
         if args.len() == 0 {
             if lower_runtime_handle(name.name) == .Val(row) -> return Val(row)
+            // The default Err is keyed by its canonical prelude identity.
+            if lower_default_err_runtime(p, ty) == .Val(row) -> return Val(row)
             definition :: lower_type_def(p, ty) ?? return None
             if !definition.key.starts_with("<corelib>/") -> return None
             return lower_runtime_handle(definition.name)

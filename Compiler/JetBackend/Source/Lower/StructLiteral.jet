@@ -28,7 +28,7 @@ fn lower_struct_construct(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     definition :: lower_owned_def(p, type_id, instruction.ty) ?? return lower_fail(&m, &f, "struct type {type_id.value} is missing")
     if lower_struct_def_fields(definition) == None -> return lower_fail(&m, &f, "{definition.name} is not a struct")
     ty :: instruction.ty ?? return lower_fail(&m, &f, "struct literal has no checked type")
-    if m.native_pack && lower_native_err_type(p, ty) -> return lower_native_err_construct(p, c, &m, &f, instruction, ty, fields)
+    if lower_native_err_type(p, ty) -> return lower_native_err_construct(p, c, &m, &f, instruction, ty, fields)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     lower_storage_into(p, &f, dst, ty)
     lower_struct_fields(p, c, &m, &f, definition, ty, dst, fields, boxed_fields)

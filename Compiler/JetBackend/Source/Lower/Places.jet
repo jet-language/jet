@@ -300,7 +300,7 @@ fn lower_handle_field_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, h
         .Handle(_, _) -> {}
         else -> return None
     }
-    if m.native_pack && lower_native_err_type(p, ty) -> return lower_native_err_place(p, &f, handle, ty, id)
+    if lower_native_err_type(p, ty) -> return lower_native_err_place(p, &f, handle, ty, id)
     if lower_native_process_place(p, &f, handle, ty, id) == .Val(place) -> return Val(place)
     runtime :: lower_runtime_handle_type(p, ty) ?? return None
     definition :: lower_type_def(p, ty) ?? return None

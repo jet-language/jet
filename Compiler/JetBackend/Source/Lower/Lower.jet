@@ -891,6 +891,9 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             if lower_tally_element(ty) == .Val(elem) -> return lower_map_repr(p, ty, elem, lower_tally_count_type())
             if lower_queue_element(ty) == .Val(elem) -> return lower_queue_repr(p, ty, elem)
             if lower_priority_queue_element(ty) == .Val(elem) -> return lower_priority_queue_repr(p, ty, elem)
+            // The checked default Err is the runtime's own JetErr (Err88) in
+            // every native lowering (NativeErr.jet), as Rust emits it.
+            if lower_default_err_type(p, ty) -> return LowerRepr.Handle{drop: "jet_rt_handle_drop_jet_err", clone: "jet_rt_handle_clone_jet_err"}
             runtime :: lower_runtime_handle_type(p, ty)
             if runtime == None && lower_runtime_missing_application(ty, LOWER_RUNTIME_HANDLES) == .Val(failure) -> return failure
             schema :: lower_record_schema_with_handle(p, ty, runtime)
@@ -3079,7 +3082,7 @@ fn lower_struct_field(p: MIRProgram, ty: MIRType, field: MIRFieldID) -> LowerFie
 fn lower_field(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, base: MIRValueID, field: MIRFieldID) Never! {
     aggregate :: lower_use(&m, &f, base) ?? return
     ty :: lower_value_type(c, base) ?? return lower_fail(&m, &f, "field base {base.value} has no checked type")
-    if m.native_pack && lower_native_err_type(p, ty) -> return lower_native_err_field(p, c, &m, &f, instruction, base, aggregate, ty, field)
+    if lower_native_err_type(p, ty) -> return lower_native_err_field(p, c, &m, &f, instruction, base, aggregate, ty, field)
     found :: lower_struct_field(p, ty, field) ?? {
         // A field read in place inside a runtime handle (Places.jet).
         place :: lower_handle_field_place(p, &m, &f, aggregate, ty, field) ?? return lower_fail(&m, &f, "field {field.value} is not a field of {mir_type_display_name(ty)}")
