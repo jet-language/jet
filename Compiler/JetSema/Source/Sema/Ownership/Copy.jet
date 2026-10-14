@@ -394,7 +394,13 @@ fn sema_copy_named_facts(
     walk: &SemaCopyWalk,
 ) -> SemaCopyTypeFacts Never! {
     if graph == .Val(registered) {
-        if sema_type_resolve_nominal_row(registered, ty, caller_module_identity) == .Val(row) -> return sema_copy_nominal_facts(registered.modules[row.module_index].nominals[row.row], ty, graph, caller_module_identity, generic_params, &walk)
+        if sema_type_resolve_nominal_row(registered, ty, caller_module_identity) == .Val(row) {
+            // A field typed by a trait name holds a trait value, which copies
+            // like `.TraitObject` (known, never duplicable on its own): it is
+            // not a nominal record whose declared parts the walk could read.
+            if registered.modules[row.module_index].nominals[row.row].kind == SemaRegistrationNominalKind.Trait -> return sema_copy_type_facts_known(false, false, true, false, false, false, true)
+            return sema_copy_nominal_facts(registered.modules[row.module_index].nominals[row.row], ty, graph, caller_module_identity, generic_params, &walk)
+        }
     }
     // Core-only naming does not remove the runtime enum's Copy capability.
     if name == "IOOperation" -> return sema_copy_type_facts_known(true, true, false, false, false, false, true)
