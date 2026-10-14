@@ -463,9 +463,18 @@ fn lower_native_value_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
         data :: lower_list_data(&f, payload)
         lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: data})
     } else {
-        if args[0].access != .Move || !mir_type_same_checked_type(source_ty, info.ty) {
+        // The route takes its List by value (borrow mask false). A moved
+        // argument transfers its allocation; a Read one (`^entries` lowered
+        // as a read of a place the scope still drops) crosses as an owned
+        // copy, as MIRRust's by-value formal does (jet_rust_emit_value_owned).
+        if (args[0].access != .Move && args[0].access != .Read) || !mir_type_same_checked_type(source_ty, info.ty) {
             lower_fail(&m, &f, "Object construction must transfer its checked ordered List")
             return true
+        }
+        entries := source
+        if args[0].access == .Read {
+            entries = lower_pointer(&f)
+            lower_clone_into(p, &m, &f, source, entries, info.ty)
         }
         dst :: lower_result(p, c, &m, &f, instruction) ?? return true
         lower_alloc(&m, &f, dst, lower_enum_box_size(p, definition))
@@ -473,10 +482,10 @@ fn lower_native_value_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
         if info.boxed {
             wrapper :: lower_pointer(&f)
             lower_alloc(&m, &f, wrapper, lower_option_box_size(p, info.ty))
-            lower_write_at(p, &f, wrapper, 0, source, info.ty)
+            lower_write_at(p, &f, wrapper, 0, entries, info.ty)
             lower_emit(&f, LIRInst.Store{base: dst, offset: info.offset, value: wrapper})
         } else {
-            lower_write_at(p, &f, dst, info.offset, source, info.ty)
+            lower_write_at(p, &f, dst, info.offset, entries, info.ty)
         }
     }
     true
