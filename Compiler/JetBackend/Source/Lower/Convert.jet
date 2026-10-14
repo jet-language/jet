@@ -187,6 +187,7 @@ fn lower_convert_numeric(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     // Numeric casts inspect their input; an exact identity cast still returns
     // an independent owner, unlike a transparent carrier transfer.
     if from_exact && to_exact -> return lower_copy(p, c, &m, &f, instruction, value)
+    if lower_convert_fixed(p, c, &m, &f, instruction, value, source_type, target) -> return
     if source != .Other && source == destination -> return lower_forward(c, &m, &f, instruction, value)
     // Reuse the numeric pairs from 08dadc79e; unlike that original lowering,
     // cross the raw-binary32 carrier boundary explicitly.
@@ -231,15 +232,15 @@ fn lower_convert_numeric(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
         }
         return lower_alias(c, &f, instruction, operand)
     }
-    // Sema only widens (Expressions/Constructors.jet:1194): a narrow word is
-    // already its value as any wider integer, and inside the inline Int range.
+    // A narrow word is already its value as an exact Int, inside the inline
+    // Int range; a fixed integer target took lower_convert_fixed above.
     if source == .Narrow {
         if to_float {
             operand :: lower_use(&m, &f, value) ?? return
             dst :: lower_result(p, c, &m, &f, instruction) ?? return
             return lower_emit(&f, LIRInst.Convert{dst: dst, src: operand})
         }
-        if to_exact || to_i64 || destination == .Narrow || lower_is_unsigned_word(target) -> return lower_forward(c, &m, &f, instruction, value)
+        if to_exact -> return lower_forward(c, &m, &f, instruction, value)
     }
     // U64 -> Int (MIRRust.rs: jet_int_owned_from_u64): a word below 2^63 is
     // the I64 widening; above it the exact value is (word & I64.MAX) + 2^63.
@@ -253,6 +254,33 @@ fn lower_convert_numeric(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     // FloatToInt uses a Prelude conversion and its fallibility instead. Do not
     // invent a saturating/trapping rule for an unreachable NumericCast pair.
     lower_fail(&m, &f, "numeric conversion from {mir_type_display_name(source_type)} to {mir_type_display_name(target)} is not lowered at O0 yet")
+}
+
+// Fixed integer to fixed integer (MIRRust.rs NumericCast: `(value) as T`).
+// Rust `as` keeps the low bits of the two's-complement value: a same-width
+// cast (I64 <-> U64, I32 <-> U32) reinterprets them, a narrowing cast
+// truncates, a widening cast sign- or zero-extends by the source's
+// signedness. Every fixed word below 64 bits is carried extended by its own
+// signedness, so the result word must be re-extended by the target's unless
+// the source word already is that value: a 64-bit target, or a wider target
+// whose extension the source's agrees with. False when either side is not a
+// fixed integer of at most 64 bits.
+fn lower_convert_fixed(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID, source_type: MIRType, target: MIRType) -> Bool Never! {
+    if lower_convert_type(source_type).kind == .IntN(source_signed, source_bits) {
+        if lower_convert_type(target).kind == .IntN(target_signed, target_bits) {
+            if source_bits > 64 || target_bits > 64 -> return false
+            same :: target_bits == 64 || (target_bits > source_bits && (target_signed || !source_signed)) || (target_bits == source_bits && target_signed == source_signed)
+            if same {
+                lower_forward(c, &m, &f, instruction, value)
+                return true
+            }
+            operand :: lower_use(&m, &f, value) ?? return true
+            dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+            lower_narrow_wrap(&f, dst, operand, target_signed, target_bits)
+            return true
+        }
+    }
+    false
 }
 
 // MIRRust.rs:conversion :23541-23579. The runtime symbol is called like any
