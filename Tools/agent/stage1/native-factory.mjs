@@ -12,9 +12,15 @@ export function admitFactoryReceipt(text, censusText) {
     const split = line.indexOf('=');
     return [line.slice(0, split), line.slice(split + 1)];
   }));
-  for (const [name, value] of Object.entries({ mode: 'factory', complete: 'true', report_count: '0', selected_factory_tier: 'Aot', actual_factory_tier: 'Aot' })) {
+  for (const [name, value] of Object.entries({ mode: 'factory', complete: 'true', selected_factory_tier: 'Aot', actual_factory_tier: 'Aot' })) {
     if (rows.get(name) !== value) throw Error(`factory receipt ${name} is not ${value}`);
   }
+  // Reports are admitted by severity: a lint warning is not a failed compile,
+  // an error report is. Every report_json line is read (the row map keeps one).
+  const reports = text.split('\n').filter(line => line.startsWith('report_json=')).map(line => JSON.parse(line.slice('report_json='.length)));
+  if (reports.length !== Number(rows.get('report_count') ?? 0)) throw Error(`factory receipt lists ${reports.length} reports but report_count is ${rows.get('report_count')}`);
+  const errors = reports.filter(report => report.severity !== 'warning' && report.severity !== 'note' && report.severity !== 'info');
+  if (errors.length) throw Error(`factory receipt has ${errors.length} error report(s): ${errors.slice(0, 5).map(report => `${report.code} ${report.what} (${report.file}:${report.line})`).join('; ')}`);
   const census = censusText.trim().split('\n');
   if (census.length !== 1 || census[0] !== 'phase\titem\tcode\tmessage\tspan') throw Error('native/library factory request has a missing or non-empty all-phases census');
   // emitted_source is legitimately absent for library/native outputs. Do not
