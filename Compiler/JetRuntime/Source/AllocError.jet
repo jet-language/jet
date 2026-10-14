@@ -31,3 +31,14 @@ ALLOC_ERROR_ALLOCATOR :: prep { I64{8} }
     if data_tree_word(left + ALLOC_ERROR_REQUESTED) != data_tree_word(right + ALLOC_ERROR_REQUESTED) -> return false
     jet_rt_string_eq(data_tree_word(left + ALLOC_ERROR_ALLOCATOR), data_tree_word(right + ALLOC_ERROR_ALLOCATOR))
 }
+// Values.rs AllocError Display = JetShow:
+// `AllocError { requested_bytes: <i64>, allocator: <String {:?}> }`.
+#Export(c) fn jet_rt_handle_display_alloc_error(value: I64) -> I64 {
+    target :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(target, rt_static_text("AllocError {{ requested_bytes: "))
+    rt_text_push_number(target, data_tree_word(value + ALLOC_ERROR_REQUESTED))
+    jet_rt_string_builder_push(target, rt_static_text(", allocator: "))
+    rt_text_push_debug_str(target, data_tree_word(value + ALLOC_ERROR_ALLOCATOR), true)
+    jet_rt_string_builder_push(target, rt_static_text(" }}"))
+    jet_rt_string_builder_finish(target)
+}
