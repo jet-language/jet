@@ -4820,6 +4820,22 @@ fn jet_codegen_checked_host_field_type(builder: JetCodegenBuilder, program: JetC
         .Apply(_, args) -> args
         else -> [Type]{}
     }
+    // The checked declaration's field type, as the MIR type definition lowers
+    // it (jet_codegen_lower_declaration_field). A registration row keeps the
+    // source spelling, e.g. a file's module alias (`cli_files.Stat`), which no
+    // MIR type names.
+    if program.owners.type_def_rows.get(jet_codegen_qualified_function_key(nominal_identity.module_identity, nominal_identity.name)) == .Val(row) {
+        definition :: program.modules[row.module_index].declarations.type_defs[row.definition_index]
+        if definition.kind == .Struct(fields, _) {
+            loop field in fields {
+                if field.name != field_name -> next
+                generic_names := [String]{}
+                loop parameter in definition.generic_params -> &generic_names.push(parameter.name)
+                if generic_names.len() != generic_args.len() -> panic("checked host projection has incomplete generic owner arguments")
+                return sema_inference_substitute_type(field.ty, generic_names, generic_args)
+            }
+        }
+    }
     loop semantic_module in program.modules {
         if semantic_module.module_identity != nominal_identity.module_identity -> next
         loop nominal in semantic_module.nominals {
