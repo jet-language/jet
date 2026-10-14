@@ -238,9 +238,9 @@ struct LowerModule {
     // Per LIR function row: the bytes of the inline aggregate it returns
     // through a hidden result pointer (its first parameter), or 0.
     mir_results: [Int]
-    // A compiler callable (lir_lower_callable) spends comptime fuel and depth
-    // through the runtime's budget hooks (lower_comptime_site); program
-    // entries never do.
+    // A compiler callable (lir_lower_callables) spends comptime fuel and
+    // depth through the runtime's budget hooks (lower_comptime_site); program
+    // entries, tests, C exports and the runtime library never do.
     comptime_budget: Bool
     glue_base: Int
     glue: [LowerGlue]
@@ -346,7 +346,7 @@ struct LowerFunction {
 // methods of generic types once per concrete instance) plus their glue.
 fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, [MIRFunctionID]{entry}, true, true, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false)
+    lower_selected(program, [MIRFunctionID]{entry}, true, true, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false, false)
 }
 
 // JET_KEEP_GOING (the bootstrap native feed): lir_lower_entry, except that a
@@ -356,14 +356,14 @@ fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Nev
 // shipped: the caller turns every issue into a census row.
 fn lir_lower_entry_keep_going(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, [MIRFunctionID]{entry}, true, true, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, true)
+    lower_selected(program, [MIRFunctionID]{entry}, true, true, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, true, false)
 }
 
 // Compiler and test callbacks retain return carriers; only program entries
 // consume Option/Result success and turn failure into a process exit.
 fn lir_lower_callables(program: MIRProgram, roots: [MIRFunctionID]) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, roots, false, true, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false)
+    lower_selected(program, roots, false, true, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false, true)
 }
 
 // RuntimeLibrary validates each exact function ID and its signature. Every
@@ -371,12 +371,12 @@ fn lir_lower_callables(program: MIRProgram, roots: [MIRFunctionID]) -> LIRLoweri
 // `export.entry` (Callable.jet).
 // No ordinary program/callback lowering enables runtime-only substitution.
 fn lir_lower_runtime_callables(program: MIRProgram, roots: [MIRFunctionID], intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LIRLowering Never! {
-    lower_selected(program, roots, false, true, program.native_pack, [String]{}, true, None, [MIROutputCheck]{}, ^intrinsics, false)
+    lower_selected(program, roots, false, true, program.native_pack, [String]{}, true, None, [MIROutputCheck]{}, ^intrinsics, false, false)
 }
 
 fn lir_lower_core_shared(program: MIRProgram, roots: [MIRFunctionID]) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, roots, false, false, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false)
+    lower_selected(program, roots, false, false, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false, false)
 }
 
 // Explicit imports are the actual external C consumer closure.
@@ -386,10 +386,15 @@ fn lir_lower_native_callables(program: MIRProgram, roots: [MIRFunctionID]) -> LI
 
 fn lir_lower_native_imports(program: MIRProgram, roots: [MIRFunctionID], imports: [String]) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, roots, false, true, true, imports, true, None, [MIROutputCheck]{}, ^intrinsics, false)
+    lower_selected(program, roots, false, true, true, imports, true, None, [MIROutputCheck]{}, ^intrinsics, false, false)
 }
 
-fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, shared_sites_dynamic: Bool, native_pack: Bool, imports: [String], c_exports: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic], keep_going: Bool) -> LIRLowering Never! {
+// `comptime_budget`: only a compiler callable (lir_lower_callables, run by the
+// comptime image) spends comptime fuel and depth through the runtime's
+// jet_rt_comptime_enter/step/leave hooks. Program entries, test harnesses, C
+// exports and the runtime library never do: the runtime library implements
+// those hooks, so a hook in it recurses into itself.
+fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, shared_sites_dynamic: Bool, native_pack: Bool, imports: [String], c_exports: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic], keep_going: Bool, comptime_budget: Bool) -> LIRLowering Never! {
     // The frontend may erase browser init functions before native MIR is
     // serialized. Their host requirement survives in the runtime-part facts.
     browser_hosted := false
@@ -450,7 +455,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         checked_types: prepared.checked_types.copy(),
         close_methods: prepared.close_methods.copy(),
         mir_sources: [Int]{},
-        comptime_budget: !wrap_entry,
+        comptime_budget: comptime_budget,
         mir_signatures: [LIRSignatureID]{},
         mir_results: [Int]{},
         glue_base: prepared.functions.len(),

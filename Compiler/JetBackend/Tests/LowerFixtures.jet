@@ -803,6 +803,10 @@ fn run() {
         clean = false
     }
     if !fx_report_lir("static-text", fx_static_text_module()) -> clean = false
+    if !fx_comptime_budget_checks() {
+        print("issue comptime-budget: a runtime callable calls a comptime budget hook, or a compiler callable lost them")
+        clean = false
+    }
     if !fx_runtime_o1_effects_check() {
         print("issue runtime-o1-effects: OS effects or runtime intrinsic operations changed order/count")
         clean = false
