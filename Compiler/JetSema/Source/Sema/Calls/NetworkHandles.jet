@@ -379,6 +379,10 @@ fn sema_call_try_network_handle_method(receiver: Expr, receiver_value: TExpr, me
     typed_args := checked_args ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if text_write {
         text :: typed_args[0]
+        // The conversion is compiler-built: Rust infers the data type and
+        // records no effect for it. Record that empty row, so the effect
+        // walk does not read the fact-less `.bytes()` as an unknown callee.
+        if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "String.bytes", text.span, [EffectRowEntry]{}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         typed_args[0] = sema_tir_expr(sema_network_handle_u8_list(), TExprKind.BuiltinMethod{receiver: text, operation: TBuiltinOp.Bytes{owned: false}, args: [TExpr]{}}, text.span)
     }
     sema_network_handle_finish(receiver_value, signature.operation, typed_args, signature.result_type, signature.effect_name, "{owner}.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
