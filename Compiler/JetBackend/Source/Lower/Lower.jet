@@ -515,6 +515,9 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     }
     functions := [LIRFunction]{}
     failed_functions := prepared.failed_functions.copy()
+    // Keep-going: the indexed program the body tasks hand back, which the
+    // glue tasks then read (lower_keep_going_glue).
+    glue_programs := [MIRProgram]{}
     if keep_going {
         kept := lower_keep_going_lower(^indexed, ^m, ^prepared.functions, ^prepared.instances, ^failed_functions) ?? panic("the keep-going native lowering tasks failed")
         prepared.functions = ^kept.inventory
@@ -522,12 +525,14 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         m = ^kept.state
         failed_functions = ^kept.failed
         functions = ^kept.functions
+        glue_programs = ^kept.programs
     } else {
         loop (index, descriptor) in prepared.functions {
             function :: lower_selected_function(indexed, &m, descriptor, prepared.instances, index, &failed_functions)
             &functions.push(function)
         }
     }
+    glue_inputs :: shared LowerGlueInputs{programs: ^glue_programs}
     if !shared_sites_dynamic {
         loop definition in program.constants {
             if definition.value == .SharedSite(site) {
@@ -597,6 +602,10 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
             if lower_trait_dispatcher(program, glue) {
                 &dispatchers.push(cursor)
                 &glue_functions.push(None)
+            } else if keep_going {
+                outcome := lower_keep_going_glue(glue_inputs, ^m, glue, functions, glue_functions) ?? panic("the keep-going native glue task failed")
+                m = ^outcome.state
+                &glue_functions.push(Val(^outcome.function))
             } else {
                 &glue_functions.push(Val(lower_checked_glue_function(program, &m, glue)))
             }
@@ -607,9 +616,18 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         }
         if emitted == dispatchers.len() -> break
         glue :: m.glue[dispatchers[emitted]].copy()
-        function :: lower_checked_glue_function(program, &m, glue)
-        if native_pack -> lower_native_glue_rewrite(program, &m, function)
-        glue_functions[dispatchers[emitted]] = Val(function)
+        function := LIRFunction?{None}
+        if keep_going {
+            outcome := lower_keep_going_glue(glue_inputs, ^m, glue, functions, glue_functions) ?? panic("the keep-going native glue task failed")
+            m = ^outcome.state
+            function = Val(^outcome.function)
+        } else {
+            function = Val(lower_checked_glue_function(program, &m, glue))
+        }
+        if native_pack {
+            if function == .Val(emitted_function) -> lower_native_glue_rewrite(program, &m, emitted_function)
+        }
+        glue_functions[dispatchers[emitted]] = ^function
         emitted += 1
     }
     if inventory != lower_trait_key_count(m) -> &m.issues.push(LIRLoweringIssue{function: "trait dispatch", message: "trait key inventory grew after dispatch emission"})
@@ -625,7 +643,13 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         // startup. Emit it last so helper bodies have discovered every fixup.
         startup :: lower_helper_id(&m, "core.shared.init", mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: [MIRType]{}}))
         startup_glue :: m.glue[startup.value - m.glue_base].copy()
-        &functions.push(lower_checked_glue_function(program, &m, startup_glue))
+        if keep_going {
+            outcome := lower_keep_going_glue(glue_inputs, ^m, startup_glue, functions, glue_functions) ?? panic("the keep-going native glue task failed")
+            m = ^outcome.state
+            &functions.push(^outcome.function)
+        } else {
+            &functions.push(lower_checked_glue_function(program, &m, startup_glue))
+        }
         lowered_entry = Val(startup)
     }
     closures :: if !wrap_entry && m.issues.len() == 0 -> lower_closure_value_layouts(program, prepared.functions, prepared.instances, m) else -> [LIRClosureValueLayout]{}
@@ -685,7 +709,8 @@ fn lower_selected_function(program: MIRProgram, m: &LowerModule, descriptor: Low
 // data, glue): those rows are complete, and the trap never names them.
 // Without JET_KEEP_GOING lowering never runs here.
 struct LowerKeepGoingInputs {
-    program: MIRProgram
+    // The one (indexed) program, moved in and handed back out after.
+    programs: [MIRProgram]
     functions: [LowerPreparedFunction]
     instances: [MIRFunction]
 }
@@ -702,18 +727,20 @@ struct LowerKeepGoingLowered {
     state: LowerModule
     failed: [U64:Bool]
     functions: [LIRFunction]
-    // The inventory and instance rows, moved back out of the tasks' inputs.
+    // The inventory and instance rows and the program, moved back out of the
+    // tasks' inputs.
     inventory: [LowerPreparedFunction]
     instances: [MIRFunction]
+    programs: [MIRProgram]
 }
 
 // Lowers every inventory function (`functions`, with the instance bodies
 // `instances`, both moved in for the lowering and handed back after) against
 // `m`; returns the module state, the failed concrete functions and the
 // lowered functions in inventory order. The (indexed) program copy moves into
-// the tasks' shared inputs.
+// the tasks' shared inputs and back out (for the glue phase).
 fn lower_keep_going_lower(program: ^MIRProgram, m: ^LowerModule, functions: ^[LowerPreparedFunction], instances: ^[MIRFunction], failed: ^[U64:Bool]) -> LowerKeepGoingLowered {
-    inputs :: shared LowerKeepGoingInputs{program: ^program, functions: ^functions, instances: ^instances}
+    inputs :: shared LowerKeepGoingInputs{programs: [MIRProgram]{^program}, functions: ^functions, instances: ^instances}
     state :: shared LowerKeepGoingState{modules: [LowerModule]{}, failed: ^failed, functions: [LIRFunction]{}, position: 0}
     lower_keep_going_fill(state, ^m)
     lower_keep_going_functions(inputs, state)
@@ -730,13 +757,14 @@ fn lower_keep_going_fill(state: Shared<LowerKeepGoingState>, m: ^LowerModule) {
 fn lower_keep_going_take(state: Shared<LowerKeepGoingState>) -> LowerKeepGoingLowered {
     permit := state.guard_edit()
     taken :: &permit.value.modules.pop() ?? panic("the native lowering module left its keep-going state")
-    LowerKeepGoingLowered{state: taken, failed: permit.value.failed.copy(), functions: compiler_take_rows<LIRFunction>(&permit.value.functions), inventory: [LowerPreparedFunction]{}, instances: [MIRFunction]{}}
+    LowerKeepGoingLowered{state: taken, failed: permit.value.failed.copy(), functions: compiler_take_rows<LIRFunction>(&permit.value.functions), inventory: [LowerPreparedFunction]{}, instances: [MIRFunction]{}, programs: [MIRProgram]{}}
 }
 
 fn lower_keep_going_restore(inputs: Shared<LowerKeepGoingInputs>, lowered: &LowerKeepGoingLowered) {
     permit := inputs.guard_edit()
     lowered.inventory = compiler_take_rows<LowerPreparedFunction>(&permit.value.functions)
     lowered.instances = compiler_take_rows<MIRFunction>(&permit.value.instances)
+    lowered.programs = compiler_take_rows<MIRProgram>(&permit.value.programs)
 }
 
 fn lower_keep_going_functions(inputs: Shared<LowerKeepGoingInputs>, state: Shared<LowerKeepGoingState>) {
@@ -773,7 +801,7 @@ fn lower_keep_going_part(inputs: Shared<LowerKeepGoingInputs>, state: Shared<Low
     read :: inputs.guard_read()
     permit := state.guard_edit()
     // Passed straight through: a local binding of the guarded program would copy it.
-    lower_keep_going_rows(read.value.program, read.value.functions, read.value.instances, &permit.value)
+    lower_keep_going_rows(read.value.programs[0], read.value.functions, read.value.instances, &permit.value)
     ""
 }
 
@@ -802,6 +830,81 @@ fn lower_keep_going_trap_row(functions: [LowerPreparedFunction], state: &LowerKe
     trap :: lower_failed_function(state.modules[0], LIRFunctionID{value: index}, descriptor.name, signature)
     &state.functions.push(trap)
     state.position = index + 1
+}
+
+// JET_KEEP_GOING for glue and helper generation (after the function
+// bodies): each glue function lowers in its own task, against the module
+// and the program moved into shared state. A stop there becomes one issue
+// and a trap of the glue's call signature, as a stopped function body
+// does, so one bad helper no longer ends the whole compile.
+struct LowerGlueInputs {
+    programs: [MIRProgram]
+}
+
+struct LowerGlueState {
+    modules: [LowerModule]
+    functions: [LIRFunction]
+}
+
+struct LowerGlueOutcome {
+    state: LowerModule
+    function: LIRFunction
+}
+
+fn lower_keep_going_glue(inputs: Shared<LowerGlueInputs>, m: ^LowerModule, glue: LowerGlue, lowered: [LIRFunction], glued: [LIRFunction?]) -> LowerGlueOutcome {
+    state :: shared LowerGlueState{modules: [LowerModule]{^m}, functions: [LIRFunction]{}}
+    stopped := ""
+    task.group lower_glue {
+        head :: task lower_keep_going_glue_part(inputs, state, glue.copy())
+        stopped = head.join() ?? compiler_threads_failure_text(err)
+    }
+    permit := state.guard_edit()
+    taken := &permit.value.modules.pop() ?? panic("the native lowering module left its keep-going glue state")
+    lowered_glue := &permit.value.functions.pop()
+    if lowered_glue != None {
+        function :: lowered_glue ?? panic("checked present above")
+        return LowerGlueOutcome{state: ^taken, function: function}
+    }
+    name :: if glue.helper != "" -> "helper.{glue.helper}.{glue.key}" else -> "glue.{glue.key}"
+    &taken.issues.push(LIRLoweringIssue{function: name, message: "keep-going trap: native glue lowering stopped: {stopped}"})
+    signature :: lower_glue_trap_signature(&taken, glue.id, lowered, glued)
+    trap :: lower_failed_function(taken, glue.id, name, signature)
+    LowerGlueOutcome{state: ^taken, function: trap}
+}
+
+fn lower_keep_going_glue_part(inputs: Shared<LowerGlueInputs>, state: Shared<LowerGlueState>, glue: LowerGlue) -> String {
+    read :: inputs.guard_read()
+    permit := state.guard_edit()
+    function :: lower_checked_glue_function(read.value.programs[0], &permit.value.modules[0], glue)
+    &permit.value.functions.push(function)
+    ""
+}
+
+// The signature a lowered function calls `id` with (a trapped glue keeps
+// its callers' ABI); a no-argument Unit signature when nothing calls it.
+fn lower_glue_trap_signature(m: &LowerModule, id: LIRFunctionID, lowered: [LIRFunction], glued: [LIRFunction?]) -> LIRSignatureID Never! {
+    loop at in 0..<lowered.len() {
+        if lower_call_signature(lowered[at], id) == .Val(signature) -> return signature
+    }
+    loop at in 0..<glued.len() {
+        if glued[at] == .Val(function) {
+            if lower_call_signature(function, id) == .Val(signature) -> return signature
+        }
+    }
+    lower_signature(&m, [LIRLayout]{}, None)
+}
+
+fn lower_call_signature(function: LIRFunction, id: LIRFunctionID) -> LIRSignatureID? Never! {
+    loop block in 0..<function.blocks.len() {
+        loop at in 0..<function.blocks[block].insts.len() {
+            if function.blocks[block].insts[at] == .Call(_, signature, callee, _) {
+                if callee == .Function(target) {
+                    if target == id -> return Val(signature)
+                }
+            }
+        }
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
