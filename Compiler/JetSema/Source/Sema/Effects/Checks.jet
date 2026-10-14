@@ -86,6 +86,9 @@ struct SemaEffectModuleInput {
     source_segments: [SemaSourceSegment]
     // D-EFF3 trait-method effect ceilings this module declares (E0742).
     trait_bounds: [SemaEffectTraitBound]{[SemaEffectTraitBound]{}}
+    // `{trait}::{owner}` implementations this module declares
+    // (sema_effect_trait_implementers), for generic dispatch.
+    trait_implementers: [String]{[String]{}}
 }
 
 struct SemaEffectDispatchSite {
@@ -892,6 +895,11 @@ struct SemaEffectCallIndex {
     current_module: Int
     modules: [SemaEffectModuleCalls]
     node_by_key: [String:Int]
+    // Rust `seed_trait_dispatch_effects` `<static>` inputs: implementing type
+    // names by trait name, and `{trait}::{method}` -> implementing type ->
+    // that type's own method node.
+    trait_implementers: [String:[String]]{[String:[String]]{}}
+    trait_impls: [String:[String:String]]{[String:[String:String]]{}}
 }
 
 struct SemaEffectModuleCalls {
@@ -1070,6 +1078,55 @@ fn sema_effect_record_dispatch(nodes: &[SemaEffectNode], node_index: Int, expres
     }
 }
 
+// Rust `seed_trait_dispatch_effects` / `method_calls.rs` generic dispatch:
+// a call through a generic bound (`producer: P` with `P: Producer`) is
+// statically selected after type inference, so it reaches the trait
+// method's `<static>` node: the declared row when the method has one,
+// otherwise the union of every implementation's summary. An implementing
+// type with no summary of its own for the method (a trait default body, an
+// unloaded impl) is unresolved, and so is a trait with no implementation:
+// either forces the maximal row, as in Rust. Only a trait-object receiver is
+// the open-world dispatch that stays maximal for a row-less method.
+fn sema_effect_record_static_dispatch(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, expression: TExpr, fact: SemaCallSiteFact) -> Bool Never! {
+    if fact.facts.effect_bound != None -> return false
+    if expression.kind == {
+        .MethodCall(receiver, method, _, _) -> {
+            trait_owner :: method.trait_owner ?? return false
+            if receiver.ty == .TraitObject(_) -> return false
+            if sema_effect_node_index(facts.node_by_key, method.symbol.key) != None -> return false
+            sema_effect_record_memory_open(&nodes, node_index, fact.span, "generic trait dispatch has no sealed target set")
+            // Rust seeds the `<static>` node per module from that module's
+            // own items, so only the trait's declaring module contributes.
+            trait_name :: sema_effect_symbol_leaf(trait_owner.key)
+            trait_module :: sema_effect_symbol_module(trait_owner.key) ?? ""
+            owners :: facts.trait_implementers.get("{trait_module}|{trait_name}") ?? [String]{}
+            impls :: facts.trait_impls.get("{trait_module}|{trait_name}::{method.name}") ?? [String:String]{}
+            unresolved := owners.len() == 0
+            loop owner in owners {
+                if impls.get(owner) == .Val(impl_key) {
+                    sema_effect_node_add_edge(&nodes, node_index, impl_key)
+                } else {
+                    unresolved = true
+                }
+            }
+            if unresolved {
+                nodes[node_index].maximal = true
+                nodes[node_index].maximal_span = Val(fact.span)
+            }
+            true
+        }
+        else -> false
+    }
+}
+
+// The declaring module of a `kind:{module}::{name}` type symbol key
+// (`symbol_id` with an empty owner).
+fn sema_effect_symbol_module(key: String) -> String? Never! {
+    head :: key.cut_last("::") ?? return None
+    kind_and_module :: head.before.split_once(":") ?? return None
+    Val(kind_and_module.after)
+}
+
 fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String) {
     if {
         sema_effect_is_call(expression) -> {
@@ -1082,8 +1139,10 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: 
                         // the pure function reports E3403 instead of E3401.
                         &diagnostics.push(sema_error("E3403", expression.span, "`{api}` is non-deterministic and cannot appear in a pure evaluation.", "Pure evaluation must produce the same result on every machine (D-PURE2).", "remove this call, or remove the enclosing function's explicit empty effect bound."))
                     } else {
-                        sema_effect_record_fact(&nodes, facts.node_by_key, node_index, value, &diagnostics)
-                        sema_effect_record_dispatch(&nodes, node_index, expression, value)
+                        if !sema_effect_record_static_dispatch(&nodes, facts, node_index, expression, value) {
+                            sema_effect_record_fact(&nodes, facts.node_by_key, node_index, value, &diagnostics)
+                            sema_effect_record_dispatch(&nodes, node_index, expression, value)
+                        }
                     }
                 }
                 .None -> {
@@ -1943,7 +2002,34 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
             sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, function_diagnostics)
         }
     }
-    calls := SemaEffectCallIndex{current_module: 0, modules: [SemaEffectModuleCalls]{}, node_by_key: node_by_key}
+    // Rust `seed_trait_dispatch_effects` (one module's items at a time):
+    // implementing types by `{module}|{trait}`, and each
+    // `{module}|{trait}::{method}`'s own summary per implementing type.
+    trait_implementers := [String:[String]]{}
+    trait_impls := [String:[String:String]]{}
+    loop module_index in 0..<inputs.len() {
+        module_row :: inputs[module_index]
+        module_identity :: modules[module_row.module_index].module_identity
+        loop row in module_row.trait_implementers {
+            pair :: row.cut_last("::") ?? next
+            trait_key :: "{module_identity}|{pair.before}"
+            owners := trait_implementers.get(trait_key) ?? [String]{}
+            if !owners.contains(pair.after) -> &owners.push(pair.after)
+            trait_implementers[trait_key] = ^owners
+        }
+        loop function in modules[module_row.module_index].functions {
+            if function.kind == .TraitMethod(_, _, owner_type, trait_symbol, _) {
+                source :: sema_effect_source_for(function, module_row.sources, source_indices[module_index])
+                method :: source.map((value) -> value.name) ?? function.name
+                trait_key :: "{module_identity}|{sema_effect_symbol_leaf(trait_symbol.key)}::{method}"
+                rows := trait_impls.get(trait_key) ?? [String:String]{}
+                owner :: sema_effect_symbol_leaf(type_name(owner_type))
+                if rows.get(owner) == None -> rows[owner] = function.key
+                trait_impls[trait_key] = ^rows
+            }
+        }
+    }
+    calls := SemaEffectCallIndex{current_module: 0, modules: [SemaEffectModuleCalls]{}, node_by_key: node_by_key, trait_implementers: ^trait_implementers, trait_impls: ^trait_impls}
     loop module_row in inputs -> &calls.modules.push(sema_effect_module_calls(modules[module_row.module_index].call_facts))
     any_unsafe :: loop node in nodes {
         if node.is_unsafe -> break true

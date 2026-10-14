@@ -140,7 +140,7 @@ fn sema_repl_type_check_stmts(session: &SemaReplSession, statements: [Stmt], sou
                 loop fact in session.context.call_facts -> &checked_module.call_facts.push(fact)
                 segments = source_segments
             }
-            &inputs.push(SemaEffectModuleInput{module_index: modules.len(), sources: ^sources, source_segments: segments, trait_bounds: sema_effect_trait_bounds(source_module.program.items)})
+            &inputs.push(SemaEffectModuleInput{module_index: modules.len(), sources: ^sources, source_segments: segments, trait_bounds: sema_effect_trait_bounds(source_module.program.items), trait_implementers: sema_effect_trait_implementers(source_module.program.items)})
             &modules.push(^checked_module)
         }
         // The session holds no package policy, so no package memory denials.
