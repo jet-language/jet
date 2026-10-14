@@ -399,6 +399,12 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
     if sema_expression_enum_variant_path(base, member, environment, program, &scopes) == .Val(path) {
         return sema_expression_enum_literal(path.enum_name, [Type]{}, path.variant, [EnumLitArg]{}, false, Val(member_span), span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
+    // Rust `infer_field` (imports arm): `alias.NAME` where `alias` is a
+    // whole-module import reads that module's constant `NAME`.
+    if base == .Ident(alias, _) {
+        module_constant :: sema_expression_module_constant(alias, member, span, expected, environment, program, &scopes, &context, &diagnostics)
+        if module_constant.handled -> return module_constant.value
+    }
     if !sema_ownership_check_owner_read(&state, Expr.Field{base: base, member: member, span: member_span}, scopes, &diagnostics) -> return None
     // A projected base suppresses descendant moves, but still answers for
     // moves of itself or its ancestors. The complete place checks all moves.
@@ -451,6 +457,28 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
         if swizzle.handled -> return if swizzle.value == .Val(read) -> sema_expr_expected(read, expected, environment, program, &diagnostics) else -> None
     }
     sema_expression_field_checked(checked_base, member, span, expected, environment, program, &scopes, &context, &diagnostics)
+}
+
+// `alias.NAME` through a whole-module import `alias` (Rust `infer_field`:
+// `modules[member_owner].consts.get(member)`): a ConstRef to the target
+// module's constant, typed by its staged value. A constant whose value has
+// not landed is a dependency wait (the reference names it) and, after the
+// comptime run, a recorded incomplete reason.
+fn sema_expression_module_constant(alias: String, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    index :: sema_scope_resolve_index(scopes, alias) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if scopes.bindings[index].symbol.kind != SymbolKind.Import -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if program.registration_graph == .Val(graph) {
+        resolved :: sema_registration_lookup_qualified(graph, environment.module_identity, alias, member) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+        if resolved.symbol.kind != SymbolKind.Constant -> return SemaMethodSpecialCheck{handled: false, value: None}
+        &context.name_references.push(SemaNameReferenceFact{span: span, symbol: resolved.symbol, kind: "const"})
+        ty :: resolved.symbol.ty ?? {
+            sema_check_unsupported(&context, "constant `{alias}.{member}` (read at offset {span.start}) has no staged compile-time value")
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        value :: sema_tir_expr(ty, TExprKind.ConstRef{symbol: resolved.symbol.id}, span)
+        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+    }
+    SemaMethodSpecialCheck{handled: false, value: None}
 }
 
 // D-SWIZZLE1 (Rust `infer_field`, `parse_swizzle_member`): `v.xy` names up to
