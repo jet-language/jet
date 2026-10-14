@@ -1,5 +1,6 @@
 use jet_foundation.[
-    MIRAccess, MIRConstant, MIRDropKind, MIRField, MIRFieldValue, MIRFunction, MIRFunctionID, MIRIndexKind, MIROperation,
+    MIRAccess, MIRBlockID, MIRConstant, MIRDropKind, MIRField, MIRFieldValue, MIRFunction, MIRFunctionID, MIRIndexKind, MIROperation,
+    MIRPhiIncoming,
     MIRPanicContext, MIRPanicLoc, MIRPanicLocal, MIRPlace, MIRPlaceID,
     MIRPreludeABI, MIRPreludeFamily, MIRProgram, MIRProjection, MIRTupleField,
     MIRSemanticOp, MIRTerminator, MIRType, MIRTypeDef, MIRTypeDefKind, MIRTypeKind, MIRValueID,
@@ -176,6 +177,52 @@ fn fx_lists_place_read() -> MIRProgram Never! {
     done :: fx_owned(&b, strings, MIROperation.MovePlace{place: root})
     fx_do(&b, MIROperation.Drop{value: done, kind: MIRDropKind.Value})
     fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_list_program(b)
+}
+
+// One `slot ?? "none"` over a String? list element: the read feeds OptionValue,
+// whose payload a Phi takes. Blocks start at `first`.
+fn fx_lists_coalesce(b: &FxBuilder, slot: MIRPlaceID, first: Int) -> MIRValueID Never! {
+    optional :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_string()})
+    read :: fx_owned(&b, optional, MIROperation.ReadPlace{place: slot})
+    some :: fx_copy(&b, fx_bool(), MIROperation.OptionIsSome{subject: read})
+    fx_block(&b, first, MIRTerminator.Branch{condition: some, then_target: MIRBlockID{value: first + 1}, else_target: MIRBlockID{value: first + 2}})
+    payload :: fx_owned(&b, fx_string(), MIROperation.OptionValue{subject: read})
+    fx_block(&b, first + 1, MIRTerminator.Jump{target: MIRBlockID{value: first + 3}})
+    fallback :: fx_owned(&b, fx_string(), MIROperation.Constant{value: .String{value: "none"}})
+    fx_block(&b, first + 2, MIRTerminator.Jump{target: MIRBlockID{value: first + 3}})
+    fx_owned(&b, fx_string(), MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: MIRBlockID{value: first + 1}, value: payload}, MIRPhiIncoming{block: MIRBlockID{value: first + 2}, value: fallback}}})
+}
+
+// fn run() { xs := [String?]{Val("red")}; print(xs[0] ?? "none"); print("zzz"); print(xs[0] ?? "none"); }
+// The ?? result is an owned Phi the lowering drops after print. The payload it
+// takes must be a copy of the element (MIRRust.rs place_read clones; a Phi
+// consumes its incoming values): before, the element was read without a
+// copy, so the print freed the list's "red" and the reused block printed.
+// expect-stdout lists-coalesce: "red\nzzz\nred\n"
+fn fx_lists_place_coalesce() -> MIRProgram Never! {
+    b := fx_builder()
+    optional :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_string()})
+    strings :: fx_list_type(optional)
+    root :: fx_local(&b, "xs", strings, mir_owned_ownership())
+    red :: fx_owned(&b, fx_string(), MIROperation.Constant{value: .String{value: "red"}})
+    present :: fx_owned(&b, optional, MIROperation.Present{value: red})
+    list :: fx_owned(&b, strings, MIROperation.BuildList{values: [MIRValueID]{present}, trait_coercion: None})
+    fx_do(&b, MIROperation.WritePlace{place: root, value: list})
+    zero :: fx_int_const(&b, 0)
+    slot :: fx_list_index_place(&b, root, zero, optional)
+    first :: fx_lists_coalesce(&b, slot, 0)
+    fx_print(&b, first)
+    fx_do(&b, MIROperation.Drop{value: first, kind: MIRDropKind.Value})
+    other :: fx_owned(&b, fx_string(), MIROperation.Constant{value: .String{value: "zzz"}})
+    fx_print(&b, other)
+    fx_do(&b, MIROperation.Drop{value: other, kind: MIRDropKind.Value})
+    again :: fx_lists_coalesce(&b, slot, 3)
+    fx_print(&b, again)
+    fx_do(&b, MIROperation.Drop{value: again, kind: MIRDropKind.Value})
+    done :: fx_owned(&b, strings, MIROperation.MovePlace{place: root})
+    fx_do(&b, MIROperation.Drop{value: done, kind: MIRDropKind.Value})
+    fx_block(&b, 6, MIRTerminator.Return{value: None})
     fx_list_program(b)
 }
 
