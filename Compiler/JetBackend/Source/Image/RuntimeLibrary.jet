@@ -38,7 +38,11 @@ struct RuntimeExportSpec {
 
 
 fn runtime_export_error(message: String) -> X64RuntimeLibraryResult Never! {
-    X64RuntimeLibraryResult{object: X64ExecutableResult{bytes: [U8]{}, errors: [String]{message}}, exports: [MIRExport]{}, export_abis: [CoreSharedRuntimeExportABI]{}}
+    runtime_export_errors([String]{message})
+}
+
+fn runtime_export_errors(messages: [String]) -> X64RuntimeLibraryResult Never! {
+    X64RuntimeLibraryResult{object: X64ExecutableResult{bytes: [U8]{}, errors: messages}, exports: [MIRExport]{}, export_abis: [CoreSharedRuntimeExportABI]{}}
 }
 
 // The C primitives the native object writer lowers: integer words of every
@@ -56,20 +60,25 @@ fn runtime_export_native_type(ty: MIRType) -> String? {
 
 // The native object has no generated boundary, so an export is an
 // infallible top-level C function: by-value primitive parameters and a
-// primitive or void result.
-fn runtime_export_signature_problem(function: MIRFunction) -> String? {
+// primitive or void result. Every problem of the signature is listed.
+fn runtime_export_signature_problems(function: MIRFunction) -> [String] Never! {
+    problems := [String]{}
     if function.form != .TopLevel || function.generic_params.len() != 0 || function.capture_params.len() != 0 {
-        return Val("is not a monomorphic top-level function")
+        &problems.push("is not a monomorphic top-level function")
     }
-    if function.failure != .Infallible -> return Val("has a failure carrier; a native C export is infallible")
+    if function.failure != .Infallible -> &problems.push("has a failure carrier; a native C export is infallible")
     loop param in function.params {
-        if param.access == .Write -> return Val("parameter `{param.name}` is written; C exports take primitives by value")
+        if param.access == .Write {
+            &problems.push("parameter `{param.name}` is written; C exports take primitives by value")
+            next
+        }
         problem :: runtime_export_native_type(param.ty) ?? next
-        return Val("parameter `{param.name}`: {problem}")
+        &problems.push("parameter `{param.name}`: {problem}")
     }
-    if mir_c_void(function.return_type) -> return None
-    problem :: runtime_export_native_type(function.return_type) ?? return None
-    Val("result: {problem}")
+    if !mir_c_void(function.return_type) {
+        if runtime_export_native_type(function.return_type) == .Val(problem) -> &problems.push("result: {problem}")
+    }
+    problems
 }
 
 enum RuntimeIntrinsicShape {
@@ -208,18 +217,28 @@ fn x64_runtime_library(program: MIRProgram, lifecycle_rows: [String]) -> X64Runt
     symbols := [String:Bool]{}
     functions := [U64:Bool]{}
     roots := [MIRFunctionID]{}
+    // Every export problem is collected, so one run lists them all.
+    problems := [String]{}
     loop entry_row in exports {
-        if symbols.get(entry_row.symbol) != None -> return runtime_export_error("duplicate checked export symbol {entry_row.symbol}")
-        &symbols.add(entry_row.symbol, true).drop("checked absent above")
-        if functions.get(entry_row.function.value) != None -> return runtime_export_error("duplicate checked export function {entry_row.symbol}")
-        &functions.add(entry_row.function.value, true).drop("checked absent above")
-        index :: rows.get(entry_row.function.value) ?? return runtime_export_error("export {entry_row.symbol} names a missing checked function")
-        if entry_row.abi != .C -> return runtime_export_error("export {entry_row.symbol} is not a C export")
-        if runtime_export_signature_problem(program.functions[index]) == .Val(problem) {
-            return runtime_export_error("export {entry_row.symbol} {problem}")
+        if symbols.get(entry_row.symbol) != None {
+            &problems.push("duplicate checked export symbol {entry_row.symbol}")
+        } else {
+            &symbols.add(entry_row.symbol, true).drop("checked absent above")
         }
+        if functions.get(entry_row.function.value) != None {
+            &problems.push("duplicate checked export function {entry_row.symbol}")
+        } else {
+            &functions.add(entry_row.function.value, true).drop("checked absent above")
+        }
+        if entry_row.abi != .C -> &problems.push("export {entry_row.symbol} is not a C export")
+        index :: rows.get(entry_row.function.value) ?? {
+            &problems.push("export {entry_row.symbol} names a missing checked function")
+            next
+        }
+        loop problem in runtime_export_signature_problems(program.functions[index]) -> &problems.push("export {entry_row.symbol} {problem}")
         &roots.push(entry_row.function)
     }
+    if problems.len() != 0 -> return runtime_export_errors(problems)
     lifecycle := [String:RuntimeLifecycle]{}
     if runtime_lifecycle_rows(lifecycle_rows, &lifecycle) == .Val(problem) -> return runtime_export_error(problem)
     hooked := 0
