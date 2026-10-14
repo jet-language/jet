@@ -841,15 +841,19 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     ret :: signature.ret ?? return lower_fail(&m, &f, "sort_by closure without a result type is not lowered at O0 yet")
     key_ty := ret
     key_err := MIRType?{None}
-    // The byte size of the method's own Result<(), E> box (try_sort_by), 0
-    // for a Unit result.
+    // The byte size of the method's own Result<(), E> box, 0 for a Unit
+    // result. try_sort_by always has one; a named comparator or key function
+    // (`xs.sort_by(order)`) checks the route's `Result<(), Never>` too, which
+    // only ever succeeds (MIRRust: the sort, then its Ok).
     outcome_size := 0
     if mode >= 3 {
         if ret.kind == .Result(ok, err) {
             key_ty = ok
             key_err = Val(err)
         }
-        result_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "try_sort_by without a checked result type is not lowered at O0 yet")
+        if lower_checked_type(c, instruction) == None -> return lower_fail(&m, &f, "try_sort_by without a checked result type is not lowered at O0 yet")
+    }
+    if lower_checked_type(c, instruction) == .Val(result_ty) {
         if result_ty.kind == .Result(ok, err) -> outcome_size = lower_result_box_size(p, ok, err)
     }
     if key_err != None && outcome_size == 0 -> return lower_fail(&m, &f, "try_sort_by with a fallible key and no Result is not lowered at O0 yet")
