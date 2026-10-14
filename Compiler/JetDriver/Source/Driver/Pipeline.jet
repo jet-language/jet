@@ -1323,6 +1323,30 @@ fn jet_driver_resolve_entry_function(
     }
     None
 }
+
+// Rust `artifact_plan.rs` `lower_entry`: with no selected Output (and, in
+// Jet, no manifest `entry:` binding), the executable entry is the entry
+// module's `fn run`, when it takes no parameter or one typed CLI record
+// (`function.params.is_empty() || cli.is_some()`). Otherwise there is no
+// entry and the package lowers as a library.
+fn jet_driver_default_run_entry(load: JetDriverLoadResult, semantic_graph: SemaGraphResult, program: MIRProgram) -> MIRFunctionID? {
+    loop source_module in semantic_graph.modules {
+        loop constant in source_module.constants {
+            if constant.declaration.resolved_output == .Val(output) {
+                if output.selected -> return None
+            }
+        }
+    }
+    if jet_driver_entry_selection(load) != None -> return None
+    key :: symbol_id(SymbolKind.Function, load.entry_module_identity, "", "run").key
+    function_id :: jet_driver_find_lowered_function_id(program.functions, key) ?? return None
+    loop function in program.functions {
+        if function.id != function_id -> next
+        if function.params.len() == 0 || jet_driver_entry_record_cli(program, function_id) != None -> return Val(function_id)
+        return None
+    }
+    None
+}
 fn jet_driver_empty_compile_trace() -> JetDriverCompileTrace Never! {
     JetDriverCompileTrace{stdout: [String]{}, stderr: [String]{}, soft_stop: false, exit_code: None}
 }
@@ -5848,6 +5872,9 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         sandbox_snapshot = Val(current)
         if kg.enabled -> jet_driver_keep_going_diagnostics(&kg, "assemble", load.diagnostics)
         if jet_driver_has_errors(load.diagnostics) && !kg.enabled -> return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Assemble), false, trace)
+    }
+    if entry_function == None && sandbox_exports == None && test_harness == None && request.mode != JetDriverCompileMode.Test && request.mode != JetDriverCompileMode.Eval && request.mode != JetDriverCompileMode.Interpreter && request.mode != JetDriverCompileMode.Repl {
+        entry_function = jet_driver_default_run_entry(load, checked_graph, program_value)
     }
     artifact_plan_option := jet_driver_artifact_plan(program_value, entry_function, test_harness, c_exports, sandbox_exports, package_facts, target_machine, web_profile)
     if artifact_plan_option == None {

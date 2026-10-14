@@ -148,6 +148,19 @@ fn run() {
     generate.selected_entry = Val("generate_files")
     generated :: jet_driver_compile_mir(^generate)
     seams_require(generated.complete && generated.entry_function != None && generated.internal_problem == None, "generate selects declared Job without fn run")
+    // Rust artifact_plan.rs `lower_entry`: with no selected Output and no
+    // manifest entry, the executable entry is the entry module's `fn run`;
+    // without one the package lowers as a library, with no entry.
+    plain :: jet_driver_compile_mir(seams_request("fn helper() -> Int {{ 1 }}\nfn run() {{ print(helper()) }}", JetDriverCompileMode.Program))
+    plain_entry :: plain.entry_function ?? panic("a package with `fn run` and no outputs lost its executable entry")
+    plain_program :: plain.mir ?? panic("default run entry MIR missing")
+    plain_run := false
+    loop function in plain_program.functions {
+        if function.id == plain_entry && function.name == "run" -> plain_run = true
+    }
+    seams_require(plain.complete && plain_run, "no-output package selects its `fn run` as the executable entry")
+    library :: jet_driver_compile_mir(seams_request("fn helper() -> Int {{ 1 }}", JetDriverCompileMode.Program))
+    seams_require(library.complete && library.entry_function == None, "no `fn run` and no outputs: library, no entry")
     // Eval's existing canonical purity pass must attribute a transitive effect
     // through checked TIR calls, including calls nested in a conditional.
     pure := seams_request("fn leaf() {{ print(\"effect\") }}\nfn helper() {{ if true {{ leaf() }} }}\nfn evaluate() {{ helper() }}\nfn run() {{ }}", JetDriverCompileMode.Eval)
