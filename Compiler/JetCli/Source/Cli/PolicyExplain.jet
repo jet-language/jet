@@ -49,7 +49,8 @@ fn jet_cli_explain_policy_lookup(key: PolicyKey, declarations: [PolicyDeclaratio
 }
 
 fn jet_cli_explain_marker_offset(source: String, line: U64) -> Int Never! {
- if (line == U64{1}) -> return 0
+ // A user `--line 0` names no line after the first; `line - 1` on U64 would trap.
+ if (line <= U64{1}) -> return 0
  remaining := line - U64{1}
  loop (index, byte) in source.bytes() {
  if (byte != U8{10}) -> next
