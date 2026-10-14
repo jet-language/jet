@@ -177,6 +177,22 @@ fn sema_function_symbol_type(func: Func, raw_protocol_return: Bool, owner: Symbo
         effect_bound: effect_bound,
         param_contract: sema_function_param_contract(func),
         call_metadata: Val(sema_function_call_metadata(func, owner, fallback_source_file, fallback_source_origin, source_segments)),
-        return_view_provenance: func.return_view_provenance,
+        return_view_provenance: sema_function_signature_view_provenance(func),
     }
+}
+
+// Rust `check_function_body` publishes a function's return-view contract on
+// its signature; with a declared `from` clause callers see the declared
+// sources (D-MEMPROVENANCE3=A), with access taken from the return type's view
+// leaves. Another module's caller reads this registered signature, so the
+// declared contract is published here, before any body check runs.
+fn sema_function_signature_view_provenance(func: Func) -> ViewProvenanceMap? {
+    if func.return_view_provenance != None -> return func.return_view_provenance.copy()
+    declared :: func.declared_return_view_provenance ?? return None
+    mutable :: if func.return_type == .Val(ret) -> sema_ownership_is_window_type(ret) else -> false
+    published := declared.copy()
+    loop index in 0..<published.entries.len() {
+        if published.entries[index].slot.len() == 0 -> published.entries[index].value.mutable = mutable
+    }
+    Val(published)
 }
