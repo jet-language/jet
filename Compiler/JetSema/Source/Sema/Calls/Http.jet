@@ -430,9 +430,13 @@ fn sema_call_http_request_arg_types(method: String, count: Int) -> [Type] Never!
     // argument to inference; its one lowering route
     // (`jet_http_client_request_body`) takes the request text, a `String`.
     if method == "body" -> return [Type]{Type.String}
-    if method == "timeout" || method == "connect_timeout" || method == "read_timeout" || method == "total_timeout" || method == "dns_timeout" || method == "tls_timeout" || method == "write_timeout" || method == "first_byte_timeout" -> return [Type]{Type.Named{name: "Duration"}}
-    if method == "redirects" -> return [Type]{Type.Named{name: "HTTPRedirectPolicy"}}
-    if method == "proxy" -> return [Type]{Type.Named{name: "HTTPProxy"}}
+    // Rust `http_type_method_return` leaves these builders' arguments to
+    // inference too; their lowering routes take the milliseconds and the
+    // redirect limit as Int (`jet_http_client_request_timeout(req, ms)`,
+    // `…_redirects(req, limit)`) and the proxy URL as a `String`.
+    if method == "timeout" || method == "connect_timeout" || method == "read_timeout" || method == "total_timeout" || method == "dns_timeout" || method == "tls_timeout" || method == "write_timeout" || method == "first_byte_timeout" -> return [Type]{Type.Int}
+    if method == "redirects" -> return [Type]{Type.Int}
+    if method == "proxy" -> return [Type]{Type.String}
     if method == "cookie" -> return [Type]{Type.Named{name: "HTTPCookieJar"}}
     if method == "form" || method == "multipart_text" -> return [Type]{Type.Map{key: Type.String, key_span: None, value: Type.String}}
     if method == "under_limit" || method == "text" -> return [Type]{Type.Int}
