@@ -3161,6 +3161,7 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
 
 
 fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    diagnostics_before :: diagnostics.len()
     if sema_scope_has_loop_label(scopes, name) {
         &diagnostics.push(sema_error("E0988", span, "loop label `{name}` is not a runtime value", "a loop label names a control-flow destination, so it cannot be read, passed, or stored", "use `break({name})` or `next({name})` to control the loop"))
         return None
@@ -3176,6 +3177,10 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
         symbol :: scopes.bindings[unresolved].symbol
         if symbol.kind == SymbolKind.Constant && symbol.ty == None {
             &context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: "const"})
+            // A comptime probe reads this reference as a dependency wait; a
+            // body check after the comptime run reaches here only when the
+            // constant's value never landed, which the reason names.
+            sema_check_unsupported(&context, "constant `{name}` (read at offset {span.start}) has no staged compile-time value")
             return None
         }
     }
@@ -3183,7 +3188,10 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
     if unresolved_index == .Val(prepared_index) {
         prepared_binding :: scopes.bindings[prepared_index]
         if prepared_binding.prepared == .Val(known) {
-            prepared_ty :: prepared_binding.symbol.ty ?? return None
+            prepared_ty :: prepared_binding.symbol.ty ?? {
+                sema_check_unsupported(&context, "prepared local `{name}` (read at offset {span.start}) has no checked type")
+                return None
+            }
             &context.name_references.push(SemaNameReferenceFact{span: span, symbol: prepared_binding.symbol, kind: "local"})
             prepared :: sema_fact_prepared_expr(known, prepared_ty, span, environment, program) ?? return None
             return sema_expr_expected(prepared, expected, environment, program, &diagnostics)
@@ -3194,7 +3202,10 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
     if unresolved_index == .Val(read_index) && sema_ownership_uninit_take(&state, scopes.bindings[read_index].symbol.id.key) != None {
         &diagnostics.push(sema_error("E0420", span, "`{name}` may be read before it is given a value", "`{name}` was declared with `Type{{ uninit }}`, so no value is available until you write to it — this read could see garbage", "write to `{name}` on every path before reading it (e.g. fill it via `mut {name}`)"))
     }
-    value :: sema_expr_check_ident(name, span, expected, environment, program, &scopes, &diagnostics) ?? return None
+    value :: sema_expr_check_ident(name, span, expected, environment, program, &scopes, &diagnostics) ?? {
+        if !sema_has_error_since(diagnostics, diagnostics_before) -> sema_check_unsupported(&context, "`{name}` (read at offset {span.start}) has no checked type")
+        return None
+    }
     expr := Expr.Ident{name: name, span: span}
     if unresolved_index == .Val(unresolved) {
         kind :: scopes.bindings[unresolved].symbol.kind
