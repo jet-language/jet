@@ -42,10 +42,10 @@ fn fx_strings_print_method(b: &FxBuilder, member: String, receiver: MIRValueID, 
 
 fn fx_strings_program(b: FxBuilder) -> MIRProgram Never! {
     p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, ^[MIRTypeDef]{})
-    members :: [String]{"len", "len_string", "is_empty", "contains", "string_starts_with", "string_ends_with"}
+    members :: [String]{"len", "len_string", "is_empty", "contains", "string_starts_with", "string_ends_with", "count_bytes"}
     loop member in members {
-        symbol :: if member == "len" || member == "len_string" -> "jet_char_len" else if member == "is_empty" -> "jet_string_is_empty" else if member == "contains" -> "jet_string_contains" else if member == "string_starts_with" -> "jet_string_starts_with" else -> "jet_string_ends_with"
-        arity :: if member == "len" || member == "len_string" || member == "is_empty" -> 1 else -> 2
+        symbol :: if member == "len" || member == "len_string" -> "jet_char_len" else if member == "is_empty" -> "jet_string_is_empty" else if member == "contains" -> "jet_string_contains" else if member == "string_starts_with" -> "jet_string_starts_with" else if member == "count_bytes" -> "jet_string_count_bytes" else -> "jet_string_ends_with"
+        arity :: if member == "len" || member == "len_string" || member == "is_empty" || member == "count_bytes" -> 1 else -> 2
         row := fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", member, symbol, arity, MIRPreludeABI.Value)
         row.signature.borrow_mask = if arity == 1 -> [Bool]{true} else -> [Bool]{true, true}
         &p.prelude_calls.push(row)
@@ -61,8 +61,9 @@ fn fx_strings_program(b: FxBuilder) -> MIRProgram Never! {
 //     print("abc" < "abcd"); print("abcd" > "abc")
 //     print("" <= ""); print("" >= ""); print("é" > "z")
 //     print("é🙂x".len()); print("".len()); print("abc".len())
+//     print("é🙂x".count_bytes()); print("".count_bytes()) // checked Int results
 // }
-// expect-stdout strings: "true\ntrue\ntrue\n3\ntrue\nfalse\nfalse\ntrue\nfalse\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n3\n0\n3\n"
+// expect-stdout strings: "true\ntrue\ntrue\n3\ntrue\nfalse\nfalse\ntrue\nfalse\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n3\n0\n3\n7\n0\n"
 fn fx_strings() -> MIRProgram Never! {
     b := fx_builder()
     apple :: fx_strings_literal(&b, "apple")
@@ -93,6 +94,8 @@ fn fx_strings() -> MIRProgram Never! {
     fx_strings_print_method(&b, "len", unicode, [MIRValueID]{}, fx_int())
     fx_strings_print_method(&b, "len", empty, [MIRValueID]{}, fx_int())
     fx_strings_print_method(&b, "len_string", abc, [MIRValueID]{}, fx_int())
+    fx_strings_print_method(&b, "count_bytes", unicode, [MIRValueID]{}, fx_int())
+    fx_strings_print_method(&b, "count_bytes", empty, [MIRValueID]{}, fx_int())
     owned :: [MIRValueID]{apple, banana, letter_b, abc, empty, letter_a, abcd, accented, letter_z, unicode}
     loop value in owned -> fx_do(&b, MIROperation.Drop{value: value, kind: MIRDropKind.Value})
     fx_block(&b, 0, MIRTerminator.Return{value: None})

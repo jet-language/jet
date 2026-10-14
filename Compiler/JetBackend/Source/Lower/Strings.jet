@@ -94,7 +94,10 @@ fn lower_string_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
         lower_fail(&m, &f, "a String builtin method without a result is not lowered at O0 yet")
         return true
     }
-    if (is_len && !lower_is_exact_int(result_ty)) || (is_bytes && lower_repr(p, result_ty) != .Word) || (!is_len && !is_bytes && result_ty.kind != .Bool) {
+    // count_bytes checks as Int (BuiltinMethods.jet registry row); the native
+    // byte length converts to it below, as MIRRust adapts the i64 kernel.
+    bytes_ok :: lower_repr(p, result_ty) == .Word || lower_is_exact_int(result_ty)
+    if (is_len && !lower_is_exact_int(result_ty)) || (is_bytes && !bytes_ok) || (!is_len && !is_bytes && result_ty.kind != .Bool) {
         lower_fail(&m, &f, "this String builtin method result type is not lowered at O0 yet")
         return true
     }
