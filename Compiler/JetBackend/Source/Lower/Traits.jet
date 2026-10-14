@@ -1,7 +1,7 @@
 // Reused from db0a9182a: an owned trait value is
 // [concrete drop-helper ID, concrete payload @8]. Closed-module dispatch
 // rejects unknown keys; payloads use ordinary stored-value layout/glue.
-use jet_foundation.[MIRAccess, MIRCallArg, MIRImplDef, MIRInstruction, MIRProgram, MIRTraitMethod, MIRTraitMethodID, MIRTraitRef, MIRType, MIRTypeID, MIRTypeKind, MIRValueID, mir_type_display_name, mir_type_identity_key]
+use jet_foundation.[MIRAccess, MIRCallArg, MIRCallee, MIRImplDef, MIRInstruction, MIRProgram, MIRTraitMethod, MIRTraitMethodID, MIRTraitRef, MIRType, MIRTypeID, MIRTypeKind, MIRValueID, mir_type_display_name, mir_type_identity_key]
 
 fn lower_trait_ref(p: MIRProgram, ty: MIRType) -> MIRTraitRef? {
     if ty.kind == .TraitObject(bounds) {
@@ -146,6 +146,34 @@ fn lower_trait_method(p: MIRProgram, bound: MIRTraitRef, id: MIRTraitMethodID) -
     None
 }
 
+// True when a lowered concrete implementation answers `name` of `bound`.
+// lower_reach_trait_type requests every method of each boxed payload type,
+// so with none the program boxes no value of the trait: no key can reach the
+// dispatch, which is the closed set lower_trait_call emits.
+fn lower_trait_dispatches(p: MIRProgram, m: LowerModule, bound: MIRTraitRef, name: String) -> Bool Never! {
+    loop implementation in p.impls {
+        trait_ref :: implementation.trait_ref ?? next
+        if trait_ref.id != bound.id -> next
+        loop id in implementation.methods {
+            row :: lower_function_index(m, lower_instance_id(id, lower_call_bindings(Val(implementation.self_type), [MIRType]{})))
+            if row >= 0 && lower_row_source(p, m, row).name == name -> return true
+        }
+    }
+    false
+}
+
+// A dynamic trait call without a dispatch target stops at
+// `jet_rt_unreachable` (lower_trait_call); lowering treats it as a call that
+// does not return (lower_is_noreturn), as the MIR's own stops are.
+fn lower_trait_call_dead(p: MIRProgram, m: LowerModule, callee: MIRCallee, args: [MIRCallArg], type_args: [MIRType]) -> Bool Never! {
+    if callee == .TraitMethod(method, bound, receiver) {
+        if args.len() == 0 || type_args.len() > 0 || lower_trait_ref(p, receiver) == None -> return false
+        checked :: lower_trait_method(p, bound, method) ?? return false
+        return !lower_trait_dispatches(p, m, bound, checked.name)
+    }
+    false
+}
+
 fn lower_trait_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, method: MIRTraitMethodID, bound: MIRTraitRef, receiver: MIRType, args: [MIRCallArg], type_args: [MIRType]) Never! {
     checked :: lower_trait_method(p, bound, method) ?? return lower_fail(&m, &f, "trait call has no checked method")
     name :: checked.name
@@ -160,6 +188,10 @@ fn lower_trait_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         return lower_fail(&m, &f, "trait default method {bound.name}.{name} is not lowered at O0 yet")
     }
     if type_args.len() > 0 -> return lower_fail(&m, &f, "generic dynamic trait receivers are not object-safe at O0")
+    if !lower_trait_dispatches(p, m, bound, name) {
+        reason :: lower_static_text(&m, &f, "unknown native trait method key")
+        return lower_noreturn_call(&m, &f, "jet_rt_unreachable", reason)
+    }
     boxed := lower_use(&m, &f, args[0].value) ?? return
     copied_receiver :: args[0].access == .Move && (args[0].implicit_clone || args[0].shared_auto_clone)
     if copied_receiver {

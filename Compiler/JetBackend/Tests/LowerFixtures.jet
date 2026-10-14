@@ -1052,6 +1052,10 @@ fn run() {
     if !fx_report("queues", fx_queues()) -> clean = false
     if !fx_report("priority-queues", fx_priority_queues()) -> clean = false
     if !fx_report("trait-values", fx_trait_values()) -> clean = false
+    if !fx_trait_unimplemented_checks() {
+        print("issue trait-unimplemented: a dynamic call no implementation answers left LIR blocks without a predecessor or lost the reachable join")
+        clean = false
+    }
     if !fx_close_owned_shape_checks() {
         print("issue close-owned: constructor destructor provenance or Close signature contract changed")
         clean = false

@@ -1,11 +1,12 @@
 use jet_foundation.[
-    MIRAccess, MIRCallArg, MIRCallee, MIRConstant, MIRCopyFact, MIRDropKind,
+    MIRAccess, MIRBlockID, MIRCallArg, MIRCallee, MIRConstant, MIRCopyFact, MIRDropKind,
     MIRFunction, MIRImplDef, MIROperation, MIRProgram, MIRTerminator,
     MIRTraitDef, MIRTraitMethod, MIRTraitMethodID, MIRTraitRef, MIRType,
-    MIRTypeDef, MIRTypeDefKind, MIRTypeKind, mir_function_id, mir_owned_ownership,
+    MIRTypeDef, MIRTypeDefKind, MIRTypeKind, mir_copy_ownership, mir_function_id, mir_owned_ownership,
     mir_trait_id, mir_type_from_kind, mir_type_id, mir_type_with_identity,
     MIRField, MIRFieldID, MIRFieldValue, MIRFunctionID,
 ]
+use jet_backend.[LIRCallee, LIRInst, LIRTerminator, lir_lower_callables]
 
 // expect-stdout trait-values: "payload\npayload\npayload\npayload\n42\n"
 // expect-runtime-only trait-values: native closed trait dispatch and text/Int ownership exports
@@ -71,6 +72,58 @@ fn fx_trait_values() -> MIRProgram Never! {
     &impl_row.methods.push(mir_function_id("consume"))
     p.impls = [MIRImplDef]{impl_row}
     p
+}
+
+// A dynamic call of a trait the program never boxes (no lowered
+// implementation, like the self-host unit's CompilerTraceSink and
+// JetEvalHostAdapter) stops at `jet_rt_unreachable` and ends its block, as a
+// MIR stop does: neither the dispatch join nor the block's tail (`8`) is
+// lowered, so LIR lint finds no block without a predecessor, while the join
+// the other branch reaches keeps its print (`9`) and the return.
+//
+// fn report(sink: Sink, tracing: Bool) {
+//     if tracing { sink.begin(); print(8) }
+//     print(9)
+// }
+fn fx_trait_unimplemented_checks() -> Bool {
+    bound :: MIRTraitRef{id: mir_trait_id("Sink"), name: "Sink"}
+    method :: MIRTraitMethodID{value: 790}
+    ty :: mir_type_with_identity(mir_type_from_kind(MIRTypeKind.TraitObject{bounds: [MIRTraitRef]{bound}}), mir_type_id("SinkObject"))
+    b := fx_builder()
+    sink :: fx_param(&b, "sink", ty, fx_borrow())
+    tracing :: fx_param(&b, "tracing", fx_bool(), mir_copy_ownership())
+    fx_block(&b, 0, MIRTerminator.Branch{condition: tracing, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 2}})
+    fx_do(&b, MIROperation.Call{callee: MIRCallee.TraitMethod{method: method, trait_ref: bound, receiver: ty}, args: [MIRCallArg]{fx_arg(sink, MIRAccess.Read)}, type_args: [MIRType]{}})
+    fx_print(&b, fx_int_const(&b, 8))
+    fx_block(&b, 1, MIRTerminator.Jump{target: MIRBlockID{value: 2}})
+    fx_print(&b, fx_int_const(&b, 9))
+    fx_block(&b, 2, MIRTerminator.Return{value: None})
+    report :: fx_function("report", b, fx_unit())
+    p := fx_program([MIRFunction]{report}, [MIRTypeDef]{})
+    p.traits = [MIRTraitDef]{
+        MIRTraitDef{id: bound.id, module_id: report.module_id, key: bound.name, name: bound.name, span: fx_span(), visibility: .Private, associated_types: [], methods: [MIRTraitMethod]{
+            MIRTraitMethod{id: method, name: "begin", span: fx_span(), self_access: Val(MIRAccess.Read), params: [], declared_return: Val(fx_unit()), return_type: fx_unit(), failure: .Infallible, effects: report.effects, is_pure: false, return_view_provenance: None, declared_return_view_provenance: None, default: None},
+        }},
+    }
+    lowered :: lir_lower_callables(p, [MIRFunctionID]{report.id})
+    loop issue in lowered.issues -> print("trait-unimplemented: {issue.function}: {issue.message}")
+    if lowered.issues.len() != 0 -> return false
+    stops := 0
+    returns := 0
+    loop function in lowered.lir.functions {
+        if function.name != report.name -> next
+        loop block in function.blocks {
+            loop instruction in block.insts {
+                if instruction == .Call(_, _, callee, _) {
+                    if callee == .Runtime(symbol) {
+                        if symbol == "jet_rt_unreachable" -> stops += 1
+                    }
+                }
+            }
+            if block.terminator == .Return(_) -> returns += 1
+        }
+    }
+    stops == 1 && returns == 1
 }
 
 fn fx_stored_close_method(owner: MIRType, identity: String, label: String) -> MIRFunction Never! {

@@ -1995,7 +1995,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
     successors := [[Int]]{}
     loop block in function.blocks {
         targets := [Int]{}
-        if lower_block_returns(block) {
+        if lower_block_returns(p, m, block) {
             loop target in mir_terminator_targets(block.terminator) {
                 position :: block_index.get(target.value) ?? {
                     lower_fail(&m, &f, "block b{block.id.value} jumps to missing block b{target.value}")
@@ -2106,21 +2106,25 @@ fn lower_place_row(function: MIRFunction, place: MIRPlaceID) -> MIRPlace? {
     None
 }
 
-fn lower_is_noreturn(operation: MIROperation) -> Bool Never! {
+// A dynamic trait call that no lowered implementation answers cannot return
+// either (lower_trait_dispatches): its successors are not lowered, so the
+// dispatch's join is never left without a predecessor.
+fn lower_is_noreturn(p: MIRProgram, m: LowerModule, operation: MIROperation) -> Bool Never! {
     if operation == .Semantic(semantic) {
         if semantic == .RequireStop(_, kind, _, _, _, _, always_stops) -> return always_stops || kind == .Panic
     }
     if operation == {
         .Never(_) -> true
         .Todo(_, _, _) -> true
+        .Call(callee, args, type_args) -> lower_trait_call_dead(p, m, callee, args, type_args)
         else -> false
     }
 }
 
-fn lower_block_returns(block: MIRBasicBlock) -> Bool Never! {
+fn lower_block_returns(p: MIRProgram, m: LowerModule, block: MIRBasicBlock) -> Bool Never! {
     if block.terminator == .Poll(_, _, _) -> return true
     loop instruction in block.instructions {
-        if lower_is_noreturn(instruction.operation) -> return false
+        if lower_is_noreturn(p, m, instruction.operation) -> return false
     }
     true
 }
@@ -2286,7 +2290,7 @@ fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
         if instruction.operation == .Phi(_) -> next
         lower_debug_line(p, c, &m, &f, instruction)
         lower_instruction(p, c, &m, &f, instruction)
-        if lower_is_noreturn(instruction.operation) && !poll_block -> return
+        if lower_is_noreturn(p, m, instruction.operation) && !poll_block -> return
     }
     if f.failed -> return
     lower_terminator(p, c, &m, &f, block)
