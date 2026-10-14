@@ -295,7 +295,8 @@ fn lower_partial_drop_node(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ba
     } else {
         // Absence is the null carrier of `base`'s own layout: a boxed or
         // inline owner is a pointer, and LIR compares pointers only to pointers.
-        zero :: lower_new_value(&f, lower_value_layout(f, base), LIRDrop.Trivial, None)
+        base_layout :: lower_value_layout(f, base)
+        zero :: lower_new_value(&f, base_layout, LIRDrop.Trivial, None)
         lower_emit(&f, LIRInst.Const{dst: zero, value: 0})
         absent :: lower_flag(&f)
         lower_emit(&f, LIRInst.Compare{dst: absent, condition: .Eq, left: base, right: zero})

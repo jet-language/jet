@@ -1589,7 +1589,8 @@ fn lower_adopt(f: &LowerFunction, dst: LIRValueID, carried: LIRValueID) Never! {
 // produce a new owning pointer, never discard an obligation.
 fn lower_forget(f: &LowerFunction, value: LIRValueID, identity: MIRTypeID?) Never! {
     if lower_value_drop(f, value) == .Trivial -> return
-    forgotten :: lower_new_value(&f, lower_value_layout(f, value), LIRDrop.Trivial, identity)
+    layout :: lower_value_layout(f, value)
+    forgotten :: lower_new_value(&f, layout, LIRDrop.Trivial, identity)
     lower_adopt(&f, forgotten, value)
 }
 
