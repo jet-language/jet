@@ -337,6 +337,12 @@ fn lower_record_handle(p: MIRProgram, ty: MIRType) -> String? {
         .Boxed(_) | .Inline(_) -> {}
         else -> return None
     }
+    // A native-pack source shape crosses as its own native glue handle
+    // (record.out/record.in shells), with or without a generated schema.
+    if p.native_pack && lower_native_record_source(p, ty) {
+        row :: lower_runtime_handle_type(p, ty) ?? return None
+        return Val(row.runtime)
+    }
     schema :: lower_record_schema(p, ty) ?? return None
     runtime :: lower_runtime_handle(schema.jet_name) ?? return None
     Val(runtime.runtime)
@@ -400,6 +406,15 @@ fn lower_record_to_runtime(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty
 fn lower_native_record_source(p: MIRProgram, ty: MIRType) -> Bool {
     row :: lower_runtime_handle_type(p, ty) ?? return false
     lower_native_source_type(p, row.jet_name) != None
+}
+
+// In the native pack a source-declared Core shape (LOWER_NATIVE_TYPES) keeps
+// its MIR layout even when its runtime row has no matching record schema: the
+// row names a Rust-tier replacement type the Jet runtime never provides, so
+// its handle and record exports are this backend's native glue
+// (lower_native_glue_import) over that layout.
+fn lower_native_declared_shape(p: MIRProgram, name: String) -> Bool Never! {
+    p.native_pack && lower_native_type(name) != None
 }
 
 fn lower_record_from_runtime(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, handle: LIRValueID, dst: LIRValueID?) Never! {

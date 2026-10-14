@@ -1228,7 +1228,7 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             // shapes. Only exact Core paths may override their MIR definition,
             // and a record schema keeps its MIR layout (Records.jet): its
             // fields read natively and it converts only at a route boundary.
-            if name.name.starts_with("<corelib>/") && schema == None {
+            if name.name.starts_with("<corelib>/") && schema == None && !lower_native_declared_shape(p, name.name) {
                 if runtime == .Val(handle) {
                     clone :: if handle.clone -> "jet_rt_handle_clone_{runtime_abi_atom(handle.runtime)}" else -> ""
                     return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime_abi_atom(handle.runtime)}", clone: clone}
@@ -1248,7 +1248,7 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
                     // even when its Jet declaration supplies the variants.
                     // Only record schemas with explicit ABI adapters retain
                     // their native layout at runtime boundaries.
-                    if definition.key.starts_with("<corelib>/") && schema == None {
+                    if definition.key.starts_with("<corelib>/") && schema == None && !lower_native_declared_shape(p, name.name) {
                         if runtime == .Val(handle) {
                             clone :: if handle.clone -> "jet_rt_handle_clone_{runtime_abi_atom(handle.runtime)}" else -> ""
                             return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime_abi_atom(handle.runtime)}", clone: clone}
