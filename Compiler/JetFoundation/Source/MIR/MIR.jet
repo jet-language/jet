@@ -4467,6 +4467,12 @@ struct MIRProgram {
     type_instances: [MIRType]
     codec_migrations: [String:MIRSchemaMigrationPlan]
     unreachable: [MIRUnreachable]
+    // A consumer-built lookup index, never serialized or digested: the first
+    // row of each type id and each type key in `types` (JetBackend Lower.jet
+    // lower_indexed_program). Empty unless a consumer builds it; when empty,
+    // lookups scan `types`.
+    type_id_rows: [U64:Int]{[U64:Int]{}}
+    type_key_rows: [String:Int]{[String:Int]{}}
 }
 
 // Resolve a private Core value hook through checked nominal and function

@@ -40,6 +40,7 @@ use jet_foundation.[
     MIROperation,
     MIROutputCheck,
     MIROwnership,
+    MIRNominalRef,
     MIROwnershipMode,
     MIRPanicLoc,
     MIRPlace,
@@ -446,7 +447,10 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     }
     all_roots := roots.copy()
     loop check in checks -> &all_roots.push(check.function)
-    prepared := lower_prepare_roots(program, all_roots, shared_sites_dynamic, native_pack, imports, ^runtime_intrinsics)
+    // Preparation and body lowering resolve type definitions through the
+    // index (lower_indexed_program); the inputs are otherwise the same.
+    indexed := lower_indexed_program(program)
+    prepared := lower_prepare_roots(indexed, all_roots, shared_sites_dynamic, native_pack, imports, ^runtime_intrinsics)
     if browser_hosted -> &prepared.issues.push(LIRLoweringIssue{function: "entry preparation", message: "browser-hosted initialization and callbacks are not lowered for native O0 yet"})
     loop issue in test_issues -> &prepared.issues.push(issue)
     test_harness := false
@@ -506,13 +510,13 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     loop (index, descriptor) in prepared.functions {
         &m.mir_rows.add(descriptor.id.value, index).drop("concrete IDs are unique")
         &m.mir_sources.push(descriptor.source_row)
-        signature :: if descriptor.instance_row >= 0 -> lower_function_signature(program, &m, prepared.instances[descriptor.instance_row]) else -> lower_function_signature(program, &m, program.functions[descriptor.source_row])
+        signature :: if descriptor.instance_row >= 0 -> lower_function_signature(indexed, &m, prepared.instances[descriptor.instance_row]) else -> lower_function_signature(indexed, &m, program.functions[descriptor.source_row])
         &m.mir_signatures.push(signature)
     }
     functions := [LIRFunction]{}
     failed_functions := prepared.failed_functions.copy()
     if keep_going {
-        kept := lower_keep_going_lower(program, ^m, ^prepared.functions, ^prepared.instances, ^failed_functions) ?? panic("the keep-going native lowering tasks failed")
+        kept := lower_keep_going_lower(^indexed, ^m, ^prepared.functions, ^prepared.instances, ^failed_functions) ?? panic("the keep-going native lowering tasks failed")
         prepared.functions = ^kept.inventory
         prepared.instances = ^kept.instances
         m = ^kept.state
@@ -520,7 +524,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         functions = ^kept.functions
     } else {
         loop (index, descriptor) in prepared.functions {
-            function :: lower_selected_function(program, &m, descriptor, prepared.instances, index, &failed_functions)
+            function :: lower_selected_function(indexed, &m, descriptor, prepared.instances, index, &failed_functions)
             &functions.push(function)
         }
     }
@@ -706,10 +710,10 @@ struct LowerKeepGoingLowered {
 // Lowers every inventory function (`functions`, with the instance bodies
 // `instances`, both moved in for the lowering and handed back after) against
 // `m`; returns the module state, the failed concrete functions and the
-// lowered functions in inventory order. The program is copied once into the
-// tasks' shared inputs.
-fn lower_keep_going_lower(program: MIRProgram, m: ^LowerModule, functions: ^[LowerPreparedFunction], instances: ^[MIRFunction], failed: ^[U64:Bool]) -> LowerKeepGoingLowered {
-    inputs :: shared LowerKeepGoingInputs{program: program.copy(), functions: ^functions, instances: ^instances}
+// lowered functions in inventory order. The (indexed) program copy moves into
+// the tasks' shared inputs.
+fn lower_keep_going_lower(program: ^MIRProgram, m: ^LowerModule, functions: ^[LowerPreparedFunction], instances: ^[MIRFunction], failed: ^[U64:Bool]) -> LowerKeepGoingLowered {
+    inputs :: shared LowerKeepGoingInputs{program: ^program, functions: ^functions, instances: ^instances}
     state :: shared LowerKeepGoingState{modules: [LowerModule]{}, failed: ^failed, functions: [LIRFunction]{}, position: 0}
     lower_keep_going_fill(state, ^m)
     lower_keep_going_functions(inputs, state)
@@ -803,6 +807,46 @@ fn lower_keep_going_trap_row(functions: [LowerPreparedFunction], state: &LowerKe
 // ---------------------------------------------------------------------------
 // Types, layouts and drop actions.
 
+// A copy of `program` with its type index (MIRProgram.type_id_rows /
+// type_key_rows: the first row of each type id and key) built, so
+// lower_type_def and lower_type_def_by_id find a definition in O(1) instead
+// of scanning every declaration. Lowering never edits `types`, so the index
+// stays exact for the whole lowering.
+fn lower_indexed_program(program: MIRProgram) -> MIRProgram Never! {
+    indexed := program.copy()
+    id_rows := [U64:Int]{}
+    key_rows := [String:Int]{}
+    loop (row, definition) in program.types {
+        if id_rows.get(definition.id.value) == None -> _ := &id_rows.add(definition.id.value, row)
+        if key_rows.get(definition.key) == None -> _ := &key_rows.add(definition.key, row)
+    }
+    indexed.type_id_rows = ^id_rows
+    indexed.type_key_rows = ^key_rows
+    indexed
+}
+
+// The first row of `types` an Apply's nominal names: by declaration id, by
+// key, or by the type's own identity, exactly the first match of a scan.
+fn lower_type_row(p: MIRProgram, name: MIRNominalRef, identity: MIRTypeID?) -> Int Never! {
+    if p.type_id_rows.len() == 0 {
+        loop row in 0..<p.types.len() {
+            if p.types[row].id == name.id || p.types[row].key == name.name -> return row
+            if identity == .Val(id) {
+                if id == p.types[row].id -> return row
+            }
+        }
+        return -1
+    }
+    best := p.type_id_rows.get(name.id.value) ?? -1
+    by_key :: p.type_key_rows.get(name.name) ?? -1
+    if by_key >= 0 && (best < 0 || by_key < best) -> best = by_key
+    if identity == .Val(id) {
+        by_identity :: p.type_id_rows.get(id.value) ?? -1
+        if by_identity >= 0 && (best < 0 || by_identity < best) -> best = by_identity
+    }
+    best
+}
+
 // The definition of a nominal type, instantiated with its applied arguments
 // when the declaration is generic (Mono.jet lower_instantiate_definition).
 fn lower_type_def(p: MIRProgram, ty: MIRType) -> MIRTypeDef? {
@@ -813,23 +857,22 @@ fn lower_type_def(p: MIRProgram, ty: MIRType) -> MIRTypeDef? {
         return None
     }
     if ty.kind == .Apply(name, args) {
-        loop definition in p.types {
-            matched := definition.id == name.id || definition.key == name.name
-            if ty.identity == .Val(identity) {
-                if identity == definition.id -> matched = true
-            }
-            if !matched -> next
-            if definition.generic_params.len() == 0 -> return Val(definition)
-            if definition.generic_params.len() != args.len() -> return None
-            return Val(lower_instantiate_definition(definition, args))
-        }
+        row :: lower_type_row(p, name, ty.identity)
+        if row < 0 -> return None
+        if p.types[row].generic_params.len() == 0 -> return Val(p.types[row].copy())
+        if p.types[row].generic_params.len() != args.len() -> return None
+        return Val(lower_instantiate_definition(p.types[row], args))
     }
     None
 }
 
 fn lower_type_def_by_id(p: MIRProgram, id: MIRTypeID) -> MIRTypeDef? {
-    loop definition in p.types {
-        if definition.id == id -> return Val(definition)
+    if p.type_id_rows.len() > 0 {
+        row :: p.type_id_rows.get(id.value) ?? return None
+        return Val(p.types[row].copy())
+    }
+    loop row in 0..<p.types.len() {
+        if p.types[row].id == id -> return Val(p.types[row].copy())
     }
     None
 }
