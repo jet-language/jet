@@ -2592,7 +2592,10 @@ fn sema_effect_walk_match_arm_children(walk: SemaEffectWalk, nodes: &[SemaEffect
 // the enclosing key, so the lambda key applies only when it owns facts.
 fn sema_effect_walk_lambda_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, lambda: TLambda) {
     lambda_key :: "lambda@{lambda.source_span.start}"
-    body_key :: if facts.modules[facts.current_module].caller_slots.get(lambda_key) != None -> lambda_key else -> caller_key
+    // A structure-only walk (FailureLaw) builds its index with no modules; its
+    // lambda bodies keep the enclosing key, as for a lambda that owns no facts.
+    owns_facts :: facts.current_module >= 0 && facts.current_module < facts.modules.len() && facts.modules[facts.current_module].caller_slots.get(lambda_key) != None
+    body_key :: if owns_facts -> lambda_key else -> caller_key
     if lambda.executable == {
         .Expr(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, body_key, value)
         .Block(body) | .SharedBlock(body) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, body_key, body)
