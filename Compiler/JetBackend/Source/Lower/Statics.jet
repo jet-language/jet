@@ -133,10 +133,10 @@ fn lower_static_fill(p: MIRProgram, m: &LowerModule, f: &LowerFunction, object: 
         }
         definition :: lower_type_def(p, aggregate) ?? return lower_fail(&m, &f, "Struct constant {name} without a definition is not lowered at O0 yet")
         if !lower_constant_owner(definition, aggregate, name) -> return lower_fail(&m, &f, "Struct constant {name} as {definition.name} is not lowered at O0 yet")
+        // A recursive edge freezes its own wrapper box (lower_static_payload).
         loop member in lower_inline_members(p, aggregate) {
-            if member.boxed -> return lower_fail(&m, &f, "boxed Struct constant edges are not lowered at O0 yet")
             value :: lower_constant_member(fields, name, member.name) ?? return lower_fail(&m, &f, "Struct constant {name} without field {member.name} is not lowered at O0 yet")
-            lower_static_child(p, &m, &f, object, offset + member.offset, member.ty, value)
+            lower_static_payload(p, &m, &f, object, LowerPayloadInfo{offset: offset + member.offset, ty: member.ty, boxed: member.boxed}, value)
             if f.failed -> return
         }
         return

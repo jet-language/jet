@@ -240,6 +240,53 @@ fn fx_constant_print_chain(b: &FxBuilder, owner: MIRValueID) Never! {
     fx_print(&b, is_end)
 }
 
+// struct ConstHolder { head: Int, tail: ConstChain } with `tail` a declared
+// recursive edge: a Struct constant stores it through its own wrapper box,
+// as the ordinary constructor does (StructLiteral.jet), in a tree and frozen.
+// fn run() {
+//     a :: ConstHolder{head: 7, tail: .End}; print(a.head); print(a.tail == .End)
+//     b :: a.clone(); drop(a); print(b.head); print(b.tail == .End); drop(b)
+//     print(HOLDER.head); print(HOLDER.tail == .End)   // HOLDER: head 8
+// }
+// expect-stdout constants-boxed-struct: "7\ntrue\n7\ntrue\n8\ntrue\n"
+fn fx_constants_boxed_struct() -> MIRProgram Never! {
+    chain_definition :: fx_constants_boxed().types[0]
+    holder :: fx_named("ConstHolder")
+    holder_definition := fx_type_def("ConstHolder", MIRTypeDefKind.Struct{fields: [MIRField]{
+        fx_field("ConstHolder", "head", fx_int()),
+        fx_field("ConstHolder", "tail", fx_named("ConstChain")),
+    }, methods: [MIRFunctionID]{}})
+    holder_definition.boxed_edges = [String]{"tail"}
+    r := fx_builder()
+    a :: fx_owned(&r, holder, MIROperation.Constant{value: fx_constant_holder(7)})
+    fx_constant_print_holder(&r, a)
+    b :: fx_owned(&r, holder, MIROperation.Copy{value: a, fact: MIRCopyFact.Explicit})
+    fx_do(&r, MIROperation.Drop{value: a, kind: MIRDropKind.Value})
+    fx_constant_print_holder(&r, b)
+    fx_do(&r, MIROperation.Drop{value: b, kind: MIRDropKind.Value})
+    frozen :: fx_value(&r, holder, fx_borrow(), MIROperation.Global{name: "fixture.holder"})
+    fx_constant_print_holder(&r, frozen)
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    p := fx_program([MIRFunction]{fx_function("run", r, fx_unit())}, [MIRTypeDef]{chain_definition, holder_definition})
+    p.constants = [MIRConstantDef]{fx_static_definition("holder", holder, fx_constant_holder(8))}
+    p
+}
+
+fn fx_constant_holder(head: Int) -> MIRConstant Never! {
+    MIRConstant.Struct{type_name: "ConstHolder", fields: [MIRConstField]{
+        MIRConstField{name: "tail", value: MIRConstant.Enum{type_name: "ConstChain", variant: "End", args: [MIRConstEnumArg]{}}},
+        MIRConstField{name: "head", value: fx_constant_int(head)},
+    }}
+}
+
+fn fx_constant_print_holder(b: &FxBuilder, owner: MIRValueID) Never! {
+    head :: fx_copy(&b, fx_int(), MIROperation.Field{base: owner, field: mir_field_id("ConstHolder.head")})
+    tail :: fx_value(&b, fx_named("ConstChain"), fx_borrow(), MIROperation.Field{base: owner, field: mir_field_id("ConstHolder.tail")})
+    is_end :: fx_copy(&b, fx_bool(), MIROperation.EnumIs{subject: tail, owner: mir_type_id("ConstChain"), variant: "End"})
+    fx_print(&b, head)
+    fx_print(&b, is_end)
+}
+
 fn fx_f32_constant_bits_checks() -> Bool Never! {
     samples :: [Float]{0.0, -0.0, 1.0, -1.5, 1.000000059604644775390625, 1.000000178813934326171875, 7.006492321624085e-46, 1.401298464324817e-45, 3.4028234663852886e38, 3.4028235677973366e38}
     expected :: [Int]{0, 2147483648, 1065353216, 3217031168, 1065353216, 1065353218, 0, 1, 2139095039, 2139095040}

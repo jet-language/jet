@@ -248,22 +248,16 @@ fn lower_constant_tree_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, 
             }
             lower_storage_into(p, &f, dst, ty)
             // MIRRust.rs:typed_struct_constant (:29305): look up by name,
-            // not constant order, and omit computed members entirely.
+            // not constant order, and omit computed members entirely. A
+            // recursive edge (:29309) adds its separate wrapper box, as the
+            // ordinary constructor does (StructLiteral.jet).
             loop field in declared {
-                // MIRRust.rs:typed_struct_constant (:29309) adds a separate
-                // recursive edge box; the ordinary O0 constructor has none.
-                loop edge in definition.boxed_edges {
-                    if edge == field.name {
-                        lower_fail(&m, &f, "boxed Struct constant edges are not lowered at O0 yet")
-                        return None
-                    }
-                }
                 value :: lower_constant_member(fields, name, field.name) ?? {
                     lower_fail(&m, &f, "Struct constant {name} without field {field.name} is not lowered at O0 yet")
                     return None
                 }
                 found :: lower_struct_field(p, ty, field.id) ?? return None
-                lower_constant_store(p, &m, &f, dst, found.offset, found.ty, value)
+                lower_constant_payload(p, &m, &f, dst, LowerPayloadInfo{offset: found.offset, ty: found.ty, boxed: found.boxed}, value)
                 if f.failed -> return None
             }
         }
