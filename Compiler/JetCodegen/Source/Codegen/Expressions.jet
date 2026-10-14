@@ -6899,23 +6899,23 @@ fn jet_codegen_lower_pattern_shape_condition(builder: &JetCodegenBuilder, progra
     test := jet_codegen_lower_pattern_shape_test(&builder, program, pattern, subject, subject_value, shape)
     builder.scope_depth = binding_depth
     if !bind_success -> return test.value
-    matched_block := jet_codegen_new_block(&builder, program, subject.span, "pattern-condition-matched")
-    missed_block := jet_codegen_new_block(&builder, program, subject.span, "pattern-condition-missed")
-    join_block := jet_codegen_new_block(&builder, program, subject.span, "pattern-condition-join")
-    jet_codegen_terminate(&builder, program, MIRTerminator.Branch{condition: test.value, then_target: matched_block, else_target: missed_block})
+    // Rust LowerCtx::lower_guarded_pattern: the test branches to the binding
+    // block or straight to the join, and the join's phi carries the test value
+    // on both edges. The arm chain then re-branches on that same test, which
+    // MIRRust.rs carrier_has_later_use reads to see a later arm's probe of the
+    // carrier is no later use of this arm's payload.
+    unmatched_predecessor := builder.current
+    matched_block := jet_codegen_new_block(&builder, program, subject.span, "pattern-matched")
+    join_block := jet_codegen_new_block(&builder, program, subject.span, "pattern-join")
+    jet_codegen_terminate(&builder, program, MIRTerminator.Branch{condition: test.value, then_target: matched_block, else_target: join_block})
     jet_codegen_switch_block(&builder, program, matched_block)
     jet_codegen_bind_pattern_shape(&builder, program, pattern, subject, subject_value, shape, test.matched, reuse_bindings)
-    true_value := jet_codegen_emit_value(&builder, program, subject.span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: true}})
     matched_predecessor := builder.current
-    jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join_block})
-    jet_codegen_switch_block(&builder, program, missed_block)
-    false_value := jet_codegen_emit_value(&builder, program, subject.span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: false}})
-    missed_predecessor := builder.current
     jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join_block})
     jet_codegen_switch_block(&builder, program, join_block)
     incoming := [MIRPhiIncoming]{
-        MIRPhiIncoming{block: matched_predecessor, value: true_value},
-        MIRPhiIncoming{block: missed_predecessor, value: false_value},
+        MIRPhiIncoming{block: unmatched_predecessor, value: test.value},
+        MIRPhiIncoming{block: matched_predecessor, value: test.value},
     }
     jet_codegen_emit_value(&builder, program, subject.span, Type.Bool, MIROperation.Phi{incoming: incoming})
 }
