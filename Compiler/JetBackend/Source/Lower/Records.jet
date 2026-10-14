@@ -18,7 +18,7 @@
 // fieldless Core enum inside a record crosses as its variant index. The rows
 // below have hand exports in CAbi.rs; every other record's schema and exports
 // are generated (RuntimeRoutes.jet LOWER_GENERATED_RECORDS, CAbiRoutes.rs).
-use jet_foundation.[MIRCallArg, MIREnumArg, MIRInstruction, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeDef, MIRTypeKind, mir_nominal_ref, mir_type_from_kind, mir_type_display_name]
+use jet_foundation.[MIRCallArg, MIREnumArg, MIRInstruction, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeDef, MIRTypeKind, core_source_owns_type, mir_nominal_ref, mir_type_from_kind, mir_type_display_name]
 
 // The shape the runtime's exports were written for. A MIR definition of the
 // same name with any other shape is not a record, so a changed Core type is
@@ -408,13 +408,15 @@ fn lower_native_record_source(p: MIRProgram, ty: MIRType) -> Bool {
     lower_native_source_type(p, row.jet_name) != None
 }
 
-// In the native pack a source-declared Core shape (LOWER_NATIVE_TYPES) keeps
-// its MIR layout even when its runtime row has no matching record schema: the
-// row names a Rust-tier replacement type the Jet runtime never provides, so
-// its handle and record exports are this backend's native glue
-// (lower_native_glue_import) over that layout.
+// In the native pack a source-declared Core shape keeps its MIR layout even
+// when its runtime row has no matching record schema. A source-owned Core
+// nominal (Stdout, Stderr, URL, EncodingError, … : core_source_owns_type) is
+// its Jet declaration on every tier (Context.rs file_handle_carrier); a
+// LOWER_NATIVE_TYPES row names a Rust-tier replacement type the Jet runtime
+// never provides. Their handle and record exports are this backend's native
+// glue (lower_native_glue_import) over that layout.
 fn lower_native_declared_shape(p: MIRProgram, name: String) -> Bool Never! {
-    p.native_pack && lower_native_type(name) != None
+    p.native_pack && (lower_native_type(name) != None || core_source_owns_type(name))
 }
 
 fn lower_record_from_runtime(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, handle: LIRValueID, dst: LIRValueID?) Never! {
