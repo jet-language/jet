@@ -4,12 +4,14 @@
 // initializes the returned reservation without a stop/fault point. This
 // provider owns the thunk records and calls them exactly once in reverse order.
 // Fixed backing is borrowed: its provenance/lifetime is a Lower obligation.
-#Import(c) fn storage_arena_open() = "jet_rt_mem_arena_open"
-#Import(c) fn storage_arena_alloc(bytes: I64) = "jet_rt_mem_arena_alloc"
-#Import(c) fn storage_arena_reset(count: I64, bytes: I64) = "jet_rt_mem_arena_reset"
-#Import(c) fn storage_arena_close() = "jet_rt_mem_arena_close"
-#Import(c) fn storage_arena_retain(bytes: I64) = "jet_rt_mem_arena_retain"
-#Import(c) fn storage_arena_release(bytes: I64) = "jet_rt_mem_arena_release"
+// The MemRegistry counters are exports of this same unit (an #Import of them
+// conflicts with the export, E1341), so these name the direct calls.
+fn storage_arena_open() { jet_rt_mem_arena_open() }
+fn storage_arena_alloc(bytes: I64) { jet_rt_mem_arena_alloc(bytes) }
+fn storage_arena_reset(count: I64, bytes: I64) { jet_rt_mem_arena_reset(count, bytes) }
+fn storage_arena_close() { jet_rt_mem_arena_close() }
+fn storage_arena_retain(bytes: I64) { jet_rt_mem_arena_retain(bytes) }
+fn storage_arena_release(bytes: I64) { jet_rt_mem_arena_release(bytes) }
 
 // Arena80: blocks List32@0, current@24, drops List24@32, bytes@56,
 // highwater@64, next-block-size@72. Bump72 embeds its RawBlock32@0;
