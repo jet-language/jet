@@ -302,16 +302,22 @@ fn lower_partial_drop_node(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ba
         shapes :: if lower_is_inline(p, ty) -> [LowerGlueShape]{LowerGlueShape{selector: -1, fields: lower_inline_glue_fields(p, ty)}} else -> lower_glue_shapes(p, &m, &f, ty)
         released :: lower_new_block(&f)
         loop shape in shapes {
-            next_shape :: lower_new_block(&f)
+            // Only a selected shape (an enum variant or Result arm) branches
+            // around its fields. A Option/struct/inline shape (selector -1)
+            // always applies, so it opens no skip block: one left without a
+            // predecessor fails the LIR lint ("block bN is unreachable").
+            next_shape := LIRBlockID?{None}
             if shape.selector >= 0 {
+                skipped :: lower_new_block(&f)
                 discriminant :: lower_word(&f)
                 lower_emit(&f, LIRInst.Load{dst: discriminant, base: base, offset: 0})
                 expected :: lower_const(&f, shape.selector)
                 selected :: lower_flag(&f)
                 lower_emit(&f, LIRInst.Compare{dst: selected, condition: .Eq, left: discriminant, right: expected})
                 selected_body :: lower_new_block(&f)
-                lower_seal(&f, LIRTerminator.Branch{condition: selected, then_target: lower_target(selected_body, [LIRValueID]{}), else_target: lower_target(next_shape, [LIRValueID]{})})
+                lower_seal(&f, LIRTerminator.Branch{condition: selected, then_target: lower_target(selected_body, [LIRValueID]{}), else_target: lower_target(skipped, [LIRValueID]{})})
                 lower_start(&f, selected_body, [LIRValueID]{})
+                next_shape = Val(skipped)
             }
             loop field in shape.fields {
                 children := [LowerPartialDrop]{}
@@ -333,8 +339,10 @@ fn lower_partial_drop_node(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ba
                     }
                 }
             }
-            lower_seal(&f, LIRTerminator.Jump{target: lower_target(released, [LIRValueID]{})})
-            lower_start(&f, next_shape, [LIRValueID]{})
+            if next_shape == .Val(skipped) {
+                lower_seal(&f, LIRTerminator.Jump{target: lower_target(released, [LIRValueID]{})})
+                lower_start(&f, skipped, [LIRValueID]{})
+            }
         }
         lower_seal(&f, LIRTerminator.Jump{target: lower_target(released, [LIRValueID]{})})
         lower_start(&f, released, [LIRValueID]{})
