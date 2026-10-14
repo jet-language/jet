@@ -337,9 +337,9 @@ fn lower_record_handle(p: MIRProgram, ty: MIRType) -> String? {
         .Boxed(_) | .Inline(_) -> {}
         else -> return None
     }
-    // A native-pack source shape crosses as its own native glue handle
-    // (record.out/record.in shells), with or without a generated schema.
-    if p.native_pack && lower_native_record_source(p, ty) {
+    // A native source shape crosses as its native glue shell
+    // (record.out/record.in), with or without a generated schema.
+    if lower_native_shell_record(p, ty) {
         row :: lower_runtime_handle_type(p, ty) ?? return None
         return Val(row.runtime)
     }
@@ -408,20 +408,29 @@ fn lower_native_record_source(p: MIRProgram, ty: MIRType) -> Bool {
     lower_native_source_type(p, row.jet_name) != None
 }
 
-// In the native pack a source-declared Core shape keeps its MIR layout even
-// when its runtime row has no matching record schema. A source-owned Core
-// nominal (Stdout, Stderr, URL, EncodingError, … : core_source_owns_type) is
-// its Jet declaration on every tier (Context.rs file_handle_carrier); a
-// LOWER_NATIVE_TYPES row names a Rust-tier replacement type the Jet runtime
-// never provides. Their handle and record exports are this backend's native
-// glue (lower_native_glue_import) over that layout.
+// A source-declared Core shape keeps its MIR layout in every native lowering
+// (the JetRT pack and the ordinary program) even when its runtime row has no
+// matching record schema. A source-owned Core nominal (Stdout, Stderr, URL,
+// EncodingError, … : core_source_owns_type) is its Jet declaration on every
+// tier (Context.rs file_handle_carrier); a LOWER_NATIVE_TYPES row (time Zone,
+// …) names a Rust-tier replacement type the Jet runtime never provides. Their
+// drop/clone/equality is ordinary native glue over that layout.
 fn lower_native_declared_shape(p: MIRProgram, name: String) -> Bool Never! {
-    p.native_pack && (lower_native_type(name) != None || core_source_owns_type(name))
+    lower_native_type(name) != None || core_source_owns_type(name)
+}
+
+// A native source record crosses a route as a shell of its native bytes: the
+// pack's own glue for every source shape, and the ordinary program's for a
+// shape with no generated record schema (no record getters exist for it).
+// Both sides lower the same Core declaration, so the shell layouts agree.
+fn lower_native_shell_record(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    if !lower_native_record_source(p, ty) -> return false
+    p.native_pack || lower_record_schema(p, ty) == None
 }
 
 fn lower_record_from_runtime(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, handle: LIRValueID, dst: LIRValueID?) Never! {
     if dst == .Val(kept) {
-        if m.native_pack && lower_native_record_source(p, ty) {
+        if lower_native_shell_record(p, ty) {
             if lower_is_inline(p, ty) {
                 lower_storage_into(p, &f, kept, ty)
                 lower_copy_bytes(&f, kept, 0, handle, 0, lower_size(p, ty).size)
@@ -602,7 +611,7 @@ fn lower_helper_record_in(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LI
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
     handle :: f.open_params[0].copy()
     target :: f.open_params[1].copy()
-    if m.native_pack && lower_native_record_source(p, glue.ty) {
+    if lower_native_shell_record(p, glue.ty) {
         if lower_repr(p, glue.ty) == .Boxed(_) {
             cloned :: lower_pointer(&f)
             lower_call_clone_glue(&m, &f, glue.ty, handle, cloned)
@@ -808,7 +817,7 @@ fn lower_record_load_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ha
 fn lower_helper_record_out(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
     value :: f.open_params[0].copy()
-    if m.native_pack && lower_native_record_source(p, glue.ty) {
+    if lower_native_shell_record(p, glue.ty) {
         target :: lower_pointer(&f)
         if lower_repr(p, glue.ty) == .Boxed(_) -> lower_call_clone_glue(&m, &f, glue.ty, value, target)
         else {
