@@ -2084,7 +2084,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         ranks[position] = rank
     }
     dead :: lower_dead_values(function)
-    releases :: lower_temp_releases(function, fact_index, sunk, dead)
+    releases :: lower_temp_releases(p, function, fact_index, sunk, dead)
     Val(LowerContext{
         mir: function.copy(),
         result: result,
@@ -2120,7 +2120,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
 // binary operand) is released right after its last such use. Builtin methods
 // release their own operands case by case and are left out.
 // Result: instruction id -> the values to release after it.
-fn lower_temp_releases(function: MIRFunction, fact_index: [U64:Int], sunk: [U64:Bool], dead: [U64:Bool]) -> [U64:[MIRValueID]] Never! {
+fn lower_temp_releases(p: MIRProgram, function: MIRFunction, fact_index: [U64:Int], sunk: [U64:Bool], dead: [U64:Bool]) -> [U64:[MIRValueID]] Never! {
     releases := [U64:[MIRValueID]]{}
     pinned := [U64:Bool]{}
     loop block in function.blocks {
@@ -2184,6 +2184,18 @@ fn lower_temp_releases(function: MIRFunction, fact_index: [U64:Int], sunk: [U64:
                         }
                     }
                     .BuildString(_) | .Binary(_, _, _, _, _) -> {}
+                    // Read-only builtins whose result owns nothing of its operands.
+                    .Semantic(semantic) -> {
+                        if semantic == .BuiltinMethod(call, _, _, _, _) {
+                            if lower_prelude_row(p, call) == .Val(prelude) {
+                                if !LOWER_RELEASE_BORROWING_BUILTINS.contains(mir_symbol_name(prelude.symbol)) -> borrowed = false
+                            } else {
+                                borrowed = false
+                            }
+                        } else {
+                            borrowed = false
+                        }
+                    }
                     else -> borrowed = false
                 }
                 if !borrowed -> break
@@ -2815,20 +2827,44 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
             if instruction.operation == .Call(_, _, _) | .CoreCall(_, _, _, _, _, _) | .IndirectCall(_, _, _) | .BuildString(_) -> dead_result = Val(result)
         }
     }
+    sealed_before :: f.builder.blocks.len()
     lower_instruction_operation(p, c, &m, &f, instruction)
     if f.failed -> return
     if dead_result == .Val(dead) -> lower_drop_value(p, c, &m, &f, dead)
     released :: c.releases.get(instruction.id.value) ?? [MIRValueID]{}
-    loop value in released -> lower_temp_release(p, c, &m, &f, value)
+    loop value in released -> lower_temp_release(p, c, &m, &f, value, sealed_before)
 }
 
+// Builtin runtime routes that only read their operands and return a scalar
+// or a fresh String (Lists.jet, Strings.jet): a temporary they read is still
+// the caller's to release.
+LOWER_RELEASE_BORROWING_BUILTINS :: [String]{"jet_list_len", "jet_list_is_empty", "jet_list_join", "jet_char_len", "jet_string_count_bytes", "jet_string_is_empty", "jet_string_contains", "jet_string_starts_with", "jet_string_ends_with"}
+
 // Releases an owned temporary after its last borrowing use, unless a slot
-// still holds its LIR value (the slot owns it then, lower_print_releases).
-fn lower_temp_release(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, value: MIRValueID) Never! {
+// still holds its LIR value (the slot owns it then, lower_print_releases), or
+// the lowering of that use already ended its life (a Move, Reown or Drop of
+// it, or a jump handing it to a block parameter): never a second release.
+fn lower_temp_release(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, value: MIRValueID, sealed_before: Int) Never! {
     if lower_is_absent(f, value) -> return
     if lower_slot_of_value(c, value) != None -> return
     index :: f.values.get(value.value) ?? return
-    loop slot_value in f.current { if slot_value == .Val(holding) && holding.value == index -> return }
+    loop slot_value in f.current {
+        if slot_value == .Val(holding) && holding.value == index -> return
+    }
+    lowered :: LIRValueID{value: index}
+    from :: if sealed_before > 0 -> sealed_before - 1 else -> 0
+    loop at in from..<f.builder.blocks.len() {
+        block :: f.builder.blocks[at]
+        loop inst in block.insts {
+            if lir_inst_consumes(inst).contains(lowered) -> return
+        }
+        loop target in lir_terminator_targets(block.terminator) {
+            if target.args.contains(lowered) -> return
+        }
+    }
+    loop inst in f.builder.open {
+        if lir_inst_consumes(inst).contains(lowered) -> return
+    }
     lower_drop_value(p, c, &m, &f, value)
 }
 
