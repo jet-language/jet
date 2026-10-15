@@ -93,11 +93,14 @@ fn lower_runtime_argument_name(p: MIRProgram, ty: MIRType) -> String? {
 // No runtime application may quietly become a native struct merely because
 // its argument key is unsupported or absent. Pure Jet generics with no runtime
 // declaration rows still use the ordinary Mono/native representation.
-fn lower_runtime_missing_application(ty: MIRType) -> LowerRepr? {
+fn lower_runtime_missing_application(ty: MIRType, rows: [LowerRuntimeHandle]) -> LowerRepr? {
     if ty.kind == .Apply(name, args) {
         if args.len() == 0 -> return None
-        if lower_runtime_generic_handle_base(name.name) {
-            return Val(LowerRepr.Unsupported{reason: "runtime type {mir_type_display_name(ty)} has unsupported or unregistered declaration arguments"})
+        prefix :: "{name.name}<"
+        loop row in rows {
+            if row.jet_name.starts_with(prefix) {
+                return Val(LowerRepr.Unsupported{reason: "runtime type {mir_type_display_name(ty)} has unsupported or unregistered declaration arguments"})
+            }
         }
     }
     None

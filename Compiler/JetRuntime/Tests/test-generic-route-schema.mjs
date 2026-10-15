@@ -381,7 +381,8 @@ pub mod shadow {
     assert.ok(!pipeJet.includes(`LowerNativeType{jet_name: "${type}"`));
   }
   const lookup = pipeJet.slice(pipeJet.indexOf("fn lower_runtime_handle("));
-  assert.ok(lookup.indexOf("loop handle in LOWER_RUNTIME_HANDLES") < lookup.indexOf("loop handle in LOWER_NATIVE_PROVIDER_HANDLES"), "seed lookup must never override an existing Rust row");
+  const seedRow = lookup.indexOf("lower_key_row(LOWER_RUNTIME_HANDLE_KEYS"), providerRow = lookup.indexOf("lower_key_row(LOWER_NATIVE_PROVIDER_HANDLE_KEYS");
+  assert.ok(seedRow >= 0 && providerRow > seedRow, "seed lookup must never override an existing Rust row");
   put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: Float) -> Float { value }\n");
   put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\n");
   const bitsDefinitions = "#Export(c) fn jet_rt_native_bits_new() -> I64 { I64{0} }\n#Export(c) fn jet_rt_native_bits_clear(bits: I64) {}\n";
