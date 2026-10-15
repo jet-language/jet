@@ -1,17 +1,33 @@
 #!/usr/bin/env bash
-# Prepare the Jet Zed dev extension for "Add Dev Extension".
+# Build and install the Jet Zed dev extension.
 #
-# Zed tries to compile Rust when Cargo.toml sits in the extension root. That fails
-# for many setups (nix-only rustc, missing wasm32-wasip2 std). We prebuild
-# extension.wasm here instead.
+# The extension directory is this one (Tools/editors/zed). Zed loads a dev
+# extension through a symlink at <zed data>/extensions/installed/jet-lang:
+#   extension.toml        manifest (rendered here from extension.toml.in)
+#   extension.wasm        prebuilt language-server glue (wasm-src/, wasm32-wasip2)
+#   grammars/jet.wasm     the tree-sitter parser
+#   languages/jet/*.scm   highlights, brackets, indents, outline, overrides
 #
-# Zed clones tree-sitter grammars into grammars/<name>/ via git. If that folder
-# already exists without a matching remote, install fails. Grammar sources live
-# in grammar-repo/; grammars/jet/ is removed so Zed can clone cleanly.
+# grammars/jet.wasm is compiled from the committed, generated parser in
+# Tools/editors/tree-sitter/src with the same command Zed's extension builder
+# uses (wasi-sdk clang, -fPIC -shared -Os), so "Add Dev Extension"/"Rebuild"
+# in Zed produce the same parser. Zed's builder clones the grammar from
+# grammar-repo/ (a local git mirror of Tools/editors/tree-sitter) at the
+# commit written into extension.toml; grammars/jet/ is removed so it can.
+#
+# Zed compiles Rust only when Cargo.toml sits in the extension root, which
+# fails for nix-only toolchains; extension.wasm is prebuilt here instead and
+# Zed loads it because the file exists.
+#
+# Finally the dev-extension symlink is (re)pointed at this directory, which
+# Zed's extension watcher picks up live. A non-symlink install of jet-lang
+# (a published extension) is never replaced.
 #
 # Usage:
-#   Tools/editors/zed/install.sh            # skip wasm rebuilds if files exist
-#   FORCE=1 Tools/editors/zed/install.sh    # rebuild all wasm files from scratch
+#   Tools/editors/zed/install.sh            # rebuild only stale wasm files
+#   FORCE=1 Tools/editors/zed/install.sh    # rebuild both wasm files
+#   NO_LINK=1 Tools/editors/zed/install.sh  # build only; leave Zed untouched
+#   ZED_EXTENSIONS_DIR=... overrides <zed data>/extensions
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
@@ -20,36 +36,27 @@ FORCE="${FORCE:-0}"
 GRAMMAR_REPO="$ROOT/grammar-repo"
 GRAMMAR_URI="file://${GRAMMAR_REPO}"
 WASM_SRC="$ROOT/wasm-src"
-TREE_SITTER_SRC="$ROOT/../tree-sitter"
+TREE_SITTER_SRC="$(cd "$ROOT/../tree-sitter" && pwd)"
+ZED_EXTENSIONS_DIR="${ZED_EXTENSIONS_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/zed/extensions}"
 
-# ── Sync grammar sources into grammar-repo/ ───────────────────────────────────
-# Authoritative sources live in Tools/editors/tree-sitter/; grammar-repo/ is a
-# standalone git repo that Zed clones via a file:// URI.
+# stale TARGET SOURCE... — true when TARGET is missing, empty or older than a source.
+stale() {
+  local target=$1; shift
+  [ "$FORCE" = "1" ] && return 0
+  [ -s "$target" ] || return 0
+  local source
+  for source in "$@"; do
+    [ "$source" -nt "$target" ] && return 0
+  done
+  return 1
+}
+
+# ── Grammar mirror (Zed clones it via a file:// URI) ─────────────────────────
 echo "Syncing grammar sources from Tools/editors/tree-sitter/ ..."
-mkdir -p "$GRAMMAR_REPO/src"
-cp "$TREE_SITTER_SRC/grammar.js" "$GRAMMAR_REPO/"
-cp "$TREE_SITTER_SRC/tree-sitter.json" "$GRAMMAR_REPO/"
-if [ -d "$TREE_SITTER_SRC/src" ]; then
-  cp -r "$TREE_SITTER_SRC/src/." "$GRAMMAR_REPO/src/"
-fi
-
-# ── Tree-sitter grammar wasm ──────────────────────────────────────────────────
-if [ ! -s "$ROOT/grammars/jet.wasm" ] || [ "$FORCE" = "1" ]; then
-  echo "Building grammars/jet.wasm ..."
-  if command -v tree-sitter >/dev/null 2>&1; then
-    (cd "$GRAMMAR_REPO" && tree-sitter generate)
-    tree-sitter build --wasm -o "$ROOT/grammars/jet.wasm" "$GRAMMAR_REPO"
-  else
-    nix-shell -p tree-sitter emscripten --run "
-      cd '$GRAMMAR_REPO' && tree-sitter generate
-      tree-sitter build --wasm -o '$ROOT/grammars/jet.wasm' '$GRAMMAR_REPO'
-    "
-  fi
-else
-  echo "  grammars/jet.wasm exists — skipping (FORCE=1 to rebuild)"
-fi
-
-# ── Grammar git repo (Zed clones from file:// URI) ───────────────────────────
+mkdir -p "$GRAMMAR_REPO"
+rm -rf "$GRAMMAR_REPO/src"
+cp "$TREE_SITTER_SRC/grammar.js" "$TREE_SITTER_SRC/tree-sitter.json" "$GRAMMAR_REPO/"
+cp -r "$TREE_SITTER_SRC/src" "$GRAMMAR_REPO/src"
 if [ ! -d "$GRAMMAR_REPO/.git" ]; then
   git -C "$GRAMMAR_REPO" init -q
 fi
@@ -59,11 +66,28 @@ if ! git -C "$GRAMMAR_REPO" diff --cached --quiet; then
 fi
 GRAMMAR_REV="$(git -C "$GRAMMAR_REPO" rev-parse HEAD)"
 
-# Remove Zed's clone target so checkout does not hit a stale directory.
+# Remove Zed's clone target so its checkout does not hit a stale directory.
 rm -rf "$ROOT/grammars/jet"
 
-# ── extension.wasm ────────────────────────────────────────────────────────────
-if [ ! -s "$ROOT/extension.wasm" ] || [ "$FORCE" = "1" ]; then
+# ── Tree-sitter grammar wasm ─────────────────────────────────────────────────
+mkdir -p "$ROOT/grammars"
+if stale "$ROOT/grammars/jet.wasm" "$TREE_SITTER_SRC/src/parser.c"; then
+  echo "Building grammars/jet.wasm ..."
+  WASI_CLANG="$ZED_EXTENSIONS_DIR/build/wasi-sdk/bin/clang"
+  if [ -x "$WASI_CLANG" ]; then
+    "$WASI_CLANG" -fPIC -shared -Os -Wl,--export=tree_sitter_jet \
+      -o "$ROOT/grammars/jet.wasm" -I "$TREE_SITTER_SRC/src" "$TREE_SITTER_SRC/src/parser.c" 2> >(grep -v 'creating shared libraries' >&2)
+  elif command -v tree-sitter >/dev/null 2>&1; then
+    tree-sitter build --wasm -o "$ROOT/grammars/jet.wasm" "$TREE_SITTER_SRC"
+  else
+    nix-shell -p tree-sitter emscripten --run "tree-sitter build --wasm -o '$ROOT/grammars/jet.wasm' '$TREE_SITTER_SRC'"
+  fi
+else
+  echo "  grammars/jet.wasm is current (FORCE=1 to rebuild)"
+fi
+
+# ── extension.wasm ───────────────────────────────────────────────────────────
+if stale "$ROOT/extension.wasm" "$WASM_SRC/src/lib.rs" "$WASM_SRC/Cargo.toml"; then
   echo "Building extension.wasm ..."
   build_extension_wasm() {
     if command -v rustup >/dev/null 2>&1; then
@@ -88,27 +112,35 @@ if [ ! -s "$ROOT/extension.wasm" ] || [ "$FORCE" = "1" ]; then
     exit 1
   fi
 else
-  echo "  extension.wasm exists — skipping (FORCE=1 to rebuild)"
+  echo "  extension.wasm is current (FORCE=1 to rebuild)"
 fi
 
-# ── Manifest ──────────────────────────────────────────────────────────────────
+# ── Manifest ─────────────────────────────────────────────────────────────────
 sed -e "s|@GRAMMAR_URI@|${GRAMMAR_URI}|g" \
     -e "s|@GRAMMAR_REV@|${GRAMMAR_REV}|g" \
     extension.toml.in > extension.toml
+
+# ── Dev-extension link ───────────────────────────────────────────────────────
+LINK="$ZED_EXTENSIONS_DIR/installed/jet-lang"
+link_state="not linked (NO_LINK=1)"
+if [ "${NO_LINK:-0}" != "1" ]; then
+  if [ -e "$LINK" ] && [ ! -L "$LINK" ]; then
+    link_state="not linked: $LINK is a published (non-dev) install; uninstall it in Zed first"
+  elif [ ! -d "$ZED_EXTENSIONS_DIR/installed" ]; then
+    link_state="not linked: no Zed extensions directory at $ZED_EXTENSIONS_DIR"
+  else
+    ln -sfn "$ROOT" "$LINK"
+    link_state="$LINK -> $ROOT"
+  fi
+fi
 
 echo ""
 echo "Jet Zed extension ready at: $ROOT"
 echo "  extension.wasm    ($(du -h extension.wasm | awk '{print $1}'))"
 echo "  grammars/jet.wasm ($(du -h grammars/jet.wasm | awk '{print $1}'))"
 echo "  grammar rev       ${GRAMMAR_REV}"
+echo "  dev extension     ${link_state}"
 echo ""
-echo "In Zed:"
-echo "  1. Remove any old 'jet' dev extension (zed: extensions)"
-echo "  2. nix develop -c cargo build     # jet → target/debug/jet"
-echo "  3. Cmd+Shift+P → zed: extensions → Add Dev Extension"
-echo "  4. Choose: $ROOT"
-echo "  5. zed: reload window"
-echo "  6. Open a .jet file — language picker shows 'Jet' (capital J)"
-echo ""
-echo "If you edit wasm-src/ or grammar-repo/, rerun: FORCE=1 Tools/editors/zed/install.sh"
-echo "Verify LSP: nix develop -c jet self lsp doctor"
+echo "Zed reloads the linked extension on its own; if a .jet buffer stays plain,"
+echo "run 'zed: reload extensions'. Open a .jet file — the language picker shows 'Jet'."
+echo "The language server is \`jet self lsp\` from PATH (Tools/agent/jet-env cargo build)."

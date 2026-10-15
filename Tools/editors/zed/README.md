@@ -7,7 +7,7 @@ quick-fixes, document links, folding, and run/test code lenses. The extension
 manifest is [`extension.toml`](extension.toml); its process capability invokes
 `jet self lsp`.
 
-## Prepare and install a dev extension
+## Build and install the dev extension
 
 From the repository root:
 
@@ -16,24 +16,32 @@ Tools/agent/jet-env cargo build
 Tools/editors/zed/install.sh
 ```
 
-In Zed, open **zed: extensions**, remove an older Jet dev extension if one is
-present, choose **Add Dev Extension**, select `Tools/editors/zed/`, and reload the
-window. The language picker entry is **Jet** with a capital J. The repository's
-`.zed/settings.json` associates `.jet` files with that language when the
-project is opened.
+`install.sh` builds the two WebAssembly assets and links the extension into
+Zed:
 
-`install.sh` prepares two WebAssembly assets. It syncs the authoritative
-Tree-sitter sources from [`Tools/editors/tree-sitter`](../tree-sitter/) into the
-standalone `grammar-repo/`, builds `grammars/jet.wasm`, and prebuilds
-`extension.wasm` from [`wasm-src`](wasm-src/). Prebuilding avoids Zed trying
-to compile the extension root as a Rust project. If a rebuild is needed, use:
+- `grammars/jet.wasm` is compiled from the committed, generated parser in
+  [`Tools/editors/tree-sitter/src`](../tree-sitter/src) with the same command
+  Zed's extension builder uses (its wasi-sdk `clang -fPIC -shared -Os`), so a
+  later **Rebuild** inside Zed produces the same parser. The script also
+  mirrors the grammar into the local git repository `grammar-repo/` that
+  `extension.toml` names, and removes `grammars/jet/` so Zed can clone it.
+- `extension.wasm` is prebuilt from [`wasm-src`](wasm-src/) for
+  `wasm32-wasip2`. Zed only compiles Rust when `Cargo.toml` sits in the
+  extension root, which fails for nix-only toolchains, and it loads a present
+  `extension.wasm` on its own.
+- The dev-extension link `~/.local/share/zed/extensions/installed/jet-lang` is
+  pointed at `Tools/editors/zed/` of the checkout the script runs from (a
+  published, non-symlink install is left alone). Zed's extension watcher
+  reloads it; **zed: reload extensions** forces it. Moving the checkout
+  breaks the link, so rerun the script after a move.
 
-```sh
-FORCE=1 Tools/editors/zed/install.sh
-```
+Only stale assets are rebuilt; `FORCE=1` rebuilds both and `NO_LINK=1` skips
+the Zed link. The language picker entry is **Jet** with a capital J.
 
-The script removes the generated `grammars/jet/` clone so Zed can fetch it
-from the local grammar repository during extension installation.
+When highlighting disappears, look in `~/.local/share/zed/logs/Zed.log` for
+`failed to load language Jet` or `Failed to load extension: jet-lang`: a query
+that names a node or string the grammar lacks makes Zed drop the whole
+language.
 
 ## Server trust and discovery
 
@@ -69,11 +77,28 @@ safely add that adapter here.
 
 ## Grammar and focused checks
 
-Lexical grammar sources are in
-[`Tools/editors/tree-sitter`](../tree-sitter/), while the compiler's token vocabulary
-is defined in [`Syntax.rs`](../../../crates/jet-foundation/src/Syntax.rs). The LSP
-semantic overlay refines live coloring for ownership markers, rules,
-decorators, and effect rows; it does not change compiler parsing.
+The editor grammar is [`Tools/editors/tree-sitter`](../tree-sitter/). It is
+deliberately permissive: Jet source is read as balanced `()`/`[]`/`{}` and
+string groups of elements, and only what the editor colors, folds, indents or
+outlines gets its own node (declarations, calls, members, bindings, labels,
+constructors, variants, markers, literals). New syntax therefore keeps
+parsing; the compiler remains the only judge of validity. Keyword spellings
+come from the generated `BEGIN/END GENERATED JET SYNTAX HIGHLIGHTS` sections,
+rendered from [`Syntax.rs`](../../../crates/jet-foundation/src/Syntax.rs) by
+`jet self devtools grammars`. Every string in `highlights.scm` must be an
+anonymous grammar token. The LSP semantic overlay refines live coloring for
+ownership markers, rules, decorators, and effect rows; it does not change
+compiler parsing.
+
+After editing `grammar.js`, regenerate and check it in
+`Tools/editors/tree-sitter`:
+
+```sh
+tree-sitter generate && tree-sitter test
+tree-sitter parse --quiet --stat ../../../Examples/**/*.jet
+```
+
+then rerun `install.sh`.
 
 Useful repository checks are:
 
