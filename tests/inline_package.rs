@@ -377,7 +377,7 @@ fn run() {}
         .find(|entry| entry.diagnostic.code == "E1362")
         .expect("path escape must retain its registered diagnostic");
     assert_eq!(failure.file, path.display().to_string());
-    assert_eq!(failure.source, source);
+    assert_eq!(&*failure.source, source);
     assert!(failure.diagnostic.span.is_some());
 
     let _ = fs::remove_file(outside);
@@ -416,7 +416,7 @@ fn run() {}
         }
         "E1362" => {
             assert_eq!(failure.file, path.display().to_string());
-            assert_eq!(failure.source, source);
+            assert_eq!(&*failure.source, source);
             assert!(failure.diagnostic.span.is_some());
         }
         code => panic!("unexpected symlink diagnostic {code}"),
@@ -537,7 +537,7 @@ fn run() {}
         .find(|entry| entry.diagnostic.code == "E1202")
         .expect("stale lock must use registered E1202");
     assert!(failure.file.ends_with(".jet/lock"), "lock provenance lost: {}", failure.file);
-    assert_eq!(failure.source, lock_source);
+    assert_eq!(&*failure.source, lock_source);
     assert_eq!(fs::read_to_string(&entry).unwrap(), source);
     assert_eq!(fs::read_to_string(&lock).unwrap(), lock_source);
 
