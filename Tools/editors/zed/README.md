@@ -45,18 +45,24 @@ language.
 
 ## Server trust and discovery
 
-The extension requests one literal command:
+The extension starts `jet self lsp`. Zed's worktree-trust gate controls whether
+the process can start; restricted worktrees do not start the language server.
+The executable is chosen in this order
+([`wasm-src/src/lib.rs`](wasm-src/src/lib.rs)):
 
-```text
-jet self lsp
+1. the Zed setting `lsp.jet-lsp.binary.path`, with `binary.arguments`
+   (default `self lsp`) and `binary.env` when set;
+2. otherwise `jet` on the worktree's `PATH` (Zed's `Worktree::which`);
+3. otherwise the server does not start and Zed shows an error that names
+   `lsp.jet-lsp.binary.path`.
+
+```json
+{ "lsp": { "jet-lsp": { "binary": { "path": "/abs/path/to/jet" } } } }
 ```
 
-Zed's worktree-trust gate controls whether this process can start. Restricted
-worktrees do not start the language server. The extension does not call
-`Worktree::which`, read an executable path from the worktree, or execute a
-worktree-provided `jet` binary; the command identity is fixed in
-[`wasm-src/src/lib.rs`](wasm-src/src/lib.rs). Put the trusted Jet executable on
-the editor process's `PATH` before opening a trusted project.
+The extension never reads the worktree's files or guesses a repository build
+output such as `target/debug/jet`. A trusted worktree whose `PATH` puts a
+different `jet` first gets that `jet`; pin `binary.path` to avoid it.
 
 `jet self lsp` does not invoke `rustc`, so the plain executable produced by the
 repository build is sufficient. Rebuild it and reload Zed after changing the
