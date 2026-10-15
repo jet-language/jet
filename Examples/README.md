@@ -81,6 +81,7 @@ listed below:
 | `<stem>.seed.out` / `<stem>.greet.out` | Input-specific output for the matching example. |
 | `<stem>.test.out` | Test-command output. |
 | `<stem>.fuzz.out` | Fuzz-command output. |
+| `<stem>.ast.out` / `<stem>.mir.out` / `<stem>.lir.out` | `jet emit --ast`/`--mir`/`--lir` stdout, checked by the native feature runner after the run passes. |
 
 Failing runs compare stdout as well as stderr and the exact exit code. A
 failure's sibling `.out` is authoritative; without one, stdout must be empty.

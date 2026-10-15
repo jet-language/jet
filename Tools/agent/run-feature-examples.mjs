@@ -87,15 +87,35 @@ export function collectFeatureExamples(featuresDir = FEATURES) {
   return entries.sort((a, b) => a.stem.localeCompare(b.stem));
 }
 
+// `jet emit` tiers with a golden: `<stem>.<tier>.out` is the stdout of
+// `jet emit --<tier> <example>`, checked after the example's run passes.
+export const EMIT_TIERS = ["ast", "mir", "lir"];
+
 function readExpected(stem) {
   const outPath = join(EXPECTED, `${stem}.out`);
   const errPath = join(EXPECTED, `${stem}.err.out`);
   const stderrPath = join(EXPECTED, `${stem}.stderr.out`);
+  const emit = {};
+  for (const tier of EMIT_TIERS) {
+    const path = join(EXPECTED, `${stem}.${tier}.out`);
+    emit[tier] = existsSync(path) ? readFileSync(path, "utf8") : null;
+  }
   return {
     out: existsSync(outPath) ? readFileSync(outPath, "utf8") : null,
     err: existsSync(errPath) ? readFileSync(errPath, "utf8") : null,
     stderrOut: existsSync(stderrPath) ? readFileSync(stderrPath, "utf8") : null,
+    emit,
   };
+}
+
+// The verdict of one `jet emit --<tier>` against its golden, or null when it matches.
+export function classifyEmit(tier, run, expected) {
+  if (run.timedOut) return { status: "timeout", detail: `emit --${tier} timeout ${run.timeoutSec}s` };
+  if (run.code !== 0) return { status: "failed", detail: `emit --${tier} exit ${run.code}`, stderr: run.stderr };
+  if (normalize(run.stdout) !== normalize(expected)) {
+    return { status: "no-match", detail: `emit --${tier} stdout`, expected, actual: normalize(run.stdout) };
+  }
+  return null;
 }
 
 export function nativeRunIsWebTarget(entry) {
@@ -331,13 +351,22 @@ async function main() {
       const skipped = skipReason(entry, expected);
       if (skipped) return { stem: entry.stem, shown: entry.shown, status: "skipped", detail: skipped };
       const staged = stageFeatureProject(entry, scratch, slot);
-      const run = await runJet(["run", entry.shown], {
+      const runOptions = {
         cwd: staged?.cwd,
         store: join(scratch, "store", String(slot)),
         scratch,
         timeoutMs: options.timeoutSec * 1000,
-      });
-      return { stem: entry.stem, shown: entry.shown, ...classifyRun(entry, run, expected), stderr: run.stderr, stdout: run.stdout };
+      };
+      const run = await runJet(["run", entry.shown], runOptions);
+      const result = { stem: entry.stem, shown: entry.shown, ...classifyRun(entry, run, expected), stderr: run.stderr, stdout: run.stdout };
+      if (result.status !== "passed") return result;
+      for (const tier of EMIT_TIERS) {
+        if (expected.emit[tier] === null) continue;
+        const emitted = await runJet(["emit", `--${tier}`, entry.shown], runOptions);
+        const verdict = classifyEmit(tier, emitted, expected.emit[tier]);
+        if (verdict) return { stem: entry.stem, shown: entry.shown, ...verdict, stderr: emitted.stderr, stdout: emitted.stdout };
+      }
+      return result;
     });
     const counts = summarize(results);
     if (options.json) {

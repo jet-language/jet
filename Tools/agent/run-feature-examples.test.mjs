@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  classifyEmit,
   classifyRun,
   collectFeatureExamples,
   nativeRunIsWebTarget,
@@ -20,6 +21,14 @@ test("warning-only stderr is non-fatal", () => {
     timedOut: false,
     timeoutSec: 60,
   }, { out: "ok\n", err: null, stderrOut: null }).status, "passed");
+});
+
+test("emit tier goldens compare exact stdout and exit", () => {
+  const ok = { code: 0, stdout: "fn run() -> Unit\n", stderr: "", timedOut: false, timeoutSec: 60 };
+  assert.equal(classifyEmit("mir", ok, "fn run() -> Unit\n"), null);
+  assert.equal(classifyEmit("mir", ok, "fn other() -> Unit\n").status, "no-match");
+  assert.equal(classifyEmit("lir", { ...ok, code: 1 }, "").detail, "emit --lir exit 1");
+  assert.equal(classifyEmit("ast", { ...ok, timedOut: true }, "").status, "timeout");
 });
 
 test("warning plus a compiler error remains a failure", () => {
