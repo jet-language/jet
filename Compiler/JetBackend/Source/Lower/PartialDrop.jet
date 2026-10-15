@@ -288,8 +288,10 @@ fn lower_partial_drop_node(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ba
             lower_inline_drop(p, &m, &f, base, ty)
         } else {
             layout :: lower_repr_layout(lower_repr(p, ty)) ?? return lower_fail(&m, &f, "partial drop leaf has no carrier")
+            // The leaf owner adopts the borrowed field carrier (a Copy may not
+            // add drop glue; LIR lint), then drops it.
             owned :: lower_new_value(&f, layout, lower_drop(&m, lower_repr(p, ty), true), ty.identity)
-            lower_emit(&f, LIRInst.Copy{dst: owned, src: base})
+            lower_adopt(&f, owned, base)
             lower_emit(&f, LIRInst.Drop{value: owned})
         }
     } else {
