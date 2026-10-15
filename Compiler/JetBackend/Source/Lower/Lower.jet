@@ -325,6 +325,11 @@ struct LowerContext {
     // Per MIR block position: the carried slots live on entry, ascending
     // (Liveness.jet); its LIR params and every edge into it carry these.
     live: [[Int]]
+    // Results nothing reads: no operand, terminator, place base or index,
+    // or bound local names them (lower_dead_values). Rust drops such a
+    // temporary at the end of its statement; natively a dead owned read is
+    // not materialized and a dead owned call result is dropped at once.
+    dead: [U64:Bool]
 }
 
 // A real cleanup entry, not a Shield or an inferred task/root role. The saved
@@ -2095,8 +2100,40 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         lir_blocks: lir_blocks,
         ranks: ranks,
         live: live,
+        dead: lower_dead_values(function),
         split_entry: split_entry,
     })
+}
+
+// The instruction results no operand, terminator, place (base or index
+// projection) or SSA-bound local names: values computed and never read.
+fn lower_dead_values(function: MIRFunction) -> [U64:Bool] Never! {
+    used := [U64:Bool]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            loop value in mir_operation_value_uses(instruction.operation) -> _ := &used.add(value.value, true)
+        }
+        loop value in mir_terminator_value_uses(block.terminator) -> _ := &used.add(value.value, true)
+    }
+    loop place in function.places {
+        if place.base == .Parameter(value) | .Capture(value) | .Temporary(value) -> _ := &used.add(value.value, true)
+        loop projection in place.projections {
+            if projection == .Index(_, index, _, _, _, _, _) -> _ := &used.add(index.value, true)
+            if projection == .Range(range, _, _) -> _ := &used.add(range.value, true)
+            if projection == .MapLookup(lookup, _, _) -> _ := &used.add(lookup.value, true)
+        }
+    }
+    loop local in function.locals {
+        if local.ssa_value == .Val(value) -> _ := &used.add(value.value, true)
+    }
+    dead := [U64:Bool]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            result :: instruction.result ?? next
+            if used.get(result.value) == None -> _ := &dead.add(result.value, true)
+        }
+    }
+    dead
 }
 
 fn lower_reverse_postorder(successors: [[Int]], entry: Int) -> [Int] Never! {
@@ -2659,7 +2696,25 @@ fn lower_return_implicit_ok(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
 // ---------------------------------------------------------------------------
 // Instructions.
 
+// A dead owned result (LowerContext.dead) is released as Rust releases an
+// unused temporary: a pure read (place, copy, payload) is never
+// materialized, so no clone is made; a fresh call or string result is
+// dropped as soon as it is produced.
 fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction) Never! {
+    if instruction.result == .Val(result) {
+        if c.dead.get(result.value) != None && lower_value_owned(c, result) {
+            if instruction.operation == .ReadPlace(_) | .Copy(_, _) | .OptionValue(_) | .ResultValue(_, _) -> return lower_alias_absent(&f, instruction)
+            if instruction.operation == .Call(_, _, _) | .CoreCall(_, _, _, _, _, _) | .IndirectCall(_, _, _) | .BuildString(_) {
+                lower_instruction_operation(p, c, &m, &f, instruction)
+                if !f.failed -> lower_drop_value(p, c, &m, &f, result)
+                return
+            }
+        }
+    }
+    lower_instruction_operation(p, c, &m, &f, instruction)
+}
+
+fn lower_instruction_operation(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction) Never! {
     if f.partial_drops.len() != 0 || f.closing != None {
         stored := lower_stored_operands(instruction.operation)
         loop value in lower_map_stored_operands(p, instruction.operation) -> &stored.push(value)
