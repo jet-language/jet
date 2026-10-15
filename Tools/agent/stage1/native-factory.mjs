@@ -7,12 +7,32 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { assertPinnedSource } from '../proof-source.mjs';
 const digest = file => createHash('sha256').update(readFileSync(file)).digest('hex');
+// Owner-allowed census rows (phase, item, code, message; span ignored): a file
+// named by NATIVE_FEED_ALLOWED_ROWS, one tab-separated row per line. Only a
+// census whose every row is listed passes; each such row is a trapped item
+// that aborts only if executed. Unset, every census must be empty.
+export function nativeAllowedRows() {
+  const file = process.env.NATIVE_FEED_ALLOWED_ROWS;
+  if (!file) return new Set();
+  return new Set(readFileSync(file, 'utf8').split('\n').filter(line => line.trim()).map(line => line.split('\t').slice(0, 4).join('\t')));
+}
+// Every row of a keep-going census (header excluded) not in `allowed`.
+export function nativeCensusRejects(censusText, allowed) {
+  const census = censusText.trim().split('\n');
+  if (census[0] !== 'phase\titem\tcode\tmessage\tspan') return ['missing census header'];
+  return census.slice(1).filter(row => !allowed.has(row.split('\t').slice(0, 4).join('\t')));
+}
 export function admitFactoryReceipt(text, censusText) {
   const rows = new Map(text.trim().split('\n').map(line => {
     const split = line.indexOf('=');
     return [line.slice(0, split), line.slice(split + 1)];
   }));
+  const allowed = nativeAllowedRows();
+  const census = censusText.trim().split('\n');
+  const allowedOnly = census.length > 1 && nativeCensusRejects(censusText, allowed).length === 0;
   for (const [name, value] of Object.entries({ mode: 'factory', complete: 'true', selected_factory_tier: 'Aot', actual_factory_tier: 'Aot' })) {
+    // An incomplete receipt is admitted only when every census row is allowed.
+    if (name === 'complete' && allowedOnly) continue;
     if (rows.get(name) !== value) throw Error(`factory receipt ${name} is not ${value}`);
   }
   // Reports are admitted by severity: a lint warning is not a failed compile,
@@ -21,8 +41,9 @@ export function admitFactoryReceipt(text, censusText) {
   if (reports.length !== Number(rows.get('report_count') ?? 0)) throw Error(`factory receipt lists ${reports.length} reports but report_count is ${rows.get('report_count')}`);
   const errors = reports.filter(report => report.severity !== 'warning' && report.severity !== 'note' && report.severity !== 'info');
   if (errors.length) throw Error(`factory receipt has ${errors.length} error report(s): ${errors.slice(0, 5).map(report => `${report.code} ${report.what} (${report.file}:${report.line})`).join('; ')}`);
-  const census = censusText.trim().split('\n');
-  if (census.length !== 1 || census[0] !== 'phase\titem\tcode\tmessage\tspan') throw Error('native/library factory request has a missing or non-empty all-phases census');
+  const rejects = nativeCensusRejects(censusText, allowed);
+  if (rejects.length) throw Error(`native/library factory request has a missing or non-empty all-phases census (${rejects.length} row(s) not allowed): ${rejects.slice(0, 5).join(' | ')}`);
+  if (census.length > 1) rows.set('allowed_census_rows', String(census.length - 1));
   // emitted_source is legitimately absent for library/native outputs. Do not
   // impose the Rust-source source_bytes>0 predicate on these typed boundaries.
   return Object.fromEntries(rows);

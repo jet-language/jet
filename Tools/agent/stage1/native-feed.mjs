@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import { accessSync, chmodSync, closeSync, constants, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compilerCpuPin, gnuTime, invokeStageZeroFactory, nativeCToolchain, peakRss, readStageZeroFactory } from './native-factory.mjs';
+import { compilerCpuPin, gnuTime, invokeStageZeroFactory, nativeAllowedRows, nativeCensusRejects, nativeCToolchain, peakRss, readStageZeroFactory } from './native-factory.mjs';
 import { readNativeRuntimePack } from '../../packaging/runtime-pack-cache.mjs';
 const producerRepo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const options = { repo: producerRepo };
@@ -91,9 +91,11 @@ function cliStageRunner({ repo, out, unit, identity, referenceToolchain, runtime
     if (!sameToolchain(toolchain, referenceToolchain)) throw Error(`stage${stage} C toolchain differs from the factory's: ${JSON.stringify(toolchain)} vs ${JSON.stringify(referenceToolchain)}`);
     rmSync(built, { force: true }); rmSync(`${built}.o`, { force: true });
     execute(`native-stage${stage}`, [timer, '-v', '-o', timing, 'timeout', '--kill-after=30', limit, ...stack, ...compilerCpuPin(cpus), jetEnv, builder, 'build', unit.source], stageEnv, unit.project, out, stepsFile);
-    const census = readFileSync(report, 'utf8').trim().split('\n');
-    if (census.length !== 1 || census[0] !== 'phase\titem\tcode\tmessage\tspan') throw Error(`stage${stage} all-phases census must exist and be empty`);
-    return { ...publish(out, runtimeDir, join(out, `stage${stage}`), built, `${built}.o`), keepGoingReport: report, keepGoingFailures: 0, timing, seconds: steps.at(-1).seconds, peakRssKb: peakRss(timing), toolchain, compilerCpus: cpus };
+    const census = readFileSync(report, 'utf8');
+    const rejects = nativeCensusRejects(census, nativeAllowedRows());
+    if (rejects.length) throw Error(`stage${stage} all-phases census must exist and be empty (or list only NATIVE_FEED_ALLOWED_ROWS rows): ${rejects.slice(0, 5).join(' | ')}`);
+    const allowedRows = census.trim().split('\n').slice(1);
+    return { ...publish(out, runtimeDir, join(out, `stage${stage}`), built, `${built}.o`), keepGoingReport: report, keepGoingFailures: allowedRows.length, allowedCensusRows: allowedRows, timing, seconds: steps.at(-1).seconds, peakRssKb: peakRss(timing), toolchain, compilerCpus: cpus };
   };
 }
 
@@ -176,7 +178,7 @@ if (options.selfRebuild) {
     if (!comparisons.fixedPoint) throw Error('native stage1/stage2 object and ELF fixed point differ (whole-file cmp); see comparisons.json');
     // `stages` stays the stage1/stage2 gate pair (native-smoke admits exactly
     // two); smoke uses stage2/jet.
-    receipt = { schema: 'jet-native-compiler/v1', commit: record.commit, sourceRoot: repo, sourceSha256: unit.sourceSha256, manifestPatch: plan.manifestPatch, factorySha256: record.factory.sha256, compilerIdentity: identity, runtimePackSha256: hash(runtime.pack), producerSha256: plan.producerSha256, harnessSha256: plan.harnessSha256, backend: 'jet-native', optimization: 'O0', compilerCpus: cpus, fixedPoint: true, comparisons, selfRebuildReceipt: join(out, 'self-rebuild.json'), stages: [{ stage: 1, ...first, keepGoingReport: factory.census, keepGoingFailures: 0, compilerCpus: cpus }, { stage: 2, ...second }], jet: second.binary, runtimeDir: join(out, 'stage2', 'jet-runtime'), steps, rc: 0, verdict: 'GREEN' };
+    receipt = { schema: 'jet-native-compiler/v1', commit: record.commit, sourceRoot: repo, sourceSha256: unit.sourceSha256, manifestPatch: plan.manifestPatch, factorySha256: record.factory.sha256, compilerIdentity: identity, runtimePackSha256: hash(runtime.pack), producerSha256: plan.producerSha256, harnessSha256: plan.harnessSha256, backend: 'jet-native', optimization: 'O0', compilerCpus: cpus, fixedPoint: true, comparisons, selfRebuildReceipt: join(out, 'self-rebuild.json'), stages: [{ stage: 1, ...first, keepGoingReport: factory.census, keepGoingFailures: Number(factory.admitted?.allowed_census_rows ?? 0), compilerCpus: cpus }, { stage: 2, ...second }], jet: second.binary, runtimeDir: join(out, 'stage2', 'jet-runtime'), steps, rc: 0, verdict: 'GREEN' };
   } catch (error) {
     receipt = { schema: 'jet-native-feed-failure/v1', plan, steps, rc: 1, verdict: 'RED', error: error.stack, fixedPoint: false };
   }
