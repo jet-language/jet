@@ -172,7 +172,7 @@ struct AuthorityResolver {
         facts :: PackageFacts.parse_uncomposed(text, file.path) ?? return Err(AuthorityError.ManifestParse{path: file.path, error: err})
         self.revalidate_file(file)
         self.revalidate_root()
-        Ok(CheckedManifest{file: file, facts: facts})
+        Ok(CheckedManifest{file: ^file, facts: facts})
     }
 
     // Open and parse one package member directory.
@@ -263,7 +263,7 @@ struct AuthorityResolver {
             file :: self.checked_file(relative)
             self.revalidate_file(file)
             &budget.record_file(file.path, file.bytes.len())
-            &found.push(file)
+            &found.push(^file)
         }
         self.revalidate_directory(scan)
         Ok(found)
@@ -456,7 +456,7 @@ struct AuthorityResolver {
                 file :: self.checked_file(relative)
                 self.revalidate_file(file)
                 &budget.record_file(file.path, file.bytes.len())
-                &found.push(file)
+                &found.push(^file)
             }
         }
         self.revalidate_directory(scan)
@@ -467,7 +467,7 @@ struct AuthorityResolver {
             if err.is_missing() -> return Ok(None)
             return Err(err)
         }
-        Ok(Val(file))
+        Ok(Val(^file))
     }
 
     // The normalized root-relative spelling of `path`; `.`, `..`, and an

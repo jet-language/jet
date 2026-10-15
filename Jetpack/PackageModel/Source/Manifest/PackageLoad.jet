@@ -226,7 +226,7 @@ impl PackageFacts {
                 return Err(pkg_entry_error(self.origin, err.message()))
             }
             if resolver.revalidate_file(file) == .Err(error) -> return Err(pkg_entry_error(self.origin, error.message()))
-            return Ok(Val(CheckedPackageEntry{file: file, callable: run_name}))
+            return Ok(Val(CheckedPackageEntry{file: ^file, callable: run_name}))
         }
         if resolver.checked_file(LEGACY_ENTRY_FILE) == {
             .Ok(main) -> {
@@ -279,7 +279,7 @@ impl PackageFacts {
         loop file in ^listed {
             is_role_file :: COMMAND_ROLE_FILES.contains(pkg_path_file_name(file.relative))
             parent :: pkg_path_parent(file.relative)
-            if !is_role_file || parent == "" || parent == "." -> &candidates.push(file)
+            if !is_role_file || parent == "" || parent == "." -> &candidates.push(^file)
         }
         entries := if self.discover_function_entries_from_files(resolver, ^candidates, BUILD_ENTRY_FN, true, true) == {
             .Ok(found) -> found
@@ -321,12 +321,12 @@ impl PackageFacts {
             is_role_file :: COMMAND_ROLE_FILES.contains(name)
             if parent == "" || parent == "." {
                 if requested_role == .Val(role) && role == name {
-                    &role_files.push(file)
+                    &role_files.push(^file)
                 } else if !is_role_file {
-                    &root_files.push(file)
+                    &root_files.push(^file)
                 }
             } else if parent == "src" && !is_role_file {
-                &src_files.push(file)
+                &src_files.push(^file)
             }
         }
         role_entries := self.command_entries(resolver, ^role_files, command)
@@ -382,7 +382,7 @@ impl PackageFacts {
                     return Err(err)
                 }
                 resolver.revalidate_file(file)
-                return Ok(Val(CheckedPackageEntry{file: file, callable: run_name}))
+                return Ok(Val(CheckedPackageEntry{file: ^file, callable: run_name}))
             }
             return Ok(None)
         }
@@ -391,7 +391,7 @@ impl PackageFacts {
             if matches.len() != 1 -> return Ok(None)
             found :: &matches.pop() ?? return Ok(None)
             file :: ^found.file ?? return Ok(None)
-            return Ok(Val(CheckedPackageEntry{file: file, callable: parts[0]}))
+            return Ok(Val(CheckedPackageEntry{file: ^file, callable: parts[0]}))
         }
         listed := self.source_files_checked(resolver)
         selected := String?{None}
@@ -422,7 +422,7 @@ impl PackageFacts {
         }
         if position < 0 -> return Ok(None)
         file :: &listed.remove(position, .Slot) ?? return Ok(None)
-        Ok(Val(CheckedPackageEntry{file: file, callable: parts[1]}))
+        Ok(Val(CheckedPackageEntry{file: ^file, callable: parts[1]}))
     }
 
     fn discover_function_entries_checked(self, resolver: AuthorityResolver, wanted: String, exclude_imported: Bool, include_manifest: Bool) -[FS, Env]> [PackageFunctionEntry] AuthorityError! {
@@ -479,7 +479,7 @@ impl PackageFacts {
             position += 1
             if lines.len() == 0 -> next
             path := file.path
-            &entries.push(PackageFunctionEntry{path: path, line: lines[0], file: Val(file)})
+            &entries.push(PackageFunctionEntry{path: path, line: lines[0], file: Val(^file)})
             rest := 1
             loop rest < lines.len() {
                 &entries.push(PackageFunctionEntry{path: path, line: lines[rest], file: None})

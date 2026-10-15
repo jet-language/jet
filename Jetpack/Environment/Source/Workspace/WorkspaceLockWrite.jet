@@ -27,7 +27,7 @@ fn env_workspace_lock_write_locked(cache: &WorkspaceDeclarationCache, workspace_
     resolver :: AuthorityResolver.open(workspace_root) ?? return Err(env_workspace_lock_invalid("workspace authority cannot be opened: {err.message()}"))
     existing_lock := CheckedFile?{None}
     if resolver.checked_file(PKG_WORKSPACE_LOCK) == {
-        .Ok(file) -> existing_lock = Val(file)
+        .Ok(file) -> existing_lock = Val(^file)
         .Err(error) -> {
             if !error.is_missing() -> return Err(env_workspace_lock_invalid("workspace lock cannot be opened: {error.message()}"))
         }
