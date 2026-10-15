@@ -432,12 +432,6 @@ fn lir_lower_native_imports(program: MIRProgram, roots: [MIRFunctionID], imports
 // sentry hooks and is never instrumented, else jet_rt_sentry_scope_enter ->
 // sentry_save -> thread_base (#Unsafe) re-enters itself.
 fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, shared_sites_dynamic: Bool, native_pack: Bool, imports: [String], c_exports: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic], keep_going: Bool, comptime_budget: Bool, sentry: Bool) -> LIRLowering Never! {
-    // The frontend may erase browser init functions before native MIR is
-    // serialized. Their host requirement survives in the runtime-part facts.
-    browser_hosted := false
-    loop part in program.facts.runtime_parts {
-        if part == .Browser -> browser_hosted = true
-    }
     test_indices := [U64:Int]{}
     test_issues := [LIRLoweringIssue]{}
     if test_serial != None {
@@ -461,7 +455,6 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     // index (lower_indexed_program); the inputs are otherwise the same.
     indexed := lower_indexed_program(program)
     prepared := lower_prepare_roots(indexed, all_roots, shared_sites_dynamic, native_pack, imports, ^runtime_intrinsics)
-    if browser_hosted -> &prepared.issues.push(LIRLoweringIssue{function: "entry preparation", message: "browser-hosted initialization and callbacks are not lowered for native O0 yet"})
     loop issue in test_issues -> &prepared.issues.push(issue)
     test_harness := false
     loop artifact in program.artifacts {
