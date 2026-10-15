@@ -155,15 +155,19 @@ struct AuthorityResolver {
         relative :: self.relative_path(directory)
         canonical :: self.probe_file(pkg_authority_relative_join(relative, PACKAGE_FILE))
         retired :: self.probe_file(pkg_authority_relative_join(relative, PAYLOAD_FILE))
-        if canonical != None && retired != None {
-            return Err(AuthorityError.AmbiguousManifest(pkg_authority_join(self.root, relative)))
-        }
-        file :: canonical ?? {
-            if retired == {
-                .Val(retired_file) -> return Err(AuthorityError.RetiredManifest(retired_file.path))
-                .None -> return Err(AuthorityError.Missing(files.join(pkg_authority_join(self.root, relative), PACKAGE_FILE)))
+        // Match the probes instead of comparing them with `None`: a `!= None`
+        // test narrows each Option into a CheckedFile copy, and a CheckedFile
+        // holds a FileReader, which cannot be copied natively.
+        if retired == {
+            .Val(retired_file) -> {
+                if canonical == {
+                    .Val(_) -> return Err(AuthorityError.AmbiguousManifest(pkg_authority_join(self.root, relative)))
+                    .None -> return Err(AuthorityError.RetiredManifest(retired_file.path))
+                }
             }
+            .None -> {}
         }
+        file :: canonical ?? return Err(AuthorityError.Missing(files.join(pkg_authority_join(self.root, relative), PACKAGE_FILE)))
         text :: file.text()
         facts :: PackageFacts.parse_uncomposed(text, file.path) ?? return Err(AuthorityError.ManifestParse{path: file.path, error: err})
         self.revalidate_file(file)
@@ -332,7 +336,8 @@ struct AuthorityResolver {
             source :: file.text()
             if pkg_declares_workspace_module(&cache, source) {
                 role :: if entry.name == WORKSPACE_FILE || pkg_declares_workspace_members(&cache, source) -> WorkspaceSourceRole.Index else -> WorkspaceSourceRole.Authority
-                candidate :: WorkspaceSource{path: file.path, source: source, role: role, checked: file}
+                // `^file` moves the checked file in; a plain read would copy its FileReader.
+                candidate :: WorkspaceSource{path: file.path, source: source, role: role, checked: ^file}
                 self.revalidate_source(candidate)
                 if role == WorkspaceSourceRole.Index -> &indexes.push(candidate) else -> &authorities.push(candidate)
             } else if entry.name == WORKSPACE_FILE {
@@ -405,11 +410,20 @@ struct AuthorityResolver {
     fn has_nested_project_boundary(self, relative: String) -[FS, Env]> Bool AuthorityError! {
         candidate_values :: [String]{PACKAGE_FILE, PAYLOAD_FILE, WORKSPACE_FILE, UNIFIED_LOCK_FILE}
         loop candidate in candidate_values {
-            probed :: self.probe_file(pkg_authority_relative_join(relative, candidate)) ? found -> found ! error -> {
-                if pkg_authority_is_symlink(error) -> return Ok(true)
-                return Err(error)
+            // Match the probe in place: binding it to a local copies the
+            // Option<CheckedFile>, and its FileReader cannot be copied natively.
+            if self.probe_file(pkg_authority_relative_join(relative, candidate)) == {
+                .Ok(found) -> {
+                    if found == {
+                        .Val(_) -> return Ok(true)
+                        .None -> {}
+                    }
+                }
+                .Err(error) -> {
+                    if pkg_authority_is_symlink(error) -> return Ok(true)
+                    return Err(error)
+                }
             }
-            if probed != None -> return Ok(true)
         }
         Ok(false)
     }

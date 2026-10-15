@@ -118,13 +118,16 @@ fn fx_order() -> MIRProgram Never! {
     }
     ops :: [MIRBinaryOp]{MIRBinaryOp.Lt, MIRBinaryOp.Lt, MIRBinaryOp.Lt, MIRBinaryOp.Ge, MIRBinaryOp.Lt}
     loop (index, pair) in pairs {
-        left :: fx_order_maybe(&b, maybe_bytes, Val(fx_list_routes_bytes(&b, pair[0])))
-        right :: fx_order_maybe(&b, maybe_bytes, Val(fx_list_routes_bytes(&b, pair[1])))
+        left_bytes :: fx_list_routes_bytes(&b, pair[0])
+        left :: fx_order_maybe(&b, maybe_bytes, Val(left_bytes))
+        right_bytes :: fx_list_routes_bytes(&b, pair[1])
+        right :: fx_order_maybe(&b, maybe_bytes, Val(right_bytes))
         // The third pair prints `[2] > [1, 9, 9]` as Lt with swapped operands.
         fx_order_print(&b, ops[index], left, right)
         if index == 2 {
             bytes_none :: fx_order_maybe(&b, maybe_bytes, None)
-            bytes_empty :: fx_order_maybe(&b, maybe_bytes, Val(fx_list_routes_bytes(&b, [Int]{})))
+            empty_bytes :: fx_list_routes_bytes(&b, [Int]{})
+            bytes_empty :: fx_order_maybe(&b, maybe_bytes, Val(empty_bytes))
             fx_order_print(&b, MIRBinaryOp.Lt, bytes_none, bytes_empty)
             &owned.push(bytes_none)
             &owned.push(bytes_empty)

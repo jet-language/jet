@@ -633,7 +633,7 @@ fn pkg_migrate_retired_entry(root: String, origin: String, package_name: String)
     loop index in 0..<olds.len() {
         if resolver.checked_file(olds[index]) == {
             .Ok(file) -> {
-                &retired_files.push(file)
+                &retired_files.push(^file)
                 &retired_index.push(index)
             }
             .Err(error) -> {
@@ -652,7 +652,9 @@ fn pkg_migrate_retired_entry(root: String, origin: String, package_name: String)
         }
         return Err(PackageEntryError{message: pkg_format_entry_error(origin, "ambiguous project entry: retired {old_names.join(", ")} and {current} both identify this project; keep one entry and run again")})
     }
-    file :: retired_files[0]
+    // Move the only retired file out; indexing would copy a CheckedFile, whose
+    // FileReader cannot be copied natively.
+    file :: &retired_files.pop() ?? return Ok(false)
     old :: olds[retired_index[0]]
     target :: news[retired_index[0]]
     if resolver.revalidate_file(file) == .Err(error) -> return Err(PackageEntryError{message: pkg_format_entry_error(origin, error.message())})
