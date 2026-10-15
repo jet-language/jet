@@ -330,6 +330,9 @@ struct LowerContext {
     // temporary at the end of its statement; natively a dead owned read is
     // not materialized and a dead owned call result is dropped at once.
     dead: [U64:Bool]
+    // Instruction id -> owned temporaries released right after it
+    // (lower_temp_releases).
+    releases: [U64:[MIRValueID]]
 }
 
 // A real cleanup entry, not a Shield or an inferred task/root role. The saved
@@ -2080,6 +2083,8 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         lir_blocks[position] = if rank == 0 && !split_entry -> entry_id else -> lower_new_block(&f)
         ranks[position] = rank
     }
+    dead :: lower_dead_values(function)
+    releases :: lower_temp_releases(function, fact_index, sunk, dead)
     Val(LowerContext{
         mir: function.copy(),
         result: result,
@@ -2100,9 +2105,98 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         lir_blocks: lir_blocks,
         ranks: ranks,
         live: live,
-        dead: lower_dead_values(function),
+        dead: dead,
+        releases: releases,
         split_entry: split_entry,
     })
+}
+
+// MIR leaves the end of an owned, never-moved temporary implicit; the Rust
+// emitter drops it at the end of its statement (lower_print_releases does
+// this for a printed temporary). A fresh Call, IndirectCall or BuildString
+// result that is owned, never moved, not sunk, not dead, bound to no local or
+// place, and read only by later instructions of its own block that borrow it
+// (a call argument whose call returns no borrow, an interpolation part, a
+// binary operand) is released right after its last such use. Builtin methods
+// release their own operands case by case and are left out.
+// Result: instruction id -> the values to release after it.
+fn lower_temp_releases(function: MIRFunction, fact_index: [U64:Int], sunk: [U64:Bool], dead: [U64:Bool]) -> [U64:[MIRValueID]] Never! {
+    releases := [U64:[MIRValueID]]{}
+    pinned := [U64:Bool]{}
+    loop block in function.blocks {
+        loop value in mir_terminator_value_uses(block.terminator) -> _ := &pinned.add(value.value, true)
+    }
+    loop place in function.places {
+        if place.base == .Parameter(value) | .Capture(value) | .Temporary(value) -> _ := &pinned.add(value.value, true)
+        loop projection in place.projections {
+            if projection == .Index(_, index, _, _, _, _, _) -> _ := &pinned.add(index.value, true)
+            if projection == .Range(range, _, _) -> _ := &pinned.add(range.value, true)
+            if projection == .MapLookup(lookup, _, _) -> _ := &pinned.add(lookup.value, true)
+        }
+    }
+    loop local in function.locals {
+        if local.ssa_value == .Val(value) -> _ := &pinned.add(value.value, true)
+    }
+    // Every use site: value -> (block, position) pairs.
+    use_blocks := [U64:[Int]]{}
+    use_positions := [U64:[Int]]{}
+    loop (block, row) in function.blocks {
+        loop (position, instruction) in row.instructions {
+            loop value in mir_operation_value_uses(instruction.operation) {
+                blocks := use_blocks.get(value.value) ?? [Int]{}
+                &blocks.push(block)
+                _ := &use_blocks.add(value.value, blocks)
+                positions := use_positions.get(value.value) ?? [Int]{}
+                &positions.push(position)
+                _ := &use_positions.add(value.value, positions)
+            }
+        }
+    }
+    loop (block, row) in function.blocks {
+        loop (position, instruction) in row.instructions {
+            result :: instruction.result ?? next
+            if !(instruction.operation == .Call(_, _, _) | .IndirectCall(_, _, _) | .BuildString(_)) -> next
+            if sunk.get(result.value) != None || dead.get(result.value) != None || pinned.get(result.value) != None -> next
+            fact_row :: fact_index.get(result.value) ?? next
+            ownership :: function.values[fact_row].ownership
+            if ownership.mode != MIROwnershipMode.Owned || ownership.moved -> next
+            blocks :: use_blocks.get(result.value) ?? next
+            positions :: use_positions.get(result.value) ?? next
+            last := -1
+            borrowed := true
+            loop (at, used_block) in blocks {
+                used_position :: positions[at]
+                if used_block != block || used_position <= position {
+                    borrowed = false
+                    break
+                }
+                user :: row.instructions[used_position]
+                if user.operation == {
+                    .Call(_, _, _) | .IndirectCall(_, _, _) -> {
+                        if user.result == .Val(user_result) {
+                            user_row :: fact_index.get(user_result.value) ?? -1
+                            if user_row < 0 {
+                                borrowed = false
+                            } else {
+                                mode :: function.values[user_row].ownership.mode
+                                if mode != MIROwnershipMode.Owned && mode != MIROwnershipMode.Copy && mode != MIROwnershipMode.Move -> borrowed = false
+                            }
+                        }
+                    }
+                    .BuildString(_) | .Binary(_, _, _, _, _) -> {}
+                    else -> borrowed = false
+                }
+                if !borrowed -> break
+                if used_position > last -> last = used_position
+            }
+            if !borrowed || last < 0 -> next
+            at_id :: row.instructions[last].id.value
+            rows := releases.get(at_id) ?? [MIRValueID]{}
+            &rows.push(result)
+            _ := &releases.add(at_id, rows)
+        }
+    }
+    releases
 }
 
 // The instruction results no operand, terminator, place (base or index
@@ -2701,17 +2795,28 @@ fn lower_return_implicit_ok(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
 // materialized, so no clone is made; a fresh call or string result is
 // dropped as soon as it is produced.
 fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction) Never! {
+    dead_result := MIRValueID?{None}
     if instruction.result == .Val(result) {
         if c.dead.get(result.value) != None && lower_value_owned(c, result) {
-            if instruction.operation == .ReadPlace(_) | .Copy(_, _) | .OptionValue(_) | .ResultValue(_, _) -> return lower_alias_absent(&f, instruction)
-            if instruction.operation == .Call(_, _, _) | .CoreCall(_, _, _, _, _, _) | .IndirectCall(_, _, _) | .BuildString(_) {
-                lower_instruction_operation(p, c, &m, &f, instruction)
-                if !f.failed -> lower_drop_value(p, c, &m, &f, result)
-                return
-            }
+            if instruction.operation == .ReadPlace(_) | .Copy(_, _) | .OptionValue(_) | .ResultValue(_, _) | .Constant(_) | .Global(_) -> return lower_alias_absent(&f, instruction)
+            if instruction.operation == .Call(_, _, _) | .CoreCall(_, _, _, _, _, _) | .IndirectCall(_, _, _) | .BuildString(_) -> dead_result = Val(result)
         }
     }
     lower_instruction_operation(p, c, &m, &f, instruction)
+    if f.failed -> return
+    if dead_result == .Val(dead) -> lower_drop_value(p, c, &m, &f, dead)
+    released :: c.releases.get(instruction.id.value) ?? [MIRValueID]{}
+    loop value in released -> lower_temp_release(p, c, &m, &f, value)
+}
+
+// Releases an owned temporary after its last borrowing use, unless a slot
+// still holds its LIR value (the slot owns it then, lower_print_releases).
+fn lower_temp_release(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, value: MIRValueID) Never! {
+    if lower_is_absent(f, value) -> return
+    if lower_slot_of_value(c, value) != None -> return
+    index :: f.values.get(value.value) ?? return
+    loop slot_value in f.current { if slot_value == .Val(holding) && holding.value == index -> return }
+    lower_drop_value(p, c, &m, &f, value)
 }
 
 fn lower_instruction_operation(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction) Never! {
