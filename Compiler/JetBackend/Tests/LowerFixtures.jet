@@ -152,9 +152,7 @@ fn fx_named(name: String) -> MIRType Never! {
 }
 
 fn fx_generic_runtime_rejection_checks() -> Bool Never! {
-    rows :: [LowerRuntimeHandle]{
-        LowerRuntimeHandle{jet_name: "FixtureGeneric<Float>", runtime: "FixtureGenericFloat", clone: true, display: false, show: false, debug: false, eq: false},
-    }
+    // DBPool is a real generic runtime base (LOWER_RUNTIME_HANDLES).
     arguments :: [MIRType]{
         mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8}),
         mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 64}),
@@ -164,8 +162,8 @@ fn fx_generic_runtime_rejection_checks() -> Bool Never! {
         mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Nested"), args: [MIRType]{fx_int()}}),
     }
     loop argument in arguments {
-        ty :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("FixtureGeneric"), args: [MIRType]{argument}})
-        failure :: lower_runtime_missing_application(ty, rows) ?? return false
+        ty :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("DBPool"), args: [MIRType]{argument}})
+        failure :: lower_runtime_missing_application(ty) ?? return false
         if failure == .Unsupported(reason) {
             if !reason.contains(mir_type_display_name(ty)) -> return false
         } else {
@@ -173,7 +171,7 @@ fn fx_generic_runtime_rejection_checks() -> Bool Never! {
         }
     }
     ordinary :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("OrdinaryGeneric"), args: [MIRType]{fx_int()}})
-    lower_runtime_missing_application(ordinary, rows) == None && lower_runtime_missing_application(fx_named("FixtureGeneric"), rows) == None
+    lower_runtime_missing_application(ordinary) == None && lower_runtime_missing_application(fx_named("DBPool")) == None
 }
 
 fn fx_borrow() -> MIROwnership Never! { mir_ownership_from_access(MIRAccess.Read) }
