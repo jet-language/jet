@@ -2142,7 +2142,7 @@ fn lower_temp_releases(function: MIRFunction, fact_index: [U64:Int], sunk: [U64:
     use_positions := [U64:[Int]]{}
     loop (block, row) in function.blocks {
         loop (position, instruction) in row.instructions {
-            loop value in mir_operation_value_uses(instruction.operation) {
+            loop value in lower_operand_values(instruction.operation) {
                 blocks := use_blocks.get(value.value) ?? [Int]{}
                 &blocks.push(block)
                 _ := &use_blocks.add(value.value, blocks)
@@ -2199,13 +2199,26 @@ fn lower_temp_releases(function: MIRFunction, fact_index: [U64:Int], sunk: [U64:
     releases
 }
 
+// Every value an operation reads: mir_operation_value_uses plus the values a
+// Closure captures (its captures are not SSA operands there, so a value read
+// only to be captured, `task f(jobs)`, would otherwise look unused).
+fn lower_operand_values(operation: MIROperation) -> [MIRValueID] Never! {
+    values := mir_operation_value_uses(operation)
+    if operation == .Closure(_, captures, _) {
+        loop capture in captures {
+            if capture == .Value(value) -> &values.push(value)
+        }
+    }
+    values
+}
+
 // The instruction results no operand, terminator, place (base or index
 // projection) or SSA-bound local names: values computed and never read.
 fn lower_dead_values(function: MIRFunction) -> [U64:Bool] Never! {
     used := [U64:Bool]{}
     loop block in function.blocks {
         loop instruction in block.instructions {
-            loop value in mir_operation_value_uses(instruction.operation) -> _ := &used.add(value.value, true)
+            loop value in lower_operand_values(instruction.operation) -> _ := &used.add(value.value, true)
         }
         loop value in mir_terminator_value_uses(block.terminator) -> _ := &used.add(value.value, true)
     }
