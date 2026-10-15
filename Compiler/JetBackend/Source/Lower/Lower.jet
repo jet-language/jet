@@ -3822,7 +3822,7 @@ fn lower_payload_local_uses(function: MIRFunction, index: LowerUseIndex, subject
             if owner.value == local -> _ := &places.add(row.id.value, true)
         }
     }
-    sites := index.uses.get(subject.value) ?? [LowerUseSite]{}
+    widened := index.copy()
     loop (block, row) in function.blocks {
         loop (position, instruction) in row.instructions {
             touched := false
@@ -3843,11 +3843,9 @@ fn lower_payload_local_uses(function: MIRFunction, index: LowerUseIndex, subject
                 .MovePlace(_) -> { if lower_payload_drop_only(function, index, instruction.result) -> next }
                 else -> {}
             }
-            lower_use_index_add(&sites, subject.value, LowerUseSite{block: block, position: position})
+            lower_use_index_add(&widened.uses, subject.value, LowerUseSite{block: block, position: position})
         }
     }
-    widened := index.copy()
-    _ := &widened.uses.add(subject.value, sites)
     Val(widened)
 }
 
