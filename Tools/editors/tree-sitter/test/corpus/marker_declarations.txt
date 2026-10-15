@@ -7,20 +7,17 @@ marker Pattern(value: String, $sites: [], $repeatable: true)
 ---
 
 (source_file
-  (marker_decl
-    name: (marker_name)
-    (marker_decl_params
-      (marker_decl_param
-        name: (identifier)
-        type: (primitive_type))
-      (marker_decl_param
-        name: (marker_fact_name
-          (identifier))
-        (list_literal))
-      (marker_decl_param
-        name: (marker_fact_name
-          (identifier))
-        (boolean_literal)))))
+  (decl_head
+    keyword: (identifier)
+    name: (type_identifier))
+  (paren_expr
+    (label
+      name: (identifier))
+    (primitive_type)
+    (meta_name)
+    (bracket_expr)
+    (meta_name)
+    (boolean)))
 
 ====================
 Public fixed groups preserve members and import-local qualification
@@ -32,18 +29,20 @@ pub marker Fast = #[library.Tag, Inline, Scalar]
 ---
 
 (source_file
-  (marker_decl
-    name: (marker_name)
-    (attribute_list
-      name: (marker_name)
-      name: (marker_name)
-      name: (marker_name)))
+  (decl_head
+    keyword: (identifier)
+    name: (type_identifier))
+  (attribute_list
+    (identifier)
+    (variant
+      name: (type_identifier))
+    (type_identifier)
+    (type_identifier))
+  (attribute)
   (function_def
-    (attribute
-      name: (marker_name))
     name: (identifier)
-    (param_list)
-    (block)))
+    parameters: (parameters)
+    body: (block)))
 
 ====================
 Nested public marker groups
@@ -59,23 +58,22 @@ pub module inner {
 
 (source_file
   (module_def
-    name: (module_path
-      (identifier))
-    (marker_decl
-      name: (marker_name)
-      (marker_decl_params
-        (marker_decl_param
-          name: (marker_fact_name
-            (identifier))
-          (list_literal))))
-    (marker_decl
-      name: (marker_name)
+    name: (identifier)
+    body: (block
+      (decl_head
+        keyword: (identifier)
+        name: (type_identifier))
+      (paren_expr
+        (meta_name)
+        (bracket_expr))
+      (decl_head
+        keyword: (identifier)
+        name: (type_identifier))
       (attribute_list
-        name: (marker_name)
-        name: (marker_name)))
-    (function_def
-      (attribute
-        name: (marker_name))
-      name: (identifier)
-      (param_list)
-      (block))))
+        (type_identifier)
+        (type_identifier))
+      (attribute)
+      (function_def
+        name: (identifier)
+        parameters: (parameters)
+        body: (block)))))
