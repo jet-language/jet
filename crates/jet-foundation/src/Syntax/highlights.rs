@@ -102,6 +102,14 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         text: KW_DEFER,
         class: HighlightClass::KeywordControl,
     },
+    HighlightToken {
+        text: KW_NEXT,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: KW_YIELD,
+        class: HighlightClass::KeywordControl,
+    },
     // D-CONC-SPAWN1=D: only `task` is reserved; qualified selectors remain
     // spellings of the same surface without reserving bare `all`/`race`/etc.
     HighlightToken {
@@ -209,6 +217,11 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
     // D-VERDICT-1308-1: retired `comptime` is teaching-only, not highlighted.
     HighlightToken {
         text: KW_DISTINCT,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    // D-FACTDECL1: compiler-fact declarations.
+    HighlightToken {
+        text: KW_FACT,
         class: HighlightClass::KeywordDeclaration,
     },
     HighlightToken {
@@ -974,7 +987,7 @@ pub fn render_vscode_generated_highlights() -> String {
                     &mut out,
                     &mut first,
                     class.textmate_scope(),
-                    "(?<![.A-Za-z0-9_])as(?=\\s+[A-Za-z_][A-Za-z0-9_]*)",
+                    "(?<![.A-Za-z0-9_])(as)(?=\\s+[A-Za-z_][A-Za-z0-9_]*)",
                 );
             }
             if !rest.is_empty() {
@@ -1283,6 +1296,7 @@ use super::{
     BUILTIN_ASSERT, BUILTIN_ASSERT_EQ, BUILTIN_CHANNEL, BUILTIN_INPUT, BUILTIN_PRINT,
     COMPTIME_MARK, CTX_BLOCK, DURATION_TYPE, KW_ADD, KW_ALIAS, KW_AS, KW_BREAK, KW_CHANGE,
     KW_CONC_TASK, KW_DEFER, KW_DERIVE, KW_DISTINCT, KW_EFFECT_DECL, KW_ELSE, KW_ENUM, KW_EXTERN,
+    KW_FACT, KW_NEXT, KW_YIELD,
     KW_FN, KW_FREEZE, KW_IF, KW_IMPL, KW_IMPURE, KW_IN, KW_IT, KW_LOOP, KW_MARKER, KW_MIGRATION,
     KW_MODULE, KW_POLICY, KW_PREP, KW_PRIV, KW_PROTOCOL, KW_PUB, KW_REACTIVE, KW_REMOVE, KW_RENAME,
     KW_RETURN, KW_RUST, KW_SCRUB, KW_SELF, KW_SHARED, KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG,

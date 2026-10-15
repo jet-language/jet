@@ -41,7 +41,7 @@
 (inline_package "package" @keyword)
 
 ; BEGIN GENERATED JET SYNTAX HIGHLIGHTS
-; keyword.control: after break defer else if in loop return task task.all task.any task.group task.race
+; keyword.control: after break defer else if in loop next return task task.all task.any task.group task.race yield
 [
   "break"
   "else"
@@ -51,7 +51,7 @@
   "return"
 ] @keyword.control
 
-; keyword.declaration: Context Impure Reactive Scrub State Test Todo Transact Transition Unsafe add alias as change client derive distinct effect enum extern fn impl marker migration module policy priv protocol pub remove rename rust server state struct tag trait use validate via wrap
+; keyword.declaration: Context Impure Reactive Scrub State Test Todo Transact Transition Unsafe add alias as change client derive distinct effect enum extern fact fn impl marker migration module policy priv protocol pub remove rename rust server state struct tag trait use validate via wrap
 [
   "derive"
   "enum"
@@ -78,7 +78,7 @@
   "true"
 ] @constant.builtin
 
-; type.builtin: () BTreeMap Bits Bool Budget BudgetApplies Bytes CSV Cache Char Complex Computed Condition DBValue Dyn Decimal Derived Duration Effect EncodingError Err Event EventPolicy EventScope EventTrace F32 F64 Float HashMap Hook I16 I32 I64 I8 IOError Instant Int Iter JSON Key Measurement MemoStats PriorityQueue Ptr Queue Rank Receiver Sender Set Shared Shared.Weak SharedGuard SharedRevisionError SharedSnapshot Signal Stream String Subscription TOML Task TaskFailure U16 U32 U64 U8 UTF8Error ViewIter WatchEvent WatchHandle WatchSet YAML
+; type.builtin: () BTreeMap Bits Bool Budget BudgetApplies Bytes CSV Cache Char Complex Computed Condition DBValue Decimal Derived Duration Dyn Effect EncodingError Err Event EventPolicy EventScope EventTrace F32 F64 Float HashMap Hook I16 I32 I64 I8 IOError Instant Int Iter JSON Key Measurement MemoStats PriorityQueue Ptr Queue Rank Receiver Sender Set Shared Shared.Weak SharedGuard SharedRevisionError SharedSnapshot Signal Stream String Subscription TOML Task TaskFailure U16 U32 U64 U8 UTF8Error ViewIter WatchEvent WatchHandle WatchSet YAML
 [
   "Bool"
   "Char"
@@ -99,9 +99,9 @@
 ] @type.builtin
 
 ; builtin: assert assert_eq channel check freeze input join print
-; marker.rule: ABI Arithmetic Bindgen CLI Close Codable CodableAsBase Commutative Comparable Context Debug DebugOnly Decode DenyUnknownFields Deprecated DevPanel Discriminant Doc Encode Env Equatable Error Every FFI FX Flag Flatten HTML Impure Inline Interrupt Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Receipt Redact Region Rename RenameAll Replayable Root SQL Scalar Scrub Shared Shield Short SingleUse Skip State Static Target Test Todo Track Transact Transition Undo UnitFamily Unsafe Untagged WasmExport allow wire
-; sigil: # $ & ... :: := :> <: ^ ~
-; operator: ! != % %% %%= %= && &= * *= + += - -= -> .. ..< .[ / /% /%= /= < << <<= <= <=> == > >= >> >>= ? ?. ?? ^= | |= || ~| ~|=
+; marker.rule: ABI Arithmetic Bindgen CLI Close Codable CodableAsBase Commutative Comparable Context Debug DebugOnly Decode DenyUnknownFields Deprecated DevPanel Discriminant Doc Encode Env Equatable Error Every FFI FX Flag Flatten HTML Impure Inline Interrupt Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PublishedSchema Reactive Receipt Redact Region Rename RenameAll Replayable Root SQL Scalar Scrub Shared Shield Short SingleUse Skip State Static Target Test Todo Track Transact Transition Undo UnitFamily Unsafe Untagged WasmExport allow wire
+; sigil: # $ & ... :: := :> <: ^
+; operator: ! != % %% %%= %= && * *= + += - -= -> .. ..< .[ / /% /%= /= < << <<= <= <=> == > >= >> >>= ? ?. ?? | ||
 ; END GENERATED JET SYNTAX HIGHLIGHTS
 
 ; Operators and punctuation
