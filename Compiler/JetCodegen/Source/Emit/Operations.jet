@@ -4780,6 +4780,21 @@ fn jet_rust_emit_static_path(ctx: &JetRustEmitContext, name: String) -> String N
     "{ctx.config.root_prefix}{jet_rust_emit_generated_path(name)}"
 }
 
+// #5001: the place expression of a constant read in place (a `Static` place
+// naming a non-storage constant): its per-thread value, built once
+// (`<name>_static()`), or the value itself where no shared value exists.
+fn jet_rust_emit_constant_place(ctx: &JetRustEmitContext, name: String) -> String? Never! {
+    no_os :: jet_rust_emit_is_no_os(&ctx)
+    root := ctx.config.root_prefix
+    loop constant in ctx.program.constants {
+        if constant.key != name || constant.is_storage -> next
+        path :: "{root}{jet_rust_emit_generated_path(constant.key)}"
+        if jet_rust_emit_shared_constant(no_os, constant) -> return Val("(*{path}_static())")
+        return Val("({path}())")
+    }
+    None
+}
+
 
 fn jet_rust_emit_scope_fact(scope: MIRScope, key: String) -> String? {
     loop fact in scope.facts { if fact.key == key -> return Val(fact.value) }

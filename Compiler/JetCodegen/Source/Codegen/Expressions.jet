@@ -1456,8 +1456,42 @@ fn jet_codegen_lower_expression_place(builder: &JetCodegenBuilder, program: JetC
                 }
             }
         }
+        // #5001: a constant read in place is its `Static` place, read only.
+        .ConstRef(symbol) -> {
+            if access != MIRAccess.Read -> return None
+            return jet_codegen_constant_place(&builder, program, expression, symbol)
+        }
         else -> None
     }
+}
+
+// #5001: the `Static` place of a module constant every read borrows in place
+// (JetCodegenConstantIndex.in_place); None for any other constant.
+fn jet_codegen_constant_place(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, symbol: SymbolID) -> MIRPlaceID? {
+    global :: program.owners.constants.in_place.get(symbol.key) ?? return None
+    if jet_codegen_find_function_row(program.function_index, symbol.key) != None -> return None
+    identity := jet_codegen_identity(&builder, program, "place", expression.span, "constant", global)
+    id := MIRPlaceID{value: stable_id("mir-place", identity)}
+    lowered_ty :: jet_codegen_lower_type_for_function(expression.ty, builder, program)
+    jet_codegen_push_place(&builder, program, MIRPlace{
+        id: id,
+        span: expression.span,
+        ty: lowered_ty,
+        base: MIRPlaceBase.Static{name: global},
+        projections: [MIRProjection]{},
+        access: MIRAccess.Read,
+        persist_key: None,
+    })
+    Val(id)
+}
+
+// #5001: whether `expression` names a constant read in place.
+fn jet_codegen_is_constant_place(builder: JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr) -> Bool Never! {
+    if expression.kind == .ConstRef(symbol) {
+        if program.owners.constants.in_place.get(symbol.key) == None -> return false
+        return jet_codegen_find_function_row(program.function_index, symbol.key) == None
+    }
+    false
 }
 
 fn jet_codegen_lower_place_for_access(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: TPlace, access: MIRAccess) -> MIRPlaceID {
@@ -1573,7 +1607,8 @@ fn jet_codegen_is_stored_struct_field(builder: JetCodegenBuilder, program: JetCo
 }
 
 // A local or parameter (`self` included), or a chain of stored struct fields
-// rooted at one, with no `Pin` on the way: its field can be read in place.
+// rooted at one, with no `Pin` on the way: its field can be read in place. A
+// constant read in place (#5001) roots such a chain like a read parameter.
 fn jet_codegen_is_stored_field_chain(builder: JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr) -> Bool Never! {
     if expression.ty == {
         .Apply(name, args) -> {
@@ -1583,6 +1618,7 @@ fn jet_codegen_is_stored_field_chain(builder: JetCodegenBuilder, program: JetCod
     }
     if expression.kind == {
         .Local(_) -> true
+        .ConstRef(_) -> jet_codegen_is_constant_place(builder, program, expression)
         .Field(receiver, reference) -> jet_codegen_is_stored_field_chain(builder, program, receiver) && jet_codegen_is_stored_struct_field(builder, program, receiver.ty, reference)
         else -> false
     }
@@ -1602,6 +1638,7 @@ fn jet_codegen_is_field_read_chain(builder: JetCodegenBuilder, program: JetCodeg
     }
     if expression.kind == {
         .Local(_) | .SharedGuardValue(_, _) -> true
+        .ConstRef(_) -> jet_codegen_is_constant_place(builder, program, expression)
         .Index(base, _, kind, access, checked_call, _) -> {
             if checked_call != None || access != AccessConvention.Read -> return false
             place_kind :: if kind == {
@@ -6001,6 +6038,8 @@ fn jet_codegen_read_binding_place(builder: &JetCodegenBuilder, program: JetCodeg
     element := expression
     if expression.kind == .Clone(inner, _) -> element = inner
     if !jet_codegen_is_element_place_chain(builder, program, element) -> return None
+    // #5001: a chain rooted at a constant read in place never changes.
+    if jet_codegen_element_chain_constant(builder, program, element) -> return jet_codegen_lower_expression_place(&builder, program, element, MIRAccess.Read)
     // Settle the root before lowering anything: lowering the place evaluates
     // its index operands, so a refusal after it would evaluate them twice.
     root :: jet_codegen_element_place_root(element) ?? return None
@@ -6056,8 +6095,8 @@ fn jet_codegen_chain_reads_element(expression: TExpr) -> Bool Never! {
 
 // A chain of stored struct fields and plain List reads (each indexed base a
 // List place, under at most a compiler-inserted clone of a plain place) down
-// to a non-persistent local, with no `Pin` on the way. Lowering it as a place
-// evaluates only its index operands.
+// to a non-persistent local or a constant read in place (#5001), with no
+// `Pin` on the way. Lowering it as a place evaluates only its index operands.
 fn jet_codegen_is_element_place_chain(builder: JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr) -> Bool Never! {
     if expression.ty == {
         .Apply(name, args) -> {
@@ -6067,6 +6106,7 @@ fn jet_codegen_is_element_place_chain(builder: JetCodegenBuilder, program: JetCo
     }
     if expression.kind == {
         .Local(local) -> local.persist_key == None
+        .ConstRef(_) -> jet_codegen_is_constant_place(builder, program, expression)
         .Field(receiver, reference) -> jet_codegen_is_element_place_chain(builder, program, receiver) && jet_codegen_is_stored_struct_field(builder, program, receiver.ty, reference)
         .Index(base, _, kind, access, checked_call, _) -> {
             if access != AccessConvention.Read || checked_call != None -> return false
@@ -6098,15 +6138,35 @@ fn jet_codegen_element_place_root(expression: TExpr) -> TLocal? {
     }
 }
 
+// #5001: whether a jet_codegen_is_element_place_chain chain is rooted at a
+// constant read in place.
+fn jet_codegen_element_chain_constant(builder: JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr) -> Bool Never! {
+    if expression.kind == {
+        .ConstRef(_) -> jet_codegen_is_constant_place(builder, program, expression)
+        .Field(receiver, _) -> jet_codegen_element_chain_constant(builder, program, receiver)
+        .Index(base, _, _, _, _, _) -> {
+            if base.kind == .Clone(inner, _) -> return jet_codegen_element_chain_constant(builder, program, inner)
+            jet_codegen_element_chain_constant(builder, program, base)
+        }
+        else -> false
+    }
+}
+
 // D-MEM-COPYSEM1: true when `place` is rooted at a read parameter through
 // field, payload, and list-index projections only. A read parameter cannot
 // change while the function runs, so reading such a place in place is
-// indistinguishable from reading a copy of it.
+// indistinguishable from reading a copy of it. Neither can a constant read
+// in place (#5001, a `Static` place of JetCodegenConstantIndex.in_place_keys).
 fn jet_codegen_read_parameter_place(builder: JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID) -> Bool Never! {
     row :: jet_codegen_find_place(builder, program, place) ?? return false
     rooted := MIRValueID?{None}
-    if row.base == .Parameter(value) -> rooted = Val(value)
-    parameter :: rooted ?? return false
+    constant := false
+    if row.base == {
+        .Parameter(value) -> rooted = Val(value)
+        .Static(name) -> constant = program.owners.constants.in_place_keys.get(name) != None
+        else -> {}
+    }
+    if rooted == None && !constant -> return false
     loop projection in row.projections {
         if projection == {
             .Field(_, _) -> {}
@@ -6117,6 +6177,8 @@ fn jet_codegen_read_parameter_place(builder: JetCodegenBuilder, program: JetCode
             else -> return false
         }
     }
+    if constant -> return true
+    parameter :: rooted ?? return false
     jet_codegen_parameter_value_access(builder, program, parameter) == (Val(MIRAccess.Read))
 }
 
@@ -6139,10 +6201,13 @@ fn jet_codegen_parameter_value_access(builder: JetCodegenBuilder, program: JetCo
 // D-MEM-COPYSEM1: a place a consuming use copies instead of moving: a read
 // parameter's place, or an element of a container (Rust
 // `lower_receiver_place` never moves an index place; a read alias of an
-// element names one).
+// element names one), or any place of a constant read in place (#5001).
 fn jet_codegen_unmovable_place(builder: JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID) -> Bool Never! {
     if jet_codegen_read_parameter_place(builder, program, place) -> return true
     row :: jet_codegen_find_place(builder, program, place) ?? return false
+    if row.base == .Static(name) {
+        if program.owners.constants.in_place_keys.get(name) != None -> return true
+    }
     loop projection in row.projections {
         if projection == .Index(_, _, _, _, _, _, _) -> return true
     }

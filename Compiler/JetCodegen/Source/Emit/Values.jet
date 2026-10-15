@@ -3047,9 +3047,11 @@ fn jet_rust_emit_place_base(ctx: &JetRustEmitContext, function: MIRFunction, bas
             .Capture(value) -> jet_rust_emit_parameter_place(&ctx, function, value, mutable)
             .Temporary(value) -> "*({jet_rust_emit_value_reference(ctx, value, mutable)})"
             .Static(name) -> {
+                // #5001: a constant read in place borrows its one value;
                 // MIRRust place_base: a persistent cell lends no mutable projection.
-                if mutable -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR mutable static projection has no canonical owning representation", "persistent places are read whole and written through their cell", None)
-                "({jet_rust_emit_static_path(&ctx, name)}).get()"
+                constant :: jet_rust_emit_constant_place(&ctx, name)
+                if mutable -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR mutable static projection has no canonical owning representation", "persistent places are read whole and written through their cell; a constant read in place is never written", None)
+                constant ?? "({jet_rust_emit_static_path(&ctx, name)}).get()"
             }
         }
     }

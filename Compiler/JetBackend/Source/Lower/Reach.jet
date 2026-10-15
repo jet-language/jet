@@ -160,19 +160,7 @@ fn lower_reach_operation(p: MIRProgram, q: &LowerPrepared, function: MIRFunction
             loop arg in args -> lower_reach_arg(p, &q, function, facts, arg, parent)
         }
         .Closure(id, _, _) -> lower_mono_dependency(p, &q, id, bindings, parent, site)
-        .Global(name) -> {
-            named := q.constant_rows.get("key:{name}")
-            if named == None -> named = q.constant_rows.get("name:{name}")
-            row :: named ?? return
-            if q.constants_seen.get(row) != None -> return
-            &q.constants_seen.add(row, true).drop("checked absent above")
-            lower_mono_intern_type(&q, p.constants[row].ty, parent)
-            if p.constants[row].value == .SharedSite(shared_site) {
-                if !q.shared_sites_dynamic -> lower_mono_dependency(p, &q, shared_site.initializer, bindings, parent, site)
-            } else {
-                lower_reach_constant(&q, p.constants[row].value, parent)
-            }
-        }
+        .Global(name) -> lower_reach_global(p, &q, name, bindings, parent, site)
         .PtrFromAddr(_, element) -> lower_mono_intern_type(&q, element, parent)
         .CoreCall(_, route, args, type_args, fallibility, plan) -> {
             loop ty in type_args -> lower_mono_intern_type(&q, ty, parent)
@@ -230,6 +218,22 @@ fn lower_reach_operation(p: MIRProgram, q: &LowerPrepared, function: MIRFunction
         }
         .Semantic(semantic) -> lower_reach_semantic(p, &q, function, facts, semantic, parent, site)
         else -> {}
+    }
+}
+
+// The module constant a `Global` read or a `Static` place names: its type and
+// value (or a shared site's initializer), once.
+fn lower_reach_global(p: MIRProgram, q: &LowerPrepared, name: String, bindings: LowerBindings, parent: Int, site: String) Never! {
+    named := q.constant_rows.get("key:{name}")
+    if named == None -> named = q.constant_rows.get("name:{name}")
+    row :: named ?? return
+    if q.constants_seen.get(row) != None -> return
+    &q.constants_seen.add(row, true).drop("checked absent above")
+    lower_mono_intern_type(&q, p.constants[row].ty, parent)
+    if p.constants[row].value == .SharedSite(shared_site) {
+        if !q.shared_sites_dynamic -> lower_mono_dependency(p, &q, shared_site.initializer, bindings, parent, site)
+    } else {
+        lower_reach_constant(&q, p.constants[row].value, parent)
     }
 }
 
@@ -313,7 +317,11 @@ fn lower_reach_body(p: MIRProgram, q: &LowerPrepared, function: MIRFunction, bin
     }
     loop capture in function.capture_params -> lower_mono_intern_type(&q, capture.ty, parent)
     loop local in function.locals -> lower_mono_intern_type(&q, local.ty, parent)
-    loop place in function.places -> lower_mono_intern_type(&q, place.ty, parent)
+    loop place in function.places {
+        lower_mono_intern_type(&q, place.ty, parent)
+        // #5001: a constant read in place is reached like a `Global` read.
+        if place.base == .Static(name) -> lower_reach_global(p, &q, name, bindings, parent, function.key)
+    }
     if function.generator == .Val(generator) -> lower_mono_intern_type(&q, generator.item, parent)
     loop decision in function.optimization.decision_rows {
         if decision.function == .Val(id) -> lower_mono_dependency(p, &q, id, bindings, parent, function.key)

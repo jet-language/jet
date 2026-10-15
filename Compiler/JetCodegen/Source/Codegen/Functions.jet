@@ -866,6 +866,10 @@ struct JetCodegenConstantIndex {
     rows: [String:JetCodegenConstantRow]
     forced_static: [String:Bool]
     forced_inline: [String:Bool]
+    // #5001: the constants every read borrows in place (a `Static` place),
+    // by symbol key, naming their MIR global key; and those global keys.
+    in_place: [String:String]
+    in_place_keys: [String:Bool]
 }
 
 struct JetCodegenConstantRow {
@@ -898,7 +902,21 @@ fn jet_codegen_constant_index(modules: [SemaGraphModuleResult]) -> JetCodegenCon
             }
         }
     }
-    JetCodegenConstantIndex{rows: rows, forced_static: forced_static, forced_inline: forced_inline}
+    in_place := [String:String]{}
+    in_place_keys := [String:Bool]{}
+    loop module_row in 0..<modules.len() {
+        loop (definition_row, definition) in modules[module_row].declarations.constants {
+            key :: jet_codegen_constant_symbol_key(definition)
+            // The declaration a read resolves (the row `rows` keeps).
+            row :: rows.get(key) ?? next
+            if row.module_index != module_row || row.definition_index != definition_row -> next
+            qualified :: jet_codegen_qualified_function_key(definition.module_identity, key)
+            if !jet_codegen_constant_reads_in_place(definition, modules, forced_static.get(qualified) != None, forced_inline.get(qualified) != None) -> next
+            _ := &in_place.add(key, definition.key)
+            if in_place_keys.get(definition.key) == None -> _ := &in_place_keys.add(definition.key, true)
+        }
+    }
+    JetCodegenConstantIndex{rows: rows, forced_static: forced_static, forced_inline: forced_inline, in_place: in_place, in_place_keys: in_place_keys}
 }
 
 // Card #4258 (D-CONSTMARK1): a read of an immutable module constant copies
@@ -916,6 +934,26 @@ fn jet_codegen_constant_copies_into_uses(definition: TConstantDef, modules: [Sem
     if definition.value == .Closure(_) -> return definition.is_comptime
     leaves :: jet_codegen_constant_use_site_leaves(definition.value)
     leaves >= 0 && leaves <= 8
+}
+
+// #5001: an immutable module constant whose folded value is one shared
+// aggregate (text, list, map, option, result, tuple or nominal value) that
+// no use site copies is read in place: the constant is the `Static` place of
+// its MIR global, built once, and every read borrows it like a read
+// parameter's place (jet_codegen_read_parameter_place). A read whose value
+// must own copies only what it takes; nothing ever moves or writes it.
+fn jet_codegen_constant_reads_in_place(definition: TConstantDef, modules: [SemaGraphModuleResult], forced_static: Bool, forced_inline: Bool) -> Bool Never! {
+    if definition.is_storage -> return false
+    if definition.value == {
+        .Unit | .Closure(_) -> return false
+        else -> {}
+    }
+    if jet_codegen_constant_copies_into_uses(definition, modules, forced_static, forced_inline) -> return false
+    aggregate :: if jet_codegen_lower_type_with_modules(definition.ty, modules, definition.module_identity, [String]{}).kind == {
+        .String | .List(_) | .Map(_, _) | .Option(_) | .Result(_, _) | .Tuple(_) | .Apply(_, _) -> true
+        else -> false
+    }
+    aggregate
 }
 
 // The scalar leaves of a value that may be copied into a use site: scalars and
@@ -1003,6 +1041,11 @@ fn jet_codegen_lower_byte_list_constant(ty: Type, value: TComptimeValue) -> MIRC
 fn jet_codegen_lower_constant_reference(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, symbol: SymbolID) -> MIRValueID {
     if jet_codegen_find_function_row(program.function_index, symbol.key) != None {
         return jet_codegen_lower_named_function_value(&builder, program, expression, symbol.key, false)
+    }
+    // #5001: a constant read in place is read from its one `Static` place:
+    // the read borrows it, and only an owning use copies what it takes.
+    if jet_codegen_constant_place(&builder, program, expression, symbol) == .Val(place) {
+        return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.ReadPlace{place: place})
     }
     row :: program.owners.constants.rows.get(symbol.key) ?? panic("checked constant reference has no declaration or function target")
     // Copied out of the builder, which the emits below write through.

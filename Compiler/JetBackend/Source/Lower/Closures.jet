@@ -259,6 +259,11 @@ fn lower_place_address(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
         lower_fail(&m, &f, "captured place {place.value} is missing")
         return None
     }
+    // #5001: a constant read in place lends its one frozen value.
+    if row.base == .Static(name) {
+        walked :: lower_static_walk(p, c, &m, &f, row, name) ?? return None
+        return Val(lower_address(&f, walked.base, walked.offset))
+    }
     slot :: c.place_slots.get(place.value) ?? {
         lower_fail(&m, &f, "captured place {place.value} has no lowered root")
         return None

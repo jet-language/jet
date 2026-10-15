@@ -312,18 +312,7 @@ fn lower_static_global(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
     repr :: lower_repr(p, definition.ty)
     if repr == .Absent -> return lower_alias_absent(&f, instruction)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
-    value := lower_static_word(0)
-    if m.static_rows.get(definition.key) == .Val(index) {
-        value = lower_static_pointer(LIRDataID{value: index})
-    } else {
-        value = lower_static_tree(p, &m, &f, definition.ty, definition.value) ?? return
-        if value.text != None {
-            cell :: lower_static_object(&m, 8)
-            lower_static_store(&m, cell, 0, value)
-            value = lower_static_pointer(cell)
-        }
-        if value.data == .Val(data) -> &m.static_rows.add(definition.key.copy(), data.value).drop("checked absent above")
-    }
+    value :: lower_static_constant_value(p, &m, &f, definition) ?? return
     if value.data == .Val(data) {
         owned := false
         if instruction.result == .Val(result) -> owned = lower_value_owned(c, result)
@@ -358,16 +347,68 @@ fn lower_static_global(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
 // from the declared initial value (runtime-owned words by the entry fixups).
 // Places rooted at it are read and written in that memory, as a cell's are.
 // Only scalar and handle carriers: a frozen List or Map tree would be
-// mutated in place.
+// mutated in place. A place rooted at an immutable constant (#5001) only
+// reads: it names the constant's one frozen value, never a copy.
 fn lower_static_walk(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, row: MIRPlace, name: String) -> LowerFieldAddress? {
     definition :: lower_global_definition(p, name) ?? {
         lower_fail(&m, &f, "module storage {name} without a definition is not lowered at O0 yet")
         return None
     }
+    shared_site :: if definition.value == {.SharedSite(_) -> true else -> false}
+    if !definition.is_storage && !shared_site {
+        // #5001: a constant read in place borrows its one frozen value.
+        object :: lower_static_constant_object(p, &m, &f, definition) ?? return None
+        cell :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.DataAddress{dst: cell, data: object})
+        if row.projections.len() == 0 -> return Val(LowerFieldAddress{base: cell, offset: 0})
+        root :: lower_read_at(p, &f, cell, 0, definition.ty) ?? return None
+        walked :: lower_walk_place(p, c, &m, &f, root, definition.ty, row.projections) ?? return None
+        return Val(walked.address)
+    }
     cell :: lower_static_storage(p, &m, &f, definition) ?? return None
     if row.projections.len() == 0 -> return Val(LowerFieldAddress{base: cell, offset: 0})
     root :: lower_read_at(p, &f, cell, 0, definition.ty) ?? return None
     lower_walk_projections(p, c, &m, &f, root, definition.ty, row.projections)
+}
+
+// The frozen value of module constant `definition`, built once and shared by
+// every `Global` read and `Static` place (`static_rows`): a word, or the data
+// object holding it (a runtime-owned word's cell filled at startup).
+fn lower_static_constant_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, definition: MIRConstantDef) -> LowerStaticValue? {
+    if m.static_rows.get(definition.key) == .Val(index) -> return Val(lower_static_pointer(LIRDataID{value: index}))
+    value := lower_static_tree(p, &m, &f, definition.ty, definition.value) ?? return None
+    if value.text != None {
+        cell :: lower_static_object(&m, 8)
+        lower_static_store(&m, cell, 0, value)
+        value = lower_static_pointer(cell)
+    }
+    if value.data == .Val(data) -> &m.static_rows.add(definition.key.copy(), data.value).drop("checked absent above")
+    Val(value)
+}
+
+// #5001: the frozen object holding constant `definition`'s value at offset 0
+// the way a slot of its type holds it, built once (`static_rows`): an inline
+// value's own storage, a runtime-owned word's cell, or a cell with the word
+// (a scalar, or a box pointer) for any other carrier.
+fn lower_static_constant_object(p: MIRProgram, m: &LowerModule, f: &LowerFunction, definition: MIRConstantDef) -> LIRDataID? {
+    key :: "place:{definition.key}"
+    if m.static_rows.get(key) == .Val(index) -> return Val(LIRDataID{value: index})
+    value :: lower_static_constant_value(p, &m, &f, definition) ?? return None
+    repr :: lower_repr(p, definition.ty)
+    object := LIRDataID{value: -1}
+    runtime_cell :: if repr == {
+        .Handle(_, _) | .ExactInt -> true
+        else -> false
+    }
+    if (lower_is_inline(p, definition.ty) || runtime_cell) && value.data != None {
+        object = value.data ?? LIRDataID{value: -1}
+    } else {
+        object = lower_static_object(&m, 8)
+        size :: lower_size(p, definition.ty).size
+        lower_static_store_sized(&m, object, 0, value, if size > 0 && size < 8 -> size else -> 8)
+    }
+    &m.static_rows.add(key, object.value).drop("checked absent above")
+    Val(object)
 }
 
 // The address of module storage `definition`'s value.
