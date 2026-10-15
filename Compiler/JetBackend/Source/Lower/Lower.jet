@@ -3761,12 +3761,106 @@ fn lower_payload_takes(function: MIRFunction, block_index: [U64:Int]) -> [U64:Bo
         loop instruction in block.instructions {
             result :: instruction.result ?? next
             if instruction.operation == .OptionValue(subject) | .ResultValue(subject, _) {
-                if lower_payload_place_read(function, index, subject) -> next
+                if lower_payload_place_read(function, index, subject) {
+                    // A subject switch binds its non-place subject to a local
+                    // (`it`); the Rust tier's subject is that value itself.
+                    local_index :: lower_payload_local_uses(function, index, subject) ?? next
+                    if !lower_carrier_has_later_use(function, local_index, block_index, subject, result) -> _ := &takes.add(result.value, true)
+                    next
+                }
                 if !lower_carrier_has_later_use(function, index, block_index, subject, result) -> _ := &takes.add(result.value, true)
             }
         }
     }
     takes
+}
+
+// Jet sema binds a subject switch's non-place subject to the generated local
+// `it` (Statements.jet sema_stmt_check_subject_switch), so each arm reads
+// `it`'s place where the Rust tier's MIR tests and projects the subject
+// value itself (and MIRRust.rs moves the payload out at the carrier's last
+// use, a non-Clone FileWriter/FileReader included). For a carrier that is
+// such a read (a ReadPlace of a whole local whose places never escape, used
+// only by variant tests and payload reads), `index` with the carrier's uses
+// widened to every access of the local: its later reads then count as later
+// uses of the carrier. The local's cleanup moves (a MovePlace feeding only
+// Drop) do not: the take clears the payload in the local's carrier
+// (lower_read_member), so that drop releases only what remains. None when
+// the carrier is not such a read.
+fn lower_payload_local_uses(function: MIRFunction, index: LowerUseIndex, subject: MIRValueID) -> LowerUseIndex? Never! {
+    site :: index.definitions.get(subject.value) ?? return None
+    read :: function.blocks[site.block].instructions[site.position].operation
+    place := MIRPlaceID{value: U64.MAX}
+    if read == .ReadPlace(read_place) {
+        place = read_place
+    } else {
+        return None
+    }
+    local := U64.MAX
+    found := false
+    loop row in function.places {
+        if row.id != place -> next
+        if row.projections.len() > 0 -> return None
+        if row.base == .Local(owner) {
+            local = owner.value
+            found = true
+        }
+    }
+    if !found -> return None
+    // The carrier is inspected only: it aliases the local's value.
+    inspected :: index.uses.get(subject.value) ?? [LowerUseSite]{}
+    loop used in inspected {
+        if used.position < 0 -> return None
+        if function.blocks[used.block].instructions[used.position].operation == {
+            .OptionIsSome(_) | .OptionValue(_) | .ResultIsOk(_) | .ResultValue(_, _) -> {}
+            else -> return None
+        }
+    }
+    places := [U64:Bool]{}
+    loop row in function.places {
+        if row.base == .Local(owner) {
+            if owner.value == local -> _ := &places.add(row.id.value, true)
+        }
+    }
+    sites := index.uses.get(subject.value) ?? [LowerUseSite]{}
+    loop (block, row) in function.blocks {
+        loop (position, instruction) in row.instructions {
+            touched := false
+            loop used in mir_operation_place_uses(instruction.operation) {
+                if places.get(used.value) != None -> touched = true
+            }
+            if instruction.operation == .Call(_, args, _) | .IndirectCall(_, args, _) {
+                loop arg in args {
+                    if arg.place == .Val(used) {
+                        if places.get(used.value) != None -> touched = true
+                    }
+                }
+            }
+            if !touched -> next
+            if block == site.block && position == site.position -> next
+            if instruction.operation == {
+                .AddressOf(_, _) | .RawAddressOf(_) | .Closure(_, _, _) -> return None
+                .MovePlace(_) -> { if lower_payload_drop_only(function, index, instruction.result) -> next }
+                else -> {}
+            }
+            lower_use_index_add(&sites, subject.value, LowerUseSite{block: block, position: position})
+        }
+    }
+    widened := index.copy()
+    _ := &widened.uses.add(subject.value, sites)
+    Val(widened)
+}
+
+// Whether `value` (a MovePlace result) is only dropped: a local's cleanup.
+fn lower_payload_drop_only(function: MIRFunction, index: LowerUseIndex, value: MIRValueID?) -> Bool Never! {
+    moved :: value ?? return false
+    uses :: index.uses.get(moved.value) ?? return false
+    loop used in uses {
+        if used.position < 0 -> return false
+        if function.blocks[used.block].instructions[used.position].operation == .Drop(_, _) -> next
+        return false
+    }
+    uses.len() > 0
 }
 
 // MIRRust.rs loop_iter_init `consumed` with plan_move_facts `single_use`: a

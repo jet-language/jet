@@ -2,7 +2,7 @@
 use jet_foundation.[
     MIRAccess, MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRBlockID, MIRCallee,
     MIRCallArg, MIRConstant, MIRDropKind, MIREnumArg, MIRField, MIRFieldValue,
-    MIRFunction, MIRFunctionID, MIROperation, MIRPayloadKind, MIRPlace,
+    MIRFunction, MIRFunctionID, MIROperation, MIRPayloadKind, MIRPhiIncoming, MIRPlace,
     MIRPlaceBase, MIRPlaceID, MIRProgram, MIRProjection, MIRTerminator,
     MIRType, MIRTypeDef, MIRTypeDefKind, MIRTypeKind, MIRValueID, MIRVariant,
     MIRVariantPayload, mir_field_id, mir_function_id, mir_owned_ownership,
@@ -412,4 +412,57 @@ fn fx_payload_take_handle_check() -> Bool Never! {
     loop issue in lowered.issues -> print("payload-take-handle: {issue.function}: {issue.message}")
     loop issue in lir_lint_module(lowered.lir) -> print("payload-take-handle: lint b{issue.block}: {issue.message}")
     lowered.issues.len() == 0 && lir_lint_module(lowered.lir).len() == 0
+}
+
+// The subject-switch shape of take_lock (`if files.create(…) == { .Ok(writer)
+// -> …; .Err(error) -> … }`, ArtifactStore.acquire_lock) and of
+// `if open_checked(p) == { .Val(file) -> found = Val(file); None -> {} }`:
+// Jet sema binds the call result to the generated local `it`, each arm reads
+// `it`'s place, the arm chain re-tests on a trivial phi of the arm's test, and
+// `it`'s cleanup moves it out to a Drop. The Rust tier tests the call value
+// itself and MIRRust.rs moves the payload out of it (carrier_has_later_use);
+// natively the arm takes the payload out of `it`'s carrier (clearing it, so
+// the cleanup drop releases only the rest). The re-test's read of `it` is on
+// the infeasible false edge after the arm, so it is no later use. FileReader
+// has no clone, so a copy could not lower.
+fn fx_payload_take_subject_local(option: Bool) -> MIRProgram Never! {
+    reader_ty :: fx_named("FileReader")
+    carrier_ty :: if option -> mir_type_from_kind(MIRTypeKind.Option{inner: reader_ty}) else -> mir_type_from_kind(MIRTypeKind.Result{ok: reader_ty, err: fx_string()})
+    b := fx_builder()
+    param :: fx_param(&b, "opened", carrier_ty, mir_owned_ownership())
+    b.params[0].access = MIRAccess.Move
+    carrier :: fx_owned(&b, carrier_ty, MIROperation.Move{value: param})
+    subject_local :: fx_local(&b, "it", carrier_ty, mir_owned_ownership())
+    fx_do(&b, MIROperation.WritePlace{place: subject_local, value: carrier})
+    read :: fx_owned(&b, carrier_ty, MIROperation.ReadPlace{place: subject_local})
+    test :: fx_copy(&b, fx_bool(), if option -> MIROperation.OptionIsSome{subject: read} else -> MIROperation.ResultIsOk{subject: read})
+    fx_block(&b, 0, MIRTerminator.Branch{condition: test, then_target: MIRBlockID{value: fx_word(U64{0}, 1)}, else_target: MIRBlockID{value: fx_word(U64{0}, 2)}})
+    reader :: fx_owned(&b, reader_ty, if option -> MIROperation.OptionValue{subject: read} else -> MIROperation.ResultValue{subject: read, ok: true})
+    fx_do(&b, MIROperation.Drop{value: reader, kind: MIRDropKind.Value})
+    fx_block(&b, 1, MIRTerminator.Jump{target: MIRBlockID{value: fx_word(U64{0}, 2)}})
+    again :: fx_copy(&b, fx_bool(), MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: MIRBlockID{value: fx_word(U64{0}, 0)}, value: test}, MIRPhiIncoming{block: MIRBlockID{value: fx_word(U64{0}, 1)}, value: test}}})
+    fx_block(&b, 2, MIRTerminator.Branch{condition: again, then_target: MIRBlockID{value: fx_word(U64{0}, 4)}, else_target: MIRBlockID{value: fx_word(U64{0}, 3)}})
+    // The next arm re-reads `it` (only when the first arm's test failed).
+    probed :: fx_value(&b, carrier_ty, mir_ownership_from_access(MIRAccess.Move), MIROperation.MovePlace{place: subject_local})
+    _ := fx_copy(&b, fx_bool(), if option -> MIROperation.OptionIsSome{subject: probed} else -> MIROperation.ResultIsOk{subject: probed})
+    fx_do(&b, MIROperation.Drop{value: probed, kind: MIRDropKind.Value})
+    fx_block(&b, 3, MIRTerminator.Jump{target: MIRBlockID{value: fx_word(U64{0}, 5)}})
+    // `it`'s cleanup.
+    cleanup :: fx_value(&b, carrier_ty, mir_ownership_from_access(MIRAccess.Move), MIROperation.MovePlace{place: subject_local})
+    fx_do(&b, MIROperation.Drop{value: cleanup, kind: MIRDropKind.Value})
+    fx_block(&b, 4, MIRTerminator.Jump{target: MIRBlockID{value: fx_word(U64{0}, 5)}})
+    fx_block(&b, 5, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("take", b, fx_unit())}, [MIRTypeDef]{})
+}
+
+fn fx_payload_take_subject_local_check() -> Bool Never! {
+    clean := true
+    loop option in ([Bool]{false, true}) {
+        name :: if option -> "payload-take-subject-option" else -> "payload-take-subject-result"
+        lowered :: lir_lower_callables(fx_payload_take_subject_local(option), [MIRFunctionID]{mir_function_id("take")})
+        loop issue in lowered.issues -> print("{name}: {issue.function}: {issue.message}")
+        loop issue in lir_lint_module(lowered.lir) -> print("{name}: lint b{issue.block}: {issue.message}")
+        if lowered.issues.len() != 0 || lir_lint_module(lowered.lir).len() != 0 -> clean = false
+    }
+    clean
 }
