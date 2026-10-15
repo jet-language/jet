@@ -93,7 +93,7 @@ Research zig @... what do they mean?
 
 Have an agent analyze/harvest/mine release notes for all languages over the last 5 years to see what we should consider avoiding, fixing, adding, removing, etc. with their reasoning for why things may not have worked in practice.
 
-Look into Zig Build Server Protocol
+Look into Zig Build Server Protocol -> what to include, what to exclude, how to loop into comptime metaprogramming (jai style)
 
 :: should basically be an implicit request for compiler comptime eval as an optimization, prep/comptime keyword forces comptime eval
 
@@ -108,3 +108,25 @@ Create an "onboarding" file both to educate and bring new maintainers/contributo
 Ideas for the ~ and ^ symbols? What should they do?
 
 Power should be **
+
+Terminal "commands" like "execute(term.clear_buffer, term.enable_raw_mode, term.enable_alternate_screen, term.hide_cursor)
+
+Need our version of jai implicit context passed as an invisible arg to every function. Allows effectively garbage collected style implicitly -> how can we implement? https://youtu.be/sEax8CQmgwo?si=KbuxOTtnm087KI6H 
+
+TLA+ /\ as trailing disjunction?
+
+Is there a legitimate, good reason to use {} c style rather than python space/tab/indent based? Research this.
+
+Thoughts on every value in the language being basically a custom wrapped pointer, so whenever you pass something it is always "by pointer" unless you "unpack it" to copy to another memory address. That way you can access both the value or pointer without having to think about it, the compiler picks the most efficient one, and things are clean. Just rough brainstorming, need discussion
+
+Port doom to jet to test
+
+MUST RESEARCH V -> INCREDIBLE LOOKING LANGUAGE VERY ALIGNED WIH A LOT OF JET GOALS, just missing metaprogramming and effects auditing, but performance and cross compilation and interop are already where jet is targeting
+
+Mine: https://smarimccarthy.is/posts/2024-12-02-four-years-of-jai/
+https://www.forrestthewoods.com/blog/learning-jai-via-advent-of-code/
+https://vlang.io/
+
+Make := that is never reassigned an error
+
+Lambda as unnamed function and anonymous union as unnamed enum
