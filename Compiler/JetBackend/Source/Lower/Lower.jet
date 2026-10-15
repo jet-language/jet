@@ -380,6 +380,11 @@ struct LowerFunction {
     close_parameter: MIRValueID?
     close_identity: LIRValueID?
     partial_drops: [LowerPartialDrop]
+    // Call/IndirectCall/BuildString result -> the sealed LIR block count right
+    // after it was defined. A temporary is released only while that count is
+    // unchanged: its definition and the release share one LIR block, so the
+    // release is dominated by the definition (lower_temp_release).
+    temp_blocks: [U64:Int]
 }
 
 // Lowers the functions `entry` reaches (Mono.jet: generic functions and
@@ -1761,6 +1766,7 @@ fn lower_new_function(id: LIRFunctionID, name: String, signature: LIRSignatureID
         close_parameter: None,
         close_identity: None,
         partial_drops: [LowerPartialDrop]{},
+        temp_blocks: [U64:Int]{},
     }
 }
 
@@ -2830,6 +2836,9 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     sealed_before :: f.builder.blocks.len()
     lower_instruction_operation(p, c, &m, &f, instruction)
     if f.failed -> return
+    if instruction.result == .Val(defined) {
+        if instruction.operation == .Call(_, _, _) | .IndirectCall(_, _, _) | .BuildString(_) -> _ := &f.temp_blocks.add(defined.value, f.builder.blocks.len())
+    }
     if dead_result == .Val(dead) -> lower_drop_value(p, c, &m, &f, dead)
     released :: c.releases.get(instruction.id.value) ?? [MIRValueID]{}
     loop value in released -> lower_temp_release(p, c, &m, &f, value, sealed_before)
@@ -2848,6 +2857,8 @@ fn lower_temp_release(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     if lower_is_absent(f, value) -> return
     if lower_slot_of_value(c, value) != None -> return
     index :: f.values.get(value.value) ?? return
+    defined_at :: f.temp_blocks.get(value.value) ?? return
+    if defined_at != f.builder.blocks.len() -> return
     loop slot_value in f.current {
         if slot_value == .Val(holding) && holding.value == index -> return
     }
