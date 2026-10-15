@@ -3489,10 +3489,15 @@ fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 // A read (not a move) of a place whose owned result is stored into another
 // place or aggregate or returned is a copy of its own, as MIRRust.rs
 // place_read's `.clone()`; otherwise the read borrows the place's value.
+// An inline aggregate's value is a pointer to its bytes, so a stored read of
+// one owns a copy even when it has no drop glue: a field write through the
+// source writes those bytes in place, and an alias would see it
+// (`resume := builder.current; builder.current = builder.entry; ...;
+// builder.current = resume` restored the entry block).
 fn lower_read_owns(p: MIRProgram, c: LowerContext, m: LowerModule, instruction: MIRInstruction, ty: MIRType) -> Bool Never! {
     result :: instruction.result ?? return false
     if c.sunk.get(result.value) == None -> return false
-    lower_value_owned(c, result) && lower_needs_drop(p, m, ty)
+    lower_value_owned(c, result) && (lower_needs_drop(p, m, ty) || lower_is_inline(p, ty))
 }
 
 // The operands an operation moves into the aggregate it builds.
