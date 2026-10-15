@@ -158,3 +158,42 @@ fn fx_order() -> MIRProgram Never! {
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, ^types)
 }
+
+// struct OrderFile { digest: [U8]? }
+// fn run() {
+//     // Equal values: `<`/`>` false, `<=`/`>=` true (Rust Vec/Option/derived Ord)
+//     for each of [1, 2] vs [1, 2], Val([1, 2]) vs Val([1, 2]),
+//     OrderFile{Val([1, 2])} vs OrderFile{Val([1, 2])}: print(<, <=, >, >=)
+// }
+// expect-stdout order-equal: "false\ntrue\nfalse\ntrue\nfalse\ntrue\nfalse\ntrue\nfalse\ntrue\nfalse\ntrue\n"
+fn fx_order_equal() -> MIRProgram Never! {
+    byte :: mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8})
+    bytes :: fx_list_type(byte)
+    maybe_bytes :: mir_type_from_kind(MIRTypeKind.Option{inner: bytes})
+    file :: fx_named("OrderFile")
+    types :: [MIRTypeDef]{
+        fx_type_def("OrderFile", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("OrderFile", "digest", maybe_bytes)}, methods: [MIRFunctionID]{}}),
+    }
+    b := fx_builder()
+    owned := [MIRValueID]{}
+    ops :: [MIRBinaryOp]{MIRBinaryOp.Lt, MIRBinaryOp.Le, MIRBinaryOp.Gt, MIRBinaryOp.Ge}
+    loop shape in 0..<3 {
+        pair := [MIRValueID]{}
+        loop _ in 0..<2 {
+            value := fx_list_routes_bytes(&b, [Int]{1, 2})
+            if shape >= 1 -> value = fx_order_maybe(&b, maybe_bytes, Val(value))
+            if shape == 2 {
+                value = fx_owned(&b, file, MIROperation.Struct{type_id: mir_type_id("OrderFile"), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("OrderFile.digest"), value: value}}})
+            }
+            &pair.push(value)
+        }
+        loop op in ops -> fx_order_print(&b, op, pair[0], pair[1])
+        &owned.push(pair[0])
+        &owned.push(pair[1])
+    }
+    loop value in owned {
+        fx_do(&b, MIROperation.Drop{value: value, kind: MIRDropKind.Value})
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, ^types)
+}

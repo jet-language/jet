@@ -457,9 +457,11 @@ fn sema_expr_operator_resolution(op: BinOp, lhs: Type, rhs: Type, span: Span, en
     None
 }
 
+// Rust CheckerInfer/binary.rs:1820-1826: `<` is `== Less`, `<=` is
+// `!= Greater`, `>` is `== Greater`, `>=` is `!= Less`; `==`/`!=` test Equal.
 fn sema_expr_operator_ordering_variant(op: BinOp) -> String Never! {
-    if op == BinOp.Lt -> return "Less"
-    if op == BinOp.Gt -> return "Greater"
+    if op == BinOp.Lt || op == BinOp.Ge -> return "Less"
+    if op == BinOp.Gt || op == BinOp.Le -> return "Greater"
     "Equal"
 }
 
