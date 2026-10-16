@@ -3810,7 +3810,12 @@ fn jet_codegen_stability_stmt_body(state: &JetCodegenLetStability, statement: TS
             entry :: state.tick
             jet_codegen_stability_list(&state, body, false)
             if jet_codegen_stability_place_root(collection) == .Val(root) {
-                state.stable[jet_codegen_loop_source_key(collection)] = !jet_codegen_stability_changed_since(state, root.name, entry) && state.pinned.get(root.name) == None && state.pinned.get("*") == None
+                // Two loops can share a key (a repeated inlined body): the walk
+                // is stable only when every one of them is, as for candidates.
+                key :: jet_codegen_loop_source_key(collection)
+                stable := !jet_codegen_stability_changed_since(state, root.name, entry) && state.pinned.get(root.name) == None && state.pinned.get("*") == None
+                if state.stable.get(key) == .Val(known) -> stable = stable && known
+                state.stable[key] = stable
             }
         }
         .Inline(body, _) -> jet_codegen_stability_list(&state, body, true)
