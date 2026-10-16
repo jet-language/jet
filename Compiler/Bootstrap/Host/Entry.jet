@@ -94,7 +94,7 @@ fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String) -> Je
     if !keep_going && (!result.complete || result.internal_problem != None) -> return result
     if result.mir == None -> return jet_bootstrap_native_escaped(result.keep_going_rows, "the native front end finished without MIR")
     census := [String]{}
-    native :: jet_cli_native_executable(result, sources, false, runtime_dir, "{prefix}.o", "{prefix}.exe", keep_going, &census)
+    native :: jet_cli_native_executable(&result, sources, false, runtime_dir, "{prefix}.o", "{prefix}.exe", keep_going, &census)
     failure :: native ?? return jet_bootstrap_native_census(^result, census)
     if failure == {
         .Lowering(functions, messages) -> { cli_files.write("{prefix}.issues", jet_cli_native_lowering_rows(functions, messages, "\t").join("\n")) ?? return jet_bootstrap_native_escaped(result.keep_going_rows, "cannot write native lowering findings") }

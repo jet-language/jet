@@ -410,14 +410,24 @@ fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Nev
     lower_selected(program, [MIRFunctionID]{entry}, true, true, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false, false, true)
 }
 
-// JET_KEEP_GOING (the bootstrap native feed): lir_lower_entry, except that a
-// function whose lowering stops is one issue and a trap of its signature
-// (lower_keep_going_functions), and the issues leave the entry and the module
-// in place, so every later phase still runs and reports. The module is never
-// shipped: the caller turns every issue into a census row.
-fn lir_lower_entry_keep_going(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
+// lir_lower_entry over the caller's program in place: the type index is
+// attached to `program` for the lowering and detached after, so the native
+// route never copies the whole program (it is left exactly as it came).
+fn lir_lower_entry_in_place(program: &MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, [MIRFunctionID]{entry}, true, true, program.native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, true, false, true)
+    native_pack :: program.native_pack
+    lower_selected_in_place(&program, [MIRFunctionID]{entry}, true, true, native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false, false, true)
+}
+
+// JET_KEEP_GOING (the bootstrap native feed): lir_lower_entry_in_place,
+// except that a function whose lowering stops is one issue and a trap of its
+// signature (lower_keep_going_functions), and the issues leave the entry and
+// the module in place, so every later phase still runs and reports. The
+// module is never shipped: the caller turns every issue into a census row.
+fn lir_lower_entry_keep_going_in_place(program: &MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
+    intrinsics :: [U64:LowerRuntimeIntrinsic]{}
+    native_pack :: program.native_pack
+    lower_selected_in_place(&program, [MIRFunctionID]{entry}, true, true, native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, true, false, true)
 }
 
 // Compiler and test callbacks retain return carriers; only program entries
@@ -461,6 +471,15 @@ fn lir_lower_native_imports(program: MIRProgram, roots: [MIRFunctionID], imports
 // sentry hooks and is never instrumented, else jet_rt_sentry_scope_enter ->
 // sentry_save -> thread_base (#Unsafe) re-enters itself.
 fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, shared_sites_dynamic: Bool, native_pack: Bool, imports: [String], c_exports: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic], keep_going: Bool, comptime_budget: Bool, sentry: Bool) -> LIRLowering Never! {
+    lowered_program := program.copy()
+    lower_selected_in_place(&lowered_program, roots, wrap_entry, shared_sites_dynamic, native_pack, imports, c_exports, test_serial, checks, ^runtime_intrinsics, keep_going, comptime_budget, sentry)
+}
+
+// lower_selected over `program` in place: preparation and body lowering
+// resolve type definitions through the type index attached to `program`
+// (lower_attach_type_index); every other read sees the program as the
+// caller handed it, and the caller gets it back unchanged.
+fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, shared_sites_dynamic: Bool, native_pack: Bool, imports: [String], c_exports: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic], keep_going: Bool, comptime_budget: Bool, sentry: Bool) -> LIRLowering Never! {
     test_indices := [U64:Int]{}
     test_issues := [LIRLoweringIssue]{}
     if test_serial != None {
@@ -481,14 +500,22 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     all_roots := roots.copy()
     loop check in checks -> &all_roots.push(check.function)
     // Preparation and body lowering resolve type definitions through the
-    // index (lower_indexed_program); the inputs are otherwise the same.
-    indexed := lower_indexed_program(program)
-    prepared := lower_prepare_roots(indexed, all_roots, shared_sites_dynamic, native_pack, imports, ^runtime_intrinsics)
+    // type index, attached to the program itself instead of to a copy of
+    // it; the caller's own index rows come back after body lowering.
+    caller_id_rows :: program.type_id_rows.copy()
+    caller_key_rows :: program.type_key_rows.copy()
+    lower_attach_type_index(&program)
+    prepared := lower_prepare_roots(program, all_roots, shared_sites_dynamic, native_pack, imports, ^runtime_intrinsics)
     loop issue in test_issues -> &prepared.issues.push(issue)
     test_harness := false
     loop artifact in program.artifacts {
         if artifact.kind == .TestExecutable || artifact.kind == .TestOverride -> test_harness = true
     }
+    // The stop-point scans read the program without its index, as before.
+    lower_restore_type_index(&program, caller_id_rows, caller_key_rows)
+    stop_points :: lower_has_stop_points(program, prepared.functions)
+    task_stop_points :: lower_task_stop_program(program, prepared.functions)
+    lower_attach_type_index(&program)
     m := LowerModule{
         signatures: [LIRSignature]{},
         test_harness: test_harness,
@@ -498,7 +525,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         test_checks: checks,
         runtime_intrinsics: ^prepared.runtime_intrinsics,
         native_pack: native_pack,
-        // lower_selected is the sole origin of both mode fields.
+        // lower_selected_in_place is the sole origin of both mode fields.
         native_exports: [String:LIRFunctionID]{},
         signature_rows: [String:Int]{},
         data: [LIRData]{},
@@ -528,8 +555,8 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         debug_file_rows: [U64:Int]{},
         debug_types: [LIRDebugType]{},
         debug_type_rows: [String:Int]{},
-        stop_points: lower_has_stop_points(program, prepared.functions),
-        task_stop_points: lower_task_stop_program(program, prepared.functions),
+        stop_points: stop_points,
+        task_stop_points: task_stop_points,
     }
     assert(program.native_pack == m.native_pack)
     loop (index, file) in program.source_files {
@@ -542,16 +569,16 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     loop (index, descriptor) in prepared.functions {
         &m.mir_rows.add(descriptor.id.value, index).drop("concrete IDs are unique")
         &m.mir_sources.push(descriptor.source_row)
-        signature :: if descriptor.instance_row >= 0 -> lower_function_signature(indexed, &m, prepared.instances[descriptor.instance_row]) else -> lower_function_signature(indexed, &m, program.functions[descriptor.source_row])
+        signature :: if descriptor.instance_row >= 0 -> lower_function_signature(program, &m, prepared.instances[descriptor.instance_row]) else -> lower_function_signature(program, &m, program.functions[descriptor.source_row])
         &m.mir_signatures.push(signature)
     }
     functions := [LIRFunction]{}
     failed_functions := prepared.failed_functions.copy()
-    // Keep-going: the indexed program the body tasks hand back, which the
-    // glue tasks then read (lower_keep_going_glue).
+    // Keep-going: the indexed program copy the body tasks hand back, which
+    // the glue tasks then read (lower_keep_going_glue).
     glue_programs := [MIRProgram]{}
     if keep_going {
-        kept := lower_keep_going_lower(^indexed, ^m, ^prepared.functions, ^prepared.instances, ^failed_functions) ?? panic("the keep-going native lowering tasks failed")
+        kept := lower_keep_going_lower(program.copy(), ^m, ^prepared.functions, ^prepared.instances, ^failed_functions) ?? panic("the keep-going native lowering tasks failed")
         prepared.functions = ^kept.inventory
         prepared.instances = ^kept.instances
         m = ^kept.state
@@ -560,10 +587,12 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         glue_programs = ^kept.programs
     } else {
         loop (index, descriptor) in prepared.functions {
-            function :: lower_selected_function(indexed, &m, descriptor, prepared.instances, index, &failed_functions)
+            function :: lower_selected_function(program, &m, descriptor, prepared.instances, index, &failed_functions)
             &functions.push(function)
         }
     }
+    // Glue, helpers and entry wrappers read the program as the caller handed it.
+    lower_restore_type_index(&program, caller_id_rows, caller_key_rows)
     glue_inputs :: shared LowerGlueInputs{programs: ^glue_programs}
     if !shared_sites_dynamic {
         loop definition in program.constants {
@@ -942,13 +971,12 @@ fn lower_call_signature(function: LIRFunction, id: LIRFunctionID) -> LIRSignatur
 // ---------------------------------------------------------------------------
 // Types, layouts and drop actions.
 
-// A copy of `program` with its type index (MIRProgram.type_id_rows /
-// type_key_rows: the first row of each type id and key) built, so
-// lower_type_def and lower_type_def_by_id find a definition in O(1) instead
-// of scanning every declaration. Lowering never edits `types`, so the index
-// stays exact for the whole lowering.
-fn lower_indexed_program(program: MIRProgram) -> MIRProgram Never! {
-    indexed := program.copy()
+// Attaches the type index to `program` in place (MIRProgram.type_id_rows /
+// type_key_rows: the first row of each type id and key), so lower_type_def
+// and lower_type_def_by_id find a definition in O(1) instead of scanning
+// every declaration. Lowering never edits `types`, so the index stays exact
+// while it is attached (lower_selected_in_place).
+fn lower_attach_type_index(program: &MIRProgram) Never! {
     id_rows := [U64:Int]{}
     key_rows := [String:Int]{}
     loop (row, definition) in program.types {
@@ -976,8 +1004,20 @@ fn lower_indexed_program(program: MIRProgram) -> MIRProgram Never! {
         if first != row || ambiguous.get(definition.name) != None -> next
         if key_rows.get(definition.name) == None -> _ := &key_rows.add(definition.name, row)
     }
-    indexed.type_id_rows = ^id_rows
-    indexed.type_key_rows = ^key_rows
+    program.type_id_rows = ^id_rows
+    program.type_key_rows = ^key_rows
+}
+
+// Puts back the index rows `program` carried before lower_attach_type_index.
+fn lower_restore_type_index(program: &MIRProgram, id_rows: [U64:Int], key_rows: [String:Int]) Never! {
+    program.type_id_rows = id_rows.copy()
+    program.type_key_rows = key_rows.copy()
+}
+
+// A copy of `program` with its type index attached (lower_attach_type_index).
+fn lower_indexed_program(program: MIRProgram) -> MIRProgram Never! {
+    indexed := program.copy()
+    lower_attach_type_index(&indexed)
     indexed
 }
 
@@ -1000,7 +1040,7 @@ fn lower_type_row(p: MIRProgram, name: MIRNominalRef, identity: MIRTypeID?) -> I
             }
         }
         // The bare spelling of a unique source-owned Core declaration, as
-        // lower_indexed_program indexes it.
+        // lower_attach_type_index indexes it.
         bare := -1
         loop row in 0..<p.types.len() {
             if p.types[row].name != name.name || !lower_core_source_bare_name(p.types[row]) -> next
