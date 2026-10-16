@@ -2663,8 +2663,8 @@ fn lower_release_use_kind(p: MIRProgram, m: LowerModule, function: MIRFunction, 
         // that clears the member in the carrier (lower_read_member,
         // lower_index_result); a borrowed one points into the carrier. A
         // List or Map index only reads its key.
-        .Field(_, _) | .EnumPayload(_, _, _, _) | .OptionValue(_) | .ResultValue(_, _) | .ProjectMembers(_, _) -> lower_release_member_kind(function, fact_index, instruction)
-        .Index(_, base, _, _, _, _, _) -> if base == value -> lower_release_member_kind(function, fact_index, instruction) else -> LOWER_RELEASE_BORROW
+        .Field(_, _) | .EnumPayload(_, _, _, _) | .OptionValue(_) | .ResultValue(_, _) | .ProjectMembers(_, _) -> lower_release_member_kind(p, function, fact_index, instruction)
+        .Index(_, base, _, _, _, _, _) -> if base == value -> lower_release_member_kind(p, function, fact_index, instruction) else -> LOWER_RELEASE_BORROW
         // A String or copied List slice copies out of its base; a view
         // points into it (lower_slice). Its bounds are only read.
         .Slice(_, base, _, _, _, _) -> {
@@ -2693,10 +2693,17 @@ fn lower_release_use_kind(p: MIRProgram, m: LowerModule, function: MIRFunction, 
     }
 }
 
-fn lower_release_member_kind(function: MIRFunction, fact_index: [U64:Int], instruction: MIRInstruction) -> Int Never! {
+// An owned member read is a copy or take of its own; a borrowed one points
+// into its carrier, unless it is a scalar (a Bool or fixed-width number read
+// out of a Result or Option): its bits are copied out, so the carrier dies
+// at its own last use (`if fallible() -> ...` reads the Ok Bool, and
+// keeping the Result box alive for that alias leaked it on every path).
+fn lower_release_member_kind(p: MIRProgram, function: MIRFunction, fact_index: [U64:Int], instruction: MIRInstruction) -> Int Never! {
     result :: instruction.result ?? return LOWER_RELEASE_BORROW
     row :: fact_index.get(result.value) ?? return LOWER_RELEASE_KEEP
     if lower_is_owned(function.values[row].ownership) -> return LOWER_RELEASE_BORROW
+    layout :: lower_repr_layout(lower_repr(p, function.values[row].ty)) ?? return LOWER_RELEASE_ALIAS
+    if function.values[row].ownership.mode == MIROwnershipMode.Copy && layout.class != .Pointer -> return LOWER_RELEASE_BORROW
     LOWER_RELEASE_ALIAS
 }
 
