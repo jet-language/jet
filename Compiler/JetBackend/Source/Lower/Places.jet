@@ -82,7 +82,7 @@ fn lower_walk_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     offset := -1
     borrowed := false
     loop projection in projections {
-        if offset >= 0 && !lower_is_inline(p, ty) {
+        if offset >= 0 && !lower_inline_of(p, &f, ty) {
             // Enter the box (or wrapper) whose pointer the location holds;
             // nested inline members stay in the same storage.
             next_base :: lower_pointer(&f)
@@ -93,7 +93,7 @@ fn lower_walk_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         if offset < 0 -> offset = 0
         if projection == {
             .Field(id, _) -> {
-                if lower_struct_field(p, ty, id) == None {
+                if lower_struct_field_of(p, &f, ty, id) == None {
                     // A field of a runtime handle: its place inside the runtime's value.
                     if offset == 0 {
                         if lower_handle_field_place(p, &m, &f, base, ty, id) == .Val(place) {
@@ -107,7 +107,7 @@ fn lower_walk_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
                     lower_fail(&m, &f, "field {id.value} of {mir_type_display_name(ty)} is not lowered at O0 yet")
                     return None
                 }
-                found :: lower_struct_field(p, ty, id) ?? return None
+                found :: lower_struct_field_of(p, &f, ty, id) ?? return None
                 address :: lower_struct_storage_address(&f, base, LowerFieldInfo{offset: offset + found.offset, ty: found.ty, boxed: found.boxed})
                 base = address.base
                 offset = address.offset

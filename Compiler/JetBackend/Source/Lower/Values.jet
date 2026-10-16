@@ -258,7 +258,7 @@ fn lower_address(f: &LowerFunction, base: LIRValueID, offset: Int) -> LIRValueID
 // Defines `dst` as the value of `ty` stored at base + offset; an inline
 // aggregate's value is the address of its bytes.
 fn lower_read_into(p: MIRProgram, f: &LowerFunction, dst: LIRValueID, base: LIRValueID, offset: Int, ty: MIRType) Never! {
-    if lower_is_inline(p, ty) {
+    if lower_inline_of(p, &f, ty) {
         bytes :: lower_const(&f, offset)
         lower_emit(&f, LIRInst.PointerAdd{dst: dst, base: base, offset: bytes})
         return
@@ -288,8 +288,9 @@ fn lower_read_into(p: MIRProgram, f: &LowerFunction, dst: LIRValueID, base: LIRV
 // The value of `ty` stored at base + offset, without a drop action; None
 // for Unit.
 fn lower_read_at(p: MIRProgram, f: &LowerFunction, base: LIRValueID, offset: Int, ty: MIRType) -> LIRValueID? {
-    layout :: lower_repr_layout(lower_repr(p, ty)) ?? return None
-    if lower_is_inline(p, ty) -> return Val(lower_address(&f, base, offset))
+    repr :: lower_repr_of(p, &f, ty)
+    layout :: lower_repr_layout(repr) ?? return None
+    if repr == .Inline(_) -> return Val(lower_address(&f, base, offset))
     value :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
     lower_read_into(p, &f, value, base, offset, ty)
     Val(value)
@@ -298,8 +299,12 @@ fn lower_read_at(p: MIRProgram, f: &LowerFunction, base: LIRValueID, offset: Int
 // Moves `value` of `ty` into base + offset: an inline aggregate's bytes are
 // copied (ownership of its contents moves with them).
 fn lower_write_at(p: MIRProgram, f: &LowerFunction, base: LIRValueID, offset: Int, value: LIRValueID, ty: MIRType) Never! {
-    if lower_is_inline(p, ty) -> return lower_copy_bytes(&f, base, offset, value, 0, lower_size(p, ty).size)
-    if lower_repr_layout(lower_repr(p, ty)) == None -> return
+    repr :: lower_repr_of(p, &f, ty)
+    if repr == .Inline(_) {
+        size :: lower_size_of(p, &f, ty).size
+        return lower_copy_bytes(&f, base, offset, value, 0, size)
+    }
+    if lower_repr_layout(repr) == None -> return
     if lower_packed_storage_layout(p, ty) == .Val(layout) {
         if layout.size < 8 {
             stored :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
@@ -324,8 +329,9 @@ fn lower_copy_bytes(f: &LowerFunction, to: LIRValueID, to_offset: Int, from: LIR
 // Zeroes the storage of a moved-out value: every owned handle or box in it
 // reads as null, which glue skips.
 fn lower_clear_at(p: MIRProgram, f: &LowerFunction, base: LIRValueID, offset: Int, ty: MIRType) Never! {
-    if lower_is_inline(p, ty) {
-        size :: lower_size(p, ty).size
+    repr :: lower_repr_of(p, &f, ty)
+    if repr == .Inline(_) {
+        size :: lower_size_of(p, &f, ty).size
         zero :: lower_const(&f, 0)
         at := 0
         loop at < size {
@@ -334,7 +340,7 @@ fn lower_clear_at(p: MIRProgram, f: &LowerFunction, base: LIRValueID, offset: In
         }
         return
     }
-    layout :: lower_repr_layout(lower_repr(p, ty)) ?? return
+    layout :: lower_repr_layout(repr) ?? return
     empty :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
     lower_emit(&f, LIRInst.Const{dst: empty, value: 0})
     lower_write_at(p, &f, base, offset, empty, ty)
@@ -342,7 +348,7 @@ fn lower_clear_at(p: MIRProgram, f: &LowerFunction, base: LIRValueID, offset: In
 
 // Frame storage of its own for one inline aggregate of `ty`, defining `dst`.
 fn lower_storage_into(p: MIRProgram, f: &LowerFunction, dst: LIRValueID, ty: MIRType) Never! {
-    size :: lower_size(p, ty).size
+    size :: lower_size_of(p, &f, ty).size
     lower_emit(&f, LIRInst.StackSlot{dst: dst, size: if size < 8 -> 8 else -> size, align: 8})
 }
 

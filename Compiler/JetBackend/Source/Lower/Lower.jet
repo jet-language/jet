@@ -235,8 +235,9 @@ struct LowerModule {
     // Type identity key -> whether the type reaches a Close owner
     // (PartialDrop.jet lower_partial_frame), once per module.
     contains_close: [String:Bool]{[String:Bool]{}}
-    // lower_repr_key -> lower_repr of that type (Lower.jet lower_repr_at), once per module.
-    repr_cache: [String:LowerRepr]{[String:LowerRepr]{}}
+    // The type cache (lower_repr_of), lent to the function being lowered:
+    // one row, or none while a function holds it.
+    types: [LowerTypeCache]{[LowerTypeCache]{LowerTypeCache{reprs: [String:LowerRepr]{}, sizes: [String:LowerSize]{}, members: [String:[LowerMember]]{}, drops: [String:Bool]{}}}}
     // lower_repr_key -> one lazy descriptor level's type facts (LazyIter.jet
     // lower_lazy_meta_facts), once per module.
     lazy_meta_facts: [String:LowerLazyMetaFacts]{[String:LowerLazyMetaFacts]{}}
@@ -392,6 +393,8 @@ struct LowerFunction {
     // Whether lower_emit and lower_seal record consumption: off while lowering
     // terminators (an edge's own arguments) and the releases themselves.
     track_consumes: Bool
+    // The module's type cache while this function is lowered (lower_lend_types).
+    types: [LowerTypeCache]
 }
 
 // Lowers the functions `entry` reaches (Mono.jet: generic functions and
@@ -1161,15 +1164,86 @@ fn lower_repr_key_layout(layout: MIRLayout) -> String Never! {
     "{lower_repr_key_scalar(layout)},{lower_repr_key_size(layout.size)}{lower_repr_key_size(layout.align)}"
 }
 
-// lower_repr through the module's cache. lower_repr is a pure function of
-// the program and the type (no other input reaches it), and the program is
-// fixed for the module, so the cached answer is the one it would compute.
-fn lower_repr_at(p: MIRProgram, m: &LowerModule, ty: MIRType) -> LowerRepr Never! {
+// The module's per-type answers, by lower_repr_key: lower_repr, lower_size,
+// lower_inline_members and lower_needs_drop. Each is a pure function of the
+// program, the module's Close index (fixed when the module is made) and the
+// type, so a cached answer is the one it would compute: the cache changes no
+// output and is never invalidated. The module holds it (LowerModule.types)
+// and lends it to the function being lowered (lower_function), so the value
+// helpers that see only the function reach it.
+struct LowerTypeCache {
+    reprs: [String:LowerRepr]
+    sizes: [String:LowerSize]
+    members: [String:[LowerMember]]
+    drops: [String:Bool]
+}
+
+fn lower_type_cache() -> LowerTypeCache Never! {
+    LowerTypeCache{reprs: [String:LowerRepr]{}, sizes: [String:LowerSize]{}, members: [String:[LowerMember]]{}, drops: [String:Bool]{}}
+}
+
+// Moves the module's type cache into `f` for the length of its lowering.
+fn lower_lend_types(m: &LowerModule, f: &LowerFunction) Never! {
+    cache := &m.types.pop() ?? lower_type_cache()
+    &f.types.push(^cache)
+}
+
+// Moves the type cache `f` borrowed back into the module.
+fn lower_return_types(m: &LowerModule, f: &LowerFunction) Never! {
+    cache := &f.types.pop() ?? return
+    if m.types.len() == 0 -> &m.types.push(^cache)
+}
+
+// lower_repr through the type cache `f` holds (lower_repr itself when it
+// holds none).
+fn lower_repr_of(p: MIRProgram, f: &LowerFunction, ty: MIRType) -> LowerRepr Never! {
+    if f.types.len() == 0 -> return lower_repr(p, ty)
     key :: lower_repr_key(ty) ?? return lower_repr(p, ty)
-    if m.repr_cache.get(key) == .Val(known) -> return known
+    if f.types[0].reprs.get(key) == .Val(known) -> return known
     repr :: lower_repr(p, ty)
-    &m.repr_cache.add(key, repr.copy()).drop("checked absent above")
+    &f.types[0].reprs.add(key, repr.copy()).drop("checked absent above")
     repr
+}
+
+// lower_size through the type cache `f` holds; nested member types share it.
+fn lower_size_of(p: MIRProgram, f: &LowerFunction, ty: MIRType) -> LowerSize Never! {
+    if f.types.len() == 0 -> return lower_size(p, ty)
+    lower_size_in(p, ty, &f.types[0].sizes)
+}
+
+// lower_is_inline through the type cache `f` holds.
+fn lower_inline_of(p: MIRProgram, f: &LowerFunction, ty: MIRType) -> Bool Never! {
+    lower_repr_of(p, &f, ty) == .Inline(_)
+}
+
+// lower_inline_members through the type cache `f` holds.
+fn lower_inline_members_of(p: MIRProgram, f: &LowerFunction, ty: MIRType) -> [LowerMember] Never! {
+    if f.types.len() == 0 -> return lower_inline_members(p, ty)
+    key :: lower_repr_key(ty) ?? return lower_inline_members(p, ty)
+    if f.types[0].members.get(key) == .Val(known) -> return known
+    members :: lower_inline_members(p, ty)
+    &f.types[0].members.add(key, members.copy()).drop("checked absent above")
+    members
+}
+
+// lower_struct_field through the type cache `f` holds.
+fn lower_struct_field_of(p: MIRProgram, f: &LowerFunction, ty: MIRType, field: MIRFieldID) -> LowerFieldInfo? {
+    if lower_repr_of(p, &f, ty) == .Inline(aggregate) {
+        loop member in lower_inline_members_of(p, &f, aggregate) {
+            if member.id == field -> return Val(LowerFieldInfo{offset: member.offset, ty: member.ty, boxed: member.boxed})
+        }
+    }
+    None
+}
+
+// lower_needs_drop through the type cache `f` holds.
+fn lower_needs_drop_of(p: MIRProgram, m: LowerModule, f: &LowerFunction, ty: MIRType) -> Bool Never! {
+    if f.types.len() == 0 -> return lower_needs_drop(p, m, ty)
+    key :: lower_repr_key(ty) ?? return lower_needs_drop(p, m, ty)
+    if f.types[0].drops.get(key) == .Val(known) -> return known
+    needs :: lower_needs_drop(p, m, ty)
+    &f.types[0].drops.add(key, needs).drop("checked absent above")
+    needs
 }
 
 fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
@@ -1634,7 +1708,7 @@ fn lower_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
         lower_fail(&m, &f, "MIR value {result.value} has no checked type")
         return None
     }
-    repr :: lower_repr_at(p, &m, ty)
+    repr :: lower_repr_of(p, &f, ty)
     if repr == .Absent {
         lower_define_absent(&f, result)
         return None
@@ -1790,6 +1864,7 @@ fn lower_new_function(id: LIRFunctionID, name: String, signature: LIRSignatureID
         releasable_lir: [Int:Bool]{},
         consumed: [Int:Bool]{},
         track_consumes: true,
+        types: [LowerTypeCache]{},
     }
 }
 
@@ -1885,10 +1960,17 @@ fn lower_function(p: MIRProgram, m: &LowerModule, function: MIRFunction, id: LIR
         lower_seal(&f, LIRTerminator.Return{value: Val(output)})
         return lir_builder_finish(f.builder)
     }
-    c :: lower_context(p, &m, &f, function) ?? return lir_builder_finish(f.builder)
+    // The body lowers with the module's type cache lent to it.
+    lower_lend_types(&m, &f)
+    lower_function_lent(p, &m, &f, function)
+    lower_return_types(&m, &f)
+    lir_builder_finish(f.builder)
+}
+
+fn lower_function_lent(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MIRFunction) Never! {
+    c :: lower_context(p, &m, &f, function) ?? return
     lower_debug_function(p, c, &m, &f)
     lower_function_body(p, c, &m, &f)
-    lir_builder_finish(f.builder)
 }
 
 // The function's read-only facts: values, blocks, slots, block order and LIR
@@ -1984,7 +2066,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
                 }
                 .Static(_) -> {}
             }
-            repr :: lower_repr_at(p, &m, ty)
+            repr :: lower_repr_of(p, &f, ty)
             if repr == .Unsupported(reason) {
                 lower_fail(&m, &f, "local of {reason} is not lowered at O0 yet")
                 return None
@@ -3042,7 +3124,7 @@ fn lower_function_body(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
 fn lower_frame_storage(p: MIRProgram, c: LowerContext, f: &LowerFunction) Never! {
     storage := [LIRValueID?]{}
     loop row in c.slots {
-        if row.carried && row.write_param < 0 && lower_is_inline(p, row.ty) {
+        if row.carried && row.write_param < 0 && lower_inline_of(p, &f, row.ty) {
             &storage.push(Val(lower_new_storage(p, &f, row.ty)))
         } else {
             &storage.push(None)
@@ -3054,7 +3136,7 @@ fn lower_frame_storage(p: MIRProgram, c: LowerContext, f: &LowerFunction) Never!
             if !lower_is_phi(instruction) -> next
             result :: instruction.result ?? next
             ty :: lower_checked_type(c, instruction) ?? next
-            if !lower_is_inline(p, ty) -> next
+            if !lower_inline_of(p, &f, ty) -> next
             held :: lower_new_storage(p, &f, ty)
             _ := &f.phi_storage.add(result.value, held.value)
         }
@@ -3086,7 +3168,7 @@ fn lower_move_root(c: LowerContext, value: MIRValueID) -> MIRValueID Never! {
 // definite assignment and drop-live flags guarantee the placeholder is never
 // read as a live value.
 fn lower_clear_slot(p: MIRProgram, c: LowerContext, f: &LowerFunction, slot: Int) Never! {
-    layout :: lower_repr_layout(lower_repr(p, c.slots[slot].ty)) ?? return lower_set_slot(&f, slot, None)
+    layout :: lower_repr_layout(lower_repr_of(p, &f, c.slots[slot].ty)) ?? return lower_set_slot(&f, slot, None)
     placeholder :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
     lower_emit(&f, LIRInst.Const{dst: placeholder, value: 0})
     lower_set_slot(&f, slot, Val(placeholder))
@@ -3115,7 +3197,7 @@ fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
     if !function_entry {
         loop slot in c.live[position] {
             row :: c.slots[slot]
-            repr :: lower_repr_at(p, &m, row.ty)
+            repr :: lower_repr_of(p, &f, row.ty)
             layout :: lower_repr_layout(repr) ?? next
             drop :: lower_drop(&m, repr, lower_is_owned(row.ownership))
             param :: lower_new_value(&f, layout, drop, row.ty.identity)
@@ -4145,7 +4227,7 @@ fn lower_copy(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
             }
         }
     }
-    repr :: lower_repr_at(p, &m, ty)
+    repr :: lower_repr_of(p, &f, ty)
     if repr == {
         .ExactInt | .Handle(_, _) | .Boxed(_) -> { if !lower_value_owned(c, instruction.result ?? value) -> return lower_alias(c, &f, instruction, source) }
         // Dropless inline by-value copies still snapshot their bytes.
@@ -4219,8 +4301,8 @@ fn lower_drop_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 // places are read from memory like projections (Closures.jet).
 fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, place: MIRPlaceID, moving: Bool) Never! {
     row :: lower_place_row(c.mir, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
-    if lower_repr(p, row.ty) == .Absent -> return lower_alias_absent(&f, instruction)
-    inline :: lower_is_inline(p, row.ty)
+    if lower_repr_of(p, &f, row.ty) == .Absent -> return lower_alias_absent(&f, instruction)
+    inline :: lower_inline_of(p, &f, row.ty)
     if moving && row.projections.len() > 0 && !lower_projected_move_supported(&m, &f, row.projections) -> return
     walk := LowerFieldAddress{base: LIRValueID{value: -1}, offset: 0}
     if row.base == .Static(name) {
@@ -4254,7 +4336,7 @@ fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         // owner's glue here was dropped twice: once at its last use, once
         // with the owner (MIRRust.rs place_read clones instead).
         ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "MIR value read from place {place.value} has no checked type")
-        repr :: lower_repr_at(p, &m, ty)
+        repr :: lower_repr_of(p, &f, ty)
         if repr == .Unsupported(reason) -> return lower_fail(&m, &f, "{reason} is not lowered at O0 yet")
         layout :: lower_repr_layout(repr) ?? return
         borrowed :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
@@ -4263,10 +4345,11 @@ fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     }
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     if moving && inline {
+        size :: lower_size_of(p, &f, row.ty).size
         lower_storage_into(p, &f, dst, row.ty)
-        lower_copy_bytes(&f, dst, 0, walk.base, walk.offset, lower_size(p, row.ty).size)
+        lower_copy_bytes(&f, dst, 0, walk.base, walk.offset, size)
     } else if !moving {
-        layout :: lower_repr_layout(lower_repr(p, row.ty)) ?? return
+        layout :: lower_repr_layout(lower_repr_of(p, &f, row.ty)) ?? return
         held :: lower_new_value(&f, layout, LIRDrop.Trivial, row.ty.identity)
         lower_read_into(p, &f, held, walk.base, walk.offset, row.ty)
         lower_clone_into(p, &m, &f, held, dst, row.ty)
@@ -4459,7 +4542,7 @@ fn lower_field(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
     aggregate :: lower_use(&m, &f, base) ?? return
     ty :: lower_value_type(c, base) ?? return lower_fail(&m, &f, "field base {base.value} has no checked type")
     if lower_native_err_type(p, ty) -> return lower_native_err_field(p, c, &m, &f, instruction, base, aggregate, ty, field)
-    found :: lower_struct_field(p, ty, field) ?? {
+    found :: lower_struct_field_of(p, &f, ty, field) ?? {
         // A field read in place inside a runtime handle (Places.jet).
         place :: lower_handle_field_place(p, &m, &f, aggregate, ty, field) ?? return lower_fail(&m, &f, "field {field.value} is not a field of {mir_type_display_name(ty)}")
         if c.fact_index.get(lower_move_root(c, base).value) == .Val(index) {
@@ -4559,18 +4642,19 @@ fn lower_read_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     if !moved && instruction.result == .Val(taken) {
         if c.payload_takes.get(taken.value) != None && lower_value_owned(c, owner) -> moved = true
     }
-    owned_result :: if instruction.result == .Val(value) -> lower_value_owned(c, value) && lower_needs_drop(p, m, ty) else -> false
+    owned_result :: if instruction.result == .Val(value) -> lower_value_owned(c, value) && lower_needs_drop_of(p, m, &f, ty) else -> false
     if !moved && owned_result {
-        layout :: lower_repr_layout(lower_repr(p, ty)) ?? return
+        layout :: lower_repr_layout(lower_repr_of(p, &f, ty)) ?? return
         held :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
         lower_read_into(p, &f, held, base, offset, ty)
         return lower_clone_into(p, &m, &f, held, dst, ty)
     }
     result :: instruction.result ?? return
     if moved && lower_value_owned(c, result) {
-        if lower_is_inline(p, ty) {
+        if lower_inline_of(p, &f, ty) {
+            size :: lower_size_of(p, &f, ty).size
             lower_storage_into(p, &f, dst, ty)
-            lower_copy_bytes(&f, dst, 0, base, offset, lower_size(p, ty).size)
+            lower_copy_bytes(&f, dst, 0, base, offset, size)
         } else {
             lower_read_into(p, &f, dst, base, offset, ty)
         }
