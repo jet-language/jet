@@ -365,10 +365,12 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, sources: JetCLIFore
     // it would copy the whole program for the length of the native route.
     // Only a program with a Rust foreign helper owns an attached copy.
     if result.mir == .Val(program) {
-        realized :: jet_cli_rust_foreign_realize(result.rust_foreign, program) ?? return Val(JetCLINativeFailure.RustForeign{error: err})
-        if realized == .Val(artifact) {
-            attached :: jet_cli_rust_foreign_attach(artifact.plan, artifact.target_dir, artifact.release, program.copy()) ?? return Val(JetCLINativeFailure.RustForeign{error: err})
-            return jet_cli_native_program_executable(result, attached, sources, release, runtime_dir, object_path, executable_path, keep_going, &census)
+        realized := jet_cli_rust_foreign_realize(result.rust_foreign, program)
+        if realized == .Err(error) -> return Val(JetCLINativeFailure.RustForeign{error: error})
+        if realized == .Ok(.Val(artifact)) {
+            attached := jet_cli_rust_foreign_attach(artifact.plan, artifact.target_dir, artifact.release, program.copy())
+            if attached == .Err(error) -> return Val(JetCLINativeFailure.RustForeign{error: error})
+            if attached == .Ok(helper_program) -> return jet_cli_native_program_executable(result, helper_program, sources, release, runtime_dir, object_path, executable_path, keep_going, &census)
         }
         return jet_cli_native_program_executable(result, program, sources, release, runtime_dir, object_path, executable_path, keep_going, &census)
     }
