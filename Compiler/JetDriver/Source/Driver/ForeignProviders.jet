@@ -410,13 +410,15 @@ fn jet_driver_foreign_collect_items(items: [Item], root_index: Int, module_index
 
 fn jet_driver_foreign_collect_requests(load: &JetDriverLoadResult, requests: &[JetDriverForeignRequest], overlays: &[JetDriverForeignSurface], diagnostics: &[Diagnostic]) {
     loop module_index in 0..<load.modules.len() {
-        loaded_module :: load.modules[module_index]
-        if loaded_module.source_unit_index < 0 || loaded_module.source_unit_index >= load.source_units.len() -> next
-        unit :: load.source_units[loaded_module.source_unit_index]
-        root_index :: unit.root_index
+        // Read through the index: a local binding of the module would copy
+        // its whole parsed program.
+        unit_index :: load.modules[module_index].source_unit_index
+        if unit_index < 0 || unit_index >= load.source_units.len() -> next
+        root_index :: load.source_units[unit_index].root_index
+        unit_path :: load.source_units[unit_index].path
         scope :: ""
-        jet_driver_foreign_collect_imports(loaded_module.program.imports, root_index, module_index, scope, unit.path, &requests, &diagnostics)
-        jet_driver_foreign_collect_items(loaded_module.program.items, root_index, module_index, scope, unit.path, &requests, &overlays, &diagnostics)
+        jet_driver_foreign_collect_imports(load.modules[module_index].program.imports, root_index, module_index, scope, unit_path, &requests, &diagnostics)
+        jet_driver_foreign_collect_items(load.modules[module_index].program.items, root_index, module_index, scope, unit_path, &requests, &overlays, &diagnostics)
     }
 }
 
