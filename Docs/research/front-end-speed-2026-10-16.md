@@ -82,7 +82,9 @@ roughly 40 MB/s, so a 50–80× gap remains.
 
 ## What changed
 
-1. **Parser: interpolations borrow the source text** (`JetParser`). The
+1. **Parser: interpolations borrow the source text** (`JetParser`). This
+   landed on dev as 704578171/ce65d90a7. On the rebase onto c2704c81f,
+   perf-next dropped its own equivalent commit (e6464902d). The
    parser state's `source` is now one lent row (`[[U8]]`), like `tables`.
    `parser_lend_source` and `parser_return_source` move the row into an
    interpolation's nested state and back, so the text is never copied. All

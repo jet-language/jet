@@ -118,3 +118,86 @@ and 60.8% of samples sit in one spin loop. The waves therefore need the
 arena allocator, which is on perf-next. Gains flatten past 8 threads, and
 the remaining limit is the allocator (stack-band arenas). Per-thread free
 lists are the next runtime item.
+
+## Measured: where a native build spends its time (2026-10-16)
+
+Two perf profiles (`perf record --call-graph fp`, 499 Hz), both of native O0
+code with symbols:
+
+- **Whole compiler.** The p26 native stage-1 compiler (`jet.o` relinked with
+  symbols against the p26 runtime pack) runs `jet build` on
+  `archive_hostile/main.jet` (11.6 KB plus Core). It takes 12.4 s and peaks
+  at 4.0 GB RSS, over 5,150 samples.
+- **Backend only.** The MemSafety fixed-backend harness (f2 factory build,
+  relinked against the f2 runtime pack) lowers the 26 MB `o9m.mird` MIR
+  dump in 5.5 s, over 2,765 samples. It spends 32% of that decoding the
+  dump.
+
+| Share of the whole-compiler build (inclusive) | Site |
+|---|---|
+| 22.8% | `lir_lint_module`. It runs twice on the same O0 LIR: once at the end of `lower_selected`, serially, and again inside `x64_compile_module`. `lir_lint_dominators` alone accounts for 18.3%. |
+| 17.0% | MIR→LIR lowering (`lower_function`). Of this, `lower_repr`/`lower_size` recomputation is 12.3% (the harness agrees at 9.2%), and `lower_runtime_handle` is 8%, which 43b2963b1 has since fixed. |
+| ~6% | x64 selection and register allocation, without lint. |
+| 10.1% | `sema_finalize_graph` |
+| 9.7% | Codegen TIR→MIR. `jet_codegen_move_last_uses` is the largest self cost; type lowering and qualification (`jet_codegen_lower_type_with_modules`, `jet_codegen_find_source_nominal_identity`) take 8%. |
+| 8.6% | Cloning the `CoreModuleExportNames` constant per call (`core_type_modules`). Re-measure after #5001. |
+| 7.5% | MIR optimize |
+| 3.3% + 3.0% | The SHA-256 target dossier identity and the `mir_program_digest` written per build |
+| 5.4% | `jet_loop_range_*`: an `Int` range loop calls the runtime on every iteration. Most of these calls come from the lint's dominator loops. |
+
+The codegen `Builder.jet` scans named in the brief (the `builder.values`
+walk in `jet_codegen_exit_value_slot`, the `jet_codegen_phi_ownership`
+walk, `pending_exits` and `exit_value_slots`) do not appear above 0.5% in
+either profile. Walks over a read parameter's list run in place
+(`jet_codegen_lower_read_list_walk`), so they copy nothing; they are
+linear, but they are not the bottleneck. The string-built identities
+(`jet_codegen_identity` + `stable_id`) appear only inside the 4.1% of
+`jet_codegen_emit`.
+
+### Ranked next improvements
+
+1. **LIR lint dominance (estimated 15–18% of a native build, byte-identical).**
+   - Replace the dense `[[Bool]]` fixpoint, which costs O(blocks² ×
+     iterations) and makes a runtime range call per element, with
+     Cooper–Harvey–Kennedy immediate dominators and dominator-tree
+     entry/exit numbers. A dominance query then becomes two comparisons.
+   - Index each value's consume sites, replacing the O(uses × consumes)
+     scan.
+   - Resolve block IDs through one first-row map, replacing the per-edge
+     `lir_block_index` scans and the O(blocks²) duplicate-ID check.
+
+   The lint keeps its own dominance code, separate from
+   `Opt/Facts.jet opt_dominators`, because it referees optimized LIR. The
+   change is prepared and parses (`/mnt/jetscratch/discovery/perfnext/lint-dominance.patch`,
+   not landed). It still needs two proofs: the harness before/after timing
+   (`perfnext/hx.sh`), and a differential test of the old and new lint over
+   mutated LIR to show the findings are identical (`perfnext/oldlint.jet` is
+   the renamed old lint for that test).
+2. **Lint once at O0 (estimated half of the remaining lint time).**
+   `x64_compile_module` re-lints the exact module `lower_selected` already
+   linted clean. Skip the second lint only when the caller passes that clean
+   result, so output stays identical.
+3. **Cache `lower_repr`/`lower_size` (estimated 9–12%).** Most callers go
+   to `lower_repr(p, ty)` directly instead of through the per-module
+   `lower_repr_at` cache, and the size computation walks inline members
+   again (`lower_inline_size_in`, `clone.MIRType`).
+4. **Parallel MIR→LIR lowering (estimated 17% of the build, divided by the
+   thread count).** Follow the plan under *Stages*. It is a large change:
+   the per-worker interning of signatures, data, glue, debug and static
+   trees, and the merge remap, must be byte-identical.
+5. **Inline `Int` range loops in codegen (estimated ≥5% across the whole
+   compiler).** Lower `loop i in a..<b` like the read-list walk, with an
+   inline compare and increment and no `jet_loop_range_*` calls. This
+   changes the MIR the compiler emits, but not program behavior.
+6. **Per-build identity hashing (≈6%).** Compute the target dossier SHA-256
+   and the MIR program digest once per process, or derive them from
+   inputs that are already hashed.
+7. **Codegen `Builder.jet` scans (<1% each, measured).**
+   - Look up `jet_codegen_phi_ownership` and `jet_codegen_exit_value_slot`
+     through `value_positions`.
+   - Stop `jet_codegen_emit_cleanup_suffix` from copying every cleanup
+     frame per action.
+   - Stream `stable_id` over the identity parts instead of formatting the
+     string.
+
+   These rank last on current data.
