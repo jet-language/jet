@@ -372,14 +372,13 @@ fn jet_cli_native_executable(result: &JetDriverCompileResult, sources: JetCLIFor
     // the native route. Only a program with a Rust foreign helper owns an
     // attached copy.
     entry_function :: result.entry_function
-    trace_sink :: result.trace_sink
     rust_foreign :: result.rust_foreign
     if &result.mir == {
         None -> {}
         .Val(program) -> {
             attached := jet_cli_rust_foreign_attached(rust_foreign, program) ?? return Val(JetCLINativeFailure.RustForeign{error: err})
-            if attached.len() == 1 -> return jet_cli_native_program_executable(entry_function, trace_sink, &attached[0], sources, release, runtime_dir, object_path, executable_path, keep_going, &census)
-            return jet_cli_native_program_executable(entry_function, trace_sink, &program, sources, release, runtime_dir, object_path, executable_path, keep_going, &census)
+            if attached.len() == 1 -> return jet_cli_native_program_executable(entry_function, result.trace_sink, &attached[0], sources, release, runtime_dir, object_path, executable_path, keep_going, &census)
+            return jet_cli_native_program_executable(entry_function, result.trace_sink, &program, sources, release, runtime_dir, object_path, executable_path, keep_going, &census)
         }
     }
     Val(JetCLINativeFailure.NoEntry)
