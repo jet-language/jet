@@ -306,15 +306,16 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
             required = sema_collection_method_argument_type(contract, index, seed, true) ?? required
         }
         &required_types.push(required)
-        // The parser stores `&xs.push(^x.f)`'s move mark on the CallArg. A
-        // marked field read keeps it as the exact-place move an ordinary
-        // consuming argument gets (Calls/Checking.jet), so the stored value
-        // moves out of its owner instead of materializing a copy (the Rust
-        // reference's `finish_builtin_method`). A field of a borrowed
-        // parameter has no storage to give up and keeps its copy.
-        taken_field := updated_args[index].convention == AccessConvention.Move && updated_args[index].expr == .Field(_, _, _)
-        if taken_field && sema_ownership_binding_for_expr(&state, updated_args[index].expr, scopes) == .Val(root) -> taken_field = !sema_ownership_binding_is_borrowed_param(root)
-        stored :: if taken_field -> sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span) else -> value
+        // The parser stores `&xs.push(^x)`'s and `&xs.push(^x.f)`'s move
+        // mark on the CallArg. A marked name or field read keeps it as the
+        // exact-place move an ordinary consuming argument gets
+        // (Calls/Checking.jet), so the stored value moves out of its owner
+        // instead of materializing a copy (the Rust reference's
+        // `finish_builtin_method`). A borrowed parameter or its field has no
+        // storage to give up and keeps its copy.
+        taken_place := updated_args[index].convention == AccessConvention.Move && sema_call_marked_move_place(updated_args[index].expr, value)
+        if taken_place && sema_ownership_binding_for_expr(&state, updated_args[index].expr, scopes) == .Val(root) -> taken_place = !sema_ownership_binding_is_borrowed_param(root)
+        stored :: if taken_place -> sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span) else -> value
         &typed.push(stored)
     }
 

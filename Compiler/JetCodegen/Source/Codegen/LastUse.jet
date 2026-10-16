@@ -1,8 +1,9 @@
 // D-MEM-COPYSEM1 (#3714): last uses move (tir_to_mir_last_use.rs).
 //
 // Lowering reads an owned local or one of its fields with ReadPlace, which
-// every backend materializes as a copy, and a sema-checked `^x` or
-// `^x.field` reaches lowering as that same bare read. When the read's value
+// every backend materializes as a copy; an unmarked owning use reaches
+// lowering as that bare read (a `^`-marked one arrives as a TIR Move and is
+// lowered as MovePlace directly, never left to this pass). When the read's value
 // is consumed (stored, returned, wrapped, or passed to an owning parameter)
 // and no later code can observe the place, the copy and the value are
 // indistinguishable, so the read becomes MovePlace. A whole local's drop
