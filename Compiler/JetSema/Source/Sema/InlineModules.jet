@@ -1317,13 +1317,7 @@ fn sema_program_with_items(program: Program, items: ^[Item]) -> Program Never! {
 // Lowers `program`'s inline modules in place; a program without one is left
 // untouched (not copied).
 fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) -> SemaInlinePreparedBindings {
-    has_module := false
-    loop item in program.items {
-        if item == .CodeModule(definition) {
-            if definition.body != None -> has_module = true
-        }
-    }
-    if !has_module -> return SemaInlinePreparedBindings{imports: [String:SemaInlineFunctionBinding]{}, modules: [SemaInlineModuleSurface]{}}
+    if !sema_inline_modules_any_body(program.items) -> return SemaInlinePreparedBindings{imports: [String:SemaInlineFunctionBinding]{}, modules: [SemaInlineModuleSurface]{}}
 
     // 1. Member types, in item order, then the enclosing file's qualified names.
     hoist := SemaInlineHoist{declarations: [Item]{}, exported: [String:Type]{}, has_exported: false}
@@ -1413,10 +1407,21 @@ fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) -> S
     calls.modules = ^surfaces
     rewritten := [Item]{}
     loop item in lowered_items -> &rewritten.push(sema_inline_rewrite_item(&calls, item))
-    program.items = rewritten
+    program.items = ^rewritten
     program.imports = imports
     loop diagnostic in calls.diagnostics -> &diagnostics.push(diagnostic)
     SemaInlinePreparedBindings{imports: ^calls.imported, modules: ^calls.modules}
+}
+
+// Whether `items` declares an inline module with a body; each item is read
+// in place.
+fn sema_inline_modules_any_body(items: [Item]) -> Bool Never! {
+    loop item in items {
+        if item == .CodeModule(definition) {
+            if definition.body != None -> return true
+        }
+    }
+    false
 }
 
 #Test("private inline member types resolve in the enclosing file without becoming public") {

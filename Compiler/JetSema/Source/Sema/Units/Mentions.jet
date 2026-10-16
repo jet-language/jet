@@ -69,7 +69,7 @@ fn sema_units_source_mentions(source: String) -> SemaUnitSourceMentions Never! {
     sorted := [SemaUnitSuffixMention]{}
     loop (_, row) in suffixes -> &sorted.push(row)
     &sorted.sort_by((left: SemaUnitSuffixMention, right: SemaUnitSuffixMention) -> left.text <=> right.text)
-    SemaUnitSourceMentions{identifiers: identifiers, unqualified: unqualified, suffixes: sorted}
+    SemaUnitSourceMentions{identifiers: ^identifiers, unqualified: ^unqualified, suffixes: ^sorted}
 }
 fn sema_units_identifier(mentions: SemaUnitSourceMentions, name: String) -> Bool Never! {
     mentions.identifiers.get(name) != None

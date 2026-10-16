@@ -194,59 +194,68 @@ fn sema_error_conversion_function(name: String, from_span: Span, to_ty: String, 
 // routine; a rejected one is removed so it never reaches lowering. `items` is
 // rewritten in place, and a list without a conversion is left untouched.
 fn sema_error_conversion_items(items: &[Item], diagnostics: &[Diagnostic]) {
-    has_conversion :: loop item in items {
-        if item == .ErrorConv(_) -> break true
+    has_conversion :: loop index in 0..<items.len() {
+        if items[index] == .ErrorConv(_) -> break true
     } ?? false
     if !has_conversion -> return
     local_types :: sema_error_conversion_local_types(items)
     edges := [SemaErrorConversionEdge]{}
     output := [Item]{}
-    loop item in items {
-        conversion := ErrorConvDef?{None}
-        if item == .ErrorConv(value) -> conversion = Val(value)
-        definition :: conversion ?? {
-            &output.push(item)
+    // Each item moves from `items` into `output`, in order; a conversion is
+    // replaced by its checked routine or dropped.
+    &items.reverse()
+    loop items.len() > 0 {
+        item := &items.pop() ?? break
+        if item == .ErrorConv(definition) {
+            routine := sema_error_conversion_routine(definition, local_types, &edges, &diagnostics) ?? next
+            &output.push(^routine)
             next
         }
-        from_ty :: definition.from_ty
-        to_ty :: definition.to_ty
-        span :: definition.from_span
-        from_local := false
-        to_local := false
-        loop name in local_types {
-            if name == from_ty -> from_local = true
-            if name == to_ty -> to_local = true
-        }
-        if to_ty != "Err" && !from_local && !to_local {
-            &diagnostics.push(sema_error("E2406", span, "can't declare `impl {from_ty} -> {to_ty}` — neither type is defined in this program", "typed-target error conversions obey the same orphan rule as trait impls (S28); only the default `Err` target may name a foreign source", "define one of these types locally, or convert the foreign source into `Err`"))
-            next
-        }
-        duplicate := false
-        loop edge in edges {
-            if edge.source == from_ty && edge.target == to_ty -> duplicate = true
-        }
-        if duplicate {
-            &diagnostics.push(sema_error("E2405", span, "duplicate error conversion: `impl {from_ty} -> {to_ty}` is already declared", "there can be at most one declared way to convert a `Source` error into a `Target`", "remove one of the two `impl … -> …` blocks"))
-            next
-        }
-        if from_ty == to_ty || sema_error_conversion_path_exists(edges, to_ty, from_ty) {
-            &diagnostics.push(sema_error("E2418", span, "Error conversion cycle: `impl {from_ty} -> {to_ty}` would make conversion loop", "Error conversions must form an acyclic route so a failure has one finite meaning.", "remove this edge or choose a target that is not already reachable back to the source."))
-            next
-        }
-        if sema_error_conversion_path_exists(edges, from_ty, to_ty) {
-            &diagnostics.push(sema_error("E2419", span, "Error conversion is ambiguous: `{from_ty}` already reaches `{to_ty}`", "A source and target may have one unique declared conversion route.", "remove the direct edge or remove one of the intermediate conversion edges."))
-            next
-        }
-        &edges.push(SemaErrorConversionEdge{source: from_ty, target: to_ty})
-        ambiguous :: sema_error_conversion_ambiguous_pair(edges)
-        if ambiguous == .Val(pair) {
-            _ := &edges.pop()
-            &diagnostics.push(sema_error("E2419", span, "Error conversion is ambiguous: `{pair.source}` already reaches `{pair.target}`", "A source and target may have one unique declared conversion route.", "remove the direct edge or remove one of the intermediate conversion edges."))
-            next
-        }
-        &output.push(Item.Func{value: sema_error_conversion_function(sema_failure_declared_conversion_name(sema_error_conversion_leaf(from_ty), sema_error_conversion_leaf(to_ty)), definition.from_span, to_ty, definition.to_span, Type.Named{name: from_ty}, definition.body, definition.body_span)})
+        &output.push(^item)
     }
-    items = output
+    items = ^output
+}
+
+// The checked routine of one declared conversion, or None when it is
+// rejected; an accepted conversion's route joins `edges`.
+fn sema_error_conversion_routine(definition: ErrorConvDef, local_types: [String], edges: &[SemaErrorConversionEdge], diagnostics: &[Diagnostic]) -> Item? {
+    from_ty :: definition.from_ty
+    to_ty :: definition.to_ty
+    span :: definition.from_span
+    from_local := false
+    to_local := false
+    loop name in local_types {
+        if name == from_ty -> from_local = true
+        if name == to_ty -> to_local = true
+    }
+    if to_ty != "Err" && !from_local && !to_local {
+        &diagnostics.push(sema_error("E2406", span, "can't declare `impl {from_ty} -> {to_ty}` — neither type is defined in this program", "typed-target error conversions obey the same orphan rule as trait impls (S28); only the default `Err` target may name a foreign source", "define one of these types locally, or convert the foreign source into `Err`"))
+        return None
+    }
+    duplicate := false
+    loop edge in edges {
+        if edge.source == from_ty && edge.target == to_ty -> duplicate = true
+    }
+    if duplicate {
+        &diagnostics.push(sema_error("E2405", span, "duplicate error conversion: `impl {from_ty} -> {to_ty}` is already declared", "there can be at most one declared way to convert a `Source` error into a `Target`", "remove one of the two `impl … -> …` blocks"))
+        return None
+    }
+    if from_ty == to_ty || sema_error_conversion_path_exists(edges, to_ty, from_ty) {
+        &diagnostics.push(sema_error("E2418", span, "Error conversion cycle: `impl {from_ty} -> {to_ty}` would make conversion loop", "Error conversions must form an acyclic route so a failure has one finite meaning.", "remove this edge or choose a target that is not already reachable back to the source."))
+        return None
+    }
+    if sema_error_conversion_path_exists(edges, from_ty, to_ty) {
+        &diagnostics.push(sema_error("E2419", span, "Error conversion is ambiguous: `{from_ty}` already reaches `{to_ty}`", "A source and target may have one unique declared conversion route.", "remove the direct edge or remove one of the intermediate conversion edges."))
+        return None
+    }
+    &edges.push(SemaErrorConversionEdge{source: from_ty, target: to_ty})
+    ambiguous :: sema_error_conversion_ambiguous_pair(edges)
+    if ambiguous == .Val(pair) {
+        _ := &edges.pop()
+        &diagnostics.push(sema_error("E2419", span, "Error conversion is ambiguous: `{pair.source}` already reaches `{pair.target}`", "A source and target may have one unique declared conversion route.", "remove the direct edge or remove one of the intermediate conversion edges."))
+        return None
+    }
+    Val(Item.Func{value: sema_error_conversion_function(sema_failure_declared_conversion_name(sema_error_conversion_leaf(from_ty), sema_error_conversion_leaf(to_ty)), definition.from_span, to_ty, definition.to_span, Type.Named{name: from_ty}, definition.body, definition.body_span)})
 }
 
 // D-FAIL-CONV2=A: the canonical Prelude conversion of one family member into

@@ -23,6 +23,7 @@ use jet_foundation.[
     Span,
     Stmt,
     StrMatchPart,
+    SwitchArm,
     TextEdit,
     TraitImplBlock,
     TraitMethodSig,
@@ -341,6 +342,14 @@ fn sema_casing_loop_label(label: NamedSpan?, diagnostics: &[Diagnostic]) {
     if label == .Val(value) -> sema_casing_snake(value.name, value.span, "loop label", &diagnostics)
 }
 
+// Each arm is read in place.
+fn sema_casing_switch_arms(arms: [SwitchArm], diagnostics: &[Diagnostic]) {
+    loop arm in arms {
+        sema_casing_expr(arm.cond, &diagnostics)
+        sema_casing_stmts(arm.body, &diagnostics)
+    }
+}
+
 fn sema_casing_stmts(statements: [Stmt], diagnostics: &[Diagnostic]) {
     loop statement in statements {
         if statement == {
@@ -391,10 +400,7 @@ fn sema_casing_stmts(statements: [Stmt], diagnostics: &[Diagnostic]) {
             }
             .Switch(subject, arms, else_body, _) | .ComptimeSwitch(subject, arms, else_body, _) -> {
                 sema_casing_expr(subject, &diagnostics)
-                loop arm in arms {
-                    sema_casing_expr(arm.cond, &diagnostics)
-                    sema_casing_stmts(arm.body, &diagnostics)
-                }
+                sema_casing_switch_arms(arms, &diagnostics)
                 if else_body == .Val(body) -> sema_casing_stmts(body, &diagnostics)
             }
             .CountedLoop(init, cond, step, body, _, _, label) -> {
