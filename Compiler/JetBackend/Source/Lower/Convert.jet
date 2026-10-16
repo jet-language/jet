@@ -254,13 +254,16 @@ fn lower_convert_u64_exact(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, 
     mask :: lower_const(&f, 9223372036854775807)
     low :: lower_word(&f)
     lower_emit(&f, LIRInst.Binary{dst: low, op: LIRBinaryOp.And, left: value, right: mask})
-    low_int :: lower_word(&f)
+    // jet_int_add borrows both halves: they are released after the sum.
+    low_int :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
     lower_call_runtime(&m, &f, "jet_int_owned_from_i64", [LIRValueID]{low}, Val(low_int))
-    half :: lower_word(&f)
+    half :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
     two_pow_63 :: lower_static_text(&m, &f, "9223372036854775808")
     lower_call_runtime(&m, &f, "jet_rt_int_from_static", two_pow_63, Val(half))
     large :: lower_word(&f)
     lower_call_runtime(&m, &f, "jet_int_add", [LIRValueID]{low_int, half}, Val(large))
+    lower_emit(&f, LIRInst.Drop{value: low_int})
+    lower_emit(&f, LIRInst.Drop{value: half})
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{large})})
     lower_start(&f, merge_block, [LIRValueID]{dst})
 }
