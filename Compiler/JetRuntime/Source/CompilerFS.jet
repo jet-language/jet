@@ -112,9 +112,19 @@ fn compiler_fs_bytes_take(bytes: I64, capacity: I64, length: I64, output: I64, l
     I64{1}
 }
 #Export(c) fn jet_files_write_bytes_os(path: I64, data: I64, length: I64, error: I64) -> I64 {
+    // O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC
+    compiler_fs_write_open(path, data, length, error, I64{524865})
+}
+#Export(c) fn jet_files_append_bytes_os(path: I64, data: I64, length: I64, error: I64) -> I64 {
+    // O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC
+    compiler_fs_write_open(path, data, length, error, I64{525377})
+}
+// Opens `path` with `flags` (mode 0666 before the umask) and writes all of
+// `data`; 1, or 0 with the IOError written through `error`.
+fn compiler_fs_write_open(path: I64, data: I64, length: I64, error: I64, flags: I64) -> I64 {
     if !compiler_fs_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
     name :: fd_c_path(path)
-    fd :: host_call(I64{2}, name, I64{524865}, I64{438})
+    fd :: host_call(I64{2}, name, flags, I64{438})
     fd_c_path_drop(name, path)
     if (fd < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, path, -fd, error)
     temporary :: RT_HOST_U8_STRIDE != I64{1} && length != I64{0}
