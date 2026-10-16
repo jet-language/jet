@@ -2213,7 +2213,7 @@ fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact
     count :: function.blocks.len()
     pinned := [U64:Bool]{}
     loop place in function.places {
-        if place.base == .Parameter(value) | .Capture(value) | .Temporary(value) -> _ := &pinned.add(value.value, true)
+        if place.base == .Parameter(value) | .Capture(value) -> _ := &pinned.add(value.value, true)
         loop projection in place.projections {
             if projection == .Index(_, index, _, _, _, _, _) -> _ := &pinned.add(index.value, true)
             if projection == .Range(range, _, _) -> _ := &pinned.add(range.value, true)
@@ -2221,23 +2221,28 @@ fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact
         }
     }
     bound_locals := [U64:Bool]{}
-    // Copy-value locals bound to an SSA value (lower_release_copy_local):
-    // local -> value, the values, and each of their root places -> value.
+    // Values read through a place of their own (lower_release_slot_places):
+    // copy-value locals bound to an SSA value (lower_release_copy_local),
+    // local -> value, and temporaries; each such place -> its value.
     copy_locals := [U64:MIRValueID]{}
-    copy_values := [U64:Bool]{}
+    slot_values := [U64:Bool]{}
     loop local in function.locals {
         if local.ssa_value == .Val(value) {
             _ := &bound_locals.add(local.id.value, true)
             if {
                 lower_release_copy_local(p, local.ownership, local.ty) -> {
                     _ := &copy_locals.add(local.id.value, value)
-                    _ := &copy_values.add(value.value, true)
+                    _ := &slot_values.add(value.value, true)
                 }
                 else -> _ := &pinned.add(value.value, true)
             }
         }
     }
-    copy_places := lower_release_copy_places(function, slots, place_slots, copy_locals, &pinned)
+    slot_places := lower_release_slot_places(function, slots, place_slots, copy_locals, &slot_values, &pinned)
+    projected_places := [U64:Bool]{}
+    loop place in function.places {
+        if place.projections.len() > 0 -> _ := &projected_places.add(place.id.value, true)
+    }
     reachable := [Bool]{}
     loop _ in function.blocks -> &reachable.push(false)
     loop position in order -> reachable[position] = true
@@ -2263,10 +2268,11 @@ fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact
                 kind :: lower_release_use_kind(p, m, function, fact_index, iter_takes, instruction, value, consumed)
                 lower_release_add_use(&uses, value, LowerReleaseUse{block: block, position: position, kind: kind})
             }
-            if copy_places.len() > 0 {
+            if slot_places.len() > 0 {
                 loop place in lower_instruction_places(instruction.operation) {
-                    value :: copy_places.get(place.value) ?? next
-                    kind :: lower_release_place_kind(function, fact_index, sunk, instruction)
+                    value :: slot_places.get(place.value) ?? next
+                    projected :: projected_places.get(place.value) != None
+                    kind :: lower_release_place_kind(function, fact_index, sunk, instruction, place, projected)
                     lower_release_add_use(&uses, value, LowerReleaseUse{block: block, position: position, kind: kind})
                 }
             }
@@ -2298,7 +2304,7 @@ fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact
             effective :: lower_release_effective_uses(function, uses, phi_edges, pinned, result, Val(result)) ?? next
             lower_release_schedule(&plan, function, successors, predecessors, phi_edges.get(result.value) ?? [Int]{}, effective, result, block, position)
             _ := &plan.candidates.add(result.value, true)
-            if copy_values.get(result.value) != None -> _ := &plan.bound.add(result.value, true)
+            if slot_values.get(result.value) != None -> _ := &plan.bound.add(result.value, true)
         }
     }
     lower_release_write_drops(&plan, p, function, fact_index, sunk, uses, phi_edges, pinned, bound_locals, reachable, successors, slots, place_slots, live)
@@ -2312,23 +2318,30 @@ fn lower_release_copy_local(p: MIRProgram, ownership: MIROwnership, ty: MIRType)
     ownership.mode == MIROwnershipMode.Copy && lower_is_owned(ownership) && lower_repr(p, ty) == .ExactInt
 }
 
-// Root places of the bound copy-value locals -> their value. A local with a
-// projected place, a cell (a closure or raw address may read it later) or a
-// stop diagnostic reading it keeps its value pinned.
-fn lower_release_copy_places(function: MIRFunction, slots: [LowerSlot], place_slots: [U64:Int], copy_locals: [U64:MIRValueID], pinned: &[U64:Bool]) -> [U64:MIRValueID] Never! {
+// The places a value is read through -> that value: the root places of the
+// bound copy-value locals, and every place of a temporary (whose value its
+// slot names, Lower.jet defined_slots). A local with a projected place, a
+// cell (a closure or raw address may read it later) or a stop diagnostic
+// reading it keeps its value pinned, as does a temporary in a cell.
+fn lower_release_slot_places(function: MIRFunction, slots: [LowerSlot], place_slots: [U64:Int], copy_locals: [U64:MIRValueID], slot_values: &[U64:Bool], pinned: &[U64:Bool]) -> [U64:MIRValueID] Never! {
     places := [U64:MIRValueID]{}
-    if copy_locals.len() == 0 -> return places
     loop place in function.places {
-        if place.base == .Local(local) {
-            value :: copy_locals.get(local.value) ?? next
-            slot :: place_slots.get(place.id.value) ?? -1
-            if place.projections.len() > 0 || slot < 0 || slots[slot].cell {
-                _ := &pinned.add(value.value, true)
-                next
-            }
-            _ := &places.add(place.id.value, value)
+        temporary :: place.base == .Temporary(_)
+        value := MIRValueID{value: U64.MAX}
+        if place.base == {
+            .Local(local) -> value = copy_locals.get(local.value) ?? next
+            .Temporary(read) -> value = read
+            else -> next
         }
+        slot :: place_slots.get(place.id.value) ?? -1
+        if (!temporary && place.projections.len() > 0) || slot < 0 || slots[slot].cell {
+            _ := &pinned.add(value.value, true)
+            next
+        }
+        if temporary -> _ := &slot_values.add(value.value, true)
+        _ := &places.add(place.id.value, value)
     }
+    if copy_locals.len() == 0 -> return places
     loop block in function.blocks {
         loop instruction in block.instructions {
             if instruction.operation == .Semantic(semantic) {
@@ -2343,18 +2356,33 @@ fn lower_release_copy_places(function: MIRFunction, slots: [LowerSlot], place_sl
     places
 }
 
-// How `instruction` uses a bound copy-value local's value through one of its
-// root places: a move takes it; a read whose owned result is stored,
-// returned or consumed clones it (Lower.jet lower_read_owns), any other read
-// names it; any other place use is not modelled.
-fn lower_release_place_kind(function: MIRFunction, fact_index: [U64:Int], sunk: [U64:Bool], instruction: MIRInstruction) -> Int Never! {
-    if instruction.operation == .MovePlace(_) -> return LOWER_RELEASE_CONSUME
+// How `instruction` uses a value through its place `place` (`projected`
+// when the place projects into it): a root move takes it; a read whose owned
+// result is stored, returned or consumed clones (Lower.jet lower_read_owns),
+// any other read or a read-only address names it or a part of it; a call
+// argument passed by the place with Read access borrows it for the call, as
+// the same value passed as an operand does (lower_release_result_kind); any
+// other place use (a write, a mutable address or argument, a partial move)
+// is not modelled.
+fn lower_release_place_kind(function: MIRFunction, fact_index: [U64:Int], sunk: [U64:Bool], instruction: MIRInstruction, place: MIRPlaceID, projected: Bool) -> Int Never! {
+    if instruction.operation == .MovePlace(_) -> return if projected -> LOWER_RELEASE_KEEP else -> LOWER_RELEASE_CONSUME
+    if instruction.operation == .AddressOf(_, access) -> return if access == MIRAccess.Read -> LOWER_RELEASE_ALIAS else -> LOWER_RELEASE_KEEP
     if instruction.operation == .ReadPlace(_) {
         result :: instruction.result ?? return LOWER_RELEASE_BORROW
         row :: fact_index.get(result.value) ?? return LOWER_RELEASE_KEEP
         if sunk.get(result.value) != None && lower_is_owned(function.values[row].ownership) -> return LOWER_RELEASE_BORROW
         return LOWER_RELEASE_ALIAS
     }
+    call_args := [MIRCallArg]{}
+    if instruction.operation == .Call(_, args, _) | .IndirectCall(_, args, _) -> call_args = args
+    if instruction.operation == .CoreCall(_, _, args, _, _, _) -> call_args = args
+    named := false
+    loop arg in call_args {
+        if arg.place != Val(place) -> next
+        if arg.access != MIRAccess.Read -> return LOWER_RELEASE_KEEP
+        named = true
+    }
+    if named -> return lower_release_result_kind(function, fact_index, instruction)
     LOWER_RELEASE_KEEP
 }
 
@@ -2612,7 +2640,8 @@ fn lower_release_takes(used: LowerReleaseUse?) -> Bool Never! {
 // Every such read must be used only later in its own block, and no write in
 // that block may fall between the read and its last use. A local an `uninit`
 // initializes is left alone (its unwritten rows hold no owners), and so is a
-// write a move out of the place may precede: a moved-out local holds a zero
+// write that may follow a move out of the place with no whole-root write
+// between them (lower_release_moved_entries): a moved-out local holds a zero
 // placeholder (lower_clear_slot), and a moved-out Write parameter's caller
 // storage still holds the moved bits.
 fn lower_release_write_drops(plan: &LowerReleasePlan, p: MIRProgram, function: MIRFunction, fact_index: [U64:Int], sunk: [U64:Bool], uses: [U64:[LowerReleaseUse]], phi_edges: [U64:[Int]], pinned: [U64:Bool], bound_locals: [U64:Bool], reachable: [Bool], successors: [[Int]], slots: [LowerSlot], place_slots: [U64:Int], live: [[Int]]) Never! {
@@ -2654,14 +2683,18 @@ fn lower_release_write_drops(plan: &LowerReleasePlan, p: MIRProgram, function: M
             }
         }
     }
-    reach := [Int:[Bool]]{}
+    moved_in := [Int:[Bool]]{}
     loop (block, row) in function.blocks {
         if !reachable[block] -> next
         loop (position, instruction) in row.instructions {
             if instruction.operation == .WritePlace(place, _) {
                 slot :: place_slots.get(place.value) ?? next
                 if eligible.get(slot) == None || lower_release_span_open(spans.get(slot) ?? [Int]{}, block, position) -> next
-                if lower_release_moved_before(&reach, successors, moves.get(slot) ?? [Int]{}, block, position) -> next
+                if moves.get(slot) != None {
+                    if moved_in.get(slot) == None -> _ := &moved_in.add(slot, lower_release_moved_entries(function, successors, place_slots, reachable, slot))
+                    entries :: moved_in.get(slot) ?? next
+                    if lower_release_moved_state(function, place_slots, slot, block, position, entries[block]) -> next
+                }
                 _ := &plan.write_drops.add(instruction.id.value, true)
             }
         }
@@ -2736,35 +2769,59 @@ fn lower_release_write_slot(row: LowerSlot, bound_locals: [U64:Bool]) -> Bool Ne
     false
 }
 
-// Whether a move out of a local (block, position pairs) can precede the
-// write at `position` of `block`.
-fn lower_release_moved_before(reach: &[Int:[Bool]], successors: [[Int]], moves: [Int], block: Int, position: Int) -> Bool Never! {
-    at := 0
-    loop at + 1 < moves.len() {
-        if moves[at] == block && moves[at + 1] < position -> return true
-        if lower_release_reaches(&reach, successors, moves[at], block) -> return true
-        at += 2
+// Whether `instruction` moves out of `slot` (1), writes its whole root (2),
+// or neither (0).
+fn lower_release_slot_event(function: MIRFunction, place_slots: [U64:Int], slot: Int, instruction: MIRInstruction) -> Int Never! {
+    if instruction.operation == .MovePlace(place) {
+        moved :: place_slots.get(place.value) ?? return 0
+        return if moved == slot -> 1 else -> 0
     }
-    false
+    if instruction.operation == .WritePlace(place, _) | .ReplacePlace(place, _) {
+        written :: place_slots.get(place.value) ?? return 0
+        if written != slot -> return 0
+        row :: lower_place_row(function, place) ?? return 0
+        if row.projections.len() == 0 -> return 2
+    }
+    0
 }
 
-// Whether block `target` is reachable from a successor of block `from`;
-// each `from` row is computed once.
-fn lower_release_reaches(reach: &[Int:[Bool]], successors: [[Int]], from: Int, target: Int) -> Bool Never! {
-    if reach.get(from) == .Val(known) -> return known[target]
-    row := [Bool]{}
-    loop _ in successors -> &row.push(false)
-    pending := successors[from].copy()
+// Whether a move out of `slot` may have left it moved-out just before
+// `position` of `block`, given the state on entry to the block: a move sets
+// it, a whole-root write (which owns a new value) clears it.
+fn lower_release_moved_state(function: MIRFunction, place_slots: [U64:Int], slot: Int, block: Int, position: Int, entry: Bool) -> Bool Never! {
+    moved := entry
+    loop (at, instruction) in function.blocks[block].instructions {
+        if at >= position -> break
+        event :: lower_release_slot_event(function, place_slots, slot, instruction)
+        if event == 1 -> moved = true
+        if event == 2 -> moved = false
+    }
+    moved
+}
+
+// Per block: whether `slot` may be moved-out on entry (a forward may-analysis
+// over lower_release_slot_event from a function entry that is not).
+fn lower_release_moved_entries(function: MIRFunction, successors: [[Int]], place_slots: [U64:Int], reachable: [Bool], slot: Int) -> [Bool] Never! {
+    count :: function.blocks.len()
+    entries := [Bool]{}
+    loop _ in 0..<count -> &entries.push(false)
+    pending := [Int]{}
+    loop block in 0..<count {
+        if reachable[block] -> &pending.push(block)
+    }
     cursor := 0
     loop cursor < pending.len() {
         block :: pending[cursor].copy()
         cursor += 1
-        if row[block] -> next
-        row[block] = true
-        loop successor in successors[block] -> &pending.push(successor)
+        out :: lower_release_moved_state(function, place_slots, slot, block, function.blocks[block].instructions.len(), entries[block])
+        if !out -> next
+        loop target in successors[block] {
+            if entries[target] -> next
+            entries[target] = true
+            &pending.push(target)
+        }
     }
-    _ := &reach.add(from, row)
-    row[target]
+    entries
 }
 
 // The last position in `block` at which the borrowed read `read` (at
@@ -3495,7 +3552,19 @@ fn lower_temp_release(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     if lower_is_absent(f, value) -> return
     index :: f.values.get(value.value) ?? return
     if f.consumed.get(index) != None -> return
-    if c.releases.bound.get(value.value) != None -> return lower_release_bound(p, c, &f, value, index)
+    if c.releases.bound.get(value.value) != None {
+        // An inline aggregate's LIR value is its storage pointer, whose drop
+        // is trivial: its fields are released by drop glue, which
+        // lower_drop_value runs (clearing the slot that names it first).
+        inline := false
+        if lower_value_type(c, value) == .Val(ty) -> inline = lower_is_inline(p, ty)
+        if !inline -> return lower_release_bound(p, c, &f, value, index)
+        tracking :: f.track_consumes
+        f.track_consumes = false
+        lower_drop_value(p, c, &m, &f, value)
+        f.track_consumes = tracking
+        return
+    }
     if lower_slot_of_value(c, value) != None -> return
     loop slot_value in f.current {
         if slot_value == .Val(holding) && holding.value == index -> return
