@@ -614,7 +614,7 @@ fn sema_union_member_open(ty: Type, generic_names: [String]) -> Bool Never! {
 // Checks one named callable's declared signature (E2417/E2422).
 fn sema_check_function_failure_contracts(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_names: [String], diagnostics: &[Diagnostic]) -> Bool {
     before :: diagnostics.len()
-    loop param in func.params -> sema_check_failure_contract_type(param.ty, param.ty_span, false, generic_names, environment, program, &diagnostics)
+    loop param_index in 0..<func.params.len() -> sema_check_failure_contract_type(func.params[param_index].ty, func.params[param_index].ty_span, false, generic_names, environment, program, &diagnostics)
     if func.return_type == .Val(return_type) -> sema_check_failure_contract_type(return_type, func.return_type_span ?? func.name_span, true, generic_names, environment, program, &diagnostics)
     diagnostics.len() == before
 }

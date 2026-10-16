@@ -77,18 +77,18 @@ fn sema_call_param_label(param: Param) -> String Never! {
 }
 
 fn sema_call_params_from_func(func: Func) -> [SemaCallParam] Never! {
-    params :: loop parameter in func.params -> {
-        effective_ty :: type_with_effective_fn_returns(parameter.ty)
-        parameter_ty :: if parameter.variadic -> Type.List{element: effective_ty} else -> effective_ty
+    params :: loop parameter_index in 0..<func.params.len() -> {
+        effective_ty :: type_with_effective_fn_returns(func.params[parameter_index].ty)
+        parameter_ty :: if func.params[parameter_index].variadic -> Type.List{element: effective_ty} else -> effective_ty
         SemaCallParam{
-            label: sema_call_param_label(parameter),
-            name: parameter.name,
-            zone: parameter.zone,
-            default: parameter.default,
+            label: sema_call_param_label(func.params[parameter_index]),
+            name: func.params[parameter_index].name,
+            zone: func.params[parameter_index].zone,
+            default: func.params[parameter_index].default,
             default_ref: None,
-            convention: parameter.convention,
+            convention: func.params[parameter_index].convention,
             ty: Val(parameter_ty),
-            variadic: parameter.variadic,
+            variadic: func.params[parameter_index].variadic,
         }
     }
     params

@@ -227,8 +227,8 @@ fn sema_state_validate_owner(definition: StructDef, state: StateDecl, all_items:
         }
     }
     members := [String]{}
-    loop field in definition.fields -> &members.push(field.name)
-    loop method in definition.methods -> &members.push(method.name)
+    loop field_index in 0..<definition.fields.len() -> &members.push(definition.fields[field_index].name)
+    loop method_index in 0..<definition.methods.len() -> &members.push(definition.methods[method_index].name)
     loop block in definition.trait_impls {
         loop method in block.methods -> &members.push(method.name)
     }

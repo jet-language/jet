@@ -41,9 +41,9 @@ fn sema_type_metadata_field_auto_ok(ty: Type) -> Bool Never! {
 
 fn sema_type_metadata_struct_auto_ok(definition: StructDef) -> Bool Never! {
     if definition.is_single_use -> return false
-    loop field in definition.fields {
-        if field.computed != None -> next
-        if !sema_type_metadata_field_auto_ok(field.ty) -> return false
+    loop field_index in 0..<definition.fields.len() {
+        if definition.fields[field_index].computed != None -> next
+        if !sema_type_metadata_field_auto_ok(definition.fields[field_index].ty) -> return false
     }
     true
 }
@@ -63,8 +63,8 @@ fn sema_type_metadata_variant_auto_ok(payload: VariantPayload) -> Bool Never! {
 
 fn sema_type_metadata_enum_auto_ok(definition: EnumDef) -> Bool Never! {
     if definition.is_single_use -> return false
-    loop variant in definition.variants {
-        if !sema_type_metadata_variant_auto_ok(variant.payload) -> return false
+    loop variant_index in 0..<definition.variants.len() {
+        if !sema_type_metadata_variant_auto_ok(definition.variants[variant_index].payload) -> return false
     }
     true
 }

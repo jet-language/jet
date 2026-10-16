@@ -209,20 +209,20 @@ fn sema_expression_zip_free_call(call: Call, expected: Type?, environment: SemaS
     is_pad := method == "zip_pad"
     inputs := [TExpr]{}
     fields := [String]{}
-    loop arg in call.args {
-        label := if arg.label == {.Val(value) -> Val(value.name) else -> None}
+    loop arg_index in 0..<call.args.len() {
+        label := if call.args[arg_index].label == {.Val(value) -> Val(value.name) else -> None}
         if is_pad && (label == (Val("fill")) || label == (Val("fills"))) -> next
-        checked :: sema_expression_zip_infer_arg(arg, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+        checked :: sema_expression_zip_infer_arg(call.args[arg_index], environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         &fields.push(sema_expression_zip_field_name(inputs.len(), label))
         &inputs.push(checked)
     }
 
     common_fill_arg := CallArg?{None}
     column_fills_arg := CallArg?{None}
-    loop arg in call.args {
-        label := if arg.label == {.Val(value) -> Val(value.name) else -> None}
-        if is_pad && label == (Val("fill")) -> common_fill_arg = Val(arg)
-        if is_pad && label == (Val("fills")) -> column_fills_arg = Val(arg)
+    loop arg_index in 0..<call.args.len() {
+        label := if call.args[arg_index].label == {.Val(value) -> Val(value.name) else -> None}
+        if is_pad && label == (Val("fill")) -> common_fill_arg = Val(call.args[arg_index])
+        if is_pad && label == (Val("fills")) -> column_fills_arg = Val(call.args[arg_index])
     }
     common_fill := TExpr?{None}
     column_fills := TExpr?{None}
@@ -235,8 +235,8 @@ fn sema_expression_zip_free_call(call: Call, expected: Type?, environment: SemaS
         column_fills = Val(checked)
     }
     fill_args := [TExpr]{}
-    loop arg in call.args {
-        label := if arg.label == {.Val(value) -> Val(value.name) else -> None}
+    loop arg_index in 0..<call.args.len() {
+        label := if call.args[arg_index].label == {.Val(value) -> Val(value.name) else -> None}
         if {
             is_pad && label == (Val("fill")) -> {
                 if common_fill == .Val(fill) -> &fill_args.push(fill)

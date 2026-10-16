@@ -45,9 +45,9 @@ fn sema_function_header_normalize_external_method(function: Func) -> Item Never!
 fn sema_function_header_check_root_params(function: Func, is_method: Bool, diagnostics: &[Diagnostic]) -> Bool {
     valid := true
     if is_method || function.external_type != None {
-        loop parameter in function.params {
-            if parameter.root {
-                &diagnostics.push(sema_error("E0103", parameter.name_span, "`#Root` is only valid on a top-level function", "a method already owns its receiver after the dot; marking another receiver would make dispatch ambiguous", "remove `#Root`, or move the function to module scope"))
+        loop parameter_index in 0..<function.params.len() {
+            if function.params[parameter_index].root {
+                &diagnostics.push(sema_error("E0103", function.params[parameter_index].name_span, "`#Root` is only valid on a top-level function", "a method already owns its receiver after the dot; marking another receiver would make dispatch ambiguous", "remove `#Root`, or move the function to module scope"))
                 valid = false
             }
         }
@@ -70,14 +70,14 @@ fn sema_function_header_check_root_params(function: Func, is_method: Bool, diagn
 // before its own; defaults fill left to right. `self` is not a parameter here.
 fn sema_function_header_check_default_forward_refs(function: Func, diagnostics: &[Diagnostic]) -> Bool {
     names := [String]{}
-    loop parameter in function.params {
-        if parameter.name != "self" -> &names.push(parameter.name)
+    loop parameter_index in 0..<function.params.len() {
+        if function.params[parameter_index].name != "self" -> &names.push(function.params[parameter_index].name)
     }
     valid := true
     index := 0
-    loop parameter in function.params {
-        if parameter.name == "self" -> next
-        if parameter.default == .Val(default) {
+    loop parameter_index in 0..<function.params.len() {
+        if function.params[parameter_index].name == "self" -> next
+        if function.params[parameter_index].default == .Val(default) {
             references := [Expr]{}
             sema_function_header_default_idents(default, &references)
             loop reference in references {
@@ -90,7 +90,7 @@ fn sema_function_header_check_default_forward_refs(function: Func, diagnostics: 
                         }
                     }
                     if later {
-                        &diagnostics.push(sema_error("E0126", span, "default for `{parameter.name}` in `{function.name}` references `{name}`, which comes after it", "defaults fill left to right; a parameter isn't in scope until it appears in the list", "reorder the parameters so `{name}` comes before `{parameter.name}`, or use a constant default"))
+                        &diagnostics.push(sema_error("E0126", span, "default for `{function.params[parameter_index].name}` in `{function.name}` references `{name}`, which comes after it", "defaults fill left to right; a parameter isn't in scope until it appears in the list", "reorder the parameters so `{name}` comes before `{function.params[parameter_index].name}`, or use a constant default"))
                         valid = false
                     }
                 }
@@ -236,22 +236,22 @@ fn sema_function_header_supported(function: Func, context: &SemaCheckContext) ->
         sema_check_unsupported(&context, "the function marker `#{marker.name}` is not supported by the self-hosted checker yet")
         supported = false
     }
-    loop parameter in function.params {
-        if parameter.root {
-            sema_check_unsupported(&context, "the `#Root` parameter `{parameter.name}` (reversible dot call) is not supported by the self-hosted checker yet")
+    loop parameter_index in 0..<function.params.len() {
+        if function.params[parameter_index].root {
+            sema_check_unsupported(&context, "the `#Root` parameter `{function.params[parameter_index].name}` (reversible dot call) is not supported by the self-hosted checker yet")
             supported = false
         }
-        if parameter.variadic_bound_list != None {
-            sema_check_unsupported(&context, "the variadic bound list on parameter `{parameter.name}` is not supported by the self-hosted checker yet")
+        if function.params[parameter_index].variadic_bound_list != None {
+            sema_check_unsupported(&context, "the variadic bound list on parameter `{function.params[parameter_index].name}` is not supported by the self-hosted checker yet")
             supported = false
         }
-        if parameter.declared_view_from_names != None {
-            sema_check_unsupported(&context, "the declared `from` view sources on parameter `{parameter.name}` are not supported by the self-hosted checker yet")
+        if function.params[parameter_index].declared_view_from_names != None {
+            sema_check_unsupported(&context, "the declared `from` view sources on parameter `{function.params[parameter_index].name}` are not supported by the self-hosted checker yet")
             supported = false
         }
         // D-METHOD-FOOTPRINT1=A: the Rust checker owns the E0231 body check
         // and API publication of a stated receiver footprint.
-        if parameter.declared_footprint != None {
+        if function.params[parameter_index].declared_footprint != None {
             sema_check_unsupported(&context, "the stated receiver footprint on `{function.name}` is not supported by the self-hosted checker yet")
             supported = false
         }

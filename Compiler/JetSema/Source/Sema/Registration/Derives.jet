@@ -1552,9 +1552,9 @@ fn sema_derive_type_info(name: String, kind: String, fields: [CtValue], base: St
 
 fn sema_derive_struct_type_info(definition: StructDef) -> CtValue {
     fields := [CtValue]{}
-    loop field in definition.fields {
-        if field.computed != None -> next
-        &fields.push(sema_derive_field_info(field.name, field.ty, field.is_pub))
+    loop field_index in 0..<definition.fields.len() {
+        if definition.fields[field_index].computed != None -> next
+        &fields.push(sema_derive_field_info(definition.fields[field_index].name, definition.fields[field_index].ty, definition.fields[field_index].is_pub))
     }
     sema_derive_type_info(definition.name, "struct", fields, None)
 }

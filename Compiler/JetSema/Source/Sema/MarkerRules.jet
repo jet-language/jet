@@ -189,9 +189,9 @@ fn sema_marker_rules_parameter_kind(parameter: MarkerDeclParam) -> TAppliedRuleA
 }
 
 fn sema_marker_rules_metadata_expr(declaration: MarkerDecl, name: String) -> Expr? {
-    loop parameter in declaration.params {
-        if parameter.name == name {
-            return parameter.value
+    loop parameter_index in 0..<declaration.params.len() {
+        if declaration.params[parameter_index].name == name {
+            return declaration.params[parameter_index].value
         }
     }
     None
@@ -212,12 +212,12 @@ fn sema_marker_rules_string_value(value: Expr) -> String? {
 
 fn sema_marker_rules_bool_fact(declaration: MarkerDecl, name: String) -> Bool? {
     found := false
-    loop parameter in declaration.params {
-        if parameter.name != name {
+    loop parameter_index in 0..<declaration.params.len() {
+        if declaration.params[parameter_index].name != name {
             next
         }
         found = true
-        value :: parameter.value ?? return None
+        value :: declaration.params[parameter_index].value ?? return None
         if value == .Bool(result, _) {
             return Val(result)
         }
@@ -231,12 +231,12 @@ fn sema_marker_rules_bool_fact(declaration: MarkerDecl, name: String) -> Bool? {
 
 fn sema_marker_rules_metadata_names(declaration: MarkerDecl, name: String, sites: Bool) -> [String]? {
     found := false
-    loop parameter in declaration.params {
-        if parameter.name != name {
+    loop parameter_index in 0..<declaration.params.len() {
+        if declaration.params[parameter_index].name != name {
             next
         }
         found = true
-        value :: parameter.value ?? return None
+        value :: declaration.params[parameter_index].value ?? return None
         if value == .ListLit(values, _) {
             names := [String]{}
             loop item in values {
@@ -330,12 +330,12 @@ fn sema_marker_rules_applied_row(declaration: MarkerDecl, source: String) -> TAp
     params := [TAppliedRuleParameter]{}
     variadic := TAppliedRuleArgKind?{None}
     variadic_source_type := String?{None}
-    loop parameter in declaration.params {
-        if parameter.name.starts_with("$") {
+    loop parameter_index in 0..<declaration.params.len() {
+        if declaration.params[parameter_index].name.starts_with("$") {
             next
         }
-        ty :: parameter.ty ?? return None
-        if parameter.variadic {
+        ty :: declaration.params[parameter_index].ty ?? return None
+        if declaration.params[parameter_index].variadic {
             if variadic != None {
                 return None
             }
@@ -343,7 +343,7 @@ fn sema_marker_rules_applied_row(declaration: MarkerDecl, source: String) -> TAp
             variadic_source_type = Val(type_name(ty))
             next
         }
-        applied_parameter :: sema_marker_rules_applied_parameter(parameter, source) ?? return None
+        applied_parameter :: sema_marker_rules_applied_parameter(declaration.params[parameter_index], source) ?? return None
         &params.push(applied_parameter)
     }
     Val(TAppliedRule{
@@ -1887,7 +1887,7 @@ fn sema_marker_rules_no_prelude_call(call: Call, environment: SemaScopeEnvironme
     if !sema_module_no_prelude(environment, program) || !sema_call_gate_is_unshadowed(call.name, scopes) -> return false
     name :: call.name
     &diagnostics.push(sema_error("E0429", call.name_span, "`{name}` is not ambient here — this file opted out with `#NoPrelude`", "`#NoPrelude` disables the curated prelude auto-imports (`print` / `input`)", "write `use core.term as io` and call `io.{name}(…)`, or remove `#NoPrelude`"))
-    loop argument in call.args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    loop argument_index in 0..<call.args.len() -> _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     true
 }
 
@@ -1907,15 +1907,15 @@ fn sema_check_memoized_function(func: Func, environment: SemaScopeEnvironment, p
     }
     if memo == None -> return
     marker :: memo ?? panic("checked #Memo marker disappeared")
-    loop parameter in func.params {
-        declared :: if parameter.variadic -> Type.List{element: parameter.ty} else -> parameter.ty
+    loop parameter_index in 0..<func.params.len() {
+        declared :: if func.params[parameter_index].variadic -> Type.List{element: func.params[parameter_index].ty} else -> func.params[parameter_index].ty
         ty :: sema_function_resolve_declared(environment, program, declared, environment.module_identity, generic_params)
         if sema_expression_zip_is_iter(ty) {
             &diagnostics.push(sema_error("E0940", marker.span, "`#Memo` cannot cache lazy `Iter` values", "a lazy iterator carries live computation state instead of one completed result", "materialize the iterator before the memoized boundary"))
             return
         }
         if ty == .List(_) || !sema_type_hashable(environment, program, ty) {
-            &diagnostics.push(sema_error("E0939", marker.span, "`#Memo` parameter `{parameter.name}` is not hashable", "memoization keys are the function's argument tuple, so every argument must pass the existing hashability rule", "use an Int, Bool, Char, String, or named hashable value as the argument"))
+            &diagnostics.push(sema_error("E0939", marker.span, "`#Memo` parameter `{func.params[parameter_index].name}` is not hashable", "memoization keys are the function's argument tuple, so every argument must pass the existing hashability rule", "use an Int, Bool, Char, String, or named hashable value as the argument"))
             return
         }
     }

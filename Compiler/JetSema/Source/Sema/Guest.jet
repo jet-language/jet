@@ -111,9 +111,9 @@ fn sema_guest_check_c_signature(graph: SemaRegistrationGraph, module_index: Int,
     module_identity :: graph.modules[module_index].module_identity
     handles :: [SemaCheckedForeignHandle]{}
     valid := true
-    loop parameter in function.params {
-        if !sema_checked_foreign_type(graph, parameter.ty, module_identity, true, false, handles, [String]{}) {
-            &diagnostics.push(sema_checked_foreign_type_error(parameter.ty, parameter.ty_span, true))
+    loop parameter_index in 0..<function.params.len() {
+        if !sema_checked_foreign_type(graph, function.params[parameter_index].ty, module_identity, true, false, handles, [String]{}) {
+            &diagnostics.push(sema_checked_foreign_type_error(function.params[parameter_index].ty, function.params[parameter_index].ty_span, true))
             valid = false
         }
     }
@@ -147,10 +147,10 @@ fn sema_guest_import_bridge_value(ty: Type) -> Bool Never! {
 
 fn sema_guest_import_bridge_compatible(function: Func) -> Bool Never! {
     if sema_guest_import_symbol(function) == None -> return false
-    loop parameter in function.params {
-        if parameter.convention == {
+    loop parameter_index in 0..<function.params.len() {
+        if function.params[parameter_index].convention == {
             .Read | .Write -> {
-                if !sema_guest_import_bridge_value(parameter.ty) -> return false
+                if !sema_guest_import_bridge_value(function.params[parameter_index].ty) -> return false
             }
             else -> return false
         }
@@ -220,8 +220,8 @@ fn sema_guest_library_component_signature(graph: SemaRegistrationGraph, module_i
     return_type :: function.return_type ?? return false
     seen := [String:Bool]{}
     if !sema_guest_library_component_type(graph, module_identity, return_type, &seen) -> return false
-    loop parameter in function.params {
-        if !sema_guest_library_component_type(graph, module_identity, parameter.ty, &seen) -> return false
+    loop parameter_index in 0..<function.params.len() {
+        if !sema_guest_library_component_type(graph, module_identity, function.params[parameter_index].ty, &seen) -> return false
     }
     true
 }

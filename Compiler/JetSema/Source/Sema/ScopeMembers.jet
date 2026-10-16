@@ -74,10 +74,10 @@ fn sema_scope_members_site_is_known(name: String) -> Bool Never! {
 
 fn sema_scope_members_declared_sites(declaration: MarkerDecl) -> [String]? {
     found := false
-    loop parameter in declaration.params {
-        if parameter.name != "$sites" -> next
+    loop parameter_index in 0..<declaration.params.len() {
+        if declaration.params[parameter_index].name != "$sites" -> next
         found = true
-        value :: parameter.value ?? return None
+        value :: declaration.params[parameter_index].value ?? return None
         if value == {
             .ListLit(values, _) -> {
                 sites := [String]{}
@@ -96,9 +96,9 @@ fn sema_scope_members_declared_sites(declaration: MarkerDecl) -> [String]? {
 }
 
 fn sema_scope_members_declared_repeatable(declaration: MarkerDecl) -> Bool? {
-    loop parameter in declaration.params {
-        if parameter.name != "$repeatable" -> next
-        value :: parameter.value ?? return None
+    loop parameter_index in 0..<declaration.params.len() {
+        if declaration.params[parameter_index].name != "$repeatable" -> next
+        value :: declaration.params[parameter_index].value ?? return None
         if value == {
             .Bool(repeatable, _) -> return Val(repeatable)
             else -> return None
@@ -108,9 +108,9 @@ fn sema_scope_members_declared_repeatable(declaration: MarkerDecl) -> Bool? {
 }
 
 fn sema_scope_members_first_parameter_is_type(declaration: MarkerDecl) -> Bool Never! {
-    loop parameter in declaration.params {
-        if parameter.name.starts_with("$") -> next
-        return parameter.ty == (Val(Type.Named{name: "Type"}))
+    loop parameter_index in 0..<declaration.params.len() {
+        if declaration.params[parameter_index].name.starts_with("$") -> next
+        return declaration.params[parameter_index].ty == (Val(Type.Named{name: "Type"}))
     }
     false
 }

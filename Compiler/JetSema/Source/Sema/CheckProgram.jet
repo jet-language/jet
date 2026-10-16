@@ -896,7 +896,7 @@ fn sema_incremental_begin(cache: SemaIncrementalCache, graph: SemaRegistrationGr
 
 fn sema_incremental_module_input(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> String Never! {
     declarations :: loop declaration_index in 0..<environment.declarations.len() -> SemaScopeDeclaration{
-        symbol_id: declaration.symbol_id, item: sema_incremental_item_header(declaration.item),
+        symbol_id: environment.declarations[declaration_index].symbol_id, item: sema_incremental_item_header(environment.declarations[declaration_index].item),
     }
     // The graph is already frozen once by begin. Callable names belong to the
     // per-body input, not whichever summary happened to run last. Everything
@@ -3348,15 +3348,15 @@ fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_pl
     false
 }
 fn sema_check_registered_tfunc_key(module_row: SemaRegistrationModule, name: String) -> String? {
-    loop function in module_row.functions {
-        if function.declaration.name == name -> return Val(function.symbol.id.key)
+    loop function_index in 0..<module_row.functions.len() {
+        if module_row.functions[function_index].declaration.name == name -> return Val(module_row.functions[function_index].symbol.id.key)
     }
     None
 }
 
 fn sema_check_registered_foreign_key(module_row: SemaRegistrationModule, name: String) -> String? {
-    loop function in module_row.foreign_functions {
-        if function.declaration.name == name -> return Val(function.symbol.id.key)
+    loop function_index in 0..<module_row.foreign_functions.len() {
+        if module_row.foreign_functions[function_index].declaration.name == name -> return Val(module_row.foreign_functions[function_index].symbol.id.key)
     }
     None
 }
@@ -4869,13 +4869,13 @@ fn sema_comptime_module_takes_values(module_row: SemaRegistrationModule, constan
         if constant.ty != None && constant.symbol.ty != None && constant.declaration.ty != None -> next
         if sema_comptime_value_for_symbol(constants, module_identity, constant.symbol.id.key) != None -> return true
     }
-    loop import in module_row.imports {
-        loop binding in import.bindings {
+    loop import_index in 0..<module_row.imports.len() {
+        loop binding in module_row.imports[import_index].bindings {
             if sema_comptime_binding_takes_value(binding, constants) -> return true
         }
     }
-    loop item in module_row.program.items {
-        key :: sema_comptime_constant_item_key(module_identity, item) ?? next
+    loop item_index in 0..<module_row.program.items.len() {
+        key :: sema_comptime_constant_item_key(module_identity, module_row.program.items[item_index]) ?? next
         if sema_comptime_value_for_symbol(constants, module_identity, key) != None -> return true
     }
     false

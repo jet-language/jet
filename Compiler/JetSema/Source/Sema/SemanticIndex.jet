@@ -1220,7 +1220,7 @@ fn sema_compiler_index_walk_type_slot(state: &SemaCompilerIndexWalkState, slot: 
 }
 
 fn sema_compiler_index_walk_function(state: &SemaCompilerIndexWalkState, function: Func, module_path: String, body_slot: String) {
-    loop parameter in function.params -> sema_compiler_index_walk_type_slot(&state, "params", parameter.ty_span, module_path, true)
+    loop parameter_index in 0..<function.params.len() -> sema_compiler_index_walk_type_slot(&state, "params", function.params[parameter_index].ty_span, module_path, true)
     if function.return_type_span == .Val(span) -> sema_compiler_index_walk_type_slot(&state, "return_type", span, module_path, false)
     sema_compiler_index_walk_stmt_slot(&state, body_slot, function.body, module_path)
 }

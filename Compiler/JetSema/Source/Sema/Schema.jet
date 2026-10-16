@@ -66,6 +66,6 @@ struct SchemaSnapshot {
 }
 
 fn snapshot_from_struct(definition: StructDef, version: String) -> SchemaSnapshot Never! {
-    fields :: loop field in definition.fields -> SnapshotField{name: field.name, ty: type_name(field.ty)}
+    fields :: loop field_index in 0..<definition.fields.len() -> SnapshotField{name: definition.fields[field_index].name, ty: type_name(definition.fields[field_index].ty)}
     SchemaSnapshot{schema_version: SNAPSHOT_VERSION, type_name: definition.name, published_version: version, squashed_before: None, fields: fields}
 }

@@ -835,13 +835,13 @@ fn sema_registration_extern_signature(function: ExternFn) -> Type Never! {
     defaults := [FunctionDefaultRef?]{}
     variadic := [Bool]{}
     conventions := [AccessConvention]{}
-    loop parameter in function.params {
-        ty :: parameter.ty
-        if parameter.variadic -> &params.push(Type.List{element: ty}) else -> &params.push(ty)
-        &names.push(parameter.name)
+    loop parameter_index in 0..<function.params.len() {
+        ty :: function.params[parameter_index].ty
+        if function.params[parameter_index].variadic -> &params.push(Type.List{element: ty}) else -> &params.push(ty)
+        &names.push(function.params[parameter_index].name)
         &defaults.push(None)
-        &variadic.push(parameter.variadic)
-        &conventions.push(parameter.convention)
+        &variadic.push(function.params[parameter_index].variadic)
+        &conventions.push(function.params[parameter_index].convention)
     }
     metadata :: FunctionCallMetadata{
         names: names,
@@ -1173,30 +1173,30 @@ fn sema_registration_variant_type(payload: VariantPayload) -> Type? {
 fn sema_registration_struct_fields(definition: StructDef, owner: Symbol, diagnostics: &[Diagnostic]) -> [SemaRegistrationField] {
     fields := [SemaRegistrationField]{}
     seen := [String:Bool]{}
-    loop field in definition.fields {
-        duplicate :: seen.get(field.name) != None
-        seen[field.name] = true
+    loop field_index in 0..<definition.fields.len() {
+        duplicate :: seen.get(definition.fields[field_index].name) != None
+        seen[definition.fields[field_index].name] = true
         if duplicate {
-            &diagnostics.push(sema_defined_twice(field.name, "fields in one nominal declaration share one namespace", field.name_span))
+            &diagnostics.push(sema_defined_twice(definition.fields[field_index].name, "fields in one nominal declaration share one namespace", definition.fields[field_index].name_span))
         }
-        field_id :: symbol_id(SymbolKind.Field, owner.module_name, owner.id.key, field.name)
+        field_id :: symbol_id(SymbolKind.Field, owner.module_name, owner.id.key, definition.fields[field_index].name)
         field_symbol :: Symbol{
             id: field_id,
             kind: SymbolKind.Field,
-            name: field.name,
+            name: definition.fields[field_index].name,
             module_name: owner.module_name,
             owner: Val(owner.id.key),
-            span: field.name_span,
-            ty: Val(field.ty),
-            visibility: sema_registration_visibility(field.is_pub, field.is_package_pub),
+            span: definition.fields[field_index].name_span,
+            ty: Val(definition.fields[field_index].ty),
+            visibility: sema_registration_visibility(definition.fields[field_index].is_pub, definition.fields[field_index].is_package_pub),
         }
         &fields.push(SemaRegistrationField{
             symbol: field_symbol,
-            ty: field.ty,
-            identity: type_identity(field.ty),
-            identity_key: "{owner.id.key}:{field.name}:{type_identity_key(field.ty)}",
-            default: field.default,
-            computed: field.computed != None,
+            ty: definition.fields[field_index].ty,
+            identity: type_identity(definition.fields[field_index].ty),
+            identity_key: "{owner.id.key}:{definition.fields[field_index].name}:{type_identity_key(definition.fields[field_index].ty)}",
+            default: definition.fields[field_index].default,
+            computed: definition.fields[field_index].computed != None,
         })
     }
     fields
@@ -1205,29 +1205,29 @@ fn sema_registration_struct_fields(definition: StructDef, owner: Symbol, diagnos
 fn sema_registration_enum_variants(definition: EnumDef, owner: Symbol, diagnostics: &[Diagnostic]) -> [SemaRegistrationVariant] {
     variants := [SemaRegistrationVariant]{}
     seen := [String:Bool]{}
-    loop variant in definition.variants {
-        duplicate :: seen.get(variant.name) != None
-        seen[variant.name] = true
+    loop variant_index in 0..<definition.variants.len() {
+        duplicate :: seen.get(definition.variants[variant_index].name) != None
+        seen[definition.variants[variant_index].name] = true
         if duplicate {
-            &diagnostics.push(sema_defined_twice(variant.name, "variants in one enum declaration share one namespace", variant.name_span))
+            &diagnostics.push(sema_defined_twice(definition.variants[variant_index].name, "variants in one enum declaration share one namespace", definition.variants[variant_index].name_span))
         }
-        payload_ty :: sema_registration_variant_type(variant.payload)
+        payload_ty :: sema_registration_variant_type(definition.variants[variant_index].payload)
         variant_symbol :: Symbol{
-            id: symbol_id(SymbolKind.Variant, owner.module_name, owner.id.key, variant.name),
+            id: symbol_id(SymbolKind.Variant, owner.module_name, owner.id.key, definition.variants[variant_index].name),
             kind: SymbolKind.Variant,
-            name: variant.name,
+            name: definition.variants[variant_index].name,
             module_name: owner.module_name,
             owner: Val(owner.id.key),
-            span: variant.name_span,
+            span: definition.variants[variant_index].name_span,
             ty: payload_ty,
             visibility: owner.visibility,
         }
         payload_key :: payload_ty.map((value) -> type_identity_key(value)) ?? "Unit"
         &variants.push(SemaRegistrationVariant{
             symbol: variant_symbol,
-            payload: variant.payload,
+            payload: definition.variants[variant_index].payload,
             payload_type: payload_ty,
-            identity_key: "{owner.id.key}:{variant.name}:{payload_key}",
+            identity_key: "{owner.id.key}:{definition.variants[variant_index].name}:{payload_key}",
         })
     }
     variants
@@ -1751,8 +1751,8 @@ fn sema_registration_value_type_rules(module_row: SemaRegistrationModule, item: 
     if item == {
         .Distinct(definition) -> {
             if definition.base == .Named(base_name) {
-                loop nominal in module_row.nominals {
-                    if nominal.kind == SemaRegistrationNominalKind.Distinct && nominal.symbol.name == base_name {
+                loop nominal_index in 0..<module_row.nominals.len() {
+                    if module_row.nominals[nominal_index].kind == SemaRegistrationNominalKind.Distinct && module_row.nominals[nominal_index].symbol.name == base_name {
                         &diagnostics.push(sema_error("E0129", definition.base_span, "`{definition.name}` can't be built on `{base_name}` — `{base_name}` is itself a distinct type", "`distinct`-over-`distinct` chaining is not allowed in v1; `{base_name}` is already a distinct type", "use `{base_name}` directly, or build on the shared base type"))
                         return false
                     }
@@ -1816,10 +1816,10 @@ fn sema_registration_impl(module_row: SemaRegistrationModule, definition: ImplDe
     trait_symbol := Symbol?{None}
     trait_identity := TypeIdentity?{None}
     if definition.trait_name == .Val(trait_name) {
-        loop candidate in module_row.nominals {
-            if candidate.kind == SemaRegistrationNominalKind.Trait && candidate.symbol.name == trait_name {
-                trait_symbol = Val(candidate.symbol)
-                trait_identity = Val(candidate.identity)
+        loop candidate_index in 0..<module_row.nominals.len() {
+            if module_row.nominals[candidate_index].kind == SemaRegistrationNominalKind.Trait && module_row.nominals[candidate_index].symbol.name == trait_name {
+                trait_symbol = Val(module_row.nominals[candidate_index].symbol)
+                trait_identity = Val(module_row.nominals[candidate_index].identity)
                 break
             }
         }
@@ -1833,7 +1833,7 @@ fn sema_registration_impl(module_row: SemaRegistrationModule, definition: ImplDe
         SemaRegistrationAssociatedType{symbol: associated_symbol, declaration: declaration, ty: declaration.ty, identity: type_identity(declaration.ty), identity_key: "{symbol.id.key}:{declaration.name}:{type_identity_key(declaration.ty)}"}
     }
     hook_owner :: sema_registration_operator_owner(owner_id, module_row.module_identity, target_type, definition.trait_name, definition.operator_rhs)
-    methods :: loop method in definition.methods -> sema_registration_function(method, sema_raw_protocol_function_return(definition.trait_name, false, method), module_row.module_identity, Val(hook_owner), module_row.source_file, module_row.source_origin, module_row.source_segments, &diagnostics)
+    methods :: loop method_index in 0..<definition.methods.len() -> sema_registration_function(definition.methods[method_index], sema_raw_protocol_function_return(definition.trait_name, false, definition.methods[method_index]), module_row.module_identity, Val(hook_owner), module_row.source_file, module_row.source_origin, module_row.source_segments, &diagnostics)
     SemaRegistrationImpl{
         symbol: symbol,
         declaration: definition,
@@ -1932,8 +1932,8 @@ fn sema_registration_opmix_builtin_impl(module_row: SemaRegistrationModule, defi
     rhs :: definition.operator_rhs ?? return false
     if rhs == .Named(rhs_name) {
         if rhs_name == definition.type_name -> return false
-        loop item in module_row.program.items {
-            if sema_registration_declared_type_name(item) == rhs_name -> return true
+        loop item_index in 0..<module_row.program.items.len() {
+            if sema_registration_declared_type_name(module_row.program.items[item_index]) == rhs_name -> return true
         }
     }
     false
@@ -2022,9 +2022,9 @@ fn sema_registration_declaration_for_symbol(module_row: SemaRegistrationModule, 
 }
 
 fn sema_registration_foreign_handle_close_key(module_row: SemaRegistrationModule, facts: SemaRegistrationForeignHandleFacts) -> String? {
-    loop registered in module_row.foreign_functions {
-        if registered.owner == SemaRegistrationForeignOwner.CModule && registered.declaration.name == facts.close {
-            return Val(registered.symbol.id.key)
+    loop registered_index in 0..<module_row.foreign_functions.len() {
+        if module_row.foreign_functions[registered_index].owner == SemaRegistrationForeignOwner.CModule && module_row.foreign_functions[registered_index].declaration.name == facts.close {
+            return Val(module_row.foreign_functions[registered_index].symbol.id.key)
         }
     }
     None
@@ -2979,8 +2979,8 @@ fn sema_registration_namespace_collisions(graph: &SemaRegistrationGraph, module_
 }
 
 fn sema_registration_module_has_nominal_name(module_row: SemaRegistrationModule, name: String) -> Bool Never! {
-    loop nominal in module_row.nominals {
-        if nominal.symbol.name == name -> return true
+    loop nominal_index in 0..<module_row.nominals.len() {
+        if module_row.nominals[nominal_index].symbol.name == name -> return true
     }
     false
 }

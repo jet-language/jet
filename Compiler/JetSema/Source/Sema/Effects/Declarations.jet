@@ -161,7 +161,7 @@ fn sema_effect_leaf_check_function(leaves: [SemaEffectLeaf], function: Func, dia
             sema_effect_leaf_check_name(leaves, name, entry.span, &diagnostics)
         }
     }
-    loop parameter in function.params -> sema_effect_leaf_check_type(leaves, parameter.ty, &diagnostics)
+    loop parameter_index in 0..<function.params.len() -> sema_effect_leaf_check_type(leaves, function.params[parameter_index].ty, &diagnostics)
     if function.return_type == .Val(ty) -> sema_effect_leaf_check_type(leaves, ty, &diagnostics)
     sema_effect_leaf_check_statements(leaves, function.body, &diagnostics)
 }

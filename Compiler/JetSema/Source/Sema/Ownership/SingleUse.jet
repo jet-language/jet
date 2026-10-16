@@ -156,7 +156,7 @@ fn sema_single_use_check_paths(before: SemaOwnershipState, paths: [SemaOwnership
 fn sema_single_use_check_consume(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.args.len() != 1 {
         &diagnostics.push(sema_error("E0103", call.name_span, "`consume` discards exactly one value", "`drop` throws a single value away, running its cleanup", "e.g. consume(x)"))
-        loop argument in call.args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        loop argument_index in 0..<call.args.len() -> _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     argument :: call.args[0]

@@ -130,15 +130,15 @@ fn sema_fixed_length_write_params_in_graph(graph: SemaRegistrationGraph) -> [Str
 
 fn sema_window_function_candidates(func: Func, rows: [SemaWindowFunctionRow], positions: [String:[Int]], candidates: &[SemaWindowCandidate]) {
     if (positions.get(func.name) ?? [Int]{}).len() > 1 -> return
-    loop param in func.params {
-        if param.convention != AccessConvention.Write -> next
-        is_list := if param.ty == { .List(_) -> true else -> false }
+    loop param_index in 0..<func.params.len() {
+        if func.params[param_index].convention != AccessConvention.Write -> next
+        is_list := if func.params[param_index].ty == { .List(_) -> true else -> false }
         if !is_list -> next
         scan := SemaWindowScan{resizes: false, marks: 0, accounted: 0, onward: [SemaWindowEdge]{}}
-        sema_window_scan_body(func.body, param.name, &scan)
+        sema_window_scan_body(func.body, func.params[param_index].name, &scan)
         if scan.resizes || scan.marks != scan.accounted -> next
         onward :: loop edge in scan.onward -> sema_window_edge_key(rows, positions, edge)
-        &candidates.push(SemaWindowCandidate{key: sema_window_param_key(func.name, param.name), onward: onward})
+        &candidates.push(SemaWindowCandidate{key: sema_window_param_key(func.name, func.params[param_index].name), onward: onward})
     }
 }
 

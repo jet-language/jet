@@ -151,7 +151,7 @@ fn sema_user_template_function_info(function: Func) -> CtValue? {
         loop row in rows -> &effects.push(TComptimeValue.String{value: row.name})
     }
     params := [TComptimeValue]{}
-    loop param in function.params -> &params.push(TComptimeValue.String{value: param.name})
+    loop param_index in 0..<function.params.len() -> &params.push(TComptimeValue.String{value: function.params[param_index].name})
     info :: sema_comptime_reflection_struct("FunctionInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: function.name}},
         SemaComptimeReflectionField{name: "module", value: TComptimeValue.String{value: ""}},

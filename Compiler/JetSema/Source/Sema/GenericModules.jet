@@ -157,13 +157,13 @@ fn sema_genmod_check_module(graph: SemaRegistrationGraph, module_row: SemaRegist
     // template was refused by import registration (E0609); its aliases stay
     // silent rather than also reporting an unknown template.
     denied := [String:Bool]{}
-    loop import in module_row.imports {
-        if import.declaration.kind == .Unqualified(_, _, imported, _, _) {
-            target_index :: sema_registration_module_index(graph, import.target_module_identity) ?? next
+    loop import_index in 0..<module_row.imports.len() {
+        if module_row.imports[import_index].declaration.kind == .Unqualified(_, _, imported, _, _) {
+            target_index :: sema_registration_module_index(graph, module_row.imports[import_index].target_module_identity) ?? next
             loop entry in imported {
                 source :: sema_genmod_find_template(templates_by_module[target_index], entry.original) ?? next
                 bound_local := String?{None}
-                loop binding in import.bindings {
+                loop binding in module_row.imports[import_index].bindings {
                     if binding.original == entry.original -> bound_local = Val(binding.local)
                 }
                 if bound_local == {

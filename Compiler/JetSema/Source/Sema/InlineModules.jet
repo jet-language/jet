@@ -901,11 +901,11 @@ fn sema_inline_rewrite_struct(rewrite: &SemaInlineRewrite, definition: StructDef
     updated := definition
     if alias != "" -> updated.name = sema_inline_type_name(alias, definition.name)
     fields := [Field]{}
-    loop field in definition.fields {
-        mapped := field
-        mapped.ty = sema_inline_rewrite_type(rewrite, field.ty)
-        mapped.computed = sema_inline_rewrite_optional_expr(&rewrite, field.computed)
-        mapped.serde_markers = sema_inline_rewrite_markers(&rewrite, field.serde_markers)
+    loop field_index in 0..<definition.fields.len() {
+        mapped := definition.fields[field_index]
+        mapped.ty = sema_inline_rewrite_type(rewrite, definition.fields[field_index].ty)
+        mapped.computed = sema_inline_rewrite_optional_expr(&rewrite, definition.fields[field_index].computed)
+        mapped.serde_markers = sema_inline_rewrite_markers(&rewrite, definition.fields[field_index].serde_markers)
         &fields.push(mapped)
     }
     updated.fields = fields
@@ -922,9 +922,9 @@ fn sema_inline_rewrite_enum(rewrite: &SemaInlineRewrite, definition: EnumDef, al
     updated := definition
     if alias != "" -> updated.name = sema_inline_type_name(alias, definition.name)
     variants := [Variant]{}
-    loop variant in definition.variants {
-        mapped := variant
-        mapped.payload = if variant.payload == {
+    loop variant_index in 0..<definition.variants.len() {
+        mapped := definition.variants[variant_index]
+        mapped.payload = if definition.variants[variant_index].payload == {
             .Unit -> VariantPayload.Unit
             .Single(ty, span) -> VariantPayload.Single{ty: sema_inline_rewrite_type(rewrite, ty), span: span}
             .Named(fields) -> {
@@ -933,8 +933,8 @@ fn sema_inline_rewrite_enum(rewrite: &SemaInlineRewrite, definition: EnumDef, al
                 VariantPayload.Named{fields: mapped_fields}
             }
         }
-        mapped.discriminant_expr = sema_inline_rewrite_optional_expr(&rewrite, variant.discriminant_expr)
-        mapped.serde_markers = sema_inline_rewrite_markers(&rewrite, variant.serde_markers)
+        mapped.discriminant_expr = sema_inline_rewrite_optional_expr(&rewrite, definition.variants[variant_index].discriminant_expr)
+        mapped.serde_markers = sema_inline_rewrite_markers(&rewrite, definition.variants[variant_index].serde_markers)
         &variants.push(mapped)
     }
     updated.variants = variants
@@ -951,12 +951,12 @@ fn sema_inline_rewrite_trait(rewrite: &SemaInlineRewrite, definition: TraitDef) 
     updated := definition
     updated.name = sema_inline_mapped_name(rewrite, definition.name)
     methods := [TraitMethodSig]{}
-    loop method in definition.methods {
-        mapped := method
+    loop method_index in 0..<definition.methods.len() {
+        mapped := definition.methods[method_index]
         saved :: rewrite.locals.len()
-        mapped.params = sema_inline_rewrite_params(&rewrite, method.params)
-        mapped.return_type = sema_inline_rewrite_optional_type(rewrite, method.return_type)
-        mapped.default_body = sema_inline_rewrite_optional_body(&rewrite, method.default_body)
+        mapped.params = sema_inline_rewrite_params(&rewrite, definition.methods[method_index].params)
+        mapped.return_type = sema_inline_rewrite_optional_type(rewrite, definition.methods[method_index].return_type)
+        mapped.default_body = sema_inline_rewrite_optional_body(&rewrite, definition.methods[method_index].default_body)
         sema_inline_restore_locals(&rewrite, saved)
         &methods.push(mapped)
     }

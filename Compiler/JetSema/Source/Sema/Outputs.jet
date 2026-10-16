@@ -257,9 +257,9 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
 }
 
 fn sema_output_has_import(module_row: SemaRegistrationModule, name: String) -> Bool {
-    loop imported in module_row.imports {
-        if imported.declaration.alias == name -> return true
-        loop binding in imported.bindings { if binding.local == name -> return true }
+    loop imported_index in 0..<module_row.imports.len() {
+        if module_row.imports[imported_index].declaration.alias == name -> return true
+        loop binding in module_row.imports[imported_index].bindings { if binding.local == name -> return true }
     }
     false
 }

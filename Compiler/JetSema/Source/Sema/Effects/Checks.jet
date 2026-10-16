@@ -600,9 +600,9 @@ fn sema_effect_via_not_callback(function: TFunc, parameter: String, ty: Type, sp
 fn sema_effect_apply_via(nodes: &[SemaEffectNode], node_index: Int, function: TFunc, diagnostics: &[Diagnostic]) {
     via :: nodes[node_index].effect_via ?? return
     parameter_type := Type?{None}
-    loop parameter in function.params {
-        if parameter.name == via.name {
-            parameter_type = Val(parameter.ty)
+    loop parameter_index in 0..<function.params.len() {
+        if function.params[parameter_index].name == via.name {
+            parameter_type = Val(function.params[parameter_index].ty)
             break
         }
     }

@@ -197,8 +197,8 @@ fn sema_gate_function(source: String, function: Func, ledger: &GateLedger, conte
     if !function.compiler_generated {
         sema_gate_structure_name(source, function.name, function.name_span, &ledger)
     }
-    loop parameter in function.params {
-        sema_gate_structure_name(source, parameter.name, parameter.name_span, &ledger)
+    loop parameter_index in 0..<function.params.len() {
+        sema_gate_structure_name(source, function.params[parameter_index].name, function.params[parameter_index].name_span, &ledger)
     }
     if function.state_transition == .Val(transition) {
         from :: transition.from ?? "_"

@@ -375,7 +375,7 @@ fn sema_taint_add_source_path(catalog: &SemaTaintCatalog, module_alias: String, 
 
 fn sema_taint_add_callable(catalog: &SemaTaintCatalog, module_identity: String, module_alias: String, owner: String, function: Func) Never! {
     params := [SemaTaintTagList]{}
-    loop parameter in function.params -> &params.push(SemaTaintTagList{tags: sema_taint_type_tags(parameter.ty)})
+    loop parameter_index in 0..<function.params.len() -> &params.push(SemaTaintTagList{tags: sema_taint_type_tags(function.params[parameter_index].ty)})
     return_tags := [String]{}
     if function.return_type == {
         .Val(ty) -> return_tags = sema_taint_type_tags(ty)
@@ -390,7 +390,7 @@ fn sema_taint_add_callable(catalog: &SemaTaintCatalog, module_identity: String, 
 
 fn sema_taint_add_extern_callable(catalog: &SemaTaintCatalog, module_identity: String, function: ExternFn) Never! {
     params := [SemaTaintTagList]{}
-    loop parameter in function.params -> &params.push(SemaTaintTagList{tags: sema_taint_type_tags(parameter.ty)})
+    loop parameter_index in 0..<function.params.len() -> &params.push(SemaTaintTagList{tags: sema_taint_type_tags(function.params[parameter_index].ty)})
     returns := [String]{SEMA_TAINT_ORIGIN_FFI}
     if function.return_type != None -> returns = sema_taint_type_tags(function.return_type ?? Type.Named{name: "Unit"})
     sema_taint_add(&returns, SEMA_TAINT_ORIGIN_FFI)
@@ -1364,20 +1364,20 @@ fn sema_taint_initial_state(catalog: SemaTaintCatalog, graph: SemaRegistrationGr
 }
 
 fn sema_taint_initial_parameter_bindings(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, function: Func, owner: String) {
-    loop parameter in function.params {
-        tags := sema_taint_type_tags(parameter.ty)
+    loop parameter_index in 0..<function.params.len() {
+        tags := sema_taint_type_tags(function.params[parameter_index].ty)
         module_identity := state.module_identity
-        sema_taint_validate_type_tags(graph, parameter.ty, module_identity, &state, parameter.ty_span)
-        type_name := sema_taint_type_name(parameter.ty)
-        if parameter.name == "self" {
-            if parameter.ty == {
+        sema_taint_validate_type_tags(graph, function.params[parameter_index].ty, module_identity, &state, function.params[parameter_index].ty_span)
+        type_name := sema_taint_type_name(function.params[parameter_index].ty)
+        if function.params[parameter_index].name == "self" {
+            if function.params[parameter_index].ty == {
                 .Named(name) -> {
                     if name == "Self" -> type_name = Val(owner)
                 }
                 else -> {}
             }
         }
-        sema_taint_set_binding(&state.bindings, parameter.name, tags, type_name)
+        sema_taint_set_binding(&state.bindings, function.params[parameter_index].name, tags, type_name)
     }
 }
 
