@@ -154,50 +154,105 @@ linear, but they are not the bottleneck. The string-built identities
 (`jet_codegen_identity` + `stable_id`) appear only inside the 4.1% of
 `jet_codegen_emit`.
 
-### Ranked next improvements
+### Landed on perf-next (2026-10-16)
 
-1. **LIR lint dominance (estimated 15–18% of a native build, byte-identical).**
-   - Replace the dense `[[Bool]]` fixpoint, which costs O(blocks² ×
-     iterations) and makes a runtime range call per element, with
-     Cooper–Harvey–Kennedy immediate dominators and dominator-tree
-     entry/exit numbers. A dominance query then becomes two comparisons.
-   - Index each value's consume sites, replacing the O(uses × consumes)
-     scan.
-   - Resolve block IDs through one first-row map, replacing the per-edge
-     `lir_block_index` scans and the O(blocks²) duplicate-ID check.
+Measured with the f2-factory backend harness (`lower_selected` keep-going
+lowering, the harness's own `lir_lint_module`, and the O0
+`x64_relocatable_object_keep_going`, one process per case), on the 20
+calibrated probes, the r27 dominance case `cli_schema_pe_sections`, and 160
+corpus MIR dumps (181 cases). Every commit leaves every `.issues`, `.lir` and
+`.o` byte-identical to the commit before it. Timings are the sum over the
+five largest dumps (mF2, o9m, mP4, mO1, cli_schema_pe_sections; 19–26 MB of
+MIR each), two alternating repetitions on a loaded machine.
 
-   The lint keeps its own dominance code, separate from
-   `Opt/Facts.jet opt_dominators`, because it referees optimized LIR. The
-   change is prepared and parses (`/mnt/jetscratch/discovery/perfnext/lint-dominance.patch`,
-   not landed). It still needs two proofs: the harness before/after timing
-   (`perfnext/hx.sh`), and a differential test of the old and new lint over
-   mutated LIR to show the findings are identical (`perfnext/oldlint.jet` is
-   the renamed old lint for that test).
-2. **Lint once at O0 (estimated half of the remaining lint time).**
-   `x64_compile_module` re-lints the exact module `lower_selected` already
-   linted clean. Skip the second lint only when the caller passes that clean
-   result, so output stays identical.
-3. **Cache `lower_repr`/`lower_size` (estimated 9–12%).** Most callers go
-   to `lower_repr(p, ty)` directly instead of through the per-module
-   `lower_repr_at` cache, and the size computation walks inline members
-   again (`lower_inline_size_in`, `clone.MIRType`).
-4. **Parallel MIR→LIR lowering (estimated 17% of the build, divided by the
-   thread count).** Follow the plan under *Stages*. It is a large change:
-   the per-worker interning of signatures, data, glue, debug and static
-   trees, and the merge remap, must be byte-identical.
-5. **Inline `Int` range loops in codegen (estimated ≥5% across the whole
-   compiler).** Lower `loop i in a..<b` like the read-list walk, with an
-   inline compare and increment and no `jet_loop_range_*` calls. This
-   changes the MIR the compiler emits, but not program behavior.
-6. **Per-build identity hashing (≈6%).** Compute the target dossier SHA-256
-   and the MIR program digest once per process, or derive them from
-   inputs that are already hashed.
-7. **Codegen `Builder.jet` scans (<1% each, measured).**
-   - Look up `jet_codegen_phi_ownership` and `jet_codegen_exit_value_slot`
-     through `value_positions`.
-   - Stop `jet_codegen_emit_cleanup_suffix` from copying every cleanup
-     frame per action.
-   - Stream `stable_id` over the identity parts instead of formatting the
-     string.
+1. **LIR lint dominance.** Cooper–Harvey–Kennedy immediate dominators with
+   dominator-tree entry/exit numbers (a dominance query is two comparisons),
+   each value's consume sites indexed, block IDs resolved through one
+   first-row map. Lint 539/610 ms → 80/77 ms (7.4×); lowering (which lints
+   once) 5816/6181 → 4761/4713 ms; object (which lints again) 1226/1603 →
+   796/791 ms. A differential harness ran the old lint (renamed) and the new
+   lint over every function of every case and over 22,325 mutants (swapped
+   and moved instructions, retargeted edges, branches turned into jumps,
+   inserted drops, duplicated block IDs, missing targets, rewired jump and
+   return values): 17,686 mutants flagged with 34,440 rows (10,042 "not
+   dominated", 6,935 unreachable, 5,554 missing block, 3,162 duplicated ID,
+   2,461 use after move, 1,013 argument count, 5,273 other), 0 mismatches.
+   On `cli_schema_pe_sections`, which this backend still lowers with the
+   r27 dominance row, the new lint reports the same row as the old.
+2. **Lint once at O0.** `lower_selected` keeps its lint findings
+   (`LIRLowering.lint`); the O0 object compile takes them instead of linting
+   the unchanged module again. Optimized modules are linted again as before.
+   Errors, keep-going traps and bytes are unchanged. With the new lint the
+   saved run is small: object 798/804 → 750/794 ms over the five dumps (one
+   lint run, about 80 ms); with the old lint it was about 540 ms.
+3. **Per-type cache.** One module cache (`LowerTypeCache`: `lower_repr`,
+   `lower_size`, inline members and needs-drop by `lower_repr_key`), lent to
+   the function being lowered, so the value helpers that only see the
+   function reach it. Most `lower_repr` time was in helpers that never see
+   the module (`lower_size_compute` 4.3%, `lower_inline_type` 2.8% of the
+   harness profile; `lower_record_schema_with_handle` was 4.2% inside it).
+   Lowering 4808 → 4038 ms over the five dumps (−16%).
 
-   These rank last on current data.
+## Per-stage profile (2026-10-16)
+
+The largest probe that fits next to the running self-host attempt is the
+backend harness unit itself: 73,077 lines of compiler source (the whole
+backend with its Foundation support) plus Core. The p26 native compiler
+runs out of memory on it at 22 GB (it peaked at 4.0 GB on an 11.6 KB
+program), so the whole-pipeline split comes from the f2 factory (the Rust
+tier) building it with `JET_TRACE_FILE`, and the backend split from the
+native harness above.
+
+| stage | f2 factory, 73 k lines | threads today |
+|---|---|---|
+| parse (load: unit 2.5 s, Core 4.9 s) | 7.5 s | per file; one assembled file |
+| imports + registration | 18.3 s | 1 |
+| sema check | 6.1 s | 1 (per module) |
+| comptime | 5.1 s | 1 |
+| sema finalize (bodies, failure, effects) | 38.1 s | bodies in waves |
+| codegen TIR→MIR | 10.3 s | waves |
+| MIR assemble + passes | 2.3 + 2.8 s | waves |
+| backend: MIR→LIR, LIR lint, x64, object (no span) | ≈ 64 s | lint/x64 in waves |
+| total (peak RSS 13.8 GB) | 161.9 s = 451 lines/s | |
+
+Inside the native backend (symbolized harness profile, o9m, before these
+commits): MIRD decoding 30% (harness input only), lint 10% in
+`lower_selected` plus the harness's and the object's own runs, `lower_repr`
+and `lower_size` 11%, the rest of MIR→LIR lowering 7%, x64 selection,
+allocation and encoding 3%, object writing 1%. Linking is a separate step
+(`x64_link_executable`) and is not in this unit's build.
+
+## Ranked plan to 1M lines/s
+
+451 lines/s on the factory and a few thousand on the native compiler are
+three orders of magnitude short. No single stage closes that; every stage
+needs both a serial speedup (data layout) and parallelism. In order of
+measured weight and readiness:
+
+1. **Sema finalize and registration (35% of the factory build).** Register
+   per module in parallel waves and merge in module order; run finalize's
+   failure and effect passes per dependency-DAG level. Replace string-keyed
+   scope maps with interned integer IDs (one symbol table per build) so
+   lookups are array indexes.
+2. **Native backend (≈40%).** Parallel MIR→LIR lowering per function (the
+   per-worker interning plan under *Stages*); with the type cache above,
+   each worker keeps its own cache. The lint and x64 already run as waves.
+   Object writing: per-function encoding in parallel, offsets by prefix sum.
+3. **Memory traffic.** The factory peaks at 13.8 GB for 73 k lines
+   (190 KB per line); the native compiler more. Arena-allocate per stage
+   and per function (AST, TIR, MIR, LIR builders), free whole arenas at the
+   stage end, and stop copying whole programs between stages (the
+   `program.copy()` routes and per-call constant clones measured earlier).
+4. **Compact data structures.** MIR/LIR instructions as flat arrays of
+   fixed-size rows with integer operands instead of enums of lists; block
+   and value IDs as dense indexes (as the lint now uses); types interned to
+   integer IDs so `lower_repr`-style queries become table lookups.
+5. **Inline `Int` range loops in codegen (≥5% of the native compiler).**
+   Lower `loop i in a..<b` to an inline compare and increment.
+6. **Lexer/parser SIMD.** Classify ASCII runs 16–32 bytes at a time
+   (identifiers, whitespace, string bodies), and parse per top-level item
+   range in parallel inside one assembled file.
+7. **Per-build identity hashing (≈6% of a small native build).** Compute
+   the target dossier SHA-256 and the MIR program digest once.
+8. **Codegen `Builder.jet` scans (<1% each).** Index phi ownership and exit
+   value slots by `value_positions`; stop copying cleanup frames per action.
