@@ -622,7 +622,7 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
     }
     facts := SemaCallFacts{return_type: result, failure_carrier: sema_call_builtin_static_carrier(result), effect_bound: Val([EffectRowEntry]{}), type_args: [Type]{}, default_refs: [FunctionDefaultRef]{}}
     if !sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, callee, span, facts, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(sema_tir_expr(result, kind, span), expected, environment, program, &diagnostics)}
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected_owned(sema_tir_expr(result, kind, span), expected, environment, program, &diagnostics)}
 }
 
 // `alias.Owner.method(...)`: a Core module alias names the owner's module.

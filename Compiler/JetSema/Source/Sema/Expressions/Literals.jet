@@ -142,7 +142,7 @@ fn sema_expression_unit_literal(raw: String, int_value: Int?, float_value: Float
                 message :: sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "time literal is outside Duration's i64 range"}}}, span)
                 fallback :: TOrFallback.Panic{message: message, location: sema_expression_panic_location(environment, program, scopes, suffix_span)}
                 checked :: sema_tir_expr(Type.Named{name: "Duration"}, TExprKind.OrFallback{value: constructed, fallback: fallback, ambient_err: None}, span)
-                return sema_expr_expected(checked, expected, environment, program, &diagnostics)
+                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
             }
             if int_value == None && float_value == None {
                 &diagnostics.push(sema_error("E0109", span, "this unit literal has no numeric value", "a literal needs an integer or floating-point payload", "write a numeric literal"))
@@ -151,14 +151,14 @@ fn sema_expression_unit_literal(raw: String, int_value: Int?, float_value: Float
             numeric :: if float_value != None -> sema_tir_expr(Type.Float, TExprKind.FloatLit{value: float_value}, span) else -> sema_tir_expr(Type.Float, TExprKind.FloatLit{value: Float.from_int(int_value ?? 0)}, span)
             destination_symbol :: symbol_id(SymbolKind.Type, unit.package, "", unit.name)
             value :: sema_tir_expr(Type.Named{name: unit.name}, TExprKind.DistinctCtor{owner: destination_symbol, argument: numeric, base: Type.Float}, span)
-            return sema_expr_expected(value, expected, environment, program, &diagnostics)
+            return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }
         if suffix == "i" {
             imaginary :: float_value ?? Float.from_int(int_value ?? 0)
             real :: sema_tir_expr(Type.Float, TExprKind.FloatLit{value: 0.0}, span)
             imaginary_value :: sema_tir_expr(Type.Float, TExprKind.FloatLit{value: imaginary}, span)
             value :: sema_tir_expr(Type.Named{name: "Complex"}, TExprKind.PreciseBuiltin{type_name: "Complex", function: "from_parts", args: [TExpr]{real, imaginary_value}}, span)
-            return sema_expr_expected(value, expected, environment, program, &diagnostics)
+            return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }
         &diagnostics.push(sema_error("E0134", suffix_span, "`{suffix}` isn't a unit in scope", "a unit suffix names a member of a `#UnitFamily` you've imported; this suffix isn't one here", "import the family that defines `{suffix}`, or write the number without a suffix"))
         return None
@@ -169,13 +169,13 @@ fn sema_expression_unit_literal(raw: String, int_value: Int?, float_value: Float
             real :: sema_tir_expr(Type.Float, TExprKind.FloatLit{value: 0.0}, span)
             imaginary_value :: sema_tir_expr(Type.Float, TExprKind.FloatLit{value: imaginary}, span)
             value :: sema_tir_expr(Type.Named{name: "Complex"}, TExprKind.PreciseBuiltin{type_name: "Complex", function: "from_parts", args: [TExpr]{real, imaginary_value}}, span)
-            return sema_expr_expected(value, expected, environment, program, &diagnostics)
+            return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }
         &diagnostics.push(sema_error("E0134", suffix_span, "`{suffix}` isn't a unit in scope", "a unit suffix names a member of a `#UnitFamily` you've imported; this suffix isn't one here", "import the family that defines `{suffix}`, or write the number without a suffix"))
         return None
     }
-    if int_value != None -> return sema_expr_expected(sema_expr_unbounded_integer_literal(int_value, span), expected, environment, program, &diagnostics)
-    if float_value != None -> return sema_expr_expected(sema_tir_expr(Type.Float, TExprKind.FloatLit{value: float_value}, span), expected, environment, program, &diagnostics)
+    if int_value != None -> return sema_expr_expected_owned(sema_expr_unbounded_integer_literal(int_value, span), expected, environment, program, &diagnostics)
+    if float_value != None -> return sema_expr_expected_owned(sema_tir_expr(Type.Float, TExprKind.FloatLit{value: float_value}, span), expected, environment, program, &diagnostics)
     &diagnostics.push(sema_error("E0109", span, "this unit literal has no numeric value", "a literal needs an integer or floating-point payload", "write a numeric literal"))
     None
 }
@@ -483,7 +483,7 @@ fn sema_expression_list(expr: Expr, elements: [Expr], span: Span, expected: Type
             else -> panic("checked list spread result is not a growable list")
         }
         if !sema_expression_list_check_clone(element_type, span, environment, program, &context, &diagnostics) -> return None
-        return sema_expr_expected(sema_tir_expr(ty, TExprKind.ListSpread{parts: checked.parts}, span), expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(sema_tir_expr(ty, TExprKind.ListSpread{parts: checked.parts}, span), expected, environment, program, &diagnostics)
     }
     values := [TExpr]{}
     loop part in checked.parts {
@@ -493,7 +493,7 @@ fn sema_expression_list(expr: Expr, elements: [Expr], span: Span, expected: Type
         }
     }
     trait_coercion :: sema_expression_list_trait_coercion(ty)
-    sema_expr_expected(sema_tir_expr(ty, TExprKind.List{values: values, trait_coercion: trait_coercion}, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tir_expr(ty, TExprKind.List{values: values, trait_coercion: trait_coercion}, span), expected, environment, program, &diagnostics)
 }
 
 fn sema_expression_map(expr: Expr, entries: [ExprPair], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -526,7 +526,7 @@ fn sema_expression_map(expr: Expr, entries: [ExprPair], span: Span, expected: Ty
             return None
         }
         ty :: result_ty ?? Type.Map{key: Type.Int, key_span: None, value: Type.Int}
-        return sema_expr_expected(sema_tir_expr(ty, TExprKind.Map{entries: [TMapEntry]{}}, span), expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(sema_tir_expr(ty, TExprKind.Map{entries: [TMapEntry]{}}, span), expected, environment, program, &diagnostics)
     }
     lowered := [TMapEntry]{}
     inferred_key := Type?{None}
@@ -565,7 +565,7 @@ fn sema_expression_map(expr: Expr, entries: [ExprPair], span: Span, expected: Ty
     }
     if result_ty == None -> result_ty = Val(Type.Map{key: inferred_key ?? Type.Int, key_span: Val(expr_span(entries[0].key)), value: inferred_value ?? Type.Int})
     ty :: result_ty ?? Type.Map{key: Type.Int, key_span: None, value: Type.Int}
-    sema_expr_expected(sema_tir_expr(ty, TExprKind.Map{entries: lowered}, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tir_expr(ty, TExprKind.Map{entries: lowered}, span), expected, environment, program, &diagnostics)
 }
 
 // D-MAP-KEY1 (E0502): one why/fix for every rejected map key, as the Rust
@@ -636,7 +636,7 @@ fn sema_expression_tuple(fields: [TupleField], span: Span, expected: Type?, envi
             }
         }
     }
-    sema_expr_expected(sema_tir_expr(Type.Tuple{fields: canonical}, TExprKind.Tuple{values: ordered}, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tir_expr(Type.Tuple{fields: canonical}, TExprKind.Tuple{values: ordered}, span), expected, environment, program, &diagnostics)
 }
 
 fn sema_expression_range(start: Expr, end: Expr, exclusive: Bool, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -683,7 +683,7 @@ fn sema_expression_char(text: String, span: Span, expected: Type?, environment: 
         &diagnostics.push(sema_error("E0001", span, "this character literal is not valid UTF-8", "a Char stores one Unicode scalar value", "write one valid character between single quotes"))
         return None
     }
-    sema_expr_expected(sema_tir_expr(Type.Char, TExprKind.CharLit{value: value}, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tir_expr(Type.Char, TExprKind.CharLit{value: value}, span), expected, environment, program, &diagnostics)
 }
 
 fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -703,7 +703,7 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
         site :: "{sema_dyn_site(base)}[{sema_dyn_site(index)}]"
         operation :: sema_dyn_index_operation(checked_index.ty, site, span, environment, program, scopes, &diagnostics) ?? return None
         value :: sema_tir_expr(sema_dyn_type(), TExprKind.HandleMethod{receiver: checked_base, operation: operation, args: [TExpr]{checked_index}}, span)
-        return sema_expr_expected(value, expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
     // Fixed lists refine lists (spec: fixed-size lists), so range selection
     // erases only the length fact. Reuse Slice for read/write window typing.
@@ -715,7 +715,7 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
         if element == .Val(item) {
             zero :: sema_tir_expr(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
             value :: sema_tir_expr(Type.List{element: item}, TExprKind.Slice{base: checked_base, start: zero, end: zero, range: Val(checked_index), location: sema_expression_panic_location(environment, program, scopes, span)}, span)
-            return sema_expr_expected(value, expected, environment, program, &diagnostics)
+            return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }
     }
     result_ty := Type?{None}
@@ -766,7 +766,7 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
                         zero_start :: sema_tir_expr(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
                         zero_end :: sema_tir_expr(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
                         subrange :: sema_tir_expr(window, TExprKind.Slice{base: checked_base, start: zero_start, end: zero_end, range: Val(checked_index), location: sema_expression_panic_location(environment, program, scopes, span)}, span)
-                        return sema_expr_expected(subrange, expected, environment, program, &diagnostics)
+                        return sema_expr_expected_owned(^subrange, expected, environment, program, &diagnostics)
                     }
                 }
                 if !sema_expression_integer_index(checked_index, expr_span(index), &diagnostics) -> return None

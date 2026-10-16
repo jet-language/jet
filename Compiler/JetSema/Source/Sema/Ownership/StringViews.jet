@@ -179,7 +179,7 @@ fn sema_string_view_materialize(name: String, span: Span, expected: Type?, envir
     facts := sema_copy_classify(checked.ty, SemaCopyIntent.Materialize, environment, program, context.generic_params, true)
     if !facts.accepted -> return sema_expr_expected(checked, expected, environment, program, &diagnostics)
     if sema_copy_effect_name(facts) != None || sema_copy_memory_operation(facts) != None -> &context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
-    sema_expr_expected(sema_tir_expr(facts.target, TExprKind.MaterializeView{value: checked}, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tir_expr(facts.target, TExprKind.MaterializeView{value: checked}, span), expected, environment, program, &diagnostics)
 }
 
 // The owning `String` destinations that materialize a string view.

@@ -603,14 +603,14 @@ fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_ar
     }
     if record.module_name == "core.math" && record.member == "sqrt" && args.len() == 1 && args[0].ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) {
         value :: sema_expression_measurement_source_call("__measurement_sqrt", args, result_type, span, environment, program) ?? return None
-        return sema_expr_expected(value, expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
     if record.module_name == "core.math" && record.member == "sqrt" && args.len() == 1 && args[0].ty == Type.Float {
         identity :: sema_call_core_module_identity(environment, program, "core.math") ?? return None
         if sema_call_core_source_target(environment, program, identity, "sqrt", type_args, span, false, &diagnostics) == .Val(target) {
             argument :: TCallArg{value: args[0], template_items: [SymbolID]{}, borrow: false, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
             value :: sema_tir_expr(result_type, TExprKind.Call{callee: target.symbol.id, type_args: [Type]{}, args: [TCallArg]{argument}}, span)
-            return sema_expr_expected(value, expected, environment, program, &diagnostics)
+            return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }
     }
     normalized :: sema_call_core_normalized_source_record(record, args)
@@ -637,7 +637,7 @@ fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_ar
         }
         source_args :: sema_call_core_source_arguments(record, args, params, span, environment, program)
         value :: sema_tir_expr(result_type, TExprKind.Call{callee: target.symbol.id, type_args: type_args, args: source_args}, span)
-        return sema_expr_expected(value, expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
     value := sema_tir_expr(result_type, TExprKind.CoreCall{record: record, args: args, source_span: span, type_args: type_args, widen_to_vec: widen_to_vec, data_plan: data_plan, fallibility: fallibility}, span)
     // Rust (fallible.rs `infer_or_fallback`) passes the slot type to a call

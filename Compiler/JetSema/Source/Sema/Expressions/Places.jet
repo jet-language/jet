@@ -207,7 +207,7 @@ fn sema_expression_deref(value: Expr, span: Span, expected: Type?, environment: 
         if name == "Ptr" && args.len() == 1 {
             if !sema_expr_require_unsafe("pointer dereference", span, &context, &diagnostics) -> return None
             result :: sema_tir_expr(args[0], TExprKind.Deref{value: checked}, span)
-            return sema_expr_expected(result, expected, environment, program, &diagnostics)
+            return sema_expr_expected_owned(^result, expected, environment, program, &diagnostics)
         }
     }
     &diagnostics.push(sema_error("E0112", span, "dereference needs a Ptr value", "only a checked pointer carries an element type through `.*`", "use a Ptr<T> value here"))
@@ -282,7 +282,7 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
         tuple_field_id :: symbol_id(SymbolKind.Field, "", tuple_owner, member)
         tuple_field_symbol :: Symbol{id: tuple_field_id, kind: SymbolKind.Field, name: member, module_name: "", owner: None, span: span, ty: Val(tuple_field.ty), visibility: 0}
         &context.name_references.push(SemaNameReferenceFact{span: span, symbol: tuple_field_symbol, kind: "field"})
-        return sema_expr_expected(tuple_field, expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(^tuple_field, expected, environment, program, &diagnostics)
     }
     // D-SHAREDGUARD2=A: a guard's held value is a compiler-known place, not
     // a stored struct field. The hidden tag records whether the place is
@@ -291,7 +291,7 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
         guard :: sema_expression_shared_guard_value(base.ty)
         if guard == .Val(held) {
             value :: sema_tir_expr(held.value_type, TExprKind.SharedGuardValue{guard: base, editable: held.editable}, span)
-            return sema_expr_expected(value, expected, environment, program, &diagnostics)
+            return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }
     }
     owner_name :: if base.ty == {
@@ -325,7 +325,7 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
                         reference := sema_expression_field_ref(field_symbol, Val(owner_symbol.id), field_ty)
                         reference.boxed = sema_scope_environment_boxed_edge(environment, program, owner_symbol.id, member)
                         value :: sema_tir_expr(field_ty, TExprKind.Field{receiver: base, field: reference}, span)
-                        return sema_expr_expected(value, expected, environment, program, &diagnostics)
+                        return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
                     }
                 }
                 &diagnostics.push(sema_error("E0302", span, "`{owner_name}` has no field `{member}`", "field access only works on names declared in the struct", "use one of the declared field names"))
@@ -358,7 +358,7 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
         if core_field == .Val(core_field_ty) {
             core_reference :: TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", owner_name, member), name: member, ty: core_field_ty, boxed: false}
             core_value :: sema_tir_expr(core_field_ty, TExprKind.Field{receiver: base, field: core_reference}, span)
-            return sema_expr_expected(core_value, expected, environment, program, &diagnostics)
+            return sema_expr_expected_owned(^core_value, expected, environment, program, &diagnostics)
         }
     }
     &diagnostics.push(sema_error("E0302", span, "`.{member}` only works on a declared struct or tuple field", "field access needs declaration metadata instead of guessing a successful type", "use a declared field on a struct or tuple"))
@@ -392,7 +392,7 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
         // call, so the site is known-pure rather than an unknown callee.
         if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "{type_name(bound_type)}.{member}", span, [EffectRowEntry]{}, &diagnostics) -> return None
         bound :: sema_tir_expr(bound_type, TExprKind.HostCall{call: THostCall.NumericBounds{ty: bound_type, member: member}}, span)
-        return sema_expr_expected(bound, expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(^bound, expected, environment, program, &diagnostics)
     }
     // Rust `infer_field` (`fold_enum_variant_path`, `is_known_enum`):
     // `Enum.Variant`, `Enum.Group.Leaf` or `types.Enum.Variant` builds the variant.
@@ -448,7 +448,7 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
         key :: sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: member}}}, member_span)
         operation :: THandleOp.DynIndexKey{site: "{sema_dyn_site(base)}.{member}", location: sema_expression_panic_location(environment, program, scopes, span)}
         value :: sema_tir_expr(sema_dyn_type(), TExprKind.HandleMethod{receiver: checked_base, operation: operation, args: [TExpr]{key}}, span)
-        return sema_expr_expected(value, expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
     sema_ownership_note_close_owner(&state, base, checked_base.ty, environment, program, scopes)
     if !sema_expression_secret_exposure_allowed(checked_base.ty, member, span, environment, program, &context, &diagnostics) -> return None

@@ -427,7 +427,7 @@ fn sema_call_check_value_constructor(call: Call, type_name_value: String, compon
         type_name_value == "Decimal" -> TExprKind.PreciseBuiltin{type_name: type_name_value, function: "from_str", args: values}
         else -> TExprKind.PreciseBuiltin{type_name: type_name_value, function: "from_parts", args: values}
     }
-    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(sema_tir_expr(result_ty, kind, call.name_span), expected, environment, program, &diagnostics)}
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(sema_tir_expr(result_ty, kind, call.name_span), expected, environment, program, &diagnostics)}
 }
 
 // An ambient row's IO effect, recorded as its call-site fact so the effect
@@ -1196,7 +1196,7 @@ fn sema_call_check_direct(state: &SemaOwnershipState, call: Call, expected: Type
         }
         result :: Type.Apply{name: "Measurement", args: [Type]{Type.Float}}
         value :: sema_expression_measurement_source_call("__measurement_new", values, result, call.name_span, environment, program) ?? return None
-        return sema_expr_expected(value, expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
     // D-STRUCT-POLICY1=A (Rust check_call_inner `apply`): an unshadowed
     // `apply(policy..., f)` wraps `f` in its user policy chain.

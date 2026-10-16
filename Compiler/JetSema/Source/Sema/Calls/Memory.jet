@@ -36,7 +36,7 @@ fn sema_call_memory_address_of(args: [CallArg], span: Span, expected: Type?, env
         return None
     }
     value :: sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    sema_expr_expected(sema_tir_expr(Type.Int, TExprKind.RawAddressOf{place: TPlace.Expr{value: value}}, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tir_expr(Type.Int, TExprKind.RawAddressOf{place: TPlace.Expr{value: value}}, span), expected, environment, program, &diagnostics)
 }
 
 fn sema_call_memory_allocator_name(ty: Type) -> String? {

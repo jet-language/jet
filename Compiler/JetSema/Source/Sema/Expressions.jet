@@ -541,15 +541,15 @@ fn sema_expr_check_operator(op: BinOp, left: Expr, right: Expr, lhs: TExpr, rhs:
     if op == BinOp.Eq || op == BinOp.Ne {
         if resolved.candidate.method.name == "compare" {
             result := sema_expr_operator_ordering_test(op, value, span, line)
-            return sema_expr_expected(result, expected, environment, program, &diagnostics)
+            return sema_expr_expected_owned(^result, expected, environment, program, &diagnostics)
         }
         if op == BinOp.Ne {
             result := sema_tir_expr(Type.Bool, TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span)
-            return sema_expr_expected(result, expected, environment, program, &diagnostics)
+            return sema_expr_expected_owned(^result, expected, environment, program, &diagnostics)
         }
     }
     if op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge {
-        return sema_expr_expected(sema_expr_operator_ordering_test(op, value, span, line), expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(sema_expr_operator_ordering_test(op, value, span, line), expected, environment, program, &diagnostics)
     }
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
@@ -909,24 +909,33 @@ fn sema_expr_optional_lift(value: TExpr, required: Type, offered: Type, environm
     None
 }
 
+// `value` as `expected` asks for it: the read form for a caller that keeps
+// reading its value. A caller done with its value passes it to
+// sema_expr_expected_owned instead, which moves it through.
 fn sema_expr_expected(value: TExpr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+    // copy: the caller keeps reading `value`; the result is a value of its own.
+    sema_expr_expected_owned(value.copy(), expected, environment, program, &diagnostics)
+}
+
+fn sema_expr_expected_owned(value: ^TExpr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+    owned := ^value
     // `expected` is known present below this line.
-    if expected == None -> return Val(value)
-    if sema_expr_expected_keeps(value.ty, expected) -> return Val(value)
+    if expected == None -> return Val(^owned)
+    if sema_expr_expected_keeps(owned.ty, expected) -> return Val(^owned)
     required := sema_expr_expected_type(expected, environment, program)
-    offered := sema_expr_expected_type(value.ty, environment, program)
-    lifted :: sema_expr_optional_lift(value, required, offered, environment, program)
+    offered := sema_expr_expected_type(owned.ty, environment, program)
+    lifted :: sema_expr_optional_lift(owned, required, offered, environment, program)
     if lifted != None -> return lifted
     if sema_expr_strict_zone_erased(required, offered, environment, program) {
-        &diagnostics.push(sema_error("E0771", value.span, "this needs {sema_type_show(required)}, but the function value is {sema_type_show(offered)}", "public labels and parameter zones are part of a function's callable type", "use `{type_name(required)}` here"))
+        &diagnostics.push(sema_error("E0771", owned.span, "this needs {sema_type_show(required)}, but the function value is {sema_type_show(offered)}", "public labels and parameter zones are part of a function's callable type", "use `{type_name(required)}` here"))
         return None
     }
     compatible :: sema_expr_expected_assignable(required, offered, environment, program) ?? return None
     if !compatible {
-        &diagnostics.push(sema_expr_mismatch_diagnostic(required, offered, value.span))
+        &diagnostics.push(sema_expr_mismatch_diagnostic(required, offered, owned.span))
         return None
     }
-    Val(sema_expr_expected_trait_coercion(^value, required, offered, environment, program))
+    Val(sema_expr_expected_trait_coercion(^owned, required, offered, environment, program))
 }
 
 // Whether sema_expr_expected(value, expected) is `value` itself, decided by
@@ -3177,7 +3186,7 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
                 }
                 &context.name_references.push(SemaNameReferenceFact{span: span, symbol: prepared_binding.symbol, kind: "local"})
                 prepared :: sema_fact_prepared_expr(known, prepared_ty, span, environment, program) ?? return None
-                return sema_expr_expected(prepared, expected, environment, program, &diagnostics)
+                return sema_expr_expected_owned(^prepared, expected, environment, program, &diagnostics)
             }
         }
     }
@@ -3250,7 +3259,7 @@ fn sema_expr_check_string(parts: [StrPart], span: Span, expected: Type?, environ
         }
         index += 1
     }
-    sema_expr_expected(sema_tir_expr(Type.String, TExprKind.StrLit{parts: tir_parts}, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tir_expr(Type.String, TExprKind.StrLit{parts: tir_parts}, span), expected, environment, program, &diagnostics)
 }
 
 fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -3283,7 +3292,7 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
             // folds into its spelling unless a Float carrier is expected.
             .Float(_, _, _, raw) -> {
                 if raw == .Val(text) {
-                    if !sema_expr_expects_machine_float(expected) -> return sema_expr_expected(sema_expr_decimal_literal("-{text}", span), expected, environment, program, &diagnostics)
+                    if !sema_expr_expects_machine_float(expected) -> return sema_expr_expected_owned(sema_expr_decimal_literal("-{text}", span), expected, environment, program, &diagnostics)
                 }
             }
             else -> {}
@@ -3305,7 +3314,7 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
                     line :: sema_source_line_at(environment.source_segments, span) ?? return None
                     zero :: TExpr{ty: value.ty, kind: TExprKind.IntLit{value: 0, width: Val(TIntegerWidth{signed: true, bits: bits})}, span: span, integer_bounds: Val(integer_bounds_exact(0)), cost: None}
                     negated :: sema_expr_arithmetic_policy_value(policy, ArithmeticOperation.Neg, value.ty, span, line, zero, value)
-                    return sema_expr_expected(negated, expected, environment, program, &diagnostics)
+                    return sema_expr_expected_owned(^negated, expected, environment, program, &diagnostics)
                 }
             }
             else -> {}
@@ -3316,14 +3325,14 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
             return None
         }
         result_ty := sema_expr_numeric_base(value.ty)
-        return sema_expr_expected(sema_tir_expr(result_ty, TExprKind.Unary{op: TUnaryOp.Neg, operand: value}, span), expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(sema_tir_expr(result_ty, TExprKind.Unary{op: TUnaryOp.Neg, operand: value}, span), expected, environment, program, &diagnostics)
     }
     if sema_dyn_is_type(sema_expr_expected_type(value.ty, environment, program)) {
         &diagnostics.push(sema_dyn_condition_error(span))
         return None
     }
     if value.ty == Type.Bool {
-        return sema_expr_expected(sema_tir_expr(Type.Bool, TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span), expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(sema_tir_expr(Type.Bool, TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span), expected, environment, program, &diagnostics)
     }
     if sema_expr_is_integer(value.ty) {
         &diagnostics.push(sema_error("E0398", span, "`!` needs Bool; use `bit_not` to flip integer bits", "marks express ownership and outcomes; arithmetic uses named methods (D-SIGIL-ALGEBRA1=B)", "write `value.bit_not()` for an integer, or compare the value to produce Bool"))
@@ -3347,11 +3356,11 @@ fn sema_expr_decimal_literal(text: String, span: Span) -> TExpr Never! {
 
 fn sema_expr_float_literal(value: Float, is_f32: Bool, raw: String?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
     if raw == .Val(text) {
-        if !sema_expr_expects_machine_float(expected) -> return sema_expr_expected(sema_expr_decimal_literal(text, span), expected, environment, program, &diagnostics)
+        if !sema_expr_expects_machine_float(expected) -> return sema_expr_expected_owned(sema_expr_decimal_literal(text, span), expected, environment, program, &diagnostics)
     }
     ty := Type.Float
     if expected == (Val(Type.Float32)) || (is_f32 && expected != (Val(Type.Float))) -> ty = Type.Float32
-    sema_expr_expected(sema_tir_expr(ty, TExprKind.FloatLit{value: value}, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tir_expr(ty, TExprKind.FloatLit{value: value}, span), expected, environment, program, &diagnostics)
 }
 
 // The opposite Dyn operand contextualizes a fractional literal without
@@ -3511,24 +3520,24 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         ty :: if arithmetic -> sema_dyn_type() else -> Type.Bool
         if equality {
             value :: sema_tir_expr(ty, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: dynamic_left, rhs: dynamic_right}, span)
-            return sema_expr_expected(value, expected, environment, program, &diagnostics)
+            return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }
         site :: "{sema_dyn_site(left)} {sema_expr_binary_name(op)} {sema_dyn_site(right)}"
         location :: sema_expression_panic_location(environment, program, scopes, span)
         operation :: if arithmetic -> THandleOp.DynBinary{op: sema_expr_binary_name(op), site: site, location: location} else -> THandleOp.DynCompare{op: sema_expr_binary_name(op), site: site, location: location}
         value :: sema_tir_expr(ty, TExprKind.HandleMethod{receiver: dynamic_left, operation: operation, args: [TExpr]{dynamic_right}}, span)
-        return sema_expr_expected(value, expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
     if op == BinOp.And || op == BinOp.Or {
         ty :: sema_expr_binary_type(op, lhs.ty, rhs.ty, span, &diagnostics) ?? return None
         value :: TExpr{ty: ty, kind: TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span: span, integer_bounds: None, cost: None}
         if sema_expr_expected_keeps(value.ty, expected) -> return Val(value)
-        return sema_expr_expected(value, expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
 
     if op == BinOp.Div && lhs.ty == Type.Int && rhs.ty == Type.Int {
         value := sema_tir_expr(Type.Named{name: "Fraction"}, TExprKind.PreciseBuiltin{type_name: "Fraction", function: "from_parts", args: [TExpr]{lhs, rhs}}, span)
-        return sema_expr_expected(value, expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
     // D-TYPE2-MEASURE1=A (Rust `infer_binary`, E2512): `Matrix * Matrix`
     // matches the left column measure against the right row measure.
@@ -3563,7 +3572,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
             else -> "div"
         }
         value :: sema_expression_measurement_source_call("__measurement_{function}", operands, measured_type, span, environment, program) ?? return None
-        return sema_expr_expected(value, expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
     left_point :: if lhs.ty == {.Named(name) -> name.ends_with("::Instant") && core_source_owns_type(name) else -> false}
     right_point :: if rhs.ty == {.Named(name) -> name.ends_with("::Instant") && core_source_owns_type(name) else -> false}
@@ -3695,7 +3704,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         }
         policed :: sema_expr_arithmetic_policy_value(policy, operation, ty, span, line, effective_lhs, effective_rhs)
         if sema_expr_expected_keeps(policed.ty, expected) -> return Val(policed)
-        return sema_expr_expected(policed, expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(^policed, expected, environment, program, &diagnostics)
     }
     overflow := false
     if (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div) && (sema_expr_is_integer(effective_lhs.ty) || sema_expr_is_integer(effective_rhs.ty)) -> overflow = true
@@ -3746,7 +3755,7 @@ fn sema_expr_check_copy_typed(checked: TExpr, span: Span, expected: Type?, envir
         .MaterializeView -> result_kind = TExprKind.MaterializeView{value: checked}
         else -> {}
     }
-    sema_expr_expected(sema_tir_expr(facts.target, result_kind, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tir_expr(facts.target, result_kind, span), expected, environment, program, &diagnostics)
 }
 
 fn sema_expr_check_copy(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -3818,14 +3827,14 @@ fn sema_expr_check_pointer_from_address(alias: String, alias_span: Span, element
     }
     if forbidden -> return None
     pointer := Type.Apply{name: "Ptr", args: [Type]{element}}
-    sema_expr_expected(sema_tir_expr(pointer, TExprKind.PtrFromAddr{address: checked, element: element}, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tir_expr(pointer, TExprKind.PtrFromAddr{address: checked, element: element}, span), expected, environment, program, &diagnostics)
 }
 
 fn sema_expr_check_comptime_name(name: String, span: Span, embedded: CtValue?, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if embedded == .Val(value) {
         if value == .Int(number) {
             literal :: sema_expr_int_literal_tir(number, Type.Int, None, span, environment, program) ?? return None
-            return sema_expr_expected(literal, expected, environment, program, &diagnostics)
+            return sema_expr_expected_owned(^literal, expected, environment, program, &diagnostics)
         }
         ty := sema_expr_expected_type(ast_comptime_value_type(value), environment, program)
         kind := if value == {
@@ -3842,7 +3851,7 @@ fn sema_expr_check_comptime_name(name: String, span: Span, embedded: CtValue?, e
             .Enum(type_name, variant, args) -> if args.len() == 0 -> TExprKind.EnumLit{enum_type: type_name, variant: variant, payload: TEnumPayload.Unit} else -> TExprKind.CtLit{value: sema_checked_comptime(value) ?? return None}
             else -> TExprKind.CtLit{value: sema_checked_comptime(value) ?? return None}
         }
-        return sema_expr_expected(sema_tir_expr(ty, kind, span), expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(sema_tir_expr(ty, kind, span), expected, environment, program, &diagnostics)
     }
     if sema_scope_resolve_index(scopes, name) == None {
         if scopes.comptime_execution_depth == 0 -> &diagnostics.push(sema_unknown_name(name, span))
@@ -3869,8 +3878,8 @@ fn sema_check_expression_inner(expr: Expr, expected: Type?, environment: SemaSco
     return if expr == {
         .Int(value, span, width, raw) -> sema_expr_integer_literal(sema_expr_exact_integer_literal(value, raw), width, expected, span, environment, program, &diagnostics)
         .Float(value, span, is_f32, raw) -> sema_expr_float_literal(value, is_f32, raw, span, expected, environment, program, &diagnostics)
-        .Bool(value, span) -> sema_expr_expected(sema_tir_expr(Type.Bool, TExprKind.BoolLit{value: value}, span), expected, environment, program, &diagnostics)
-        .Unit(span) -> sema_expr_expected(sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Unit, span), expected, environment, program, &diagnostics)
+        .Bool(value, span) -> sema_expr_expected_owned(sema_tir_expr(Type.Bool, TExprKind.BoolLit{value: value}, span), expected, environment, program, &diagnostics)
+        .Unit(span) -> sema_expr_expected_owned(sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Unit, span), expected, environment, program, &diagnostics)
         .Str(parts, span) -> sema_expr_check_string(parts, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .Ident(name, span) -> if sema_ownership_is_share_site(state, span) -> sema_expr_check_shared_identifier(name, span, expected, environment, program, &scopes, &state, &context, &diagnostics) else -> sema_expr_check_identifier(name, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
         .Paren(value, span) -> sema_expr_check_paren(value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -3979,7 +3988,7 @@ fn sema_check_expression_cold(expr: Expr, expected: Type?, environment: SemaScop
             checked :: sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
             if forbidden -> return None
             pointer := Type.Apply{name: "Ptr", args: [Type]{checked.ty}}
-            sema_expr_expected(sema_tir_expr(pointer, TExprKind.RawOf{value: checked}, span), expected, environment, program, &diagnostics)
+            sema_expr_expected_owned(sema_tir_expr(pointer, TExprKind.RawOf{value: checked}, span), expected, environment, program, &diagnostics)
         }
         .PtrFromAddr(alias, alias_span, element, address, span) -> sema_expr_check_pointer_from_address(alias, alias_span, element, address, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .Tainted(value, tag_value, span) -> {
@@ -4067,7 +4076,7 @@ fn sema_expr_check_pattern_test(subject: Expr, pattern: Pattern, span: Span, exp
     checked_subject :: subject_value ?? return None
     checked_pattern := sema_check_pattern(checked_subject, pattern, TPatternPosition.Arm, false, false, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     checked :: checked_pattern.checked ?? return None
-    sema_expr_expected(sema_tir_expr(Type.Bool, TExprKind.PatternMatches{subject: checked.subject, pattern: checked.pattern}, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tir_expr(Type.Bool, TExprKind.PatternMatches{subject: checked.subject, pattern: checked.pattern}, span), expected, environment, program, &diagnostics)
 }
 
 // D-COMPILE-STACK1=A: the deepest source nesting sema checks, the limit the

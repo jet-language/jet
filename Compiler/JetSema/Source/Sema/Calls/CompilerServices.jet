@@ -170,7 +170,7 @@ fn sema_compiler_services_lower_core_call(check: SemaCompilerServicesCallCheck, 
     if check.module_name == "core.build" && check.member == "graph" {
         if check.arguments.len() != 1 -> return None
         call :: THostCall.Method{receiver: check.arguments[0], method: "graph", args: [TExpr]{}}
-        return sema_expr_expected(sema_tir_expr(check.result_type, TExprKind.HostCall{call: call}, span), expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(sema_tir_expr(check.result_type, TExprKind.HostCall{call: call}, span), expected, environment, program, &diagnostics)
     }
     if check.module_name != "core.compiler" -> return None
     record :: sema_call_core_record(check.module_name, check.member, check.arguments.len(), span, &diagnostics) ?? return None

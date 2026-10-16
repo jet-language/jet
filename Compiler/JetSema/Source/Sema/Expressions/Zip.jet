@@ -123,12 +123,12 @@ fn sema_expression_zip_family(method: String, inputs: [TExpr], fields: [String],
         if inputs.len() == 0 {
             empty := sema_tir_expr(Type.List{element: Type.Named{name: "Unit"}}, TExprKind.ListLit{values: [TExpr]{}}, span)
             value := sema_tir_expr(result_ty, TExprKind.BuiltinMethod{receiver: empty, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
-            return sema_expr_expected(value, expected, environment, program, &diagnostics)
+            return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }
         receiver := inputs[0]
         if sema_expression_zip_is_iter(receiver.ty) -> return sema_expr_expected(receiver, expected, environment, program, &diagnostics)
         value := sema_tir_expr(result_ty, TExprKind.BuiltinMethod{receiver: receiver, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
-        return sema_expr_expected(value, expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
 
     output_elements := elements
@@ -196,7 +196,7 @@ fn sema_expression_zip_family(method: String, inputs: [TExpr], fields: [String],
     loop index in 1..<inputs.len() -> &lowered_args.push(inputs[index])
     loop fill in fill_args -> &lowered_args.push(fill)
     value := sema_tir_expr(result_ty, TExprKind.BuiltinMethod{receiver: receiver, operation: operation, args: lowered_args}, span)
-    return sema_expr_expected(value, expected, environment, program, &diagnostics)
+    return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
 }
 
 fn sema_expression_zip_infer_arg(argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

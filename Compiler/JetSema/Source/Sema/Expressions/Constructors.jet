@@ -1342,7 +1342,7 @@ fn sema_expression_typed_literal_regex(value: Expr, span: Span, expected: Type?,
             message :: sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "compiler-checked regex failed to compile"}}}, span)
             fallback :: TOrFallback.Panic{message: message, location: sema_expression_panic_location(environment, program, scopes, span)}
             checked :: sema_tir_expr(result_type, TExprKind.OrFallback{value: compiled, fallback: fallback, ambient_err: None}, span)
-            return sema_expr_expected(checked, expected, environment, program, &diagnostics)
+            return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
         }
         else -> {
             &diagnostics.push(sema_error("E0906", span, "the source Regex literal producer is unavailable", "checked patterns and dynamic patterns use the same source-owned engine", "load the core.regex source module"))
@@ -1452,33 +1452,33 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             .ByteText(parts) -> {
                 elements :: sema_expression_typed_literal_byte_text(parts, result_head, span, &diagnostics) ?? return None
                 checked :: sema_expression_list(Expr.ListLit{elements: elements, span: span}, elements, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                return sema_expr_expected(checked, expected, environment, program, &diagnostics)
+                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
             }
             .Empty -> {
                 checked :: sema_expression_list(Expr.ListLit{elements: [Expr]{}, span: span}, [Expr]{}, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                return sema_expr_expected(checked, expected, environment, program, &diagnostics)
+                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
             }
             .Elements(elements) -> {
                 if elements.len() == 1 && sema_expression_typed_literal_whole_value(result_head, elements[0], environment, program, &scopes, &state, &tail_store, &context) -> return sema_expression_typed_literal_whole(result_head, elements[0], expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 checked :: sema_expression_list(Expr.ListLit{elements: elements, span: span}, elements, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                return sema_expr_expected(checked, expected, environment, program, &diagnostics)
+                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
             }
             .Value(value) -> {
                 if sema_expression_typed_literal_whole_value(result_head, value, environment, program, &scopes, &state, &tail_store, &context) -> return sema_expression_typed_literal_whole(result_head, value, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 elements := [Expr]{value}
                 checked :: sema_expression_list(Expr.ListLit{elements: elements, span: span}, elements, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                return sema_expr_expected(checked, expected, environment, program, &diagnostics)
+                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
             }
             else -> return sema_expression_typed_literal_mismatch(result_head, span, &diagnostics)
         }
         .Map(_, _, _) -> if body == {
             .Empty -> {
                 checked :: sema_expression_map(Expr.MapLit{entries: [ExprPair]{}, span: span}, [ExprPair]{}, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                return sema_expr_expected(checked, expected, environment, program, &diagnostics)
+                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
             }
             .Entries(entries) -> {
                 checked :: sema_expression_map(Expr.MapLit{entries: entries, span: span}, entries, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                return sema_expr_expected(checked, expected, environment, program, &diagnostics)
+                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
             }
             // #3739: a map body without `:` can only be the whole value.
             .Value(value) -> return sema_expression_typed_literal_whole(result_head, value, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -1487,22 +1487,22 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
         .Named(name) -> if body == {
             .Fields(fields) -> {
                 checked :: sema_expression_struct_literal(name, [Type]{}, fields, false, None, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                return sema_expr_expected(checked, expected, environment, program, &diagnostics)
+                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
             }
             .Empty -> {
                 checked :: sema_expression_struct_literal(name, [Type]{}, [ExprField]{}, false, None, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                return sema_expr_expected(checked, expected, environment, program, &diagnostics)
+                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
             }
             else -> {}
         }
         .Apply(name, args) -> if body == {
             .Fields(fields) -> {
                 checked :: sema_expression_struct_literal(name, args, fields, false, None, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                return sema_expr_expected(checked, expected, environment, program, &diagnostics)
+                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
             }
             .Empty -> {
                 checked :: sema_expression_struct_literal(name, args, [ExprField]{}, false, None, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                return sema_expr_expected(checked, expected, environment, program, &diagnostics)
+                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
             }
             else -> {}
         }
@@ -1512,7 +1512,7 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             .Value(value) -> {
                 checked :: sema_check_expression(value, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 typed :: sema_expr_expected(checked, Val(result_head), environment, program, &diagnostics) ?? return None
-                return sema_expr_expected(typed, expected, environment, program, &diagnostics)
+                return sema_expr_expected_owned(^typed, expected, environment, program, &diagnostics)
             }
             else -> return sema_expression_typed_literal_mismatch(result_head, span, &diagnostics)
         }
@@ -1542,7 +1542,7 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             }
             if sema_expression_typed_literal_distinct_mismatch(result_head, converted, environment, program, &scopes, &diagnostics) -> return None
             typed :: sema_expr_expected(converted, Val(result_head), environment, program, &diagnostics) ?? return None
-            return sema_expr_expected(typed, expected, environment, program, &diagnostics)
+            return sema_expr_expected_owned(^typed, expected, environment, program, &diagnostics)
         }
         .Elements(elements) -> if elements.len() == 1 {
             value := elements[0]
@@ -1558,7 +1558,7 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             }
             if sema_expression_typed_literal_distinct_mismatch(result_head, converted, environment, program, &scopes, &diagnostics) -> return None
             typed :: sema_expr_expected(converted, Val(result_head), environment, program, &diagnostics) ?? return None
-            return sema_expr_expected(typed, expected, environment, program, &diagnostics)
+            return sema_expr_expected_owned(^typed, expected, environment, program, &diagnostics)
         }
         else -> {}
     }

@@ -116,7 +116,7 @@ fn sema_expression_present(value: Expr, span: Span, expected: Type?, environment
             return None
         }
     }
-    sema_expr_expected(sema_tir_expr(result_ty ?? Type.Option{inner: payload.ty}, TExprKind.Present{value: payload}, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tir_expr(result_ty ?? Type.Option{inner: payload.ty}, TExprKind.Present{value: payload}, span), expected, environment, program, &diagnostics)
 }
 
 fn sema_expression_absent(span: Span, expected: Type?, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -306,7 +306,7 @@ fn sema_expression_result_payload(value: Expr, success: Bool, take_field: Bool, 
     }
     result_ty :: Type.Result{ok: ok_ty, err: err_ty}
     kind :: if success -> TExprKind.Ok{value: payload} else -> TExprKind.Err{value: payload}
-    sema_expr_expected(sema_tir_expr(result_ty, kind, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tir_expr(result_ty, kind, span), expected, environment, program, &diagnostics)
 }
 
 fn sema_expression_try_union_conversion(target: Type, source: Type) -> TTryConvert? {
@@ -1068,7 +1068,7 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
         }
         after_result :: sema_tir_expr(ok, TExprKind.OrFallback{value: subject, fallback: failure_route, ambient_err: checked_route.ambient_err}, span)
         mixed :: sema_tir_expr(fallback_payload, TExprKind.OrFallback{value: after_result, fallback: route_value, ambient_err: None}, span)
-        return sema_expr_expected(mixed, expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(^mixed, expected, environment, program, &diagnostics)
     }
     result :: sema_tir_expr(fallback_payload, TExprKind.OrFallback{value: subject, fallback: route_value, ambient_err: checked_route.ambient_err}, span)
     sema_expr_expected(result, expected, environment, program, &diagnostics)
