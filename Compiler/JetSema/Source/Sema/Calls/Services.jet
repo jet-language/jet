@@ -639,10 +639,10 @@ fn sema_job_queue_nominal(environment: SemaScopeEnvironment, program: SemaProgra
     loop module_index in 0..<graph.modules.len() {
         if graph.modules[module_index].module_name != "core.jobs" -> next
         loop nominal_index in 0..<graph.modules[module_index].nominals.len() {
-            nominal :: graph.modules[module_index].nominals[nominal_index]
-            if nominal.symbol.name == leaf {
-                if nominal.compiler_owned -> return leaf.copy()
-                return "{nominal.symbol.module_name}::{leaf}"
+            // Read in place: binding the row copied each core.jobs nominal.
+            if graph.modules[module_index].nominals[nominal_index].symbol.name == leaf {
+                if graph.modules[module_index].nominals[nominal_index].compiler_owned -> return leaf.copy()
+                return "{graph.modules[module_index].nominals[nominal_index].symbol.module_name}::{leaf}"
             }
         }
     }

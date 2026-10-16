@@ -3114,9 +3114,9 @@ fn sema_checked_validate_delegation(graph: SemaRegistrationGraph, module_row: Se
     owner_module :: implementation.target_module_identity ?? return
     owner_index :: sema_registration_module_index(graph, owner_module) ?? return
     loop nominal_index in 0..<graph.modules[owner_index].nominals.len() {
-        nominal :: graph.modules[owner_index].nominals[nominal_index]
-        if nominal.kind != SemaRegistrationNominalKind.Struct || nominal.symbol.name != definition.type_name -> next
-        loop field in nominal.fields {
+        // Read in place: binding the row copied every nominal of the module.
+        if graph.modules[owner_index].nominals[nominal_index].kind != SemaRegistrationNominalKind.Struct || graph.modules[owner_index].nominals[nominal_index].symbol.name != definition.type_name -> next
+        loop field in graph.modules[owner_index].nominals[nominal_index].fields {
             if field.symbol.name != field_name -> next
             field_type_name :: type_name(field.ty)
             satisfied :: sema_type_bound_satisfied(graph, field.ty, trait_name, module_row.module_identity) ?? true

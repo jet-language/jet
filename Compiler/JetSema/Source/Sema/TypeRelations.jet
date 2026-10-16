@@ -571,9 +571,9 @@ fn sema_type_alias_cycles_check(graph: &SemaRegistrationGraph) Never! {
     positions := [String:Int]{}
     loop module_index in 0..<graph.modules.len() {
         loop row in 0..<graph.modules[module_index].nominals.len() {
-            nominal :: graph.modules[module_index].nominals[row]
-            if nominal.kind != SemaRegistrationNominalKind.TypeAlias -> next
-            positions[nominal.symbol.id.key] = rows.len()
+            // Read in place: binding the row copied every nominal, methods included.
+            if graph.modules[module_index].nominals[row].kind != SemaRegistrationNominalKind.TypeAlias -> next
+            positions[graph.modules[module_index].nominals[row].symbol.id.key] = rows.len()
             &rows.push(SemaTypeAliasCycleRow{module_index: module_index, row: row, edges: [Int]{}})
         }
     }

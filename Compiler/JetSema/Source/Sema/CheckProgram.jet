@@ -2210,18 +2210,18 @@ fn sema_comptime_indexed_function_source(graph: SemaRegistrationGraph, module_in
     if row == {
         .Function(declaring, index) -> {
             if module_index >= 0 && declaring != module_index -> return None
-            function :: graph.modules[declaring].functions[index]
-            return Val(SemaComptimeFunctionSource{declaration: function.declaration, symbol: function.symbol, kind: TFuncKind.TopLevel, raw_protocol_return: function.raw_protocol_return})
+            // copy: the source is the caller's own; the row stays in the graph.
+            return Val(SemaComptimeFunctionSource{declaration: graph.modules[declaring].functions[index].declaration.copy(), symbol: graph.modules[declaring].functions[index].symbol.copy(), kind: TFuncKind.TopLevel, raw_protocol_return: graph.modules[declaring].functions[index].raw_protocol_return})
         }
         .NominalMethod(declaring, owner, index) -> {
             if module_index >= 0 && declaring != module_index -> return None
-            function :: graph.modules[declaring].nominals[owner].methods[index]
-            return Val(SemaComptimeFunctionSource{declaration: function.declaration, symbol: function.symbol, kind: sema_comptime_method_kind(function.declaration, graph.modules[declaring].nominals[owner].ty, None), raw_protocol_return: function.raw_protocol_return})
+            // copy: the source is the caller's own; the row stays in the graph.
+            return Val(SemaComptimeFunctionSource{declaration: graph.modules[declaring].nominals[owner].methods[index].declaration.copy(), symbol: graph.modules[declaring].nominals[owner].methods[index].symbol.copy(), kind: sema_comptime_method_kind(graph.modules[declaring].nominals[owner].methods[index].declaration, graph.modules[declaring].nominals[owner].ty, None), raw_protocol_return: graph.modules[declaring].nominals[owner].methods[index].raw_protocol_return})
         }
         .ImplMethod(declaring, owner, index) -> {
             if module_index >= 0 && declaring != module_index -> return None
-            function :: graph.modules[declaring].impls[owner].methods[index]
-            return Val(SemaComptimeFunctionSource{declaration: function.declaration, symbol: function.symbol, kind: sema_comptime_method_kind(function.declaration, graph.modules[declaring].impls[owner].target_type, graph.modules[declaring].impls[owner].trait_symbol), raw_protocol_return: function.raw_protocol_return})
+            // copy: the source is the caller's own; the row stays in the graph.
+            return Val(SemaComptimeFunctionSource{declaration: graph.modules[declaring].impls[owner].methods[index].declaration.copy(), symbol: graph.modules[declaring].impls[owner].methods[index].symbol.copy(), kind: sema_comptime_method_kind(graph.modules[declaring].impls[owner].methods[index].declaration, graph.modules[declaring].impls[owner].target_type, graph.modules[declaring].impls[owner].trait_symbol), raw_protocol_return: graph.modules[declaring].impls[owner].methods[index].raw_protocol_return})
         }
         .Foreign(_, _) -> return None
     }
@@ -2729,21 +2729,23 @@ fn sema_check_registered_protocol_unit_return(job: SemaBodyJob, module_index: In
                 if graph.modules[module_index].impls[owner].methods[row].declaration.return_type != None -> return false
                 return sema_check_protocol_unit_trait(graph.modules[module_index].impls[owner].declaration.trait_name)
             }
-            .NominalMethod(_, owner, row) -> {
-                // Read in place: binding the indexed path copies the method.
-                nominal :: graph.modules[module_index].nominals[owner]
-                if nominal.methods[row].declaration.return_type != None -> return false
-                method_span :: nominal.methods[row].declaration.span
-                if nominal.source == .SourceAST(item) {
-                    if item == {
-                        .Struct(definition) -> return sema_check_protocol_unit_block(definition.trait_impls, method_span)
-                        .Enum(definition) -> return sema_check_protocol_unit_block(definition.trait_impls, method_span)
-                        else -> {}
-                    }
-                }
-                return false
-            }
+            .NominalMethod(_, owner, row) -> return sema_check_registered_nominal_protocol_unit(graph, module_index, owner, row)
             .TopLevel(_) -> return false
+        }
+    }
+    false
+}
+
+// Read through the graph as a read parameter: binding the nominal row copied
+// the whole declaration, every method included, once per checked method.
+fn sema_check_registered_nominal_protocol_unit(graph: SemaRegistrationGraph, module_index: Int, owner: Int, row: Int) -> Bool Never! {
+    if graph.modules[module_index].nominals[owner].methods[row].declaration.return_type != None -> return false
+    method_span :: graph.modules[module_index].nominals[owner].methods[row].declaration.span
+    if graph.modules[module_index].nominals[owner].source == .SourceAST(item) {
+        if item == {
+            .Struct(definition) -> return sema_check_protocol_unit_block(definition.trait_impls, method_span)
+            .Enum(definition) -> return sema_check_protocol_unit_block(definition.trait_impls, method_span)
+            else -> {}
         }
     }
     false
