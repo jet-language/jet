@@ -560,11 +560,8 @@ fn civil_mod(value: Int, divisor: Int) -> Int Never! {
     if remainder < 0 -> return remainder + divisor
     remainder
 }
-fn civil_floor(value: Int, divisor: Int) -> Int Never! {
-    quotient :: value /% divisor
-    if value %% divisor < 0 -> return quotient - 1
-    quotient
-}
+// `/%` already rounds toward negative infinity.
+fn civil_floor(value: Int, divisor: Int) -> Int Never! { value /% divisor }
 fn civil_negated(value: Int) -> Int Never! { civil_i64(-value) }
 fn civil_abs(value: Int) -> Int Never! {
     if value < 0 -> return civil_negated(value)
