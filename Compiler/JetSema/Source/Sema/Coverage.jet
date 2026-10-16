@@ -11,6 +11,7 @@ use jet_foundation.[
     Stmt,
     TExpr,
     TExprKind,
+    TIfCond,
     TPattern,
     TPatternBinding,
     TPatternShape,
@@ -473,27 +474,38 @@ fn sema_coverage_if_let_value(pattern: TPattern, subject: TExpr) -> TExpr Never!
 // The value form arrives as a nested `if` chain sharing one span and ending in
 // `NoElse` (checked as `Never("no else arm")`). Collect its checked arm
 // conditions, or None when the chain has a real `else` value.
+// The chain is walked through read parameters (one frame per level), so
+// only the collected conditions are copied: holding each level in a local
+// copied the rest of the chain once per level.
 fn sema_coverage_noelse_chain_conditions(head_condition: TExpr, else_value: TExpr, span: Span) -> [TExpr]? {
-    conditions := [TExpr]{head_condition}
-    current := else_value
-    loop {
-        if current.kind == {
-            .Never(reason) -> {
-                if reason == "no else arm" -> return Val(conditions)
-                return None
-            }
-            .IfExpr(cond, _, _, _, next_value) -> {
-                if current.span != span -> return None
-                if cond == {
-                    .Plain(value) -> &conditions.push(value)
-                    .IfLet(pattern, subject) -> &conditions.push(sema_coverage_if_let_value(pattern, subject))
-                    else -> return None
-                }
-                current = next_value
-            }
-            else -> return None
+    // copy: the result owns each collected condition; the chain stays the caller's.
+    conditions := [TExpr]{head_condition.copy()}
+    if !sema_coverage_noelse_chain_collect(else_value, span, &conditions) -> return None
+    Val(conditions)
+}
+
+fn sema_coverage_noelse_chain_collect(current: TExpr, span: Span, conditions: &[TExpr]) -> Bool Never! {
+    if current.kind == {
+        .Never(reason) -> return reason == "no else arm"
+        .IfExpr(cond, _, _, _, next_value) -> {
+            if current.span != span -> return false
+            if !sema_coverage_chain_condition(cond, &conditions) -> return false
+            return sema_coverage_noelse_chain_collect(next_value, span, &conditions)
         }
+        else -> return false
     }
+}
+
+// Appends the checked condition of one chain level; false for a form the
+// coverage proof does not read.
+fn sema_coverage_chain_condition(cond: TIfCond, conditions: &[TExpr]) -> Bool Never! {
+    if cond == {
+        // copy: the result owns each collected condition.
+        .Plain(value) -> &conditions.push(value.copy())
+        .IfLet(pattern, subject) -> &conditions.push(sema_coverage_if_let_value(pattern, subject))
+        else -> return false
+    }
+    true
 }
 
 // True when this `if` level heads (or continues) an else-less dispatch chain:
@@ -573,21 +585,17 @@ fn sema_coverage_is_closed_set(ty: Type, environment: SemaScopeEnvironment, prog
 // The checked arm conditions of a value table with an `else` arm: every level
 // that shares the table's span, stopping at the `else` value.
 fn sema_coverage_else_chain_conditions(head_condition: TExpr, else_value: TExpr, span: Span) -> [TExpr] {
-    conditions := [TExpr]{head_condition}
-    current := else_value
-    loop {
-        if current.span != span -> return conditions
-        if current.kind == {
-            .IfExpr(cond, _, _, _, next_value) -> {
-                if cond == {
-                    .Plain(value) -> &conditions.push(value)
-                    .IfLet(pattern, subject) -> &conditions.push(sema_coverage_if_let_value(pattern, subject))
-                    else -> return conditions
-                }
-                current = next_value
-            }
-            else -> return conditions
-        }
+    // copy: the result owns each collected condition; the chain stays the caller's.
+    conditions := [TExpr]{head_condition.copy()}
+    sema_coverage_else_chain_collect(else_value, span, &conditions)
+    conditions
+}
+
+fn sema_coverage_else_chain_collect(current: TExpr, span: Span, conditions: &[TExpr]) Never! {
+    if current.span != span -> return
+    if current.kind == .IfExpr(cond, _, _, _, next_value) {
+        if !sema_coverage_chain_condition(cond, &conditions) -> return
+        sema_coverage_else_chain_collect(next_value, span, &conditions)
     }
 }
 
