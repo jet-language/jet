@@ -3154,7 +3154,7 @@ fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
         }
         lower_debug_line(p, c, &m, &f, instruction)
         lower_instruction(p, c, &m, &f, instruction)
-        if lower_is_noreturn(p, m, instruction.operation) && !poll_block -> return
+        if (lower_is_noreturn(p, m, instruction.operation) || lower_open_sealed(f)) && !poll_block -> return
     }
     if f.failed -> return
     f.track_consumes = false
@@ -3498,6 +3498,11 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     open_before :: f.builder.open.len()
     lower_instruction_operation(p, c, &m, &f, instruction)
     if f.failed -> return
+    // A lowering that ended in a terminator (an unsupported operation's
+    // Unreachable, a no-return call) left no open block: nothing after it runs,
+    // and anything emitted now would be attached to the next block lowered,
+    // which this block's values do not dominate.
+    if lower_open_sealed(f) -> return
     if instruction.result == .Val(defined) {
         if c.releases.candidates.get(defined.value) != None {
             from :: if f.builder.blocks.len() == sealed_before -> open_before else -> 0
@@ -3506,6 +3511,13 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     }
     released :: c.releases.after.get(instruction.id.value) ?? [MIRValueID]{}
     loop value in released -> lower_temp_release(p, c, &m, &f, value)
+}
+
+// Whether the open block was already sealed: the last block the builder
+// sealed is the one lowering is still emitting into.
+fn lower_open_sealed(f: LowerFunction) -> Bool Never! {
+    count :: f.builder.blocks.len()
+    count > 0 && f.builder.blocks[count - 1].id == f.open
 }
 
 // A release candidate is releasable when its lowering made a fresh LIR value
