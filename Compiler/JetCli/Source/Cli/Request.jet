@@ -7,7 +7,6 @@
 // `package.jet`, or the entry's own directory for a loose file.
 use core.files as cli_files
 use core.sys as cli_sys
-use core.time as cli_time
 use jet_foundation.[
     AppAuthorizedDirectory,
     AppAuthorizedDirectoryEntry,
@@ -1132,18 +1131,27 @@ fn jet_cli_trace_sink(requested: String?) -> JetCLITraceSink? {
     human :: chosen == "-" || chosen == "stderr"
     target :: if human -> JET_CLI_TRACE_STDERR else -> chosen
     start_ms :: jet_cli_trace_uptime_ms()
-    unix_ms :: cli_time.unix_ns() /% 1000000
     pid :: cli_sys.pid()
     executable :: cli_sys.executable().split("/").to_list()
     process := "jet"
     if executable.len() > 0 && executable[executable.len() - 1] != "" -> process = executable[executable.len() - 1]
     functions :: (cli_sys.get(JET_CLI_TRACE_DETAIL_ENV) ?? "") == "functions"
     detail :: if functions -> "true" else -> "false"
-    opening :: if human -> "[{jet_cli_trace_clock(0)}] trace: {process} pid {pid}, functions {detail}\n" else -> "[\n{{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":{pid},\"tid\":0,\"args\":{{\"name\":{foundation_json_quote(process)}}}}},\n{{\"name\":\"trace.start\",\"ph\":\"i\",\"s\":\"g\",\"ts\":0,\"pid\":{pid},\"tid\":0,\"args\":{{\"unix_ms\":{unix_ms},\"functions\":{detail}}}}},\n"
+    opening :: if human -> "[{jet_cli_trace_clock(0)}] trace: {process} pid {pid}, functions {detail}\n" else -> "[\n{{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":{pid},\"tid\":0,\"args\":{{\"name\":{foundation_json_quote(process)}}}}},\n"
     opened :: if human -> jet_cli_trace_append(target, opening) else -> jet_cli_trace_create(target, opening)
     if opened == .Val(problem) {
         _ :: jet_cli_trace_append(JET_CLI_TRACE_STDERR, "jet: cannot write the compiler trace `{chosen}`: {problem}\n")
         return None
+    }
+    if !human {
+        // The wall-clock anchor readers align the trace with: the
+        // modification time the header write just set (no clock read).
+        unix_ms :: if cli_files.stat(target) == .Ok(info) -> info.modified.to_unix_ms() else -> 0
+        started :: jet_cli_trace_append(target, "{{\"name\":\"trace.start\",\"ph\":\"i\",\"s\":\"g\",\"ts\":0,\"pid\":{pid},\"tid\":0,\"args\":{{\"unix_ms\":{unix_ms},\"functions\":{detail}}}}},\n")
+        if started == .Val(problem) {
+            _ :: jet_cli_trace_append(JET_CLI_TRACE_STDERR, "jet: cannot write the compiler trace `{chosen}`: {problem}\n")
+            return None
+        }
     }
     Val(JetCLITraceSink{
         target: target,
