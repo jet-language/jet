@@ -261,9 +261,10 @@ fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], e
         loop used in used_names {
             if !program.used_import_names.contains(used) -> &program.used_import_names.push(used)
         }
-        modules[module_index].program = sema_marker_module_bind_program(program, bindings)
         imports := [JetDriverScopedImport]{}
         jet_driver_scoped_imports(program.imports, program.items, "", true, &imports)
+        sema_marker_module_bind_program(&program, bindings)
+        modules[module_index].program = ^program
         loop index in 0..<edges.len() {
             if edges[index].source_module_identity != modules[module_index].module_identity -> next
             loop declaration in imports {

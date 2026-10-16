@@ -310,16 +310,17 @@ fn sema_marker_module_bind_items(items: [Item], bindings: [SemaMarkerModuleBindi
 }
 
 // Both direct uses and replayed group members feed this single AST projection.
-fn sema_marker_module_bind_program(program: Program, bindings: [SemaMarkerModuleBinding]) -> Program Never! {
-    if bindings.len() == 0 -> return program.copy()
-    bound := program
-    bound.items = sema_marker_module_bind_items(program.items, bindings)
-    loop index in 0..<bound.rule_facts.len() -> bound.rule_facts[index].marker = sema_marker_module_bind_marker(bound.rule_facts[index].marker, bindings)
-    loop index in 0..<bound.applied_rules.len() -> bound.applied_rules[index].marker = sema_marker_module_bind_marker(bound.applied_rules[index].marker, bindings)
-    bound
+// The program is rewritten in place; with no binding it is left untouched.
+fn sema_marker_module_bind_program(program: &Program, bindings: [SemaMarkerModuleBinding]) Never! {
+    if bindings.len() == 0 -> return
+    program.items = sema_marker_module_bind_items(program.items, bindings)
+    loop index in 0..<program.rule_facts.len() -> program.rule_facts[index].marker = sema_marker_module_bind_marker(program.rule_facts[index].marker, bindings)
+    loop index in 0..<program.applied_rules.len() -> program.applied_rules[index].marker = sema_marker_module_bind_marker(program.applied_rules[index].marker, bindings)
 }
 
-fn sema_marker_module_bind_input(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], input: SemaRegistrationModuleInput) -> SemaRegistrationModuleInput {
+// The marker bindings of `input`: each directly used imported marker binds to
+// its declaring module. Every input is read in place.
+fn sema_marker_module_bindings(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], input: SemaRegistrationModuleInput) -> [SemaMarkerModuleBinding] {
     bindings := [SemaMarkerModuleBinding]{}
     loop marker in sema_marker_rules_collect_program(input.program) {
         if marker.declaration_module != None -> next
@@ -342,9 +343,7 @@ fn sema_marker_module_bind_input(inputs: [SemaRegistrationModuleInput], edges: [
         }
         if resolved.status == "found" && resolved.declaration == .Val(declaration) -> &bindings.push(SemaMarkerModuleBinding{name: marker.name, application_span: marker.name_span, module_identity: resolved.declaring_module_identity, declaration_span: declaration.name_span})
     }
-    bound := input
-    bound.program = sema_marker_module_bind_program(input.program, bindings)
-    bound
+    ^bindings
 }
 
 fn sema_marker_module_check_groups(graph: SemaRegistrationGraph, module_identity: String, items: [Item], scope: String, exported: Bool, catalog: SemaScopeMembersMarkerRegistry, diagnostics: &[Diagnostic]) {

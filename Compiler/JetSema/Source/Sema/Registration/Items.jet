@@ -967,7 +967,8 @@ fn sema_registration_function(func: Func, raw_protocol_return: Bool, module_iden
     }
     SemaRegistrationFunction{
         symbol: symbol,
-        declaration: func,
+        // copy: the function row owns its declaration; the program keeps its item.
+        declaration: func.copy(),
         signature: signature,
         identity: type_identity(signature),
         identity_key: sema_registration_function_identity_key(module_identity, owner_key, signature),
@@ -1696,7 +1697,8 @@ fn sema_registration_add_root(module_row: &SemaRegistrationModule, item: Item, s
         else -> None
     }
     symbol :: if function == {
-        Val(value) -> value.symbol
+        // copy: the symbol table and the function row each own the symbol.
+        Val(value) -> value.symbol.copy()
         None -> sema_registration_root_symbol(item, module_row.module_identity, source_file, source_origin, source_segments, &diagnostics) ?? return false
     }
     module_row.symbol_positions[name] = module_row.symbols.len()
@@ -1720,7 +1722,8 @@ fn sema_registration_push_declaration(module_row: &SemaRegistrationModule, item:
     if item == .Impl(definition) {
         if definition.trait_name == .Val(trait_name) -> module_row.declared_trait_impls[sema_type_metadata_impl_key(definition.type_name, trait_name)] = true
     }
-    &module_row.declarations.push(item)
+    // copy: the declaration registry owns its item; the program keeps its own.
+    &module_row.declarations.push(item.copy())
 }
 
 // E0106: the Rust reference's `register_struct`/`register_enum`/
@@ -2014,9 +2017,11 @@ fn sema_registration_item_has_foreign_name(item: Item, name: String) -> Bool Nev
 // foreign function (declared inside an extern block, which has no root name)
 // needs the scan over the module's declarations.
 fn sema_registration_declaration_for_symbol(module_row: SemaRegistrationModule, symbol: Symbol) -> Item? {
-    if module_row.declaration_positions.get(symbol.name) == .Val(position) -> return Val(module_row.declarations[position])
+    // copy: an export row owns its declaration; the module row keeps its own.
+    if module_row.declaration_positions.get(symbol.name) == .Val(position) -> return Val(module_row.declarations[position].copy())
     loop declaration in module_row.declarations {
-        if sema_registration_item_has_foreign_name(declaration, symbol.name) -> return Val(declaration)
+        // copy: as above, only the matched declaration is copied out.
+        if sema_registration_item_has_foreign_name(declaration, symbol.name) -> return Val(declaration.copy())
     }
     None
 }
@@ -2186,7 +2191,7 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
 
     sema_attach_diagnostic_source_locations(&diagnostics, 0, module_row.source_segments)
     loop diagnostic in diagnostics -> &reported.push(diagnostic)
-    module_row
+    ^module_row
 }
 
 // The CLI shape of one `#CLI` field (Rust `CLIFieldKind`).
@@ -3059,7 +3064,7 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     // inject_units_prelude, then resolve_unit_dimensions, before any module is
     // registered. The compiler-owned effect module is not a source module and
     // takes no catalog families.
-    prepared_inputs := inputs
+    prepared_inputs := ^inputs
     sema_registration_retain_original_error_module(&prepared_inputs, &diagnostics)
     units_catalog :: sema_units_catalog(&diagnostics)
     loop index in 0..<prepared_inputs.len() {
@@ -3069,26 +3074,42 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     sema_units_resolve(&prepared_inputs, edges, &diagnostics)
     // Rust CheckInner `bind_marker_applications`: a directly used imported
     // marker binds to its declaring module before any module registers.
-    loop index in 0..<prepared_inputs.len() -> prepared_inputs[index] = sema_marker_module_bind_input(prepared_inputs, edges, prepared_inputs[index])
+    // Each program binds in place; its bindings read every input in place.
+    loop index in 0..<prepared_inputs.len() {
+        bindings :: sema_marker_module_bindings(prepared_inputs, edges, prepared_inputs[index])
+        sema_marker_module_bind_program(&prepared_inputs[index].program, bindings)
+    }
     // Module identity -> row; duplicates are rejected below, so the first row
     // is the only row (Rust `Bundle/ItemReuse.rs` `by_identity`).
     module_rows := [String:Int]{}
     generic_module_index :: sema_generic_modules_index(prepared_inputs, edges)
     // D-STRUCT-POLICY1=A: user policies are package-scoped, so every module
-    // of a package materializes the same checked declarations.
+    // of a package materializes the same checked declarations. Policies and
+    // imported templates are read off every input in place first: the loop
+    // below consumes the inputs, and a template module may precede its
+    // importer.
     package_policies := [String:[UserPolicyDecl]]{}
-    loop input in prepared_inputs {
-        if package_policies.get(input.package_identity) == None -> package_policies[input.package_identity] = sema_policy_package_declarations(prepared_inputs, input.package_identity, &diagnostics)
+    imported_templates := [[SemaGenericModuleSource]]{}
+    loop index in 0..<prepared_inputs.len() {
+        if package_policies.get(prepared_inputs[index].package_identity) == None -> package_policies[prepared_inputs[index].package_identity] = sema_policy_package_declarations(prepared_inputs, prepared_inputs[index].package_identity, &diagnostics)
+        &imported_templates.push(sema_generic_modules_imported(prepared_inputs, edges, generic_module_index, prepared_inputs[index].module_identity))
     }
-    loop input in prepared_inputs {
-        imported_templates :: sema_generic_modules_imported(prepared_inputs, edges, generic_module_index, input.module_identity)
+    // Only modules declaring a module alias or a generic module keep their
+    // programs as written for the alias check after registration.
+    written_inputs :: sema_generic_modules_written(prepared_inputs)
+    // Each input moves out of the list (front to back) into its module row.
+    &prepared_inputs.reverse()
+    &imported_templates.reverse()
+    loop prepared_inputs.len() > 0 {
+        input := &prepared_inputs.pop() ?? break
+        templates := &imported_templates.pop() ?? break
         policies :: package_policies.get(input.package_identity) ?? [UserPolicyDecl]{}
-        module_row := sema_registration_prepare_module_row(input, imported_templates, policies, &diagnostics)
+        module_row := sema_registration_prepare_module_row(^input, templates, policies, &diagnostics)
         duplicate :: module_rows.get(module_row.module_identity) != None
         if !duplicate -> module_rows[module_row.module_identity] = modules.len()
         if {
             duplicate -> &diagnostics.push(sema_defined_twice_optional(module_row.module_identity, "module identities must be unique in one declaration graph", None))
-            else -> &modules.push(module_row)
+            else -> &modules.push(^module_row)
         }
     }
     if package_identity == "" || entry_module_identity == "" {
@@ -3208,7 +3229,7 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     graph.complete = !sema_has_error_since(graph.diagnostics, 0)
     // D-CONF-GENSPELL1=A: generic-module aliases resolve and check their
     // arguments once every import is bound (Rust's expansion pre-pass).
-    sema_generic_modules_check(&graph, prepared_inputs)
+    sema_generic_modules_check(&graph, written_inputs)
     graph.complete = !sema_has_error_since(graph.diagnostics, 0)
     // Rust erases templates and aliases once expanded: their symbols stay
     // registered, but no later pass sees an unexpanded body. They are removed

@@ -165,23 +165,7 @@ fn sema_units_resolve(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegist
     module_rows := [String:Int]{}
     locals := [[String:Int]]{}
     exports := [[String:Int]]{}
-    loop (module_index, input) in inputs {
-        module_rows[input.module_identity] = module_index
-        local := [String:Int]{}
-        public := [String:Int]{}
-        loop (item, value) in input.program.items {
-            if value == .UnitFamily(family) {
-                if family.dimension == .Val(claim) {
-                    index :: declarations.len()
-                    local[family.family] = index
-                    if family.is_pub -> public[family.family] = index
-                    &declarations.push(SemaUnitDimensionDeclaration{module_index: module_index, item: item, family: family.family, span: family.family_span, claim: claim, preset: family.resolved_dimension})
-                }
-            }
-        }
-        &locals.push(local)
-        &exports.push(public)
-    }
+    sema_units_dimension_declarations(inputs, &declarations, &module_rows, &locals, &exports)
     visibility := [SemaUnitDimensionVisibility]{}
     loop local in locals -> &visibility.push(SemaUnitDimensionVisibility{local: local, imported: [String:[Int]]{}, qualified: [String:Int]{}, aliases: [String:Int]{}})
     loop edge in edges {
@@ -277,5 +261,27 @@ fn sema_units_resolve(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegist
                 if definition.resolved_owner == None -> definition.resolved_owner = Val(owner)
             }
         }
+    }
+}
+
+// Every unit family of `inputs` that claims a dimension, with each module's
+// local and exported family rows; each input is read in place.
+fn sema_units_dimension_declarations(inputs: [SemaRegistrationModuleInput], declarations: &[SemaUnitDimensionDeclaration], module_rows: &[String:Int], locals: &[[String:Int]], exports: &[[String:Int]]) Never! {
+    loop (module_index, input) in inputs {
+        module_rows[input.module_identity] = module_index
+        local := [String:Int]{}
+        public := [String:Int]{}
+        loop (item, value) in input.program.items {
+            if value == .UnitFamily(family) {
+                if family.dimension == .Val(claim) {
+                    index :: declarations.len()
+                    local[family.family] = index
+                    if family.is_pub -> public[family.family] = index
+                    &declarations.push(SemaUnitDimensionDeclaration{module_index: module_index, item: item, family: family.family, span: family.family_span, claim: claim, preset: family.resolved_dimension})
+                }
+            }
+        }
+        &locals.push(^local)
+        &exports.push(^public)
     }
 }

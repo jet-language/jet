@@ -40,8 +40,14 @@ struct SemaPolicyUses {
 // Registration runs this after inline-module lifting, before signature and
 // body passes, so generated wrappers receive exactly the ordinary checks.
 fn sema_policy_materialize(program: &Program, declarations: [UserPolicyDecl], module_identity: String, source_file: String, origin: SemaSourceOrigin, segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) {
+    generated :: sema_policy_wrappers(program.items, declarations, module_identity, source_file, origin, segments, &diagnostics)
+    loop item in generated -> &program.items.push(item)
+}
+
+// The policy wrappers `items` call for; each item is read in place.
+fn sema_policy_wrappers(items: [Item], declarations: [UserPolicyDecl], module_identity: String, source_file: String, origin: SemaSourceOrigin, segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> [Item] {
     uses := [String:[String]]{}
-    loop item in program.items {
+    loop item in items {
         if item == .Func(function) {
             loop call in sema_policy_calls(function) {
                 names := uses.get(function.name) ?? [String]{}
@@ -54,7 +60,7 @@ fn sema_policy_materialize(program: &Program, declarations: [UserPolicyDecl], mo
         }
     }
     generated := [Item]{}
-    loop item in program.items {
+    loop item in items {
         if item == .Func(target) {
             names :: uses.get(target.name) ?? next
             signature :: sema_function_symbol_type(target, false, symbol_id(SymbolKind.Function, module_identity, "", target.name), source_file, origin, segments)
@@ -88,7 +94,7 @@ fn sema_policy_materialize(program: &Program, declarations: [UserPolicyDecl], mo
             }
         }
     }
-    loop item in generated -> &program.items.push(item)
+    ^generated
 }
 
 fn sema_policy_declarations_checked(input: [UserPolicyDecl], diagnostics: &[Diagnostic]) -> [UserPolicyDecl] {

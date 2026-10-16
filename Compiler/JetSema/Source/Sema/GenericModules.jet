@@ -119,9 +119,11 @@ fn sema_genmod_written_input(inputs: [SemaRegistrationModuleInput], module_ident
 fn sema_generic_modules_written(inputs: [SemaRegistrationModuleInput]) -> [SemaRegistrationModuleInput] {
     written := [SemaRegistrationModuleInput]{}
     loop input in inputs {
-        if sema_genmod_declares_modules(input.program.items) -> &written.push(input)
+        // copy: the alias check reads these programs as written after
+        // registration moves every input's program into its row.
+        if sema_genmod_declares_modules(input.program.items) -> &written.push(input.copy())
     }
-    written
+    ^written
 }
 
 fn sema_genmod_declares_modules(items: [Item]) -> Bool {
