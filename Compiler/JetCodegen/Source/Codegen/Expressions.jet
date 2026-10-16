@@ -1164,8 +1164,9 @@ fn jet_codegen_place_access(builder: &JetCodegenBuilder, program: JetCodegenProg
     source.access = access
     jet_codegen_projected_accessors(&builder, program, &source, access)
     jet_codegen_push_place(&builder, program, source)
-    // A place reached through a read alias stays one (jet_codegen_unmovable_place).
-    if builder.read_windows.get(place.value) != None -> _ := &builder.read_windows.add(source.id.value, true)
+    // A place below a read alias's place stays one (jet_codegen_unmovable_place);
+    // a root's own place never is one.
+    if source.projections.len() > 0 && builder.read_alias_places.get(place.value) != None -> _ := &builder.read_alias_places.add(source.id.value, true)
     source.id
 }
 
@@ -6230,13 +6231,14 @@ fn jet_codegen_parameter_value_access(builder: JetCodegenBuilder, program: JetCo
 // parameter's place, or an element of a container (Rust
 // `lower_receiver_place` never moves an index place; a read alias of an
 // element names one), or any place of a constant read in place (#5001), or a
-// place reached through a read alias (a read window or a place projected
-// from one, `JetCodegenBuilder.read_windows`): its root still owns it. An
-// explicit `^x.f` of the root itself names its own place and still moves.
+// place below a read alias's place (`JetCodegenBuilder.read_alias_places`
+// with at least one projection, or an access or field place derived from
+// one): its root still owns it. A root's own place is never such a place, so
+// an explicit `^r` or `^r.f` of the root still moves.
 fn jet_codegen_unmovable_place(builder: JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID) -> Bool Never! {
     if jet_codegen_read_parameter_place(builder, program, place) -> return true
-    if builder.read_windows.get(place.value) != None -> return true
     row :: jet_codegen_find_place(builder, program, place) ?? return false
+    if row.projections.len() > 0 && builder.read_alias_places.get(place.value) != None -> return true
     if row.base == .Static(name) {
         if program.owners.constants.in_place_keys.get(name) != None -> return true
     }

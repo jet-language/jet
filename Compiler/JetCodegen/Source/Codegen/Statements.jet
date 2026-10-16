@@ -3371,22 +3371,26 @@ fn jet_codegen_stability_changed_since(state: JetCodegenLetStability, root: Stri
     (state.last.get(root) ?? 0) > since || (state.last.get("*") ?? 0) > since
 }
 
-// A read of `name`: the innermost pending binding of that name breaks if its
-// root changed since the binding, and its root is read through it.
-fn jet_codegen_stability_read(state: &JetCodegenLetStability, name: String, depth: Int) Never! {
+// A read of `name`: every pending binding of that name (a derived value may
+// chain to several bindings; a shadowed one only answers more
+// conservatively) breaks if its root changed since the binding, and its root
+// is read through it. `seen` holds the names this read already reached.
+fn jet_codegen_stability_read(state: &JetCodegenLetStability, name: String, seen: &[String]) Never! {
+    if seen.contains(name) -> return
+    &seen.push(name.copy())
     state.tick += 1
     state.read_at[name] = state.tick
+    roots := [String]{}
     index := state.pending.len() - 1
     loop index >= 0 {
         if state.pending[index].name == name {
-            // The root name is read again after `state` changes below.
             root :: state.pending[index].root.copy()
             if jet_codegen_stability_changed_since(state, root, state.pending[index].start) -> state.pending[index].broken = true
-            if depth < 16 && root != name -> jet_codegen_stability_read(&state, root, depth + 1)
-            return
+            if root != name -> &roots.push(root)
         }
         index -= 1
     }
+    loop root in roots -> jet_codegen_stability_read(&state, root, &seen)
 }
 
 // A loop's body runs again after its last statement: a binding made before
@@ -3683,6 +3687,13 @@ fn jet_codegen_stability_stmt_body(state: &JetCodegenLetStability, statement: TS
         }
         .Assign(place, _, assigned, _, _, _) -> {
             jet_codegen_stability_expr(&state, assigned, value)
+            // A value derived from a binding stored into a place that outlives
+            // the walk's view of it (an earlier local, a field): the binding
+            // copies.
+            if !jet_codegen_stability_scalar(assigned.ty) {
+                mentioned :: jet_codegen_stability_pending_mentions(state, assigned)
+                loop name in mentioned -> state.pinned[name] = true
+            }
             if place == {
                 .Local(local) -> jet_codegen_stability_disturb(&state, local.name)
                 .Expr(target) -> jet_codegen_stability_expr(&state, target, write)
@@ -3847,7 +3858,8 @@ fn jet_codegen_stability_expr(state: &JetCodegenLetStability, expression: TExpr,
         // Every use reads the local; a value or write use of a bare local
         // consumes it.
         .Local(local) -> {
-            jet_codegen_stability_read(&state, local.name, 0)
+            seen := [String]{}
+            jet_codegen_stability_read(&state, local.name, &seen)
             if use_kind != inspect {
                 state.uses += 1
                 state.consumed[local.name] = state.uses
@@ -3875,7 +3887,8 @@ fn jet_codegen_stability_expr(state: &JetCodegenLetStability, expression: TExpr,
         .Borrow(place, access) -> jet_codegen_stability_expr(&state, place, jet_codegen_stability_access(access))
         .Move(moved) | .Drop(moved) | .Close(moved) -> jet_codegen_stability_expr(&state, moved, write)
         .ResourceTake(local) -> {
-            jet_codegen_stability_read(&state, local.name, 0)
+            seen := [String]{}
+            jet_codegen_stability_read(&state, local.name, &seen)
             jet_codegen_stability_disturb(&state, local.name)
         }
         // A mutating route writes through its receiver; an owned iterator
