@@ -5155,16 +5155,15 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         &output.push(TStmt.Return{value: None, span: span})
                     }
                     else -> {
-                        // The returned expression is read in place.
-                        if value == .Val(returned) {
-                            checked :: sema_stmt_check_returned_value(returned, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-                            if {
-                                checked == None -> {
-                                    complete = false
-                                }
-                                else -> {
-                                    &output.push(TStmt.Return{value: checked, span: span})
-                                }
+                        // `value` is narrowed to the returned expression here (the
+                        // None arm above); it is read in place through a read parameter.
+                        checked :: sema_stmt_check_returned_value(value, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                        if {
+                            checked == None -> {
+                                complete = false
+                            }
+                            else -> {
+                                &output.push(TStmt.Return{value: checked, span: span})
                             }
                         }
                     }
