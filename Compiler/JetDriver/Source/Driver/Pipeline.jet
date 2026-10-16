@@ -18,6 +18,7 @@ use jet_foundation.[
     DIAGNOSTIC_ERROR,
     Diagnostic,
     ImportedItem,
+    Item,
     MIRAccess,
     MIRAllocatorPolicy,
     MIRArtifactBuildMode,
@@ -5096,35 +5097,47 @@ struct JetDriverCheckedProjectionCapture {
 // One source-unit classifier for ordinary compilation and retained services.
 // ABI-only Core rows still have a catalog unit; their absent source-file bytes
 // remain empty. Real Core and private source units keep their actual bytes.
+// `release_programs`: each parsed program moves into its input and the loaded
+// module keeps an empty one (an ordinary compile reads programs only through
+// the registration graph from here on); otherwise the input is a copy.
 fn jet_driver_registration_module_inputs(
-    modules: [JetDriverLoadedModule],
+    modules: &[JetDriverLoadedModule],
     source_units: [JetDriverSourceUnit],
     source_files: [MIRSourceFile],
     providers: [SemaForeignProviderInput],
     diagnostics: &[Diagnostic],
     core_sources: [JetDriverCoreSource],
+    release_programs: Bool,
 ) -> [SemaRegistrationModuleInput]? {
     inputs := [SemaRegistrationModuleInput]{}
     source_positions :: jet_driver_source_file_positions(source_files)
     loop loaded_index in 0..<modules.len() {
-        loaded_module :: modules[loaded_index]
-        if loaded_module.source_unit_index < 0 || loaded_module.source_unit_index >= source_units.len() {
+        // Fields are read through the index: a local binding of the loaded
+        // module would copy its whole parsed program.
+        unit_index :: modules[loaded_index].source_unit_index
+        if unit_index < 0 || unit_index >= source_units.len() {
             &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a loaded module has no exact source-unit owner", "semantic registration preserves the loader's canonical source-unit identity", "retain the catalog source-unit index returned by JetDriver"))
             return None
         }
-        unit := source_units[loaded_module.source_unit_index]
-        core_source_alias :: jet_driver_core_source_alias(unit, loaded_module, core_sources)
-        handles :: jet_driver_registration_foreign_handle_facts(loaded_module.module_identity, providers, &diagnostics) ?? return None
+        unit := source_units[unit_index]
+        core_source_alias :: jet_driver_core_source_alias(unit, modules[loaded_index], core_sources)
+        handles :: jet_driver_registration_foreign_handle_facts(modules[loaded_index].module_identity, providers, &diagnostics) ?? return None
+        // The items, the bulk of a parsed program, move out first so the copy
+        // of the rest is small; they then move into the input.
+        items := [Item]{}
+        if release_programs -> compiler_transfer_rows<Item>(&items, &modules[loaded_index].program.items)
+        program := modules[loaded_index].program
+        if release_programs -> compiler_transfer_rows<Item>(&program.items, &items)
         &inputs.push(SemaRegistrationModuleInput{
-            package_identity: loaded_module.package_identity,
-            module_identity: loaded_module.module_identity,
-            module_name: loaded_module.module_name,
+            package_identity: modules[loaded_index].package_identity,
+            module_identity: modules[loaded_index].module_identity,
+            module_name: modules[loaded_index].module_name,
             core_source_alias: core_source_alias,
             module_path: jet_driver_module_display(unit.relative_path),
             source_file: unit.path,
             source_segments: unit.source_segments,
             source_origin: unit.source_origin,
-            program: loaded_module.program,
+            program: ^program,
             foreign_handles: handles,
             source: jet_driver_source_text_at(source_files, source_positions, unit.path),
         })
@@ -5341,7 +5354,10 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     }
     target_machine :: target_machine_option ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Check), false, trace)
 
-    registration_inputs := jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, foreign_provider_inputs, &load.diagnostics, request.core_sources) ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Load), false, trace)
+    // Doc, REPL and the retained checked projection read the loaded programs
+    // again; every other compile hands them to registration.
+    release_programs :: !(checked_projection || request.mode == JetDriverCompileMode.Doc || request.mode == JetDriverCompileMode.Repl)
+    registration_inputs := jet_driver_registration_module_inputs(&load.modules, load.source_units, load.source_files, foreign_provider_inputs, &load.diagnostics, request.core_sources, release_programs) ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Load), false, trace)
     canonical_effect_module_identity := canonical_effect_module.module_identity
     &registration_inputs.push(^canonical_effect_module)
     registration_module_count := registration_inputs.len()
