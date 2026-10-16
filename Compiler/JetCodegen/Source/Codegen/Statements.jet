@@ -3379,7 +3379,8 @@ fn jet_codegen_stability_read(state: &JetCodegenLetStability, name: String, dept
     index := state.pending.len() - 1
     loop index >= 0 {
         if state.pending[index].name == name {
-            root :: state.pending[index].root
+            // The root name is read again after `state` changes below.
+            root :: state.pending[index].root.copy()
             if jet_codegen_stability_changed_since(state, root, state.pending[index].start) -> state.pending[index].broken = true
             if depth < 16 && root != name -> jet_codegen_stability_read(&state, root, depth + 1)
             return
