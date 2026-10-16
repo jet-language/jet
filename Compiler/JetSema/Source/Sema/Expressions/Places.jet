@@ -365,7 +365,9 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
     None
 }
 
-fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+// `field` is the whole `base.member` expression (spanning `span`): the moved
+// checks read it in place instead of rebuilding it around a copy of `base`.
+fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     // Rust infer_field diagnoses the foreign surface before reading `os`,
     // without treating a lexical `os` binding as an exemption.
     if base == .Ident(root, _) && root == "os" && member == "environ" {
@@ -405,11 +407,13 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
         module_constant :: sema_expression_module_constant(alias, member, span, expected, environment, program, &scopes, &context, &diagnostics)
         if module_constant.handled -> return module_constant.value
     }
-    if !sema_ownership_check_owner_read(&state, Expr.Field{base: base, member: member, span: member_span}, scopes, &diagnostics) -> return None
+    // copy: the owner read is reported at the member name, so it checks the
+    // place under that span; `field` itself spans the whole path. With no
+    // live view the check cannot fail and reads nothing else, so it is skipped.
+    if state.views.len() > 0 && !sema_ownership_check_owner_read(&state, Expr.Field{base: base.copy(), member: member, span: member_span}, scopes, &diagnostics) -> return None
     // A projected base suppresses descendant moves, but still answers for
     // moves of itself or its ancestors. The complete place checks all moves.
-    place_expr :: Expr.Field{base: base, member: member, span: span}
-    moved_ok :: if context.suppress_partial_move_root_read -> sema_ownership_check_root_base_use(&state, place_expr, scopes, &diagnostics) else -> sema_ownership_check_moved_place_use(&state, place_expr, scopes, &diagnostics)
+    moved_ok :: if context.suppress_partial_move_root_read -> sema_ownership_check_root_base_use(&state, field, scopes, &diagnostics) else -> sema_ownership_check_moved_place_use(&state, field, scopes, &diagnostics)
     if !moved_ok -> return None
     // The base is checked once, for real. When it is a shared handle, that
     // check is rolled back and the locked-read rewrite is checked instead.
