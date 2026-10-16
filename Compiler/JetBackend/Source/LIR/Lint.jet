@@ -91,24 +91,32 @@ fn lir_lint_function(program: LIRModule, function: LIRFunction) -> [LIRLintIssue
     }
     if issues.len() > 0 -> return issues
 
-    // Block identity and edges.
+    // Block identity and edges. Block IDs resolve through their first row
+    // (as lir_block_index does), and each block reports one duplicate issue
+    // per earlier block with its ID.
+    rows :: lir_lint_block_rows(function)
+    earlier_rows := [Int]{}
+    loop _ in function.blocks -> &earlier_rows.push(0)
     loop (index, block) in function.blocks {
-        loop (other, earlier) in function.blocks {
-            if other < index && earlier.id == block.id -> &issues.push(lir_lint_issue(function, block.id.value, "block ID b{block.id.value} is duplicated"))
+        first :: rows.get(block.id.value) ?? index
+        duplicates := earlier_rows[first]
+        loop duplicates > 0 {
+            &issues.push(lir_lint_issue(function, block.id.value, "block ID b{block.id.value} is duplicated"))
+            duplicates -= 1
         }
+        earlier_rows[first] = earlier_rows[first] + 1
         if block.lines.len() != block.insts.len() + 1 -> &issues.push(lir_lint_issue(function, block.id.value, "block has {block.lines.len()} source lines for {block.insts.len()} instructions and its terminator"))
         loop target in lir_terminator_targets(block.terminator) {
-            target_index :: lir_block_index(function, target.block)
+            target_index :: rows.get(target.block.value) ?? -1
             if target_index < 0 {
                 &issues.push(lir_lint_issue(function, block.id.value, "jump to missing block b{target.block.value}"))
             } else {
                 if target_index == 0 -> &issues.push(lir_lint_issue(function, block.id.value, "jump to the entry block"))
-                target_block :: function.blocks[target_index]
-                if target.args.len() != target_block.params.len() {
-                    &issues.push(lir_lint_issue(function, block.id.value, "jump to b{target.block.value} passes {target.args.len()} arguments for {target_block.params.len()} parameters"))
+                if target.args.len() != function.blocks[target_index].params.len() {
+                    &issues.push(lir_lint_issue(function, block.id.value, "jump to b{target.block.value} passes {target.args.len()} arguments for {function.blocks[target_index].params.len()} parameters"))
                 } else {
                     loop (position, arg) in target.args {
-                        param :: target_block.params[position]
+                        param :: function.blocks[target_index].params[position]
                         if lir_lint_value_valid(function, arg) && lir_lint_value_valid(function, param) && function.values[arg.value].layout != function.values[param.value].layout {
                             &issues.push(lir_lint_issue(function, block.id.value, "jump argument v{arg.value} does not match the layout of b{target.block.value} parameter v{param.value}"))
                         }
@@ -157,52 +165,54 @@ fn lir_lint_function(program: LIRModule, function: LIRFunction) -> [LIRLintIssue
     }
     if issues.len() > 0 -> return issues
 
-    dominators :: lir_lint_dominators(function)
+    dominance :: lir_lint_dominance(function, rows)
     loop (block_index, block) in function.blocks {
-        if !dominators[block_index][block_index] -> &issues.push(lir_lint_issue(function, block.id.value, "block b{block.id.value} is unreachable"))
+        if !dominance.reachable[block_index] -> &issues.push(lir_lint_issue(function, block.id.value, "block b{block.id.value} is unreachable"))
     }
     if issues.len() > 0 -> return issues
 
     // Uses: defined, dominated by their definition, not after a consume.
-    consumes := [LIRLintSite]{}
-    consumed := [LIRValueID]{}
+    // Each value's consume sites, in block and instruction order.
+    consumes := [[LIRLintSite]]{}
+    loop _ in function.values -> &consumes.push([LIRLintSite]{})
     loop (block_index, block) in function.blocks {
         loop (inst_index, inst) in block.insts {
             loop value in lir_inst_consumes(inst) {
-                &consumes.push(LIRLintSite{block: block_index, index: inst_index})
-                &consumed.push(value)
+                if lir_lint_value_valid(function, value) -> &consumes[value.value].push(LIRLintSite{block: block_index, index: inst_index})
             }
         }
     }
     loop (block_index, block) in function.blocks {
-        uses := [LIRValueID]{}
         loop (inst_index, inst) in block.insts {
             loop value in lir_inst_uses(inst) {
-                loop message in lir_lint_use(function, definitions, dominators, consumes, consumed, value, LIRLintSite{block: block_index, index: inst_index}) -> &issues.push(lir_lint_issue(function, block.id.value, message))
+                loop message in lir_lint_use(function, definitions, dominance, consumes, value, LIRLintSite{block: block_index, index: inst_index}) -> &issues.push(lir_lint_issue(function, block.id.value, message))
             }
             loop message in lir_lint_inst(program, function, inst) -> &issues.push(lir_lint_issue(function, block.id.value, message))
         }
         terminator_site :: LIRLintSite{block: block_index, index: block.insts.len()}
         loop value in lir_terminator_uses(block.terminator) {
-            loop message in lir_lint_use(function, definitions, dominators, consumes, consumed, value, terminator_site) -> &issues.push(lir_lint_issue(function, block.id.value, message))
+            loop message in lir_lint_use(function, definitions, dominance, consumes, value, terminator_site) -> &issues.push(lir_lint_issue(function, block.id.value, message))
         }
         loop message in lir_lint_terminator(function, signature, block.terminator) -> &issues.push(lir_lint_issue(function, block.id.value, message))
     }
     issues
 }
 
-fn lir_lint_site_dominates(dominators: [[Bool]], first: LIRLintSite, second: LIRLintSite) -> Bool Never! {
-    if first.block == second.block -> first.index < second.index else -> dominators[second.block][first.block]
+fn lir_lint_site_dominates(dominance: LIRLintDominance, first: LIRLintSite, second: LIRLintSite) -> Bool Never! {
+    if first.block == second.block -> return first.index < second.index
+    lir_lint_block_dominates(dominance, first.block, second.block)
 }
 
-fn lir_lint_use(function: LIRFunction, definitions: [LIRLintSite?], dominators: [[Bool]], consumes: [LIRLintSite], consumed: [LIRValueID], value: LIRValueID, site: LIRLintSite) -> [String] Never! {
+// `consumes[v]` lists the sites that consume value v, in block and
+// instruction order; a use reports once per consume that dominates it.
+fn lir_lint_use(function: LIRFunction, definitions: [LIRLintSite?], dominance: LIRLintDominance, consumes: [[LIRLintSite]], value: LIRValueID, site: LIRLintSite) -> [String] Never! {
     if !lir_lint_value_valid(function, value) -> return [String]{"use of missing value v{value.value}"}
     messages := [String]{}
     if definitions[value.value] == .Val(definition) {
-        if !lir_lint_site_dominates(dominators, definition, site) -> &messages.push("use of v{value.value} is not dominated by its definition")
+        if !lir_lint_site_dominates(dominance, definition, site) -> &messages.push("use of v{value.value} is not dominated by its definition")
     }
-    loop (index, event) in consumes {
-        if consumed[index] == value && lir_lint_site_dominates(dominators, event, site) -> &messages.push("use of v{value.value} after it was moved or dropped")
+    loop event in consumes[value.value] {
+        if lir_lint_site_dominates(dominance, event, site) -> &messages.push("use of v{value.value} after it was moved or dropped")
     }
     messages
 }
@@ -402,59 +412,145 @@ fn lir_lint_terminator(function: LIRFunction, signature: LIRSignature, terminato
     messages
 }
 
-// dominators[b][d] is true when block index d dominates block index b. A
-// block that does not dominate itself is unreachable from the entry.
-fn lir_lint_dominators(function: LIRFunction) -> [[Bool]] Never! {
-    count :: function.blocks.len()
+// Block ID -> its first row in `function.blocks` (lir_block_index's answer).
+fn lir_lint_block_rows(function: LIRFunction) -> [Int:Int] Never! {
+    rows := [Int:Int]{}
+    loop (index, block) in function.blocks {
+        if rows.get(block.id.value) == None -> &rows.add(block.id.value, index).drop("a block ID keeps its first row")
+    }
+    rows
+}
+
+// Dominance over block rows. The lint referees optimized LIR, so it computes
+// dominance itself rather than through the optimizer's analysis
+// (Opt/Facts.jet): Cooper-Harvey-Kennedy immediate dominators over reverse
+// postorder from the entry, then each row's entry and exit number in a walk
+// of the dominator tree, so a dominance query is two comparisons.
+// `reachable[b]` is whether the entry reaches row b; an unreachable row has
+// no numbers (-1).
+struct LIRLintDominance {
+    reachable: [Bool]
+    enter: [Int]
+    exit: [Int]
+}
+
+// Whether reachable row `first` dominates reachable row `second`.
+fn lir_lint_block_dominates(dominance: LIRLintDominance, first: Int, second: Int) -> Bool Never! {
+    dominance.enter[first] <= dominance.enter[second] && dominance.exit[second] <= dominance.exit[first]
+}
+
+fn lir_lint_dominance_meet(parent: [Int], rank: [Int], first: Int, second: Int) -> Int Never! {
+    left := first
+    right := second
+    loop left != right {
+        loop rank[left] > rank[right] -> left = parent[left]
+        loop rank[right] > rank[left] -> right = parent[right]
+    }
+    left
+}
+
+fn lir_lint_dominance(function: LIRFunction, rows: [Int:Int]) -> LIRLintDominance Never! {
+    successors := [[Int]]{}
     predecessors := [[Int]]{}
-    loop _ in 0..<count -> &predecessors.push([Int]{})
+    parent := [Int]{}
+    rank := [Int]{}
+    next_edge := [Int]{}
+    reachable := [Bool]{}
+    enter := [Int]{}
+    exit := [Int]{}
+    loop _ in function.blocks {
+        &successors.push([Int]{})
+        &predecessors.push([Int]{})
+        &parent.push(-1)
+        &rank.push(-1)
+        &next_edge.push(0)
+        &reachable.push(false)
+        &enter.push(-1)
+        &exit.push(-1)
+    }
+    if function.blocks.len() == 0 -> return LIRLintDominance{reachable: reachable, enter: enter, exit: exit}
     loop (index, block) in function.blocks {
         loop target in lir_terminator_targets(block.terminator) {
-            target_index :: lir_block_index(function, target.block)
-            if target_index >= 0 -> &predecessors[target_index].push(index)
-        }
-    }
-    reachable := [Bool]{}
-    loop _ in 0..<count -> &reachable.push(false)
-    reachable[0] = true
-    pending := [Int]{0}
-    cursor := 0
-    loop cursor < pending.len() {
-        current :: pending[cursor]
-        cursor += 1
-        loop target in lir_terminator_targets(function.blocks[current].terminator) {
-            target_index :: lir_block_index(function, target.block)
-            if target_index >= 0 && !reachable[target_index] {
-                reachable[target_index] = true
-                &pending.push(target_index)
+            row :: rows.get(target.block.value) ?? -1
+            if row >= 0 {
+                &successors[index].push(row)
+                &predecessors[row].push(index)
             }
         }
     }
-    dominators := [[Bool]]{}
-    loop index in 0..<count {
-        row := [Bool]{}
-        loop other in 0..<count -> &row.push(if index == 0 -> other == 0 else -> reachable[index])
-        &dominators.push(row)
+    // Depth-first postorder from the entry, with explicit frames.
+    stack := [Int]{0}
+    depth := 1
+    reachable[0] = true
+    postorder := [Int]{}
+    loop depth > 0 {
+        current :: stack[depth - 1].copy()
+        if next_edge[current] < successors[current].len() {
+            child :: successors[current][next_edge[current]].copy()
+            next_edge[current] = next_edge[current] + 1
+            if !reachable[child] {
+                reachable[child] = true
+                if depth < stack.len() -> stack[depth] = child else -> &stack.push(child)
+                depth += 1
+            }
+        } else {
+            &postorder.push(current)
+            depth -= 1
+        }
     }
+    order := [Int]{}
+    cursor := postorder.len()
+    loop cursor > 0 {
+        cursor -= 1
+        row :: postorder[cursor].copy()
+        rank[row] = order.len()
+        &order.push(row)
+    }
+    parent[0] = 0
     changed := true
     loop changed {
         changed = false
-        loop index in 1..<count {
-            if reachable[index] {
-                row := [Bool]{}
-                loop other in 0..<count -> &row.push(true)
-                loop predecessor in predecessors[index] {
-                    if reachable[predecessor] {
-                        loop other in 0..<count -> row[other] = row[other] && dominators[predecessor][other]
+        loop row in order {
+            if row != 0 {
+                chosen := -1
+                loop predecessor in predecessors[row] {
+                    if parent[predecessor] >= 0 {
+                        if chosen < 0 -> chosen = predecessor else -> chosen = lir_lint_dominance_meet(parent, rank, chosen, predecessor)
                     }
                 }
-                row[index] = true
-                if row != dominators[index] {
-                    dominators[index] = row
+                if parent[row] != chosen {
+                    parent[row] = chosen
                     changed = true
                 }
             }
         }
     }
-    dominators
+    // Entry and exit numbers in a depth-first walk of the dominator tree.
+    children := [[Int]]{}
+    next_child := [Int]{}
+    loop _ in function.blocks {
+        &children.push([Int]{})
+        &next_child.push(0)
+    }
+    loop row in order { if row != 0 -> &children[parent[row]].push(row) }
+    enter[0] = 0
+    number := 1
+    stack[0] = 0
+    depth = 1
+    loop depth > 0 {
+        current :: stack[depth - 1].copy()
+        if next_child[current] < children[current].len() {
+            child :: children[current][next_child[current]].copy()
+            next_child[current] = next_child[current] + 1
+            enter[child] = number
+            number += 1
+            if depth < stack.len() -> stack[depth] = child else -> &stack.push(child)
+            depth += 1
+        } else {
+            exit[current] = number
+            number += 1
+            depth -= 1
+        }
+    }
+    LIRLintDominance{reachable: reachable, enter: enter, exit: exit}
 }
