@@ -1863,73 +1863,74 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     params := [TParameter]{}
     param_index := 0
     loop param_index < func.params.len() {
-        parameter :: func.params[param_index]
-        parameter_ty := type_with_effective_fn_returns(parameter.ty)
-        if param_index == 0 && parameter.name == "self" {
+        // The parameter is read in place (`func.params[param_index]`): a
+        // binding of it copied the whole parameter, default expression included.
+        parameter_ty := type_with_effective_fn_returns(func.params[param_index].ty)
+        if param_index == 0 && func.params[param_index].name == "self" {
             if function_kind == {
                 .Method(_, receiver_type) -> parameter_ty = receiver_type
                 .TraitMethod(_, _, receiver_type, _, _) -> parameter_ty = receiver_type
                 else -> {}
             }
         }
-        if parameter.variadic -> parameter_ty = Type.List{element: parameter_ty}
+        if func.params[param_index].variadic -> parameter_ty = Type.List{element: parameter_ty}
         parameter_ty = sema_function_resolve_declared(updated, program, parameter_ty, module_identity, generic_params)
         // D-MAP-KEY1 (E0502): a map in a declared parameter type needs a key-eligible key.
-        if !(param_index == 0 && parameter.name == "self") && !sema_type_check_declared_map_keys(updated, program, parameter_ty, parameter.ty_span, &diagnostics) -> complete = false
+        if !(param_index == 0 && func.params[param_index].name == "self") && !sema_type_check_declared_map_keys(updated, program, parameter_ty, func.params[param_index].ty_span, &diagnostics) -> complete = false
         default_expr := TExpr?{None}
-        if parameter.default != None {
+        if func.params[param_index].default != None {
             default_context := sema_check_context_init()
             default_context.unsafe_depth = context.unsafe_depth
             default_context.generic_params = generic_params
             default_context.host_hooks = context.host_hooks
             // Checked on the live ownership state inside a fork and rolled back.
             default_fork :: sema_ownership_fork(&state)
-            checked_default :: sema_check_expression(parameter.default ?? Expr.Unit{span: parameter.name_span}, Val(parameter_ty), updated, program, &scopes, &state, &tail_store, &default_context, &diagnostics)
+            checked_default :: sema_check_expression(func.params[param_index].default ?? Expr.Unit{span: func.params[param_index].name_span}, Val(parameter_ty), updated, program, &scopes, &state, &tail_store, &default_context, &diagnostics)
             sema_ownership_fork_rollback(&state, default_fork)
             sema_ownership_fork_close(&state, default_fork)
             if {
                 checked_default == None -> {
                     complete = false
-                    loop reason in default_context.incomplete_reasons -> sema_check_unsupported(&context, "default of `{parameter.name}`: {reason}")
+                    loop reason in default_context.incomplete_reasons -> sema_check_unsupported(&context, "default of `{func.params[param_index].name}`: {reason}")
                 }
                 else -> {
                     default_expr = checked_default
                 }
             }
         }
-        param_mutable := parameter.convention == AccessConvention.Write
+        param_mutable := func.params[param_index].convention == AccessConvention.Write
         param_symbol := Symbol{
-            id: symbol_id(SymbolKind.Parameter, module_identity, owner_id.key, parameter.name),
+            id: symbol_id(SymbolKind.Parameter, module_identity, owner_id.key, func.params[param_index].name),
             kind: SymbolKind.Parameter,
-            name: parameter.name,
+            name: func.params[param_index].name,
             module_name: module_identity,
             owner: Val(owner_id.key),
-            span: parameter.name_span,
+            span: func.params[param_index].name_span,
             ty: Val(parameter_ty),
             visibility: 0,
         }
         if {
-            !sema_scope_declare_local(&scopes, param_symbol, param_mutable, parameter.convention, None, false) -> {
-                &diagnostics.push(sema_already_defined(parameter.name, parameter.name_span))
+            !sema_scope_declare_local(&scopes, param_symbol, param_mutable, func.params[param_index].convention, None, false) -> {
+                &diagnostics.push(sema_already_defined(func.params[param_index].name, func.params[param_index].name_span))
                 complete = false
             }
             else -> {
                 sema_ownership_declare_binding(&state, param_symbol, true)
-                if param_index == 0 && parameter.name == "self" && parameter.convention == AccessConvention.Move && func.name == "close" && sema_function_is_consuming_close_body(func, module_identity, program) -> state.close_receiver_key = param_symbol.id.key
+                if param_index == 0 && func.params[param_index].name == "self" && func.params[param_index].convention == AccessConvention.Move && func.name == "close" && sema_function_is_consuming_close_body(func, module_identity, program) -> state.close_receiver_key = param_symbol.id.key
                 if function_kind == {
                     .Method(_, _) | .TraitMethod(_, _, _, _, _) -> {
-                        if param_index == 0 && parameter.name == "self" -> context.return_view_receiver_key = param_symbol.id.key
+                        if param_index == 0 && func.params[param_index].name == "self" -> context.return_view_receiver_key = param_symbol.id.key
                         else -> &context.return_view_parameter_keys.push(param_symbol.id.key)
                     }
                     else -> &context.return_view_parameter_keys.push(param_symbol.id.key)
                 }
             }
         }
-        local := tir_symbol_local(parameter.name, parameter.name_span, param_symbol.id)
+        local := tir_symbol_local(func.params[param_index].name, func.params[param_index].name_span, param_symbol.id)
         local.mutable = param_mutable
-        if !sema_function_explicit_receiver(function_kind, param_index, parameter) {
-            public_label :: parameter.public_label.map((label) -> label.name) ?? parameter.name
-            &params.push(TParameter{local: local, name: parameter.name, span: parameter.name_span, ty: parameter_ty, convention: parameter.convention, public_label: public_label, zone: parameter.zone, default: default_expr, variadic: parameter.variadic})
+        if !sema_function_explicit_receiver(function_kind, param_index, func.params[param_index]) {
+            public_label :: func.params[param_index].public_label.map((label) -> label.name) ?? func.params[param_index].name
+            &params.push(TParameter{local: local, name: func.params[param_index].name, span: func.params[param_index].name_span, ty: parameter_ty, convention: func.params[param_index].convention, public_label: public_label, zone: func.params[param_index].zone, default: default_expr, variadic: func.params[param_index].variadic})
         }
         param_index += 1
     }
