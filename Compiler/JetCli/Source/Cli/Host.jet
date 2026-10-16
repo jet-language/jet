@@ -20,6 +20,7 @@ use jet_driver.[
     JetDriverCompileResult,
     JetDriverDocModule,
     JetDriverRustForeignError,
+    JetDriverRustForeignFacts,
     JetDriverVerbOutput,
     JET_DRIVER_EXIT_OK,
     JET_DRIVER_EXIT_USAGE,
@@ -40,6 +41,7 @@ use jet_eval.[
 use jet_foundation.[
     CtValue,
     Diagnostic,
+    MIRProgram,
     MIRTestCase,
     MIROutputCheck,
     DIAGNOSTIC_ERROR,
@@ -365,16 +367,21 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, sources: JetCLIFore
     // it would copy the whole program for the length of the native route.
     // Only a program with a Rust foreign helper owns an attached copy.
     if result.mir == .Val(program) {
-        realized := jet_cli_rust_foreign_realize(result.rust_foreign, program)
-        if realized == .Err(error) -> return Val(JetCLINativeFailure.RustForeign{error: error})
-        if realized == .Ok(.Val(artifact)) {
-            attached := jet_cli_rust_foreign_attach(artifact.plan, artifact.target_dir, artifact.release, program.copy())
-            if attached == .Err(error) -> return Val(JetCLINativeFailure.RustForeign{error: error})
-            if attached == .Ok(helper_program) -> return jet_cli_native_program_executable(result, helper_program, sources, release, runtime_dir, object_path, executable_path, keep_going, &census)
-        }
+        attached :: jet_cli_rust_foreign_attached(result.rust_foreign, program) ?? return Val(JetCLINativeFailure.RustForeign{error: err})
+        if attached.len() == 1 -> return jet_cli_native_program_executable(result, attached[0], sources, release, runtime_dir, object_path, executable_path, keep_going, &census)
         return jet_cli_native_program_executable(result, program, sources, release, runtime_dir, object_path, executable_path, keep_going, &census)
     }
     Val(JetCLINativeFailure.NoEntry)
+}
+
+// jet_cli_rust_foreign_prepare without taking the program: none, or the one
+// copy a realized Rust foreign helper attaches to.
+fn jet_cli_rust_foreign_attached(facts: JetDriverRustForeignFacts, program: MIRProgram) -[FS, Env, Exec, Time.Wait]> [MIRProgram] JetDriverRustForeignError! {
+    realized :: jet_cli_rust_foreign_realize(facts, program)
+    if realized == {
+        .Val(artifact) -> { return Ok([MIRProgram]{jet_cli_rust_foreign_attach(artifact.plan, artifact.target_dir, artifact.release, program.copy())}) }
+        .None -> { return Ok([MIRProgram]{}) }
+    }
 }
 
 fn jet_cli_native_program_executable(result: JetDriverCompileResult, unpruned: MIRProgram, sources: JetCLIForeignSources, release: Bool, runtime_dir: String, object_path: String, executable_path: String, keep_going: Bool, census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
