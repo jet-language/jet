@@ -899,7 +899,17 @@ fn sema_expr_expected_trait_coercion(value: ^TExpr, required: Type, offered: Typ
 // it adds exactly one `Present` last. A value that is already optional or
 // fallible, or that never returns, keeps the ordinary checks (E0108/E0309).
 fn sema_expr_optional_lift(value: TExpr, required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
-    normalized :: sema_expr_unwrap_tag(required)
+    lifted_type :: sema_expr_optional_lift_type(required, offered, environment, program) ?? return None
+    // copy: the caller keeps its operand; the lifted node owns its own.
+    Val(sema_tir_node(lifted_type, TExprKind.Present{value: value.copy()}, value.span))
+}
+
+// The optional type a value of type `offered` lifts to under `required`, or
+// None when it does not lift. Decided from the types alone, so an owning
+// caller moves its value into the lift.
+fn sema_expr_optional_lift_type(required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
+    normalized := sema_expr_unwrap_tag(required)
+    lifts := false
     if normalized == {
         .Option(payload) -> {
             if sema_expr_unwrap_tag(offered) == {
@@ -911,10 +921,11 @@ fn sema_expr_optional_lift(value: TExpr, required: Type, offered: Type, environm
             }
             fits :: sema_expr_expected_assignable(payload, offered, environment, program) ?? return None
             if !fits -> return None
-            return Val(sema_tir_node(normalized, TExprKind.Present{value: value}, value.span))
+            lifts = true
         }
         else -> {}
     }
+    if lifts -> return Val(^normalized)
     None
 }
 
@@ -933,8 +944,10 @@ fn sema_expr_expected_owned(value: ^TExpr, expected: Type?, environment: SemaSco
     if sema_expr_expected_keeps(owned.ty, expected) -> return Val(^owned)
     required := sema_expr_expected_type(expected, environment, program)
     offered := sema_expr_expected_type(owned.ty, environment, program)
-    lifted :: sema_expr_optional_lift(owned, required, offered, environment, program)
-    if lifted != None -> return lifted
+    if sema_expr_optional_lift_type(required, offered, environment, program) == .Val(lifted_type) {
+        span :: owned.span
+        return Val(sema_tir_node(lifted_type, TExprKind.Present{value: ^owned}, span))
+    }
     if sema_expr_strict_zone_erased(required, offered, environment, program) {
         &diagnostics.push(sema_error("E0771", owned.span, "this needs {sema_type_show(required)}, but the function value is {sema_type_show(offered)}", "public labels and parameter zones are part of a function's callable type", "use `{type_name(required)}` here"))
         return None

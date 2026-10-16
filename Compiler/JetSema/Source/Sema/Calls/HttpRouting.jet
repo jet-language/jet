@@ -128,7 +128,9 @@ fn sema_http_route_shape(expression: Expr, environment: SemaScopeEnvironment, pr
     }
 }
 fn sema_http_route_environment_for_module(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String) -> SemaScopeEnvironment Never! {
-    result := environment
+    // copy: the route checks run in another module's environment while the
+    // caller keeps its own; every caller holds `environment` as a read param.
+    result := environment.copy()
     result.module_identity = module_identity
     if program.registration_graph == .Val(graph) {
         if sema_registration_module_index(graph, module_identity) == .Val(module_index) {
@@ -136,7 +138,7 @@ fn sema_http_route_environment_for_module(environment: SemaScopeEnvironment, pro
             result.module_name = graph.modules[module_index].module_name
         }
     }
-    result
+    ^result
 }
 
 fn sema_http_route_method_owner_module(graph: SemaRegistrationGraph, symbol_key: String) -> String? {

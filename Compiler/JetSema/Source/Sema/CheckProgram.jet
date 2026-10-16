@@ -3977,9 +3977,14 @@ fn sema_check_body_part_fill(slot: Shared<SemaBodyPart>, items: ^[SemaBodyJob], 
 // Gives a thread's slot its own light copy of the shared module scope, made
 // on that thread.
 fn sema_check_body_part_copy_scope(environment: SemaScopeEnvironment, slot: Shared<SemaBodyPart>) {
-    source :: environment.module_scope ?? panic("the body-check module scope left the shared environment")
-    permit :: slot.guard_edit()
-    permit.value.scopes = sema_scope_light_copy(source)
+    // The shared module scope is read in place by the light copy.
+    if environment.module_scope == .Val(source) {
+        light := sema_scope_light_copy(source)
+        permit :: slot.guard_edit()
+        permit.value.scopes = ^light
+        return
+    }
+    panic("the body-check module scope left the shared environment")
 }
 
 // Moves a part's bodies onto `bodies`, last item first.

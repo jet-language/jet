@@ -662,23 +662,14 @@ fn sema_type_resolve_declared(graph: SemaRegistrationGraph, ty: Type, caller_mod
 fn sema_type_graph_lookup_symbol(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaRegistrationResolvedSymbol? {
     local :: sema_registration_lookup_name(graph, module_identity, name)
     if local != None -> return local
-    canonical_parts :: name.split("::").to_list()
-    if canonical_parts.len() >= 2 {
-        last :: canonical_parts.len() - 1
-        target_name := canonical_parts[last]
-        target_parts := [String]{}
-        loop index in 0..<last -> &target_parts.push(canonical_parts[index])
-        target_module :: target_parts.join("::")
-        if sema_registration_module_index(graph, target_module) != None {
-            return sema_registration_lookup_name(graph, target_module, target_name)
+    // The name is cut in place; no part list is built per lookup.
+    if name.cut_last("::") == .Val(canonical) {
+        if sema_registration_module_index(graph, canonical.before) != None {
+            return sema_registration_lookup_name(graph, canonical.before, canonical.after)
         }
     }
-    parts :: name.split(".").to_list()
-    if parts.len() >= 2 {
-        alias := parts[0]
-        target_name := [String]{}
-        loop index in 1..<parts.len() -> &target_name.push(parts[index])
-        return sema_registration_lookup_qualified(graph, module_identity, alias, target_name.join("."))
+    if name.split_once(".") == .Val(qualified) {
+        return sema_registration_lookup_qualified(graph, module_identity, qualified.before, qualified.after)
     }
     // Only the established bare-owner trigger set may supply a global alias.
     // Local declarations and explicit imports have already won above.

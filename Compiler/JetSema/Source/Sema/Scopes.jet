@@ -1760,8 +1760,9 @@ fn sema_scope_binding_is_light(table: SemaScopeTable, index: Int) -> Bool Never!
 // The checked type of row `index`, wherever the row keeps it.
 fn sema_scope_binding_type(environment: SemaScopeEnvironment, table: SemaScopeTable, index: Int) -> Type? {
     if sema_scope_binding_is_light(table, index) {
-        source :: environment.module_scope ?? panic("a body thread read a module function type outside its parallel pass")
-        return source.bindings[index].symbol.ty
+        // The module scope is read in place; only the row's type leaves it.
+        if environment.module_scope == .Val(source) -> return source.bindings[index].symbol.ty
+        panic("a body thread read a module function type outside its parallel pass")
     }
     table.bindings[index].symbol.ty
 }
@@ -1769,8 +1770,9 @@ fn sema_scope_binding_type(environment: SemaScopeEnvironment, table: SemaScopeTa
 // Row `index`'s symbol with its checked type.
 fn sema_scope_binding_symbol(environment: SemaScopeEnvironment, table: SemaScopeTable, index: Int) -> Symbol {
     if sema_scope_binding_is_light(table, index) {
-        source :: environment.module_scope ?? panic("a body thread read a module function symbol outside its parallel pass")
-        return source.bindings[index].symbol
+        // The module scope is read in place; only the row's symbol leaves it.
+        if environment.module_scope == .Val(source) -> return source.bindings[index].symbol
+        panic("a body thread read a module function symbol outside its parallel pass")
     }
     table.bindings[index].symbol
 }
