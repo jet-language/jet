@@ -36,8 +36,8 @@ fn sema_export_unsupported_diagnostic(boundary: SemaExportBoundary, name: String
 fn sema_sandbox_export_functions(graph: SemaRegistrationGraph) -> [Func] Never! {
     functions := [Func]{}
     module_index :: sema_registration_module_index(graph, graph.entry_module_identity) ?? return functions
-    loop item in graph.modules[module_index].program.items {
-        if item == {
+    loop item_index in 0..<graph.modules[module_index].program.items.len() {
+        if graph.modules[module_index].program.items[item_index] == {
             .Func(function) -> {
                 if function.is_pub && !function.is_package_pub -> &functions.push(function)
             }

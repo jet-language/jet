@@ -87,10 +87,10 @@ fn sema_generic_modules_collect(graph: SemaRegistrationGraph, inputs: [SemaRegis
     // value parameter reports once however often the template is used.
     templates_by_module := [[SemaGenericModuleTemplate]]{}
     output := [[Diagnostic]]{}
-    loop module_row in graph.modules {
-        check := SemaGenericModuleCheck{module_identity: module_row.module_identity, diagnostics: [Diagnostic]{}, seen: [String:Bool]{}}
+    loop module_row_index in 0..<graph.modules.len() {
+        check := SemaGenericModuleCheck{module_identity: graph.modules[module_row_index].module_identity, diagnostics: [Diagnostic]{}, seen: [String:Bool]{}}
         templates := [SemaGenericModuleTemplate]{}
-        if sema_genmod_written_input(inputs, module_row.module_identity) == .Val(index) {
+        if sema_genmod_written_input(inputs, graph.modules[module_row_index].module_identity) == .Val(index) {
             templates = sema_genmod_collect_templates(inputs[index].program.items, &check)
         }
         &templates_by_module.push(templates)

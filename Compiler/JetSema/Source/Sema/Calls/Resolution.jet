@@ -601,12 +601,12 @@ fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_type
 // and the delegation forwarding.
 fn sema_call_implemented_trait_method_candidates(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, receiver_type: Type, method: String, type_args: [Type], caller_module: String, caller_package: String, generic_params: [TGenericParam], span: Span, diagnostics: &[Diagnostic]) -> [SemaCallMethodCandidate] Never! {
     candidates := [SemaCallMethodCandidate]{}
-    loop graph_module in graph.modules {
-        loop implementation in graph_module.impls {
-            if implementation.target_identity_key != nominal.identity_key -> next
-            trait_symbol :: implementation.trait_symbol ?? next
-            written :: loop function in implementation.methods {
-                if function.symbol.name == method {
+    loop graph_module_index in 0..<graph.modules.len() {
+        loop implementation_index in 0..<graph.modules[graph_module_index].impls.len() {
+            if graph.modules[graph_module_index].impls[implementation_index].target_identity_key != nominal.identity_key -> next
+            trait_symbol :: graph.modules[graph_module_index].impls[implementation_index].trait_symbol ?? next
+            written :: loop function_index in 0..<graph.modules[graph_module_index].impls[implementation_index].methods.len() {
+                if graph.modules[graph_module_index].impls[implementation_index].methods[function_index].symbol.name == method {
                     break true
                 }
             } ?? false
@@ -616,7 +616,7 @@ fn sema_call_implemented_trait_method_candidates(graph: SemaRegistrationGraph, n
             if !sema_call_trait_visible(graph, trait_nominal, caller_module, caller_package) -> next
             loop trait_method in trait_nominal.trait_methods {
                 if trait_method.declaration.name != method -> next
-                if implementation.delegation_field == .None && trait_method.declaration.default_body == .None {
+                if graph.modules[graph_module_index].impls[implementation_index].delegation_field == .None && trait_method.declaration.default_body == .None {
                     next
                 }
                 candidate :: sema_call_trait_method_candidate_from_registration(graph, trait_nominal, trait_method, receiver_type, type_args, caller_module, generic_params, span, &diagnostics) ?? next

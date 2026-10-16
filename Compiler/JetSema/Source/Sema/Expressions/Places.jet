@@ -236,10 +236,10 @@ fn sema_expression_tuple_field(base: TExpr, member: String, span: Span, diagnost
 fn sema_expression_carrier_type_symbol(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> Symbol? {
     carrier :: mir_boundary_head_carrier_module(name) ?? return None
     if program.registration_graph == .Val(graph) {
-    loop module_row in graph.modules {
-        if module_row.module_name != carrier -> next
-        loop nominal in module_row.nominals {
-            if nominal.symbol.name == name -> return Val(nominal.symbol)
+    loop module_row_index in 0..<graph.modules.len() {
+        if graph.modules[module_row_index].module_name != carrier -> next
+        loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
+            if graph.modules[module_row_index].nominals[nominal_index].symbol.name == name -> return Val(graph.modules[module_row_index].nominals[nominal_index].symbol)
         }
     }
     }

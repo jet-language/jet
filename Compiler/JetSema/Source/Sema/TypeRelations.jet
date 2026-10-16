@@ -881,8 +881,14 @@ fn sema_type_bound_satisfied_resolved(graph: SemaRegistrationGraph, actual_resol
         else -> {}
     }
     nominal_row :: sema_type_resolve_nominal_row(graph, actual_resolved, caller_module_identity) ?? return None
-    nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     trait_symbol :: sema_type_graph_trait_symbol(graph, caller_module_identity, bound_name) ?? return None
+    // The nominal row is passed in place: binding it copied the declaration.
+    sema_type_bound_satisfied_nominal(graph, graph.modules[nominal_row.module_index].nominals[nominal_row.row], trait_symbol, bound_name)
+}
+
+// Impl rows are read by index through the read graph: element loops over
+// `graph.modules` copied every module, impls included, on each bound check.
+fn sema_type_bound_satisfied_nominal(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, trait_symbol: Symbol, bound_name: String) -> Bool? {
     if bound_name == "Close" && sema_type_provider_close_owner(nominal) -> return Val(true)
     unresolved_impl := false
     if graph.impl_traits_indexed {
@@ -898,11 +904,11 @@ fn sema_type_bound_satisfied_resolved(graph: SemaRegistrationGraph, actual_resol
             }
         }
     } else {
-        loop graph_module in graph.modules {
-            loop implementation in graph_module.impls {
-                trait_matches :: sema_type_graph_impl_matches_trait(graph, implementation, trait_symbol) ?? next
+        loop module_index in 0..<graph.modules.len() {
+            loop impl_index in 0..<graph.modules[module_index].impls.len() {
+                trait_matches :: sema_type_graph_impl_matches_trait(graph, graph.modules[module_index].impls[impl_index], trait_symbol) ?? next
                 if !trait_matches -> next
-                target_matches :: sema_type_graph_impl_matches_nominal(graph, implementation, nominal) ?? {
+                target_matches :: sema_type_graph_impl_matches_nominal(graph, graph.modules[module_index].impls[impl_index], nominal) ?? {
                     unresolved_impl = true
                     next
                 }
@@ -974,14 +980,18 @@ fn sema_type_builtin_bound_satisfied(graph: SemaRegistrationGraph, actual_resolv
         else -> {}
     }
     nominal_row :: sema_type_resolve_nominal_row(graph, actual_resolved, caller_module_identity) ?? return None
-    nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+    // The nominal row is passed in place: binding it copied the declaration.
+    sema_type_builtin_bound_satisfied_nominal(graph, graph.modules[nominal_row.module_index].nominals[nominal_row.row], bound_name)
+}
+
+fn sema_type_builtin_bound_satisfied_nominal(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, bound_name: String) -> Bool? {
     // A caller that sees no declared `Close` reaches the same provider owners.
     if bound_name == "Close" && sema_type_provider_close_owner(nominal) -> return Val(true)
     unresolved_impl := false
-    loop graph_module in graph.modules {
-        loop implementation in graph_module.impls {
-            if implementation.trait_name != (Val(bound_name)) -> next
-            target_matches :: sema_type_graph_impl_matches_nominal(graph, implementation, nominal) ?? {
+    loop module_index in 0..<graph.modules.len() {
+        loop impl_index in 0..<graph.modules[module_index].impls.len() {
+            if graph.modules[module_index].impls[impl_index].trait_name != (Val(bound_name)) -> next
+            target_matches :: sema_type_graph_impl_matches_nominal(graph, graph.modules[module_index].impls[impl_index], nominal) ?? {
                 unresolved_impl = true
                 next
             }
@@ -989,29 +999,33 @@ fn sema_type_builtin_bound_satisfied(graph: SemaRegistrationGraph, actual_resolv
         }
     }
     if nominal.source == .SourceAST(item) {
-        blocks := [TraitImplBlock]{}
-        derives := [NamedSpan]{}
         if item == {
             .Struct(definition) -> {
-                blocks = definition.trait_impls
-                derives = definition.derives
+                if sema_type_blocks_or_derives_name(definition.trait_impls, definition.derives, bound_name) -> return Val(true)
             }
             .Enum(definition) -> {
-                blocks = definition.trait_impls
-                derives = definition.derives
+                if sema_type_blocks_or_derives_name(definition.trait_impls, definition.derives, bound_name) -> return Val(true)
             }
-            .Distinct(definition) -> derives = definition.derives
+            .Distinct(definition) -> {
+                if sema_type_blocks_or_derives_name([TraitImplBlock]{}, definition.derives, bound_name) -> return Val(true)
+            }
             else -> {}
-        }
-        loop block in blocks {
-            if block.trait_name == bound_name -> return Val(true)
-        }
-        loop derived_trait in derives {
-            if derived_trait.name == bound_name -> return Val(true)
         }
     }
     if unresolved_impl || !graph.complete -> return None
     Val(false)
+}
+
+// A trait block or derive named `bound_name`, read in place: collecting the
+// blocks into locals copied every block with its methods.
+fn sema_type_blocks_or_derives_name(blocks: [TraitImplBlock], derives: [NamedSpan], bound_name: String) -> Bool Never! {
+    loop index in 0..<blocks.len() {
+        if blocks[index].trait_name == bound_name -> return true
+    }
+    loop index in 0..<derives.len() {
+        if derives[index].name == bound_name -> return true
+    }
+    false
 }
 
 fn sema_type_bound_satisfied_with_generics(graph: SemaRegistrationGraph, actual: Type, bound_name: String, caller_module_identity: String, generic_params: [TGenericParam]) -> Bool? {
@@ -1142,19 +1156,24 @@ fn sema_type_assignable_in_graph(graph: SemaRegistrationGraph, required: Type, o
 fn sema_type_associated(graph: SemaRegistrationGraph, actual: Type, trait_name: String, associated_name: String, caller_module_identity: String) -> Type? {
     actual_resolved :: sema_type_resolve_declared(graph, actual, caller_module_identity)
     nominal_row :: sema_type_resolve_nominal_row(graph, actual_resolved, caller_module_identity) ?? return None
-    nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     trait_symbol :: sema_type_graph_trait_symbol(graph, caller_module_identity, trait_name) ?? return None
+    // The nominal row is passed in place: binding it copied the declaration.
+    sema_type_associated_nominal(graph, graph.modules[nominal_row.module_index].nominals[nominal_row.row], trait_symbol, associated_name)
+}
+
+fn sema_type_associated_nominal(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, trait_symbol: Symbol, associated_name: String) -> Type? {
     resolved_type := Type?{None}
-    loop graph_module in graph.modules {
-        loop implementation in graph_module.impls {
-            trait_matches :: sema_type_graph_impl_matches_trait(graph, implementation, trait_symbol) ?? next
+    loop module_index in 0..<graph.modules.len() {
+        loop impl_index in 0..<graph.modules[module_index].impls.len() {
+            trait_matches :: sema_type_graph_impl_matches_trait(graph, graph.modules[module_index].impls[impl_index], trait_symbol) ?? next
             if !trait_matches -> next
-            target_matches :: sema_type_graph_impl_matches_nominal(graph, implementation, nominal) ?? next
+            target_matches :: sema_type_graph_impl_matches_nominal(graph, graph.modules[module_index].impls[impl_index], nominal) ?? next
             if !target_matches -> next
-            loop associated in implementation.associated_types {
-                if associated.symbol.name != associated_name -> next
+            associated_types :: graph.modules[module_index].impls[impl_index].associated_types.len()
+            loop associated_index in 0..<associated_types {
+                if graph.modules[module_index].impls[impl_index].associated_types[associated_index].symbol.name != associated_name -> next
                 if resolved_type != None -> return None
-                resolved_type = Val(sema_type_resolve_declared(graph, associated.ty, implementation.source_module_identity))
+                resolved_type = Val(sema_type_resolve_declared(graph, graph.modules[module_index].impls[impl_index].associated_types[associated_index].ty, graph.modules[module_index].impls[impl_index].source_module_identity))
             }
         }
     }

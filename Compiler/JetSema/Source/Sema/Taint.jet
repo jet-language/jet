@@ -351,12 +351,12 @@ fn sema_taint_add_tag_declaration(catalog: &SemaTaintCatalog, module_identity: S
     }
 }
 fn sema_taint_collect_tag_declarations(catalog: &SemaTaintCatalog, graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) {
-    loop module_row in graph.modules {
+    loop module_row_index in 0..<graph.modules.len() {
         module_diagnostics := [Diagnostic]{}
-        loop item in module_row.program.items {
-            if item == .Tag(tag_value) -> sema_taint_add_tag_declaration(&catalog, module_row.module_identity, tag_value, &module_diagnostics)
+        loop item_index in 0..<graph.modules[module_row_index].program.items.len() {
+            if graph.modules[module_row_index].program.items[item_index] == .Tag(tag_value) -> sema_taint_add_tag_declaration(&catalog, graph.modules[module_row_index].module_identity, tag_value, &module_diagnostics)
         }
-        sema_attach_diagnostic_source_locations(&module_diagnostics, 0, module_row.source_segments)
+        sema_attach_diagnostic_source_locations(&module_diagnostics, 0, graph.modules[module_row_index].source_segments)
         loop diagnostic in module_diagnostics -> &diagnostics.push(diagnostic)
     }
 }
@@ -401,21 +401,21 @@ fn sema_taint_add_field(catalog: &SemaTaintCatalog, module_identity: String, own
     &catalog.fields.push(SemaTaintFieldFact{module_identity: module_identity, owner_type: owner, field: field.name, tags: sema_taint_type_tags(field.ty), type_name: sema_taint_type_name(field.ty), span: field.ty_span})
 }
 fn sema_taint_collect_items(catalog: &SemaTaintCatalog, graph: SemaRegistrationGraph) Never! {
-    loop module_row in graph.modules {
-        loop item in module_row.program.items {
-            if item == {
-                .Func(function) -> sema_taint_add_callable(&catalog, module_row.module_identity, module_row.module_name, "", function)
+    loop module_row_index in 0..<graph.modules.len() {
+        loop item_index in 0..<graph.modules[module_row_index].program.items.len() {
+            if graph.modules[module_row_index].program.items[item_index] == {
+                .Func(function) -> sema_taint_add_callable(&catalog, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].module_name, "", function)
                 .Struct(definition) -> {
-                    loop field in definition.fields -> sema_taint_add_field(&catalog, module_row.module_identity, definition.name, field)
-                    loop method in definition.methods -> sema_taint_add_callable(&catalog, module_row.module_identity, module_row.module_name, definition.name, method)
+                    loop field in definition.fields -> sema_taint_add_field(&catalog, graph.modules[module_row_index].module_identity, definition.name, field)
+                    loop method in definition.methods -> sema_taint_add_callable(&catalog, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].module_name, definition.name, method)
                     loop trait_impl in definition.trait_impls {
-                        loop method in trait_impl.methods -> sema_taint_add_callable(&catalog, module_row.module_identity, module_row.module_name, definition.name, method)
+                        loop method in trait_impl.methods -> sema_taint_add_callable(&catalog, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].module_name, definition.name, method)
                     }
                 }
-                .Enum(definition) -> loop method in definition.methods -> sema_taint_add_callable(&catalog, module_row.module_identity, module_row.module_name, definition.name, method)
-                .Impl(definition) -> loop method in definition.methods -> sema_taint_add_callable(&catalog, module_row.module_identity, module_row.module_name, definition.type_name, method)
-                .ExternRust(block) -> loop function in block.functions -> sema_taint_add_extern_callable(&catalog, module_row.module_identity, function)
-                .CModule(block) -> loop function in block.functions -> sema_taint_add_extern_callable(&catalog, module_row.module_identity, function)
+                .Enum(definition) -> loop method in definition.methods -> sema_taint_add_callable(&catalog, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].module_name, definition.name, method)
+                .Impl(definition) -> loop method in definition.methods -> sema_taint_add_callable(&catalog, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].module_name, definition.type_name, method)
+                .ExternRust(block) -> loop function in block.functions -> sema_taint_add_extern_callable(&catalog, graph.modules[module_row_index].module_identity, function)
+                .CModule(block) -> loop function in block.functions -> sema_taint_add_extern_callable(&catalog, graph.modules[module_row_index].module_identity, function)
                 else -> {}
             }
         }

@@ -128,21 +128,21 @@ fn sema_http_unmounted_warnings(graph: SemaRegistrationGraph, modules: [SemaGrap
         }
     }
     diagnostics := [Diagnostic]{}
-    loop module_row in graph.modules {
+    loop module_row_index in 0..<graph.modules.len() {
         diagnostic_start :: diagnostics.len()
-        loop nominal in module_row.nominals {
-            if mounted.contains(nominal.symbol.id.key) -> next
-            loop method in nominal.methods {
-                loop marker in method.declaration.markers {
-                    if sema_http_route_marker_verb(marker, graph, module_row.module_identity) == None -> next
-                    &diagnostics.push(sema_lint("E2818", marker.span,
-                        "HTTP route method `{method.declaration.name}` belongs to a struct that is never mounted.",
+        loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
+            if mounted.contains(graph.modules[module_row_index].nominals[nominal_index].symbol.id.key) -> next
+            loop method_index in 0..<graph.modules[module_row_index].nominals[nominal_index].methods.len() {
+                loop marker_index in 0..<graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers.len() {
+                    if sema_http_route_marker_verb(graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers[marker_index], graph, graph.modules[module_row_index].module_identity) == None -> next
+                    &diagnostics.push(sema_lint("E2818", graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers[marker_index].span,
+                        "HTTP route method `{graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.name}` belongs to a struct that is never mounted.",
                         "Route markers record facts; only an explicit mux.mount(value) exposes that struct's routes.",
-                        "Pass a value of `{nominal.symbol.name}` to mux.mount, or remove the route marker."))
+                        "Pass a value of `{graph.modules[module_row_index].nominals[nominal_index].symbol.name}` to mux.mount, or remove the route marker."))
                 }
             }
         }
-        sema_attach_diagnostic_source_locations(&diagnostics, diagnostic_start, module_row.source_segments)
+        sema_attach_diagnostic_source_locations(&diagnostics, diagnostic_start, graph.modules[module_row_index].source_segments)
     }
     diagnostics
 }

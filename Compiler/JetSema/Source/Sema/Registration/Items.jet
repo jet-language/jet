@@ -229,9 +229,9 @@ fn sema_registration_unit_facts(graph: SemaRegistrationGraph) -> [SemaRegistrati
     time_dimension :: Val(Dimension{axes: [DimensionAxis]{DimensionAxis{name: "core.units::Time", exponent: Measure.SignedLiteral{kind: "dimension", value: 1}}}})
     sema_registration_unit_fact_push(&facts, SemaRegistrationUnitFact{name: "Duration", package: "core.units", family: "Time", member: "ns", dimension: time_dimension, scale: UnitRatio{numerator: 1, denominator: 1}, scale_provenance: UnitScaleProvenance.Rational, offset: UnitRatio{numerator: 0, denominator: 1}, kind: QuantityKind.Delta})
     sema_registration_unit_fact_push(&facts, SemaRegistrationUnitFact{name: "Instant", package: "core.units", family: "Time", member: "ns", dimension: time_dimension, scale: UnitRatio{numerator: 1, denominator: 1}, scale_provenance: UnitScaleProvenance.Rational, offset: UnitRatio{numerator: 0, denominator: 1}, kind: QuantityKind.Point})
-    loop module_row in graph.modules {
-        loop item in module_row.program.items {
-            if item == {
+    loop module_row_index in 0..<graph.modules.len() {
+        loop item_index in 0..<graph.modules[module_row_index].program.items.len() {
+            if graph.modules[module_row_index].program.items[item_index] == {
                 .UnitFamily(definition) -> sema_registration_unit_family_facts(definition, &facts)
                 else -> {}
             }
@@ -248,10 +248,10 @@ fn sema_registration_unit_facts(graph: SemaRegistrationGraph) -> [SemaRegistrati
 fn sema_registration_unit_fact_for_type(graph: SemaRegistrationGraph, ty: Type) -> SemaRegistrationUnitFact? {
     name :: sema_registration_unit_leaf_name(ty) ?? return None
     qualified :: sema_registration_unit_type_is_qualified(ty)
-    loop fact in graph.unit_facts {
-        if fact.name != name -> next
-        if qualified && sema_registration_unit_fact_is_builtin_time(fact) -> next
-        return Val(fact)
+    loop fact_index in 0..<graph.unit_facts.len() {
+        if graph.unit_facts[fact_index].name != name -> next
+        if qualified && sema_registration_unit_fact_is_builtin_time(graph.unit_facts[fact_index]) -> next
+        return Val(graph.unit_facts[fact_index])
     }
     None
 }
@@ -3426,10 +3426,10 @@ fn sema_registration_resolve_default(graph: SemaRegistrationGraph, reference: Fu
             .Foreign(_, _) -> {}
         }
     }
-    loop module_row in graph.modules {
-        loop nominal in module_row.nominals {
-            loop method in nominal.trait_methods {
-                if method.symbol.id.key == reference.owner_key -> return sema_registration_parameter_default(method.parameters, reference)
+    loop module_row_index in 0..<graph.modules.len() {
+        loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
+            loop method_index in 0..<graph.modules[module_row_index].nominals[nominal_index].trait_methods.len() {
+                if graph.modules[module_row_index].nominals[nominal_index].trait_methods[method_index].symbol.id.key == reference.owner_key -> return sema_registration_parameter_default(graph.modules[module_row_index].nominals[nominal_index].trait_methods[method_index].parameters, reference)
             }
         }
     }
@@ -3488,13 +3488,13 @@ fn sema_registration_apply_graph_module_rows(graph: SemaRegistrationGraph, modul
 // declaring member's current symbol row.
 fn sema_registration_apply_namespace(graph: SemaRegistrationGraph, module_index: Int, scopes: &SemaScopeTable, diagnostics: &[Diagnostic], waiting: &[SemaScopeProbeConstant]) -> Bool {
     complete := true
-    loop owner in graph.modules[module_index].namespace_bindings {
-        symbol :: graph.modules[owner.module_index].symbols[owner.row]
+    loop owner_index in 0..<graph.modules[module_index].namespace_bindings.len() {
+        symbol :: graph.modules[graph.modules[module_index].namespace_bindings[owner_index].module_index].symbols[graph.modules[module_index].namespace_bindings[owner_index].row]
         if !sema_scope_add_module_symbol(&scopes, symbol) {
             &diagnostics.push(sema_diagnostic_with_source_location(sema_defined_twice(symbol.name, "imported names share the module namespace", symbol.span), graph.modules[module_index].source_segments))
             complete = false
         } else if sema_comptime_symbol_waits(symbol) {
-            &waiting.push(SemaScopeProbeConstant{binding: scopes.bindings.len() - 1, source: SemaScopeProbeSource.Namespace{module_index: owner.module_index, position: owner.row}})
+            &waiting.push(SemaScopeProbeConstant{binding: scopes.bindings.len() - 1, source: SemaScopeProbeSource.Namespace{module_index: graph.modules[module_index].namespace_bindings[owner_index].module_index, position: graph.modules[module_index].namespace_bindings[owner_index].row}})
         }
     }
     complete

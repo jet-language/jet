@@ -36,12 +36,12 @@ fn sema_data_nominal_is(name: String, leaf: String) -> Bool Never! {
 
 fn sema_data_source_type_name(environment: SemaScopeEnvironment, program: SemaProgramTables, leaf: String) -> String Never! {
     if program.registration_graph == .Val(graph) {
-        loop module_row in graph.modules {
-            if module_row.module_name != "core.data" -> next
-            loop nominal in module_row.nominals {
-                if nominal.symbol.name == leaf {
-                    if nominal.compiler_owned -> return "{leaf}"
-                    return "{nominal.symbol.module_name}::{leaf}"
+        loop module_row_index in 0..<graph.modules.len() {
+            if graph.modules[module_row_index].module_name != "core.data" -> next
+            loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
+                if graph.modules[module_row_index].nominals[nominal_index].symbol.name == leaf {
+                    if graph.modules[module_row_index].nominals[nominal_index].compiler_owned -> return "{leaf}"
+                    return "{graph.modules[module_row_index].nominals[nominal_index].symbol.module_name}::{leaf}"
                 }
             }
         }

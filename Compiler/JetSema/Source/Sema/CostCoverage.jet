@@ -34,19 +34,19 @@ fn sema_cost_coverage(registration: SemaRegistrationGraph, checked: SemaGraphRes
     positions := [String:Int]{}
     module_rows := [String:[Int]]{}
     declarations := [(module_identity: String, start: Int, end: Int, name: String):String]{}
-    loop module_row in registration.modules {
+    loop module_row_index in 0..<registration.modules.len() {
         first :: callables.len()
-        loop function in module_row.functions -> &callables.push(sema_cost_callable(function, module_row.module_identity, registration.entry_module_identity, selected))
-        loop nominal in module_row.nominals {
-            loop function in nominal.methods -> &callables.push(sema_cost_callable(function, module_row.module_identity, registration.entry_module_identity, selected))
-            loop method in nominal.trait_methods {
-                if method.declaration.default_body == None -> next
-                source :: method.declaration
-                &callables.push(SemaCostCallable{key: method.symbol.id.key, label: "{module_row.module_identity}:{method.symbol.name}", name: source.name, module_identity: module_row.module_identity, span: source.span, definition: source.name_span, generated: false, foreign: false, root: false})
+        loop function_index in 0..<registration.modules[module_row_index].functions.len() -> &callables.push(sema_cost_callable(registration.modules[module_row_index].functions[function_index], registration.modules[module_row_index].module_identity, registration.entry_module_identity, selected))
+        loop nominal_index in 0..<registration.modules[module_row_index].nominals.len() {
+            loop function_index in 0..<registration.modules[module_row_index].nominals[nominal_index].methods.len() -> &callables.push(sema_cost_callable(registration.modules[module_row_index].nominals[nominal_index].methods[function_index], registration.modules[module_row_index].module_identity, registration.entry_module_identity, selected))
+            loop method_index in 0..<registration.modules[module_row_index].nominals[nominal_index].trait_methods.len() {
+                if registration.modules[module_row_index].nominals[nominal_index].trait_methods[method_index].declaration.default_body == None -> next
+                source :: registration.modules[module_row_index].nominals[nominal_index].trait_methods[method_index].declaration
+                &callables.push(SemaCostCallable{key: registration.modules[module_row_index].nominals[nominal_index].trait_methods[method_index].symbol.id.key, label: "{registration.modules[module_row_index].module_identity}:{registration.modules[module_row_index].nominals[nominal_index].trait_methods[method_index].symbol.name}", name: source.name, module_identity: registration.modules[module_row_index].module_identity, span: source.span, definition: source.name_span, generated: false, foreign: false, root: false})
             }
         }
-        loop implementation in module_row.impls {
-            loop function in implementation.methods -> &callables.push(sema_cost_callable(function, module_row.module_identity, registration.entry_module_identity, selected))
+        loop implementation_index in 0..<registration.modules[module_row_index].impls.len() {
+            loop function_index in 0..<registration.modules[module_row_index].impls[implementation_index].methods.len() -> &callables.push(sema_cost_callable(registration.modules[module_row_index].impls[implementation_index].methods[function_index], registration.modules[module_row_index].module_identity, registration.entry_module_identity, selected))
         }
         rows := [Int]{}
         loop index in first..<callables.len() {
@@ -55,11 +55,11 @@ fn sema_cost_coverage(registration: SemaRegistrationGraph, checked: SemaGraphRes
             &rows.push(index)
         }
         &rows.sort_by((left, right) -> (callables[left].span.start <=> callables[right].span.start).then(left <=> right))
-        module_rows[module_row.module_identity] = ^rows
+        module_rows[registration.modules[module_row_index].module_identity] = ^rows
     }
-    loop module_row in registration.modules {
-        loop constant in module_row.constants {
-            if constant.declaration.resolved_output == .Val(output) {
+    loop module_row_index in 0..<registration.modules.len() {
+        loop constant_index in 0..<registration.modules[module_row_index].constants.len() {
+            if registration.modules[module_row_index].constants[constant_index].declaration.resolved_output == .Val(output) {
                 if !output.selected -> next
                 if output.module_id < 0 || output.module_id >= registration.modules.len() -> next
                 module_identity :: registration.modules[output.module_id].module_identity

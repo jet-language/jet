@@ -620,12 +620,12 @@ fn sema_comptime_reflection_layout_item_resolutions(graph: SemaRegistrationGraph
 fn sema_comptime_reflection_layout_engine(graph: SemaRegistrationGraph) -> TargetLayoutEngine Never! {
     qualified_items := [TargetLayoutQualifiedItem]{}
     resolutions := [TargetLayoutNameResolution]{}
-    loop registration_module in graph.modules {
-        loop item in registration_module.program.items {
-            name :: sema_comptime_reflection_layout_item_name(item) ?? next
-            qualified_name :: if registration_module.module_identity == "" -> name else -> "{registration_module.module_identity}::{name}"
-            &qualified_items.push(TargetLayoutQualifiedItem{qualified_name: qualified_name, module_identity: registration_module.module_identity, item: item})
-            sema_comptime_reflection_layout_item_resolutions(graph, registration_module.module_identity, qualified_name, item, &resolutions)
+    loop registration_module_index in 0..<graph.modules.len() {
+        loop item_index in 0..<graph.modules[registration_module_index].program.items.len() {
+            name :: sema_comptime_reflection_layout_item_name(graph.modules[registration_module_index].program.items[item_index]) ?? next
+            qualified_name :: if graph.modules[registration_module_index].module_identity == "" -> name else -> "{graph.modules[registration_module_index].module_identity}::{name}"
+            &qualified_items.push(TargetLayoutQualifiedItem{qualified_name: qualified_name, module_identity: graph.modules[registration_module_index].module_identity, item: graph.modules[registration_module_index].program.items[item_index]})
+            sema_comptime_reflection_layout_item_resolutions(graph, graph.modules[registration_module_index].module_identity, qualified_name, graph.modules[registration_module_index].program.items[item_index], &resolutions)
         }
     }
     jet_target_layout_engine_with_registry([Item]{}, qualified_items, resolutions, jet_target_layout_from_machine(graph.target_machine))

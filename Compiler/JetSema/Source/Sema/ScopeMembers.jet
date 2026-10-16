@@ -213,16 +213,16 @@ fn sema_scope_members_build_marker_registry(graph: SemaRegistrationGraph, module
     }
     if !sema_scope_members_registry_add_applied_catalog(&registry, catalog) -> return None
     current_module_found := false
-    loop module_row in graph.modules {
+    loop module_row_index in 0..<graph.modules.len() {
         // The current module's rows come from `program`; read either in place.
-        if module_row.module_identity == module_identity {
+        if graph.modules[module_row_index].module_identity == module_identity {
             current_module_found = true
             if !sema_scope_members_registry_add_program(&registry, program) -> return None
         } else {
             // Derive providers retain their existing package scope; marker
             // declarations enter only through the import-qualified rows below.
-            loop item in module_row.program.items {
-                if item == .UserDerive(provider) {
+            loop item_index in 0..<graph.modules[module_row_index].program.items.len() {
+                if graph.modules[module_row_index].program.items[item_index] == .UserDerive(provider) {
                     sema_scope_members_append_name(&registry.derive_provider_names, provider.trait_name)
                     sema_scope_members_append_name(&registry.known_marker_names, provider.trait_name)
                 }

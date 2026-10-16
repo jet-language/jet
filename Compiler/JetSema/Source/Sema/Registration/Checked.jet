@@ -2838,16 +2838,16 @@ fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegi
         else -> {}
     }
     trait_ref :: sema_checked_trait_nominal_row(graph, module_row.module_identity, trait_name) ?? return
-    loop expected in graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods {
+    loop expected_index in 0..<graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods.len() {
         found := SemaRegistrationFunction?{None}
         loop actual in implementation.methods {
-            if actual.declaration.name == expected.declaration.name {
+            if actual.declaration.name == graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[expected_index].declaration.name {
                 found = Val(actual)
                 break
             }
         }
         actual :: found ?? next
-        compatible :: sema_type_assignable_in_graph(graph, expected.signature, actual.signature, module_row.module_identity)
+        compatible :: sema_type_assignable_in_graph(graph, graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[expected_index].signature, actual.signature, module_row.module_identity)
         mismatch :: if compatible == {
             .Val(value) -> !value
             else -> graph.complete
@@ -3116,10 +3116,10 @@ fn sema_checked_validate_delegation(graph: SemaRegistrationGraph, module_row: Se
     loop nominal_index in 0..<graph.modules[owner_index].nominals.len() {
         // Read in place: binding the row copied every nominal of the module.
         if graph.modules[owner_index].nominals[nominal_index].kind != SemaRegistrationNominalKind.Struct || graph.modules[owner_index].nominals[nominal_index].symbol.name != definition.type_name -> next
-        loop field in graph.modules[owner_index].nominals[nominal_index].fields {
-            if field.symbol.name != field_name -> next
-            field_type_name :: type_name(field.ty)
-            satisfied :: sema_type_bound_satisfied(graph, field.ty, trait_name, module_row.module_identity) ?? true
+        loop field_index in 0..<graph.modules[owner_index].nominals[nominal_index].fields.len() {
+            if graph.modules[owner_index].nominals[nominal_index].fields[field_index].symbol.name != field_name -> next
+            field_type_name :: type_name(graph.modules[owner_index].nominals[nominal_index].fields[field_index].ty)
+            satisfied :: sema_type_bound_satisfied(graph, graph.modules[owner_index].nominals[nominal_index].fields[field_index].ty, trait_name, module_row.module_identity) ?? true
             if !satisfied {
                 &diagnostics.push(sema_error("E2401", definition.type_span, "`{field_type_name}` doesn't implement `{trait_name}`, so it can't delegate", "`impl {definition.type_name}.{trait_name} using {field_name}` forwards `{trait_name}` methods to the `{field_name}` field, but `{field_type_name}` doesn't implement `{trait_name}`", "implement `impl {field_type_name}: {trait_name}` on the field's type, or choose a different field"))
             }
@@ -3666,12 +3666,12 @@ fn sema_checked_layout_item_resolutions(graph: SemaRegistrationGraph, module_row
 fn sema_checked_layout_engine(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule) -> TargetLayoutEngine Never! {
     qualified_items := [TargetLayoutQualifiedItem]{}
     name_resolutions := [TargetLayoutNameResolution]{}
-    loop source_module in graph.modules {
-        loop item in source_module.program.items {
-            item_name :: sema_checked_layout_item_name(item) ?? next
-            identity :: sema_checked_module_key(source_module, item_name)
-            &qualified_items.push(TargetLayoutQualifiedItem{qualified_name: identity, module_identity: source_module.module_identity, item: item})
-            sema_checked_layout_item_resolutions(graph, source_module, identity, item, &name_resolutions)
+    loop source_module_index in 0..<graph.modules.len() {
+        loop item_index in 0..<graph.modules[source_module_index].program.items.len() {
+            item_name :: sema_checked_layout_item_name(graph.modules[source_module_index].program.items[item_index]) ?? next
+            identity :: sema_checked_module_key(graph.modules[source_module_index], item_name)
+            &qualified_items.push(TargetLayoutQualifiedItem{qualified_name: identity, module_identity: graph.modules[source_module_index].module_identity, item: graph.modules[source_module_index].program.items[item_index]})
+            sema_checked_layout_item_resolutions(graph, graph.modules[source_module_index], identity, graph.modules[source_module_index].program.items[item_index], &name_resolutions)
         }
     }
     jet_target_layout_engine_with_registry([Item]{}, qualified_items, name_resolutions, jet_target_layout_from_machine(graph.target_machine))

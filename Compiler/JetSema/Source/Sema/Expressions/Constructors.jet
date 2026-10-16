@@ -869,20 +869,20 @@ fn sema_expression_checked_text_target(head: Type, environment: SemaScopeEnviron
         }
         else -> return None
     }
-    loop graph_module in graph.modules {
-        loop implementation in graph_module.impls {
-            if !sema_type_graph_is_checked_text_impl(graph, implementation) -> next
-            if implementation.target_identity_key != registered.identity_key && (implementation.target_module_identity != Val(registered.symbol.module_name) || implementation.target_type_name != registered.symbol.name) -> next
+    loop graph_module_index in 0..<graph.modules.len() {
+        loop implementation_index in 0..<graph.modules[graph_module_index].impls.len() {
+            if !sema_type_graph_is_checked_text_impl(graph, graph.modules[graph_module_index].impls[implementation_index]) -> next
+            if graph.modules[graph_module_index].impls[implementation_index].target_identity_key != registered.identity_key && (graph.modules[graph_module_index].impls[implementation_index].target_module_identity != Val(registered.symbol.module_name) || graph.modules[graph_module_index].impls[implementation_index].target_type_name != registered.symbol.name) -> next
             check := SemaRegistrationFunction?{None}
             encode_hole := SemaRegistrationFunction?{None}
-            loop method in implementation.methods {
-                if method.symbol.name == "check" -> check = Val(method)
-                if method.symbol.name == "encode_hole" -> encode_hole = Val(method)
+            loop method_index in 0..<graph.modules[graph_module_index].impls[implementation_index].methods.len() {
+                if graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name == "check" -> check = Val(graph.modules[graph_module_index].impls[implementation_index].methods[method_index])
+                if graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name == "encode_hole" -> encode_hole = Val(graph.modules[graph_module_index].impls[implementation_index].methods[method_index])
             }
             if check != None && encode_hole != None {
                 return Val(SemaExpressionCheckedTextTarget{
                     owner: registered.symbol,
-                    implementation_module_identity: graph_module.module_identity,
+                    implementation_module_identity: graph.modules[graph_module_index].module_identity,
                     check: check ?? return None,
                     encode_hole: encode_hole ?? return None,
                 })

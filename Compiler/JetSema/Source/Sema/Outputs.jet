@@ -321,8 +321,8 @@ fn sema_output_fact(graph: SemaRegistrationGraph, declaring_index: Int, address:
 }
 
 fn sema_output_default(graph: SemaRegistrationGraph, entry_index: Int, diagnostics: &[Diagnostic]) -> String? Never! {
-    loop item in graph.modules[entry_index].program.items {
-        if item == .Const(definition) {
+    loop item_index in 0..<graph.modules[entry_index].program.items.len() {
+        if graph.modules[entry_index].program.items[item_index] == .Const(definition) {
             if definition.ty != (Val(Type.Named{name: "__OutputDefaults"})) -> next
             if definition.value == .StructLit(_, _, _, _, fields, _, _) {
                 loop field in fields {
@@ -538,9 +538,9 @@ fn sema_output_fact_with_solved_effects(output: ^ResolvedOutput, graph: SemaRegi
     key :: symbol_id(SymbolKind.Function, modules[target].module_identity, "", fact.semantic_name).key
     function_index :: rows[target].get(key) ?? return fact
     declaration_span := Span?{None}
-    loop function in graph.modules[target].functions {
-        if function.symbol.id.key == key {
-            declaration_span = function.declaration.return_type_span
+    loop function_index in 0..<graph.modules[target].functions.len() {
+        if graph.modules[target].functions[function_index].symbol.id.key == key {
+            declaration_span = graph.modules[target].functions[function_index].declaration.return_type_span
             break
         }
     }

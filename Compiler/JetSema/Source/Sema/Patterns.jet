@@ -742,10 +742,10 @@ fn sema_pattern_map_key_written(key: Expr) -> Bool Never! {
 
 fn sema_pattern_map_resolve_key(key: TExpr, env: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr {
     if key.kind == .ConstRef(symbol) && program.registration_graph == .Val(graph) {
-        loop module_row in graph.modules {
-            loop constant in module_row.constants {
-                if constant.symbol.id.key != symbol.key -> next
-                if constant.declaration.ct == .Val(value) {
+        loop module_row_index in 0..<graph.modules.len() {
+            loop constant_index in 0..<graph.modules[module_row_index].constants.len() {
+                if graph.modules[module_row_index].constants[constant_index].symbol.id.key != symbol.key -> next
+                if graph.modules[module_row_index].constants[constant_index].declaration.ct == .Val(value) {
                     if sema_checked_comptime(value) == .Val(known) {
                         resolved := key
                         resolved.kind = TExprKind.CtLit{value: known}

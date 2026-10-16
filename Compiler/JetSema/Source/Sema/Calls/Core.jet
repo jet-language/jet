@@ -106,13 +106,13 @@ fn sema_call_core_import_target(environment: SemaScopeEnvironment, program: Sema
 fn sema_call_source_import_target(environment: SemaScopeEnvironment, program: SemaProgramTables, alias: String) -> SemaCallImportTarget? {
     if program.registration_graph == .Val(graph) {
     module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
-    loop import in graph.modules[module_index].imports {
-        loop binding in import.bindings {
-            if binding.local != alias || binding.symbol.kind != SymbolKind.Import || binding.declaration != None -> next
-            target_index :: sema_registration_module_index(graph, binding.target_module_identity) ?? return None
+    loop import_index in 0..<graph.modules[module_index].imports.len() {
+        loop binding_index in 0..<graph.modules[module_index].imports[import_index].bindings.len() {
+            if graph.modules[module_index].imports[import_index].bindings[binding_index].local != alias || graph.modules[module_index].imports[import_index].bindings[binding_index].symbol.kind != SymbolKind.Import || graph.modules[module_index].imports[import_index].bindings[binding_index].declaration != None -> next
+            target_index :: sema_registration_module_index(graph, graph.modules[module_index].imports[import_index].bindings[binding_index].target_module_identity) ?? return None
             module_name :: graph.modules[target_index].module_name
             if sema_core_import_is_core(module_name) -> return None
-            return Val(SemaCallImportTarget{alias: alias, module_identity: binding.target_module_identity, module_name: module_name, item: None, span: binding.symbol.span})
+            return Val(SemaCallImportTarget{alias: alias, module_identity: graph.modules[module_index].imports[import_index].bindings[binding_index].target_module_identity, module_name: module_name, item: None, span: graph.modules[module_index].imports[import_index].bindings[binding_index].symbol.span})
         }
     }
     return None
@@ -291,10 +291,10 @@ fn sema_call_import_member_unknown(member: String, span: Span) -> Diagnostic {
 
 fn sema_call_core_module_identity(environment: SemaScopeEnvironment, program: SemaProgramTables, module_name: String) -> String? {
     if program.registration_graph == .Val(graph) {
-    loop module_row in graph.modules {
-        if module_row.module_name != module_name || !sema_module_is_core_source(module_row.module_identity) -> next
+    loop module_row_index in 0..<graph.modules.len() {
+        if graph.modules[module_row_index].module_name != module_name || !sema_module_is_core_source(graph.modules[module_row_index].module_identity) -> next
         loop owner in CORE_SOURCE_OWNED_ROWS {
-            if owner.module_name == module_name && owner.alias == module_row.core_source_alias && module_row.source_file == "<corelib>/{owner.path}" -> return Val(module_row.module_identity)
+            if owner.module_name == module_name && owner.alias == graph.modules[module_row_index].core_source_alias && graph.modules[module_row_index].source_file == "<corelib>/{owner.path}" -> return Val(graph.modules[module_row_index].module_identity)
         }
     }
     return None

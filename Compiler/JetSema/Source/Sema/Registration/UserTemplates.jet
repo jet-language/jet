@@ -575,9 +575,9 @@ fn sema_user_text_blocks_in_item(item: Item, source: String, block_spans: [Span]
 // D-META-DSL1=A: a text block is checked by its rule only when the rule's
 // first declaration has a body (Rust `marker_vocabulary.declaration`).
 fn sema_registration_declared_text_rule(graph: SemaRegistrationGraph, name: String) -> Bool Never! {
-    loop module_row in graph.modules {
-        loop item in module_row.program.items {
-            if item == .MarkerDecl(declaration) {
+    loop module_row_index in 0..<graph.modules.len() {
+        loop item_index in 0..<graph.modules[module_row_index].program.items.len() {
+            if graph.modules[module_row_index].program.items[item_index] == .MarkerDecl(declaration) {
                 if declaration.name == name -> return declaration.body != None
             }
         }

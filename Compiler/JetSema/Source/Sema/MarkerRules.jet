@@ -670,9 +670,9 @@ fn sema_marker_rules_constant_for_reference(symbol: Symbol, references: [SemaNam
     }
     if program.registration_graph == .Val(graph) {
         module_index :: sema_registration_module_index(graph, symbol.module_name) ?? return None
-        loop constant in graph.modules[module_index].constants {
-            if constant.symbol.id.key == symbol.id.key {
-                value :: constant.declaration.ct ?? return None
+        loop constant_index in 0..<graph.modules[module_index].constants.len() {
+            if graph.modules[module_index].constants[constant_index].symbol.id.key == symbol.id.key {
+                value :: graph.modules[module_index].constants[constant_index].declaration.ct ?? return None
                 return sema_checked_comptime(value)
             }
         }
@@ -1855,26 +1855,26 @@ fn sema_marker_rules_check_inline_always(graph: SemaRegistrationGraph, modules: 
         }
     }
     found := false
-    loop source_module in graph.modules {
+    loop source_module_index in 0..<graph.modules.len() {
         start :: diagnostics.len()
-        loop item in source_module.program.items {
-            if item == .Func(function) {
+        loop item_index in 0..<graph.modules[source_module_index].program.items.len() {
+            if graph.modules[source_module_index].program.items[item_index] == .Func(function) {
                 sema_inline_always_check_function(function, &diagnostics)
-                key :: symbol_id(SymbolKind.Function, source_module.module_identity, "", function.name).key
+                key :: symbol_id(SymbolKind.Function, graph.modules[source_module_index].module_identity, "", function.name).key
                 if function.is_inline_always && address_taken.get(key) != None {
                     name :: function.name
                     &diagnostics.push(sema_error("E0918", function.inline_span ?? function.name_span, "`{name}` cannot be inlined: its address is taken", "`#Inline(Always)` promises every call to `{name}` expands in place — but `{name}` is also used as a plain value somewhere (stored, returned, or passed as a callback), and a value needs a real function to point at.", "drop `#Inline(Always)`, or call `{name}` directly instead of through a value."))
                 }
             }
         }
-        loop nominal in source_module.nominals {
-            loop method in nominal.methods -> sema_inline_always_check_function(method.declaration, &diagnostics)
+        loop nominal_index in 0..<graph.modules[source_module_index].nominals.len() {
+            loop method_index in 0..<graph.modules[source_module_index].nominals[nominal_index].methods.len() -> sema_inline_always_check_function(graph.modules[source_module_index].nominals[nominal_index].methods[method_index].declaration, &diagnostics)
         }
-        loop implementation in source_module.impls {
-            loop method in implementation.methods -> sema_inline_always_check_function(method.declaration, &diagnostics)
+        loop implementation_index in 0..<graph.modules[source_module_index].impls.len() {
+            loop method_index in 0..<graph.modules[source_module_index].impls[implementation_index].methods.len() -> sema_inline_always_check_function(graph.modules[source_module_index].impls[implementation_index].methods[method_index].declaration, &diagnostics)
         }
         if diagnostics.len() > start -> found = true
-        sema_attach_diagnostic_source_locations(&diagnostics, start, source_module.source_segments)
+        sema_attach_diagnostic_source_locations(&diagnostics, start, graph.modules[source_module_index].source_segments)
     }
     found
 }

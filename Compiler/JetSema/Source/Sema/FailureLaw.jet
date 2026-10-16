@@ -453,9 +453,9 @@ fn sema_failure_nominal_is_error(leaf: String, seen: [String], environment: Sema
             local :: sema_failure_items_nominal_is_error(graph.modules[module_index].program.items, environment.module_identity, leaf, seen, environment, program)
             if local != None -> return local
         }
-        loop module_row in graph.modules {
-            if module_row.module_identity == environment.module_identity -> next
-            imported :: sema_failure_items_nominal_is_error(module_row.program.items, module_row.module_identity, leaf, seen, environment, program)
+        loop module_row_index in 0..<graph.modules.len() {
+            if graph.modules[module_row_index].module_identity == environment.module_identity -> next
+            imported :: sema_failure_items_nominal_is_error(graph.modules[module_row_index].program.items, graph.modules[module_row_index].module_identity, leaf, seen, environment, program)
             if imported != None -> return imported
         }
     }

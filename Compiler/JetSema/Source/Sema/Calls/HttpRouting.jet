@@ -50,9 +50,9 @@ fn sema_http_route_find_function(environment: SemaScopeEnvironment, program: Sem
     symbol := scopes.bindings[index].symbol
     if symbol.kind != SymbolKind.Function -> return None
     if program.registration_graph == .Val(graph) {
-    loop module_row in graph.modules {
-        loop function in module_row.functions {
-            if function.symbol.id.key == symbol.id.key -> return Val(function)
+    loop module_row_index in 0..<graph.modules.len() {
+        loop function_index in 0..<graph.modules[module_row_index].functions.len() {
+            if graph.modules[module_row_index].functions[function_index].symbol.id.key == symbol.id.key -> return Val(graph.modules[module_row_index].functions[function_index])
         }
     }
     return None
@@ -82,16 +82,16 @@ fn sema_http_route_shape(expression: Expr, environment: SemaScopeEnvironment, pr
         .Lambda(lambda) -> {
             if lambda.meta.http_route_source == .Val(source) {
                 if program.registration_graph == .Val(graph) {
-                loop module_row in graph.modules {
-                    loop nominal in module_row.nominals {
-                        loop method in nominal.methods {
-                            if method.symbol.id.key != source -> next
+                loop module_row_index in 0..<graph.modules.len() {
+                    loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
+                        loop method_index in 0..<graph.modules[module_row_index].nominals[nominal_index].methods.len() {
+                            if graph.modules[module_row_index].nominals[nominal_index].methods[method_index].symbol.id.key != source -> next
                             params := [SemaHTTPRouteParameter]{}
-                            loop index in 1..<method.declaration.params.len() {
-                                parameter :: method.declaration.params[index]
-                                &params.push(SemaHTTPRouteParameter{name: parameter.name, ty: sema_type_resolve_declared(graph, parameter.ty, module_row.module_identity)})
+                            loop index in 1..<graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.params.len() {
+                                parameter :: graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.params[index]
+                                &params.push(SemaHTTPRouteParameter{name: parameter.name, ty: sema_type_resolve_declared(graph, parameter.ty, graph.modules[module_row_index].module_identity)})
                             }
-                            return Val(SemaHTTPRouteShape{params: params, body: LambdaBody.Block{body: method.declaration.body}, module_identity: module_row.module_identity})
+                            return Val(SemaHTTPRouteShape{params: params, body: LambdaBody.Block{body: graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.body}, module_identity: graph.modules[module_row_index].module_identity})
                         }
                     }
                 }
@@ -140,13 +140,13 @@ fn sema_http_route_environment_for_module(environment: SemaScopeEnvironment, pro
 }
 
 fn sema_http_route_method_owner_module(graph: SemaRegistrationGraph, symbol_key: String) -> String? {
-    loop module_row in graph.modules {
-        loop nominal in module_row.nominals {
-            loop method in nominal.methods { if method.symbol.id.key == symbol_key -> return Val(module_row.module_identity) }
-            loop method in nominal.trait_methods { if method.symbol.id.key == symbol_key -> return Val(module_row.module_identity) }
+    loop module_row_index in 0..<graph.modules.len() {
+        loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
+            loop method in graph.modules[module_row_index].nominals[nominal_index].methods { if method.symbol.id.key == symbol_key -> return Val(graph.modules[module_row_index].module_identity) }
+            loop method in graph.modules[module_row_index].nominals[nominal_index].trait_methods { if method.symbol.id.key == symbol_key -> return Val(graph.modules[module_row_index].module_identity) }
         }
-        loop implementation in module_row.impls {
-            loop method in implementation.methods { if method.symbol.id.key == symbol_key -> return Val(module_row.module_identity) }
+        loop implementation_index in 0..<graph.modules[module_row_index].impls.len() {
+            loop method in graph.modules[module_row_index].impls[implementation_index].methods { if method.symbol.id.key == symbol_key -> return Val(graph.modules[module_row_index].module_identity) }
         }
     }
     None
@@ -179,10 +179,10 @@ fn sema_http_route_constant_string(expression: Expr, environment: SemaScopeEnvir
             binding := scopes.bindings[index]
             if binding.symbol.kind != SymbolKind.Constant -> return None
             if program.registration_graph == .Val(graph) {
-            loop module_row in graph.modules {
-                loop constant in module_row.constants {
-                    if constant.symbol.id.key != binding.symbol.id.key -> next
-                    if constant.declaration.ct == {
+            loop module_row_index in 0..<graph.modules.len() {
+                loop constant_index in 0..<graph.modules[module_row_index].constants.len() {
+                    if graph.modules[module_row_index].constants[constant_index].symbol.id.key != binding.symbol.id.key -> next
+                    if graph.modules[module_row_index].constants[constant_index].declaration.ct == {
                         .Val(ct_value) -> {
                             if ct_value == {
                                 .Str(text) -> { return Val(text) }
@@ -484,9 +484,9 @@ fn sema_http_route_response_status(expression: Expr, environment: SemaScopeEnvir
         .Ident(name, _) -> {
             if program.registration_graph == .Val(graph) {
             if sema_registration_module_index(graph, module_identity) == .Val(module_index) {
-                loop constant in graph.modules[module_index].constants {
-                    if constant.symbol.name == name {
-                        if constant.declaration.ct == {
+                loop constant_index in 0..<graph.modules[module_index].constants.len() {
+                    if graph.modules[module_index].constants[constant_index].symbol.name == name {
+                        if graph.modules[module_index].constants[constant_index].declaration.ct == {
                             .Val(ct_value) -> {
                                 if ct_value == {
                                     .Int(number) -> { return Val(number) }
@@ -502,10 +502,10 @@ fn sema_http_route_response_status(expression: Expr, environment: SemaScopeEnvir
             index := sema_scope_resolve_index(scopes, name)
             if index == .Val(found) {
                 binding := scopes.bindings[found]
-                loop module_row in graph.modules {
-                    loop constant in module_row.constants {
-                        if constant.symbol.id.key == binding.symbol.id.key {
-                            if constant.declaration.ct == {
+                loop module_row_index in 0..<graph.modules.len() {
+                    loop constant_index in 0..<graph.modules[module_row_index].constants.len() {
+                        if graph.modules[module_row_index].constants[constant_index].symbol.id.key == binding.symbol.id.key {
+                            if graph.modules[module_row_index].constants[constant_index].declaration.ct == {
                                 .Val(ct_value) -> {
                                     if ct_value == {
                                         .Int(number) -> { return Val(number) }

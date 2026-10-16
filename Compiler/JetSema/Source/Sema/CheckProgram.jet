@@ -163,17 +163,17 @@ fn sema_target_check_socket_surfaces(graph: SemaRegistrationGraph, used_core: [S
     operations :: if wasip2 -> sema_target_wasip2_unsupported_operations(used_core) else -> [String]{}
     seen := [String:Bool]{}
     complete := true
-    loop module_row in graph.modules {
+    loop module_row_index in 0..<graph.modules.len() {
         diagnostic_start :: diagnostics.len()
-        loop imported in module_row.imports {
-            path := imported.target_module_identity
+        loop imported_index in 0..<graph.modules[module_row_index].imports.len() {
+            path := graph.modules[module_row_index].imports[imported_index].target_module_identity
             if sema_registration_module_index(graph, path) == .Val(index) -> path = graph.modules[index].module_name
             surface :: sema_target_socket_surface(path) ?? next
-            span :: if imported.declaration.kind == {
+            span :: if graph.modules[module_row_index].imports[imported_index].declaration.kind == {
                 .Unqualified(_, _, _, items_span, _) -> items_span
-                else -> imported.declaration.alias_span
+                else -> graph.modules[module_row_index].imports[imported_index].declaration.alias_span
             }
-            key :: "{module_row.module_identity}:{span.start}:{span.end}:E3304"
+            key :: "{graph.modules[module_row_index].module_identity}:{span.start}:{span.end}:E3304"
             if !socket_target && seen.get(key) == None {
                 seen[key] = true
                 &diagnostics.push(sema_error("E3304", span, "`{surface}` is not available for target `{target}`.", "`{surface}` needs native sockets or WASI Preview 2 sockets, and this target provides neither runtime boundary. A `jet build` or `jet run` run reports this target-support diagnostic.", "Build for `wasm32-wasip2` or a supported native target, or remove the `{surface}` import."))
@@ -182,7 +182,7 @@ fn sema_target_check_socket_surfaces(graph: SemaRegistrationGraph, used_core: [S
             if !wasip2 -> next
             unsupported_surface :: surface == "core.net.tls" || surface == "core.net.ws" || surface == "core.http.client" || surface == "core.email"
             if unsupported_surface {
-                operation_key :: "{module_row.module_identity}:{span.start}:{span.end}:E3305:{surface}"
+                operation_key :: "{graph.modules[module_row_index].module_identity}:{span.start}:{span.end}:E3305:{surface}"
                 if seen.get(operation_key) == None {
                     seen[operation_key] = true
                     &diagnostics.push(sema_error("E3305", span, "`{surface}` is not available for target `{target}`.", "The selected target has no Prelude adapter for `{surface}`; WASI Preview 2 provides TCP/UDP sockets but not this operation. A `jet build` or `jet run` run reports this target-support diagnostic.", "use a supported TCP/UDP operation, or build for a native target."))
@@ -192,14 +192,14 @@ fn sema_target_check_socket_surfaces(graph: SemaRegistrationGraph, used_core: [S
             loop operation in operations {
                 separator :: operation.rfind(".")
                 if separator < 0 || operation.slice(0, separator) != surface -> next
-                operation_key :: "{module_row.module_identity}:{span.start}:{span.end}:E3305:{operation}"
+                operation_key :: "{graph.modules[module_row_index].module_identity}:{span.start}:{span.end}:E3305:{operation}"
                 if seen.get(operation_key) != None -> next
                 seen[operation_key] = true
                 &diagnostics.push(sema_error("E3305", span, "`{operation}` is not available for target `{target}`.", "The selected target has no Prelude adapter for `{operation}`; WASI Preview 2 provides TCP/UDP sockets but not this operation. A `jet build` or `jet run` run reports this target-support diagnostic.", "use a supported TCP/UDP operation, or build for a native target."))
                 complete = false
             }
         }
-        sema_attach_diagnostic_source_locations(&diagnostics, diagnostic_start, module_row.source_segments)
+        sema_attach_diagnostic_source_locations(&diagnostics, diagnostic_start, graph.modules[module_row_index].source_segments)
     }
     complete
 }
@@ -1702,6 +1702,8 @@ fn sema_function_check_passes(func: Func, owner_id: SymbolID, function_kind: TFu
     share_known := [Span]{}
     loop {
         sema_comptime_body_work_count(environment.comptime_body_values, SemaComptimeBodyWorkOperation.CheckPassStarted)
+        // copy: every pass starts from the generic checks' reports; a rechecked
+        // pass discards its own list.
         pass_diagnostics := generics.diagnostics.copy()
         pass_call_facts := [SemaCallSiteFact]{}
         pass_comptime_requests := [SemaComptimeRequest]{}
@@ -1766,8 +1768,8 @@ fn sema_function_resolve_declared(environment: SemaScopeEnvironment, program: Se
 fn sema_function_is_consuming_close_body(func: Func, module_identity: String, program: SemaProgramTables) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
         module_index :: sema_registration_module_index(graph, module_identity) ?? return false
-        loop item in graph.modules[module_index].program.items {
-            if item == {
+        loop item_index in 0..<graph.modules[module_index].program.items.len() {
+            if graph.modules[module_index].program.items[item_index] == {
                 .Impl(definition) -> {
                     if sema_function_close_trait_leaf(definition.trait_name ?? "") && sema_function_declares_span(definition.methods, func.span) -> return true
                 }
@@ -1803,6 +1805,8 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     module_name := updated.module_name
     fallback_source_file := updated.source_file
     complete := generics.complete
+    // copy: the generic parameter lists stay with `generics` for the next pass;
+    // the context owns this pass's.
     function_generic_params := generics.own.copy()
     generic_params := generics.merged.copy()
     sema_function_apply_scope_policies(updated, program, &scopes, func.span, func.markers)
@@ -1842,6 +1846,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     sema_check_memoized_function(func, updated, program, generic_params, &diagnostics)
     if !sema_function_header_check_default_forward_refs(func, &diagnostics) -> complete = false
     if !sema_function_header_check_variadic_bound_shape(func, updated, program, &diagnostics) -> complete = false
+    // copy: a shared-facts handle and its frontier, not the facts.
     context.comptime_body_values = updated.comptime_body_values.copy()
     sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.ContextAttached)
     unsafe_gate_valid := true
@@ -2960,9 +2965,9 @@ fn sema_check_registration_module_program(environment: SemaScopeEnvironment, pro
         // a module that declares a state section or a typestate marker.
         if !sema_module_is_core_source(graph.modules[module_index].module_identity) && sema_state_items_use_typestate(graph.modules[module_index].program.items) {
             bundle_items := [Item]{}
-            loop registered_module in graph.modules {
-                if sema_module_is_core_source(registered_module.module_identity) -> next
-                loop item in registered_module.program.items -> &bundle_items.push(item)
+            loop registered_module_index in 0..<graph.modules.len() {
+                if sema_module_is_core_source(graph.modules[registered_module_index].module_identity) -> next
+                loop item_index in 0..<graph.modules[registered_module_index].program.items.len() -> &bundle_items.push(graph.modules[registered_module_index].program.items[item_index])
             }
             loop diagnostic in sema_state_validate_declarations(graph.modules[module_index].program.items, bundle_items) -> &module_result.diagnostics.push(diagnostic)
         }
@@ -3007,15 +3012,15 @@ fn sema_check_registration_module_foreign(environment: SemaScopeEnvironment, pro
         foreign_diagnostic_count := module_result.diagnostics.len()
         foreign_provider_inputs := [SemaForeignProviderInput]{}
         has_foreign_import_target := false
-        loop edge in graph.edges {
-            if edge.target_module_identity == graph.modules[module_index].module_identity && edge.foreign_binding != None {
+        loop edge_index in 0..<graph.edges.len() {
+            if graph.edges[edge_index].target_module_identity == graph.modules[module_index].module_identity && graph.edges[edge_index].foreign_binding != None {
                 has_foreign_import_target = true
                 break
             }
         }
         if has_foreign_import_target {
-            loop provider in graph.foreign_providers {
-                if provider.module_identity == graph.modules[module_index].module_identity -> &foreign_provider_inputs.push(provider)
+            loop provider_index in 0..<graph.foreign_providers.len() {
+                if graph.foreign_providers[provider_index].module_identity == graph.modules[module_index].module_identity -> &foreign_provider_inputs.push(graph.foreign_providers[provider_index])
             }
         }
         foreign_providers := sema_checked_foreign_providers(foreign_provider_inputs, &module_result.diagnostics)
@@ -3631,7 +3636,7 @@ SEMA_BODY_SCOPE_BYTES_PER_BINDING :: 2048
 // package namespace rows (the compiler builtins are a fixed few more).
 fn sema_check_module_scope_rows(graph: SemaRegistrationGraph, module_index: Int) -> Int Never! {
     rows := graph.modules[module_index].symbols.len() + graph.modules[module_index].namespace_bindings.len()
-    loop import in graph.modules[module_index].imports -> rows += import.bindings.len()
+    loop import_index in 0..<graph.modules[module_index].imports.len() -> rows += graph.modules[module_index].imports[import_index].bindings.len()
     rows
 }
 
@@ -3716,7 +3721,7 @@ fn sema_check_method_jobs(graph: SemaRegistrationGraph, source_module: SemaRegis
         impl_method_keys := [String:Bool]{}
         loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
             if count_work -> impl_rows_scanned += 1
-            loop method in graph.modules[impl_row.module_index].impls[impl_row.row].methods -> impl_method_keys[method.symbol.id.key] = true
+            loop method_index in 0..<graph.modules[impl_row.module_index].impls[impl_row.row].methods.len() -> impl_method_keys[graph.modules[impl_row.module_index].impls[impl_row.row].methods[method_index].symbol.id.key] = true
         }
         loop (method_index, method) in nominal.methods {
             if impl_method_keys.get(method.symbol.id.key) != None -> next
@@ -4185,23 +4190,23 @@ fn sema_name_index_symbol(index: &[String:SemaNameResolvedDeclaration], symbol: 
 // declaration in graph order wins, as the ordered search did.
 fn sema_name_symbol_index(graph: SemaRegistrationGraph) -> [String:SemaNameResolvedDeclaration] Never! {
     index := [String:SemaNameResolvedDeclaration]{}
-    loop graph_module in graph.modules {
-        loop symbol in graph_module.symbols {
-            sema_name_index_symbol(&index, symbol, if {
-                symbol.kind == SymbolKind.Constant -> "const"
-                symbol.kind == SymbolKind.Function -> "function"
+    loop graph_module_index in 0..<graph.modules.len() {
+        loop symbol_index in 0..<graph.modules[graph_module_index].symbols.len() {
+            sema_name_index_symbol(&index, graph.modules[graph_module_index].symbols[symbol_index], if {
+                graph.modules[graph_module_index].symbols[symbol_index].kind == SymbolKind.Constant -> "const"
+                graph.modules[graph_module_index].symbols[symbol_index].kind == SymbolKind.Function -> "function"
                 else -> "semantic"
             })
         }
-        loop nominal in graph_module.nominals {
-            loop field in nominal.fields -> sema_name_index_symbol(&index, field.symbol, "field")
-            loop variant in nominal.variants -> sema_name_index_symbol(&index, variant.symbol, "variant")
-            loop function in nominal.methods -> sema_name_index_symbol(&index, function.symbol, "method")
-            loop method in nominal.trait_methods -> sema_name_index_symbol(&index, method.symbol, "method")
+        loop nominal_index in 0..<graph.modules[graph_module_index].nominals.len() {
+            loop field_index in 0..<graph.modules[graph_module_index].nominals[nominal_index].fields.len() -> sema_name_index_symbol(&index, graph.modules[graph_module_index].nominals[nominal_index].fields[field_index].symbol, "field")
+            loop variant_index in 0..<graph.modules[graph_module_index].nominals[nominal_index].variants.len() -> sema_name_index_symbol(&index, graph.modules[graph_module_index].nominals[nominal_index].variants[variant_index].symbol, "variant")
+            loop function_index in 0..<graph.modules[graph_module_index].nominals[nominal_index].methods.len() -> sema_name_index_symbol(&index, graph.modules[graph_module_index].nominals[nominal_index].methods[function_index].symbol, "method")
+            loop method_index in 0..<graph.modules[graph_module_index].nominals[nominal_index].trait_methods.len() -> sema_name_index_symbol(&index, graph.modules[graph_module_index].nominals[nominal_index].trait_methods[method_index].symbol, "method")
         }
-        loop implementation in graph_module.impls {
-            loop function in implementation.methods -> sema_name_index_symbol(&index, function.symbol, "method")
-            loop associated in implementation.associated_types -> sema_name_index_symbol(&index, associated.symbol, "associated_type")
+        loop implementation_index in 0..<graph.modules[graph_module_index].impls.len() {
+            loop function_index in 0..<graph.modules[graph_module_index].impls[implementation_index].methods.len() -> sema_name_index_symbol(&index, graph.modules[graph_module_index].impls[implementation_index].methods[function_index].symbol, "method")
+            loop associated_index in 0..<graph.modules[graph_module_index].impls[implementation_index].associated_types.len() -> sema_name_index_symbol(&index, graph.modules[graph_module_index].impls[implementation_index].associated_types[associated_index].symbol, "associated_type")
         }
     }
     index
@@ -4443,9 +4448,9 @@ fn sema_name_loaded_facts(modules: [MIRNameModule], programs: [Program], aliases
 
 fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], structure_facts: [MIRStructureFact]) -> MIRNameFacts Never! {
     facts := MIRNameFacts{modules: [MIRNameModule]{}, declarations: [MIRNameDeclaration]{}, aliases: [MIRNameAlias]{}, references: [MIRNameReference]{}, structure_facts: [MIRStructureFact]{}}
-    loop graph_module in graph.modules {
-        namespace :: if sema_registration_package_is_namespace(graph_module.package_identity) -> Val(graph_module.package_identity) else -> None
-        &facts.modules.push(MIRNameModule{alias: graph_module.module_name, path: graph_module.module_path, package: graph_module.package_identity, namespace: namespace})
+    loop graph_module_index in 0..<graph.modules.len() {
+        namespace :: if sema_registration_package_is_namespace(graph.modules[graph_module_index].package_identity) -> Val(graph.modules[graph_module_index].package_identity) else -> None
+        &facts.modules.push(MIRNameModule{alias: graph.modules[graph_module_index].module_name, path: graph.modules[graph_module_index].module_path, package: graph.modules[graph_module_index].package_identity, namespace: namespace})
     }
     owner_names :: sema_name_owner_index(graph)
     symbol_index :: sema_name_symbol_index(graph)
@@ -4483,7 +4488,7 @@ fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModule
         }
         module_index += 1
     }
-    loop reference in graph.output_name_references -> sema_name_add_reference(&facts, graph, owner_names, &module_indices, reference.span, reference.symbol, reference.kind)
+    loop reference_index in 0..<graph.output_name_references.len() -> sema_name_add_reference(&facts, graph, owner_names, &module_indices, graph.output_name_references[reference_index].span, graph.output_name_references[reference_index].symbol, graph.output_name_references[reference_index].kind)
     MIRNameFacts{
         modules: facts.modules,
         declarations: sema_name_first_declarations(^facts.declarations),
@@ -4502,16 +4507,16 @@ fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModule
 fn sema_name_structure_facts(graph: SemaRegistrationGraph) -> [MIRStructureFact] Never! {
     facts := [MIRStructureFact]{}
     module_indices := [String:Int]{}
-    loop edge in graph.edges {
-        source_index :: sema_registration_cached_module_index(graph, edge.source_module_identity, &module_indices) ?? next
-        target_index :: sema_registration_cached_module_index(graph, edge.target_module_identity, &module_indices) ?? next
+    loop edge_index in 0..<graph.edges.len() {
+        source_index :: sema_registration_cached_module_index(graph, graph.edges[edge_index].source_module_identity, &module_indices) ?? next
+        target_index :: sema_registration_cached_module_index(graph, graph.edges[edge_index].target_module_identity, &module_indices) ?? next
         source :: graph.modules[source_index]
         target :: graph.modules[target_index]
         &facts.push(MIRStructureFact{
             kind: MIRStructureFactKind.ImportEdge,
             subject: "{source.module_name} -> {target.module_name}",
             source: source.module_path,
-            span: edge.declaration.span,
+            span: graph.edges[edge_index].declaration.span,
             status: "resolved",
             detail: "resolved import edge",
             gate: None,
@@ -4925,8 +4930,8 @@ fn sema_comptime_module_apply_values(module_row: &SemaRegistrationModule, module
 
 fn sema_comptime_constant_has_ast_value(graph: SemaRegistrationGraph, module_identity: String, key: String) -> Bool Never! {
     module_index :: sema_registration_module_index(graph, module_identity) ?? return false
-    loop constant in graph.modules[module_index].constants {
-        if constant.symbol.id.key == key -> return constant.declaration.ct != None
+    loop constant_index in 0..<graph.modules[module_index].constants.len() {
+        if graph.modules[module_index].constants[constant_index].symbol.id.key == key -> return graph.modules[module_index].constants[constant_index].declaration.ct != None
     }
     true
 }
@@ -5974,24 +5979,24 @@ fn sema_authority_entry_reach(graph: SemaRegistrationGraph, modules: [SemaGraphM
 
 // Rust `entry_candidates`.
 fn sema_authority_entry_roots(graph: SemaRegistrationGraph, edges: [String:[String]]) -> [String] {
-    loop module_row in graph.modules {
-        loop constant in module_row.constants {
-            output :: constant.declaration.resolved_output ?? next
+    loop module_row_index in 0..<graph.modules.len() {
+        loop constant_index in 0..<graph.modules[module_row_index].constants.len() {
+            output :: graph.modules[module_row_index].constants[constant_index].declaration.resolved_output ?? next
             if !output.selected -> next
             if output.module_id < 0 || output.module_id >= graph.modules.len() -> return [String]{}
-            loop function in graph.modules[output.module_id].functions {
-                if function.declaration.name == output.semantic_name && edges.get(function.symbol.id.key) != None -> return [String]{function.symbol.id.key}
+            loop function_index in 0..<graph.modules[output.module_id].functions.len() {
+                if graph.modules[output.module_id].functions[function_index].declaration.name == output.semantic_name && edges.get(graph.modules[output.module_id].functions[function_index].symbol.id.key) != None -> return [String]{graph.modules[output.module_id].functions[function_index].symbol.id.key}
             }
             return [String]{}
         }
     }
     entry_index :: sema_registration_module_index(graph, graph.entry_module_identity) ?? return [String]{}
     build := [String]{}
-    loop function in graph.modules[entry_index].functions {
-        key :: function.symbol.id.key
+    loop function_index in 0..<graph.modules[entry_index].functions.len() {
+        key :: graph.modules[entry_index].functions[function_index].symbol.id.key
         if edges.get(key) == None -> next
-        if function.declaration.name == "run" -> return [String]{key}
-        if function.declaration.name == "build" && function.declaration.params.len() == 1 && function.declaration.params[0].ty == (Type.Named{name: "BuildContext"}) -> build = [String]{key}
+        if graph.modules[entry_index].functions[function_index].declaration.name == "run" -> return [String]{key}
+        if graph.modules[entry_index].functions[function_index].declaration.name == "build" && graph.modules[entry_index].functions[function_index].declaration.params.len() == 1 && graph.modules[entry_index].functions[function_index].declaration.params[0].ty == (Type.Named{name: "BuildContext"}) -> build = [String]{key}
     }
     build
 }
@@ -6394,16 +6399,16 @@ fn sema_failure_reconcile_infallible(modules: &[SemaGraphModuleResult], projecte
 // parser already registers as a declaration.
 fn sema_check_script_entries(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
     found := false
-    loop source_module in graph.modules {
-        statements :: source_module.program.script_body
+    loop source_module_index in 0..<graph.modules.len() {
+        statements :: graph.modules[source_module_index].program.script_body
         if statements.len() == 0 -> next
         span :: Span{start: sema_compiler_index_stmt_span(statements[0]).start, end: sema_compiler_index_stmt_span(statements[statements.len() - 1]).end}
         start :: diagnostics.len()
         if {
-            source_module.module_identity != graph.entry_module_identity -> &diagnostics.push(sema_error("E0620", span, "imported script `{source_module.module_path}` has executable top-level statements", "imported files provide declarations; executable code belongs in an explicit `fn run`", "move the statements into the entry file's `fn run`, or import a declaration-only file"))
+            graph.modules[source_module_index].module_identity != graph.entry_module_identity -> &diagnostics.push(sema_error("E0620", span, "imported script `{graph.modules[source_module_index].module_path}` has executable top-level statements", "imported files provide declarations; executable code belongs in an explicit `fn run`", "move the statements into the entry file's `fn run`, or import a declaration-only file"))
             else -> &diagnostics.push(sema_error("E0621", span, "top-level executable statements require an explicit `fn run`", "Jet does not invent a runtime function for ordinary files; only `fn run` executes code", "move the statements into `fn run`"))
         }
-        sema_attach_diagnostic_source_locations(&diagnostics, start, source_module.source_segments)
+        sema_attach_diagnostic_source_locations(&diagnostics, start, graph.modules[source_module_index].source_segments)
         found = true
     }
     found

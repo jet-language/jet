@@ -1632,8 +1632,8 @@ fn sema_expr_unit_dimension(ty: Type, environment: SemaScopeEnvironment, program
 
 fn sema_expr_unit_counterpart(fact: SemaRegistrationUnitFact, kind: QuantityKind, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationUnitFact? {
     if program.registration_graph == .Val(graph) {
-    loop candidate in graph.unit_facts {
-        if candidate.package == fact.package && candidate.family == fact.family && candidate.member == fact.member && candidate.kind == kind -> return Val(candidate)
+    loop candidate_index in 0..<graph.unit_facts.len() {
+        if graph.unit_facts[candidate_index].package == fact.package && graph.unit_facts[candidate_index].family == fact.family && graph.unit_facts[candidate_index].member == fact.member && graph.unit_facts[candidate_index].kind == kind -> return Val(graph.unit_facts[candidate_index])
     }
     }
     None
@@ -2279,16 +2279,16 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
     // only the Core source modules indexed as owning this name's impls.
     if graph.source_impl_owner_modules.get(receiver_name) == .Val(owner_modules) {
         loop owner_index in owner_modules {
-            loop implementation in graph.modules[owner_index].impls {
-                if implementation.target_type_name != receiver_name -> next
-                loop function in implementation.methods {
-                    if function.symbol.name != method || function.parameters.len() == 0 -> next
-                    method_ref :: TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
+            loop implementation_index in 0..<graph.modules[owner_index].impls.len() {
+                if graph.modules[owner_index].impls[implementation_index].target_type_name != receiver_name -> next
+                loop function_index in 0..<graph.modules[owner_index].impls[implementation_index].methods.len() {
+                    if graph.modules[owner_index].impls[implementation_index].methods[function_index].symbol.name != method || graph.modules[owner_index].impls[implementation_index].methods[function_index].parameters.len() == 0 -> next
+                    method_ref :: TMethodRef{symbol: graph.modules[owner_index].impls[implementation_index].methods[function_index].symbol.id, name: graph.modules[owner_index].impls[implementation_index].methods[function_index].symbol.name, mangled: true, trait_owner: None, operator_identity: None}
                     // The impl's signature names types as its owning module
                     // sees them (Rust `owner_type_for_reader`).
-                    generics :: loop param in function.generic_params -> TGenericParam{name: param.name, bounds: [SymbolID]{}}
-                    owner_signature :: sema_type_resolve_declared_with_generics(graph, function.signature, graph.modules[owner_index].module_identity, generics)
-                    candidate :: sema_call_method_candidate_from_registration(owner_signature, function.generic_params, program.registration_graph, caller_module, caller_package, environment.generic_params, Val(lookup_type), function.parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
+                    generics :: loop param_index in 0..<graph.modules[owner_index].impls[implementation_index].methods[function_index].generic_params.len() -> TGenericParam{name: graph.modules[owner_index].impls[implementation_index].methods[function_index].generic_params[param_index].name, bounds: [SymbolID]{}}
+                    owner_signature :: sema_type_resolve_declared_with_generics(graph, graph.modules[owner_index].impls[implementation_index].methods[function_index].signature, graph.modules[owner_index].module_identity, generics)
+                    candidate :: sema_call_method_candidate_from_registration(owner_signature, graph.modules[owner_index].impls[implementation_index].methods[function_index].generic_params, program.registration_graph, caller_module, caller_package, environment.generic_params, Val(lookup_type), graph.modules[owner_index].impls[implementation_index].methods[function_index].parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
                     &candidates.push(candidate)
                 }
             }
@@ -2379,10 +2379,10 @@ fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, program:
     base_name :: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver_type)) ?? return false
     if graph.source_impl_owner_modules.get(base_name) == .Val(owner_modules) {
         loop owner_index in owner_modules {
-            loop implementation in graph.modules[owner_index].impls {
-                if implementation.target_type_name != base_name -> next
-                loop function in implementation.methods {
-                    if function.symbol.name == method && (!needs_receiver || function.parameters.len() > 0) -> return true
+            loop implementation_index in 0..<graph.modules[owner_index].impls.len() {
+                if graph.modules[owner_index].impls[implementation_index].target_type_name != base_name -> next
+                loop function_index in 0..<graph.modules[owner_index].impls[implementation_index].methods.len() {
+                    if graph.modules[owner_index].impls[implementation_index].methods[function_index].symbol.name == method && (!needs_receiver || graph.modules[owner_index].impls[implementation_index].methods[function_index].parameters.len() > 0) -> return true
                 }
             }
         }

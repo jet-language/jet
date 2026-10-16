@@ -622,11 +622,11 @@ fn sema_authority_check_items(items: [Item], diagnostics: &[Diagnostic]) {
 // reported.
 fn sema_effect_check_authority_handles(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
     found := false
-    loop source_module in graph.modules {
+    loop source_module_index in 0..<graph.modules.len() {
         start :: diagnostics.len()
-        sema_authority_check_items(source_module.program.items, &diagnostics)
+        sema_authority_check_items(graph.modules[source_module_index].program.items, &diagnostics)
         if diagnostics.len() > start {
-            sema_attach_diagnostic_source_locations(&diagnostics, start, source_module.source_segments)
+            sema_attach_diagnostic_source_locations(&diagnostics, start, graph.modules[source_module_index].source_segments)
             found = true
         }
     }

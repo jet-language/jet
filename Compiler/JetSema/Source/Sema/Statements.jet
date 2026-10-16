@@ -1077,10 +1077,10 @@ fn sema_stmt_for_in_iterable_fact(environment: SemaScopeEnvironment, program: Se
     if program.registration_graph == .Val(graph) {
         collection_identity := type_identity_key(collection_type)
         iterable_impl := SemaRegistrationImpl?{None}
-        loop module_row in graph.modules {
-            loop implementation in module_row.impls {
-                if implementation.trait_name != (Val("Iterable")) || implementation.target_identity_key != collection_identity -> next
-                iterable_impl = Val(implementation)
+        loop module_row_index in 0..<graph.modules.len() {
+            loop implementation_index in 0..<graph.modules[module_row_index].impls.len() {
+                if graph.modules[module_row_index].impls[implementation_index].trait_name != (Val("Iterable")) || graph.modules[module_row_index].impls[implementation_index].target_identity_key != collection_identity -> next
+                iterable_impl = Val(graph.modules[module_row_index].impls[implementation_index])
             }
         }
         iterable :: iterable_impl ?? return None
@@ -1096,10 +1096,10 @@ fn sema_stmt_for_in_iterable_fact(environment: SemaScopeEnvironment, program: Se
         if sema_stmt_for_in_named_type_name(resolved_iter_type) == None -> return None
         iterator_identity := type_identity_key(resolved_iter_type)
         iterator_impl := SemaRegistrationImpl?{None}
-        loop module_row in graph.modules {
-            loop implementation in module_row.impls {
-                if implementation.trait_name != (Val("Iterator")) || implementation.target_identity_key != iterator_identity -> next
-                iterator_impl = Val(implementation)
+        loop module_row_index in 0..<graph.modules.len() {
+            loop implementation_index in 0..<graph.modules[module_row_index].impls.len() {
+                if graph.modules[module_row_index].impls[implementation_index].trait_name != (Val("Iterator")) || graph.modules[module_row_index].impls[implementation_index].target_identity_key != iterator_identity -> next
+                iterator_impl = Val(graph.modules[module_row_index].impls[implementation_index])
             }
         }
         iterator :: iterator_impl ?? return None
@@ -3514,8 +3514,8 @@ fn sema_stmt_module_storage_binding(environment: SemaScopeEnvironment, program: 
     }
     if program.registration_graph == .Val(graph) {
         module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return false
-        loop constant in graph.modules[module_index].constants {
-            if constant.symbol.id.key == id.key -> return constant.declaration.mutable && !constant.declaration.is_comptime
+        loop constant_index in 0..<graph.modules[module_index].constants.len() {
+            if graph.modules[module_index].constants[constant_index].symbol.id.key == id.key -> return graph.modules[module_index].constants[constant_index].declaration.mutable && !graph.modules[module_index].constants[constant_index].declaration.is_comptime
         }
     }
     false
@@ -3679,21 +3679,21 @@ fn sema_stmt_transaction_rollback_methods(ty: Type, environment: SemaScopeEnviro
     if program.registration_graph == .Val(graph) {
         nominal_row :: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
         nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-        loop graph_module in graph.modules {
-            loop implementation in graph_module.impls {
-                trait_matches := implementation.trait_name == (Val("Rollback"))
-                if implementation.trait_symbol != None {
-                    trait_value :: implementation.trait_symbol ?? return None
+        loop graph_module_index in 0..<graph.modules.len() {
+            loop implementation_index in 0..<graph.modules[graph_module_index].impls.len() {
+                trait_matches := graph.modules[graph_module_index].impls[implementation_index].trait_name == (Val("Rollback"))
+                if graph.modules[graph_module_index].impls[implementation_index].trait_symbol != None {
+                    trait_value :: graph.modules[graph_module_index].impls[implementation_index].trait_symbol ?? return None
                     trait_matches = trait_value.name == "Rollback"
                 }
-                if !trait_matches || !sema_stmt_transaction_impl_matches_nominal(graph, implementation, nominal) -> next
-                trait_owner := sema_stmt_transaction_rollback_trait_symbol(graph, implementation)
+                if !trait_matches || !sema_stmt_transaction_impl_matches_nominal(graph, graph.modules[graph_module_index].impls[implementation_index], nominal) -> next
+                trait_owner := sema_stmt_transaction_rollback_trait_symbol(graph, graph.modules[graph_module_index].impls[implementation_index])
                 snapshot_method := TMethodRef?{None}
                 restore_method := TMethodRef?{None}
-                loop method in implementation.methods {
-                    method_ref := TMethodRef{symbol: method.symbol.id, name: method.symbol.name, mangled: false, trait_owner: trait_owner.map((value) -> value.id), operator_identity: None}
-                    if method.symbol.name == "snapshot" -> snapshot_method = Val(method_ref)
-                    if method.symbol.name == "restore" -> restore_method = Val(method_ref)
+                loop method_index in 0..<graph.modules[graph_module_index].impls[implementation_index].methods.len() {
+                    method_ref := TMethodRef{symbol: graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.id, name: graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name, mangled: false, trait_owner: trait_owner.map((value) -> value.id), operator_identity: None}
+                    if graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name == "snapshot" -> snapshot_method = Val(method_ref)
+                    if graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name == "restore" -> restore_method = Val(method_ref)
                 }
                 if snapshot_method != None && restore_method != None {
                     snapshot :: snapshot_method ?? return None

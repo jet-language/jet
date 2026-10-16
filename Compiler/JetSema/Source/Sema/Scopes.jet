@@ -1534,9 +1534,9 @@ fn sema_scope_module_policy(table: &SemaScopeTable, graph: SemaRegistrationGraph
     }
     if sema_registration_module_index(graph, module_identity) == .Val(module_index) {
         package_identity :: graph.modules[module_index].package_identity
-        loop declaration in graph.modules[module_index].program.policy_declarations {
-            if declaration.key != PolicyKey.ExplicitUnits || declaration.scope != PolicyScope.Function -> next
-            target :: declaration.target ?? next
+        loop declaration_index in 0..<graph.modules[module_index].program.policy_declarations.len() {
+            if graph.modules[module_index].program.policy_declarations[declaration_index].key != PolicyKey.ExplicitUnits || graph.modules[module_index].program.policy_declarations[declaration_index].scope != PolicyScope.Function -> next
+            target :: graph.modules[module_index].program.policy_declarations[declaration_index].target ?? next
             slot := policy.function_unit_starts.get(target.start) ?? -1
             if slot < 0 {
                 slot = policy.function_unit_ends.len()

@@ -45,9 +45,9 @@ fn sema_expression_unit_literal_type_name(name: String) -> String Never! {
 }
 
 fn sema_expression_unit_literal_time_fact(suffix: String, graph: SemaRegistrationGraph) -> SemaRegistrationUnitFact? {
-    loop module_row in graph.modules {
-        loop item in module_row.program.items {
-            if item == {
+    loop module_row_index in 0..<graph.modules.len() {
+        loop item_index in 0..<graph.modules[module_row_index].program.items.len() {
+            if graph.modules[module_row_index].program.items[item_index] == {
                 .UnitFamily(definition) -> {
                     owner :: definition.resolved_owner ?? ""
                     if definition.family != "Time" || owner != "core.units" -> next
@@ -80,9 +80,9 @@ fn sema_expression_unit_literal_fact(suffix: String, graph: SemaRegistrationGrap
     type_name :: sema_expression_unit_literal_type_name(suffix)
     registered :: sema_registration_unit_fact_for_type(graph, Type.Named{name: type_name})
     if registered == .Val(fact) && fact.member == suffix && fact.kind == QuantityKind.Linear -> return Val(fact)
-    loop module_row in graph.modules {
-        loop item in module_row.program.items {
-            if item == {
+    loop module_row_index in 0..<graph.modules.len() {
+        loop item_index in 0..<graph.modules[module_row_index].program.items.len() {
+            if graph.modules[module_row_index].program.items[item_index] == {
                 .UnitFamily(definition) -> {
                     owner :: definition.resolved_owner ?? ""
                     if definition.family == "Time" && owner == "core.units" -> next
@@ -94,7 +94,7 @@ fn sema_expression_unit_literal_fact(suffix: String, graph: SemaRegistrationGrap
                         if member.name == suffix {
                             return Val(SemaRegistrationUnitFact{
                                 name: sema_expression_unit_literal_type_name(member.name),
-                                package: definition.resolved_owner ?? module_row.package_identity,
+                                package: definition.resolved_owner ?? graph.modules[module_row_index].package_identity,
                                 family: definition.family,
                                 member: member.name,
                                 dimension: definition.resolved_dimension,

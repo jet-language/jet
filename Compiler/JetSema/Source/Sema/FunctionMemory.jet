@@ -245,12 +245,12 @@ fn sema_function_memory_walk_module(modules: [SemaFunctionMemoryModuleInput], pa
 
 fn sema_function_memory_walk_graph(graph: SemaRegistrationGraph, walk: &SemaFunctionMemoryWalk) -> Int Never! {
     modules := [SemaFunctionMemoryModuleInput]{}
-    loop module_row in graph.modules {
-        &modules.push(SemaFunctionMemoryModuleInput{module_identity: module_row.module_identity, package_identity: module_row.package_identity, policy_declarations: module_row.program.policy_declarations})
+    loop module_row_index in 0..<graph.modules.len() {
+        &modules.push(SemaFunctionMemoryModuleInput{module_identity: graph.modules[module_row_index].module_identity, package_identity: graph.modules[module_row_index].package_identity, policy_declarations: graph.modules[module_row_index].program.policy_declarations})
     }
     limit := 0
-    loop module_row in graph.modules {
-        limit += sema_function_memory_walk_module(modules, module_row.package_identity, module_row.module_identity, module_row.program.policy_declarations, module_row.program.items, &walk)
+    loop module_row_index in 0..<graph.modules.len() {
+        limit += sema_function_memory_walk_module(modules, graph.modules[module_row_index].package_identity, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].program.policy_declarations, graph.modules[module_row_index].program.items, &walk)
     }
     limit
 }

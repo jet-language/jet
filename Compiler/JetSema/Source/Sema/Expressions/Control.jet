@@ -461,14 +461,14 @@ struct SemaFailureProvenance {
 
 fn sema_failure_definition_location(environment: SemaScopeEnvironment, program: SemaProgramTables, symbol: Symbol) -> String? {
     if program.registration_graph == .Val(graph) {
-    loop module_row in graph.modules {
-        if module_row.module_identity != symbol.module_name && module_row.module_name != symbol.module_name -> next
-        if module_row.module_path == "" -> return None
-        line :: sema_source_line_at(module_row.source_segments, symbol.span) ?? return None
-        loop segment in module_row.source_segments {
-            if symbol.span.start >= segment.generated.start && symbol.span.start < segment.generated.end && line <= segment.line_starts.len() {
-                column :: symbol.span.start - segment.generated.start - segment.line_starts[line - 1] + 1
-                return Val("{module_row.module_path}:{line}:{column}")
+    loop module_row_index in 0..<graph.modules.len() {
+        if graph.modules[module_row_index].module_identity != symbol.module_name && graph.modules[module_row_index].module_name != symbol.module_name -> next
+        if graph.modules[module_row_index].module_path == "" -> return None
+        line :: sema_source_line_at(graph.modules[module_row_index].source_segments, symbol.span) ?? return None
+        loop segment_index in 0..<graph.modules[module_row_index].source_segments.len() {
+            if symbol.span.start >= graph.modules[module_row_index].source_segments[segment_index].generated.start && symbol.span.start < graph.modules[module_row_index].source_segments[segment_index].generated.end && line <= graph.modules[module_row_index].source_segments[segment_index].line_starts.len() {
+                column :: symbol.span.start - graph.modules[module_row_index].source_segments[segment_index].generated.start - graph.modules[module_row_index].source_segments[segment_index].line_starts[line - 1] + 1
+                return Val("{graph.modules[module_row_index].module_path}:{line}:{column}")
             }
         }
         return None
