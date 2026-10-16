@@ -685,17 +685,23 @@ fn sema_type_graph_lookup_symbol(graph: SemaRegistrationGraph, module_identity: 
     bare_owner :: core_bare_source_module(name)
     if bare_owner == .Val(owner_name) {
         loop row in sema_registration_nominal_rows_named(graph, name) {
-            module_row :: graph.modules[row.module_index]
-            nominal :: module_row.nominals[row.row]
-            if module_row.module_name != owner_name
-                || !module_row.module_identity.starts_with("<corelib>/")
-                || nominal.kind != SemaRegistrationNominalKind.TypeAlias
-                || nominal.generic_params.len() != 0
-                || nominal.symbol.visibility < 2 -> next
-            return Val(SemaRegistrationResolvedSymbol{symbol: nominal.symbol, source_module_identity: module_row.module_identity, target_module_identity: module_row.module_identity, visibility: nominal.symbol.visibility})
+            // The module and nominal are passed as places: binding the module
+            // copied it whole per row.
+            found :: sema_type_graph_bare_alias(graph.modules[row.module_index], graph.modules[row.module_index].nominals[row.row], owner_name)
+            if found != None -> return found
         }
     }
     sema_type_graph_unique_type_owner(graph, module_identity, name)
+}
+
+// The established bare-owner alias `nominal` of `module_row`, when it is one.
+fn sema_type_graph_bare_alias(module_row: SemaRegistrationModule, nominal: SemaRegistrationNominal, owner_name: String) -> SemaRegistrationResolvedSymbol? Never! {
+    if module_row.module_name != owner_name
+        || !module_row.module_identity.starts_with("<corelib>/")
+        || nominal.kind != SemaRegistrationNominalKind.TypeAlias
+        || nominal.generic_params.len() != 0
+        || nominal.symbol.visibility < 2 -> return None
+    Val(SemaRegistrationResolvedSymbol{symbol: nominal.symbol, source_module_identity: module_row.module_identity, target_module_identity: module_row.module_identity, visibility: nominal.symbol.visibility})
 }
 
 // Rust `struct_owner_module`'s tail: a bare type name the caller neither

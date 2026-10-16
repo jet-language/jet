@@ -3368,23 +3368,31 @@ fn sema_registration_lookup_name(graph: SemaRegistrationGraph, module_identity: 
         permit.value.name_lookups += 1
     }
     module_index :: sema_registration_module_index(graph, module_identity) ?? return None
-    module_row :: graph.modules[module_index]
-    if module_row.symbol_positions.get(name) == .Val(symbol_position) {
-        symbol :: module_row.symbols[symbol_position]
-        return Val(SemaRegistrationResolvedSymbol{symbol: symbol, source_module_identity: module_identity, target_module_identity: module_identity, visibility: symbol.visibility})
-    }
-    if module_row.import_binding_rows.get(name) == .Val(binding_ref) {
-        binding :: module_row.imports[binding_ref.import_index].bindings[binding_ref.binding]
-        return Val(SemaRegistrationResolvedSymbol{symbol: binding.symbol, source_module_identity: binding.target_module_identity, target_module_identity: binding.target_module_identity, visibility: binding.visibility})
-    }
+    // The module is passed as a place to a read parameter: binding it here
+    // copied the whole module (its program and tables) on every lookup.
+    local :: sema_registration_lookup_module_name(graph.modules[module_index], module_identity, name)
+    if local != None -> return local
     if sema_registration_namespace_owner(graph, module_index, name) == .Val(owner) {
-        symbol :: graph.modules[owner.module_index].symbols[owner.row]
-        owner_identity :: graph.modules[owner.module_index].module_identity
-        return Val(SemaRegistrationResolvedSymbol{symbol: symbol, source_module_identity: owner_identity, target_module_identity: owner_identity, visibility: symbol.visibility})
+        return Val(SemaRegistrationResolvedSymbol{symbol: graph.modules[owner.module_index].symbols[owner.row], source_module_identity: graph.modules[owner.module_index].module_identity, target_module_identity: graph.modules[owner.module_index].module_identity, visibility: graph.modules[owner.module_index].symbols[owner.row].visibility})
     }
     builtin :: sema_registration_compiler_builtin_row(graph, name) ?? return None
-    symbol :: graph.modules[builtin.module_index].nominals[builtin.row].symbol
-    Val(SemaRegistrationResolvedSymbol{symbol: symbol, source_module_identity: symbol.module_name, target_module_identity: symbol.module_name, visibility: symbol.visibility})
+    nominal_symbol :: graph.modules[builtin.module_index].nominals[builtin.row].symbol
+    Val(SemaRegistrationResolvedSymbol{symbol: nominal_symbol, source_module_identity: nominal_symbol.module_name, target_module_identity: nominal_symbol.module_name, visibility: nominal_symbol.visibility})
+}
+
+// A name declared or imported by one module.
+fn sema_registration_lookup_module_name(module_row: SemaRegistrationModule, module_identity: String, name: String) -> SemaRegistrationResolvedSymbol? {
+    if module_row.symbol_positions.get(name) == .Val(symbol_position) {
+        return Val(SemaRegistrationResolvedSymbol{symbol: module_row.symbols[symbol_position], source_module_identity: module_identity, target_module_identity: module_identity, visibility: module_row.symbols[symbol_position].visibility})
+    }
+    if module_row.import_binding_rows.get(name) == .Val(binding_ref) {
+        return sema_registration_resolved_import_binding(module_row.imports[binding_ref.import_index].bindings[binding_ref.binding])
+    }
+    None
+}
+
+fn sema_registration_resolved_import_binding(binding: SemaRegistrationImportBinding) -> SemaRegistrationResolvedSymbol? Never! {
+    Val(SemaRegistrationResolvedSymbol{symbol: binding.symbol, source_module_identity: binding.target_module_identity, target_module_identity: binding.target_module_identity, visibility: binding.visibility})
 }
 
 fn sema_registration_lookup_qualified(graph: SemaRegistrationGraph, module_identity: String, alias: String, name: String) -> SemaRegistrationResolvedSymbol? {
