@@ -3487,8 +3487,16 @@ fn jet_codegen_stability_list(state: &JetCodegenLetStability, statements: [TStmt
         jet_codegen_stability_stmt(&state, statement)
         if statement == {
             .Let(local, _, init, _, _, span) -> {
-                if !local.mutable && !local.generated {
-                    if jet_codegen_stability_place_root(init) == .Val(root) -> jet_codegen_stability_bind(&state, jet_codegen_element_let_key(local, span), local.name, root.name, false, jet_codegen_stability_whole_root(init))
+                place_root := TLocal?{None}
+                if !local.mutable && !local.generated -> place_root = jet_codegen_stability_place_root(init)
+                if place_root == .Val(root) {
+                    jet_codegen_stability_bind(&state, jet_codegen_element_let_key(local, span), local.name, root.name, false, jet_codegen_stability_whole_root(init))
+                } else if !jet_codegen_stability_scalar(init.ty) {
+                    // A value derived from a binding (a slice, a view, a call
+                    // result) may borrow its place: reading it reads the
+                    // binding (jet_codegen_stability_read).
+                    mentioned :: jet_codegen_stability_pending_mentions(state, init)
+                    loop name in mentioned -> jet_codegen_stability_bind(&state, "derived@{span.start}:{span.end}", local.name, name, false, false)
                 }
             }
             .RefutableBind(pattern, init, _, _) -> jet_codegen_stability_pattern(&state, pattern, init, false)
@@ -3503,6 +3511,54 @@ fn jet_codegen_stability_list(state: &JetCodegenLetStability, statements: [TStmt
         }
     }
     if !transparent -> jet_codegen_stability_settle(&state, mark)
+}
+
+fn jet_codegen_stability_scalar(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int | .IntN(_, _) | .Float | .Float32 | .Bool | .Char -> true
+        .Tagged(_, inner) -> jet_codegen_stability_scalar(inner)
+        else -> false
+    }
+}
+
+// The pending binding names `expression` mentions anywhere.
+fn jet_codegen_stability_pending_mentions(state: JetCodegenLetStability, expression: TExpr) -> [String] Never! {
+    names := [String]{}
+    jet_codegen_stability_collect_locals(expression, &names)
+    found := [String]{}
+    loop name in names {
+        if found.contains(name) -> next
+        loop candidate in state.pending {
+            if candidate.name == name {
+                &found.push(name)
+                break
+            }
+        }
+    }
+    found
+}
+
+fn jet_codegen_stability_collect_locals(expression: TExpr, names: &[String]) Never! {
+    if expression.kind == .Local(local) {
+        &names.push(local.name)
+        return
+    }
+    loop child in tir_expr_children(expression) -> jet_codegen_stability_collect_locals(child, &names)
+}
+
+// A view of a binding (a slice, a `View`/`ViewMut` value) may outlive the
+// reads this walk orders (stored, returned, captured): the binding copies.
+fn jet_codegen_stability_pin_views(state: &JetCodegenLetStability, expression: TExpr) Never! {
+    view := if expression.kind == {
+        .Slice(_, _, _, _, _) -> true
+        else -> false
+    }
+    if expression.ty == .Apply(name, _) {
+        if name == "View" || name == "ViewMut" -> view = true
+    }
+    if !view || state.pending.len() == 0 -> return
+    mentioned :: jet_codegen_stability_pending_mentions(state, expression)
+    loop name in mentioned -> state.pinned[name] = true
 }
 
 // The local a place expression is rooted at, through fields, indexes,
@@ -3592,6 +3648,8 @@ fn jet_codegen_stability_else(state: &JetCodegenLetStability, else_body: [TStmt]
 fn jet_codegen_stability_stmt(state: &JetCodegenLetStability, statement: TStmt) Never! {
     value :: JetCodegenStabilityUse.Value
     write :: JetCodegenStabilityUse.Write
+    // Every binding made before the loop is older than its entry tick.
+    state.tick += 1
     entry :: state.tick
     looping :: if statement == {
         .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) -> true
@@ -3784,6 +3842,7 @@ fn jet_codegen_stability_expr(state: &JetCodegenLetStability, expression: TExpr,
     inspect :: JetCodegenStabilityUse.Inspect
     value :: JetCodegenStabilityUse.Value
     write :: JetCodegenStabilityUse.Write
+    jet_codegen_stability_pin_views(&state, expression)
     if expression.kind == {
         // Every use reads the local; a value or write use of a bare local
         // consumes it.

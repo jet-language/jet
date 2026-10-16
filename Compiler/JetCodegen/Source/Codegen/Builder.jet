@@ -2702,6 +2702,9 @@ fn jet_codegen_project_field_place(builder: &JetCodegenBuilder, program: JetCode
         access: base_place.access,
         persist_key: base_place.persist_key,
     })
+    // A field of a place reached through a read alias stays one
+    // (jet_codegen_unmovable_place).
+    if builder.read_windows.get(base.value) != None -> _ := &builder.read_windows.add(place_id.value, true)
     place_id
 }
 

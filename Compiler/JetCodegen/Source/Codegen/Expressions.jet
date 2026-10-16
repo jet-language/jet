@@ -1164,6 +1164,8 @@ fn jet_codegen_place_access(builder: &JetCodegenBuilder, program: JetCodegenProg
     source.access = access
     jet_codegen_projected_accessors(&builder, program, &source, access)
     jet_codegen_push_place(&builder, program, source)
+    // A place reached through a read alias stays one (jet_codegen_unmovable_place).
+    if builder.read_windows.get(place.value) != None -> _ := &builder.read_windows.add(source.id.value, true)
     source.id
 }
 
@@ -6228,51 +6230,18 @@ fn jet_codegen_parameter_value_access(builder: JetCodegenBuilder, program: JetCo
 // parameter's place, or an element of a container (Rust
 // `lower_receiver_place` never moves an index place; a read alias of an
 // element names one), or any place of a constant read in place (#5001), or a
-// place at or below the read window a visible read alias names (a payload of
-// a stable pattern subject, `g :: program.graph`): its root still owns it.
+// place reached through a read alias (a read window or a place projected
+// from one, `JetCodegenBuilder.read_windows`): its root still owns it. An
+// explicit `^x.f` of the root itself names its own place and still moves.
 fn jet_codegen_unmovable_place(builder: JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID) -> Bool Never! {
     if jet_codegen_read_parameter_place(builder, program, place) -> return true
+    if builder.read_windows.get(place.value) != None -> return true
     row :: jet_codegen_find_place(builder, program, place) ?? return false
     if row.base == .Static(name) {
         if program.owners.constants.in_place_keys.get(name) != None -> return true
     }
     loop projection in row.projections {
         if projection == .Index(_, _, _, _, _, _, _) -> return true
-    }
-    if row.projections.len() == 0 -> return false
-    loop binding in builder.bindings {
-        if builder.read_alias_places.get(binding.place.value) == None || builder.read_windows.get(binding.place.value) == None -> next
-        window :: jet_codegen_find_place(builder, program, binding.place) ?? next
-        if jet_codegen_place_within(window, row) -> return true
-    }
-    false
-}
-
-// Whether `place` names `window` or a place below it: the same base and
-// `window`'s projections as its prefix.
-fn jet_codegen_place_within(window: MIRPlace, place: MIRPlace) -> Bool Never! {
-    if window.base != place.base || window.projections.len() > place.projections.len() -> return false
-    loop (index, projection) in window.projections {
-        if !jet_codegen_same_projection(projection, place.projections[index]) -> return false
-    }
-    true
-}
-
-fn jet_codegen_same_projection(left: MIRProjection, right: MIRProjection) -> Bool Never! {
-    if left == {
-        .Field(field, _) -> {
-            if right == .Field(other, _) -> return field == other
-        }
-        .Payload(kind, _) -> {
-            if right == .Payload(other, _) -> return kind == other
-        }
-        .Index(kind, index, _, _, _, _, _) -> {
-            if right == .Index(other_kind, other_index, _, _, _, _, _) -> return kind == other_kind && index == other_index
-        }
-        .Deref(_) -> {
-            if right == .Deref(_) -> return true
-        }
-        else -> {}
     }
     false
 }
