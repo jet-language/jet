@@ -499,7 +499,7 @@ fn jet_cli_structural(argv: [String], command: String, json: Bool) -> JetDriverV
         return jet_cli_struct_fail("structural merge produced source that does not parse", "resolve edits manually; no output was written")
     }
     output :: jet_cli_report_path(jet_cli_report_cwd(), jet_cli_option_value(argv, "--out") ?? paths[1])
-    if jet_cli_compile_overlays(paths[1], output, [JetCLIOverlay]{JetCLIOverlay{path: output, source: formatted.text}}, false, false, None, JetDriverCompileMode.Doc) == {
+    if jet_cli_compile_overlays(paths[1], output, [JetCLIOverlay]{JetCLIOverlay{path: output, source: formatted.text}}, false, false, None, JetDriverCompileMode.Doc, None) == {
         .Refused(refusal) -> return refusal.copy()
         .Compiled(result, _) -> {
             if jet_cli_errors(result.diagnostics).len() > 0 {

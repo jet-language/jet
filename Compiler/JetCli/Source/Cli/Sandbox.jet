@@ -159,7 +159,7 @@ fn jet_cli_compile_sandbox(file: String, source: String, color: Bool, quiet: Boo
     }
     target :: JetDriverCompileTarget.Sandbox{export_name: None, frozen_interfaces: jet_cli_sandbox_frozen_interfaces(api_dir), timezone_data: zones}
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_for_target(file, file, [JetCLIOverlay]{}, color, true, threads, JetDriverCompileMode.Program, target)
+    compiled :: jet_cli_compile_for_target(file, file, [JetCLIOverlay]{}, color, true, threads, JetDriverCompileMode.Program, target, None)
     if compiled == {
         .Refused(refusal) -> output = refusal.copy()
         .Compiled(result, snapshot) -> output = jet_cli_sandbox_result(file, source, color, quiet, api_dir, result, snapshot)

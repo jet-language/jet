@@ -530,6 +530,33 @@ enum JetCLIThreads {
     Refused(plan: JetCLIPlan)
 }
 
+// The commands `--trace[=FILE]` streams the compiler's trace for.
+JET_CLI_TRACE_COMMANDS :: [String]{"build", "run", "check", "test", "emit"}
+
+// The trace target `--trace` (`-`: readable lines on stderr) or
+// `--trace=FILE` (the JET_TRACE_FILE trace file) names in the jet-owned
+// argv; `None` without the flag. The host opens it (Request.jet
+// `jet_cli_trace_sink`), the front door checks where it may appear.
+fn jet_cli_trace_flag(jet_argv: [String]) -> String? Never! {
+    loop argument in jet_argv {
+        if argument == "--trace" -> return Val("-")
+        if argument.starts_with("--trace=") -> return Val(argument.slice(8..<argument.len()))
+    }
+    None
+}
+
+// The usage error of a misplaced or empty `--trace`, or `None`.
+fn jet_cli_trace_refusal(jet_argv: [String], command: String, color: Bool) -> JetCLIPlan? Never! {
+    requested :: jet_cli_trace_flag(jet_argv) ?? return None
+    if !JET_CLI_TRACE_COMMANDS.contains(command) {
+        return Val(jet_cli_fail("E2102", "`--trace` is only valid with a command that compiles", jet_cli_why("E2102"), "use it with `jet build`, `run`, `check`, `test`, or `emit`", color, JET_DRIVER_EXIT_USAGE))
+    }
+    if requested == "" {
+        return Val(jet_cli_fail("E2104", "`--trace=` needs a file name", jet_cli_why("E2104"), "write `--trace` to stream the trace to stderr, or `--trace=FILE` to write it to FILE", color, JET_DRIVER_EXIT_USAGE))
+    }
+    None
+}
+
 // `jet check [<file>|<dir>]`, also the target step of `build`, `run`, and
 // `doc` (Source/main.rs bare dispatch and `resolve_command_target`). A bare
 // command, or one aimed at a directory, resolves the project entry
@@ -758,7 +785,7 @@ fn jet_cli_build(jet_argv: [String], args: [String], color: Bool, quiet: Bool, t
 // refused until its port lands, never ignored; an unregistered one was
 // already refused by E2102, or is ignored by the `jet <file>` shorthand as
 // the Rust host ignores it.
-JET_CLI_RUN_PORTED_FLAGS :: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--color", "--threads", "--allow", "--deny", "-p", "--show-default"}
+JET_CLI_RUN_PORTED_FLAGS :: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--color", "--threads", "--trace", "--allow", "--deny", "-p", "--show-default"}
 
 // `jet run [<file>]` (`args` = `run`, the target, then the positional
 // words), also the `jet <file>` shorthand (`shorthand`). The target resolves
@@ -1354,6 +1381,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm]> JetCL
                     .Cap(cap) -> threads = cap
                 }
             }
+            if jet_cli_trace_refusal(jet_argv, "run", color) == .Val(refusal) -> return refusal
             run_args := [String]{"run"}
             loop word in args -> &run_args.push(word)
             return jet_cli_run(jet_argv, run_args, passthrough, true, color, quiet, verbose, threads)
@@ -1372,6 +1400,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm]> JetCL
     }
     if !owns_flags {
         if jet_cli_check_flags(jet_argv, command, color) == .Val(refusal) -> return refusal
+        if jet_cli_trace_refusal(jet_argv, command, color) == .Val(refusal) -> return refusal
     }
     if command != "dev" && jet_argv.contains("--canvas") {
         return jet_cli_fail("E2102", "`--canvas` is only valid with `jet dev`", jet_cli_why("E2102"), "run `jet dev <file.jet> --canvas` to open the Canvas IDE", color, JET_DRIVER_EXIT_USAGE)

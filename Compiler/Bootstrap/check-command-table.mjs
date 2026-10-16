@@ -283,9 +283,18 @@ export function readJetTable(text) {
   };
 }
 
+// Flags only the Jet table carries: the Jet CLI's `--trace` (owner-directed
+// 2026-10-16), added after the Rust host froze. They are compared out of both
+// tables, so every shared row still has to agree in order.
+export const JET_ONLY_FLAGS = new Set(["--trace"]);
+
 // Section-by-section differences, each row named by its key.
-export function tableDifferences(jet, rust) {
+export function tableDifferences(jetTable, rust) {
+  const jet = { ...jetTable, flags: jetTable.flags.filter((flag) => !JET_ONLY_FLAGS.has(flag.long)) };
   const differences = [];
+  for (const flag of rust.flags) {
+    if (JET_ONLY_FLAGS.has(flag.long)) differences.push(`flags: ${flag.long} is Jet-only but the Rust table declares it`);
+  }
   for (const [section, key] of [["handlers", "key"], ["commands", "name"], ["flags", "long"]]) {
     const length = Math.max(jet[section].length, rust[section].length);
     for (let index = 0; index < length; index += 1) {
