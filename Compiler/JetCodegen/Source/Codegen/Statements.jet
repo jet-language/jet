@@ -3627,31 +3627,58 @@ fn jet_codegen_stability_values(state: &JetCodegenLetStability, values: [TExpr])
 }
 
 // A condition; its pattern bindings stay pending until the guarded branch
-// ends (jet_codegen_stability_settle_scoped).
-fn jet_codegen_stability_cond(state: &JetCodegenLetStability, condition: TIfCond) Never! {
+// ends (jet_codegen_stability_settle_scoped). `guarded`: the condition is
+// a non-first `&&` operand, lowered in a block of its own that does not
+// dominate the guarded branch (jet_codegen_lower_condition).
+fn jet_codegen_stability_cond(state: &JetCodegenLetStability, condition: TIfCond, guarded: Bool) Never! {
     if condition == {
         .Plain(value) | .IsNone(value) -> jet_codegen_stability_expr(&state, value, JetCodegenStabilityUse.Value)
         .And(left, right) -> {
-            jet_codegen_stability_cond(&state, left)
-            jet_codegen_stability_cond(&state, right)
+            jet_codegen_stability_cond(&state, left, guarded)
+            jet_codegen_stability_cond(&state, right, true)
         }
         .IfLet(pattern, subject) | .Matches(pattern, subject) -> {
             jet_codegen_stability_values(&state, tir_pattern_children(pattern))
             jet_codegen_stability_inspected(&state, subject)
             jet_codegen_stability_pattern(&state, pattern, subject, true)
+            // #5031: a window over an indexed place is defined where its
+            // index operands are evaluated. In a guarded operand that block
+            // does not dominate the branch reading the payload bindings, so
+            // the subject stays a value and its bindings are ordinary slots
+            // written in the operand's block.
+            if guarded && jet_codegen_stability_indexed(subject) && jet_codegen_stability_pattern_binds(pattern) -> state.stable[jet_codegen_pattern_subject_key(subject)] = false
         }
         // The prelude's bindings stay visible in the branch it guards.
         .WithPrelude(prelude, nested) -> {
             jet_codegen_stability_list(&state, prelude, true)
-            jet_codegen_stability_cond(&state, nested)
+            jet_codegen_stability_cond(&state, nested, guarded)
         }
     }
+}
+
+// Whether the place a pattern subject names
+// (jet_codegen_stability_place_root's shape) has an index link: lowering it
+// evaluates the index operands, and every place below it uses them.
+fn jet_codegen_stability_indexed(expression: TExpr) -> Bool Never! {
+    if expression.kind == {
+        .Clone(inner, _) | .OrFallback(inner, _, _) | .Borrow(inner, _) | .Field(inner, _) -> jet_codegen_stability_indexed(inner)
+        .Index(_, _, _, _, _, _) -> true
+        else -> false
+    }
+}
+
+// Whether `pattern` binds a name (jet_codegen_stability_pattern's facts).
+fn jet_codegen_stability_pattern_binds(pattern: TPattern) -> Bool Never! {
+    loop fact in pattern.bindings {
+        if fact.name != "" && fact.name != "_" -> return true
+    }
+    false
 }
 
 // The guarded branch of `condition`; its pattern bindings answer at its end.
 fn jet_codegen_stability_guarded(state: &JetCodegenLetStability, condition: TIfCond, then_body: [TStmt], then_value: TExpr?) Never! {
     mark :: state.pending.len()
-    jet_codegen_stability_cond(&state, condition)
+    jet_codegen_stability_cond(&state, condition, false)
     jet_codegen_stability_list(&state, then_body, false)
     if then_value == .Val(value) -> jet_codegen_stability_expr(&state, value, JetCodegenStabilityUse.Value)
     jet_codegen_stability_settle_scoped(&state, mark)
