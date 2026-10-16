@@ -417,6 +417,7 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
     // chain twice per level: exponential in the chain depth.)
     base_scope_mark :: sema_scope_mark(&scopes)
     base_context_mark :: sema_check_context_save(context)
+    // copy: the probe's ownership state is restored when the base check is rolled back.
     base_state :: state.copy()
     base_diagnostic_count :: diagnostics.len()
     base_tail_body_count :: tail_store.bodies.len()

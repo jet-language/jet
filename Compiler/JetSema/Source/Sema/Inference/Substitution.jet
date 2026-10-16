@@ -76,7 +76,57 @@ fn sema_inference_substitute_type_inner(ty: Type, bindings: [SemaInferenceBindin
 }
 
 fn sema_inference_substitute_type_bindings(ty: Type, bindings: [SemaInferenceBinding]) -> Type Never! {
+    // copy: a type no binding changes is the input itself; one copy replaces
+    // the rebuild that copied every part of it.
+    if bindings.len() == 0 || !sema_inference_type_changes(ty, bindings) -> return ty.copy()
     sema_inference_substitute_type_inner(ty, bindings, [String]{})
+}
+
+// Whether substituting `bindings` into `ty` changes it: some named part has a
+// binding that is not that name itself (the cases where
+// sema_inference_substitute_type_inner rewrites instead of keeping the part).
+fn sema_inference_type_changes(ty: Type, bindings: [SemaInferenceBinding]) -> Bool Never! {
+    if ty == {
+        .Named(name) -> {
+            value :: sema_inference_binding_type(name, bindings, [String]{}) ?? return false
+            return !type_identity_equal(value, ty)
+        }
+        .List(inner) -> return sema_inference_type_changes(inner, bindings)
+        .Shared(inner) -> return sema_inference_type_changes(inner, bindings)
+        .Option(inner) -> return sema_inference_type_changes(inner, bindings)
+        .Tagged(_, inner) -> return sema_inference_type_changes(inner, bindings)
+        .Map(key, _, value) -> return sema_inference_type_changes(key, bindings) || sema_inference_type_changes(value, bindings)
+        .Result(ok, err) -> return sema_inference_type_changes(ok, bindings) || sema_inference_type_changes(err, bindings)
+        .Fn(params, ret, _, _, _, _) -> {
+            loop index in 0..<params.len() {
+                if sema_inference_type_changes(params[index], bindings) -> return true
+            }
+            if ret == .Val(declared) -> return sema_inference_type_changes(declared, bindings)
+            return false
+        }
+        .Apply(_, args) -> {
+            loop index in 0..<args.len() {
+                if sema_inference_type_changes(args[index], bindings) -> return true
+            }
+            return false
+        }
+        .Tuple(fields) -> {
+            loop index in 0..<fields.len() {
+                if sema_inference_type_changes(fields[index].ty, bindings) -> return true
+            }
+            return false
+        }
+        .FixedList(element, _) -> return sema_inference_type_changes(element, bindings)
+        .InlineRange(base, _, _) -> return sema_inference_type_changes(base, bindings)
+        .Quantity(base, _) -> return sema_inference_type_changes(base, bindings)
+        .Union(members) -> {
+            loop index in 0..<members.len() {
+                if sema_inference_type_changes(members[index], bindings) -> return true
+            }
+            return false
+        }
+        else -> return false
+    }
 }
 
 fn sema_inference_substitute_type(ty: Type, names: [String], actuals: [Type]) -> Type Never! {
