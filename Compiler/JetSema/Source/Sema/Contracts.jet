@@ -720,11 +720,11 @@ fn sema_contract_function_for_symbol(environment: SemaScopeEnvironment, program:
         declaration :: sema_registration_callable_declaration(graph, target)
         if declaration != None -> return declaration
     }
-    loop declaration in environment.declarations {
-        if declaration.symbol_id.key == target.key {
-            if declaration.item == .Func(value) -> return Val(value)
+    loop declaration_index in 0..<environment.declarations.len() {
+        if environment.declarations[declaration_index].symbol_id.key == target.key {
+            if environment.declarations[declaration_index].item == .Func(value) -> return Val(value)
         }
-        method :: sema_contract_method_function_for_item(declaration.item, target, environment.module_identity)
+        method :: sema_contract_method_function_for_item(environment.declarations[declaration_index].item, target, environment.module_identity)
         if method != None -> return method
     }
     None
@@ -781,11 +781,11 @@ fn sema_contract_function_facts(environment: SemaScopeEnvironment, program: Sema
         registered :: sema_contract_registered_facts(graph, target)
         if registered != None -> return registered
     }
-    loop declaration in environment.declarations {
-        if declaration.symbol_id.key == target.key {
-            if declaration.item == .Func(value) -> return Val(sema_contract_callee_facts(value))
+    loop declaration_index in 0..<environment.declarations.len() {
+        if environment.declarations[declaration_index].symbol_id.key == target.key {
+            if environment.declarations[declaration_index].item == .Func(value) -> return Val(sema_contract_callee_facts(value))
         }
-        method :: sema_contract_method_facts_for_item(declaration.item, target, environment.module_identity)
+        method :: sema_contract_method_facts_for_item(environment.declarations[declaration_index].item, target, environment.module_identity)
         if method != None -> return method
     }
     None

@@ -261,8 +261,8 @@ fn sema_call_append_local_methods(output: &[SemaCallMethodCandidate], methods: [
 fn sema_call_local_method_candidates(environment: SemaScopeEnvironment, program: SemaProgramTables, method: String, owner_type_args: [Type], type_args: [Type]) -> [SemaCallMethodCandidate] Never! {
     module_name :: environment.module_identity
     candidates := [SemaCallMethodCandidate]{}
-    loop declaration in environment.declarations {
-        if declaration.item == {
+    loop declaration_index in 0..<environment.declarations.len() {
+        if environment.declarations[declaration_index].item == {
             .Struct(value) -> {
                 owner_type :: sema_call_method_owner_type(value.name, owner_type_args)
                 sema_call_append_local_methods(&candidates, value.methods, module_name, value.name, owner_type, None, type_args, environment.source_file, environment.source_origin, environment.source_segments)
@@ -283,8 +283,8 @@ fn sema_call_local_method_candidates(environment: SemaScopeEnvironment, program:
 }
 
 fn sema_call_method_function_for_symbol(target: SymbolID, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Func? {
-    loop declaration in environment.declarations {
-        if declaration.item == {
+    loop declaration_index in 0..<environment.declarations.len() {
+        if environment.declarations[declaration_index].item == {
             .Struct(value) -> {
                 loop method in value.methods {
                     candidate :: symbol_id(SymbolKind.Function, environment.module_identity, value.name, method.name)

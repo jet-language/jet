@@ -1040,9 +1040,9 @@ fn sema_call_core_global_shared(lifetime: MIRSharedLifetime, member: String, typ
     target :: sema_call_resolve_direct(name, [Type]{}, environment, program, &scopes, args[0].span, &diagnostics) ?? return sema_call_core_shared_reject(member, span, &diagnostics)
     if target.generic_params.len() != 0 -> return sema_call_core_shared_reject(member, span, &diagnostics)
     same_module := false
-    loop declaration in environment.declarations {
-        if declaration.symbol_id != target.symbol.id -> next
-        if declaration.item == .Func(function) {
+    loop declaration_index in 0..<environment.declarations.len() {
+        if environment.declarations[declaration_index].symbol_id != target.symbol.id -> next
+        if environment.declarations[declaration_index].item == .Func(function) {
             same_module = function.external_type == None && function.type_params.len() == 0 && function.params.len() == 0
             break
         }

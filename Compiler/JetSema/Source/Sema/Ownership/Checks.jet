@@ -1542,8 +1542,8 @@ fn sema_ownership_view_source_projection(projection: SemaOwnershipProjection) ->
 }
 
 fn sema_ownership_view_source_for_place(place: SemaOwnershipPlace, receiver_key: String, parameter_keys: [String], scopes: SemaScopeTable) -> ViewSourcePath? {
-    loop binding in scopes.bindings {
-        if binding.symbol.id.key == place.root_key {
+    loop binding_index in 0..<scopes.bindings.len() {
+        if scopes.bindings[binding_index].symbol.id.key == place.root_key {
             source := ViewSource?{None}
             if {
                 receiver_key != "" && receiver_key == place.root_key -> source = Val(ViewSource.Receiver)
@@ -1622,10 +1622,10 @@ fn sema_ownership_diag_view_return_boundary(span: Span) -> Diagnostic {
 // view. A consumed view carrier differs: its windows still borrow the
 // caller's owner.
 fn sema_ownership_consumed_view_owner(place: SemaOwnershipPlace, scopes: SemaScopeTable) -> Bool Never! {
-    loop binding in scopes.bindings {
-        if binding.symbol.id.key != place.root_key -> next
-        if binding.access != AccessConvention.Move -> return false
-        ty :: binding.symbol.ty ?? return true
+    loop binding_index in 0..<scopes.bindings.len() {
+        if scopes.bindings[binding_index].symbol.id.key != place.root_key -> next
+        if scopes.bindings[binding_index].access != AccessConvention.Move -> return false
+        ty :: scopes.bindings[binding_index].symbol.ty ?? return true
         if ty == {
             .Apply(name, args) -> return !((name == "View" || name == "ViewMut") && args.len() == 1)
             else -> return true
@@ -2159,9 +2159,9 @@ fn sema_ownership_view_descends_from(state: SemaOwnershipState, child: SemaOwner
     loop parent >= 0 {
         if parent == ancestor -> return true
         next_parent := -1
-        loop fact in state.views {
-            if fact.seq == parent && fact.active && !fact.invalidated {
-                next_parent = fact.reborrow_parent
+        loop fact_index in 0..<state.views.len() {
+            if state.views[fact_index].seq == parent && state.views[fact_index].active && !state.views[fact_index].invalidated {
+                next_parent = state.views[fact_index].reborrow_parent
                 break
             }
         }
@@ -2230,8 +2230,8 @@ fn sema_ownership_binding_for_expr(state: &SemaOwnershipState, expr: Expr, scope
 }
 
 fn sema_ownership_place_is_static(place: SemaOwnershipPlace, scopes: SemaScopeTable) -> Bool Never! {
-    loop binding in scopes.bindings {
-        if binding.symbol.id.key == place.root_key -> return binding.symbol.kind == SymbolKind.Constant
+    loop binding_index in 0..<scopes.bindings.len() {
+        if scopes.bindings[binding_index].symbol.id.key == place.root_key -> return scopes.bindings[binding_index].symbol.kind == SymbolKind.Constant
     }
     false
 }
@@ -3083,8 +3083,8 @@ fn sema_receiver_mark_replace(mark: SemaReceiverMark, written: String, needed: S
 }
 
 fn sema_receiver_mark_is_write_window(state: SemaOwnershipState, root: String) -> Bool Never! {
-    loop view in state.views {
-        if view.carrier == root && view.active && view.access == AccessConvention.Write -> return true
+    loop view_index in 0..<state.views.len() {
+        if state.views[view_index].carrier == root && state.views[view_index].active && state.views[view_index].access == AccessConvention.Write -> return true
     }
     false
 }
@@ -4277,9 +4277,9 @@ fn sema_ownership_carries_lending_view(expr: Expr, name: String) -> Bool {
 
 fn sema_ownership_report_lending_view_escape(expr: Expr, action: String, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     loop key in context.lending_view_parameter_keys {
-        loop binding in scopes.bindings {
-            if binding.symbol.id.key != key -> next
-            name :: binding.symbol.name
+        loop binding_index in 0..<scopes.bindings.len() {
+            if scopes.bindings[binding_index].symbol.id.key != key -> next
+            name :: scopes.bindings[binding_index].symbol.name
             if !sema_ownership_carries_lending_view(expr, name) -> break
             &diagnostics.push(sema_error("E0212", expr_span(expr), "the lent mutable view `{name}` cannot {action}", "the view is valid only while the current iteration or callback invocation is active", "use the view inside that scope, and keep only owned values outside it"))
             return true

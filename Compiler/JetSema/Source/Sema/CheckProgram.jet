@@ -895,7 +895,7 @@ fn sema_incremental_begin(cache: SemaIncrementalCache, graph: SemaRegistrationGr
 }
 
 fn sema_incremental_module_input(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> String Never! {
-    declarations :: loop declaration in environment.declarations -> SemaScopeDeclaration{
+    declarations :: loop declaration_index in 0..<environment.declarations.len() -> SemaScopeDeclaration{
         symbol_id: declaration.symbol_id, item: sema_incremental_item_header(declaration.item),
     }
     // The graph is already frozen once by begin. Callable names belong to the

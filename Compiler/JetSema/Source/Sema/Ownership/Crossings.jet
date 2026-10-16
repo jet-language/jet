@@ -319,8 +319,8 @@ fn sema_ownership_crossing_problem_for_name(name: String, ty: Type, crossing: Se
         binding :: scopes.bindings[binding_index]
         if binding.string_view -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ViewBorrow))
         expr := Expr.Ident{name: name, span: binding.symbol.span}
-        loop fact in state.views {
-            if fact.active && sema_ownership_view_fact_matches_expr(fact, expr, scopes) -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ViewBorrow))
+        loop fact_index in 0..<state.views.len() {
+            if state.views[fact_index].active && sema_ownership_view_fact_matches_expr(state.views[fact_index], expr, scopes) -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ViewBorrow))
         }
         if (crossing == SemaSendCrossing.TaskCapture || crossing == SemaSendCrossing.ChannelSend || crossing == SemaSendCrossing.ParallelWorker || crossing == SemaSendCrossing.HTTPHandler) && sema_function_reactive_is_local(context, binding.symbol.id.key) && sema_function_reactive_handle_type(ty) {
             return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.LocalReactive{name: type_name(ty)}))

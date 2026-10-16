@@ -3507,9 +3507,9 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
 // local declarations (sema_scope_environment for a graph module), so the
 // binding is read from the module's registered constant rows.
 fn sema_stmt_module_storage_binding(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Bool Never! {
-    loop declaration in environment.declarations {
-        if declaration.symbol_id.key != id.key -> next
-        if declaration.item == .Const(definition) -> return definition.mutable && !definition.is_comptime
+    loop declaration_index in 0..<environment.declarations.len() {
+        if environment.declarations[declaration_index].symbol_id.key != id.key -> next
+        if environment.declarations[declaration_index].item == .Const(definition) -> return definition.mutable && !definition.is_comptime
         return false
     }
     if program.registration_graph == .Val(graph) {

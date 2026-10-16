@@ -2103,8 +2103,8 @@ fn sema_expr_comptime_method_target(methods: [Func], owner_name: String, module_
 }
 
 fn sema_expr_comptime_local_method_target(environment: SemaScopeEnvironment, program: SemaProgramTables, symbol: SymbolID) -> SemaExprComptimeTarget? {
-    loop row in environment.declarations {
-        target :: if row.item == {
+    loop row_index in 0..<environment.declarations.len() {
+        target :: if environment.declarations[row_index].item == {
             .Struct(value) -> sema_expr_comptime_method_target(value.methods, value.name, environment.module_identity, symbol)
             .Enum(value) -> sema_expr_comptime_method_target(value.methods, value.name, environment.module_identity, symbol)
             else -> None
@@ -3000,8 +3000,8 @@ fn sema_expr_function_field(receiver: Type, name: String, method_name: String, e
             }
         }
     } else {
-        loop declaration in environment.declarations {
-            if declaration.item == {
+        loop declaration_index in 0..<environment.declarations.len() {
+            if environment.declarations[declaration_index].item == {
                 .Struct(value) -> {
                     if value.name != definition.name -> next
                     loop method in value.methods {

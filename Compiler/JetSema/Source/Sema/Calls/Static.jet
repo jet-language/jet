@@ -82,8 +82,8 @@ fn sema_call_static_registered_method_exists(graph: SemaRegistrationGraph, nomin
 }
 
 fn sema_call_static_local_generic_method_exists(symbol: Symbol, method: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    loop declaration in environment.declarations {
-        if declaration.item == {
+    loop declaration_index in 0..<environment.declarations.len() {
+        if environment.declarations[declaration_index].item == {
             .Struct(value) -> {
                 if value.name == symbol.name && value.type_params.len() > 0 {
                     loop function in value.methods {
@@ -211,8 +211,8 @@ fn sema_call_static_local_target(owner_symbol: Symbol, owner_name: String, decla
 
 fn sema_call_static_local_targets(symbol: Symbol, method: String, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> [SemaStaticMethodTarget] Never! {
     targets := [SemaStaticMethodTarget]{}
-    loop declaration in environment.declarations {
-        if declaration.item == {
+    loop declaration_index in 0..<environment.declarations.len() {
+        if environment.declarations[declaration_index].item == {
             .Struct(value) -> {
                 if value.name != symbol.name -> next
                 owner_params :: sema_inference_type_params(value.type_params)

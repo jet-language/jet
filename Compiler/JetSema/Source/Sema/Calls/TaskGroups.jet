@@ -546,9 +546,9 @@ fn sema_taskgroup_admit_capture_borrow(capture: TCapture, facts: TCaptureFacts, 
     place := SemaOwnershipPlace?{None}
     access := if sema_taskgroup_contains_name(facts.mutable, name) -> AccessConvention.Write else -> AccessConvention.Read
     symbol :: capture.local.symbol_id ?? return None
-    loop binding in scopes.bindings {
-        if binding.symbol.id.key == symbol.key && binding.symbol.name == name {
-            if binding.access == AccessConvention.Write -> access = AccessConvention.Write
+    loop binding_index in 0..<scopes.bindings.len() {
+        if scopes.bindings[binding_index].symbol.id.key == symbol.key && scopes.bindings[binding_index].symbol.name == name {
+            if scopes.bindings[binding_index].access == AccessConvention.Write -> access = AccessConvention.Write
         }
     }
     loop view in state.views {

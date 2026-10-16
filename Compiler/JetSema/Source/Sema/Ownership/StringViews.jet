@@ -144,8 +144,8 @@ fn sema_string_view_owner(scopes: SemaScopeTable, state: SemaOwnershipState, nam
     index :: sema_scope_resolve_index(scopes, name) ?? return "its owner"
     key :: scopes.bindings[index].symbol.id.key
     owner := "its owner"
-    loop fact in state.views {
-        if fact.active && fact.carrier_key == key -> owner = fact.source.root
+    loop fact_index in 0..<state.views.len() {
+        if state.views[fact_index].active && state.views[fact_index].carrier_key == key -> owner = state.views[fact_index].source.root
     }
     owner
 }
@@ -208,9 +208,9 @@ fn sema_read_view_owning_read(name: String, destination: Type, scopes: SemaScope
 fn sema_string_view_stable_owner(scopes: SemaScopeTable, state: SemaOwnershipState, name: String) -> Bool Never! {
     index :: sema_scope_resolve_index(scopes, name) ?? return false
     key :: scopes.bindings[index].symbol.id.key
-    loop fact in state.views {
-        if !fact.active || fact.carrier_key != key -> next
-        owner :: sema_scope_resolve(scopes, fact.source.root) ?? return false
+    loop fact_index in 0..<state.views.len() {
+        if !state.views[fact_index].active || state.views[fact_index].carrier_key != key -> next
+        owner :: sema_scope_resolve(scopes, state.views[fact_index].source.root) ?? return false
         return owner.kind == SymbolKind.Parameter || owner.kind == SymbolKind.Constant
     }
     false
