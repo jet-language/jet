@@ -48,15 +48,6 @@ use jet_backend.[x64_runtime_library, x64_runtime_export_abi_json, x64_link_runt
 // The production CLI and bootstrap observer share the driver's all-phases
 // implementation. A diagnostic trap is a failed compile, never an artifact.
 fn jet_cli_compile_request(request: ^JetDriverCompileRequest, emit_rust: Bool) -> JetDriverCompileResult {
-    // The result hands the request's trace sink back, so the host's phases
-    // after the compile (Host.jet's native backend route) trace through it.
-    trace_sink :: request.trace_sink.copy()
-    result := jet_cli_compile_request_stages(^request, emit_rust)
-    result.trace_sink = trace_sink
-    result
-}
-
-fn jet_cli_compile_request_stages(request: ^JetDriverCompileRequest, emit_rust: Bool) -> JetDriverCompileResult {
     if !jet_cli_keep_going_enabled() {
         return if emit_rust -> jet_driver_compile(^request) else -> jet_driver_compile_mir(^request)
     }
@@ -866,7 +857,7 @@ struct JetCLIOverlay {
 // policy-marked copy of the entry; nothing is written), traced through
 // `trace_sink`: the process's one sink, which `jet_cli_main` opens for
 // `build`, `run`, `check`, `test` and `emit` (`--trace`, JET_TRACE_FILE).
-fn jet_cli_compile_entry(file: String, color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: CompilerTraceSink?) -> JetCLICompiled {
+fn jet_cli_compile_entry(file: String, color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
     overlays := [JetCLIOverlay]{}
     if entry_source == .Val(replacement) -> &overlays.push(JetCLIOverlay{path: file, source: replacement})
     jet_cli_compile_overlays(file, file, overlays, color, emit_rust, threads, mode, trace_sink)
@@ -945,14 +936,14 @@ fn jet_cli_prepare_refused(what: String, fix: String, color: Bool) -> JetCLIPrep
 // them, compiled with `entry` as the entry. An overlay replaces the bytes of a
 // walked file, or adds an absent `.jet` file the walk would have read; the
 // source loader and its authorization stay the one in this file.
-fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: CompilerTraceSink?) -> JetCLICompiled {
+fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
     jet_cli_compile_for_target(anchor, entry, overlays, color, emit_rust, threads, mode, JetDriverCompileTarget.Native, trace_sink)
 }
 
 // Sandbox and native targets use the same authorized source snapshot. The
 // source walk is the `sources` span; the request carries `trace_sink` into
 // the driver's phases, and its result back to the native backend.
-fn jet_cli_compile_for_target(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, target: JetDriverCompileTarget, trace_sink: CompilerTraceSink?) -> JetCLICompiled {
+fn jet_cli_compile_for_target(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, target: JetDriverCompileTarget, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     if jet_cli_prepare_overlays(anchor, entry, overlays, color, threads, mode) == {
         .Refused(output) -> {
@@ -963,10 +954,13 @@ fn jet_cli_compile_for_target(anchor: String, entry: String, overlays: [JetCLIOv
             if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_snapshot_file_count(snapshot))
             selected := request
             selected.target = target
-            selected.trace_sink = trace_sink
+            selected.trace_sink = jet_cli_trace_boxed(trace_sink)
             library_prefix :: if target == .Native -> cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") else -> None
             result := jet_cli_compile_request(^selected, emit_rust && library_prefix == None)
             if library_prefix == .Val(prefix) -> result = jet_cli_runtime_library(^result, prefix)
+            // The host's phases after the compile (Host.jet's native backend
+            // route) trace through the same sink, which the result carries.
+            result.trace_sink = jet_cli_trace_boxed(trace_sink)
             return JetCLICompiled.Compiled{result: result, snapshot: snapshot}
         }
     }
@@ -1131,7 +1125,7 @@ struct JetCLITraceMemory {
 // selects, else JET_TRACE_FILE; `None` when neither asks for a trace or the
 // target cannot be written (the reason goes to stderr, the compile goes on).
 // A file target is truncated and starts with the trace header.
-fn jet_cli_trace_sink(requested: String?) -> CompilerTraceSink? {
+fn jet_cli_trace_sink(requested: String?) -> JetCLITraceSink? {
     chosen := cli_sys.get(JET_CLI_TRACE_FILE_ENV) ?? ""
     if requested == .Val(flag) -> chosen = flag
     if chosen == "" -> return None
@@ -1151,7 +1145,7 @@ fn jet_cli_trace_sink(requested: String?) -> CompilerTraceSink? {
         _ :: jet_cli_trace_append(JET_CLI_TRACE_STDERR, "jet: cannot write the compiler trace `{chosen}`: {problem}\n")
         return None
     }
-    Val(jet_cli_trace_object(JetCLITraceSink{
+    Val(JetCLITraceSink{
         target: target,
         human: human,
         start_ms: start_ms,
@@ -1160,10 +1154,17 @@ fn jet_cli_trace_sink(requested: String?) -> CompilerTraceSink? {
         functions: functions,
         phase_counters: (cli_sys.get(JET_CLI_PHASE_COUNTERS_ENV) ?? "") != "",
         state: shared JetCLITraceState{writing: true, stacks: [Int:[JetCLITraceSpan]]{}, progress_at: [String:Int]{}},
-    }))
+    })
 }
 
-// The sink as the driver's trait object.
+// A driver trait object over the sink. Trait objects cannot be copied, so
+// each owner (the request, the result) gets its own; every one writes
+// through the sink's one shared state.
+fn jet_cli_trace_boxed(sink: JetCLITraceSink?) -> CompilerTraceSink? Never! {
+    opened :: sink ?? return None
+    Val(jet_cli_trace_object(opened.copy()))
+}
+
 fn jet_cli_trace_object(sink: ^JetCLITraceSink) -> CompilerTraceSink Never! {
     ^sink
 }

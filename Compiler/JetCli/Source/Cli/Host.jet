@@ -98,7 +98,7 @@ fn jet_cli_errors(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
 // program, not a library, runs in Run mode, so an entry with no `fn run` is
 // E0101 (CmdInspect.rs `check_projection_with_options_and_preflight`,
 // Completion.rs).
-fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, json: Bool, trace_sink: CompilerTraceSink?) -> JetDriverVerbOutput {
+fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, json: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     watch :: cli_time.start()
     if !project {
         if jet_cli_missing_project_context(file, source) == .Val(missing) {
@@ -162,7 +162,7 @@ fn jet_cli_write_notice(notice: String) {
 // summary; stdout is the Rust of the dev-mode artifact: the runtime/Core
 // prefix (MIRRust `emit_mir_runtime_text` under the development devtools
 // policy) followed by the emitted program.
-fn jet_cli_compile_emit(file: String, source: String, color: Bool, json: Bool, trace_sink: CompilerTraceSink?) -> JetDriverVerbOutput {
+fn jet_cli_compile_emit(file: String, source: String, color: Bool, json: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     requires_run :: jet_cli_entry_lacks_run(source)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_entry(file, color, true, None, JetDriverCompileMode.Program, None, trace_sink)
@@ -532,7 +532,7 @@ fn jet_cli_build_result(file: String, source: String, color: Bool, release: Bool
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
-fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Bool, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: CompilerTraceSink?) -> JetDriverVerbOutput {
+fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Bool, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_entry(file, color, false, threads, JetDriverCompileMode.Program, None, trace_sink)
     if compiled == {
@@ -592,7 +592,7 @@ fn jet_cli_run_result(file: String, source: String, color: Bool, release: Bool, 
     output
 }
 
-fn jet_cli_compile_run(file: String, source: String, color: Bool, release: Bool, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, trace_sink: CompilerTraceSink?) -> JetDriverVerbOutput {
+fn jet_cli_compile_run(file: String, source: String, color: Bool, release: Bool, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_entry(file, color, false, threads, JetDriverCompileMode.Program, None, trace_sink)
     if compiled == {
@@ -659,7 +659,7 @@ fn jet_cli_test_result(file: String, source: String, color: Bool, verbose: Bool,
     output
 }
 
-fn jet_cli_compile_test(file: String, source: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions, trace_sink: CompilerTraceSink?) -> JetDriverVerbOutput {
+fn jet_cli_compile_test(file: String, source: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     if options.status.len() > 0 {
         stderr_handle := cli_term.stderr()
         &stderr_handle.write(options.status).drop("jet stderr")
@@ -1588,7 +1588,7 @@ fn jet_cli_plan_compiles(plan: JetCLIPlan) -> Bool Never! {
 
 // Carry out one plan; a host step that finishes as a plan runs that plan.
 // `trace_sink` traces a compiling verb's compile (`jet_cli_main`).
-fn jet_cli_execute(plan: JetCLIPlan, trace_sink: CompilerTraceSink?{None}) -> JetDriverVerbOutput {
+fn jet_cli_execute(plan: JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}
     if plan == {
         .Done(done) -> output = done.copy()
