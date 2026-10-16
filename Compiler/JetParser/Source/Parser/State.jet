@@ -199,6 +199,23 @@ fn parser_return_tables(state: &JetParserState, nested: &JetParserState) Never! 
     &state.tables.push(tables)
 }
 
+// An interpolation hole parses with its parent's tables and source text: the
+// source moves to the nested state and back instead of being copied once
+// per hole. Every exit returns both before the parent reads again.
+fn parser_lend_hole(state: &JetParserState, nested: &JetParserState) Never! {
+    parser_lend_tables(&state, &nested)
+    source := ^state.source
+    state.source = [U8]{}
+    nested.source = ^source
+}
+
+fn parser_return_hole(state: &JetParserState, nested: &JetParserState) Never! {
+    parser_return_tables(&state, &nested)
+    source := ^nested.source
+    nested.source = [U8]{}
+    state.source = ^source
+}
+
 fn parser_is_trivia(kind: Int) -> Bool Never! {
     kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT
 }

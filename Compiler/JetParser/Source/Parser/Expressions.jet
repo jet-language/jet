@@ -931,7 +931,7 @@ fn parser_parse_interpolation(state: &JetParserState, part: StringPart, depth: I
         position: 0,
         diagnostics: [Diagnostic]{},
         source_end: part.span.end,
-        source: state.source,
+        source: [U8]{},
         block_spans: [Span]{},
         pending_type_gt: false,
         pending_type_gt_span: Span{start: 0, end: 0},
@@ -940,17 +940,18 @@ fn parser_parse_interpolation(state: &JetParserState, part: StringPart, depth: I
         allow_environment_reads: state.allow_environment_reads,
         derive_template_depth: state.derive_template_depth,
     }
-    // The nested state parses with the outer tables; every exit hands them back.
-    parser_lend_tables(&state, &nested)
+    // The nested state parses with the outer tables and source; every exit
+    // hands them back.
+    parser_lend_hole(&state, &nested)
     if parser_current_kind(&nested) == TOKEN_EQ {
-        parser_return_tables(&state, &nested)
+        parser_return_hole(&state, &nested)
         parser_add_error(&state, parser_current(&nested).span, "empty debug-label interpolation `{{=}}`", "`{{expr=}}` needs an expression before `=`", "write `{{count=}}` or `{{x + 1=}}`")
         return
     }
     value :: parser_parse_expression(&nested, 1, depth + 1)
     loop block in nested.block_spans -> &state.block_spans.push(block)
     if nested.diagnostics.len() > 0 {
-        parser_return_tables(&state, &nested)
+        parser_return_hole(&state, &nested)
         parser_take_nested_failure(&state, nested.diagnostics)
         return
     }
@@ -961,14 +962,14 @@ fn parser_parse_interpolation(state: &JetParserState, part: StringPart, depth: I
             piece :: parser_debug_label_piece(nested, token)
             if piece == "" {
                 found :: parser_describe_token(nested, token)
-                parser_return_tables(&state, &nested)
+                parser_return_hole(&state, &nested)
                 parser_add_error(&state, token.span, "`{{…=}}` debug labels need a simple expression, not {found}", "the label reprints the expression text before `=`", "use a name or a short expression such as `{{count=}}`")
                 return
             }
             label = "{label}{piece}"
         }
         if label == "" {
-            parser_return_tables(&state, &nested)
+            parser_return_hole(&state, &nested)
             parser_add_error(&state, parser_current(&nested).span, "empty debug-label interpolation", "`{{expr=}}` needs an expression before `=`", "write `{{count=}}`")
             return
         }
@@ -977,7 +978,7 @@ fn parser_parse_interpolation(state: &JetParserState, part: StringPart, depth: I
     format :: parser_parse_string_format(&nested)
     extra :: parser_current(&nested)
     extra_found :: parser_describe_token(nested, extra)
-    parser_return_tables(&state, &nested)
+    parser_return_hole(&state, &nested)
     if nested.abort_mark != 0 {
         parser_take_nested_failure(&state, nested.diagnostics)
         return
