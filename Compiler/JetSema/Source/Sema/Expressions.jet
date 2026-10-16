@@ -3154,8 +3154,10 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
         argument_index += 1
     }
     candidates := [SemaCallMethodCandidate]{}
-    if args.len() == 1 && operator_trait == .Val(trait_name) && argument_types[0] == .Val(rhs) && program.registration_graph == .Val(graph) {
-        loop resolution in sema_expr_registration_operator_candidates(graph, receiver_value.ty, rhs, trait_name, method, false, method_span, environment, program, &scopes, &diagnostics) -> &candidates.push(resolution.candidate)
+    if args.len() == 1 && operator_trait == .Val(trait_name) {
+        if argument_types[0] == .Val(rhs) && program.registration_graph == .Val(graph) {
+            loop resolution in sema_expr_registration_operator_candidates(graph, receiver_value.ty, rhs, trait_name, method, false, method_span, environment, program, &scopes, &diagnostics) -> &candidates.push(resolution.candidate)
+        }
     }
     if candidates.len() == 0 {
         candidates = if program.registration_graph == {

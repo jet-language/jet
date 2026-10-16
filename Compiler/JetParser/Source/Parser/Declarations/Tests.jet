@@ -20,7 +20,9 @@ fn parser_test_ahead(state: &JetParserState) -> Bool Never! {
 fn parser_test_name(value: Expr) -> (name: String?, span: Span) {
     if value == {
         .Str(parts, span) -> {
-            if parts.len() == 1 && parts[0] == .Lit(text) -> return (name: Val(text), span: span)
+            if parts.len() == 1 {
+                if parts[0] == .Lit(text) -> return (name: Val(text), span: span)
+            }
             return (name: None, span: span)
         }
         else -> return (name: None, span: expr_span(value))

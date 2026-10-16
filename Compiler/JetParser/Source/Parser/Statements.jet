@@ -1690,10 +1690,14 @@ fn parser_typed_literal_uninit_marker(head: Type?, body: TypedLitBody) -> Span? 
             if inner == .Ident(word, span) && word == "uninit" -> return Val(span)
         }
         .Elements(elements) -> {
-            if elements.len() == 1 && elements[0] == .Ident(word, span) && word == "uninit" -> return Val(span)
+            if elements.len() == 1 {
+                if elements[0] == .Ident(word, span) && word == "uninit" -> return Val(span)
+            }
         }
         .Fields(fields) -> {
-            if fields.len() == 1 && fields[0].name == "uninit" && fields[0].value == .Ident(word, _) && word == "uninit" -> return Val(fields[0].name_span)
+            if fields.len() == 1 && fields[0].name == "uninit" {
+                if fields[0].value == .Ident(word, _) && word == "uninit" -> return Val(fields[0].name_span)
+            }
         }
         else -> {}
     }

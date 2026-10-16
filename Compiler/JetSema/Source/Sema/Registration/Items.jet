@@ -2480,7 +2480,9 @@ fn sema_registration_cli_scalar(ty: Type) -> Bool Never! {
 // Rust `marker_string`: the marker's first argument when it is one literal string.
 fn sema_registration_cli_marker_string(marker: Marker) -> String? {
     if marker.args.len() == 0 -> return None
-    if marker.args[0] == .Expr(value) && value == .Str(parts, _) && parts.len() == 1 && parts[0] == .Lit(text) -> return Val(text)
+    if marker.args[0] == .Expr(value) && value == .Str(parts, _) && parts.len() == 1 {
+        if parts[0] == .Lit(text) -> return Val(text)
+    }
     None
 }
 

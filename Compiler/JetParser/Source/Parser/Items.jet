@@ -1200,9 +1200,13 @@ fn parser_marker_is_c_guest_import(marker: Marker) -> Bool Never! {
 fn parser_bind_guest_import_symbol(state: &JetParserState, func: &Func) {
     symbol := ""
     error_span := func.span
-    if func.body.len() == 1 && func.body[0] == .Expr(value) && value == .Str(parts, span) {
-        error_span = span
-        if parts.len() == 1 && parts[0] == .Lit(text) -> symbol = text
+    if func.body.len() == 1 {
+        if func.body[0] == .Expr(value) && value == .Str(parts, span) {
+            error_span = span
+            if parts.len() == 1 {
+                if parts[0] == .Lit(text) -> symbol = text
+            }
+        }
     }
     if symbol == "" {
         parser_add_error_code(&state, "E3212", error_span, "a `#Import(c)` declaration needs one non-empty symbol string", "the Jet signature is checked by sema and the string after `=` names the stable C symbol", "write `#Import(c) fn name(args) -> Return = \"c_symbol\"`")
@@ -1697,7 +1701,9 @@ fn parser_apply_function_markers(state: &JetParserState, func: &Func, markers: [
             }
             // D-TAG-SURFACE1=A: `#Scrub(Tag)` names the one fact tag removed.
             "Scrub" -> {
-                if parser_marker_bindings(marker, [String]{"tag"}) == .Val(values) && values[0] == .Val(written) && written == .Ident(name, _) -> func.scrub_tag = Val(name)
+                if parser_marker_bindings(marker, [String]{"tag"}) == .Val(values) {
+                    if values[0] == .Val(written) && written == .Ident(name, _) -> func.scrub_tag = Val(name)
+                }
             }
             // D-METHODMACRO1=A: bare `#Inline` is a hint; `#Inline(Always)`
             // is the checked promise. A written `Hint` or `Never` mode is

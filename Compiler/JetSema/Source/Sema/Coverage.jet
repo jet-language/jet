@@ -61,7 +61,9 @@ fn sema_coverage_nested_part(shape: TPatternShape) -> (key: String, inner: TPatt
         .Ok(_, _, inner, _) -> if inner == .Val(nested) -> return Val((key: "Ok", inner: nested.shape))
         .Err(_, _, inner, _) -> if inner == .Val(nested) -> return Val((key: "Err", inner: nested.shape))
         .Variant(variant, bindings, _, _) -> {
-            if bindings.len() == 1 && bindings[0] == .Nested(nested) -> return Val((key: variant, inner: nested.shape))
+            if bindings.len() == 1 {
+                if bindings[0] == .Nested(nested) -> return Val((key: variant, inner: nested.shape))
+            }
         }
         else -> {}
     }

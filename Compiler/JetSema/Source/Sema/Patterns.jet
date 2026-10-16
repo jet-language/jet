@@ -1188,10 +1188,12 @@ fn sema_pattern_report_retired_outcome(pattern: Pattern, subject_ty: Type, env: 
             if slots.len() != 1 -> return
             normalized_ty :: sema_pattern_unwrap_tags(subject_ty)
             if normalized_ty == .Result(ok, _) && variant == "Ok" && leading_dot {
-                if sema_pattern_is_option(sema_pattern_unwrap_tags(ok)) && slots[0] == .Nested(state) {
-                    if sema_pattern_names_optional_state(state) {
-                        &diagnostics.push(sema_pattern_retired_outcome_diagnostic(span, state, subject_ty))
-                        return
+                if sema_pattern_is_option(sema_pattern_unwrap_tags(ok)) {
+                    if slots[0] == .Nested(state) {
+                        if sema_pattern_names_optional_state(state) {
+                            &diagnostics.push(sema_pattern_retired_outcome_diagnostic(span, state, subject_ty))
+                            return
+                        }
                     }
                 }
             }

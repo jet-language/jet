@@ -3882,7 +3882,9 @@ fn jet_driver_comptime_fold(expression: TExpr, values: [SemaComptimeItemValue]) 
         .StrLit(parts) -> {
             if expression.ty != Type.String -> return None
             if parts.len() == 0 -> return Val(TComptimeValue.String{value: ""})
-            if parts.len() == 1 && parts[0] == .Literal(text) -> return Val(TComptimeValue.String{value: text})
+            if parts.len() == 1 {
+                if parts[0] == .Literal(text) -> return Val(TComptimeValue.String{value: text})
+            }
         }
         // A checked literal that already carries its value (D-INTBIG1: an
         // integer outside the i64 range is a BigInt constant; a `$` fact read

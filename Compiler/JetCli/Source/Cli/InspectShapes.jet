@@ -174,7 +174,9 @@ fn jet_cli_shape_marker(markers: [Marker], name: String) -> Marker? Never! {
 fn jet_cli_shape_static_string(argument: MarkerCallArg) -> String? Never! {
     if argument == .Expr(expression) {
         if expression == .Str(parts, _) {
-            if parts.len() > 0 && parts[0] == .Lit(text) -> return Val(text)
+            if parts.len() > 0 {
+                if parts[0] == .Lit(text) -> return Val(text)
+            }
         }
     }
     None

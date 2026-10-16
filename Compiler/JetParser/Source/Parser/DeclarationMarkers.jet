@@ -205,7 +205,9 @@ fn parser_layout_grouped_fact(state: &JetParserState, marker: Marker, is_enum: B
 fn parser_layout_align_call(value: Expr) -> Call? {
     if value == .Call(call) && call.name == "align" {
         if call.args.len() == 1 -> return Val(call)
-        if call.args.len() == 2 && call.args[0].expr == .Ident(name, _) && name == "target" -> return Val(call)
+        if call.args.len() == 2 {
+            if call.args[0].expr == .Ident(name, _) && name == "target" -> return Val(call)
+        }
     }
     None
 }

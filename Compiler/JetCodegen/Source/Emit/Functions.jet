@@ -3123,7 +3123,9 @@ fn jet_rust_emit_codec_call_allowed(ctx: &JetRustEmitContext, codec: MIRSerdeCod
     }
     id :: target ?? return false
     if jet_rust_emit_function_index(ctx, id) == .Val(candidate_index) {
-        if ctx.program.functions[candidate_index].id == id && ctx.program.functions[candidate_index].form == .TraitMethod(_, _, _, serde) -> return serde == codec
+        if ctx.program.functions[candidate_index].id == id {
+            if ctx.program.functions[candidate_index].form == .TraitMethod(_, _, _, serde) -> return serde == codec
+        }
     }
     false
 }
