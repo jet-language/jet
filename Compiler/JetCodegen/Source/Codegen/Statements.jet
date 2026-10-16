@@ -533,7 +533,14 @@ fn jet_codegen_lower_pattern_match(builder: &JetCodegenBuilder, program: JetCode
     window :: jet_codegen_pattern_window(builder, program, subject_value)
     // A read window tests a place nothing changes during the match (a read
     // parameter's, or a stable root's): no copy keeps the subject stable.
-    if clone_subject && jet_codegen_read_window_of(builder, program, subject_value) == None {
+    // Neither does a plain place read (a local or a stored field path): its
+    // ReadPlace already stands for a copy, every payload binding stores its
+    // own payload (copying that payload only, or taking it once the MIR
+    // last-use pass moves the subject's dead root), and every test runs
+    // before any arm body can change the place. Only a computed subject
+    // keeps the checked copy.
+    plain_read :: window == None && jet_codegen_plain_place_path(subject)
+    if clone_subject && !plain_read && jet_codegen_read_window_of(builder, program, subject_value) == None {
         subject_value = jet_codegen_emit_value(&builder, program, span, subject.ty, MIROperation.Copy{value: subject_value, fact: MIRCopyFact.Materialize})
         // The copy tests the same place, so its payload bindings still alias it.
         if window == .Val(place) -> &builder.pattern_windows.push(JetCodegenPatternWindow{value: subject_value, place: place})
