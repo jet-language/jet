@@ -538,9 +538,9 @@ fn sema_output_fact_with_solved_effects(output: ^ResolvedOutput, graph: SemaRegi
     key :: symbol_id(SymbolKind.Function, modules[target].module_identity, "", fact.semantic_name).key
     function_index :: rows[target].get(key) ?? return fact
     declaration_span := Span?{None}
-    loop function_index in 0..<graph.modules[target].functions.len() {
-        if graph.modules[target].functions[function_index].symbol.id.key == key {
-            declaration_span = graph.modules[target].functions[function_index].declaration.return_type_span
+    loop declared_index in 0..<graph.modules[target].functions.len() {
+        if graph.modules[target].functions[declared_index].symbol.id.key == key {
+            declaration_span = graph.modules[target].functions[declared_index].declaration.return_type_span
             break
         }
     }
