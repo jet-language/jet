@@ -300,7 +300,9 @@ fn sema_statement_tail_store_init() -> SemaStatementTailStore Never! {
 
 fn sema_statement_tail_store_add_body(store: &SemaStatementTailStore, statements: [Stmt]) -> Int Never! {
     body_id := store.bodies.len()
-    &store.bodies.push(SemaStatementTailBody{statements: statements, last_reads: [String:Int]{}})
+    // copy: the checker's statement lists are read parameters (the program
+    // keeps them), and live-after queries outlive this frame's borrow of them.
+    &store.bodies.push(SemaStatementTailBody{statements: statements.copy(), last_reads: [String:Int]{}})
     body_id
 }
 

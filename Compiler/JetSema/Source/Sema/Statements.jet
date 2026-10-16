@@ -4472,10 +4472,13 @@ fn sema_stmt_check_loop_step(step: Stmt, environment: SemaScopeEnvironment, prog
 }
 
 
-// Leave a statement list: drop its lambda tail frames and, when it entered
-// one source nesting level, that level.
-fn sema_stmt_leave_statements(context: &SemaCheckContext, depth: Int, nested: Bool) Never! {
+// Leave a statement list: drop its lambda tail frames and its tail body (and
+// any a nested list left; bodies are added and dropped in stack order, and no
+// frame refers to one past its list) and, when it entered one source nesting
+// level, that level.
+fn sema_stmt_leave_statements(context: &SemaCheckContext, tail_store: &SemaStatementTailStore, depth: Int, body_id: Int, nested: Bool) Never! {
     loop context.lambda_statement_tails.len() > depth -> _ := &context.lambda_statement_tails.pop()
+    loop tail_store.bodies.len() > body_id -> _ := &tail_store.bodies.pop()
     if nested -> sema_leave_source_nesting(&context)
 }
 
@@ -5239,12 +5242,12 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                             !valid -> complete = false
                             else -> {
                                 start_tir :: start_value ?? {
-                                    sema_stmt_leave_statements(&context, tail_frame_depth, entered_nesting)
+                                    sema_stmt_leave_statements(&context, &tail_store, tail_frame_depth, tail_body_id, entered_nesting)
                                     sema_stmt_restore_statement_scopes(&scopes, previous_return_type, previous_failure_carrier, previous_loop_depth)
                                     return SemaStatementResult{value: output, complete: false}
                                 }
                                 end_tir :: end_value ?? {
-                                    sema_stmt_leave_statements(&context, tail_frame_depth, entered_nesting)
+                                    sema_stmt_leave_statements(&context, &tail_store, tail_frame_depth, tail_body_id, entered_nesting)
                                     sema_stmt_restore_statement_scopes(&scopes, previous_return_type, previous_failure_carrier, previous_loop_depth)
                                     return SemaStatementResult{value: output, complete: false}
                                 }
@@ -5437,12 +5440,12 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                     init_tir == None || !cond_valid || !nested.complete || !step_valid || !loop_scope_valid -> complete = false
                     else -> {
                         init_value :: init_tir ?? {
-                            sema_stmt_leave_statements(&context, tail_frame_depth, entered_nesting)
+                            sema_stmt_leave_statements(&context, &tail_store, tail_frame_depth, tail_body_id, entered_nesting)
                             sema_stmt_restore_statement_scopes(&scopes, previous_return_type, previous_failure_carrier, previous_loop_depth)
                             return SemaStatementResult{value: output, complete: false}
                         }
                         cond_value :: cond_tir ?? {
-                            sema_stmt_leave_statements(&context, tail_frame_depth, entered_nesting)
+                            sema_stmt_leave_statements(&context, &tail_store, tail_frame_depth, tail_body_id, entered_nesting)
                             sema_stmt_restore_statement_scopes(&scopes, previous_return_type, previous_failure_carrier, previous_loop_depth)
                             return SemaStatementResult{value: output, complete: false}
                         }
@@ -5643,7 +5646,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
         sema_stmt_note_silent_incomplete(statements[index], statement_complete, complete, diagnostics, statement_diagnostics, &context, statement_reasons)
         index += 1
     }
-    sema_stmt_leave_statements(&context, tail_frame_depth, entered_nesting)
+    sema_stmt_leave_statements(&context, &tail_store, tail_frame_depth, tail_body_id, entered_nesting)
     scopes.return_type = previous_return_type
     scopes.failure_carrier = previous_failure_carrier
     scopes.loop_depth = previous_loop_depth

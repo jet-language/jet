@@ -946,9 +946,10 @@ fn sema_expression_lambda_bound_escapes(binding: Binding, statements: [Stmt], st
     tail_count := context.lambda_statement_tails.len()
     last_tail := tail_count - 1
     loop tail_index < last_tail {
-        frame :: context.lambda_statement_tails[tail_index]
-        tail :: tail_store.bodies[frame.body_id]
-        if sema_expression_lambda_bound_tail_use(tail.statements, frame.start_index, binding.name, &saw_use) -> return Val(true)
+        // The tail body is read in place: binding it copied its statements.
+        body_id :: context.lambda_statement_tails[tail_index].body_id
+        tail_start :: context.lambda_statement_tails[tail_index].start_index
+        if sema_expression_lambda_bound_tail_use(tail_store.bodies[body_id].statements, tail_start, binding.name, &saw_use) -> return Val(true)
         tail_index += 1
     }
     if !saw_use -> return Val(true)
