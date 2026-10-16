@@ -979,13 +979,16 @@ fn lower_helper_map_find(p: MIRProgram, m: &LowerModule, glue: LowerGlue, shape:
 // Moves the key and value in: an existing key keeps its entry key (the
 // incoming one is dropped) and its value is replaced, dropped by map.set and
 // returned in an Option box by map.insert (null when the key was new).
+// map.increment's count is a word it adds; the key is taken.
 fn lower_helper_map_insert(p: MIRProgram, m: &LowerModule, glue: LowerGlue, shape: LowerMapShape, returns_old: Bool) -> LIRFunction Never! {
     result :: if returns_old -> Val(lir_layout_pointer()) else -> None
-    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lower_map_key_layout(p, shape), lower_map_value_layout(p, shape)}, result)
+    increments :: glue.helper == "map.increment"
+    taken := [LIRDrop]{LIRDrop.Trivial, lower_drop(&m, lower_repr(p, shape.key), true)}
+    if !increments -> &taken.push(lower_drop(&m, lower_repr(p, shape.value), true))
+    f := lower_helper_start_taking(&m, glue, [LIRLayout]{lir_layout_pointer(), lower_map_key_layout(p, shape), lower_map_value_layout(p, shape)}, taken, result)
     map :: f.open_params[0].copy()
     key :: f.open_params[1].copy()
     value :: f.open_params[2].copy()
-    increments :: glue.helper == "map.increment"
     index :: lower_word(&f)
     lower_call_helper(&m, &f, "map.find", glue.ty, [LIRValueID]{map, key}, Val(index))
     zero :: lower_const(&f, 0)

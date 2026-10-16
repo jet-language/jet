@@ -138,10 +138,12 @@ fn lower_capture_address(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
 }
 
 // `Capture(slot)`: the captured value, read from its cell (an inline
-// aggregate's value is the cell itself).
+// aggregate's value is the cell itself). The value stays the closure box's
+// (its release helper drops it): the body reads it in place, a borrow with
+// no drop glue of its own, never a second owner.
 fn lower_capture(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, slot: Int) Never! {
     ty :: lower_checked_type(c, instruction) ?? return lower_alias_absent(&f, instruction)
-    if lower_repr_layout(lower_repr(p, ty)) == None -> return lower_alias_absent(&f, instruction)
+    layout :: lower_repr_layout(lower_repr(p, ty)) ?? return lower_alias_absent(&f, instruction)
     address :: lower_capture_address(p, c, &m, &f, slot) ?? return
     index :: lower_capture_index(c.mir, slot)
     if c.mir.capture_params[index].place_only {
@@ -152,7 +154,9 @@ fn lower_capture(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
         return lower_alias_absent(&f, instruction)
     }
     if lower_is_inline(p, ty) -> return lower_alias(c, &f, instruction, address)
-    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    result :: instruction.result ?? return
+    dst :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
+    lower_define(c, &f, result, dst)
     lower_read_into(p, &f, dst, address, 0, ty)
 }
 

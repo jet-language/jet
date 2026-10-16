@@ -776,11 +776,13 @@ fn lower_helper_list_join(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LI
     lir_builder_finish(f.builder)
 }
 
+// The pushed value is taken over (lower_helper_start_taking).
 fn lower_helper_list_push(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     elem :: lower_list_element(glue.ty) ?? panic("list.push helper has no List type")
     params := [LIRLayout]{lir_layout_pointer()}
     if lower_repr_layout(lower_repr(p, elem)) == .Val(layout) -> &params.push(layout)
-    f := lower_helper_start(&m, glue, params, None)
+    taken :: lower_drop(&m, lower_repr(p, elem), true)
+    f := lower_helper_start_taking(&m, glue, params, [LIRDrop]{LIRDrop.Trivial, taken}, None)
     list :: f.open_params[0].copy()
     incoming :: if f.open_params.len() == 2 -> Val(f.open_params[1].copy()) else -> None
     length :: lower_list_reserve(p, &m, &f, list, elem)
@@ -1189,10 +1191,12 @@ fn lower_helper_list_index_of(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -
 
 // `xs.insert(at, value)` (Collections.rs jet_list_insert_kernel): a position
 // in 0...len, else the List bounds stop; later elements move up one slot.
+// The inserted value is taken over (lower_helper_start_taking).
 fn lower_helper_list_insert(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     elem :: lower_list_element(glue.ty) ?? panic("list.insert helper has no List type")
     value_layout :: lower_repr_layout(lower_repr(p, elem)) ?? lir_layout_pointer()
-    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_word(), value_layout}, None)
+    taken :: lower_drop(&m, lower_repr(p, elem), true)
+    f := lower_helper_start_taking(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_word(), value_layout}, [LIRDrop]{LIRDrop.Trivial, LIRDrop.Trivial, taken}, None)
     list :: f.open_params[0].copy()
     index :: f.open_params[1].copy()
     value :: f.open_params[2].copy()

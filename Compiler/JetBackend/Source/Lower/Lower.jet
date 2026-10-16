@@ -2312,13 +2312,14 @@ fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact
     plan := LowerReleasePlan{after: [U64:[MIRValueID]]{}, edges: [Int:[MIRValueID]]{}, candidates: [U64:Bool]{}, bound: [U64:Bool]{}, write_drops: [U64:Bool]{}, slot_edges: [Int:[Int]]{}, slot_returns: [Int:[Int]]{}, taken: [U64:Bool]{}}
     count :: function.blocks.len()
     pinned := [U64:Bool]{}
+    // The values a place's projections compute it from (an index, a range,
+    // a map key): each instruction naming the place reads them, as an
+    // operand of its own (lower_release_projection_operands).
+    place_operands := [U64:[MIRValueID]]{}
     loop place in function.places {
         if place.base == .Parameter(value) | .Capture(value) -> _ := &pinned.add(value.value, true)
-        loop projection in place.projections {
-            if projection == .Index(_, index, _, _, _, _, _) -> _ := &pinned.add(index.value, true)
-            if projection == .Range(range, _, _) -> _ := &pinned.add(range.value, true)
-            if projection == .MapLookup(lookup, _, _) -> _ := &pinned.add(lookup.value, true)
-        }
+        operands :: lower_release_projection_operands(place)
+        if operands.len() > 0 -> _ := &place_operands.add(place.id.value, operands)
     }
     bound_locals := [U64:Bool]{}
     // Values read through a place of their own (lower_release_slot_places):
@@ -2370,8 +2371,10 @@ fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact
                 kind :: lower_release_use_kind(p, m, function, fact_index, iter_takes, instruction, value, consumed)
                 lower_release_add_use(&uses, value, LowerReleaseUse{block: block, position: position, kind: kind})
             }
-            if slot_places.len() > 0 {
+            if slot_places.len() > 0 || place_operands.len() > 0 {
                 loop place in lower_instruction_places(instruction.operation) {
+                    operands :: place_operands.get(place.value) ?? [MIRValueID]{}
+                    loop operand in operands -> lower_release_add_use(&uses, operand, LowerReleaseUse{block: block, position: position, kind: LOWER_RELEASE_BORROW})
                     value :: slot_places.get(place.value) ?? next
                     projected :: projected_places.get(place.value) != None
                     kind :: lower_release_place_kind(function, fact_index, sunk, instruction, place, projected)
@@ -2412,6 +2415,8 @@ fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact
                 if lower_native_err_type(p, function.values[base_row].ty) -> next
             }
             if lower_release_member_read(instruction.operation) && lower_close_method(p, m.close_methods, function.values[fact_row].ty) != None -> next
+            // A view slice points into its base: it owns nothing to release.
+            if instruction.operation == .Slice(_, _, _, _, _, _) && lower_view_element(function.values[fact_row].ty) != None -> next
             if dead.get(result.value) != None {
                 lower_release_add(&plan.after, instruction.id.value, result)
                 _ := &plan.candidates.add(result.value, true)
@@ -2432,6 +2437,19 @@ fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact
 // natively, as an exact Int is.
 fn lower_release_copy_local(p: MIRProgram, ownership: MIROwnership, ty: MIRType) -> Bool Never! {
     ownership.mode == MIROwnershipMode.Copy && lower_is_owned(ownership) && lower_repr(p, ty) == .ExactInt
+}
+
+// The values a place's projections read whenever an instruction lowers the
+// place (Places.jet walks them for each naming instruction; an address
+// taken of the place is computed once, by the instruction that takes it).
+fn lower_release_projection_operands(place: MIRPlace) -> [MIRValueID] Never! {
+    operands := [MIRValueID]{}
+    loop projection in place.projections {
+        if projection == .Index(_, index, _, _, _, _, _) -> &operands.push(index)
+        if projection == .Range(range, _, _) -> &operands.push(range)
+        if projection == .MapLookup(lookup, _, _) -> &operands.push(lookup)
+    }
+    operands
 }
 
 // The places a value is read through -> that value: the root places of the
@@ -2543,14 +2561,17 @@ fn lower_release_terminator_kind(terminator: MIRTerminator) -> Int Never! {
 
 // Operations whose owned result, when lowered to a fresh LIR value, owns its
 // storage outright: a call or builder result, a new aggregate, a constant or
-// clone, arithmetic, a loop range cursor or value, a phi of owned values, and
-// an owned member or element read (a copy of its own, or a take that clears
-// the member in its carrier: lower_read_member, lower_index_result).
+// clone, arithmetic, a String or copied List slice, a loop cursor or range
+// value, a phi of owned values, and an owned member or element read (a copy
+// of its own, or a take that clears the member in its carrier:
+// lower_read_member, lower_index_result). MIR drops an iterator loop's
+// cursor where the loop ends, not on an early exit out of its body.
 fn lower_release_producer(operation: MIROperation) -> Bool Never! {
     if operation == {
         .Call(_, _, _) | .IndirectCall(_, _, _) | .CoreCall(_, _, _, _, _, _) | .BuildString(_) | .BuildList(_, _) | .BuildMap(_) -> true
         .Struct(_, _) | .Tuple(_, _) | .Enum(_, _, _) | .Present(_) | .ResultOk(_) | .ResultErr(_) | .TraitBox(_, _) | .Closure(_, _, _) -> true
-        .Constant(_) | .Global(_) | .Copy(_, _) | .Binary(_, _, _, _, _) | .Unary(_, _) | .Convert(_, _, _, _) | .Range(_, _, _) | .LoopRangeInit(_, _, _, _, _) | .LoopRangeValue(_, _) | .Phi(_) -> true
+        .Constant(_) | .Global(_) | .Copy(_, _) | .Binary(_, _, _, _, _) | .Unary(_, _) | .Convert(_, _, _, _) | .Range(_, _, _) | .Slice(_, _, _, _, _, _) -> true
+        .LoopRangeInit(_, _, _, _, _) | .LoopRangeValue(_, _) | .LoopIterInit(_, _, _, _, _) | .Phi(_) -> true
         .MovePlace(_) | .Move(_) -> true
         .Semantic(semantic) -> lower_release_semantic_producer(semantic)
         else -> lower_release_member_read(operation)
@@ -2601,6 +2622,15 @@ fn lower_release_use_kind(p: MIRProgram, m: LowerModule, function: MIRFunction, 
         // List or Map index only reads its key.
         .Field(_, _) | .EnumPayload(_, _, _, _) | .OptionValue(_) | .ResultValue(_, _) | .ProjectMembers(_, _) -> lower_release_member_kind(function, fact_index, instruction)
         .Index(_, base, _, _, _, _, _) -> if base == value -> lower_release_member_kind(function, fact_index, instruction) else -> LOWER_RELEASE_BORROW
+        // A String or copied List slice copies out of its base; a view
+        // points into it (lower_slice). Its bounds are only read.
+        .Slice(_, base, _, _, _, _) -> {
+            if base != value -> return LOWER_RELEASE_BORROW
+            result :: instruction.result ?? return LOWER_RELEASE_BORROW
+            row :: fact_index.get(result.value) ?? return LOWER_RELEASE_KEEP
+            if lower_view_element(function.values[row].ty) != None -> return LOWER_RELEASE_ALIAS
+            LOWER_RELEASE_BORROW
+        }
         // lower_copy clones into an owned result, except an inline aggregate
         // no consumer takes, which it aliases.
         .Copy(_, _) -> {
@@ -3768,10 +3798,14 @@ fn lower_open_defines(f: LowerFunction, index: Int, from: Int) -> Bool Never! {
 
 // Builtin runtime routes that only read their operands and return a scalar
 // or a fresh value (Lists.jet, Strings.jet, Maps.jet, TextBytes.jet; a
-// string split Iter holds copies of its text and separator, Text.jet): a
-// temporary they read is still the caller's to release once their owned
-// result no longer needs it.
-LOWER_RELEASE_BORROWING_BUILTINS :: [String]{"jet_list_len", "jet_list_is_empty", "jet_list_join", "jet_list_contains", "jet_char_len", "jet_string_count_bytes", "jet_string_is_empty", "jet_string_contains", "jet_string_starts_with", "jet_string_ends_with", "jet_string_bytes", "jet_string_replace", "jet_string_repeat", "jet_string_from_bytes", "jet_string_from_bytes_lossy", "jet_iter_string_split", "jet_iter_string_rsplit", "jet_map_len", "jet_map_is_empty", "jet_map_get_opt", "jet_map_has_key"}
+// string split Iter holds copies of its text and separator, Text.jet; the
+// Unicode text routes and the `*_view` text cuts copy out what they return,
+// Strings.jet lower_route_symbol; `==` compares in place, Builtins.jet
+// lower_core_equal and Strings.jet lower_string_method; index_of only
+// compares its needle, Lists.jet lower_helper_list_index_of): a temporary
+// they read is still the caller's to release once their owned result no
+// longer needs it.
+LOWER_RELEASE_BORROWING_BUILTINS :: [String]{"jet_eq", "jet_list_len", "jet_list_is_empty", "jet_list_join", "jet_list_contains", "jet_list_index_of", "jet_char_len", "jet_string_count_bytes", "jet_string_is_empty", "jet_string_contains", "jet_string_starts_with", "jet_string_ends_with", "jet_string_bytes", "jet_string_replace", "jet_string_repeat", "jet_string_from_bytes", "jet_string_from_bytes_lossy", "jet_string_after", "jet_string_before", "jet_string_after_view", "jet_string_before_view", "jet_string_trim_view", "jet_unicode_trim", "jet_unicode_trim_view", "jet_unicode_lower", "jet_unicode_upper", "jet_unicode_index_of", "jet_unicode_last_index_of", "jet_unicode_count", "jet_iter_string_split", "jet_iter_string_rsplit", "jet_map_len", "jet_map_is_empty", "jet_map_get_opt", "jet_map_has_key"}
 
 // Releases an owned temporary (lower_release_plan) unless its lowering made
 // no fresh owner of it (lower_mark_releasable), a slot holds its LIR value
@@ -6742,10 +6776,21 @@ fn lower_call_helper(m: &LowerModule, f: &LowerFunction, name: String, ty: MIRTy
 // with the entry block open and its parameters (one per `params` layout) in
 // `f.open_params`; read them before sealing the entry block.
 fn lower_helper_start(m: &LowerModule, glue: LowerGlue, params: [LIRLayout], result: LIRLayout?) -> LowerFunction Never! {
+    lower_helper_start_taking(&m, glue, params, [LIRDrop]{}, result)
+}
+
+// lower_helper_start for a helper that takes over some of its arguments (a
+// pushed or inserted value): parameter `i` carries `taken[i]`'s drop glue
+// (Trivial, or missing, for a borrowed one), so the LIR states the hand-off
+// at every call and the helper's body ends what it took.
+fn lower_helper_start_taking(m: &LowerModule, glue: LowerGlue, params: [LIRLayout], taken: [LIRDrop], result: LIRLayout?) -> LowerFunction Never! {
     signature :: lower_signature(&m, params, result)
     f := lower_new_function(glue.id, "helper.{glue.helper}.{glue.key}", signature, MIRBlockID{value: U64.MAX})
     entry_params := [LIRValueID]{}
-    loop layout in params -> &entry_params.push(lower_new_value(&f, layout, LIRDrop.Trivial, None))
+    loop (position, layout) in params {
+        drop :: if position < taken.len() -> taken[position].copy() else -> LIRDrop.Trivial
+        &entry_params.push(lower_new_value(&f, layout, drop, None))
+    }
     entry :: lower_new_block(&f)
     lower_start(&f, entry, entry_params)
     f
