@@ -9,6 +9,7 @@ use jet_foundation.[
     MIRPanicLoc,
     MIRPanicLocal,
     MIRPlaceID,
+    MIRProjection,
     Span,
     TDestructureBinding,
     TExpr,
@@ -17,7 +18,24 @@ use jet_foundation.[
     mir_source_file_id,
 ]
 
+// D-MEM-COPYSEM1: a copying destructure of a read parameter's place, or of a
+// place whose root the bindings' scope leaves alone
+// (jet_codegen_stable_element_lets), binds each immutable name as a read
+// alias of its field in place: each read holds what the copy would, and a
+// consuming use copies the field (jet_codegen_unmovable_place).
 fn jet_codegen_lower_field_destructure(builder: &JetCodegenBuilder, program: JetCodegenProgram, temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span) {
+    if !move_fields && jet_codegen_scope_end_close_function(builder, program, init.ty) == None {
+        if jet_codegen_destructure_window(&builder, program, init, binds, span) == .Val(window) {
+            _ := &builder.read_windows.add(window.value, true)
+            loop binding in binds {
+                field_type := jet_codegen_checked_host_field_type(builder, program, init.ty, binding.field)
+                field_id := jet_codegen_host_field_id(builder, program, init.ty, binding.field)
+                field_place := jet_codegen_project_window_place(&builder, program, window, MIRProjection.Field{field: field_id, span: span}, field_type, span)
+                _ := jet_codegen_bind_local_alias(&builder, program, binding.local, field_type, field_place, false)
+            }
+            return
+        }
+    }
     subject := if {
         !move_fields && jet_codegen_scope_end_close_function(builder, program, init.ty) != None -> {
             source_place := jet_codegen_lower_expression_place(&builder, program, init, MIRAccess.Read)
@@ -65,6 +83,18 @@ fn jet_codegen_lower_field_destructure(builder: &JetCodegenBuilder, program: Jet
         _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: destination, value: value})
     }
     if temporary == .Val(place) -> jet_codegen_finish_owned_destructure(&builder, program, place, init.ty, binds, span)
+}
+
+// The read window a copying destructure aliases: every name is immutable and
+// `init` names a read parameter's place or a stable place.
+fn jet_codegen_destructure_window(builder: &JetCodegenBuilder, program: JetCodegenProgram, init: TExpr, binds: [TDestructureBinding], span: Span) -> MIRPlaceID? {
+    loop binding in binds {
+        if binding.local.mutable || binding.local.generated -> return None
+    }
+    window :: jet_codegen_read_window_place(&builder, program, init)
+    if window != None -> return window
+    if builder.stable_element_lets.get(jet_codegen_destructure_key(span)) != (Val(true)) -> return None
+    jet_codegen_stable_window_place(&builder, program, init)
 }
 
 // Retire the whole-owner cleanup after moving fields; omitted fields still

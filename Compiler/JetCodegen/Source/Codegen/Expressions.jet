@@ -5958,8 +5958,10 @@ fn jet_codegen_write_pattern_binding(builder: &JetCodegenBuilder, program: JetCo
 // generated local a hoisted switch aliases to one, is a write window: the
 // variant tests read the place, and every payload binding aliases it through
 // `MIRProjection.Payload`, so edits reach the owner's storage, never a copy.
-// D-MEM-COPYSEM1: a subject naming a read parameter's place is a read window
-// the same way, so testing it never copies the whole subject.
+// D-MEM-COPYSEM1: a subject naming a read parameter's place, or a place whose
+// root the bindings' scopes leave alone (jet_codegen_stable_element_lets), is
+// a read window the same way, so neither testing it nor binding its payloads
+// copies the subject.
 fn jet_codegen_lower_pattern_subject(builder: &JetCodegenBuilder, program: JetCodegenProgram, subject: TExpr) -> MIRValueID {
     window := MIRPlaceID?{None}
     if subject.kind == {
@@ -5972,7 +5974,8 @@ fn jet_codegen_lower_pattern_subject(builder: &JetCodegenBuilder, program: JetCo
         else -> {}
     }
     if window == None {
-        read :: jet_codegen_lower_read_window(&builder, program, subject)
+        stable :: builder.stable_element_lets.get(jet_codegen_pattern_subject_key(subject)) == (Val(true))
+        read :: jet_codegen_lower_read_window(&builder, program, subject, stable)
         if read == .Val(value) -> return value
     }
     place :: window ?? return jet_codegen_lower_expr(&builder, program, subject)
@@ -5982,18 +5985,46 @@ fn jet_codegen_lower_pattern_subject(builder: &JetCodegenBuilder, program: JetCo
 }
 
 // D-MEM-COPYSEM1: read `subject` as a read window when it names a read
-// parameter's place; None leaves the subject to the ordinary value path.
+// parameter's place, or (`stable`: its bindings leave the root alone) a
+// place over a stable root (jet_codegen_stable_window_place); None leaves the
+// subject to the ordinary value path.
 // A Core subject with a native Rust carrier keeps the value path: the
 // carrier can hold a payload in a host representation (Dyn.Int is i64)
 // that only the checked payload readers widen, so an aliased payload place
 // would read the wrong type.
-fn jet_codegen_lower_read_window(builder: &JetCodegenBuilder, program: JetCodegenProgram, subject: TExpr) -> MIRValueID? {
+fn jet_codegen_lower_read_window(builder: &JetCodegenBuilder, program: JetCodegenProgram, subject: TExpr, stable: Bool) -> MIRValueID? {
     if subject.ty == .Named(name) && jet_rust_emit_core_rust_type_name(name) != None -> return None
-    place :: jet_codegen_read_window_place(&builder, program, subject) ?? return None
-    value := jet_codegen_emit_value(&builder, program, subject.span, subject.ty, MIROperation.ReadPlace{place: place})
-    _ := &builder.read_windows.add(place.value, true)
-    &builder.pattern_windows.push(JetCodegenPatternWindow{value: value, place: place})
+    place := jet_codegen_read_window_place(&builder, program, subject)
+    if place == None && stable -> place = jet_codegen_stable_window_place(&builder, program, subject)
+    window :: place ?? return None
+    value := jet_codegen_emit_value(&builder, program, subject.span, subject.ty, MIROperation.ReadPlace{place: window})
+    _ := &builder.read_windows.add(window.value, true)
+    &builder.pattern_windows.push(JetCodegenPatternWindow{value: value, place: window})
     Val(value)
+}
+
+// D-MEM-COPYSEM1: the place a pattern subject names when it is a chain of
+// stored fields and plain List reads (jet_codegen_is_element_place_chain)
+// over a stable root (jet_codegen_stable_root). The caller proved the
+// bindings' scopes never change, move, or capture that root
+// (jet_codegen_stable_element_lets), so each read of a binding aliasing the
+// subject's payload holds what a copy made at the binding would. The index
+// operands are evaluated once, here, as reading the subject would.
+fn jet_codegen_stable_window_place(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr) -> MIRPlaceID? {
+    if expression.kind == {
+        .Clone(inner, _) -> return jet_codegen_stable_window_place(&builder, program, inner)
+        .Borrow(inner, access) -> {
+            if access == AccessConvention.Read -> return jet_codegen_stable_window_place(&builder, program, inner)
+        }
+        else -> {}
+    }
+    if !jet_codegen_is_element_place_chain(builder, program, expression) || jet_codegen_element_chain_constant(builder, program, expression) -> return None
+    // Settle the root before lowering anything: lowering the place evaluates
+    // its index operands, so a refusal after it would evaluate them twice.
+    root :: jet_codegen_element_place_root(expression) ?? return None
+    local_place :: jet_codegen_lower_local_place(&builder, program, root)
+    if !jet_codegen_stable_root(builder, program, root, local_place) -> return None
+    jet_codegen_lower_expression_place(&builder, program, expression, MIRAccess.Read)
 }
 
 // The read-window place `value` was lowered from, if any.
@@ -6027,11 +6058,13 @@ fn jet_codegen_read_window_place(builder: &JetCodegenBuilder, program: JetCodege
 // (`row :: graph.modules[i]`, `item :: row.items[j].field`) is aliased in
 // place: the parameter cannot change while the function runs, so each read of
 // the element holds exactly what a copy made at the binding would, and
-// binding it never copies the element. So is a place whose root the binding's
-// scope leaves alone (`stable_root`, jet_codegen_stable_alias_root). The index
-// operands are evaluated once, here, as reading the value would; the bounds
-// check runs where the element is read, as MIRRust renders the window place at
-// each use.
+// binding it never copies the element. So is a field or element place below a
+// root the binding's scope leaves alone (`stable_root`,
+// jet_codegen_stable_root): `g :: program.graph`, `row :: rows[i]`; such a
+// place becomes a read window, so a pattern over the binding aliases it too.
+// The index operands are evaluated once, here, as reading the value would;
+// the bounds check runs where the element is read, as MIRRust renders the
+// window place at each use.
 fn jet_codegen_read_binding_place(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, stable_root: Bool) -> MIRPlaceID? {
     window :: jet_codegen_read_window_place(&builder, program, expression)
     if window != None -> return window
@@ -6045,51 +6078,44 @@ fn jet_codegen_read_binding_place(builder: &JetCodegenBuilder, program: JetCodeg
     root :: jet_codegen_element_place_root(element) ?? return None
     local_place := jet_codegen_lower_local_place(&builder, program, root)
     root_place := jet_codegen_place_access(&builder, program, local_place, MIRAccess.Read)
-    if !jet_codegen_read_parameter_place(builder, program, root_place) {
-        if !stable_root || !jet_codegen_stable_alias_root(builder, program, root, local_place, element) -> return None
+    if jet_codegen_read_parameter_place(builder, program, root_place) {
+        // Every link below the root is a stored field or a List index, so
+        // the lowered place stays rooted at the root's own storage.
+        return jet_codegen_lower_expression_place(&builder, program, element, MIRAccess.Read)
     }
-    // Every link below the root is a stored field or a List index, so the
-    // lowered place stays rooted at the root's own storage.
-    jet_codegen_lower_expression_place(&builder, program, element, MIRAccess.Read)
+    // A whole root is no place below it: binding it stays a copy, which the
+    // MIR pass moves at the root's last use.
+    if !stable_root || element.kind == .Local(_) || !jet_codegen_stable_root(builder, program, root, local_place) -> return None
+    place :: jet_codegen_lower_expression_place(&builder, program, element, MIRAccess.Read) ?? return None
+    _ := &builder.read_windows.add(place.value, true)
+    Val(place)
 }
 
-// D-MEM-COPYSEM1 (Rust `check_binding` read window, E0212): beyond a read
-// parameter, an immutable binding of a list element aliases it when the
-// binding's scope never changes, moves, or captures the element's root once
-// the binding is made (`stable_root`, jet_codegen_stable_element_lets): each
-// read of the alias then holds what a copy made at the binding would, and a
-// consuming use copies the element (jet_codegen_unmovable_place). The root is
-// a write parameter itself (`item :: p.items[j].field`), or the own storage of
-// a local or an owned parameter whose element the binding names
-// (`row :: rows[i]`; Rust materializes a field read of a local), never a
-// window or an alias reaching its owner under another name.
-fn jet_codegen_stable_alias_root(builder: JetCodegenBuilder, program: JetCodegenProgram, root: TLocal, local_place: MIRPlaceID, element: TExpr) -> Bool Never! {
-    if root.persist_key != None || builder.window_aliases.contains(root.name) -> return false
+// D-MEM-COPYSEM1 (Rust `check_binding` read window, E0212): a root whose
+// places an immutable binding may alias when the binding's scope never
+// changes, moves, or captures it once the binding is made
+// (jet_codegen_stable_element_lets): each read of the alias then holds what a
+// copy made at the binding would, and a consuming use copies the aliased
+// place (jet_codegen_unmovable_place). The root is the own storage of a
+// local, or an owned or write parameter, or a read alias of a read window
+// (a payload of a stable pattern subject, `g :: program.graph`), never a
+// write window, a capture, a persistent cell, a split owner (its fields
+// have drops of their own), or another alias reaching its owner under
+// another name.
+fn jet_codegen_stable_root(builder: JetCodegenBuilder, program: JetCodegenProgram, root: TLocal, local_place: MIRPlaceID) -> Bool Never! {
+    if root.persist_key != None || builder.window_aliases.contains(root.name) || builder.partial_move_roots.get(root.name) != None -> return false
     binding :: jet_codegen_find_binding_for_local(builder, program, root) ?? return false
-    if binding.place != local_place || builder.read_alias_places.get(local_place.value) != None -> return false
+    if binding.place != local_place -> return false
+    if builder.read_alias_places.get(local_place.value) != None -> return builder.read_windows.get(local_place.value) != None
     row :: jet_codegen_find_place(builder, program, local_place) ?? return false
     if row.projections.len() > 0 -> return false
-    element_read :: if element.kind == {
-        .Index(_, _, _, _, _, _) -> true
-        else -> false
-    }
     if row.base == {
         .Parameter(value) -> {
             access :: jet_codegen_parameter_value_access(builder, program, value) ?? return false
-            if access == MIRAccess.Write -> return jet_codegen_chain_reads_element(element)
-            return access == MIRAccess.Move && element_read
+            return access == MIRAccess.Write || access == MIRAccess.Move
         }
-        .Local(id) -> return binding.local == id && element_read
+        .Local(id) -> return binding.local == id
         else -> return false
-    }
-}
-
-// Whether a jet_codegen_is_element_place_chain chain indexes a list.
-fn jet_codegen_chain_reads_element(expression: TExpr) -> Bool Never! {
-    if expression.kind == {
-        .Index(_, _, _, _, _, _) -> true
-        .Field(receiver, _) -> jet_codegen_chain_reads_element(receiver)
-        else -> false
     }
 }
 
@@ -6201,7 +6227,9 @@ fn jet_codegen_parameter_value_access(builder: JetCodegenBuilder, program: JetCo
 // D-MEM-COPYSEM1: a place a consuming use copies instead of moving: a read
 // parameter's place, or an element of a container (Rust
 // `lower_receiver_place` never moves an index place; a read alias of an
-// element names one), or any place of a constant read in place (#5001).
+// element names one), or any place of a constant read in place (#5001), or a
+// place at or below the read window a visible read alias names (a payload of
+// a stable pattern subject, `g :: program.graph`): its root still owns it.
 fn jet_codegen_unmovable_place(builder: JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID) -> Bool Never! {
     if jet_codegen_read_parameter_place(builder, program, place) -> return true
     row :: jet_codegen_find_place(builder, program, place) ?? return false
@@ -6210,6 +6238,41 @@ fn jet_codegen_unmovable_place(builder: JetCodegenBuilder, program: JetCodegenPr
     }
     loop projection in row.projections {
         if projection == .Index(_, _, _, _, _, _, _) -> return true
+    }
+    if row.projections.len() == 0 -> return false
+    loop binding in builder.bindings {
+        if builder.read_alias_places.get(binding.place.value) == None || builder.read_windows.get(binding.place.value) == None -> next
+        window :: jet_codegen_find_place(builder, program, binding.place) ?? next
+        if jet_codegen_place_within(window, row) -> return true
+    }
+    false
+}
+
+// Whether `place` names `window` or a place below it: the same base and
+// `window`'s projections as its prefix.
+fn jet_codegen_place_within(window: MIRPlace, place: MIRPlace) -> Bool Never! {
+    if window.base != place.base || window.projections.len() > place.projections.len() -> return false
+    loop (index, projection) in window.projections {
+        if !jet_codegen_same_projection(projection, place.projections[index]) -> return false
+    }
+    true
+}
+
+fn jet_codegen_same_projection(left: MIRProjection, right: MIRProjection) -> Bool Never! {
+    if left == {
+        .Field(field, _) -> {
+            if right == .Field(other, _) -> return field == other
+        }
+        .Payload(kind, _) -> {
+            if right == .Payload(other, _) -> return kind == other
+        }
+        .Index(kind, index, _, _, _, _, _) -> {
+            if right == .Index(other_kind, other_index, _, _, _, _, _) -> return kind == other_kind && index == other_index
+        }
+        .Deref(_) -> {
+            if right == .Deref(_) -> return true
+        }
+        else -> {}
     }
     false
 }
