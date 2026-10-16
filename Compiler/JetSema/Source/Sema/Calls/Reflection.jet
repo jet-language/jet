@@ -213,7 +213,7 @@ fn sema_call_try_reflection_metadata_method(
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "{owner}.{method}", span, [EffectRowEntry]{}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     result_type :: sema_call_reflection_method_return(owner, method, [Type]{Type.String}) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_expr(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: typed.values}}, span)
+    value := sema_tir_node(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: typed.values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
@@ -263,6 +263,6 @@ fn sema_call_try_reflection_handle_method(
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     result_type :: sema_call_reflection_method_return(owner, method, [Type]{}) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
+    value := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }

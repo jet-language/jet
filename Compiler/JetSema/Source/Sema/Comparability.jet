@@ -377,14 +377,14 @@ fn sema_comparability_check_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span
             }
             return rejected
         }
-        return SemaComparabilityBinary{handled: true, value: Val(sema_tir_expr(Type.Bool, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))}
+        return SemaComparabilityBinary{handled: true, value: Val(sema_tir_node(Type.Bool, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))}
     }
     if !sema_type_comparable(environment, program, lhs.ty) {
         &diagnostics.push(sema_error("E0109", span, "{label} can't compare or combine {shown} and {type_name(rhs.ty)}", "{label} is not defined for {shown}", "use an operation supported by {shown}, or call a named method"))
         return rejected
     }
     result_ty := if op == BinOp.Compare -> Type.Named{name: "Ordering"} else -> Type.Bool
-    SemaComparabilityBinary{handled: true, value: Val(sema_tir_expr(result_ty, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))}
+    SemaComparabilityBinary{handled: true, value: Val(sema_tir_node(result_ty, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))}
 }
 
 // Rust `check_assert_eq_call`: both sides share one type (E0108) and that type

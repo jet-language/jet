@@ -167,7 +167,7 @@ fn sema_single_use_check_consume(call: Call, environment: SemaScopeEnvironment, 
         }
         if !sema_ownership_mark_move(&state, argument.expr, scopes, "`consume`", &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    SemaDirectSpecialCheck{handled: true, value: Val(sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Drop{value: value}, call.name_span))}
+    SemaDirectSpecialCheck{handled: true, value: Val(sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Drop{value: value}, call.name_span))}
 }
 
 fn sema_single_use_diag_unconsumed(name: String, span: Span) -> Diagnostic {

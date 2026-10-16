@@ -84,7 +84,7 @@ fn sema_expression_layout_binop_result(op: BinOp, left: Type, right: Type) -> Se
 
 fn sema_expression_layout_literal(value: TExpr) -> TExpr Never! {
     if value.ty == Type.Int || value.ty == Type.Float || value.ty == .InlineRange(_, _, _) {
-        return sema_tir_expr(Type.Named{name: "LengthVar"}, TExprKind.LayoutLiteral{value: value}, value.span)
+        return sema_tir_node(Type.Named{name: "LengthVar"}, TExprKind.LayoutLiteral{value: value}, value.span)
     }
     value.copy()
 }
@@ -110,7 +110,7 @@ fn sema_expr_check_layout_binary(op: BinOp, left: TExpr, right: TExpr, span: Spa
     result_type :: result.result_type ?? return SemaExpressionLayoutBinaryCheck{handled: true, value: None}
     lowered_left :: sema_expression_layout_literal(left)
     lowered_right :: sema_expression_layout_literal(right)
-    value :: if op == BinOp.Add || op == BinOp.Sub -> sema_tir_expr(result_type, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lowered_left, rhs: lowered_right}, span) else -> sema_tir_expr(result_type, TExprKind.LayoutCompare{op: sema_expr_tir_binary_op(op), lhs: lowered_left, rhs: lowered_right}, span)
+    value :: if op == BinOp.Add || op == BinOp.Sub -> sema_tir_node(result_type, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lowered_left, rhs: lowered_right}, span) else -> sema_tir_node(result_type, TExprKind.LayoutCompare{op: sema_expr_tir_binary_op(op), lhs: lowered_left, rhs: lowered_right}, span)
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics)
     SemaExpressionLayoutBinaryCheck{handled: true, value: checked}
 }
@@ -211,7 +211,7 @@ fn sema_call_try_layout_method(receiver: Expr, receiver_value: TExpr, method: St
     ownership := sema_ownership_check_method_call(&state, "{owner}.{method}", receiver, AccessConvention.Read, sema_expression_layout_method_params(required_types), &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> valid = false
     if !valid -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value :: sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.LayoutMethod{method: method}, args: values}, span)
+    value :: sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.LayoutMethod{method: method}, args: values}, span)
     if !sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, "{owner}.{method}", span, sema_expression_layout_call_facts(result_type), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
@@ -249,7 +249,7 @@ fn sema_expression_measurement_source_call(function: String, values: [TExpr], re
     callee :: sema_registration_direct_symbol(graph.modules[source_index], function) ?? return None
     arguments :: loop value in values -> TCallArg{value: value, template_items: [SymbolID]{}, borrow: !sema_call_is_scalar(value.ty), mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
     type_args :: if function == "__measurement_result" && result_type == .Result(_, error) -> [Type]{error} else -> [Type]{}
-    return Val(sema_tir_expr(result_type, TExprKind.Call{callee: callee.symbol.id, type_args: type_args, args: arguments}, span))
+    return Val(sema_tir_node(result_type, TExprKind.Call{callee: callee.symbol.id, type_args: type_args, args: arguments}, span))
     }
     None
 }

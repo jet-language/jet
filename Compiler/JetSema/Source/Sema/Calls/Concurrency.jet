@@ -156,13 +156,13 @@ fn sema_call_concurrency_check_sender(receiver: Expr, receiver_value: TExpr, arg
     ownership := sema_ownership_check_method_call(&state, "send", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     value := payload
-    if updated_args[0].flags.implicit_clone || updated_args[0].flags.shared_auto_clone -> value = sema_tir_expr(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(updated_args[0].flags.shared_auto_clone)}, value.span)
+    if updated_args[0].flags.implicit_clone || updated_args[0].flags.shared_auto_clone -> value = sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(updated_args[0].flags.shared_auto_clone)}, value.span)
     sema_function_reactive_note_channel(&context, updated_args[0].expr, payload_ty)
     lowered := [TExpr]{value}
     // Rust `receiver_effect_leaf("Sender", "send")`: a send may block on a
     // bounded channel, so it records `Time.Wait`.
     if !sema_stream_handle_effect_fact(environment, program, &scopes, &context, "Sender.send", span, Type.Named{name: "Unit"}, "Time.Wait", &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    tir := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.SenderSend, args: lowered}, span)
+    tir := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.SenderSend, args: lowered}, span)
     checked := sema_expr_expected(tir, expected, environment, program, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked}
 }
@@ -207,7 +207,7 @@ fn sema_call_concurrency_parallel(receiver: Expr, receiver_value: TExpr, method:
             &typed.push(limit)
         }
         operation := TClosureOp.ParaMap
-        tir := sema_tir_expr(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: operation, args: typed}, span)
+        tir := sema_tir_node(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: operation, args: typed}, span)
         checked := sema_expr_expected(tir, expected, environment, program, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: checked}
     }
@@ -222,7 +222,7 @@ fn sema_call_concurrency_parallel(receiver: Expr, receiver_value: TExpr, method:
             sema_call_concurrency_reject_parallel_type("item", element, span, environment, program, scopes, context, &diagnostics)
             sema_call_concurrency_reject_parallel_type("result", result_type, span, environment, program, scopes, context, &diagnostics)
             operation := TClosureOp.ParaFilter
-            tir := sema_tir_expr(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: operation, args: typed}, span)
+            tir := sema_tir_node(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: operation, args: typed}, span)
             checked := sema_expr_expected(tir, expected, environment, program, &diagnostics)
             return SemaMethodSpecialCheck{handled: true, value: checked}
         }
@@ -231,7 +231,7 @@ fn sema_call_concurrency_parallel(receiver: Expr, receiver_value: TExpr, method:
         sema_call_concurrency_reject_parallel_type("item", element, span, environment, program, scopes, context, &diagnostics)
         sema_call_concurrency_reject_parallel_type("result", result_type, span, environment, program, scopes, context, &diagnostics)
         operation := TClosureOp.ParaPartition{tuple_struct: type_tuple_struct_name(fields)}
-        tir := sema_tir_expr(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: operation, args: typed}, span)
+        tir := sema_tir_node(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: operation, args: typed}, span)
         checked := sema_expr_expected(tir, expected, environment, program, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: checked}
     }
@@ -253,7 +253,7 @@ fn sema_call_concurrency_parallel(receiver: Expr, receiver_value: TExpr, method:
     result_type = accumulator
     sema_call_concurrency_reject_parallel_type("item", element, span, environment, program, scopes, context, &diagnostics)
     sema_call_concurrency_reject_parallel_type("result", result_type, span, environment, program, scopes, context, &diagnostics)
-    tir := sema_tir_expr(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: TClosureOp.ParaFold, args: typed}, span)
+    tir := sema_tir_node(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: TClosureOp.ParaFold, args: typed}, span)
     checked := sema_expr_expected(tir, expected, environment, program, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked}
 }

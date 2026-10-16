@@ -43,7 +43,7 @@ fn sema_call_shared_owner_host_value(receiver_value: TExpr, method: String, args
         else -> type_name(receiver_value.ty)
     }
     if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "{owner}.{method}", span, sema_shared_access_effect_row(receiver_value.ty, method, span), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_expr(result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: args}}, span)
+    value := sema_tir_node(result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: args}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
@@ -68,7 +68,7 @@ fn sema_call_shared_owner_param(name: String, convention: AccessConvention, ty: 
 }
 
 fn sema_call_shared_owner_owned_arg(value: TExpr, argument: CallArg) -> TExpr Never! {
-    if argument.flags.implicit_clone || argument.flags.shared_auto_clone -> return sema_tir_expr(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(argument.flags.shared_auto_clone)}, value.span)
+    if argument.flags.implicit_clone || argument.flags.shared_auto_clone -> return sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(argument.flags.shared_auto_clone)}, value.span)
     value.copy()
 }
 

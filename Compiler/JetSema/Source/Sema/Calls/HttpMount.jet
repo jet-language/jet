@@ -88,7 +88,7 @@ fn sema_call_http_mount(receiver: Expr, receiver_value: TExpr, args: [CallArg], 
                             if registered.declaration.name == method.name -> meta.http_route_source = Val(registered.symbol.id.key)
                         }
                         handler :: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: invocation}, span: marker.span, meta: meta}}
-                        registration :: sema_call_try_http_router(receiver, sema_tir_expr(receiver_value.ty, TExprKind.Local{local: mux_local}, span), verb, [CallArg]{sema_http_mount_arg(path, marker.span), sema_http_mount_arg(handler, marker.span)}, marker.span, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                        registration :: sema_call_try_http_router(receiver, sema_tir_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), verb, [CallArg]{sema_http_mount_arg(path, marker.span), sema_http_mount_arg(handler, marker.span)}, marker.span, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                         if registration.value == .Val(value) -> &body.push(TStmt.ExprStmt{value: value, span: marker.span})
                     }
                 }
@@ -102,7 +102,7 @@ fn sema_call_http_mount(receiver: Expr, receiver_value: TExpr, args: [CallArg], 
     }
     sema_single_use_leave_scope(&scopes, &state, &diagnostics)
     sema_scope_leave(&scopes, &state)
-    value :: sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.InlineBlock{body: body}, span)
+    value :: sema_tir_node(Type.Named{name: "Unit"}, TExprKind.InlineBlock{body: body}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 

@@ -269,7 +269,7 @@ fn sema_stmt_check_yield(value: Expr, span: Span, return_type: Type?, environmen
         }
     }
     if !sema_stmt_move_direct(value, &state, scopes, "`yield`", &diagnostics) -> return None
-    call := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.YieldSend{value: yielded}}, span)
+    call := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.YieldSend{value: yielded}}, span)
     Val(TStmt.ExprStmt{value: call, span: span})
 }
 
@@ -617,7 +617,7 @@ fn sema_stmt_check_unit_branch(body: [Stmt], value_expr: Expr, bindings: [SemaCo
         if {
             checked_value == None -> result.complete = false
             else -> {
-                value :: checked_value ?? sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Unit, value_span)
+                value :: checked_value ?? sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, value_span)
                 if value.kind == {
                     .Unit -> {}
                     else -> &result.value.push(TStmt.ExprStmt{value: value, span: value_span})
@@ -905,7 +905,7 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
         // is unreachable (codegen ends it in an Unreachable terminator), so it
         // never falls through to the join, exactly as
         // sema_stmt_refutable_switch_exits already assumes.
-        else_result = Val([TStmt]{TStmt.ExprStmt{value: sema_tir_expr(Type.Named{name: "Never"}, TExprKind.Never{reason: "no else arm"}, span), span: span}})
+        else_result = Val([TStmt]{TStmt.ExprStmt{value: sema_tir_node(Type.Named{name: "Never"}, TExprKind.Never{reason: "no else arm"}, span), span: span}})
     }
     loop condition in conditions {
         if condition == None -> return SemaStatementResult{value: [TStmt]{}, complete: false}
@@ -1698,7 +1698,7 @@ fn sema_stmt_for_in_is_range(collection_type: Type) -> Bool Never! {
 }
 
 fn sema_stmt_for_in_range_zero(span: Span) -> TExpr Never! {
-    sema_tir_expr(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
+    sema_tir_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
 }
 
 // `ty` is None when the loop source failed its own check: the loop name
@@ -2671,7 +2671,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
         .Value(value) -> {
             checked := sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if checked != None {
-                item :: checked ?? sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Unit, expr_span(value))
+                item :: checked ?? sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, expr_span(value))
                 result.tir = Val(TOrFallback.Value{value: item})
                 &result.statements.push(TStmt.ExprStmt{value: item, span: expr_span(value)})
             }
@@ -2692,7 +2692,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
                 &diagnostics.push(sema_error("E0405", block_span, "`??` fallback blocks cannot continue after a refutable binding", "a refutable binding needs one direct diverging miss route", "end the block with `return`, `panic(...)`, `break`, or `next`"))
             }
             if valid {
-                block_expr := sema_tir_expr(Type.Named{name: "Never"}, TExprKind.InlineBlock{body: checked_block.value}, block_span)
+                block_expr := sema_tir_node(Type.Named{name: "Never"}, TExprKind.InlineBlock{body: checked_block.value}, block_span)
                 result.tir = Val(TOrFallback.Value{value: block_expr})
                 result.statements = checked_block.value
                 result.complete = true
@@ -2743,10 +2743,10 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
                 else -> {
                     message := sema_check_expression(args[0].expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                     if message != None {
-                        checked :: message ?? sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: ""}}}, name_span)
+                        checked :: message ?? sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: ""}}}, name_span)
                         location := sema_expression_panic_location(environment, program, scopes, name_span)
                         result.tir = Val(TOrFallback.Panic{message: checked, location: location})
-                        panic_expr := sema_tir_expr(Type.Named{name: "Never"}, TExprKind.RequireStop{kind: TRequireKind.Panic{msg: checked}, location: location, always_stops: true}, name_span)
+                        panic_expr := sema_tir_node(Type.Named{name: "Never"}, TExprKind.RequireStop{kind: TRequireKind.Panic{msg: checked}, location: location, always_stops: true}, name_span)
                         &result.statements.push(TStmt.ExprStmt{value: panic_expr, span: name_span})
                         result.complete = true
                     }
@@ -2851,7 +2851,7 @@ fn sema_stmt_check_refutable_binding(binding: Binding, pattern: Pattern, fallbac
     payload := sema_stmt_refutable_capture_payload(typed.pattern, typed.subject.ty)
     if payload != None && names.len() == 1 {
         local := locals[0]
-        initializer := sema_tir_expr(payload ?? Type.Named{name: "Unit"}, TExprKind.OrFallback{value: typed.subject, fallback: fallback_tir, ambient_err: checked_fallback.ambient_err}, span)
+        initializer := sema_tir_node(payload ?? Type.Named{name: "Unit"}, TExprKind.OrFallback{value: typed.subject, fallback: fallback_tir, ambient_err: checked_fallback.ambient_err}, span)
         return Val(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: initializer, gc_promotion: None, gc_transferred: false, span: Span{start: local.span.start, end: expr_span(binding.init).end}})
     }
     Val(TStmt.RefutableBind{pattern: typed.pattern, init: typed.subject, fallback: checked_fallback.statements, span: span})
@@ -3288,7 +3288,7 @@ fn sema_stmt_check_uninit_binding(binding: Binding, environment: SemaScopeEnviro
     local.mutable = true
     local.uninit_scalar = !fixed
     local.uninit_fixed = fixed
-    init :: sema_tir_expr(ty, TExprKind.Uninit, ty_span)
+    init :: sema_tir_node(ty, TExprKind.Uninit, ty_span)
     Val(TStmt.Let{local: local, let_ty: TLetTy.Annotated{ty: ty, wrapper: TLetWrapper.Plain}, init: init, gc_promotion: None, gc_transferred: false, span: Span{start: binding.name_span.start, end: ty_span.end}})
 }
 
@@ -3554,7 +3554,7 @@ fn sema_stmt_check_module_storage_assignment(symbol: Symbol, name: String, name_
     line :: sema_source_line_at(environment.source_segments, name_span) ?? return None
     storage := tir_persistent_local(name, environment.module_identity, required, name_span)
     storage.mutable = true
-    place :: sema_tir_expr(required, TExprKind.Local{local: storage}, name_span)
+    place :: sema_tir_node(required, TExprKind.Local{local: storage}, name_span)
     Val(TStmt.Assign{place: TPlace.Expr{value: place}, op: tir_op, value: checked, clone_value: false, line: line, span: Span{start: name_span.start, end: expr_span(expr).end}})
 }
 
@@ -4054,7 +4054,7 @@ fn sema_stmt_check_defer_close(close: Expr, span: Span, environment: SemaScopeEn
                     &diagnostics.push(sema_error("E0905", expr_span(argument.expr), "`{shown}` isn't `Close`", "`{shown}` would need to implement `Close` before it can be used here", "write `impl {shown}: Close {{ … }}` with every required method"))
                 }
                 if !sema_stmt_move_direct(argument.expr, &state, scopes, "the deferred `close`", &diagnostics) || !close_valid -> return None
-                closed := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Close{value: value}, span)
+                closed := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Close{value: value}, span)
                 return Val(TStmt.DeferClose{close: closed, resource: resource_id, scope_id: scopes.current, span: span})
             }
             None
@@ -4247,9 +4247,9 @@ fn sema_stmt_check_assignment_place(target: LValue, compound: Bool, environment:
                     &diagnostics.push(sema_dyn_member_error(member, span))
                     return None
                 }
-                key :: sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: member}}}, span)
+                key :: sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: member}}}, span)
                 operation :: THandleOp.DynIndexKey{site: "{sema_dyn_site(base)}.{member}", location: sema_expression_panic_location(environment, program, scopes, span)}
-                return Val(sema_tir_expr(sema_dyn_type(), TExprKind.HandleMethod{receiver: checked_base, operation: operation, args: [TExpr]{key}}, span))
+                return Val(sema_tir_node(sema_dyn_type(), TExprKind.HandleMethod{receiver: checked_base, operation: operation, args: [TExpr]{key}}, span))
             }
             // D-SWIZZLE1: authored nominal fields are not builtin math lanes.
             if checked_base.ty == .Named(math_name) {
@@ -4346,7 +4346,7 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
         if !sema_stmt_move_direct(expr, &state, scopes, "the assignment", &diagnostics) -> return None
         &steps.push(checked)
         set :: THandleOp.DynSetPath{keys: keys, site: site, location: sema_expression_panic_location(environment, program, scopes, span)}
-        value :: sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: root, operation: set, args: steps}, span)
+        value :: sema_tir_node(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: root, operation: set, args: steps}, span)
         return Val(TStmt.ExprStmt{value: value, span: Span{start: span.start, end: expr_span(expr).end}})
     }
     // E0362 (Rust statements.rs `compound_nested_hook`): a compound operator
@@ -4815,8 +4815,8 @@ fn sema_stmt_check_return_value_typed(value: Expr, return_type: Type?, environme
     payload :: sema_stmt_check_return_payload(value, sema_stmt_return_success_type(return_type), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     normalized := sema_expr_unwrap_tag(required)
     if normalized == {
-        .Result(_, _) -> return Val(sema_tir_expr(required, TExprKind.Ok{value: payload}, expr_span(value)))
-        .Option(_) -> return Val(sema_tir_expr(required, TExprKind.Present{value: payload}, expr_span(value)))
+        .Result(_, _) -> return Val(sema_tir_node(required, TExprKind.Ok{value: payload}, expr_span(value)))
+        .Option(_) -> return Val(sema_tir_node(required, TExprKind.Present{value: payload}, expr_span(value)))
         else -> return Val(payload)
     }
 }
@@ -5258,7 +5258,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                     }
                     .In(collection_expr, step_expr) -> {
                         collection_value := sema_check_expression(collection_expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-                        collection :: collection_value ?? sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Unit, expr_span(collection_expr))
+                        collection :: collection_value ?? sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, expr_span(collection_expr))
                         step_value := TExpr?{None}
                         if step_expr != None {
                             stride :: step_expr
@@ -5412,8 +5412,8 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                 init_tir := sema_stmt_check_binding(init, init_lambda_escapes, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 cond_tir := sema_check_expression(cond, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 cond_valid := cond_tir != None
-                if cond_tir != None && (cond_tir ?? sema_tir_expr(Type.Bool, TExprKind.BoolLit{value: false}, span)).ty != Type.Bool {
-                    cond_ty :: (cond_tir ?? sema_tir_expr(Type.Bool, TExprKind.BoolLit{value: false}, span)).ty
+                if cond_tir != None && (cond_tir ?? sema_tir_node(Type.Bool, TExprKind.BoolLit{value: false}, span)).ty != Type.Bool {
+                    cond_ty :: (cond_tir ?? sema_tir_node(Type.Bool, TExprKind.BoolLit{value: false}, span)).ty
                     &diagnostics.push(if sema_dyn_is_type(sema_expr_expected_type(cond_ty, environment, program)) -> sema_dyn_condition_error(span) else -> sema_error("E0110", span, "the counted loop condition must be Bool, but this is {type_name(cond_ty)}", "the program needs a clear yes or no here", "compare the value to produce Bool"))
                     cond_valid = false
                 }
@@ -5459,8 +5459,8 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                     cond == None -> {
                         complete = false
                     }
-                    (cond ?? sema_tir_expr(Type.Bool, TExprKind.BoolLit{value: false}, span)).ty != Type.Bool -> {
-                        cond_ty :: (cond ?? sema_tir_expr(Type.Bool, TExprKind.BoolLit{value: false}, span)).ty
+                    (cond ?? sema_tir_node(Type.Bool, TExprKind.BoolLit{value: false}, span)).ty != Type.Bool -> {
+                        cond_ty :: (cond ?? sema_tir_node(Type.Bool, TExprKind.BoolLit{value: false}, span)).ty
                         &diagnostics.push(if sema_dyn_is_type(sema_expr_expected_type(cond_ty, environment, program)) -> sema_dyn_condition_error(span) else -> sema_error("E0110", span, "the while condition must be Bool, but this is {type_name(cond_ty)}", "the program needs a clear yes or no here", "compare the value to produce Bool"))
                         complete = false
                     }
@@ -5968,13 +5968,13 @@ fn sema_stmt_check_scoped_statement(statement: Stmt, return_type: Type?, environ
                         // `Authority` built from the resolved cap list.
                         if sema_ownership_last_use_statements(body, handle.name) {
                             rights :: (loop cap in caps -> TComptimeValue.String{value: cap.name})
-                            rights_value :: sema_tir_expr(Type.List{element: Type.String}, TExprKind.CtLit{value: TComptimeValue.List{values: rights}}, handle.span)
+                            rights_value :: sema_tir_node(Type.List{element: Type.String}, TExprKind.CtLit{value: TComptimeValue.List{values: rights}}, handle.span)
                             reference :: TMethodRef{symbol: symbol_id(SymbolKind.Function, "", "JetAuthority", "from_rights"), name: "from_rights", mangled: false, trait_owner: None, operator_identity: None}
                             // Building the handle is effect-free; record the known-pure site so
                             // the effect pass does not treat it as an unknown call.
                             _ := sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "Authority.from_rights", handle.span, [EffectRowEntry]{}, &diagnostics)
                             rights_arg :: TCallArg{value: rights_value, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
-                            init :: sema_tir_expr(Type.Named{name: "Authority"}, TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: true, path: "JetAuthority", generics: [TPreludeArg]{}}, owner_type: None, method: reference, type_args: [Type]{}, args: [TCallArg]{rights_arg}}, handle.span)
+                            init :: sema_tir_node(Type.Named{name: "Authority"}, TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: true, path: "JetAuthority", generics: [TPreludeArg]{}}, owner_type: None, method: reference, type_args: [Type]{}, args: [TCallArg]{rights_arg}}, handle.span)
                             &region_body.push(TStmt.Let{local: tir_symbol_local(handle.name, handle.span, symbol.id), let_ty: TLetTy.Annotated{ty: Type.Named{name: "Authority"}, wrapper: TLetWrapper.Plain}, init: init, gc_promotion: None, gc_transferred: false, span: handle.span})
                         }
                     }

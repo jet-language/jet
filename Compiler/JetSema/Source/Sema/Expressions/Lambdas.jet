@@ -2189,7 +2189,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         frozen_captures: lambda_work.meta.frozen_captures,
         uses_stack_sentry: false,
     }
-    result := sema_tir_expr(fn_ty, TExprKind.Lambda{value: lambda_value}, lambda.span)
+    result := sema_tir_node(fn_ty, TExprKind.Lambda{value: lambda_value}, lambda.span)
     checked :: if (host_callback || open_result) && expected_ret == None -> result else -> sema_expr_expected(result, expected, environment, program, &diagnostics) ?? return None
     if inline_loop {
         sema_scope_leave(&lambda_scopes, &lambda_state)
@@ -2247,7 +2247,7 @@ fn sema_expression_lambda_lift_value(value: TExpr, carrier: Type) -> TExpr Never
             return value.copy()
         }
         if value.ty == (Type.Named{name: "Never"}) -> return value.copy()
-        return sema_tir_expr(carrier, TExprKind.Ok{value: value}, value.span)
+        return sema_tir_node(carrier, TExprKind.Ok{value: value}, value.span)
     }
     value.copy()
 }

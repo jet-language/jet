@@ -509,7 +509,7 @@ fn sema_call_builtin_static_lowered(row: BuiltinStaticRow, values: [TExpr], args
     if row.lowering == {
         .ArgumentBuiltin(operation) -> Val(TExprKind.BuiltinMethod{receiver: values[0], operation: operation, args: rest})
         .IntFromRadix -> Val(TExprKind.BuiltinMethod{receiver: values[0], operation: TBuiltinOp.IntFromRadix{line: line}, args: rest})
-        .UnitBuiltin(operation) -> Val(TExprKind.BuiltinMethod{receiver: sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Unit, span), operation: operation, args: values})
+        .UnitBuiltin(operation) -> Val(TExprKind.BuiltinMethod{receiver: sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, span), operation: operation, args: values})
         .PreludeStatic(rooted, path, generics) -> {
             owner_args :: loop generic in generics -> if generic == {
                 .Jet(ty) -> TPreludeArg.Jet{ty: sema_inference_substitute_type_bindings(ty, bindings)}
@@ -580,7 +580,7 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
         if !sema_ownership_mark_unmarked_move(&state, args[index].expr, scopes, "`{callee}`", &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     }
     loop index in 0..<values.len() {
-        if ownership_args[index].flags.implicit_clone || ownership_args[index].flags.shared_auto_clone -> values[index] = sema_tir_expr(values[index].ty, TExprKind.Clone{value: values[index], fact: tir_call_arg_copy_fact(ownership_args[index].flags.shared_auto_clone)}, values[index].span)
+        if ownership_args[index].flags.implicit_clone || ownership_args[index].flags.shared_auto_clone -> values[index] = sema_tir_node(values[index].ty, TExprKind.Clone{value: values[index], fact: tir_call_arg_copy_fact(ownership_args[index].flags.shared_auto_clone)}, values[index].span)
     }
 
     if expected == .Val(expected_type) {
@@ -835,10 +835,10 @@ fn sema_call_try_distinct_conversion(owner: Symbol, display_name: String, method
     ownership := sema_ownership_check_call_arguments(&state, callee, params, &ownership_args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return sema_call_distinct_conversion_failed()
     value := argument
-    if ownership_args[0].flags.implicit_clone || ownership_args[0].flags.shared_auto_clone -> value = sema_tir_expr(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(ownership_args[0].flags.shared_auto_clone)}, value.span)
+    if ownership_args[0].flags.implicit_clone || ownership_args[0].flags.shared_auto_clone -> value = sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(ownership_args[0].flags.shared_auto_clone)}, value.span)
     success :: Type.Named{name: display_name}
     row :: numeric_row ?? {
-        constructed :: sema_tir_expr(success, TExprKind.DistinctCtor{owner: owner.id, argument: value, base: facts.base}, span)
+        constructed :: sema_tir_node(success, TExprKind.DistinctCtor{owner: owner.id, argument: value, base: facts.base}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(constructed, expected, environment, program, context, &diagnostics)}
     }
     operation :: sema_call_distinct_numeric_operation(row) ?? return sema_call_distinct_conversion_failed()
@@ -863,7 +863,7 @@ fn sema_call_try_distinct_conversion(owner: Symbol, display_name: String, method
     }
     fallible :: base_fallible || (facts.range != None && !literal_in_range)
     result :: if fallible -> Type.Result{ok: success, err: Type.String} else -> success
-    converted :: sema_tir_expr(result, TExprKind.DistinctConvert{owner: owner.id, argument: value, operation: operation, range: facts.range, fallible: fallible}, span)
+    converted :: sema_tir_node(result, TExprKind.DistinctConvert{owner: owner.id, argument: value, operation: operation, range: facts.range, fallible: fallible}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(converted, expected, environment, program, context, &diagnostics)}
 }
 
@@ -917,7 +917,7 @@ fn sema_call_try_inline_range_conversion(descriptor: Call, method: String, args:
     }
     if !literal && reports_runtime -> &diagnostics.push(sema_range_runtime_conversion(head, method, expr_span(args[0].expr)))
     result :: if literal -> target else -> Type.Result{ok: target, err: Type.String}
-    converted :: sema_tir_expr(result, TExprKind.NumericMethod{receiver: argument, operation: TNumericOp.InlineRange{lo: bounds.lo, hi: bounds.hi, fallible: !literal}}, span)
+    converted :: sema_tir_node(result, TExprKind.NumericMethod{receiver: argument, operation: TNumericOp.InlineRange{lo: bounds.lo, hi: bounds.hi, fallible: !literal}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(converted, expected, environment, program, context, &diagnostics)}
 }
 

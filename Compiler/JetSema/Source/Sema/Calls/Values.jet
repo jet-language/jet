@@ -100,11 +100,11 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
         borrowed :: sema_ownership_places_from_expr_in_state(callee, scopes, &state).len() > 0
         local.deref = borrowed
         init := callee_value
-        if borrowed -> init = sema_tir_expr(init.ty, TExprKind.Borrow{place: init, access: AccessConvention.Read}, init.span)
+        if borrowed -> init = sema_tir_node(init.ty, TExprKind.Borrow{place: init, access: AccessConvention.Read}, init.span)
         ordered := [TStmt]{TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: span}}
         loop pin in pins -> &ordered.push(pin)
         pins = ^ordered
-        call_callee = sema_tir_expr(callee_value.ty, TExprKind.Local{local: local}, callee_value.span)
+        call_callee = sema_tir_node(callee_value.ty, TExprKind.Local{local: local}, callee_value.span)
     }
     result_type_raw :: sema_call_signature_return(resolved_signature) ?? return None
     result_type :: sema_call_resolved_type(result_type_raw, environment, program)
@@ -123,13 +123,13 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
             }
         }
     }
-    call_value :: sema_tir_expr(result_type, TExprKind.IndirectCall{callee: call_callee, type_args: [Type]{}, args: lowered, signature: resolved_signature}, span)
+    call_value :: sema_tir_node(result_type, TExprKind.IndirectCall{callee: call_callee, type_args: [Type]{}, args: lowered, signature: resolved_signature}, span)
     contracted :: if {
         contract_nodes.len() > 0 -> {
             wrapped := contract_bindings
             loop contract in contract_nodes -> &wrapped.push(TStmt.Contract{contract: contract})
             &wrapped.push(TStmt.ExprStmt{value: call_value, span: span})
-            sema_tir_expr(result_type, TExprKind.InlineBlock{body: wrapped}, span)
+            sema_tir_node(result_type, TExprKind.InlineBlock{body: wrapped}, span)
         }
         else -> call_value
     }
@@ -179,7 +179,7 @@ fn sema_call_value_inline_loop(lambda: Lambda, span: Span, expected: Type?, envi
         }
     }
     result_type :: sema_call_signature_return(signature) ?? Type.Named{name: "Unit"}
-    inline_value :: sema_tir_expr(result_type, TExprKind.InlineBlock{body: body}, span)
+    inline_value :: sema_tir_node(result_type, TExprKind.InlineBlock{body: body}, span)
     checked_value :: sema_expr_expected(inline_value, expected, environment, program, &diagnostics) ?? return None
     checked_args := [CallArg]{}
     binding :: sema_call_bind_value(signature, &checked_args, span, &diagnostics) ?? return None

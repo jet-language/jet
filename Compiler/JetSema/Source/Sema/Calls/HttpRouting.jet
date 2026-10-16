@@ -1043,9 +1043,9 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
             &diagnostics.push(sema_error("E2805", updated_args[1].span, "HTTP route handler has no complete checked endpoint contract", "router registration needs response metadata and serializable path/query/body schemas", "return a typed `HTTPResponse` constructor from every handler path"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        route_handler := sema_tir_expr(callback.ty, TExprKind.FnValue{kind: TFnValueKind.Send{value: callback}}, callback.span)
+        route_handler := sema_tir_node(callback.ty, TExprKind.FnValue{kind: TFnValueKind.Send{value: callback}}, callback.span)
         operation := THandleOp.HTTPRouterRegister{verb: sema_http_route_verb(method), handler: route_handler, file: environment.source_file, line: line, handler_param_names: path_names_for_tir, contract_json: contract}
-        tir := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{path_value}}, span)
+        tir := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{path_value}}, span)
         sema_call_http_router_effect(tir.ty, span, environment, program, &scopes, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)}
     }

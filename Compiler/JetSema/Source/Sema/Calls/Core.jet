@@ -609,7 +609,7 @@ fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_ar
         identity :: sema_call_core_module_identity(environment, program, "core.math") ?? return None
         if sema_call_core_source_target(environment, program, identity, "sqrt", type_args, span, false, &diagnostics) == .Val(target) {
             argument :: TCallArg{value: args[0], template_items: [SymbolID]{}, borrow: false, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
-            value :: sema_tir_expr(result_type, TExprKind.Call{callee: target.symbol.id, type_args: [Type]{}, args: [TCallArg]{argument}}, span)
+            value :: sema_tir_node(result_type, TExprKind.Call{callee: target.symbol.id, type_args: [Type]{}, args: [TCallArg]{argument}}, span)
             return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }
     }
@@ -636,10 +636,10 @@ fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_ar
             return None
         }
         source_args :: sema_call_core_source_arguments(record, args, params, span, environment, program)
-        value :: sema_tir_expr(result_type, TExprKind.Call{callee: target.symbol.id, type_args: type_args, args: source_args}, span)
+        value :: sema_tir_node(result_type, TExprKind.Call{callee: target.symbol.id, type_args: type_args, args: source_args}, span)
         return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
-    value := sema_tir_expr(result_type, TExprKind.CoreCall{record: record, args: args, source_span: span, type_args: type_args, widen_to_vec: widen_to_vec, data_plan: data_plan, fallibility: fallibility}, span)
+    value := sema_tir_node(result_type, TExprKind.CoreCall{record: record, args: args, source_span: span, type_args: type_args, widen_to_vec: widen_to_vec, data_plan: data_plan, fallibility: fallibility}, span)
     // Rust (fallible.rs `infer_or_fallback`) passes the slot type to a call
     // only as an inference hint: a Core call that returns `Never` produces no
     // value, and the enclosing `??` or branch accepts its divergence.
@@ -899,7 +899,7 @@ fn sema_call_core_posix_control(member: String) -> Bool Never! {
 fn sema_call_core_materialize_authority_boundary(record: CoreCallRecord, index: Int, value: TExpr, span: Span) -> TExpr Never! {
     if !core_call_authority_boundary_at(record, index) -> return value.copy()
     wire :: core_call("core.plugin", "__authority_to_wire") ?? panic("checked Authority wire row is missing")
-    sema_tir_expr(Type.String, TExprKind.CoreCall{record: wire, args: [TExpr]{value},
+    sema_tir_node(Type.String, TExprKind.CoreCall{record: wire, args: [TExpr]{value},
         source_span: span, type_args: [Type]{}, widen_to_vec: [Bool]{false},
         data_plan: None, fallibility: TFailureCarrier.Infallible}, span)
 }
@@ -1064,7 +1064,7 @@ fn sema_call_core_global_shared(lifetime: MIRSharedLifetime, member: String, typ
     context.call_facts[before].shared_lifetime = Val(lifetime)
     context.call_facts[before].shared_member = member
     context.call_facts[before].shared_source = environment.module_identity
-    value :: sema_tir_expr(checked.value.ty, TExprKind.GlobalShared{initializer: target.symbol.id, lifetime: lifetime}, span)
+    value :: sema_tir_node(checked.value.ty, TExprKind.GlobalShared{initializer: target.symbol.id, lifetime: lifetime}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 

@@ -99,7 +99,7 @@ fn sema_time_check_method_ownership(receiver: Expr, method: String, args: [CallA
 
 fn sema_time_finish_handle(receiver: TExpr, operation: THandleOp, args: [TExpr], result: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     if !sema_time_record_intrinsic(result, effect_name, api, span, environment, program, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_expr(result, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
+    value := sema_tir_node(result, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
     checked := sema_expr_expected(value, expected, environment, program, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked}
 }
@@ -256,7 +256,7 @@ fn sema_time_rng_generic_method(receiver: Expr, receiver_value: TExpr, method: S
         else -> THandleOp.RNGShuffle
     }
     if !sema_time_record_intrinsic(result, "Rand", "RNG.{method}", span, environment, program, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_expr(result, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: values}, span)
+    value := sema_tir_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: values}, span)
     checked := sema_expr_expected(value, expected, environment, program, &diagnostics)
     return SemaMethodSpecialCheck{handled: true, value: checked}
 }
@@ -334,9 +334,9 @@ fn sema_time_civil_method(receiver: Expr, receiver_value: TExpr, owner: String, 
             local.generated = true
             local.deref = borrowed
             init := receiver_value
-            if borrowed -> init = sema_tir_expr(init.ty, TExprKind.Borrow{place: init, access: AccessConvention.Read}, init.span)
+            if borrowed -> init = sema_tir_node(init.ty, TExprKind.Borrow{place: init, access: AccessConvention.Read}, init.span)
             &pins.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: span})
-            pinned_receiver = sema_tir_expr(receiver_value.ty, TExprKind.Local{local: local}, receiver_value.span)
+            pinned_receiver = sema_tir_node(receiver_value.ty, TExprKind.Local{local: local}, receiver_value.span)
         }
         loop pin in sema_call_pin_binder_arguments(typed, params, &lowered, environment, program, scopes, span) -> &pins.push(pin)
         packed :: sema_call_pack_variadic_arguments(typed, params, lowered, environment, program, &context, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}

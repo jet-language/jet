@@ -402,8 +402,8 @@ fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [Ca
     runtime_args := [TExpr]{function_value}
     loop value in typed_values -> &runtime_args.push(value)
     target_values := [TExpr]{}
-    loop target in selected -> &target_values.push(sema_tir_expr(Type.Int, TExprKind.IntLit{value: target, width: None}, span))
-    &runtime_args.push(sema_tir_expr(Type.List{element: Type.Int}, TExprKind.ListLit{values: target_values}, span))
+    loop target in selected -> &target_values.push(sema_tir_node(Type.Int, TExprKind.IntLit{value: target, width: None}, span))
+    &runtime_args.push(sema_tir_node(Type.List{element: Type.Int}, TExprKind.ListLit{values: target_values}, span))
     fallibility := if result_type == {.Result(ok, error) -> TFailureCarrier.Result{success: ok, error: error} else -> TFailureCarrier.Infallible}
     effective_type_args := [Type]{function_value.ty}
     values_args := [CallArg]{args[0]}

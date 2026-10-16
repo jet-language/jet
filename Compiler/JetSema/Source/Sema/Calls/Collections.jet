@@ -315,7 +315,7 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
         // storage to give up and keeps its copy.
         taken_place := updated_args[index].convention == AccessConvention.Move && sema_call_marked_move_place(updated_args[index].expr, value)
         if taken_place && sema_ownership_binding_for_expr(&state, updated_args[index].expr, scopes) == .Val(root) -> taken_place = !sema_ownership_binding_is_borrowed_param(root)
-        stored :: if taken_place -> sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span) else -> value
+        stored :: if taken_place -> sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span) else -> value
         &typed.push(stored)
     }
 
@@ -367,17 +367,17 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
                     else -> {}
                 }
             }
-            sema_tir_expr(result_type, TExprKind.BuiltinMethod{receiver: builtin_receiver, operation: builtin, args: builtin_args}, span)
+            sema_tir_node(result_type, TExprKind.BuiltinMethod{receiver: builtin_receiver, operation: builtin, args: builtin_args}, span)
         }
-        .Closure(closure) -> sema_tir_expr(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: closure, args: typed}, span)
+        .Closure(closure) -> sema_tir_node(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: closure, args: typed}, span)
         .ListShuffle -> {
-            lazy := sema_tir_expr(result_type, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
-            sema_tir_expr(result_type, TExprKind.BuiltinMethod{receiver: lazy, operation: TBuiltinOp.IterShuffle, args: [TExpr]{}}, span)
+            lazy := sema_tir_node(result_type, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
+            sema_tir_node(result_type, TExprKind.BuiltinMethod{receiver: lazy, operation: TBuiltinOp.IterShuffle, args: [TExpr]{}}, span)
         }
         .SetClosure(closure) -> {
             element :: sema_collection_receiver_element(receiver_value.ty) ?? Type.Int
             list_type := Type.List{element: element}
-            set_list := sema_tir_expr(list_type, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.SetToList, args: [TExpr]{}}, span)
+            set_list := sema_tir_node(list_type, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.SetToList, args: [TExpr]{}}, span)
             if {
                 closure == TClosureOp.FlatMap -> {
                     inner :: if result_type == {
@@ -387,25 +387,25 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
                         else -> Type.Int
                     }
                     mapped_type := Type.List{element: inner}
-                    mapped := sema_tir_expr(mapped_type, TExprKind.ClosureMethod{receiver: set_list, operation: closure, args: typed}, span)
-                    sema_tir_expr(result_type, TExprKind.BuiltinMethod{receiver: mapped, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
+                    mapped := sema_tir_node(mapped_type, TExprKind.ClosureMethod{receiver: set_list, operation: closure, args: typed}, span)
+                    sema_tir_node(result_type, TExprKind.BuiltinMethod{receiver: mapped, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
                 }
                 else -> {
-                    sema_tir_expr(result_type, TExprKind.ClosureMethod{receiver: set_list, operation: closure, args: typed}, span)
+                    sema_tir_node(result_type, TExprKind.ClosureMethod{receiver: set_list, operation: closure, args: typed}, span)
                 }
             }
         }
         .SetMinimum -> {
             element :: sema_collection_receiver_element(receiver_value.ty) ?? Type.Int
-            set_list := sema_tir_expr(Type.List{element: element}, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.SetToList, args: [TExpr]{}}, span)
-            sema_tir_expr(result_type, TExprKind.BuiltinMethod{receiver: set_list, operation: TBuiltinOp.Min{float: false}, args: [TExpr]{}}, span)
+            set_list := sema_tir_node(Type.List{element: element}, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.SetToList, args: [TExpr]{}}, span)
+            sema_tir_node(result_type, TExprKind.BuiltinMethod{receiver: set_list, operation: TBuiltinOp.Min{float: false}, args: [TExpr]{}}, span)
         }
         .IterToSet -> {
             // #4009: `Set.from` collects a list; drain the iterator through the
             // same `.to_list()` a user would write before building the set.
             element :: sema_collection_receiver_element(receiver_value.ty) ?? Type.Int
-            drained := sema_tir_expr(Type.List{element: element}, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.IterToList, args: [TExpr]{}}, span)
-            sema_tir_expr(result_type, TExprKind.BuiltinMethod{receiver: drained, operation: TBuiltinOp.SetFrom, args: [TExpr]{}}, span)
+            drained := sema_tir_node(Type.List{element: element}, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.IterToList, args: [TExpr]{}}, span)
+            sema_tir_node(result_type, TExprKind.BuiltinMethod{receiver: drained, operation: TBuiltinOp.SetFrom, args: [TExpr]{}}, span)
         }
     }
     checked := sema_expr_expected(value, expected, environment, program, &diagnostics)
@@ -424,7 +424,7 @@ fn sema_call_collections_runs_on_iter(operation: TBuiltinOp) -> Bool Never! {
 
 fn sema_call_collections_list_as_iter(value: TExpr, span: Span) -> TExpr Never! {
     element :: sema_call_collections_list_element(value.ty) ?? return value
-    sema_tir_expr(Type.Apply{name: "Iter", args: [Type]{element}}, TExprKind.BuiltinMethod{receiver: value, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
+    sema_tir_node(Type.Apply{name: "Iter", args: [Type]{element}}, TExprKind.BuiltinMethod{receiver: value, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
 }
 
 // Rust Type::without_user_tags, then a List or FixedList element.

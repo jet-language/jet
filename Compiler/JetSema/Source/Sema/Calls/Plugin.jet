@@ -222,7 +222,7 @@ fn sema_call_try_plugin_method(receiver: Expr, receiver_value: TExpr, method: St
         loop index in 0..<typed.values.len() {
             if typed.slots[index] == slot {
                 value := typed.values[index]
-                if index < checked_args.len() && (checked_args[index].flags.implicit_clone || checked_args[index].flags.shared_auto_clone) -> value = sema_tir_expr(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(checked_args[index].flags.shared_auto_clone)}, value.span)
+                if index < checked_args.len() && (checked_args[index].flags.implicit_clone || checked_args[index].flags.shared_auto_clone) -> value = sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(checked_args[index].flags.shared_auto_clone)}, value.span)
                 &values.push(value)
                 found = true
                 break
@@ -239,7 +239,7 @@ fn sema_call_try_plugin_method(receiver: Expr, receiver_value: TExpr, method: St
     if !supported -> return SemaMethodSpecialCheck{handled: true, value: None}
     signature := MIRComponentSignatureDescriptor{params: component_params, result: result_descriptor ?? return SemaMethodSpecialCheck{handled: true, value: None}}
     result := Type.Result{ok: result_type, err: Type.Named{name: "PluginError"}}
-    value := sema_tir_expr(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.PluginInvoke{export_name: export_value.name, signature: signature}, args: values}, span)
+    value := sema_tir_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.PluginInvoke{export_name: export_value.name, signature: signature}, args: values}, span)
     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
     } else {
         return SemaMethodSpecialCheck{handled: true, value: None}

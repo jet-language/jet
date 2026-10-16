@@ -191,9 +191,9 @@ fn sema_ui_handle_typed_arg(arg: CallArg, ty: Type, environment: SemaScopeEnviro
 }
 
 fn sema_ui_handle_optional_arg(arg: CallArg, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if sema_expression_absent_none(arg.expr) -> return Val(sema_tir_expr(Type.Option{inner: ty}, TExprKind.Absent, arg.span))
+    if sema_expression_absent_none(arg.expr) -> return Val(sema_tir_node(Type.Option{inner: ty}, TExprKind.Absent, arg.span))
     value :: sema_ui_handle_typed_arg(arg, ty, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    return Val(sema_tir_expr(Type.Option{inner: ty}, TExprKind.Present{value: value}, value.span))
+    return Val(sema_tir_node(Type.Option{inner: ty}, TExprKind.Present{value: value}, value.span))
 }
 
 fn sema_ui_handle_button(module_name: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
@@ -231,7 +231,7 @@ fn sema_ui_handle_button(module_name: String, args: [CallArg], type_args: [Type]
     accessible_label :: sema_ui_handle_optional_arg(bound[2], Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     callback :: sema_ui_handle_stored_callback("button on_click", bound[3], [Type]{}, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     result_type := Type.Named{name: "UINode"}
-    value := sema_tir_expr(result_type, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UIButtonOnClick{label: label, shortcut: shortcut, accessible_label: accessible_label, executable: callback, site: span.start}}, span)
+    value := sema_tir_node(result_type, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UIButtonOnClick{label: label, shortcut: shortcut, accessible_label: accessible_label, executable: callback, site: span.start}}, span)
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if !sema_ui_handle_core_record_effects(record, span, type_args, result_type, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     SemaDirectSpecialCheck{handled: true, value: Val(checked)}
@@ -263,7 +263,7 @@ fn sema_ui_handle_text_input(module_name: String, args: [CallArg], type_args: [T
         return SemaDirectSpecialCheck{handled: true, value: value}
     }
     callback :: sema_ui_handle_stored_callback("text_input on_drop", bound[2], [Type]{Type.Named{name: "UIDropItem"}}, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    value := sema_tir_expr(result_type, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UITextInputOnDrop{state: state_value, ime: ime_value, executable: callback, site: span.start}}, span)
+    value := sema_tir_node(result_type, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UITextInputOnDrop{state: state_value, ime: ime_value, executable: callback, site: span.start}}, span)
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if !sema_ui_handle_core_record_effects(record, span, type_args, result_type, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     return SemaDirectSpecialCheck{handled: true, value: Val(checked)}
@@ -322,7 +322,7 @@ fn sema_call_try_ui_handle_method(receiver: Expr, receiver_value: TExpr, method:
         }
         if method == "set_focus_group" -> sema_call_core_ui_focus_group_lint(args, span, environment, program, &scopes, &diagnostics)
         typed_args :: sema_ui_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        value := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.UIBackendMethod{method: method}, args: typed_args}, span)
+        value := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.UIBackendMethod{method: method}, args: typed_args}, span)
         checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         return SemaMethodSpecialCheck{handled: true, value: Val(checked)}
     }
@@ -442,7 +442,7 @@ fn sema_ui_browser_method(receiver: Expr, receiver_value: TExpr, owner: String, 
     }
     if !valid || !effects_ok -> return SemaMethodSpecialCheck{handled: true, value: None}
     operation :: if sema_ui_browser_route_server(owner) -> THandleOp.HTTPServerMethod{kind: owner, method: method} else -> THandleOp.HTTPClientMethod{kind: owner, method: method}
-    value := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: typed_args}, span)
+    value := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: typed_args}, span)
     checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }

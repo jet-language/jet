@@ -395,7 +395,7 @@ fn sema_expression_core_record_literal(owner_name: String, fields: [ExprField], 
             break
         }
     }
-    value :: sema_tir_expr(Type.Named{name: owner_name}, TExprKind.StructLit{fields: values, extra: None}, span)
+    value :: sema_tir_node(Type.Named{name: owner_name}, TExprKind.StructLit{fields: values, extra: None}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 
@@ -476,7 +476,7 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
         checked :: sema_expression_struct_field_value(field, default_value, field.name_span, false, owner, names, args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         &values.push(checked)
     }
-    value := sema_tir_expr(result_ty, TExprKind.StructLit{fields: values, extra: None}, span)
+    value := sema_tir_node(result_ty, TExprKind.StructLit{fields: values, extra: None}, span)
     if as_trait == .Val(trait_name) {
         trait_symbol_index :: sema_scope_resolve_index(scopes, trait_name)
         if trait_symbol_index == None || scopes.bindings[trait_symbol_index ?? 0].symbol.kind != SymbolKind.Trait {
@@ -490,7 +490,7 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
             .TraitObject(_) -> resolved_trait
             else -> Type.TraitObject{bounds: [String]{trait_symbol.name}}
         }
-        value = sema_tir_expr(target, TExprKind.TraitBox{value: value, target: target}, span)
+        value = sema_tir_node(target, TExprKind.TraitBox{value: value, target: target}, span)
     }
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
@@ -746,7 +746,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
     // actual declaration owner's type, just as its payload field types do.
     declared_enum_ty :: if generic_args.len() > 0 -> Type.Apply{name: owner.name, args: generic_args} else -> Type.Named{name: owner.name}
     enum_ty :: sema_expression_field_owner_type(environment, program, owner.module_name, declared_enum_ty, generic_names)
-    value :: sema_tir_expr(enum_ty, TExprKind.EnumCtor{owner: owner.id, variant: variant_id, payload: payload}, span)
+    value :: sema_tir_node(enum_ty, TExprKind.EnumCtor{owner: owner.id, variant: variant_id, payload: payload}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 
@@ -787,7 +787,7 @@ fn sema_expression_core_enum_literal(enum_name: String, variants: [String], vari
         &checked_args.push(TEnumArg{value: checked, clone: false, move: false})
     }
     payload :: if checked_args.len() == 0 -> TEnumPayload.Unit else -> TEnumPayload.Positional{args: checked_args}
-    value :: sema_tir_expr(Type.Named{name: enum_name}, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: payload}, span)
+    value :: sema_tir_node(Type.Named{name: enum_name}, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: payload}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 
@@ -945,7 +945,7 @@ fn sema_expression_checked_text_from(target: SemaExpressionCheckedTextTarget, ty
     error_type :: if checked.ty == {.Result(_, error) -> error else -> { return None }}
     source_local :: tir_generated_local("__checked_text_source_{span.start}", span)
     error_local :: tir_generated_local("__checked_text_error_{span.start}", span)
-    source_value :: sema_tir_expr(Type.String, TExprKind.Local{local: source_local}, span)
+    source_value :: sema_tir_node(Type.String, TExprKind.Local{local: source_local}, span)
     original := TExpr?{None}
     checker_call := TExpr?{None}
     if checked.kind == .Call(callee, type_args, args) {
@@ -953,14 +953,14 @@ fn sema_expression_checked_text_from(target: SemaExpressionCheckedTextTarget, ty
             original = Val(args[0].value)
             checker_args := args
             checker_args[0].value = source_value
-            checker_call = Val(sema_tir_expr(checked.ty, TExprKind.Call{callee: callee, type_args: type_args, args: checker_args}, span))
+            checker_call = Val(sema_tir_node(checked.ty, TExprKind.Call{callee: callee, type_args: type_args, args: checker_args}, span))
         }
     }
     source_init :: original ?? return None
     checker :: checker_call ?? return None
     nominal :: Type.Named{name: type_name}
     result_type :: Type.Result{ok: nominal, err: error_type}
-    wrapped :: sema_tir_expr(nominal, TExprKind.DistinctCtor{owner: target.owner.id, argument: sema_tir_expr(Type.String, TExprKind.Move{value: source_value}, span), base: Type.String}, span)
+    wrapped :: sema_tir_node(nominal, TExprKind.DistinctCtor{owner: target.owner.id, argument: sema_tir_node(Type.String, TExprKind.Move{value: source_value}, span), base: Type.String}, span)
     ok_pattern :: TPattern{
         shape: TPatternShape.Ok{binding: "_", binding_span: span, inner: None, span: span},
         bindings: [TPatternBindingFact]{},
@@ -977,18 +977,18 @@ fn sema_expression_checked_text_from(target: SemaExpressionCheckedTextTarget, ty
         mutable: false,
         boxed: false,
     }
-    error_value :: sema_tir_expr(error_type, TExprKind.Local{local: error_local}, span)
-    handler :: sema_tir_expr(result_type, TExprKind.ResultHandler{
+    error_value :: sema_tir_node(error_type, TExprKind.Local{local: error_local}, span)
+    handler :: sema_tir_node(result_type, TExprKind.ResultHandler{
         subject: checker,
         ok_pattern: ok_pattern,
         ok_body: [TStmt]{},
-        ok_value: sema_tir_expr(result_type, TExprKind.Ok{value: wrapped}, span),
+        ok_value: sema_tir_node(result_type, TExprKind.Ok{value: wrapped}, span),
         err_pattern: err_pattern,
         err_body: [TStmt]{},
-        err_value: sema_tir_expr(result_type, TExprKind.Err{value: error_value}, span),
-        terminal: sema_tir_expr(result_type, TExprKind.Never{reason: "CheckedText.check has exactly Ok and Err outcomes"}, span),
+        err_value: sema_tir_node(result_type, TExprKind.Err{value: error_value}, span),
+        terminal: sema_tir_node(result_type, TExprKind.Never{reason: "CheckedText.check has exactly Ok and Err outcomes"}, span),
     }, span)
-    Val(sema_tir_expr(result_type, TExprKind.InlineBlock{body: [TStmt]{
+    Val(sema_tir_node(result_type, TExprKind.InlineBlock{body: [TStmt]{
         TStmt.Let{local: source_local, let_ty: TLetTy.Annotated{ty: Type.String, wrapper: TLetWrapper.Plain}, init: source_init, gc_promotion: None, gc_transferred: false, span: span},
         TStmt.ExprStmt{value: handler, span: span},
     }}, span))
@@ -1017,8 +1017,8 @@ fn sema_expression_checked_text_raw(target: SemaExpressionCheckedTextTarget, typ
     ownership := sema_ownership_check_call_arguments(&state, callee, params, &ownership_args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     value := argument
-    if ownership_args[0].flags.implicit_clone || ownership_args[0].flags.shared_auto_clone -> value = sema_tir_expr(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(ownership_args[0].flags.shared_auto_clone)}, value.span)
-    constructed :: sema_tir_expr(Type.Named{name: type_name}, TExprKind.DistinctCtor{owner: target.owner.id, argument: value, base: Type.String}, method_span)
+    if ownership_args[0].flags.implicit_clone || ownership_args[0].flags.shared_auto_clone -> value = sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(ownership_args[0].flags.shared_auto_clone)}, value.span)
+    constructed :: sema_tir_node(Type.Named{name: type_name}, TExprKind.DistinctCtor{owner: target.owner.id, argument: value, base: Type.String}, method_span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(constructed, expected, environment, program, &diagnostics)}
 }
 
@@ -1148,7 +1148,7 @@ fn sema_expression_checked_text_literal(head: Type, source_head: Type?, body: Ty
         checked_text: Val(evaluation),
     })
     value :: text
-    result := sema_tir_expr(head, TExprKind.DistinctCtor{owner: target.owner.id, argument: value, base: Type.String}, span)
+    result := sema_tir_node(head, TExprKind.DistinctCtor{owner: target.owner.id, argument: value, base: Type.String}, span)
     return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expr_expected(result, expected, environment, program, &diagnostics)}
     }
     SemaExpressionCheckedTextLiteral{handled: true, value: None}
@@ -1303,9 +1303,9 @@ fn sema_expression_typed_literal_text(kind: MIRTypedHeadKind, head: Type, value:
         }
         return sema_call_core_check_fixed(environment, program, "core.net.url", "literal", [Type]{}, args, span, expected, &scopes, &state, &tail_store, &context, &diagnostics)
     }
-    result := sema_tir_expr(head, TExprKind.HostCall{call: THostCall.TypedTextInterp{kind: kind, literals: checked.literals, holes: checked.holes, trusted_html: checked.trusted_html}}, span)
+    result := sema_tir_node(head, TExprKind.HostCall{call: THostCall.TypedTextInterp{kind: kind, literals: checked.literals, holes: checked.holes, trusted_html: checked.trusted_html}}, span)
     if kind == MIRTypedHeadKind.HTML && checked.holes.len() == 0 {
-        result = sema_tir_expr(head, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: checked.literals[0]}}}, span)
+        result = sema_tir_node(head, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: checked.literals[0]}}}, span)
     }
     sema_expr_expected(result, expected, environment, program, &diagnostics)
 }
@@ -1339,9 +1339,9 @@ fn sema_expression_typed_literal_regex(value: Expr, span: Span, expected: Type?,
             argument :: CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: pattern}}, span: expr_span(value)}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
             compiled :: sema_call_core_check_source_owned(target, "core.regex.compile", [Type]{}, [CallArg]{argument}, span, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
             result_type :: if compiled.ty == {.Result(ok, _) -> ok else -> panic("source Regex compile producer is not fallible")}
-            message :: sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "compiler-checked regex failed to compile"}}}, span)
+            message :: sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "compiler-checked regex failed to compile"}}}, span)
             fallback :: TOrFallback.Panic{message: message, location: sema_expression_panic_location(environment, program, scopes, span)}
-            checked :: sema_tir_expr(result_type, TExprKind.OrFallback{value: compiled, fallback: fallback, ambient_err: None}, span)
+            checked :: sema_tir_node(result_type, TExprKind.OrFallback{value: compiled, fallback: fallback, ambient_err: None}, span)
             return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
         }
         else -> {

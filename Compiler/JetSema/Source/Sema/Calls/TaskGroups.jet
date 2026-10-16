@@ -471,7 +471,7 @@ fn sema_taskgroup_callable_wrapper(value: TExpr, signature: Type, span: Span) ->
         }
         else -> return None
     }
-    body := sema_tir_expr(result_ty, TExprKind.IndirectCall{callee: value, type_args: [Type]{}, args: [TCallArg]{}, signature: signature}, span)
+    body := sema_tir_node(result_ty, TExprKind.IndirectCall{callee: value, type_args: [Type]{}, args: [TCallArg]{}, signature: signature}, span)
     Val(TLambda{
         executable: TLambdaBody.Expr{value: body},
         source_span: span,
@@ -760,7 +760,7 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
     }
     task_type := Type.Apply{name: "Task", args: [Type]{task_result_ty}}
     kind := TCoreClosureKind.Spawn{group: group, site: span.start, label: None, executable: lambda}
-    value := sema_tir_expr(task_type, TExprKind.CoreClosureCall{kind: kind}, span)
+    value := sema_tir_node(task_type, TExprKind.CoreClosureCall{kind: kind}, span)
     if group != None {
         index :: sema_taskgroup_active_index(context.taskgroups) ?? 0
         group_name := context.taskgroups.stack[index].name
@@ -781,7 +781,7 @@ fn sema_taskgroup_check_surface_method(receiver: Expr, method: String, args: [Ca
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         sema_taskgroup_note_time_effect(&context, span)
-        value := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Unit, span)
+        value := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
     }
     if method == sema_taskgroup_internal_all_method() || method == sema_taskgroup_internal_race_method() || method == sema_taskgroup_internal_any_method() {
@@ -855,7 +855,7 @@ fn sema_taskgroup_check_task_method(receiver: Expr, receiver_value: TExpr, metho
     join := method == "join"
     result_type := if join -> sema_taskgroup_failure_result(payload) else -> Type.Named{name: "Unit"}
     operation := if join -> THandleOp.TaskJoin else -> THandleOp.TaskDetach
-    value := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
+    value := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
     checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     effect_name := if join -> "Time.Wait" else -> ""
     if !sema_stream_handle_effect_fact(environment, program, &scopes, &context, "Task.{method}", span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}

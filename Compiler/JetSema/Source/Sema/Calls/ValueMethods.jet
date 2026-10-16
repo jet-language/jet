@@ -91,8 +91,8 @@ fn sema_value_method_kind(row: BuiltinMethodRow, method: String, receiver_value:
         .Builtin(operation) -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: operation, args: typed}
         .StringSlice -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.Slice{line: line}, args: typed}
         .StringRangeSlice -> {
-            zero_start := sema_tir_expr(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
-            zero_end := sema_tir_expr(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
+            zero_start := sema_tir_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
+            zero_end := sema_tir_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
             TExprKind.Slice{base: receiver_value, start: zero_start, end: zero_end, range: Val(typed[0]), location: sema_expression_panic_location(environment, program, scopes, span)}
         }
         .StringSplitOnce -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.StringSplitOnce{tuple_struct: sema_value_method_tuple_struct(result)}, args: typed}
@@ -135,7 +135,7 @@ fn sema_value_method_option_map(receiver: Expr, receiver_value: TExpr, inner: Ty
     // The method itself is known-pure (as every builtin value method); the
     // callback's own effects are its lambda's, merged where the walk meets it.
     if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "Option.map", span, [EffectRowEntry]{}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_expr(Type.Option{inner: success}, TExprKind.ClosureMethod{receiver: receiver_value, operation: TClosureOp.OptionMap, args: [TExpr]{callback}}, span)
+    value := sema_tir_node(Type.Option{inner: success}, TExprKind.ClosureMethod{receiver: receiver_value, operation: TClosureOp.OptionMap, args: [TExpr]{callback}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 

@@ -396,7 +396,7 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         // has no storage to give up and keeps its copy.
         taken_place := parameter.convention == AccessConvention.Move && !parameter.variadic && args[index].convention == AccessConvention.Move && sema_call_marked_move_place(args[index].expr, value)
         if taken_place && sema_ownership_binding_for_expr(&state, args[index].expr, scopes) == .Val(root) -> taken_place = !sema_ownership_binding_is_borrowed_param(root)
-        stored :: if taken_place -> sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span) else -> value
+        stored :: if taken_place -> sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span) else -> value
         &values.push(stored)
         &slots.push(slot)
         &required_types.push(required)
@@ -477,7 +477,7 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
         ty :: original.ty
         init := original
         if lowered[index].clone || lowered[index].arc_clone {
-            init = sema_tir_expr(ty, TExprKind.Clone{value: init, fact: tir_call_arg_copy_fact(lowered[index].arc_clone)}, original.span)
+            init = sema_tir_node(ty, TExprKind.Clone{value: init, fact: tir_call_arg_copy_fact(lowered[index].arc_clone)}, original.span)
             lowered[index].clone = false
             lowered[index].arc_clone = false
         }
@@ -488,16 +488,16 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
         borrowed :: (lowered[index].borrow || lowered[index].mut_borrow) && place_value
         if borrowed {
             access :: if lowered[index].mut_borrow -> AccessConvention.Write else -> AccessConvention.Read
-            init = sema_tir_expr(ty, TExprKind.Borrow{place: init, access: access}, original.span)
+            init = sema_tir_node(ty, TExprKind.Borrow{place: init, access: access}, original.span)
         }
         symbol :: sema_call_binder_ref_symbol(environment, program, owner, typed.binder_site, pin_slot, params[slot].name, ty, span)
         local := tir_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id)
         local.generated = true
         local.mutable = lowered[index].mut_borrow
         local.deref = borrowed
-        local_value :: sema_tir_expr(ty, TExprKind.Local{local: local}, original.span)
+        local_value :: sema_tir_node(ty, TExprKind.Local{local: local}, original.span)
         moves_pin :: params[slot].convention == AccessConvention.Move || (params[slot].variadic && !lowered[index].spread)
-        lowered[index].value = if moves_pin -> sema_tir_expr(ty, TExprKind.Move{value: local_value}, original.span) else -> local_value
+        lowered[index].value = if moves_pin -> sema_tir_node(ty, TExprKind.Move{value: local_value}, original.span) else -> local_value
         &bindings.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: span})
     }
     bindings
@@ -509,7 +509,7 @@ fn sema_call_with_binder_pins(pins: ^[TStmt], call_value: ^TExpr, span: Span) ->
     ty :: call_value.ty.copy()
     body := pins
     &body.push(TStmt.ExprStmt{value: call_value, span: span})
-    sema_tir_expr(ty, TExprKind.InlineBlock{body: body}, span)
+    sema_tir_node(ty, TExprKind.InlineBlock{body: body}, span)
 }
 
 // The place a `^`-marked call argument moves exactly: a field read, or a
@@ -578,12 +578,12 @@ fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [S
             if !lowered[index].clone && !lowered[index].arc_clone {
                 if !sema_expression_list_check_clone(value.ty, value.span, environment, program, &context, &diagnostics) -> return false
             }
-            if args[index].convention == AccessConvention.Move -> value = sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span)
-            value = sema_tir_expr(typed.required_types[index], TExprKind.MaterializeView{value: value}, value.span)
+            if args[index].convention == AccessConvention.Move -> value = sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span)
+            value = sema_tir_node(typed.required_types[index], TExprKind.MaterializeView{value: value}, value.span)
         } else if lowered[index].clone || lowered[index].arc_clone {
-            value = sema_tir_expr(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(lowered[index].arc_clone)}, value.span)
+            value = sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(lowered[index].arc_clone)}, value.span)
         } else if args[index].convention == AccessConvention.Move {
-            value = sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span)
+            value = sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span)
         } else if lowered[index].spread {
             // A lone spread is a direct List borrow; mixed spread cloning is
             // judged below on the canonical ListSpread, not on its List root.
@@ -599,10 +599,10 @@ fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [S
             copies_place :: places.len() > 0 && (borrowed || !sema_ownership_unmarked_moves_name(args[index].expr) || sema_ownership_is_share_site(state, args[index].span))
             if copies_place {
                 if !sema_expression_list_check_clone(value.ty, value.span, environment, program, &context, &diagnostics) -> return false
-                value = sema_tir_expr(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(false)}, value.span)
+                value = sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(false)}, value.span)
             } else {
                 if !sema_ownership_mark_unmarked_move(&state, args[index].expr, scopes, "the variadic list", &diagnostics) -> return false
-                value = sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span)
+                value = sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span)
             }
         }
         lowered[index].value = ^value

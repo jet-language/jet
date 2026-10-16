@@ -149,7 +149,7 @@ fn sema_services_bind_labels(api: String, args: &[CallArg], labels: [String], sp
 }
 
 fn sema_services_apply_access(value: TExpr, access: AccessConvention) -> TExpr Never! {
-    if access == AccessConvention.Move -> return sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span)
+    if access == AccessConvention.Move -> return sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span)
     value.copy()
 }
 
@@ -378,7 +378,7 @@ fn sema_check_service_tree_method(method: String, receiver: Expr, receiver_value
             &diagnostics.push(sema_error("E0112", expr_span(updated_args[1].expr), "service worker handler has no checked top-level function identity", "service handlers must resolve to registered top-level function bodies", "pass a registered top-level function"))
             return Val(SemaMethodSpecialCheck{handled: true, value: None})
         }
-        core_args := [TExpr]{receiver_value, values[0], handler, sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: handler_name}}}, span), values[2]}
+        core_args := [TExpr]{receiver_value, values[0], handler, sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: handler_name}}}, span), values[2]}
         record :: sema_call_core_record("core.service", "worker", core_args.len(), span, &diagnostics) ?? return Val(SemaMethodSpecialCheck{handled: true, value: None})
         params := sema_services_method_params([Type]{Type.String, handler_type, Type.Int}, [AccessConvention]{sema_call_core_access(record, 1) ?? AccessConvention.Read, sema_call_core_access(record, 2) ?? AccessConvention.Read, sema_call_core_access(record, 4) ?? AccessConvention.Read})
         ownership := sema_ownership_check_method_call(&state, "ServiceTree.worker", receiver, AccessConvention.Write, params, &updated_args, scopes, span, &diagnostics)
@@ -493,7 +493,7 @@ fn sema_check_service_runtime_method(method: String, receiver: Expr, receiver_va
         &handle_args.push(sema_services_apply_access(values[index], access))
         index += 1
     }
-    value := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: handle_args}, span)
+    value := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: handle_args}, span)
     checked := if expected == .Val(target) -> sema_expr_expected(value, target, environment, program, &diagnostics) else -> Val(value)
     Val(SemaMethodSpecialCheck{handled: true, value: checked})
 }
@@ -708,14 +708,14 @@ fn sema_call_try_job_queue_method(receiver: Expr, receiver_value: TExpr, method:
     sema_call_http_check_serde(SemaSerdeDirection.Encode, payload_type, expr_span(updated_args[1].expr), environment, program, &diagnostics)
     payload :: sema_check_expression(updated_args[1].expr, Val(payload_type), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed
     last_type :: if method == "enqueue" -> Type.Option{inner: Type.String} else -> Type.Named{name: "Duration"}
-    last :: if updated_args.len() == 3 -> sema_check_expression(updated_args[2].expr, Val(last_type), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed else -> sema_tir_expr(last_type, TExprKind.Absent, span)
+    last :: if updated_args.len() == 3 -> sema_check_expression(updated_args[2].expr, Val(last_type), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed else -> sema_tir_node(last_type, TExprKind.Absent, span)
     parameter_types :: if updated_args.len() == 3 -> [Type]{Type.String, payload_type, last_type} else -> [Type]{Type.String, payload_type}
     params :: sema_services_method_params(parameter_types, [AccessConvention]{})
     ownership :: sema_ownership_check_method_call(&state, "JobQueue.{method}", receiver, AccessConvention.Write, params, &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return failed
     // Source takes its immutable shared handle as a normal read, not the old
     // native mutable carrier. Receiver ownership has already been checked.
-    normalized :: [TExpr]{receiver_value, sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: job_name}}}, job_span), payload, last}
+    normalized :: [TExpr]{receiver_value, sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: job_name}}}, job_span), payload, last}
     record :: sema_call_core_receiver_record(Type.Named{name: "JobQueue"}, method, normalized.len(), span, &diagnostics) ?? return failed
     result_type :: sema_services_result_type(Type.Named{name: sema_job_queue_nominal(environment, program, "JobQueueReceipt")})
     failure :: sema_services_result_carrier(result_type)

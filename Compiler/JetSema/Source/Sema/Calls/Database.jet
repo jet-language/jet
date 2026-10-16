@@ -149,7 +149,7 @@ fn sema_call_try_database_method(receiver: Expr, receiver_value: TExpr, method: 
     }
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_database_record_effect(contract.effect_name, api, span, environment, program, &scopes, &context, contract.result_type, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_expr(contract.result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: contract.operation, args: typed}, span)
+    value := sema_tir_node(contract.result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: contract.operation, args: typed}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
@@ -193,6 +193,6 @@ fn sema_call_try_sql_raw(receiver: Expr, method: String, args: [CallArg], span: 
     if argument.label != None -> &diagnostics.push(sema_error("E0104", argument.span, "`SQL.raw` takes a positional String", "the raw SQL escape has one fixed input", "remove the argument label"))
     if argument.convention == AccessConvention.Move -> &diagnostics.push(sema_error("E0203", argument.span, "a value was passed with the move marker `^` to a parameter that does not consume", "SQL.raw reads its String input", "remove the move marker `^` here"))
     text :: sema_check_expression(argument.expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_expr(Type.Named{name: "SQL"}, TExprKind.HostCall{call: THostCall.TypedText{kind: TTypedTextForm.SQLRaw, argument: text}}, span)
+    value := sema_tir_node(Type.Named{name: "SQL"}, TExprKind.HostCall{call: THostCall.TypedText{kind: TTypedTextForm.SQLRaw, argument: text}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
