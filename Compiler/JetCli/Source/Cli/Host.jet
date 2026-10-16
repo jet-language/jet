@@ -361,8 +361,21 @@ fn jet_cli_keep_going_row(phase: String, item: String, message: String) -> Strin
 // `census`; lowering and object findings no longer stop the route while it
 // still has an entry and object bytes, so each later phase reports too.
 fn jet_cli_native_executable(result: JetDriverCompileResult, sources: JetCLIForeignSources, release: Bool, runtime_dir: String, object_path: String, executable_path: String, keep_going: Bool, census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
-    raw_program :: result.mir ?? return Val(JetCLINativeFailure.NoEntry)
-    unpruned :: jet_cli_rust_foreign_prepare(result.rust_foreign, ^raw_program) ?? return Val(JetCLINativeFailure.RustForeign{error: err})
+    // The checked MIR is read where the result holds it: a local binding of
+    // it would copy the whole program for the length of the native route.
+    // Only a program with a Rust foreign helper owns an attached copy.
+    if result.mir == .Val(program) {
+        realized :: jet_cli_rust_foreign_realize(result.rust_foreign, program) ?? return Val(JetCLINativeFailure.RustForeign{error: err})
+        if realized == .Val(artifact) {
+            attached :: jet_cli_rust_foreign_attach(artifact.plan, artifact.target_dir, artifact.release, program.copy()) ?? return Val(JetCLINativeFailure.RustForeign{error: err})
+            return jet_cli_native_program_executable(result, attached, sources, release, runtime_dir, object_path, executable_path, keep_going, &census)
+        }
+        return jet_cli_native_program_executable(result, program, sources, release, runtime_dir, object_path, executable_path, keep_going, &census)
+    }
+    Val(JetCLINativeFailure.NoEntry)
+}
+
+fn jet_cli_native_program_executable(result: JetDriverCompileResult, unpruned: MIRProgram, sources: JetCLIForeignSources, release: Bool, runtime_dir: String, object_path: String, executable_path: String, keep_going: Bool, census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
     entry_id :: result.entry_function ?? return Val(JetCLINativeFailure.NoEntry)
     // Only functions the entry reaches are lowered, generic ones per instance.
     lowered :: if keep_going -> lir_lower_entry_keep_going(unpruned, entry_id) else -> lir_lower_entry(unpruned, entry_id)
