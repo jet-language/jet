@@ -4567,11 +4567,17 @@ fn jet_driver_test_artifacts(package_identity: String, entry_module_identity: St
     jet_codegen_lower_job_test_artifacts([TJobFact]{}, tests, [THarnessPlanFact]{harness}, test_functions, checked)
 }
 
-// D-ADOPT-GUEST1=A / U3: the entry module's `#Export(c)` functions in
-// declaration order, each a checked MIR function under the C export law
-// (Rust `artifact_plan::lower_exports` over `Sema::guest_export_surface`).
-fn jet_driver_c_exports(graph: SemaRegistrationGraph, entry_module_identity: String, functions: [MIRFunction]) -> [MIRExport] Never! {
-    exports := [MIRExport]{}
+// One `#Export(c)` function of the entry module: its symbol key and name.
+struct JetDriverCExportRow {
+    key: String
+    name: String
+}
+
+// The entry module's `#Export(c)` functions in declaration order, read from
+// the registration graph before MIR lowering so the graph need not stay
+// alive through lowering and assembly (jet_driver_c_exports).
+fn jet_driver_c_export_rows(graph: SemaRegistrationGraph, entry_module_identity: String) -> [JetDriverCExportRow] Never! {
+    rows := [JetDriverCExportRow]{}
     loop registration_module in graph.modules {
         if registration_module.module_identity != entry_module_identity -> next
         loop row in registration_module.functions {
@@ -4579,15 +4585,46 @@ fn jet_driver_c_exports(graph: SemaRegistrationGraph, entry_module_identity: Str
             loop marker in row.declaration.markers {
                 if sema_marker_is_guest_export(marker) -> exported = true
             }
-            if !exported -> next
-            loop function in functions {
-                if function.key != row.symbol.id.key -> next
-                if mir_c_export_signature(function) -> &exports.push(MIRExport{symbol: jet_driver_c_symbol(row.declaration.name), function: function.id, abi: .C})
-                break
-            }
+            if exported -> &rows.push(JetDriverCExportRow{key: row.symbol.id.key, name: row.declaration.name})
+        }
+    }
+    rows
+}
+
+// D-ADOPT-GUEST1=A / U3: the entry module's `#Export(c)` functions in
+// declaration order (jet_driver_c_export_rows), each a checked MIR function
+// under the C export law (Rust `artifact_plan::lower_exports` over
+// `Sema::guest_export_surface`).
+fn jet_driver_c_exports(rows: [JetDriverCExportRow], functions: [MIRFunction]) -> [MIRExport] Never! {
+    exports := [MIRExport]{}
+    loop row in rows {
+        loop function in functions {
+            if function.key != row.key -> next
+            if mir_c_export_signature(function) -> &exports.push(MIRExport{symbol: jet_driver_c_symbol(row.name), function: function.id, abi: .C})
+            break
         }
     }
     exports
+}
+
+// The Rust foreign facts of the registration graph a compile kept past MIR
+// lowering; a compile that released it had no `extern rust` function, whose
+// facts are empty (jet_driver_rust_foreign_present).
+fn jet_driver_late_rust_foreign_facts(graph: SemaRegistrationGraph?) -> JetDriverRustForeignFacts Never! {
+    if graph == .Val(registration) -> return jet_driver_rust_foreign_facts(registration)
+    jet_driver_rust_foreign_empty()
+}
+
+// The Sandbox export surface over the registration graph a Sandbox compile
+// keeps past MIR lowering (read through a parameter, so the binding borrows).
+fn jet_driver_late_sandbox_exports(graph: SemaRegistrationGraph?, program: MIRProgram, codable_keys: [String], diagnostics: &[Diagnostic]) -> [MIRExport] {
+    registration :: graph ?? panic("a Sandbox compile released its registration graph before its export surface")
+    jet_driver_sandbox_exports(registration, program, codable_keys, &diagnostics)
+}
+
+fn jet_driver_late_sandbox_snapshot(graph: SemaRegistrationGraph?, export_name: String, symbols: [String]) -> SemaPluginFrozenSnapshotInput {
+    registration :: graph ?? panic("a Sandbox compile released its registration graph before its interface snapshot")
+    sema_sandbox_interface_snapshot(registration, export_name, symbols)
 }
 
 // The record types the Component boundary may carry: checked declarations
@@ -5544,6 +5581,9 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     )
     if request.trace_sink == .Val(sink) -> sink.end("comptime.bodies", body_run.values.len())
     load.diagnostics = stage_diagnostics
+    // The body recheck returns the run's values and closures as its own.
+    comptime_run.values = [SemaComptimeItemValue]{}
+    comptime_run.functions = [SemaComptimeFunctionResult]{}
     returned_registration := ^body_run.registration
     body_run.registration = None
     registration_graph = ^returned_registration ?? return jet_driver_compile_internal_result(load, trace, "comptime body rechecking lost the registration graph")
@@ -5570,8 +5610,8 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         return jet_driver_doc_failure(^result, request.mode, Val(body_run.graph.names.structure_facts))
     }
     checked_graph = ^body_run.graph
-    comptime_values := body_run.values
-    comptime_functions := body_run.functions
+    comptime_values := ^body_run.values
+    comptime_functions := ^body_run.functions
 
     stage_diagnostics = load.diagnostics
     load.diagnostics = [Diagnostic]{}
@@ -5589,6 +5629,9 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     )
     if request.trace_sink == .Val(sink) -> sink.end("comptime.validate", validation.values.len())
     load.diagnostics = stage_diagnostics
+    // Finalization, the body recheck and checked-text validation were the
+    // declaration pass's last readers.
+    sema_comptime_stage_release(&comptime_stage)
     validated_registration := ^validation.registration
     validation.registration = None
     registration_graph = ^validated_registration ?? return jet_driver_compile_internal_result(load, trace, "checked text validation lost the registration graph")
@@ -5606,8 +5649,8 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         return jet_driver_doc_failure(^result, request.mode, Val(validation.graph.names.structure_facts))
     }
     checked_graph = ^validation.graph
-    comptime_values = validation.values
-    comptime_functions = validation.functions
+    comptime_values = ^validation.values
+    comptime_functions = ^validation.functions
     if request.capture_build_nodes && checked_graph.complete && !jet_driver_has_errors(load.diagnostics) {
         load.build_nodes = jet_driver_build_compiler_nodes(request, load, checked_graph, canonical_effect_module_identity)
         if load.build_nodes == None -> return jet_driver_compile_internal_result(load, trace, "the final checked build bundle lost its exact source bytes or node identity")
@@ -5627,6 +5670,8 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         if !kg.enabled -> return jet_driver_compile_internal_result(load, trace, "staged method closure lost its checked function or registered owner")
         jet_driver_keep_going_row(&kg, "comptime.validate", "-", "ICE", "staged method closure lost its checked function or registered owner", "-")
     }
+    // The merge was the staged closures' last reader.
+    comptime_functions = [SemaComptimeFunctionResult]{}
     if checked_projection {
         resolved_registration := sema_comptime_graph_with_values(^registration_graph, comptime_values)
         schema_ingress :: capture.schema_ingress ?? return jet_driver_compile_internal_result(load, trace, "the retained checked projection lost its actual schema input")
@@ -5655,6 +5700,8 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         registration_graph = ^resolved_registration
         if load.build_program == None -> return jet_driver_compile_internal_result(load, trace, "the checked build program reflection snapshot is incomplete")
     }
+    // Only a REPL session reads the build-time values past this point.
+    if request.mode != JetDriverCompileMode.Repl -> comptime_values = [SemaComptimeItemValue]{}
     if request.mode == JetDriverCompileMode.Eval {
         selected_name :: request.selected_entry ?? "run"
         key :: symbol_id(SymbolKind.Function, load.entry_module_identity, "", selected_name).key
@@ -5733,12 +5780,31 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         &module_function_counts.push(module_functions.len())
         compiler_transfer_rows<TFunc>(&checked_functions, &module_functions)
     }
+    // Every checked function has its owner now.
+    registered_function_keys = [String:[String:Bool]]{}
     // E0601 only when neither named tests nor selected Check Outputs exist.
     if request.mode == JetDriverCompileMode.Test && jet_driver_runnable_test_count(registration_graph) == 0 {
         &load.diagnostics.push(jet_driver_diagnostic_without_span("E0601", "no `#Test` blocks found to run", "add at least one top-level block: #Test(\"describes what this checks\") {{ ... }}", "use `assert` and `assert_eq` inside the block to check results"))
     }
     if jet_driver_has_errors(load.diagnostics) -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)
     if failed_stage != None && !kg.enabled -> return jet_driver_doc_failure(jet_driver_compile_result(load, load.diagnostics, None, None, None, None, failed_stage, false, trace), request.mode, Val(checked_graph.names.structure_facts))
+
+    // From here on the registration graph is read only for the entry
+    // module's C export rows, the Rust foreign facts, a Sandbox export
+    // surface and a REPL session. Read the export rows now and keep the graph
+    // only for a route that reads it later, so MIR lowering, assembly, the
+    // optimizer and the native backend never hold every registered module.
+    c_export_rows :: jet_driver_c_export_rows(registration_graph, load.entry_module_identity)
+    sandbox_target := if request.target == {
+        .Sandbox(_, _, _) -> true
+        else -> false
+    }
+    keep_registration :: sandbox_target || request.mode == JetDriverCompileMode.Repl || jet_driver_rust_foreign_present(registration_graph)
+    late_registration := SemaRegistrationGraph?{None}
+    late_registration = Val(^registration_graph)
+    if !keep_registration -> late_registration = None
+    // Lowering and assembly read only the checked modules, imports and names.
+    sema_graph_result_release_checking_facts(&checked_graph)
 
     // #3980: lower only the Core source bodies the program reaches (Rust
     // TIR `should_lower_imported_core_body`).
@@ -5781,6 +5847,8 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         }
         function_index += 1
     }
+    // The owner check above was the owner map's last reader.
+    function_owners = [String:String]{}
     if kg.enabled {
         jet_driver_keep_going_diagnostics(&kg, "lower", load.diagnostics)
         jet_driver_keep_going_flush(&kg, request.trace_sink)
@@ -5807,10 +5875,6 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     web_target := if request.target == {
         .Web(_, _, _) -> true
         .Native | .Sandbox(_, _, _) -> false
-    }
-    sandbox_target := if request.target == {
-        .Sandbox(_, _, _) -> true
-        else -> false
     }
     if entry_function == None && web_target {
         &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the Web compile target requires an explicit package entry function", "WebApplication publication invokes exactly the manifest-selected checked entry", "declare an `outputs.web.entry` function in the selected package"))
@@ -5858,6 +5922,8 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         &stage_diagnostics,
     )
     load.diagnostics = stage_diagnostics
+    // Lowering and assembly were the runtime module rows' last readers.
+    runtime_semantic_modules = [SemaGraphModuleResult]{}
     if kg.enabled {
         jet_driver_keep_going_diagnostics(&kg, "assemble", load.diagnostics)
         jet_driver_keep_going_flush(&kg, request.trace_sink)
@@ -5883,7 +5949,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         if artifacts.harnesses.len() > 0 -> test_harness = Val(artifacts.harnesses[0].id)
         if test_harness == None -> return jet_driver_compile_internal_result(load, trace, "the checked tests lowered to no MIR test harness")
     }
-    c_exports :: jet_driver_c_exports(registration_graph, load.entry_module_identity, program_value.functions)
+    c_exports :: jet_driver_c_exports(c_export_rows, program_value.functions)
     // D-PLUGIN-EXPORT1=A / D-PLUGIN-VERSION1=A: a sandbox's export surface is
     // checked (E1260) and diffed against its frozen interface (E1257) before
     // anything is optimized or emitted.
@@ -5891,10 +5957,10 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     sandbox_exports := [MIRExport]?{None}
     sandbox_snapshot := SemaPluginFrozenSnapshotInput?{None}
     if request.target == .Sandbox(requested_export, frozen_interfaces, _) {
-        exports :: jet_driver_sandbox_exports(registration_graph, program_value, codable_keys, &load.diagnostics)
+        exports :: jet_driver_late_sandbox_exports(late_registration, program_value, codable_keys, &load.diagnostics)
         sandbox_exports = Val(exports)
         export_name :: requested_export ?? jet_driver_sandbox_default_export_name(load, request)
-        current :: sema_sandbox_interface_snapshot(registration_graph, export_name, (loop export in exports -> export.symbol))
+        current :: jet_driver_late_sandbox_snapshot(late_registration, export_name, (loop export in exports -> export.symbol))
         prior := SemaPluginFrozenSnapshotInput?{None}
         loop text in frozen_interfaces {
             parsed :: sema_sandbox_parse_snapshot(text) ?? next
@@ -5923,7 +5989,8 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
             loop function in module_row.functions { if function.key == owner.key -> root = Val(function) }
         }
         checked_root :: root ?? return jet_driver_compile_internal_result(load, trace, "REPL selected root lost its checked TFunc")
-        resolved_registration := sema_comptime_graph_with_values(^registration_graph, comptime_values)
+        repl_registration := ^late_registration ?? return jet_driver_compile_internal_result(load, trace, "REPL selected root lost its registration graph")
+        resolved_registration := sema_comptime_graph_with_values(^repl_registration, comptime_values)
         source :: sema_registration_callable_declaration(resolved_registration, owner) ?? return jet_driver_compile_internal_result(load, trace, "REPL selected root lost its registered declaration")
         session :: repl_session_new(^resolved_registration, ^checked_graph.modules, source, checked_root, ^program_value, jet_eval_runtime_config(request.eval_config)) ?? {
             &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "REPL session initialization refused the checked root", err.message, "select an empty zero-parameter REPL root"))
@@ -5933,6 +6000,10 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         result.repl_session = Val(session)
         return result
     }
+    // Assembly, the export surfaces, the entry fallback and the artifact plan
+    // were the checked graph's last readers; the optimizer and the backend
+    // read only the MIR program.
+    sema_graph_result_release_rows(&checked_graph)
     // Compile time is explicit in the checker, so ordinary immutable bindings
     // over pure work are folded here, once, for every execution tier.
     program_value = jet_driver_fold_pure_calls(^program_value)
@@ -6047,7 +6118,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         return result
     }
 
-    rust_foreign :: jet_driver_rust_foreign_facts(registration_graph)
+    rust_foreign :: jet_driver_late_rust_foreign_facts(late_registration)
     if !emit_rust {
         result := jet_driver_compile_result(load, load.diagnostics, entry_function, Val(^optimized_program), None, None, None, true, trace)
         result.rust_foreign = rust_foreign

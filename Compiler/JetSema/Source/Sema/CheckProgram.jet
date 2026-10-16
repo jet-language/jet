@@ -429,6 +429,48 @@ struct SemaGraphResult {
     memory_projections: [SemaMemoryProjectionRow]{[SemaMemoryProjectionRow]{}}
 }
 
+// Releases the rows of a checked graph that only checking, comptime and Doc
+// read: call-site, compute and memory facts, comptime requests and body
+// sources, retained programs, Outputs and the checker's own diagnostics. MIR
+// lowering, assembly and the backend read none of them; the driver releases
+// them before lowering (jet_driver_compile_loaded_stages).
+fn sema_graph_result_release_checking_facts(graph: &SemaGraphResult) Never! {
+    graph.call_facts = [SemaCallSiteFact]{}
+    graph.comptime_requests = [SemaComptimeRequest]{}
+    graph.comptime_body_sources = [SemaComptimeBodySource]{}
+    graph.compute_facts = [SemaComputeFunctionFacts]{}
+    graph.diagnostics = [Diagnostic]{}
+    graph.inferred_infallible = [String]{}
+    graph.programs = [Program]{}
+    graph.outputs = [ResolvedOutput]{}
+    graph.memory_declarations = [SemaMemoryFactDeclaration]{}
+    graph.memory_projections = [SemaMemoryProjectionRow]{}
+}
+
+// Releases the module rows, resolved imports and name facts of a checked
+// graph once MIR assembly and the artifact plan have read them; the
+// optimizer and the backend read only the MIR program.
+fn sema_graph_result_release_rows(graph: &SemaGraphResult) Never! {
+    graph.modules = [SemaGraphModuleResult]{}
+    graph.imports = [SemaRegistrationImport]{}
+    graph.names = sema_name_facts_empty()
+}
+
+// Releases what the declaration pass handed to finalization, the body
+// recheck and checked-text validation (its modules, imports, names and item
+// sources) once the last of them has run.
+fn sema_comptime_stage_release(stage: &SemaComptimeDeclarationStage) Never! {
+    stage.modules = [SemaGraphModuleResult]{}
+    stage.imports = [SemaRegistrationImport]{}
+    stage.names = sema_name_facts_empty()
+    stage.sources = [SemaComptimeItemSource]{}
+    stage.diagnostics = [Diagnostic]{}
+}
+
+fn sema_name_facts_empty() -> MIRNameFacts Never! {
+    MIRNameFacts{modules: [MIRNameModule]{}, declarations: [MIRNameDeclaration]{}, aliases: [MIRNameAlias]{}, references: [MIRNameReference]{}, structure_facts: [MIRStructureFact]{}}
+}
+
 // Invocation-memory body memo, owned by the compiler's existing root service.
 // It never replaces registration, summaries or the whole-program verdict.
 struct SemaIncrementalCache {
