@@ -258,7 +258,7 @@ fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, dept
             power_span :: parser_cover(operator_token.span, parser_bump(&state).span)
             right :: parser_parse_expression_restricted(&state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
             diagnostic := diagnostic_from_registry("E0396", Val(power_span), "Jet writes power as `value.pow(exponent)`, not `**`.", "`**` is a power operator in some other languages; Jet uses the `pow` method.", "Write `base.pow(exponent)`, for example `2.pow(3)`.")
-            if !parser_aborting(&state) && left.span.start >= 0 && left.span.end <= right.span.start && right.span.start < right.span.end && right.span.end <= state.source.len() {
+            if !parser_aborting(&state) && left.span.start >= 0 && left.span.end <= right.span.start && right.span.start < right.span.end && right.span.end <= state.sources[0].len() {
                 base :: parser_source_slice(state, left.span.start, left.span.end)
                 exponent :: parser_source_slice(state, right.span.start, right.span.end)
                 diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: Span{start: left.span.start, end: right.span.end}, new_text: "({base}).pow({exponent})"})
@@ -931,7 +931,7 @@ fn parser_parse_interpolation(state: &JetParserState, part: StringPart, depth: I
         position: 0,
         diagnostics: [Diagnostic]{},
         source_end: part.span.end,
-        source: [U8]{},
+        sources: [[U8]]{},
         block_spans: [Span]{},
         pending_type_gt: false,
         pending_type_gt_span: Span{start: 0, end: 0},

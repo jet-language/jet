@@ -405,9 +405,9 @@ fn parser_parse_marker_args(state: &JetParserState) -> ParsedMarkerArgs {
 fn parser_marker_written_text(state: &JetParserState, marker: Marker) -> String? {
     start := marker.span.start
     end :: marker.span.end
-    if start < 0 || end > state.source.len() || end <= start -> return None
-    if state.source[start] == (U8{35}) -> start += 1
-    text :: String.from_bytes(state.source.slice(start, end)) ?? return None
+    if start < 0 || end > state.sources[0].len() || end <= start -> return None
+    if state.sources[0][start] == (U8{35}) -> start += 1
+    text :: String.from_bytes(state.sources[0].slice(start, end)) ?? return None
     Val(text)
 }
 

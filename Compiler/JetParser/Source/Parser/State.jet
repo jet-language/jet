@@ -84,7 +84,9 @@ struct JetParserState {
     // D-SEMI1=A: an authored `;` reports E0373 once per file.
     explicit_semicolon_reported: Bool{false}
     // The source text, when known; L0507 and E0373 build their edits from it.
-    source: [U8]{[U8]{}}
+    // One row, so an interpolation hole can borrow it (parser_lend_hole) the
+    // way it borrows `tables`; empty only while lent.
+    sources: [[U8]]{[[U8]]{[U8]{}}}
     // Rust stops a statement or item at its first fatal error and resumes at
     // the next boundary, so one mistake reports once. `abort_mark` is the
     // diagnostics length just after that error (0 = none; a rewind below it
@@ -200,20 +202,19 @@ fn parser_return_tables(state: &JetParserState, nested: &JetParserState) Never! 
 }
 
 // An interpolation hole parses with its parent's tables and source text: the
-// source moves to the nested state and back instead of being copied once
-// per hole. Every exit returns both before the parent reads again.
+// source row moves to the nested state and back instead of the whole source
+// being copied once per hole. Every exit returns both before the parent
+// reads again.
 fn parser_lend_hole(state: &JetParserState, nested: &JetParserState) Never! {
     parser_lend_tables(&state, &nested)
-    source := ^state.source
-    state.source = [U8]{}
-    nested.source = ^source
+    source :: &state.sources.pop() ?? return
+    &nested.sources.push(source)
 }
 
 fn parser_return_hole(state: &JetParserState, nested: &JetParserState) Never! {
     parser_return_tables(&state, &nested)
-    source := ^nested.source
-    nested.source = [U8]{}
-    state.source = ^source
+    source :: &nested.sources.pop() ?? return
+    &state.sources.push(source)
 }
 
 fn parser_is_trivia(kind: Int) -> Bool Never! {
@@ -346,10 +347,10 @@ fn parser_report_explicit_semicolon(state: &JetParserState, span: Span) Never! {
             break
         }
     }
-    same_line := next_start >= 0 && next_start <= state.source.len()
+    same_line := next_start >= 0 && next_start <= state.sources[0].len()
     if same_line {
         loop index in span.end..<next_start {
-            byte :: Int.from_u8(state.source[index])
+            byte :: Int.from_u8(state.sources[0][index])
             if byte == 10 || byte == 13 -> same_line = false
         }
     }
@@ -360,7 +361,7 @@ fn parser_report_explicit_semicolon(state: &JetParserState, span: Span) Never! {
 
 fn parser_teach_arithmetic_method(state: &JetParserState, method: String, lhs: Span, rhs: Span, operator: Span, compound: Bool) Never! {
     diagnostic := diagnostic_from_registry("E0398", Val(operator), "this arithmetic spelling is retired; use `{method}`", "marks express ownership and outcomes; arithmetic uses named methods (D-SIGIL-ALGEBRA1=B)", "write `value.{method}(other)` and assign the result back for a compound update")
-    if lhs.start >= 0 && rhs.end <= state.source.len() && lhs.end <= rhs.start {
+    if lhs.start >= 0 && rhs.end <= state.sources[0].len() && lhs.end <= rhs.start {
         left :: parser_source_slice(state, lhs.start, lhs.end)
         right :: parser_source_slice(state, rhs.start, rhs.end)
         replacement :: if compound -> "{left} = ({left}).{method}({right})" else -> "({left}).{method}({right})"
@@ -411,7 +412,7 @@ fn parser_add_error_code_edit(state: &JetParserState, code: String, span: Span, 
 // after it.
 fn parser_deletion_edit(state: JetParserState, span: Span) -> TextEdit Never! {
     end := span.end
-    loop end < state.source.len() && (Int.from_u8(state.source[end]) == 32 || Int.from_u8(state.source[end]) == 9) -> end += 1
+    loop end < state.sources[0].len() && (Int.from_u8(state.sources[0][end]) == 32 || Int.from_u8(state.sources[0][end]) == 9) -> end += 1
     TextEdit{span: Span{start: span.start, end: end}, new_text: ""}
 }
 
@@ -661,7 +662,7 @@ fn parser_is_space_byte(byte: Int) -> Bool Never! {
 }
 
 fn parser_source_slice(state: JetParserState, start: Int, end: Int) -> String Never! {
-    String.from_bytes(state.source.slice(start, end)) ?? ""
+    String.from_bytes(state.sources[0].slice(start, end)) ?? ""
 }
 
 // The source between two recorded pieces may hold only the chain's own
@@ -670,12 +671,12 @@ fn parser_source_slice(state: JetParserState, start: Int, end: Int) -> String Ne
 fn parser_branch_gap_is_connector(state: JetParserState, start: Int, end: Int) -> Bool Never! {
     index := start
     loop index < end {
-        if parser_is_space_byte(Int.from_u8(state.source[index])) {
+        if parser_is_space_byte(Int.from_u8(state.sources[0][index])) {
             index += 1
             next
         }
         word_start :: index
-        loop index < end && !parser_is_space_byte(Int.from_u8(state.source[index])) -> index += 1
+        loop index < end && !parser_is_space_byte(Int.from_u8(state.sources[0][index])) -> index += 1
         word :: parser_source_slice(state, word_start, index)
         if word != "if" && word != "else" && word != "->" -> return false
     }
@@ -691,8 +692,8 @@ fn parser_take_branch_piece(state: JetParserState, piece: Span, cursor: Int, end
     if !parser_branch_gap_is_connector(state, cursor, piece.start) -> return None
     start := piece.start
     stop := piece.end
-    loop start < stop && parser_is_space_byte(Int.from_u8(state.source[start])) -> start += 1
-    loop stop > start && parser_is_space_byte(Int.from_u8(state.source[stop - 1])) -> stop -= 1
+    loop start < stop && parser_is_space_byte(Int.from_u8(state.sources[0][start])) -> start += 1
+    loop stop > start && parser_is_space_byte(Int.from_u8(state.sources[0][stop - 1])) -> stop -= 1
     Val(Span{start: start, end: stop})
 }
 
@@ -704,7 +705,7 @@ fn parser_indent_following_lines(state: JetParserState, piece: Span, unit: Strin
     first := true
     loop {
         line_end := line_start
-        loop line_end < piece.end && Int.from_u8(state.source[line_end]) != 10 -> line_end += 1
+        loop line_end < piece.end && Int.from_u8(state.sources[0][line_end]) != 10 -> line_end += 1
         line :: parser_source_slice(state, line_start, line_end)
         if first {
             out = line
@@ -712,7 +713,7 @@ fn parser_indent_following_lines(state: JetParserState, piece: Span, unit: Strin
         } else {
             blank := true
             loop index in line_start..<line_end {
-                if !parser_is_space_byte(Int.from_u8(state.source[index])) -> blank = false
+                if !parser_is_space_byte(Int.from_u8(state.sources[0][index])) -> blank = false
             }
             out = if blank -> "{out}\n" else -> "{out}\n{unit}{line}"
         }
@@ -729,12 +730,12 @@ fn parser_indent_following_lines(state: JetParserState, piece: Span, unit: Strin
 fn parser_arm_table_edit(state: JetParserState, if_span: Span, parts: [ParserBranchPart], diag_mark: Int) -> TextEdit? Never! {
     start :: if_span.start
     end :: if state.position > 0 -> state.tokens[state.position - 1].span.end else -> 0
-    if start >= end || end > state.source.len() || parser_source_slice(state, start, start + 2) != "if" -> return None
+    if start >= end || end > state.sources[0].len() || parser_source_slice(state, start, start + 2) != "if" -> return None
     if parser_error_since(state, diag_mark) -> return None
     line_start := start
-    loop line_start > 0 && Int.from_u8(state.source[line_start - 1]) != 10 -> line_start -= 1
+    loop line_start > 0 && Int.from_u8(state.sources[0][line_start - 1]) != 10 -> line_start -= 1
     indent_end := line_start
-    loop indent_end < start && (Int.from_u8(state.source[indent_end]) == 32 || Int.from_u8(state.source[indent_end]) == 9) -> indent_end += 1
+    loop indent_end < start && (Int.from_u8(state.sources[0][indent_end]) == 32 || Int.from_u8(state.sources[0][indent_end]) == 9) -> indent_end += 1
     indent :: parser_source_slice(state, line_start, indent_end)
     unit :: "    "
     arms := ""
@@ -753,7 +754,7 @@ fn parser_arm_table_edit(state: JetParserState, if_span: Span, parts: [ParserBra
             // A guard head that starts with `after` is a readiness timeout,
             // not a Boolean test.
             word_end := cond.start
-            loop word_end < cond.end && (parser_is_identifier_byte(Int.from_u8(state.source[word_end]))) -> word_end += 1
+            loop word_end < cond.end && (parser_is_identifier_byte(Int.from_u8(state.sources[0][word_end]))) -> word_end += 1
             if parser_source_slice(state, cond.start, word_end) == "after" -> return None
             arms = "{arms}{indent}{unit}{parser_indent_following_lines(state, cond, unit)} -> {parser_indent_following_lines(state, body, unit)}\n"
             arm_count += 1
@@ -767,7 +768,7 @@ fn parser_arm_table_edit(state: JetParserState, if_span: Span, parts: [ParserBra
     }
     if arm_count == 0 || cursor > end -> return None
     loop index in cursor..<end {
-        if !parser_is_space_byte(Int.from_u8(state.source[index])) -> return None
+        if !parser_is_space_byte(Int.from_u8(state.sources[0][index])) -> return None
     }
     Val(TextEdit{span: Span{start: start, end: end}, new_text: "if {{\n{arms}{else_line}{indent}}}"})
 }
