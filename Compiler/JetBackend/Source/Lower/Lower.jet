@@ -5034,6 +5034,54 @@ fn lower_block_reaches(index: LowerUseIndex, from: Int, to: Int) -> Bool Never! 
     false
 }
 
+// Whether the value a local holds at its read `site` can reach that read
+// again along a back edge: a path from the read to itself that no whole
+// write of the local (`places` are its places; WritePlace, ReplacePlace or
+// InitializeUninit of an unprojected one) crosses. Walked backwards over
+// predecessors from the read's block; a block holding such a write, the
+// read's own included, stops the path.
+fn lower_local_read_recurs(function: MIRFunction, index: LowerUseIndex, places: [U64:Bool], site: LowerUseSite) -> Bool Never! {
+    roots := [U64:Bool]{}
+    loop row in function.places {
+        if row.projections.len() == 0 && places.get(row.id.value) != None -> _ := &roots.add(row.id.value, true)
+    }
+    if lower_block_writes_local(function, roots, site.block) -> return false
+    seen := [Int:Bool]{}
+    pending := [Int]{}
+    loop predecessor in index.predecessors[site.block] {
+        if seen.get(predecessor) == None {
+            _ := &seen.add(predecessor, true)
+            &pending.push(predecessor)
+        }
+    }
+    cursor := 0
+    loop cursor < pending.len() {
+        at :: pending[cursor]
+        cursor += 1
+        if at == site.block -> return true
+        if lower_block_writes_local(function, roots, at) -> next
+        loop predecessor in index.predecessors[at] {
+            if seen.get(predecessor) == None {
+                _ := &seen.add(predecessor, true)
+                &pending.push(predecessor)
+            }
+        }
+    }
+    false
+}
+
+fn lower_block_writes_local(function: MIRFunction, roots: [U64:Bool], block: Int) -> Bool Never! {
+    loop instruction in function.blocks[block].instructions {
+        if instruction.operation == .WritePlace(place, _) | .ReplacePlace(place, _) {
+            if roots.get(place.value) != None -> return true
+        }
+        if instruction.operation == .InitializeUninit(place) {
+            if roots.get(place.value) != None -> return true
+        }
+    }
+    false
+}
+
 // Jet sema binds a subject switch's non-place subject to the generated local
 // `it` (Statements.jet sema_stmt_check_subject_switch), so each arm reads
 // `it`'s place where the Rust tier's MIR tests and projects the subject
@@ -5045,12 +5093,15 @@ fn lower_block_reaches(index: LowerUseIndex, from: Int, to: Int) -> Bool Never! 
 // uses of the carrier. The local's cleanup moves (a MovePlace feeding only
 // Drop) do not: the take clears the payload in the local's carrier
 // (lower_read_member), so that drop releases only what remains. None when
-// the carrier is not such a read, or when its read sits in a loop: the back
-// edge re-runs the read, and the widened uses (which skip the read's own
-// site) cannot see that next iteration's tests and payload reads.
+// the carrier is not such a read, or when the local's value is live across a
+// back edge into the read (lower_local_read_recurs): the next iteration
+// re-reads the same value, and the widened uses (which skip the read's own
+// site) cannot see that iteration's tests and payload reads. A local
+// written again inside the loop before each read (a subject switch's `it`
+// bound to a call made in the loop body) holds a fresh value each time, and
+// its payload is still taken.
 fn lower_payload_local_uses(function: MIRFunction, index: LowerUseIndex, subject: MIRValueID) -> LowerUseIndex? Never! {
     site :: index.definitions.get(subject.value) ?? return None
-    if lower_block_in_cycle(index, site.block) -> return None
     read :: function.blocks[site.block].instructions[site.position].operation
     place := MIRPlaceID{value: U64.MAX}
     if read == .ReadPlace(read_place) {
@@ -5084,6 +5135,7 @@ fn lower_payload_local_uses(function: MIRFunction, index: LowerUseIndex, subject
             if owner.value == local -> _ := &places.add(row.id.value, true)
         }
     }
+    if lower_local_read_recurs(function, index, places, site) -> return None
     widened := index.copy()
     loop (block, row) in function.blocks {
         loop (position, instruction) in row.instructions {
