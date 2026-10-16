@@ -1099,7 +1099,17 @@ fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, program: JetCod
 }
 
 fn jet_codegen_lower_for_in(builder: &JetCodegenBuilder, program: JetCodegenProgram, label: String?, variable: TLocal, variable_two: TLocal?, source: TExpr, collection: TExpr, step: TExpr?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, source_stable: Bool, body: [TStmt], span: Span) {
-    if method_kind == None && step == None && !by_value && !columnar && jet_codegen_lower_read_list_walk(&builder, program, label, variable, variable_two, collection, source_stable, body, span) -> return
+    // A source that would be copied (a field path, or a compiler copy of a
+    // later-used local) walks in place when the body leaves its root alone
+    // (jet_codegen_stable_element_lets); a bare owned local keeps the iterator,
+    // which moves it at its last use.
+    stable_walk := source_stable
+    bare_local :: if collection.kind == {
+        .Local(_) -> true
+        else -> false
+    }
+    if !stable_walk && !bare_local -> stable_walk = builder.stable_element_lets.get(jet_codegen_loop_source_key(collection)) == (Val(true))
+    if method_kind == None && step == None && !by_value && !columnar && jet_codegen_lower_read_list_walk(&builder, program, label, variable, variable_two, collection, stable_walk, body, span) -> return
     iter_init_call := jet_codegen_add_loop_prelude_call(&builder, program, "loop_iter_init", "jet_loop_iter_init", 5, [Bool]{false, false, false, false, false})
     iter_has_next_call := jet_codegen_add_loop_prelude_call(&builder, program, "loop_iter_has_next", "jet_loop_iter_has_next", 1, [Bool]{true})
     iter_value_call := jet_codegen_add_loop_prelude_call(&builder, program, "loop_iter_value", "jet_loop_iter_value", 1, [Bool]{true})
@@ -3354,6 +3364,11 @@ fn jet_codegen_destructure_key(span: Span) -> String Never! {
     "destructure@{span.start}:{span.end}"
 }
 
+// The stability key of a `loop item in <collection>` source.
+fn jet_codegen_loop_source_key(collection: TExpr) -> String Never! {
+    "loop-source@{collection.span.start}:{collection.span.end}"
+}
+
 fn jet_codegen_stable_element_lets(statements: [TStmt], expression: TExpr?) -> [String:Bool] Never! {
     state := JetCodegenLetStability{tick: 0, last: [String:Int]{}, read_at: [String:Int]{}, pinned: [String:Bool]{}, uses: 0, consumed: [String:Int]{}, pending: [JetCodegenLetCandidate]{}, stable: [String:Bool]{}}
     jet_codegen_stability_list(&state, statements, false)
@@ -3782,7 +3797,14 @@ fn jet_codegen_stability_stmt_body(state: &JetCodegenLetStability, statement: TS
             jet_codegen_stability_owner(&state, source)
             jet_codegen_stability_owner(&state, collection)
             if step == .Val(step_value) -> jet_codegen_stability_expr(&state, step_value, value)
+            // A walk in place (jet_codegen_lower_read_list_walk) reads the
+            // source's slots every iteration: stable when nothing in the body
+            // changes, captures or address-takes its root.
+            entry :: state.tick
             jet_codegen_stability_list(&state, body, false)
+            if jet_codegen_stability_place_root(collection) == .Val(root) {
+                state.stable[jet_codegen_loop_source_key(collection)] = !jet_codegen_stability_changed_since(state, root.name, entry) && state.pinned.get(root.name) == None && state.pinned.get("*") == None
+            }
         }
         .Inline(body, _) -> jet_codegen_stability_list(&state, body, true)
         .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) -> jet_codegen_stability_list(&state, body, false)
