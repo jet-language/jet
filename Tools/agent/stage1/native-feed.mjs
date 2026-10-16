@@ -106,7 +106,7 @@ if (options.selfRebuild) {
   const target = join(out, 'self-rebuild.json');
   if (existsSync(target)) throw Error(`self-rebuild receipt already exists: ${target}`);
   const publication = JSON.parse(readFileSync(join(out, 'native-compiler.json'), 'utf8'));
-  if (publication.schema !== 'jet-native-compiler/v1' || publication.verdict !== 'GREEN' || publication.fixedPoint !== true) throw Error('self-rebuild needs a GREEN fixed-point native-compiler.json');
+  if (publication.schema !== 'jet-native-compiler/v1' || publication.verdict !== 'GREEN') throw Error('self-rebuild needs a GREEN native-compiler.json (a published stage2)');
   if (!Number.isInteger(publication.compilerCpus)) throw Error('self-rebuild needs the compiler CPU count its publication recorded (compilerCpus)');
   const unit = JSON.parse(readFileSync(join(out, 'assembly', 'plan.json'), 'utf8'));
   const second = publication.stages.find(stage => stage.stage === 2);
@@ -170,15 +170,15 @@ if (options.selfRebuild) {
     json(temporaryArtifacts, artifacts); renameSync(temporaryArtifacts, artifactsFile);
     const run = cliStageRunner({ repo, out, unit, identity, referenceToolchain: factory.toolchain, runtimeDir: options.runtime, stepsFile, cpus });
     const second = run(2, first.binary);
-    // The gate: factory stage1 == native stage2, whole files. The stage3
-    // self-rebuild is the separate `--self-rebuild` follow-up receipt.
+    // Owner decision 2026-10-16: the self-hosting gate is stage2 == stage3
+    // (the `--self-rebuild` follow-up). Factory stage1 vs native stage2 is
+    // recorded (whole files) and fixed after self-hosting; it does not gate.
     const gate = compare(out, 'stage1', 'stage2');
     const comparisons = { fixedPoint: gate.every(row => row.equal), stages: [1, 2], files: gate };
     json(join(out, 'comparisons.json'), comparisons);
-    if (!comparisons.fixedPoint) throw Error('native stage1/stage2 object and ELF fixed point differ (whole-file cmp); see comparisons.json');
     // `stages` stays the stage1/stage2 gate pair (native-smoke admits exactly
     // two); smoke uses stage2/jet.
-    receipt = { schema: 'jet-native-compiler/v1', commit: record.commit, sourceRoot: repo, sourceSha256: unit.sourceSha256, manifestPatch: plan.manifestPatch, factorySha256: record.factory.sha256, compilerIdentity: identity, runtimePackSha256: hash(runtime.pack), producerSha256: plan.producerSha256, harnessSha256: plan.harnessSha256, backend: 'jet-native', optimization: 'O0', compilerCpus: cpus, fixedPoint: true, comparisons, selfRebuildReceipt: join(out, 'self-rebuild.json'), stages: [{ stage: 1, ...first, keepGoingReport: factory.census, keepGoingFailures: Number(factory.admitted?.allowed_census_rows ?? 0), compilerCpus: cpus }, { stage: 2, ...second }], jet: second.binary, runtimeDir: join(out, 'stage2', 'jet-runtime'), steps, rc: 0, verdict: 'GREEN' };
+    receipt = { schema: 'jet-native-compiler/v1', commit: record.commit, sourceRoot: repo, sourceSha256: unit.sourceSha256, manifestPatch: plan.manifestPatch, factorySha256: record.factory.sha256, compilerIdentity: identity, runtimePackSha256: hash(runtime.pack), producerSha256: plan.producerSha256, harnessSha256: plan.harnessSha256, backend: 'jet-native', optimization: 'O0', compilerCpus: cpus, fixedPoint: comparisons.fixedPoint, gate: 'stage2==stage3', comparisons, selfRebuildReceipt: join(out, 'self-rebuild.json'), stages: [{ stage: 1, ...first, keepGoingReport: factory.census, keepGoingFailures: Number(factory.admitted?.allowed_census_rows ?? 0), compilerCpus: cpus }, { stage: 2, ...second }], jet: second.binary, runtimeDir: join(out, 'stage2', 'jet-runtime'), steps, rc: 0, verdict: 'GREEN' };
   } catch (error) {
     receipt = { schema: 'jet-native-feed-failure/v1', plan, steps, rc: 1, verdict: 'RED', error: error.stack, fixedPoint: false };
   }
