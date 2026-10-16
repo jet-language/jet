@@ -1417,10 +1417,14 @@ fn jet_cli_trace_write(target: String, state: &JetCLITraceState, text: String) N
     _ :: jet_cli_trace_append(JET_CLI_TRACE_STDERR, "jet: the compiler trace stopped: writing `{target}` failed: {problem}\n")
 }
 
-// Appends `text` (each call opens, writes and closes, so every event is in
-// the file when the call returns); the failure, or `None`.
+// Appends `text` (each call opens, writes, flushes and closes, so every event
+// is in the file when the call returns); the failure, or `None`. Writes go
+// through an append-mode `FileWriter` (the native runtime pack exports the
+// writer routes; it has no whole-file append route).
 fn jet_cli_trace_append(target: String, text: String) -> String? Never! {
-    cli_files.append_all(target, text) ?? return Val("{err}")
+    writer :: cli_files.append(target) ?? return Val("{err}")
+    writer.write_all(text.bytes()) ?? return Val("{err}")
+    writer.flush() ?? return Val("{err}")
     None
 }
 
