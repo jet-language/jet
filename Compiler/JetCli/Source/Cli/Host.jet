@@ -547,7 +547,13 @@ fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Boo
     compiled := jet_cli_compile_entry(file, color, false, threads, JetDriverCompileMode.Program, None, trace_sink)
     if &compiled == {
         .Refused(refusal) -> output = refusal.copy()
-        .Compiled(result, snapshot) -> output = jet_cli_build_result(file, source, color, release, invocation, &result, snapshot)
+        .Compiled(result, snapshot) -> {
+            // copy: the snapshot (a few source-root rows) is read before the
+            // exclusive borrow of `result`; both are payloads of the borrowed
+            // `compiled`, so one call may not read one while writing the other.
+            authorized :: snapshot.copy()
+            output = jet_cli_build_result(file, source, color, release, invocation, &result, authorized)
+        }
     }
     output
 }
@@ -608,7 +614,13 @@ fn jet_cli_compile_run(file: String, source: String, color: Bool, release: Bool,
     compiled := jet_cli_compile_entry(file, color, false, threads, JetDriverCompileMode.Program, None, trace_sink)
     if &compiled == {
         .Refused(refusal) -> output = refusal.copy()
-        .Compiled(result, snapshot) -> output = jet_cli_run_result(file, source, color, release, verbose, program_args, invocation, &result, snapshot)
+        .Compiled(result, snapshot) -> {
+            // copy: the snapshot (a few source-root rows) is read before the
+            // exclusive borrow of `result`; both are payloads of the borrowed
+            // `compiled`, so one call may not read one while writing the other.
+            authorized :: snapshot.copy()
+            output = jet_cli_run_result(file, source, color, release, verbose, program_args, invocation, &result, authorized)
+        }
     }
     output
 }
