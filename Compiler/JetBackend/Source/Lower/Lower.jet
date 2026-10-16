@@ -2095,7 +2095,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
     }
     dead :: lower_dead_values(function)
     iter_takes :: lower_iter_takes(function)
-    releases :: lower_release_plan(p, m, function, fact_index, dead, sunk, block_index, successors, order, iter_takes, slots, place_slots)
+    releases :: lower_release_plan(p, m, function, fact_index, dead, sunk, block_index, successors, order, iter_takes, slots, place_slots, live)
     Val(LowerContext{
         mir: function.copy(),
         result: result,
@@ -2163,6 +2163,15 @@ fn lower_consumed_operands(p: MIRProgram, m: LowerModule, operation: MIROperatio
 // itself moved, reowned, dropped or handed to a block parameter is never
 // released again (LowerFunction.consumed).
 //
+// A copy-value local (an exact Int, lower_release_copy_local) owns its value
+// natively, but MIR never drops it: Rust drops a BigInt at the end of its
+// scope. Bound to an SSA value, that value is a temporary whose root place
+// reads are uses too (a cloning read only reads it, a borrowing one aliases
+// it, a move takes it). Kept in a slot, the slot's value is released where
+// the slot dies: on each edge out of a block holding it into a block that
+// does not need it, and before a return; under the same read rule as an
+// overwrite.
+//
 // A root or projected WritePlace into an owned local releases the value it
 // overwrites unless a borrowed read of that local may still be in use: every
 // such read and its aliases must be used only later in its own block, and
@@ -2175,8 +2184,15 @@ struct LowerReleasePlan {
     edges: [Int:[MIRValueID]]
     // The temporaries the plan releases.
     candidates: [U64:Bool]
+    // Candidates bound to a copy-value local: released although the local's
+    // slot names them.
+    bound: [U64:Bool]
     // WritePlace instruction ids that release the overwritten value first.
     write_drops: [U64:Bool]
+    // Edge key (as `edges`) -> copy-value local slots whose value dies on it.
+    slot_edges: [Int:[Int]]
+    // Block position -> copy-value local slots released before its return.
+    slot_returns: [Int:[Int]]
 }
 
 // One use of a MIR value: by the instruction at `position`, or by its block's
@@ -2192,8 +2208,8 @@ LOWER_RELEASE_ALIAS :: prep { 2 }
 // The use's ownership effect is not modelled: the value is never released.
 LOWER_RELEASE_KEEP :: prep { 3 }
 
-fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact_index: [U64:Int], dead: [U64:Bool], sunk: [U64:Bool], block_index: [U64:Int], successors: [[Int]], order: [Int], iter_takes: [U64:Bool], slots: [LowerSlot], place_slots: [U64:Int]) -> LowerReleasePlan Never! {
-    plan := LowerReleasePlan{after: [U64:[MIRValueID]]{}, edges: [Int:[MIRValueID]]{}, candidates: [U64:Bool]{}, write_drops: [U64:Bool]{}}
+fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact_index: [U64:Int], dead: [U64:Bool], sunk: [U64:Bool], block_index: [U64:Int], successors: [[Int]], order: [Int], iter_takes: [U64:Bool], slots: [LowerSlot], place_slots: [U64:Int], live: [[Int]]) -> LowerReleasePlan Never! {
+    plan := LowerReleasePlan{after: [U64:[MIRValueID]]{}, edges: [Int:[MIRValueID]]{}, candidates: [U64:Bool]{}, bound: [U64:Bool]{}, write_drops: [U64:Bool]{}, slot_edges: [Int:[Int]]{}, slot_returns: [Int:[Int]]{}}
     count :: function.blocks.len()
     pinned := [U64:Bool]{}
     loop place in function.places {
@@ -2205,12 +2221,23 @@ fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact
         }
     }
     bound_locals := [U64:Bool]{}
+    // Copy-value locals bound to an SSA value (lower_release_copy_local):
+    // local -> value, the values, and each of their root places -> value.
+    copy_locals := [U64:MIRValueID]{}
+    copy_values := [U64:Bool]{}
     loop local in function.locals {
         if local.ssa_value == .Val(value) {
-            _ := &pinned.add(value.value, true)
             _ := &bound_locals.add(local.id.value, true)
+            if {
+                lower_release_copy_local(p, local.ownership, local.ty) -> {
+                    _ := &copy_locals.add(local.id.value, value)
+                    _ := &copy_values.add(value.value, true)
+                }
+                else -> _ := &pinned.add(value.value, true)
+            }
         }
     }
+    copy_places := lower_release_copy_places(function, slots, place_slots, copy_locals, &pinned)
     reachable := [Bool]{}
     loop _ in function.blocks -> &reachable.push(false)
     loop position in order -> reachable[position] = true
@@ -2236,6 +2263,13 @@ fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact
                 kind :: lower_release_use_kind(p, m, function, fact_index, iter_takes, instruction, value, consumed)
                 lower_release_add_use(&uses, value, LowerReleaseUse{block: block, position: position, kind: kind})
             }
+            if copy_places.len() > 0 {
+                loop place in lower_instruction_places(instruction.operation) {
+                    value :: copy_places.get(place.value) ?? next
+                    kind :: lower_release_place_kind(function, fact_index, sunk, instruction)
+                    lower_release_add_use(&uses, value, LowerReleaseUse{block: block, position: position, kind: kind})
+                }
+            }
         }
         kind :: lower_release_terminator_kind(row.terminator)
         loop value in mir_terminator_value_uses(row.terminator) {
@@ -2249,6 +2283,13 @@ fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact
             if !lower_release_producer(instruction.operation) || pinned.get(result.value) != None -> next
             fact_row :: fact_index.get(result.value) ?? next
             if !lower_is_owned(function.values[fact_row].ownership) -> next
+            // A native Err field reads a runtime record (NativeErr.jet); a
+            // member of a type with a Close is never released as a copy.
+            if instruction.operation == .Field(base, _) {
+                base_row :: fact_index.get(base.value) ?? next
+                if lower_native_err_type(p, function.values[base_row].ty) -> next
+            }
+            if lower_release_member_read(instruction.operation) && lower_close_method(p, m.close_methods, function.values[fact_row].ty) != None -> next
             if dead.get(result.value) != None {
                 lower_release_add(&plan.after, instruction.id.value, result)
                 _ := &plan.candidates.add(result.value, true)
@@ -2257,10 +2298,64 @@ fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact
             effective :: lower_release_effective_uses(function, uses, phi_edges, pinned, result, Val(result)) ?? next
             lower_release_schedule(&plan, function, successors, predecessors, phi_edges.get(result.value) ?? [Int]{}, effective, result, block, position)
             _ := &plan.candidates.add(result.value, true)
+            if copy_values.get(result.value) != None -> _ := &plan.bound.add(result.value, true)
         }
     }
-    lower_release_write_drops(&plan, function, fact_index, sunk, uses, phi_edges, pinned, bound_locals, reachable, successors, slots, place_slots)
+    lower_release_write_drops(&plan, p, function, fact_index, sunk, uses, phi_edges, pinned, bound_locals, reachable, successors, slots, place_slots, live)
     plan
+}
+
+// A local whose owned value MIR never drops: Copy-mode (Rust drops it as a
+// BigInt at the end of its scope; MIR registers no drop for it) yet owned
+// natively, as an exact Int is.
+fn lower_release_copy_local(p: MIRProgram, ownership: MIROwnership, ty: MIRType) -> Bool Never! {
+    ownership.mode == MIROwnershipMode.Copy && lower_is_owned(ownership) && lower_repr(p, ty) == .ExactInt
+}
+
+// Root places of the bound copy-value locals -> their value. A local with a
+// projected place, a cell (a closure or raw address may read it later) or a
+// stop diagnostic reading it keeps its value pinned.
+fn lower_release_copy_places(function: MIRFunction, slots: [LowerSlot], place_slots: [U64:Int], copy_locals: [U64:MIRValueID], pinned: &[U64:Bool]) -> [U64:MIRValueID] Never! {
+    places := [U64:MIRValueID]{}
+    if copy_locals.len() == 0 -> return places
+    loop place in function.places {
+        if place.base == .Local(local) {
+            value :: copy_locals.get(local.value) ?? next
+            slot :: place_slots.get(place.id.value) ?? -1
+            if place.projections.len() > 0 || slot < 0 || slots[slot].cell {
+                _ := &pinned.add(value.value, true)
+                next
+            }
+            _ := &places.add(place.id.value, value)
+        }
+    }
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .Semantic(semantic) {
+                if semantic == .RequireStop(_, _, _, _, context, _, _) {
+                    loop row in context.locals {
+                        if copy_locals.get(row.local.value) == .Val(value) -> _ := &pinned.add(value.value, true)
+                    }
+                }
+            }
+        }
+    }
+    places
+}
+
+// How `instruction` uses a bound copy-value local's value through one of its
+// root places: a move takes it; a read whose owned result is stored,
+// returned or consumed clones it (Lower.jet lower_read_owns), any other read
+// names it; any other place use is not modelled.
+fn lower_release_place_kind(function: MIRFunction, fact_index: [U64:Int], sunk: [U64:Bool], instruction: MIRInstruction) -> Int Never! {
+    if instruction.operation == .MovePlace(_) -> return LOWER_RELEASE_CONSUME
+    if instruction.operation == .ReadPlace(_) {
+        result :: instruction.result ?? return LOWER_RELEASE_BORROW
+        row :: fact_index.get(result.value) ?? return LOWER_RELEASE_KEEP
+        if sunk.get(result.value) != None && lower_is_owned(function.values[row].ownership) -> return LOWER_RELEASE_BORROW
+        return LOWER_RELEASE_ALIAS
+    }
+    LOWER_RELEASE_KEEP
 }
 
 fn lower_release_add(rows: &[U64:[MIRValueID]], at: U64, value: MIRValueID) Never! {
@@ -2284,11 +2379,14 @@ fn lower_release_add_key(rows: &[U64:[Int]], value: MIRValueID, key: Int) Never!
 }
 
 // Records one use per instruction: an operation naming a value twice uses it
-// once, with the same kind.
+// once, with the same kind; named as an operand and through a bound local's
+// place with two different kinds, it is not modelled.
 fn lower_release_add_use(uses: &[U64:[LowerReleaseUse]], value: MIRValueID, used: LowerReleaseUse) Never! {
     rows := uses.get(value.value) ?? [LowerReleaseUse]{}
-    if rows.len() > 0 && rows[rows.len() - 1].block == used.block && rows[rows.len() - 1].position == used.position -> return
-    &rows.push(used)
+    last :: rows.len() - 1
+    same :: last >= 0 && rows[last].block == used.block && rows[last].position == used.position
+    if same && rows[last].kind == used.kind -> return
+    if same -> rows[last] = LowerReleaseUse{block: used.block, position: used.position, kind: LOWER_RELEASE_KEEP} else -> &rows.push(used)
     _ := &uses.add(value.value, rows)
 }
 
@@ -2301,19 +2399,39 @@ fn lower_release_terminator_kind(terminator: MIRTerminator) -> Int Never! {
 
 // Operations whose owned result, when lowered to a fresh LIR value, owns its
 // storage outright: a call or builder result, a new aggregate, a constant or
-// clone, arithmetic, a loop range cursor, a phi of owned values.
+// clone, arithmetic, a loop range cursor or value, a phi of owned values, and
+// an owned member or element read (a copy of its own, or a take that clears
+// the member in its carrier: lower_read_member, lower_index_result).
 fn lower_release_producer(operation: MIROperation) -> Bool Never! {
     if operation == {
         .Call(_, _, _) | .IndirectCall(_, _, _) | .CoreCall(_, _, _, _, _, _) | .BuildString(_) | .BuildList(_, _) | .BuildMap(_) -> true
         .Struct(_, _) | .Tuple(_, _) | .Enum(_, _, _) | .Present(_) | .ResultOk(_) | .ResultErr(_) | .TraitBox(_, _) | .Closure(_, _, _) -> true
-        .Constant(_) | .Global(_) | .Copy(_, _) | .Binary(_, _, _, _, _) | .Unary(_, _) | .Convert(_, _, _, _) | .Range(_, _, _) | .LoopRangeInit(_, _, _, _, _) | .Phi(_) -> true
+        .Constant(_) | .Global(_) | .Copy(_, _) | .Binary(_, _, _, _, _) | .Unary(_, _) | .Convert(_, _, _, _) | .Range(_, _, _) | .LoopRangeInit(_, _, _, _, _) | .LoopRangeValue(_, _) | .Phi(_) -> true
         .Semantic(semantic) -> lower_release_semantic_producer(semantic)
-        else -> false
+        else -> lower_release_member_read(operation)
     }
 }
 
 fn lower_release_semantic_producer(semantic: MIRSemanticOp) -> Bool Never! {
     if semantic == .BuiltinMethod(_, _, _, _, _) | .StaticPreludeCall(_, _, _, _) | .StructLiteral(_, _, _, _) | .HostCall(_, _) -> return true
+    false
+}
+
+fn lower_release_member_read(operation: MIROperation) -> Bool Never! {
+    if operation == .Field(_, _) | .EnumPayload(_, _, _, _) | .OptionValue(_) | .ResultValue(_, _) | .Index(_, _, _, _, _, _, _) -> return true
+    false
+}
+
+// Whether a plain read loop's cursor snapshots its collection (Iter.jet
+// lower_iter_init clones a List or Map it does not take): the collection is
+// then only read, once, by the LoopIterInit.
+fn lower_release_iter_snapshots(p: MIRProgram, function: MIRFunction, fact_index: [U64:Int], operation: MIROperation) -> Bool Never! {
+    if operation == .LoopIterInit(_, collection, _, by_value, source_kind) {
+        if by_value || source_kind != .Plain -> return false
+        row :: fact_index.get(collection.value) ?? return false
+        ty :: function.values[row].ty
+        return lower_lazy_element(ty) == None && lower_range_members(p, ty) == None && lower_sequence_element(ty) != None
+    }
     false
 }
 
@@ -2325,6 +2443,7 @@ fn lower_release_use_kind(p: MIRProgram, m: LowerModule, function: MIRFunction, 
         .LoopIterInit(_, collection, _, _, _) -> {
             if collection != value -> return LOWER_RELEASE_BORROW
             if iter_takes.get(value.value) != None -> return LOWER_RELEASE_CONSUME
+            if lower_release_iter_snapshots(p, function, fact_index, instruction.operation) -> return LOWER_RELEASE_BORROW
             LOWER_RELEASE_KEEP
         }
         .BuildString(_) | .Binary(_, _, _, _, _) | .Unary(_, _) | .EnumIs(_, _, _) | .OptionIsSome(_) | .ResultIsOk(_) | .Range(_, _, _) -> LOWER_RELEASE_BORROW
@@ -2496,7 +2615,7 @@ fn lower_release_takes(used: LowerReleaseUse?) -> Bool Never! {
 // write a move out of the place may precede: a moved-out local holds a zero
 // placeholder (lower_clear_slot), and a moved-out Write parameter's caller
 // storage still holds the moved bits.
-fn lower_release_write_drops(plan: &LowerReleasePlan, function: MIRFunction, fact_index: [U64:Int], sunk: [U64:Bool], uses: [U64:[LowerReleaseUse]], phi_edges: [U64:[Int]], pinned: [U64:Bool], bound_locals: [U64:Bool], reachable: [Bool], successors: [[Int]], slots: [LowerSlot], place_slots: [U64:Int]) Never! {
+fn lower_release_write_drops(plan: &LowerReleasePlan, p: MIRProgram, function: MIRFunction, fact_index: [U64:Int], sunk: [U64:Bool], uses: [U64:[LowerReleaseUse]], phi_edges: [U64:[Int]], pinned: [U64:Bool], bound_locals: [U64:Bool], reachable: [Bool], successors: [[Int]], slots: [LowerSlot], place_slots: [U64:Int], live: [[Int]]) Never! {
     eligible := [Int:Bool]{}
     loop (slot, row) in slots {
         if lower_release_write_slot(row, bound_locals) -> _ := &eligible.add(slot, true)
@@ -2547,6 +2666,59 @@ fn lower_release_write_drops(plan: &LowerReleasePlan, function: MIRFunction, fac
             }
         }
     }
+    lower_release_slot_deaths(&plan, p, function, uses, eligible, reachable, successors, slots, place_slots, live)
+}
+
+// Where each copy-value local slot's value dies (lower_release_copy_local;
+// the slot passes lower_release_write_drops' read rule): on each edge out
+// of a block holding it (live into the block or written in it) into a block
+// it is not live into, and before the return of a block holding it. A slot
+// written with a value anything else also uses is left alone.
+fn lower_release_slot_deaths(plan: &LowerReleasePlan, p: MIRProgram, function: MIRFunction, uses: [U64:[LowerReleaseUse]], eligible: [Int:Bool], reachable: [Bool], successors: [[Int]], slots: [LowerSlot], place_slots: [U64:Int], live: [[Int]]) Never! {
+    dying := [Int:Bool]{}
+    loop (slot, row) in slots {
+        if eligible.get(slot) == None || !row.carried || row.cell || row.write_param >= 0 -> next
+        if row.base == .Local(_) && lower_release_copy_local(p, row.ownership, row.ty) -> _ := &dying.add(slot, true)
+    }
+    if dying.len() == 0 -> return
+    written := [[Int]]{}
+    loop _ in function.blocks -> &written.push([Int]{})
+    loop (block, row) in function.blocks {
+        if !reachable[block] -> next
+        loop instruction in row.instructions {
+            if instruction.operation == .WritePlace(place, value) | .ReplacePlace(place, value) {
+                slot :: place_slots.get(place.value) ?? next
+                if dying.get(slot) == None -> next
+                target :: lower_place_row(function, place) ?? next
+                if target.projections.len() > 0 || (uses.get(value.value) ?? [LowerReleaseUse]{}).len() != 1 {
+                    _ := &dying.remove(slot)
+                    next
+                }
+                &written[block].push(slot)
+            }
+        }
+    }
+    count :: function.blocks.len()
+    loop (block, row) in function.blocks {
+        if !reachable[block] -> next
+        loop slot in 0..<slots.len() {
+            if dying.get(slot) == None || !(live[block].contains(slot) || written[block].contains(slot)) -> next
+            if successors[block].len() == 0 {
+                if row.terminator == .Return(_) -> lower_release_add_slot(&plan.slot_returns, block, slot)
+                next
+            }
+            loop target in successors[block] {
+                if !live[target].contains(slot) -> lower_release_add_slot(&plan.slot_edges, block * count + target, slot)
+            }
+        }
+    }
+}
+
+fn lower_release_add_slot(rows: &[Int:[Int]], key: Int, slot: Int) Never! {
+    held := rows.get(key) ?? [Int]{}
+    if held.contains(slot) -> return
+    &held.push(slot)
+    _ := &rows.add(key, held)
 }
 
 // A place whose value an overwrite must release, as a Rust assignment drops
@@ -3062,7 +3234,7 @@ fn lower_edge_copies(p: MIRProgram, c: LowerContext, f: LowerFunction, target: M
 // that releases temporaries, lower_release_plan, needs one too), which is
 // filled after the terminator seals the current block.
 fn lower_branch_target(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, target: MIRBlockID, pending: &[LIRBlockID], pending_targets: &[MIRBlockID]) -> LIRJumpTarget? {
-    if !lower_edge_copies(p, c, f, target) && lower_edge_releases(c, f, target).len() == 0 -> return lower_edge(p, c, &m, &f, target)
+    if !lower_edge_copies(p, c, f, target) && lower_edge_releases(c, f, target).len() == 0 && lower_edge_slot_releases(c, f, target).len() == 0 -> return lower_edge(p, c, &m, &f, target)
     block :: lower_new_block(&f)
     &pending.push(block)
     &pending_targets.push(target)
@@ -3134,15 +3306,21 @@ fn lower_terminator(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
                 returned :: value ?? return lower_fail(&m, &f, "return without a value from a function returning {mir_type_display_name(c.mir.return_type)}")
                 lowered :: lower_use(&m, &f, returned) ?? return
                 lower_write_at(p, &f, storage, 0, lowered, c.mir.return_type)
+                lower_release_return_slots(c, &f, None)
                 lower_comptime_leave(&m, &f)
                 return lower_seal(&f, LIRTerminator.Return{value: None})
             }
             if lower_repr_layout(c.result) == None {
+                lower_release_return_slots(c, &f, None)
                 lower_comptime_leave(&m, &f)
                 return lower_seal(&f, LIRTerminator.Return{value: None})
             }
-            returned :: value ?? return lower_return_implicit_ok(p, c, &m, &f)
+            returned :: value ?? {
+                lower_release_return_slots(c, &f, None)
+                return lower_return_implicit_ok(p, c, &m, &f)
+            }
             lowered :: lower_use(&m, &f, returned) ?? return
+            lower_release_return_slots(c, &f, Val(lowered))
             lower_comptime_leave(&m, &f)
             lower_seal(&f, LIRTerminator.Return{value: Val(lowered)})
         }
@@ -3310,19 +3488,46 @@ LOWER_RELEASE_BORROWING_BUILTINS :: [String]{"jet_list_len", "jet_list_is_empty"
 // no fresh owner of it (lower_mark_releasable), a slot holds its LIR value
 // (the slot owns it then), or the lowering already ended its life (a Move,
 // Reown or Drop of it, or a jump handing it to a block parameter): never a
-// second release.
+// second release. A bound copy-value local's value is released through its
+// slot (lower_release_bound).
 fn lower_temp_release(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, value: MIRValueID) Never! {
     if f.releasable.get(value.value) == None -> return
     if lower_is_absent(f, value) -> return
-    if lower_slot_of_value(c, value) != None -> return
     index :: f.values.get(value.value) ?? return
     if f.consumed.get(index) != None -> return
+    if c.releases.bound.get(value.value) != None -> return lower_release_bound(p, c, &f, value, index)
+    if lower_slot_of_value(c, value) != None -> return
     loop slot_value in f.current {
         if slot_value == .Val(holding) && holding.value == index -> return
     }
     tracking :: f.track_consumes
     f.track_consumes = false
     lower_drop_value(p, c, &m, &f, value)
+    f.track_consumes = tracking
+}
+
+// A bound copy-value local's value after its last use: the block parameter
+// its slot carries it in when the slot is live into this block, else the
+// value itself; the slot then holds a placeholder.
+fn lower_release_bound(p: MIRProgram, c: LowerContext, f: &LowerFunction, value: MIRValueID, index: Int) Never! {
+    target := LIRValueID{value: index}
+    if lower_slot_of_value(c, value) == .Val(slot) {
+        held :: f.current[slot].copy()
+        if held == .Val(holding) {
+            if lower_value_drop(f, holding) != .Trivial -> target = holding
+        }
+        lower_clear_slot(p, c, &f, slot)
+    }
+    if lower_value_drop(f, target) == .Trivial -> return
+    lower_release_lir(&f, target)
+}
+
+// Drops a LIR owner outside an instruction's own lowering: not a consumption
+// lower_emit should record.
+fn lower_release_lir(f: &LowerFunction, value: LIRValueID) Never! {
+    tracking :: f.track_consumes
+    f.track_consumes = false
+    lower_emit(&f, LIRInst.Drop{value: value})
     f.track_consumes = tracking
 }
 
@@ -3333,8 +3538,35 @@ fn lower_edge_releases(c: LowerContext, f: LowerFunction, target: MIRBlockID) ->
     c.releases.edges.get(from * c.mir.blocks.len() + to) ?? [MIRValueID]{}
 }
 
+// The copy-value local slots whose value dies on that edge.
+fn lower_edge_slot_releases(c: LowerContext, f: LowerFunction, target: MIRBlockID) -> [Int] Never! {
+    from :: c.block_index.get(f.mir_block.value) ?? return [Int]{}
+    to :: c.block_index.get(target.value) ?? return [Int]{}
+    c.releases.slot_edges.get(from * c.mir.blocks.len() + to) ?? [Int]{}
+}
+
 fn lower_release_edge(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, target: MIRBlockID) Never! {
+    dying :: lower_edge_slot_releases(c, f, target)
+    lower_release_slots(&f, dying, None)
     loop value in lower_edge_releases(c, f, target) -> lower_temp_release(p, c, &m, &f, value)
+}
+
+// Releases the values copy-value local slots hold where they die
+// (lower_release_slot_deaths); never `kept`, the value a return hands over.
+fn lower_release_slots(f: &LowerFunction, slots: [Int], kept: LIRValueID?) Never! {
+    loop slot in slots {
+        held :: f.current[slot].copy() ?? next
+        if kept == .Val(returned) {
+            if returned == held -> next
+        }
+        if lower_value_drop(f, held) == .Trivial -> next
+        lower_release_lir(&f, held)
+    }
+}
+
+fn lower_release_return_slots(c: LowerContext, f: &LowerFunction, kept: LIRValueID?) Never! {
+    position :: c.block_index.get(f.mir_block.value) ?? return
+    lower_release_slots(&f, c.releases.slot_returns.get(position) ?? [Int]{}, kept)
 }
 
 fn lower_instruction_operation(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction) Never! {
