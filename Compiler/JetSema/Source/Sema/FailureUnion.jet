@@ -258,27 +258,31 @@ fn sema_failure_union_mint(graph: &SemaRegistrationGraph, row: SemaFailureUnionR
     }
     definition :: sema_failure_union_enum(owned, graph.modules[row.module_index].functions[row.function_row].declaration, variants)
     item :: Item.Enum{value: definition}
-    registered := graph.modules[row.module_index]
-    first_nominal :: registered.nominals.len()
-    source_file :: registered.source_file.copy()
-    source_origin :: registered.source_origin.copy()
+    // The type registers in the module in place; the trail records the
+    // appended rows (copying the module, every row of its program, twice per
+    // minted type was the cost of the old whole-row record).
+    module_index :: row.module_index
+    mark :: sema_graph_module_mark(graph.modules[module_index])
+    first_nominal :: graph.modules[module_index].nominals.len()
+    source_file :: graph.modules[module_index].source_file.copy()
+    source_origin :: graph.modules[module_index].source_origin.copy()
     register_diagnostics := [Diagnostic]{}
-    if !sema_registration_add_root(&registered, item, source_file, source_origin, segments, &register_diagnostics) || register_diagnostics.len() > 0 {
+    if !sema_registration_add_root(&graph.modules[module_index], item, source_file, source_origin, segments, &register_diagnostics) || register_diagnostics.len() > 0 {
+        sema_graph_module_rollback(&graph.modules[module_index], mark, owned)
         loop diagnostic in register_diagnostics -> &diagnostics.push(diagnostic)
         sema_attach_diagnostic_source_locations(&diagnostics, start, segments)
         return None
     }
-    &registered.program.items.push(item.copy())
-    symbol :: registered.symbols[registered.symbols.len() - 1].copy()
-    module_identity :: registered.module_identity.copy()
-    if symbol.visibility > 0 -> &registered.exports.push(SemaRegistrationExport{name: symbol.name, symbol: symbol, declaration: Val(item), source_module_identity: module_identity, visibility: symbol.visibility})
-    &trail.entries.push(SemaGraphUndo.ModuleRow{module_index: row.module_index, old: graph.modules[row.module_index]})
+    &graph.modules[module_index].program.items.push(item.copy())
+    symbol :: graph.modules[module_index].symbols[graph.modules[module_index].symbols.len() - 1].copy()
+    module_identity :: graph.modules[module_index].module_identity.copy()
+    if symbol.visibility > 0 -> &graph.modules[module_index].exports.push(SemaRegistrationExport{name: symbol.name, symbol: symbol, declaration: Val(item), source_module_identity: module_identity, visibility: symbol.visibility})
+    &trail.entries.push(SemaGraphUndo.ModuleAppend{module_index: module_index, mark: mark, name: owned})
     if !trail.nominal_indexes_saved {
         &trail.entries.push(SemaGraphUndo.NominalIndexes{symbol_rows: graph.nominal_symbol_rows, slots: graph.nominal_row_slots, buckets: graph.nominal_row_buckets})
         trail.nominal_indexes_saved = true
     }
-    graph.modules[row.module_index] = registered
-    sema_registration_index_nominal_rows(&graph, row.module_index, first_nominal)
+    sema_registration_index_nominal_rows(&graph, module_index, first_nominal)
     sema_attach_diagnostic_source_locations(&diagnostics, start, segments)
     Val(Type.Named{name: owned})
 }
