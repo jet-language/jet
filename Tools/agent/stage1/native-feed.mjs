@@ -69,7 +69,7 @@ const compare = (out, left, right) => ['jet', 'jet.o'].map(name => ({ name, equa
 // path and cwd every time, empty all-phases census, fresh outputs only.
 function cliStageRunner({ repo, out, unit, identity, referenceToolchain, runtimeDir, stepsFile, cpus }) {
   const env = { ...process.env, JET_TOOLCHAIN_ROOT: repo, JET_KEEP_GOING: '1', JET_COMPILER_IDENTITY: identity };
-  for (const key of Object.keys(env)) if (key.startsWith('JET_FRONT_') || key.startsWith('JET_BOOTSTRAP_') || key === 'JET_DUMP_MIR' || key === 'JET_DEBUG_LOWER_ALL' || key === 'JET_KEEP_GOING_SKIP' || key === 'JET_KEEP_GOING_REPORT') delete env[key];
+  for (const key of Object.keys(env)) if (key.startsWith('JET_FRONT_') || key.startsWith('JET_BOOTSTRAP_') || key.startsWith('JET_TRACE_') || key === 'JET_PHASE_COUNTERS' || key === 'JET_DUMP_MIR' || key === 'JET_DEBUG_LOWER_ALL' || key === 'JET_KEEP_GOING_SKIP' || key === 'JET_KEEP_GOING_REPORT') delete env[key];
   // jet_rt_main runs the compiler on the process main thread and O0 frames
   // never share slots, so RLIMIT_STACK bounds recursion depth: every native
   // CLI stage execs under a 1 GiB stack set before exec. GNU time records
@@ -86,7 +86,11 @@ function cliStageRunner({ repo, out, unit, identity, referenceToolchain, runtime
   const built = join(unit.project, '.jet/build/selfhost');
   return (stage, builder) => {
     const report = join(out, `stage${stage}-keep-going.tsv`), timing = join(out, `stage${stage}.time`);
-    const stageEnv = { ...env, JET_KEEP_GOING_REPORT: report };
+    // Every native CLI stage streams its own compiler trace (one event per
+    // line, flushed per event) so a running stage can be watched; an inherited
+    // JET_TRACE_* setting never reaches it (deleted above). Output bytes do not
+    // depend on tracing.
+    const stageEnv = { ...env, JET_KEEP_GOING_REPORT: report, JET_TRACE_FILE: join(out, `stage${stage}.trace.jsonl`) };
     const toolchain = nativeCToolchain(jetEnv, stageEnv, unit.project);
     if (!sameToolchain(toolchain, referenceToolchain)) throw Error(`stage${stage} C toolchain differs from the factory's: ${JSON.stringify(toolchain)} vs ${JSON.stringify(referenceToolchain)}`);
     rmSync(built, { force: true }); rmSync(`${built}.o`, { force: true });
