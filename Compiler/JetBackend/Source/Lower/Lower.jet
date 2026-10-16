@@ -311,10 +311,11 @@ struct LowerContext {
     // OptionValue/ResultValue/EnumPayload results MIRRust.rs moves out of
     // their carrier rather than cloning (lower_payload_takes).
     payload_takes: [U64:Bool]
-    // Root MovePlace results only variant tests and payload reads use
-    // (lower_inspect_carriers): the moved subject of a match whose local's
-    // drop flag the move cleared. The release plan frees it (or what a
-    // payload take leaves of it) on every path.
+    // Local and local field-path MovePlace results only variant tests and
+    // payload reads use (lower_inspect_carriers): the moved subject of a
+    // match whose local's drop flag (or owner's field) the move cleared. The
+    // release plan frees it (or what a payload take leaves of it) on every
+    // path.
     inspect_carriers: [U64:Bool]
     // Collections a read loop's cursor takes instead of snapshotting
     // (lower_iter_takes): an owned List or Map read only by its LoopIterInit.
@@ -2399,11 +2400,16 @@ fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact
             // release follows the tests and payload reads: no owner of its own.
             if lower_is_inspect_move(inspect_moves, instruction) -> next
             // A root move owns the value its slot no longer holds
-            // (lower_clear_slot); a partial move's field stays with the
-            // partial-drop flags of its owner.
+            // (lower_clear_slot). A partial move's field stays with the
+            // partial-drop flags of its owner, unless it is an inspect
+            // carrier: the move cleared the field, which its owner's drop
+            // then skips, and no use takes the value over.
             if instruction.operation == .MovePlace(place) {
-                if projected_places.get(place.value) != None -> next
-                _ := &plan.taken.add(result.value, true)
+                if projected_places.get(place.value) == None {
+                    _ := &plan.taken.add(result.value, true)
+                } else if !carrier {
+                    next
+                }
             }
             // A native Err field reads a runtime record (NativeErr.jet); a
             // member of a type with a Close is never released as a copy.
@@ -3748,7 +3754,8 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
             else -> lower_mark_releasable(&f, defined, values_before, from)
             // A moved root names the slot's current value, which dominates
             // here; the move cleared the slot, so the carrier owns it alone.
-            if c.inspect_carriers.get(defined.value) != None && f.releasable.get(defined.value) == None {
+            // (A moved field is a fresh value its own lowering defined.)
+            if c.inspect_carriers.get(defined.value) != None && c.releases.taken.get(defined.value) != None && f.releasable.get(defined.value) == None {
                 if f.values.get(defined.value) == .Val(index) {
                     _ := &f.releasable.add(defined.value, true)
                     _ := &f.releasable_lir.add(index, true)
@@ -5133,14 +5140,21 @@ fn lower_is_inspect_move(inspect_moves: [U64:Bool], instruction: MIRInstruction)
     false
 }
 
-// Root-local MovePlace results only variant tests, payload reads and
-// inspect Moves use: a match subject the last-use pass moved out of its
-// dead local (clearing the local's drop flag). Nothing in MIR drops such a
-// carrier, so the release plan does (lower_release_plan).
+// MovePlace results of a local or a field path of one that only variant
+// tests, payload reads and inspect Moves use: a match subject the last-use
+// pass moved out of its dead local (clearing the local's drop flag) or out
+// of a field nothing reads again (clearing the field in its owner, whose
+// drop then skips it). Nothing in MIR drops such a carrier, so the release
+// plan does (lower_release_plan).
 fn lower_inspect_carriers(function: MIRFunction, inspect_moves: [U64:Bool]) -> [U64:Bool] Never! {
     roots := [U64:Bool]{}
     loop place in function.places {
-        if place.projections.len() == 0 && place.base == .Local(_) -> _ := &roots.add(place.id.value, true)
+        if !(place.base == .Local(_)) -> next
+        fields := true
+        loop projection in place.projections {
+            if !(projection == .Field(_, _)) -> fields = false
+        }
+        if fields -> _ := &roots.add(place.id.value, true)
     }
     moved := [U64:Bool]{}
     loop block in function.blocks {
