@@ -1,0 +1,29 @@
+// A match over a local nothing reads afterwards: an arm that binds nothing,
+// and an arm that binds one field of a two-field variant, each release the
+// subject (or the fields the binding left behind) exactly once.
+enum Pair {
+    Two(left: [Int], right: String)
+    Single(left: [Int])
+    Nothing
+}
+
+fn make(k: Int) -> Pair Never! {
+    if k % 3 == 0 -> return Pair.Two{left: [Int]{k, k + 1}, right: "r{k}"}
+    if k % 3 == 1 -> return Pair.Single{left: [Int]{k}}
+    Pair.Nothing
+}
+
+fn run() {
+    hits := 0
+    misses := 0
+    lefts := 0
+    loop k in 0..<6 {
+        x :: make(k)
+        if x == {
+            .Two(left, _) -> lefts += left.len()
+            .Single(_) -> hits += 1
+            .Nothing -> misses += 1
+        }
+    }
+    print("lefts {lefts} hits {hits} misses {misses}")
+}

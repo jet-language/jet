@@ -308,9 +308,14 @@ struct LowerContext {
     sunk: [U64:Bool]
     // MIR value a `Move` defines -> the value it moves.
     moves: [U64:U64]
-    // OptionValue/ResultValue results MIRRust.rs moves out of their carrier
-    // rather than cloning (lower_payload_takes).
+    // OptionValue/ResultValue/EnumPayload results MIRRust.rs moves out of
+    // their carrier rather than cloning (lower_payload_takes).
     payload_takes: [U64:Bool]
+    // Root MovePlace results only variant tests and payload reads use
+    // (lower_inspect_carriers): the moved subject of a match whose local's
+    // drop flag the move cleared. The release plan frees it (or what a
+    // payload take leaves of it) on every path.
+    inspect_carriers: [U64:Bool]
     // Collections a read loop's cursor takes instead of snapshotting
     // (lower_iter_takes): an owned List or Map read only by its LoopIterInit.
     iter_takes: [U64:Bool]
@@ -2120,12 +2125,20 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
     read_slots := [U64:Int]{}
     sunk := [U64:Bool]{}
     moves := [U64:U64]{}
+    // A Move only variant tests and payload reads use does not land its
+    // operand anywhere: a place read under it stays a borrow of the place
+    // (no whole-subject clone), and lower_read_member copies or takes only
+    // the payload a binding stores.
+    inspect_moves :: lower_inspect_moves(function)
+    inspect_carriers :: lower_inspect_carriers(function, inspect_moves)
     loop block in function.blocks {
         if block.terminator == .Return(returned) {
             if returned == .Val(value) -> _ := &sunk.add(value.value, true)
         }
         loop instruction in block.instructions {
-            loop consumed in lower_consumed_operands(p, m, instruction.operation) -> _ := &sunk.add(consumed.value, true)
+            if !lower_is_inspect_move(inspect_moves, instruction) {
+                loop consumed in lower_consumed_operands(p, m, instruction.operation) -> _ := &sunk.add(consumed.value, true)
+            }
             result_value :: instruction.result ?? next
             if instruction.operation == {
                 .ReadPlace(place) | .MovePlace(place) -> {
@@ -2177,7 +2190,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
     }
     dead :: lower_dead_values(function)
     iter_takes :: lower_iter_takes(function)
-    releases :: lower_release_plan(p, m, function, fact_index, dead, sunk, block_index, successors, order, iter_takes, slots, place_slots, live)
+    releases :: lower_release_plan(p, m, function, fact_index, dead, sunk, block_index, successors, order, iter_takes, inspect_moves, inspect_carriers, slots, place_slots, live)
     Val(LowerContext{
         mir: function.copy(),
         result: result,
@@ -2192,6 +2205,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         sunk: sunk,
         moves: moves,
         payload_takes: lower_payload_takes(function, block_index),
+        inspect_carriers: inspect_carriers,
         iter_takes: iter_takes,
         fixed_literals: lower_fixed_literals(p, function),
         order: order,
@@ -2290,7 +2304,7 @@ LOWER_RELEASE_ALIAS :: prep { 2 }
 // The use's ownership effect is not modelled: the value is never released.
 LOWER_RELEASE_KEEP :: prep { 3 }
 
-fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact_index: [U64:Int], dead: [U64:Bool], sunk: [U64:Bool], block_index: [U64:Int], successors: [[Int]], order: [Int], iter_takes: [U64:Bool], slots: [LowerSlot], place_slots: [U64:Int], live: [[Int]]) -> LowerReleasePlan Never! {
+fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact_index: [U64:Int], dead: [U64:Bool], sunk: [U64:Bool], block_index: [U64:Int], successors: [[Int]], order: [Int], iter_takes: [U64:Bool], inspect_moves: [U64:Bool], inspect_carriers: [U64:Bool], slots: [LowerSlot], place_slots: [U64:Int], live: [[Int]]) -> LowerReleasePlan Never! {
     plan := LowerReleasePlan{after: [U64:[MIRValueID]]{}, edges: [Int:[MIRValueID]]{}, candidates: [U64:Bool]{}, bound: [U64:Bool]{}, write_drops: [U64:Bool]{}, slot_edges: [Int:[Int]]{}, slot_returns: [Int:[Int]]{}}
     count :: function.blocks.len()
     pinned := [U64:Bool]{}
@@ -2345,7 +2359,9 @@ fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact
                 }
                 next
             }
-            consumed :: lower_consumed_operands(p, m, instruction.operation)
+            // An inspect Move aliases its operand (lower_release_use_kind):
+            // the operand's own release follows the tests and payload reads.
+            consumed :: if lower_is_inspect_move(inspect_moves, instruction) -> [MIRValueID]{} else -> lower_consumed_operands(p, m, instruction.operation)
             loop value in lower_operand_values(instruction.operation) {
                 kind :: lower_release_use_kind(p, m, function, fact_index, iter_takes, instruction, value, consumed)
                 lower_release_add_use(&uses, value, LowerReleaseUse{block: block, position: position, kind: kind})
@@ -2368,9 +2384,13 @@ fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact
         if !reachable[block] -> next
         loop (position, instruction) in row.instructions {
             result :: instruction.result ?? next
-            if !lower_release_producer(instruction.operation) || pinned.get(result.value) != None -> next
+            carrier :: inspect_carriers.get(result.value) != None
+            if (!lower_release_producer(instruction.operation) && !carrier) || pinned.get(result.value) != None -> next
             fact_row :: fact_index.get(result.value) ?? next
             if !lower_is_owned(function.values[fact_row].ownership) -> next
+            // A moved match subject of a type with a Close keeps the partial
+            // drop frame's handling (PartialDrop.jet).
+            if carrier && lower_close_method(p, m.close_methods, function.values[fact_row].ty) != None -> next
             // A native Err field reads a runtime record (NativeErr.jet); a
             // member of a type with a Close is never released as a copy.
             if instruction.operation == .Field(base, _) {
@@ -2574,6 +2594,10 @@ fn lower_release_use_kind(p: MIRProgram, m: LowerModule, function: MIRFunction, 
             if lower_is_owned(function.values[row].ownership) && !lower_is_inline(p, function.values[row].ty) -> return LOWER_RELEASE_BORROW
             LOWER_RELEASE_ALIAS
         }
+        // Only an inspect Move reaches here (any other Move consumes its
+        // operand): its result names the operand for the tests and payload
+        // reads that use it.
+        .Move(_) -> LOWER_RELEASE_ALIAS
         // The key is read; the lookup's result is the map place's own row.
         .MapLookup(_, _, _) -> LOWER_RELEASE_BORROW
         .Semantic(semantic) -> lower_release_semantic_kind(p, m, function, fact_index, instruction, semantic)
@@ -3610,6 +3634,14 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         if c.releases.candidates.get(defined.value) != None {
             from :: if f.builder.blocks.len() == sealed_before -> open_before else -> 0
             lower_mark_releasable(&f, defined, values_before, from)
+            // A moved root names the slot's current value, which dominates
+            // here; the move cleared the slot, so the carrier owns it alone.
+            if c.inspect_carriers.get(defined.value) != None && f.releasable.get(defined.value) == None {
+                if f.values.get(defined.value) == .Val(index) {
+                    _ := &f.releasable.add(defined.value, true)
+                    _ := &f.releasable_lir.add(index, true)
+                }
+            }
         }
     }
     released :: c.releases.after.get(instruction.id.value) ?? [MIRValueID]{}
@@ -3680,7 +3712,11 @@ fn lower_temp_release(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
         f.track_consumes = tracking
         return
     }
-    if lower_slot_of_value(c, value) != None -> return
+    if lower_slot_of_value(c, value) == .Val(slot) {
+        // A moved match subject's slot was cleared by its move: the carrier
+        // is released here, unless a cell holds it (Closures.jet).
+        if c.inspect_carriers.get(value.value) == None || c.slots[slot].cell -> return
+    }
     loop slot_value in f.current {
         if slot_value == .Val(holding) && holding.value == index -> return
     }
@@ -4806,6 +4842,9 @@ fn lower_carrier_has_later_use(function: MIRFunction, index: LowerUseIndex, bloc
     loop used in uses {
         if used.block != block && used.block != definition_block -> local = false
     }
+    // A carrier defined outside the loop the projection runs in is read
+    // again by the next iteration: never its last use.
+    if lower_block_in_cycle(index, block) && (definition_block < 0 || !lower_block_reaches(index, block, definition_block)) -> return true
     if local -> return false
     known :: lower_use_known_condition(function, index, block_index, block, definition_block)
     seen := [Bool]{}
@@ -4849,14 +4888,16 @@ fn lower_payload_place_read(function: MIRFunction, index: LowerUseIndex, value: 
     false
 }
 
-// The OptionValue/ResultValue results whose owned carrier MIRRust.rs moves
-// the payload out of (no immutable place read, no later carrier use).
+// The OptionValue/ResultValue/EnumPayload results whose owned carrier
+// MIRRust.rs moves the payload out of (no immutable place read, no later
+// carrier use): the payload is taken, never cloned, and the carrier's own
+// release (or the local's drop) frees only what remains.
 fn lower_payload_takes(function: MIRFunction, block_index: [U64:Int]) -> [U64:Bool] Never! {
     takes := [U64:Bool]{}
     candidate := false
     loop block in function.blocks {
         loop instruction in block.instructions {
-            if instruction.operation == .OptionValue(_) | .ResultValue(_, _) -> candidate = true
+            if instruction.operation == .OptionValue(_) | .ResultValue(_, _) | .EnumPayload(_, _, _, _) -> candidate = true
         }
     }
     if !candidate -> return takes
@@ -4864,7 +4905,7 @@ fn lower_payload_takes(function: MIRFunction, block_index: [U64:Int]) -> [U64:Bo
     loop block in function.blocks {
         loop instruction in block.instructions {
             result :: instruction.result ?? next
-            if instruction.operation == .OptionValue(subject) | .ResultValue(subject, _) {
+            if instruction.operation == .OptionValue(subject) | .ResultValue(subject, _) | .EnumPayload(subject, _, _, _) {
                 if lower_payload_place_read(function, index, subject) {
                     // A subject switch binds its non-place subject to a local
                     // (`it`); the Rust tier's subject is that value itself.
@@ -4879,6 +4920,120 @@ fn lower_payload_takes(function: MIRFunction, block_index: [U64:Int]) -> [U64:Bo
     takes
 }
 
+// The value a variant test or payload read inspects, if `operation` is one.
+fn lower_inspect_subject(operation: MIROperation) -> MIRValueID? Never! {
+    if operation == .EnumIs(subject, _, _) | .EnumPayload(subject, _, _, _) | .OptionIsSome(subject) | .OptionValue(subject) | .ResultIsOk(subject) | .ResultValue(subject, _) -> return Val(subject)
+    None
+}
+
+// The `candidates` whose every use is a variant test or payload read of it,
+// or (`inspect_moves`) an inspect Move of it; one use at least, and none by
+// a terminator or a phi.
+fn lower_inspected_only(function: MIRFunction, candidates: [U64:Bool], inspect_moves: [U64:Bool]) -> [U64:Bool] Never! {
+    used := [U64:Bool]{}
+    rejected := [U64:Bool]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            inspected :: lower_inspect_subject(instruction.operation)
+            through := MIRValueID?{None}
+            if lower_is_inspect_move(inspect_moves, instruction) {
+                if instruction.operation == .Move(inner) -> through = Val(inner)
+            }
+            loop value in mir_operation_value_uses(instruction.operation) {
+                if candidates.get(value.value) == None -> next
+                if inspected == Val(value) || through == Val(value) {
+                    _ := &used.add(value.value, true)
+                } else {
+                    _ := &rejected.add(value.value, true)
+                }
+            }
+        }
+        loop value in mir_terminator_value_uses(block.terminator) -> _ := &rejected.add(value.value, true)
+    }
+    out := [U64:Bool]{}
+    loop (key, _) in used {
+        if rejected.get(key) == None -> _ := &out.add(key, true)
+    }
+    out
+}
+
+// The Moves only variant tests and payload reads use (the last-use pass's
+// `match.payload.take`): result value -> true. Such a Move lands its
+// operand nowhere; lowering forwards it and its operand stays what it was.
+fn lower_inspect_moves(function: MIRFunction) -> [U64:Bool] Never! {
+    moved := [U64:Bool]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .Move(_) {
+                if instruction.result == .Val(result) -> _ := &moved.add(result.value, true)
+            }
+        }
+    }
+    if moved.len() == 0 -> return moved
+    lower_inspected_only(function, moved, [U64:Bool]{})
+}
+
+fn lower_is_inspect_move(inspect_moves: [U64:Bool], instruction: MIRInstruction) -> Bool Never! {
+    if inspect_moves.len() == 0 -> return false
+    if instruction.operation == .Move(_) {
+        if instruction.result == .Val(result) -> return inspect_moves.get(result.value) != None
+    }
+    false
+}
+
+// Root-local MovePlace results only variant tests, payload reads and
+// inspect Moves use: a match subject the last-use pass moved out of its
+// dead local (clearing the local's drop flag). Nothing in MIR drops such a
+// carrier, so the release plan does (lower_release_plan).
+fn lower_inspect_carriers(function: MIRFunction, inspect_moves: [U64:Bool]) -> [U64:Bool] Never! {
+    roots := [U64:Bool]{}
+    loop place in function.places {
+        if place.projections.len() == 0 && place.base == .Local(_) -> _ := &roots.add(place.id.value, true)
+    }
+    moved := [U64:Bool]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .MovePlace(place) {
+                if roots.get(place.value) == None -> next
+                if instruction.result == .Val(result) -> _ := &moved.add(result.value, true)
+            }
+        }
+    }
+    if moved.len() == 0 -> return moved
+    lower_inspected_only(function, moved, inspect_moves)
+}
+
+// Whether `block` can reach itself along terminator edges (it is in a loop).
+fn lower_block_in_cycle(index: LowerUseIndex, block: Int) -> Bool Never! {
+    lower_block_reaches(index, block, block)
+}
+
+// Whether a path of one edge or more leads from block `from` to block `to`
+// (walked backwards from `to` over predecessors).
+fn lower_block_reaches(index: LowerUseIndex, from: Int, to: Int) -> Bool Never! {
+    seen := [Int:Bool]{}
+    pending := [Int]{}
+    loop predecessor in index.predecessors[to] {
+        if seen.get(predecessor) == None {
+            _ := &seen.add(predecessor, true)
+            &pending.push(predecessor)
+        }
+    }
+    cursor := 0
+    loop cursor < pending.len() {
+        at :: pending[cursor]
+        cursor += 1
+        if at == from -> return true
+        loop predecessor in index.predecessors[at] {
+            if seen.get(predecessor) == None {
+                _ := &seen.add(predecessor, true)
+                &pending.push(predecessor)
+            }
+        }
+    }
+    false
+}
+
 // Jet sema binds a subject switch's non-place subject to the generated local
 // `it` (Statements.jet sema_stmt_check_subject_switch), so each arm reads
 // `it`'s place where the Rust tier's MIR tests and projects the subject
@@ -4890,9 +5045,12 @@ fn lower_payload_takes(function: MIRFunction, block_index: [U64:Int]) -> [U64:Bo
 // uses of the carrier. The local's cleanup moves (a MovePlace feeding only
 // Drop) do not: the take clears the payload in the local's carrier
 // (lower_read_member), so that drop releases only what remains. None when
-// the carrier is not such a read.
+// the carrier is not such a read, or when its read sits in a loop: the back
+// edge re-runs the read, and the widened uses (which skip the read's own
+// site) cannot see that next iteration's tests and payload reads.
 fn lower_payload_local_uses(function: MIRFunction, index: LowerUseIndex, subject: MIRValueID) -> LowerUseIndex? Never! {
     site :: index.definitions.get(subject.value) ?? return None
+    if lower_block_in_cycle(index, site.block) -> return None
     read :: function.blocks[site.block].instructions[site.position].operation
     place := MIRPlaceID{value: U64.MAX}
     if read == .ReadPlace(read_place) {
