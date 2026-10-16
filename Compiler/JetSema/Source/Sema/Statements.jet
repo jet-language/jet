@@ -5124,13 +5124,12 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                 }
             }
             .Val(binding) -> {
-                updated_binding := binding
                 lambda_escapes := context.lambda_escapes
-                if updated_binding.init == {
-                    .Lambda(_) -> lambda_escapes = sema_expression_lambda_bound_escapes(updated_binding, statements, index + 1, &tail_store, environment, program, &scopes, &state, &context, &diagnostics)
+                if binding.init == {
+                    .Lambda(_) -> lambda_escapes = sema_expression_lambda_bound_escapes(binding, statements, index + 1, &tail_store, environment, program, &scopes, &state, &context, &diagnostics)
                     else -> {}
                 }
-                checked :: sema_stmt_check_binding(updated_binding, lambda_escapes, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                checked :: sema_stmt_check_binding(binding, lambda_escapes, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 if checked == {
                     .Val(value) -> &output.push(value)
                     .None -> complete = false
@@ -5144,7 +5143,6 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                 }
             }
             .Return(value, span) -> {
-                source := value ?? Expr.Unit{span: span}
                 if {
                     sema_stmt_generator_return_rejected(value, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) -> complete = false
                     sema_stmt_never_return_rejected(value, return_type, context.function_name, span, &diagnostics) -> complete = false
@@ -5157,13 +5155,16 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         &output.push(TStmt.Return{value: None, span: span})
                     }
                     else -> {
-                        checked :: sema_stmt_check_returned_value(source, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-                        if {
-                            checked == None -> {
-                                complete = false
-                            }
-                            else -> {
-                                &output.push(TStmt.Return{value: checked, span: span})
+                        // The returned expression is read in place.
+                        if value == .Val(returned) {
+                            checked :: sema_stmt_check_returned_value(returned, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                            if {
+                                checked == None -> {
+                                    complete = false
+                                }
+                                else -> {
+                                    &output.push(TStmt.Return{value: checked, span: span})
+                                }
                             }
                         }
                     }

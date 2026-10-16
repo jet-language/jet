@@ -21,11 +21,14 @@ fn sema_pure_root_diagnostic(root: String, call: String, path: [String], span: S
 
 fn sema_pure_root_expr(root: String, modules: [SemaGraphModuleResult], positions: [String:SemaPureRootPosition], calls: &SemaEffectCallIndex, owner: TFunc, expression: TExpr, visited: &[String:Bool], path: &[String]) -> Diagnostic? {
     if sema_effect_is_call(expression) {
-        calls.current_module = positions[owner.key].module_index
-        fact := sema_effect_find_fact(calls, owner.key, expression.span)
+        module_index :: positions[owner.key].module_index
+        calls.current_module = module_index
+        // The call fact is read in place from its module (the call index
+        // keeps positions in the same order as `call_facts`).
+        fact :: sema_effect_find_fact(calls, owner.key, expression.span)
         key := ""
-        if fact == .Val(site) {
-            if site.callee == .Val(callee) -> key = callee.key
+        if fact == .Val(at) {
+            if modules[module_index].call_facts[at].callee == .Val(callee) -> key = callee.key
         }
         if key == "" && expression.kind == .Call(callee, _, _) -> key = callee.key
         if positions.get(key) == .Val(position) {
@@ -33,8 +36,8 @@ fn sema_pure_root_expr(root: String, modules: [SemaGraphModuleResult], positions
             if found != None -> return found
         } else {
             denied := false
-            if fact == .Val(site) {
-                if site.facts.effect_bound == .Val(row) {
+            if fact == .Val(at) {
+                if modules[module_index].call_facts[at].facts.effect_bound == .Val(row) {
                     names :: loop entry in row -> entry.name
                     denied = sema_effect_without_deny_only(names).len() > 0
                 } else { denied = !sema_effect_is_compiler_intrinsic(expression) }

@@ -399,7 +399,7 @@ fn sema_scope_members_check_marker_body(marker: String, body: [Stmt], diagnostic
             sema_scope_members_walk(member_body, true, &diagnostics)
             next
         }
-        loop child in sema_scope_members_child_bodies(statement) -> sema_scope_members_walk(child, true, &diagnostics)
+        sema_scope_members_walk_children(statement, true, &diagnostics)
     }
 }
 
@@ -440,20 +440,19 @@ fn sema_scope_members_walk(body: [Stmt], nested: Bool, diagnostics: &[Diagnostic
             sema_scope_members_walk(member_body, nested, &diagnostics)
             next
         }
-        loop child in sema_scope_members_child_bodies(statement) -> sema_scope_members_walk(child, nested, &diagnostics)
+        sema_scope_members_walk_children(statement, nested, &diagnostics)
     }
 }
 
-// Rust `child_bodies`: every statement block a statement carries.
-fn sema_scope_members_child_bodies(statement: Stmt) -> [[Stmt]] Never! {
+// Rust `child_bodies`: walks every statement block a statement carries, in
+// place (arms in order, then the else body).
+fn sema_scope_members_walk_children(statement: Stmt, nested: Bool, diagnostics: &[Diagnostic]) {
     if statement == {
         .Switch(_, arms, else_body, _) -> {
-            bodies := [[Stmt]]{}
-            loop arm in arms -> &bodies.push(arm.body)
-            if else_body == .Val(body) -> &bodies.push(body)
-            bodies
+            loop arm in arms -> sema_scope_members_walk(arm.body, nested, &diagnostics)
+            if else_body == .Val(body) -> sema_scope_members_walk(body, nested, &diagnostics)
         }
-        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> [[Stmt]]{body}
-        else -> [[Stmt]]{}
+        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> sema_scope_members_walk(body, nested, &diagnostics)
+        else -> {}
     }
 }

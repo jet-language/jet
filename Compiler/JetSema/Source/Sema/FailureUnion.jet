@@ -394,16 +394,17 @@ fn sema_failure_project_returns(graph: &SemaRegistrationGraph, projections: [Sem
     unused_diagnostics := [Diagnostic]{}
     loop projection in projections {
         module_index :: projection.module_index
-        updated := graph.modules[module_index].functions[projection.row].declaration
+        // copy: the projected declaration is a new row; the old row stays on the trail.
+        updated := graph.modules[module_index].functions[projection.row].declaration.copy()
         updated.return_type = Val(projection.return_type)
         updated.return_type_span = None
         row :: sema_registration_function(updated, graph.modules[module_index].functions[projection.row].raw_protocol_return, graph.modules[module_index].module_identity, None, graph.modules[module_index].source_file, graph.modules[module_index].source_origin, graph.modules[module_index].source_segments, &unused_diagnostics)
         symbols[projection.key] = row.symbol
         local_keys["{module_index}|{projection.key}"] = true
         local_names["{module_index}|{updated.name}"] = projection.key
-        items[projection.key] = Item.Func{value: updated}
+        items[projection.key] = Item.Func{value: ^updated}
         &trail.entries.push(SemaGraphUndo.FunctionRow{module_index: module_index, row: projection.row, old: graph.modules[module_index].functions[projection.row]})
-        graph.modules[module_index].functions[projection.row] = row.copy()
+        graph.modules[module_index].functions[projection.row] = ^row
         if !seen[module_index] {
             seen[module_index] = true
             &declaring.push(module_index)

@@ -5934,6 +5934,18 @@ fn sema_comptime_effect_sources(source_module: SemaRegistrationModule) -> [SemaE
     sources
 }
 
+// One checked module's effect inputs, read in place from its registration row.
+fn sema_effect_module_input(source: SemaRegistrationModule, module_index: Int) -> SemaEffectModuleInput Never! {
+    SemaEffectModuleInput{
+        module_index: module_index,
+        sources: sema_comptime_effect_sources(source),
+        // copy: the effect inputs locate their diagnostics; the graph keeps its segments.
+        source_segments: source.source_segments.copy(),
+        trait_bounds: sema_effect_trait_bounds(source.program.items),
+        trait_implementers: sema_effect_trait_implementers(source.program.items),
+    }
+}
+
 fn sema_comptime_policy_for_package(policies: [SemaRegistrationPackagePolicy], package_identity: String) -> SemaRegistrationPackagePolicy? {
     loop policy in policies {
         if policy.package_identity == package_identity -> return Val(policy)
@@ -6481,7 +6493,13 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
         recheck.len() > 0 -> {
             rechecked := [SemaGraphModuleResult]{}
             after_recheck_graph := sema_finalize_check_modules(^after_body_graph, values, comptime_functions, checked_types, recheck, false, hook_access, threads, None, "sema.recheck", trace_sink, &rechecked)
-            loop (row, module_index) in recheck -> modules[module_index] = rechecked[row]
+            // One rechecked result per `recheck` row, in order: each moves
+            // into its module's slot, last row first.
+            loop rechecked.len() > 0 {
+                row :: rechecked.len() - 1
+                checked := &rechecked.pop() ?? break
+                modules[recheck[row]] = ^checked
+            }
             ^after_recheck_graph
         }
         else -> ^after_body_graph
@@ -6514,14 +6532,7 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     effect_inputs := [SemaEffectModuleInput]{}
     loop module_index in 0..<modules.len() {
         source_index :: sema_registration_module_index(final_graph, modules[module_index].module_identity) ?? next
-        source :: final_graph.modules[source_index]
-        &effect_inputs.push(SemaEffectModuleInput{
-            module_index: module_index,
-            sources: sema_comptime_effect_sources(source),
-            source_segments: source.source_segments,
-            trait_bounds: sema_effect_trait_bounds(source.program.items),
-            trait_implementers: sema_effect_trait_implementers(source.program.items),
-        })
+        &effect_inputs.push(sema_effect_module_input(final_graph.modules[source_index], module_index))
     }
     if trace_sink == .Val(sink) -> sink.begin("sema.effects", "", -1, -1)
     root_policy :: sema_comptime_policy_for_package(stage.package_policies, final_graph.package_identity)
