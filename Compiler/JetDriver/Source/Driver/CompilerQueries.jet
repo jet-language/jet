@@ -473,7 +473,7 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
     stage_diagnostics = load.diagnostics
     load.diagnostics = [Diagnostic]{}
     body_run := jet_driver_orchestrate_comptime_bodies(
-        &registration,
+        ^registration,
         stage,
         ^graph,
         run.values,
@@ -484,6 +484,9 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
         &stage_diagnostics,
     )
     load.diagnostics = stage_diagnostics
+    returned_registration := ^body_run.registration
+    body_run.registration = None
+    registration = ^returned_registration ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, Val("comptime body rechecking lost the registration graph"))
     if body_run.soft_stop -> return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, None)
     if !body_run.complete {
         if body_run.internal_problem == None {
@@ -496,7 +499,7 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
     stage_diagnostics = load.diagnostics
     load.diagnostics = [Diagnostic]{}
     validation := jet_driver_validate_checked_text(
-        &registration,
+        ^registration,
         stage,
         ^graph,
         body_run.values,
@@ -507,6 +510,9 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
         &stage_diagnostics,
     )
     load.diagnostics = stage_diagnostics
+    validated_registration := ^validation.registration
+    validation.registration = None
+    registration = ^validated_registration ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, Val("checked text validation lost the registration graph"))
     if validation.soft_stop -> return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, None)
     if !validation.complete {
         if validation.internal_problem == None {
