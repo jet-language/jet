@@ -136,7 +136,7 @@ fn jet_cli_sandbox_write(file: String, artifacts: JetPluginArtifacts, build_dir:
 // baseline (PluginExport.rs `check_and_freeze_version` ignores a failed
 // save, so a read-only cache never fails the build), then build the guest.
 fn jet_cli_sandbox_result(file: String, source: String, color: Bool, quiet: Bool, api_dir: String, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
-    errors :: jet_cli_errors(jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files))
+    errors :: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), snapshot, result.generated_source_files)
     if errors.len() > 0 {
         return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }

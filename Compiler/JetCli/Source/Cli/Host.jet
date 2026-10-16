@@ -219,7 +219,7 @@ fn jet_cli_compile_eval(file: String, pure: Bool, color: Bool, json: Bool) -> Je
 }
 
 fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
-    errors :: jet_cli_errors(jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files))
+    errors :: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), snapshot, result.generated_source_files)
     if errors.len() > 0 -> return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, errors, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     program :: result.mir ?? return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
@@ -376,7 +376,9 @@ fn jet_cli_native_executable(result: &JetDriverCompileResult, sources: JetCLIFor
     if &result.mir == {
         None -> {}
         .Val(program) -> {
+            if result.trace_sink == .Val(sink) -> sink.begin("native.rust_foreign", "", -1, -1)
             attached := jet_cli_rust_foreign_attached(rust_foreign, program) ?? return Val(JetCLINativeFailure.RustForeign{error: err})
+            if result.trace_sink == .Val(sink) -> sink.end("native.rust_foreign", attached.len())
             if attached.len() == 1 -> return jet_cli_native_program_executable(entry_function, result.trace_sink, &attached[0], sources, release, runtime_dir, object_path, executable_path, keep_going, &census)
             return jet_cli_native_program_executable(entry_function, result.trace_sink, &program, sources, release, runtime_dir, object_path, executable_path, keep_going, &census)
         }
@@ -398,7 +400,9 @@ fn jet_cli_rust_foreign_attached(facts: JetDriverRustForeignFacts, program: MIRP
 // trace sink (`trace_sink`, the result's): `native.lower` (MIR to LIR),
 // `native.object` (x64 selection, encoding and the object; in release it
 // holds `native.optimize`, the O2 LIR passes), `native.foreign` (the C
-// closure) and `native.link`. A span a failure returns from stays open.
+// closure) and `native.link`; before them `native.sources` (the C sources
+// the snapshot declares) and `native.rust_foreign` (a Rust foreign helper's
+// realization). A span a failure returns from stays open.
 fn jet_cli_native_program_executable(entry_function: MIRFunctionID?, trace_sink: CompilerTraceSink?, unpruned: &MIRProgram, sources: JetCLIForeignSources, release: Bool, runtime_dir: String, object_path: String, executable_path: String, keep_going: Bool, census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
     entry_id :: entry_function ?? return Val(JetCLINativeFailure.NoEntry)
     // Only functions the entry reaches are lowered, generic ones per instance.
@@ -475,7 +479,9 @@ fn jet_cli_native_optimize(lir: LIRModule, trace_sink: CompilerTraceSink?) -> LI
 // without switching to a different backend.
 fn jet_cli_build_native(file: String, command: String, release: Bool, result: &JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, binary: String, color: Bool) -[FS, Env, Exec, Time.Wait]> JetDriverVerbOutput Never! {
     if result.mir == None -> return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
+    if result.trace_sink == .Val(sink) -> sink.begin("native.sources", "", -1, -1)
     sources :: jet_cli_native_c_sources(snapshot) ?? return jet_cli_build_failed("couldn't realize C dependencies for `{file}`: {err.message}", jet_cli_why("E2105"), "check the declared C source/library paths and the installed C toolchain", color)
+    if result.trace_sink == .Val(sink) -> sink.end("native.sources", -1)
     fix :: "correct the reported native backend problems, then retry `jet {command} {file}`"
     census := [String]{}
     // JET_KEEP_GOING=1 (the bootstrap feed's native CLI stages) lowers the way
@@ -533,16 +539,36 @@ fn jet_cli_build_binary(file: String, command: String, color: Bool, release: Boo
 // The application authority check of a build or run with no errors: E1803
 // (rendered as the Rust host reports it, exit 1) when the policy denies or
 // leaves undecided a right the program requires (Authority.jet).
+// Traced as `cli.authority`.
 fn jet_cli_authority_check(file: String, source: String, color: Bool, command: String, invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult) -> JetDriverVerbOutput? Never! {
-    refusal :: jet_cli_authority_refusal(jet_cli_application_authority(result, invocation), file, command) ?? return None
+    if result.trace_sink == .Val(sink) -> sink.begin("cli.authority", "", -1, -1)
+    authority :: jet_cli_application_authority(result, invocation)
+    if result.trace_sink == .Val(sink) -> sink.end("cli.authority", authority.required.len())
+    refusal :: jet_cli_authority_refusal(authority, file, command) ?? return None
     Val(JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, [Diagnostic]{refusal}, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR})
+}
+
+// The diagnostics jet_driver_report_problems shows (all but the advisory
+// lints, unless `show_advisories`), presented. A presented diagnostic owns a
+// copy of its file's bytes (its origin's `source`), so a report presents only
+// what it shows: the self-hosted compiler unit is one 25 MB file with
+// thousands of lints, whose presented copies came to ~130 GB.
+fn jet_cli_present_shown(result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, show_advisories: Bool) -> [Diagnostic] Never! {
+    shown := [Diagnostic]{}
+    loop diagnostic in result.diagnostics {
+        if show_advisories || diagnostic.severity != DIAGNOSTIC_LINT -> &shown.push(diagnostic)
+    }
+    jet_driver_present_diagnostics(shown, snapshot, result.generated_source_files)
 }
 
 // `jet build <file>`: compile through the Jet compiler, report its problems
 // the way the Rust host does, check the application authority, then write
 // the executable.
 fn jet_cli_build_result(file: String, source: String, color: Bool, release: Bool, invocation: JetCLIInvocationAuthority?, result: &JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
-    errors :: jet_cli_errors(jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files))
+    // Only the errors are presented (jet_cli_present_shown).
+    if result.trace_sink == .Val(sink) -> sink.begin("cli.diagnostics", "", -1, -1)
+    errors :: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), snapshot, result.generated_source_files)
+    if result.trace_sink == .Val(sink) -> sink.end("cli.diagnostics", errors.len())
     if errors.len() > 0 {
         return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
@@ -608,12 +634,14 @@ fn jet_cli_write_verbose_lints(file: String, source: String, color: Bool, diagno
 // an error stop the run, and so does the application authority check;
 // `run` hides advisory lints unless `--verbose`.
 fn jet_cli_run_result(file: String, source: String, color: Bool, release: Bool, verbose: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?, result: &JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
-    diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-    if jet_cli_errors(diagnostics).len() > 0 {
-        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, diagnostics, color, verbose), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    if result.trace_sink == .Val(sink) -> sink.begin("cli.diagnostics", "", -1, -1)
+    errors :: jet_cli_errors(result.diagnostics)
+    if result.trace_sink == .Val(sink) -> sink.end("cli.diagnostics", errors.len())
+    if errors.len() > 0 {
+        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, jet_cli_present_shown(result, snapshot, verbose), color, verbose), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     if jet_cli_authority_check(file, source, color, "run", invocation, result) == .Val(refusal) -> return refusal
-    if verbose -> jet_cli_write_verbose_lints(file, source, color, diagnostics)
+    if verbose -> jet_cli_write_verbose_lints(file, source, color, jet_cli_present_shown(result, snapshot, true))
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     if jet_cli_build_binary(file, "run", color, release, &result, snapshot) == {
         .Failed(failure) -> output = failure.copy()
@@ -649,11 +677,10 @@ fn jet_cli_native_test_unrun_check_report() -> String Never! {
 // ProcessSpec retains the project/snapshot/filter/shuffle/serial/capture policy;
 // its stdout is ordinary output, never the framed outcome transport.
 fn jet_cli_test_result(file: String, source: String, color: Bool, verbose: Bool, options: JetCLITestOptions, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
-    diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-    if jet_cli_errors(diagnostics).len() > 0 {
-        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, diagnostics, color, verbose), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    if jet_cli_errors(result.diagnostics).len() > 0 {
+        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, jet_cli_present_shown(result, snapshot, verbose), color, verbose), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
-    if verbose -> jet_cli_write_verbose_lints(file, source, color, diagnostics)
+    if verbose -> jet_cli_write_verbose_lints(file, source, color, jet_cli_present_shown(result, snapshot, true))
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     if !result.complete -> return jet_cli_ice("the Jet compiler stopped before finishing the tests of `{file}`")
     root :: snapshot.roots[0].canonical_path

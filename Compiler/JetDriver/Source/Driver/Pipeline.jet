@@ -5338,6 +5338,7 @@ fn jet_driver_compile_core_library_mir(owned_request: ^JetDriverCompileRequest) 
     load := jet_driver_load_core_library(request)
     if request.trace_sink == .Val(sink) -> sink.end("load", load.modules.len())
     result := jet_driver_compile_loaded_stages(request, &kg, false, ^load, false, &capture, &journal)
+    jet_driver_trace_released(request.trace_sink)
     result.canonical_routes = canonical_pass_take(&journal)
     result
 }
@@ -5353,12 +5354,14 @@ fn jet_driver_compile_keep_going(request: ^JetDriverCompileRequest, options: Jet
     capture := JetDriverCheckedProjectionCapture{}
     journal := canonical_pass_journal(CanonicalPassOptions{adapter_mode: request.adapter_mode, operation_ids: request.adapter_operation_ids})
     result := jet_driver_compile_stages(request, &kg, emit_rust, false, &capture, &journal)
+    if request.trace_sink == .Val(sink) -> sink.begin("keepgoing.final", "", -1, -1)
     result.canonical_routes = canonical_pass_take(&journal)
     if result.internal_problem == .Val(problem) -> jet_driver_keep_going_row(&kg, "internal", "-", "ICE", problem, "-")
     // Reports of a stage that returned early; recorded rows are not repeated.
     kg.diagnostic_mark = 0
     jet_driver_keep_going_diagnostics(&kg, "final", result.diagnostics)
     result.keep_going_rows = kg.rows
+    if request.trace_sink == .Val(sink) -> sink.end("keepgoing.final", result.keep_going_rows.len())
     result
 }
 
@@ -5368,7 +5371,9 @@ fn jet_driver_compile_stages(request: JetDriverCompileRequest, kg: &JetDriverKee
     if request.trace_sink == .Val(sink) -> sink.begin("load", "", -1, -1)
     load := jet_driver_load(request)
     if request.trace_sink == .Val(sink) -> sink.end("load", load.modules.len())
-    jet_driver_compile_loaded_stages(request, &kg, emit_rust, ^load, checked_projection, &capture, &journal)
+    result := jet_driver_compile_loaded_stages(request, &kg, emit_rust, ^load, checked_projection, &capture, &journal)
+    jet_driver_trace_released(request.trace_sink)
+    result
 }
 
 // Loading is shared by executable requests and compiler-owned library graphs;
@@ -6041,7 +6046,12 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         optimization = jet_driver_keep_going_optimize(&kg, &program_value, ^optimization, request.mir_lint_every_pass, request.compiler_threads, &journal)
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
-    if request.trace_sink == .Val(sink) -> sink.end("optimize", function_owners_for_errors.len())
+    if request.trace_sink == .Val(sink) {
+        sink.end("optimize", function_owners_for_errors.len())
+        // The optimizer's checks, the late Rust foreign facts, any emission
+        // and the compile result, up to jet_driver_trace_result_built.
+        sink.begin("driver.result", "", -1, -1)
+    }
     if optimization.error != None && kg.enabled -> optimization.error = None
     if optimization.error == {
         Val(optimizer_error) -> {
@@ -6143,6 +6153,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     if !emit_rust {
         result := jet_driver_compile_result(load, load.diagnostics, entry_function, Val(^optimized_program), None, None, None, true, trace)
         result.rust_foreign = rust_foreign
+        jet_driver_trace_result_built(request.trace_sink, result.diagnostics.len())
         return result
     }
 
@@ -6206,7 +6217,28 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     }
     result := jet_driver_compile_result(load, load.diagnostics, entry_function, Val(^optimized_program), emitted_source, emit_manifest, None, true, trace)
     result.rust_foreign = rust_foreign
+    jet_driver_trace_result_built(request.trace_sink, result.diagnostics.len())
     result
+}
+
+// Ends `driver.result` (items: the result's diagnostics, which the host
+// presents next) and opens `driver.release`: the compile's remaining locals
+// (graphs, load, checked rows) drop as jet_driver_compile_loaded_stages
+// returns, and its caller closes the span (jet_driver_trace_released).
+fn jet_driver_trace_result_built(trace_sink: CompilerTraceSink?, diagnostics: Int) {
+    if trace_sink == .Val(sink) {
+        sink.end("driver.result", diagnostics)
+        sink.begin("driver.release", "", -1, -1)
+    }
+}
+
+// Closes `driver.release` after jet_driver_compile_loaded_stages returns, and
+// a `driver.result` a route after the optimizer returned from early.
+fn jet_driver_trace_released(trace_sink: CompilerTraceSink?) {
+    if trace_sink == .Val(sink) {
+        sink.end("driver.release", -1)
+        sink.end("driver.result", -1)
+    }
 }
 
 fn jet_driver_core_source_alias(unit: JetDriverSourceUnit, loaded_module: JetDriverLoadedModule, core_sources: [JetDriverCoreSource]) -> String Never! {

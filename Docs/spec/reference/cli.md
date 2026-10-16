@@ -589,7 +589,11 @@ counter as a `JET_PHASE_COUNTERS` line on stderr. The phases are the CLI's
 `sources` walk, the driver's (`load` and its `parse` waves, `register`,
 `sema.check`, `comptime`, `sema.finalize`,
 `comptime.bodies`, `comptime.validate`, `lower`, `assemble`, `optimize`,
-`emit`) and the native backend's (`native.lower`, `native.object` with
+`driver.result` holding `emit`, `driver.release` as the compile's
+intermediate state drops, and under `JET_KEEP_GOING=1` `keepgoing.final` and
+`keepgoing.report`), the host's checks of the result (`cli.diagnostics`,
+`cli.authority`) and the native backend's (`native.sources`,
+`native.rust_foreign`, `native.lower`, `native.object` with
 `native.optimize` under `--release`, `native.foreign`, `native.link`; one
 `native.build` for a test harness). The readable stream is written through
 `/dev/stderr`, so redirect stderr to a file with `2>>`, or use

@@ -46,7 +46,8 @@ use jet_backend.[x64_runtime_library, x64_runtime_export_abi_json, x64_link_runt
 
 // The production CLI and bootstrap observer share the driver's all-phases
 // implementation. A diagnostic trap is a failed compile, never an artifact.
-fn jet_cli_compile_request(request: ^JetDriverCompileRequest, emit_rust: Bool) -> JetDriverCompileResult {
+// `trace_sink` traces the keep-going report write (`keepgoing.report`).
+fn jet_cli_compile_request(request: ^JetDriverCompileRequest, emit_rust: Bool, trace_sink: JetCLITraceSink?{None}) -> JetDriverCompileResult {
     if !jet_cli_keep_going_enabled() {
         return if emit_rust -> jet_driver_compile(^request) else -> jet_driver_compile_mir(^request)
     }
@@ -56,7 +57,9 @@ fn jet_cli_compile_request(request: ^JetDriverCompileRequest, emit_rust: Bool) -
     }
     result := jet_driver_compile_keep_going(^request, JetDriverKeepGoing{skip: skip}, emit_rust)
     if result.keep_going_rows.len() > 0 -> result.complete = false
+    if trace_sink == .Val(sink) -> sink.begin("keepgoing.report", "", -1, -1)
     problem :: jet_cli_keep_going_report(result.keep_going_rows)
+    if trace_sink == .Val(sink) -> sink.end("keepgoing.report", result.keep_going_rows.len())
     if problem != "" -> return jet_driver_compile_escaped_failure(problem)
     result
 }
@@ -955,7 +958,7 @@ fn jet_cli_compile_for_target(anchor: String, entry: String, overlays: [JetCLIOv
             selected.target = target
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)
             library_prefix :: if target == .Native -> cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") else -> None
-            result := jet_cli_compile_request(^selected, emit_rust && library_prefix == None)
+            result := jet_cli_compile_request(^selected, emit_rust && library_prefix == None, trace_sink)
             if library_prefix == .Val(prefix) -> result = jet_cli_runtime_library(^result, prefix)
             // The host's phases after the compile (Host.jet's native backend
             // route) trace through the same sink, which the result carries.
