@@ -776,8 +776,9 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
     single_use_paths := [SemaOwnershipPath]{}
     arm_index := 0
     loop arm_index < arms.len() {
-        arm := arms[arm_index]
-        condition_result := sema_expression_check_condition(arm.cond, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        // The arm is read in place (`arms[arm_index]`): binding it copied the
+        // whole arm, its body included.
+        condition_result := sema_expression_check_condition(arms[arm_index].cond, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         arm_bindings := [SemaConditionBinding]{}
         if condition_result == {
             .Val(condition) -> {
@@ -791,51 +792,55 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
         }
         branch_mark :: sema_scope_mark(&scopes)
         branch_fork :: sema_ownership_fork(&state)
-        sema_scope_enter(&scopes, &state, "if.arm@{arm.span.start}")
+        sema_scope_enter(&scopes, &state, "if.arm@{arms[arm_index].span.start}")
         sema_expression_declare_condition_bindings(arm_bindings, &scopes, &state, true, &diagnostics)
-        if value_tail -> context.value_tail_span = sema_stmt_value_tail_marker(arm.body)
-        branch := sema_check_statements(arm.body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
+        if value_tail -> context.value_tail_span = sema_stmt_value_tail_marker(arms[arm_index].body)
+        branch := sema_check_statements(arms[arm_index].body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
         // An arm whose body did not check leaves no complete TIR for it; the
         // table must not lower that arm as an empty fall-through.
         if !branch.complete -> complete = false
         if value_tail {
             context.value_tail_span = Val(span)
-            if !sema_stmt_check_value_block_end(arm.body, branch.value, return_type, arm.span, context.function_name, &diagnostics) -> complete = false
+            if !sema_stmt_check_value_block_end(arms[arm_index].body, branch.value, return_type, arms[arm_index].span, context.function_name, &diagnostics) -> complete = false
         }
         sema_single_use_leave_scope(&scopes, &state, &diagnostics)
-        branch_path :: sema_ownership_fork_path(state, fork)
+        branch_path := sema_ownership_fork_path(state, fork)
         sema_ownership_fork_rollback(&state, branch_fork)
         sema_ownership_fork_close(&state, branch_fork)
         &branch_hardware.push(sema_scope_hardware_facts(scopes))
         sema_scope_rollback(&scopes, branch_mark)
-        &branches.push(branch)
+        falls_through :: sema_stmt_tir_block_can_fall_through(branch.value)
+        &branches.push(^branch)
         // D-COPY-DEFAULT1: an arm that leaves does not reach the merge.
         loop site in branch_path.share_found -> &arm_found.push(site)
-        if sema_stmt_tir_block_can_fall_through(branch.value) -> &single_use_paths.push(branch_path)
-        if {
-            !sema_stmt_tir_block_can_fall_through(branch.value) -> {}
-            !has_branch -> {
-                merged_path = branch_path
+        if falls_through {
+            if has_branch {
+                merged_path = sema_ownership_path_join(state, fork, merged_path, branch_path, true, merged_path.share_found)
+            } else {
+                // copy: the first falling-through arm's path is both the merge
+                // seed and its own row of the single-use check below.
+                merged_path = branch_path.copy()
                 has_branch = true
             }
-            else -> merged_path = sema_ownership_path_join(state, fork, merged_path, branch_path, true, merged_path.share_found)
+            &single_use_paths.push(^branch_path)
         }
         arm_index += 1
     }
     else_result := [TStmt]?{None}
     else_fork :: sema_ownership_fork(&state)
     else_mark :: sema_scope_mark(&scopes)
-    if else_body != None {
-        body :: else_body
+    if else_body == .Val(body) {
         complement :: sema_stmt_else_presence_names(arms, scopes)
         if value_tail -> context.value_tail_span = sema_stmt_value_tail_marker(body)
-        checked_else :: if complement.len() == 0 -> sema_stmt_check_block(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, "if.else@{span.start}", loop_depth) else -> sema_stmt_check_else_complement(complement, body, span, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
+        checked_else := if complement.len() == 0 -> sema_stmt_check_block(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, "if.else@{span.start}", loop_depth) else -> sema_stmt_check_else_complement(complement, body, span, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
         if !checked_else.complete -> complete = false
         if value_tail {
             context.value_tail_span = Val(span)
             if !sema_stmt_check_value_block_end(body, checked_else.value, return_type, span, context.function_name, &diagnostics) -> complete = false
         }
-        else_result = Val(checked_else.value)
+        checked_value := ^checked_else.value
+        checked_else.value = [TStmt]{}
+        else_result = Val(^checked_value)
     }
     else_path :: sema_ownership_fork_path(state, fork)
     sema_ownership_fork_rollback(&state, else_fork)
@@ -905,18 +910,28 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
     loop condition in conditions {
         if condition == None -> return SemaStatementResult{value: [TStmt]{}, complete: false}
     }
-    SemaStatementResult{value: sema_stmt_switch_chain(conditions, branches, arms, else_result, span, 0) ?? [TStmt]{}, complete: true}
+    SemaStatementResult{value: sema_stmt_switch_chain(^conditions, ^branches, arms, ^else_result, span) ?? [TStmt]{}, complete: true}
 }
 
-// The checked switch from arm `index` on, as the else-if chain codegen lowers.
-// Built by direct recursion, one frame per arm, so every finished level is a
-// moved temporary; a loop would hold the partial chain in a local and copy it
-// into each new level, quadratic in the arm count.
-fn sema_stmt_switch_chain(conditions: [SemaCheckedCondition?], branches: [SemaStatementResult], arms: [SwitchArm], else_result: [TStmt]?, span: Span, index: Int) -> [TStmt]? {
-    if index == arms.len() -> return else_result.copy()
-    condition :: conditions[index] ?? return None
-    arm_span :: if index == 0 -> span else -> arms[index].span
-    Val([TStmt]{TStmt.If{condition: condition.condition, then_body: branches[index].value, else_body: sema_stmt_switch_chain(conditions, branches, arms, else_result, span, index + 1), else_is_elseif: index + 1 < arms.len(), span: arm_span}})
+// The checked switch as the else-if chain codegen lowers, built from the
+// last arm back: each level moves its condition and checked body out of the
+// consumed rows and the chain so far into the new level, so no checked body
+// is copied (the old recursion copied every arm's body and the else body).
+fn sema_stmt_switch_chain(conditions: ^[SemaCheckedCondition?], branches: ^[SemaStatementResult], arms: [SwitchArm], else_result: ^[TStmt]?, span: Span) -> [TStmt]? {
+    owned_conditions := ^conditions
+    owned_branches := ^branches
+    chain := ^else_result
+    index := arms.len()
+    loop index > 0 {
+        index -= 1
+        condition_row := &owned_conditions.pop() ?? return None
+        condition := ^condition_row ?? return None
+        branch := &owned_branches.pop() ?? return None
+        arm_span :: if index == 0 -> span else -> arms[index].span
+        rest := ^chain
+        chain = Val([TStmt]{TStmt.If{condition: ^condition.condition, then_body: ^branch.value, else_body: ^rest, else_is_elseif: index + 1 < arms.len(), span: arm_span}})
+    }
+    chain
 }
 
 
