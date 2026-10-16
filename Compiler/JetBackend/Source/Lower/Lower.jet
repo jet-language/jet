@@ -2395,9 +2395,6 @@ fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact
             if (!lower_release_producer(instruction.operation) && !carrier) || pinned.get(result.value) != None -> next
             fact_row :: fact_index.get(result.value) ?? next
             if !lower_is_owned(function.values[fact_row].ownership) -> next
-            // A moved match subject of a type with a Close keeps the partial
-            // drop frame's handling (PartialDrop.jet).
-            if carrier && lower_close_method(p, m.close_methods, function.values[fact_row].ty) != None -> next
             // An inspect Move forwards its operand (lower_forward), whose own
             // release follows the tests and payload reads: no owner of its own.
             if lower_is_inspect_move(inspect_moves, instruction) -> next
@@ -3831,13 +3828,10 @@ fn lower_temp_release(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
         f.track_consumes = tracking
         return
     }
-    if lower_slot_of_value(c, value) == .Val(slot) {
-        // A root move's slot was cleared by the move (lower_clear_slot): the
-        // moved value is released here; a moved match subject is not when a
-        // cell holds it (Closures.jet).
-        carrier :: c.inspect_carriers.get(value.value) != None
-        if (!carrier && c.releases.taken.get(value.value) == None) || (carrier && c.slots[slot].cell) -> return
-    }
+    // A root move cleared its slot (lower_clear_slot, or lower_clear_at for
+    // a cell): the moved value it took, a moved match subject included, is
+    // released here.
+    if lower_slot_of_value(c, value) != None && c.releases.taken.get(value.value) == None -> return
     loop slot_value in f.current {
         if slot_value == .Val(holding) && holding.value == index -> return
     }
