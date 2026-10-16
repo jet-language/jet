@@ -4853,6 +4853,14 @@ fn jet_driver_trace_lookup_counters(trace_sink: CompilerTraceSink?, phase: Strin
     }
 }
 
+// The comptime stage graph's lookup counts, read through a read parameter so
+// the pattern binding borrows the graph (binding it from the owned stage
+// would copy every module's AST natively).
+fn jet_driver_stage_lookup_counts(graph: SemaRegistrationGraph?, fallback: SemaLookupCounters) -> SemaLookupCounters {
+    if graph == .Val(stage_graph) -> return sema_registration_lookup_counts(stage_graph)
+    fallback
+}
+
 // Writes the rows recorded since the last flush to the trace sink.
 fn jet_driver_keep_going_flush(kg: &JetDriverKeepGoingLog, trace_sink: CompilerTraceSink?) {
     if trace_sink == .Val(sink) {
@@ -5412,7 +5420,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     if request.trace_sink == .Val(sink) -> sink.end("sema.check", comptime_stage.modules.len())
     // Every copy of a graph shares one counter set (SemaLookupCounters).
     check_lookups := register_lookups
-    if comptime_stage.graph == .Val(stage_graph) -> check_lookups = sema_registration_lookup_counts(stage_graph)
+    check_lookups = jet_driver_stage_lookup_counts(comptime_stage.graph, check_lookups)
     jet_driver_trace_lookup_counters(request.trace_sink, "sema.check", check_lookups, register_lookups)
     if kg.enabled {
         loop diagnostic in comptime_stage.diagnostics -> &load.diagnostics.push(diagnostic)

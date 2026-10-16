@@ -5510,9 +5510,7 @@ fn sema_collect_comptime_declarations(graph: ^SemaRegistrationGraph, package_pol
     loop module_index < module_count {
         environment := sema_check_shared_take_environment(module_state)
         program := sema_check_shared_take_program(module_state)
-        if program.registration_graph == .Val(registered) {
-            if trace_sink == .Val(sink) -> sink.begin("sema.module", registered.modules[module_index].module_path, module_index, module_count)
-        }
+        if trace_sink == .Val(sink) -> sema_comptime_trace_module_begin(sink, program, module_index, module_count)
         memory_plan := sema_check_shared_take_memory_plan(module_state)
         owned_check := sema_check_registration_module(^environment, ^program, None, ^memory_plan, module_index, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, [String:Int]{}, false, false, sema_check_prepared_none(), None, None, "sema.check", trace_sink)
         restored_environment := ^owned_check.environment
@@ -5566,14 +5564,8 @@ fn sema_collect_comptime_declarations(graph: ^SemaRegistrationGraph, package_pol
     pass_environment := sema_comptime_probe_shared_take_environment(shared_state)
     pass_program := sema_comptime_probe_shared_take_program(shared_state)
     sema_comptime_body_work_flush(pass_environment.comptime_body_publication, trace_sink, "sema.check")
-    imports := [SemaRegistrationImport]{}
-    names :: if pass_program.registration_graph == {
-        .Val(registered) -> {
-            imports = registered.imports
-            sema_name_build_facts(registered, modules, sema_name_structure_facts(registered))
-        }
-        else -> { panic("the declaration pass lost its registration graph") }
-    }
+    imports := sema_comptime_stage_imports(pass_program)
+    names :: sema_comptime_stage_names(pass_program, modules)
     pass_graph := ^pass_program.registration_graph
     SemaComptimeDeclarationStage{
         modules: ^modules,
@@ -5585,6 +5577,24 @@ fn sema_collect_comptime_declarations(graph: ^SemaRegistrationGraph, package_pol
         complete: complete,
         graph: ^pass_graph,
     }
+}
+
+// The registration graph inside an owned program tables value is reached
+// through these read parameters: a pattern binding of a read parameter's
+// payload borrows it, whereas binding it from the owned local would copy the
+// whole graph (every module's AST) natively, once per call.
+fn sema_comptime_trace_module_begin(sink: CompilerTraceSink, program: SemaProgramTables, module_index: Int, module_count: Int) {
+    if program.registration_graph == .Val(registered) -> sink.begin("sema.module", registered.modules[module_index].module_path, module_index, module_count)
+}
+
+fn sema_comptime_stage_imports(program: SemaProgramTables) -> [SemaRegistrationImport] {
+    if program.registration_graph == .Val(registered) -> return registered.imports.copy()
+    panic("the declaration pass lost its registration graph")
+}
+
+fn sema_comptime_stage_names(program: SemaProgramTables, modules: [SemaGraphModuleResult]) -> MIRNameFacts {
+    if program.registration_graph == .Val(registered) -> return sema_name_build_facts(registered, modules, sema_name_structure_facts(registered))
+    panic("the declaration pass lost its registration graph")
 }
 
 // Declaration-only modules against the staging run's existing program owner.
