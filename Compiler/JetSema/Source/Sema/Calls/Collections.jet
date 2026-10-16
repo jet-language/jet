@@ -3,6 +3,7 @@
 use jet_foundation.[
     AccessConvention,
     CallArg,
+    CollectionLaw,
     Diagnostic,
     Expr,
     ParamZone,
@@ -307,13 +308,18 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
         }
         &required_types.push(required)
         // The parser stores `&xs.push(^x)`'s and `&xs.push(^x.f)`'s move
-        // mark on the CallArg. A marked name or field read keeps it as the
-        // exact-place move an ordinary consuming argument gets
-        // (Calls/Checking.jet), so the stored value moves out of its owner
-        // instead of materializing a copy (the Rust reference's
-        // `finish_builtin_method`). A borrowed parameter or its field has no
-        // storage to give up and keeps its copy.
-        taken_place := updated_args[index].convention == AccessConvention.Move && sema_call_marked_move_place(updated_args[index].expr, value)
+        // mark on the CallArg. On a method that stores its argument (a
+        // Mutate/TryMutate row other than `remove`, which only compares), a
+        // marked name or field read keeps it as the exact-place move an
+        // ordinary consuming argument gets (Calls/Checking.jet), so the stored
+        // value moves out of its owner instead of materializing a copy (the
+        // Rust reference's `finish_builtin_method`). A method that only reads
+        // its argument (`contains`, `index_of`, ...) never takes it: the
+        // ownership walk below records no move for a collection argument, so
+        // a later read of the owner must still find its value. A borrowed
+        // parameter or its field has no storage to give up and keeps its copy.
+        stores_argument :: (contract.row.law == CollectionLaw.Mutate || contract.row.law == CollectionLaw.TryMutate) && contract.row.name != "remove"
+        taken_place := stores_argument && updated_args[index].convention == AccessConvention.Move && sema_call_marked_move_place(updated_args[index].expr, value)
         if taken_place && sema_ownership_binding_for_expr(&state, updated_args[index].expr, scopes) == .Val(root) -> taken_place = !sema_ownership_binding_is_borrowed_param(root)
         stored :: if taken_place -> sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span) else -> value
         &typed.push(stored)
