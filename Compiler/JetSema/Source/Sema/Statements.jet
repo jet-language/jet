@@ -5033,21 +5033,22 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
     reachable := true
     index := 0
     loop index < statements.len() {
-        statement :: statements[index]
+        // Each statement is read in place (`statements[index]`): a binding of
+        // the row copied the whole statement, its nested bodies included.
         context.lambda_statement_tails[tail_frame_depth].start_index = index + 1
         if !reachable {
-            if !sema_stmt_check_unreachable_statement(statement, index, statements, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth) -> complete = false
+            if !sema_stmt_check_unreachable_statement(statements[index], index, statements, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth) -> complete = false
             index += 1
             next
         }
-        sema_ownership_release_dead_views(&state, statement, &tail_store, &context)
+        sema_ownership_release_dead_views(&state, statements[index], &tail_store, &context)
         output_start := output.len()
         statement_diagnostics :: diagnostics.len()
         statement_reasons :: context.incomplete_reasons.len()
         statement_complete :: complete
         // #3708: these statements own a failure route of their own (task
         // groups, transactions, reactive scopes, generators, deferred closes).
-        if statement == {
+        if statements[index] == {
             .TaskGroup(_, _, _, _, _) | .Transact(_, _, _, _, _) | .Live(_, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .Yield(_, _) | .DeferClose(_, _) -> context.failure_direct_source = true
             else -> {}
         }
@@ -5057,17 +5058,17 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
             .Val(.Result(success, _)) -> success == (Type.Named{name: "Unit"})
             else -> false
         }
-        if index + 1 == statements.len() && statement == .Expr(tail) && (context.value_tail_span == (Val(expr_span(tail))) || (unit_result_return && sema_stmt_return_expr_is_carrier(tail, return_type, environment, scopes))) && !sema_stmt_refutable_expr_diverges(tail) {
+        if index + 1 == statements.len() && statements[index] == .Expr(tail) && (context.value_tail_span == (Val(expr_span(tail))) || (unit_result_return && sema_stmt_return_expr_is_carrier(tail, return_type, environment, scopes))) && !sema_stmt_refutable_expr_diverges(tail) {
             returned :: sema_stmt_check_returned_value(tail, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if returned == {
                 .Val(value) -> &output.push(TStmt.Return{value: Val(value), span: expr_span(tail)})
                 .None -> complete = false
             }
-            sema_stmt_note_silent_incomplete(statement, statement_complete, complete, diagnostics, statement_diagnostics, &context, statement_reasons)
+            sema_stmt_note_silent_incomplete(statements[index], statement_complete, complete, diagnostics, statement_diagnostics, &context, statement_reasons)
             index += 1
             next
         }
-        if statement == {
+        if statements[index] == {
             .Expr(expr) -> {
                 if !sema_stmt_check_expression_statement(expr, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth, &output) -> complete = false
             }
@@ -5583,7 +5584,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                 }
             }
             .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Region(_, _, _, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .Switched(_, _, _) | .Transact(_, _, _, _, _) | .Policy(_, _, _) | .AuthorityScope(_, _, _, _, _) | .TaskGroup(_, _, _, _, _) -> {
-                if !sema_stmt_check_scoped_statement(statement, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth, &output) -> complete = false
+                if !sema_stmt_check_scoped_statement(statements[index], return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth, &output) -> complete = false
             }
             .ComptimeIf(_, _, _, _, span, _) | .ComptimeSwitch(_, _, _, span) | .ComptimeBlock(_, _, span) -> {
                 complete = false
@@ -5594,15 +5595,15 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                 if sema_scope_environment_no_os(environment) {
                     &diagnostics.push(sema_error("E3301", span, "`#Live {{ … }}` is not available on a no-OS target.", "No-OS targets have no OS; only `core`-level APIs are available.", "Terminal I/O requires an OS terminal device. Select a hosted target or declare an IO.Write provider."))
                 } else {
-                    sema_check_unsupported(&context, "the {sema_stmt_scope_form_label(statement)} block at offset {span.start} is not supported by the self-hosted checker yet")
+                    sema_check_unsupported(&context, "the {sema_stmt_scope_form_label(statements[index])} block at offset {span.start} is not supported by the self-hosted checker yet")
                 }
             }
             .Layout(_, _, _, span) | .ContextBlock(_, _, span) | .AssumeDet(_, _, _, span) -> {
                 complete = false
-                sema_check_unsupported(&context, "the {sema_stmt_scope_form_label(statement)} block at offset {span.start} is not supported by the self-hosted checker yet")
+                sema_check_unsupported(&context, "the {sema_stmt_scope_form_label(statements[index])} block at offset {span.start} is not supported by the self-hosted checker yet")
             }
         }
-        if statement == {
+        if statements[index] == {
             .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) -> reachable = false
             .Loop(body, _, _, _) -> {
                 if !sema_stmt_refutable_loop_body_can_break(body) -> reachable = false
@@ -5610,7 +5611,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
             // Rust flow facts: a table whose every path leaves, or a literal
             // `true` loop that nothing breaks, ends the reachable path too.
             .Switch(_, _, _, _) | .While(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) -> {
-                if sema_stmt_refutable_statement_exits(statement) -> reachable = false
+                if sema_stmt_refutable_statement_exits(statements[index]) -> reachable = false
             }
             .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Shield(body, _) | .Region(_, _, body, _) | .AuthorityScope(_, _, _, body, _) -> {
                 if sema_stmt_refutable_block_exits(body) -> reachable = false
@@ -5623,16 +5624,8 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
             }
             else -> {}
         }
-        if output.len() > output_start {
-            last :: output[output.len() - 1]
-            if last == {
-                .ExprStmt(value, _) -> {
-                    if value.ty == (Type.Named{name: "Never"}) -> reachable = false
-                }
-                else -> {}
-            }
-        }
-        sema_stmt_note_silent_incomplete(statement, statement_complete, complete, diagnostics, statement_diagnostics, &context, statement_reasons)
+        if output.len() > output_start && sema_stmt_checked_never(output[output.len() - 1]) -> reachable = false
+        sema_stmt_note_silent_incomplete(statements[index], statement_complete, complete, diagnostics, statement_diagnostics, &context, statement_reasons)
         index += 1
     }
     sema_stmt_leave_statements(&context, tail_frame_depth, entered_nesting)
@@ -5640,6 +5633,13 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
     scopes.failure_carrier = previous_failure_carrier
     scopes.loop_depth = previous_loop_depth
     SemaStatementResult{value: output, complete: complete}
+}
+
+// Whether a checked statement is an expression statement of type `Never`;
+// read in place so the last output row is not copied.
+fn sema_stmt_checked_never(statement: TStmt) -> Bool Never! {
+    if statement == .ExprStmt(value, _) -> return value.ty == (Type.Named{name: "Never"})
+    false
 }
 
 // Collect-all: a statement that left its list incomplete with no error report
