@@ -65,7 +65,7 @@ use jet_lexer.[
     token_string_parts,
 ]
 use jet_parser.[
-    parse_lexed_with_source,
+    parse_lexed_owned_with_source,
     parser_line_starts,
 ]
 use jet_sema.[
@@ -2752,7 +2752,7 @@ fn jet_driver_parse_user_unit(text: String, retain_demand: Bool) -> JetDriverPar
     lexed :: lex(source)
     demand := jet_driver_empty_core_identifier_demand()
     if retain_demand -> jet_driver_collect_core_identifier_demand(lexed.tokens, lexed.tables, &demand, true)
-    parsed :: parse_lexed_with_source(lexed, source, parser_line_starts(source))
+    parsed :: parse_lexed_owned_with_source(^lexed, source, parser_line_starts(source))
     JetDriverParsedUnit{parsed: ^parsed, demand: ^demand}
 }
 
@@ -2833,7 +2833,7 @@ fn jet_driver_parse_core_source(text: String, module_name: String, owned_members
     lexed :: lex_generated(source)
     demand := jet_driver_empty_core_identifier_demand()
     jet_driver_collect_core_identifier_demand(lexed.tokens, lexed.tables, &demand, runtime_entry)
-    parsed := parse_lexed_with_source(lexed, source, parser_line_starts(source))
+    parsed := parse_lexed_owned_with_source(^lexed, source, parser_line_starts(source))
     kept := [Item]{}
     loop item in parsed.program.items {
         if item == {

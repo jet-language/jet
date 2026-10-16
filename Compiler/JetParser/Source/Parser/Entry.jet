@@ -98,6 +98,12 @@ fn parse_lexed_with_source(lexed: Lexed, source: [U8], line_starts: [Int]) -> Pa
     parser_parse_lexed_lines(lexed.copy(), source, line_starts, false)
 }
 
+// parse_lexed_with_source for a caller that is done with its tokens: they
+// move into the parser instead of being copied.
+fn parse_lexed_owned_with_source(lexed: ^Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
+    parser_parse_lexed_lines(^lexed, source, line_starts, false)
+}
+
 // Parse a Jetpack config surface (Rust `parse_config_with_source`): the
 // config lexer keeps `$NAME` as one identifier token, which this parser reads
 // as the typed environment read (D-ONCE-DOLLAR1=B); `source` stays available
