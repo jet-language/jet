@@ -2227,24 +2227,18 @@ fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact
             if instruction.operation == .Phi(incoming) {
                 loop entry in incoming {
                     from :: block_index.get(entry.block.value) ?? next
-                    keys := phi_edges.get(entry.value.value) ?? [Int]{}
-                    &keys.push(from * count + block)
-                    _ := &phi_edges.add(entry.value.value, keys)
+                    lower_release_add_key(&phi_edges, entry.value, from * count + block)
                 }
                 next
             }
             consumed :: lower_consumed_operands(p, m, instruction.operation)
-            seen := [U64:Bool]{}
             loop value in lower_operand_values(instruction.operation) {
-                if seen.get(value.value) != None -> next
-                _ := &seen.add(value.value, true)
                 kind :: lower_release_use_kind(p, m, function, fact_index, iter_takes, instruction, value, consumed)
                 lower_release_add_use(&uses, value, LowerReleaseUse{block: block, position: position, kind: kind})
             }
         }
+        kind :: lower_release_terminator_kind(row.terminator)
         loop value in mir_terminator_value_uses(row.terminator) {
-            kind := LOWER_RELEASE_BORROW
-            if row.terminator == .Return(_) | .Yield(_, _) | .Break(_, _) -> kind = LOWER_RELEASE_CONSUME
             lower_release_add_use(&uses, value, LowerReleaseUse{block: block, position: row.instructions.len(), kind: kind})
         }
     }
@@ -2260,12 +2254,12 @@ fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact
                 _ := &plan.candidates.add(result.value, true)
                 next
             }
-            effective :: lower_release_effective_uses(function, uses, phi_edges, pinned, result, false) ?? next
+            effective :: lower_release_effective_uses(function, uses, phi_edges, pinned, result, Val(result)) ?? next
             lower_release_schedule(&plan, function, successors, predecessors, phi_edges.get(result.value) ?? [Int]{}, effective, result, block, position)
             _ := &plan.candidates.add(result.value, true)
         }
     }
-    lower_release_write_drops(&plan, function, fact_index, sunk, uses, phi_edges, pinned, bound_locals, reachable, slots, place_slots)
+    lower_release_write_drops(&plan, function, fact_index, sunk, uses, phi_edges, pinned, bound_locals, reachable, successors, slots, place_slots)
     plan
 }
 
@@ -2276,10 +2270,33 @@ fn lower_release_add(rows: &[U64:[MIRValueID]], at: U64, value: MIRValueID) Neve
     _ := &rows.add(at, values)
 }
 
+fn lower_release_add_edge(rows: &[Int:[MIRValueID]], key: Int, value: MIRValueID) Never! {
+    values := rows.get(key) ?? [MIRValueID]{}
+    if values.contains(value) -> return
+    &values.push(value)
+    _ := &rows.add(key, values)
+}
+
+fn lower_release_add_key(rows: &[U64:[Int]], value: MIRValueID, key: Int) Never! {
+    keys := rows.get(value.value) ?? [Int]{}
+    &keys.push(key)
+    _ := &rows.add(value.value, keys)
+}
+
+// Records one use per instruction: an operation naming a value twice uses it
+// once, with the same kind.
 fn lower_release_add_use(uses: &[U64:[LowerReleaseUse]], value: MIRValueID, used: LowerReleaseUse) Never! {
     rows := uses.get(value.value) ?? [LowerReleaseUse]{}
+    if rows.len() > 0 && rows[rows.len() - 1].block == used.block && rows[rows.len() - 1].position == used.position -> return
     &rows.push(used)
     _ := &uses.add(value.value, rows)
+}
+
+// A returned, yielded or break-carried value is taken by the terminator; any
+// other terminator operand (a branch condition) is only read.
+fn lower_release_terminator_kind(terminator: MIRTerminator) -> Int Never! {
+    if terminator == .Return(_) | .Yield(_, _) | .Break(_, _) -> return LOWER_RELEASE_CONSUME
+    LOWER_RELEASE_BORROW
 }
 
 // Operations whose owned result, when lowered to a fresh LIR value, owns its
@@ -2287,15 +2304,17 @@ fn lower_release_add_use(uses: &[U64:[LowerReleaseUse]], value: MIRValueID, used
 // clone, arithmetic, a loop range cursor, a phi of owned values.
 fn lower_release_producer(operation: MIROperation) -> Bool Never! {
     if operation == {
-        .Call(_, _, _) | .IndirectCall(_, _, _) | .CoreCall(_, _, _, _, _, _) | .BuildString(_) | .BuildList(_, _) | .BuildMap(_) -> return true
-        .Struct(_, _) | .Tuple(_, _) | .Enum(_, _, _) | .Present(_) | .ResultOk(_) | .ResultErr(_) | .TraitBox(_, _) | .Closure(_, _, _) -> return true
-        .Constant(_) | .Global(_) | .Copy(_, _) | .Binary(_, _, _, _, _) | .Unary(_, _) | .Convert(_, _, _, _) | .Range(_, _, _) | .LoopRangeInit(_, _, _, _, _) | .Phi(_) -> return true
-        .Semantic(semantic) -> {
-            if semantic == .BuiltinMethod(_, _, _, _, _) | .StaticPreludeCall(_, _, _, _) | .StructLiteral(_, _, _, _) | .HostCall(_, _) -> return true
-            return false
-        }
-        else -> return false
+        .Call(_, _, _) | .IndirectCall(_, _, _) | .CoreCall(_, _, _, _, _, _) | .BuildString(_) | .BuildList(_, _) | .BuildMap(_) -> true
+        .Struct(_, _) | .Tuple(_, _) | .Enum(_, _, _) | .Present(_) | .ResultOk(_) | .ResultErr(_) | .TraitBox(_, _) | .Closure(_, _, _) -> true
+        .Constant(_) | .Global(_) | .Copy(_, _) | .Binary(_, _, _, _, _) | .Unary(_, _) | .Convert(_, _, _, _) | .Range(_, _, _) | .LoopRangeInit(_, _, _, _, _) | .Phi(_) -> true
+        .Semantic(semantic) -> lower_release_semantic_producer(semantic)
+        else -> false
     }
+}
+
+fn lower_release_semantic_producer(semantic: MIRSemanticOp) -> Bool Never! {
+    if semantic == .BuiltinMethod(_, _, _, _, _) | .StaticPreludeCall(_, _, _, _) | .StructLiteral(_, _, _, _) | .HostCall(_, _) -> return true
+    false
 }
 
 // How `instruction` uses `value` (LOWER_RELEASE_*); `consumed` is
@@ -2306,47 +2325,48 @@ fn lower_release_use_kind(p: MIRProgram, m: LowerModule, function: MIRFunction, 
         .LoopIterInit(_, collection, _, _, _) -> {
             if collection != value -> return LOWER_RELEASE_BORROW
             if iter_takes.get(value.value) != None -> return LOWER_RELEASE_CONSUME
-            return LOWER_RELEASE_KEEP
+            LOWER_RELEASE_KEEP
         }
-        .BuildString(_) | .Binary(_, _, _, _, _) | .Unary(_, _) | .EnumIs(_, _, _) | .OptionIsSome(_) | .ResultIsOk(_) | .Range(_, _, _) -> return LOWER_RELEASE_BORROW
-        .LoopRangeInit(_, _, _, _, _) | .LoopRangeHasNext(_, _) | .LoopRangeValue(_, _) | .LoopRangeAdvance(_, _) -> return LOWER_RELEASE_BORROW
-        .LoopIterHasNext(_, _) | .LoopIterValue(_, _) | .LoopIterAdvance(_, _) -> return LOWER_RELEASE_BORROW
-        .Call(_, _, _) | .IndirectCall(_, _, _) | .CoreCall(_, _, _, _, _, _) | .Convert(_, _, _, _) -> return lower_release_result_kind(function, fact_index, instruction)
-        .Field(_, _) | .EnumPayload(_, _, _, _) | .OptionValue(_) | .ResultValue(_, _) | .ProjectMembers(_, _) -> {
-            // An owned member read is a copy of its own, or a take that
-            // clears the member in the carrier (lower_read_member); a
-            // borrowed one points into the carrier.
-            result :: instruction.result ?? return LOWER_RELEASE_BORROW
-            row :: fact_index.get(result.value) ?? return LOWER_RELEASE_KEEP
-            if lower_is_owned(function.values[row].ownership) -> return LOWER_RELEASE_BORROW
-            return LOWER_RELEASE_ALIAS
-        }
+        .BuildString(_) | .Binary(_, _, _, _, _) | .Unary(_, _) | .EnumIs(_, _, _) | .OptionIsSome(_) | .ResultIsOk(_) | .Range(_, _, _) -> LOWER_RELEASE_BORROW
+        .LoopRangeInit(_, _, _, _, _) | .LoopRangeHasNext(_, _) | .LoopRangeValue(_, _) | .LoopRangeAdvance(_, _) -> LOWER_RELEASE_BORROW
+        .LoopIterHasNext(_, _) | .LoopIterValue(_, _) | .LoopIterAdvance(_, _) -> LOWER_RELEASE_BORROW
+        .Call(_, _, _) | .IndirectCall(_, _, _) | .CoreCall(_, _, _, _, _, _) | .Convert(_, _, _, _) -> lower_release_result_kind(function, fact_index, instruction)
+        // An owned member or element read is a copy of its own, or a take
+        // that clears the member in the carrier (lower_read_member,
+        // lower_index_result); a borrowed one points into the carrier. A
+        // List or Map index only reads its key.
+        .Field(_, _) | .EnumPayload(_, _, _, _) | .OptionValue(_) | .ResultValue(_, _) | .ProjectMembers(_, _) -> lower_release_member_kind(function, fact_index, instruction)
+        .Index(_, base, _, _, _, _, _) -> if base == value -> lower_release_member_kind(function, fact_index, instruction) else -> LOWER_RELEASE_BORROW
+        // lower_copy clones into an owned result, except an inline aggregate
+        // no consumer takes, which it aliases.
         .Copy(_, _) -> {
-            // lower_copy clones into an owned result, except an inline
-            // aggregate no consumer takes, which it aliases.
             result :: instruction.result ?? return LOWER_RELEASE_BORROW
             row :: fact_index.get(result.value) ?? return LOWER_RELEASE_KEEP
             if lower_is_owned(function.values[row].ownership) && !lower_is_inline(p, function.values[row].ty) -> return LOWER_RELEASE_BORROW
-            return LOWER_RELEASE_ALIAS
-        }
-        .Index(_, base, index, _, _, _, _) -> {
-            if index == value && base != value -> return LOWER_RELEASE_BORROW
-            return LOWER_RELEASE_KEEP
+            LOWER_RELEASE_ALIAS
         }
         // The key is read; the lookup's result is the map place's own row.
-        .MapLookup(_, _, _) -> return LOWER_RELEASE_BORROW
-        .Semantic(semantic) -> {
-            if semantic == .Print(_, _) -> return LOWER_RELEASE_BORROW
-            if semantic == .BuiltinMethod(call, _, _, _, _) {
-                row :: m.prelude_positions.get(call.value) ?? return LOWER_RELEASE_KEEP
-                if LOWER_RELEASE_BORROWING_BUILTINS.contains(mir_symbol_name(p.prelude_calls[row].symbol)) -> return LOWER_RELEASE_BORROW
-                return LOWER_RELEASE_KEEP
-            }
-            if semantic == .StaticPreludeCall(_, _, _, _) | .HostCall(_, _) -> return lower_release_result_kind(function, fact_index, instruction)
-            return LOWER_RELEASE_KEEP
-        }
-        else -> return LOWER_RELEASE_KEEP
+        .MapLookup(_, _, _) -> LOWER_RELEASE_BORROW
+        .Semantic(semantic) -> lower_release_semantic_kind(p, m, function, fact_index, instruction, semantic)
+        else -> LOWER_RELEASE_KEEP
     }
+}
+
+fn lower_release_member_kind(function: MIRFunction, fact_index: [U64:Int], instruction: MIRInstruction) -> Int Never! {
+    result :: instruction.result ?? return LOWER_RELEASE_BORROW
+    row :: fact_index.get(result.value) ?? return LOWER_RELEASE_KEEP
+    if lower_is_owned(function.values[row].ownership) -> return LOWER_RELEASE_BORROW
+    LOWER_RELEASE_ALIAS
+}
+
+fn lower_release_semantic_kind(p: MIRProgram, m: LowerModule, function: MIRFunction, fact_index: [U64:Int], instruction: MIRInstruction, semantic: MIRSemanticOp) -> Int Never! {
+    if semantic == .Print(_, _) -> return LOWER_RELEASE_BORROW
+    if semantic == .StaticPreludeCall(_, _, _, _) | .HostCall(_, _) -> return lower_release_result_kind(function, fact_index, instruction)
+    if semantic == .BuiltinMethod(call, _, _, _, _) {
+        row :: m.prelude_positions.get(call.value) ?? return LOWER_RELEASE_KEEP
+        if LOWER_RELEASE_BORROWING_BUILTINS.contains(lower_runtime_symbol(p.prelude_calls[row])) -> return lower_release_result_kind(function, fact_index, instruction)
+    }
+    LOWER_RELEASE_KEEP
 }
 
 // A non-consuming argument of a call whose result owns nothing borrowed: no
@@ -2362,8 +2382,9 @@ fn lower_release_result_kind(function: MIRFunction, fact_index: [U64:Int], instr
 // The uses that keep `value` alive: its own, and those of every result that
 // may alias it, transitively. None when a use keeps it unreleased: an
 // unmodelled use, or an alias that is consumed, bound to a local, merged by a
-// phi or used by a terminator. A `strict` value is itself treated as an alias.
-fn lower_release_effective_uses(function: MIRFunction, uses: [U64:[LowerReleaseUse]], phi_edges: [U64:[Int]], pinned: [U64:Bool], value: MIRValueID, strict: Bool) -> [LowerReleaseUse]? Never! {
+// phi or used by a terminator. Every value but `owner` is an alias: a
+// borrowed read (no owner) is one itself.
+fn lower_release_effective_uses(function: MIRFunction, uses: [U64:[LowerReleaseUse]], phi_edges: [U64:[Int]], pinned: [U64:Bool], value: MIRValueID, owner: MIRValueID?) -> [LowerReleaseUse]? Never! {
     effective := [LowerReleaseUse]{}
     pending := [MIRValueID]{value}
     seen := [U64:Bool]{}
@@ -2373,7 +2394,7 @@ fn lower_release_effective_uses(function: MIRFunction, uses: [U64:[LowerReleaseU
         cursor += 1
         if seen.get(current.value) != None -> next
         _ := &seen.add(current.value, true)
-        alias :: strict || current != value
+        alias :: owner != Val(current)
         if alias && (pinned.get(current.value) != None || phi_edges.get(current.value) != None) -> return None
         rows :: uses.get(current.value) ?? [LowerReleaseUse]{}
         loop used in rows {
@@ -2435,49 +2456,56 @@ fn lower_release_schedule(plan: &LowerReleasePlan, function: MIRFunction, succes
             loop target in successors[block] {
                 if live_in.get(target) != None -> next
                 key :: block * count + target
-                if phi_keys.contains(key) -> next
-                rows := plan.edges.get(key) ?? [MIRValueID]{}
-                if rows.contains(value) -> next
-                &rows.push(value)
-                _ := &plan.edges.add(key, rows)
+                if !phi_keys.contains(key) -> lower_release_add_edge(&plan.edges, key, value)
             }
             next
         }
-        last := -1
-        taken := false
-        loop used in effective {
-            if used.block != block -> next
-            if used.position > last {
-                last = used.position
-                taken = used.kind == LOWER_RELEASE_CONSUME
-            } else if used.position == last && used.kind == LOWER_RELEASE_CONSUME {
-                taken = true
-            }
-        }
-        if taken -> next
-        at :: if last < 0 -> def_position else -> last
-        if at >= function.blocks[block].instructions.len() -> next
+        last :: lower_release_last_use(effective, block)
+        at :: if last == .Val(used) -> used.position else -> def_position
+        if at >= function.blocks[block].instructions.len() || lower_release_takes(last) -> next
         lower_release_add(&plan.after, function.blocks[block].instructions[at].id.value, value)
     }
 }
 
-// WritePlace instructions into an owned local (whole or projected) that
-// release the value they overwrite: none while a borrowed read of the local,
-// or an alias of one, may still be used after the write. Every such read must
-// be used only later in its own block, and no write in that block may fall
-// between the read and its last use. A local an `uninit` initializes is left
-// alone (its unwritten rows hold no owners).
-fn lower_release_write_drops(plan: &LowerReleasePlan, function: MIRFunction, fact_index: [U64:Int], sunk: [U64:Bool], uses: [U64:[LowerReleaseUse]], phi_edges: [U64:[Int]], pinned: [U64:Bool], bound_locals: [U64:Bool], reachable: [Bool], slots: [LowerSlot], place_slots: [U64:Int]) Never! {
+// The last use of a temporary in `block`; of two uses by one instruction,
+// the one that takes it.
+fn lower_release_last_use(effective: [LowerReleaseUse], block: Int) -> LowerReleaseUse? Never! {
+    found := LowerReleaseUse?{None}
+    loop used in effective {
+        if used.block == block && lower_release_follows(used, found) -> found = Val(used.copy())
+    }
+    found
+}
+
+fn lower_release_follows(used: LowerReleaseUse, found: LowerReleaseUse?) -> Bool Never! {
+    last :: found ?? return true
+    used.position > last.position || (used.position == last.position && used.kind == LOWER_RELEASE_CONSUME)
+}
+
+fn lower_release_takes(used: LowerReleaseUse?) -> Bool Never! {
+    if used == .Val(last) -> return last.kind == LOWER_RELEASE_CONSUME
+    false
+}
+
+// WritePlace instructions into an owner (lower_release_write_slot), whole or
+// projected, that release the value they overwrite: none while a borrowed
+// read of the place, or an alias of one, may still be used after the write.
+// Every such read must be used only later in its own block, and no write in
+// that block may fall between the read and its last use. A local an `uninit`
+// initializes is left alone (its unwritten rows hold no owners), and so is a
+// write a move out of the place may precede: a moved-out local holds a zero
+// placeholder (lower_clear_slot), and a moved-out Write parameter's caller
+// storage still holds the moved bits.
+fn lower_release_write_drops(plan: &LowerReleasePlan, function: MIRFunction, fact_index: [U64:Int], sunk: [U64:Bool], uses: [U64:[LowerReleaseUse]], phi_edges: [U64:[Int]], pinned: [U64:Bool], bound_locals: [U64:Bool], reachable: [Bool], successors: [[Int]], slots: [LowerSlot], place_slots: [U64:Int]) Never! {
     eligible := [Int:Bool]{}
     loop (slot, row) in slots {
-        if row.cell || row.write_param >= 0 || !lower_is_owned(row.ownership) -> next
-        if row.base == .Local(local) {
-            if bound_locals.get(local.value) == None -> _ := &eligible.add(slot, true)
-        }
+        if lower_release_write_slot(row, bound_locals) -> _ := &eligible.add(slot, true)
     }
     if eligible.len() == 0 -> return
-    // Per slot: block, read position and last use position of each borrowed read.
+    // Per slot: block, read position and last use position of each borrowed
+    // read; block and position of each move out of it.
     spans := [Int:[Int]]{}
+    moves := [Int:[Int]]{}
     loop (block, row) in function.blocks {
         if !reachable[block] -> next
         loop (position, instruction) in row.instructions {
@@ -2485,8 +2513,11 @@ fn lower_release_write_drops(plan: &LowerReleasePlan, function: MIRFunction, fac
                 if place_slots.get(place.value) == .Val(slot) -> _ := &eligible.remove(slot)
                 next
             }
+            if instruction.operation == .MovePlace(place) {
+                if place_slots.get(place.value) == .Val(slot) -> lower_release_add_row(&moves, slot, [Int]{block, position})
+                next
+            }
             result :: instruction.result ?? next
-            if instruction.operation == .MovePlace(_) -> next
             if instruction.operation == .ReadPlace(_) && sunk.get(result.value) != None -> next
             if !(instruction.operation == .ReadPlace(_) | .AddressOf(_, _)) {
                 // A call or method on a place: its owned result owns nothing borrowed.
@@ -2496,45 +2527,101 @@ fn lower_release_write_drops(plan: &LowerReleasePlan, function: MIRFunction, fac
             loop place in lower_instruction_places(instruction.operation) {
                 slot :: place_slots.get(place.value) ?? next
                 if eligible.get(slot) == None -> next
-                effective :: lower_release_effective_uses(function, uses, phi_edges, pinned, result, true) ?? {
+                span :: lower_release_read_span(function, uses, phi_edges, pinned, result, block, position) ?? {
                     _ := &eligible.remove(slot)
                     next
                 }
-                last := position
-                local := true
-                loop used in effective {
-                    if used.block != block || used.position >= row.instructions.len() -> local = false
-                    if used.position > last -> last = used.position
-                }
-                if !local {
-                    _ := &eligible.remove(slot)
-                    next
-                }
-                rows := spans.get(slot) ?? [Int]{}
-                &rows.push(block)
-                &rows.push(position)
-                &rows.push(last)
-                _ := &spans.add(slot, rows)
+                lower_release_add_row(&spans, slot, [Int]{block, position, span})
             }
         }
     }
+    reach := [Int:[Bool]]{}
     loop (block, row) in function.blocks {
         if !reachable[block] -> next
         loop (position, instruction) in row.instructions {
             if instruction.operation == .WritePlace(place, _) {
                 slot :: place_slots.get(place.value) ?? next
-                if eligible.get(slot) == None -> next
-                open := false
-                rows :: spans.get(slot) ?? [Int]{}
-                at := 0
-                loop at + 2 < rows.len() {
-                    if rows[at] == block && rows[at + 1] < position && rows[at + 2] >= position -> open = true
-                    at += 3
-                }
-                if !open -> _ := &plan.write_drops.add(instruction.id.value, true)
+                if eligible.get(slot) == None || lower_release_span_open(spans.get(slot) ?? [Int]{}, block, position) -> next
+                if lower_release_moved_before(&reach, successors, moves.get(slot) ?? [Int]{}, block, position) -> next
+                _ := &plan.write_drops.add(instruction.id.value, true)
             }
         }
     }
+}
+
+// A place whose value an overwrite must release, as a Rust assignment drops
+// the value it replaces: an owned local (not bound to an SSA value), carried
+// in its slot or kept in a cell; a Write parameter, whose caller storage owns
+// its value; or a captured place inside a closure body. A borrowed
+// parameter's cell copy owns nothing.
+fn lower_release_write_slot(row: LowerSlot, bound_locals: [U64:Bool]) -> Bool Never! {
+    if row.write_param >= 0 -> return true
+    if row.base == .Local(local) {
+        if bound_locals.get(local.value) != None -> return false
+        return lower_is_owned(row.ownership)
+    }
+    if row.base == .Capture(_) -> return row.cell
+    false
+}
+
+// Whether a move out of a local (block, position pairs) can precede the
+// write at `position` of `block`.
+fn lower_release_moved_before(reach: &[Int:[Bool]], successors: [[Int]], moves: [Int], block: Int, position: Int) -> Bool Never! {
+    at := 0
+    loop at + 1 < moves.len() {
+        if moves[at] == block && moves[at + 1] < position -> return true
+        if lower_release_reaches(&reach, successors, moves[at], block) -> return true
+        at += 2
+    }
+    false
+}
+
+// Whether block `target` is reachable from a successor of block `from`;
+// each `from` row is computed once.
+fn lower_release_reaches(reach: &[Int:[Bool]], successors: [[Int]], from: Int, target: Int) -> Bool Never! {
+    if reach.get(from) == .Val(known) -> return known[target]
+    row := [Bool]{}
+    loop _ in successors -> &row.push(false)
+    pending := successors[from].copy()
+    cursor := 0
+    loop cursor < pending.len() {
+        block :: pending[cursor].copy()
+        cursor += 1
+        if row[block] -> next
+        row[block] = true
+        loop successor in successors[block] -> &pending.push(successor)
+    }
+    _ := &reach.add(from, row)
+    row[target]
+}
+
+// The last position in `block` at which the borrowed read `read` (at
+// `position`) or an alias of it is used; None when one is used elsewhere.
+fn lower_release_read_span(function: MIRFunction, uses: [U64:[LowerReleaseUse]], phi_edges: [U64:[Int]], pinned: [U64:Bool], read: MIRValueID, block: Int, position: Int) -> Int? Never! {
+    effective :: lower_release_effective_uses(function, uses, phi_edges, pinned, read, None) ?? return None
+    last := position
+    loop used in effective {
+        if used.block != block || used.position >= function.blocks[block].instructions.len() -> return None
+        last = if used.position > last -> used.position else -> last
+    }
+    Val(last)
+}
+
+fn lower_release_add_row(rows: &[Int:[Int]], slot: Int, values: [Int]) Never! {
+    row := rows.get(slot) ?? [Int]{}
+    loop value in values -> &row.push(value)
+    _ := &rows.add(slot, row)
+}
+
+// Whether a borrowed read of the slot (block, read position, last use
+// triples) is still in use at `position` of `block`.
+fn lower_release_span_open(rows: [Int], block: Int, position: Int) -> Bool Never! {
+    at := 0
+    loop at + 2 < rows.len() {
+        if rows[at] == block && rows[at + 1] < position && rows[at + 2] >= position -> return true
+        at += 3
+    }
+    false
 }
 
 // Every value an operation reads: mir_operation_value_uses plus the values a
@@ -3193,27 +3280,31 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
 // temporary is used in.
 fn lower_mark_releasable(f: &LowerFunction, value: MIRValueID, values_before: Int, from: Int) Never! {
     index :: f.values.get(value.value) ?? return
-    if index < values_before -> return
-    defined := false
-    loop param in f.open_params {
-        if param.value == index -> defined = true
-    }
-    if !defined {
-        loop at in from..<f.builder.open.len() {
-            if lir_inst_def(f.builder.open[at]) == .Val(dst) {
-                if dst.value == index -> defined = true
-            }
-        }
-    }
-    if !defined -> return
+    if index < values_before || !lower_open_defines(f, index, from) -> return
     _ := &f.releasable.add(value.value, true)
     _ := &f.releasable_lir.add(index, true)
 }
 
+// Whether LIR value `index` is a parameter of the open block or defined by
+// one of its instructions from `from` on.
+fn lower_open_defines(f: LowerFunction, index: Int, from: Int) -> Bool Never! {
+    loop param in f.open_params {
+        if param.value == index -> return true
+    }
+    loop at in from..<f.builder.open.len() {
+        if lir_inst_def(f.builder.open[at]) == .Val(dst) {
+            if dst.value == index -> return true
+        }
+    }
+    false
+}
+
 // Builtin runtime routes that only read their operands and return a scalar
-// or a fresh value (Lists.jet, Strings.jet, Maps.jet): a temporary they read
-// is still the caller's to release.
-LOWER_RELEASE_BORROWING_BUILTINS :: [String]{"jet_list_len", "jet_list_is_empty", "jet_list_join", "jet_list_contains", "jet_char_len", "jet_string_count_bytes", "jet_string_is_empty", "jet_string_contains", "jet_string_starts_with", "jet_string_ends_with", "jet_string_bytes", "jet_string_replace", "jet_string_repeat", "jet_map_len", "jet_map_is_empty", "jet_map_get_opt", "jet_map_has_key"}
+// or a fresh value (Lists.jet, Strings.jet, Maps.jet, TextBytes.jet; a
+// string split Iter holds copies of its text and separator, Text.jet): a
+// temporary they read is still the caller's to release once their owned
+// result no longer needs it.
+LOWER_RELEASE_BORROWING_BUILTINS :: [String]{"jet_list_len", "jet_list_is_empty", "jet_list_join", "jet_list_contains", "jet_char_len", "jet_string_count_bytes", "jet_string_is_empty", "jet_string_contains", "jet_string_starts_with", "jet_string_ends_with", "jet_string_bytes", "jet_string_replace", "jet_string_repeat", "jet_string_from_bytes", "jet_string_from_bytes_lossy", "jet_iter_string_split", "jet_iter_string_rsplit", "jet_map_len", "jet_map_is_empty", "jet_map_get_opt", "jet_map_has_key"}
 
 // Releases an owned temporary (lower_release_plan) unless its lowering made
 // no fresh owner of it (lower_mark_releasable), a slot holds its LIR value
