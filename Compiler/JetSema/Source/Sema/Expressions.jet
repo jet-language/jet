@@ -16,6 +16,7 @@ use jet_foundation.[
     DimensionAxis,
     Expr,
     Func,
+    Item,
     IntegerWidth,
     MIRCopyFact,
     OperatorMarker,
@@ -47,6 +48,7 @@ use jet_foundation.[
     TUnitFormat,
     TUnitRounding,
     TUnitRoundingMode,
+    TraitImplBlock,
     Type,
     TypeTupleField,
     UnOp,
@@ -590,145 +592,125 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
     receiver_canonical :: receiver_name.contains("::")
     receiver_name = sema_expr_operator_row_name(receiver_name)
     nominal_rows :: sema_registration_nominal_rows_named(graph, receiver_name)
+    // Each registered row is passed as a place to a read parameter, which
+    // borrows it; binding the row (or looping over the row lists) copied
+    // whole nominals, impls and functions natively, once per operator.
     loop nominal_row in nominal_rows {
-        module_index :: nominal_row.module_index
-        nominal :: graph.modules[module_index].nominals[nominal_row.row]
-        // A resolved receiver carries the canonical identity (`module::Vec2`)
-        // while the registered row keeps the declared spelling; infer such a
-        // receiver against the declaration resolved in its own module.
-        owner_module :: graph.modules[module_index].module_identity
-        inference_ty := nominal.ty
-        if receiver_canonical -> inference_ty = sema_type_resolve_declared(graph, nominal.ty, owner_module)
-        owner_inference :: sema_infer_registered_nominal(nominal, inference_ty, program.registration_graph, caller_module, caller_package, environment.generic_params, receiver_type, [Type]{}, None, span, &diagnostics) ?? next
-        if !owner_inference.complete || !owner_inference.compatible -> next
-        owner_type := sema_inference_substitute_type_bindings(nominal.ty, owner_inference.substitutions)
-        receiver_owner :: sema_inference_substitute_type_bindings(sema_expr_operator_reader_type(graph, nominal.ty, owner_module, nominal.generic_params, [SemaRegistrationGenericParam]{}), owner_inference.substitutions)
-        loop implementation in graph.modules[module_index].impls {
-            if !sema_expr_operator_target_matches(implementation, nominal) -> next
-            if implementation.trait_name != (Val(trait_name)) -> next
-            if require_commutative && implementation.operator_marker != (Val(OperatorMarker.Commutative)) -> next
-            implementation_rhs := implementation.operator_rhs
-            if implementation_rhs == None -> implementation_rhs = Val(owner_type)
-            qualified_rhs := sema_inference_substitute_type_bindings(implementation_rhs ?? owner_type, owner_inference.substitutions)
-            if !sema_expr_operator_rhs_matches(Val(qualified_rhs), rhs_type) -> next
-            trait_symbol := implementation.trait_symbol
-            if trait_symbol == None -> trait_symbol = sema_type_graph_trait_symbol(graph, implementation.source_module_identity, trait_name)
-            loop function in implementation.methods {
-                if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph.modules[module_index].module_identity, graph.modules[module_index].package_identity) -> next
-                specialized :: sema_inference_substitute_type_bindings(sema_expr_operator_reader_type(graph, function.signature, implementation.source_module_identity, nominal.generic_params, function.generic_params), owner_inference.substitutions)
-                candidate :: sema_expr_operator_candidate_from_function(function, specialized, program.registration_graph, owner_type, receiver_owner, trait_symbol, trait_name, method, qualified_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
-                duplicate := false
-                loop existing in candidates {
-                    if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity {
-                        duplicate = true
-                    }
-                }
-                if !duplicate -> &candidates.push(SemaExprOperatorResolution{candidate: candidate, receiver_is_left: true})
-            }
-        }
-        if nominal.source == {
-            .SourceAST(item) -> {
-                if item == {
-                    .Struct(definition) -> {
-                        loop block in definition.trait_impls {
-                            if block.trait_name != trait_name -> next
-                            if require_commutative && block.operator_marker != (Val(OperatorMarker.Commutative)) -> next
-                            // The authored right-hand type resolves in the owner's
-                            // module, like the impl rows below.
-                            block_rhs := sema_type_resolve_declared(graph, block.operator_rhs ?? nominal.ty, owner_module)
-                            block_rhs = sema_inference_substitute_type_bindings(block_rhs, owner_inference.substitutions)
-                            if !sema_expr_operator_rhs_matches(Val(block_rhs), rhs_type) -> next
-                            trait_symbol :: sema_type_graph_trait_symbol(graph, graph.modules[module_index].module_identity, trait_name)
-                            loop source_method in block.methods {
-                                if source_method.name != method -> next
-                                registered := -1
-                                loop (index, candidate_function) in nominal.methods {
-                                    if candidate_function.declaration.span == source_method.span -> registered = index
-                                }
-                                if registered < 0 -> next
-                                function :: nominal.methods[registered]
-                                if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph.modules[module_index].module_identity, graph.modules[module_index].package_identity) -> next
-                                specialized :: sema_inference_substitute_type_bindings(sema_expr_operator_reader_type(graph, function.signature, owner_module, nominal.generic_params, function.generic_params), owner_inference.substitutions)
-                                candidate :: sema_expr_operator_candidate_from_function(function, specialized, program.registration_graph, owner_type, receiver_owner, trait_symbol, trait_name, method, block_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
-                                duplicate := false
-                                loop existing in candidates {
-                                    if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity {
-                                        duplicate = true
-                                    }
-                                }
-                                if !duplicate -> &candidates.push(SemaExprOperatorResolution{candidate: candidate, receiver_is_left: true})
-                            }
-                        }
-                    }
-                    .Enum(definition) -> {
-                        loop block in definition.trait_impls {
-                            if block.trait_name != trait_name -> next
-                            if require_commutative && block.operator_marker != (Val(OperatorMarker.Commutative)) -> next
-                            block_rhs := sema_type_resolve_declared(graph, block.operator_rhs ?? nominal.ty, owner_module)
-                            block_rhs = sema_inference_substitute_type_bindings(block_rhs, owner_inference.substitutions)
-                            if !sema_expr_operator_rhs_matches(Val(block_rhs), rhs_type) -> next
-                            trait_symbol :: sema_type_graph_trait_symbol(graph, graph.modules[module_index].module_identity, trait_name)
-                            loop source_method in block.methods {
-                                if source_method.name != method -> next
-                                registered := -1
-                                loop (index, candidate_function) in nominal.methods {
-                                    if candidate_function.declaration.span == source_method.span -> registered = index
-                                }
-                                if registered < 0 -> next
-                                function :: nominal.methods[registered]
-                                if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph.modules[module_index].module_identity, graph.modules[module_index].package_identity) -> next
-                                specialized :: sema_inference_substitute_type_bindings(sema_expr_operator_reader_type(graph, function.signature, owner_module, nominal.generic_params, function.generic_params), owner_inference.substitutions)
-                                candidate :: sema_expr_operator_candidate_from_function(function, specialized, program.registration_graph, owner_type, receiver_owner, trait_symbol, trait_name, method, block_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
-                                duplicate := false
-                                loop existing in candidates {
-                                    if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity {
-                                        duplicate = true
-                                    }
-                                }
-                                if !duplicate -> &candidates.push(SemaExprOperatorResolution{candidate: candidate, receiver_is_left: true})
-                            }
-                        }
-                    }
-                    else -> {}
-                }
-            }
-            else -> {}
-        }
+        sema_expr_operator_nominal_candidates(graph, graph.modules[nominal_row.module_index].nominals[nominal_row.row], nominal_row.module_index, receiver_canonical, receiver_type, rhs_type, trait_name, method, require_commutative, span, caller_module, caller_package, environment, program, &diagnostics, &candidates)
     }
     impl_rows :: sema_registration_impl_rows_named(graph, receiver_name)
     loop impl_row in impl_rows {
-        module_index :: impl_row.module_index
-        implementation :: graph.modules[module_index].impls[impl_row.row]
-        if implementation.trait_name != (Val(trait_name)) -> next
-        if require_commutative && implementation.operator_marker != (Val(OperatorMarker.Commutative)) -> next
-        owner_type := implementation.target_type
-        // The leaf row key admits same-named owners of other modules; only an
-        // impl whose resolved target is the receiver's own type applies.
-        if sema_expr_type_base_name(sema_type_resolve_declared(graph, owner_type, implementation.source_module_identity)) != sema_expr_type_base_name(sema_type_resolve_declared(graph, receiver_type, caller_module)) -> next
-        // The authored right-hand type resolves in the impl's module, like the
-        // canonical operand type it is matched against (D-OPMIX1 `Int.Mul(Price)`).
-        implementation_rhs := sema_type_resolve_declared(graph, implementation.operator_rhs ?? owner_type, implementation.source_module_identity)
-        if !sema_expr_operator_rhs_matches(Val(implementation_rhs), rhs_type) -> next
-        impl_module :: implementation.source_module_identity
-        owner_generics := [SemaRegistrationGenericParam]{}
-        if sema_type_resolve_nominal_row(graph, owner_type, impl_module) == .Val(owner_row) -> owner_generics = graph.modules[owner_row.module_index].nominals[owner_row.row].generic_params
-        receiver_owner :: sema_expr_operator_reader_type(graph, owner_type, impl_module, owner_generics, [SemaRegistrationGenericParam]{})
-        trait_symbol := implementation.trait_symbol
-        if trait_symbol == None -> trait_symbol = sema_type_graph_trait_symbol(graph, implementation.source_module_identity, trait_name)
-        loop function in implementation.methods {
-            if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph.modules[module_index].module_identity, graph.modules[module_index].package_identity) -> next
-            reader_signature :: sema_expr_operator_reader_type(graph, function.signature, impl_module, owner_generics, function.generic_params)
-            candidate :: sema_expr_operator_candidate_from_function(function, reader_signature, program.registration_graph, owner_type, receiver_owner, trait_symbol, trait_name, method, implementation_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
-            duplicate := false
-            loop existing in candidates {
-                if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity {
-                    duplicate = true
-                }
-            }
-            if !duplicate -> &candidates.push(SemaExprOperatorResolution{candidate: candidate, receiver_is_left: true})
-        }
+        sema_expr_operator_impl_row_candidates(graph, graph.modules[impl_row.module_index].impls[impl_row.row], impl_row.module_index, receiver_type, rhs_type, trait_name, method, require_commutative, span, caller_module, caller_package, environment, program, &diagnostics, &candidates)
     }
     candidates
+}
+
+// The operator candidates one registered nominal declares: its matching impl
+// rows, then the trait blocks of its source declaration.
+fn sema_expr_operator_nominal_candidates(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, module_index: Int, receiver_canonical: Bool, receiver_type: Type, rhs_type: Type, trait_name: String, method: String, require_commutative: Bool, span: Span, caller_module: String, caller_package: String, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic], candidates: &[SemaExprOperatorResolution]) Never! {
+    // A resolved receiver carries the canonical identity (`module::Vec2`)
+    // while the registered row keeps the declared spelling; infer such a
+    // receiver against the declaration resolved in its own module.
+    owner_module :: graph.modules[module_index].module_identity
+    inference_ty := nominal.ty
+    if receiver_canonical -> inference_ty = sema_type_resolve_declared(graph, nominal.ty, owner_module)
+    owner_inference :: sema_infer_registered_nominal(nominal, inference_ty, program.registration_graph, caller_module, caller_package, environment.generic_params, receiver_type, [Type]{}, None, span, &diagnostics) ?? return
+    if !owner_inference.complete || !owner_inference.compatible -> return
+    owner_type :: sema_inference_substitute_type_bindings(nominal.ty, owner_inference.substitutions)
+    receiver_owner :: sema_inference_substitute_type_bindings(sema_expr_operator_reader_type(graph, nominal.ty, owner_module, nominal.generic_params, [SemaRegistrationGenericParam]{}), owner_inference.substitutions)
+    loop impl_index in 0..<graph.modules[module_index].impls.len() {
+        sema_expr_operator_nominal_impl_candidates(graph, graph.modules[module_index].impls[impl_index], nominal, module_index, owner_inference.substitutions, owner_type, receiver_owner, rhs_type, trait_name, method, require_commutative, span, caller_module, caller_package, environment, program, &diagnostics, &candidates)
+    }
+    if nominal.source == .SourceAST(item) -> sema_expr_operator_source_candidates(graph, nominal, item, module_index, owner_module, owner_inference.substitutions, owner_type, receiver_owner, rhs_type, trait_name, method, require_commutative, span, caller_module, caller_package, environment, program, &diagnostics, &candidates)
+}
+
+fn sema_expr_operator_nominal_impl_candidates(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl, nominal: SemaRegistrationNominal, module_index: Int, substitutions: [SemaInferenceBinding], owner_type: Type, receiver_owner: Type, rhs_type: Type, trait_name: String, method: String, require_commutative: Bool, span: Span, caller_module: String, caller_package: String, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic], candidates: &[SemaExprOperatorResolution]) Never! {
+    if !sema_expr_operator_target_matches(implementation, nominal) -> return
+    if implementation.trait_name != (Val(trait_name)) -> return
+    if require_commutative && implementation.operator_marker != (Val(OperatorMarker.Commutative)) -> return
+    qualified_rhs :: sema_inference_substitute_type_bindings(implementation.operator_rhs ?? owner_type, substitutions)
+    if !sema_expr_operator_rhs_matches(Val(qualified_rhs), rhs_type) -> return
+    trait_symbol := implementation.trait_symbol
+    if trait_symbol == None -> trait_symbol = sema_type_graph_trait_symbol(graph, implementation.source_module_identity, trait_name)
+    loop function_index in 0..<implementation.methods.len() {
+        sema_expr_operator_function_candidate(graph, implementation.methods[function_index], module_index, implementation.source_module_identity, nominal.generic_params, Val(substitutions), owner_type, receiver_owner, trait_symbol, trait_name, method, qualified_rhs, span, caller_module, caller_package, environment, program, &diagnostics, &candidates)
+    }
+}
+
+fn sema_expr_operator_source_candidates(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, item: Item, module_index: Int, owner_module: String, substitutions: [SemaInferenceBinding], owner_type: Type, receiver_owner: Type, rhs_type: Type, trait_name: String, method: String, require_commutative: Bool, span: Span, caller_module: String, caller_package: String, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic], candidates: &[SemaExprOperatorResolution]) Never! {
+    if item == {
+        .Struct(definition) -> sema_expr_operator_block_candidates(graph, nominal, definition.trait_impls, module_index, owner_module, substitutions, owner_type, receiver_owner, rhs_type, trait_name, method, require_commutative, span, caller_module, caller_package, environment, program, &diagnostics, &candidates)
+        .Enum(definition) -> sema_expr_operator_block_candidates(graph, nominal, definition.trait_impls, module_index, owner_module, substitutions, owner_type, receiver_owner, rhs_type, trait_name, method, require_commutative, span, caller_module, caller_package, environment, program, &diagnostics, &candidates)
+        else -> {}
+    }
+}
+
+fn sema_expr_operator_block_candidates(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, blocks: [TraitImplBlock], module_index: Int, owner_module: String, substitutions: [SemaInferenceBinding], owner_type: Type, receiver_owner: Type, rhs_type: Type, trait_name: String, method: String, require_commutative: Bool, span: Span, caller_module: String, caller_package: String, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic], candidates: &[SemaExprOperatorResolution]) Never! {
+    loop block_index in 0..<blocks.len() {
+        sema_expr_operator_block_methods(graph, nominal, blocks[block_index], module_index, owner_module, substitutions, owner_type, receiver_owner, rhs_type, trait_name, method, require_commutative, span, caller_module, caller_package, environment, program, &diagnostics, &candidates)
+    }
+}
+
+fn sema_expr_operator_block_methods(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, block: TraitImplBlock, module_index: Int, owner_module: String, substitutions: [SemaInferenceBinding], owner_type: Type, receiver_owner: Type, rhs_type: Type, trait_name: String, method: String, require_commutative: Bool, span: Span, caller_module: String, caller_package: String, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic], candidates: &[SemaExprOperatorResolution]) Never! {
+    if block.trait_name != trait_name -> return
+    if require_commutative && block.operator_marker != (Val(OperatorMarker.Commutative)) -> return
+    // The authored right-hand type resolves in the owner's module, like the
+    // impl rows.
+    block_rhs :: sema_inference_substitute_type_bindings(sema_type_resolve_declared(graph, block.operator_rhs ?? nominal.ty, owner_module), substitutions)
+    if !sema_expr_operator_rhs_matches(Val(block_rhs), rhs_type) -> return
+    trait_symbol :: sema_type_graph_trait_symbol(graph, graph.modules[module_index].module_identity, trait_name)
+    loop source_index in 0..<block.methods.len() {
+        if block.methods[source_index].name != method -> next
+        registered := -1
+        loop index in 0..<nominal.methods.len() {
+            if nominal.methods[index].declaration.span == block.methods[source_index].span -> registered = index
+        }
+        if registered < 0 -> next
+        sema_expr_operator_function_candidate(graph, nominal.methods[registered], module_index, owner_module, nominal.generic_params, Val(substitutions), owner_type, receiver_owner, trait_symbol, trait_name, method, block_rhs, span, caller_module, caller_package, environment, program, &diagnostics, &candidates)
+    }
+}
+
+// The impls registered under the receiver's name (D-OPMIX1 hooks such as
+// `impl Int.Mul(Price)`), whose target resolves to the receiver's own type.
+fn sema_expr_operator_impl_row_candidates(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl, module_index: Int, receiver_type: Type, rhs_type: Type, trait_name: String, method: String, require_commutative: Bool, span: Span, caller_module: String, caller_package: String, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic], candidates: &[SemaExprOperatorResolution]) Never! {
+    if implementation.trait_name != (Val(trait_name)) -> return
+    if require_commutative && implementation.operator_marker != (Val(OperatorMarker.Commutative)) -> return
+    // The leaf row key admits same-named owners of other modules; only an
+    // impl whose resolved target is the receiver's own type applies.
+    if sema_expr_type_base_name(sema_type_resolve_declared(graph, implementation.target_type, implementation.source_module_identity)) != sema_expr_type_base_name(sema_type_resolve_declared(graph, receiver_type, caller_module)) -> return
+    // The authored right-hand type resolves in the impl's module, like the
+    // canonical operand type it is matched against (D-OPMIX1 `Int.Mul(Price)`).
+    implementation_rhs :: sema_type_resolve_declared(graph, implementation.operator_rhs ?? implementation.target_type, implementation.source_module_identity)
+    if !sema_expr_operator_rhs_matches(Val(implementation_rhs), rhs_type) -> return
+    if sema_type_resolve_nominal_row(graph, implementation.target_type, implementation.source_module_identity) == .Val(owner_row) {
+        sema_expr_operator_impl_row_methods(graph, implementation, module_index, graph.modules[owner_row.module_index].nominals[owner_row.row].generic_params, implementation_rhs, trait_name, method, span, caller_module, caller_package, environment, program, &diagnostics, &candidates)
+        return
+    }
+    sema_expr_operator_impl_row_methods(graph, implementation, module_index, [SemaRegistrationGenericParam]{}, implementation_rhs, trait_name, method, span, caller_module, caller_package, environment, program, &diagnostics, &candidates)
+}
+
+fn sema_expr_operator_impl_row_methods(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl, module_index: Int, owner_generics: [SemaRegistrationGenericParam], implementation_rhs: Type, trait_name: String, method: String, span: Span, caller_module: String, caller_package: String, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic], candidates: &[SemaExprOperatorResolution]) Never! {
+    receiver_owner :: sema_expr_operator_reader_type(graph, implementation.target_type, implementation.source_module_identity, owner_generics, [SemaRegistrationGenericParam]{})
+    trait_symbol := implementation.trait_symbol
+    if trait_symbol == None -> trait_symbol = sema_type_graph_trait_symbol(graph, implementation.source_module_identity, trait_name)
+    loop function_index in 0..<implementation.methods.len() {
+        sema_expr_operator_function_candidate(graph, implementation.methods[function_index], module_index, implementation.source_module_identity, owner_generics, None, implementation.target_type, receiver_owner, trait_symbol, trait_name, method, implementation_rhs, span, caller_module, caller_package, environment, program, &diagnostics, &candidates)
+    }
+}
+
+// One registered method as an operator candidate: visible to the caller,
+// its signature read as the owner's module names it (and specialized by
+// `substitutions` when the owner was inferred), added once per method
+// identity.
+fn sema_expr_operator_function_candidate(graph: SemaRegistrationGraph, function: SemaRegistrationFunction, module_index: Int, signature_module: String, owner_generics: [SemaRegistrationGenericParam], substitutions: [SemaInferenceBinding]?, owner_type: Type, receiver_owner: Type, trait_symbol: Symbol?, trait_name: String, method: String, rhs: Type, span: Span, caller_module: String, caller_package: String, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic], candidates: &[SemaExprOperatorResolution]) Never! {
+    if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph.modules[module_index].module_identity, graph.modules[module_index].package_identity) -> return
+    reader :: sema_expr_operator_reader_type(graph, function.signature, signature_module, owner_generics, function.generic_params)
+    specialized :: if substitutions == .Val(bindings) -> sema_inference_substitute_type_bindings(reader, bindings) else -> reader
+    candidate :: sema_expr_operator_candidate_from_function(function, specialized, program.registration_graph, owner_type, receiver_owner, trait_symbol, trait_name, method, rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? return
+    loop existing in candidates {
+        if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity -> return
+    }
+    &candidates.push(SemaExprOperatorResolution{candidate: candidate, receiver_is_left: true})
 }
 
 fn sema_expr_tir_binary_op(op: BinOp) -> TBinaryOp Never! {
