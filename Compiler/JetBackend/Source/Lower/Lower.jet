@@ -3298,13 +3298,34 @@ fn lower_branch_target(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
     Val(lower_target(block, [LIRValueID]{}))
 }
 
+// Each pending edge is a separate path out of the block: the slot state one
+// edge's releases change (a slot cleared to its placeholder, a partial-drop
+// reset) must not leak into its siblings, whose arguments would then name
+// values defined only on the other edge.
+struct LowerEdgeState {
+    current: [LIRValueID?]
+    partial_drops: [LowerPartialDrop]
+}
+
+fn lower_edge_state(f: LowerFunction) -> LowerEdgeState Never! {
+    LowerEdgeState{current: f.current.copy(), partial_drops: f.partial_drops.copy()}
+}
+
+fn lower_restore_edge_state(f: &LowerFunction, state: LowerEdgeState) Never! {
+    f.current = state.current.copy()
+    f.partial_drops = state.partial_drops.copy()
+}
+
 fn lower_fill_pending(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, pending: [LIRBlockID], pending_targets: [MIRBlockID]) Never! {
+    state :: lower_edge_state(f)
     loop (index, block) in pending {
+        lower_restore_edge_state(&f, state)
         lower_start(&f, block, [LIRValueID]{})
         lower_release_edge(p, c, &m, &f, pending_targets[index])
         edge :: lower_edge(p, c, &m, &f, pending_targets[index]) ?? return
         lower_seal(&f, LIRTerminator.Jump{target: edge})
     }
+    lower_restore_edge_state(&f, state)
 }
 
 fn lower_condition(m: &LowerModule, f: &LowerFunction, value: MIRValueID) -> LIRValueID? {
