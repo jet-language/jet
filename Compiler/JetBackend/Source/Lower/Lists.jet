@@ -1603,11 +1603,12 @@ fn lower_list_concat(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     length :: lower_word(&f)
     lower_emit(&f, LIRInst.Binary{dst: length, op: LIRBinaryOp.Add, left: left_length, right: right_length})
     data :: lower_list_buffer(&m, &f, length, stride)
-    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
-    lower_storage_into(p, &f, dst, result_ty)
-    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: length})
-    lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: length})
-    lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: data})
+    // The result is named after the copy loops, in the block they end in, so
+    // the release plan can release it (Lower.jet lower_mark_releasable).
+    header :: lower_new_storage(p, &f, result_ty)
+    lower_emit(&f, LIRInst.Store{base: header, offset: 0, value: length})
+    lower_emit(&f, LIRInst.Store{base: header, offset: 8, value: length})
+    lower_emit(&f, LIRInst.Store{base: header, offset: 16, value: data})
     zero :: lower_const(&f, 0)
     sources :: [LIRValueID]{left, right}
     written := zero
@@ -1624,6 +1625,8 @@ fn lower_list_concat(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     // Only a List the call takes by Move is its to release; a Read-lent local stays its owner's.
     if args[0].access == .Move && lower_value_owned(c, args[0].value) -> lower_map_drop_value(p, &m, &f, left, types[0])
     if args[1].access == .Move && lower_value_owned(c, args[1].value) -> lower_map_drop_value(p, &m, &f, right, types[1])
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    lower_emit(&f, LIRInst.Move{dst: dst, src: header})
     true
 }
 
