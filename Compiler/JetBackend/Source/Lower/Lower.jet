@@ -2799,6 +2799,12 @@ fn lower_release_semantic_kind(p: MIRProgram, m: LowerModule, function: MIRFunct
         // like a Read argument, and a later write of the place may release
         // that value (lower_release_write_drops).
         if receiver == value && receiver_place != None && !lower_release_owned_value(function, fact_index, value) -> return lower_release_result_kind(function, fact_index, instruction)
+        // A method returning nothing or a scalar (`s.len()`, `t.count(k)`,
+        // `bits.has(i)`) cannot hand back a view of its receiver: the receiver
+        // is only read for the call (one it takes over is a consumed operand,
+        // checked first), so a read of a Set, Tally, Queue or Bits local for
+        // `len` no longer pins the local against every write drop and death.
+        if receiver == value && lower_release_scalar_result(p, function, fact_index, instruction) -> return LOWER_RELEASE_BORROW
         row :: m.prelude_positions.get(call.value) ?? return LOWER_RELEASE_KEEP
         if LOWER_RELEASE_BORROWING_BUILTINS.contains(lower_runtime_symbol(p.prelude_calls[row])) -> return lower_release_result_kind(function, fact_index, instruction)
     }
@@ -2826,6 +2832,16 @@ fn lower_release_result_kind(function: MIRFunction, fact_index: [U64:Int], instr
     mode :: function.values[row].ownership.mode
     if mode == MIROwnershipMode.Owned || mode == MIROwnershipMode.Copy || mode == MIROwnershipMode.Move -> return LOWER_RELEASE_BORROW
     LOWER_RELEASE_KEEP
+}
+
+// Whether `instruction` has no result, or a copied one holding no pointer
+// (a Bool, Int word or fixed-width number; a zero-sized value).
+fn lower_release_scalar_result(p: MIRProgram, function: MIRFunction, fact_index: [U64:Int], instruction: MIRInstruction) -> Bool Never! {
+    result :: instruction.result ?? return true
+    row :: fact_index.get(result.value) ?? return false
+    if function.values[row].ownership.mode != MIROwnershipMode.Copy -> return false
+    layout :: lower_repr_layout(lower_repr(p, function.values[row].ty)) ?? return true
+    layout.class != .Pointer
 }
 
 // Whether `value` owns what it holds (unknown values count as owned).
@@ -3073,8 +3089,9 @@ fn lower_release_write_drops(plan: &LowerReleasePlan, p: MIRProgram, m: LowerMod
 // a loop that rebinds a list local each iteration releases each old list
 // on the edge into the rebinding block, lower_release_slots).
 // It is never released before a return (MIR drops it there), nor when a
-// field of it is moved out (its partial-drop flags own that). A slot
-// written with a value anything else also uses is left alone.
+// field of it is moved out (its partial-drop flags own that). A slot whose
+// whole root is written with a value anything else also uses is left alone;
+// a projected write (`seen[k] = v` after `seen = [K:V]{}`) keeps it dying.
 fn lower_release_slot_deaths(plan: &LowerReleasePlan, p: MIRProgram, m: LowerModule, function: MIRFunction, uses: [U64:[LowerReleaseUse]], eligible: [Int:Bool], reachable: [Bool], successors: [[Int]], slots: [LowerSlot], place_slots: [U64:Int], projected_places: [U64:Bool], live: [[Int]]) Never! {
     dying := [Int:Bool]{}
     place_rows :: lower_place_rows(function)
@@ -3104,7 +3121,14 @@ fn lower_release_slot_deaths(plan: &LowerReleasePlan, p: MIRProgram, m: LowerMod
                 slot :: place_slots.get(place.value) ?? next
                 if dying.get(slot) == None -> next
                 target :: lower_place_row(function, place_rows, place) ?? next
-                if target.projections.len() > 0 || (uses.get(value.value) ?? [LowerReleaseUse]{}).len() != 1 {
+                // A projected write (`seen[k] = v`, `holder.items = rows`)
+                // works on the value the slot holds, in place: a boxed root is
+                // made unique and the slot rebound to it first
+                // (lower_slot_root_for_write), so the slot still holds its
+                // one owner, and the place is a use (lower_live_slots), so the
+                // block is one it is live into. It neither fills nor empties the slot.
+                if target.projections.len() > 0 -> next
+                if (uses.get(value.value) ?? [LowerReleaseUse]{}).len() != 1 {
                     _ := &dying.remove(slot)
                     next
                 }
