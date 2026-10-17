@@ -340,6 +340,21 @@ fn jet_codegen_last_use_remainder_moves(builder: JetCodegenBuilder, place_row: [
     remainder
 }
 
+// The key of the borrowed plain list walk (LoopIterInit, not by value) that
+// is the only use of `value`, as its collection; -1 for none.
+fn jet_codegen_last_use_iter_source(builder: JetCodegenBuilder, users_block: [U64:[Int]], users_index: [U64:[Int]], value: MIRValueID) -> Int Never! {
+    blocks :: users_block.get(value.value) ?? return -1
+    indices :: users_index.get(value.value) ?? return -1
+    if blocks.len() != 1 -> return -1
+    block :: blocks[0]
+    index :: indices[0]
+    if index >= builder.blocks[block].instructions.len() -> return -1
+    if builder.blocks[block].instructions[index].operation == .LoopIterInit(_, collection, _, by_value, source_kind) {
+        if collection == value && !by_value && source_kind == MIRLoopSourceKind.Plain -> return jet_codegen_last_use_key(block, index)
+    }
+    -1
+}
+
 // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_last_use.rs::LowerCtx::move_last_uses
 fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenProgram) Never! {
     block_count :: builder.blocks.len()
@@ -879,6 +894,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
     group_end := [Int:Int]{}
     loop (group_index, row) in groups -> _ := &group_end.add(jet_codegen_last_use_key(row.block, row.payloads[row.payloads.len() - 1]), group_index)
     conversions := [Int:Int]{}
+    iter_takes := [Int:Bool]{}
     moved_groups := [Int]{}
     loop block in 0..<block_count {
         if !reachable[block] -> next
@@ -921,8 +937,20 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
                     loop bit in bits {
                         if bit != own && (live_out[block].get(bit) ?? false) -> other_copy = true
                     }
-                    if worth && !rejected[target] && !rejected[root] && !(live_out[block].get(target) ?? false) && !jet_codegen_last_use_in_window(read_windows, block, index, target) && !other_copy && jet_codegen_read_window_of(builder, program, result) == None && jet_codegen_last_use_consumed(builder, program, users_block, users_index, result) {
+                    // A read only a borrowed list walk's cursor takes moves
+                    // into it, and the walk then hands its items out by value.
+                    consumed := jet_codegen_last_use_consumed(builder, program, users_block, users_index, result)
+                    iter_key := -1
+                    if !consumed {
+                        listed := false
+                        if value_row.get(result.value) == .Val(list_row) {
+                            if builder.values[list_row].ty.kind == .List(_) -> listed = true
+                        }
+                        if listed -> iter_key = jet_codegen_last_use_iter_source(builder, users_block, users_index, result)
+                    }
+                    if worth && !rejected[target] && !rejected[root] && !(live_out[block].get(target) ?? false) && !jet_codegen_last_use_in_window(read_windows, block, index, target) && !other_copy && jet_codegen_read_window_of(builder, program, result) == None && (consumed || iter_key >= 0) {
                         _ := &conversions.add(jet_codegen_last_use_key(block, index), target)
+                        if iter_key >= 0 -> _ := &iter_takes.add(iter_key, true)
                     }
                 }
             }
@@ -985,6 +1013,13 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
             _ := &clears.add(key, [MIRInstruction]{off, write})
         }
     }
+    // A borrowed list walk whose collection read became a move takes the
+    // list by value (LoopIterInit by_value: the items move out of it).
+    loop block in 0..<block_count {
+        loop index in 0..<builder.blocks[block].instructions.len() {
+            if iter_takes.get(jet_codegen_last_use_key(block, index)) != None -> _ := &touched.add(block, true)
+        }
+    }
     loop block in 0..<block_count {
         if touched.get(block) == None -> next
         rewritten := [MIRInstruction]{}
@@ -996,6 +1031,9 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
                 instruction.operation = MIROperation.EnumPayload{subject: taken, owner: owner, variant: variant, index: field}
             }
             if moved_reads.get(key) == .Val(read_place) -> instruction.operation = MIROperation.MovePlace{place: read_place}
+            if iter_takes.get(key) != None && original.operation == .LoopIterInit(call, collection, step, _, source_kind) {
+                instruction.operation = MIROperation.LoopIterInit{call: call, collection: collection, step: step, by_value: true, source_kind: source_kind}
+            }
             &rewritten.push(instruction)
             if clears.get(key) == .Val(extra) {
                 loop added in extra -> &rewritten.push(added)

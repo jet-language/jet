@@ -1105,18 +1105,49 @@ fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, program: JetCod
     true
 }
 
+// Whether `collection` is a List naming an owned local's whole place (not a
+// parameter, a read alias or a persisted root), which the MIR last-use pass
+// may move into a by-value walk.
+fn jet_codegen_loop_owned_local(builder: JetCodegenBuilder, program: JetCodegenProgram, collection: TExpr) -> Bool Never! {
+    listed :: if jet_codegen_builtin_untag(collection.ty) == {
+        .List(_) -> true
+        else -> false
+    }
+    if !listed -> return false
+    if collection.kind == .Local(local) {
+        binding :: jet_codegen_find_binding_for_local(builder, program, local) ?? return false
+        if builder.read_alias_places.get(binding.place.value) != None -> return false
+        row :: jet_codegen_find_place(builder, program, binding.place) ?? return false
+        if row.projections.len() != 0 || row.persist_key != None -> return false
+        return row.base == .Local(_)
+    }
+    false
+}
+
+// Whether `body` may consume the loop item `name`: a value or write use of
+// the bare name (jet_codegen_stability_expr's `consumed`).
+fn jet_codegen_loop_body_consumes(body: [TStmt], name: String) -> Bool Never! {
+    state := JetCodegenLetStability{tick: 0, last: [String:Int]{}, read_at: [String:Int]{}, pinned: [String:Bool]{}, uses: 0, consumed: [String:Int]{}, pending: [JetCodegenLetCandidate]{}, stable: [String:Bool]{}}
+    jet_codegen_stability_list(&state, body, false)
+    state.consumed.get(name) != None
+}
+
 fn jet_codegen_lower_for_in(builder: &JetCodegenBuilder, program: JetCodegenProgram, label: String?, variable: TLocal, variable_two: TLocal?, source: TExpr, collection: TExpr, step: TExpr?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, source_stable: Bool, body: [TStmt], span: Span) {
     // A source that would be copied (a field path, or a compiler copy of a
     // later-used local) walks in place when the body leaves its root alone
     // (jet_codegen_stable_element_lets); a bare owned local keeps the iterator,
-    // which moves it at its last use.
+    // which moves it at its last use. A body that may consume a non-scalar
+    // item of a bare owned local takes the iterator too: at the local's last
+    // use the MIR pass moves the list into it (LastUse.jet), so every item
+    // moves out instead of being copied out of a walked slot.
     stable_walk := source_stable
     bare_local :: if collection.kind == {
         .Local(_) -> true
         else -> false
     }
     if !stable_walk && !bare_local -> stable_walk = builder.stable_element_lets.get(jet_codegen_loop_source_key(collection)) == (Val(true))
-    if method_kind == None && step == None && !by_value && !columnar && jet_codegen_lower_read_list_walk(&builder, program, label, variable, variable_two, collection, stable_walk, body, span) -> return
+    consuming :: bare_local && variable_two == None && method_kind == None && !jet_codegen_stability_scalar(jet_codegen_for_in_item_type(collection, method_kind)) && jet_codegen_loop_owned_local(builder, program, collection) && jet_codegen_loop_body_consumes(body, variable.name)
+    if method_kind == None && step == None && !by_value && !columnar && !consuming && jet_codegen_lower_read_list_walk(&builder, program, label, variable, variable_two, collection, stable_walk, body, span) -> return
     iter_init_call := jet_codegen_add_loop_prelude_call(&builder, program, "loop_iter_init", "jet_loop_iter_init", 5, [Bool]{false, false, false, false, false})
     iter_has_next_call := jet_codegen_add_loop_prelude_call(&builder, program, "loop_iter_has_next", "jet_loop_iter_has_next", 1, [Bool]{true})
     iter_value_call := jet_codegen_add_loop_prelude_call(&builder, program, "loop_iter_value", "jet_loop_iter_value", 1, [Bool]{true})
