@@ -46,6 +46,9 @@ fn mir_pass_fixed_reduction_normalize_function(function: &MIRFunction, prelude_c
     loop vector_index < vectors.len() {
         vector := vectors[vector_index]
         if vector.rule == .Reduction && vector.decision == .Eligible && vector.fixed_reduction != None && vector.body_blocks.len() > 0 {
+            // copy: the rollback snapshot (owner: `snapshot`) and the function being rewritten in
+            // place (owner: the write parameter) must both exist: a rejected attempt restores the
+            // snapshot.
             snapshot :: function.copy()
             normalized :: mir_pass_fixed_reduction_attempt(&function, prelude_calls, snapshot, vector)
             if {

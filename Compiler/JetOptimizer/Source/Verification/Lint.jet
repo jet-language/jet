@@ -120,9 +120,15 @@ fn mir_lint_program(program: MIRProgram) -> MIRLintError? Never! {
 fn mir_lint_program_scan(program: MIRProgram, all: Bool) -> [MIRLintError] Never! {
     failures := [MIRLintError]{}
     if program.functions.len() == 0 -> return failures
+    // copy: the lint context owns the function it checks (owner: ctx.function, rewritten by
+    // mir_lint_enter) while the read program keeps its own (owner: the caller); the owned-part lint
+    // moves functions instead.
     ctx := mir_lint_context(mir_lint_index(program), program.functions[0].copy())
     loop position in 0..<program.functions.len() {
         if position > 0 {
+            // copy: the lint context owns the function it checks (owner: ctx.function) while the
+            // read program keeps its own (owner: the caller); the owned-part lint moves functions
+            // instead.
             ctx.function = program.functions[position].copy()
             mir_lint_enter(&ctx)
         }
@@ -248,6 +254,9 @@ fn mir_lint_index(program: MIRProgram) -> MIRLintIndex Never! {
     _ := &type_vars.add("Self", true)
     loop position in 0..<program.functions.len() {
         _ := &functions.add(program.functions[position].id.value, position)
+        // copy: each signature part (owner: the read `program` parameter, the caller's MIR) is
+        // copied into the lint index (owner: the index, which outlives this read and is shared by
+        // every lint worker); the program cannot give up its rows here.
         &signatures.push(MIRLintSignature{key: program.functions[position].key.copy(), params: program.functions[position].params.copy(), return_type: program.functions[position].return_type.copy(), solved_effects: program.functions[position].effects.solved.copy(), capture_count: program.functions[position].capture_params.len(), captures: program.functions[position].capture_params.copy(), return_view_provenance: program.functions[position].return_view_provenance.copy()})
         loop param in program.functions[position].generic_params -> _ := &type_vars.add(param.name.copy(), true)
     }
@@ -257,12 +266,18 @@ fn mir_lint_index(program: MIRProgram) -> MIRLintIndex Never! {
         row := MIRLintTypeRow{name: program.types[position].name.copy(), fields: None, variants: None, target: None}
         if program.types[position].kind == {
             .Alias(target) | .Distinct(target, _) -> {
+                // copy: the alias target type (owner: the read `program` parameter, the caller's
+                // MIR) is copied into the lint index (owner: the index, which outlives this read
+                // and is shared by every lint worker); the program cannot give up its rows here.
                 row.target = Val(target.copy())
                 _ := &transparent.add(program.types[position].name.copy(), true)
                 _ := &transparent.add(program.types[position].key.copy(), true)
                 _ := &transparent.add(mir_lint_leaf(program.types[position].name), true)
             }
             .Struct(declared, _) -> {
+                // copy: the struct field row (owner: the read `program` parameter, the caller's
+                // MIR) is copied into the lint index (owner: the index, which outlives this read
+                // and is shared by every lint worker); the program cannot give up its rows here.
                 loop field in declared -> _ := &fields.add(field.id.value, field.copy())
                 row.fields = Val(declared.copy())
             }
@@ -275,6 +290,9 @@ fn mir_lint_index(program: MIRProgram) -> MIRLintIndex Never! {
         }
         &type_rows.push(row)
     }
+    // copy: the program field row (owner: the read `program` parameter, the caller's MIR) is copied
+    // into the lint index (owner: the index, which outlives this read and is shared by every lint
+    // worker); the program cannot give up its rows here.
     loop row in program.fields -> _ := &fields.add(row.id.value, row.field.copy())
     loop row in program.traits {
         loop declaration in row.associated_types -> _ := &type_vars.add(declaration.name.copy(), true)
@@ -1180,6 +1198,8 @@ fn mir_lint_variant(ctx: MIRLintContext, owner: MIRTypeID, variant: String) -> M
     definition :: ctx.index.type_rows[position]
     variants :: definition.variants ?? return MIRLintVariantLookup{variant: None, problem: mir_lint_problem(.EnumVariant, "type {definition.name} is not an enum")}
     loop row in variants {
+        // copy: the variant row stays in the index (owner: ctx.index, read parameter) and the
+        // lookup result owns its copy (owner: the returned lookup), used after the index read ends.
         if row.name == variant -> return MIRLintVariantLookup{variant: Val(row.copy()), problem: None}
     }
     MIRLintVariantLookup{variant: None, problem: mir_lint_problem(.EnumVariant, "{definition.name} declares no variant {variant}")}
@@ -2558,6 +2578,9 @@ fn mir_lint_view_owners(ctx: MIRLintContext, defs: MIRLintDefs, operation: MIROp
         if target == .Val(function) {
             position :: ctx.index.functions.get(function.value) ?? -1
             if position >= 0 {
+                // copy: the callee's return-view provenance stays in the index (owner: ctx.index,
+                // read parameter) while this call check owns its copy (owner: `provenance`,
+                // assigned on either call shape).
                 provenance = ctx.index.signatures[position].return_view_provenance.copy()
                 loop (slot, param) in ctx.index.signatures[position].params {
                     if param.name == "self" -> receiver = slot
@@ -2568,6 +2591,9 @@ fn mir_lint_view_owners(ctx: MIRLintContext, defs: MIRLintDefs, operation: MIROp
     if operation == .IndirectCall(callee, _, _) {
         ty :: mir_lint_type_of(ctx, callee)
         if ty == .Val(callable) {
+            // copy: the callable type's return-view provenance stays with the operand type (owner:
+            // `ty`, a lookup result view) while this call check owns its copy (owner:
+            // `provenance`).
             if callable.kind == .Fn(signature) -> provenance = signature.return_view_provenance.copy()
         }
     }

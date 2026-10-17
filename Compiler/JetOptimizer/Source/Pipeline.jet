@@ -553,7 +553,9 @@ fn mir_pass_lint_wave(program: &MIRProgram, pass: MIROptimizationPassID, threads
 // One thread: lints its slot's functions on its own copy of the index; the
 // part stops at its first failure (at most one is returned).
 fn mir_pass_lint_slot(slot: Shared<MIRPassWaveSlot>, shared_index: Shared<MIRLintIndex>) -> [MIRLintError] {
-    // A copy: every worker reads the one shared index, so none may move it out.
+    // copy: every worker lints with its own index (owner: this worker, moved into
+    // mir_lint_owned_part) built from the one shared index (owner: the Shared cell, read by all
+    // workers); a read guard only lends a view, so none may move it out.
     index := shared_index.guard_read().value.copy()
     permit := slot.guard_edit()
     mir_lint_owned_part(^index, &permit.value.functions, false)
