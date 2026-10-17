@@ -213,16 +213,16 @@ fn jet_cli_compile_eval(file: String, pure: Bool, color: Bool, json: Bool) -> Je
     compiled :: jet_cli_compile_file(file, color, false, None, mode)
     if compiled == {
         .Refused(refusal) -> output = refusal.copy()
-        .Compiled(result, snapshot) -> output = jet_cli_eval_result(file, source, color, json, result, snapshot)
+        .Compiled(result, snapshot) -> output = jet_cli_eval_result(file, source, color, json, ^result, snapshot)
     }
     output
 }
 
-fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
+fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, result: ^JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
     errors :: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), snapshot, result.generated_source_files)
     if errors.len() > 0 -> return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, errors, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
-    program :: result.mir ?? return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
+    program :: ^result.mir ?? return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
     entry :: result.entry_function ?? return jet_cli_ice("the Jet compiler finished `{file}` without its `run` entry")
     config :: jet_eval_default_config()
     span :: Span{start: 0, end: 0}
