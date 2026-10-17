@@ -4479,11 +4479,9 @@ fn sema_stmt_compound_hook_value(target: LValue, op: BinOp?, op_span: Span, expr
             return Val(Expr.Binary{op: operator, left: Expr.Ident{name: name, span: name_span}, right: expr, span: op_span})
         }
         .Field(base, field, span) -> {
-            indexed :: if base == {
-                .Ident(_, _) -> false
-                .Index(_, _, _, _) -> true
-                else -> return None
-            }
+            plain_root :: base == .Ident(_, _)
+            indexed :: base == .Index(_, _, _, _)
+            if !plain_root && !indexed -> return None
             place :: Expr.Field{base: base, member: field, span: span}
             probe_diagnostics := [Diagnostic]{}
             probed :: sema_probe_expression(place, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return None

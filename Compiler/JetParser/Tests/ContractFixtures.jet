@@ -519,7 +519,8 @@ fn pc_allow_and_fact_roots() {
     pc_require(allowed.program.applied_rules.len() == 1 && allowed.program.rule_facts.len() == 1, "allow keeps its application and fact")
     application :: allowed.program.applied_rules[0]
     pc_require(application.site == Val(RuleSite.Statement) && application.target != None, "allow records its ordinary statement site")
-    loop word in [String]{"$unknown", "$HOME", "$Build"} {
+    unknown_words :: [String]{"$unknown", "$HOME", "$Build"}
+    loop word in unknown_words {
         rejected :: parse_source("fn run() {{ print({word})\n print(\"after\")\n }}".bytes())
         pc_require(rejected.diagnostics.len() == 1 && rejected.diagnostics[0].code == "E0003", "unknown dollar word has one parser diagnosis")
         span :: rejected.diagnostics[0].span ?? panic("dollar diagnosis lost its span")
@@ -528,7 +529,8 @@ fn pc_allow_and_fact_roots() {
         pc_require(source.slice(span.start..<span.end) == word, "dollar diagnosis highlights exactly the authored word")
         pc_require(if word == "$HOME" -> rejected.diagnostics[0].what.contains("config") else -> rejected.diagnostics[0].what.contains("compiler fact"), "ALL_CAPS environment read and unknown fact diagnoses remain distinct")
     }
-    loop root in [String]{"$build", "$package", "$phase", "$program"} {
+    fact_roots :: [String]{"$build", "$package", "$phase", "$program"}
+    loop root in fact_roots {
         pc_require(parse_source("fn run() {{ print({root}.name) }}".bytes()).diagnostics.len() == 0, "canonical fact root parses")
     }
     pc_require(parse_source("fn run() {{ print(Int.$layout) }}".bytes()).diagnostics.len() == 0, "subject member fact parses")

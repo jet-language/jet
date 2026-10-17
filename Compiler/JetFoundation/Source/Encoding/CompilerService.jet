@@ -223,15 +223,22 @@ fn compiler_service_array(value: Dyn, name: String) -> [Dyn]? Never! {
 }
 
 // The one tag and payload of a `{"Tag": payload}` object.
-fn compiler_service_tagged(value: Dyn) -> (tag: String, payload: Dyn)? Never! {
+struct CompilerServiceTagged {
+    tag: String
+    payload: Dyn
+}
+
+fn compiler_service_tagged(value: Dyn) -> CompilerServiceTagged? Never! {
     if value == .Object(fields) {
-        if fields.len() == 1 -> return Val((tag: fields[0].key, payload: fields[0].value))
+        if fields.len() == 1 -> return Val(CompilerServiceTagged{tag: fields[0].key, payload: fields[0].value})
     }
     None
 }
 
 fn compiler_service_tag(tag: String, payload: Dyn) -> Dyn Never! {
-    Dyn.Object([(key: String, value: Dyn)]{(key: tag, value: payload)})
+    fields := [(key: String, value: Dyn)]{}
+    &fields.push((key: tag, value: payload))
+    Dyn.Object(fields)
 }
 
 // A CtValue as JSON, losslessly (floats by bit pattern). A closure or a
