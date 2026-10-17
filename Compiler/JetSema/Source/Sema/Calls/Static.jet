@@ -547,16 +547,22 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
     }
 
     values := [TExpr]{}
+    explicit_moves := [Bool]{}
     loop index in 0..<args.len() {
         value :: sema_call_builtin_static_argument(args[index], row.parameters[index], row, &bindings, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        &values.push(value)
+        // A written `^name` is a checked move, as for any consuming argument
+        // (Calls/Checking.jet): never a silent copy, E0201 on a read
+        // parameter. `shared name`'s operand carries no written `^`.
+        explicit :: args[index].convention == AccessConvention.Move && !args[index].flags.shared_operand && args[index].expr == .Ident(_, _) && !sema_ownership_type_is_copy(value.ty)
+        if explicit && sema_ownership_reject_read_param_move(&state, args[index].expr, scopes, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        &explicit_moves.push(explicit)
+        &values.push(sema_call_marked_move_value(&state, explicit, args[index].expr, ^value, scopes, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None})
     }
     // Rust `finish_builtin_method` (and `shared x`'s `Shared.new` arm)
     // declares no parameter conventions for a builtin static: a written `^`
-    // on a field is the consuming argument's exact move, and on a bare name
-    // it is the plain read Rust infers, so neither is E0203. The name still
-    // moves here like an unmarked owning position: a borrowed parameter
-    // keeps its value, and a later use turns the move into a share.
+    // is the consuming argument's exact move. The bare name `shared x` moves
+    // here like an unmarked owning position: a borrowed parameter keeps its
+    // value, and a later use turns the move into a share.
     params := [SemaCallParam]{}
     ownership_args := args
     named_moves := [Int]{}
@@ -565,9 +571,13 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
         if args[index].convention == AccessConvention.Move {
             if args[index].expr == {
                 .Ident(_, _) -> {
-                    convention = AccessConvention.Read
-                    ownership_args[index].convention = AccessConvention.Read
-                    &named_moves.push(index)
+                    if explicit_moves[index] {
+                        convention = AccessConvention.Move
+                    } else {
+                        convention = AccessConvention.Read
+                        ownership_args[index].convention = AccessConvention.Read
+                        &named_moves.push(index)
+                    }
                 }
                 else -> convention = AccessConvention.Move
             }

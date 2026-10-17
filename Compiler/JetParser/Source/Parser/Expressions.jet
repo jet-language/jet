@@ -678,7 +678,9 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
         parser_bump(&state)
         operand :: parser_parse_expression_restricted(&state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
         span :: parser_cover(token.span, operand.span)
-        argument :: CallArg{convention: AccessConvention.Move, expr: operand.expr, span: operand.span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+        flags := ast_empty_call_arg_flags()
+        flags.shared_operand = true
+        argument :: CallArg{convention: AccessConvention.Move, expr: operand.expr, span: operand.span, flags: flags, label: None, spread: false}
         return ParsedExpr{
             expr: Expr.MethodCall{receiver: Expr.Ident{name: "Shared", span: token.span}, method: "new", method_span: token.span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false, checked_callee: None},
             span: span,
