@@ -165,8 +165,11 @@ fn jet_cli_comparison_observation(value: Dyn, prefix: String, relation: Observat
 }
 
 fn jet_cli_comparison_seed(value: Dyn, inherited: U64?) -> U64? Never! {
-    number :: jet_cli_comparison_int(value, "seed") ?? return inherited
-    if number < 0 -> return inherited
+    // copy: `inherited` is the caller's seed (a read parameter it keeps); the case
+    // identity owns the returned seed.
+    number :: jet_cli_comparison_int(value, "seed") ?? return inherited.copy()
+    // copy: same two owners as above.
+    if number < 0 -> return inherited.copy()
     Val(U64{number})
 }
 
