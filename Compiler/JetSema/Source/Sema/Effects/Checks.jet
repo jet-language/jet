@@ -905,7 +905,10 @@ struct SemaEffectCallIndex {
     // names by trait name, and `{trait}::{method}` -> implementing type ->
     // that type's own method node.
     trait_implementers: [String:[String]]{[String:[String]]{}}
-    trait_impls: [String:[String:String]]{[String:[String:String]]{}}
+    // "{module}|{trait}::{method}#{implementing type leaf}" -> that
+    // implementation's own summary key, one flat map (no per-trait map copied
+    // on every insert).
+    trait_impls: [String:String]{[String:String]{}}
 }
 
 struct SemaEffectModuleCalls {
@@ -1118,10 +1121,10 @@ fn sema_effect_record_static_dispatch(nodes: &[SemaEffectNode], facts: SemaEffec
             trait_name :: sema_effect_symbol_leaf(trait_owner.key)
             trait_module :: sema_effect_symbol_module(trait_owner.key) ?? ""
             owners :: facts.trait_implementers.get("{trait_module}|{trait_name}") ?? [String]{}
-            impls :: facts.trait_impls.get("{trait_module}|{trait_name}::{method.name}") ?? [String:String]{}
+            impls_key :: "{trait_module}|{trait_name}::{method.name}"
             unresolved := owners.len() == 0
             loop owner in owners {
-                if impls.get(owner) == .Val(impl_key) {
+                if facts.trait_impls.get("{impls_key}#{owner}") == .Val(impl_key) {
                     sema_effect_node_add_edge(&nodes, node_index, impl_key)
                 } else {
                     unresolved = true
@@ -2031,20 +2034,36 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
     // Rust `seed_trait_dispatch_effects` (one module's items at a time):
     // implementing types by `{module}|{trait}`, and each
     // `{module}|{trait}::{method}`'s own summary per implementing type.
-    trait_implementers := [String:[String]]{}
-    trait_impls := [String:[String:String]]{}
+    // Owners group per trait key in first-seen order, each owner once
+    // (`implementer_seen`), appended in place: O(rows), not a list scan and
+    // copy per row.
+    implementer_groups := [String:Int]{}
+    implementer_keys := [String]{}
+    implementer_lists := [[String]]{}
+    implementer_seen := [String:Bool]{}
+    trait_impls := [String:String]{}
     loop module_index in 0..<inputs.len() {
         module_row :: inputs[module_index]
         module_identity :: modules[module_row.module_index].module_identity
         loop row in module_row.trait_implementers {
             pair :: row.cut_last("::") ?? next
             trait_key :: "{module_identity}|{pair.before}"
-            owners := trait_implementers.get(trait_key) ?? [String]{}
-            if !owners.contains(pair.after) -> &owners.push(pair.after)
-            trait_implementers[trait_key] = ^owners
+            group_row := implementer_groups.get(trait_key) ?? -1
+            if group_row < 0 {
+                group_row = implementer_lists.len()
+                implementer_groups[trait_key] = group_row
+                &implementer_keys.push(trait_key)
+                &implementer_lists.push([String]{})
+            }
+            seen_key :: "{module_identity}|{row}"
+            if implementer_seen.get(seen_key) != None -> next
+            implementer_seen[seen_key] = true
+            &implementer_lists[group_row].push(pair.after)
         }
         sema_effect_add_trait_impls(modules[module_row.module_index].functions, module_row, module_identity, source_indices[module_index], &trait_impls)
     }
+    trait_implementers := [String:[String]]{}
+    loop (group_row, trait_key) in implementer_keys -> trait_implementers[trait_key] = implementer_lists[group_row]
     calls := SemaEffectCallIndex{current_module: 0, modules: [SemaEffectModuleCalls]{}, node_by_key: ^node_by_key, trait_implementers: ^trait_implementers, trait_impls: ^trait_impls}
     loop module_row in inputs -> &calls.modules.push(sema_effect_module_calls(modules[module_row.module_index].call_facts))
     any_unsafe :: loop node in nodes {
@@ -2155,15 +2174,12 @@ fn sema_effect_add_module_nodes(functions: [TFunc], module_row: SemaEffectModule
 
 // Each `{module}|{trait}::{method}` implementation's node key per
 // implementing type, first one kept (Rust `seed_trait_dispatch_effects`).
-fn sema_effect_add_trait_impls(functions: [TFunc], module_row: SemaEffectModuleInput, module_identity: String, source_index: SemaEffectSourceIndex, trait_impls: &[String:[String:String]]) {
+fn sema_effect_add_trait_impls(functions: [TFunc], module_row: SemaEffectModuleInput, module_identity: String, source_index: SemaEffectSourceIndex, trait_impls: &[String:String]) {
     loop function in functions {
         if function.kind == .TraitMethod(_, _, owner_type, trait_symbol, _) {
             method :: sema_effect_method_name(function, module_row.sources, source_index)
-            trait_key :: "{module_identity}|{sema_effect_symbol_leaf(trait_symbol.key)}::{method}"
-            rows := trait_impls.get(trait_key) ?? [String:String]{}
-            owner :: sema_effect_symbol_leaf(type_name(owner_type))
-            if rows.get(owner) == None -> rows[owner] = function.key
-            trait_impls[trait_key] = ^rows
+            key :: "{module_identity}|{sema_effect_symbol_leaf(trait_symbol.key)}::{method}#{sema_effect_symbol_leaf(type_name(owner_type))}"
+            if trait_impls.get(key) == None -> trait_impls[key] = function.key
         }
     }
 }
