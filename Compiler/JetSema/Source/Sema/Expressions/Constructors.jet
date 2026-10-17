@@ -310,7 +310,9 @@ fn sema_expression_struct_field_value(field: Field, field_value: Expr, field_ref
     checked_value := if string_view -> sema_string_view_check_field(field_value, field_ty, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression_with_lambda_escapes(field_value, Val(expected_ty), environment, program, &scopes, &state, &tail_store, &context, Val(true), &diagnostics)
     checked :: checked_value ?? return None
     if !string_view && !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
-    compatible :: sema_expr_expected_assignable(field_ty, checked.ty, environment, program) ?? return None
+    // A supported Atomic field checks its scalar initializer against the
+    // scalar (`expected_ty`); the Atomic.new carrier is added below.
+    compatible :: sema_expr_expected_assignable(expected_ty, checked.ty, environment, program) ?? return None
     if !compatible {
         &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(expected_ty, environment, program), sema_expr_expected_type(checked.ty, environment, program), expr_span(field_value)))
         return None
@@ -1412,6 +1414,13 @@ fn sema_expression_variant_head(head: Type, environment: SemaScopeEnvironment, p
     if sema_scope_declaration_enum_declares(environment, program, owner.id, parts[1]) -> Val(SemaExpressionVariantHead{enum_name: parts[0], variant: parts[1]}) else -> None
 }
 
+// A record field written as the bare shorthand `{name}`: the parser gives its
+// value the field name's own identifier and span.
+fn sema_expression_field_is_shorthand(field: ExprField) -> Bool Never! {
+    if field.value == .Ident(name, value_span) -> return name == field.name && value_span.start == field.name_span.start && value_span.end == field.name_span.end
+    false
+}
+
 // D-DIST1/D-DIST3 (E0128): a distinct head never re-types its base value;
 // the destination owns the explicit conversion. Returns true when reported.
 fn sema_expression_typed_literal_distinct_mismatch(head: Type, value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
@@ -1426,7 +1435,9 @@ fn sema_expression_typed_literal_distinct_mismatch(head: Type, value: TExpr, env
         .Char -> "from_char"
         else -> "from_{offered}"
     }
-    &diagnostics.push(sema_error("E0128", value.span, "a `{offered}` can't be used where a `{facts.name}` is expected", "`{facts.name}` and `{offered}` are different types — even though `{facts.name}` is built on `{type_name(facts.base)}`, one is never accepted in place of the other", "convert explicitly: `{facts.name}.{method}(expr)`"))
+    // The source spelling of the destination, never its resolved symbol identity.
+    shown :: sema_type_nominal_leaf(Type.Named{name: facts.name})
+    &diagnostics.push(sema_error("E0128", value.span, "a `{offered}` can't be used where a `{shown}` is expected", "`{shown}` and `{offered}` are different types — even though `{shown}` is built on `{type_name(facts.base)}`, one is never accepted in place of the other", "convert explicitly: `{shown}.{method}(expr)`"))
     true
 }
 
@@ -1500,6 +1511,13 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
         }
         .Named(name) -> if body == {
             .Fields(fields) -> {
+                // D-DIST1 (#4764): a distinct head is not a record, so `CustomerID{n}`
+                // is its one-expression body (the parser reads `{n}` as a field
+                // shorthand before types are known) and reaches the E0128 conversion rule.
+                if fields.len() == 1 && sema_expression_field_is_shorthand(fields[0]) && sema_expr_distinct_facts(result_head, environment, program, &scopes) != None {
+                    // copy: `fields` is a payload of read parameter `body`, which keeps the original
+                    return sema_expression_typed_literal(head, TypedLitBody.Value{value: fields[0].value.copy()}, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                }
                 checked :: sema_expression_struct_literal(name, [Type]{}, fields, false, None, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
             }
