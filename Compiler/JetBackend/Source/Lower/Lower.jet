@@ -2378,11 +2378,10 @@ fn lower_builtin_reads_operand(p: MIRProgram, m: LowerModule, function: MIRFunct
     false
 }
 
-// Builtin methods whose exact Int arguments are all bounds or positions the
-// lowering converts to native words and never drops or stores (Lists.jet
-// lower_list_method_window, lower_list_method; the String slice route's Word
-// bounds, which TextRoutes.jet jet_string_slice_builtin only reads).
-LOWER_RELEASE_INT_READING_BUILTINS :: [String]{"jet_list_slice", "jet_list_swap", "jet_list_get_opt", "jet_string_slice_builtin"}
+// Builtin methods whose exact Int arguments are all positions the lowering
+// converts to native words and never drops or stores (Lists.jet
+// lower_list_method). Slices read every operand (LOWER_RELEASE_BORROWING_BUILTINS).
+LOWER_RELEASE_INT_READING_BUILTINS :: [String]{"jet_list_swap", "jet_list_get_opt"}
 
 // MIR leaves the end of an owned temporary implicit; the Rust emitter drops it
 // at the end of its statement, and a Rust assignment drops the value it
@@ -2436,6 +2435,10 @@ struct LowerReleasePlan {
     // Candidates made by a root MovePlace: released although the read slot
     // map names their slot, which no longer holds them.
     taken: [U64:Bool]
+    // Root reads of an exact Int local that own a copy of the slot's value
+    // (lower_release_owning_read; lower_read_owns): released as temporaries
+    // although the read slot map names their slot.
+    owned_reads: [U64:Bool]
 }
 
 // One use of a MIR value: by the instruction at `position`, or by its block's
@@ -2452,7 +2455,7 @@ LOWER_RELEASE_ALIAS :: prep { 2 }
 LOWER_RELEASE_KEEP :: prep { 3 }
 
 fn lower_release_plan(p: MIRProgram, m: LowerModule, function: MIRFunction, fact_index: [U64:Int], dead: [U64:Bool], sunk: [U64:Bool], block_index: [U64:Int], successors: [[Int]], order: [Int], iter_takes: [U64:Bool], inspect_moves: [U64:Bool], inspect_carriers: [U64:Bool], slots: [LowerSlot], place_slots: [U64:Int], live: [[Int]]) -> LowerReleasePlan Never! {
-    plan := LowerReleasePlan{after: [U64:[MIRValueID]]{}, edges: [Int:[MIRValueID]]{}, candidates: [U64:Bool]{}, bound: [U64:Bool]{}, write_drops: [U64:Bool]{}, slot_edges: [Int:[Int]]{}, slot_returns: [Int:[Int]]{}, taken: [U64:Bool]{}}
+    plan := LowerReleasePlan{after: [U64:[MIRValueID]]{}, edges: [Int:[MIRValueID]]{}, candidates: [U64:Bool]{}, bound: [U64:Bool]{}, write_drops: [U64:Bool]{}, slot_edges: [Int:[Int]]{}, slot_returns: [Int:[Int]]{}, taken: [U64:Bool]{}, owned_reads: [U64:Bool]{}}
     count :: function.blocks.len()
     pinned := [U64:Bool]{}
     // The values a place's projections compute it from (an index, a range,
@@ -3003,7 +3006,8 @@ fn lower_release_takes(used: LowerReleaseUse?) -> Bool Never! {
 // A read used only later in its own block leaves no write in that block
 // between the read and its last use; a read used in later blocks too
 // (lower_release_cross_read) leaves no write or move of the place in its
-// block after it, nor in any block its value is live into. A local an `uninit`
+// block after it, nor in any block its value is live into, unless it owns a
+// copy instead (lower_release_owning_read). A local an `uninit`
 // initializes is left alone (its unwritten rows hold no owners). Whether the
 // place may hold no value at the write follows lower_release_slot_flow: a
 // move out of it empties it, a whole-root write fills it. A local carried in
@@ -3072,7 +3076,9 @@ fn lower_release_write_drops(plan: &LowerReleasePlan, p: MIRProgram, m: LowerMod
     }
     loop row in crossing {
         if eligible.get(row.slot) == None -> next
-        if !lower_release_cross_read(function, uses, phi_edges, pinned, reachable, successors, predecessors, place_slots, live, row) -> _ := &eligible.remove(row.slot)
+        if lower_release_cross_read(function, uses, phi_edges, pinned, reachable, successors, predecessors, place_slots, live, row) -> next
+        if lower_release_owning_read(&plan, p, function, uses, phi_edges, pinned, successors, predecessors, slots, place_slots, projected_places, row) -> next
+        _ := &eligible.remove(row.slot)
     }
     // Per slot * block count + block: the slot may enter the block empty, or
     // holding a value; per slot: whether both are computed.
@@ -3134,7 +3140,9 @@ fn lower_release_write_drops(plan: &LowerReleasePlan, p: MIRProgram, m: LowerMod
 // (MIR drops such a local only where its scope ends, behind its drop flag;
 // a loop that rebinds a list local each iteration releases each old list
 // on the edge into the rebinding block, lower_release_slots).
-// It is never released before a return (MIR drops it there), nor when a
+// It is never released before a return (MIR drops it there), except a
+// `View<str>`, which MIR never drops (a borrowed `&str` window there, an
+// owned String handle here: lower_string_view), nor when a
 // field of it is moved out (its partial-drop flags own that). A slot whose
 // whole root is written with a value anything else also uses is left alone;
 // a projected write (`seen[k] = v` after `seen = [K:V]{}`) keeps it dying.
@@ -3149,7 +3157,7 @@ fn lower_release_slot_deaths(plan: &LowerReleasePlan, p: MIRProgram, m: LowerMod
                 _ := &dying.add(slot, true)
             } else if lower_needs_drop(p, m, row.ty) && lower_close_method(p, m.close_methods, row.ty) == None {
                 _ := &dying.add(slot, true)
-                _ := &owned.add(slot, true)
+                if !lower_string_view(row.ty) -> _ := &owned.add(slot, true)
             }
         }
     }
@@ -3362,6 +3370,32 @@ fn lower_release_cross_read(function: MIRFunction, uses: [U64:[LowerReleaseUse]]
         end :: if live_out -> function.blocks[block].instructions.len() else -> (last.get(block) ?? -1) + 1
         if lower_release_block_writes(function.blocks[block].instructions, place_slots, row.slot, 0, end) -> return false
     }
+    true
+}
+
+// A borrowed read lower_release_cross_read rejects, of an exact Int local
+// (lower_release_copy_local, not a cell) through its root place, whose uses
+// only read it (merged by no phi, taken by no consumer, every use modelled):
+// it owns a copy of the slot's value instead (lower_read_owns clones it, a
+// word unless the value is a big integer), released as a temporary after its
+// uses (lower_release_schedule), so the slot's writes and deaths still
+// release the values they find. `implementation :: p.impls[at]` followed by
+// `at = next[at]` names `p.impls[at]` by the old `at` after the write.
+fn lower_release_owning_read(plan: &LowerReleasePlan, p: MIRProgram, function: MIRFunction, uses: [U64:[LowerReleaseUse]], phi_edges: [U64:[Int]], pinned: [U64:Bool], successors: [[Int]], predecessors: [[Int]], slots: [LowerSlot], place_slots: [U64:Int], projected_places: [U64:Bool], row: LowerReleaseCrossRead) -> Bool Never! {
+    if slots[row.slot].cell || !lower_release_copy_local(p, slots[row.slot].ownership, slots[row.slot].ty) -> return false
+    root := false
+    if function.blocks[row.block].instructions[row.position].operation == .ReadPlace(place) {
+        root = projected_places.get(place.value) == None && place_slots.get(place.value) == Val(row.slot)
+    }
+    if !root || pinned.get(row.read) != None || phi_edges.get(row.read) != None -> return false
+    read :: MIRValueID{value: row.read}
+    effective :: lower_release_effective_uses(function, uses, phi_edges, pinned, read, Val(read)) ?? return false
+    loop used in effective {
+        if used.kind == LOWER_RELEASE_CONSUME -> return false
+    }
+    lower_release_schedule(&plan, function, successors, predecessors, [Int]{}, effective, read, row.block, row.position)
+    _ := &plan.candidates.add(row.read, true)
+    _ := &plan.owned_reads.add(row.read, true)
     true
 }
 
@@ -4225,9 +4259,12 @@ fn lower_open_defines(f: LowerFunction, index: Int, from: Int) -> Bool Never! {
 // lower_core_equal and Strings.jet lower_string_method; index_of only
 // compares its needle, Lists.jet lower_helper_list_index_of; a Map remove
 // only compares its key, Maps.jet lower_helper_map_take; Int.parse and
-// Float.parse read their text into a fresh Result): a temporary they read is
-// still the caller's to release once their owned result no longer needs it.
-LOWER_RELEASE_BORROWING_BUILTINS :: [String]{"jet_eq", "jet_list_len", "jet_list_is_empty", "jet_list_join", "jet_list_contains", "jet_list_index_of", "jet_char_len", "jet_string_count_bytes", "jet_string_is_empty", "jet_string_contains", "jet_string_starts_with", "jet_string_ends_with", "jet_string_bytes", "jet_string_replace", "jet_string_repeat", "jet_string_from_bytes", "jet_string_from_bytes_lossy", "jet_string_after", "jet_string_before", "jet_string_after_view", "jet_string_before_view", "jet_string_trim_view", "jet_unicode_trim", "jet_unicode_trim_view", "jet_unicode_lower", "jet_unicode_upper", "jet_unicode_index_of", "jet_unicode_last_index_of", "jet_unicode_count", "jet_iter_string_split", "jet_iter_string_rsplit", "jet_map_len", "jet_map_is_empty", "jet_map_get_opt", "jet_map_has_key", "jet_map_pop_kernel", "jet_int_parse", "jet_float_parse"}
+// Float.parse read their text into a fresh Result; a List slice copies its
+// window's elements, Lists.jet lower_list_method_window, and a String slice
+// its window's text, Text.jet rt_text_slice, reading only their bounds): a
+// temporary they read is still the caller's to release once their owned
+// result no longer needs it.
+LOWER_RELEASE_BORROWING_BUILTINS :: [String]{"jet_eq", "jet_list_len", "jet_list_is_empty", "jet_list_join", "jet_list_contains", "jet_list_index_of", "jet_list_slice", "jet_char_len", "jet_string_count_bytes", "jet_string_is_empty", "jet_string_contains", "jet_string_starts_with", "jet_string_ends_with", "jet_string_bytes", "jet_string_replace", "jet_string_repeat", "jet_string_from_bytes", "jet_string_from_bytes_lossy", "jet_string_slice_builtin", "jet_string_after", "jet_string_before", "jet_string_after_view", "jet_string_before_view", "jet_string_trim_view", "jet_unicode_trim", "jet_unicode_trim_view", "jet_unicode_lower", "jet_unicode_upper", "jet_unicode_index_of", "jet_unicode_last_index_of", "jet_unicode_count", "jet_iter_string_split", "jet_iter_string_rsplit", "jet_map_len", "jet_map_is_empty", "jet_map_get_opt", "jet_map_has_key", "jet_map_pop_kernel", "jet_int_parse", "jet_float_parse"}
 
 // Releases an owned temporary (lower_release_plan) unless its lowering made
 // no fresh owner of it (lower_mark_releasable), a slot holds its LIR value
@@ -4256,7 +4293,7 @@ fn lower_temp_release(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     // A root move cleared its slot (lower_clear_slot, or lower_clear_at for
     // a cell): the moved value it took, a moved match subject included, is
     // released here.
-    if lower_slot_of_value(c, value) != None && c.releases.taken.get(value.value) == None -> return
+    if lower_slot_of_value(c, value) != None && c.releases.taken.get(value.value) == None && c.releases.owned_reads.get(value.value) == None -> return
     loop slot_value in f.current {
         if slot_value == .Val(holding) && holding.value == index -> return
     }
@@ -4991,7 +5028,8 @@ fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 
 // A read (not a move) of a place whose owned result is stored into another
 // place or aggregate or returned is a copy of its own, as MIRRust.rs
-// place_read's `.clone()`; otherwise the read borrows the place's value.
+// place_read's `.clone()`; otherwise the read borrows the place's value. A
+// read the release plan makes an owner (lower_release_owning_read) copies too.
 // An inline aggregate's value is a pointer to its bytes, so a stored read of
 // one owns a copy even when it has no drop glue: a field write through the
 // source writes those bytes in place, and an alias would see it
@@ -4999,6 +5037,7 @@ fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 // builder.current = resume` restored the entry block).
 fn lower_read_owns(p: MIRProgram, c: LowerContext, m: LowerModule, instruction: MIRInstruction, ty: MIRType) -> Bool Never! {
     result :: instruction.result ?? return false
+    if c.releases.owned_reads.get(result.value) != None -> return true
     if c.sunk.get(result.value) == None -> return false
     lower_value_owned(c, result) && (lower_needs_drop(p, m, ty) || lower_is_inline(p, ty))
 }
