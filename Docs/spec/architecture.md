@@ -743,9 +743,9 @@ values and including their source files does not activate the host startup path
 or qualify a native supplier.
 
 The bootstrap host initializes every `JetDriverCompileRequest` field, including
-declared defaults, through checked field-symbol metadata. Ordinary bootstrap
-compilation keeps `comptime_stop_points` false; only native comptime selection
-enables it. The focused
+declared defaults, through checked field-symbol metadata. Compilation keeps
+`comptime_stop_points` false: compile-time code runs in the in-process
+evaluator, which refuses stop points, until native in-memory O0 lands. The focused
 [`bootstrap host field guard`](../../Tools/agent/bootstrap-host-fields.test.mjs)
 checks that new request fields have both an emitted initializer row and its
 metadata binding before the generated producer is built.

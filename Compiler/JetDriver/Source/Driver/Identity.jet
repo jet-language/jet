@@ -259,13 +259,13 @@ struct JetDriverCompileRequest {
     execution_host: JetDriverExecutionHost?{None}
     // Unified host/stop contract (#4720): the comptime lowering session
     // produces MIR stop points (Poll/Stopped and the budget can-stop rows)
-    // for the native execution host. Only the native comptime selection sets
-    // it; the evaluator refuses stop points, so every other compile leaves it
-    // off.
+    // only for a native execution host. Compile-time code runs in the
+    // in-process evaluator until native in-memory O0 lands, and the evaluator
+    // refuses stop points, so every compile leaves it off.
     comptime_stop_points: Bool{false}
     // Ordinary native Program/Test/Doc artifacts use returning-stop MIR.
-    // This is independent of the native comptime session selection above;
-    // evaluator, Rust emission and library assembly leave it disabled.
+    // This is independent of the comptime stop points above; evaluator, Rust
+    // emission and library assembly leave it disabled.
     native_stop_points: Bool{false}
 }
 
