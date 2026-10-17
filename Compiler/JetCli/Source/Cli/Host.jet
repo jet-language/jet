@@ -523,7 +523,9 @@ fn jet_cli_native_back(front: ^JetCLINativeFront, trace_sink: CompilerTraceSink?
         if !keep_going || object.bytes.len() == 0 {
             dump := String?{None}
             if fault_dump == .Val(directory) {
+                // Bounded like the lowering dump (JET_CLI_EMIT_FAULT_DUMP_FUNCTIONS).
                 loop (index, function) in outcome.faults {
+                    if index >= JET_CLI_EMIT_FAULT_DUMP_FUNCTIONS -> break
                     if jet_cli_emit_fault_lir(function, index, directory) != None -> dump = Val(directory)
                 }
             }

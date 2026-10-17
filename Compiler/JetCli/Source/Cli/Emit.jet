@@ -2,7 +2,7 @@
 // successful --json still prints raw generated Rust; the mode flag changes
 // only compiler diagnostic routing. `--ast`, `--mir` and `--lir` print one
 // EmitTree (EmitTree.jet): text by default, the `emit` status under --json.
-use jet_backend.[lir_lower_entry]
+use jet_backend.[lir_lint_module, lir_lower_entry]
 use jet_driver.[
     JetDriverAuthorizedSourceSnapshot,
     JetDriverCompileResult,
@@ -78,9 +78,22 @@ fn jet_cli_emit_tier_result(file: String, source: String, color: Bool, json: Boo
     // foreign helper lowers from its own attached copy of the program.
     attached :: jet_cli_rust_foreign_attached(result.rust_foreign, program) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_rust_foreign_report(err, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     lowered :: if attached.len() == 1 -> lir_lower_entry(attached[0], entry) else -> lir_lower_entry(program, entry)
-    if lowered.issues.len() > 0 {
-        functions :: loop issue in lowered.issues -> issue.function
-        messages :: loop issue in lowered.issues -> issue.message
+    functions := [String]{}
+    messages := [String]{}
+    loop issue in lowered.issues {
+        &functions.push(issue.function)
+        &messages.push(issue.message)
+    }
+    // The lowering does not lint (the native route lints each function in
+    // its object job, SPEED-500K D6); the dump reports the findings as the
+    // lowering's issues once did, after any lowering issue.
+    if functions.len() == 0 {
+        loop issue in lir_lint_module(lowered.lir) {
+            &functions.push(issue.function)
+            &messages.push("LIR lint b{issue.block}: {issue.message}")
+        }
+    }
+    if functions.len() > 0 {
         what :: "the Jet backend can't lower `{file}` yet:\n{jet_cli_native_lowering_rows(functions, messages, ": ").join("\n")}"
         return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", what, jet_cli_why("E2104"), "correct the reported native backend problems, then retry `jet emit --lir {file}`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }

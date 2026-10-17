@@ -48,9 +48,9 @@ test("process CPU per line, nested checks and digests subtracted from their phas
     ...span("optimize.check", 22000, 23000, 30_000_000),
     { name: "optimize", cat: "optimize", ph: "E", ts: 30000, args: { proc_cpu_ns: 200_000_000 } },
     { name: "native.lower", cat: "native.lower", ph: "B", ts: 30000 },
-    ...span("native.lir_lint", 31000, 32000, 4_000_000, "lower"),
     { name: "native.lower", cat: "native.lower", ph: "E", ts: 40000, args: { proc_cpu_ns: 10_000_000 } },
     counter("native.lower.lir_insts", 2000),
+    ...span("native.object", 40000, 50000, 13_000_000),
   ]);
   const { status, out } = run(file, "--column", "1M");
   assert.equal(status, 1, out);
@@ -62,10 +62,10 @@ test("process CPU per line, nested checks and digests subtracted from their phas
   assert.deepEqual(row(out, "P8").slice(3, 7), ["100,000", "1,300", "76.9x", "OVER"]);
   assert.deepEqual(row(out, "P9").slice(3, 7), ["80,000", "500", "160.0x", "OVER"]);
   assert.deepEqual(row(out, "D5").slice(3, 7), ["20,000", "0", "inf", "OVER"]);
-  assert.deepEqual(row(out, "P10").slice(3, 7), ["6,000", "1,300", "4.6x", "OVER"]);
-  assert.deepEqual(row(out, "P11").slice(3, 7), ["4,000", "250", "16.0x", "OVER"]);
+  assert.deepEqual(row(out, "P10").slice(3, 7), ["10,000", "1,300", "7.7x", "OVER"]);
+  assert.deepEqual(row(out, "P11+P12+P13").slice(3, 7), ["13,000", "3,250", "4.0x", "OVER"]);
   assert.equal(row(out, "P3")[6], "absent");
-  assert.match(out, /native\.lir_lint lower\s+1\s+0\.004/);
+  assert.doesNotMatch(out, /native\.lir_lint/);
   assert.match(out, /load\.marker_groups\.relex\s+1\s+0\.001/);
   assert.match(out, /D12 overlap: not in trace/);
   assert.match(out, /FAIL: over the 1M budget/);

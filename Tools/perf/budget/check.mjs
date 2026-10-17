@@ -289,7 +289,6 @@ function main() {
       census.push([name, kind, sum.count, fixed(sum.ns / 1e9, 3), grouped(sum.ns / lines), grouped(sum.items)]);
     }
   };
-  addCensus("D6 LIR lint", "native.lir_lint", true);
   addCensus("D10b marker groups", "load.marker_groups.relex", false);
   addCensus("D10b marker groups", "load.marker_groups.reparse", false);
   addCensus("D12 comptime lower", "comptime.lower", true);

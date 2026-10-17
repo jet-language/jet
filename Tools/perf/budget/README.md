@@ -19,19 +19,22 @@ What the native `jet` writes for the checker (Compiler/JetCli/Source/Cli/Request
   thread, `/proc/self/stat`, 10 ms ticks) and `majflt`;
 - work counters (`C` events, summed per name): `parse.{user_,core_,}lines`,
   `parse.{user_,core_,}tokens`, `lower.functions`, `{lower,assemble,optimize}.mir_insts`,
-  `native.{lower,optimize}.functions`, `native.{lower,optimize}.lir_insts`,
+  `native.lower.functions`, `native.lower.lir_insts`,
   `native.object.bytes`, `native.link.bytes`, `comptime.functions_lowered`,
   `lower.comptime_overlap_functions`;
-- the spans the plan had no measurement for: `native.lir_lint` (detail `lower`
-  or `object`, D6), `load.marker_groups.relex` / `.reparse` (D10b),
-  `comptime.lower` (detail `program` or `grow`, D12) with the overlap counter,
-  `mir.digest` (detail: the consumer, `web.semantic`; D5; traces written
-  before the D5 cutover also carry `optimize.seal_check` and `optimize.seal`),
-  and `optimize.check`, the one MIR checker (P9; traces written before the D3
-  cutover carry `optimize.legality` and `optimize.lint` instead).
+- the spans the plan had no measurement for: `load.marker_groups.relex` /
+  `.reparse` (D10b), `comptime.lower` (detail `program` or `grow`, D12) with
+  the overlap counter, `mir.digest` (detail: the consumer, `web.semantic`; D5;
+  traces written before the D5 cutover also carry `optimize.seal_check` and
+  `optimize.seal`), and `optimize.check`, the one MIR checker (P9; traces
+  written before the D3 cutover carry `optimize.legality` and `optimize.lint`
+  instead). The one LIR check (P11, D6) runs per function inside
+  `native.object` and has no span of its own: its allowance is in the
+  P11+P12+P13 row (traces written before the D6 cutover carry
+  `native.lir_lint` spans, which that row and P10 then include).
 
 The default clock is the process CPU time when the trace carries it, else wall
-time (traces written before these spans and clocks; their P9, D5 and P11 time
-is still inside P8, P10 and P12, which then show `absent` rows). The per-line
+time (traces written before these spans and clocks; their P9 and D5 time is
+still inside P8, which then shows `absent` rows). The per-line
 denominator is the trace's `parse.user_lines`, else `default_lines` (448,165,
 the self-compile unit).
