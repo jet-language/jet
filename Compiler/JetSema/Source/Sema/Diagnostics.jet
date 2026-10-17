@@ -196,12 +196,6 @@ fn sema_error(code: String, span: Span, what: String, why: String, fix: String) 
     sema_error_optional(code, Val(span), what, why, fix)
 }
 
-// Rust Sema/Purity.rs `e3402`: ambient I/O or network access attempted
-// during a sandboxed package build or module-value evaluation.
-fn sema_e3402(call_name: String, span: Span?) -> Diagnostic {
-    sema_error_optional("E3402", span, "`{call_name}` is not allowed during a sandboxed package build", "package builds run with ambient I/O and network access disabled (D-PURE2)", "compute this value at compile time or pass it in as a parameter")
-}
-
 fn sema_lint(code: String, span: Span, what: String, why: String, fix: String) -> Diagnostic {
     diagnostic_from_registry(code, Val(span), what, why, fix)
 }

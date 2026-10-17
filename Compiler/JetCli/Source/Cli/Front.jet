@@ -19,6 +19,7 @@ use jet_driver.[
 use jet_foundation.[
     JET_CLI_COMMANDS,
     JET_CLI_HANDLERS,
+    JET_COMPILER_SERVICE_VERB,
     Diagnostic,
     PolicyKey,
     diagnostic_from_registry,
@@ -138,6 +139,9 @@ enum JetCLIPlan {
     // `jet inspect output <file> [<address>]` (CmdInspect.rs `run_output`):
     // the sema-selected Output of the authorized request of `file`.
     Output(file: String, address: String?, color: Bool, json: Bool)
+    // `jet __jetpack <op>` (JetpackService.jet): the internal compiler
+    // service `jetpack` speaks over stdin/stdout; never in help.
+    CompilerService(op: String)
 }
 
 // One native `jet fmt` invocation (Source/main.rs `"fmt"` -> `run_fmt`).
@@ -1253,6 +1257,12 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm]> JetCL
     // D-ADOPT-CCSPELL1=A: the engine compiler aliases own every raw argument
     // (Source/main.rs `dispatch_alias`), before Jet's output/flag parsing.
     if raw.len() > 0 && (raw[0] == "cc" || raw[0] == "c++") -> return jet_cli_foreign_compile_plan(raw)
+    // The internal compiler service owns its raw arguments, as the engine
+    // aliases do: `jet __jetpack <op>`, nothing else.
+    if raw.len() > 0 && raw[0] == JET_COMPILER_SERVICE_VERB {
+        if raw.len() != 2 -> return jet_cli_done("", jet_cli_report("E2104", "`jet {JET_COMPILER_SERVICE_VERB}` takes exactly one operation", jet_cli_why("E2104"), "`jet {JET_COMPILER_SERVICE_VERB}` is spoken by `jetpack`; run the jetpack command instead", false), JET_DRIVER_EXIT_USAGE)
+        return JetCLIPlan.CompilerService{op: raw[1]}
+    }
     // Output flags, parsed once from the jet-owned prefix before `--`.
     owned :: jet_cli_owned_flags(raw)
     color := false

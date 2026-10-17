@@ -43,7 +43,7 @@ fn envmodel_is_ambient_io_builtin(name: String) -> Bool Never! {
 // Scan a field expression for an ambient-I/O call; the first one fires E3402.
 fn envmodel_check_build_io(value: Expr) EnvModelEvalError! {
     loop site in comptime_walk_calls(value) {
-        if envmodel_is_ambient_io_builtin(site.name) -> return Err(EnvModelEvalError{diagnostic: sema_e3402(site.name, Val(site.span))})
+        if envmodel_is_ambient_io_builtin(site.name) -> return Err(EnvModelEvalError{diagnostic: envmodel_e3402(site.name, Val(site.span))})
     }
 }
 

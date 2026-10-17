@@ -92,7 +92,7 @@ fn cli_run_project_job_leaf(verification: &StoreVerification, cache: &WorkspaceD
         theme.error_coded("E1330", "job `{job}` has a non-directory cwd", "job cwd `{job_cwd}` is not a directory", "use a project-relative directory for `cwd`.")
         return EXIT_USAGE
     }
-    jet_binary := cli_find_jet_binary()
+    jet_binary := envmodel_find_jet_binary()
     cache_key := String?{None}
     if metadata.cache != JobCachePolicy.Uncached {
         if metadata.outputs.len() == 0 {
@@ -189,7 +189,7 @@ fn cli_run_project_job_leaf(verification: &StoreVerification, cache: &WorkspaceD
 // The compiler a strict cached job runs: the lease-resolved executable when
 // the job environment provides `jet`, else the one on PATH.
 fn cli_resolve_job_jet_binary(env: ShellEnv) -[FS, Env]> String CLIError! {
-    requested :: cli_find_jet_binary()
+    requested :: envmodel_find_jet_binary()
     loop lease in env.cache_leases {
         found :: lease.executable_for_command(requested) ?? return Err(CLIError.Other("{err}"))
         if found == .Val(stable) -> return Ok(stable)

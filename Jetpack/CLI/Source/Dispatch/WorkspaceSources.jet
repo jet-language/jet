@@ -186,7 +186,7 @@ fn cli_workspace_index_required_diagnostic() -> Diagnostic Never! {
     diagnostic_from_registry("E1239", None, "workspace build needs workspace.jet as the index", "an authority declaration is not a member index", "move members into workspace.jet and keep one workspace index")
 }
 
-fn cli_workspace_snapshot_from_source(resolver: AuthorityResolver, expected: WorkspaceSource) -[FS]> WorkspaceSnapshot CLIError! {
+fn cli_workspace_snapshot_from_source(resolver: AuthorityResolver, expected: WorkspaceSource) -[FS, Env, Exec, Time.Wait]> WorkspaceSnapshot CLIError! {
     if envmodel_workspace_load_checked_source(resolver, expected) == {
         .Ok(snapshot) -> Ok(snapshot)
         .Err(error) -> Err(CLIError.Diagnostic(error.diagnostic))

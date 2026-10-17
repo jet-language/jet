@@ -1,0 +1,69 @@
+// The jetpack side of `jet __jetpack comptime-evaluate`: the request carries
+// exactly the config-value program `jet` evaluates in-process, a refusal is
+// placed on the config expression as the in-process evaluator places it, and
+// a plain literal never reaches the compiler.
+
+// The first top-level constant of `source`, with the source's functions.
+fn envmodel_service_test_constant(source: String) -> (expr: Expr, funcs: [String: Func]) {
+    parsed :: parse_source(source.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    funcs := [String: Func]{}
+    found := Expr?{None}
+    loop item in parsed.program.items {
+        if item == {
+            .Func(function) -> funcs[function.name] = function
+            .Const(constant) -> {
+                if found == None -> found = Val(constant.value)
+            }
+            else -> {}
+        }
+    }
+    (expr: found ?? panic("the fixture declares a constant"), funcs: funcs)
+}
+
+#Test("compiler service comptime request carries the config value program") {
+    source :: "fn double(x: Int) -> Int {{ x * 2 }}\nVALUE :: double(PORT)\n"
+    fixture :: envmodel_service_test_constant(source)
+    globals := [String: CtValue]{}
+    globals["PORT"] = CtValue.Int(21)
+    program :: jet_config_program(fixture.expr, source, fixture.funcs, globals) ?? panic("the config value program builds")
+    assert(program.contains("fn double(x: Int) -> Int {{ x * 2 }}"), program)
+    assert(program.contains("JET_CONFIG_GLOBAL_0 :: 21"), program)
+    assert(program.contains("{JET_CONFIG_VALUE_NAME} :: prep {{ double(JET_CONFIG_GLOBAL_0) }}"), program)
+    request :: foundation_parse_protocol_json(compiler_service_comptime_request(program, "/srv/project")) ?? panic("the request is protocol JSON")
+    fields :: compiler_service_comptime_request_from(request) ?? panic("the request reads back")
+    assert_eq(fields.program, program)
+    assert_eq(fields.base_dir, "/srv/project")
+}
+
+#Test("compiler service refusal is placed on the config expression") {
+    source :: "VALUE :: 1 + missing()\n"
+    fixture :: envmodel_service_test_constant(source)
+    refusal :: jet_config_eval_diagnostic(None, "this config value could not be evaluated: `missing` is not defined")
+    response :: foundation_parse_protocol_json(compiler_service_comptime_response(JetConfigOutcome.Refused{diagnostic: refusal})) ?? panic("the response is protocol JSON")
+    if compiler_service_comptime_outcome(response) == {
+        .Val(.Refused(diagnostic)) -> {
+            placed :: jet_config_eval_placed(fixture.expr, diagnostic)
+            assert_eq(placed.diagnostic.code, "E0956")
+            assert_eq(placed.diagnostic.span, Val(expr_span(fixture.expr)))
+            assert_eq(placed.diagnostic.what, refusal.what)
+            assert_eq(placed.diagnostic.why, refusal.why)
+            assert_eq(placed.diagnostic.fix, refusal.fix)
+        }
+        else -> panic("the refusal reads back")
+    }
+}
+
+#Test("compiler service is not asked for a plain literal") {
+    cases :: [(source: String, expected: CtValue)]{(source: "VALUE :: 42\n", expected: CtValue.Int(42)), (source: "VALUE :: \"text\"\n", expected: CtValue.Str("text")), (source: "VALUE :: (true)\n", expected: CtValue.Bool(true))}
+    loop row in cases {
+        fixture :: envmodel_service_test_constant(row.source)
+        value :: comptime_evaluate(fixture.expr, row.source, fixture.funcs, "/nonexistent", [String: CtValue]{}) ?? panic("a literal is its own value: {err.diagnostic.what}")
+        assert(value == row.expected)
+    }
+}
+
+#Test("compiler service finds the sibling jet or the PATH name") {
+    found :: envmodel_find_jet_binary()
+    assert(found == BINARY_NAME || files.is_file(found), found)
+}

@@ -7,7 +7,7 @@
 
 CLI_TEST_IMAGE_SERVICE_E1336 :: prep { embed_file("../../../tests/cli/image_service_projection_e1336.txt") }
 
-fn cli_test_eval_error(src: String, dir: String) -[FS, Env]> EnvModelEvalError {
+fn cli_test_eval_error(src: String, dir: String) -[FS, Env, Exec, Time.Wait]> EnvModelEvalError {
     if envmodel_evaluate_env(src, dir) == {
         .Ok(_) -> panic("the environment must be refused")
         .Err(error) -> error

@@ -1,0 +1,497 @@
+// The first-party compiler service between the `jetpack` engine and the `jet`
+// binary. Jetpack links only the front end; a config value that needs the
+// comptime stage, or a project entry that needs the checker, is answered by
+// `jet __jetpack <op>` (one evaluator, one checker; I8). Both sides build the
+// same config-value program here, and both ends of the wire use these codecs:
+// one JSON request on stdin, one JSON response on stdout. The verb is internal
+// (absent from help and the command registry), like the engine side's
+// `--engine-protocol`.
+//
+// Ops:
+//   comptime-evaluate  {"program", "base_dir"} -> {"value"} | {"error"}
+//   check-entry        {"file", "source"}      -> {"diagnostics"}
+// A response `error` / `diagnostics` row is a wire diagnostic; the requester
+// places a config failure on its own expression. `comptime_evaluate` has one
+// definition per binary over this file: in `jet` (JetCli ConfigEval.jet) it
+// evaluates in-process, in `jetpack` (EnvModel CompilerService.jet) it asks
+// the sibling `jet` through this service; both place the outcome with
+// `jet_config_eval_placed`.
+use core.encoding.json as service_json
+use core.math as service_math
+
+JET_COMPILER_SERVICE_VERB :: "__jetpack"
+JET_COMPILER_SERVICE_COMPTIME_EVALUATE :: "comptime-evaluate"
+JET_COMPILER_SERVICE_CHECK_ENTRY :: "check-entry"
+
+// A config value that could not be evaluated: the diagnostic, placed on the
+// config source.
+#Error
+struct ComptimeEvalError {
+    diagnostic: Diagnostic
+}
+
+JET_CONFIG_VALUE_NAME :: "JET_CONFIG_VALUE"
+JET_CONFIG_VALUE_FILE :: "jet_config_value.jet"
+
+// E0956 for one config value; `span` is the config expression's own span, or
+// None on the compiler side of the service, which has no such expression.
+fn jet_config_eval_diagnostic(span: Span?, what: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E0956", span, what, "config values are evaluated as typed Jet code at build time, and only literal data crosses into and out of that code", "write the value as literal data, or compute it with a pure function over literal data")
+}
+
+fn jet_config_eval_error(expr: Expr, what: String) -> ComptimeEvalError Never! {
+    ComptimeEvalError{diagnostic: jet_config_eval_diagnostic(Val(expr_span(expr)), what)}
+}
+
+// A spanless refusal from the evaluator, placed on the config expression.
+fn jet_config_eval_placed(expr: Expr, diagnostic: Diagnostic) -> ComptimeEvalError Never! {
+    ComptimeEvalError{diagnostic: diagnostic_from_registry(diagnostic.code, Val(expr_span(expr)), diagnostic.what, diagnostic.why, diagnostic.fix)}
+}
+
+// The value of one config-value program, or the spanless diagnostic that
+// refused it; the requester places that diagnostic on its config expression.
+enum JetConfigOutcome {
+    Value(value: CtValue)
+    Refused(diagnostic: Diagnostic)
+}
+
+// A string with no interpolation, a whole number, or a truth value: the
+// literal is its own value, so no program is checked for it.
+fn jet_config_plain_literal(expr: Expr) -> CtValue? Never! {
+    if expr == {
+        .Paren(inner, _) -> jet_config_plain_literal(inner)
+        .Bool(flag, _) -> Val(CtValue.Bool{value: flag})
+        .Int(number, _, width, _) -> if width == None -> Val(CtValue.Int{value: number}) else -> None
+        .Str(parts, _) -> {
+            text := [String]{}
+            loop part in parts {
+                if part == .Lit(piece) -> &text.push(piece) else -> return None
+            }
+            Val(CtValue.Str{value: text.join("")})
+        }
+        else -> None
+    }
+}
+
+// The typed program for one config value. Each global the expression reads
+// becomes one ALL_CAPS module constant, and each read is respelled to it.
+fn jet_config_program(expr: Expr, source: String, funcs: [String: Func], globals: [String: CtValue]) -> String ComptimeEvalError! {
+    bytes :: source.bytes()
+    span :: expr_span(expr)
+    if span.start < 0 || span.end > bytes.len() || span.start > span.end -> return Err(jet_config_eval_error(expr, "this config value has no source text to evaluate"))
+    sites := [ComptimeNameSite]{}
+    loop site in comptime_walk_identifiers(expr) {
+        if globals.get(site.name) == None -> next
+        if site.span.start < span.start || site.span.end > span.end -> return Err(jet_config_eval_error(expr, "`{site.name}` is read outside this config value's source text"))
+        index := sites.len()
+        loop index > 0 && sites[index - 1].span.start > site.span.start -> index -= 1
+        &sites.insert(index, site)
+    }
+    constants := [String: String]{}
+    lines := [String]{}
+    loop name in funcs.keys() {
+        if funcs[name].span.start < 0 || funcs[name].span.end > bytes.len() -> next
+        &lines.push(String.from_bytes(bytes.slice(funcs[name].span.start, funcs[name].span.end)) ?? return Err(jet_config_eval_error(expr, "the function `{name}` is not valid text")))
+    }
+    text := [String]{}
+    cursor := span.start
+    loop site in sites {
+        if site.span.start < cursor -> next
+        constant := constants.get(site.name) ?? ""
+        if constant == "" {
+            constant = "JET_CONFIG_GLOBAL_{constants.len()}"
+            value :: globals[site.name]
+            literal :: jet_config_literal(value) ?? return Err(jet_config_eval_error(expr, "`{site.name}` holds a value this config value can't read as literal data"))
+            constants[site.name] = constant
+            &lines.push("{constant} :: {literal}")
+        }
+        &text.push(String.from_bytes(bytes.slice(cursor, site.span.start)) ?? "")
+        &text.push(constant)
+        cursor = site.span.end
+    }
+    &text.push(String.from_bytes(bytes.slice(cursor, span.end)) ?? "")
+    body :: text.join("")
+    &lines.push("{JET_CONFIG_VALUE_NAME} :: prep {{ {body} }}")
+    &lines.push("")
+    Ok(lines.join("\n"))
+}
+
+// The typed Jet literal spelling of a config value, or None for a value
+// literal data cannot spell (a config record such as `Env{…}`, a closure).
+fn jet_config_literal(value: CtValue) -> String? Never! {
+    if value == {
+        .Int(number) -> Val("{number}")
+        .BigInt(decimal) -> Val(decimal)
+        .Bool(flag) -> Val(if flag -> "true" else -> "false")
+        .Float(number) -> if number == {
+            .F64(inner) -> {
+                shown :: "{inner}"
+                if !shown.contains(".") && !shown.contains("e") -> return None
+                Val(shown)
+            }
+            .F32(_) -> None
+        }
+        .Str(text) -> Val("\"{jet_config_string_escape(text)}\"")
+        .List(values) -> {
+            element :: if values.len() == 0 -> "Int" else -> type_name(ast_comptime_value_type(values[0]))
+            items := [String]{}
+            loop item in values -> &items.push(jet_config_literal(item) ?? return None)
+            Val(["[", element, "]{{", items.join(", "), "}}"].join(""))
+        }
+        .Map(entries) -> {
+            map_type :: type_name(ast_comptime_value_type(value))
+            items := [String]{}
+            loop entry in entries {
+                key :: jet_config_literal(ast_comptime_key_to_value(entry.key)) ?? return None
+                item :: jet_config_literal(entry.value) ?? return None
+                &items.push("{key}: {item}")
+            }
+            Val([map_type, "{{", items.join(", "), "}}"].join(""))
+        }
+        .Present(inner) -> {
+            item :: jet_config_literal(inner) ?? return None
+            Val("Val({item})")
+        }
+        else -> None
+    }
+}
+
+// A string literal body: `\`, `"`, and line breaks escaped, and literal
+// braces doubled so they are not interpolation holes.
+fn jet_config_string_escape(text: String) -> String Never! {
+    out := [U8]{}
+    loop byte in text.bytes() {
+        if {
+            byte == (U8{92}) || byte == (U8{34}) -> {
+                &out.push(U8{92})
+                &out.push(byte)
+            }
+            byte == (U8{123}) || byte == (U8{125}) -> {
+                &out.push(byte)
+                &out.push(byte)
+            }
+            byte == (U8{10}) -> {
+                &out.push(U8{92})
+                &out.push(U8{110})
+            }
+            byte == (U8{13}) -> {
+                &out.push(U8{92})
+                &out.push(U8{114})
+            }
+            byte == (U8{9}) -> {
+                &out.push(U8{92})
+                &out.push(U8{116})
+            }
+            else -> &out.push(byte)
+        }
+    }
+    String.from_bytes(out) ?? text
+}
+
+// ── Wire ──
+
+fn compiler_service_render(value: Dyn) -> String Never! {
+    service_json.to_string(value) ?? panic("compact JSON rendering of a service Dyn is total")
+}
+
+// The field `name` of a JSON object, or None.
+fn compiler_service_get(value: Dyn, name: String) -> Dyn? Never! {
+    if value == .Object(fields) {
+        loop entry in fields {
+            if entry.key == name -> return Val(entry.value)
+        }
+    }
+    None
+}
+
+fn compiler_service_text(value: Dyn, name: String) -> String? Never! {
+    field :: compiler_service_get(value, name) ?? return None
+    if field == .Text(text) -> return Val(text)
+    None
+}
+
+fn compiler_service_int(value: Dyn, name: String) -> Int? Never! {
+    field :: compiler_service_get(value, name) ?? return None
+    if field == .Int(number) -> return Val(number)
+    None
+}
+
+fn compiler_service_array(value: Dyn, name: String) -> [Dyn]? Never! {
+    field :: compiler_service_get(value, name) ?? return None
+    if field == .Array(items) -> return Val(items)
+    None
+}
+
+// The one tag and payload of a `{"Tag": payload}` object.
+fn compiler_service_tagged(value: Dyn) -> (tag: String, payload: Dyn)? Never! {
+    if value == .Object(fields) {
+        if fields.len() == 1 -> return Val((tag: fields[0].key, payload: fields[0].value))
+    }
+    None
+}
+
+fn compiler_service_tag(tag: String, payload: Dyn) -> Dyn Never! {
+    Dyn.Object([(key: String, value: Dyn)]{(key: tag, value: payload)})
+}
+
+// A CtValue as JSON, losslessly (floats by bit pattern). A closure or a
+// failure report never crosses the service: None.
+fn compiler_service_value_wire(value: CtValue) -> Dyn? Never! {
+    if value == {
+        .Int(number) -> Val(compiler_service_tag("Int", Dyn.Int(number)))
+        .Float(number) -> if number == {
+            .F32(inner) -> Val(compiler_service_tag("F32", Dyn.Int(service_math.to_bits(inner))))
+            .F64(inner) -> Val(compiler_service_tag("F64", Dyn.Int(service_math.to_bits(inner))))
+        }
+        .Bool(flag) -> Val(compiler_service_tag("Bool", Dyn.Bool(flag)))
+        .Char(character) -> Val(compiler_service_tag("Char", Dyn.Text("{character}")))
+        .Str(text) -> Val(compiler_service_tag("Str", Dyn.Text(text)))
+        .BigInt(decimal) -> Val(compiler_service_tag("BigInt", Dyn.Text(decimal)))
+        .Bytes(bytes) -> {
+            items :: loop byte in bytes -> Dyn.Int(Int.from_u8(byte))
+            Val(compiler_service_tag("Bytes", Dyn.Array(items)))
+        }
+        .List(values) -> {
+            items := [Dyn]{}
+            loop item in values -> &items.push(compiler_service_value_wire(item) ?? return None)
+            Val(compiler_service_tag("List", Dyn.Array(items)))
+        }
+        .Map(entries) -> {
+            items := [Dyn]{}
+            loop entry in entries {
+                key :: compiler_service_key_wire(entry.key)
+                item :: compiler_service_value_wire(entry.value) ?? return None
+                &items.push(Dyn.Object(["key": key, "value": item]))
+            }
+            Val(compiler_service_tag("Map", Dyn.Array(items)))
+        }
+        .Struct(type_name, fields) -> {
+            items := [Dyn]{}
+            loop field in fields -> &items.push(Dyn.Object(["name": Dyn.Text(field.name), "value": compiler_service_value_wire(field.value) ?? return None]))
+            Val(compiler_service_tag("Struct", Dyn.Object(["type": Dyn.Text(type_name), "fields": Dyn.Array(items)])))
+        }
+        .Enum(type_name, variant, args) -> {
+            items := [Dyn]{}
+            loop argument in args {
+                label :: if argument.label == .Val(text) -> Dyn.Text(text) else -> Dyn.Null
+                &items.push(Dyn.Object(["label": label, "value": compiler_service_value_wire(argument.value) ?? return None]))
+            }
+            Val(compiler_service_tag("Enum", Dyn.Object(["type": Dyn.Text(type_name), "variant": Dyn.Text(variant), "args": Dyn.Array(items)])))
+        }
+        .Present(inner) -> Val(compiler_service_tag("Present", compiler_service_value_wire(inner) ?? return None))
+        .Unit -> Val(Dyn.Text("Unit"))
+        .Failed(_) | .Closure(_) -> None
+    }
+}
+
+fn compiler_service_char(text: String) -> Char? Never! {
+    chars :: text.chars().to_list()
+    if chars.len() != 1 -> return None
+    Val(chars[0])
+}
+
+fn compiler_service_value_from_wire(value: Dyn) -> CtValue? Never! {
+    if value == .Text(word) {
+        if word == "Unit" -> return Val(CtValue.Unit)
+        return None
+    }
+    tagged :: compiler_service_tagged(value) ?? return None
+    payload :: tagged.payload
+    if tagged.tag == {
+        "Int" -> if payload == .Int(number) -> Val(CtValue.Int{value: number}) else -> None
+        "F32" -> if payload == .Int(bits) -> Val(CtValue.Float{value: CtFloat.F32{value: service_math.from_bits(bits)}}) else -> None
+        "F64" -> if payload == .Int(bits) -> Val(CtValue.Float{value: CtFloat.F64{value: service_math.from_bits(bits)}}) else -> None
+        "Bool" -> if payload == .Bool(flag) -> Val(CtValue.Bool{value: flag}) else -> None
+        "Char" -> if payload == .Text(text) -> Val(CtValue.Char{value: compiler_service_char(text) ?? return None}) else -> None
+        "Str" -> if payload == .Text(text) -> Val(CtValue.Str{value: text}) else -> None
+        "BigInt" -> if payload == .Text(text) -> Val(CtValue.BigInt{value: text}) else -> None
+        "Bytes" -> {
+            items :: if payload == .Array(rows) -> rows else -> return None
+            bytes := [U8]{}
+            loop item in items {
+                if item == .Int(number) {
+                    if number < 0 || number > 255 -> return None
+                    &bytes.push(U8{number})
+                } else { return None }
+            }
+            Val(CtValue.Bytes{value: bytes})
+        }
+        "List" -> {
+            items :: if payload == .Array(rows) -> rows else -> return None
+            values := [CtValue]{}
+            loop item in items -> &values.push(compiler_service_value_from_wire(item) ?? return None)
+            Val(CtValue.List{values: values})
+        }
+        "Map" -> {
+            items :: if payload == .Array(rows) -> rows else -> return None
+            entries := [CtMapEntry]{}
+            loop item in items {
+                key :: compiler_service_key_from_wire(compiler_service_get(item, "key") ?? return None) ?? return None
+                entry_value :: compiler_service_value_from_wire(compiler_service_get(item, "value") ?? return None) ?? return None
+                &entries.push(CtMapEntry{key: key, value: entry_value})
+            }
+            Val(CtValue.Map{entries: entries})
+        }
+        "Struct" -> {
+            type_name :: compiler_service_text(payload, "type") ?? return None
+            fields := [NamedCtValue]{}
+            loop item in compiler_service_array(payload, "fields") ?? return None {
+                name :: compiler_service_text(item, "name") ?? return None
+                field_value :: compiler_service_value_from_wire(compiler_service_get(item, "value") ?? return None) ?? return None
+                &fields.push(NamedCtValue{name: name, value: field_value})
+            }
+            Val(CtValue.Struct{type_name: type_name, fields: fields})
+        }
+        "Enum" -> {
+            type_name :: compiler_service_text(payload, "type") ?? return None
+            variant :: compiler_service_text(payload, "variant") ?? return None
+            args := [CtEnumArg]{}
+            loop item in compiler_service_array(payload, "args") ?? return None {
+                label :: compiler_service_text(item, "label")
+                argument_value :: compiler_service_value_from_wire(compiler_service_get(item, "value") ?? return None) ?? return None
+                &args.push(CtEnumArg{label: label, value: argument_value})
+            }
+            Val(CtValue.Enum{type_name: type_name, variant: variant, args: args})
+        }
+        "Present" -> Val(CtValue.Present{value: compiler_service_value_from_wire(payload) ?? return None})
+        else -> None
+    }
+}
+
+fn compiler_service_named_keys_wire(fields: [NamedCtKey]) -> Dyn Never! {
+    items :: loop field in fields -> Dyn.Object(["name": Dyn.Text(field.name), "value": compiler_service_key_wire(field.value)])
+    Dyn.Array(items)
+}
+
+fn compiler_service_key_wire(key: CtKey) -> Dyn Never! {
+    if key == {
+        .Int(number) -> compiler_service_tag("Int", Dyn.Int(number))
+        .BigInt(decimal) -> compiler_service_tag("BigInt", Dyn.Text(decimal))
+        .Str(text) -> compiler_service_tag("Str", Dyn.Text(text))
+        .Bool(flag) -> compiler_service_tag("Bool", Dyn.Bool(flag))
+        .Char(character) -> compiler_service_tag("Char", Dyn.Text("{character}"))
+        .Tuple(fields) -> compiler_service_tag("Tuple", compiler_service_named_keys_wire(fields))
+        .Struct(type_name, fields) -> compiler_service_tag("Struct", Dyn.Object(["type": Dyn.Text(type_name), "fields": compiler_service_named_keys_wire(fields)]))
+        .Enum(type_name, variant) -> compiler_service_tag("Enum", Dyn.Object(["type": Dyn.Text(type_name), "variant": Dyn.Text(variant)]))
+    }
+}
+
+fn compiler_service_named_keys_from_wire(value: Dyn) -> [NamedCtKey]? Never! {
+    items :: if value == .Array(rows) -> rows else -> return None
+    fields := [NamedCtKey]{}
+    loop item in items {
+        name :: compiler_service_text(item, "name") ?? return None
+        key :: compiler_service_key_from_wire(compiler_service_get(item, "value") ?? return None) ?? return None
+        &fields.push(NamedCtKey{name: name, value: key})
+    }
+    Val(fields)
+}
+
+fn compiler_service_key_from_wire(value: Dyn) -> CtKey? Never! {
+    tagged :: compiler_service_tagged(value) ?? return None
+    payload :: tagged.payload
+    if tagged.tag == {
+        "Int" -> if payload == .Int(number) -> Val(CtKey.Int{value: number}) else -> None
+        "BigInt" -> if payload == .Text(text) -> Val(CtKey.BigInt{decimal: text}) else -> None
+        "Str" -> if payload == .Text(text) -> Val(CtKey.Str{value: text}) else -> None
+        "Bool" -> if payload == .Bool(flag) -> Val(CtKey.Bool{value: flag}) else -> None
+        "Char" -> if payload == .Text(text) -> Val(CtKey.Char{value: compiler_service_char(text) ?? return None}) else -> None
+        "Tuple" -> Val(CtKey.Tuple{fields: compiler_service_named_keys_from_wire(payload) ?? return None})
+        "Struct" -> {
+            type_name :: compiler_service_text(payload, "type") ?? return None
+            Val(CtKey.Struct{type_name: type_name, fields: compiler_service_named_keys_from_wire(compiler_service_get(payload, "fields") ?? return None) ?? return None})
+        }
+        "Enum" -> {
+            type_name :: compiler_service_text(payload, "type") ?? return None
+            Val(CtKey.Enum{type_name: type_name, variant: compiler_service_text(payload, "variant") ?? return None})
+        }
+        else -> None
+    }
+}
+
+// The fields of a diagnostic the requester renders or re-anchors: severity,
+// code, the span within the requester's own source, and the three sentences.
+fn compiler_service_diagnostic_wire(diagnostic: Diagnostic) -> Dyn Never! {
+    span :: if diagnostic.span == .Val(found) -> Dyn.Object(["start": Dyn.Int(found.start), "end": Dyn.Int(found.end)]) else -> Dyn.Null
+    Dyn.Object([
+        "severity": Dyn.Int(diagnostic.severity),
+        "code": Dyn.Text(diagnostic.code),
+        "span": span,
+        "what": Dyn.Text(diagnostic.what),
+        "why": Dyn.Text(diagnostic.why),
+        "fix": Dyn.Text(diagnostic.fix),
+    ])
+}
+
+fn compiler_service_diagnostic_from_wire(value: Dyn) -> Diagnostic? Never! {
+    span := Span?{None}
+    if compiler_service_get(value, "span") == .Val(found) {
+        if found != Dyn.Null -> span = Val(Span{start: compiler_service_int(found, "start") ?? return None, end: compiler_service_int(found, "end") ?? return None})
+    }
+    Val(Diagnostic{
+        severity: compiler_service_int(value, "severity") ?? return None,
+        code: compiler_service_text(value, "code") ?? return None,
+        span: span,
+        what: compiler_service_text(value, "what") ?? return None,
+        why: compiler_service_text(value, "why") ?? return None,
+        fix: compiler_service_text(value, "fix") ?? return None,
+    })
+}
+
+// ── Requests and responses ──
+
+fn compiler_service_comptime_request(program: String, base_dir: String) -> String Never! {
+    compiler_service_render(Dyn.Object(["program": Dyn.Text(program), "base_dir": Dyn.Text(base_dir)]))
+}
+
+// The `{program, base_dir}` of a comptime-evaluate request, or None.
+fn compiler_service_comptime_request_from(request: Dyn) -> (program: String, base_dir: String)? Never! {
+    program :: compiler_service_text(request, "program") ?? return None
+    base_dir :: compiler_service_text(request, "base_dir") ?? return None
+    Val((program: program, base_dir: base_dir))
+}
+
+// A value that no wire spelling carries is refused as the evaluator refuses
+// a result a config value can't hold.
+fn compiler_service_comptime_response(outcome: JetConfigOutcome) -> String Never! {
+    if outcome == {
+        .Value(value) -> {
+            if compiler_service_value_wire(value) == .Val(wire) -> return compiler_service_render(Dyn.Object(["value": wire]))
+            compiler_service_render(Dyn.Object(["error": compiler_service_diagnostic_wire(jet_config_eval_diagnostic(None, "this config value's result has a shape a config value can't hold"))]))
+        }
+        .Refused(diagnostic) -> compiler_service_render(Dyn.Object(["error": compiler_service_diagnostic_wire(diagnostic)]))
+    }
+}
+
+// The outcome a comptime-evaluate response carries, or None for a response
+// that is not one.
+fn compiler_service_comptime_outcome(response: Dyn) -> JetConfigOutcome? Never! {
+    if compiler_service_get(response, "value") == .Val(wire) -> return Val(JetConfigOutcome.Value{value: compiler_service_value_from_wire(wire) ?? return None})
+    if compiler_service_get(response, "error") == .Val(wire) -> return Val(JetConfigOutcome.Refused{diagnostic: compiler_service_diagnostic_from_wire(wire) ?? return None})
+    None
+}
+
+fn compiler_service_check_request(file: String, source: String) -> String Never! {
+    compiler_service_render(Dyn.Object(["file": Dyn.Text(file), "source": Dyn.Text(source)]))
+}
+
+// The `{file, source}` of a check-entry request, or None.
+fn compiler_service_check_request_from(request: Dyn) -> (file: String, source: String)? Never! {
+    file :: compiler_service_text(request, "file") ?? return None
+    source :: compiler_service_text(request, "source") ?? return None
+    Val((file: file, source: source))
+}
+
+fn compiler_service_check_response(diagnostics: [Diagnostic]) -> String Never! {
+    rows :: loop diagnostic in diagnostics -> compiler_service_diagnostic_wire(diagnostic)
+    compiler_service_render(Dyn.Object(["diagnostics": Dyn.Array(rows)]))
+}
+
+// Every diagnostic of a check-entry response, in compiler order, or None.
+fn compiler_service_check_diagnostics(response: Dyn) -> [Diagnostic]? Never! {
+    diagnostics := [Diagnostic]{}
+    loop row in compiler_service_array(response, "diagnostics") ?? return None {
+        &diagnostics.push(compiler_service_diagnostic_from_wire(row) ?? return None)
+    }
+    Val(diagnostics)
+}

@@ -1,0 +1,57 @@
+// The jetpack side of the first-party compiler service (JetFoundation
+// CompilerService.jet): jetpack links only the front end, so a config value
+// that needs the comptime stage, or a project entry that needs the checker,
+// is answered by the sibling `jet` through `jet __jetpack <op>` (one
+// evaluator, one checker; I8). Jetpack-only: inside `jet` the environment
+// model's `comptime_evaluate` is the in-process one (JetCli ConfigEval.jet).
+
+// The service could not answer: the compiler was not found or failed, or its
+// response was not one the protocol defines.
+#Error
+struct CompilerServiceError {
+    detail: String
+}
+
+// The sibling `jet` binary next to the running `jetpack` process, falling
+// back to a bare PATH lookup (the reverse of the compiler's
+// same-directory-then-PATH engine search).
+fn envmodel_find_jet_binary() -[FS, Env]> String Never! {
+    exe :: sys.executable()
+    if exe != "" {
+        name :: if sys.is_windows() -> "jet.exe" else -> "jet"
+        candidate :: files.join(files.dirname(exe), name)
+        if files.is_file(candidate) -> return candidate
+    }
+    BINARY_NAME
+}
+
+// One request to `jet __jetpack <op>` and its parsed response.
+fn envmodel_compiler_service(op: String, request: String) -[FS, Env, Exec, Time.Wait]> Dyn CompilerServiceError! {
+    jet :: envmodel_find_jet_binary()
+    child :: process.cmd([String]{jet, JET_COMPILER_SERVICE_VERB, op}).stdin(.Stream).stdout(.Capture).stderr(.Capture).spawn() ?? return Err(CompilerServiceError{detail: "`{jet}` could not be started: {err}"})
+    child.stdin.write(request) ?? return Err(CompilerServiceError{detail: "the request could not be sent to `{jet}`: {err}"})
+    child.stdin.close() ?? return Err(CompilerServiceError{detail: "the request could not be sent to `{jet}`: {err}"})
+    receipt :: child.wait() ?? return Err(CompilerServiceError{detail: "`{jet}` could not be awaited: {err}"})
+    if receipt.signal != None || receipt.code != 0 {
+        status :: if receipt.signal != None -> "ended by a signal" else -> "exited with status {receipt.code}"
+        reported :: receipt.errors.trim()
+        return Err(CompilerServiceError{detail: if reported == "" -> "`{jet} {JET_COMPILER_SERVICE_VERB} {op}` {status}" else -> "`{jet} {JET_COMPILER_SERVICE_VERB} {op}` {status}: {reported}"})
+    }
+    response :: foundation_parse_protocol_json(receipt.output) ?? return Err(CompilerServiceError{detail: "`{jet} {JET_COMPILER_SERVICE_VERB} {op}` answered with a response that is not protocol JSON"})
+    Ok(response)
+}
+
+// Evaluate `expr` (spelled in `source`) with `funcs` callable and `globals`
+// readable, as `jet` does in-process: a plain literal is already its value;
+// every other expression is the config-value program the sibling compiler
+// evaluates, and its refusal is placed on `expr`.
+fn comptime_evaluate(expr: Expr, source: String, funcs: [String: Func], base_dir: String, globals: [String: CtValue]) -[FS, Env, Exec, Time.Wait]> CtValue ComptimeEvalError! {
+    if jet_config_plain_literal(expr) == .Val(value) -> return Ok(value)
+    program :: jet_config_program(expr, source, funcs, globals) ?? return Err(err)
+    response :: envmodel_compiler_service(JET_COMPILER_SERVICE_COMPTIME_EVALUATE, compiler_service_comptime_request(program, base_dir)) ?? return Err(jet_config_eval_error(expr, "this config value could not be evaluated: {err.detail}"))
+    outcome :: compiler_service_comptime_outcome(response) ?? return Err(jet_config_eval_error(expr, "this config value could not be evaluated: the compiler's answer is not a config value"))
+    if outcome == {
+        .Value(value) -> Ok(value)
+        .Refused(diagnostic) -> Err(jet_config_eval_placed(expr, diagnostic))
+    }
+}

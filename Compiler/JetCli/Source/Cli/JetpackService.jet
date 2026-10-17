@@ -1,0 +1,74 @@
+// `jet __jetpack <op>`: the compiler side of the first-party compiler service
+// (JetFoundation CompilerService.jet). `jetpack` links only the front end and
+// reaches the one evaluator and the one checker through this internal verb
+// (I8); it is absent from help and the command registry. One JSON request is
+// read from stdin and one JSON response is written to stdout. A request the
+// verb can't read is a usage error on stderr (exit 2); a check that can't
+// load its sources keeps that refusal's stderr and status.
+use core.term as cli_term
+use jet_driver.[
+    JetDriverCompileMode,
+    JetDriverVerbOutput,
+    JET_DRIVER_EXIT_OK,
+    JET_DRIVER_EXIT_USAGE,
+    jet_driver_present_diagnostics,
+]
+use jet_foundation.[
+    Diagnostic,
+    JET_COMPILER_SERVICE_CHECK_ENTRY,
+    JET_COMPILER_SERVICE_COMPTIME_EVALUATE,
+    JET_COMPILER_SERVICE_VERB,
+    compiler_service_check_request_from,
+    compiler_service_check_response,
+    compiler_service_comptime_request_from,
+    compiler_service_comptime_response,
+    diagnostic_from_registry,
+    foundation_parse_protocol_json,
+]
+
+fn jet_cli_compiler_service_refused(what: String) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{
+        stdout: "",
+        stderr: jet_cli_report("E2104", what, jet_cli_why("E2104"), "`jet {JET_COMPILER_SERVICE_VERB}` is spoken by `jetpack`; run the jetpack command instead", false),
+        exit_code: JET_DRIVER_EXIT_USAGE,
+    }
+}
+
+// Answer one service request read from stdin.
+fn jet_cli_compiler_service(op: String) -> JetDriverVerbOutput {
+    if op != JET_COMPILER_SERVICE_COMPTIME_EVALUATE && op != JET_COMPILER_SERVICE_CHECK_ENTRY {
+        return jet_cli_compiler_service_refused("`{op}` is not a compiler service operation")
+    }
+    text :: cli_term.read_all_input() ?? return jet_cli_compiler_service_refused("the compiler service request could not be read from stdin: {err}")
+    jet_cli_compiler_service_answer(op, text)
+}
+
+// The response to one request: `op` is a known operation.
+fn jet_cli_compiler_service_answer(op: String, text: String) -> JetDriverVerbOutput {
+    request :: foundation_parse_protocol_json(text) ?? return jet_cli_compiler_service_refused("the `{op}` request is not valid protocol JSON")
+    if op == JET_COMPILER_SERVICE_COMPTIME_EVALUATE {
+        fields :: compiler_service_comptime_request_from(request) ?? return jet_cli_compiler_service_refused("the `{op}` request needs the text fields `program` and `base_dir`")
+        return JetDriverVerbOutput{stdout: compiler_service_comptime_response(jet_config_evaluate_program(fields.program, fields.base_dir)), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    fields :: compiler_service_check_request_from(request) ?? return jet_cli_compiler_service_refused("the `{op}` request needs the text fields `file` and `source`")
+    jet_cli_compiler_service_check(fields.file, fields.source)
+}
+
+// check-entry: `jet check`'s checker (Program mode) over the entry's source
+// root with the entry's bytes taken from the request, so the checked bytes
+// are the ones the requester reads its job registry from. Every presented
+// diagnostic is returned in compiler order; a run with no error whose
+// compile still failed internally is one E2105 row.
+fn jet_cli_compiler_service_check(file: String, source: String) -> JetDriverVerbOutput {
+    compiled :: jet_cli_compile_entry(file, false, false, None, JetDriverCompileMode.Program, Val(source), None)
+    if compiled == {
+        .Refused(refusal) -> return ^refusal
+        .Compiled(result, snapshot) -> {
+            diagnostics := jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+            if jet_cli_errors(diagnostics).len() == 0 {
+                if result.internal_problem == .Val(problem) -> &diagnostics.push(diagnostic_from_registry("E2105", None, "the compiler could not finish checking `{file}`: {problem}", jet_cli_why("E2105"), "report this compiler defect with the entry file attached"))
+            }
+            return JetDriverVerbOutput{stdout: compiler_service_check_response(diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        }
+    }
+}
