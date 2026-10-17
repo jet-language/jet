@@ -66,6 +66,7 @@ use jet_foundation.[
     MIRVariant,
     MIRVariantPayload,
     CompilerThreads,
+    CompilerTraceSink,
     compiler_take_rows,
     compiler_threads_failure_text,
     compiler_threads_single,
@@ -438,11 +439,12 @@ fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Nev
 // lir_lower_entry over the caller's program in place: the type index is
 // attached to `program` for the lowering and detached after, so the native
 // route never copies the whole program (it is left exactly as it came). The
-// function bodies lower on the threads `threads` admits (Workers.jet).
-fn lir_lower_entry_in_place(program: &MIRProgram, entry: MIRFunctionID, threads: CompilerThreads) -> LIRLowering Never! {
+// function bodies lower on the threads `threads` admits (Workers.jet). With a
+// trace, the LIR lint of the lowered module is its own `native.lir_lint` span.
+fn lir_lower_entry_in_place(program: &MIRProgram, entry: MIRFunctionID, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
     native_pack :: program.native_pack
-    lower_selected_in_place(&program, [MIRFunctionID]{entry}, true, true, native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false, false, true, threads)
+    lower_selected_in_place(&program, [MIRFunctionID]{entry}, true, true, native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false, false, true, threads, trace_sink)
 }
 
 // JET_KEEP_GOING (the bootstrap native feed): lir_lower_entry_in_place,
@@ -450,10 +452,10 @@ fn lir_lower_entry_in_place(program: &MIRProgram, entry: MIRFunctionID, threads:
 // signature (lower_keep_going_functions), and the issues leave the entry and
 // the module in place, so every later phase still runs and reports. The
 // module is never shipped: the caller turns every issue into a census row.
-fn lir_lower_entry_keep_going_in_place(program: &MIRProgram, entry: MIRFunctionID, threads: CompilerThreads) -> LIRLowering Never! {
+fn lir_lower_entry_keep_going_in_place(program: &MIRProgram, entry: MIRFunctionID, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
     native_pack :: program.native_pack
-    lower_selected_in_place(&program, [MIRFunctionID]{entry}, true, true, native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, true, false, true, threads)
+    lower_selected_in_place(&program, [MIRFunctionID]{entry}, true, true, native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, true, false, true, threads, trace_sink)
 }
 
 // Compiler and test callbacks retain return carriers; only program entries
@@ -501,7 +503,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     // rewrite rows), while these read-parameter entry points leave the caller's MIR intact. Callers
     // that hand theirs over use the *_in_place entry points.
     lowered_program := program.copy()
-    lower_selected_in_place(&lowered_program, roots, wrap_entry, shared_sites_dynamic, native_pack, imports, c_exports, test_serial, checks, ^runtime_intrinsics, keep_going, comptime_budget, sentry, compiler_threads_single())
+    lower_selected_in_place(&lowered_program, roots, wrap_entry, shared_sites_dynamic, native_pack, imports, c_exports, test_serial, checks, ^runtime_intrinsics, keep_going, comptime_budget, sentry, compiler_threads_single(), None)
 }
 
 // lower_selected over `program` in place: preparation and body lowering
@@ -510,7 +512,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
 // caller handed it, and the caller gets it back unchanged. The function
 // bodies lower on the threads `threads` admits for their size
 // (lower_workers_lower); the result is the same for any thread count.
-fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, shared_sites_dynamic: Bool, native_pack: Bool, imports: [String], c_exports: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic], keep_going: Bool, comptime_budget: Bool, sentry: Bool, threads: CompilerThreads) -> LIRLowering Never! {
+fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, shared_sites_dynamic: Bool, native_pack: Bool, imports: [String], c_exports: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic], keep_going: Bool, comptime_budget: Bool, sentry: Bool, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> LIRLowering Never! {
     test_indices := [U64:Int]{}
     test_issues := [LIRLoweringIssue]{}
     if test_serial != None {
@@ -783,7 +785,9 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
     issues := m.issues.copy()
     lint := [LIRLintIssue]?{None}
     if issues.len() == 0 || keep_going {
+        if trace_sink == .Val(sink) -> sink.begin("native.lir_lint", "lower", -1, -1)
         findings :: lir_lint_module(lowered)
+        if trace_sink == .Val(sink) -> sink.end("native.lir_lint", lowered.functions.len())
         loop issue in findings -> &issues.push(LIRLoweringIssue{function: issue.function, message: "LIR lint b{issue.block}: {issue.message}"})
         lint = Val(findings)
     }

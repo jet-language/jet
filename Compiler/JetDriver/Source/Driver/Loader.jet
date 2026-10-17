@@ -2743,9 +2743,13 @@ struct JetDriverCoreIdentifierDemand {
     regex_literal: Bool
 }
 
+// `lines` (newlines) and `tokens` are the unit's parse work, which a traced
+// parse wave reports (SPEED-500K work counters).
 struct JetDriverParsedUnit {
     parsed: ParseResult
     demand: JetDriverCoreIdentifierDemand
+    lines: Int{0}
+    tokens: Int{0}
 }
 
 fn jet_driver_empty_core_identifier_demand() -> JetDriverCoreIdentifierDemand Never! {
@@ -2789,8 +2793,11 @@ fn jet_driver_parse_user_unit(text: String, retain_demand: Bool) -> JetDriverPar
     lexed :: lex(source)
     demand := jet_driver_empty_core_identifier_demand()
     if retain_demand -> jet_driver_collect_core_identifier_demand(lexed.tokens, lexed.tables, &demand, true)
-    parsed :: parse_lexed_with_source(^lexed, source, parser_line_starts(source))
-    JetDriverParsedUnit{parsed: ^parsed, demand: ^demand}
+    tokens :: lexed.tokens.len()
+    line_starts :: parser_line_starts(source)
+    lines :: line_starts.len() - 1
+    parsed :: parse_lexed_with_source(^lexed, source, line_starts)
+    JetDriverParsedUnit{parsed: ^parsed, demand: ^demand, lines: lines, tokens: tokens}
 }
 
 // A user source parse: the inline carrier is masked; a structure failure
@@ -2870,7 +2877,10 @@ fn jet_driver_parse_core_source(text: String, module_name: String, owned_members
     lexed :: lex_generated(source)
     demand := jet_driver_empty_core_identifier_demand()
     jet_driver_collect_core_identifier_demand(lexed.tokens, lexed.tables, &demand, runtime_entry)
-    parsed := parse_lexed_with_source(^lexed, source, parser_line_starts(source))
+    tokens :: lexed.tokens.len()
+    line_starts :: parser_line_starts(source)
+    lines :: line_starts.len() - 1
+    parsed := parse_lexed_with_source(^lexed, source, line_starts)
     kept := [Item]{}
     loop item in parsed.program.items {
         if item == {
@@ -2891,7 +2901,7 @@ fn jet_driver_parse_core_source(text: String, module_name: String, owned_members
     loop diagnostic in parsed.diagnostics {
         if diagnostic.severity != DIAGNOSTIC_LINT -> &diagnostics.push(diagnostic)
     }
-    JetDriverParsedUnit{parsed: ParseResult{program: ^parsed.program, diagnostics: ^diagnostics}, demand: ^demand}
+    JetDriverParsedUnit{parsed: ParseResult{program: ^parsed.program, diagnostics: ^diagnostics}, demand: ^demand, lines: lines, tokens: tokens}
 }
 
 // The runtime unit row (`core.<area>.runtime.<unit>`) a Core import path
@@ -3012,6 +3022,8 @@ fn jet_driver_parse_wave(request: JetDriverCompileRequest, source_units: [JetDri
     core_input_bytes := 0
     user_source_units := 0
     core_source_units := 0
+    // Whether each job, in `pending` order, is a user source (tracing only).
+    user_jobs := [Bool]{}
     loop position in first..<pending.len() {
         job :: jet_driver_parse_job(request, source_units[pending[position]], pending[position] == runtime_entry)
         bytes :: jet_driver_parse_job_bytes(job)
@@ -3024,10 +3036,12 @@ fn jet_driver_parse_wave(request: JetDriverCompileRequest, source_units: [JetDri
         // String.len scheduling weights count scalars; count_bytes is the
         // existing borrowed O(1) UTF-8 byte query, reached only while tracing.
         if request.trace_sink == .Val(_) {
+            user_job := false
             if job == {
                 .Source(text) -> {
                     user_input_bytes += text.count_bytes()
                     user_source_units += 1
+                    user_job = true
                 }
                 .RuntimeEntry(text) -> {
                     core_input_bytes += text.count_bytes()
@@ -3039,6 +3053,7 @@ fn jet_driver_parse_wave(request: JetDriverCompileRequest, source_units: [JetDri
                 }
                 .Missing -> {}
             }
+            &user_jobs.push(user_job)
         }
         &jobs.push(job)
     }
@@ -3065,8 +3080,9 @@ fn jet_driver_parse_wave(request: JetDriverCompileRequest, source_units: [JetDri
         &results.extend(done)
     }
     &results.reverse()
-    // One input-volume delta per completed wave, summed by the trace reader;
-    // these are not token, AST, cache-hit, or physical parse-work counts.
+    // One input-volume delta per completed wave, summed by the trace reader.
+    // The byte counters are loaded payloads; `lines` (newlines) and `tokens`
+    // (top-level lexer tokens) are what the parses consumed.
     if request.trace_sink == .Val(sink) {
         sink.progress("counters.parse.user_input_bytes", user_input_bytes, 0)
         sink.progress("counters.parse.core_input_bytes", core_input_bytes, 0)
@@ -3074,6 +3090,26 @@ fn jet_driver_parse_wave(request: JetDriverCompileRequest, source_units: [JetDri
         sink.progress("counters.parse.user_source_units", user_source_units, 0)
         sink.progress("counters.parse.core_source_units", core_source_units, 0)
         sink.progress("counters.parse.source_units", user_source_units + core_source_units, 0)
+        user_lines := 0
+        core_lines := 0
+        user_tokens := 0
+        core_tokens := 0
+        // `results` is in `pending` order, last first.
+        loop (index, unit) in results {
+            if user_jobs[results.len() - 1 - index] {
+                user_lines += unit.lines
+                user_tokens += unit.tokens
+            } else {
+                core_lines += unit.lines
+                core_tokens += unit.tokens
+            }
+        }
+        sink.progress("counters.parse.user_lines", user_lines, 0)
+        sink.progress("counters.parse.core_lines", core_lines, 0)
+        sink.progress("counters.parse.lines", user_lines + core_lines, 0)
+        sink.progress("counters.parse.user_tokens", user_tokens, 0)
+        sink.progress("counters.parse.core_tokens", core_tokens, 0)
+        sink.progress("counters.parse.tokens", user_tokens + core_tokens, 0)
     }
     results
 }
@@ -3774,7 +3810,7 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
     provenance :: jet_driver_collect_source_files(request.authorized_sources, source_units, modules, core_generated)
     loop diagnostic in provenance.diagnostics -> &diagnostics.push(diagnostic)
     if !provenance.complete -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
-    if failed_stage == None && !jet_driver_expand_imported_marker_groups(&modules, &resolved_imports, source_units, provenance.files, &diagnostics) {
+    if failed_stage == None && !jet_driver_expand_imported_marker_groups(&modules, &resolved_imports, source_units, provenance.files, &diagnostics, request.trace_sink) {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)
     }
     complete :: failed_stage == None && !jet_driver_has_errors(diagnostics)

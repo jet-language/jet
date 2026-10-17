@@ -9,6 +9,7 @@ use jet_foundation.[
     canonical_pass_record,
     canonical_pass_mir_snapshot,
     CompilerThreads,
+    CompilerTraceSink,
     MIRAccelerationFact,
     MIRBoundsFact,
     MIRDecisionRow,
@@ -130,13 +131,22 @@ fn mir_optimizer_succeeded(report: MIROptimizationReport) -> MIROptimizationResu
 // passes run in waves on up to `threads` compiler threads (mir_pass_wave),
 // and the seal digest encodes the functions on them
 // (mir_program_digest_threads); the result is the same for every thread count.
-fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threads: CompilerThreads, journal: &CanonicalPassJournal) -> MIROptimizationResult {
+// With a trace, the checks and digests are their own spans inside the
+// caller's `optimize` (SPEED-500K P9 and D5): `optimize.legality`,
+// `optimize.lint`, and `mir.digest` (detail: the consumer, `optimize.seal`
+// or `optimize.seal_check`).
+fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threads: CompilerThreads, journal: &CanonicalPassJournal, trace_sink: CompilerTraceSink?) -> MIROptimizationResult {
     report := mir_optimizer_empty_report()
     pipeline_before :: mir_pass_journal_before(program, journal, "mir.optimize-pipeline")
+    if trace_sink == .Val(sink) -> sink.begin("optimize.legality", "", -1, -1)
     validation := mir_pass_check(&program, .LegalityVerification, full_verification, threads)
+    if trace_sink == .Val(sink) -> sink.end("optimize.legality", program.functions.len())
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
     mir_pass_journal_check(program, &journal, "mir.legality-verification")
-    if mir_optimizer_has_complete_seal(program) {
+    if trace_sink == .Val(sink) -> sink.begin("mir.digest", "optimize.seal_check", -1, -1)
+    sealed :: mir_optimizer_has_complete_seal(program)
+    if trace_sink == .Val(sink) -> sink.end("mir.digest", program.functions.len())
+    if sealed {
         report.completed = mir_optimizer_production_order()
         loop function in program.functions {
             report.bounds_facts += function.optimization.bounds_facts.len()
@@ -145,7 +155,9 @@ fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threads: 
             report.acceleration_facts += function.optimization.acceleration_facts.len()
             report.decision_rows += function.optimization.decision_rows.len()
         }
+        if trace_sink == .Val(sink) -> sink.begin("optimize.lint", "", -1, -1)
         validation = mir_pass_lint_wave(&program, .CanonicalLoopFacts, threads)
+        if trace_sink == .Val(sink) -> sink.end("optimize.lint", program.functions.len())
         if validation == .Val(error) -> return mir_optimizer_failed(error, report)
         mir_pass_journal_after(program, &journal, "mir.optimize-pipeline", pipeline_before)
         return mir_optimizer_succeeded(report)
@@ -234,11 +246,15 @@ fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threads: 
         validation = mir_pass_validate_wave(&program, .CanonicalLoopFacts, threads)
         if validation == .Val(error) -> return mir_optimizer_failed(error, report)
     }
+    if trace_sink == .Val(sink) -> sink.begin("optimize.lint", "", -1, -1)
     validation = mir_pass_lint_wave(&program, .CanonicalLoopFacts, threads)
+    if trace_sink == .Val(sink) -> sink.end("optimize.lint", program.functions.len())
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
     report.decision_rows = mir_pass_derive_decision_rows(&program)
     mir_pass_sort_decision_rows_for_program(&program)
+    if trace_sink == .Val(sink) -> sink.begin("mir.digest", "optimize.seal", -1, -1)
     digest :: mir_program_digest_threads(&program, threads)
+    if trace_sink == .Val(sink) -> sink.end("mir.digest", program.functions.len())
     loop index in 0..<program.functions.len() -> program.functions[index].optimization.derived_from_digest = Val(digest)
     mir_pass_journal_after(program, &journal, "mir.optimize-pipeline", pipeline_before)
     mir_optimizer_succeeded(report)

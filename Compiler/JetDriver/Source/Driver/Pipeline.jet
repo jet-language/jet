@@ -1944,6 +1944,9 @@ struct JetDriverComptimeCounters {
     rows_lowered: Int
     // G: item functions evaluated on a bare program.
     items_bare: Int
+    // Tracing only (`track_keys`): JetDriverComptimeRunResult.lowered_keys.
+    track_keys: Bool
+    lowered_keys: [String:Bool]
 }
 
 // The program a flush evaluates on: held until the first evaluation moves it
@@ -2436,6 +2439,10 @@ struct JetDriverComptimeRunResult {
     graph_finished: Bool
     trail: SemaGraphTrail
     declared: [SemaGraphModuleResult]
+    // Traced runs only: the `module_identity\nkey` of every checked function
+    // a temporary program lowered, which the `lower` phase compares with the
+    // functions it lowers again (D12, `counters.lower.comptime_overlap_functions`).
+    lowered_keys: [String:Bool]{[String:Bool]{}}
 }
 
 fn jet_driver_comptime_run_result(
@@ -2817,10 +2824,15 @@ fn jet_driver_comptime_program(
     head :: batch.entries[start].request
     items := [JetCodegenLoweredFunction]{}
     staging.restore = true
+    if request.trace_sink == .Val(sink) -> sink.begin("comptime.lower", "program", -1, -1)
     staged_lowering := jet_driver_comptime_lower(&staging, closure, batch, start, &items)
+    if request.trace_sink == .Val(sink) -> sink.end("comptime.lower", closure.len() + items.len())
     lowered := ^staged_lowering ?? return None
     counters.programs_built += 1
     counters.rows_lowered += closure.len() + items.len()
+    if counters.track_keys {
+        loop function in closure -> counters.lowered_keys["{function.module_identity}\n{function.key}"] = true
+    }
     if lowered.functions.len() != closure.len() {
         &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, head.module_identity, "E0003", head.span, "temporary code generation did not return every checked comptime function", "the evaluator receives the complete checked TIR function closure", "retain every checked function through Codegen"))
         return None
@@ -2972,6 +2984,7 @@ fn jet_driver_comptime_grow(
     live: &JetDriverComptimeLive,
     item_ids: &[MIRFunctionID],
     machines: &[JetDriverComptimeMachine],
+    trace_sink: CompilerTraceSink?,
 ) -> Bool {
     if live.session.len() == 0 -> return false
     new_functions := [TFunc]{}
@@ -2988,13 +3001,18 @@ fn jet_driver_comptime_grow(
         None -> return false
         .Val(session) -> {
             if restore -> jet_codegen_comptime_session_restore(&session, live.functions)
+            if trace_sink == .Val(sink) -> sink.begin("comptime.lower", "grow", -1, -1)
             lowered = lower_comptime_growth(&session, new_functions, requests, staging.growth_constants)
+            if trace_sink == .Val(sink) -> sink.end("comptime.lower", new_functions.len() + requests.len())
         }
     }
     staging.restore = false
     grown := ^lowered ?? return false
     staging.restore = true
     counters.rows_lowered += new_functions.len() + requests.len()
+    if counters.track_keys {
+        loop function in new_functions -> counters.lowered_keys["{function.module_identity}\n{function.key}"] = true
+    }
     ids := [U64:Bool]{}
     keys := [String:Bool]{}
     if !jet_driver_comptime_growth_functions_fit(live, grown.functions, &ids, &keys) -> return false
@@ -3190,7 +3208,7 @@ fn jet_driver_comptime_flush(
             &live.push(^row)
         }
         if live.len() > 0 {
-            _ := jet_driver_comptime_grow(batch, start, &staging, &counters, &live[0], &item_functions, &machines)
+            _ := jet_driver_comptime_grow(batch, start, &staging, &counters, &live[0], &item_functions, &machines, request.trace_sink)
         }
     }
     if machines.len() == 0 {
@@ -3398,7 +3416,9 @@ fn jet_driver_run_comptime(
     request: JetDriverCompileRequest,
     diagnostics: &[Diagnostic],
 ) -> JetDriverComptimeRunResult {
-    counters := JetDriverComptimeCounters{items_checked: 0, programs_built: 0, programs_grown: 0, item_functions_evaluated: 0, rows_lowered: 0, items_bare: 0}
+    track_keys := false
+    if request.trace_sink == .Val(_) -> track_keys = true
+    counters := JetDriverComptimeCounters{items_checked: 0, programs_built: 0, programs_grown: 0, item_functions_evaluated: 0, rows_lowered: 0, items_bare: 0, track_keys: track_keys, lowered_keys: [String:Bool]{}}
     // Read before the tables take `staged`: staged values only type waiting
     // constants, so the module rows, foreign rows and the keep-going mode
     // read the same with or without them.
@@ -3440,7 +3460,9 @@ fn jet_driver_run_comptime(
         sink.progress("counters.comptime.item_functions_evaluated", counters.item_functions_evaluated, -1)
         sink.progress("counters.comptime.rows_lowered", counters.rows_lowered, -1)
         sink.progress("counters.comptime.items_bare", counters.items_bare, -1)
+        sink.progress("counters.comptime.functions_lowered", counters.lowered_keys.len(), -1)
     }
+    result.lowered_keys = ^counters.lowered_keys
     // The completed run hands the graph on as `graph`; any other exit hands
     // it back here.
     if result.graph_finished {
@@ -4991,6 +5013,37 @@ fn jet_driver_trace_lookup_counters(trace_sink: CompilerTraceSink?, phase: Strin
     }
 }
 
+// SPEED-500K work counters of the MIR phases, written after the phase's span
+// closes so the counting is not charged to it.
+// `counters.<phase>.mir_insts`: the instructions and terminators of `functions`.
+fn jet_driver_trace_mir_insts(trace_sink: CompilerTraceSink?, phase: String, functions: [MIRFunction]) {
+    if trace_sink == .Val(sink) -> sink.progress("counters.{phase}.mir_insts", jet_driver_mir_instruction_count(functions), -1)
+}
+
+fn jet_driver_mir_instruction_count(functions: [MIRFunction]) -> Int Never! {
+    count := 0
+    loop function in functions {
+        loop block in function.blocks -> count += block.instructions.len() + 1
+    }
+    count
+}
+
+// `lower`'s counters: the functions it lowered (and the nested ones lowering
+// made), their MIR instructions, and how many of the checked functions a
+// comptime program had already lowered (D12; `comptime_keys` is
+// JetDriverComptimeRunResult.lowered_keys).
+fn jet_driver_trace_lower_counters(trace_sink: CompilerTraceSink?, checked: [TFunc], functions: [MIRFunction], nested: [MIRFunction], comptime_keys: [String:Bool]) {
+    if trace_sink == .Val(sink) {
+        overlap := 0
+        loop function in checked {
+            if comptime_keys.get("{function.module_identity}\n{function.key}") != None -> overlap += 1
+        }
+        sink.progress("counters.lower.functions", functions.len() + nested.len(), -1)
+        sink.progress("counters.lower.mir_insts", jet_driver_mir_instruction_count(functions) + jet_driver_mir_instruction_count(nested), -1)
+        sink.progress("counters.lower.comptime_overlap_functions", overlap, -1)
+    }
+}
+
 // The comptime stage graph's lookup counts, read through a read parameter so
 // the pattern binding borrows the graph (binding it from the owned stage
 // would copy every module's AST natively).
@@ -5190,7 +5243,7 @@ fn jet_driver_keep_going_mir_trap_row(kg: &JetDriverKeepGoingLog, program: MIRPr
 // function it rejects in the program as it stands; all of them become traps
 // together and the optimizer runs again on the program, so reruns grow with
 // the failing checks rather than with the failing functions.
-fn jet_driver_keep_going_optimize(kg: &JetDriverKeepGoingLog, program: &MIRProgram, first: ^MIROptimizationResult, full_verification: Bool, threads: CompilerThreads, journal: &CanonicalPassJournal) -> MIROptimizationResult {
+fn jet_driver_keep_going_optimize(kg: &JetDriverKeepGoingLog, program: &MIRProgram, first: ^MIROptimizationResult, full_verification: Bool, threads: CompilerThreads, journal: &CanonicalPassJournal, trace_sink: CompilerTraceSink?) -> MIROptimizationResult {
     optimization := ^first
     attempts := 0
     traps := 0
@@ -5217,7 +5270,7 @@ fn jet_driver_keep_going_optimize(kg: &JetDriverKeepGoingLog, program: &MIRProgr
         if trapped == 0 -> break
         traps += trapped
         attempts += 1
-        optimization = optimize_mir_program(&program, full_verification, threads, &journal)
+        optimization = optimize_mir_program(&program, full_verification, threads, &journal, trace_sink)
     }
     if optimization.error != None -> jet_driver_keep_going_row(&kg, "optimize", "-", "STOPPED", "the optimizer still fails after {traps} keep-going traps in {attempts} reruns; emission runs on the program as the optimizer left it", "-")
     optimization
@@ -6067,6 +6120,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
 
     lowered := lower_functions(&sema_functions, &runtime_semantic_modules, load.source_files, request.compiler_threads, request.trace_sink, request.native_stop_points, jet_driver_resolved_package_edition(load), kg.enabled)
     if request.trace_sink == .Val(sink) -> sink.end("lower", lowered.functions.len())
+    jet_driver_trace_lower_counters(request.trace_sink, sema_functions, lowered.functions, lowered.nested_functions, comptime_run.lowered_keys)
     // JET_KEEP_GOING: each function whose lowering stopped lowered as a trap.
     loop failure in lowered.lowering_failures -> jet_driver_keep_going_row(&kg, "lower", "{failure.name} [{failure.key}]", "TRAPPED", "lowered as a trap: lowering it stopped: {failure.message}", "{failure.source_file}:{failure.span.start}..{failure.span.end}")
     if lowered.functions.len() != sema_functions.len() {
@@ -6252,6 +6306,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     // over pure work are folded here, once, for every execution tier.
     program_value = jet_driver_fold_pure_calls(^program_value)
     if request.trace_sink == .Val(sink) -> sink.end("assemble", program_value.functions.len())
+    jet_driver_trace_mir_insts(request.trace_sink, "assemble", program_value.functions)
 
     // The optimizer rewrites the program in place (no second copy of the
     // largest compile-time structure); an optimizer error is located through
@@ -6259,13 +6314,14 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     // every compile and every pass when the request asks for full verification.
     function_owners_for_errors := jet_driver_mir_function_owners(program_value)
     if request.trace_sink == .Val(sink) -> sink.begin("optimize", "", -1, -1)
-    optimization := optimize_mir_program(&program_value, request.mir_lint_every_pass, request.compiler_threads, &journal)
+    optimization := optimize_mir_program(&program_value, request.mir_lint_every_pass, request.compiler_threads, &journal, request.trace_sink)
     if kg.enabled {
-        optimization = jet_driver_keep_going_optimize(&kg, &program_value, ^optimization, request.mir_lint_every_pass, request.compiler_threads, &journal)
+        optimization = jet_driver_keep_going_optimize(&kg, &program_value, ^optimization, request.mir_lint_every_pass, request.compiler_threads, &journal, request.trace_sink)
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
+    if request.trace_sink == .Val(sink) -> sink.end("optimize", function_owners_for_errors.len())
+    jet_driver_trace_mir_insts(request.trace_sink, "optimize", program_value.functions)
     if request.trace_sink == .Val(sink) {
-        sink.end("optimize", function_owners_for_errors.len())
         // The optimizer's checks, the late Rust foreign facts, any emission
         // and the compile result, up to jet_driver_trace_result_built.
         sink.begin("driver.result", "", -1, -1)
@@ -6305,13 +6361,17 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         return jet_driver_compile_result(load, load.diagnostics, entry_function, Val(^optimized_program), None, None, failed_stage, failed_stage == .None && !jet_driver_has_errors(load.diagnostics), trace)
     }
     if web_target {
+        // A MIR digest consumer (D5): traced as `mir.digest` like the optimizer's.
+        if request.trace_sink == .Val(sink) -> sink.begin("mir.digest", "web.semantic", -1, -1)
+        semantic_digest :: mir_program_digest(optimized_program)
+        if request.trace_sink == .Val(sink) -> sink.end("mir.digest", optimized_program.functions.len())
         web_config_option := if request.target == {
             .Native | .Sandbox(_, _, _) -> None
             .Web(assets, release_policy, _) -> Val(JetWebEmitConfig{
                 artifact: artifact_plan.id,
                 layout: jet_target_layout_from_machine(target_machine),
                 assets: assets,
-                semantic_digest: mir_program_digest(optimized_program),
+                semantic_digest: semantic_digest,
                 root_prefix: "",
                 release_devtools_policy: release_policy,
             })

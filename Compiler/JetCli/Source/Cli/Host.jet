@@ -10,8 +10,9 @@ use jet_backend.[
     LIRFunctionID,
     LIRLowering,
     LIRModule,
+    X64ExecutableResult,
     x64_execution_service,
-    lir_lower_entry_in_place, lir_lower_entry_keep_going_in_place, lir_optimize_module,
+    lir_lint_module, lir_lower_entry_in_place, lir_lower_entry_keep_going_in_place, lir_optimize_module,
     x64_link_executable,
     x64_relocatable_object_owned,
 ]
@@ -429,9 +430,10 @@ fn jet_cli_native_front(entry_function: MIRFunctionID?, trace_sink: CompilerTrac
     entry_id :: entry_function ?? return Val(JetCLINativeFailure.NoEntry)
     // Only functions the entry reaches are lowered, generic ones per instance.
     if trace_sink == .Val(sink) -> sink.begin("native.lower", "", -1, -1)
-    lowered :: if keep_going -> lir_lower_entry_keep_going_in_place(&unpruned, entry_id, threads) else -> lir_lower_entry_in_place(&unpruned, entry_id, threads)
+    lowered :: if keep_going -> lir_lower_entry_keep_going_in_place(&unpruned, entry_id, threads, trace_sink) else -> lir_lower_entry_in_place(&unpruned, entry_id, threads, trace_sink)
     function_count :: lowered.lir.functions.len()
     if trace_sink == .Val(sink) -> sink.end("native.lower", function_count)
+    jet_cli_trace_lir_counters(trace_sink, "native.lower", lowered.lir)
     if lowered.issues.len() > 0 {
         if keep_going {
             loop issue in lowered.issues -> &census.push(jet_cli_keep_going_row("native.lower", issue.function, issue.message))
@@ -477,8 +479,11 @@ fn jet_cli_native_back(front: ^JetCLINativeFront, trace_sink: CompilerTraceSink?
     if trace_sink == .Val(sink) -> sink.begin("native.object", "", -1, -1)
     // The memory term is read now: the compile before this holds most of it.
     object_threads :: CompilerThreads{cap: threads.cap, cores: threads.cores, memory_available: jet_cli_memory_available()}
-    object :: if level > 0 -> x64_relocatable_object_owned(jet_cli_native_optimize(^front.lowered.lir, level, trace_sink), front.entry, object_threads, keep_going, None) else -> x64_relocatable_object_owned(^front.lowered.lir, front.entry, object_threads, keep_going, front.lowered.lint)
-    if trace_sink == .Val(sink) -> sink.end("native.object", front.function_count)
+    object :: if level > 0 -> jet_cli_native_object_optimized(jet_cli_native_optimize(^front.lowered.lir, level, trace_sink), front.entry, object_threads, keep_going, trace_sink) else -> x64_relocatable_object_owned(^front.lowered.lir, front.entry, object_threads, keep_going, front.lowered.lint)
+    if trace_sink == .Val(sink) {
+        sink.end("native.object", front.function_count)
+        sink.progress("counters.native.object.bytes", object.bytes.len(), -1)
+    }
     if object.errors.len() > 0 {
         if keep_going {
             loop error in object.errors -> &census.push(jet_cli_keep_going_row("native.object", "-", error))
@@ -500,7 +505,10 @@ fn jet_cli_native_back(front: ^JetCLINativeFront, trace_sink: CompilerTraceSink?
     input_count :: names.len()
     if trace_sink == .Val(sink) -> sink.begin("native.link", "", -1, -1)
     image :: x64_link_executable(names, ^bytes)
-    if trace_sink == .Val(sink) -> sink.end("native.link", input_count)
+    if trace_sink == .Val(sink) {
+        sink.end("native.link", input_count)
+        sink.progress("counters.native.link.bytes", image.bytes.len(), -1)
+    }
     if image.errors.len() > 0 {
         if keep_going {
             loop error in image.errors -> &census.push(jet_cli_keep_going_row("native.link", "-", error))
@@ -524,7 +532,32 @@ fn jet_cli_native_optimize(lir: ^LIRModule, level: Int, trace_sink: CompilerTrac
     if trace_sink == .Val(sink) -> sink.begin("native.optimize", "", -1, -1)
     optimized :: lir_optimize_module(^lir, level)
     if trace_sink == .Val(sink) -> sink.end("native.optimize", optimized.functions.len())
+    jet_cli_trace_lir_counters(trace_sink, "native.optimize", optimized)
     optimized
+}
+
+// The O1/O2 object of the optimized module: its one LIR lint, traced as
+// `native.lir_lint` (detail `object`; SPEED-500K D6), whose findings the
+// object compile reports instead of linting the module again.
+fn jet_cli_native_object_optimized(lir: ^LIRModule, entry: LIRFunctionID, threads: CompilerThreads, keep_going: Bool, trace_sink: CompilerTraceSink?) -> X64ExecutableResult Never! {
+    if trace_sink == .Val(sink) -> sink.begin("native.lir_lint", "object", -1, -1)
+    findings :: lir_lint_module(lir)
+    if trace_sink == .Val(sink) -> sink.end("native.lir_lint", lir.functions.len())
+    x64_relocatable_object_owned(^lir, entry, threads, keep_going, Val(findings))
+}
+
+// SPEED-500K work counters of a LIR phase, after its span closed:
+// `counters.<phase>.functions` and `counters.<phase>.lir_insts` (block
+// instructions and terminators).
+fn jet_cli_trace_lir_counters(trace_sink: CompilerTraceSink?, phase: String, lir: LIRModule) Never! {
+    if trace_sink == .Val(sink) {
+        insts := 0
+        loop function in lir.functions {
+            loop block in function.blocks -> insts += block.insts.len() + 1
+        }
+        sink.progress("counters.{phase}.functions", lir.functions.len(), -1)
+        sink.progress("counters.{phase}.lir_insts", insts, -1)
+    }
 }
 
 // `jet build`'s report of the native route. Report all native findings

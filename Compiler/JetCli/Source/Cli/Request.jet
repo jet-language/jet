@@ -1086,8 +1086,10 @@ fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLIOver
 // the Chrome trace-event lines the Rust host's writer produces
 // (crates/jet-driver/src/Trace.rs): the `[` header, `process_name`,
 // `trace.start` (`unix_ms`, `functions`), one `B`/`E` event per span with
-// `rss_kb`/`peak_rss_kb` (VmRSS/VmHWM) on every close and a `memory`
-// counter after a phase, throttled `C` progress events, `<phase>.<name>`
+// `rss_kb`/`peak_rss_kb` (VmRSS/VmHWM) and the span's CPU time (`cpu_ns` of
+// its thread, `proc_cpu_ns` of every thread, `majflt` major faults; this
+// writer only) on every close and a `memory` counter after a phase,
+// throttled `C` progress events, `<phase>.<name>`
 // counter events, and `JET_PHASE_COUNTERS` stderr lines when that variable is
 // set, so Tools/perf and Tools/agent read either compiler's trace. `-` or
 // `stderr` streams one readable line per event to stderr instead. Every line
@@ -1103,11 +1105,24 @@ JET_CLI_TRACE_STDERR :: "/dev/stderr"
 // always written (Trace.rs `PROGRESS_INTERVAL`).
 JET_CLI_TRACE_PROGRESS_MS :: 200
 
-// One open span: its kind, the label it shows, and when it began (µs).
+// One open span: its kind, the label it shows, when it began (µs), and the
+// CPU clocks and fault count when it began.
 struct JetCLITraceSpan {
     kind: String
     label: String
     start_us: Int
+    start: JetCLITraceUsage
+}
+
+// CPU time in ns of the calling thread (`/proc/thread-self/schedstat`: the
+// scheduler's exact run time) and of the whole process (`/proc/self/stat`
+// utime + stime, in 10 ms clock ticks), and the process's major page faults;
+// -1 where unreadable. A span reports the difference between its end and its
+// begin; begin and end run on the same thread (spans nest per thread).
+struct JetCLITraceUsage {
+    cpu_ns: Int
+    proc_cpu_ns: Int
+    majflt: Int
 }
 
 struct JetCLITraceState {
@@ -1206,6 +1221,7 @@ impl JetCLITraceSink.CompilerTraceSink {
         ts :: jet_cli_trace_micros(self.start_ms)
         thread :: jet_cli_trace_thread()
         label :: if detail == "" -> name else -> detail
+        start :: jet_cli_trace_usage()
         permit := self.state.guard_edit()
         if !permit.value.writing -> return
         stack := permit.value.stacks.get(thread) ?? [JetCLITraceSpan]{}
@@ -1218,7 +1234,7 @@ impl JetCLITraceSink.CompilerTraceSink {
             args :: if index >= 0 -> ",\"args\":{{\"index\":{index},\"total\":{total}}}" else -> ""
             line = "{line}{jet_cli_trace_head(label, Val(name), "B", ts, self.pid, thread)}{args}}},\n"
         }
-        &stack.push(JetCLITraceSpan{kind: name, label: label, start_us: ts})
+        &stack.push(JetCLITraceSpan{kind: name, label: label, start_us: ts, start: start})
         permit.value.stacks[thread] = stack
         jet_cli_trace_write(self.target, &permit.value, line)
     }
@@ -1227,6 +1243,7 @@ impl JetCLITraceSink.CompilerTraceSink {
     // deeper span an early return left open; no open span of that kind on
     // this thread writes nothing.
     fn end(self, name: String, items: Int) Never! -[FS]> {
+        usage :: jet_cli_trace_usage()
         memory :: jet_cli_trace_memory()
         ts :: jet_cli_trace_micros(self.start_ms)
         thread :: jet_cli_trace_thread()
@@ -1239,10 +1256,11 @@ impl JetCLITraceSink.CompilerTraceSink {
         line := ""
         loop stack.len() > position + 1 {
             abandoned :: &stack.pop() ?? break
-            line = "{line}{jet_cli_trace_close_line(self, abandoned, false, -1, None, ts, thread, stack.len())}"
+            line = "{line}{jet_cli_trace_close_line(self, abandoned, false, -1, None, None, ts, thread, stack.len())}"
         }
         closed :: &stack.pop() ?? return
-        line = "{line}{jet_cli_trace_close_line(self, closed, true, items, memory, ts, thread, stack.len())}"
+        spent :: jet_cli_trace_usage_since(closed.start, usage)
+        line = "{line}{jet_cli_trace_close_line(self, closed, true, items, memory, Val(spent), ts, thread, stack.len())}"
         permit.value.stacks[thread] = stack
         jet_cli_trace_write(self.target, &permit.value, line)
     }
@@ -1305,19 +1323,28 @@ impl JetCLITraceSink {
 
 // A span's close. Machine form: its `E` event (with args only for the span
 // `end` named), then a phase's `memory` counter; readable form: one line
-// with the span's duration, item count and memory.
-fn jet_cli_trace_close_line(sink: JetCLITraceSink, span: JetCLITraceSpan, named: Bool, items: Int, memory: JetCLITraceMemory?, ts: Int, thread: Int, depth: Int) -> String Never! {
+// with the span's duration, CPU time, item count and memory.
+fn jet_cli_trace_close_line(sink: JetCLITraceSink, span: JetCLITraceSpan, named: Bool, items: Int, memory: JetCLITraceMemory?, spent: JetCLITraceUsage?, ts: Int, thread: Int, depth: Int) -> String Never! {
     if sink.human {
         item :: if span.label == span.kind -> "" else -> " {span.label}"
         counted :: if items >= 0 -> " items={items}" else -> ""
         abandoned :: if named -> "" else -> " (left open)"
-        return "{jet_cli_trace_prefix(sink, ts, thread, depth)}< {span.kind}{item} {jet_cli_trace_seconds(ts - span.start_us)}s{counted}{jet_cli_trace_resident(memory)}{abandoned}\n"
+        cpu := ""
+        if spent == .Val(usage) {
+            if usage.cpu_ns >= 0 -> cpu = " cpu={jet_cli_trace_seconds(usage.cpu_ns /% 1000)}s"
+        }
+        return "{jet_cli_trace_prefix(sink, ts, thread, depth)}< {span.kind}{item} {jet_cli_trace_seconds(ts - span.start_us)}s{cpu}{counted}{jet_cli_trace_resident(memory)}{abandoned}\n"
     }
     head :: jet_cli_trace_head(span.label, Val(span.kind), "E", ts, sink.pid, thread)
     if !named -> return "{head}}},\n"
     args := [String]{}
     if items >= 0 -> &args.push("\"items\":{items}")
     if memory == .Val(kb) -> &args.push("\"rss_kb\":{kb.rss_kb},\"peak_rss_kb\":{kb.peak_kb}")
+    if spent == .Val(usage) {
+        if usage.cpu_ns >= 0 -> &args.push("\"cpu_ns\":{usage.cpu_ns}")
+        if usage.proc_cpu_ns >= 0 -> &args.push("\"proc_cpu_ns\":{usage.proc_cpu_ns}")
+        if usage.majflt >= 0 -> &args.push("\"majflt\":{usage.majflt}")
+    }
     joined :: args.join(",")
     line := "{head},\"args\":{{{joined}}}}},\n"
     if span.label == span.kind && memory == .Val(kb) {
@@ -1432,6 +1459,46 @@ fn jet_cli_trace_status_kb(line: String) -> Int Never! {
         return Int.parse(word) ?? -1
     }
     -1
+}
+
+// `/proc/self/stat` counts CPU time in clock ticks of USER_HZ (100 on every
+// Linux ABI): 10 ms each.
+JET_CLI_TRACE_NS_PER_TICK :: 10000000
+
+// The CPU clocks and major fault count a span starts from and ends at.
+fn jet_cli_trace_usage() -> JetCLITraceUsage Never! {
+    usage := JetCLITraceUsage{cpu_ns: -1, proc_cpu_ns: -1, majflt: -1}
+    // `<run ns> <wait ns> <timeslices>`: the first field is the thread's CPU time.
+    if cli_files.read("/proc/thread-self/schedstat") == .Ok(schedstat) {
+        loop field in schedstat.trim().split(" ") {
+            usage.cpu_ns = Int.parse(field) ?? -1
+            break
+        }
+    }
+    // `pid (comm) state …`: the fields after the last `)` start at field 3
+    // (state), so majflt (12), utime (14) and stime (15) are 9, 11 and 12.
+    text :: cli_files.read("/proc/self/stat") ?? return usage
+    parts :: text.split(")").to_list()
+    if parts.len() < 2 -> return usage
+    fields := [String]{}
+    loop word in parts[parts.len() - 1].trim().split(" ") {
+        if word != "" -> &fields.push(word)
+    }
+    if fields.len() < 13 -> return usage
+    usage.majflt = Int.parse(fields[9]) ?? -1
+    utime :: Int.parse(fields[11]) ?? return usage
+    stime :: Int.parse(fields[12]) ?? return usage
+    usage.proc_cpu_ns = (utime + stime) * JET_CLI_TRACE_NS_PER_TICK
+    usage
+}
+
+// What a span spent between `start` and `now`; -1 where either is unknown.
+fn jet_cli_trace_usage_since(start: JetCLITraceUsage, now: JetCLITraceUsage) -> JetCLITraceUsage Never! {
+    JetCLITraceUsage{
+        cpu_ns: if start.cpu_ns < 0 || now.cpu_ns < 0 -> -1 else -> now.cpu_ns - start.cpu_ns,
+        proc_cpu_ns: if start.proc_cpu_ns < 0 || now.proc_cpu_ns < 0 -> -1 else -> now.proc_cpu_ns - start.proc_cpu_ns,
+        majflt: if start.majflt < 0 || now.majflt < 0 -> -1 else -> now.majflt - start.majflt,
+    }
 }
 
 // Writes one event's text; the first failure stops the trace.
