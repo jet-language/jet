@@ -5305,15 +5305,31 @@ fn sema_comptime_probe_part_apply(environment: SemaScopeEnvironment, program: Se
     }
 }
 
+// The constants `references` name that have no compile-time value yet. A
+// staged value is looked up only for the referenced keys: the values are
+// scanned once for those keys, instead of keying every staged value (and
+// copying it into a map) on each of the run's item checks.
 fn sema_comptime_dependencies_from_references(graph: SemaRegistrationGraph, references: [SemaNameReferenceFact], values: [SemaComptimeItemValue]) -> [String] Never! {
     dependencies := [String]{}
     if references.len() == 0 -> return dependencies
-    constants :: sema_comptime_constant_values(values)
+    wanted := [String:Bool]{}
+    loop reference in references {
+        if reference.symbol.kind == SymbolKind.Constant -> wanted[reference.symbol.id.key] = true
+    }
+    if wanted.len() == 0 -> return dependencies
+    // "{module identity}|{key}" of every staged constant value a reference
+    // can name (sema_comptime_constant_values keys values the same way).
+    staged := [String:Bool]{}
+    loop value in values {
+        if value.kind != SemaComptimeItemKind.Constant -> next
+        if wanted.get(value.key) == None -> next
+        staged["{value.module_identity}|{value.key}"] = true
+    }
     seen := [String:Bool]{}
     loop reference in references {
         if reference.symbol.kind != SymbolKind.Constant -> next
         if seen.get(reference.symbol.id.key) != None -> next
-        if sema_comptime_value_for_symbol(constants, reference.symbol.module_name, reference.symbol.id.key) != None -> next
+        if staged.get("{reference.symbol.module_name}|{reference.symbol.id.key}") != None -> next
         if sema_comptime_constant_has_ast_value(graph, reference.symbol.module_name, reference.symbol.id.key) -> next
         seen[reference.symbol.id.key] = true
         &dependencies.push(reference.symbol.id.key)
