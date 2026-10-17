@@ -420,7 +420,7 @@ export async function runTransport(entry, { jet, repo, logDir, runtimePack, runt
             const result = node(spec.runner, out, 'run'); exact(result, 'compiled native expectation producer: CHECK OK\n');
         } else if (spec.type === 'selfhost') {
             const unitRoot = join(out, 'compiler'); mkdirSync(unitRoot, { recursive: true }); const file = join(unitRoot, 'unit.jet');
-            writeFileSync(file, readFileSync(await aggregate(), 'utf8') + '\nuse core.process as selfhost_process\nfn run() { jet_cli_main(selfhost_process.args()) }\n');
+            writeFileSync(file, readFileSync(await aggregate(), 'utf8') + '\nuse core.process as selfhost_process\nfn run() { selfhost_process.exit(jet_cli_main(selfhost_process.args())) }\n');
             await compile(file, unitRoot, join(out, 'self-feed'), join(out, 'self.mird'));
             node(spec.runner, out, repo);
             const binary = await compile(join(out, 'unit.jet'), out, join(out, 'self-lower'));
