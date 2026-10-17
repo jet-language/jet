@@ -115,7 +115,7 @@ fn jet_codegen_core_reach_one_stmt_keys(statement: TStmt, functions: [TFunc], ke
                 jet_codegen_core_reach_stmt_keys(body, functions, &keys)
             }
             .Match(_, arms, _, _) -> loop arm in arms -> jet_codegen_core_reach_stmt_keys(arm.body, functions, &keys)
-            .EnumMatch(_, _, arms, else_body, _, _) -> {
+            .EnumMatch(_, arms, else_body, _, _) -> {
                 loop arm in arms -> jet_codegen_core_reach_stmt_keys(arm.body, functions, &keys)
                 if else_body == .Val(body) -> jet_codegen_core_reach_stmt_keys(body, functions, &keys)
             }

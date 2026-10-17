@@ -1240,7 +1240,7 @@ fn sema_expression_lambda_collect_tir_statements(statements: [TStmt], frame: Int
                 sema_expression_lambda_collect_tir_expr(init, frame, &scopes, &keys)
                 sema_expression_lambda_collect_tir_statements(fallback, frame, &scopes, &keys)
             }
-            .Assign(place, _, value, _, _, _) -> {
+            .Assign(place, _, value, _, _) -> {
                 sema_expression_lambda_collect_tir_place(place, frame, &scopes, &keys)
                 sema_expression_lambda_collect_tir_expr(value, frame, &scopes, &keys)
             }
@@ -1286,7 +1286,7 @@ fn sema_expression_lambda_collect_tir_statements(statements: [TStmt], frame: Int
                 sema_expression_lambda_collect_tir_expr(subject, frame, &scopes, &keys)
                 loop arm in arms -> sema_expression_lambda_collect_tir_statements(arm.body, frame, &scopes, &keys)
             }
-            .EnumMatch(scrutinee, _, arms, else_body, _, _) -> {
+            .EnumMatch(scrutinee, arms, else_body, _, _) -> {
                 sema_expression_lambda_collect_tir_expr(scrutinee, frame, &scopes, &keys)
                 loop arm in arms -> sema_expression_lambda_collect_tir_statements(arm.body, frame, &scopes, &keys)
                 if else_body == .Val(else_statements) -> sema_expression_lambda_collect_tir_statements(else_statements, frame, &scopes, &keys)
@@ -2359,7 +2359,7 @@ fn sema_expression_lambda_lift_block(statements: &[TStmt], carrier: Type) Never!
                 }
                 statements[index] = TStmt.Match{subject: subject, arms: updated_arms, exhaustive: exhaustive, span: span}
             }
-            .EnumMatch(subject, clone_subject, arms, else_body, fallthrough, span) -> {
+            .EnumMatch(subject, arms, else_body, fallthrough, span) -> {
                 updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
@@ -2372,7 +2372,7 @@ fn sema_expression_lambda_lift_block(statements: &[TStmt], carrier: Type) Never!
                     sema_expression_lambda_lift_block(&lifted, carrier)
                     updated_else = Val(lifted)
                 }
-                statements[index] = TStmt.EnumMatch{scrutinee: subject, clone_subject: clone_subject, arms: updated_arms, else_body: updated_else, fallthrough: fallthrough, span: span}
+                statements[index] = TStmt.EnumMatch{scrutinee: subject, arms: updated_arms, else_body: updated_else, fallthrough: fallthrough, span: span}
             }
             .RangeSwitch(subject, arms, else_body, span) -> {
                 updated_arms := arms.copy()

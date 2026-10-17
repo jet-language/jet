@@ -594,7 +594,6 @@ fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], span: 
         argument :: args[0]
         value :: sema_check_expression(argument.expr, Val(want), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         payload = Val(value)
-        clone_arg = argument.flags.implicit_clone || argument.flags.shared_auto_clone
         borrowed := sema_data_argument_is_borrowed(argument.expr, scopes)
         if argument.convention != AccessConvention.Move && borrowed && !sema_ownership_type_is_copy(want) {
             if sema_ownership_type_cloneable(want) == (Val(true)) -> clone_arg = true

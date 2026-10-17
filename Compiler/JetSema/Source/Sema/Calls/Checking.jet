@@ -11,6 +11,7 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     FunctionDefaultRef,
+    MIRCopyFact,
     PlaceAccess,
     Span,
     Symbol,
@@ -26,7 +27,6 @@ use jet_foundation.[
     ast_empty_call_arg_flags,
     expr_span,
     symbol_id,
-    tir_call_arg_copy_fact,
     tir_symbol_local,
     type_identity_equal,
     type_name,
@@ -489,11 +489,6 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
         // element of the write-borrowed `lowered`.
         original :: lowered[index].value.copy()
         init := original
-        if lowered[index].clone || lowered[index].arc_clone {
-            init = sema_tir_node(original.ty, TExprKind.Clone{value: init, fact: tir_call_arg_copy_fact(lowered[index].arc_clone)}, original.span)
-            lowered[index].clone = false
-            lowered[index].arc_clone = false
-        }
         place_value :: if init.kind == {
             .Local(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Deref(_) | .Borrow(_, _) -> true
             else -> false
@@ -598,8 +593,6 @@ fn sema_call_lower_bound_arguments(typed: SemaCallTypedArguments, params: [SemaC
             template_items: [SymbolID]{},
             borrow: param.convention == AccessConvention.Read && !sema_call_is_scalar(value.ty),
             mut_borrow: param.convention == AccessConvention.Write,
-            clone: arg.flags.implicit_clone,
-            arc_clone: arg.flags.shared_auto_clone,
             fn_coerce: None,
             widen_to_vec: widen_to_vec,
             widen_to_union: widen_to_union,
@@ -624,13 +617,9 @@ fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [S
         if lowered[index].widen_to_vec {
             // The boundary copy itself clones the fixed list's elements.
             // Do not first clone the array and then clone that copy again.
-            if !lowered[index].clone && !lowered[index].arc_clone {
-                if !sema_expression_list_check_clone(value.ty, value.span, environment, program, &context, &diagnostics) -> return false
-            }
+            if !sema_expression_list_check_clone(value.ty, value.span, environment, program, &context, &diagnostics) -> return false
             if args[index].convention == AccessConvention.Move -> value = sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span)
             value = sema_tir_node(typed.required_types[index], TExprKind.MaterializeView{value: value}, value.span)
-        } else if lowered[index].clone || lowered[index].arc_clone {
-            value = sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(lowered[index].arc_clone)}, value.span)
         } else if args[index].convention == AccessConvention.Move {
             value = sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span)
         } else if lowered[index].spread {
@@ -648,7 +637,7 @@ fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [S
             copies_place :: places.len() > 0 && (borrowed || !sema_ownership_unmarked_moves_name(args[index].expr) || sema_ownership_is_share_site(state, args[index].span))
             if copies_place {
                 if !sema_expression_list_check_clone(value.ty, value.span, environment, program, &context, &diagnostics) -> return false
-                value = sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(false)}, value.span)
+                value = sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: MIRCopyFact.Materialize}, value.span)
             } else {
                 if !sema_ownership_mark_unmarked_move(&state, args[index].expr, scopes, "the variadic list", &diagnostics) -> return false
                 value = sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span)
@@ -657,8 +646,6 @@ fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [S
         lowered[index].value = ^value
         lowered[index].borrow = false
         lowered[index].mut_borrow = false
-        lowered[index].clone = false
-        lowered[index].arc_clone = false
         lowered[index].widen_to_vec = false
     }
     true
@@ -708,7 +695,7 @@ fn sema_call_pack_variadic_arguments(typed: SemaCallTypedArguments, params: [Sem
             value: ^value, template_items: [SymbolID]{},
             borrow: params[slot].convention == AccessConvention.Read,
             mut_borrow: params[slot].convention == AccessConvention.Write,
-            clone: false, arc_clone: false, fn_coerce: None,
+            fn_coerce: None,
             widen_to_vec: false, widen_to_union: None, box_as_trait: None,
             label: Val(params[slot].label), spread: false,
         })
@@ -716,10 +703,10 @@ fn sema_call_pack_variadic_arguments(typed: SemaCallTypedArguments, params: [Sem
     Val(^packed)
 }
 
-// This path runs Ownership after expression typing and before lowering. The
-// ownership hook may mark implicit_clone on the source arg, so lowering must
-// happen only after it accepts and completes. Return the lowered arguments
-// together with the declaration-slot temporaries placed before the call.
+// This path runs Ownership after expression typing and before lowering, so
+// lowering happens only after the ownership check accepts and completes.
+// Return the lowered arguments together with the declaration-slot
+// temporaries placed before the call.
 fn sema_call_check_bound_arguments_owned(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> (args: [TCallArg], pins: [TStmt])? {
     typed :: sema_call_typecheck_bound_arguments(callee, params, abi, apply_lambda_escape_override, binding, &args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, false) ?? return None
     ownership :: sema_ownership_check_call_arguments(&state, callee, params, &args, scopes, &diagnostics)

@@ -48,7 +48,6 @@ use jet_foundation.[
     regex_syntax_validate,
     symbol_id,
     type_identity_key,
-    tir_call_arg_copy_fact,
     type_name,
 ]
 
@@ -686,7 +685,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
                 return None
             }
             if !sema_copy_site_record_move(payload_expr, scopes, &state, &tail_store, &context, &diagnostics) -> return None
-            payload = TEnumPayload.Positional{args: [TEnumArg]{TEnumArg{value: checked, clone: false, move: false}}}
+            payload = TEnumPayload.Positional{args: [TEnumArg]{TEnumArg{value: checked}}}
         }
         .Named(fields) -> {
             // Rust `check_enum_lit`: payload fields are checked and kept in the
@@ -734,7 +733,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
                     return None
                 }
                 if !sema_copy_site_record_move(payload_expr, scopes, &state, &tail_store, &context, &diagnostics) -> return None
-                &named_values.push(TNamedEnumArg{name: label, value: TEnumArg{value: checked, clone: false, move: false}})
+                &named_values.push(TNamedEnumArg{name: label, value: TEnumArg{value: checked}})
             }
             loop (index, was_supplied) in supplied {
                 if !was_supplied {
@@ -787,7 +786,7 @@ fn sema_expression_core_enum_literal(enum_name: String, variants: [String], vari
             return None
         }
         if !sema_copy_site_record_move(payload_expr, scopes, &state, &tail_store, &context, &diagnostics) -> return None
-        &checked_args.push(TEnumArg{value: checked, clone: false, move: false})
+        &checked_args.push(TEnumArg{value: checked})
     }
     payload :: if checked_args.len() == 0 -> TEnumPayload.Unit else -> TEnumPayload.Positional{args: checked_args}
     value :: sema_tir_node(Type.Named{name: enum_name}, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: payload}, span)
@@ -1019,9 +1018,7 @@ fn sema_expression_checked_text_raw(target: SemaExpressionCheckedTextTarget, typ
     ownership_args := args
     ownership := sema_ownership_check_call_arguments(&state, callee, params, &ownership_args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value := argument
-    if ownership_args[0].flags.implicit_clone || ownership_args[0].flags.shared_auto_clone -> value = sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(ownership_args[0].flags.shared_auto_clone)}, value.span)
-    constructed :: sema_tir_node(Type.Named{name: type_name}, TExprKind.DistinctCtor{owner: target.owner.id, argument: value, base: Type.String}, method_span)
+    constructed :: sema_tir_node(Type.Named{name: type_name}, TExprKind.DistinctCtor{owner: target.owner.id, argument: argument, base: Type.String}, method_span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(constructed, expected, environment, program, &diagnostics)}
 }
 

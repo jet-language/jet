@@ -134,8 +134,6 @@ struct TCallArg {
     template_items: [SymbolID]
     borrow: Bool
     mut_borrow: Bool
-    clone: Bool
-    arc_clone: Bool
     fn_coerce: TFnCoerce?
     widen_to_vec: Bool
     widen_to_union: Type?
@@ -159,8 +157,6 @@ struct TFieldRef {
 
 struct TEnumArg {
     value: TExpr
-    clone: Bool
-    move: Bool
 }
 enum TAllocCtor {
     Arena
@@ -366,7 +362,7 @@ enum TStmt {
     TupleDestructure(temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span)
     StructDestructure(temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span)
     ListDestructure(temp: TLocal, init: TExpr, count: Int, file: String, line: Int, elements: [TLocal], span: Span)
-    Assign(place: TPlace, op: TBinaryOp?, value: TExpr, clone_value: Bool, line: Int, span: Span)
+    Assign(place: TPlace, op: TBinaryOp?, value: TExpr, line: Int, span: Span)
     CountedLoop(label: String?, init: TStmt, condition: TExpr, step: TStmt?, vectorization: AutoVectorizationFacts?, body: [TStmt], span: Span)
     ForRange(label: String?, local: TLocal, start: TExpr, end: TExpr, step: TExpr?, exclusive: Bool, body: [TStmt], vectorization: AutoVectorizationFacts?, span: Span)
     Range(label: String?, variable: TLocal, source: TExpr?, start: TExpr, end: TExpr, step: TExpr?, exclusive: Bool, vectorization: AutoVectorizationFacts?, body: [TStmt], span: Span)
@@ -381,12 +377,12 @@ enum TStmt {
     BreakValue(label: String?, value: TExpr, span: Span)
     Continue(label: String?, span: Span)
     Match(subject: TExpr, arms: [TMatchArm], exhaustive: Bool, span: Span)
-    EnumMatch(scrutinee: TExpr, clone_subject: Bool, arms: [TMatchArm], else_body: [TStmt]?, fallthrough: Bool, span: Span)
+    EnumMatch(scrutinee: TExpr, arms: [TMatchArm], else_body: [TStmt]?, fallthrough: Bool, span: Span)
     RangeSwitch(subject: TExpr, arms: [TRangeArm], else_body: [TStmt], span: Span)
     IndexAssign(uninit: Bool, base: TExpr, index: TExpr, is_map: Bool, value: TExpr, span: Span)
     IndexFieldAssign(value: TIndexFieldAssign, span: Span)
     IndexHookAssign(type_name: String, base: TExpr, index: TExpr, value: TExpr, span: Span)
-    MathSwizzleAssign(base: TExpr, type_name: String, lanes: [Int], value: TExpr, clone_value: Bool, span: Span)
+    MathSwizzleAssign(base: TExpr, type_name: String, lanes: [Int], value: TExpr, span: Span)
     ForIn(label: String?, variable: TLocal, variable_two: TLocal?, source: TExpr, collection: TExpr, step: TExpr?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, source_stable: Bool, body: [TStmt], span: Span)
     Inline(body: [TStmt], span: Span)
     DebugOnly(body: [TStmt], span: Span)
@@ -431,7 +427,6 @@ struct TIndexFieldAssign {
     field_ty: Type
     op: TBinaryOp?
     value: TExpr
-    clone_value: Bool
     line: Int
 }
 
@@ -524,14 +519,6 @@ enum TUnitRoundingMode {
     NearestEven
 }
 struct TUnitRounding { mode: TUnitRoundingMode, digits: TExpr }
-
-// #4318: the copy fact of a call argument sema marked for copying (MIRRust
-// call_arg_copy_fact): a shared-reference retain is a share; an owning
-// parameter filled from a value the caller keeps materializes (D-MEM-COPYSEM1).
-fn tir_call_arg_copy_fact(shared: Bool) -> MIRCopyFact Never! {
-    if shared -> return MIRCopyFact.Share
-    MIRCopyFact.Materialize
-}
 
 enum TExprKind {
     IntLit(value: Int, width: TIntegerWidth?)
@@ -743,7 +730,6 @@ enum TModuleCallForm {
 
 struct TExternArg {
     value: TExpr
-    clone: Bool
     mut_borrow: Bool
 }
 
@@ -2241,7 +2227,7 @@ fn tir_each_stmt_child(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, T
             tir_each_stmt_list_child(fallback, visit)
         }
         .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _, _) -> visit(init)
-        .Assign(place, _, value, _, _, _) -> {
+        .Assign(place, _, value, _, _) -> {
             if place == {
                 .Expr(place_value) -> visit(place_value)
                 else -> {}
@@ -2293,7 +2279,7 @@ fn tir_each_stmt_child(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, T
             visit(subject)
             tir_each_match_arm_child(arms, visit)
         }
-        .EnumMatch(scrutinee, _, arms, else_body, _, _) -> {
+        .EnumMatch(scrutinee, arms, else_body, _, _) -> {
             visit(scrutinee)
             tir_each_match_arm_child(arms, visit)
             if else_body == Val(nested) {
@@ -2322,7 +2308,7 @@ fn tir_each_stmt_child(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, T
             visit(index)
             visit(value)
         }
-        .MathSwizzleAssign(base, _, _, value, _, _) -> {
+        .MathSwizzleAssign(base, _, _, value, _) -> {
             visit(base)
             visit(value)
         }

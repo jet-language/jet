@@ -39,7 +39,6 @@ use jet_foundation.[
     expr_span,
     symbol_id,
     tir_generated_local,
-    tir_call_arg_copy_fact,
     tir_symbol_local,
     type_name,
 ]
@@ -808,11 +807,6 @@ fn sema_contract_generated_argument_symbol(environment: SemaScopeEnvironment, pr
 fn sema_contract_pin_argument(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: String, index: Int, parameter_name: String, convention: AccessConvention, argument: &TCallArg, call_span: Span, scopes: &SemaScopeTable, state: &SemaOwnershipState, bindings: &[TStmt]) -> TLocal Never! {
     original := argument.value
     init := original
-    if argument.clone || argument.arc_clone {
-        init = sema_tir_node(original.ty, TExprKind.Clone{value: init, fact: tir_call_arg_copy_fact(argument.arc_clone)}, original.span)
-        argument.clone = false
-        argument.arc_clone = false
-    }
     local := tir_generated_local("contract_arg_{call_span.start}_{index}", call_span)
     local.mutable = argument.mut_borrow
     if argument.borrow || argument.mut_borrow {

@@ -608,7 +608,7 @@ fn sema_call_core_source_arguments(record: CoreCallRecord, args: [TExpr], params
         param :: params[index]
         &result.push(TCallArg{value: value, template_items: [SymbolID]{},
             borrow: param.convention == AccessConvention.Read && !sema_call_is_scalar(value.ty),
-            mut_borrow: param.convention == AccessConvention.Write, clone: false, arc_clone: false,
+            mut_borrow: param.convention == AccessConvention.Write,
             fn_coerce: None, widen_to_vec: false,
             widen_to_union: sema_call_widen_union(param.ty ?? value.ty, value.ty),
             box_as_trait: sema_call_box_as_trait(param.ty ?? value.ty, value.ty, environment, program),
@@ -632,7 +632,7 @@ fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_ar
     if record.module_name == "core.math" && record.member == "sqrt" && args.len() == 1 && args[0].ty == Type.Float {
         identity :: sema_call_core_module_identity(environment, program, "core.math") ?? return None
         if sema_call_core_source_target(environment, program, identity, "sqrt", type_args, span, false, &diagnostics) == .Val(target) {
-            argument :: TCallArg{value: args[0], template_items: [SymbolID]{}, borrow: false, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+            argument :: TCallArg{value: args[0], template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
             value :: sema_tir_node(result_type, TExprKind.Call{callee: target.symbol.id, type_args: [Type]{}, args: [TCallArg]{argument}}, span)
             return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }

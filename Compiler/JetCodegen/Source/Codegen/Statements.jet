@@ -358,7 +358,7 @@ fn jet_codegen_lower_task_group(builder: &JetCodegenBuilder, program: JetCodegen
     // Prelude's borrowed `JetTaskGroup::close`, deferred to the scope's exit.
     resource := TExpr{ty: group_ty, kind: TExprKind.Local{local: group}, span: span, integer_bounds: None, cost: None}
     close_method := TMethodRef{symbol: symbol_id(SymbolKind.Function, "", "jet_std::JetTaskGroup", "close"), name: "close", mangled: false, trait_owner: None, operator_identity: None}
-    close_arg := TCallArg{value: resource, template_items: [SymbolID]{}, borrow: true, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+    close_arg := TCallArg{value: resource, template_items: [SymbolID]{}, borrow: true, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
     close := TExpr{ty: Type.Named{name: "Unit"}, kind: TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: true, path: "jet_std::JetTaskGroup", generics: [TPreludeArg]{}}, owner_type: None, method: close_method, type_args: [Type]{}, args: [TCallArg]{close_arg}}, span: span, integer_bounds: None, cost: None}
     group_symbol :: group.symbol_id ?? panic("checked task-group local has no symbol identity")
     thunk := jet_codegen_lower_defer_thunk(&builder, program, close, group_symbol, scope.value, span)
@@ -532,23 +532,8 @@ fn jet_codegen_lower_refutable_bind(builder: &JetCodegenBuilder, program: JetCod
     if !success_reaches_join && !missed_reaches_join -> jet_codegen_terminate(&builder, program, MIRTerminator.Unreachable{reason: "both refutable binding paths terminate"})
 }
 
-fn jet_codegen_lower_pattern_match(builder: &JetCodegenBuilder, program: JetCodegenProgram, subject: TExpr, clone_subject: Bool, arms: [TMatchArm], else_body: [TStmt]?, no_match_unreachable: Bool, no_match_reason: String, span: Span) {
-    subject_value := jet_codegen_lower_pattern_subject(&builder, program, subject)
-    window :: jet_codegen_pattern_window(builder, program, subject_value)
-    // A read window tests a place nothing changes during the match (a read
-    // parameter's, or a stable root's): no copy keeps the subject stable.
-    // Neither does a plain place read (a local or a stored field path): its
-    // ReadPlace already stands for a copy, every payload binding stores its
-    // own payload (copying that payload only, or taking it once the MIR
-    // last-use pass moves the subject's dead root), and every test runs
-    // before any arm body can change the place. Only a computed subject
-    // keeps the checked copy.
-    plain_read :: window == None && jet_codegen_plain_place_path(subject)
-    if clone_subject && !plain_read && jet_codegen_read_window_of(builder, program, subject_value) == None {
-        subject_value = jet_codegen_emit_value(&builder, program, span, subject.ty, MIROperation.Copy{value: subject_value, fact: MIRCopyFact.Materialize})
-        // The copy tests the same place, so its payload bindings still alias it.
-        if window == .Val(place) -> jet_codegen_push_pattern_window(&builder, subject_value, place)
-    }
+fn jet_codegen_lower_pattern_match(builder: &JetCodegenBuilder, program: JetCodegenProgram, subject: TExpr, arms: [TMatchArm], else_body: [TStmt]?, no_match_unreachable: Bool, no_match_reason: String, span: Span) {
+    subject_value :: jet_codegen_lower_pattern_subject(&builder, program, subject)
     saved_lookup_head := builder.pattern_lookup_head
     builder.pattern_lookup_head = Val(builder.current)
     join_block := jet_codegen_new_block(&builder, program, span, "pattern-match-join")
@@ -1314,24 +1299,6 @@ fn jet_codegen_assignment_place_type(builder: JetCodegenBuilder, program: JetCod
     }
 }
 
-fn jet_codegen_assignment_destination_is_string_view(builder: JetCodegenBuilder, program: JetCodegenProgram, place: TPlace) -> Bool Never! {
-    if place == {
-        .Local(local) -> return jet_codegen_is_string_view_local(builder, program, local)
-        .Expr(place_value) -> return if place_value.kind == {
-            .Local(local) -> jet_codegen_is_string_view_local(builder, program, local)
-            else -> false
-        }
-    }
-}
-
-fn jet_codegen_assignment_value(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: TExpr, clone_value: Bool, destination_is_view: Bool, span: Span) -> MIRValueID {
-    lowered := jet_codegen_lower_expr(&builder, program, value)
-    if !clone_value -> return lowered
-    fact := MIRCopyFact.Materialize
-    if jet_codegen_is_string_view_value(builder, program, value) && !destination_is_view -> fact = MIRCopyFact.ViewMaterialize
-    jet_codegen_emit_value(&builder, program, span, value.ty, MIROperation.Copy{value: lowered, fact: fact})
-}
-
 fn jet_codegen_lower_index_assign(builder: &JetCodegenBuilder, program: JetCodegenProgram, uninit: Bool, base: TExpr, index: TExpr, is_map: Bool, value: TExpr, span: Span) {
     right := jet_codegen_lower_expr(&builder, program, value)
     kind := if {
@@ -1395,7 +1362,7 @@ fn jet_codegen_drop_temporary_shared_guard(builder: &JetCodegenBuilder, program:
 }
 
 fn jet_codegen_lower_index_field_assign(builder: &JetCodegenBuilder, program: JetCodegenProgram, assign: TIndexFieldAssign, span: Span) {
-    right := jet_codegen_assignment_value(&builder, program, assign.value, assign.clone_value, false, span)
+    right := jet_codegen_lower_expr(&builder, program, assign.value)
     kind := if assign.is_map -> MIRIndexKind.Map else -> MIRIndexKind.List
     tir_kind := if assign.is_map -> TIndexKind.Map else -> TIndexKind.List
     element_type := jet_codegen_index_element_type(assign.base.ty, kind)
@@ -1426,7 +1393,7 @@ fn jet_codegen_lower_index_field_assign(builder: &JetCodegenBuilder, program: Je
     jet_codegen_drop_temporary_shared_guard(&builder, program, place, span)
 }
 
-fn jet_codegen_lower_math_swizzle_assign(builder: &JetCodegenBuilder, program: JetCodegenProgram, base: TExpr, lanes: [Int], value: TExpr, clone_value: Bool, span: Span) {
+fn jet_codegen_lower_math_swizzle_assign(builder: &JetCodegenBuilder, program: JetCodegenProgram, base: TExpr, lanes: [Int], value: TExpr, span: Span) {
     if lanes.len() == 0 -> panic("checked swizzle assignment has no lanes")
     right := jet_codegen_lower_expr(&builder, program, value)
     right_values := [MIRValueID]{}
@@ -1459,7 +1426,7 @@ fn jet_codegen_lower_math_swizzle_assign(builder: &JetCodegenBuilder, program: J
     index := 0
     loop index < places.len() {
         lane_value := right_values[index]
-        if clone_value || index + 1 < lanes.len() -> lane_value = jet_codegen_emit_value(&builder, program, span, right_type, MIROperation.Copy{value: lane_value, fact: MIRCopyFact.Materialize})
+        if index + 1 < lanes.len() -> lane_value = jet_codegen_emit_value(&builder, program, span, right_type, MIROperation.Copy{value: lane_value, fact: MIRCopyFact.Materialize})
         _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: places[index], value: lane_value})
         index += 1
     }
@@ -1772,8 +1739,8 @@ fn jet_codegen_lower_index_hook_assign(builder: &JetCodegenBuilder, program: Jet
         box_as_trait: None,
     }
     call_args := [TCallArg]{
-        TCallArg{value: index, template_items: [SymbolID]{}, borrow: !jet_codegen_is_scalar_type(index.ty), mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false},
-        TCallArg{value: value, template_items: [SymbolID]{}, borrow: !jet_codegen_is_scalar_type(value.ty), mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false},
+        TCallArg{value: index, template_items: [SymbolID]{}, borrow: !jet_codegen_is_scalar_type(index.ty), mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false},
+        TCallArg{value: value, template_items: [SymbolID]{}, borrow: !jet_codegen_is_scalar_type(value.ty), mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false},
     }
     lowered_call_args := if {
         direct_target != None -> {
@@ -2081,8 +2048,6 @@ fn jet_codegen_transaction_call_arg(value: TExpr) -> TCallArg Never! {
         template_items: [SymbolID]{},
         borrow: false,
         mut_borrow: false,
-        clone: false,
-        arc_clone: false,
         fn_coerce: None,
         widen_to_vec: false,
         widen_to_union: None,
@@ -2413,14 +2378,13 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, program: JetCodegenP
         }
         .TupleDestructure(temp, init, move_fields, binds, span) | .StructDestructure(temp, init, move_fields, binds, span) -> jet_codegen_lower_field_destructure(&builder, program, temp, init, move_fields, binds, span)
         .ListDestructure(_, init, count, _, _, elements, span) -> jet_codegen_lower_list_destructure(&builder, program, init, count, elements, span)
-        .Assign(place_expr, op, value, clone_value, line, span) -> {
+        .Assign(place_expr, op, value, line, span) -> {
             place_ty := jet_codegen_assignment_place_type(builder, program, place_expr)
-            destination_is_view := jet_codegen_assignment_destination_is_string_view(builder, program, place_expr)
             refill := MIRPlaceID?{None}
             if op == None -> refill = jet_codegen_subject_refill_slot(builder, program, place_expr, value)
             right := if refill == {
                 .Val(slot) -> jet_codegen_take_refill_slot(&builder, program, slot, value.ty, span)
-                else -> jet_codegen_assignment_value(&builder, program, value, clone_value, destination_is_view, span)
+                else -> jet_codegen_lower_expr(&builder, program, value)
             }
             place := jet_codegen_lower_place_for_access(&builder, program, place_expr, MIRAccess.Write)
             assigned := if op == {
@@ -2439,7 +2403,7 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, program: JetCodegenP
         }
         .IndexAssign(uninit, base, index, is_map, value, span) -> jet_codegen_lower_index_assign(&builder, program, uninit, base, index, is_map, value, span)
         .IndexFieldAssign(assign, span) -> jet_codegen_lower_index_field_assign(&builder, program, assign, span)
-        .MathSwizzleAssign(base, _, lanes, value, clone_value, span) -> jet_codegen_lower_math_swizzle_assign(&builder, program, base, lanes, value, clone_value, span)
+        .MathSwizzleAssign(base, _, lanes, value, span) -> jet_codegen_lower_math_swizzle_assign(&builder, program, base, lanes, value, span)
         .IndexHookAssign(_, base, index, value, span) -> jet_codegen_lower_index_hook_assign(&builder, program, base, index, value, span)
         .SplitViews(owner, root, _, _, _, _, _, _, _, name, start, end, single, write, element, line, span) -> jet_codegen_lower_split_view(&builder, program, owner, root, name, start, end, single, write, element, line, span)
         .Return(value, span) -> {
@@ -2499,12 +2463,12 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, program: JetCodegenP
             jet_codegen_register_deferred_call(&builder, program, thunk, close.ty)
         }
         .RefutableBind(pattern, init, fallback, span) -> jet_codegen_lower_refutable_bind(&builder, program, pattern, init, fallback, span)
-        .Match(subject, arms, exhaustive, span) -> jet_codegen_lower_pattern_match(&builder, program, subject, false, arms, None, exhaustive, "checked exhaustive match", span)
+        .Match(subject, arms, exhaustive, span) -> jet_codegen_lower_pattern_match(&builder, program, subject, arms, None, exhaustive, "checked exhaustive match", span)
         .RangeSwitch(subject, arms, else_body, span) -> jet_codegen_lower_range_switch(&builder, program, subject, arms, else_body, span)
         .MixedSwitch(subject, _, arms, else_body, span) -> jet_codegen_lower_mixed_switch(&builder, program, subject, arms, else_body, span)
-        .EnumMatch(scrutinee, clone_subject, arms, else_body, fallthrough, span) -> {
+        .EnumMatch(scrutinee, arms, else_body, fallthrough, span) -> {
             reason := if fallthrough -> "checked exhaustive match fallthrough" else -> "checked exhaustive match otherwise"
-            jet_codegen_lower_pattern_match(&builder, program, scrutinee, clone_subject, arms, else_body, else_body == None, reason, span)
+            jet_codegen_lower_pattern_match(&builder, program, scrutinee, arms, else_body, else_body == None, reason, span)
         }
         .While(label, condition, body, span) -> {
             condition_block := jet_codegen_new_block(&builder, program, span, "while-condition")
@@ -3909,7 +3873,7 @@ fn jet_codegen_stability_stmt_body(state: &JetCodegenLetStability, statement: TS
             jet_codegen_stability_inspected(&state, init)
             jet_codegen_stability_list(&state, fallback, false)
         }
-        .Assign(place, op, assigned, _, _, _) -> {
+        .Assign(place, op, assigned, _, _) -> {
             refill := String?{None}
             if op == None -> refill = jet_codegen_stability_subject_refill(state, place, assigned)
             if refill == .Val(taken) {
@@ -3980,7 +3944,7 @@ fn jet_codegen_stability_stmt_body(state: &JetCodegenLetStability, statement: TS
             jet_codegen_stability_inspected(&state, subject)
             jet_codegen_stability_arms(&state, subject, arms)
         }
-        .EnumMatch(scrutinee, _, arms, else_body, _, _) -> {
+        .EnumMatch(scrutinee, arms, else_body, _, _) -> {
             jet_codegen_stability_inspected(&state, scrutinee)
             jet_codegen_stability_arms(&state, scrutinee, arms)
             jet_codegen_stability_else(&state, else_body)
@@ -4008,7 +3972,7 @@ fn jet_codegen_stability_stmt_body(state: &JetCodegenLetStability, statement: TS
             jet_codegen_stability_expr(&state, assign.value, value)
             jet_codegen_stability_expr(&state, assign.base, write)
         }
-        .MathSwizzleAssign(base, _, _, assigned, _, _) -> {
+        .MathSwizzleAssign(base, _, _, assigned, _) -> {
             jet_codegen_stability_expr(&state, assigned, value)
             jet_codegen_stability_expr(&state, base, write)
         }

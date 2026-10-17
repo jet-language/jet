@@ -23,7 +23,6 @@ use jet_foundation.[
     Type,
     core_source_owns_type,
     symbol_id,
-    tir_call_arg_copy_fact,
 ]
 
 struct SemaStreamHandleSpec {
@@ -328,9 +327,6 @@ fn sema_stream_handle_checked_args(callee: String, params: [SemaCallParam], args
         .None -> sema_ownership_check_call_arguments(&state, callee, params, &checked_args, scopes, &diagnostics)
     }
     if !ownership.accepted || !ownership.complete -> return None
-    loop index in 0..<values.len() {
-        if index < checked_args.len() && (checked_args[index].flags.implicit_clone || checked_args[index].flags.shared_auto_clone) -> values[index] = sema_tir_node(values[index].ty, TExprKind.Clone{value: values[index], fact: tir_call_arg_copy_fact(checked_args[index].flags.shared_auto_clone)}, values[index].span)
-    }
     Val(values)
 }
 

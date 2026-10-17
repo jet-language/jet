@@ -41,7 +41,6 @@ use jet_foundation.[
     expr_span,
     jet_target_layout_atomic_scalar_type,
     symbol_id,
-    tir_call_arg_copy_fact,
     type_identity_equal,
     type_name,
 ]
@@ -491,8 +490,6 @@ fn sema_call_builtin_static_call_arg(value: TExpr, argument: CallArg) -> TCallAr
         template_items: [SymbolID]{},
         borrow: argument.convention == AccessConvention.Read && !sema_call_is_scalar(value.ty),
         mut_borrow: argument.convention == AccessConvention.Write,
-        clone: false,
-        arc_clone: false,
         fn_coerce: None,
         widen_to_vec: false,
         widen_to_union: None,
@@ -594,9 +591,6 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     loop index in named_moves {
         if !sema_ownership_mark_unmarked_move(&state, args[index].expr, scopes, "`{callee}`", &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    loop index in 0..<values.len() {
-        if ownership_args[index].flags.implicit_clone || ownership_args[index].flags.shared_auto_clone -> values[index] = sema_tir_node(values[index].ty, TExprKind.Clone{value: values[index], fact: tir_call_arg_copy_fact(ownership_args[index].flags.shared_auto_clone)}, values[index].span)
     }
 
     if expected == .Val(expected_type) {
@@ -851,11 +845,9 @@ fn sema_call_try_distinct_conversion(owner: Symbol, display_name: String, method
     ownership_args := args
     ownership := sema_ownership_check_call_arguments(&state, callee, params, &ownership_args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return sema_call_distinct_conversion_failed()
-    value := argument
-    if ownership_args[0].flags.implicit_clone || ownership_args[0].flags.shared_auto_clone -> value = sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(ownership_args[0].flags.shared_auto_clone)}, value.span)
     success :: Type.Named{name: display_name}
     row :: numeric_row ?? {
-        constructed :: sema_tir_node(success, TExprKind.DistinctCtor{owner: owner.id, argument: value, base: facts.base}, span)
+        constructed :: sema_tir_node(success, TExprKind.DistinctCtor{owner: owner.id, argument: argument, base: facts.base}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(constructed, expected, environment, program, context, &diagnostics)}
     }
     operation :: sema_call_distinct_numeric_operation(row) ?? return sema_call_distinct_conversion_failed()
@@ -880,7 +872,7 @@ fn sema_call_try_distinct_conversion(owner: Symbol, display_name: String, method
     }
     fallible :: base_fallible || (facts.range != None && !literal_in_range)
     result :: if fallible -> Type.Result{ok: success, err: Type.String} else -> success
-    converted :: sema_tir_node(result, TExprKind.DistinctConvert{owner: owner.id, argument: value, operation: operation, range: facts.range, fallible: fallible}, span)
+    converted :: sema_tir_node(result, TExprKind.DistinctConvert{owner: owner.id, argument: argument, operation: operation, range: facts.range, fallible: fallible}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(converted, expected, environment, program, context, &diagnostics)}
 }
 

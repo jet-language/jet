@@ -456,10 +456,10 @@ fn jet_codegen_require_trait_box_target(target: Type, builder: JetCodegenBuilder
 
 fn jet_codegen_call_access(argument: TCallArg, formal: AccessConvention?) -> MIRAccess Never! {
     if argument.mut_borrow -> return MIRAccess.Write
-    if argument.widen_to_union != None && !argument.borrow && !argument.mut_borrow && !argument.clone && !argument.arc_clone && !jet_codegen_is_copy_type(argument.value.ty) {
+    if argument.widen_to_union != None && !argument.borrow && !argument.mut_borrow && !jet_codegen_is_copy_type(argument.value.ty) {
         return MIRAccess.Move
     }
-    if argument.clone || argument.arc_clone || jet_codegen_is_move_kind(argument.value.kind) -> return MIRAccess.Move
+    if jet_codegen_is_move_kind(argument.value.kind) -> return MIRAccess.Move
     if argument.borrow -> return MIRAccess.Read
     convention :: formal ?? AccessConvention.Read
     jet_codegen_lower_access(convention)
@@ -479,15 +479,6 @@ fn jet_codegen_is_string_view_local(builder: JetCodegenBuilder, program: JetCode
     binding :: jet_codegen_find_binding_for_local(builder, program, local) ?? return false
     index :: builder.local_positions.get(binding.local.value) ?? return false
     builder.locals[index].string_view
-}
-
-fn jet_codegen_is_string_view_value(builder: JetCodegenBuilder, program: JetCodegenProgram, value: TExpr) -> Bool Never! {
-    if value.ty != Type.String -> return false
-    if value.kind == {
-        .Local(local) -> return jet_codegen_is_string_view_local(builder, program, local)
-        .Borrow(inner, _) -> return jet_codegen_is_string_view_value(builder, program, inner)
-        else -> false
-    }
 }
 
 // MIRRust lower_local_value: a string-view binding keeps its Jet `String`
@@ -544,7 +535,7 @@ fn jet_codegen_lower_extern_args(builder: &JetCodegenBuilder, program: JetCodege
         }
         access := if {
             argument.mut_borrow -> MIRAccess.Write
-            argument.clone || resource_take -> MIRAccess.Move
+            resource_take -> MIRAccess.Move
             else -> MIRAccess.Read
         }
         &lowered.push(MIRCallArg{
@@ -556,7 +547,7 @@ fn jet_codegen_lower_extern_args(builder: &JetCodegenBuilder, program: JetCodege
             source_index: None,
             binder_slot: None,
             spread: false,
-            implicit_clone: argument.clone,
+            implicit_clone: false,
             shared_auto_clone: false,
             owned_last_use: access == MIRAccess.Move,
             authority_boundary: false,
@@ -579,7 +570,6 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
         if argument.spread -> panic("checked call retains an unpacked variadic argument")
         slot := index
         formal := Val(conventions[slot])
-        materialize_view_clone := argument.clone && jet_codegen_is_string_view_value(builder, program, argument.value)
         access := jet_codegen_call_access(argument, formal)
         place := MIRPlaceID?{None}
         place_expr := argument.value
@@ -624,13 +614,10 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
             None -> jet_codegen_lower_call_carrier(&builder, program, argument, access, variadic, args, index) ?? jet_codegen_emit_expr(&builder, program, argument.value)
             Val(place_id) -> {
                 operation := MIROperation.ReadPlace{place: place_id}
-                if access == MIRAccess.Move && !materialize_view_clone && !argument.clone && !argument.arc_clone -> operation = MIROperation.MovePlace{place: place_id}
+                if access == MIRAccess.Move -> operation = MIROperation.MovePlace{place: place_id}
                 jet_codegen_emit_value(&builder, program, argument.value.span, place_ty, operation)
             }
         }
-        if materialize_view_clone -> value = jet_codegen_emit_value(&builder, program, argument.value.span, argument.value.ty, MIROperation.Copy{value: value, fact: MIRCopyFact.ViewMaterialize})
-        materialized_clone := (argument.clone || argument.arc_clone) && !materialize_view_clone
-        if materialized_clone -> value = jet_codegen_emit_value(&builder, program, argument.value.span, argument.value.ty, MIROperation.Copy{value: value, fact: if argument.arc_clone -> MIRCopyFact.Share else -> MIRCopyFact.Materialize})
         // A synthetic rest List borrowed by the callee still belongs to the
         // caller. Its cleanup slot owns the pack, not the lent argument.
         is_pack := slot >= 0 && slot < variadic.len() && variadic[slot] && jet_codegen_collection_owned_temporary(argument.value)
@@ -676,7 +663,7 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
         owned_trait_box :: box_as_trait != None && access != MIRAccess.Read
         owned_last_use := access == MIRAccess.Move || owned_trait_box || (widen_to_union != None && place == .None && !copy_source)
         call_place := place
-        if owned_trait_box || argument.widen_to_union != None || materialize_view_clone -> call_place = None
+        if owned_trait_box || argument.widen_to_union != None -> call_place = None
         &lowered.push(MIRCallArg{
             value: value,
             place: call_place,
@@ -708,7 +695,7 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
 // place, every other argument must leave the root alone
 // (jet_codegen_operand_holds_root).
 fn jet_codegen_lower_call_carrier(builder: &JetCodegenBuilder, program: JetCodegenProgram, argument: TCallArg, access: MIRAccess, variadic: [Bool], args: [TCallArg], index: Int) -> MIRValueID? {
-    if access != MIRAccess.Read || argument.borrow || argument.mut_borrow || argument.clone || argument.arc_clone || argument.widen_to_vec -> return None
+    if access != MIRAccess.Read || argument.borrow || argument.mut_borrow || argument.widen_to_vec -> return None
     if argument.fn_coerce != None || argument.widen_to_union != None || argument.box_as_trait != None -> return None
     if index < variadic.len() && variadic[index] -> return None
     if argument.value.kind == .Present(payload) {
@@ -2452,8 +2439,6 @@ fn jet_codegen_lower_fn_value(builder: &JetCodegenBuilder, program: JetCodegenPr
                     template_items: [SymbolID]{},
                     borrow: true,
                     mut_borrow: false,
-                    clone: false,
-                    arc_clone: false,
                     fn_coerce: None,
                     widen_to_vec: false,
                     widen_to_union: None,
@@ -2473,8 +2458,6 @@ fn jet_codegen_lower_fn_value(builder: &JetCodegenBuilder, program: JetCodegenPr
                         template_items: [SymbolID]{},
                         borrow: !jet_codegen_is_copy_type(ty),
                         mut_borrow: false,
-                        clone: false,
-                        arc_clone: false,
                         fn_coerce: None,
                         widen_to_vec: false,
                         widen_to_union: None,
@@ -2682,9 +2665,7 @@ fn jet_codegen_enum_variant(definition: TTypeDef, variant_name: String) -> TVari
 }
 
 fn jet_codegen_lower_enum_argument(builder: &JetCodegenBuilder, program: JetCodegenProgram, argument: TEnumArg) -> MIRValueID {
-    value := jet_codegen_lower_expr(&builder, program, argument.value)
-    if argument.clone -> return jet_codegen_emit_value(&builder, program, argument.value.span, argument.value.ty, MIROperation.Copy{value: value, fact: MIRCopyFact.Materialize})
-    value
+    jet_codegen_lower_expr(&builder, program, argument.value)
 }
 
 fn jet_codegen_lower_enum_payload(builder: &JetCodegenBuilder, program: JetCodegenProgram, shape: JetCodegenEnumVariantShape, variant_name: String, payload: TEnumPayload) -> [MIREnumArg] {
@@ -3246,8 +3227,6 @@ fn jet_codegen_plain_named_function_value(builder: &JetCodegenBuilder, program: 
             template_items: [SymbolID]{},
             borrow: !jet_codegen_is_copy_type(ty),
             mut_borrow: false,
-            clone: false,
-            arc_clone: false,
             fn_coerce: None,
             widen_to_vec: false,
             widen_to_union: None,

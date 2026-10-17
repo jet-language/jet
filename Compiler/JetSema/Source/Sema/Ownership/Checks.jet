@@ -2819,7 +2819,6 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
                 loop place in places -> &accesses.push(SemaOwnershipCallAccess{place: place, access: arg.convention, span: arg.span, reserved: false, retained: retained})
             }
         }
-        mark_implicit_clone := false
         mark_implicit_take := false
         if decision == SemaCallConventionDecision.NeedsImplicitClone {
             if sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "Unit"}) -> next
@@ -2846,10 +2845,7 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
                 // visible here, so an unresolved nominal takes the cloneable
                 // diagnostic; both reject the unmarked owning argument.
                 if {
-                    sema_ownership_type_cloneable(param.ty ?? Type.Named{name: "Unit"}) ?? true -> {
-                        mark_implicit_clone = true
-                        &diagnostics.push(sema_ownership_call_diag_clone(callee, sema_ownership_argument_name(arg), arg.span))
-                    }
+                    sema_ownership_type_cloneable(param.ty ?? Type.Named{name: "Unit"}) ?? true -> &diagnostics.push(sema_ownership_call_diag_clone(callee, sema_ownership_argument_name(arg), arg.span))
                     else -> {
                         accepted = false
                         &diagnostics.push(sema_ownership_call_diag_not_copyable(callee, index, sema_ownership_argument_name(arg), arg.span))
@@ -2874,7 +2870,6 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
             if !sema_ownership_mark_move(&state, arg.expr, scopes, "`{callee}`", &diagnostics) -> accepted = false
         }
         if mark_implicit_take -> args[index].convention = AccessConvention.Move
-        if mark_implicit_clone -> args[index].flags.implicit_clone = true
     }
     if !sema_ownership_activate_call_reservations(accesses, &diagnostics) -> accepted = false
     SemaOwnershipCheckResult{accepted: accepted, complete: complete}

@@ -1952,10 +1952,10 @@ fn jet_codegen_partial_move_statements(statements: [TStmt], roots: &[String:Bool
                 jet_codegen_partial_move_statements(body, &roots)
                 next
             }
-            .Match(subject, arms, _, _) | .EnumMatch(subject, _, arms, _, _, _) -> {
+            .Match(subject, arms, _, _) | .EnumMatch(subject, arms, _, _, _) -> {
                 jet_codegen_partial_move_expression(subject, &roots)
                 loop arm in arms -> jet_codegen_partial_move_statements(arm.body, &roots)
-                if statement == .EnumMatch(_, _, _, else_body, _, _) {
+                if statement == .EnumMatch(_, _, else_body, _, _) {
                     if else_body == .Val(body) -> jet_codegen_partial_move_statements(body, &roots)
                 }
                 next

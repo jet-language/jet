@@ -126,7 +126,7 @@ fn sema_stmt_tir_loop_body_has_break(statements: [TStmt], label: String?, allow_
                     if sema_stmt_tir_loop_body_has_break(arm.body, label, allow_unlabeled) -> return true
                 }
             }
-            .EnumMatch(_, _, arms, else_body, _, _) -> {
+            .EnumMatch(_, arms, else_body, _, _) -> {
                 loop arm in arms {
                     if sema_stmt_tir_loop_body_has_break(arm.body, label, allow_unlabeled) -> return true
                 }
@@ -1333,7 +1333,7 @@ fn sema_stmt_for_in_tir_expr_names(value: TExpr, key: String) -> Bool Never! {
 fn sema_stmt_for_in_tir_assigns(statements: [TStmt], key: String) -> Bool Never! {
     loop statement in statements {
         if statement == {
-            .Assign(place, _, _, _, _, _) -> {
+            .Assign(place, _, _, _, _) -> {
                 if place == .Local(local) {
                     if sema_stmt_for_in_tir_local_is(local, key) -> return true
                 }
@@ -1359,7 +1359,7 @@ fn sema_stmt_for_in_tir_assigns(statements: [TStmt], key: String) -> Bool Never!
             .Match(_, arms, _, _) -> loop arm in arms {
                 if sema_stmt_for_in_tir_assigns(arm.body, key) -> return true
             }
-            .EnumMatch(_, _, arms, else_body, _, _) -> {
+            .EnumMatch(_, arms, else_body, _, _) -> {
                 loop arm in arms {
                     if sema_stmt_for_in_tir_assigns(arm.body, key) -> return true
                 }
@@ -1441,7 +1441,7 @@ fn sema_stmt_for_in_tir_stays(statements: [TStmt], key: String) -> Bool Never! {
             .Match(_, arms, _, _) -> loop arm in arms {
                 if !sema_stmt_for_in_tir_stays(arm.body, key) -> return false
             }
-            .EnumMatch(_, _, arms, else_body, _, _) -> {
+            .EnumMatch(_, arms, else_body, _, _) -> {
                 loop arm in arms {
                     if !sema_stmt_for_in_tir_stays(arm.body, key) -> return false
                 }
@@ -3524,7 +3524,7 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
     scopes.bindings[index].integer_bounds = updated_bounds
     // A new value has no `#Track` origin (Rust `clear_origin`).
     scopes.bindings[index].origin = None
-    Val(TStmt.Assign{place: TPlace.Local{local: local}, op: tir_op, value: checked, clone_value: false, line: line, span: Span{start: name_span.start, end: expr_span(expr).end}})
+    Val(TStmt.Assign{place: TPlace.Local{local: local}, op: tir_op, value: checked, line: line, span: Span{start: name_span.start, end: expr_span(expr).end}})
 }
 
 // Rust `is_global_mutable_binding`: this module's own `name := …` binding that
@@ -3580,7 +3580,7 @@ fn sema_stmt_check_module_storage_assignment(symbol: Symbol, name: String, name_
     storage := tir_persistent_local(name, environment.module_identity, required, name_span)
     storage.mutable = true
     place :: sema_tir_node(required, TExprKind.Local{local: storage}, name_span)
-    Val(TStmt.Assign{place: TPlace.Expr{value: place}, op: tir_op, value: checked, clone_value: false, line: line, span: Span{start: name_span.start, end: expr_span(expr).end}})
+    Val(TStmt.Assign{place: TPlace.Expr{value: place}, op: tir_op, value: checked, line: line, span: Span{start: name_span.start, end: expr_span(expr).end}})
 }
 
 // Rust `source != target && source.numeric_widening_to(target).is_some()`.
@@ -3934,7 +3934,7 @@ fn sema_stmt_tir_statement_touches_shared(statement: TStmt) -> Bool Never! {
             }
             false
         }
-        .EnumMatch(scrutinee, _, arms, else_body, _, _) -> {
+        .EnumMatch(scrutinee, arms, else_body, _, _) -> {
             if sema_stmt_tir_expr_touches_shared(scrutinee) -> return true
             loop arm in arms {
                 if sema_stmt_tir_pattern_touches_shared(arm.pattern) -> return true
@@ -4441,7 +4441,7 @@ fn sema_stmt_check_place_assignment(target: LValue, checked_place: ^TExpr, op: B
         else -> {}
     }
     line :: sema_source_line_at(environment.source_segments, place.span) ?? return None
-    Val(TStmt.Assign{place: TPlace.Expr{value: place}, op: tir_op, value: checked, clone_value: false, line: line, span: Span{start: place.span.start, end: expr_span(expr).end}})
+    Val(TStmt.Assign{place: TPlace.Expr{value: place}, op: tir_op, value: checked, line: line, span: Span{start: place.span.start, end: expr_span(expr).end}})
 }
 
 fn sema_stmt_compound_nested_hook(op: BinOp, base: Expr, field_ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
@@ -6296,7 +6296,7 @@ fn sema_stmt_check_scoped_statement(statement: Stmt, return_type: Type?, environ
                             // Building the handle is effect-free; record the known-pure site so
                             // the effect pass does not treat it as an unknown call.
                             _ := sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "Authority.from_rights", handle.span, [EffectRowEntry]{}, &diagnostics)
-                            rights_arg :: TCallArg{value: rights_value, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+                            rights_arg :: TCallArg{value: rights_value, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
                             init :: sema_tir_node(Type.Named{name: "Authority"}, TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: true, path: "JetAuthority", generics: [TPreludeArg]{}}, owner_type: None, method: reference, type_args: [Type]{}, args: [TCallArg]{rights_arg}}, handle.span)
                             &region_body.push(TStmt.Let{local: tir_symbol_local(handle.name, handle.span, symbol.id), let_ty: TLetTy.Annotated{ty: Type.Named{name: "Authority"}, wrapper: TLetWrapper.Plain}, init: init, gc_promotion: None, gc_transferred: false, span: handle.span})
                         }

@@ -1312,7 +1312,7 @@ fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: Sema
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, init, audited, &diagnostics)
                 sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, fallback, audited, &diagnostics)
             }
-            .Assign(place, _, value, _, _, _) -> {
+            .Assign(place, _, value, _, _) -> {
                 if place == {
                     .Expr(place_value) -> {
                         sema_effect_check_unsafe_expr(&nodes, facts, caller, place_value, audited, &diagnostics)
@@ -1360,7 +1360,7 @@ fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: Sema
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, subject, audited, &diagnostics)
                 loop arm in arms -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, arm.body, audited, &diagnostics)
             }
-            .EnumMatch(scrutinee, _, arms, else_body, _, _) -> {
+            .EnumMatch(scrutinee, arms, else_body, _, _) -> {
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, scrutinee, audited, &diagnostics)
                 loop arm in arms -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, arm.body, audited, &diagnostics)
                 if else_body == .Val(else_statements) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, else_statements, audited, &diagnostics)
@@ -1380,7 +1380,7 @@ fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: Sema
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, value.index, audited, &diagnostics)
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, value.value, audited, &diagnostics)
             }
-            .MathSwizzleAssign(base, _, _, value, _, _) -> {
+            .MathSwizzleAssign(base, _, _, value, _) -> {
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, base, audited, &diagnostics)
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, value, audited, &diagnostics)
             }
@@ -2739,7 +2739,7 @@ fn sema_effect_walk_stmt_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode]
             sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, fallback)
         }
         .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, init)
-        .Assign(place, _, value, _, _, _) -> {
+        .Assign(place, _, value, _, _) -> {
             sema_effect_walk_place_children(walk, &nodes, facts, &diagnostics, caller, place)
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         }
@@ -2788,7 +2788,7 @@ fn sema_effect_walk_stmt_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode]
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, subject)
             sema_effect_walk_match_arm_children(walk, &nodes, facts, &diagnostics, caller, arms)
         }
-        .EnumMatch(scrutinee, _, arms, else_body, _, _) -> {
+        .EnumMatch(scrutinee, arms, else_body, _, _) -> {
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, scrutinee)
             sema_effect_walk_match_arm_children(walk, &nodes, facts, &diagnostics, caller, arms)
             if else_body == .Val(else_statements) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, else_statements)
@@ -2808,7 +2808,7 @@ fn sema_effect_walk_stmt_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode]
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value.index)
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value.value)
         }
-        .MathSwizzleAssign(base, _, _, value, _, _) -> {
+        .MathSwizzleAssign(base, _, _, value, _) -> {
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, base)
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         }
