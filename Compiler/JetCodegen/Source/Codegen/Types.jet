@@ -1404,13 +1404,10 @@ fn jet_codegen_field_ref_by_name(modules: [SemaGraphModuleResult], nominals: Jet
         return TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", resolved.owner_key, resolved.field_name), name: resolved.field_name, ty: ty, boxed: false}
     }
     nominal_identity :: identity ?? panic("resolved field lost its nominal identity")
-    loop semantic_module in modules {
-        if semantic_module.module_identity != nominal_identity.module_identity -> next
-        loop nominal in semantic_module.nominals {
-            if nominal.symbol.name != nominal_identity.name -> next
-            loop field in nominal.fields {
-                if field.symbol.name == resolved.field_name -> return TFieldRef{owner: Val(nominal.symbol.id), field: field.symbol.id, name: resolved.field_name, ty: ty, boxed: false}
-            }
+    loop nominal_row in jet_codegen_scope_nominal_rows(nominals, nominal_identity.module_identity, nominal_identity.name) {
+        nominal :: modules[nominal_row.module_index].nominals[nominal_row.nominal_index]
+        loop field in nominal.fields {
+            if field.symbol.name == resolved.field_name -> return TFieldRef{owner: Val(nominal.symbol.id), field: field.symbol.id, name: resolved.field_name, ty: ty, boxed: false}
         }
     }
     panic(jet_codegen_field_resolution_ice(function_key, owner_type, jet_codegen_field_owner_type(owner_type), member, "synthesized field reference has no registered field"))

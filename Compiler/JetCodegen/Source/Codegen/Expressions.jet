@@ -1078,8 +1078,10 @@ fn jet_codegen_lower_precise_builtin(builder: &JetCodegenBuilder, program: JetCo
     result_type :: expression.ty
     helper := jet_codegen_precise_source_helper(type_name, function)
     if helper == .Val(name) {
-        loop semantic_module in program.modules {
-            if semantic_module.module_name != "core.math" || (type_name != "Int" && semantic_module.nominal_positions.get(type_name) == None) -> next
+        math_modules :: program.nominals.named_modules.get("core.math") ?? [Int]{}
+        loop module_index in math_modules {
+            semantic_module :: program.modules[module_index]
+            if type_name != "Int" && semantic_module.nominal_positions.get(type_name) == None -> next
             // The helper is a top-level function: its checked key is its
             // registered symbol key, never its bare name.
             target :: jet_codegen_find_function_by_key(program.function_index, symbol_id(SymbolKind.Function, semantic_module.module_identity, "", name).key, semantic_module.module_identity) ?? panic("checked precise source helper `{name}` is absent from the lowered function set")
@@ -1786,13 +1788,10 @@ fn jet_codegen_is_stored_struct_field(builder: JetCodegenBuilder, program: JetCo
     found :: jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, owner_name, builder.generic_type_names)
     // A compiler-owned record row (`Range`, a Core record) stores every field.
     identity :: found ?? return jet_codegen_compiler_owned_record_field(owner_name, reference.name) != None
-    loop semantic_module in program.modules {
-        if semantic_module.module_identity != identity.module_identity -> next
-        loop nominal in semantic_module.nominals {
-            if nominal.symbol.name != identity.name -> next
-            loop field in nominal.fields {
-                if field.symbol.name == reference.name -> return nominal.kind == SemaRegistrationNominalKind.Struct && !field.computed
-            }
+    loop nominal_row in jet_codegen_scope_nominal_rows(program.nominals, identity.module_identity, identity.name) {
+        nominal :: program.modules[nominal_row.module_index].nominals[nominal_row.nominal_index]
+        loop field in nominal.fields {
+            if field.symbol.name == reference.name -> return nominal.kind == SemaRegistrationNominalKind.Struct && !field.computed
         }
     }
     false
@@ -2509,14 +2508,7 @@ fn jet_codegen_lower_fn_value(builder: &JetCodegenBuilder, program: JetCodegenPr
 fn jet_codegen_geometry_source_target(builder: JetCodegenBuilder, program: JetCodegenProgram, owner_type: Type, operation: String) -> TFunc? Never! {
     head :: jet_codegen_type_head_name(owner_type) ?? return None
     owner :: jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, head, builder.generic_type_names) ?? return None
-    source_module := false
-    loop semantic_module in program.modules {
-        if semantic_module.module_identity == owner.module_identity && semantic_module.module_name == "core.math" {
-            source_module = true
-            break
-        }
-    }
-    if !source_module -> return None
+    if !jet_codegen_scope_has_module(program.nominals, program.modules, owner.module_identity, "core.math") -> return None
     if owner.name == {
         "ScreenPoint" | "ScreenDelta" | "WorldPoint" | "WorldDelta" | "ViewPoint" | "ViewDelta" | "CameraPoint" | "CameraDelta" | "DevicePoint" | "DeviceDelta" | "Point2" | "Delta2" | "Transform" | "Transform2" -> {}
         else -> return None
@@ -5154,20 +5146,17 @@ fn jet_codegen_checked_host_field_type(builder: JetCodegenBuilder, program: JetC
             }
         }
     }
-    loop semantic_module in program.modules {
-        if semantic_module.module_identity != nominal_identity.module_identity -> next
-        loop nominal in semantic_module.nominals {
-            if nominal.symbol.name != nominal_identity.name -> next
-            loop field in nominal.fields {
-                if field.symbol.name == field_name {
-                    generic_names := [String]{}
-                    loop parameter in nominal.generic_params -> &generic_names.push(parameter.name)
-                    if generic_names.len() != generic_args.len() -> panic("checked host projection has incomplete generic owner arguments")
-                    return sema_inference_substitute_type(field.ty, generic_names, generic_args)
-                }
+    loop nominal_row in jet_codegen_scope_nominal_rows(program.nominals, nominal_identity.module_identity, nominal_identity.name) {
+        nominal :: program.modules[nominal_row.module_index].nominals[nominal_row.nominal_index]
+        loop field in nominal.fields {
+            if field.symbol.name == field_name {
+                generic_names := [String]{}
+                loop parameter in nominal.generic_params -> &generic_names.push(parameter.name)
+                if generic_names.len() != generic_args.len() -> panic("checked host projection has incomplete generic owner arguments")
+                return sema_inference_substitute_type(field.ty, generic_names, generic_args)
             }
-            panic("checked host projection field has no registered nominal field")
         }
+        panic("checked host projection field has no registered nominal field")
     }
     panic("checked host projection nominal disappeared from Codegen input")
 }

@@ -119,13 +119,9 @@ fn jet_codegen_finish_owned_destructure(builder: &JetCodegenBuilder, program: Je
             identity :: jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, name, builder.generic_type_names)
             if identity == {
                 .Val(nominal_identity) -> {
-                    loop semantic_module in program.modules {
-                        if semantic_module.module_identity != nominal_identity.module_identity -> next
-                        loop nominal in semantic_module.nominals {
-                            if nominal.symbol.name != nominal_identity.name -> next
-                            loop field in nominal.fields {
-                                if !field.computed -> jet_codegen_register_omitted_destructure_field(&builder, program, place, ty, field.symbol.name, binds, span)
-                            }
+                    loop row in jet_codegen_scope_nominal_rows(program.nominals, nominal_identity.module_identity, nominal_identity.name) {
+                        loop field in program.modules[row.module_index].nominals[row.nominal_index].fields {
+                            if !field.computed -> jet_codegen_register_omitted_destructure_field(&builder, program, place, ty, field.symbol.name, binds, span)
                         }
                     }
                 }

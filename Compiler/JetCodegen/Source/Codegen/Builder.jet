@@ -910,6 +910,13 @@ struct JetCodegenNominalIndex {
     default_err_ids: [U64:Bool]
     // Module identity -> its scope row in `scope_nominals` and `scope_owners`.
     scopes: [String:Int]
+    // Per scope: its module rows, in module order.
+    scope_modules: [[Int]]
+    // "<scope row>:<nominal name>" -> every nominal of that name the scope's
+    // modules declare, in module then declaration order.
+    scope_rows: [String:[JetCodegenNominalRow]]
+    // Module name -> its module rows, in module order.
+    named_modules: [String:[Int]]
     // Per scope: each declared nominal name -> its identity in the first
     // module of that identity declaring the name.
     scope_nominals: [[String:JetCodegenNominalIdentity]]
@@ -945,6 +952,8 @@ fn jet_codegen_nominal_index(modules: [SemaGraphModuleResult]) -> JetCodegenNomi
     default_err_fault := ""
     scopes := [String:Int]{}
     scope_modules := [[Int]]{}
+    scope_rows := [String:[JetCodegenNominalRow]]{}
+    named_modules := [String:[Int]]{}
     corelib_nominals := [String:[JetCodegenNominalCandidate]]{}
     qualified_nominals := [String:JetCodegenNominalCandidate]{}
     owner_keys := [String:JetCodegenNominalCandidate]{}
@@ -958,6 +967,9 @@ fn jet_codegen_nominal_index(modules: [SemaGraphModuleResult]) -> JetCodegenNomi
         }
         scope :: scopes.get(identity) ?? panic("nominal index lost a module scope row")
         &scope_modules[scope].push(module_index)
+        same_name := named_modules.get(semantic_module.module_name) ?? [Int]{}
+        &same_name.push(module_index)
+        named_modules[semantic_module.module_name] = same_name
         last_definition := [String:Int]{}
         loop definition_index in 0..<semantic_module.declarations.type_defs.len() {
             definition :: semantic_module.declarations.type_defs[definition_index]
@@ -989,8 +1001,13 @@ fn jet_codegen_nominal_index(modules: [SemaGraphModuleResult]) -> JetCodegenNomi
         loop nominal_index in 0..<semantic_module.nominals.len() {
             nominal :: semantic_module.nominals[nominal_index]
             found := rows.get(nominal.symbol.id.key) ?? [JetCodegenNominalRow]{}
-            &found.push(JetCodegenNominalRow{module_index: module_index, nominal_index: nominal_index, type_def_index: last_definition.get(nominal.symbol.name) ?? -1})
+            type_def_index :: last_definition.get(nominal.symbol.name) ?? -1
+            &found.push(JetCodegenNominalRow{module_index: module_index, nominal_index: nominal_index, type_def_index: type_def_index})
             rows[nominal.symbol.id.key] = found
+            scope_key :: "{scope}:{nominal.symbol.name}"
+            in_scope := scope_rows.get(scope_key) ?? [JetCodegenNominalRow]{}
+            &in_scope.push(JetCodegenNominalRow{module_index: module_index, nominal_index: nominal_index, type_def_index: type_def_index})
+            scope_rows[scope_key] = in_scope
             // Spellings resolve to the first nominal of each name only.
             if (semantic_module.nominal_positions.get(nominal.symbol.name) ?? -1) != nominal_index -> next
             if corelib {
@@ -1051,6 +1068,9 @@ fn jet_codegen_nominal_index(modules: [SemaGraphModuleResult]) -> JetCodegenNomi
         type_defs_by_name: type_defs_by_name,
         default_err_ids: default_err_ids,
         scopes: scopes,
+        scope_modules: scope_modules,
+        scope_rows: scope_rows,
+        named_modules: named_modules,
         scope_nominals: scope_nominals,
         scope_owners: scope_owners,
         corelib_nominals: corelib_nominals,
@@ -1064,6 +1084,23 @@ fn jet_codegen_nominal_index(modules: [SemaGraphModuleResult]) -> JetCodegenNomi
         owner_fault: owner_fault,
         traits: jet_codegen_trait_names(modules),
     }
+}
+
+// Every nominal named `name` that the modules of `module_identity` declare,
+// in module then declaration order: the rows a scan of every module, filtered
+// by identity and then by nominal name, meets, read from one index row.
+fn jet_codegen_scope_nominal_rows(nominals: JetCodegenNominalIndex, module_identity: String, name: String) -> [JetCodegenNominalRow] Never! {
+    scope :: nominals.scopes.get(module_identity) ?? return [JetCodegenNominalRow]{}
+    nominals.scope_rows.get("{scope}:{name}") ?? [JetCodegenNominalRow]{}
+}
+
+// Whether a module of `module_identity` is named `module_name`.
+fn jet_codegen_scope_has_module(nominals: JetCodegenNominalIndex, modules: [SemaGraphModuleResult], module_identity: String, module_name: String) -> Bool Never! {
+    scope :: nominals.scopes.get(module_identity) ?? return false
+    loop module_index in nominals.scope_modules[scope] {
+        if modules[module_index].module_name == module_name -> return true
+    }
+    false
 }
 
 // A builder ready to lower `function` against `program`.
