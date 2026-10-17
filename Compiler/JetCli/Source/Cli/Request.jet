@@ -635,7 +635,11 @@ fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sour
         target: JetDriverCompileTarget.Native,
         record_store: None,
         trace_sink: None,
-        mir_lint_every_pass: false,
+        // Dev verification knob (the bootstrap host's
+        // JET_BOOTSTRAP_MIR_LINT_EVERY_PASS): JET_MIR_LINT_EVERY_PASS=1 checks
+        // legality and MIR Lint after every optimizer pass, and a failure names
+        // the pass and carries the rejected function's MIR.
+        mir_lint_every_pass: (cli_sys.get("JET_MIR_LINT_EVERY_PASS") ?? "") == "1",
         compiler_threads: CompilerThreads{cap: threads, cores: cli_sys.cpu_count(), memory_available: jet_cli_memory_available()},
         mode: mode,
         build_inputs: Val(jet_driver_shared_build_inputs(JetCLIBuildInputs{})),

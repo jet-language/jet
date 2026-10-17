@@ -79,6 +79,8 @@ use jet_foundation.[
     mir_type_is_integer,
     mir_type_is_numeric,
     mir_type_same_checked_type,
+    canonical_pass_mir_operation_kind,
+    canonical_pass_mir_terminator,
     mir_view_copy_kind,
 ]
 
@@ -2129,7 +2131,8 @@ fn mir_pass_remainder_drops(function: MIRFunction, definitions: MIRPassDefinitio
 // branches (one place moved in each dispatch arm) never conflict. The
 // remainder drop of a partly moved owner releases only the fields still in
 // place, so only an earlier move of the owner itself conflicts with it.
-fn mir_pass_move_is_live(moved: [MIRPassPlaceEvent], reinitialized: [MIRPassPlaceEvent], path: [String], remainder_drop: Bool, block: MIRBlockID, index: Int, dominance: MIRPassDominance) -> Bool Never! {
+// The earlier move still live at this one, if any.
+fn mir_pass_live_move(moved: [MIRPassPlaceEvent], reinitialized: [MIRPassPlaceEvent], path: [String], remainder_drop: Bool, block: MIRBlockID, index: Int, dominance: MIRPassDominance) -> MIRPassPlaceEvent? Never! {
     loop earlier in moved {
         overlaps :: mir_pass_place_path_is_prefix(earlier.projections, path) || (!remainder_drop && mir_pass_place_path_is_prefix(path, earlier.projections))
         if !overlaps || !mir_pass_precedes(earlier.block, earlier.index, block, index, dominance) -> next
@@ -2140,9 +2143,67 @@ fn mir_pass_move_is_live(moved: [MIRPassPlaceEvent], reinitialized: [MIRPassPlac
                 break
             }
         }
-        if !restored -> return true
+        if !restored -> return Val(earlier)
     }
-    false
+    None
+}
+
+// A place's root as a reader sees it: the local's source name when the root
+// is a named local, else the canonical root key.
+fn mir_pass_place_label(function: MIRFunction, place: MIRPlace) -> String Never! {
+    if place.base == .Local(local) {
+        loop row in function.locals {
+            if row.id == local -> return "`{row.name}` ({mir_pass_place_root(place)})"
+        }
+    }
+    "`{mir_pass_place_root(place)}`"
+}
+
+// Dev tooling (JET_MIR_LINT_EVERY_PASS=1): one function's MIR as text, the
+// dump a full-verification failure carries so the rejected program is read
+// where it failed. Locals, place rows, then each reachable-or-not block with
+// its instructions (`%result = Kind(%uses) [places]`) and terminator.
+fn mir_pass_debug_function_text(function: MIRFunction) -> String Never! {
+    lines := [String]{"fn {function.key} (id {function.id.value}, entry block {function.entry.value})"}
+    loop local in function.locals -> &lines.push("  local {local.id.value} `{local.name}` place {local.place.value}")
+    loop place in function.places {
+        projections := [String]{}
+        loop projection in place.projections {
+            step := ".payload"
+            if projection == {
+                .Field(field, _) -> step = ".field{field.value}"
+                .Index(_, index, _, _, _, _, _) -> step = "[%{index.value}]"
+                .Deref(_) -> step = ".*"
+                .Payload(_, _) -> {}
+                .Range(range, _, _) -> step = "[%{range.value}..]"
+                .MapLookup(lookup, _, _) -> step = "[lookup %{lookup.value}]"
+            }
+            &projections.push(step)
+        }
+        access := "read"
+        if place.access == .Write -> access = "write"
+        if place.access == .Move -> access = "move"
+        &lines.push("  place {place.id.value} = {mir_pass_place_root(place)}{projections.join("")} {access}")
+    }
+    loop block in function.blocks {
+        &lines.push("  block {block.id.value}:")
+        loop (index, instruction) in block.instructions {
+            result := ""
+            if instruction.result == .Val(value) -> result = "%{value.value} = "
+            uses :: loop value in mir_operation_value_uses(instruction.operation) -> "%{value.value}"
+            places :: loop place in mir_operation_place_uses(instruction.operation) -> "{place.value}"
+            shown_places :: if places.len() == 0 -> "" else -> " places [{places.join(", ")}]"
+            released := ""
+            if instruction.operation == .Drop(_, kind) {
+                released = if kind == .NoDrop -> " drop none" else -> " drop release"
+            }
+            &lines.push("    {index}: {result}{canonical_pass_mir_operation_kind(instruction.operation)}({uses.join(", ")}){shown_places}{released}")
+        }
+        targets :: loop target in mir_terminator_targets(block.terminator) -> "{target.value}"
+        operands :: loop value in mir_terminator_value_uses(block.terminator) -> "%{value.value}"
+        &lines.push("    -> {canonical_pass_mir_terminator(block.terminator)}({operands.join(", ")}) blocks [{targets.join(", ")}]")
+    }
+    lines.join("\n")
 }
 
 fn mir_pass_validate_moves(
@@ -2229,7 +2290,10 @@ fn mir_pass_validate_moves(
                                 written_at :: if write_slots.get(root) == .Val(slot) -> writes[slot] else -> [MIRPassPlaceEvent]{}
                                 remainder_drop := false
                                 if instruction.result == .Val(result) -> remainder_drop = remainder_drops.get(result.value) != None
-                                if mir_pass_move_is_live(moved_at, written_at, mir_pass_place_projection_keys(place), remainder_drop, block.id, index, dominators) -> return Val("place is moved more than once")
+                                if mir_pass_live_move(moved_at, written_at, mir_pass_place_projection_keys(place), remainder_drop, block.id, index, dominators) == .Val(earlier) {
+                                    kind :: if remainder_drop -> "its scope-end cleanup" else -> "a move"
+                                    return Val("place is moved more than once: {mir_pass_place_label(function, place)} is moved by {kind} at block {block.id.value} instruction {index} after its move at block {earlier.block.value} instruction {earlier.index}")
+                                }
                                 if place.base == {
                                     .Static(_) -> {
                                         if place.projections.len() != 0 -> return Val("static move place has a projection")

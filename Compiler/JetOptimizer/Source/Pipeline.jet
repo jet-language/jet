@@ -514,11 +514,33 @@ fn mir_pass_wave_slots(slots: [Shared<MIRPassWaveSlot>], from: Int, first: Int, 
     counts
 }
 
-// Legality, then MIR Lint when `lint` is set: the entry check.
+// Legality, then MIR Lint when `lint` is set: the entry check. Under full
+// verification a failure also names the pass whose output was rejected and
+// carries the rejected function's MIR (mir_pass_debug_failure).
 fn mir_pass_check(program: &MIRProgram, pass: MIROptimizationPassID, lint: Bool, threads: CompilerThreads) -> MIROptimizationError? {
     validation :: mir_pass_validate_wave(&program, pass, threads)
-    if validation != None || !lint -> return validation
-    mir_pass_lint_wave(&program, pass, threads)
+    if validation == .Val(error) {
+        if !lint -> return validation
+        return Val(mir_pass_debug_failure(program, error))
+    }
+    if !lint -> return None
+    linted :: mir_pass_lint_wave(&program, pass, threads) ?? return None
+    Val(mir_pass_debug_failure(program, linted))
+}
+
+// Dev tooling (JET_MIR_LINT_EVERY_PASS=1 sets full verification): `error`
+// with the pass that produced the rejected program and the MIR text of the
+// function it names, so a lowering or pass defect is read where it failed.
+fn mir_pass_debug_failure(program: MIRProgram, error: MIROptimizationError) -> MIROptimizationError Never! {
+    failed := error.copy()
+    function_id :: error.function ?? return failed
+    loop function in program.functions {
+        if function.id == function_id {
+            failed.message = "{error.message}\nrejected after pass {mir_pass_name(error.pass)}:\n{mir_pass_debug_function_text(function)}"
+            return failed
+        }
+    }
+    failed
 }
 
 // The check after `pass`: legality and MIR Lint, only under full
