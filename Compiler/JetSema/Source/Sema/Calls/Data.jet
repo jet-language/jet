@@ -529,6 +529,25 @@ fn sema_call_try_html_raw(owner: String, method: String, args: [CallArg], span: 
 fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     known_type :: sema_data_type_name(ty) ?? ""
     if ty != (Type.Named{name: "DBValue"}) && !sema_data_is_json_name(known_type) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    // Rust `check_core_json_lit`: `Dyn.object()` is an empty object and
+    // `Dyn.from(value)` calls the value's Encode contract.
+    if sema_data_is_json_name(known_type) && (variant == "object" || variant == "from") {
+        count :: if variant == "object" -> 0 else -> 1
+        if args.len() != count {
+            sema_data_arity_diagnostic("Dyn.{variant}", count, args.len(), span, &diagnostics)
+            sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        if variant == "object" {
+            map :: sema_tir_node(Type.Map{key: Type.String, key_span: None, value: sema_dyn_type()}, TExprKind.MapLit{entries: [TMapEntry]{}}, span)
+            value :: sema_tir_node(sema_dyn_type(), TExprKind.JSONLit{variant: "Object", arg: Val(map), clone_arg: false}, span)
+            return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)}
+        }
+        sema_data_check_labels("Dyn.from", args, [String]{}, span, &diagnostics)
+        if args[0].convention == AccessConvention.Move -> &diagnostics.push(sema_error("E0203", args[0].span, "a value was passed with the move marker `^` to a parameter that does not consume", "Dyn.from reads the value's Encode contract", "remove the move marker `^` here"))
+        value :: sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        return sema_data_check_encode(args[0].expr, value, [CallArg]{}, [Type]{}, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     private_number :: sema_data_is_json_name(known_type) && variant == "Number" && context.unsafe_depth > 0 && environment.module_name == "__core_encoding_stream"
     if !private_number && !sema_data_literal_variant_valid(ty, variant) {
         &diagnostics.push(sema_error("E0304", span, "`{type_name(ty)}` has no variant `{variant}`", "Dyn and DBValue expose closed compiler-owned literal variants", "check the variant name"))
