@@ -698,6 +698,16 @@ Private unpublished arithmetic workspaces use their unique-owner discard.
 Rust-tier seed/verification transport uses the identical C layout, with its
 allocator paired at construction and release; that registered transport dies
 at the Rust cutover, rather than defining a second numeric representation.
+`Atomic<Int>` (`AtomicInt.jet`) owns one exact publication per cell; `add`
+returns the independently owned previous exact value. Compare-exchange uses
+numeric equality while retaining the observed node through publication, not
+pointer equality. Fallible add leaves the cell unchanged on refusal and reports
+the physical failed native request in `AllocError.requested_bytes` with
+allocator `"exact-int"`; those byte counts reflect native node/limb layout, not
+Rust temporary-vector layout. An inline fast path allocates nothing and takes
+no allocation fault probe. A spilling operation probes once even if its CAS
+retries, then separately allocates a node and limbs; a limb-capacity refusal
+frees the already allocated node.
 
 
 Native iterator operations preserve the delivered stop rail. A stopped callback
