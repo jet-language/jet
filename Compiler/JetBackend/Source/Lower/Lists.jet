@@ -814,9 +814,17 @@ fn lower_list_sole_owner(f: &LowerFunction, data: LIRValueID) -> LIRValueID Neve
 // a private buffer of the same capacity (at least the length, so growth stays
 // amortized) holding a clone of every element; the old buffer loses this
 // owner, and is dropped here if every other owner released it meanwhile.
+// For an entry no owner can copy (lower_contains_uncopyable: a Close owner, a
+// handle without clone, an atomic, a Task) the helper is the identity, as
+// box.unique's: Sema never lets such a buffer be shared.
 fn lower_helper_list_unique(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     elem :: lower_list_family_entry(p, glue.ty) ?? panic("list.unique helper has no List-family entry")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
+    seen := [String:Bool]{}
+    if lower_contains_uncopyable(p, m, elem, &seen) {
+        lower_seal(&f, LIRTerminator.Return{value: None})
+        return lir_builder_finish(f.builder)
+    }
     list :: f.open_params[0].copy()
     length :: lower_list_word(&f, list, 0)
     cap :: lower_list_word(&f, list, 8)
