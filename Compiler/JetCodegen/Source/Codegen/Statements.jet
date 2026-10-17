@@ -2416,7 +2416,12 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, program: JetCodegenP
         .Assign(place_expr, op, value, clone_value, line, span) -> {
             place_ty := jet_codegen_assignment_place_type(builder, program, place_expr)
             destination_is_view := jet_codegen_assignment_destination_is_string_view(builder, program, place_expr)
-            right := jet_codegen_assignment_value(&builder, program, value, clone_value, destination_is_view, span)
+            refill := MIRPlaceID?{None}
+            if op == None -> refill = jet_codegen_subject_refill_slot(builder, program, place_expr, value)
+            right := if refill == {
+                .Val(slot) -> jet_codegen_take_refill_slot(&builder, program, slot, value.ty, span)
+                else -> jet_codegen_assignment_value(&builder, program, value, clone_value, destination_is_view, span)
+            }
             place := jet_codegen_lower_place_for_access(&builder, program, place_expr, MIRAccess.Write)
             assigned := if op == {
                 .None -> right

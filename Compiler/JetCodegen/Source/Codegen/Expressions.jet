@@ -6577,6 +6577,41 @@ fn jet_codegen_under_split_root(builder: JetCodegenBuilder, program: JetCodegenP
     }
     false
 }
+
+// #5041: the payload slot `root = p` takes instead of copying: `p` aliases a
+// payload of a read window over the owned local `root` it refills
+// (jet_codegen_bind_window_binding's owned_payload_places: no read parameter,
+// element, constant, aliased window or split drop on the way), and `root`
+// has no Close of its own. Taking the payload leaves a hole the write fills
+// at once: the write drops what is left of the old root (its carrier glue
+// skips the taken member) and stores the payload. The stability proof
+// admitted the window only if nothing reads `p` once `root` changes
+// (jet_codegen_stability_subject_refill), so no alias outlives the take.
+fn jet_codegen_subject_refill_slot(builder: JetCodegenBuilder, program: JetCodegenProgram, place: TPlace, value: TExpr) -> MIRPlaceID? Never! {
+    taken :: jet_codegen_refill_binding(value) ?? return None
+    target :: jet_codegen_refill_target(place) ?? return None
+    binding :: jet_codegen_find_binding_for_local(builder, program, taken) ?? return None
+    if builder.owned_payload_places.get(binding.place.value) == None -> return None
+    root :: jet_codegen_find_binding_for_local(builder, program, target) ?? return None
+    slot :: jet_codegen_find_place(builder, program, binding.place) ?? return None
+    owner :: jet_codegen_find_place(builder, program, root.place) ?? return None
+    if owner.projections.len() != 0 || slot.base != owner.base -> return None
+    if owner.base == {
+        .Local(_) -> {}
+        else -> return None
+    }
+    if jet_codegen_nominal_close_function(builder, program, root.ty) != None -> return None
+    Val(binding.place)
+}
+
+// Take the payload in `slot` out of its subject (a checked `^p`'s MovePlace
+// through the payload projection, jet_codegen_unmovable_place admitting it).
+fn jet_codegen_take_refill_slot(builder: &JetCodegenBuilder, program: JetCodegenProgram, slot: MIRPlaceID, ty: Type, span: Span) -> MIRValueID Never! {
+    _ := &builder.payload_take_places.add(slot.value, true)
+    jet_codegen_retain_place_access(&builder, program, slot, MIRAccess.Move)
+    jet_codegen_emit_value(&builder, program, span, ty, MIROperation.MovePlace{place: slot})
+}
+
 // #4318 §4: the place a stable loop source names. Like
 // `jet_codegen_read_window_place`, but the root may also be a local or any
 // parameter: sema proved the loop body never mentions the source's root
