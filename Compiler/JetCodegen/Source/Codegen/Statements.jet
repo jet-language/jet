@@ -197,7 +197,12 @@ fn jet_codegen_lower_condition(builder: &JetCodegenBuilder, program: JetCodegenP
             join_block := jet_codegen_new_block(&builder, program, source_span, "condition-and-join")
             jet_codegen_terminate(&builder, program, MIRTerminator.Branch{condition: left_value, then_target: right_block, else_target: false_block})
             jet_codegen_switch_block(&builder, program, right_block)
+            // The right side's block reaches the arm only through the join,
+            // which the false edge also enters, so a pattern subject lowered
+            // here takes no element window (jet_codegen_lower_read_window).
+            builder.short_circuit_depth += 1
             right_value := jet_codegen_lower_condition(&builder, program, right)
+            builder.short_circuit_depth -= 1
             right_predecessor := builder.current
             jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join_block})
             jet_codegen_switch_block(&builder, program, false_block)

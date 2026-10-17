@@ -6295,8 +6295,9 @@ fn jet_codegen_lower_pattern_subject(builder: &JetCodegenBuilder, program: JetCo
 // An element window's place carries its index operands, values defined
 // where the subject is lowered; every read of a binding aliasing the window
 // uses them, so that block must dominate the arm. On the right of `&&` or
-// `||` (builder.short_circuit_depth) it does not: the arm is reached through
-// the short-circuit join, which the left side's short edge also enters. Such
+// `||` (builder.short_circuit_depth: the expression operators and the
+// if-condition `&&` alike) it does not: the arm is reached through the
+// short-circuit join, which the left side's short edge also enters. Such
 // a subject keeps the value path (its bindings hold copies). A stored-field
 // window carries no operand and stays valid anywhere.
 fn jet_codegen_lower_read_window(builder: &JetCodegenBuilder, program: JetCodegenProgram, subject: TExpr, stable: Bool) -> MIRValueID? {
