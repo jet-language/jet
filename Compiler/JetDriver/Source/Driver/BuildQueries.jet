@@ -190,9 +190,9 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     base_dir :: jet_driver_parent_path(path)
     compiled := jet_driver_compile_mir_selection(&request, JetDriverCompileMode.Interpreter, Val(^path), Val("build"), true, false)
     if !compiled.complete || compiled.internal_problem != None -> return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, ^compiled.internal_problem)
-    program :: compiled.build_program ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("checked build invocation lost its ProgramInfo"))
+    program :: ^compiled.build_program ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("checked build invocation lost its ProgramInfo"))
     entry :: compiled.entry_function ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("checked build invocation lost its MIR entry"))
-    mir :: compiled.mir ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("checked build invocation lost its MIR program"))
+    mir :: ^compiled.mir ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("checked build invocation lost its MIR program"))
     if request.eval_config.host_adapter == None -> return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("build evaluation requires the invocation's host adapter"))
     session_id :: jet_driver_build_next_session_id(&scope) ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("build invocation identity space exhausted"))
     session := build_session_new(session_id, package, request.host_facts.compiler_identity ?? "", scope.policy)
@@ -229,7 +229,7 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     }
     finished :: build_session_finish(&session, value)
     loop error in finished.diagnostics -> &errors.push(jet_eval_build_session_diagnostic(error))
-    plan :: finished.plan ?? return jet_driver_build_query_empty(^request, ^errors, false, None)
+    plan :: ^finished.plan ?? return jet_driver_build_query_empty(^request, ^errors, false, None)
     if jet_driver_has_errors(errors) -> return jet_driver_build_query_empty(^request, ^errors, false, None)
     generated :: build_plan_selected_generated(plan)
     // The final ordinary checked bundle, not the staging build callable,
