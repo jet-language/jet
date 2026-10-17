@@ -1,0 +1,56 @@
+# #3722 (D-NEW-TEMPLATE1=A): every `jet new --template` value runs and passes its
+# one test on the Jet-hosted CLI, and no template run reports a diagnostic
+# located in Core source. Port of tests/jet_test.rs::jet_new_every_template_runs_and_tests
+# and the web build step of tests/web_scaffold.rs. The default template is
+# covered by first_hour/first_hour_cli_journey.case.
+env: NO_COLOR=1
+step: jet new starter_cli --template cli
+cwd: {work}/
+file: starter_cli/run.jet is-file
+file: starter_cli/@run.jet absent
+step: jet run
+cwd: {work}/starter_cli
+stdout: ~ "hello, world"
+stderr: !~ "Core/"
+step: jet test --capture=all
+cwd: {work}/starter_cli
+stdout: ~ "1 passed"
+stderr: !~ "Core/"
+step: jet new starter_ui --template ui
+cwd: {work}/
+file: starter_ui/run.jet is-file
+file: starter_ui/@run.jet absent
+step: jet run
+cwd: {work}/starter_ui
+stdout: ~ "hello, world"
+stderr: !~ "Core/"
+step: jet test --capture=all
+cwd: {work}/starter_ui
+stdout: ~ "1 passed"
+stderr: !~ "Core/"
+step: jet new starter_overrides --template overrides
+cwd: {work}/
+file: starter_overrides/@run.jet is-file
+file: starter_overrides/@build.jet is-file
+file: starter_overrides/@dev.jet is-file
+file: starter_overrides/@test.jet is-file
+step: jet run
+cwd: {work}/starter_overrides
+stdout: ~ "hello, world"
+stderr: !~ "Core/"
+step: jet test --capture=all
+cwd: {work}/starter_overrides
+stdout: ~ "1 passed"
+stderr: !~ "Core/"
+step: jet new starter_web --template web
+cwd: {work}/
+file: starter_web/run.jet is-file
+file: starter_web/@run.jet absent
+step: jet test --capture=all
+cwd: {work}/starter_web
+stdout: ~ "1 passed"
+stderr: !~ "Core/"
+step: jet build --target web
+cwd: {work}/starter_web
+stderr: !~ "Core/"
+file: starter_web/.jet/build/index.html is-file
