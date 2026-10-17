@@ -140,9 +140,17 @@ inline-C closure; each records its resolved `cc`/`ar` paths, versions and
 `NIX_HARDENING_ENABLE`, and a CLI stage whose toolchain differs from the
 factory's is refused. Each runs under GNU `time -v` (seconds, peak RSS) with a
 1 GiB main stack set by `prlimit` before exec: the native compiler runs on the
-main thread, and the Rust thread-stack variable does not raise it. CLI stages
-get `JET_COMPILER_IDENTITY` from the stage-1 factory receipt's
-`compiler_source_identity` and a `NATIVE_STAGE_TIMEOUT` (default 10800 s).
+main thread, and the Rust thread-stack variable does not raise it. Every
+compiler assembled by `native-compiler.mjs` knows its own identity: the
+assembly writes `compilerSourceIdentity(<source>)` (`native-factory.mjs`, the
+`BuildIdentity.rs` `compiler_source_id` framing, `name@version#<id>`) into
+Request.jet's last line, `JET_CLI_BUILT_COMPILER_IDENTITY`, and records it as
+the plan's `compilerIdentity`; so stage N+1 carries the identity of the source
+stage N compiled and a plain `jet build` needs no environment.
+`JET_COMPILER_IDENTITY` remains only an explicit override (tests, and builders
+that predate the embedded identity, such as a factory-era seed); the feed sets
+it for no stage built from an assembly. CLI stages get a `NATIVE_STAGE_TIMEOUT`
+(default 10800 s).
 Compiler thread admission (`compiler_threads_admit`) starts from the CPUs a
 process may run on. That is its only input the chain can set: the factory
 takes no `--threads` cap. So the stage 1 factory and every CLI stage run
@@ -172,10 +180,9 @@ seed: the pack its own lowering produced, so stage 1's code and runtime share
 one layout. Stage 1 then produces this source's runtime pack through the
 runtime-library seam (`prebuild-runtime.mjs <stage1/jet>`, written to
 `native-runtime/` and copied beside stage 1), and stages 2 and 3 link against
-that pack. Each stage runs under the identity of the compiler running it:
-stage 1 under the seed's, stages 2 and 3 under this source's, both computed as
-`compilerSourceIdentity` (`native-factory.mjs`, the `BuildIdentity.rs`
-`compiler_source_id` framing) since there is no factory receipt. The C
+that pack. The seed runs under its own identity (embedded, or for an older
+seed the `compilerSourceIdentity` of its publication's source, as an
+override); stages 1, 2 and 3 carry this source's embedded identity. The C
 toolchain reference is the one stage 1 resolves. The receipt records the seed
 (publication and self-rebuild hashes, stage 3 binary/object sha256, identity,
 runtime key and pack sha256) instead of `factorySha256`; stage 1 (the seed's

@@ -74,11 +74,14 @@ function publish(out, runtimeDir, directory, binary, object) {
 // Whole-file byte comparison of jet and jet.o; never a section subset.
 const compare = (out, left, right) => ['jet', 'jet.o'].map(name => ({ name, equal: readFileSync(join(out, left, name)).equals(readFileSync(join(out, right, name))) }));
 // The environment of every native CLI process: the source export's toolchain
-// root and the RUNNING compiler's identity; no inherited private seam,
-// bootstrap, trace or keep-going setting.
+// root; no inherited private seam, bootstrap, trace, keep-going or identity
+// setting. `identity` is set only for a builder that predates the embedded
+// identity (Request.jet JET_CLI_BUILT_COMPILER_IDENTITY): every compiler this
+// tooling assembles carries its own.
 function nativeEnv(repo, identity) {
-  const env = { ...process.env, JET_TOOLCHAIN_ROOT: repo, JET_COMPILER_IDENTITY: identity };
-  for (const key of Object.keys(env)) if (key.startsWith('JET_FRONT_') || key.startsWith('JET_BOOTSTRAP_') || key.startsWith('JET_TRACE_') || key === 'JET_PHASE_COUNTERS' || key === 'JET_DUMP_MIR' || key === 'JET_DEBUG_LOWER_ALL' || key === 'JET_KEEP_GOING' || key === 'JET_KEEP_GOING_SKIP' || key === 'JET_KEEP_GOING_REPORT') delete env[key];
+  const env = { ...process.env, JET_TOOLCHAIN_ROOT: repo };
+  for (const key of Object.keys(env)) if (key.startsWith('JET_FRONT_') || key.startsWith('JET_BOOTSTRAP_') || key.startsWith('JET_TRACE_') || key === 'JET_PHASE_COUNTERS' || key === 'JET_DUMP_MIR' || key === 'JET_DEBUG_LOWER_ALL' || key === 'JET_KEEP_GOING' || key === 'JET_KEEP_GOING_SKIP' || key === 'JET_KEEP_GOING_REPORT' || key === 'JET_COMPILER_IDENTITY') delete env[key];
+  if (identity) env.JET_COMPILER_IDENTITY = identity;
   return env;
 }
 // jet_rt_main runs the compiler on the process main thread and O0 frames
@@ -93,8 +96,9 @@ function nativeLimited(timing, cpus, command) {
 }
 // Real argv CLI stage: <builder> build <assembled selfhost.jet>, same source
 // path and cwd every time, empty all-phases census, fresh outputs only.
-// `identity` names the builder (the compiler running), not its output.
-function cliStageRunner({ repo, out, unit, identity, referenceToolchain, runtimeDir, stepsFile, cpus }) {
+// `identity`: the builder's (the compiler running) identity override, or null
+// when the builder embeds it; `builderIdentity` is what the receipt records.
+function cliStageRunner({ repo, out, unit, identity, builderIdentity, referenceToolchain, runtimeDir, stepsFile, cpus }) {
   const env = { ...nativeEnv(repo, identity), JET_KEEP_GOING: '1' };
   const jetEnv = join(repo, 'Tools/agent/jet-env');
   // The inline-C archive (and so jet/jet.o) depends on the C toolchain the
@@ -118,7 +122,7 @@ function cliStageRunner({ repo, out, unit, identity, referenceToolchain, runtime
     const rejects = nativeCensusRejects(census, nativeAllowedRows());
     if (rejects.length) throw Error(`stage${stage} all-phases census must exist and be empty (or list only NATIVE_FEED_ALLOWED_ROWS rows): ${rejects.slice(0, 5).join(' | ')}`);
     const allowedRows = census.trim().split('\n').slice(1);
-    return { ...publish(out, runtimeDir, join(out, `stage${stage}`), built, `${built}.o`), keepGoingReport: report, keepGoingFailures: allowedRows.length, allowedCensusRows: allowedRows, timing, seconds: steps.at(-1).seconds, peakRssKb: peakRss(timing), toolchain, compilerCpus: cpus, compilerIdentity: identity };
+    return { ...publish(out, runtimeDir, join(out, `stage${stage}`), built, `${built}.o`), keepGoingReport: report, keepGoingFailures: allowedRows.length, allowedCensusRows: allowedRows, timing, seconds: steps.at(-1).seconds, peakRssKb: peakRss(timing), toolchain, compilerCpus: cpus, compilerIdentity: builderIdentity, identityOverride: Boolean(identity) };
   };
 }
 // A self-hosted seed: a GREEN publication whose stage3 rebuilt itself
@@ -137,7 +141,7 @@ function readNativeSeed(directory) {
   if (sha256 !== self.stage3?.sha256 || objectSha256 !== self.stage3?.objectSha256) throw Error(`seed stage3 bytes differ from ${selfFile}`);
   const runtimeDir = join(directory, 'stage3', 'jet-runtime');
   const runtime = readNativeRuntimePack(runtimeDir);
-  return { publication: publicationFile, publicationSha256: hash(publicationBytes), selfRebuild: selfFile, selfRebuildSha256: hash(selfBytes), commit: publication.commit, sourceRoot: publication.sourceRoot, binary, sha256, objectSha256, compilerIdentity: compilerSourceIdentity(publication.sourceRoot), publishedIdentity: publication.compilerIdentity, runtimeDir, runtimeKey: runtime.key, runtimePackSha256: hash(runtime.pack) };
+  return { publication: publicationFile, publicationSha256: hash(publicationBytes), selfRebuild: selfFile, selfRebuildSha256: hash(selfBytes), commit: publication.commit, sourceRoot: publication.sourceRoot, binary, sha256, objectSha256, compilerIdentity: publication.identityEmbedded ? publication.compilerIdentity : compilerSourceIdentity(publication.sourceRoot), publishedIdentity: publication.compilerIdentity, identityEmbedded: publication.identityEmbedded === true, runtimeDir, runtimeKey: runtime.key, runtimePackSha256: hash(runtime.pack) };
 }
 
 if (options.selfRebuild) {
@@ -154,7 +158,7 @@ if (options.selfRebuild) {
   let selfReceipt;
   try {
     if (unit.sourceSha256 !== publication.sourceSha256) throw Error('assembled source differs from the published fixed point');
-    const run = cliStageRunner({ repo: publication.sourceRoot, out, unit, identity: publication.compilerIdentity, referenceToolchain: second.toolchain, runtimeDir: publication.runtimeDir, stepsFile: join(out, 'self-rebuild-steps.json'), cpus: publication.compilerCpus });
+    const run = cliStageRunner({ repo: publication.sourceRoot, out, unit, identity: publication.identityEmbedded ? null : publication.compilerIdentity, builderIdentity: publication.compilerIdentity, referenceToolchain: second.toolchain, runtimeDir: publication.runtimeDir, stepsFile: join(out, 'self-rebuild-steps.json'), cpus: publication.compilerCpus });
     const third = run(3, second.binary);
     const files = compare(out, 'stage2', 'stage3');
     const identical = files.every(row => row.equal);
@@ -176,38 +180,39 @@ if (options.selfRebuild) {
   const unit = JSON.parse(readFileSync(join(assembly, 'plan.json'), 'utf8'));
   const stage1 = join(out, 'stage1');
   const prefix = join(stage1, 'factory-output');
-  // Seed mode pins the candidate export the way a factory record does, and
-  // names the candidate by its own source identity (stage1 and stage2 run
-  // this source; the seed runs its own and stage1 is built under the seed's).
+  // Seed mode pins the candidate export the way a factory record does. The
+  // assembly embeds this source's identity in the unit (native-compiler.mjs),
+  // so stage1 and stage2, both built from it, know their own.
   const seed = options.seed ? readNativeSeed(options.seed) : null;
   const pin = seed ? assertPinnedSource(repo, JSON.parse(readFileSync(join(dirname(repo), 'source.manifest.json'), 'utf8')).commit) : null;
-  const candidateIdentity = seed ? compilerSourceIdentity(repo) : null;
+  const candidateIdentity = unit.compilerIdentity;
+  if (!/^[^@#\s]+@[^@#\s]+#[0-9a-f]{64}$/.test(candidateIdentity ?? '')) throw Error(`assembly ${join(assembly, 'plan.json')} embeds no compiler identity`);
   const runtimeDir = seed ? join(out, 'native-runtime') : options.runtime;
   const stages = seed
     ? [`native seed stage3 (${seed.binary}) real argv \`jet build\` with its own runtime pack -> native stage1`, 'native stage1 runtime-library seam (prebuild-runtime.mjs) -> runtime pack of this source (native-runtime/)', 'native stage1 real argv with that pack -> native stage2']
     : ['source-bound AOT factory -> native stage1', 'native stage1 real argv -> native stage2'];
-  const plan = { schema: 'jet-native-feed-plan/v1', sourceRoot: repo, manifestPatch: unit.manifestPatch ?? null, source: unit.source, sourceSha256: unit.sourceSha256, map: unit.map, entry: unit.entry, factoryRecord: options.factory ?? null, seed, ...(seed ? { commit: pin.commit, tree: pin.tree, compilerIdentity: candidateIdentity } : {}), runtimeDir, producerSha256: hash(readFileSync(fileURLToPath(import.meta.url))), harnessSha256: hash(readFileSync(new URL('./native-factory.mjs', import.meta.url))), stages, comparisons: ['stage1/jet.o == stage2/jet.o', 'stage1/jet == stage2/jet'], selfRebuild: { followUp: 'native-feed.mjs --self-rebuild --out <this dir>', receipt: 'self-rebuild.json', comparisons: ['stage2/jet.o == stage3/jet.o', 'stage2/jet == stage3/jet'] }, stack: '1 GiB RLIMIT_STACK (prlimit) for every native CLI stage', compilerCpus: cpus, allPhasesReportsMandatory: true, optimization: 'O0' };
+  const plan = { schema: 'jet-native-feed-plan/v1', sourceRoot: repo, manifestPatch: unit.manifestPatch ?? null, source: unit.source, sourceSha256: unit.sourceSha256, map: unit.map, entry: unit.entry, compilerIdentity: candidateIdentity, factoryRecord: options.factory ?? null, seed, ...(seed ? { commit: pin.commit, tree: pin.tree } : {}), runtimeDir, producerSha256: hash(readFileSync(fileURLToPath(import.meta.url))), harnessSha256: hash(readFileSync(new URL('./native-factory.mjs', import.meta.url))), stages, comparisons: ['stage1/jet.o == stage2/jet.o', 'stage1/jet == stage2/jet'], selfRebuild: { followUp: 'native-feed.mjs --self-rebuild --out <this dir>', receipt: 'self-rebuild.json', comparisons: ['stage2/jet.o == stage3/jet.o', 'stage2/jet == stage3/jet'] }, stack: '1 GiB RLIMIT_STACK (prlimit) for every native CLI stage', compilerCpus: cpus, allPhasesReportsMandatory: true, optimization: 'O0' };
   json(join(out, 'plan.json'), plan);
   if (options.dryRun) { console.log(JSON.stringify({ ...plan, dryRun: true, upstreamArtifactsNotYetAdmitted: true }, null, 2)); process.exit(0); }
   let receipt;
   try {
-    // The native CLI takes its compiler identity only from the environment
-    // (JetCli Request.jet jet_cli_driver_request) and refuses to compile without
-    // it (Pipeline.jet E0003): `name@version#<compiler_source_id>` of the
-    // compiler running.
-    let source, identity, referenceToolchain, first, runtime, builtBy;
+    // The native CLI refuses to compile without its identity (Pipeline.jet
+    // E0003), `name@version#<compiler_source_id>` of the compiler running:
+    // embedded by its assembly, else (a builder that predates embedding)
+    // JET_COMPILER_IDENTITY.
+    let source, referenceToolchain, first, runtime, builtBy;
+    const identity = candidateIdentity;
     if (seed) {
       source = pin;
-      identity = candidateIdentity;
       const jetEnv = join(repo, 'Tools/agent/jet-env');
-      referenceToolchain = nativeCToolchain(jetEnv, nativeEnv(repo, seed.compilerIdentity), unit.project);
+      referenceToolchain = nativeCToolchain(jetEnv, nativeEnv(repo, null), unit.project);
       // The seed's `jet build` links stage1 against jet-runtime/ beside the
       // seed (Host.jet jet_cli_runtime_dir): the pack its own lowering made.
-      first = cliStageRunner({ repo, out, unit, identity: seed.compilerIdentity, referenceToolchain, runtimeDir: null, stepsFile, cpus })(1, seed.binary);
+      first = cliStageRunner({ repo, out, unit, identity: seed.identityEmbedded ? null : seed.compilerIdentity, builderIdentity: seed.compilerIdentity, referenceToolchain, runtimeDir: null, stepsFile, cpus })(1, seed.binary);
       // This source's runtime pack, lowered by this source (stage1), is the
       // one stages 2 and 3 link against.
       const timing = join(out, 'runtime-pack.time');
-      execute('runtime-pack', nativeLimited(timing, cpus, [jetEnv, process.execPath, join(producerRepo, 'Tools/packaging/prebuild-runtime.mjs'), first.binary, runtimeDir, '--repo', repo]), nativeEnv(repo, identity), repo, out, stepsFile);
+      execute('runtime-pack', nativeLimited(timing, cpus, [jetEnv, process.execPath, join(producerRepo, 'Tools/packaging/prebuild-runtime.mjs'), first.binary, runtimeDir, '--repo', repo]), nativeEnv(repo, null), repo, out, stepsFile);
       runtime = readNativeRuntimePack(runtimeDir);
       if (runtime.provenance.compilerSha256 !== first.sha256) throw Error('runtime pack must be produced by this native stage1');
       cpSync(runtimeDir, join(stage1, 'jet-runtime'), { recursive: true, dereference: true });
@@ -217,9 +222,9 @@ if (options.selfRebuild) {
     } else {
       const record = readStageZeroFactory(options.factory, repo);
       source = record;
-      // Every native stage uses the identity the factory baked in
-      // (Bootstrap/Host/Native.rs), which its bootstrap receipt records
-      // (Bootstrap/Tests.rs).
+      // The factory's own identity (Bootstrap/Host/Native.rs, recorded by its
+      // bootstrap receipt, Bootstrap/Tests.rs) is recorded; the stage1 it
+      // builds from this assembly embeds this source's.
       runtime = readNativeRuntimePack(options.runtime);
       if (runtime.provenance.bootstrapFactory?.sourceCommit !== record.commit || runtime.provenance.compilerSha256 !== record.factory.sha256) throw Error('runtime pack must be produced by this same source-bound factory');
       const packPath = join(options.runtime, runtime.key, 'jet_runtime.pack.o');
@@ -231,14 +236,14 @@ if (options.selfRebuild) {
         if (existsSync(file) && readFileSync(file, 'utf8').trim()) throw Error(`native stage1 codegen/link findings: ${file}`);
       }
       const receiptRows = existsSync(factory.receipt) ? readFileSync(factory.receipt, 'utf8').split('\n') : [];
-      identity = receiptRows.find(row => row.startsWith('compiler_source_identity='))?.slice('compiler_source_identity='.length);
-      if (typeof identity !== 'string' || !/^[^@#\s]+@[^@#\s]+#[^@#\s]+$/.test(identity)) throw Error(`factory receipt ${factory.receipt} lacks compiler_source_identity (\`name@version#source-id\`); refusing to invent one`);
+      const factoryIdentity = receiptRows.find(row => row.startsWith('compiler_source_identity='))?.slice('compiler_source_identity='.length);
+      if (typeof factoryIdentity !== 'string' || !/^[^@#\s]+@[^@#\s]+#[^@#\s]+$/.test(factoryIdentity)) throw Error(`factory receipt ${factory.receipt} lacks compiler_source_identity (\`name@version#source-id\`); refusing to invent one`);
       const published = publish(out, options.runtime, stage1, prefix + '.exe', prefix + '.o');
       steps.push({ name: 'factory-native-stage1', rc: 0, seconds: (Date.now() - start) / 1000, factorySeconds: factory.seconds, peakRssKb: factory.peakRssKb, timing: factory.timing, toolchain: factory.toolchain, factoryReceipt: factory.receipt, keepGoingReport: factory.census, ...published });
       json(stepsFile, steps);
       referenceToolchain = factory.toolchain;
-      first = { ...published, keepGoingReport: factory.census, keepGoingFailures: Number(factory.admitted?.allowed_census_rows ?? 0), compilerCpus: cpus };
-      builtBy = { factorySha256: record.factory.sha256 };
+      first = { ...published, keepGoingReport: factory.census, keepGoingFailures: Number(factory.admitted?.allowed_census_rows ?? 0), compilerCpus: cpus, compilerIdentity: factoryIdentity };
+      builtBy = { factorySha256: record.factory.sha256, factoryIdentity };
     }
     const artifactsFile = join(dirname(repo), 'ARTIFACTS.json');
     const artifacts = existsSync(artifactsFile) ? JSON.parse(readFileSync(artifactsFile, 'utf8')) : { schema: 'jet-regression-artifacts/v1', regression_role: 'discovery', commit: source.commit, tree: source.tree, source: repo, target_dir: `/mnt/jetscratch/targets/source-${source.commit}`, artifacts: {} };
@@ -246,7 +251,7 @@ if (options.selfRebuild) {
     artifacts.artifacts.candidate_jetc0 = { path: first.binary, sha256: first.sha256, native: true, runtimeDir: join(stage1, 'jet-runtime'), sourceSha256: unit.sourceSha256 };
     const temporaryArtifacts = `${artifactsFile}.${process.pid}.new`;
     json(temporaryArtifacts, artifacts); renameSync(temporaryArtifacts, artifactsFile);
-    const run = cliStageRunner({ repo, out, unit, identity, referenceToolchain, runtimeDir, stepsFile, cpus });
+    const run = cliStageRunner({ repo, out, unit, identity: null, builderIdentity: identity, referenceToolchain, runtimeDir, stepsFile, cpus });
     const second = run(2, first.binary);
     // Owner decision 2026-10-16: the self-hosting gate is stage2 == stage3
     // (the `--self-rebuild` follow-up). Stage1 vs native stage2 is recorded
@@ -257,7 +262,7 @@ if (options.selfRebuild) {
     json(join(out, 'comparisons.json'), comparisons);
     // `stages` stays the stage1/stage2 gate pair (native-smoke admits exactly
     // two); smoke uses stage2/jet.
-    receipt = { schema: 'jet-native-compiler/v1', commit: source.commit, sourceRoot: repo, sourceSha256: unit.sourceSha256, manifestPatch: plan.manifestPatch, ...builtBy, compilerIdentity: identity, runtimePackSha256: hash(runtime.pack), producerSha256: plan.producerSha256, harnessSha256: plan.harnessSha256, backend: 'jet-native', optimization: 'O0', compilerCpus: cpus, fixedPoint: comparisons.fixedPoint, gate: 'stage2==stage3', comparisons, selfRebuildReceipt: join(out, 'self-rebuild.json'), stages: [{ stage: 1, ...first }, { stage: 2, ...second }], jet: second.binary, runtimeDir: join(out, 'stage2', 'jet-runtime'), steps, rc: 0, verdict: 'GREEN' };
+    receipt = { schema: 'jet-native-compiler/v1', commit: source.commit, sourceRoot: repo, sourceSha256: unit.sourceSha256, manifestPatch: plan.manifestPatch, ...builtBy, compilerIdentity: identity, identityEmbedded: true, runtimePackSha256: hash(runtime.pack), producerSha256: plan.producerSha256, harnessSha256: plan.harnessSha256, backend: 'jet-native', optimization: 'O0', compilerCpus: cpus, fixedPoint: comparisons.fixedPoint, gate: 'stage2==stage3', comparisons, selfRebuildReceipt: join(out, 'self-rebuild.json'), stages: [{ stage: 1, ...first }, { stage: 2, ...second }], jet: second.binary, runtimeDir: join(out, 'stage2', 'jet-runtime'), steps, rc: 0, verdict: 'GREEN' };
   } catch (error) {
     receipt = { schema: 'jet-native-feed-failure/v1', plan, steps, rc: 1, verdict: 'RED', error: error.stack, fixedPoint: false };
   }
