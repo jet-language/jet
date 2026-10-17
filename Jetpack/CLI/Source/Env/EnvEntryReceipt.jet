@@ -263,7 +263,7 @@ fn cli_announce_env_ready(theme: Theme, project_dir: String, roots: HangarRoots,
 fn cli_record_env_entry_receipt(theme: Theme, project_dir: String, roots: HangarRoots, definition_fingerprint: String, inherited_loader_path: String?, secret_identity: String, stats: EnvReadyStats) CLIError! -[IO, FS, Env, Time, Time.Wait]> {
     current :: stats.realized_set()
     selections :: stats.realized_entries()
-    stamp :: store_environment_entry_stamp(roots, project_dir, definition_fingerprint, inherited_loader_path, selections)
+    stamp :: store_environment_entry_stamp(roots, project_dir, definition_fingerprint, inherited_loader_path, selections) ?? return Err(CLIError.Store(err))
     if cli_read_env_entry_receipt(project_dir) == .Val(previous) {
         previous_display := [(name: String, version: String)]{}
         loop package in previous.packages {

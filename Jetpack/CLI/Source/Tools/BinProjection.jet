@@ -39,7 +39,7 @@ fn cli_materialize_generation_bins(verification: &StoreVerification, generation_
         } else {
             roots :: HangarRoots{root: tool.store_root, dev_mode: true}
             entry :: cli_tool_store_entry(&verification, roots, tool)
-            fallback :: store_snapshot_lease(&verification, roots, entry)
+            fallback :: store_snapshot_lease(&verification, roots, entry) ?? return Err(CLIError.Store(err))
             if cli_tool_project_bins(bin_dir, tool, fallback, &projected) == {
                 .Ok(digests) -> {
                     fallback.release()
@@ -52,12 +52,12 @@ fn cli_materialize_generation_bins(verification: &StoreVerification, generation_
             }
         }
     }
-    store_sync_store_directory(bin_dir)
+    store_sync_store_directory(bin_dir) ?? return Err(CLIError.Store(err))
 }
 
 // The checked StoreEntry that authorizes a recorded tool.
 fn cli_tool_store_entry(verification: &StoreVerification, roots: HangarRoots, tool: InstalledUserTool) -> StoreEntry CLIError! {
-    loop entry in store_list_checked(&verification, roots) {
+    loop entry in (store_list_checked(&verification, roots) ?? return Err(CLIError.Store(err))) {
         if entry.reference == tool.reference && entry.envelope.output_hash == tool.output_hash -> return Ok(entry)
     }
     Err(CLIError.Other("profile StoreEntry authority is unavailable"))
@@ -202,7 +202,7 @@ fn cli_atomic_write_profile_pointer(bytes: [U8]) CLIError! -[FS, Env]> {
     partial :: files.join(directory, TOOL_PROFILE_POINTER_PARTIAL)
     cli_write_synced(partial, bytes)
     cli_finalize_profile_pointer(partial, cli_tool_profile_path())
-    store_sync_store_directory(directory)
+    store_sync_store_directory(directory) ?? return Err(CLIError.Store(err))
 }
 
 fn cli_atomic_write_current_pointer(bytes: [U8]) CLIError! -[FS, Env]> {
@@ -210,7 +210,7 @@ fn cli_atomic_write_current_pointer(bytes: [U8]) CLIError! -[FS, Env]> {
     partial :: files.join(directory, TOOL_PROFILE_CURRENT_PARTIAL)
     cli_write_synced(partial, bytes)
     cli_finalize_profile_pointer(partial, cli_tool_current_path())
-    store_sync_store_directory(directory)
+    store_sync_store_directory(directory) ?? return Err(CLIError.Store(err))
 }
 
 // A no-follow stat, or None when nothing exists at `path`.

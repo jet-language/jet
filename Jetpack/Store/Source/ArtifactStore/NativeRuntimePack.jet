@@ -12,8 +12,10 @@ enum NativeRuntimePackError {
 }
 
 impl encoding.EncodingError -> NativeRuntimePackError { NativeRuntimePackError.Encoding(self) }
-impl ArtifactStoreError -> NativeRuntimePackError { NativeRuntimePackError.Store(self) }
 impl IOError -> NativeRuntimePackError { NativeRuntimePackError.IO(self) }
+// ArtifactStoreError has no declared route here: it already carries IOError,
+// so a second edge would give IOError two routes (E2419). Store calls wrap
+// their failure as `.Store(err)` at the call site.
 
 // Roles preserve the order of the admitted composition, not filesystem order.
 struct NativeRuntimeRoleObject {
@@ -399,19 +401,19 @@ fn native_runtime_pack_publish(store: ArtifactStore, subject: NativeRuntimePackS
     census := NativePackReadCensus{capture: false, objects: [ObjectHandle]{}}
     subject_bytes :: subject.to_bytes()
     if ObjectHandle.from_bytes(subject_bytes) != approval.subject -> return Err(NativeRuntimePackError.Invalid("prepared subject changed before authorization"))
-    _ :: store.publish_blob(subject_bytes)
+    _ :: store.publish_blob(subject_bytes) ?? return Err(NativeRuntimePackError.Store(err))
     _ :: native_runtime_pack_check_approval(store, subject, approval.subject, approval, &census)
-    approval_object :: store.publish_blob(approval.to_bytes())
+    approval_object :: store.publish_blob(approval.to_bytes()) ?? return Err(NativeRuntimePackError.Store(err))
     identity :: NativeRuntimePackIdentity{subject: approval.subject, approval: approval_object}
     _ :: native_pack_blob(store, compiler, &census)
-    identity_object :: store.publish_blob(identity.to_bytes())
+    identity_object :: store.publish_blob(identity.to_bytes()) ?? return Err(NativeRuntimePackError.Store(err))
     composition :: NativeCandidateComposition{
         compiler, expected_runtime_identity: identity_object, expected_approval: approval_object,
         compatible_abi: subject.abi, compatible_routes: subject.routes, compatible_providers: subject.providers,
     }
     // Existing publish_bytes returns Conflict for a different record at this
     // compiler-bound action key. Never overwrite or select by native.key.
-    Ok(store.publish_bytes(NativeCandidateComposition.action_key(compiler), composition.to_bytes(), false))
+    Ok(store.publish_bytes(NativeCandidateComposition.action_key(compiler), composition.to_bytes(), false) ?? return Err(NativeRuntimePackError.Store(err)))
 }
 
 struct VerifiedNativeRuntimePack {
@@ -429,7 +431,7 @@ struct VerifiedNativeRuntimePack {
 fn native_runtime_pack_load(store: ArtifactStore, compiler: ObjectHandle) -[FS, Env, Exec, Time, Rand]> VerifiedNativeRuntimePack NativeRuntimePackError! {
     census := NativePackReadCensus{capture: true, objects: [ObjectHandle]{}}
     _ :: native_pack_blob(store, compiler, &census)
-    selected :: if store.lookup_artifact(NativeCandidateComposition.action_key(compiler)) == {
+    selected :: if (store.lookup_artifact(NativeCandidateComposition.action_key(compiler)) ?? return Err(NativeRuntimePackError.Store(err))) == {
         .Hit(artifact) -> artifact
         else -> { return Err(NativeRuntimePackError.Invalid("candidate composition is missing or corrupt")) }
     }
@@ -506,7 +508,7 @@ fn native_pack_revision(text: String) NativeRuntimePackError! {
 fn native_pack_handle(text: String) -> ObjectHandle NativeRuntimePackError! {
     fields :: text.split(":").to_list()
     if fields.len() != 2 -> return Err(NativeRuntimePackError.Invalid("object handle must be sha256:length"))
-    digest :: ArtifactDigest.from_hex(fields[0])
+    digest :: ArtifactDigest.from_hex(fields[0]) ?? return Err(NativeRuntimePackError.Store(err))
     if digest.to_hex() != fields[0] -> return Err(NativeRuntimePackError.Invalid("object digest must be lowercase hex"))
     Ok(ObjectHandle.new(digest, native_pack_decimal(fields[1])))
 }
@@ -787,7 +789,7 @@ struct NativeRuntimePackEvidence {
 fn native_runtime_pack_prepare(store: ArtifactStore, subject: NativeRuntimePackSubject, evidence: NativeRuntimePackEvidence) -[FS, Env, Exec, Time, Rand]> ObjectHandle NativeRuntimePackError! {
     census := NativePackReadCensus{capture: false, objects: [ObjectHandle]{}}
     _ :: native_runtime_pack_check_evidence(store, subject, evidence, &census)
-    Ok(store.publish_blob(subject.to_bytes()))
+    Ok(store.publish_blob(subject.to_bytes()) ?? return Err(NativeRuntimePackError.Store(err)))
 }
 
 // Admitted source manifests and explicit human authorization receipts preserve

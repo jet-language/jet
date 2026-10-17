@@ -75,14 +75,19 @@ struct NixCacheError {
     fn message(self) -> String Never! { self.what() }
 }
 
-// Store-area failures raised inside admission are atomic-admission failures,
-// exactly as Rust's `io_error(NixCacheErrorKind::Admission, error)`.
-impl StoreError -> NixCacheError { NixCacheError.new(NixCacheErrorKind.Admission, self.message()) }
-
 impl IOError -> NixCacheError { NixCacheError.new(NixCacheErrorKind.Admission, "{self}") }
 
 fn store_nix_io_error(kind: NixCacheErrorKind, error: IOError) -> NixCacheError Never! {
     NixCacheError.new(kind, "{error}")
+}
+
+// Store-area failures raised inside admission are atomic-admission failures,
+// exactly as Rust's `io_error(NixCacheErrorKind::Admission, error)`. StoreError
+// has no declared route here: it already carries IOError, so a second edge
+// would give IOError two routes (E2419); Store calls wrap their failure with
+// this at the call site.
+fn store_nix_store_error(error: StoreError) -> NixCacheError Never! {
+    NixCacheError.new(NixCacheErrorKind.Admission, error.message())
 }
 
 // Signed narinfo plus the exact bytes that were verified for it.

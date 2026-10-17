@@ -93,7 +93,7 @@ fn store_plan_nix_downloads(verification: &StoreVerification, roots: HangarRoots
     endpoint :: NixCacheEndpoint.from_roots(roots)
     store_dir := "/nix/store"
     cache_info_loaded := offline
-    existing_entries :: store_nix_entries_by_store_path(store_list_checked(&verification, roots))
+    existing_entries :: store_nix_entries_by_store_path(store_list_checked(&verification, roots) ?? return Err(store_nix_store_error(err)))
     queue := Rank<String>.new()
     loop store_path in store_paths {
         store_nix_validate_store_path(store_path, store_dir)
