@@ -3625,8 +3625,11 @@ fn jet_codegen_stability_arm_roots(expression: TExpr, roots: &[String]) Never! {
 // arm runs under `condition`, so its pattern bindings are in scope, and a
 // payload binding's slot is lent even when the arm reads it uncopied.
 fn jet_codegen_stability_arm_root(value: TExpr, condition: TIfCond, guarded: Bool, roots: &[String]) Never! {
-    if value.kind == .Clone(inner, _) -> return jet_codegen_stability_chain_root(inner, condition, guarded, true, &roots)
-    if guarded -> jet_codegen_stability_chain_root(value, condition, guarded, false, &roots)
+    if value.kind == .Clone(inner, _) {
+        jet_codegen_stability_chain_root(inner, condition, guarded, true, &roots)
+    } else if guarded {
+        jet_codegen_stability_chain_root(value, condition, guarded, false, &roots)
+    }
 }
 
 fn jet_codegen_stability_chain_root(inner: TExpr, condition: TIfCond, guarded: Bool, copied: Bool, roots: &[String]) Never! {
@@ -3665,6 +3668,7 @@ fn jet_codegen_arm_subject_root(condition: TIfCond, name: String) -> TLocal? Nev
 // binding over `root` itself (jet_codegen_stability_pattern records it with
 // `root` as its root): the refill takes `p` out of the subject it replaces.
 fn jet_codegen_stability_subject_refill(state: JetCodegenLetStability, place: TPlace, assigned: TExpr) -> String? Never! {
+    if state.pending.len() == 0 -> return None
     taken :: jet_codegen_refill_binding(assigned) ?? return None
     target :: jet_codegen_refill_target(place) ?? return None
     loop candidate in state.pending {
@@ -3886,7 +3890,7 @@ fn jet_codegen_stability_stmt_body(state: &JetCodegenLetStability, statement: TS
             if op == None -> refill = jet_codegen_stability_subject_refill(state, place, assigned)
             if refill == .Val(taken) {
                 // #5041: `root = p` refilling the subject `p` was bound over
-                // takes `p` out of that subject (jet_codegen_subject_refill_take):
+                // takes `p` out of that subject (jet_codegen_subject_refill_slot):
                 // it reads `p` and stores no alias of it.
                 seen := [String]{}
                 jet_codegen_stability_read(&state, taken, &seen)

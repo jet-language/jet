@@ -6628,6 +6628,7 @@ fn jet_codegen_under_split_root(builder: JetCodegenBuilder, program: JetCodegenP
 // admitted the window only if nothing reads `p` once `root` changes
 // (jet_codegen_stability_subject_refill), so no alias outlives the take.
 fn jet_codegen_subject_refill_slot(builder: JetCodegenBuilder, program: JetCodegenProgram, place: TPlace, value: TExpr) -> MIRPlaceID? Never! {
+    if builder.owned_payload_places.len() == 0 -> return None
     taken :: jet_codegen_refill_binding(value) ?? return None
     target :: jet_codegen_refill_target(place) ?? return None
     binding :: jet_codegen_find_binding_for_local(builder, program, taken) ?? return None
