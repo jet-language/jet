@@ -57,7 +57,7 @@ fn method_wave_comptime_rows(graph: SemaRegistrationGraph, hooks: Shared<SemaReg
 
 fn method_wave_checked(graph: SemaRegistrationGraph, threads: CompilerThreads, cached: [SemaComptimeFunctionResult]) -> SemaGraphResult {
     hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
-    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, hooks, threads, None)
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, None)
     sema_finalize_registration_graph(graph, None, ^stage, [SemaComptimeItemValue]{}, cached, hooks, threads, None, None)
 }
 
@@ -220,7 +220,7 @@ fn method_wave_case(source: String, negative: Bool, keep_going: Bool, use_compti
 
 fn method_wave_cached_checked(graph: SemaRegistrationGraph, threads: CompilerThreads, cache: SemaIncrementalCache) -> SemaGraphResult {
     hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
-    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, hooks, threads, None)
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, None)
     sema_finalize_registration_graph(graph, None, ^stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, threads, Val(cache), None)
 }
 

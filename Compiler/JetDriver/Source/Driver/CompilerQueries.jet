@@ -398,7 +398,7 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
     if jet_driver_has_errors(output_diagnostics) -> registration.complete = false
     if registration.internal_problem == .Val(problem) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val(problem))
     // Declaration checking loans the single graph to its stage, then returns it.
-    stage := sema_collect_comptime_declarations(^registration, jet_driver_compiler_check_package_policies(load), input.request.eval_config.host_hooks, input.request.compiler_threads, input.request.trace_sink)
+    stage := sema_collect_comptime_declarations(^registration, jet_driver_compiler_check_package_policies(load), input.request.trace_sink)
     declared_registration := ^stage.graph
     stage.graph = None
     registration = ^declared_registration ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the declaration pass lost its registration graph"))

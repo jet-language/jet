@@ -3578,7 +3578,7 @@ fn jet_driver_comptime_run(
             }
             resolved_count = values.len()
         }
-        prechecks := sema_comptime_precheck_items(&environment, &program, available, pending, values, request.compiler_threads)
+        prechecks := sema_comptime_precheck_items(&environment, &program, available, pending, request.compiler_threads)
         &prechecks.reverse()
         prechecked_values :: values.len()
         loop source in pending {
@@ -3607,7 +3607,7 @@ fn jet_driver_comptime_run(
                         next
                     }
                 }
-                checked_item := jet_driver_comptime_prechecked(^precheck, values, prechecked_values) ?? sema_check_comptime_item(&environment, &program, &probe, available, source, values)
+                checked_item := jet_driver_comptime_prechecked(^precheck, values, prechecked_values) ?? sema_check_comptime_item(&environment, &program, &probe, available, source)
                 precheck = None
                 counters.items_checked += 1
                 if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, checked_item.waiting_dependencies, checked_item.diagnostics.len() > 0 || !checked_item.complete) {
@@ -3624,7 +3624,7 @@ fn jet_driver_comptime_run(
                             return jet_driver_comptime_lost_graph(values, checked_functions, trace)
                         }
                         resolved_count = values.len()
-                        checked_item = sema_check_comptime_item(&environment, &program, &probe, available, source, values)
+                        checked_item = sema_check_comptime_item(&environment, &program, &probe, available, source)
                         counters.items_checked += 1
                     }
                 }
@@ -5766,7 +5766,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         )
     }
     if request.trace_sink == .Val(sink) -> sink.begin("sema.check", "", -1, -1)
-    comptime_stage := sema_collect_comptime_declarations(^registration_graph, package_policies, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink)
+    comptime_stage := sema_collect_comptime_declarations(^registration_graph, package_policies, request.trace_sink)
     if request.trace_sink == .Val(sink) -> sink.end("sema.check", comptime_stage.modules.len())
     // Every copy of a graph shares one counter set (SemaLookupCounters).
     check_lookups := register_lookups

@@ -5142,7 +5142,7 @@ fn sema_comptime_module_sources(program: SemaProgramTables, module_index: Int) -
 // source (its check reads no expression), and every source of a module whose
 // checks admit one thread have no row (None), and the run checks them at
 // their turn. The result has one row per source.
-fn sema_comptime_precheck_items(environment: &SemaScopeEnvironment, program: &SemaProgramTables, available: SemaComptimeAvailableConstants, sources: [SemaComptimeItemSource], values: [SemaComptimeItemValue], threads: CompilerThreads) -> [SemaComptimeItemCheck?] {
+fn sema_comptime_precheck_items(environment: &SemaScopeEnvironment, program: &SemaProgramTables, available: SemaComptimeAvailableConstants, sources: [SemaComptimeItemSource], threads: CompilerThreads) -> [SemaComptimeItemCheck?] {
     checks := [SemaComptimeItemCheck?]{}
     loop _ in 0..<sources.len() -> &checks.push(None)
     // The expression sources of each module, in order of first appearance.
@@ -5166,7 +5166,7 @@ fn sema_comptime_precheck_items(environment: &SemaScopeEnvironment, program: &Se
         loop position in row -> total += sources[position].span.end - sources[position].span.start
     }
     if compiler_threads_admit(threads, sources.len(), total, SEMA_PROBE_MIN_BYTES_PER_THREAD, 0, 0) <= 1 -> return checks
-    shared_state :: shared SemaPrecheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, available: [SemaComptimeAvailableConstants]{available}, sources: [[SemaComptimeItemSource]]{sources}, values: [[SemaComptimeItemValue]]{values}, probes: [SemaScopeProbe]{}, positions: [[Int]]{}}
+    shared_state :: shared SemaPrecheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, available: [SemaComptimeAvailableConstants]{available}, sources: [[SemaComptimeItemSource]]{sources}, probes: [SemaScopeProbe]{}, positions: [[Int]]{}}
     sema_comptime_precheck_fill(shared_state, ^environment, ^program)
     loop row in 0..<module_positions.len() {
         weights := [Int]{}
@@ -5207,15 +5207,14 @@ fn sema_comptime_precheck_items(environment: &SemaScopeEnvironment, program: &Se
 SEMA_PRECHECK_PARTS_PER_THREAD :: 4
 
 // What every precheck thread reads: the run's environment (entered in the
-// current module) and program tables, the pass's available constants,
-// sources and values, and the current module's prepared probe scope and
-// source positions; each the one row of its list.
+// current module) and program tables, the pass's available constants and
+// sources, and the current module's prepared probe scope and source
+// positions; each the one row of its list.
 struct SemaPrecheckShared {
     environments: [SemaScopeEnvironment]
     programs: [SemaProgramTables]
     available: [SemaComptimeAvailableConstants]
     sources: [[SemaComptimeItemSource]]
-    values: [[SemaComptimeItemValue]]
     probes: [SemaScopeProbe]
     positions: [[Int]]
 }
@@ -5297,7 +5296,7 @@ fn sema_comptime_precheck_claimed(shared_state: Shared<SemaPrecheckShared>, boun
         loop index in bounds[part]..<bounds[part + 1] {
             sema_host_hook_unwant(wanted)
             // Passed straight through: a local binding of a guarded row would copy it.
-            check := sema_check_comptime_item_in(inputs.value.environments[0], inputs.value.programs[0], &probe, inputs.value.available[0], inputs.value.sources[0][inputs.value.positions[0][index]], inputs.value.values[0])
+            check := sema_check_comptime_item_in(inputs.value.environments[0], inputs.value.programs[0], &probe, inputs.value.available[0], inputs.value.sources[0][inputs.value.positions[0][index]])
             if sema_host_hook_was_wanted(wanted) {
                 &checks.push(None)
             } else {
@@ -5653,12 +5652,12 @@ fn sema_comptime_collect_module_sources(graph: SemaRegistrationGraph, source_mod
     items
 }
 
-// `host_hooks` and `threads` are the comptime run's: the declaration pass
-// makes no body check of its own (D2: the sources' constant dependencies
-// come from the run's item checks). `graph` moves into the pass's program
-// tables, which no check changes, and leaves unchanged with the stage as the
+// The declaration pass makes no body check of its own (D2: the sources'
+// constant dependencies come from the run's item checks), so it takes no
+// host callbacks or threads. `graph` moves into the pass's program tables,
+// which no check changes, and leaves unchanged with the stage as the
 // comptime run's graph: the pass never copies it.
-fn sema_collect_comptime_declarations(graph: ^SemaRegistrationGraph, package_policies: [SemaRegistrationPackagePolicy], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> SemaComptimeDeclarationStage {
+fn sema_collect_comptime_declarations(graph: ^SemaRegistrationGraph, package_policies: [SemaRegistrationPackagePolicy], trace_sink: CompilerTraceSink?) -> SemaComptimeDeclarationStage {
     diagnostics := [Diagnostic]{}
     loop diagnostic in graph.diagnostics -> &diagnostics.push(diagnostic)
     complete := graph.complete
@@ -5922,11 +5921,11 @@ fn sema_comptime_program(graph: ^SemaRegistrationGraph, values: [SemaComptimeIte
 }
 
 // `environment` is the run's sema_comptime_environment and `program` its
-// tables (sema_comptime_program), whose graph already carries `values`;
-// `available` covers the same values.
+// tables (sema_comptime_program), whose graph already carries the run's
+// values; `available` covers the same values.
 // `probe` is the run's module scope (sema_comptime_probe_init), lent to every
 // item and function check of the run.
-fn sema_check_comptime_item(environment: &SemaScopeEnvironment, program: &SemaProgramTables, probe: &SemaScopeProbe, available: SemaComptimeAvailableConstants, source: SemaComptimeItemSource, values: [SemaComptimeItemValue]) -> SemaComptimeItemCheck {
+fn sema_check_comptime_item(environment: &SemaScopeEnvironment, program: &SemaProgramTables, probe: &SemaScopeProbe, available: SemaComptimeAvailableConstants, source: SemaComptimeItemSource) -> SemaComptimeItemCheck {
     if source.checked_text == .Val(evaluation) {
         dependencies := evaluation.dependencies
         waiting := sema_comptime_waiting_dependencies(available, dependencies)
@@ -5950,7 +5949,7 @@ fn sema_check_comptime_item(environment: &SemaScopeEnvironment, program: &SemaPr
     empty := sema_comptime_body_values_prefix(environment.comptime_body_publication, 0)
     entered :: sema_scope_environment_enter_probe_module(&environment, program, source.module_identity, ^empty)
     if !entered -> return SemaComptimeItemCheck{request: None, dependencies: source.dependencies, waiting_dependencies: source.dependencies, diagnostics: [Diagnostic]{}, complete: false}
-    sema_check_comptime_item_in(environment, program, &probe, available, source, values)
+    sema_check_comptime_item_in(environment, program, &probe, available, source)
 }
 
 // Read-only half of the item check: the environment is borrowed, so reading
@@ -5959,7 +5958,11 @@ fn sema_check_comptime_item(environment: &SemaScopeEnvironment, program: &SemaPr
 // (sema_comptime_dependencies_from_references over its own references, with
 // the dependencies the source carries from registration, a marker argument's
 // or a checked text's); no dependency probe checks the expression before it.
-fn sema_check_comptime_item_in(environment: SemaScopeEnvironment, program: SemaProgramTables, probe: &SemaScopeProbe, available: SemaComptimeAvailableConstants, source: SemaComptimeItemSource, values: [SemaComptimeItemValue]) -> SemaComptimeItemCheck {
+// The list names every referenced constant without an AST value, staged or
+// not (the driver reads it to decide whether an evaluation needs the staged
+// rows, jet_driver_comptime_batch_add `needs_rows`); `waiting` is the part
+// `available` lacks.
+fn sema_check_comptime_item_in(environment: SemaScopeEnvironment, program: SemaProgramTables, probe: &SemaScopeProbe, available: SemaComptimeAvailableConstants, source: SemaComptimeItemSource) -> SemaComptimeItemCheck {
     if program.registration_graph == .Val(resolved_graph) {
         sema_comptime_probe_prepare(&probe, environment, program, available.counted_values)
         diagnostics := probe.diagnostics.copy()
@@ -5976,7 +5979,7 @@ fn sema_check_comptime_item_in(environment: SemaScopeEnvironment, program: SemaP
         tail_store := sema_statement_tail_store_init()
         checked := sema_check_expression(source.expression, source.expected_type, environment, program, &probe.table, &state, &tail_store, &context, &diagnostics)
         sema_scope_rollback(&probe.table, mark)
-        dependencies := sema_comptime_dependencies_from_references(resolved_graph, context.name_references, values)
+        dependencies := sema_comptime_dependencies_from_references(resolved_graph, context.name_references, [SemaComptimeItemValue]{})
         loop dependency in source.dependencies {
             already := false
             loop existing in dependencies {

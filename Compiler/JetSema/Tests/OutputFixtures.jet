@@ -45,7 +45,7 @@ fn output_fixture_solved_effects(effects_source: String, failures: &[String]) {
         return
     }
     hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
-    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, hooks, compiler_threads_single(), None)
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, None)
     checked := sema_finalize_registration_graph(graph, None, ^stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None, None)
     if !checked.complete {
         &failures.push("solved effect publication: real body/effect check failed {checked.diagnostics:Debug}")
