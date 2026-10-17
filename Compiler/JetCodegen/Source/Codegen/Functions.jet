@@ -1048,8 +1048,8 @@ fn jet_codegen_lower_constant_reference(builder: &JetCodegenBuilder, program: Je
         return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.ReadPlace{place: place})
     }
     row :: program.owners.constants.rows.get(symbol.key) ?? panic("checked constant reference has no declaration or function target")
-    // Copied out of the builder, which the emits below write through.
-    definition :: program.modules[row.module_index].declarations.constants[row.definition_index].copy()
+    // A view: `program` is read-only here; the emits below write only the builder.
+    definition :: program.modules[row.module_index].declarations.constants[row.definition_index]
     copies := builder.constant_copies.get(symbol.key)
     if copies == None {
         qualified := jet_codegen_qualified_function_key(definition.module_identity, symbol.key)
@@ -3783,6 +3783,8 @@ fn jet_codegen_lower_range(slot: Shared<JetCodegenProgramSlot>, first: Int, last
 // every caller still lowers. A trap that cannot lower stops the compile.
 fn jet_codegen_lower_keep_going_trap(slot: Shared<JetCodegenProgramSlot>, position: Int, message: String, failures: &[JetCodegenLoweringFailure]) -> JetCodegenLoweredFunction {
     inputs :: slot.guard_read()
+    // copy: the trap edits its own function row (its body becomes the trap), while the row stays
+    // unchanged in the shared program slot that every other lowering worker reads.
     trapped := inputs.value.programs[0].function_index.rows[position].copy()
     &failures.push(JetCodegenLoweringFailure{name: trapped.name, key: trapped.key, source_file: trapped.source_file, span: trapped.source_span, message: message})
     stop :: TExpr{ty: Type.Named{name: "Never"}, kind: TExprKind.Never{reason: "keep-going trap: lowering this function stopped: {message}"}, span: trapped.source_span, integer_bounds: None, cost: None}

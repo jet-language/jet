@@ -705,6 +705,8 @@ fn jet_codegen_owner_receiver_in_pattern_spelling(pattern: Type, actual: Type, o
         }
         else -> {}
     }
+    // copy: the pattern spelling is a new owned Type. Otherwise it equals `actual`, the caller's
+    // checked type (a read parameter), which stays on its node.
     actual.copy()
 }
 
@@ -1629,9 +1631,14 @@ fn jet_codegen_emit_mir_type(builder: &JetCodegenBuilder, program: JetCodegenPro
 // share) of a Copy-ABI value is a bitwise `Scalar` read.
 fn jet_codegen_scalar_copy_fact(builder: JetCodegenBuilder, program: JetCodegenProgram, operation: MIROperation) -> MIROperation Never! {
     if operation == .Copy(value, fact) {
+        // copy: the operation with its copy fact is a new owned MIROperation. Without a position it
+        // equals `operation`, the caller's operation (a read parameter), which stays with the
+        // caller.
         at :: builder.value_positions.get(value.value) ?? return operation.copy()
         return MIROperation.Copy{value: value, fact: mir_copy_fact_for_ownership(fact, builder.values[at].ownership)}
     }
+    // copy: the operation with its copy fact is a new owned MIROperation. Otherwise it equals
+    // `operation`, the caller's operation (a read parameter), which stays with the caller.
     operation.copy()
 }
 

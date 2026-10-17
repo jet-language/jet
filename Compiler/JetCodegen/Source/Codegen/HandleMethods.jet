@@ -57,6 +57,8 @@ fn jet_codegen_handle_core(module_name: String, member: String, symbol: String, 
 fn jet_codegen_handle_type_without_tags(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) | .InlineRange(inner, _, _) -> return jet_codegen_handle_type_without_tags(inner)
+        // copy: the untagged type is a new owned Type. Otherwise it equals `ty`, the caller's
+        // checked type (a read parameter), which stays on its node.
         else -> return ty.copy()
     }
 }

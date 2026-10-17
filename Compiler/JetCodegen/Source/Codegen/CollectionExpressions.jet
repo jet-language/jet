@@ -150,11 +150,17 @@ fn jet_codegen_collection_slot_value(builder: &JetCodegenBuilder, program: JetCo
 
 fn jet_codegen_collection_boxed_expr(builder: JetCodegenBuilder, program: JetCodegenProgram, value: TExpr, target: Type) -> TExpr Never! {
     coercion_type := jet_codegen_collection_trait_target(target, builder, program)
+    // copy: the boxed element is a new owned TExpr. Without a coercion it equals `value`, the
+    // caller's checked element (a read parameter), which stays in the list literal's TIR.
     if coercion_type == None -> return value.copy()
     source_type := jet_codegen_unwrap_pattern_tags(value.ty)
     if source_type == {
+        // copy: the boxed element is a new owned TExpr. For a trait-object target it equals
+        // `value`, the caller's checked element (a read parameter), which stays in the TIR.
         .TraitObject(_) -> return value.copy()
         .Named(name) -> {
+            // copy: the boxed element is a new owned TExpr. For a declared bound it equals `value`,
+            // the caller's checked element (a read parameter), which stays in the TIR.
             if jet_codegen_trait_bound_is_declared(program.nominals, name, builder.function.module_identity) -> return value.copy()
         }
         .Apply(_, _) -> {}

@@ -767,7 +767,8 @@ fn jet_rust_emit_slots(slots: [Shared<JetRustEmitSlot>], from: Int, shared_ctx: 
 // only its own. The lines are held last-first, so draining pops them in
 // program order.
 fn jet_rust_emit_slot(slot: Shared<JetRustEmitSlot>, shared_ctx: Shared<JetRustEmitContext>) -> Int {
-    // A copy: every worker reads the one shared context, so none may move it out.
+    // copy: each emit worker edits its own context (failure, kept failures, caches), while the
+    // shared context behind the read guard stays intact for every other worker.
     worker := shared_ctx.guard_read().value.copy()
     worker.failure = None
     worker.kept_failures = [JetRustEmitKeptFailure]{}

@@ -77,6 +77,8 @@ fn jet_codegen_builtin_route(member: String, symbol: String, arity: Int, borrow_
 fn jet_codegen_builtin_untag(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) -> return jet_codegen_builtin_untag(inner)
+        // copy: the untagged type is a new owned Type. Otherwise it equals `ty`, the caller's
+        // checked type (a read parameter), which stays on the TIR node.
         else -> return ty.copy()
     }
 }

@@ -2547,6 +2547,8 @@ fn jet_rust_emit_partial_type_instance(ctx: &JetRustEmitContext, ty: MIRType) ->
     loop instance in ctx.program.type_instances {
         if mir_type_same_checked_type(ty, instance) -> return instance
     }
+    // copy: the instance type is a new owned MIRType. Otherwise it equals `ty`, the caller's MIR
+    // type (a read parameter), which stays on its node.
     ty.copy()
 }
 
@@ -2557,6 +2559,9 @@ fn jet_rust_emit_partial_substitute_type(ctx: &JetRustEmitContext, source: MIRTy
                 loop (index, parameter) in parameters {
                     if parameter.name == name.name && name.id == mir_type_id(parameter.name) {
                         if index < arguments.len() -> return arguments[index]
+                        // copy: the substituted type is a new owned MIRType. Unbound, it equals
+                        // `source`, the caller's MIR type (a read parameter), which stays on its
+                        // node.
                         return source.copy()
                     }
                 }

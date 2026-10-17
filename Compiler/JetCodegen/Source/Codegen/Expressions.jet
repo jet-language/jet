@@ -494,9 +494,17 @@ fn jet_codegen_is_string_view_value(builder: JetCodegenBuilder, program: JetCode
 // type for dispatch, but its place carries the borrowed `View<str>` carrier;
 // a read takes that carrier so its slot holds the borrowed `&str`.
 fn jet_codegen_local_read_type(builder: JetCodegenBuilder, program: JetCodegenProgram, local: TLocal, ty: Type) -> Type Never! {
+    // copy: the read type is a new owned Type. Here it equals `ty`, the caller's checked type (a
+    // read parameter), which stays on the TIR node.
     if ty != Type.String || local.persist_key != None || local.deref -> return ty.copy()
+    // copy: the read type is a new owned Type. Without a binding it equals `ty`, the caller's
+    // checked type (a read parameter), which stays on the TIR node.
     binding :: jet_codegen_find_binding_for_local(builder, program, local) ?? return ty.copy()
+    // copy: the read type is a new owned Type equal to the binding's declared View type, which
+    // stays in the builder's binding table.
     if binding.ty == .Apply(name, args) && name == "View" && args.len() == 1 && args[0] == (Type.Named{name: "str"}) -> return binding.ty.copy()
+    // copy: the read type is a new owned Type. Otherwise it equals `ty`, the caller's checked type
+    // (a read parameter), which stays on the TIR node.
     ty.copy()
 }
 
@@ -2975,6 +2983,8 @@ fn jet_codegen_unit_never_return(builder: &JetCodegenBuilder, program: JetCodege
         else -> return None
     }
     // A copy: lowering the `Ok(())` below writes the builder.
+    // copy: the declared return type is read while the return lowering writes the builder
+    // (`&builder`), so a view into builder.function would be live across those writes.
     declared :: builder.function.ret.copy()
     carrier :: declared ?? return None
     success :: jet_codegen_never_carrier_success(carrier) ?? return None
@@ -4007,6 +4017,9 @@ fn jet_codegen_try_output_error_type(builder: JetCodegenBuilder, program: JetCod
                 else -> panic("checked union error widening has no Result failure carrier")
             }
         }
+        // copy: the output error type is a new owned Type. Without a conversion it equals
+        // `source_error`, the caller's checked error type (a read parameter), which stays on the
+        // TIR node.
         .NoConversion -> return source_error.copy()
         else -> panic("diverging conversion has no output error type")
     }
@@ -5003,6 +5016,8 @@ fn jet_codegen_field_owner_type(ty: Type) -> Type Never! {
         }
         else -> {}
     }
+    // copy: the owner type is a new owned Type. Otherwise it equals `ty`, the caller's checked type
+    // (a read parameter), which stays on the TIR node.
     ty.copy()
 }
 
@@ -5886,6 +5901,8 @@ struct JetCodegenPatternTest {
 fn jet_codegen_unwrap_pattern_tags(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) -> return jet_codegen_unwrap_pattern_tags(inner)
+        // copy: the untagged type is a new owned Type. Otherwise it equals `ty`, the caller's
+        // checked type (a read parameter), which stays on the TIR node.
         else -> return ty.copy()
     }
 }
@@ -7262,6 +7279,8 @@ fn jet_codegen_pattern_lookup_cache(builder: &JetCodegenBuilder, program: JetCod
     local :: tir_generated_local("pattern_lookup_cache_{builder.locals.len()}", span)
     cache :: jet_codegen_bind_local(&builder, program, local, cache_ty, true, None, None, false)
     current := builder.current
+    // copy: the lookup head is read while the cache setup writes the builder (`&builder`, which
+    // resets pattern_lookup_head), so a view would be live across that write.
     lookup_block :: builder.pattern_lookup_head.copy()
     if lookup_block == .Val(head) -> jet_codegen_switch_block(&builder, program, head)
     absent :: jet_codegen_emit_value(&builder, program, span, cache_ty, MIROperation.Absent)

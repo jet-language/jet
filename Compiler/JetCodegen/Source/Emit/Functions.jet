@@ -2768,6 +2768,9 @@ fn jet_rust_emit_impl_carrier_trait(ctx: &JetRustEmitContext, implementation: MI
     }
     identity :: owner_id ?? return None
     position :: jet_rust_emit_type_index(ctx, identity) ?? return None
+    // copy: `definition` is passed on after jet_rust_emit_declares_type_definition writes the emit
+    // context (`&ctx`, its declared-type cache), so a view into ctx.program.types would be live
+    // across that write.
     definition :: ctx.program.types[position].copy()
     if definition.id != identity -> return None
     if jet_rust_emit_module_selected(ctx, definition.module_id) && jet_rust_emit_declares_type_definition(&ctx, definition) -> return None
@@ -2783,6 +2786,9 @@ fn jet_rust_emit_impl_owner_declared(ctx: &JetRustEmitContext, implementation: M
     }
     identity :: owner_id ?? return false
     position :: jet_rust_emit_type_index(ctx, identity) ?? return false
+    // copy: `definition` is read in the same expression as jet_rust_emit_declares_type_definition
+    // writes the emit context (`&ctx`), so a view into ctx.program.types would be live across that
+    // write.
     definition :: ctx.program.types[position].copy()
     definition.id == identity && jet_rust_emit_module_selected(ctx, definition.module_id) && jet_rust_emit_declares_type_definition(&ctx, definition)
 }
@@ -2856,6 +2862,9 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRIm
         if jet_rust_emit_function_index(ctx, method_id) == .Val(function_index) {
             // The emitters below write through `ctx`, so they take a copy of
             // the row, as the one-row adapter this replaces did.
+            // copy: the impl's method row is read while emitting it writes the emit context
+            // (`&ctx`) and `lines`, so a view into ctx.program.functions would be live across those
+            // writes.
             function :: ctx.program.functions[function_index].copy()
             if function.id == method_id {
                 found = true

@@ -286,8 +286,12 @@ fn jet_codegen_lower_defer_thunk(builder: &JetCodegenBuilder, program: JetCodege
     // its value: the callee's own checked return (a defaulted `Unit Err!`
     // Close.close) is not the Unit statement's type, so a Unit close runs as
     // a statement of a Unit thunk instead of being its returned value.
+    // copy: the defer thunk owns its close type, while `close` is the caller's checked defer
+    // expression (a read parameter), which stays in the TIR.
     close_type :: close.ty.copy()
     unit_close :: close_type == Type.Named{name: "Unit"}
+    // copy: the defer thunk's body owns its close expression, while `close` is the caller's checked
+    // defer expression (a read parameter), which stays in the TIR.
     executable :: if unit_close -> TLambdaBody.Block{body: [TStmt]{TStmt.ExprStmt{value: close.copy(), span: span}}} else -> TLambdaBody.Expr{value: close.copy()}
     lambda := TLambda{
         executable: executable,

@@ -49,9 +49,13 @@ fn jet_codegen_closure_receiver_without_user_tags(receiver: Type) -> Type Never!
         .Tagged(marker, inner) -> {
             if marker == {
                 .User(_) -> return jet_codegen_closure_receiver_without_user_tags(inner)
+                // copy: the receiver type is a new owned Type. Otherwise it equals `receiver`, the
+                // caller's checked receiver type (a read parameter), which stays on the TIR node.
                 else -> return receiver.copy()
             }
         }
+        // copy: the receiver type is a new owned Type. Otherwise it equals `receiver`, the caller's
+        // checked receiver type (a read parameter), which stays on the TIR node.
         else -> return receiver.copy()
     }
 }
@@ -266,6 +270,9 @@ fn jet_codegen_lower_closure_method(builder: &JetCodegenBuilder, program: JetCod
 // kernel cannot accept. `Never Never!` keeps its carrier, as the function does.
 fn jet_codegen_plain_callback_argument(builder: JetCodegenBuilder, program: JetCodegenProgram, operation: TClosureOp, argument: TExpr) -> TExpr Never! {
     if operation == {
+        // copy: the callback argument is a new owned TExpr. For these operations it equals
+        // `argument`, the caller's checked callback (a read parameter), which stays in the closure
+        // op's TIR.
         .TryMap | .TryFilter | .TrySortBy | .TrySortByDesc | .EachRef -> return argument.copy()
         else -> {}
     }
@@ -277,16 +284,26 @@ fn jet_codegen_plain_callback_argument(builder: JetCodegenBuilder, program: JetC
         .ConstRef(symbol) -> jet_codegen_find_function_row(program.function_index, symbol.key) != None
         else -> false
     }
+    // copy: the callback argument is a new owned TExpr. An unnamed callback equals `argument`, the
+    // caller's checked callback (a read parameter), which stays in the TIR.
     if !named -> return argument.copy()
     fn_type := jet_codegen_unwrap_pattern_tags(argument.ty)
     if fn_type == .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) {
+        // copy: the callback argument is a new owned TExpr. Without a declared return it equals
+        // `argument`, the caller's checked callback (a read parameter), which stays in the TIR.
         declared :: ret ?? return argument.copy()
+        // copy: the callback argument is a new owned TExpr. Without a Never carrier it equals
+        // `argument`, the caller's checked callback (a read parameter), which stays in the TIR.
         success :: jet_codegen_never_carrier_success(declared) ?? return argument.copy()
+        // copy: the callback argument is a new owned TExpr. For a Never success it equals
+        // `argument`, the caller's checked callback (a read parameter), which stays in the TIR.
         if jet_codegen_unwrap_pattern_tags(success) == (Type.Named{name: "Never"}) -> return argument.copy()
         plain := argument
         plain.ty = Type.Fn{params: params, ret: Val(success), effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
         return plain
     }
+    // copy: the callback argument is a new owned TExpr. Otherwise it equals `argument`, the
+    // caller's checked callback (a read parameter), which stays in the TIR.
     argument.copy()
 }
 
