@@ -310,8 +310,8 @@ struct LowerContext {
     sunk: [U64:Bool]
     // MIR value a `Move` defines -> the value it moves.
     moves: [U64:U64]
-    // OptionValue/ResultValue/EnumPayload results MIRRust.rs moves out of
-    // their carrier rather than cloning (lower_payload_takes).
+    // Field/OptionValue/ResultValue/EnumPayload results MIRRust.rs moves out
+    // of their carrier rather than cloning (lower_payload_takes).
     payload_takes: [U64:Bool]
     // Local and local field-path MovePlace results only variant tests and
     // payload reads use (lower_inspect_carriers): the moved subject of a
@@ -4901,6 +4901,15 @@ fn lower_field(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
         }
         if lower_repr(p, place.ty) == .Absent -> return lower_alias_absent(&f, instruction)
         dst :: lower_result(p, c, &m, &f, instruction) ?? return
+        // The handle keeps a lent field even when its carrier dies here
+        // (lower_payload_takes): an owned result is a copy of it.
+        taken :: if instruction.result == .Val(result) -> c.payload_takes.get(result.value) != None else -> false
+        if taken && lower_value_owned(c, instruction.result ?? base) && lower_needs_drop_of(p, m, &f, place.ty) {
+            layout :: lower_repr_layout(lower_repr_of(p, &f, place.ty)) ?? return
+            lent :: lower_new_value(&f, layout, LIRDrop.Trivial, place.ty.identity)
+            lower_read_into(p, &f, lent, place.address.base, place.address.offset, place.ty)
+            return lower_clone_into(p, &m, &f, lent, dst, place.ty)
+        }
         return lower_read_member(p, c, &m, &f, instruction, base, dst, place.address.base, place.address.offset, place.ty)
     }
     if lower_repr(p, found.ty) == .Absent -> return lower_alias_absent(&f, instruction)
@@ -5203,16 +5212,17 @@ fn lower_payload_place_read(function: MIRFunction, index: LowerUseIndex, value: 
     false
 }
 
-// The OptionValue/ResultValue/EnumPayload results whose owned carrier
-// MIRRust.rs moves the payload out of (no immutable place read, no later
-// carrier use): the payload is taken, never cloned, and the carrier's own
-// release (or the local's drop) frees only what remains.
+// The Field/OptionValue/ResultValue/EnumPayload results whose owned carrier
+// MIRRust.rs moves the member out of (no immutable place read, no later
+// carrier use): the member is taken, never cloned, and the carrier's own
+// release (or the local's drop) frees only what remains. A field of a
+// fresh call result stored into a record is moved out of it this way.
 fn lower_payload_takes(function: MIRFunction, block_index: [U64:Int]) -> [U64:Bool] Never! {
     takes := [U64:Bool]{}
     candidate := false
     loop block in function.blocks {
         loop instruction in block.instructions {
-            if instruction.operation == .OptionValue(_) | .ResultValue(_, _) | .EnumPayload(_, _, _, _) -> candidate = true
+            if instruction.operation == .Field(_, _) | .OptionValue(_) | .ResultValue(_, _) | .EnumPayload(_, _, _, _) -> candidate = true
         }
     }
     if !candidate -> return takes
@@ -5220,7 +5230,7 @@ fn lower_payload_takes(function: MIRFunction, block_index: [U64:Int]) -> [U64:Bo
     loop block in function.blocks {
         loop instruction in block.instructions {
             result :: instruction.result ?? next
-            if instruction.operation == .OptionValue(subject) | .ResultValue(subject, _) | .EnumPayload(subject, _, _, _) {
+            if instruction.operation == .Field(subject, _) | .OptionValue(subject) | .ResultValue(subject, _) | .EnumPayload(subject, _, _, _) {
                 if lower_payload_place_read(function, index, subject) {
                     // A subject switch binds its non-place subject to a local
                     // (`it`); the Rust tier's subject is that value itself.

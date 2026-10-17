@@ -67,6 +67,11 @@ fn split(seed: String) -> [[String]] {
     out
 }
 
+// A field of a fresh call result is taken out of it; the rest is released.
+fn fresh_left(seed: String) -> Graph {
+    Graph{names: make_pair(seed).left}
+}
+
 // A field of an owned parameter is returned by move.
 fn take_right(pair: ^Pair) -> [String] {
     pair.right
@@ -180,4 +185,6 @@ fn run() {
     print("keep {copy_graph.names[0]} still {lent.left[0]}")
     print("maybe {maybe_left("m", true)} {maybe_left("m", false)}")
     print("repeated {repeated(3)}")
+    fresh :: fresh_left("f")
+    print("fresh {fresh.names[0]} {fresh.names.len()}")
 }
