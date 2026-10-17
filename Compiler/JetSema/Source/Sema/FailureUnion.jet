@@ -12,10 +12,12 @@
 // onto `T (A | B)!` with no written span. Functions the #3708 solve proved
 // infallible are projected onto `T Never!`. A union contract changes what its
 // callers check against, so the modules that declare or reference one are
-// checked again (`sema_failure_recheck_modules`); a `T Never!` projection is
-// reconciled onto the bodies already checked, as the Rust reference does
-// (`sema_failure_reconcile_infallible`; lowering reads a callee's plain return
-// against the `Result` carrier its call site names, #3740).
+// checked again, and within them only the bodies that declare or reference
+// one (`sema_failure_recheck_plan`; the other bodies are replayed from the
+// first pass); a `T Never!` projection is reconciled onto the bodies already
+// checked, as the Rust reference does (`sema_failure_reconcile_infallible`;
+// lowering reads a callee's plain return against the `Result` carrier its
+// call site names, #3740).
 use jet_foundation.[
     Call,
     CallLabel,
