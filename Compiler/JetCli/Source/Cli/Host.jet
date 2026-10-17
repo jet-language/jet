@@ -365,7 +365,7 @@ fn jet_cli_keep_going_row(phase: String, item: String, message: String) -> Strin
 // lowering or compilation fails is a trap and every finding is one row of
 // `census`; lowering and object findings no longer stop the route while it
 // still has an entry and object bytes, so each later phase reports too.
-fn jet_cli_native_executable(result: &JetDriverCompileResult, sources: JetCLIForeignSources, release: Bool, runtime_dir: String, object_path: String, executable_path: String, keep_going: Bool, census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
+fn jet_cli_native_executable(result: &JetDriverCompileResult, sources: JetCLIForeignSources, level: Int, runtime_dir: String, object_path: String, executable_path: String, keep_going: Bool, census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
     // The checked MIR is lowered where the result holds it: native lowering
     // indexes it in place (lir_lower_entry_in_place), so neither a local
     // binding nor the lowering copies the whole program for the length of
@@ -379,8 +379,8 @@ fn jet_cli_native_executable(result: &JetDriverCompileResult, sources: JetCLIFor
             if result.trace_sink == .Val(sink) -> sink.begin("native.rust_foreign", "", -1, -1)
             attached := jet_cli_rust_foreign_attached(rust_foreign, program) ?? return Val(JetCLINativeFailure.RustForeign{error: err})
             if result.trace_sink == .Val(sink) -> sink.end("native.rust_foreign", attached.len())
-            if attached.len() == 1 -> return jet_cli_native_program_executable(entry_function, result.trace_sink, &attached[0], sources, release, runtime_dir, object_path, executable_path, keep_going, &census)
-            return jet_cli_native_program_executable(entry_function, result.trace_sink, &program, sources, release, runtime_dir, object_path, executable_path, keep_going, &census)
+            if attached.len() == 1 -> return jet_cli_native_program_executable(entry_function, result.trace_sink, &attached[0], sources, level, runtime_dir, object_path, executable_path, keep_going, &census)
+            return jet_cli_native_program_executable(entry_function, result.trace_sink, &program, sources, level, runtime_dir, object_path, executable_path, keep_going, &census)
         }
     }
     Val(JetCLINativeFailure.NoEntry)
@@ -398,12 +398,12 @@ fn jet_cli_rust_foreign_attached(facts: JetDriverRustForeignFacts, program: MIRP
 
 // JET_TRACE_FILE / `--trace`: the route's phases are spans of the compile's
 // trace sink (`trace_sink`, the result's): `native.lower` (MIR to LIR),
-// `native.object` (x64 selection, encoding and the object; in release it
-// holds `native.optimize`, the O2 LIR passes), `native.foreign` (the C
+// `native.object` (x64 selection, encoding and the object; at O1/O2 it
+// holds `native.optimize`, the LIR passes of `level`), `native.foreign` (the C
 // closure) and `native.link`; before them `native.sources` (the C sources
 // the snapshot declares) and `native.rust_foreign` (a Rust foreign helper's
 // realization). A span a failure returns from stays open.
-fn jet_cli_native_program_executable(entry_function: MIRFunctionID?, trace_sink: CompilerTraceSink?, unpruned: &MIRProgram, sources: JetCLIForeignSources, release: Bool, runtime_dir: String, object_path: String, executable_path: String, keep_going: Bool, census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
+fn jet_cli_native_program_executable(entry_function: MIRFunctionID?, trace_sink: CompilerTraceSink?, unpruned: &MIRProgram, sources: JetCLIForeignSources, level: Int, runtime_dir: String, object_path: String, executable_path: String, keep_going: Bool, census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
     entry_id :: entry_function ?? return Val(JetCLINativeFailure.NoEntry)
     // Only functions the entry reaches are lowered, generic ones per instance.
     if trace_sink == .Val(sink) -> sink.begin("native.lower", "", -1, -1)
@@ -422,13 +422,13 @@ fn jet_cli_native_program_executable(entry_function: MIRFunctionID?, trace_sink:
     }
     entry :: lowered.entry ?? return Val(JetCLINativeFailure.LostEntry)
     // No absolute source root enters DWARF: comp_dir stays "." on every
-    // route, so the output never depends on the checkout path. Dev is O0,
-    // which leaves the lowered module unchanged and uncopied.
+    // route, so the output never depends on the checkout path. O0 (`run`, comptime)
+    // leaves the lowered module unchanged and uncopied.
     if trace_sink == .Val(sink) -> sink.begin("native.object", "", -1, -1)
     object :: if {
-        keep_going && release -> x64_relocatable_object_keep_going(jet_cli_native_optimize(lowered.lir, trace_sink), entry)
+        keep_going && level > 0 -> x64_relocatable_object_keep_going(jet_cli_native_optimize(lowered.lir, level, trace_sink), entry)
         keep_going -> x64_relocatable_object_keep_going(^lowered.lir, entry)
-        release -> x64_relocatable_object(jet_cli_native_optimize(lowered.lir, trace_sink), entry)
+        level > 0 -> x64_relocatable_object(jet_cli_native_optimize(lowered.lir, level, trace_sink), entry)
         else -> x64_relocatable_object(lowered.lir, entry)
     }
     if trace_sink == .Val(sink) -> sink.end("native.object", function_count)
@@ -467,10 +467,17 @@ fn jet_cli_native_program_executable(entry_function: MIRFunctionID?, trace_sink:
     None
 }
 
-// The release profile's O2 LIR passes, traced as `native.optimize`.
-fn jet_cli_native_optimize(lir: LIRModule, trace_sink: CompilerTraceSink?) -> LIRModule Never! {
+// AGENTS.md I9: `run` (and dev) is O0, `build` O1, `--release` O2.
+fn jet_cli_native_level(command: String, release: Bool) -> Int Never! {
+    if release -> return 2
+    if command == "build" -> 1 else -> 0
+}
+
+// The LIR passes of `level` (AGENTS.md I9: `build` O1, `--release` O2),
+// traced as `native.optimize`.
+fn jet_cli_native_optimize(lir: LIRModule, level: Int, trace_sink: CompilerTraceSink?) -> LIRModule Never! {
     if trace_sink == .Val(sink) -> sink.begin("native.optimize", "", -1, -1)
-    optimized :: lir_optimize_module(lir, 2)
+    optimized :: lir_optimize_module(lir, level)
     if trace_sink == .Val(sink) -> sink.end("native.optimize", optimized.functions.len())
     optimized
 }
@@ -484,7 +491,7 @@ fn jet_cli_build_native(file: String, command: String, release: Bool, result: &J
     if result.trace_sink == .Val(sink) -> sink.end("native.sources", -1)
     fix :: "correct the reported native backend problems, then retry `jet {command} {file}`"
     census := [String]{}
-    failure :: jet_cli_native_executable(&result, sources, release, jet_cli_runtime_dir(), "{binary}.o", binary, false, &census) ?? return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    failure :: jet_cli_native_executable(&result, sources, jet_cli_native_level(command, release), jet_cli_runtime_dir(), "{binary}.o", binary, false, &census) ?? return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     if failure == {
         .RustForeign(error) -> JetDriverVerbOutput{stdout: "", stderr: jet_cli_rust_foreign_report(error, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
         .NoEntry -> jet_cli_build_failed("`{file}` has no `fn run` to build", "an executable starts at the program's `fn run`", "add `fn run()` to the file, or check it with `jet check {file}`", color)
@@ -508,7 +515,7 @@ enum JetCLIBuilt {
 }
 
 // Write `.jet/build/<stem>` in the source root for a compile with no errors,
-// through the native backend; dev remains O0 and release uses the O2 passes.
+// through the native backend at the command's level (jet_cli_native_level).
 fn jet_cli_build_binary(file: String, command: String, color: Bool, release: Bool, result: &JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetCLIBuilt Never! {
     if result.internal_problem == .Val(problem) -> return JetCLIBuilt.Failed{output: jet_cli_ice(problem)}
     if !result.complete -> return JetCLIBuilt.Failed{output: jet_cli_ice("the Jet compiler stopped before finishing `{file}`")}

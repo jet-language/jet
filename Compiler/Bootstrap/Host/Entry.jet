@@ -24,6 +24,7 @@ use jet_cli.[
     jet_cli_runtime_library,
     jet_cli_native_c_sources,
     jet_cli_native_executable,
+    jet_cli_native_level,
     jet_cli_native_lowering_rows,
     jet_cli_runtime_key,
     JET_CLI_RUNTIME_PACK_FILE,
@@ -64,8 +65,9 @@ fn jet_bootstrap_library_object(request: ^JetDriverCompileRequest, prefix: Strin
 }
 
 // The native feed is `jet build`'s own native route (Host.jet
-// `jet_cli_native_executable`) at the dev profile (O0), so the factory's
-// stage1 and the CLI's stage2 get identical link inputs, order and flags.
+// `jet_cli_native_executable`) at `build`'s level (O1, jet_cli_native_level), so
+// the factory's stage1 and the CLI's stage2 get identical passes, link inputs,
+// order and flags.
 // JET_RUNTIME_PACK names `<jet-runtime>/<key>/jet_runtime.pack.o` inside a
 // packaged runtime directory whose `native.key` is `<key>`; that directory
 // is the one `jet build` finds beside `jet`. A program with a C closure links
@@ -94,7 +96,7 @@ fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String) -> Je
     if !keep_going && (!result.complete || result.internal_problem != None) -> return result
     if result.mir == None -> return jet_bootstrap_native_escaped(result.keep_going_rows, "the native front end finished without MIR")
     census := [String]{}
-    native :: jet_cli_native_executable(&result, sources, false, runtime_dir, "{prefix}.o", "{prefix}.exe", keep_going, &census)
+    native :: jet_cli_native_executable(&result, sources, jet_cli_native_level("build", false), runtime_dir, "{prefix}.o", "{prefix}.exe", keep_going, &census)
     failure :: native ?? return jet_bootstrap_native_census(^result, census)
     if failure == {
         .Lowering(functions, messages) -> { cli_files.write("{prefix}.issues", jet_cli_native_lowering_rows(functions, messages, "\t").join("\n")) ?? return jet_bootstrap_native_escaped(result.keep_going_rows, "cannot write native lowering findings") }

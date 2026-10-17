@@ -69,10 +69,10 @@ function dryRun(extra, inspect) {
     } finally { rmSync(root, { recursive: true, force: true }); }
 }
 
-test('native assembly selects real CLI and two native O0 builds at the same path', () => {
+test('native assembly selects real CLI and two native O1 builds at the same path', () => {
     dryRun(root => ['--runtime-dir', join(root, 'unavailable-runtime')], plan => {
         assert.equal(plan.backend, 'jet-native');
-        assert.equal(plan.optimization, 'O0');
+        assert.equal(plan.optimization, 'O1');
         assert.equal(plan.lowering, 'lir_lower_entry');
         assert.equal(plan.linker, 'x64_link_executable');
         assert.equal(plan.stages.length, 2);

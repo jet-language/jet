@@ -52,7 +52,7 @@ Tools/agent/jet-env node Tools/agent/native-compiler.mjs \
 ```
 
 The seed must execute the Jet compiler's Jet CLI code, not the Rust reference
-CLI. Plain `build` selects native O0 lowering, ELF object emission and the Jet
+CLI. Plain `build` selects native O1 lowering, ELF object emission and the Jet
 static linker. The runtime directory must have `native.key`, the matching
 `KEY/jet_runtime.pack.o`, and `provenance.json` identifying a Jet-native pack
 with zero Rust/LLVM objects and its SHA-256. Every output stage receives this
@@ -75,7 +75,7 @@ and package the runtime first, then set `JET_RUNTIME_PACK` to
 `<jet-runtime>/<key>/jet_runtime.pack.o` inside that packaged runtime directory
 (its `native.key` must name `<key>`) while lowering the exact assembled CLI unit.
 The native feed runs `jet build`'s own native route
-(`jet_cli_native_executable` in `Compiler/JetCli/Source/Cli/Host.jet`) at O0
+(`jet_cli_native_executable` in `Compiler/JetCli/Source/Cli/Host.jet`) at O1
 with that directory as the runtime directory: the same C closure (inline
 `#FFI(c)` bodies, c@path archives, the musl platform from
 `<jet-runtime>/foreign/platform` or the toolchain), the same runtime object or
