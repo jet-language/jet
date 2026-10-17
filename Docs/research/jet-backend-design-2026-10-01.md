@@ -1084,11 +1084,21 @@ CString helpers called directly by `Lower/CForeign.jet` have a checked
 lowering-only ABI table in `runtime-route-abi.mjs`; they are not invented Rust
 routes. Packing borrows an E4 header and returns an owned NUL buffer; unpacking
 returns an owned E4 header; freeing takes pointer and size including NUL.
-For Jet-owned routes, generated `LowerRoute.native_lists` is true. Lists of
-records cross directly as native inline element buffers, with the checked
-record's native stride (for example SocketAddr56), not arrays of record
-handles. Seed routes retain the handle-buffer conversions. Both use the
-same data-pointer/length C call shape, and record schemas remain checked.
+For Jet-owned routes, generated `LowerRoute.native_lists` is true; it admits
+nested List carriers (a List of Lists or of Text crosses as native headers
+and buffers). Lists of Core records cross every route, Jet-owned or seed, as
+a buffer of eight-byte record handles that the lowering rebuilds natively
+(`list.record_handles` / `lower_record_list_from_runtime`), never as inline
+rows: the runtime record shape (nullable OptText words, sequence owners,
+DirEntry24, FieldError16) is not the native inline row, so a provider cannot
+write one. A List of opaque handles (`[SocketAddr]`: JetSocketAddr boxes) is
+a buffer of those handle words. `jet_std_fs_list_dir_raw`, `jet_dyn_field`,
+the codec failure lists and `message_parts` build or read handle buffers;
+`jet_net_raw_resolve_ordered` publishes Socket56 boxes behind handle words
+(its inline-row worker output stays internal to the HTTP build resolver).
+Both use the same data-pointer/length C call shape, and record schemas remain
+checked; a native fixture reads a field of a route-returned record List so a
+shape drift fails as a wrong value, not as a pointer-sized allocation.
 StreamCursor's native cutover is one complete export family: all Cursor/Reader
 routes, clone/drop, and the borrowed Cursor buffer projection are Jet-owned.
 G1 rejects a partial family before generating routes; it retains logical

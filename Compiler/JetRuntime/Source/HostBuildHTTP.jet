@@ -133,7 +133,7 @@ fn bh_range_error(error: I64) -> I64 { bh_static_error(error, rt_static_text("ou
     name :: if bracketed -> rt_text_copy(data + I64{1}, length - I64{2}) else -> host
     scratch :: jet_rt_alloc(I64{24}, I64{8})
     thread_zero(scratch, I64{24})
-    resolved :: jet_net_raw_resolve_ordered(name, native_port, scratch, scratch + I64{8}, scratch + I64{16})
+    resolved :: net_resolve_rows(name, native_port, scratch, scratch + I64{8}, scratch + I64{16})
     if bracketed -> jet_rt_string_drop(name)
     rows :: rt_text_word(scratch)
     count :: rt_text_word(scratch + I64{8})

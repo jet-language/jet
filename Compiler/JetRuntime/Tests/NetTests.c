@@ -86,7 +86,8 @@ extern void jet_rt_handle_drop_jet_socket_addr(Address *);
 extern void jet_rt_handle_drop_jet_ip_addr(IP *);
 extern int64_t jet_socket_address_encode_raw(Address *, void *);
 extern bool jet_socket_address_decode_raw(void *, int64_t, Address *);
-extern int64_t jet_net_raw_resolve_ordered(Text *, int64_t, Address **, int64_t *, ResolveError **);
+extern int64_t jet_net_raw_resolve_ordered(Text *, int64_t, Address ***, int64_t *, ResolveError **);
+extern void jet_rt_handle_drop_jet_socket_addr(Address *);
 extern ResolveError *jet_rt_record_new_jet_resolve_error(int64_t, int64_t, int64_t, Text *);
 extern ResolveError *jet_rt_handle_clone_jet_resolve_error(ResolveError *);
 extern int64_t jet_rt_record_get_jet_resolve_error_kind(ResolveError *);
@@ -144,16 +145,19 @@ int main(void) {
     jet_rt_handle_drop_jet_resolve_error(error_copy);
 
     Text numeric = {(unsigned char *)"127.0.0.1", 9, 0};
-    Address *rows = NULL;
+    Address **rows = NULL;
     int64_t count = 0;
     error = NULL;
     assert(jet_net_raw_resolve_ordered(&numeric, INT64_C(0x123400000050), &rows, &count, &error) == 1);
     assert(count > 0 && rows && !error);
+    // The route publishes one Socket56 box per answer behind an eight-byte
+    // slot: the native [SocketAddr] List of JetSocketAddr handles.
     for (int64_t i = 0; i < count; ++i) {
-        assert(rows[i].ip.family == 4 && rows[i].port == 80);
-        assert(rows[i].ip.octets[0] == 127 && rows[i].ip.octets[3] == 1 && rows[i].reserved == 0);
+        assert(rows[i]->ip.family == 4 && rows[i]->port == 80);
+        assert(rows[i]->ip.octets[0] == 127 && rows[i]->ip.octets[3] == 1 && rows[i]->reserved == 0);
+        jet_rt_handle_drop_jet_socket_addr(rows[i]);
     }
-    jet_rt_free(rows, count * 56, 8);
+    jet_rt_free(rows, count * 8, 8);
     unsigned char invalid[] = {'a', 0, 'b'};
     Text nul = {invalid, 3, 0};
     error = NULL;
