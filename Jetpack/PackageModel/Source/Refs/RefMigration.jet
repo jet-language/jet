@@ -23,7 +23,7 @@ struct MigratedRef {
         target :: pkg_ref_split_last_selector(halves.before)
         if target.empty_half -> return unchanged
         selector :: pkg_ref_first_selector(source.selector, target.selector, prefix.policy)
-        canonical :: if selector.copy() == {
+        canonical :: if selector == {
             .Val(value) -> if value != "" -> "{target.source}{REF_PROVIDER_AT}{source.source}{REF_CHANNEL_MARKER}{value}" else -> "{target.source}{REF_PROVIDER_AT}{source.source}"
             .None -> "{target.source}{REF_PROVIDER_AT}{source.source}"
         }

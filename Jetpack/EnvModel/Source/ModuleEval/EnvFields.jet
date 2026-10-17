@@ -13,21 +13,23 @@ struct EnvCapture {
     presets: [PresetSpec]
     languages: [LanguageSpec]
     files: [ManagedFile]
+}
 
-    // The environment-scoped facts of this capture under `name`.
-    fn contribution(self, name: String, reads: [EnvironmentRead], services: [DevServicePlan]) -> EnvironmentContribution Never! {
-        EnvironmentContribution{
-            name: name,
-            environment_reads: reads,
-            dev_services: services,
-            secrets: self.secrets.copy(),
-            adapters: self.adapters.copy(),
-            lifecycle: self.lifecycle.copy(),
-            presets: self.presets.copy(),
-            languages: self.languages.copy(),
-            files: self.files.copy(),
-        }
-    }
+// Files one `env.<name>` capture: its environment-scoped facts under `path`,
+// then its module entry. The capture's parts move into both rows.
+fn envmodel_file_env_capture(capture: ^EnvCapture, path: String, reads: ^[EnvironmentRead], services: ^[DevServicePlan], contributions: &[EnvironmentContribution], entries: &[ModuleEntry]) Never! {
+    &contributions.push(EnvironmentContribution{
+        name: path,
+        environment_reads: ^reads,
+        dev_services: ^services,
+        secrets: ^capture.secrets,
+        adapters: ^capture.adapters,
+        lifecycle: ^capture.lifecycle,
+        presets: ^capture.presets,
+        languages: ^capture.languages,
+        files: ^capture.files,
+    })
+    &entries.push(ModuleEntry{key: ModuleEntryKey{namespace: Namespace.Env, path: path}, entry: ^capture.entry})
 }
 
 // How one `Env` field is lowered.

@@ -159,8 +159,7 @@ fn envmodel_evaluate_module(decl: ModuleDecl, src: String, scope: ModuleEvalScop
                     .Env -> {
                         capture :: envmodel_evaluate_env_contribution(value, src, scope, globals, source)
                         reads :: envmodel_environment_reads(pkg_bytes_text(source_bytes, contribution.span.start, contribution.span.end))
-                        &environment_contributions.push(capture.contribution(contribution.path, reads, [DevServicePlan]{}))
-                        &entries.push(ModuleEntry{key: ModuleEntryKey{namespace: Namespace.Env, path: contribution.path}, entry: capture.entry})
+                        envmodel_file_env_capture(^capture, contribution.path, ^reads, [DevServicePlan]{}, &environment_contributions, &entries)
                     }
                     .Profile -> { &package_profiles.push(envmodel_evaluate_package_profile_expr(contribution.path, value, src, scope, globals, decl.name)) }
                     else -> panic("contribution namespace/value shape mismatch")
@@ -171,8 +170,7 @@ fn envmodel_evaluate_module(decl: ModuleDecl, src: String, scope: ModuleEvalScop
                 services := [DevServicePlan]{}
                 loop service in lit.services -> &services.push(envmodel_evaluate_dev_service(service, scope, globals))
                 reads :: envmodel_environment_reads(pkg_bytes_text(source_bytes, contribution.span.start, contribution.span.end))
-                &environment_contributions.push(capture.contribution(contribution.path, reads, services))
-                &entries.push(ModuleEntry{key: ModuleEntryKey{namespace: Namespace.Env, path: contribution.path}, entry: capture.entry})
+                envmodel_file_env_capture(^capture, contribution.path, ^reads, ^services, &environment_contributions, &entries)
             }
             .Image(lit) -> { &images.push(envmodel_evaluate_image(contribution.path, lit, scope, globals)) }
             .Profile(lit) -> { &package_profiles.push(envmodel_evaluate_package_profile_fields(contribution.path, lit.fields, src, scope, globals, decl.name)) }
