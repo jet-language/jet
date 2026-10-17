@@ -1157,28 +1157,34 @@ fn sema_expression_checked_text_literal(head: Type, source_head: Type?, body: Ty
 }
 
 
-fn sema_expression_typed_literal_byte_text(parts: [ByteTextPart], head: Type, span: Span, diagnostics: &[Diagnostic]) -> [Expr]? {
-    values := [Expr]{}
+// D-BYTELIT1=B: the bytes a `[U8]{"…"}` body spells. ASCII text contributes
+// one byte per character and `\xNN` the written byte; non-ASCII text is E0119.
+fn sema_expression_typed_literal_byte_text(parts: [ByteTextPart], head: Type, span: Span, diagnostics: &[Diagnostic]) -> [U8]? {
+    bytes := [U8]{}
     loop part in parts {
         if part == {
             .Lit(text) -> {
-                bytes := text.bytes()
-                loop byte in bytes {
+                loop byte in text.bytes() {
                     if Int.from_u8(byte) >= 128 {
                         &diagnostics.push(sema_error("E0119", span, "this body doesn't match typed-literal head `{type_name(head)}`", "byte-list text is ASCII so every character has one unambiguous byte value", "use ASCII text or numeric elements for a byte list"))
                         return None
                     }
-                    number :: Int.from_u8(byte)
-                    &values.push(Expr.Int{value: number, span: span, width: None, raw: Val("{number}")})
+                    &bytes.push(byte)
                 }
             }
-            .Byte(byte) -> {
-                number :: Int.from_u8(byte)
-                &values.push(Expr.Int{value: number, span: span, width: None, raw: Val("{number}")})
-            }
+            .Byte(byte) -> &bytes.push(byte)
         }
     }
-    Val(values)
+    Val(bytes)
+}
+
+// A `[U8]` byte-text value checks as one byte constant (Rust tir_to_mir_expr
+// `constant_byte_list`), never one list element per byte: the generated
+// Unicode assets spell up to 1.49 MB this way, and per-byte Int expressions
+// cost every phase from sema to comptime a node per byte.
+fn sema_expression_typed_literal_is_byte_list(head: Type) -> Bool Never! {
+    if head == .List(element) -> return element == Type.IntN{signed: false, bits: 8}
+    false
 }
 
 fn sema_expression_typed_literal_text_parts(parts: [StrPart], kind: MIRTypedHeadKind, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaExpressionTypedTextParts? {
@@ -1452,7 +1458,13 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
     if result_head == {
         .List(_) | .FixedList(_, _) -> if body == {
             .ByteText(parts) -> {
-                elements :: sema_expression_typed_literal_byte_text(parts, result_head, span, &diagnostics) ?? return None
+                bytes :: sema_expression_typed_literal_byte_text(parts, result_head, span, &diagnostics) ?? return None
+                if sema_expression_typed_literal_is_byte_list(result_head) {
+                    constant :: sema_tir_node(result_head, TExprKind.CtLit{value: TComptimeValue.Bytes{value: bytes}}, span)
+                    return sema_expr_expected_owned(^constant, expected, environment, program, &diagnostics)
+                }
+                // `[U8; N]{"…"}` and other element heads check each byte as an element.
+                elements :: loop byte in bytes -> Expr.Int{value: Int.from_u8(byte), span: span, width: None, raw: Val("{Int.from_u8(byte)}")}
                 checked :: sema_expression_list(Expr.ListLit{elements: elements, span: span}, elements, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
             }

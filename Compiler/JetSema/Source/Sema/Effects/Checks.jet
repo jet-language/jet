@@ -1203,6 +1203,11 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: 
         .List(values, _) | .ListLit(values) -> {
             if values.len() > 0 && !sema_effect_is_fixed_list(expression.ty) -> sema_effect_push_memory_event(&nodes, node_index, expression.span, "list construction allocates backing storage", "alloc", None)
         }
+        // A `[U8]{"…"}` byte value (one checked byte constant) builds the same
+        // backing storage its per-element list spelling would.
+        .CtLit(value) -> {
+            if value == .Bytes(bytes) && bytes.len() > 0 && !sema_effect_is_fixed_list(expression.ty) -> sema_effect_push_memory_event(&nodes, node_index, expression.span, "list construction allocates backing storage", "alloc", None)
+        }
         .Map(entries) | .MapLit(entries) -> {
             if entries.len() > 0 -> sema_effect_push_memory_event(&nodes, node_index, expression.span, "map construction allocates backing storage", "alloc", None)
         }

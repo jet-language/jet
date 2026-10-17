@@ -4185,12 +4185,16 @@ fn jet_driver_comptime_fold_from_bytes(value: TExpr, values: [SemaComptimeItemVa
         if operation != TBuiltinOp.StringFromBytes || args.len() != 0 -> return None
         folded :: jet_driver_comptime_fold(receiver, values) ?? return None
         bytes := [U8]{}
-        if folded == .List(items) {
-            loop item in items {
+        if folded == {
+            // A checked `[U8]{"…"}` byte value folds to its bytes.
+            // copy: `values_bytes` is a payload of `folded`, which keeps the original
+            .Bytes(values_bytes) -> bytes = values_bytes.copy()
+            .List(items) -> loop item in items {
                 if item == .Int(number) -> &bytes.push(U8.from_int(number) ?? return None)
                 else -> return None
             }
-        } else { return None }
+            else -> return None
+        }
         decoded :: String.from_bytes(bytes) ?? return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "UTF8Error"}}})
         return Val(TComptimeValue.Present{value: TComptimeValue.String{value: decoded}})
     }

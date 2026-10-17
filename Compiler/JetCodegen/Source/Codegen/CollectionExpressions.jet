@@ -99,6 +99,8 @@ fn jet_codegen_collection_owned_temporary(value: TExpr) -> Bool Never! {
     if value.kind == {
         .List(_, _) | .ListSpread(_) | .ListLit(_) | .ColumnarListLit(_, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) -> true
         .Call(_, _, _) | .IndirectCall(_, _, _, _) | .ModuleCall(_, _, _, _, _) | .MethodCall(_, _, _, _) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .CoreCall(_, _, _, _, _, _, _) -> true
+        // A checked `[U8]{"…"}` byte value lowers to a fresh byte constant.
+        .CtLit(constant) -> constant == .Bytes(_)
         else -> false
     }
 }

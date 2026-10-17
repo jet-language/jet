@@ -831,6 +831,8 @@ fn jet_codegen_lower_borrowed_fallback(builder: &JetCodegenBuilder, program: Jet
 fn jet_codegen_operand_holds_root(expression: TExpr, alias: Bool) -> Bool Never! {
     if expression.kind == {
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Unit | .DefaultLit | .Absent | .ConstRef(_) | .Local(_) -> true
+        // A checked byte constant (`[U8]{"…"}`) reads no place.
+        .CtLit(constant) -> constant == .Bytes(_)
         .StrLit(parts) -> {
             loop part in parts {
                 if part == .Interpolation(_, _) -> return false
