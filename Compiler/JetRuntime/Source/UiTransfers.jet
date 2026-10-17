@@ -14,3 +14,62 @@
     ui_carrier_store(result + UI_NODE_SHORTCUT, if (present != U8{0}) -> jet_rt_handle_clone_jet_ui_shortcut(shortcut) else -> I64{0})
     result
 }
+
+// Ui.rs jet_ui_raw_node_transfer (CAbiRoutes.rs route): Jet packs the tags and
+// absent slots; this only unpacks them into a fresh Node160. Text and the
+// children List are borrowed (each child is cloned); exact Int carriers are
+// borrowed words. The wire carries no present optional slot: absent must be 63
+// (accessibility, IME, key, click, drop, shortcut). An off-contract carrier
+// is the reference's unreachable!/assert, a host defect.
+fn ui_transfer_defect() {
+    reason :: rt_static_text("invalid audited UI node carrier")
+    jet_rt_unreachable(rt_text_data(reason), rt_text_len(reason))
+}
+fn ui_transfer_color(node: I64, offset: I64, kind_word: I64, word: I64) {
+    kind :: jet_int_owned_to_i64(kind_word)
+    if (kind < I64{0} || kind > I64{3}) -> ui_transfer_defect()
+    ui_carrier_store(node + offset, kind)
+    ui_carrier_store(node + offset + I64{8}, ui_node_color_payload(kind, jet_int_owned_to_i64(word)))
+}
+#Export(c) fn jet_ui_raw_node_transfer(label: I64, width: Float, height: Float, role_tag: I64, kind_tag: I64, children_data: I64, children_length: I64, color_present: U8, color: I64, absent_slots: I64, style_present: U8, foreground_kind: I64, foreground_word: I64, background_kind: I64, background_word: I64, style_flags: I64) -> I64 {
+    role :: jet_int_owned_to_i64(role_tag)
+    kind :: jet_int_owned_to_i64(kind_tag)
+    if (role < I64{-1} || role > I64{3} || kind < I64{0} || kind > I64{4}) -> ui_transfer_defect()
+    if (jet_int_owned_to_i64(absent_slots) != I64{63}) -> ui_transfer_defect()
+    node :: jet_rt_alloc(UI_NODE_BYTES, I64{8})
+    ui_carrier_store(node + UI_NODE_LABEL, jet_rt_string_clone(label))
+    ui_carrier_store(node + UI_NODE_WIDTH, rt_f64_bits(width))
+    ui_carrier_store(node + UI_NODE_HEIGHT, rt_f64_bits(height))
+    ui_carrier_store(node + UI_NODE_ROLE, role)
+    ui_carrier_store(node + UI_NODE_KIND, kind)
+    children :: data_sequence_new(children_length, UI_NODE_CHILD_BYTES)
+    target :: ui_carrier_word(children + DATA_SEQUENCE_DATA)
+    index := I64{0}
+    loop index < children_length {
+        ui_carrier_store(target + index * UI_NODE_CHILD_BYTES, jet_rt_handle_clone_jet_ui_node(ui_carrier_word(children_data + index * UI_NODE_CHILD_BYTES)))
+        index += I64{1}
+    }
+    ui_carrier_store(children + DATA_SEQUENCE_LENGTH, children_length)
+    ui_carrier_store(node + UI_NODE_CHILDREN, children)
+    ui_carrier_store(node + UI_NODE_COLOR, if (color_present != U8{0}) -> jet_rt_string_clone(color) else -> I64{0})
+    if (style_present != U8{0}) {
+        ui_carrier_store(node + UI_NODE_STYLE_PRESENT, I64{1})
+        ui_transfer_color(node, UI_NODE_FOREGROUND_KIND, foreground_kind, foreground_word)
+        ui_transfer_color(node, UI_NODE_BACKGROUND_KIND, background_kind, background_word)
+        ui_carrier_store(node + UI_NODE_STYLE_FLAGS, jet_int_owned_to_i64(style_flags).bit_and(I64{7}))
+    } else {
+        offset := UI_NODE_STYLE_PRESENT
+        loop offset <= UI_NODE_STYLE_FLAGS {
+            ui_carrier_store(node + offset, I64{0})
+            offset += I64{8}
+        }
+    }
+    ui_carrier_store(node + UI_NODE_ABSENT_MASK, UI_NODE_OPTION_MASK)
+    ui_carrier_store(node + UI_NODE_IME, I64{0})
+    ui_carrier_store(node + UI_NODE_CLICK_FN, I64{0})
+    ui_carrier_store(node + UI_NODE_DROP_FN, I64{0})
+    ui_carrier_store(node + UI_NODE_ACCESSIBILITY, I64{0})
+    ui_carrier_store(node + UI_NODE_SHORTCUT, I64{0})
+    ui_carrier_store(node + UI_NODE_KEY, I64{0})
+    node
+}
