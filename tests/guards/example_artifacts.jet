@@ -1,6 +1,5 @@
 use core.files as artifact_files
 use core.sys as artifact_sys
-// KNOWN-FAILING #4815: original Rust law also rejects the committed executable bridges/native/build.sh.
 
 // Port of tests/example_artifacts.rs:8-64: don't follow directory symlinks.
 fn s3_artifact_check_directory(path: String) -[FS, Env]> {
@@ -12,7 +11,9 @@ fn s3_artifact_check_directory(path: String) -[FS, Env]> {
             s3_artifact_check_directory(entry.path)
             next
         }
-        assert(!entry.name.ends_with(".rs"), "generated Rust under examples: {entry.path}")
+        // A hand-written foreign host that links a Jet library is source, not generated output.
+        foreign_host :: entry.path.ends_with("Examples/ffi/projections/rust/host.rs")
+        assert(!entry.name.ends_with(".rs") || foreign_host, "generated Rust under examples: {entry.path}")
         if artifact_sys.family() == "unix" {
             // Rust metadata follows a symlink for the executable-mode check only.
             target :: artifact_files.canonicalize(entry.path) ?? next
