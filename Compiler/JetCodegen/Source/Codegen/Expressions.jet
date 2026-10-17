@@ -6234,16 +6234,31 @@ fn jet_codegen_parameter_value_access(builder: JetCodegenBuilder, program: JetCo
 // place below a read alias's place (`JetCodegenBuilder.read_alias_places`
 // with at least one projection, or an access or field place derived from
 // one): its root still owns it. A root's own place is never such a place, so
-// an explicit `^r` or `^r.f` of the root still moves.
+// an explicit `^r` or `^r.f` of the root still moves. Neither is any place of
+// a borrowed local (jet_codegen_bind_borrowed_local): its subject owns what
+// it holds.
 fn jet_codegen_unmovable_place(builder: JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID) -> Bool Never! {
     if jet_codegen_read_parameter_place(builder, program, place) -> return true
     row :: jet_codegen_find_place(builder, program, place) ?? return false
     if row.projections.len() > 0 && builder.read_alias_places.get(place.value) != None -> return true
+    if jet_codegen_borrowed_local_place(builder, program, place) -> return true
     if row.base == .Static(name) {
         if program.owners.constants.in_place_keys.get(name) != None -> return true
     }
     loop projection in row.projections {
         if projection == .Index(_, _, _, _, _, _, _) -> return true
+    }
+    false
+}
+
+// #5041: `place` is rooted at a borrowed local (jet_codegen_bind_borrowed_local,
+// the only Local-based MIR local whose storage is a ReadBorrow): neither it
+// nor anything below it can be moved or have a payload taken.
+fn jet_codegen_borrowed_local_place(builder: JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID) -> Bool Never! {
+    row :: jet_codegen_find_place(builder, program, place) ?? return false
+    if row.base == .Local(local) {
+        at :: builder.local_positions.get(local.value) ?? return false
+        return builder.locals[at].ownership.mode == MIROwnershipMode.ReadBorrow
     }
     false
 }
@@ -6701,13 +6716,17 @@ fn jet_codegen_lower_pattern_or(builder: &JetCodegenBuilder, program: JetCodegen
     // window hidden, never a copy of it.
     // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_pattern_shape_condition (`Or` passes no window)
     hidden := jet_codegen_hide_pattern_window(&builder, program, subject_value)
+    // #5041: under a read window each alternative's matched block binds its
+    // names to borrows of its own payload slots (jet_codegen_bind_or_borrowed).
+    borrow_window :: jet_codegen_or_borrow_window(builder, program, pattern, alternatives, hidden, bind_success, reuse_bindings)
     index := 0
     loop index < alternatives.len() {
-        test := jet_codegen_lower_pattern_shape_condition(&builder, program, pattern, subject, subject_value, alternatives[index], bind_success, reuse_bindings || index > 0)
+        test := jet_codegen_lower_pattern_shape_condition(&builder, program, pattern, subject, subject_value, alternatives[index], bind_success && borrow_window == None, reuse_bindings || index > 0)
         matched_block := jet_codegen_new_block(&builder, program, span, "pattern-or-matched")
         next_block := jet_codegen_new_block(&builder, program, span, "pattern-or-next")
         jet_codegen_terminate(&builder, program, MIRTerminator.Branch{condition: test, then_target: matched_block, else_target: next_block})
         jet_codegen_switch_block(&builder, program, matched_block)
+        if borrow_window == .Val(base) -> jet_codegen_bind_or_borrowed(&builder, program, pattern, subject, base, alternatives[index], index > 0)
         true_value := jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: true}})
         matched_predecessor := builder.current
         jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join_block})
@@ -6722,6 +6741,134 @@ fn jet_codegen_lower_pattern_or(builder: &JetCodegenBuilder, program: JetCodegen
     &incoming.push(MIRPhiIncoming{block: missed_predecessor, value: false_value})
     jet_codegen_switch_block(&builder, program, join_block)
     jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.Phi{incoming: incoming})
+}
+
+// #5041: the read window an or-pattern's bindings borrow from, or None to
+// bind copies. A read window's place cannot change while the bindings live
+// (a read parameter, or a stable root: jet_codegen_lower_read_window), so a
+// borrow of an alternative's payload slot reads exactly what a copy made at
+// the binding would. Only an immutable pattern whose alternatives bind
+// direct payload slots qualifies: a nested, collection, text or binary
+// alternative, or a variant group (its leaf is known only at run time),
+// keeps the copying lowerer, as do bindings an enclosing pattern already
+// declared (`reuse_bindings`).
+fn jet_codegen_or_borrow_window(builder: JetCodegenBuilder, program: JetCodegenProgram, pattern: TPattern, alternatives: [TPatternShape], window: MIRPlaceID?, bind_success: Bool, reuse_bindings: Bool) -> MIRPlaceID? Never! {
+    if !bind_success || reuse_bindings || pattern.mutable -> return None
+    if builder.retained_root && builder.scope_depth == 0 -> return None
+    place :: window ?? return None
+    if builder.read_windows.get(place.value) == None -> return None
+    loop fact in pattern.bindings {
+        if fact.mutable -> return None
+    }
+    loop shape in alternatives {
+        if !jet_codegen_or_borrow_shape(builder, program, pattern, shape) -> return None
+    }
+    Val(place)
+}
+
+fn jet_codegen_or_borrow_shape(builder: JetCodegenBuilder, program: JetCodegenProgram, pattern: TPattern, shape: TPatternShape) -> Bool Never! {
+    if shape == {
+        .Variant(variant, bindings, _, _) -> {
+            if pattern.enum_type == .Val(owner) {
+                if jet_codegen_pattern_group_leaves(builder, program, owner, variant) != None -> return false
+            }
+            loop binding in bindings {
+                if binding == .Nested(_) -> return false
+            }
+            return true
+        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> return inner == None
+        .Absent(_) | .Range(_, _, _) -> return true
+        .Struct(fields, _, _) -> {
+            loop field in fields {
+                if field == .Nested(_, _, _) -> return false
+            }
+            return true
+        }
+        else -> return false
+    }
+}
+
+// #5041: bind the names of one or-pattern alternative that matched under the
+// read window `base`, each to its payload slot (jet_codegen_bind_pattern_shape's
+// window places). `reuse`: an earlier alternative declared the locals.
+fn jet_codegen_bind_or_borrowed(builder: &JetCodegenBuilder, program: JetCodegenProgram, pattern: TPattern, subject: TExpr, base: MIRPlaceID, shape: TPatternShape, reuse: Bool) Never! {
+    if shape == {
+        .Variant(variant, bindings, _, _) -> {
+            subject_type := jet_codegen_unwrap_pattern_tags(subject.ty)
+            result_variant := false
+            if subject_type == .Result(_, _) -> result_variant = variant == "Ok" || variant == "Err"
+            if result_variant {
+                loop binding in bindings {
+                    if binding == .Bind(name, _) {
+                        if name == "" || name == "_" -> next
+                        fact :: jet_codegen_pattern_binding_fact(pattern, name)
+                        slot :: jet_codegen_payload_window_place(&builder, program, base, MIRPayloadKind.Result{ok: variant == "Ok"}, fact.ty, fact.span)
+                        jet_codegen_write_borrowed_binding(&builder, program, fact, slot, reuse)
+                    }
+                }
+                return
+            }
+            target :: jet_codegen_pattern_variant_owner(builder, program, pattern, subject.ty, variant)
+            loop (index, binding) in bindings {
+                if binding == .Bind(name, _) {
+                    if name == "" || name == "_" -> next
+                    fact :: jet_codegen_pattern_binding_fact(pattern, name)
+                    slot :: jet_codegen_payload_window_place(&builder, program, base, MIRPayloadKind.Enum{owner: target.owner, variant: target.variant, index: index}, fact.ty, fact.span)
+                    jet_codegen_write_borrowed_binding(&builder, program, fact, slot, reuse)
+                }
+            }
+        }
+        .Present(name, binding_span, _, _) -> {
+            if name == "" || name == "_" -> return
+            fact :: jet_codegen_pattern_binding_fact(pattern, name)
+            slot :: jet_codegen_payload_window_place(&builder, program, base, MIRPayloadKind.Option, fact.ty, binding_span)
+            jet_codegen_write_borrowed_binding(&builder, program, fact, slot, reuse)
+        }
+        .Ok(name, binding_span, _, _) | .Err(name, binding_span, _, _) -> {
+            if name == "" || name == "_" -> return
+            ok :: if shape == {.Ok(_, _, _, _) -> true else -> false}
+            fact :: jet_codegen_pattern_binding_fact(pattern, name)
+            slot :: jet_codegen_payload_window_place(&builder, program, base, MIRPayloadKind.Result{ok: ok}, fact.ty, binding_span)
+            jet_codegen_write_borrowed_binding(&builder, program, fact, slot, reuse)
+        }
+        .Struct(fields, _, _) -> {
+            loop field in fields {
+                if field == .Bind(field_name, name, _) {
+                    if name == "" || name == "_" -> next
+                    fact :: jet_codegen_pattern_binding_fact(pattern, name)
+                    field_id :: jet_codegen_host_field_id(builder, program, subject.ty, field_name)
+                    slot :: jet_codegen_project_window_place(&builder, program, base, MIRProjection.Field{field: field_id, span: fact.span}, fact.ty, fact.span)
+                    jet_codegen_write_borrowed_binding(&builder, program, fact, slot, reuse)
+                }
+            }
+        }
+        else -> {}
+    }
+}
+
+// #5041: bind `fact` to the value in the read-window slot `slot`. An owned
+// type binds a borrowed local holding a ReadBorrow read of the slot, so
+// nothing is copied and nothing drops; a consuming use of the name copies
+// the slot (jet_codegen_unmovable_place). A copy type reads its value.
+fn jet_codegen_write_borrowed_binding(builder: &JetCodegenBuilder, program: JetCodegenProgram, fact: TPatternBindingFact, slot: MIRPlaceID, reuse: Bool) Never! {
+    local := tir_user_local(fact.name, fact.span)
+    local.mutable = false
+    local.symbol_id = fact.symbol_id
+    borrowed :: jet_codegen_ownership(fact.ty).mode == MIROwnershipMode.Owned
+    place := if {
+        reuse -> {
+            binding :: jet_codegen_find_binding_for_local(builder, program, local) ?? panic("checked or-pattern binding has no shared MIR local")
+            binding.place
+        }
+        borrowed -> jet_codegen_bind_borrowed_local(&builder, program, local, fact.ty)
+        else -> jet_codegen_bind_local(&builder, program, local, fact.ty, false, None, None, false)
+    }
+    value :: if {
+        borrowed -> jet_codegen_emit_mir_type(&builder, program, fact.span, jet_codegen_lower_type_for_function(fact.ty, builder, program), mir_ownership_from_access(MIRAccess.Read), MIROperation.ReadPlace{place: slot})
+        else -> jet_codegen_emit_value(&builder, program, fact.span, fact.ty, MIROperation.ReadPlace{place: slot})
+    }
+    _ := jet_codegen_emit(&builder, program, fact.span, None, MIROperation.WritePlace{place: place, value: value})
 }
 
 fn jet_codegen_pattern_int(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: Int, span: Span) -> MIRValueID Never! {

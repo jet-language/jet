@@ -5333,6 +5333,12 @@ fn lower_payload_local_uses(function: MIRFunction, index: LowerUseIndex, subject
         }
     }
     if !found -> return None
+    // A borrowed local (a ReadBorrow MIRLocal, JetCodegen
+    // jet_codegen_bind_borrowed_local) holds what its subject owns: nothing
+    // is ever taken from it.
+    loop row in function.locals {
+        if row.id.value == local && !lower_is_owned(row.ownership) -> return None
+    }
     // The carrier is inspected only: it aliases the local's value.
     inspected :: index.uses.get(subject.value) ?? [LowerUseSite]{}
     loop used in inspected {

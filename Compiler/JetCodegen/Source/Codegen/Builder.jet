@@ -2583,6 +2583,45 @@ fn jet_codegen_bind_local(builder: &JetCodegenBuilder, program: JetCodegenProgra
     jet_codegen_bind_local_with_base(&builder, program, local, ty, mutable, parameter, None, parameter_access, None, string_view)
 }
 
+// #5041: a read-only binding that holds a borrow of a payload place its
+// subject still owns (jet_codegen_lower_pattern_or under a read window): the
+// local's storage is a ReadBorrow of that place, so writing it copies
+// nothing, nothing drops it, and a consuming use of it copies the place
+// (jet_codegen_unmovable_place).
+fn jet_codegen_bind_borrowed_local(builder: &JetCodegenBuilder, program: JetCodegenProgram, local: TLocal, ty: Type) -> MIRPlaceID Never! {
+    symbol_key :: (local.symbol_id ?? SymbolID{key: ""}).key
+    identity :: jet_codegen_local_identity(&builder, program, local)
+    local_id := MIRLocalID{value: stable_id("mir-local", identity)}
+    place_id := MIRPlaceID{value: stable_id("mir-place", "{identity}|place")}
+    mir_ty := jet_codegen_lower_type_for_function(ty, builder, program)
+    jet_codegen_push_place(&builder, program, MIRPlace{
+        id: place_id,
+        span: local.span,
+        ty: mir_ty,
+        base: MIRPlaceBase.Local{local: local_id},
+        projections: [MIRProjection]{},
+        access: MIRAccess.Read,
+        persist_key: None,
+    })
+    jet_codegen_push_local(&builder, program, MIRLocal{
+        id: local_id,
+        name: local.name,
+        span: local.span,
+        ty: mir_ty,
+        place: place_id,
+        ssa_value: None,
+        mutable: false,
+        ownership: mir_ownership_from_access(MIRAccess.Read),
+        is_comptime: false,
+        uninit: false,
+        arena_view: false,
+        string_view: false,
+        gc_root: false,
+    })
+    &builder.bindings.push(JetCodegenBinding{name: local.name, symbol_key: symbol_key, ty: ty, place: place_id, local: local_id, depth: builder.scope_depth})
+    place_id
+}
+
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::bind_local_alias
 fn jet_codegen_bind_local_alias(builder: &JetCodegenBuilder, program: JetCodegenProgram, local: TLocal, ty: Type, place: MIRPlaceID, mutable: Bool) -> MIRPlaceID Never! {
     symbol_key :: (local.symbol_id ?? SymbolID{key: ""}).key

@@ -525,6 +525,10 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
         defined_index :: def_index.get(subject) ?? panic("checked last-use row is missing")
         if builder.blocks[defined_block].instructions[defined_index].operation == {
             .Parameter(_, _) | .Capture(_) | .Global(_) -> valid = false
+            // A borrowed local's value belongs to its subject: never taken apart.
+            .ReadPlace(read) -> {
+                if jet_codegen_borrowed_local_place(builder, program, read) -> valid = false
+            }
             else -> {}
         }
         if value_row.get(subject) == None -> next
