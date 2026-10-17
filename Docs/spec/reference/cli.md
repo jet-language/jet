@@ -38,8 +38,9 @@ values, blocks, places, locals and scopes from zero (`v0`, `b0`, `p0`, `l0`,
 module-wide functions, signatures and data in order of first use and lists
 a called function it does not show as `declare fN name`. When `jet build`
 fails to lower a function, it writes that function's MIR and LIR as `<n>.mir`
-and `<n>.lir` beside the build output in `.jet/build/<stem>.ice/`, and the
-report names that directory.
+and `<n>.lir` beside the build output in `.jet/build/<stem>.ice/`; when it
+fails to compile a function to machine code, it writes that function's final
+LIR as `<n>.lir` there. The report names that directory.
 
 `jet self devtools new-ui <name>` writes `tests/ui/<name>.jet` and its
 diagnostic snapshot using the same compiler and renderer as the UI harness.

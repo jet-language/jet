@@ -103,7 +103,7 @@ fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String) -> Je
     failure :: native ?? return jet_bootstrap_native_census(^result, census)
     if failure == {
         .Lowering(functions, messages, _) -> { cli_files.write("{prefix}.issues", jet_cli_native_lowering_rows(functions, messages, "\t").join("\n")) ?? return jet_bootstrap_native_escaped(result.keep_going_rows, "cannot write native lowering findings") }
-        .Object(errors) -> { cli_files.write("{prefix}.issues", errors.join("\n")) ?? return jet_bootstrap_native_escaped(result.keep_going_rows, "cannot write native object findings") }
+        .Object(errors, _) -> { cli_files.write("{prefix}.issues", errors.join("\n")) ?? return jet_bootstrap_native_escaped(result.keep_going_rows, "cannot write native object findings") }
         .Link(errors) -> { cli_files.write("{prefix}.pack-issues", errors.join("\n")) ?? return jet_bootstrap_native_escaped(result.keep_going_rows, "cannot write native link findings") }
         .RustForeign(error) -> { return jet_bootstrap_native_escaped(result.keep_going_rows, "native feed foreign Rust: {error.what}") }
         .NoEntry -> { return jet_bootstrap_native_escaped(result.keep_going_rows, "the native front end finished without an entry") }

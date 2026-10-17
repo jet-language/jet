@@ -183,13 +183,13 @@ fn jet_cli_emit_fault_dump(program: MIRProgram, lir: LIRModule, rows: [String], 
     Val(directory)
 }
 
-// The object-fault hook: one failing function's LIR, written as
-// `<directory>/<index>.lir` the way jet_cli_emit_fault_dump writes it. A
-// per-function object job calls it on its failure path while it still holds
-// the function: the MIR is released before the object compile and the
-// object compile consumes the module, so neither is at hand afterwards.
-// Without the module, module-wide ids print as themselves. The directory, or
-// None when a write fails.
+// An object fault's dump: one failing function's final LIR, written as
+// `<directory>/<index>.lir` the way jet_cli_emit_fault_dump writes it. The
+// per-function object jobs hand back the functions that failed
+// (X64ObjectOutcome.faults), and jet_cli_native_back writes them here; the
+// MIR is released before the object compile and the module is consumed by
+// it. Without the module, module-wide ids print as themselves. The
+// directory, or None when a write fails.
 fn jet_cli_emit_fault_lir(function: LIRFunction, index: Int, directory: String) -[FS]> String? Never! {
     cli_files.create_dir_all(directory) ?? return None
     cli_files.write("{directory}/{index}.lir", jet_cli_emit_tree_text([JetCLIEmitNode]{jet_cli_emit_lir_function(function, lir_print_ids())})) ?? return None
