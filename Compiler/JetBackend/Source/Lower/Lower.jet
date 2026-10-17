@@ -2707,7 +2707,7 @@ fn lower_release_use_kind(p: MIRProgram, m: LowerModule, function: MIRFunction, 
         .Move(_) -> LOWER_RELEASE_ALIAS
         // The key is read; the lookup's result is the map place's own row.
         .MapLookup(_, _, _) -> LOWER_RELEASE_BORROW
-        .Semantic(semantic) -> lower_release_semantic_kind(p, m, function, fact_index, instruction, semantic)
+        .Semantic(semantic) -> lower_release_semantic_kind(p, m, function, fact_index, instruction, value, semantic)
         else -> LOWER_RELEASE_KEEP
     }
 }
@@ -2726,7 +2726,7 @@ fn lower_release_member_kind(p: MIRProgram, function: MIRFunction, fact_index: [
     LOWER_RELEASE_ALIAS
 }
 
-fn lower_release_semantic_kind(p: MIRProgram, m: LowerModule, function: MIRFunction, fact_index: [U64:Int], instruction: MIRInstruction, semantic: MIRSemanticOp) -> Int Never! {
+fn lower_release_semantic_kind(p: MIRProgram, m: LowerModule, function: MIRFunction, fact_index: [U64:Int], instruction: MIRInstruction, value: MIRValueID, semantic: MIRSemanticOp) -> Int Never! {
     if semantic == .Print(_, _) -> return LOWER_RELEASE_BORROW
     if semantic == .StaticPreludeCall(_, _, _, _) | .HostCall(_, _) -> return lower_release_result_kind(function, fact_index, instruction)
     // `spawn` only reads its group, site and label (Tasks.jet
@@ -2738,6 +2738,19 @@ fn lower_release_semantic_kind(p: MIRProgram, m: LowerModule, function: MIRFunct
     if semantic == .BuiltinMethod(call, _, _, _, _) {
         row :: m.prelude_positions.get(call.value) ?? return LOWER_RELEASE_KEEP
         if LOWER_RELEASE_BORROWING_BUILTINS.contains(lower_runtime_symbol(p.prelude_calls[row])) -> return lower_release_result_kind(function, fact_index, instruction)
+    }
+    // A Read argument of an Iter adapter is only read (lower_lazy_closure_route:
+    // a Read callback is cloned into the adapter; a seed, fill or zip_strict
+    // trap-context text is copied by the runtime); the arguments an adapter
+    // takes over are consumed operands (lower_lazy_stored_operands).
+    if semantic == .ClosureMethod(receiver, args, call) {
+        if receiver == value -> return LOWER_RELEASE_KEEP
+        row :: m.prelude_positions.get(call.value) ?? return LOWER_RELEASE_KEEP
+        if !lower_lazy_closure_route(lower_runtime_symbol(p.prelude_calls[row])) -> return LOWER_RELEASE_KEEP
+        loop arg in args {
+            if arg.value == value && (arg.access != .Read || arg.place != None) -> return LOWER_RELEASE_KEEP
+        }
+        return lower_release_result_kind(function, fact_index, instruction)
     }
     LOWER_RELEASE_KEEP
 }
@@ -3952,10 +3965,11 @@ fn lower_open_defines(f: LowerFunction, index: Int, from: Int) -> Bool Never! {
 // Unicode text routes and the `*_view` text cuts copy out what they return,
 // Strings.jet lower_route_symbol; `==` compares in place, Builtins.jet
 // lower_core_equal and Strings.jet lower_string_method; index_of only
-// compares its needle, Lists.jet lower_helper_list_index_of): a temporary
+// compares its needle, Lists.jet lower_helper_list_index_of; a Map remove
+// only compares its key, Maps.jet lower_helper_map_take): a temporary
 // they read is still the caller's to release once their owned result no
 // longer needs it.
-LOWER_RELEASE_BORROWING_BUILTINS :: [String]{"jet_eq", "jet_list_len", "jet_list_is_empty", "jet_list_join", "jet_list_contains", "jet_list_index_of", "jet_char_len", "jet_string_count_bytes", "jet_string_is_empty", "jet_string_contains", "jet_string_starts_with", "jet_string_ends_with", "jet_string_bytes", "jet_string_replace", "jet_string_repeat", "jet_string_from_bytes", "jet_string_from_bytes_lossy", "jet_string_after", "jet_string_before", "jet_string_after_view", "jet_string_before_view", "jet_string_trim_view", "jet_unicode_trim", "jet_unicode_trim_view", "jet_unicode_lower", "jet_unicode_upper", "jet_unicode_index_of", "jet_unicode_last_index_of", "jet_unicode_count", "jet_iter_string_split", "jet_iter_string_rsplit", "jet_map_len", "jet_map_is_empty", "jet_map_get_opt", "jet_map_has_key"}
+LOWER_RELEASE_BORROWING_BUILTINS :: [String]{"jet_eq", "jet_list_len", "jet_list_is_empty", "jet_list_join", "jet_list_contains", "jet_list_index_of", "jet_char_len", "jet_string_count_bytes", "jet_string_is_empty", "jet_string_contains", "jet_string_starts_with", "jet_string_ends_with", "jet_string_bytes", "jet_string_replace", "jet_string_repeat", "jet_string_from_bytes", "jet_string_from_bytes_lossy", "jet_string_after", "jet_string_before", "jet_string_after_view", "jet_string_before_view", "jet_string_trim_view", "jet_unicode_trim", "jet_unicode_trim_view", "jet_unicode_lower", "jet_unicode_upper", "jet_unicode_index_of", "jet_unicode_last_index_of", "jet_unicode_count", "jet_iter_string_split", "jet_iter_string_rsplit", "jet_map_len", "jet_map_is_empty", "jet_map_get_opt", "jet_map_has_key", "jet_map_pop_kernel"}
 
 // Releases an owned temporary (lower_release_plan) unless its lowering made
 // no fresh owner of it (lower_mark_releasable), a slot holds its LIR value
