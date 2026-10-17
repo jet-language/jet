@@ -25,7 +25,6 @@ use jet_foundation.[
     MIRPayloadKind,
     MIRPlace,
     MIRPlaceID,
-    MIRPollKind,
     MIRProgram,
     MIRProjection,
     MIRScopeKind,
@@ -471,13 +470,6 @@ fn jet_cli_emit_mir_terminator(ids: JetCLIEmitMIRIds, terminator: MIRTerminator)
 fn jet_cli_emit_mir_return(ids: JetCLIEmitMIRIds, value: MIRValueID?) -> String Never! {
     returned :: value ?? return "return"
     "return {jet_cli_emit_mir_value(ids, returned)}"
-}
-
-fn jet_cli_emit_mir_poll(kind: MIRPollKind) -> String Never! {
-    if kind == {
-        .Check -> "check"
-        .Propagate -> "propagate"
-    }
 }
 
 fn jet_cli_emit_mir_unary(op: MIRUnaryOp) -> String Never! {

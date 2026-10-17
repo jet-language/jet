@@ -13,7 +13,7 @@ use jet_driver.[
     jet_driver_present_diagnostics,
     jet_driver_report_problems,
 ]
-use jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_render_all]
+use jet_foundation.[Diagnostic, MIRProgram, diagnostic_from_registry, diagnostic_render_all]
 use jet_parser.[parse_source]
 
 fn jet_cli_emit_check_failure(file: String, source: String, errors: [Diagnostic], color: Bool, json: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
@@ -62,7 +62,15 @@ fn jet_cli_emit_tier_result(file: String, source: String, color: Bool, json: Boo
         if !jet_driver_is_a11y_lint(diagnostic.code) -> &lints.push(diagnostic)
     }
     stderr :: if lints.len() > 0 -> diagnostic_render_all(file, source, lints, color) else -> ""
-    program :: result.mir ?? return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
+    // The program is read where the result holds it (a read window over the
+    // payload, as jet_cli_compile_check reads it), never unwrapped into a
+    // copy of the whole MIR.
+    if result.mir == .Val(program) -> return jet_cli_emit_tier_program(file, source, color, json, tier, function, result, program, stderr)
+    jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
+}
+
+// The MIR and LIR tiers of jet_cli_emit_tier_result over its checked program.
+fn jet_cli_emit_tier_program(file: String, source: String, color: Bool, json: Bool, tier: String, function: String?, result: JetDriverCompileResult, program: MIRProgram, stderr: String) -> JetDriverVerbOutput {
     selected :: jet_cli_emit_mir_selected(program, result.package_identity, function)
     if function == .Val(name) {
         if selected.len() == 0 -> return jet_cli_emit_missing_function(file, source, tier, name, color, json)
