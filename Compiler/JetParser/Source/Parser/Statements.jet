@@ -1791,6 +1791,12 @@ fn parser_parse_assignment_or_expression(state: &JetParserState) -> Stmt {
     named :: start.kind == TOKEN_IDENT || start.kind == TOKEN_SELF
     if !named && !parser_starts_expression(start.kind) {
         parser_report_not_a_statement(&state, start)
+        // Consume the offending token (as the `in` arm does): every statement
+        // loop re-enters here at the same position otherwise, reporting it
+        // forever. A closing brace or the end stays for the enclosing body.
+        if start.kind != TOKEN_RBRACE && start.kind != TOKEN_EOF {
+            parser_bump(&state)
+        }
         return Stmt.Expr{expr: Expr.Unit{span: start.span}}
     }
     left :: parser_parse_expression(&state, 1, 0)

@@ -5595,21 +5595,25 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                     else -> &output.push(TStmt.Loop{label: label_name, body: nested.value, span: span})
                 }
             }
+            // An arm must fall through to the statement loop's `index += 1`:
+            // a `next` here re-checks the same statement forever, pushing one
+            // more diagnostic each time.
             .Break(span) -> {
-                frame_index :: sema_loop_value_resolve_frame(context, None) ?? {
+                resolved :: sema_loop_value_resolve_frame(context, None)
+                if resolved == .Val(frame_index) {
+                    frame :: context.loop_value_frames[frame_index]
+                    if {
+                        !sema_stmt_loop_value_break_missing_payload(frame, span, &diagnostics) -> {
+                            complete = false
+                        }
+                        else -> {
+                            sema_loop_value_record_break(&context, frame_index, state)
+                            &output.push(TStmt.Break{label: None, span: span})
+                        }
+                    }
+                } else {
                     &diagnostics.push(sema_error("E0115", span, "`break` only works inside a loop", "`break` and `next` steer the nearest loop", "move this inside a loop, or remove it"))
                     complete = false
-                    next
-                }
-                frame :: context.loop_value_frames[frame_index]
-                if {
-                    !sema_stmt_loop_value_break_missing_payload(frame, span, &diagnostics) -> {
-                        complete = false
-                    }
-                    else -> {
-                        sema_loop_value_record_break(&context, frame_index, state)
-                        &output.push(TStmt.Break{label: None, span: span})
-                    }
                 }
             }
             .BreakValue(value, span) -> {
@@ -5631,28 +5635,21 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                 }
             }
             .BreakLabel(name, span) -> {
-                if {
-                    !sema_scope_has_loop_label(scopes, name) -> {
-                        &diagnostics.push(sema_stmt_unknown_loop_label(name, span))
-                        complete = false
-                    }
-                    else -> {
-                        frame_index :: sema_loop_value_resolve_frame(context, Val(name)) ?? {
-                            &diagnostics.push(sema_stmt_unknown_loop_label(name, span))
+                resolved :: if sema_scope_has_loop_label(scopes, name) -> sema_loop_value_resolve_frame(context, Val(name)) else -> None
+                if resolved == .Val(frame_index) {
+                    frame :: context.loop_value_frames[frame_index]
+                    if {
+                        !sema_stmt_loop_value_break_missing_payload(frame, span, &diagnostics) -> {
                             complete = false
-                            next
                         }
-                        frame :: context.loop_value_frames[frame_index]
-                        if {
-                            !sema_stmt_loop_value_break_missing_payload(frame, span, &diagnostics) -> {
-                                complete = false
-                            }
-                            else -> {
-                                sema_loop_value_record_break(&context, frame_index, state)
-                                &output.push(TStmt.Break{label: Val(name), span: span})
-                            }
+                        else -> {
+                            sema_loop_value_record_break(&context, frame_index, state)
+                            &output.push(TStmt.Break{label: Val(name), span: span})
                         }
                     }
+                } else {
+                    &diagnostics.push(sema_stmt_unknown_loop_label(name, span))
+                    complete = false
                 }
             }
             .BreakLabelValue(name, name_span, value, span) -> {
