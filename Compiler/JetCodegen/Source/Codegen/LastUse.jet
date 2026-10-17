@@ -1107,7 +1107,132 @@ fn jet_codegen_last_use_cfg(builder: JetCodegenBuilder, block_count: Int, block_
         }
         &guarded.push(shared_guard)
     }
+    jet_codegen_last_use_bypass_retests(builder, block_index, def_block, def_index, &predecessors)
     JetCodegenLastUseCFG{predecessors: ^predecessors, reachable: ^reachable, guarded: ^guarded}
+}
+
+// One re-test join bypassed for liveness: `target` (a successor of `join`)
+// lists `preds` (the join's predecessors whose edge agrees) instead of
+// `join`.
+struct JetCodegenLastUseBypass {
+    target: Int
+    join: Int
+    preds: [Int]
+}
+
+// The liveness predecessors (move_last_uses walks them only for liveness):
+// a bound pattern condition branches on its test to the binding block or
+// straight to its join, and the join re-branches on a trivial phi of that
+// same test (jet_codegen_lower_pattern_shape_condition, Rust
+// lower_guarded_pattern). A predecessor that enters the join on the test's
+// false edge never leaves it on the true edge, and the binding block never
+// leaves it on the false edge, so each successor of the join lists the
+// join's predecessors whose edge agrees (an edge of unknown outcome feeds
+// both) instead of the join, which holds only that phi. Otherwise a binding
+// consumed in its arm stays live along the unmatched edge and, around a
+// loop's back edge, is never a last use inside a loop. Native lowering
+// prunes the same edge for payload takes (lower_use_infeasible). Every
+// bypass is decided on the CFG's own predecessors before any is applied.
+fn jet_codegen_last_use_bypass_retests(builder: JetCodegenBuilder, block_index: [U64:Int], def_block: [U64:Int], def_index: [U64:Int], predecessors: &[[Int]]) Never! {
+    bypasses := [JetCodegenLastUseBypass]{}
+    loop (join, row) in builder.blocks {
+        tested :: jet_codegen_last_use_retest(builder, def_block, def_index, join) ?? next
+        then_index := -1
+        else_index := -1
+        if row.terminator == .Branch(_, then_target, else_target) {
+            then_index = block_index.get(then_target.value) ?? -1
+            else_index = block_index.get(else_target.value) ?? -1
+        }
+        if then_index < 0 || else_index < 0 || then_index == join || else_index == join || then_index == else_index -> next
+        then_preds := [Int]{}
+        else_preds := [Int]{}
+        loop pred in predecessors[join] {
+            known :: jet_codegen_last_use_edge_known(builder, block_index, def_block, def_index, predecessors, pred, join, tested)
+            if known != 0 -> &then_preds.push(pred)
+            if known != 1 -> &else_preds.push(pred)
+        }
+        &bypasses.push(JetCodegenLastUseBypass{target: then_index, join: join, preds: ^then_preds})
+        &bypasses.push(JetCodegenLastUseBypass{target: else_index, join: join, preds: ^else_preds})
+    }
+    loop bypass in bypasses {
+        rows := [Int]{}
+        loop pred in predecessors[bypass.target] {
+            if pred == bypass.join {
+                loop agreeing in bypass.preds -> &rows.push(agreeing)
+            } else {
+                &rows.push(pred)
+            }
+        }
+        predecessors[bypass.target] = ^rows
+    }
+}
+
+// The test a pattern's re-test join branches on: the join's only
+// instruction is a trivial phi (every incoming value the same test) and its
+// terminator branches on that phi. None for any other block.
+fn jet_codegen_last_use_retest(builder: JetCodegenBuilder, def_block: [U64:Int], def_index: [U64:Int], block: Int) -> MIRValueID? Never! {
+    row :: builder.blocks[block]
+    if row.instructions.len() != 1 -> return None
+    if row.terminator == .Branch(condition, _, _) {
+        if row.instructions[0].result != (Val(condition)) -> return None
+        if !(row.instructions[0].operation == .Phi(_)) -> return None
+        tested :: jet_codegen_last_use_tested(builder, def_block, def_index, condition)
+        if tested == condition -> return None
+        return Val(tested)
+    }
+    None
+}
+
+// The value a branch condition tests: a trivial phi (every incoming value
+// the same) stands for that value, as native lower_use_tested reads it.
+fn jet_codegen_last_use_tested(builder: JetCodegenBuilder, def_block: [U64:Int], def_index: [U64:Int], condition: MIRValueID) -> MIRValueID Never! {
+    block :: def_block.get(condition.value) ?? return condition.copy()
+    index :: def_index.get(condition.value) ?? return condition.copy()
+    if builder.blocks[block].instructions[index].operation == .Phi(incoming) {
+        if incoming.len() == 0 || incoming[0].value == condition -> return condition.copy()
+        loop row in incoming {
+            if row.value != incoming[0].value -> return condition.copy()
+        }
+        return jet_codegen_last_use_tested(builder, def_block, def_index, incoming[0].value)
+    }
+    condition.copy()
+}
+
+// Whether the edge from `from` into `join` is taken only when `tested`
+// holds (1), only when it fails (0), or either way (-1): `from` branches on
+// `tested` with `join` as one target, or `from` ends a chain of
+// single-predecessor blocks (a pattern's binding block) entered from one
+// edge of such a branch.
+fn jet_codegen_last_use_edge_known(builder: JetCodegenBuilder, block_index: [U64:Int], def_block: [U64:Int], def_index: [U64:Int], predecessors: [[Int]], from: Int, join: Int, tested: MIRValueID) -> Int Never! {
+    if builder.blocks[from].terminator == .Branch(condition, then_target, else_target) {
+        return jet_codegen_last_use_branch_known(builder, block_index, def_block, def_index, condition, then_target, else_target, join, tested)
+    }
+    if !(builder.blocks[from].terminator == .Jump(_)) -> return -1
+    at := from
+    steps := 0
+    loop steps < 16 {
+        if predecessors[at].len() != 1 -> return -1
+        entry :: predecessors[at][0]
+        if builder.blocks[entry].terminator == {
+            .Branch(condition, then_target, else_target) -> return jet_codegen_last_use_branch_known(builder, block_index, def_block, def_index, condition, then_target, else_target, at, tested)
+            .Jump(_) -> {
+                at = entry
+                steps += 1
+            }
+            else -> return -1
+        }
+    }
+    -1
+}
+
+// 1 when the branch reaches `target` only on its true edge of `tested`, 0
+// only on its false edge, -1 otherwise.
+fn jet_codegen_last_use_branch_known(builder: JetCodegenBuilder, block_index: [U64:Int], def_block: [U64:Int], def_index: [U64:Int], condition: MIRValueID, then_target: MIRBlockID, else_target: MIRBlockID, target: Int, tested: MIRValueID) -> Int Never! {
+    if then_target == else_target -> return -1
+    if jet_codegen_last_use_tested(builder, def_block, def_index, condition) != tested -> return -1
+    if (block_index.get(then_target.value) ?? -1) == target -> return 1
+    if (block_index.get(else_target.value) ?? -1) == target -> return 0
+    -1
 }
 
 // move_last_uses's backward liveness: the candidates live out of each block.
