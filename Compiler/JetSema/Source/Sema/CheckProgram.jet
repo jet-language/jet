@@ -263,10 +263,6 @@ struct SemaGraphModuleResult {
     // module whose body checked, in declaration order; the checked synthetic
     // function is in `functions` and its key in `injected_function_keys`.
     tests: [TTestFact]{[TTestFact]{}}
-    // D1: one record per body this module's pass checked, in check order
-    // (sema_checked_body_record), so the failure-union recheck replays every
-    // body a projected contract cannot change (sema_recheck_baseline).
-    bodies: [SemaCheckedBodyRecord]{[SemaCheckedBodyRecord]{}}
 }
 
 // #3708: what one checked function body propagates: the keys of the declared
@@ -281,207 +277,6 @@ struct SemaFunctionFailureFacts {
     union_cases: [SemaFailureCase]{[SemaFailureCase]{}}
     union_edges: [String]{[String]{}}
     union_general: Bool{false}
-}
-
-// The lengths of the module result lists a checked body appends its rows
-// to, taken before and after the body (sema_result_row_marks): the rows in
-// [before, after) of each list are that body's.
-struct SemaResultRowMarks {
-    functions: Int
-    diagnostics: Int
-    call_facts: Int
-    comptime_requests: Int
-    name_references: Int
-    copy_events: Int
-    comptime_body_sources: Int
-    compute_facts: Int
-    failure_facts: Int
-}
-
-// D1: one body a module pass checked, as sema_finalize_graph's failure-union
-// recheck replays it instead of checking it again: its function key, the
-// module scope it saw (`scope_epoch`: the return-view publications the body
-// loop had made, sema_function_publish_return_views), its rows in the module
-// result lists, and the scalar facts the lists do not carry. `replay` holds
-// when the checked function was appended complete (`functions[function_row]`)
-// without a host callback or another raw body read, the same bar the
-// incremental memo sets (sema_incremental_accept): such a check is a function
-// of the declarations it names and the scope it saw, so the recheck, which
-// changes neither for a body that names no projected contract, reads the
-// same result.
-struct SemaCheckedBodyRecord {
-    key: String
-    scope_epoch: Int
-    replay: Bool
-    function_row: Int
-    exact_int_reachable: Bool
-    hardware_use: MIRTargetHardwareUse
-    before: SemaResultRowMarks
-    after: SemaResultRowMarks
-}
-
-// What one method check leaves for its SemaCheckedBodyRecord
-// (sema_check_registration_method): whether a body was checked at all (a
-// comptime-checked body is appended from the comptime results in every
-// pass), whether its function was appended, what it reached, and the facts
-// merged into the module totals.
-struct SemaBodyRetention {
-    checked: Bool
-    appended: Bool
-    reach: SemaBodyCheckReach
-    exact_int_reachable: Bool
-    hardware_use: MIRTargetHardwareUse
-}
-
-// D1: the body loop's return-view publications so far
-// (sema_function_publish_return_views): how many, and whether every one came
-// from a replayed or comptime-checked body, so the module scope still equals
-// the retained pass's scope at that count; a freshly checked body that
-// publishes ends the replay of the bodies after it.
-struct SemaBodyScopeEpoch {
-    publications: Int
-    trusted: Bool
-}
-
-// D1: what the recheck of one module replays from the module's first-pass
-// result (sema_recheck_baseline): the retained packet of every body no
-// projected contract can change, by function key, with the scope epoch it
-// was checked at. Empty for a pass that replays nothing.
-struct SemaRecheckBaseline {
-    bodies: [String:SemaRetainedBody]
-}
-
-struct SemaRetainedBody {
-    scope_epoch: Int
-    packet: SemaParallelBody
-}
-
-fn sema_recheck_baseline_none() -> SemaRecheckBaseline Never! {
-    SemaRecheckBaseline{bodies: [String:SemaRetainedBody]{}}
-}
-
-fn sema_result_row_marks(result: SemaGraphModuleResult) -> SemaResultRowMarks Never! {
-    SemaResultRowMarks{
-        functions: result.functions.len(), diagnostics: result.diagnostics.len(),
-        call_facts: result.call_facts.len(), comptime_requests: result.comptime_requests.len(),
-        name_references: result.name_references.len(), copy_events: result.copy_events.len(),
-        comptime_body_sources: result.comptime_body_sources.len(), compute_facts: result.compute_facts.len(),
-        failure_facts: result.failure_facts.len(),
-    }
-}
-
-// The record of a body checked between `before` and `after` whose function,
-// when `appended`, is the last row of `functions` at `after`.
-fn sema_checked_body_record(key: String, scope_epoch: Int, appended: Bool, reach: SemaBodyCheckReach, exact_int_reachable: Bool, hardware_use: ^MIRTargetHardwareUse, before: SemaResultRowMarks, after: SemaResultRowMarks) -> SemaCheckedBodyRecord Never! {
-    SemaCheckedBodyRecord{
-        key: key, scope_epoch: scope_epoch,
-        replay: appended && !reach.host && !reach.foreign_raw_body,
-        function_row: if appended -> after.functions - 1 else -> -1,
-        exact_int_reachable: exact_int_reachable, hardware_use: ^hardware_use,
-        before: before, after: after,
-    }
-}
-
-// D1: moves rows [from, rows.len()) out of `rows` in order, leaving the rows
-// before `from`; each row is popped (an owned move), none is copied.
-fn sema_take_rows_from<T>(rows: &[T], from: Int) -> [T] Never! {
-    taken := [T]{}
-    loop rows.len() > from {
-        row := &rows.pop() ?? panic("a nonempty module result list failed to pop")
-        &taken.push(^row)
-    }
-    &taken.reverse()
-    taken
-}
-
-// D1: drops rows [from, rows.len()) of `rows`.
-fn sema_drop_rows_from<T>(rows: &[T], from: Int) Never! {
-    loop rows.len() > from -> _ := &rows.pop()
-}
-
-// D1: the recheck baseline of a module from its first-pass result: the
-// packet of every retained body that `dependents` (sema_failure_dependent_bodies)
-// leaves out, its rows moved out of `result` (the rechecked result replaces
-// it). The view summaries (sema_check_view_summaries) make the module scope
-// every body is checked against, so a summary function the body pass checks
-// (`summary_keys`, sema_recheck_summary_keys) whose check could change makes
-// every body's scope uncertain: unless each one is replayed, nothing is
-// replayed and the module is checked again whole.
-fn sema_recheck_baseline(result: &SemaGraphModuleResult, dependents: [String:Bool], summary_keys: [String]) -> SemaRecheckBaseline Never! {
-    baseline := sema_recheck_baseline_none()
-    replayable := [String:Bool]{}
-    loop record in result.bodies {
-        if record.replay && dependents.get(record.key) == None -> replayable[record.key] = true
-    }
-    loop key in summary_keys {
-        if replayable.get(key) == None -> return ^baseline
-    }
-    // Records are in check order, so each record's rows are the last ones
-    // still in the lists once the rows after it are dropped.
-    loop result.bodies.len() > 0 {
-        record := &result.bodies.pop() ?? break
-        if replayable.get(record.key) == None -> next
-        sema_drop_rows_from<TFunc>(&result.functions, record.function_row + 1)
-        function := &result.functions.pop() ?? panic("a retained body lost its checked function")
-        sema_drop_rows_from<Diagnostic>(&result.diagnostics, record.after.diagnostics)
-        sema_drop_rows_from<SemaCallSiteFact>(&result.call_facts, record.after.call_facts)
-        sema_drop_rows_from<SemaComptimeRequest>(&result.comptime_requests, record.after.comptime_requests)
-        sema_drop_rows_from<SemaNameReferenceFact>(&result.name_references, record.after.name_references)
-        sema_drop_rows_from<SemaCopyEvent>(&result.copy_events, record.after.copy_events)
-        sema_drop_rows_from<SemaComptimeBodySource>(&result.comptime_body_sources, record.after.comptime_body_sources)
-        sema_drop_rows_from<SemaComputeFunctionFacts>(&result.compute_facts, record.after.compute_facts)
-        sema_drop_rows_from<SemaFunctionFailureFacts>(&result.failure_facts, record.after.failure_facts)
-        compute := &result.compute_facts.pop() ?? panic("a retained body lost its compute facts")
-        failure := SemaFunctionFailureFacts?{None}
-        if record.after.failure_facts > record.before.failure_facts -> failure = &result.failure_facts.pop()
-        copy_events := sema_take_rows_from<SemaCopyEvent>(&result.copy_events, record.before.copy_events)
-        comptime_body_sources := sema_take_rows_from<SemaComptimeBodySource>(&result.comptime_body_sources, record.before.comptime_body_sources)
-        diagnostics := sema_take_rows_from<Diagnostic>(&result.diagnostics, record.before.diagnostics)
-        call_facts := sema_take_rows_from<SemaCallSiteFact>(&result.call_facts, record.before.call_facts)
-        comptime_requests := sema_take_rows_from<SemaComptimeRequest>(&result.comptime_requests, record.before.comptime_requests)
-        name_references := sema_take_rows_from<SemaNameReferenceFact>(&result.name_references, record.before.name_references)
-        key :: record.key.copy()
-        scope_epoch :: record.scope_epoch
-        exact_int_reachable :: record.exact_int_reachable
-        hardware_use := ^record.hardware_use
-        checked := SemaFunctionResult{
-            value: Val(^function), complete: true, exact_int_reachable: exact_int_reachable,
-            copy_events: ^copy_events, hardware_use: ^hardware_use,
-            comptime_body_sources: ^comptime_body_sources, compute_facts: ^compute, failure: ^failure,
-        }
-        packet := SemaParallelBody{
-            job_index: -1, checked: Val(^checked), diagnostics: ^diagnostics, call_facts: ^call_facts,
-            comptime_requests: ^comptime_requests, name_references: ^name_references,
-            method_input: None, wanted_hooks: false, cache_hit: true,
-        }
-        baseline.bodies[key] = SemaRetainedBody{scope_epoch: scope_epoch, packet: ^packet}
-    }
-    ^baseline
-}
-
-// D1: the retained packet of body `key` when the recheck can replay it at
-// `job_index`: the body loop's scope still equals the retained pass's
-// (`epoch.trusted`) at the publication count the body was checked at. The
-// packet leaves the baseline either way.
-fn sema_recheck_take_body(baseline: &SemaRecheckBaseline, key: String, epoch: SemaBodyScopeEpoch, job_index: Int) -> SemaParallelBody? Never! {
-    if baseline.bodies.len() == 0 -> return None
-    retained := &baseline.bodies.remove(key) ?? return None
-    if !epoch.trusted || retained.scope_epoch != epoch.publications -> return None
-    packet := ^retained.packet
-    packet.job_index = job_index
-    Val(^packet)
-}
-
-// The function keys the retained baseline replays at `epoch`
-// (sema_recheck_take_body), so the recheck's parallel passes check only the
-// other bodies.
-fn sema_recheck_replayed_keys(baseline: SemaRecheckBaseline, epoch: SemaBodyScopeEpoch) -> [String:Bool] Never! {
-    keys := [String:Bool]{}
-    if !epoch.trusted -> return keys
-    loop (key, retained) in baseline.bodies {
-        if retained.scope_epoch == epoch.publications -> keys[key] = true
-    }
-    keys
 }
 
 enum SemaComptimeItemKind {
@@ -3382,8 +3177,8 @@ fn sema_check_registered_method_jobs(environment: SemaScopeEnvironment, program:
     panic("an owning registered-module pass lost its registration graph")
 }
 
-fn sema_check_registered_parallel_method_jobs(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, memory_plan: SemaFunctionMemoryPlan, all_method_jobs: [SemaBodyJob], comptime_rows: [String:Int], replayed: [String:Bool], weights: &[Int]) -> [SemaBodyJob] {
-    if program.registration_graph == .Val(graph) -> return sema_check_parallel_method_jobs(graph, graph.modules[module_index], memory_plan, environment.generic_params, all_method_jobs, comptime_rows, replayed, &weights)
+fn sema_check_registered_parallel_method_jobs(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, memory_plan: SemaFunctionMemoryPlan, all_method_jobs: [SemaBodyJob], comptime_rows: [String:Int], weights: &[Int]) -> [SemaBodyJob] {
+    if program.registration_graph == .Val(graph) -> return sema_check_parallel_method_jobs(graph, graph.modules[module_index], memory_plan, environment.generic_params, all_method_jobs, comptime_rows, &weights)
     panic("an owning registered-module pass lost its registration graph")
 }
 
@@ -3396,10 +3191,7 @@ fn sema_check_registered_top_level_name(module_index: Int, item_index: Int, envi
 
 // The caller selects ordinary Jet functions in source order. All graph and
 // plan metadata reads finish before a writable checker or trap is entered.
-// D1: `baseline` holds the retained bodies a recheck replays
-// (sema_recheck_take_body) and `epoch` the return-view publications so far;
-// every checked body leaves its record on `result.bodies`.
-fn sema_check_registration_top_level(module_index: Int, item_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, return_view_rows: &[String:Int], ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: &SemaModuleMemo?, baseline: &SemaRecheckBaseline, epoch: &SemaBodyScopeEpoch, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], result: &SemaGraphModuleResult, scopes_changed: &Bool, keep_going: Bool, pending_obligations: Bool, trace_functions: Bool, trace_sink: CompilerTraceSink?, item_count: Int, count_work: Bool, functions_checked: &Int) {
+fn sema_check_registration_top_level(module_index: Int, item_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, return_view_rows: &[String:Int], ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: &SemaModuleMemo?, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], result: &SemaGraphModuleResult, scopes_changed: &Bool, keep_going: Bool, pending_obligations: Bool, trace_functions: Bool, trace_sink: CompilerTraceSink?, item_count: Int, count_work: Bool, functions_checked: &Int) {
     job :: SemaBodyJob.TopLevel{item_index: item_index}
     function_name :: sema_check_registered_top_level_name(module_index, item_index, environment, program)
     owner_id :: sema_check_registered_function_id(job, module_index, environment, program)
@@ -3409,7 +3201,6 @@ fn sema_check_registration_top_level(module_index: Int, item_index: Int, memory_
             if checked_function.function == .Val(function) {
                 if sema_function_publish_return_views(&scopes, &return_view_rows, function) {
                     scopes_changed = true
-                    epoch.publications += 1
                     sema_incremental_publication(&memo)
                 }
             }
@@ -3446,12 +3237,7 @@ fn sema_check_registration_top_level(module_index: Int, item_index: Int, memory_
             if trace_functions {
                 if trace_sink == .Val(sink) -> sink.begin("sema.function", function_name, item_index, item_count)
             }
-            replay := sema_recheck_take_body(&baseline, owner_id.key, epoch, item_index)
-            replayed :: replay != None
-            checked_epoch :: epoch.publications
-            before :: sema_result_row_marks(result)
-            reach := SemaBodyCheckReach{host: false, foreign_raw_body: false}
-            checked :: sema_check_module_function(&ready, &queries, memo, item_index, scopes_changed, job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks, &result.diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references, ^replay, &reach, count_work, &functions_checked)
+            checked :: sema_check_module_function(&ready, &queries, memo, item_index, scopes_changed, job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks, &result.diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references, count_work, &functions_checked)
             if trace_functions {
                 if trace_sink == .Val(sink) -> sink.end("sema.function", 1)
             }
@@ -3462,11 +3248,6 @@ fn sema_check_registration_top_level(module_index: Int, item_index: Int, memory_
             if checked.value == .Val(function) {
                 if sema_function_publish_return_views(&scopes, &return_view_rows, function) {
                     scopes_changed = true
-                    epoch.publications += 1
-                    // A fresh check's publication may differ from the
-                    // retained pass's: the bodies after it see a scope the
-                    // baseline did not.
-                    if !replayed -> epoch.trusted = false
                     sema_incremental_publication(&memo)
                 }
             }
@@ -3475,30 +3256,21 @@ fn sema_check_registration_top_level(module_index: Int, item_index: Int, memory_
             loop fact in function_call_facts -> &result.call_facts.push(fact)
             loop request in function_comptime_requests -> &result.comptime_requests.push(request)
             loop reference in function_name_references -> &result.name_references.push(reference)
-            appended := false
             if !checked.complete {
                 result.complete = false
                 sema_check_push_function_reasons("function `{function_name}`", checked, &result.incomplete_reasons)
                 if keep_going -> _ := sema_keep_going_push_stub(sema_keep_going_registered_stub(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks), "function `{function_name}`", &result.functions, &result.incomplete_reasons)
             } else if keep_going && sema_check_function_failed(result.diagnostics, function_diagnostic_start, pending_obligations) {
                 if !sema_keep_going_push_stub(sema_keep_going_registered_stub(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks), "function `{function_name}`", &result.functions, &result.incomplete_reasons) -> result.complete = false
-            } else if sema_append_function(&result.functions, checked) {
-                appended = true
-            } else {
+            } else if !sema_append_function(&result.functions, checked) {
                 result.complete = false
                 &result.incomplete_reasons.push("function `{function_name}`: checked function could not be recorded")
             }
-            after :: sema_result_row_marks(result)
-            &result.bodies.push(sema_checked_body_record(owner_id.key, checked_epoch, appended, reach, checked.exact_int_reachable, sema_hardware_use_snapshot(checked.hardware_use), before, after))
         }
     }
 }
 
-// D1: `replay` is the method's retained packet from the pass before the
-// failure solve, taken in place of a check (its preparation is made again:
-// the packet carries no method input); `retention` gets what the method's
-// record needs (sema_check_apply_method_job).
-fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: SemaModuleMemo?, ordinal: Int, scopes: &SemaScopeTable, environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], diagnostics: &[Diagnostic], functions: &[TFunc], call_facts: &[SemaCallSiteFact], hardware_use: &MIRTargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], exact_int_reachable: &Bool, copy_events: &[SemaCopyEvent], reasons: &[String], keep_going: Bool, pending_obligations: Bool, replay: ^SemaParallelBody?, retention: &SemaBodyRetention) -> Bool {
+fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: SemaModuleMemo?, ordinal: Int, scopes: &SemaScopeTable, environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], diagnostics: &[Diagnostic], functions: &[TFunc], call_facts: &[SemaCallSiteFact], hardware_use: &MIRTargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], exact_int_reachable: &Bool, copy_events: &[SemaCopyEvent], reasons: &[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
     label :: sema_check_registered_method_label(job, module_index, environment, program)
     owner_id :: sema_check_registered_function_id(job, module_index, environment, program)
     raw_protocol_return :: sema_check_registered_raw_protocol_return(job, module_index, environment, program)
@@ -3520,7 +3292,6 @@ fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_pl
         }
         .None -> {}
     }
-    retention.checked = true
     function_diagnostic_start :: diagnostics.len()
     query := SemaBodyMemoQuery?{None}
     if memo == .Val(_) {
@@ -3528,8 +3299,6 @@ fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_pl
         if query == None -> query = sema_incremental_registered_body_query(memo, job, module_index, memory_plan, environment, program)
     }
     prepared := sema_incremental_prepared(sema_check_take_body(&ready, ordinal), query, ordinal, true)
-    replayed := ^replay
-    if replayed != None -> prepared = ^replayed
     prior_reach := SemaBodyCheckReach{host: false, foreign_raw_body: false}
     if prepared == .Val(body) {
         if body.wanted_hooks {
@@ -3545,7 +3314,6 @@ fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_pl
     if prepared != None {
         packet := ^prepared ?? panic("a prepared method packet disappeared")
         prepared = None
-        retention.reach = SemaBodyCheckReach{host: packet.host_reached, foreign_raw_body: packet.volatile}
         sema_incremental_accept_packet(query, packet)
         taken_input := ^packet.method_input
         packet.method_input = None
@@ -3580,17 +3348,13 @@ fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_pl
     sema_function_check_registered_location(job, module_index, memory_plan, owned_input.memory_position, environment, program, &scopes)
     if checked_result == None {
         if query == None {
-            observed :: sema_incremental_observer(true)
-            checked_result = Val(sema_function_check_registered(job, module_index, memory_plan, owned_input.memory_position, owner_id, owned_input.function_kind, raw_protocol_return, &environment, program, &scopes, sema_body_check_observe(host_hooks, observed), &diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references))
-            seen :: sema_incremental_reach(observed)
-            retention.reach = SemaBodyCheckReach{host: prior_reach.host || seen.host, foreign_raw_body: prior_reach.foreign_raw_body || seen.foreign_raw_body}
+            checked_result = Val(sema_function_check_registered(job, module_index, memory_plan, owned_input.memory_position, owner_id, owned_input.function_kind, raw_protocol_return, &environment, program, &scopes, host_hooks, &diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references))
         } else {
             query = sema_incremental_retarget(^query, memo)
             prefix := ^owned_input.diagnostics
             owned_input.diagnostics = [Diagnostic]{}
             packet := sema_check_inline_memo_body(ordinal, job, module_index, memory_plan, owned_input.memory_position, owner_id, owned_input.function_kind, raw_protocol_return, &environment, program, &scopes, host_hooks, prior_reach, ^prefix)
             packet.method_input = Val(^owned_input)
-            retention.reach = SemaBodyCheckReach{host: packet.host_reached, foreign_raw_body: packet.volatile}
             sema_incremental_accept_packet(query, packet)
             restored_input := ^packet.method_input
             packet.method_input = None
@@ -3617,8 +3381,6 @@ fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_pl
     scopes.location_function = previous_location
     environment.generic_params = base_generic_params.copy()
     exact_int_reachable = exact_int_reachable || checked.exact_int_reachable
-    retention.exact_int_reachable = checked.exact_int_reachable
-    retention.hardware_use = sema_hardware_use_snapshot(checked.hardware_use)
     sema_hardware_use_merge(&hardware_use, sema_hardware_use_snapshot(checked.hardware_use))
     loop event in checked.copy_events -> &copy_events.push(event)
     loop fact in function_call_facts -> &call_facts.push(fact)
@@ -3647,10 +3409,7 @@ fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_pl
         rewritten.failure_carrier = sema_failure_carrier(Val(raw_return))
         checked.value = Val(^rewritten)
     }
-    if sema_append_function(&functions, checked) {
-        retention.appended = true
-        return true
-    }
+    if sema_append_function(&functions, checked) -> return true
     &reasons.push("{label}: checked function could not be recorded")
     false
 }
@@ -3893,20 +3652,7 @@ fn sema_check_drain_body(body: ^SemaParallelBody, diagnostics: &[Diagnostic], ca
     ^taken ?? panic("an accepted body packet has no checked result")
 }
 
-// D1: `replay` is the body's retained packet from the pass before the
-// failure solve, taken in place of a check; `reach` gets what the check
-// reached (a host callback, another raw body), which decides whether its
-// record can be replayed in turn.
-fn sema_check_module_function(ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: SemaModuleMemo?, job_index: Int, scopes_changed: Bool, job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], replay: ^SemaParallelBody?, reach: &SemaBodyCheckReach, count_work: Bool, functions_checked: &Int) -> SemaFunctionResult {
-    replayed := ^replay
-    if replayed != None {
-        body := ^replayed ?? panic("a replayed body packet disappeared")
-        replayed = None
-        // The retained pass checked this body in this process, so its names
-        // are restored as on a memo hit.
-        sema_function_check_registered_name(job, module_index, memory_plan, memory_position, &environment, program)
-        return sema_check_drain_body(^body, &diagnostics, &call_facts, &comptime_requests, &name_references)
-    }
+fn sema_check_module_function(ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: SemaModuleMemo?, job_index: Int, scopes_changed: Bool, job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], count_work: Bool, functions_checked: &Int) -> SemaFunctionResult {
     query := SemaBodyMemoQuery?{None}
     if memo == .Val(_) {
         query = &queries.remove(job_index)
@@ -3921,25 +3667,18 @@ fn sema_check_module_function(ready: &[SemaPreparedBody], queries: &[Int:SemaBod
             sema_incremental_accept_packet(query, body)
             // Preserve serial names on a hit and the original method side effect.
             if body.cache_hit || function_kind != TFuncKind.TopLevel -> sema_function_check_registered_name(job, module_index, memory_plan, memory_position, &environment, program)
-            reach = SemaBodyCheckReach{host: body.host_reached, foreign_raw_body: body.volatile}
             return sema_check_drain_body(^body, &diagnostics, &call_facts, &comptime_requests, &name_references)
         }
         prior_reach = SemaBodyCheckReach{host: body.host_reached, foreign_raw_body: body.volatile}
     }
     if count_work -> functions_checked += 1
     if query == None {
-        // No cold fingerprints or temporary cache product arrays; the
-        // observer records what the body's record needs.
-        observed :: sema_incremental_observer(true)
-        checked := sema_function_check_registered(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, &environment, program, &scopes, sema_body_check_observe(host_hooks, observed), &diagnostics, &call_facts, &comptime_requests, &name_references)
-        seen :: sema_incremental_reach(observed)
-        reach = SemaBodyCheckReach{host: prior_reach.host || seen.host, foreign_raw_body: prior_reach.foreign_raw_body || seen.foreign_raw_body}
-        return ^checked
+        // No cold fingerprints, observer or temporary cache product arrays.
+        return sema_function_check_registered(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, &environment, program, &scopes, host_hooks, &diagnostics, &call_facts, &comptime_requests, &name_references)
     }
     query = sema_incremental_retarget(^query, memo)
     body := sema_check_inline_memo_body(job_index, job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, &environment, program, &scopes, host_hooks, prior_reach, [Diagnostic]{})
     sema_incremental_accept_packet(query, body)
-    reach = SemaBodyCheckReach{host: body.host_reached, foreign_raw_body: body.volatile}
     sema_check_drain_body(^body, &diagnostics, &call_facts, &comptime_requests, &name_references)
 }
 
@@ -4015,22 +3754,22 @@ struct SemaBodyPart {
     items: [SemaBodyJob]
     bodies: [SemaPreparedBody]
     cache_replay: [Bool]{[Bool]{}}
+    cache_observe: Bool{false}
 }
 
 // The item indexes of module `module_index`'s top-level functions a compiler
 // thread can check, in item order: not foreign (the foreign stage checks
 // those), not already checked by comptime (the body loop takes that result),
-// not replayed from a recheck baseline (`replayed`, D1), and without generic
-// parameters (sema_function_check_shared). `weights` gets each one's source
-// bytes.
-fn sema_check_parallel_jobs(graph: SemaRegistrationGraph, module_index: Int, comptime_rows: [String:Int], replayed: [String:Bool], weights: &[Int]) -> [SemaBodyJob] Never! {
+// and without generic parameters (sema_function_check_shared). `weights`
+// gets each one's source bytes.
+fn sema_check_parallel_jobs(graph: SemaRegistrationGraph, module_index: Int, comptime_rows: [String:Int], weights: &[Int]) -> [SemaBodyJob] Never! {
     source_module :: graph.modules[module_index]
     jobs := [SemaBodyJob]{}
     item_index := 0
     loop item in source_module.program.items {
         if item == .Func(func) {
             key :: symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name).key
-            if func.inline_foreign == None && !sema_function_is_guest_import(func) && func.type_params.len() == 0 && comptime_rows.get("{source_module.module_identity}\n{key}") == None && replayed.get(key) == None {
+            if func.inline_foreign == None && !sema_function_is_guest_import(func) && func.type_params.len() == 0 && comptime_rows.get("{source_module.module_identity}\n{key}") == None {
                 &jobs.push(SemaBodyJob.TopLevel{item_index: item_index})
                 &weights.push(func.span.end - func.span.start)
             }
@@ -4087,7 +3826,7 @@ fn sema_check_method_parallel_eligible(graph: SemaRegistrationGraph, source_modu
     true
 }
 
-fn sema_check_parallel_method_jobs(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, generic_params: [TGenericParam], all_jobs: [SemaBodyJob], comptime_rows: [String:Int], replayed: [String:Bool], weights: &[Int]) -> [SemaBodyJob] {
+fn sema_check_parallel_method_jobs(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, generic_params: [TGenericParam], all_jobs: [SemaBodyJob], comptime_rows: [String:Int], weights: &[Int]) -> [SemaBodyJob] {
     jobs := [SemaBodyJob]{}
     if generic_params.len() != 0 -> return jobs
     loop job in all_jobs {
@@ -4095,13 +3834,13 @@ fn sema_check_parallel_method_jobs(graph: SemaRegistrationGraph, source_module: 
             .NominalMethod(_, nominal_index, method_index) -> {
                 nominal :: source_module.nominals[nominal_index]
                 method :: nominal.methods[method_index]
-                if replayed.get(method.symbol.id.key) != None || !sema_check_method_parallel_eligible(graph, source_module, memory_plan, method, nominal.ty, comptime_rows) -> next
+                if !sema_check_method_parallel_eligible(graph, source_module, memory_plan, method, nominal.ty, comptime_rows) -> next
                 &weights.push(method.declaration.span.end - method.declaration.span.start)
             }
             .ImplMethod(_, implementation_index, method_index) -> {
                 implementation :: source_module.impls[implementation_index]
                 method :: implementation.methods[method_index]
-                if replayed.get(method.symbol.id.key) != None || !sema_check_method_parallel_eligible(graph, source_module, memory_plan, method, implementation.target_type, comptime_rows) -> next
+                if !sema_check_method_parallel_eligible(graph, source_module, memory_plan, method, implementation.target_type, comptime_rows) -> next
                 &weights.push(method.declaration.span.end - method.declaration.span.start)
             }
             .TopLevel(_) -> panic("a top-level job entered the method wave")
@@ -4138,9 +3877,7 @@ fn sema_check_body_part_in(environment: SemaScopeEnvironment, program: SemaProgr
                 &part.bodies.push(SemaPreparedBody.Replay{job_index: sema_check_body_job_index(part.items[index])})
                 next
             }
-            // What the check reaches decides whether its record can be
-            // replayed by a recheck (D1) or retained by the memo.
-            observed :: sema_incremental_observer(true)
+            observed :: sema_incremental_observer(part.cache_observe)
             checked_count += 1
             sema_host_hook_unwant(wanted)
             if part.items[index] == {
@@ -4189,35 +3926,20 @@ fn sema_check_generated_method_author_span(job: SemaBodyJob, module_index: Int, 
     panic("a registered Jet method lost its owning graph")
 }
 
-// D1: a replayed method takes its retained packet from `baseline`; every
-// checked method leaves its record on `result.bodies` with the rows it
-// appended to `result` (sema_checked_body_record).
-fn sema_check_apply_method_job(module_index: Int, memory_plan: SemaFunctionMemoryPlan, job: SemaBodyJob, ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: SemaModuleMemo?, baseline: &SemaRecheckBaseline, epoch: SemaBodyScopeEpoch, scopes: &SemaScopeTable, environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], result: &SemaGraphModuleResult, keep_going: Bool, pending_obligations: Bool) -> Bool {
+fn sema_check_apply_method_job(module_index: Int, memory_plan: SemaFunctionMemoryPlan, job: SemaBodyJob, ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: SemaModuleMemo?, scopes: &SemaScopeTable, environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], diagnostics: &[Diagnostic], functions: &[TFunc], call_facts: &[SemaCallSiteFact], hardware_use: &MIRTargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], exact_int_reachable: &Bool, copy_events: &[SemaCopyEvent], reasons: &[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
     ordinal :: if job == {
         .NominalMethod(position, _, _) -> position
         .ImplMethod(position, _, _) -> position
         .TopLevel(_) -> panic("a top-level job entered method application")
     }
-    owner_id :: sema_check_registered_function_id(job, module_index, environment, program)
-    replay := sema_recheck_take_body(&baseline, owner_id.key, epoch, ordinal)
-    retention := SemaBodyRetention{checked: false, appended: false, reach: SemaBodyCheckReach{host: false, foreign_raw_body: false}, exact_int_reachable: false, hardware_use: sema_hardware_empty_use()}
-    before :: sema_result_row_marks(result)
     author_span :: sema_check_generated_method_author_span(job, module_index, environment, program)
-    complete := false
     if author_span == .Val(span) {
         generated_diagnostics := [Diagnostic]{}
-        complete = sema_check_registration_method(job, module_index, memory_plan, &ready, &queries, memo, ordinal, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &generated_diagnostics, &result.functions, &result.call_facts, &result.hardware_use, &result.comptime_requests, &result.name_references, &result.comptime_body_sources, &result.compute_facts, &result.exact_int_reachable, &result.copy_events, &result.incomplete_reasons, keep_going, pending_obligations, ^replay, &retention)
-        sema_author_facing_diagnostics(span, generated_diagnostics, &result.diagnostics)
-    } else {
-        complete = sema_check_registration_method(job, module_index, memory_plan, &ready, &queries, memo, ordinal, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &result.diagnostics, &result.functions, &result.call_facts, &result.hardware_use, &result.comptime_requests, &result.name_references, &result.comptime_body_sources, &result.compute_facts, &result.exact_int_reachable, &result.copy_events, &result.incomplete_reasons, keep_going, pending_obligations, ^replay, &retention)
+        complete := sema_check_registration_method(job, module_index, memory_plan, &ready, &queries, memo, ordinal, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &generated_diagnostics, &functions, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &exact_int_reachable, &copy_events, &reasons, keep_going, pending_obligations)
+        sema_author_facing_diagnostics(span, generated_diagnostics, &diagnostics)
+        return complete
     }
-    if retention.checked {
-        after :: sema_result_row_marks(result)
-        hardware_use := ^retention.hardware_use
-        retention.hardware_use = sema_hardware_empty_use()
-        &result.bodies.push(sema_checked_body_record(owner_id.key, epoch.publications, retention.appended, retention.reach, retention.exact_int_reachable, ^hardware_use, before, after))
-    }
-    complete
+    sema_check_registration_method(job, module_index, memory_plan, &ready, &queries, memo, ordinal, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &diagnostics, &functions, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &exact_int_reachable, &copy_events, &reasons, keep_going, pending_obligations)
 }
 
 // The module scope the body loop of module `module_index` checks against:
@@ -4289,7 +4011,7 @@ fn sema_check_bodies_parallel(shared: Shared<SemaCheckShared>, module_index: Int
             }
         }
         slot :: shared SemaBodyPart{scopes: sema_scope_init(""), items: [SemaBodyJob]{}, bodies: [SemaPreparedBody]{}}
-        sema_check_body_part_fill(slot, ^items, ^replay)
+        sema_check_body_part_fill(slot, ^items, ^replay, has_memo)
         &slots.push(slot)
     }
     _ := sema_check_body_parts(shared, slots, 0, module_index)
@@ -4324,10 +4046,11 @@ fn sema_check_shared_return_scope(shared: Shared<SemaCheckShared>) -> SemaScopeT
 }
 
 // Moves a thread's item indexes into its slot.
-fn sema_check_body_part_fill(slot: Shared<SemaBodyPart>, items: ^[SemaBodyJob], replay: ^[Bool]) {
+fn sema_check_body_part_fill(slot: Shared<SemaBodyPart>, items: ^[SemaBodyJob], replay: ^[Bool], observe: Bool) {
     permit :: slot.guard_edit()
     permit.value.items = ^items
     permit.value.cache_replay = ^replay
+    permit.value.cache_observe = observe
 }
 
 // Gives a thread's slot its own light copy of the shared module scope, made
@@ -4399,12 +4122,7 @@ fn sema_host_hook_was_wanted(wanted: Shared<SemaHostHookWanted>) -> Bool {
 // stand in for checking the same functions here while they still apply
 // (sema_check_module_function).
 // Read-only declaration/body thunks close before either owner is moved.
-// D1: `baseline` is the recheck's retained bodies (sema_recheck_baseline),
-// empty in a pass that replays nothing; the module result records every
-// body this pass checked (`bodies`).
-fn sema_check_registration_module(owned_environment: ^SemaScopeEnvironment, owned_program: ^SemaProgramTables, host_hooks: SemaHostHookAccess?, owned_memory_plan: ^SemaFunctionMemoryPlan, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], check_bodies: Bool, pending_obligations: Bool, prepared: ^SemaPreparedBodies, baseline: ^SemaRecheckBaseline, scheduling: SemaMethodScheduling?, session: SemaIncrementalCache?, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaOwnedModuleCheck {
-    recheck := ^baseline
-    epoch := SemaBodyScopeEpoch{publications: 0, trusted: true}
+fn sema_check_registration_module(owned_environment: ^SemaScopeEnvironment, owned_program: ^SemaProgramTables, host_hooks: SemaHostHookAccess?, owned_memory_plan: ^SemaFunctionMemoryPlan, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], check_bodies: Bool, pending_obligations: Bool, prepared: ^SemaPreparedBodies, scheduling: SemaMethodScheduling?, session: SemaIncrementalCache?, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaOwnedModuleCheck {
     ready := ^prepared
     memo := ^ready.memo
     ready.memo = None
@@ -4454,7 +4172,7 @@ fn sema_check_registration_module(owned_environment: ^SemaScopeEnvironment, owne
             if count_work -> items_scanned += 1
             if trace_sink == .Val(sink) -> sink.progress("sema.bodies", item_index, item_count)
             if sema_check_registered_item_is_jet_function(environment, program, module_index, item_index) {
-                sema_check_registration_top_level(module_index, item_index, memory_plan, &environment, program, &scopes, &return_view_rows, &ready.bodies, &queries, &memo, &recheck, &epoch, host_hooks, comptime_functions, comptime_rows, &module_result, &scopes_changed, keep_going, pending_obligations, trace_functions, trace_sink, item_count, count_work, &functions_checked)
+                sema_check_registration_top_level(module_index, item_index, memory_plan, &environment, program, &scopes, &return_view_rows, &ready.bodies, &queries, &memo, host_hooks, comptime_functions, comptime_rows, &module_result, &scopes_changed, keep_going, pending_obligations, trace_functions, trace_sink, item_count, count_work, &functions_checked)
             } else {
                 sema_check_registration_module_test(environment, program, module_index, item_index, scopes, host_hooks, &module_result)
             }
@@ -4464,7 +4182,7 @@ fn sema_check_registration_module(owned_environment: ^SemaScopeEnvironment, owne
         method_ready := sema_check_prepared_none()
         if scheduling == .Val(schedule) {
             weights := [Int]{}
-            jobs := sema_check_registered_parallel_method_jobs(environment, program, module_index, memory_plan, all_method_jobs, comptime_rows, sema_recheck_replayed_keys(recheck, epoch), &weights)
+            jobs := sema_check_registered_parallel_method_jobs(environment, program, module_index, memory_plan, all_method_jobs, comptime_rows, &weights)
             work := 0
             loop weight in weights -> work += weight
             workers := 1
@@ -4483,7 +4201,7 @@ fn sema_check_registration_module(owned_environment: ^SemaScopeEnvironment, owne
         }
         loop job in all_method_jobs {
             if count_work -> method_jobs += 1
-            if !sema_check_apply_method_job(module_index, memory_plan, job, &method_ready.bodies, &method_ready.queries, memo, &recheck, epoch, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &module_result, keep_going, pending_obligations) -> module_result.complete = false
+            if !sema_check_apply_method_job(module_index, memory_plan, job, &method_ready.bodies, &method_ready.queries, memo, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &module_result.diagnostics, &module_result.functions, &module_result.call_facts, &module_result.hardware_use, &module_result.comptime_requests, &module_result.name_references, &module_result.comptime_body_sources, &module_result.compute_facts, &module_result.exact_int_reachable, &module_result.copy_events, &module_result.incomplete_reasons, keep_going, pending_obligations) -> module_result.complete = false
         }
         injected_from := module_result.functions.len()
         if !sema_inject_prelude_error_conversions(module_identity, &environment, program, &scopes, host_hooks, &module_result.functions, &module_result.diagnostics, &module_result.call_facts, &module_result.comptime_requests, &module_result.name_references, &module_result.incomplete_reasons, keep_going) -> module_result.complete = false
@@ -5971,7 +5689,7 @@ fn sema_collect_comptime_declarations(graph: ^SemaRegistrationGraph, package_pol
         program := sema_check_shared_take_program(module_state)
         if trace_sink == .Val(sink) -> sema_comptime_trace_module_begin(sink, program, module_index, module_count)
         memory_plan := sema_check_shared_take_memory_plan(module_state)
-        owned_check := sema_check_registration_module(^environment, ^program, None, ^memory_plan, module_index, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, [String:Int]{}, false, false, sema_check_prepared_none(), sema_recheck_baseline_none(), None, None, "sema.check", trace_sink)
+        owned_check := sema_check_registration_module(^environment, ^program, None, ^memory_plan, module_index, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, [String:Int]{}, false, false, sema_check_prepared_none(), None, None, "sema.check", trace_sink)
         restored_environment := ^owned_check.environment
         restored_program := ^owned_check.program
         restored_memory_plan := ^owned_check.memory_plan
@@ -6109,7 +5827,7 @@ fn sema_check_declarations_in_shared(shared_state: Shared<SemaCheckShared>, modu
     environment := sema_check_shared_take_environment(shared_state)
     program := sema_check_shared_take_program(shared_state)
     memory_plan := sema_check_shared_take_memory_plan(shared_state)
-    checked := sema_check_registration_module(^environment, ^program, None, ^memory_plan, module_index, values, [SemaComptimeFunctionResult]{}, [String:Int]{}, false, false, sema_check_prepared_none(), sema_recheck_baseline_none(), None, None, counter_phase, trace_sink)
+    checked := sema_check_registration_module(^environment, ^program, None, ^memory_plan, module_index, values, [SemaComptimeFunctionResult]{}, [String:Int]{}, false, false, sema_check_prepared_none(), None, None, counter_phase, trace_sink)
     restored_environment := ^checked.environment
     restored_program := ^checked.program
     restored_memory_plan := ^checked.memory_plan
@@ -6557,11 +6275,7 @@ struct SemaFinalizeChecked {
 // read the existing Env/Shared owner, then join before that owner is recovered.
 // Returning the actual graph keeps failure projection/rechecks on the same
 // registered rows rather than on a second snapshot.
-// D1: `recheck` is the failure-union recheck plan (sema_failure_recheck_plan):
-// `selected` is then its modules, `modules` holds every module's first-pass
-// result, and each selected module's result becomes the baseline its recheck
-// replays (sema_recheck_baseline) and is replaced by the rechecked result.
-fn sema_finalize_check_modules(graph: ^SemaRegistrationGraph, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], selected: [Int], pending_obligations: Bool, host_hooks: SemaHostHookAccess?, threads: CompilerThreads, session: SemaIncrementalCache?, phase: String, trace_sink: CompilerTraceSink?, modules: &[SemaGraphModuleResult], recheck: SemaFailureRecheckPlan?) -> SemaRegistrationGraph {
+fn sema_finalize_check_modules(graph: ^SemaRegistrationGraph, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], selected: [Int], pending_obligations: Bool, host_hooks: SemaHostHookAccess?, threads: CompilerThreads, session: SemaIncrementalCache?, phase: String, trace_sink: CompilerTraceSink?, modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
     if trace_sink == .Val(sink) -> sink.begin(phase, "", -1, -1)
     // A codec wave (sema_codec_waves) checks only the generated codecs it
     // filled, into the modules' existing results.
@@ -6592,25 +6306,23 @@ fn sema_finalize_check_modules(graph: ^SemaRegistrationGraph, values: [SemaCompt
     trace_functions := false
     if trace_sink == .Val(sink) -> trace_functions = sink.functions()
     checked_functions := 0
-    loop (row, module_index) in selected {
+    loop module_index in selected {
         if codec_wave {
             checked_functions += sema_check_codec_module_in_shared(shared_state, host_hooks, module_index, comptime_functions, comptime_rows, pending_obligations, phase, trace_sink, &modules[module_index])
             next
         }
-        baseline := sema_recheck_baseline_none()
-        if recheck == .Val(plan) -> baseline = sema_recheck_baseline(&modules[module_index], plan.dependents[row], sema_recheck_summary_keys_in_shared(shared_state, module_index, comptime_rows))
         weights := [Int]{}
-        jobs :: sema_check_parallel_jobs_in_shared(shared_state, module_index, comptime_rows, sema_recheck_replayed_keys(baseline, SemaBodyScopeEpoch{publications: 0, trusted: true}), &weights, phase, trace_sink)
+        jobs :: sema_check_parallel_jobs_in_shared(shared_state, module_index, comptime_rows, &weights, phase, trace_sink)
         scope_rows :: sema_check_module_scope_rows_in_shared(shared_state, module_index)
         body_work := 0
         loop weight in weights -> body_work += weight
         workers := 1
         if !trace_functions -> workers = compiler_threads_admit(threads, jobs.len(), body_work, SEMA_BODY_MIN_BYTES_PER_THREAD, scope_rows * SEMA_BODY_SCOPE_BYTES_PER_BINDING, 0)
         prepared := sema_check_prepare_module(shared_state, host_hooks, module_index, values, comptime_functions, comptime_rows, jobs, weights, workers, session, phase, trace_sink)
-        checked := sema_check_module_in_shared(shared_state, host_hooks, module_index, values, comptime_functions, comptime_rows, pending_obligations, ^prepared, ^baseline, threads, session, phase, trace_sink)
+        checked := sema_check_module_in_shared(shared_state, host_hooks, module_index, values, comptime_functions, comptime_rows, pending_obligations, ^prepared, threads, session, phase, trace_sink)
         if trace_sink == .Val(sink) -> sink.end("sema.module", checked.functions.len())
         checked_functions += checked.functions.len()
-        if recheck == .Val(_) -> modules[module_index] = ^checked else -> &modules.push(^checked)
+        &modules.push(^checked)
     }
     if trace_sink == .Val(sink) -> sink.end(phase, checked_functions)
     environment_out := sema_check_shared_take_environment(shared_state)
@@ -6623,37 +6335,19 @@ fn sema_finalize_check_modules(graph: ^SemaRegistrationGraph, values: [SemaCompt
     ^graph_out ?? panic("a completed registered-body pass lost its graph")
 }
 
-fn sema_check_parallel_jobs_in_shared(shared_state: Shared<SemaCheckShared>, module_index: Int, comptime_rows: [String:Int], replayed: [String:Bool], weights: &[Int], phase: String, trace_sink: CompilerTraceSink?) -> [SemaBodyJob] {
+fn sema_check_parallel_jobs_in_shared(shared_state: Shared<SemaCheckShared>, module_index: Int, comptime_rows: [String:Int], weights: &[Int], phase: String, trace_sink: CompilerTraceSink?) -> [SemaBodyJob] {
     inputs :: shared_state.guard_read()
-    sema_check_parallel_jobs_from_environment(inputs.value.environments[0], inputs.value.programs[0], module_index, comptime_rows, replayed, &weights, phase, trace_sink)
+    sema_check_parallel_jobs_from_environment(inputs.value.environments[0], inputs.value.programs[0], module_index, comptime_rows, &weights, phase, trace_sink)
 }
 
-fn sema_check_parallel_jobs_from_environment(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, comptime_rows: [String:Int], replayed: [String:Bool], weights: &[Int], phase: String, trace_sink: CompilerTraceSink?) -> [SemaBodyJob] {
+fn sema_check_parallel_jobs_from_environment(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, comptime_rows: [String:Int], weights: &[Int], phase: String, trace_sink: CompilerTraceSink?) -> [SemaBodyJob] {
     if program.registration_graph == .Val(graph) {
         if trace_sink == .Val(sink) -> sink.begin("sema.module", graph.modules[module_index].module_path, module_index, graph.modules.len())
-        jobs := sema_check_parallel_jobs(graph, module_index, comptime_rows, replayed, &weights)
+        jobs := sema_check_parallel_jobs(graph, module_index, comptime_rows, &weights)
         if trace_sink == .Val(sink) -> sink.progress("counters.{phase}.items_scanned", graph.modules[module_index].program.items.len(), -1)
         return ^jobs
     }
     panic("a registered-module scheduler lost its graph")
-}
-
-// D1: the keys of module `module_index`'s view summary functions
-// (sema_check_view_summary_jobs) a recheck would check again: every one not
-// checked by comptime, whose summary the body pass makes.
-fn sema_recheck_summary_keys_in_shared(shared_state: Shared<SemaCheckShared>, module_index: Int, comptime_rows: [String:Int]) -> [String] {
-    inputs :: shared_state.guard_read()
-    sema_recheck_summary_keys(inputs.value.environments[0], inputs.value.programs[0], module_index, comptime_rows)
-}
-
-fn sema_recheck_summary_keys(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, comptime_rows: [String:Int]) -> [String] {
-    keys := [String]{}
-    module_identity :: sema_check_registered_module_identity(environment, program, module_index)
-    loop item_index in sema_check_view_summary_jobs(environment, program, module_index) {
-        key :: sema_check_registered_function_id(SemaBodyJob.TopLevel{item_index: item_index}, module_index, environment, program).key
-        if comptime_rows.get("{module_identity}\n{key}") == None -> &keys.push(key)
-    }
-    keys
 }
 
 fn sema_check_module_scope_rows_in_shared(shared_state: Shared<SemaCheckShared>, module_index: Int) -> Int {
@@ -6678,11 +6372,11 @@ fn sema_check_prepare_module(shared_state: Shared<SemaCheckShared>, host_hooks: 
     sema_check_bodies_parallel(shared_state, module_index, ^scopes, jobs, weights, workers, memo, ^queries)
 }
 
-fn sema_check_module_in_shared(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, prepared: ^SemaPreparedBodies, baseline: ^SemaRecheckBaseline, threads: CompilerThreads, session: SemaIncrementalCache?, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaGraphModuleResult {
+fn sema_check_module_in_shared(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, prepared: ^SemaPreparedBodies, threads: CompilerThreads, session: SemaIncrementalCache?, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaGraphModuleResult {
     environment := sema_check_shared_take_environment(shared_state)
     program := sema_check_shared_take_program(shared_state)
     memory_plan := sema_check_shared_take_memory_plan(shared_state)
-    checked := sema_check_registration_module(^environment, ^program, host_hooks, ^memory_plan, module_index, values, comptime_functions, comptime_rows, true, pending_obligations, ^prepared, ^baseline, Val(SemaMethodScheduling{shared_state: shared_state, threads: threads}), session, counter_phase, trace_sink)
+    checked := sema_check_registration_module(^environment, ^program, host_hooks, ^memory_plan, module_index, values, comptime_functions, comptime_rows, true, pending_obligations, ^prepared, Val(SemaMethodScheduling{shared_state: shared_state, threads: threads}), session, counter_phase, trace_sink)
     restored_environment := ^checked.environment
     restored_program := ^checked.program
     restored_memory_plan := ^checked.memory_plan
@@ -6705,13 +6399,9 @@ fn sema_check_codec_module_in_shared(shared_state: Shared<SemaCheckShared>, host
     jobs :: sema_check_registered_method_jobs(environment, program, module_index, &scanned, false)
     ready := [SemaPreparedBody]{}
     queries := [Int:SemaBodyMemoQuery]{}
-    // A wave's methods see the post-summary scope, which the recheck's body
-    // loop reproduces when no return view was published (epoch 0).
-    baseline := sema_recheck_baseline_none()
-    epoch :: SemaBodyScopeEpoch{publications: 0, trusted: true}
     before :: result.functions.len()
     loop job in jobs {
-        if !sema_check_apply_method_job(module_index, memory_plan, job, &ready, &queries, None, &baseline, epoch, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &result, keep_going, pending_obligations) -> result.complete = false
+        if !sema_check_apply_method_job(module_index, memory_plan, job, &ready, &queries, None, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &result.diagnostics, &result.functions, &result.call_facts, &result.hardware_use, &result.comptime_requests, &result.name_references, &result.comptime_body_sources, &result.compute_facts, &result.exact_int_reachable, &result.copy_events, &result.incomplete_reasons, keep_going, pending_obligations) -> result.complete = false
     }
     sema_check_shared_fill(shared_state, ^environment, ^program, ^memory_plan)
     result.functions.len() - before
@@ -6757,8 +6447,8 @@ fn sema_failure_obligation_callee(diagnostic: Diagnostic, mark: String) -> Strin
 
 // Whether a function check reported an error a keep-going trap answers for.
 // Before the failure solve (`pending_obligations`) an obligation against an
-// unannotated callee is not one yet: the solve discharges it, or the body
-// that keeps it is checked again (`sema_failure_recheck_plan`).
+// unannotated callee is not one yet: the solve discharges it, or the module
+// that keeps it is checked again (`sema_failure_recheck_modules`).
 fn sema_check_function_failed(diagnostics: [Diagnostic], start: Int, pending_obligations: Bool) -> Bool Never! {
     if !pending_obligations -> return sema_has_error_since(diagnostics, start)
     mark :: sema_failure_obligation_mark()
@@ -6770,44 +6460,13 @@ fn sema_check_function_failed(diagnostics: [Diagnostic], start: Int, pending_obl
 
 // Whether `module_result` calls one of `keys` or names one as a value.
 fn sema_failure_module_references(module_result: SemaGraphModuleResult, keys: [String:Bool]) -> Bool Never! {
-    sema_failure_rows_reference(module_result, keys, 0, module_result.call_facts.len(), 0, module_result.name_references.len())
-}
-
-// Whether `module_result`'s call facts [call_start, call_end) call one of
-// `keys` or its name references [reference_start, reference_end) name one as
-// a value.
-fn sema_failure_rows_reference(module_result: SemaGraphModuleResult, keys: [String:Bool], call_start: Int, call_end: Int, reference_start: Int, reference_end: Int) -> Bool Never! {
-    loop index in call_start..<call_end {
-        if module_result.call_facts[index].callee == .Val(callee) && keys.get(callee.key) != None -> return true
+    loop fact in module_result.call_facts {
+        if fact.callee == .Val(callee) && keys.get(callee.key) != None -> return true
     }
-    loop index in reference_start..<reference_end {
-        if keys.get(module_result.name_references[index].symbol.id.key) != None -> return true
+    loop reference in module_result.name_references {
+        if keys.get(reference.symbol.id.key) != None -> return true
     }
     false
-}
-
-// The module rule's diagnostic test over `diagnostics[start, end)`: an error
-// after a mint (a minted type may have been named before it existed), or a
-// failure obligation against a callee that kept its carrier (not one of
-// `plain_keys`) with keep-going, so the trap sees that error.
-fn sema_failure_diagnostics_depend(diagnostics: [Diagnostic], start: Int, end: Int, minted: Bool, keep_going: Bool, plain_keys: [String:Bool], mark: String) -> Bool Never! {
-    if !minted && !keep_going -> return false
-    loop index in start..<end {
-        if diagnostics[index].severity != DIAGNOSTIC_ERROR -> next
-        callee :: sema_failure_obligation_callee(diagnostics[index], mark)
-        depends :: if callee == .Val(key) -> keep_going && plain_keys.get(key) == None else -> minted
-        if depends -> return true
-    }
-    false
-}
-
-// D1: the failure-union recheck plan: the modules the one body check can't
-// keep, in order, and per module the keys of the bodies the projection could
-// check differently (`dependents`); the module's other retained bodies are
-// replayed (sema_recheck_baseline).
-struct SemaFailureRecheckPlan {
-    modules: [Int]
-    dependents: [[String:Bool]]
 }
 
 // D-FAIL-INFER-UNION1=A: the modules the one body check can't keep, in
@@ -6820,10 +6479,7 @@ struct SemaFailureRecheckPlan {
 // keep-going, a module with a failure obligation against a callee that kept
 // its carrier (`infallible` holds the `T Never!` projections) is checked again
 // so its traps see that error, as they do once the obligations are settled.
-// D1: within a module, the same rules select the bodies to check again
-// (sema_failure_dependent_bodies); the module's declarations, constants,
-// tests, injected conversions and foreign rows are checked again whole.
-fn sema_failure_recheck_plan(modules: [SemaGraphModuleResult], unions: SemaFailureUnionProjected, infallible: [String], keep_going: Bool) -> SemaFailureRecheckPlan Never! {
+fn sema_failure_recheck_modules(modules: [SemaGraphModuleResult], unions: SemaFailureUnionProjected, infallible: [String], keep_going: Bool) -> [Int] Never! {
     union_keys := [String:Bool]{}
     loop key in unions.keys -> union_keys[key] = true
     declaring := [Bool]{}
@@ -6832,35 +6488,21 @@ fn sema_failure_recheck_plan(modules: [SemaGraphModuleResult], unions: SemaFailu
     plain_keys := [String:Bool]{}
     loop key in infallible -> plain_keys[key] = true
     mark :: sema_failure_obligation_mark()
-    plan := SemaFailureRecheckPlan{modules: [Int]{}, dependents: [[String:Bool]]{}}
+    selected := [Int]{}
     loop (module_index, module_result) in modules {
         recheck := declaring[module_index]
         if !recheck && union_keys.len() > 0 -> recheck = sema_failure_module_references(module_result, union_keys)
-        if !recheck -> recheck = sema_failure_diagnostics_depend(module_result.diagnostics, 0, module_result.diagnostics.len(), unions.minted, keep_going, plain_keys, mark)
-        if !recheck -> next
-        &plan.modules.push(module_index)
-        &plan.dependents.push(sema_failure_dependent_bodies(module_result, union_keys, unions.minted, keep_going, plain_keys, mark))
+        if !recheck && (unions.minted || keep_going) {
+            loop diagnostic in module_result.diagnostics {
+                if diagnostic.severity != DIAGNOSTIC_ERROR -> next
+                callee :: sema_failure_obligation_callee(diagnostic, mark)
+                recheck = if callee == .Val(key) -> keep_going && plain_keys.get(key) == None else -> unions.minted
+                if recheck -> break
+            }
+        }
+        if recheck -> &selected.push(module_index)
     }
-    plan
-}
-
-// D1: the keys of the bodies of `module_result` whose check the projection
-// could change, by the module rule applied to each body's own rows: a
-// projected function's body (its contract changed), a body that calls a
-// projected function or names one as a value, a body with an error after a
-// mint, and with keep-going a body with a failure obligation against a
-// callee that kept its carrier. Every other body named no projected
-// contract and no minted type, so against the projected graph it checks to
-// the same result (sema_checked_body_record).
-fn sema_failure_dependent_bodies(module_result: SemaGraphModuleResult, union_keys: [String:Bool], minted: Bool, keep_going: Bool, plain_keys: [String:Bool], mark: String) -> [String:Bool] Never! {
-    dependents := [String:Bool]{}
-    loop record in module_result.bodies {
-        dependent := union_keys.get(record.key) != None
-        if !dependent && union_keys.len() > 0 -> dependent = sema_failure_rows_reference(module_result, union_keys, record.before.call_facts, record.after.call_facts, record.before.name_references, record.after.name_references)
-        if !dependent -> dependent = sema_failure_diagnostics_depend(module_result.diagnostics, record.before.diagnostics, record.after.diagnostics, minted, keep_going, plain_keys, mark)
-        if dependent -> dependents[record.key] = true
-    }
-    dependents
+    selected
 }
 
 // #3708 / #3740: the Rust reference checks every body once and reconciles the
@@ -6943,7 +6585,7 @@ fn sema_codec_waves(owned: ^SemaRegistrationGraph, trail: &SemaGraphTrail, value
         if affected.len() == 0 -> break
         generated += graph.codec_wave_rows.len()
         waves += 1
-        checked := sema_finalize_check_modules(^graph, values, comptime_functions, checked_types, affected, true, host_hooks, threads, None, "sema.codecs", trace_sink, &modules, None)
+        checked := sema_finalize_check_modules(^graph, values, comptime_functions, checked_types, affected, true, host_hooks, threads, None, "sema.codecs", trace_sink, &modules)
         graph = ^checked
         graph.codec_wave_rows = [String:Bool]{}
     }
@@ -6981,7 +6623,7 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     if session == .Val(cache) -> sema_incremental_begin(cache, resolved_graph, values, comptime_functions, checked_types)
     all_modules :: loop module_index in 0..<resolved_graph.modules.len() -> module_index
     modules := [SemaGraphModuleResult]{}
-    body_graph := sema_finalize_check_modules(^resolved_graph, values, comptime_functions, checked_types, all_modules, true, hook_access, threads, session, "sema.bodies", trace_sink, &modules, None)
+    body_graph := sema_finalize_check_modules(^resolved_graph, values, comptime_functions, checked_types, all_modules, true, hook_access, threads, session, "sema.bodies", trace_sink, &modules)
     // D-META-AUTO1 demand: only the generated codecs a requirement reached
     // get bodies, checked into their modules' results before the failure solve.
     after_body_graph := sema_codec_waves(^body_graph, &trail, values, comptime_functions, checked_types, hook_access, threads, trace_sink, &modules)
@@ -7000,12 +6642,21 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     infallible :: sema_failure_project_infallible(&after_body_graph, inferred_infallible, comptime_functions, &trail)
     if trace_sink == .Val(sink) -> sink.end("sema.failure", inferred_infallible.len())
     // One body pass: only the modules a union contract changes are checked
-    // again, and within them only the bodies the contract could change (D1:
-    // every other retained body is replayed into the rechecked result); the
-    // `T Never!` projections are reconciled onto the checked bodies.
-    recheck :: sema_failure_recheck_plan(modules, unions, infallible, after_body_graph.keep_going)
+    // again; the `T Never!` projections are reconciled onto the checked bodies.
+    recheck :: sema_failure_recheck_modules(modules, unions, infallible, after_body_graph.keep_going)
     final_graph := if {
-        recheck.modules.len() > 0 -> sema_finalize_check_modules(^after_body_graph, values, comptime_functions, checked_types, recheck.modules, false, hook_access, threads, None, "sema.recheck", trace_sink, &modules, Val(recheck))
+        recheck.len() > 0 -> {
+            rechecked := [SemaGraphModuleResult]{}
+            after_recheck_graph := sema_finalize_check_modules(^after_body_graph, values, comptime_functions, checked_types, recheck, false, hook_access, threads, None, "sema.recheck", trace_sink, &rechecked)
+            // One rechecked result per `recheck` row, in order: each moves
+            // into its module's slot, last row first.
+            loop rechecked.len() > 0 {
+                row :: rechecked.len() - 1
+                checked := &rechecked.pop() ?? break
+                modules[recheck[row]] = ^checked
+            }
+            ^after_recheck_graph
+        }
         else -> ^after_body_graph
     }
     sema_failure_reconcile_infallible(&modules, infallible)

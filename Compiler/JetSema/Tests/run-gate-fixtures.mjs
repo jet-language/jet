@@ -35,7 +35,6 @@ const fixtures = [
     ["named-tuple-identity", "Compiler/JetSema/Tests/NamedTupleIdentityFixtures.jet"],
     ["recovered-frozen", "Compiler/JetSema/Tests/FrozenFixtures.jet"],
     ["recovered-policy-guest", "Compiler/JetSema/Tests/BurnDownFixtures.jet"],
-    ["failure-recheck-replay", "Compiler/JetSema/Tests/FailureRecheckReplayFixtures.jet"],
 ];
 for (const [name, path] of fixtures) {
     const project = join(out, name);
