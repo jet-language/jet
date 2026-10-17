@@ -83,8 +83,8 @@ fn lower_reach_callee(p: MIRProgram, q: &LowerPrepared, callee: MIRCallee, type_
         }
         .TraitMethod(method, bound, receiver) -> {
             lower_mono_intern_type(&q, receiver, parent)
-            if lower_trait_ref(p, receiver) == None && lower_trait_impl(p, receiver, bound) == .Val(implementation) {
-                checked :: lower_trait_method(p, bound, method) ?? return
+            if lower_trait_ref(p, receiver) == None && lower_trait_impl(p, q.traits, receiver, bound) == .Val(implementation) {
+                checked :: lower_trait_method(p, q.traits, bound, method) ?? return
                 loop id in implementation.methods {
                     row :: q.source_rows.get(id.value) ?? next
                     if p.functions[row].name == checked.name -> lower_mono_request(p, &q, id, Val(receiver), type_args, parent, site).drop("concrete trait method")

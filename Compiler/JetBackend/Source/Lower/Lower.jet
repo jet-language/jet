@@ -245,6 +245,8 @@ struct LowerModule {
     source_rows: [U64:Int]
     // Shared stop classification indexes checked Prelude effects once.
     prelude_positions: [U64:Int]
+    // Trait rows and impls by trait (Traits.jet lower_trait_index), once per lowering.
+    traits: LowerTraitIndex
     // Checked foreign ID -> its #FFI(asm) function, and -> its program.foreign row.
     asm_foreign: [U64:MIRFunctionID]
     foreign_rows: [U64:Int]
@@ -542,6 +544,7 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
         static_live: None,
         source_rows: [U64:Int]{},
         prelude_positions: lower_prelude_positions(program),
+        traits: ^prepared.traits,
         asm_foreign: ^prepared.asm_foreign,
         foreign_rows: ^prepared.foreign_rows,
         mir_rows: [U64:Int]{},

@@ -3,6 +3,39 @@
 // rejects unknown keys; payloads use ordinary stored-value layout/glue.
 use jet_foundation.[MIRAccess, MIRCallArg, MIRCallee, MIRImplDef, MIRInstruction, MIRProgram, MIRTraitMethod, MIRTraitMethodID, MIRTraitRef, MIRType, MIRTypeID, MIRTypeKind, MIRValueID, mir_type_display_name, mir_type_identity_key]
 
+// Per lowering, built once (lower_trait_index; LowerPrepared.traits, then
+// LowerModule.traits): trait id value -> its first row in p.traits; trait id
+// -> the p.impls rows implementing it in program order, chained
+// (`impl_first`, then `impl_next[row]`, -1 ends); "<trait id>:<receiver
+// identity key>" -> the first such impl row. Trait method, impl and dispatch
+// lookups visit only the bound's own rows instead of every trait and impl.
+struct LowerTraitIndex { rows: [U64:Int], impl_first: [U64:Int], impl_next: [Int], impl_rows: [String:Int] }
+
+fn lower_trait_index(p: MIRProgram) -> LowerTraitIndex Never! {
+    rows := [U64:Int]{}
+    loop (row, definition) in p.traits {
+        if rows.get(definition.id.value) == None -> &rows.add(definition.id.value, row).drop("checked absent above")
+    }
+    impl_first := [U64:Int]{}
+    impl_last := [U64:Int]{}
+    impl_next := [Int]{}
+    impl_rows := [String:Int]{}
+    loop (row, implementation) in p.impls {
+        &impl_next.push(-1)
+        trait_ref :: implementation.trait_ref ?? next
+        id :: trait_ref.id.value
+        if impl_last.get(id) == .Val(last) {
+            impl_next[last] = row
+        } else {
+            impl_first[id] = row
+        }
+        impl_last[id] = row
+        key :: "{id}:{mir_type_identity_key(implementation.self_type)}"
+        if impl_rows.get(key) == None -> &impl_rows.add(key, row).drop("checked absent above")
+    }
+    LowerTraitIndex{rows: ^rows, impl_first: ^impl_first, impl_next: ^impl_next, impl_rows: ^impl_rows}
+}
+
 fn lower_trait_ref(p: MIRProgram, ty: MIRType) -> MIRTraitRef? {
     if ty.kind == .TraitObject(bounds) {
         if bounds.len() == 1 -> return Val(bounds[0])
@@ -17,16 +50,11 @@ fn lower_trait_ref(p: MIRProgram, ty: MIRType) -> MIRTraitRef? {
     None
 }
 
-fn lower_trait_impl(p: MIRProgram, ty: MIRType, bound: MIRTraitRef) -> MIRImplDef? {
-    // The receiver's identity key, built once rather than per impl of `bound`.
-    key := String?{None}
-    loop implementation in p.impls {
-        trait_ref :: implementation.trait_ref ?? next
-        if trait_ref.id != bound.id -> next
-        if key == None -> key = Val(mir_type_identity_key(ty))
-        if mir_type_identity_key(implementation.self_type) == (key ?? "") -> return Val(implementation)
-    }
-    None
+// The first impl of `bound` whose receiver has `ty`'s identity key.
+fn lower_trait_impl(p: MIRProgram, traits: LowerTraitIndex, ty: MIRType, bound: MIRTraitRef) -> MIRImplDef? {
+    if traits.impl_first.get(bound.id.value) == None -> return None
+    row :: traits.impl_rows.get("{bound.id.value}:{mir_type_identity_key(ty)}") ?? return None
+    Val(p.impls[row])
 }
 
 fn lower_trait_size(p: MIRProgram, ty: MIRType) -> Int Never! {
@@ -37,10 +65,10 @@ fn lower_trait_box_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, sour
     bound :: lower_trait_ref(p, target) ?? return lower_fail(&m, &f, "trait boxing target {mir_type_display_name(target)} is not a single checked trait")
     if lower_size(p, ty).align > 8 -> return lower_fail(&m, &f, "native trait payload alignment above 8 is not lowered at O0 yet")
     if bound.name != "Renderable" {
-        implementation :: lower_trait_impl(p, ty, bound) ?? return lower_fail(&m, &f, "trait boxing {mir_type_display_name(ty)} has no checked {bound.name} implementation")
-        loop definition in p.traits {
-            if definition.id != bound.id -> next
-            loop method in definition.methods {
+        implementation :: lower_trait_impl(p, m.traits, ty, bound) ?? return lower_fail(&m, &f, "trait boxing {mir_type_display_name(ty)} has no checked {bound.name} implementation")
+        trait_row :: m.traits.rows.get(bound.id.value) ?? -1
+        if trait_row >= 0 {
+            loop method in p.traits[trait_row].methods {
                 found := false
                 loop id in implementation.methods {
                     instance :: lower_instance_id(id, lower_call_bindings(Val(ty), [MIRType]{}))
@@ -146,11 +174,9 @@ fn lower_trait_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunct
     lir_builder_finish(f.builder)
 }
 
-fn lower_trait_method(p: MIRProgram, bound: MIRTraitRef, id: MIRTraitMethodID) -> MIRTraitMethod? {
-    loop definition in p.traits {
-        if definition.id != bound.id -> next
-        loop method in definition.methods { if method.id == id -> return Val(method) }
-    }
+fn lower_trait_method(p: MIRProgram, traits: LowerTraitIndex, bound: MIRTraitRef, id: MIRTraitMethodID) -> MIRTraitMethod? {
+    row :: traits.rows.get(bound.id.value) ?? return None
+    loop method in p.traits[row].methods { if method.id == id -> return Val(method) }
     None
 }
 
@@ -159,13 +185,14 @@ fn lower_trait_method(p: MIRProgram, bound: MIRTraitRef, id: MIRTraitMethodID) -
 // so with none the program boxes no value of the trait: no key can reach the
 // dispatch, which is the closed set lower_trait_call emits.
 fn lower_trait_dispatches(p: MIRProgram, m: LowerModule, bound: MIRTraitRef, name: String) -> Bool Never! {
-    loop implementation in p.impls {
-        trait_ref :: implementation.trait_ref ?? next
-        if trait_ref.id != bound.id -> next
+    at := m.traits.impl_first.get(bound.id.value) ?? -1
+    loop at >= 0 {
+        implementation :: p.impls[at]
         loop id in implementation.methods {
             row :: lower_function_index(m, lower_instance_id(id, lower_call_bindings(Val(implementation.self_type), [MIRType]{})))
             if row >= 0 && lower_row_source(p, m, row).name == name -> return true
         }
+        at = m.traits.impl_next[at]
     }
     false
 }
@@ -176,18 +203,18 @@ fn lower_trait_dispatches(p: MIRProgram, m: LowerModule, bound: MIRTraitRef, nam
 fn lower_trait_call_dead(p: MIRProgram, m: LowerModule, callee: MIRCallee, args: [MIRCallArg], type_args: [MIRType]) -> Bool Never! {
     if callee == .TraitMethod(method, bound, receiver) {
         if args.len() == 0 || type_args.len() > 0 || lower_trait_ref(p, receiver) == None -> return false
-        checked :: lower_trait_method(p, bound, method) ?? return false
+        checked :: lower_trait_method(p, m.traits, bound, method) ?? return false
         return !lower_trait_dispatches(p, m, bound, checked.name)
     }
     false
 }
 
 fn lower_trait_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, method: MIRTraitMethodID, bound: MIRTraitRef, receiver: MIRType, args: [MIRCallArg], type_args: [MIRType]) Never! {
-    checked :: lower_trait_method(p, bound, method) ?? return lower_fail(&m, &f, "trait call has no checked method")
+    checked :: lower_trait_method(p, m.traits, bound, method) ?? return lower_fail(&m, &f, "trait call has no checked method")
     name :: checked.name
     if args.len() == 0 -> return lower_fail(&m, &f, "trait call has no checked receiver")
     if lower_trait_ref(p, receiver) == None {
-        implementation :: lower_trait_impl(p, receiver, bound) ?? return lower_fail(&m, &f, "trait call has no concrete implementation")
+        implementation :: lower_trait_impl(p, m.traits, receiver, bound) ?? return lower_fail(&m, &f, "trait call has no concrete implementation")
         loop id in implementation.methods {
             instance :: lower_instance_id(id, lower_call_bindings(Val(receiver), type_args))
             row :: lower_function_index(m, instance)
@@ -224,9 +251,10 @@ fn lower_trait_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         result_storage = Val(storage)
     }
     done :: lower_new_block(&f)
-    loop implementation in p.impls {
-        trait_ref :: implementation.trait_ref ?? next
-        if trait_ref.id != bound.id -> next
+    at := m.traits.impl_first.get(bound.id.value) ?? -1
+    loop at >= 0 {
+        implementation :: p.impls[at]
+        at = m.traits.impl_next[at]
         loop id in implementation.methods {
             concrete :: implementation.self_type
             target :: lower_instance_id(id, lower_call_bindings(Val(concrete), [MIRType]{}))
@@ -286,7 +314,7 @@ fn lower_reach_trait_type(p: MIRProgram, q: &LowerPrepared, ty: MIRType, target:
         lower_reach_render_child(&q, ty, true, parent)
         return
     }
-    implementation :: lower_trait_impl(p, ty, bound) ?? return
+    implementation :: lower_trait_impl(p, q.traits, ty, bound) ?? return
     loop id in implementation.methods -> lower_mono_request(p, &q, id, Val(ty), [MIRType]{}, parent, "trait box {bound.name}").drop("trait vtable method")
 }
 
