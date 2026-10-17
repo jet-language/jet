@@ -31,7 +31,7 @@ fn capture_test_record(id: String, seq: U64, bytes: U64, protected: Bool) -> Cap
 fn capture_test_error(budget: CaptureBudget, records: [CaptureTestRecord], incoming: CaptureTestRecord?) -> CaptureBudgetError Never! {
     if plan_eviction_inner<CaptureTestRecord>(budget, records, incoming) == {
         .Err(error) -> error
-        .Ok(_) -> panic("expected retention refusal")
+        .Ok(_) -> { panic("expected retention refusal") }
     }
 }
 
@@ -87,7 +87,7 @@ fn capture_test_error(budget: CaptureBudget, records: [CaptureTestRecord], incom
 #Test("capture_budget_rejects_zero_before_record_validation") {
     if CaptureBudget.new(U64{0}) == {
         .Err(error) -> assert_eq(error, CaptureBudgetError.ZeroByteLimit)
-        .Ok(_) -> panic("zero admitted")
+        .Ok(_) -> { panic("zero admitted") }
     }
     bad :: [CaptureTestRecord]{capture_test_record("", U64{0}, U64.MAX, false)}
     error :: capture_test_error(CaptureBudget.new_unchecked(U64{0}), bad, None)

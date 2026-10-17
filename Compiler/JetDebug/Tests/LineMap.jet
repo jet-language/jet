@@ -79,7 +79,7 @@ use std.thread as thread
     result :: LineMap.load_verified(map_path, "program.jet", jet_src, "program.rs", rust_src, binary)
     error :: if result == {
         .Err(error) -> error
-        else -> panic("edited sidecar entries must not be trusted")
+        else -> { panic("edited sidecar entries must not be trusted") }
     }
     assert(error.contains("entries do not match"), error)
     _ :: fs.remove_dir_all(root)

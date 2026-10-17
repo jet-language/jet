@@ -68,7 +68,7 @@ fn lsp_semantic_symbol_metadata_json(db: SymbolDB, symbol: SemanticSymbol) -> St
         loop fact in contract.associated_types {
             ty :: if fact.implementation == {
                 .Val(value) -> foundation_json_quote(value)
-                None -> "null"
+                .None -> "null"
             }
             &associated.push("{{\"name\":{foundation_json_quote(fact.name)},\"type\":{ty}}}")
         }
@@ -76,11 +76,11 @@ fn lsp_semantic_symbol_metadata_json(db: SymbolDB, symbol: SemanticSymbol) -> St
     }
     base :: if def.nominal_base == {
         .Val(value) -> foundation_json_quote(value)
-        None -> "null"
+        .None -> "null"
     }
     relation :: if derivation == {
         .Val(row) -> derivation_record_json(row[0])
-        None -> "null"
+        .None -> "null"
     }
     Val("{{\"identity\":{foundation_json_quote(def.identity)},\"qualified_name\":{foundation_json_quote(def.qualified_name)},\"signature\":{foundation_json_quote(symbol.signature)},\"nominal_base\":{base},\"trait_contracts\":[{contracts.join(",")}],\"derivation\":{relation}}}")
 }
@@ -179,12 +179,12 @@ fn lsp_checked_instance_identity(db: SymbolDB, path: String, start: Int, end: In
 
 // Rust: Source/LSP/Features.rs:1451. Errors propagate before later priorities.
 fn lsp_checked_identity_in_span(db: SymbolDB, path: String, start: Int, end: Int) -> String? ()! {
-    reference :: lsp_checked_reference_in_span(db, path, start, end)?
+    reference :: lsp_checked_reference_in_span(db, path, start, end)
     if reference == .Val(row) {
         if row[0].target == .Val(target) -> return Ok(lsp_checked_anchor_identity(db, target))
         return Ok(None)
     }
-    definition :: lsp_checked_definition_in_span(db, path, start, end)?
+    definition :: lsp_checked_definition_in_span(db, path, start, end)
     if definition == .Val(row) -> return Ok(Val(row[0].identity.copy()))
     lsp_checked_instance_identity(db, path, start, end)
 }

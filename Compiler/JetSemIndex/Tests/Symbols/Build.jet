@@ -19,7 +19,7 @@ fn semantic_s14_from_checked(db: SymbolDB, registration: SemaRegistrationGraph, 
 fn semantic_s14_contextual_result_source() -> String Never! { "fn run() {{}}\n" }
 fn semantic_s14_contextual_result_names_are_not_advertised_as_keywords(db: SymbolDB, registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
     symbols :: semantic_s14_from_checked(db, registration, names, module_sources, loaded_module_rows)
-    loop name in [String]{"Ok", "Err"} {
+    loop name in ([String]{"Ok", "Err"}) {
         keyword_identity :: "builtin:keyword:{name}"
         loop symbol in symbols.symbols() {
             assert(symbol.identity != keyword_identity && !(symbol.name == name && symbol.kind == SemanticSymbolKind.Keyword))
@@ -40,7 +40,7 @@ fn semantic_s14_source_distinct_and_unit_conversion_members_are_cataloged(db: Sy
     assert_eq(unit.owner, Val("Usd"))
     found := false
     distinct_start :: "\n".bytes().len()
-    loop candidate in symbols.complete_visible_at("from_u", Val("UserID"), SemanticVisibilityAnchor{module_path: module_path, offset: Val(distinct_start), session_top_level: false}) {
+    loop candidate in symbols.complete_visible_at("from_u", Val("UserID"), (SemanticVisibilityAnchor{module_path: module_path, offset: Val(distinct_start), session_top_level: false})) {
         if candidate[0].qualified_name == "UserID.from_u8" -> found = true
     }
     assert(found)
@@ -76,7 +76,7 @@ fn semantic_s14_semantic_symbols_carry_shared_docs_and_provenance(db: SymbolDB, 
     assert_eq(score.examples, [String]{"score(\"Ada\")"})
     if score.provenance == {
         .Source(_) -> {}
-        else -> panic("source provenance")
+        else -> { panic("source provenance") }
     }
     local :: symbols.lookup("local_total")
     assert_eq(local.len(), 1)
@@ -169,7 +169,7 @@ fn semantic_s14_semantic_symbols_include_language_builtins(db: SymbolDB, registr
     assert_eq(filter.summary, "Keeps items where f(item) is true.")
     if filter.provenance == {
         .Builtin(_) -> {}
-        else -> panic("builtin provenance")
+        else -> { panic("builtin provenance") }
     }
     found := false
     loop candidate in symbols.complete("fil", Val("List")) {

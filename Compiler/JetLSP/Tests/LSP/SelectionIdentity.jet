@@ -9,7 +9,7 @@ fn lsp_selection_test_def(identity: String, start: Int, end: Int) -> SymDef Neve
 }
 fn lsp_selection_test_ref(identity: String?, start: Int, end: Int) -> SymRef Never! {
     target := DefinitionAnchor?{None}
-    if identity == .Val(value) -> target = Val(DefinitionAnchor{module_path: "defs.jet", kind: "param", def_span: SourceSpan{start: 0, end: 1}, semantic_identity: Val(value)})
+    if identity == .Val(value) -> target = Val(DefinitionAnchor{module_path: "defs.jet", kind: "param", def_span: (SourceSpan{start: 0, end: 1}), semantic_identity: Val(value)})
     SymRef{name: "value", span: Span{start: start, end: end}, module_path: "main.jet", scope_identity: None, target: target, fact: None}
 }
 
@@ -28,18 +28,18 @@ fn lsp_selection_test_ref(identity: String?, start: Int, end: Int) -> SymRef Nev
 
 #Test("checked reference selects smallest containing span and preserves absent unresolved ambiguous distinctions") {
     db := SymbolDB.new()
-    assert(lsp_checked_reference_in_span(db, "main.jet", 4, 5) == .Ok(None))
+    assert(lsp_checked_reference_in_span(db, "main.jet", 4, 5) == .Ok(.None))
     db.refs = [SymRef]{lsp_selection_test_ref(Val("outer"), 0, 10), lsp_selection_test_ref(None, 3, 6)}
-    assert(lsp_checked_reference_in_span(db, "main.jet", 4, 5) == .Err(()))
+    assert(lsp_checked_reference_in_span(db, "main.jet", 4, 5) == .Err(_))
     db.refs[1] = lsp_selection_test_ref(Val("inner"), 3, 6)
     result :: lsp_checked_reference_in_span(db, "main.jet", 4, 5) ?? panic("selection")
     row :: result ?? panic("reference")
     assert_eq(row[0].span, Span{start: 3, end: 6})
     &db.refs.push(lsp_selection_test_ref(Val("different"), 3, 6))
-    assert(lsp_checked_reference_in_span(db, "main.jet", 4, 5) == .Err(()))
+    assert(lsp_checked_reference_in_span(db, "main.jet", 4, 5) == .Err(_))
     db.refs[2] = lsp_selection_test_ref(Val("inner"), 3, 6)
     assert(lsp_checked_reference_in_span(db, "main.jet", 4, 5) == .Ok(.Val(_)))
-    assert(lsp_checked_reference_in_span(db, "other.jet", 4, 5) == .Ok(None))
+    assert(lsp_checked_reference_in_span(db, "other.jet", 4, 5) == .Ok(.None))
 }
 
 #Test("checked definition keeps smallest span ambiguity and reference errors prevent fallback") {
@@ -50,9 +50,9 @@ fn lsp_selection_test_ref(identity: String?, start: Int, end: Int) -> SymRef Nev
     assert_eq(row[0].identity, "inner")
     assert_eq(lsp_checked_identity_in_span(db, "main.jet", 4, 5), Ok(Val("inner")))
     &db.defs.push(lsp_selection_test_def("different", 3, 6))
-    assert(lsp_checked_definition_in_span(db, "main.jet", 4, 5) == .Err(()))
+    assert(lsp_checked_definition_in_span(db, "main.jet", 4, 5) == .Err(_))
     db.refs = [SymRef]{lsp_selection_test_ref(None, 3, 6)}
-    assert(lsp_checked_identity_in_span(db, "main.jet", 4, 5) == .Err(()))
+    assert(lsp_checked_identity_in_span(db, "main.jet", 4, 5) == .Err(_))
 }
 
 #Test("instance identity chooses smallest retained application and refuses tied differing identities") {
@@ -63,7 +63,7 @@ fn lsp_selection_test_ref(identity: String?, start: Int, end: Int) -> SymRef Nev
     assert_eq(lsp_checked_identity_in_span(db, "main.jet", 4, 5), Ok(Val("inner")))
     &instance.applications.push(InstanceApplicationFact{name: "Box", module_path: "main.jet", semantic_identity: "different", span: SourceSpan{start: 3, end: 6}})
     &db.index.set_instances([InstanceFact]{instance})
-    assert(lsp_checked_instance_identity(db, "main.jet", 4, 5) == .Err(()))
+    assert(lsp_checked_instance_identity(db, "main.jet", 4, 5) == .Err(_))
     assert_eq(lsp_checked_instance_identity(db, "other.jet", 4, 5), Ok(None))
 }
 

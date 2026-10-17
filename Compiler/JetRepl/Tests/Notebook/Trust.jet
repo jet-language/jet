@@ -129,14 +129,14 @@ fn notebook_trust_test_active(decision: NotebookRenderDecision) -> Bool Never! {
             assert_eq(text, "chart")
             assert_eq(mime, expected)
         }
-        else -> panic("non-active MIME must not request a grant")
+        else -> { panic("non-active MIME must not request a grant") }
     }
     bundle.mime = [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "text/html", payload: "<b>safe supplied bytes</b>"}, NotebookMIMEEntry{media_type: "application/javascript", payload: "drop"}}
     bundle.requested_origins = [String]{}
     bundle.requested_messages = [String]{}
     if notebook_decide_render(store, "src", "env", "rend", bundle) == {
         .AllowPassive(_, mime) -> assert_eq(mime, [NotebookMIMEEntry]{bundle.mime[0]})
-        else -> panic("zero-capability HTML is passive-equivalent")
+        else -> { panic("zero-capability HTML is passive-equivalent") }
     }
     bundle.requested_messages = [String]{"M"}
     assert(notebook_trust_test_fallback(notebook_decide_render(store, "src", "env", "rend", bundle)))
@@ -175,13 +175,13 @@ fn notebook_trust_test_active(decision: NotebookRenderDecision) -> Bool Never! {
     bundle.requested_messages = [String]{}
     if notebook_decide_render(store, "src", "env", "rend", bundle) == {
         .AllowPassive(_, mime) -> assert_eq(mime, allowed)
-        else -> panic("zero-capability bundle is passive-equivalent")
+        else -> { panic("zero-capability bundle is passive-equivalent") }
     }
     bundle.requested_origins = [String]{"https://data.example"}
     _ :: notebook_trust_grant_active(&store, notebook_trust_test_request(bundle))
     if notebook_decide_render(store, "src", "env", "rend", bundle) == {
         .AllowActive(_, mime) -> assert_eq(mime, bundle.mime)
-        else -> panic("active grant preserves every MIME row")
+        else -> { panic("active grant preserves every MIME row") }
     }
     notebook_trust_revoke_matching(&store, "src")
     request := notebook_trust_test_request(bundle)

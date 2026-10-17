@@ -1,6 +1,6 @@
 // No inline Rust tests in either assigned window. These controls call the
 // actual byte-policy/response bodies and native FS/CLI providers; no mocks.
-fn lsp_env_test_json(text: String) -> DataTree Never! {
+fn lsp_env_test_json(text: String) -> Dyn Never! {
     foundation_parse_protocol_json(text) ?? panic("environment resource JSON fixture")
 }
 
@@ -25,7 +25,7 @@ fn lsp_env_test_scratch(label: String) -[Env, FS, Exec]> OSPath Never! {
 }
 
 #Test("environment output accepts strict JSON scalars and preserves trimmed text") {
-    loop text in [String]{"{{\"packages\":[]}}", "null", "true", "42", "[1,2]", "\"é\""} {
+    loop text in ([String]{"{{\"packages\":[]}}", "null", "true", "42", "[1,2]", "\"é\""}) {
         stdout := " \t{Char{13}}\n{text}\n".bytes()
         assert_eq(lsp_environment_resource_text(true, ^stdout), Ok(text))
     }
@@ -38,7 +38,7 @@ fn lsp_env_test_scratch(label: String) -[Env, FS, Exec]> OSPath Never! {
     assert_eq(lsp_environment_resource_text(false, ^valid), Err(LSPEnvironmentResourceReadError.Unavailable))
     invalid_utf8 := [U8]{U8{255}}
     assert_eq(lsp_environment_resource_text(true, ^invalid_utf8), Err(LSPEnvironmentResourceReadError.Unavailable))
-    loop text in [String]{"", " {Char{13}}\n\t", "not JSON", "{{\"x\":1,\"x\":2}}", "9223372036854775808", "\"\\ud800\""} {
+    loop text in ([String]{"", " {Char{13}}\n\t", "not JSON", "{{\"x\":1,\"x\":2}}", "9223372036854775808", "\"\\ud800\""}) {
         stdout := text.bytes()
         assert_eq(lsp_environment_resource_text(true, ^stdout), Err(LSPEnvironmentResourceReadError.Unavailable))
     }
@@ -65,10 +65,10 @@ fn lsp_env_test_scratch(label: String) -[Env, FS, Exec]> OSPath Never! {
 
 #Test("resources read returns exact invalid-params response for every missing or nonstring URI") {
     server :: lsp_env_test_server()
-    id :: DataTree.Text("request-\"a\"")
+    id :: Dyn.Text("request-\"a\"")
     expected :: Val(lsp_error_response(id, -32602, "resources/read requires a URI"))
     assert_eq(lsp_environment_resource_read_response(server, None, id), expected)
-    loop raw in [String]{"null", "[]", "1", "{{}}", "{{\"uri\":null}}", "{{\"uri\":1}}", "{{\"uri\":[]}}"} {
+    loop raw in ([String]{"null", "[]", "1", "{{}}", "{{\"uri\":null}}", "{{\"uri\":1}}", "{{\"uri\":[]}}"}) {
         assert_eq(lsp_environment_resource_read_response(server, Val(lsp_env_test_json(raw)), id), expected)
     }
     // Wrong URI wins before root/current_dir/executable lookup.
@@ -80,7 +80,7 @@ fn lsp_env_test_scratch(label: String) -[Env, FS, Exec]> OSPath Never! {
     uri :: "jet://environment\"\\\n"
     text :: "{{\"message\":\"é\"}}\n"
     actual :: lsp_env_test_json(lsp_environment_resource_contents_json(uri, text))
-    expected :: DataTree.Object([String:DataTree]{"contents": DataTree.Array([DataTree]{DataTree.Object([String:DataTree]{"uri": DataTree.Text(uri), "mimeType": DataTree.Text("application/json"), "text": DataTree.Text(text)})})})
+    expected :: Dyn.Object([String:Dyn]{"contents": Dyn.Array([Dyn]{Dyn.Object([String:Dyn]{"uri": Dyn.Text(uri), "mimeType": Dyn.Text("application/json"), "text": Dyn.Text(text)})})})
     assert_eq(actual, expected)
 }
 
@@ -121,15 +121,15 @@ fn lsp_env_test_scratch(label: String) -[Env, FS, Exec]> OSPath Never! {
     server := lsp_env_test_server()
     server.workspace_roots = [OSPath]{scratch}
     params :: Val(lsp_env_test_json("{{\"uri\":\"jet://environment\"}}"))
-    response :: lsp_environment_resource_read_response(server, params, DataTree.Int(7)) ?? panic("resource response")
+    response :: lsp_environment_resource_read_response(server, params, Dyn.Int(7)) ?? panic("resource response")
     frame :: lsp_env_test_json(response)
     result :: frame.field("result") ?? panic("resource result")
-    assert_eq(frame.field("id"), Val(DataTree.Int(7)))
+    assert_eq(frame.field("id"), Val(Dyn.Int(7)))
     contents :: result.field("contents") ?? panic("resource contents")
     if contents == .Array(rows) {
         assert_eq(rows.len(), 1)
-        assert_eq(rows[0].field("uri"), Val(DataTree.Text(LSP_ENVIRONMENT_RESOURCE_URI)))
-        assert_eq(rows[0].field("mimeType"), Val(DataTree.Text("application/json")))
+        assert_eq(rows[0].field("uri"), Val(Dyn.Text(LSP_ENVIRONMENT_RESOURCE_URI)))
+        assert_eq(rows[0].field("mimeType"), Val(Dyn.Text("application/json")))
         value :: rows[0].field("text") ?? panic("resource text")
         if value == .Text(report) {
             assert(foundation_parse_protocol_json(report) != None)
@@ -139,7 +139,7 @@ fn lsp_env_test_scratch(label: String) -[Env, FS, Exec]> OSPath Never! {
     // not a substituted process status or provider failure callback.
     lsp_env_files.write(lsp_environment_resource_file(scratch), "module env.dev {{ packages: [ }}\n".bytes()) ?? panic("write malformed native environment")
     assert_eq(lsp_environment_resource_read_json([OSPath]{scratch}, LSP_ENVIRONMENT_RESOURCE_URI), Err(LSPEnvironmentResourceReadError.Unavailable))
-    assert_eq(lsp_environment_resource_read_response(server, params, DataTree.Int(7)), Val(lsp_error_response(DataTree.Int(7), -32002, "environment resource unavailable")))
+    assert_eq(lsp_environment_resource_read_response(server, params, Dyn.Int(7)), Val(lsp_error_response(Dyn.Int(7), -32002, "environment resource unavailable")))
     lsp_env_files.write(lsp_environment_resource_file(scratch), "module env.dev {{ packages: [] }}\n".bytes()) ?? panic("restore valid native environment")
     restored :: lsp_environment_resource_read_json([OSPath]{scratch}, LSP_ENVIRONMENT_RESOURCE_URI) ?? panic("restored real environment")
     assert(foundation_parse_protocol_json(restored) != None)
@@ -155,6 +155,6 @@ fn lsp_env_test_scratch(label: String) -[Env, FS, Exec]> OSPath Never! {
             root :: actual ?? panic("current directory environment root")
             assert(lsp_env_path.equals(root, path))
         }
-        None -> assert_eq(actual, None)
+        .None -> assert_eq(actual, None)
     }
 }

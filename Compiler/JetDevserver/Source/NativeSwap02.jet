@@ -16,14 +16,14 @@ impl NativeSwapState {
     }
     // Rust: crates/jet-devserver/src/NativeSwap.rs:1841
     fn fail(self: Self, explanation: NativeSwapExplanation) -> NativeSwapReceipt NativeSwapError! {
-        receipt := self.rollback()?
+        receipt := self.rollback()
         receipt.outcome = if explanation.disposition == .Restart -> NativeSwapOutcome.RestartRequired else -> NativeSwapOutcome.Rejected
         receipt.explanation = .Val(^explanation)
         receipt
     }
     // Rust: crates/jet-devserver/src/NativeSwap.rs:1855
     fn validate_plan(self: &Self, plan: &NativeSwapPlan) NativeSwapError! {
-        plan.validate_shape()?
+        plan.validate_shape()
         source_id :: self.source().canonical()
         if !plan.source.matches(self.source()) -> return .Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "plan source `{plan.source.canonical()}` does not match resident source"))
         if plan.from != self.executable -> return .Err(NativeSwapError.input(source_id, .StalePlan, "plan `from` executable does not match resident executable"))
@@ -45,16 +45,16 @@ impl NativeSwapState {
         if plan.code_changed() {
             if plan.capability.code == {
                 .Replace -> {}
-                .Restart -> return .Err(restart_or_reject(source_id, plan.capability.restart, .CodeRevisionUnsupported, "code revision changed but capability permits replacement only at restart"))
-                .Reject -> return .Err(NativeSwapError.input(source_id, .CodeRevisionUnsupported, "code revision changed and capability rejects in-place replacement"))
+                .Restart -> { return .Err(restart_or_reject(source_id, plan.capability.restart, .CodeRevisionUnsupported, "code revision changed but capability permits replacement only at restart")) }
+                .Reject -> { return .Err(NativeSwapError.input(source_id, .CodeRevisionUnsupported, "code revision changed and capability rejects in-place replacement")) }
             }
         }
         if plan.data_changed() {
             if plan.capability.data == {
-                .Preserve -> return .Err(restart_or_reject(source_id, plan.capability.restart, .DataRevisionUnsupported, "data revision changed but resident data policy is preserve"))
+                .Preserve -> { return .Err(restart_or_reject(source_id, plan.capability.restart, .DataRevisionUnsupported, "data revision changed but resident data policy is preserve")) }
                 .Replace | .Migrate -> {}
-                .Restart -> return .Err(restart_or_reject(source_id, plan.capability.restart, .LayoutChanged, "data revision changed and capability requires a clean restart"))
-                .Reject -> return .Err(NativeSwapError.input(source_id, .DataRevisionUnsupported, "data revision changed and capability rejects in-place replacement"))
+                .Restart -> { return .Err(restart_or_reject(source_id, plan.capability.restart, .LayoutChanged, "data revision changed and capability requires a clean restart")) }
+                .Reject -> { return .Err(NativeSwapError.input(source_id, .DataRevisionUnsupported, "data revision changed and capability rejects in-place replacement")) }
             }
         }
         relocation_supported :: plan.relocation.strategy.permits_in_place() && plan.capability.relocation.permits_in_place()
@@ -63,8 +63,8 @@ impl NativeSwapState {
         link_supported :: plan.link.strategy.permits_in_place() && plan.capability.link.permits_in_place()
         if (plan.code_changed() || plan.data_changed()) && !link_supported -> return .Err(restart_or_reject(source_id, plan.capability.restart, .LinkStrategyUnsupported,
             "link strategy `{plan.link.strategy.as_str()}` with capability `{plan.capability.link.as_str()}` does not permit in-place activation"))
-        self.validate_listener_handles(plan)?
-        self.validate_connection_handles(plan)?
+        self.validate_listener_handles(plan)
+        self.validate_connection_handles(plan)
     }
     // Rust: crates/jet-devserver/src/NativeSwap.rs:2028
     fn validate_listener_handles(self: &Self, plan: &NativeSwapPlan) NativeSwapError! {
@@ -150,13 +150,13 @@ fn validate_identity(value: String, label: String) Err! {
 }
 // Rust: crates/jet-devserver/src/NativeSwap.rs:2314
 fn validate_source_identity(identity: &NativeSwapSourceIdentity, label: String) Err! {
-    validate_identity(identity.source_id, "{label} source")?
+    validate_identity(identity.source_id, "{label} source")
     validate_identity(identity.module_ref, "{label} module")
 }
 // Rust: crates/jet-devserver/src/NativeSwap.rs:2321
 fn validate_hot_swap_decision(source_id: String, source: &NativeSwapSourceIdentity, decision: &HotSwapDecision) NativeSwapError! {
     _ :: validate_identity(decision.module_ref, "hot-swap decision module") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-    if decision.module_ref != source.module_ref -> return .Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "hot-swap decision module `{decision.module}` does not match source module `{source.module}`"))
+    if decision.module_ref != source.module_ref -> return .Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "hot-swap decision module `{decision.module_ref}` does not match source module `{source.module_ref}`"))
     if decision.state_facts().len() > MAX_NATIVE_SWAP_FACTS -> return .Err(NativeSwapError.input(source_id, .FactLimit, "hot-swap decision exceeds its retention fact limit"))
     seen := [String:Bool]{}
     loop fact in decision.state_facts() {

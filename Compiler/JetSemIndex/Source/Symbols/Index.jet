@@ -46,7 +46,7 @@ struct SemanticSymbolIndex {
         }
         if slot == {
             .Val(index) -> self.entries[index] = ^symbol
-            None -> &self.entries.push(^symbol)
+            .None -> &self.entries.push(^symbol)
         }
         &self.sort()
     }
@@ -77,7 +77,7 @@ struct SemanticSymbolIndex {
         // compiler repro: ToolW1-S13/repro/optional-view-context-repro.jet.
         if found == {
             .Val(index) -> Val(self.window(index))
-            None -> None
+            .None -> None
         }
     }
 
@@ -134,7 +134,7 @@ struct SemanticSymbolIndex {
         // Same explicit option match as lookup_qualified (frozen compiler ICE).
         if best == {
             .Val(index) -> Val(self.window(index))
-            None -> None
+            .None -> None
         }
     }
 
@@ -200,7 +200,7 @@ struct SemanticSymbolIndex {
                         indices[position] = index
                     }
                 }
-                None -> {
+                .None -> {
                     &keys.push(key)
                     &indices.push(index)
                 }
@@ -267,7 +267,7 @@ fn semantic_visibility_key(symbol: SemanticSymbol, anchor: SemanticVisibilityAnc
     imported :: symbol.identity.starts_with("import:")
     if !imported {
         if symbol.provenance == {
-            .Session -> return Val(SemanticVisibilityKey{rank: 2, depth: 0, declaration_offset: 0})
+            .Session -> { return Val(SemanticVisibilityKey{rank: 2, depth: 0, declaration_offset: 0}) }
             .Source(_) -> {
                 rank := 2
                 if anchor == .Val(here) {

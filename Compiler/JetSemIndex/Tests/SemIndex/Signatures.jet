@@ -67,11 +67,11 @@ fn semindex_s6_test_param(name: String, default: Expr?) -> Param Never! {
             assert(default.value_unavailable.required_stage == .Prepared)
             assert_eq(default.value_unavailable.reason, "the semindex producer does not evaluate callable defaults")
         }
-        None -> panic("source default lost")
+        .None -> { panic("source default lost") }
     }
     if defaults[1] == {
         .Val(default) -> assert_eq(default.source_text, "true")
-        None -> panic("source default lost")
+        .None -> { panic("source default lost") }
     }
     assert(defaults[2] == None)
     assert_eq(semindex_parameter_defaults(params, "α 30 true", false).len(), 4)

@@ -223,8 +223,7 @@ fn review_semantic_ops_with_receipts(before: SemIndex, after: SemIndex, receipts
             old :: old_defs[old_index]
             new :: new_defs[new_index]
             valid_pair = old.kind == new.kind && old.signature_id == new.signature_id
-                && (if is_move -> old.name == new.name && old.module_path != new.module_path
-                    else -> old.module_path == new.module_path && old.name != new.name)
+                && (if is_move -> old.name == new.name && old.module_path != new.module_path else -> old.module_path == new.module_path && old.name != new.name)
         }
         alignment := ReviewAlignment.UnmatchedAfter
         if valid_pair {
@@ -239,27 +238,28 @@ fn review_semantic_ops_with_receipts(before: SemIndex, after: SemIndex, receipts
                 removed_ids[new_defs[new_index].stable_id] = true
                 alignment = ReviewAlignment.Recorded
             }
-        } else if old_candidates.len() > 1 || new_candidates.len() > 1 -> alignment = ReviewAlignment.Ambiguous
-        else if old_candidates.len() == 0 -> alignment = ReviewAlignment.UnmatchedBefore
-        stable_id :: if new_index >= 0 -> new_defs[new_index].stable_id.copy()
-            else if old_index >= 0 -> old_defs[old_index].stable_id.copy()
-            else if receipt.targets.len() > 0 -> receipt.targets[0].stable_id.copy()
+        } else if old_candidates.len() > 1 || new_candidates.len() > 1 {
+            alignment = ReviewAlignment.Ambiguous
+        } else if old_candidates.len() == 0 {
+            alignment = ReviewAlignment.UnmatchedBefore
+        }
+        stable_id :: if {
+            new_index >= 0 -> new_defs[new_index].stable_id.copy()
+            old_index >= 0 -> old_defs[old_index].stable_id.copy()
+            receipt.targets.len() > 0 -> receipt.targets[0].stable_id.copy()
             else -> "{receipt.kind}:unresolved"
+        }
         before_identity :: if old_index >= 0 -> Val(old_defs[old_index].human_identity.copy()) else -> ^before_name
         after_identity :: if new_index >= 0 -> Val(new_defs[new_index].human_identity.copy()) else -> ^after_name
         identity :: if after_identity == {
             .Val(name) -> name.copy()
-            None -> if before_identity == {
+            .None -> if before_identity == {
                 .Val(name) -> name.copy()
-                None -> "unknown"
+                .None -> "unknown"
             }
         }
-        old_payload :: if is_move {
-            if old_index >= 0 -> Val(old_defs[old_index].module_path.copy()) else -> None
-        } else -> before_identity.copy()
-        new_payload :: if is_move {
-            if new_index >= 0 -> Val(new_defs[new_index].module_path.copy()) else -> None
-        } else -> after_identity.copy()
+        old_payload :: if is_move -> (if old_index >= 0 -> Val(old_defs[old_index].module_path.copy()) else -> None) else -> before_identity.copy()
+        new_payload :: if is_move -> (if new_index >= 0 -> Val(new_defs[new_index].module_path.copy()) else -> None) else -> after_identity.copy()
         source :: receipt.rule_id ?? receipt.kind
         operation :: ReviewSemanticOp{kind: if is_move -> ReviewOpKind.Moved else -> ReviewOpKind.Renamed,
             stable_id: ^stable_id, identity: ^identity, before: ^old_payload, after: ^new_payload,
@@ -309,11 +309,11 @@ fn review_optional_order(left: String?, right: String?) -> Ordering Never! {
     if left == {
         .Val(old) -> if right == {
             .Val(new) -> old <=> new
-            None -> 1 <=> 0
+            .None -> 1 <=> 0
         }
-        None -> if right == {
+        .None -> if right == {
             .Val(_) -> 0 <=> 1
-            None -> 0 <=> 0
+            .None -> 0 <=> 0
         }
     }
 }
@@ -340,7 +340,7 @@ fn review_append_effect_operations(operations: &[ReviewSemanticOp], before: View
         new_shape := String?{None}
         if old_by_function.get(function) == .Val(index) -> old_shape = Val(review_effect_shape(before[index]))
         if new_by_function.get(function) == .Val(index) -> new_shape = Val(review_effect_shape(after[index]))
-        if old_shape == (new_shape) -> next
+        if old_shape == new_shape -> next
         &operations.push(ReviewSemanticOp{kind: ReviewOpKind.EffectChanged, stable_id: "effect:{function}", identity: function.copy(),
             before: ^old_shape, after: ^new_shape, before_identity: Val(function.copy()), after_identity: Val(function.copy()),
             alignment: ReviewAlignment.Matched, source_operation: None})

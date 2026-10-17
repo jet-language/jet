@@ -1,9 +1,9 @@
 // Private continuation of jet_devserver.WebHost.
-use jet_devserver.WebHost.*
+use jet_devserver.WebHost.[LIVE_RELOAD_POLL_MS, MAX_STATIC_RESPONSE_BYTES, WebHost]
 use jet_devserver.[CanvasAsset, ResidentDevSession, static_relative_path, content_type_for, read_static_file_bounded, write_response]
 use jet_devserver.Canvas as Canvas
 use jet_devserver.PausedEvaluate.[PausedEvaluateHostError]
-use jet_foundation.DataTree.[DataTree]
+use jet_foundation.Dyn.[Dyn]
 use jet_foundation.JSON.[parse_json]
 use std.io.[Write, Error, ErrorKind]
 use std.sync.atomic.[AtomicU64, Ordering]
@@ -73,7 +73,10 @@ fn current_revision_for_request(canvas_file: String, request: String) -> String 
     source_id :: parse_json(request).ok().and_then((value) -> if value == {
         .Object(object) -> object.into_iter().find_map(((name, value)) -> {
             if name != "source_id" -> return .None
-            match value { .Text(id) | .TypedText(id) -> .Val(^id); _ -> .None }
+            if value == {
+                .Text(id) | .TypedText(id) -> .Val(^id)
+                else -> .None
+            }
         })
         else -> .None
     }).unwrap_or_default()
@@ -81,14 +84,20 @@ fn current_revision_for_request(canvas_file: String, request: String) -> String 
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:6075
 fn source_id_from_payload(payload: String) -> String {
-    value :: match parse_json(payload) { .Ok(value) -> value; .Err(_) -> return "" }
+    value :: if parse_json(payload) == {
+        .Ok(value) -> value
+        .Err(_) -> { return "" }
+    }
     // Rust: crates/jet-devserver/src/WebHost.rs:6080
-    fn find(value: DataTree) -> String? {
+    fn find(value: Dyn) -> String? {
         return if value == {
             .Object(object) -> {
                 if object.iter().find_map(((name, value)) -> {
                     if name != "source_id" -> return .None
-                    match value { .Text(id) | .TypedText(id) -> .Val(id.clone()); _ -> .None }
+                    if value == {
+                        .Text(id) | .TypedText(id) -> .Val(id.clone())
+                        else -> .None
+                    }
                 }) == .Val(source_id) -> return .Val(^source_id)
                 object.iter().find_map(((_, value)) -> find(value))
             }
@@ -108,7 +117,7 @@ fn serve_static_from_root(stream: impl Write, root: OSPath, path: String, nonce:
     // The generated output root is the complete preview boundary. No source fallback.
     relative :: if static_relative_path(path) == {
         .Ok(path) -> path
-        .Err(()) -> { write_response(stream, "400 Bad Request", "text/plain; charset=utf-8", "bad path".bytes())?; return .Ok(400) }
+        .Err(_) -> { write_response(stream, "400 Bad Request", "text/plain; charset=utf-8", "bad path".bytes())?; return .Ok(400) }
     }
     content_type :: content_type_for(&relative)
     is_html :: relative.extension().and_then((extension) -> extension.to_str()).is_some_and((extension) -> extension.eq_ignore_ascii_case("html"))
@@ -408,8 +417,7 @@ fn live_reload_script(nonce: String, session_secret: String) -> String {
       ui.overlayTitle.textContent = "Build failed — " + (s.file || "Jet source");
       ui.overlayFooter.textContent = (s.message || state) + " — clears on the next clean build";
       if (diagnostic !== dismissedDiagnostic) {{
-        if (depth() === "pill") {{ errorFace = true; autoOpened = true; setDepth("lens", false); }}
-        else if (errorFace) {{ ui.overlayResult.textContent = ""; }}
+        if (depth() === "pill") {{ errorFace = true; autoOpened = true; setDepth("lens", false); }} else if (errorFace) {{ ui.overlayResult.textContent = ""; }}
         else dismissedDiagnostic = diagnostic;
       }}
     }} else {{

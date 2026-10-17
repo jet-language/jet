@@ -1,12 +1,12 @@
 // Source/LSP/Server.rs:3110–3220. Real W38 Server/W36 state and resident
 // checked query. Encoders/hint formatters are sole Features/Completion owners;
 // these handlers do not reimplement classification or reasoning.
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use core.files.runtime.kernel_path_components as lsp_token_path
 use jet_foundation.[Span]
 use jet_semindex.[InlayHint]
 
-fn lsp_semantic_tokens_response(server: LSPServer, params: DataTree?, id: DataTree) -[FS, Env]> String? {
+fn lsp_semantic_tokens_response(server: LSPServer, params: Dyn?, id: Dyn) -[FS, Env]> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri :: if (td.field("uri") ?? return None) == {
@@ -23,7 +23,7 @@ fn lsp_semantic_tokens_response(server: LSPServer, params: DataTree?, id: DataTr
     Val(lsp_response(id, lsp_semantic_tokens_json(doc.text, data)))
 }
 
-fn lsp_semantic_tokens_range_response(server: LSPServer, params: DataTree?, id: DataTree) -[FS, Env]> String? {
+fn lsp_semantic_tokens_range_response(server: LSPServer, params: Dyn?, id: Dyn) -[FS, Env]> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri :: if (td.field("uri") ?? return None) == {
@@ -44,7 +44,7 @@ fn lsp_semantic_tokens_range_response(server: LSPServer, params: DataTree?, id: 
     Val(lsp_response(id, lsp_semantic_tokens_json(doc.text, data)))
 }
 
-fn lsp_semantic_tokens_delta_response(server: LSPServer, params: DataTree?, id: DataTree) -[FS, Env]> String? {
+fn lsp_semantic_tokens_delta_response(server: LSPServer, params: Dyn?, id: Dyn) -[FS, Env]> String? {
     // Rust3160–3177: LSP explicitly permits returning a full result for delta.
     // Same inputs and same checked query as full, not a pretend delta cache.
     lsp_semantic_tokens_response(server, params, id)
@@ -60,7 +60,7 @@ fn lsp_semantic_tokens_result_id(src: String, data: [U32]) -> String Never! {
     "{src.bytes().len()}:{data.len()}"
 }
 
-fn lsp_inlay_hint_response(server: LSPServer, params: DataTree?, id: DataTree) -[FS, Env]> String? {
+fn lsp_inlay_hint_response(server: LSPServer, params: Dyn?, id: Dyn) -[FS, Env]> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri :: if (td.field("uri") ?? return None) == {

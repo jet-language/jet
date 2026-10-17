@@ -1,6 +1,6 @@
 // Source/LSP/Server.rs:353–632: resident request/notification dispatch,
 // workspace transitions and the original advertised capability contract.
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use core.files.runtime.kernel_path_components as lsp_request_path
 use core.files.runtime.kernel_path_components.[OSPath]
 use core.term as lsp_request_term
@@ -8,7 +8,7 @@ use jet_devserver.[EDITOR_WORKBENCH_METHOD, EDITOR_RECONNECT_METHOD, EDITOR_NAVI
 use jet_driver.[jet_driver_query_path]
 
 // Rust353–414: known methods always reach their sole feature provider.
-fn lsp_handle_request(server: &LSPServer, method: String, params: DataTree?, id: DataTree) -[FS, Env, Exec, IO, Time.Wait]> String? Never! {
+fn lsp_handle_request(server: &LSPServer, method: String, params: Dyn?, id: Dyn) -[FS, Env, Exec, IO, Time.Wait]> String? Never! {
     if method == {
         "initialize" -> {
             lsp_configure_workspace_roots(&server.workspace_roots, &server.workspace_folders, params, server.snapshot.cwd)
@@ -57,22 +57,22 @@ fn lsp_handle_request(server: &LSPServer, method: String, params: DataTree?, id:
 }
 
 // Rust415–429: EditorHostAdapter owns parsing, typed host state and errors.
-fn lsp_editor_host_response(server: LSPServer, method: String, params: DataTree?, id: DataTree) -> String? Never! {
+fn lsp_editor_host_response(server: LSPServer, method: String, params: Dyn?, id: Dyn) -> String? Never! {
     if (&server.editor_host.dispatch(method, params)) == {
         .Ok(result) -> Val(lsp_response(id, result))
         .Err(error) -> Val(lsp_error_response(id, Int{editor_host_error_code(error)}, "{error}"))
     }
 }
 
-fn lsp_build_graph_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? Never! {
+fn lsp_build_graph_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? Never! {
     value :: params ?? return None
     document :: value.field("textDocument") ?? return None
     uri :: document.field("uri") ?? return None
     if uri == .Text(text) {
         doc :: server.diagnostic_state.docs.get(text) ?? return None
         if lsp_build_graph_json(server.snapshot, doc.path, doc.text) == {
-            .Ok(.Val(graph)) -> return Val(lsp_response(id, graph))
-            .Ok(None) | .Err(_) -> return Val(lsp_response(id, "null"))
+            .Ok(.Val(graph)) -> { return Val(lsp_response(id, graph)) }
+            .Ok(.None) | .Err(_) -> { return Val(lsp_response(id, "null")) }
         }
     }
     None
@@ -81,7 +81,7 @@ fn lsp_build_graph_response(server: LSPServer, params: DataTree?, id: DataTree) 
 // Rust505–563: cancellation is recorded in the native reader BEFORE queueing.
 // The main loop removes late IDs after handling; this branch must not simulate
 // cancellation or duplicate the reader's shared set.
-fn lsp_handle_notification(server: &LSPServer, method: String, params: DataTree?, stdout: &lsp_request_term.Stdout) IOError! -[IO, Time.Wait, FS, Env]> {
+fn lsp_handle_notification(server: &LSPServer, method: String, params: Dyn?, stdout: &lsp_request_term.Stdout) IOError! -[IO, Time.Wait, FS, Env]> {
     if method == {
         "initialized" | "notifications/initialized" | "$/cancelRequest" | "notifications/cancelled" -> {}
         "exit" -> server.shutdown = true
@@ -98,7 +98,7 @@ fn lsp_handle_notification(server: &LSPServer, method: String, params: DataTree?
     }
 }
 
-fn lsp_initialize_response(id: DataTree) -> String Never! {
+fn lsp_initialize_response(id: Dyn) -> String Never! {
     result :: """
 {{
   "protocolVersion": "2025-11-25",
@@ -172,7 +172,7 @@ fn lsp_push_workspace_root(roots: &[OSPath], path: OSPath, cwd: OSPath) Never! {
     &roots.push(normalized)
 }
 
-fn lsp_push_workspace_folder(roots: &[OSPath], folder: DataTree, cwd: OSPath) Never! {
+fn lsp_push_workspace_folder(roots: &[OSPath], folder: Dyn, cwd: OSPath) Never! {
     uri :: folder.field("uri") ?? return
     if uri == .Text(text) {
         path :: lsp_request_path.from_text(lsp_uri_to_path(text, cwd.platform == lsp_request_path.PathPlatform.Windows), cwd.platform)
@@ -180,7 +180,7 @@ fn lsp_push_workspace_folder(roots: &[OSPath], folder: DataTree, cwd: OSPath) Ne
     }
 }
 
-fn lsp_configure_workspace_roots(roots: &[OSPath], workspace_folders: &Bool, params: DataTree?, cwd: OSPath) Never! {
+fn lsp_configure_workspace_roots(roots: &[OSPath], workspace_folders: &Bool, params: Dyn?, cwd: OSPath) Never! {
     configured := [OSPath]{}
     if params == .Val(value) {
         workspace_folders = value.field("workspaceFolders") != None
@@ -192,7 +192,7 @@ fn lsp_configure_workspace_roots(roots: &[OSPath], workspace_folders: &Bool, par
                     loop folder in rows -> lsp_push_workspace_folder(&configured, folder, cwd)
                 }
             }
-            None -> {
+            .None -> {
                 if value.field("rootUri") == {
                     .Val(uri) -> {
                         if uri == .Text(text) {
@@ -200,7 +200,7 @@ fn lsp_configure_workspace_roots(roots: &[OSPath], workspace_folders: &Bool, par
                             lsp_push_workspace_root(&configured, path, cwd)
                         }
                     }
-                    None -> {
+                    .None -> {
                         if value.field("rootPath") == .Val(path) {
                             if path == .Text(text) -> lsp_push_workspace_root(&configured, lsp_request_path.from_text(text, cwd.platform), cwd)
                         }
@@ -212,7 +212,7 @@ fn lsp_configure_workspace_roots(roots: &[OSPath], workspace_folders: &Bool, par
     roots = configured
 }
 
-fn lsp_update_workspace_roots(roots: &[OSPath], workspace_folders: &Bool, params: DataTree?, cwd: OSPath) Never! {
+fn lsp_update_workspace_roots(roots: &[OSPath], workspace_folders: &Bool, params: Dyn?, cwd: OSPath) Never! {
     event :: (params ?? return).field("event") ?? return
     workspace_folders = true
     if event.field("removed") == .Val(removed) {
@@ -224,8 +224,7 @@ fn lsp_update_workspace_roots(roots: &[OSPath], workspace_folders: &Bool, params
                     // Remove in place; no whole-root-vector copy per removal.
                     index := 0
                     loop index < roots.len() {
-                        if lsp_request_path.equals(roots[index], path) -> _ := &roots.remove(index)
-                        else -> index += 1
+                        if lsp_request_path.equals(roots[index], path) -> _ := &roots.remove(index) else -> index += 1
                     }
                 }
             }

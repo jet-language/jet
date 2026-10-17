@@ -61,7 +61,7 @@ fn lsp_dirty_documents(state: LSPDiagnosticState) -> [String] Never! {
     loop (root, modules) in state.checked_modules {
         if dirty_set.has_key(root) || !state.docs.has_key(root) -> next
         found := false
-        loop module in modules {
+        loop module_ref in modules {
             loop path in changed {
                 if lsp_source_paths_equal(module_ref, path) {
                     found = true
@@ -154,7 +154,7 @@ fn lsp_diagnostic_json_with_clears(diagnostic: Diagnostic, file: ReportPath, src
     severity :: if diagnostic.severity == DIAGNOSTIC_LINT -> 2 else -> 1
     range :: if diagnostic.span == {
         .Val(span) -> lsp_byte_span_to_range(src, span)
-        None -> lsp_full_document_range(src)
+        .None -> lsp_full_document_range(src)
     }
     related :: lsp_related_information_json(diagnostic, uri, src, diagnostics)
     message :: foundation_json_quote(diagnostic_escape_bidi_text(diagnostic.what.copy()))
@@ -174,7 +174,7 @@ fn lsp_related_information_json(diagnostic: Diagnostic, uri: String, src: String
             span :: cause.span ?? next
             if cause.origin == {
                 .Val(origin) -> &related.push(lsp_related_location_json(lsp_path_to_uri(origin.path), origin.source, span, cause.what))
-                None -> &related.push(lsp_related_location_json(uri, src, span, cause.what))
+                .None -> &related.push(lsp_related_location_json(uri, src, span, cause.what))
             }
             break
         }
@@ -261,7 +261,7 @@ fn lsp_close_document_diagnostics(state: &LSPDiagnosticState, queries: &JetDrive
         &queries.remove_document(cwd, doc.path)
         loop (root, modules) in state.checked_modules {
             if root == uri || !state.docs.has_key(root) -> next
-            loop module in modules {
+            loop module_ref in modules {
                 if lsp_source_paths_equal(module_ref, doc.path) {
                     state.dirty[root] = true
                     break

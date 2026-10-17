@@ -34,7 +34,7 @@ fn semindex_open_test_clean(root: String) -[FS]> {
     second :: semindex_package_facts_diagnostic("other.jet", "ambiguous")
     failure :: SemIndexError.Load{diagnostics: [Diagnostic]{first, second}}
     assert_eq(failure.message(), "2 load/check diagnostic(s)")
-    if failure == .Load(diagnostics) -> assert_eq(diagnostics, [Diagnostic]{first, second})
+    if failure == .Load(diagnostics) -> assert_eq(diagnostics, ([Diagnostic]{first, second}))
     assert_eq(semindex_package_facts_error_text([Diagnostic]{}), "")
     expected :: "E1206: package facts for `./é/main.jet` have a shape error — one typed Package fact graph must own this projection; broken; E1206: package facts for `other.jet` have a shape error — one typed Package fact graph must own this projection; ambiguous"
     assert_eq(semindex_package_facts_error_text([Diagnostic]{first, second}), expected)
@@ -52,7 +52,7 @@ fn semindex_open_test_clean(root: String) -[FS]> {
     semindex_open_test_write(root, "run.jet", "fn run() {{}}\n")
     entry :: semindex_open_files.join(root, "run.jet")
     if semindex_package_facts_for_entry(&cache, entry) == {
-        .Ok(_) -> panic("ambiguous package roots must remain an error")
+        .Ok(_) -> { panic("ambiguous package roots must remain an error") }
         .Err(error) -> {
             // Main's oracle ruling: the migration-era substring was stale;
             // the registered Authority diagnostic text remains canonical.
@@ -71,7 +71,7 @@ fn semindex_open_test_clean(root: String) -[FS]> {
     semindex_open_test_write(root, ".jet/lock", "version = 1\nworkspace_source_digest = \"sha256-stale\"\n")
     semindex_open_test_write(root, "run.jet", "fn run() {{}}\n")
     if semindex_workspace_overlay_policy_for_entry(&cache, semindex_open_files.join(root, "run.jet")) == {
-        .Ok(_) -> panic("stale workspace authority must remain visible")
+        .Ok(_) -> { panic("stale workspace authority must remain visible") }
         .Err(error) -> assert_eq(error.diagnostic.code, "E1202")
     }
     semindex_open_test_clean(root)
@@ -122,7 +122,7 @@ fn semindex_open_test_clean(root: String) -[FS]> {
     semindex_open_test_write(child, "b.jet", source)
     semindex_open_test_write(child, "run.jet", "fn run() {{}}\n")
     if semindex_workspace_overlay_policy_for_entry(&cache, semindex_open_files.join(child, "run.jet")) == {
-        .Ok(_) -> panic("ambiguous boundary must remain visible")
+        .Ok(_) -> { panic("ambiguous boundary must remain visible") }
         .Err(error) -> assert_eq(error.diagnostic.code, "E1239")
     }
     semindex_open_test_clean(root)
@@ -150,7 +150,7 @@ fn semindex_open_test_clean(root: String) -[FS]> {
     // A recognized workspace lock that cannot decode is an error, not absence.
     semindex_open_test_write(child, ".jet/lock", "version = nope\nworkspace_source_digest = \"{digest}\"\n")
     if semindex_workspace_overlay_policy_for_entry(&cache, entry) == {
-        .Ok(_) -> panic("malformed inner workspace lock cannot fall outward")
+        .Ok(_) -> { panic("malformed inner workspace lock cannot fall outward") }
         .Err(error) -> assert_eq(error.diagnostic.code, "E1202")
     }
     semindex_open_test_clean(root)
@@ -171,7 +171,7 @@ fn semindex_open_test_hello_index(index: SemIndex) Never! {
     assert(index.references_to("print").len() > 0)
     json :: index.to_json()
     assert(json.contains("\"schema_version\":{SEMINDEX_SCHEMA_VERSION}"))
-    loop field in [String]{"outputs", "definitions", "identity", "references", "calls", "effects", "members", "instances", "run"} -> assert(json.contains("\"{field}\""))
+    loop field in ([String]{"outputs", "definitions", "identity", "references", "calls", "effects", "members", "instances", "run"}) -> assert(json.contains("\"{field}\""))
 }
 
 // lib.rs511–561 and597–639: use the sole existing exact Config/lock fixture

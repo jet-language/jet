@@ -26,7 +26,13 @@ impl WebModuleFact {
 enum WebStateValue { Text(String); Integer(I64); Unsigned(U64); Boolean(Bool); Bytes([U8]) }
 impl WebStateValue {
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:97
-    fn kind(self: Self) -> String { match self { .Text(_) -> "text"; .Integer(_) -> "integer"; .Unsigned(_) -> "unsigned"; .Boolean(_) -> "boolean"; .Bytes(_) -> "bytes" } }
+    fn kind(self: Self) -> String { if self == {
+        .Text(_) -> "text"
+        .Integer(_) -> "integer"
+        .Unsigned(_) -> "unsigned"
+        .Boolean(_) -> "boolean"
+        .Bytes(_) -> "bytes"
+    } }
 }
 // Rust: crates/jet-devserver/src/WebModuleSwap.rs:109
 impl From<&String> for WebStateValue { fn from(value: String) -> Self { .Text(value.to_string()) } }
@@ -48,7 +54,15 @@ impl From<[U8]> for WebStateValue { fn from(value: [U8]) -> Self { .Bytes(^value
 enum WebStateKind { Signal; Store; QueryCache; FormDraft; Scroll; Focus; Island }
 impl WebStateKind {
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:169
-    fn as_str(self) -> String { match self { .Signal -> "signal"; .Store -> "store"; .QueryCache -> "query_cache"; .FormDraft -> "form_draft"; .Scroll -> "scroll"; .Focus -> "focus"; .Island -> "island" } }
+    fn as_str(self) -> String { if self == {
+        .Signal -> "signal"
+        .Store -> "store"
+        .QueryCache -> "query_cache"
+        .FormDraft -> "form_draft"
+        .Scroll -> "scroll"
+        .Focus -> "focus"
+        .Island -> "island"
+    } }
 }
 // Rust: crates/jet-devserver/src/WebModuleSwap.rs:182,208
 struct WebSignalFact { key: String; type_fingerprint: String; value: WebStateValue }
@@ -99,15 +113,50 @@ enum WebModuleSwapStateFact {
 }
 impl WebModuleSwapStateFact {
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:263
-    fn kind(self: Self) -> WebStateKind { match self { .Signal(_) -> .Signal; .Store(_) -> .Store; .QueryCache(_) -> .QueryCache; .FormDraft(_) -> .FormDraft; .Scroll(_) -> .Scroll; .Focus(_) -> .Focus; .Island(_) -> .Island } }
+    fn kind(self: Self) -> WebStateKind { if self == {
+        .Signal(_) -> .Signal
+        .Store(_) -> .Store
+        .QueryCache(_) -> .QueryCache
+        .FormDraft(_) -> .FormDraft
+        .Scroll(_) -> .Scroll
+        .Focus(_) -> .Focus
+        .Island(_) -> .Island
+    } }
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:275
-    fn key(self: Self) -> String { match self { .Signal(f) -> &f.key; .Store(f) -> &f.key; .QueryCache(f) -> &f.key; .FormDraft(f) -> &f.key; .Scroll(f) -> &f.key; .Focus(f) -> &f.key; .Island(f) -> &f.key } }
+    fn key(self: Self) -> String { if self == {
+        .Signal(f) -> &f.key
+        .Store(f) -> &f.key
+        .QueryCache(f) -> &f.key
+        .FormDraft(f) -> &f.key
+        .Scroll(f) -> &f.key
+        .Focus(f) -> &f.key
+        .Island(f) -> &f.key
+    } }
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:287
-    fn identity(self: Self) -> String { match self { .Island(f) -> &f.identity; _ -> self.key() } }
+    fn identity(self: Self) -> String { if self == {
+        .Island(f) -> &f.identity
+        else -> self.key()
+    } }
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:294
-    fn type_fingerprint(self: Self) -> String { match self { .Signal(f) -> &f.type_fingerprint; .Store(f) -> &f.type_fingerprint; .QueryCache(f) -> &f.type_fingerprint; .FormDraft(f) -> &f.type_fingerprint; .Scroll(f) -> &f.type_fingerprint; .Focus(f) -> &f.type_fingerprint; .Island(f) -> &f.type_fingerprint } }
+    fn type_fingerprint(self: Self) -> String { if self == {
+        .Signal(f) -> &f.type_fingerprint
+        .Store(f) -> &f.type_fingerprint
+        .QueryCache(f) -> &f.type_fingerprint
+        .FormDraft(f) -> &f.type_fingerprint
+        .Scroll(f) -> &f.type_fingerprint
+        .Focus(f) -> &f.type_fingerprint
+        .Island(f) -> &f.type_fingerprint
+    } }
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:306
-    fn value(self: Self) -> WebStateValue { match self { .Signal(f) -> &f.value; .Store(f) -> &f.value; .QueryCache(f) -> &f.value; .FormDraft(f) -> &f.value; .Scroll(f) -> &f.value; .Focus(f) -> &f.value; .Island(f) -> &f.value } }
+    fn value(self: Self) -> WebStateValue { if self == {
+        .Signal(f) -> &f.value
+        .Store(f) -> &f.value
+        .QueryCache(f) -> &f.value
+        .FormDraft(f) -> &f.value
+        .Scroll(f) -> &f.value
+        .Focus(f) -> &f.value
+        .Island(f) -> &f.value
+    } }
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:318
     fn with_value(self: Self, value: WebStateValue) -> Self {
         if self == {
@@ -139,7 +188,7 @@ impl WebModuleSwapSnapshot {
         if self.page.identity.is_empty() -> return .Err(.InvalidSnapshot(detail: "page identity must be non-empty"))
         if self.page.identity != self.identity.page -> return .Err(.InvalidSnapshot(detail: "page fact identity does not match swap identity"))
         self.modules.sort_by((left, right) -> left.identity.cmp(&right.identity))
-        loop module in &self.modules {
+        loop module_ref in &self.modules {
             if module_ref.identity.is_empty() || module_ref.interface_fingerprint.is_empty() || module_ref.body_fingerprint.is_empty() -> return .Err(.InvalidSnapshot(detail: "module identity and fingerprints must be non-empty"))
         }
         if self.modules.windows(2).any((pair) -> pair[0].identity == pair[1].identity) -> return .Err(.InvalidSnapshot(detail: "module identities must be unique"))
@@ -149,7 +198,7 @@ impl WebModuleSwapSnapshot {
             if fact == .Island(_) && fact.identity().is_empty() -> return .Err(.InvalidSnapshot(detail: "island identities must be non-empty"))
         }
         if self.state.windows(2).any((pair) -> pair[0].kind() == pair[1].kind() && pair[0].key() == pair[1].key()) -> return .Err(.InvalidSnapshot(detail: "state keys must be unique within a state family"))
-        return .Ok(())
+        return .Ok(_)
     }
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:460
     fn module_ref(self: Self, identity: String) -> WebModuleFact? {
@@ -189,7 +238,10 @@ impl WebModuleSwapCompatibility {
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:551
     fn is_compatible(self: Self) -> Bool { self == .Compatible }
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:555
-    fn reason_codes(self: Self) -> [WebModuleSwapReasonCode] { match self { .Compatible -> &[]; .Incompatible(reason_codes: codes) -> codes } }
+    fn reason_codes(self: Self) -> [WebModuleSwapReasonCode] { if self == {
+        .Compatible -> &[]
+        .Incompatible(reason_codes: codes) -> codes
+    } }
 }
 // Rust: crates/jet-devserver/src/WebModuleSwap.rs:565
 struct WebModuleSwapResetFact {
@@ -205,7 +257,7 @@ struct WebModuleSwapPlan {
 impl WebModuleSwapPlan {
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:591
     fn from_hot_swap_decision(base: WebModuleSwapSnapshot, candidate: WebModuleSwapSnapshot, decision: HotSwapDecision) -> Self WebModuleSwapError! {
-        base := base.clone(); candidate := candidate.clone(); base.normalize()?; candidate.normalize()?
+        base := base.clone(); candidate := candidate.clone(); base.normalize()?; candidate.normalize()
         if decision.module_ref.is_empty() || decision.module_ref != base.identity.module_ref -> return .Err(.DecisionModuleMismatch(expected: base.identity.module_ref.clone(), found: decision.module_ref.clone()))
         retention := [String:&StateRetentionFact]{}
         loop fact in decision.state_facts() {
@@ -285,7 +337,13 @@ impl WebModuleSwapPlan {
 enum WebModuleSwapOperation { Pause; Apply; Commit; Rollback; Restart }
 impl WebModuleSwapOperation {
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:799
-    fn as_str(self) -> String { match self { .Pause -> "pause"; .Apply -> "apply"; .Commit -> "commit"; .Rollback -> "rollback"; .Restart -> "restart" } }
+    fn as_str(self) -> String { if self == {
+        .Pause -> "pause"
+        .Apply -> "apply"
+        .Commit -> "commit"
+        .Rollback -> "rollback"
+        .Restart -> "restart"
+    } }
 }
 // Rust: crates/jet-devserver/src/WebModuleSwap.rs:811
 impl WebModuleSwapOperation.Display { fn display(self: Self) -> String { self.as_str() } }
@@ -293,7 +351,11 @@ impl WebModuleSwapOperation.Display { fn display(self: Self) -> String { self.as
 enum WebModuleSwapPhase { Committed; Paused; Applied }
 impl WebModuleSwapPhase {
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:825
-    fn as_str(self) -> String { match self { .Committed -> "committed"; .Paused -> "paused"; .Applied -> "applied" } }
+    fn as_str(self) -> String { if self == {
+        .Committed -> "committed"
+        .Paused -> "paused"
+        .Applied -> "applied"
+    } }
 }
 // Rust: crates/jet-devserver/src/WebModuleSwap.rs:835
 impl WebModuleSwapPhase.Display { fn display(self: Self) -> String { self.as_str() } }
@@ -301,7 +363,13 @@ impl WebModuleSwapPhase.Display { fn display(self: Self) -> String { self.as_str
 enum WebModuleSwapReceiptStatus { Paused; Applied; Committed; RolledBack; Restarted }
 impl WebModuleSwapReceiptStatus {
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:851
-    fn as_str(self) -> String { match self { .Paused -> "paused"; .Applied -> "applied"; .Committed -> "committed"; .RolledBack -> "rolled_back"; .Restarted -> "restarted" } }
+    fn as_str(self) -> String { if self == {
+        .Paused -> "paused"
+        .Applied -> "applied"
+        .Committed -> "committed"
+        .RolledBack -> "rolled_back"
+        .Restarted -> "restarted"
+    } }
 }
 // Rust: crates/jet-devserver/src/WebModuleSwap.rs:863
 struct WebModuleSwapReceipt {
@@ -321,7 +389,7 @@ impl WebModuleSwapReceipt {
         reasons :: self.reason_codes.iter().map((reason) -> reason.as_str()).collect<[_]>().join(",")
         preserved :: self.preserved.iter().map((fact) -> "{fact.kind().as_str()}:{fact.key()}").collect<[_]>().join(",")
         reset :: self.reset.iter().map((fact) -> "{fact.state.kind().as_str()}:{fact.state.key()}({fact.reason.as_str()})").collect<[_]>().join(",")
-        return "operation={self.operation} status={self.status.as_str()} phase={self.phase} identity={self.identity.module}/{self.identity.page} candidate={self.candidate_identity.module}/{self.candidate_identity.page} source_revision={self.source_revision} build_revision={self.build_revision} changed_modules=[{changed}] reasons=[{reasons}] preserved=[{preserved}] reset=[{reset}] committed_page={self.committed_page.artifact} active_page={self.active_page.artifact}"
+        return "operation={self.operation} status={self.status.as_str()} phase={self.phase} identity={self.identity.module_ref}/{self.identity.page} candidate={self.candidate_identity.module_ref}/{self.candidate_identity.page} source_revision={self.source_revision} build_revision={self.build_revision} changed_modules=[{changed}] reasons=[{reasons}] preserved=[{preserved}] reset=[{reset}] committed_page={self.committed_page.artifact} active_page={self.active_page.artifact}"
     }
 }
 // Rust: crates/jet-devserver/src/WebModuleSwap.rs:939
@@ -343,7 +411,7 @@ impl WebModuleSwapError.Display {
     fn display(self: Self) -> String {
         return if self == {
             .InvalidSnapshot(detail: detail) -> "invalid web swap snapshot: {detail}"
-            .IdentityMismatch(expected: expected, found: found) -> "web swap identity mismatch: expected {expected.module}/{expected.page} but found {found.module}/{found.page}"
+            .IdentityMismatch(expected: expected, found: found) -> "web swap identity mismatch: expected {expected.module_ref}/{expected.page} but found {found.module_ref}/{found.page}"
             .DecisionModuleMismatch(expected: expected, found: found) -> "web swap decision module mismatch: expected `{expected}` but found `{found}`"
             .MissingRetentionFact(kind: kind, key: key) -> "web swap has no canonical retention fact for {kind.as_str()} `{key}`"
             .DuplicateRetentionKey(key: key) -> "web swap retention key `{key}` is not unique"
@@ -364,7 +432,7 @@ struct WebModuleSwapState {
 impl WebModuleSwapState {
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:1048
     fn new(snapshot: WebModuleSwapSnapshot) -> Self WebModuleSwapError! {
-        snapshot := ^snapshot; snapshot.normalize()?
+        snapshot := ^snapshot; snapshot.normalize()
         return .Ok(Self(active: snapshot.clone(), committed: ^snapshot, pending: .None, phase: .Committed))
     }
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:1059
@@ -378,7 +446,7 @@ impl WebModuleSwapState {
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:1076
     fn pause(self: Self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
         if self.phase != .Committed || self.pending.is_some() -> return .Err(.InvalidTransition(operation: .Pause, phase: self.phase))
-        self.validate_base(&plan)?
+        self.validate_base(&plan)
         if plan.base.identity != plan.candidate.identity -> return .Err(.IdentityMismatch(expected: plan.base.identity.clone(), found: plan.candidate.identity.clone()))
         if !plan.is_compatible() -> return .Err(.Incompatible(reason_codes: plan.compatibility.reason_codes().to_vec()))
         self.pending = .Val(^plan); self.phase = .Paused
@@ -387,8 +455,8 @@ impl WebModuleSwapState {
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:1107
     fn apply(self: Self) -> WebModuleSwapReceipt WebModuleSwapError! {
         if self.phase != .Paused -> return .Err(.InvalidTransition(operation: .Apply, phase: self.phase))
-        plan :: self.pending.as_ref().ok_or(WebModuleSwapError.NoPendingPlan)?
-        self.validate_base(plan)?
+        plan :: self.pending.as_ref().ok_or(WebModuleSwapError.NoPendingPlan)
+        self.validate_base(plan)
         if !plan.is_compatible() -> return .Err(.Incompatible(reason_codes: plan.compatibility.reason_codes().to_vec()))
         applied :: plan.applied_snapshot(); self.active = ^applied; self.phase = .Applied
         return .Ok(self.receipt(.Apply, .Applied))
@@ -396,8 +464,8 @@ impl WebModuleSwapState {
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:1131
     fn commit(self: Self) -> WebModuleSwapReceipt WebModuleSwapError! {
         if self.phase != .Applied -> return .Err(.InvalidTransition(operation: .Commit, phase: self.phase))
-        plan :: self.pending.as_ref().ok_or(WebModuleSwapError.NoAppliedPlan)?
-        self.validate_base(plan)?
+        plan :: self.pending.as_ref().ok_or(WebModuleSwapError.NoAppliedPlan)
+        self.validate_base(plan)
         if self.active.identity != plan.candidate.identity -> return .Err(.IdentityMismatch(expected: plan.candidate.identity.clone(), found: self.active.identity.clone()))
         plan :: self.pending.take().expect("applied swap has a pending plan")
         self.committed = self.active.clone(); self.phase = .Committed
@@ -417,14 +485,17 @@ impl WebModuleSwapState {
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:1210
     fn apply_decision(self: Self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
         if !plan.is_compatible() -> return self.restart(^plan)
-        self.pause(^plan)?
+        self.pause(^plan)
         if self.apply() == .Err(error) { _ :: self.rollback(); return .Err(^error) }
-        return match self.commit() { .Ok(receipt) -> .Ok(^receipt); .Err(error) -> { _ :: self.rollback(); .Err(^error) } }
+        return if self.commit() == {
+            .Ok(receipt) -> .Ok(^receipt)
+            .Err(error) -> { _ :: self.rollback(), .Err(^error) }
+        }
     }
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:1234
     fn restart(self: Self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
         if self.phase != .Committed || self.pending.is_some() -> return .Err(.InvalidTransition(operation: .Restart, phase: self.phase))
-        self.validate_base(&plan)?
+        self.validate_base(&plan)
         if plan.base.identity != plan.candidate.identity -> return .Err(.IdentityMismatch(expected: plan.base.identity.clone(), found: plan.candidate.identity.clone()))
         if plan.is_compatible() -> return .Err(.Incompatible(reason_codes: [.SemanticIncompatible]))
         self.active = plan.candidate.clone(); self.committed = self.active.clone(); self.phase = .Committed
@@ -434,7 +505,7 @@ impl WebModuleSwapState {
     fn validate_base(self: &Self, plan: &WebModuleSwapPlan) WebModuleSwapError! {
         if self.committed.identity != plan.base.identity -> return .Err(.IdentityMismatch(expected: self.committed.identity.clone(), found: plan.base.identity.clone()))
         if self.committed.source_revision != plan.base.source_revision || self.committed.build_revision != plan.base.build_revision -> return .Err(.StalePlan(expected_source_revision: plan.base.source_revision.clone(), found_source_revision: self.committed.source_revision.clone(), expected_build_revision: plan.base.build_revision.clone(), found_build_revision: self.committed.build_revision.clone()))
-        return .Ok(())
+        return .Ok(_)
     }
     // Rust: crates/jet-devserver/src/WebModuleSwap.rs:1287
     fn receipt(self: Self, operation: WebModuleSwapOperation, status: WebModuleSwapReceiptStatus) -> WebModuleSwapReceipt {

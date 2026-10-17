@@ -110,11 +110,11 @@ fn semindex_fn_signature(name: String, params: [SymNameType], param_contract: [S
     }
     result :: if ret == {
         .Val(ty) -> type_name(ty)
-        None -> ""
+        .None -> ""
     }
     ceiling :: if effect_via == {
         .Val(via) -> " -[via {via.name}]>"
-        None -> if shown.len() == 0 -> "" else -> " -[{shown.join(", ")}]>"
+        .None -> if shown.len() == 0 -> "" else -> " -[{shown.join(", ")}]>"
     }
     suffix :: if ceiling != "" -> if result == "" -> ceiling else -> "{ceiling} {result}" else if result != "" -> " -> {result}" else -> ""
     signature := "fn {name}({parameter_parts.join(", ")}){suffix}"
@@ -156,7 +156,7 @@ fn semindex_parameter_defaults(params: [Param], source: String, skip_self: Bool)
                     value_unavailable: CallableFactUnavailable{required_stage: CompilerStage.Prepared, reason: "the semindex producer does not evaluate callable defaults"},
                 }))
             }
-            None -> &defaults.push(None)
+            .None -> &defaults.push(.None)
         }
     }
     defaults
@@ -165,8 +165,8 @@ fn semindex_callable_policies(function: Func) -> [CallablePolicy] Never! {
     loop marker in function.markers {
         if marker.name == "Policy" {
             if callable_policy_chain_parse(marker_expr_args_owned(marker)) == {
-                .Ok(chain) -> return chain.policies
-                .Err(_) -> return [CallablePolicy]{}
+                .Ok(chain) -> { return chain.policies }
+                .Err(_) -> { return [CallablePolicy]{} }
             }
         }
     }

@@ -2,13 +2,13 @@
 // Completion owns dynamic/static completion; SemIndex owns parameter binding.
 // lsp_build_symbol_db is pending canonical retained-bundle projection, not a
 // second symbol walk. No DTO or replacement semantic database is defined here.
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use jet_foundation.[foundation_json_quote, type_name, failure_contract_effective_type, failure_contract_source]
 use jet_semindex.[SymbolDB, semindex_build_symbol_db, function_parameter_parts, binder_active_parameter]
 use jet_driver.[JetDriverCompilerCheckResult]
 use core.files.runtime.kernel_path_components as lsp_completion_path
 
-fn lsp_completion_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_completion_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri_value :: td.field("uri") ?? return None
@@ -25,7 +25,7 @@ fn lsp_completion_response(server: LSPServer, params: DataTree?, id: DataTree) -
         version :: if doc.version >= 0 -> U64.from_int(doc.version) ?? panic("i32 version fits u64") else -> U64{0}
         dynamic :: lsp_dynamic_completion_json(value, doc.text, offset, version, if result.graph != None -> Val(result) else -> None, root)
         if dynamic == {
-            .Err(message) -> return Val(lsp_error_response(id, -32602, message))
+            .Err(message) -> { return Val(lsp_error_response(id, -32602, message)) }
             .Ok(result) -> { if result == .Val(json) -> return Val(lsp_response(id, json)) }
         }
         db := lsp_build_symbol_db(result)
@@ -39,7 +39,7 @@ fn lsp_completion_response(server: LSPServer, params: DataTree?, id: DataTree) -
     None
 }
 
-fn lsp_signature_help_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_signature_help_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri_value :: td.field("uri") ?? return None
@@ -65,14 +65,14 @@ fn lsp_signature_help_response(server: LSPServer, params: DataTree?, id: DataTre
                 if return_type == .Val(ty) -> label += " {ty}"
                 if via == {
                     .Val(param) -> label += " -[via {param.name}]>"
-                    None -> {
+                    .None -> {
                         if effects == {
                             .Val(row) -> {
                                 names := [String]{}
                                 loop entry in row -> &names.push(entry.name)
                                 label += " -[{names.join(", ")}]>"
                             }
-                            None -> label += "\neffects: unavailable"
+                            .None -> label += "\neffects: unavailable"
                         }
                     }
                 }

@@ -1,7 +1,7 @@
 // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1
 // Style facts only; widget trees, focus, cursor and application model remain with the host.
-use jet_foundation.[DataTree, TEXT_NUL]
-use jet_foundation.JSON.[json_escape, parse_json_with_limit]
+use jet_foundation.[Dyn, TEXT_NUL]
+use jet_foundation.JSON.[foundation_json_escape, parse_json_with_limit]
 use jet_foundation.SHA256 as SHA256
 use std.collections.[VecDeque]
 // GATE #4494: shared immutable snapshots and transactional mutex ownership.
@@ -494,7 +494,7 @@ fn apply_locked(state: ReloadState, edit: TerminalStyleEdit) -> TerminalStyleRel
                 receipt
             }
         }
-        .Invalid -> panic("candidate parsing produced invalid change")
+        .Invalid -> { panic("candidate parsing produced invalid change") }
     }
 }
 // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1221
@@ -592,7 +592,7 @@ struct TerminalStyleHostAdapter {
     // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1443
     fn default() -> TerminalStyleHostAdapter { TerminalStyleHostAdapter.new() }
     // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1449
-    fn new() -> TerminalStyleHostAdapter { TerminalStyleHostAdapter{reload: TerminalStyleReload.new(), source: Mutex.new(None)} }
+    fn new() -> TerminalStyleHostAdapter { TerminalStyleHostAdapter{reload: TerminalStyleReload.new(), source: Mutex.new(.None)} }
     // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1466
     fn inject(self, source: TerminalStyleHostSource) -> () {
         guard := self.source.lock().unwrap_or_else((p) -> p.into_inner())
@@ -666,7 +666,7 @@ fn parse_style_request(body: String, source: TerminalStyleHostSource, revision: 
     Ok(^edit)
 }
 // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1612
-fn object_map(value: DataTree) -> [String:DataTree] Err! {
+fn object_map(value: Dyn) -> [String:Dyn] Err! {
     if value == .Object(fields) -> Ok(fields.iter().cloned().collect()) else -> Err("terminal style request must be an object")
 }
 // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1619
@@ -695,11 +695,11 @@ fn outcome_json(outcome: TerminalStyleHostOutcome, snapshot: TerminalStyleSnapsh
     if outcome == {
         .Applied{revision, change} -> {
             &output.push_str(",\"outcome\":\"applied\",\"revision\":{revision},\"change\":\"{change.as_str()}\"")
-            if snapshot == .Val(snapshot) -> &output.push_str(",\"fingerprint\":\"{json_escape(snapshot.fingerprint())}\"")
+            if snapshot == .Val(snapshot) -> &output.push_str(",\"fingerprint\":\"{foundation_json_escape(snapshot.fingerprint())}\"")
         }
         .Rejected(rejection) -> {
             &output.push_str(",\"outcome\":\"rejected\",\"code\":\"{rejection.code()}\"")
-            if rejection == .Invalid(fact) -> &output.push_str(",\"message\":\"{json_escape(fact.message)}\"")
+            if rejection == .Invalid(fact) -> &output.push_str(",\"message\":\"{foundation_json_escape(fact.message)}\"")
         }
         .Unavailable(reason) -> &output.push_str(",\"outcome\":\"unavailable\",\"reason\":\"{reason.as_str()}\"")
     }

@@ -1,7 +1,7 @@
 // Source/LSP/Server.rs:2839–3108,3222–3400. Sole W38 LSPServer and
 // W36 document state; Completion/Features (0734/0736/0737), checked source
 // snapshots (0741), and the sole Syntax keyword table remain dependencies.
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use core.files.runtime.kernel_path_components as lsp_reference_path
 use jet_foundation.[Span, foundation_json_quote]
 use jet_lexer.[Token, TOKEN_IDENT, TOKEN_KW_MUTATE, TOKEN_KW_MOVE]
@@ -14,7 +14,7 @@ fn lsp_impact_report_json_with_provenance(report: String) -> String Never! {
     "{body},\"evidence\":\"checked_static\",\"runtime_observation\":\"not_run\",\"provenance_scope\":\"checked_semantic_index\"}}"
 }
 
-fn lsp_references_response(server: LSPServer, params: DataTree?, id: DataTree) -[FS, Env]> String? {
+fn lsp_references_response(server: LSPServer, params: Dyn?, id: Dyn) -[FS, Env]> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri :: if (td.field("uri") ?? return None) == {
@@ -58,7 +58,7 @@ fn lsp_references_response(server: LSPServer, params: DataTree?, id: DataTree) -
     Val(lsp_response(id, "[{items.join(",")}]"))
 }
 
-fn lsp_prepare_rename_response(server: LSPServer, params: DataTree?, id: DataTree) -[FS, Env]> String? {
+fn lsp_prepare_rename_response(server: LSPServer, params: Dyn?, id: Dyn) -[FS, Env]> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri :: if (td.field("uri") ?? return None) == {
@@ -97,7 +97,7 @@ fn lsp_prepare_rename_response(server: LSPServer, params: DataTree?, id: DataTre
     Val(lsp_response(id, "{{\"range\":{lsp_range_json(range)},\"placeholder\":{foundation_json_quote(token.payload.text)}}}"))
 }
 
-fn lsp_rename_response(server: LSPServer, params: DataTree?, id: DataTree) -[FS, Env]> String? {
+fn lsp_rename_response(server: LSPServer, params: Dyn?, id: Dyn) -[FS, Env]> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri :: if (td.field("uri") ?? return None) == {
@@ -145,7 +145,7 @@ fn lsp_rename_response(server: LSPServer, params: DataTree?, id: DataTree) -[FS,
         file_uri :: lsp_path_to_uri(source.path)
         version :: if snapshot.version == {
             .Val(number) -> "{number}"
-            None -> "null"
+            .None -> "null"
         }
         &changes.push("{{\"textDocument\":{{\"uri\":{foundation_json_quote(file_uri)},\"version\":{version}}},\"edits\":[{edits.join(",")}]}}")
     }
@@ -304,7 +304,10 @@ fn lsp_document_symbol_kind(kind: SymKind) -> Int? Never! {
 }
 
 fn lsp_call_hierarchy_item_json(def: SymDef, src: String) -> String? Never! {
-    if def.kind != .Function{..} -> return None
+    if def.kind == {
+        .Function{..} -> {}
+        else -> { return None }
+    }
     uri :: lsp_path_to_uri(def.module_path)
     range :: lsp_range_json(lsp_byte_span_to_range(src, def.def_span))
     Val("{{\"name\":{foundation_json_quote(def.name)},\"kind\":12,\"uri\":{foundation_json_quote(uri)},\"range\":{range},\"selectionRange\":{range}}}")
@@ -322,7 +325,7 @@ fn lsp_type_hierarchy_item_json(def: SymDef, src: String) -> String? Never! {
     Val("{{\"name\":{foundation_json_quote(def.name)},\"kind\":{kind},\"uri\":{foundation_json_quote(uri)},\"range\":{range},\"selectionRange\":{range}}}")
 }
 
-fn lsp_type_hierarchy_item_params(params: DataTree?) -> (uri: String, name: String)? Never! {
+fn lsp_type_hierarchy_item_params(params: Dyn?) -> (uri: String, name: String)? Never! {
     item :: (params ?? return None).field("item") ?? return None
     uri :: if (item.field("uri") ?? return None) == {
         .Text(text) -> text

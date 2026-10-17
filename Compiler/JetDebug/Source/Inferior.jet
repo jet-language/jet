@@ -35,7 +35,7 @@ struct TargetIdentity {
 }
 // Rust: crates/jet-debug/src/Inferior.rs:114
 struct Inferior {
-    child: Child; stdin: ChildStdin; rx: mpsc.Receiver[U8]; _reader: JoinHandle[Unit]?
+    child: Child; stdin: ChildStdin; rx: mpsc.Receiver<U8>; _reader: JoinHandle[Unit]?
     stdout_path: OSPath; stderr_path: OSPath; stdout_pos: U64; stderr_pos: U64
     attached: TargetIdentity?; detached: Bool; debuggee_exited: Bool; closed: Bool
 }
@@ -54,7 +54,9 @@ impl Inferior {
         if !binary.is_file() -> return .Err(io.Error.new(.NotFound, "debug binary does not exist: {binary.display()}"))
         cmd := Command.new("lldb")
         cmd.arg("--no-lldbinit")
-        if rust_pretty_printer_files() == .Val((script, commands)) {
+        if rust_pretty_printer_files() == .Val(tuple_6) {
+            script :: tuple_6._0
+            commands :: tuple_6._1
             if checked_lldb_quote(script.to_string_lossy()) == .Ok(script) -> cmd.arg("--one-line-before-file").arg("command script import {script}").arg("--source-before-file").arg(commands)
         }
         child := cmd.arg("--").arg(binary).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn()?
@@ -65,12 +67,12 @@ impl Inferior {
             byte := [U8{0}]
             loop {
                 if stdout.read(&byte) == {
-                    .Ok(0) | .Err(_) -> break
+                    .Ok(0) | .Err(_) -> { break }
                     .Ok(_) -> if tx.send(byte[0]).is_err() -> break
                 }
             }
         })
-        static SESSION_COUNTER :: AtomicU64.new(0)
+        SESSION_COUNTER :: AtomicU64.new(0)
         n :: SESSION_COUNTER.fetch_add(1, .Relaxed)
         tmp :: std.env.temp_dir()
         stdout_path :: capture_path(tmp, n, "stdout")
@@ -103,7 +105,9 @@ impl Inferior {
         identity :: verify_attach_target(binary, pid)?
         cmd := Command.new("lldb")
         cmd.arg("--no-lldbinit")
-        if rust_pretty_printer_files() == .Val((script, commands)) {
+        if rust_pretty_printer_files() == .Val(tuple_7) {
+            script :: tuple_7._0
+            commands :: tuple_7._1
             if checked_lldb_quote(script.to_string_lossy()) == .Ok(script) -> cmd.arg("--one-line-before-file").arg("command script import {script}").arg("--source-before-file").arg(commands)
         }
         child := cmd.stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn()?
@@ -114,12 +118,12 @@ impl Inferior {
             byte := [U8{0}]
             loop {
                 if stdout.read(&byte) == {
-                    .Ok(0) | .Err(_) -> break
+                    .Ok(0) | .Err(_) -> { break }
                     .Ok(_) -> if tx.send(byte[0]).is_err() -> break
                 }
             }
         })
-        static SESSION_COUNTER :: AtomicU64.new(0)
+        SESSION_COUNTER :: AtomicU64.new(0)
         n :: SESSION_COUNTER.fetch_add(1, .Relaxed)
         tmp :: std.env.temp_dir()
         stdout_path :: capture_path(tmp, n, "stdout")
@@ -155,7 +159,10 @@ impl Inferior {
     }
     // Rust: crates/jet-debug/src/Inferior.rs:387
     fn drain_file(path: OSPath, pos: U64) -> String {
-        f := match File.open(path) { .Ok(f) -> ^f; .Err(_) -> return "" }
+        f := if File.open(path) == {
+            .Ok(f) -> ^f
+            .Err(_) -> { return "" }
+        }
         if f.seek(.Start(pos)).is_err() -> return ""
         buf := ""
         if f.read_to_string(&buf).is_ok() -> pos += U64{buf.len()}
@@ -242,7 +249,7 @@ impl Inferior {
         quoted :: checked_lldb_quote(symbol)?
         output :: self.cmd("image lookup -n {quoted}")?
         if lldb_command_failed(output) || !output.lines().any((line) -> line.contains(symbol)) -> return .Err(io.Error.new(.InvalidData, "lldb could not resolve {role} symbol {symbol}"))
-        return .Ok(())
+        return .Ok(_)
     }
     // Rust: crates/jet-debug/src/Inferior.rs:608
     fn install_native_slot(self: &Self, installer: String, entry: String) IOError! {
@@ -250,7 +257,7 @@ impl Inferior {
         self.require_symbol(entry, "typed candidate entry")?
         output :: self.cmd("expr -- (void) {installer}({entry})")?
         if lldb_command_failed(output) -> return .Err(io.Error.new(.InvalidData, "lldb could not install typed native callable {installer}: {compact_output(output)}"))
-        return .Ok(())
+        return .Ok(_)
     }
     // Rust: crates/jet-debug/src/Inferior.rs:628
     fn write_resume(self: &Self, command: String) IOError! {
@@ -290,7 +297,7 @@ impl Inferior {
         return parse_breakpoint(output).ok_or_else(() -> io.Error.new(.InvalidData, "lldb did not return a breakpoint id"))
     }
     // Rust: crates/jet-debug/src/Inferior.rs:706
-    fn delete_breakpoint(self: &Self, id: Usize) IOError! { self.cmd("breakpoint delete {id}")?; return .Ok(()) }
+    fn delete_breakpoint(self: &Self, id: Usize) IOError! { self.cmd("breakpoint delete {id}")?; return .Ok(_) }
     // Rust: crates/jet-debug/src/Inferior.rs:711
     fn configure_launch(self: &Self, args: &[String], cwd: String?, env: &[(String, String)]) IOError! {
         if !args.is_empty() {
@@ -305,7 +312,7 @@ impl Inferior {
             assignments.push(checked_lldb_quote("{key}={value}")?)
         }
         if !assignments.is_empty() -> self.cmd("settings set target.env-vars {assignments.join(" ")}")?
-        return .Ok(())
+        return .Ok(_)
     }
     // Rust: crates/jet-debug/src/Inferior.rs:752
     fn locals(self: Self) -> String IOError! { return self.cmd("frame variable") }
@@ -335,34 +342,34 @@ impl Inferior {
     fn select_thread(self: &Self, id: U32) IOError! {
         output :: self.cmd("thread select {id}")?
         if output.contains("error:") || output.contains("no thread") -> return .Err(io.Error.new(.NotFound, clean_lldb_error(output, "thread is no longer available")))
-        return .Ok(())
+        return .Ok(_)
     }
     // Rust: crates/jet-debug/src/Inferior.rs:808
     fn select_frame(self: &Self, index: Usize) IOError! {
         output :: self.cmd("frame select {index}")?
         if output.contains("error:") -> return .Err(io.Error.new(.NotFound, clean_lldb_error(output, "frame is no longer available")))
-        return .Ok(())
+        return .Ok(_)
     }
     // Rust: crates/jet-debug/src/Inferior.rs:819
     fn interrupt(self: Self) -> String IOError! { self.cmd("process interrupt")?; return self.backtrace() }
     // Rust: crates/jet-debug/src/Inferior.rs:824
     fn detach(self: &Self) IOError! {
-        if self.debuggee_exited { self.attached = None; self.detached = true; return .Ok(()) }
+        if self.debuggee_exited { self.attached = None; self.detached = true; return .Ok(_) }
         if self.child.try_wait()?.is_some() {
             if self.attached.as_ref() == .Val(identity) {
                 if identity.verify() == {
                     .Err(error) -> {
-                        if error.kind() == .NotFound { self.attached = None; self.detached = true; return .Ok(()) }
+                        if error.kind() == .NotFound { self.attached = None; self.detached = true; return .Ok(_) }
                         return .Err(^error)
                     }
-                    .Ok(()) -> {}
+                    .Ok(_) -> {}
                 }
             }
             return .Err(io.Error.new(.UnexpectedEof, "lldb closed before detach was proven"))
         }
         if self.attached.as_ref() == .Val(identity) {
             if identity.verify() == .Err(error) {
-                if error.kind() == .NotFound { self.attached = None; self.detached = true; return .Ok(()) }
+                if error.kind() == .NotFound { self.attached = None; self.detached = true; return .Ok(_) }
                 return .Err(^error)
             }
         }
@@ -375,19 +382,19 @@ impl Inferior {
         }
         self.attached = None
         self.detached = true
-        return .Ok(())
+        return .Ok(_)
     }
     // Rust: crates/jet-debug/src/Inferior.rs:883
     fn terminate_debuggee(self: &Self) IOError! {
-        if self.debuggee_exited { self.attached = None; self.detached = true; return .Ok(()) }
+        if self.debuggee_exited { self.attached = None; self.detached = true; return .Ok(_) }
         if self.child.try_wait()?.is_some() {
             if self.attached.as_ref() == .Val(identity) {
                 if identity.verify() == {
                     .Err(error) -> {
-                        if error.kind() == .NotFound { self.attached = None; self.detached = true; return .Ok(()) }
+                        if error.kind() == .NotFound { self.attached = None; self.detached = true; return .Ok(_) }
                         return .Err(^error)
                     }
-                    .Ok(()) -> {}
+                    .Ok(_) -> {}
                 }
             }
             return .Err(io.Error.new(.UnexpectedEof, "lldb closed before termination was proven"))
@@ -398,12 +405,12 @@ impl Inferior {
         if self.attached.as_ref() == .Val(identity) {
             if identity.verify() == {
                 .Err(error) -> if error.kind() != .NotFound -> return .Err(^error)
-                .Ok(()) -> return .Err(io.Error.new(.UnexpectedEof, "lldb did not prove that the debuggee terminated"))
+                .Ok(_) -> { return .Err(io.Error.new(.UnexpectedEof, "lldb did not prove that the debuggee terminated")) }
             }
         }
         self.attached = None
         self.detached = true
-        return .Ok(())
+        return .Ok(_)
     }
     // Rust: crates/jet-debug/src/Inferior.rs:936
     fn quit(self: Self) { self := ^self; self.shutdown() }
@@ -622,7 +629,7 @@ fn complete_quoted_literal(s: String) -> String? {
         if escaped { escaped = false; next }
         if c == {
             '\\' -> escaped = true
-            '"' -> return .Val(s[0..<i + 1])
+            '"' -> { return .Val(s[0..<i + 1]) }
             else -> {}
         }
     }
@@ -665,7 +672,7 @@ fn parse_exit_signal(output: String) -> String? {
     })
 }
 // Rust: crates/jet-debug/src/Inferior.rs:1401
-fn lldb_quote(value: String) -> String { return "\"{{value.replace('\\', "\\\\").replace('"', "\\\"")}}\"" }}
+fn lldb_quote(value: String) -> String { return "\"{{value.replace('\\', "\\\").replace('"', "\\"")}}"" }}
 // Rust: crates/jet-debug/src/Inferior.rs:1405
 fn checked_lldb_quote(value: String) -> String IOError! {
     if value.chars().any((c) -> c.is_control()) -> return .Err(io.Error.new(.InvalidInput, "debugger path contains a control character"))
@@ -735,20 +742,20 @@ impl TargetIdentity {
         return .Ok(Self { pid: pid, proc_dir: ^proc_dir, executable: ^executable, executable_hash: ^executable_hash, uid: target.uid, session: target.session, start_time: target.start_time })
     }
     // Rust: crates/jet-debug/src/Inferior.rs:1554,1601
-    fn verify(self: &Self) IOError! {
-        if selected_os() != "linux" -> return .Ok(())
+    fn verify(self: Self) IOError! {
+        if selected_os() != "linux" -> return .Ok(_)
         current :: ProcSnapshot.read(proc_base(self.proc_dir))?
         if current.executable != self.executable || current.executable_hash != self.executable_hash || current.uid != self.uid || current.session != self.session || current.start_time != self.start_time -> return .Err(io.Error.new(.PermissionDenied, "attach target identity changed"))
         if current.state == 'Z' || current.state == 'X' || current.state == 'x' -> return .Err(io.Error.new(.NotFound, "attach target has exited"))
-        return .Ok(())
+        return .Ok(_)
     }
     // Rust: crates/jet-debug/src/Inferior.rs:1576,1606
-    fn verify_running(self: &Self) IOError! {
-        if selected_os() != "linux" -> return .Ok(())
+    fn verify_running(self: Self) IOError! {
+        if selected_os() != "linux" -> return .Ok(_)
         loop _ in 0..20 {
             current :: ProcSnapshot.read(proc_base(self.proc_dir))?
             self.verify()?
-            if current.state != 'T' && current.state != 't' -> return .Ok(())
+            if current.state != 'T' && current.state != 't' -> return .Ok(_)
             std.thread.sleep(Duration.from_millis(10))
         }
         return .Err(io.Error.new(.WouldBlock, "attach target {self.pid} did not resume after detach"))
@@ -771,19 +778,19 @@ fn proc_stat_fields(stat: String) -> [String] IOError! {
     return .Ok(stat[close + 1..<stat.len()].split_whitespace().collect())
 }
 // Rust: crates/jet-debug/src/Inferior.rs:1642
-fn validate_target(target: &ProcSnapshot, executable: &OSPath, executable_hash: String, current_uid: U32) IOError! {
+fn validate_target(target: ProcSnapshot, executable: OSPath, executable_hash: String, current_uid: U32) IOError! {
     if target.uid != current_uid -> return .Err(io.Error.new(.PermissionDenied, "attach target belongs to another user"))
     if target.tracer_pid != 0 -> return .Err(io.Error.new(.PermissionDenied, "attach target is already being traced"))
     if target.state == 'Z' || target.state == 'X' || target.state == 'x' -> return .Err(io.Error.new(.NotFound, "attach target has exited"))
     if target.executable != executable || target.executable_hash != executable_hash -> return .Err(io.Error.new(.PermissionDenied, "attach target executable does not match the debug binary"))
-    return .Ok(())
+    return .Ok(_)
 }
 // Rust: crates/jet-debug/src/Inferior.rs:1675
 fn lldb_reported_error(output: String) -> Bool { return output.lines().any((line) -> line.trim_start().starts_with("error:")) }
 // Rust: crates/jet-debug/src/Inferior.rs:1681
 fn verify_attach_target(binary: OSPath, pid: U32) -> TargetIdentity IOError! { return TargetIdentity.capture(binary, pid) }
 // Rust: crates/jet-debug/src/Inferior.rs:1685
-fn cleanup_failed_start(child: Child, stdin: ChildStdin, rx: mpsc.Receiver[U8], reader: JoinHandle[Unit], paths: &[OSPath]) {
+fn cleanup_failed_start(child: Child, stdin: ChildStdin, rx: mpsc.Receiver<U8>, reader: JoinHandle[Unit], paths: &[OSPath]) {
     child := ^child
     drop(^stdin)
     drop(^rx)
@@ -795,7 +802,7 @@ fn cleanup_failed_start(child: Child, stdin: ChildStdin, rx: mpsc.Receiver[U8], 
 // Rust: crates/jet-debug/src/Inferior.rs:1702
 fn capture_path(tmp: OSPath, counter: U64, stream: String) -> OSPath { return tmp.join("jet_debug_native_{std.process.id()}_{counter}.{stream}") }
 // Rust: crates/jet-debug/src/Inferior.rs:1711
-fn create_capture_file(path: &OSPath) IOError! {
+fn create_capture_file(path: OSPath) IOError! {
     options := OpenOptions.new()
     options.write(true).create_new(true)
     if selected_family() == "unix" -> options.mode(0o600) // GATE #4494: private native file mode.

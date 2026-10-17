@@ -35,7 +35,7 @@ fn semops_test_semantic_op_producer_and_blame_consumer_use_checked_facts(root: S
         if row.operation != None -> found_receipt = true
     }
     assert(found_receipt)
-    loop row in semantic_blame(after, [SemanticOp]{}) -> assert(row.operation == None)
+    loop row in semantic_blame(after, ([SemanticOp]{})) -> assert(row.operation == None)
 }
 fn semops_test_tool_fix_pairing_records_rename_and_blame_reads_the_receipt(before_index: SemIndex, after_index: SemIndex) {
     produced :: semantic_rename_ops(before_index, after_index)
@@ -54,7 +54,7 @@ fn semops_test_tool_fix_pairing_records_rename_and_blame_reads_the_receipt(befor
         }
     }
     assert(found)
-    loop row in semantic_blame(after_index, [SemanticOp]{}) -> assert(row.operation == None)
+    loop row in semantic_blame(after_index, ([SemanticOp]{})) -> assert(row.operation == None)
 }
 fn semops_test_blame_matches_recorded_targets_without_text_inference(index: SemIndex) {
     op :: SemanticOp{
@@ -65,7 +65,7 @@ fn semops_test_blame_matches_recorded_targets_without_text_inference(index: SemI
         }}, files: [SemanticOpFile]{},
     }
     found := false
-    loop row in semantic_blame(index, [SemanticOp]{op}) {
+    loop row in semantic_blame(index, ([SemanticOp]{op})) {
         if row.identity.ends_with("summarize") {
             operation :: row.operation ?? panic("recorded rename target")
             assert_eq(operation.kind, "rename")
@@ -123,8 +123,8 @@ fn semops_test_operation(kind: String, to: String?) -> SemanticOp Never! {
     recorded :: rows[0].operation ?? panic("first recorded target")
     assert_eq(recorded.kind, "structural")
     assert(rows[1].operation == None)
-    loop row in semantic_blame(index, [SemanticOp]{}) -> assert(row.operation == None)
-    loop after in [String]{"run::summarize", "summarize", "unrelated::summarize"} {
+    loop row in semantic_blame(index, ([SemanticOp]{})) -> assert(row.operation == None)
+    loop after in ([String]{"run::summarize", "summarize", "unrelated::summarize"}) {
         operation := semops_test_operation("structural", None)
         operation.targets = [SemanticOpTarget]{SemanticOpTarget{stable_id: "unrelated", before: "report", after, kind: "unrelated", module_path: "unrelated"}}
         assert(semops_operation_applies_to_fact(operation, fact))
@@ -171,8 +171,8 @@ fn semops_test_operation(kind: String, to: String?) -> SemanticOp Never! {
         assert_eq(ops[0].targets[0].stable_id, "def:old")
         assert_eq(ops[0].files.len(), 0)
     } else { panic("object receipt") }
-    assert(semops_parse_files(DataTree.Null) == None)
-    assert(semops_ops(DataTree.Null) == None)
+    assert(semops_parse_files(Dyn.Null) == None)
+    assert(semops_ops(Dyn.Null) == None)
     assert(semops_parse_receipt(`{"files":[],"files":[]}`) == None)
     assert(semops_parse_receipt("{{malformed") == None)
 }

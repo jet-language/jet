@@ -83,23 +83,23 @@ struct BigFixtureFacts { file_count: USize, function_count: USize, source_bytes:
 // Rust: tests/canvas_scenarios.rs:389
 fn write_big_fixture(dir: OSPath) -> BigFixtureFacts {
     main := String.new()
-    loop module in 0..BIG_MODULE_COUNT -> main.push_str("use \"./part_{module:02}\" as p{module:02}\n")
+    loop module_ref in 0..BIG_MODULE_COUNT -> main.push_str("use \"./part_{module_ref:02}\" as p{module_ref:02}\n")
     main.push('\n')
     main.push_str("fn run() {{\n")
     loop function in 0..BIG_FUNCTION_COUNT {
         module_ref :: function / BIG_FUNCTIONS_PER_MODULE
-        main.push_str("    value_{function:03} :: p{module:02}.function_{function:03}()\n")
+        main.push_str("    value_{function:03} :: p{module_ref:02}.function_{function:03}()\n")
     }
     main.push_str("    print(value_299)\n}}\n")
     canonical := String.new()
     fs.write(dir.join("main.jet"), main).expect("write generated Canvas entry source")
     canonical.push_str("main.jet\n")
     canonical.push_str(main)
-    loop module in 0..BIG_MODULE_COUNT {
+    loop module_ref in 0..BIG_MODULE_COUNT {
         first :: module_ref * BIG_FUNCTIONS_PER_MODULE
         source := String.new()
         loop function in first..first + BIG_FUNCTIONS_PER_MODULE -> source.push_str("pub fn function_{function:03}() Int -[]> {{ return 1 }}\n\n")
-        name :: "part_{module:02}.jet"
+        name :: "part_{module_ref:02}.jet"
         fs.write(dir.join(name), source).expect("write generated Canvas module source")
         canonical.push_str(name)
         canonical.push('\n')
@@ -110,7 +110,7 @@ fn write_big_fixture(dir: OSPath) -> BigFixtureFacts {
 // Rust: tests/canvas_scenarios.rs:435
 fn read_big_fixture_facts(dir: OSPath) -> BigFixtureFacts {
     canonical := String.new()
-    loop name in std.iter.once("main.jet".to_string()).chain((0..BIG_MODULE_COUNT).map(module_ref -> "part_{module:02}.jet")) {
+    loop name in std.iter.once("main.jet".to_string()).chain((0..BIG_MODULE_COUNT).map(module_ref -> "part_{module_ref:02}.jet")) {
         source :: fs.read_to_string(dir.join(name)).expect("read generated Canvas source")
         canonical.push_str(name)
         canonical.push('\n')
@@ -213,8 +213,8 @@ fn cargo_target_dir(repo: OSPath) -> OSPath {
 fn canvas_tools() -> CanvasTools? {
     CANVAS_TOOLS.get_or_init(() -> {
         strict :: env.var_os("JET_CANVAS_PREREQUISITES").as_deref() == "strict"
-        chromium :: resolve_canvas_tool("chromium", strict)?
-        node :: resolve_canvas_tool("node", strict)?
+        chromium :: resolve_canvas_tool("chromium", strict)
+        node :: resolve_canvas_tool("node", strict)
         CanvasTools{chromium: ^chromium, node: ^node}
     }).as_ref()
 }
@@ -222,9 +222,9 @@ fn canvas_tools() -> CanvasTools? {
 fn gecko_tools() -> GeckoTools Err! {
     GECKO_TOOLS.get_or_init(() -> {
         strict :: env.var_os("JET_CANVAS_PREREQUISITES").as_deref() == "strict"
-        firefox :: resolve_canvas_tool("firefox", strict).ok_or_else(() -> "Gecko smoke needs a valid Firefox executable")?
-        geckodriver :: resolve_canvas_tool("geckodriver", strict).ok_or_else(() -> "Gecko smoke needs a valid geckodriver executable")?
-        node :: resolve_canvas_tool("node", strict).ok_or_else(() -> "Gecko smoke needs a valid Node executable")?
+        firefox :: resolve_canvas_tool("firefox", strict).ok_or_else(() -> "Gecko smoke needs a valid Firefox executable")
+        geckodriver :: resolve_canvas_tool("geckodriver", strict).ok_or_else(() -> "Gecko smoke needs a valid geckodriver executable")
+        node :: resolve_canvas_tool("node", strict).ok_or_else(() -> "Gecko smoke needs a valid Node executable")
         GeckoTools{firefox: ^firefox, geckodriver: ^geckodriver, node: ^node}
     }).as_ref().map_err(error -> error.as_str())
 }
@@ -232,9 +232,9 @@ fn gecko_tools() -> GeckoTools Err! {
 fn resolve_canvas_tool(name: String, strict: Bool) -> OSPath? {
     resolved_key :: "JET_CANVAS_{name.to_ascii_uppercase()}_RESOLVED"
     override_key :: "JET_CANVAS_{name.to_ascii_uppercase()}"
-    candidate :: (if strict -> env.var_os(resolved_key) else -> env.var_os(override_key).or_else(() -> name.into()))?
-    path :: resolve_executable(OSPath.from(candidate))?
-    output :: Command.new(path).arg("--version").output().ok()?
+    candidate :: (if strict -> env.var_os(resolved_key) else -> env.var_os(override_key).or_else(() -> name.into()))
+    path :: resolve_executable(OSPath.from(candidate))
+    output :: Command.new(path).arg("--version").output().ok()
     version :: "{String.from_utf8_lossy(output.stdout)}{String.from_utf8_lossy(output.stderr)}"
     valid :: if name == {
         "chromium" -> version.contains("Chromium") || version.contains("Chrome")
@@ -304,8 +304,8 @@ struct CanvasCase {
     // Rust: tests/canvas_scenarios.rs:1372
     fn drop(&self) {
         if fs.remove_dir_all(self.dir) == {
-            Err(err) -> if err.kind() != ErrorKind.NotFound -> eprintln("warning: could not remove Canvas scenario artifacts at {self.dir.display()}: {err}")
-            Ok(_) -> {}
+            .Err(err) -> if err.kind() != ErrorKind.NotFound -> eprintln("warning: could not remove Canvas scenario artifacts at {self.dir.display()}: {err}")
+            .Ok(_) -> {}
         }
     }
 }
@@ -368,16 +368,15 @@ struct DevServer {
 }
 // Rust: tests/canvas_scenarios.rs:1494
 fn stop_process_tree(child: &Child) {
-    if core.sys.target.selected_family() == "unix" -> stop_process_tree_unix(child.id())
-    else -> _ :: child.kill()
+    if core.sys.target.selected_family() == "unix" -> stop_process_tree_unix(child.id()) else -> _ :: child.kill()
     _ :: child.wait()
 }
 // Rust: tests/canvas_scenarios.rs:1505
 fn stop_process_tree_unix(pid: U32) {
     children_path :: "/proc/{pid}/task/{pid}/children"
     if fs.read_to_string(children_path) == {
-        Ok(children) -> loop child in children.split_whitespace().filter_map(value -> value.parse<U32>().ok()) -> stop_process_tree_unix(child)
-        Err(_) -> {}
+        .Ok(children) -> loop child in children.split_whitespace().filter_map(value -> value.parse<U32>().ok()) -> stop_process_tree_unix(child)
+        .Err(_) -> {}
     }
     _ :: Command.new("kill").args(["-KILL", pid.to_string()]).status()
 }
@@ -396,9 +395,9 @@ fn wait_for_server(child: &Child, port: U16) {
 }
 // Rust: tests/canvas_scenarios.rs:1541
 fn http_ok(port: U16, path: &String) -> Bool {
-    stream := if TcpStream.connect(("127.0.0.1", port)) == {
-        Ok(stream) -> ^stream
-        Err(_) -> { return false }
+    stream := if TcpStream.connect((_0: "127.0.0.1", _1: port)) == {
+        .Ok(stream) -> ^stream
+        .Err(_) -> { return false }
     }
     authorization :: CANVAS_SESSIONS.get_or_init(() -> Mutex.new({})).lock().unwrap().get(port)
         .map(token -> "Authorization: Bearer {token}{Char{13}}\n").unwrap_or_default()

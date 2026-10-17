@@ -1,11 +1,11 @@
 // Source/LSP/Server.rs:1693–1941. Pending W38 Server ABI reconciliation.
 // Native identities stay OSPath; display spellings only join SemIndex facts.
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use jet_foundation.[Span, foundation_json_quote]
 use core.files.runtime.kernel_path_components as lsp_symbol_path
 use core.text.runtime.kernel_unicode_string as lsp_symbol_text
 
-fn lsp_document_symbol_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_document_symbol_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri_value :: td.field("uri") ?? return None
@@ -36,7 +36,7 @@ fn lsp_document_symbol_response(server: LSPServer, params: DataTree?, id: DataTr
     None
 }
 
-fn lsp_workspace_symbol_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_workspace_symbol_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     query := ""
     if params == .Val(value) {
         if value.field("query") == .Val(field) {
@@ -53,7 +53,7 @@ fn lsp_workspace_symbol_response(server: LSPServer, params: DataTree?, id: DataT
         }
         owner :: if open == {
             .Val(uri) -> server.check_with_bundle(server.diagnostic_state.docs[uri]).checked
-            None -> &server.queries.check_text_lsp(server.snapshot, path, source)
+            .None -> &server.queries.check_text_lsp(server.snapshot, path, source)
         }
         permit :: owner.guard_read()
         result :: permit.value.result
@@ -77,7 +77,7 @@ fn lsp_workspace_symbol_response(server: LSPServer, params: DataTree?, id: DataT
     Val(lsp_response(id, "[{rows.join(",")}]"))
 }
 
-fn lsp_folding_range_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_folding_range_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri_value :: td.field("uri") ?? return None
@@ -90,7 +90,7 @@ fn lsp_folding_range_response(server: LSPServer, params: DataTree?, id: DataTree
     None
 }
 
-fn lsp_document_highlight_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_document_highlight_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri_value :: td.field("uri") ?? return None
@@ -113,11 +113,11 @@ fn lsp_document_highlight_response(server: LSPServer, params: DataTree?, id: Dat
         loop reference in db.refs {
             if reference.module_path == path && reference.name == name -> &spans.push((_0: reference.span, _1: 2))
         }
-        &spans.sort_by((a: (Span, Int), b: (Span, Int)) -> {
-            if a._0.start != b._0.start -> a._0.start <=> b._0.start else -> a.1 <=> b.1
+        &spans.sort_by((a, b) -> {
+            if a._0.start != b._0.start -> a._0.start <=> b._0.start else -> a._1 <=> b._1
         })
         rows := [String]{}
-        previous := (_0: Span, _1: Int)?{None}
+        previous := [(Span, Int)]{}.first()
         loop entry in spans {
             if previous == .Val(last) {
                 if last._0.start == entry._0.start && last._0.end == entry._0.end && last._1 == entry._1 -> next
@@ -130,7 +130,7 @@ fn lsp_document_highlight_response(server: LSPServer, params: DataTree?, id: Dat
     None
 }
 
-fn lsp_selection_range_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_selection_range_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri_value :: td.field("uri") ?? return None
@@ -159,7 +159,7 @@ fn lsp_selection_range_response(server: LSPServer, params: DataTree?, id: DataTr
     None
 }
 
-fn lsp_document_link_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_document_link_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri_value :: td.field("uri") ?? return None
@@ -172,7 +172,7 @@ fn lsp_document_link_response(server: LSPServer, params: DataTree?, id: DataTree
     None
 }
 
-fn lsp_code_lens_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_code_lens_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri_value :: td.field("uri") ?? return None

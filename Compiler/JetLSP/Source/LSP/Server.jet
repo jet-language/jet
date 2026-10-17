@@ -4,7 +4,7 @@
 use core.files.runtime.kernel_path_components.[OSPath]
 use core.files.runtime.kernel_path_components as lsp_loop_path
 use core.term as lsp_loop_term
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use jet_driver.[JetDriverCompilerQueries, JetDriverQuerySnapshot, JetDriverCheckedQuery]
 use jet_lexer.[Token, lex]
 use jet_pkg_model.[pkg_mask_inline_package_source]
@@ -41,10 +41,10 @@ struct LSPServer {
 
     fn check_with_bundle(self, doc: LSPDocument) -[FS, Env]> LSPCheckedRequest Never! {
         checked :: lsp_check_with_bundle(self.diagnostic_state, &self.queries, self.snapshot, doc)
-        versions :: {
+        versions :: (() -> {
             permit :: checked.guard_read()
             lsp_checked_document_versions(self.diagnostic_state, permit.value.result, self.snapshot.cwd.platform)
-        }
+        })()
         LSPCheckedRequest{checked: checked, checked_versions: versions}
     }
 
@@ -62,7 +62,7 @@ fn lsp_lex_document(queries: JetDriverCompilerQueries, cwd: OSPath, doc: LSPDocu
     &queries.lex_text(cwd, doc.path, doc.text)
 }
 
-fn lsp_apply_content_change(doc: LSPDocument, change: DataTree) -> Bool Never! {
+fn lsp_apply_content_change(doc: LSPDocument, change: Dyn) -> Bool Never! {
     if change != .Object(_) -> return false
     text :: change.field("text") ?? return false
     if text == {
@@ -76,21 +76,21 @@ fn lsp_apply_content_change(doc: LSPDocument, change: DataTree) -> Bool Never! {
                     range :: lsp_range_from_json(value) ?? return false
                     return &doc.apply_range_edit(range, length, replacement)
                 }
-                None -> {
+                .None -> {
                     if length != None -> return false
                     &doc.replace_text(replacement.copy())
                     return true
                 }
             }
         }
-        else -> return false
+        else -> { return false }
     }
 }
 
 // The transaction owns only the edited text. Rejecting any edit keeps the
 // resident document/version intact; sequential edits see earlier edits.
 // A successful empty change list still advances the version and marks dirty.
-fn lsp_update_document(state: LSPDiagnosticState, params: DataTree?, is_open: Bool, platform: core.files.runtime.kernel_path_components.PathPlatform) -> String? Never! {
+fn lsp_update_document(state: LSPDiagnosticState, params: Dyn?, is_open: Bool, platform: core.files.runtime.kernel_path_components.PathPlatform) -> String? Never! {
     value :: params ?? return None
     document :: value.field("textDocument") ?? return None
     uri_value :: document.field("uri") ?? return None
@@ -107,7 +107,7 @@ fn lsp_update_document(state: LSPDiagnosticState, params: DataTree?, is_open: Bo
                                 path :: core.files.runtime.kernel_path_components.from_text(lsp_uri_to_path(uri, platform == core.files.runtime.kernel_path_components.PathPlatform.Windows), platform)
                                 state.docs[uri] = LSPDocument.new(path, text.copy(), version)
                             }
-                            else -> return None
+                            else -> { return None }
                         }
                     } else {
                         changes :: value.field("contentChanges") ?? return None
@@ -122,25 +122,25 @@ fn lsp_update_document(state: LSPDiagnosticState, params: DataTree?, is_open: Bo
                                 state.docs[uri] = updated
                                 state.dirty[uri] = true
                             }
-                            else -> return None
+                            else -> { return None }
                         }
                     }
                     return Val(uri.copy())
                 }
-                else -> return None
+                else -> { return None }
             }
         }
-        else -> return None
+        else -> { return None }
     }
 }
 
-fn lsp_publish_after_open(state: &LSPDiagnosticState, queries: &JetDriverCompilerQueries, snapshot: JetDriverQuerySnapshot, params: DataTree?, stdout: &lsp_loop_term.Stdout) IOError! -[IO, Time.Wait, FS, Env]> {
+fn lsp_publish_after_open(state: &LSPDiagnosticState, queries: &JetDriverCompilerQueries, snapshot: JetDriverQuerySnapshot, params: Dyn?, stdout: &lsp_loop_term.Stdout) IOError! -[IO, Time.Wait, FS, Env]> {
     uri :: lsp_update_document(&state, params, true, snapshot.cwd.platform) ?? return
     lsp_publish_document_diagnostics(&state, &queries, snapshot, uri, &stdout) ?? return Err(err)
     // A failed actual write leaves existing dirtiness intact, exactly Rust767.
     _ := &state.dirty.remove(uri)
 }
 
-fn lsp_publish_after_change(state: &LSPDiagnosticState, params: DataTree?, platform: core.files.runtime.kernel_path_components.PathPlatform) Never! {
+fn lsp_publish_after_change(state: &LSPDiagnosticState, params: Dyn?, platform: core.files.runtime.kernel_path_components.PathPlatform) Never! {
     _ := lsp_update_document(&state, params, false, platform)
 }

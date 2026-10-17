@@ -5,7 +5,7 @@ use jet_devserver.PausedEvaluate.[AggregateKind, AuthorityGrant, AuthorityRequir
 use jet_foundation.SHA256.[sha256_hex]
 
 // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:18
-UNKNOWN_TYPE :: "Unknown"
+UNKNOWN_TYPE :: prep { String{"Unknown"} }
 // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:19
 MAX_SOURCE_COMPONENT_BYTES :: prep { USize{256} }
 // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:27
@@ -17,12 +17,12 @@ impl PausedDebugSessionAdapter {
     // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:37
     fn new(identity: SessionIdentity, source: JetDevtoolsSourceIdentityFact, scope_id: String, snapshot: DebugSnapshot, authority: AuthoritySet) -> PausedDebugSessionAdapter Err! {
         adapter := PausedDebugSessionAdapter { identity: identity, source: source, scope_id: scope_id, snapshot: snapshot, authority: authority, state: .Paused }
-        adapter.validate()?
+        adapter.validate()
         adapter
     }
     // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:57
     fn debugger_authority(scope_id: String) -> AuthoritySet Err! {
-        AuthoritySet.new([AuthorityGrant.new(INSPECT_AUTHORITY, scope_id)?, AuthorityGrant.new(EVALUATE_AUTHORITY, scope_id)?])
+        AuthoritySet.new([AuthorityGrant.new(INSPECT_AUTHORITY, scope_id), AuthorityGrant.new(EVALUATE_AUTHORITY, scope_id)?])
     }
     // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:64
     fn identity(&self) -> SessionIdentity { &self.identity }
@@ -35,7 +35,7 @@ impl PausedDebugSessionAdapter {
         self.identity = identity
         self.snapshot = snapshot
         self.state = .Paused
-        self.validate()?
+        self.validate()
     }
     // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:91
     fn inject_into(&self, host: &PausedEvaluateHost) Err! {
@@ -43,7 +43,7 @@ impl PausedDebugSessionAdapter {
             host.clear_session()
             return
         }
-        location := self.source_location()?
+        location := self.source_location()
         bindings := [ValueProjection]{}
         bindings.reserve(self.snapshot.locals.len())
         loop (index, local) in self.snapshot.locals.iter().enumerate() {
@@ -55,8 +55,8 @@ impl PausedDebugSessionAdapter {
             if projection.type_name.is_empty() -> projection.type_name = UNKNOWN_TYPE
             bindings.push(projection)
         }
-        scope := LexicalScope.new(self.scope_id.clone(), bounded_scope_name(self.snapshot.function), .None, location, bindings)?
-        session := PausedSession.paused(self.identity.clone(), [scope], self.authority.clone(), DEFAULT_EVALUATION_BUDGET)?
+        scope := LexicalScope.new(self.scope_id.clone(), bounded_scope_name(self.snapshot.function), .None, location, bindings)
+        session := PausedSession.paused(self.identity.clone(), [scope], self.authority.clone(), DEFAULT_EVALUATION_BUDGET)
         host.clear_evaluator_result()
         host.set_session(session)
     }
@@ -172,7 +172,7 @@ impl PausedDebugSessionAdapter {
 // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:371
 fn normalized_type_name(value: String) -> String {
     value := value.trim() // #4303
-    if value.is_empty() || value.chars().any((ch) -> ch.is_control()) -> UNKNOWN_TYPE else bounded_name(value)
+    if value.is_empty() || value.chars().any((ch) -> ch.is_control()) -> UNKNOWN_TYPE else -> bounded_name(value)
 }
 // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:380
 fn bounded_name(value: String) -> String {
@@ -181,7 +181,7 @@ fn bounded_name(value: String) -> String {
         if name.len().saturating_add(ch.len_utf8()) > MAX_SOURCE_COMPONENT_BYTES -> break
         name.push(ch)
     }
-    if name.is_empty() -> UNKNOWN_TYPE else name
+    if name.is_empty() -> UNKNOWN_TYPE else -> name
 }
 // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:395
 fn bounded_scope_name(value: String) -> String { bounded_name(value) }
@@ -198,8 +198,8 @@ fn bounded_text(value: String) -> (String, Bool) {
                 else -> result.push('�')
             }
         } else { result.push(ch) }
-        if result.len() > USize{MAX_VALUE_BYTES} {
-            loop result.len() > USize{MAX_VALUE_BYTES} -> _ :: result.pop()
+        if result.len() > (USize{MAX_VALUE_BYTES}) {
+            loop result.len() > (USize{MAX_VALUE_BYTES}) -> _ :: result.pop()
             truncated = true
             break
         }

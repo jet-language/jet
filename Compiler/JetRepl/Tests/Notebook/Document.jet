@@ -21,13 +21,13 @@ fn notebook_document_test_store(nb: &JetNotebook, id: String, text: String) Note
 fn notebook_document_test_error(nb: JetNotebook, id: String) -> String Never! {
     if nb.dependency_order(id) == {
         .Err(error) -> error.message
-        .Ok(_) -> panic("expected dependency error")
+        .Ok(_) -> { panic("expected dependency error") }
     }
 }
 fn notebook_document_test_edit_error(nb: JetNotebook, id: String, source: String) -> String Never! {
     if &nb.edit_cell(id, source) == {
         .Err(error) -> error.message
-        .Ok(_) -> panic("expected edit error")
+        .Ok(_) -> { panic("expected edit error") }
     }
 }
 // End the returned write window at the helper boundary before editing the
@@ -88,7 +88,7 @@ fn notebook_document_test_add(nb: &JetNotebook, kind: NotebookCellKind, source: 
     nb.cells[2].depends_on = [String]{"missing"}
     error :: if &nb.refresh_dependencies() == {
         .Err(error) -> error.message
-        .Ok(_) -> panic("unknown edge accepted")
+        .Ok(_) -> { panic("unknown edge accepted") }
     }
     assert_eq(error, "cell `read` depends on unknown cell `missing`")
 }
@@ -229,7 +229,7 @@ fn notebook_document_test_add(nb: &JetNotebook, kind: NotebookCellKind, source: 
     loop id in ids {
         error :: if &nb.store_output(id, notebook_plain_bundle("text"), 1, None) == {
             .Err(error) -> error.message
-            .Ok(_) -> panic("store accepted")
+            .Ok(_) -> { panic("store accepted") }
         }
         expected :: "cell `{id}` is not a Jet cell"
         assert_eq(error, expected)

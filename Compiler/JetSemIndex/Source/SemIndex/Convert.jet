@@ -79,9 +79,9 @@ fn semindex_contract_metadata(definition: SymDef, registration: SemaRegistration
 }
 fn semindex_declaration_contract_metadata(item: Item, items: [Item], members: [MemberFact]) -> SemIndexContractMetadata Never! {
     if item == {
-        .Distinct(definition) -> return SemIndexContractMetadata{nominal_base: Val(type_name(definition.base)), trait_contracts: semindex_trait_contracts_for_owner(items, definition.name, members)}
-        .Struct(definition) -> return SemIndexContractMetadata{nominal_base: None, trait_contracts: semindex_trait_contracts_for_owner(items, definition.name, members)}
-        .Enum(definition) -> return SemIndexContractMetadata{nominal_base: None, trait_contracts: semindex_trait_contracts_for_owner(items, definition.name, members)}
+        .Distinct(definition) -> { return SemIndexContractMetadata{nominal_base: Val(type_name(definition.base)), trait_contracts: semindex_trait_contracts_for_owner(items, definition.name, members)} }
+        .Struct(definition) -> { return SemIndexContractMetadata{nominal_base: None, trait_contracts: semindex_trait_contracts_for_owner(items, definition.name, members)} }
+        .Enum(definition) -> { return SemIndexContractMetadata{nominal_base: None, trait_contracts: semindex_trait_contracts_for_owner(items, definition.name, members)} }
         .Trait(definition) -> {
             associated := [SemIndexAssociatedTypeFact]{}
             loop row in definition.assoc_types -> &associated.push(SemIndexAssociatedTypeFact{name: row.name, implementation: None})
@@ -183,7 +183,7 @@ fn semindex_callable_signature(kind: SymKind, returned_views: [ViewProvenanceFac
         checked_effects := CallableEffectsFact.Unavailable{reason: CallableFactUnavailable{required_stage: CompilerStage.Typed, reason: "the checker has not published a checked callable effect row"}}
         if effect_via == {
             .Val(via) -> checked_effects = .Checked{effects: [CallableEffectFact]{CallableEffectFact.ViaParameter{name: via.name, source: semindex_source_span(via.span)}}}
-            None -> {
+            .None -> {
                 if effects == .Val(row) {
                     facts := [CallableEffectFact]{}
                     loop entry in row -> &facts.push(CallableEffectFact.Named{name: entry.name, source: semindex_source_span(entry.span)})
@@ -227,7 +227,7 @@ fn semindex_convert_kind(kind: SymKind) -> SemIndexSymbolKind Never! {
                 .Checked(failure) -> Val(type_name(failure_contract_effective_type(failure)))
                 .Unavailable(_) -> if return_type == {
                     .Val(ty) -> Val(type_name(ty))
-                    None -> None
+                    .None -> None
                 }
             }
             .Function{params: projected, call_contract: contract, ret: ret}
@@ -246,7 +246,7 @@ fn semindex_convert_kind(kind: SymKind) -> SemIndexSymbolKind Never! {
         .Field(ty, parent) -> .Field{ty: type_name(ty), parent: parent}
         .Local(mutable, ty) -> .Local{mutable: mutable, ty: if ty == {
             .Val(value) -> Val(type_name(value))
-            None -> None
+            .None -> None
         }}
         .Param(ty) -> .Param{ty: type_name(ty)}
     }

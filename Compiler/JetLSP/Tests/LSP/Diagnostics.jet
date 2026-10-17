@@ -12,7 +12,7 @@ use jet_driver.[JetDriverCompileRequest, JetDriverCompileTarget, JetDriverAuthor
 use jet_eval.[jet_eval_default_config]
 use jet_pkg_model.[BuildStamp]
 use jet_queries.[QueryKey, FileKey, InputKey]
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use jet_parser.[parse_source]
 use core.encoding.json as lsp_diag_test_json
 
@@ -26,10 +26,10 @@ fn lsp_diag_test_report(code: String, what: String, why: String, fix: String, sp
 fn lsp_diag_test_one(diagnostic: Diagnostic, file: ReportPath, src: String) -[FS, Env]> String Never! {
     lsp_diagnostic_json_with_clears(diagnostic, file, src, 0, lsp_path_to_uri(file.as_str()), [Diagnostic]{diagnostic})
 }
-fn lsp_diag_test_field(value: DataTree, name: String) -> DataTree Never! {
+fn lsp_diag_test_field(value: Dyn, name: String) -> Dyn Never! {
     value.field(name) ?? panic("missing JSON field {name}")
 }
-fn lsp_diag_test_params(json: String) -> DataTree Never! {
+fn lsp_diag_test_params(json: String) -> Dyn Never! {
     value :: lsp_diag_test_json.parse(json) ?? panic("published notification JSON")
     lsp_diag_test_field(value, "params")
 }
@@ -64,7 +64,7 @@ fn lsp_diag_test_params(json: String) -> DataTree Never! {
     assert(json.contains("\"fix\":{foundation_json_quote(diagnostic.fix)}"))
     assert_eq(diagnostic.fix, "Replace `#[Codable]` with `#Codable`")
     assert(json.contains("\"new_text\":\"#Codable\""))
-    assert(json.ends_with(",\"data\":{{diagnostic_to_json(diagnostic, file, "#[Codable]\n")}}}}"))
+    assert(json.ends_with(",\"data\":{diagnostic_to_json(diagnostic, file, "#[Codable]\n")}}}"))
 }
 
 #Test("lsp_uses_registry_fix_for_report") {
@@ -152,9 +152,9 @@ fn lsp_diag_test_params(json: String) -> DataTree Never! {
     diagnostics :: [Diagnostic]{root, dependent}
     json :: lsp_diagnostic_json_with_clears(dependent, ReportPath.from_process("/work/main.jet"), "x{bidi}", 0, "file:///work/main.jet", diagnostics)
     value :: lsp_diag_test_json.parse(json) ?? panic("bidi editor JSON")
-    assert_eq(lsp_diag_test_field(value, "message"), DataTree.Text("dependent \\u{{202e}}"))
+    assert_eq(lsp_diag_test_field(value, "message"), Dyn.Text("dependent \\u{{202e}}"))
     data :: lsp_diag_test_field(value, "data")
-    assert_eq(lsp_diag_test_field(data, "what"), DataTree.Text("dependent {bidi}"))
+    assert_eq(lsp_diag_test_field(data, "what"), Dyn.Text("dependent {bidi}"))
     assert_eq(lsp_diag_test_field(value, "range"), lsp_diag_test_json.parse(lsp_range_json(lsp_byte_span_to_range("x{bidi}", Span{start: 1, end: 4}))) ?? panic("range"))
     assert(json.contains("root \\\\u{{202e}}visible\\nnext"))
 }
@@ -274,7 +274,7 @@ fn lsp_diag_test_clean(checked: Shared<JetDriverCheckedQuery>) Never! {
     groups :: lsp_diagnostic_groups(state, main_uri, permit.value.result, diagnostics, snapshot.cwd.platform, &targets)
     clears :: diagnostic_report_clear_counts(diagnostics)
     imported :: lsp_diag_test_params(lsp_document_group_json(state, scoring_uri, diagnostics, groups[scoring_uri], clears))
-    assert_eq(lsp_diag_test_field(imported, "version"), DataTree.Int(2))
+    assert_eq(lsp_diag_test_field(imported, "version"), Dyn.Int(2))
     imported_errors := [Diagnostic]{}
     loop index in groups[scoring_uri] {
         if diagnostics[index].code == "E0107" -> &imported_errors.push(diagnostics[index])
@@ -407,17 +407,17 @@ fn lsp_diag_test_clean(checked: Shared<JetDriverCheckedQuery>) Never! {
     file :: ReportPath.from_process("/work/a b.jet")
     json :: lsp_publish_diagnostics("file:///work/a%20b.jet", file, "a b", Val(12), diagnostics, [Int]{1, 0}, diagnostic_report_clear_counts(diagnostics))
     params :: lsp_diag_test_params(json)
-    assert_eq(lsp_diag_test_field(params, "version"), DataTree.Int(12))
+    assert_eq(lsp_diag_test_field(params, "version"), Dyn.Int(12))
     values :: lsp_diag_test_field(params, "diagnostics")
     if values == {
         .Array(items) -> {
             assert_eq(items.len(), 2)
-            assert_eq(lsp_diag_test_field(items[0], "code"), DataTree.Text("E0957"))
-            assert_eq(lsp_diag_test_field(items[1], "code"), DataTree.Text("E0956"))
+            assert_eq(lsp_diag_test_field(items[0], "code"), Dyn.Text("E0957"))
+            assert_eq(lsp_diag_test_field(items[1], "code"), Dyn.Text("E0956"))
             expected :: lsp_diag_test_json.parse(diagnostic_to_json_with_clears(first, file, "a b", 1)) ?? panic("compiler data")
             assert_eq(lsp_diag_test_field(items[1], "data"), expected)
         }
-        else -> panic("published diagnostics must be an array")
+        else -> { panic("published diagnostics must be an array") }
     }
     no_version :: lsp_diag_test_params(lsp_publish_diagnostics("file:///work/a%20b.jet", file, "", None, [Diagnostic]{}, [Int]{}, [Int]{}))
     assert_eq(no_version.field("version"), None)

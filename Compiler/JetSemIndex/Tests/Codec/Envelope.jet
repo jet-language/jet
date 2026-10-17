@@ -25,7 +25,7 @@
                 expected :: "invalid number `{number}`"
                 assert_eq(error.message, expected)
             }
-            .Ok(_) -> panic("typed expand envelope accepted an overflowing integer atom")
+            .Ok(_) -> { panic("typed expand envelope accepted an overflowing integer atom") }
         }
     }
 }
@@ -119,11 +119,11 @@ fn semindex_envelope_right_view_source() -> String Never! {
 fn returned_view_provenance_is_structured_and_changes_signature_id(union: SemIndex, right: SemIndex) {
     pick :: if union.lookup("pick") == {
         .Val(row) -> row
-        .None -> panic("pick definition")
+        .None -> { panic("pick definition") }
     }
     if pick[0].kind == {
         .Function(_, _, _) -> {}
-        else -> panic("pick must be a function")
+        else -> { panic("pick must be a function") }
     }
     assert_eq(pick[0].view_provenance.len(), 1)
     provenance :: pick[0].view_provenance[0]
@@ -140,7 +140,7 @@ fn returned_view_provenance_is_structured_and_changes_signature_id(union: SemInd
     assert(wire.contains(`"projections":[{"kind":"range"}]`))
     right_pick :: if right.lookup("pick") == {
         .Val(row) -> row
-        .None -> panic("pick definition")
+        .None -> { panic("pick definition") }
     }
     assert_eq(right_pick[0].view_provenance[0].canonical(), "slot:$;parameter:1;access:read;path:range")
     union_signature := String?{None}
@@ -161,7 +161,7 @@ fn semindex_envelope_aggregate_view_source(right_owner: String) -> String Never!
 fn aggregate_view_provenance_preserves_slots_and_changes_signature_id(distinct: SemIndex, changed: SemIndex) {
     pair :: if distinct.lookup("pair") == {
         .Val(row) -> row
-        .None -> panic("pair definition")
+        .None -> { panic("pair definition") }
     }
     assert_eq(pair[0].view_provenance.len(), 2)
     assert_eq(pair[0].view_provenance[0].output_path, [String]{"left"})
@@ -203,12 +203,12 @@ fn semindex_expanded_status_boundary(index: SemIndex, projection: ExpandProjecti
         ExpandObjectEntry{key: "z", value: ExpandValue.Number{value: 2}},
     }}
     if semindex_status_expand_value(duplicate) == {
-        .Ok(_) -> panic("duplicate expand key must be refused by canonical StatusFields")
+        .Ok(_) -> { panic("duplicate expand key must be refused by canonical StatusFields") }
         .Err(error) -> assert_eq(error.message, "duplicate status field `z`")
     }
     nested :: ExpandValue.Array{values: [ExpandValue]{duplicate}}
     if semindex_status_expand_value(nested) == {
-        .Ok(_) -> panic("nested duplicate must not be erased")
+        .Ok(_) -> { panic("nested duplicate must not be erased") }
         .Err(error) -> assert_eq(error.message, "duplicate status field `z`")
     }
 }

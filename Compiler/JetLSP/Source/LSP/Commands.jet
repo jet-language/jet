@@ -1,13 +1,13 @@
 // Source/LSP/Server.rs:2353–2535. Sole W38 server/request witness.
 // BudgetView.read_compatible is a required canonical Driver publication: this
 // consumer never measures, manufactures a report, or replaces failed reads.
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use jet_foundation.[foundation_json_quote, mir_sha256_hex_bytes]
 use jet_impact.[ImpactReport]
 use core.files.runtime.kernel_path_components as lsp_command_path
 use core.files.host.retained_descriptor as lsp_command_fs
 
-fn lsp_execute_command_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_execute_command_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     value :: params ?? return None
     command_value :: value.field("command") ?? return None
     if command_value != .Text(_) -> return None
@@ -50,7 +50,7 @@ fn lsp_execute_command_response(server: LSPServer, params: DataTree?, id: DataTr
                     if root == None {
                         parent :: if lsp_command_path.parent_span(doc.path) == {
                             .Val(extent) -> lsp_command_path.owned_span(doc.path, extent)
-                            None -> lsp_command_path.from_text(".", doc.path.platform)
+                            .None -> lsp_command_path.from_text(".", doc.path.platform)
                         }
                         root = Val(if lsp_command_fs.canonicalize(parent) == {
                             .Ok(path) -> path

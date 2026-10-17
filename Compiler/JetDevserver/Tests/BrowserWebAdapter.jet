@@ -1,5 +1,5 @@
-use jet_devserver.BrowserWebAdapter.*
-use jet_devserver.BrowserHost.*
+use jet_devserver.BrowserWebAdapter.[BrowserWebState, parse_action, reconnect_json, render_page, view_json]
+use jet_devserver.BrowserHost.[BrowserHost, BrowserSessionState, JET_DEVTOOLS_PROTOCOL]
 use jet_devserver.Devtools.[JetDevtoolsEnvelope, JetDevtoolsEvent, JetDevtoolsHostKind, JetDevtoolsPanelCapability, JetDevtoolsPanelProjection]
 use jet_devserver.Devtools.catalog.[canonical]
 use jet_devserver.Session.[DevtoolsProjection, DevtoolsStatusFact, DevtoolsSessionState, DevtoolsCommandCapabilities, JET_DEVTOOLS_PROTOCOL]
@@ -17,7 +17,7 @@ fn projection(sequence: U64) -> (DevtoolsProjection, [JetDevtoolsPanelProjection
         command_capabilities: DevtoolsCommandCapabilities { project_rebuild: false,
             project_rebuild_reason: .Val("no rebuild executor is registered for this host") },
         command_receipts: [], reset: sequence == 1, truncation: false }
-    (_0: projected, _1: panels)
+    (projected, panels)
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2340
 #Test("typed_projection_renders_both_placements_from_one_state") {

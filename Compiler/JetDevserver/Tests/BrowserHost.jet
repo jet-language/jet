@@ -1,4 +1,4 @@
-use jet_devserver.BrowserHost.*
+use jet_devserver.BrowserHost.[BrowserActionGrant, BrowserHost, BrowserHostAction, BrowserHostEvent, BrowserHtmlElement, BrowserNode, BrowserPanelFact, BrowserReconnectCursor, BrowserSourceGrant, BrowserSourceLocation, MAX_RECONNECT_EVENTS]
 // Rust: crates/jet-devserver/src/BrowserHost.rs:1495
 fn panel(status: String, nodes: [BrowserNode]) -> BrowserPanelFact {
     BrowserPanelFact.new("build", "Build", 12, status, ^nodes)
@@ -55,7 +55,7 @@ fn event(session: String, revision: U64, sequence: U64, status: String) -> Brows
 // Rust: crates/jet-devserver/src/BrowserHost.rs:1569
 #Test("reconnect_is_bounded_and_cursor_resumes") {
     host := BrowserHost.new("s1")
-    loop sequence in 1..=(U64(MAX_RECONNECT_EVENTS) + 2) {
+    loop sequence in 1..(U64(MAX_RECONNECT_EVENTS) + 2) {
         &host.apply_event(event("s1", sequence, sequence, "ready")).unwrap()
     }
     retained :: host.resume_from(.Val(BrowserReconnectCursor.from(254))).unwrap()

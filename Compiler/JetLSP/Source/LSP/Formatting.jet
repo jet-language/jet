@@ -2,12 +2,12 @@
 // Pending W38 Server ABI reconciliation: LSPServer and its lex method use the
 // sole W36 documents; this fragment does not declare Server or another cache.
 // Formatter and typed-head registry are canonical port-compiler publications.
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use jet_foundation.[Span, TextEdit, foundation_json_quote, typed_head_kind, TYPE_REGEX]
 use jet_parser.[jet_format_source]
 use jet_lexer.[Token, TOKEN_STRING, TOKEN_RAW_STRING, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_IDENT, TOKEN_DOT, TOKEN_HASH]
 
-fn lsp_format_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_format_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri :: td.field("uri") ?? return None
@@ -21,7 +21,7 @@ fn lsp_format_response(server: LSPServer, params: DataTree?, id: DataTree) -> St
     None
 }
 
-fn lsp_range_format_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_range_format_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri :: td.field("uri") ?? return None
@@ -34,7 +34,7 @@ fn lsp_range_format_response(server: LSPServer, params: DataTree?, id: DataTree)
     None
 }
 
-fn lsp_on_type_format_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_on_type_format_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri :: td.field("uri") ?? return None
@@ -79,7 +79,7 @@ fn lsp_on_type_format_edits(src: String, tokens: [Token], position: LSPPos, trig
         loop pair in pairs {
             if pair.opaque || pair.open.end > offset || offset > pair.close.start -> next
             if active == {
-                None -> active = Val(pair)
+                .None -> active = Val(pair)
                 .Val(previous) -> {
                     if pair.close.end - pair.open.start < previous.close.end - previous.open.start -> active = Val(pair)
                 }
@@ -153,7 +153,7 @@ fn lsp_newline_format_edits(src: String, pair: LSPTokenBracePair, position: LSPP
         expected = base_indent.copy()
     }
     edits := [TextEdit]{}
-    if bytes[line_start..<indent_end] != expected.bytes() -> &edits.push(TextEdit{span: Span{start: line_start, end: indent_end}, new_text: ^expected})
+    if bytes[line_start..<indent_end] != expected.bytes() -> &edits.push(TextEdit{span: (Span{start: line_start, end: indent_end}), new_text: ^expected})
     if close_on_line == .Val(close) {
         if close.close.start > indent_end {
             gap_start := close.close.start

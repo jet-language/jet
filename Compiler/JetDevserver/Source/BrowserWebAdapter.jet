@@ -1,11 +1,11 @@
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1
 // HTTP-facing adapter for the typed browser devtools host.
 use std.collections.[VecDeque]
-use jet_foundation.DataTree.[DataTree]
+use jet_foundation.Dyn.[Dyn]
 use jet_foundation.Devtools.[jet_observe_live_value_update]
 use jet_foundation.DevtoolsControl.[JetDevtoolsCommandReceipt]
 use jet_foundation.HotSwap.[HotSwapDecision]
-use jet_foundation.JSON.[json_escape, parse_json_with_limit]
+use jet_foundation.JSON.[foundation_json_escape, parse_json_with_limit]
 use jet_foundation.SHA256.[sha256_hex]
 use jet_foundation.[TEXT_NUL]
 use jet_devserver.BrowserHost.[BrowserActionGrant, BrowserDock, BrowserHost, BrowserHostAction, BrowserHostEffect, BrowserHostError, BrowserHostEvent, BrowserHtmlElement, BrowserNode, BrowserNodeKind, BrowserPanelFact, BrowserPanelView, BrowserPlacement, BrowserReconnectCursor, BrowserSelection, BrowserSessionState, BrowserSourceGrant, BrowserSourceLocation, MAX_BROWSER_TEXT, MAX_BROWSER_VALUE]
@@ -106,7 +106,7 @@ impl BrowserWebState {
             }
             .None -> self.host.clear_selection()
         }
-        .Ok(())
+        .Ok(_)
     }
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:269
@@ -129,7 +129,7 @@ fn normalize_status(status: DevtoolsStatusFact) -> DevtoolsStatusFact {
 fn bounded_optional(value: String?, limit: USize) -> String? {
     value.and_then((value) -> {
         bounded := bounded_text(value, "", limit)
-        if bounded.is_empty() -> .None else .Val(bounded)
+        if bounded.is_empty() -> .None else -> .Val(bounded)
     })
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:300
@@ -145,13 +145,13 @@ fn sync_session(state: &BrowserWebState?, session: &ResidentDevSession) Err! {
     if state.is_none() -> state = .Val(BrowserWebState.new(projection.session_id.clone()))
     resident := state.as_mut().expect("browser web state initialized")
     resident.tools.source = session.canvas_port() != 0
-    resident.tools.source_reason = if resident.tools.source -> .None else .Val(SOURCE_TOOLS_OFF_REASON.to_string())
+    resident.tools.source_reason = if resident.tools.source -> .None else -> .Val(SOURCE_TOOLS_OFF_REASON.to_string())
     resident.sync(projection, canonical_panels)
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:337
 SOURCE_TOOLS_OFF_REASON :: "This host runs without Canvas, so source is read and edited elsewhere."
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:340
-fn object_map(value: DataTree) -> [String:DataTree] Err! {
+fn object_map(value: Dyn) -> [String:Dyn] Err! {
     if value == {
         .Object(fields) -> .Ok(fields.iter().cloned().collect())
         else -> .Err("expected a JSON object")
@@ -199,10 +199,10 @@ fn record_dom_snapshot(state: &BrowserWebState?, session_id: String, payload: &[
     loop update in live_value_updates -> jet_observe_live_value_update(update.key, update.type_identity, update.rendered_value.as_deref())
     resident := state.get_or_insert_with(() -> BrowserWebState.new(session_id.to_string()))
     resident.dom_state = facts
-    .Ok(())
+    .Ok(_)
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:457
-fn parse_live_value_update(object: [String:DataTree]) -> WebLiveValueUpdate Err! {
+fn parse_live_value_update(object: [String:Dyn]) -> WebLiveValueUpdate Err! {
     keys := object.keys().collect(); keys.sort()
     loop field in keys {
         if !["kind", "key", "type_identity", "rendered_value"].contains(field) -> return .Err("web DOM snapshot persist_live_value has unknown field `{field}`")
@@ -212,19 +212,19 @@ fn parse_live_value_update(object: [String:DataTree]) -> WebLiveValueUpdate Err!
     type_identity := required_json_string(object, "type_identity")?
     rendered_value := if object.get("rendered_value") == {
         .Val(.Null) -> .None, .Val(.Text(value)) -> .Val(value.to_string())
-        .Val(_) -> return .Err("web DOM snapshot persist_live_value `rendered_value` must be a string or null")
+        .Val(_) -> { return .Err("web DOM snapshot persist_live_value `rendered_value` must be a string or null") }
         .None -> { return .Err("web DOM snapshot persist_live_value has no `rendered_value`") }
     }
     .Ok(WebLiveValueUpdate { key: key, type_identity: type_identity, rendered_value: rendered_value })
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:495
-fn required_json_string(object: [String:DataTree], key: String) -> String Err! {
+fn required_json_string(object: [String:Dyn], key: String) -> String Err! {
     value := object.get(key).ok_or("web DOM snapshot has no `{key}`")?
     text := value.as_str() ?? return .Err("web DOM snapshot `{key}` must be a string")
     .Ok(text.to_string())
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:510
-fn parse_dom_state_value(value: DataTree) -> WebStateValue Err! {
+fn parse_dom_state_value(value: Dyn) -> WebStateValue Err! {
     object := object_map(value) ?? return .Err("web DOM snapshot state value must be an object")
     kind := required_json_string(object, "kind")?
     if kind == {
@@ -234,8 +234,7 @@ fn parse_dom_state_value(value: DataTree) -> WebStateValue Err! {
             else -> .Err("web DOM integer state value must be a JSON integer")
         }
         "unsigned" -> if object.get("value") == {
-            .Val(.Int(value)) if value >= 0 -> .Ok(.Unsigned(U64{value}))
-            else -> .Err("web DOM unsigned state value must be a non-negative integer")
+            .Val(.Int(value)) if value >= 0 -> .Ok(.Unsigned(U64{value})) else -> .Err("web DOM unsigned state value must be a non-negative integer")
         }
         "boolean" -> if object.get("value") == {
             .Val(.Bool(value)) -> .Ok(.Boolean(value))
@@ -247,8 +246,8 @@ fn parse_dom_state_value(value: DataTree) -> WebStateValue Err! {
             bytes := [U8]{[].with_capacity(values.len())}
             loop value in values {
                 if value == {
-                    .Int(n) if n >= 0 && n <= 255 -> bytes.push(U8{n})
-                    else -> return .Err("web DOM bytes state value has a non-byte element")
+                    .Int(n) && n >= 0 && n <= 255 -> bytes.push(U8{n})
+                    else -> { return .Err("web DOM bytes state value has a non-byte element") }
                 }
             }
             .Ok(.Bytes(bytes))
@@ -344,7 +343,7 @@ fn manifest_artifact_identity(manifest: String) -> String Err! {
     .Ok(identity)
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:688
-fn parse_manifest(manifest: String) -> DataTree Err! {
+fn parse_manifest(manifest: String) -> Dyn Err! {
     root := parse_json_with_limit(manifest, USize{MAX_STATIC_RESPONSE_BYTES}) ?? return .Err("web manifest is not valid bounded JSON")
     object := object_map(root) ?? return .Err("web manifest must be a JSON object")
     schema := required_json_string(object, "schema")?
@@ -386,7 +385,7 @@ fn snapshot_from_manifest(source_revision: String, build_revision: String, manif
         loop id in import_rows {
             if id == {
                 .Int(n) -> imports.push(n.to_string())
-                else -> return .Err("web manifest module import id must be an integer")
+                else -> { return .Err("web manifest module import id must be an integer") }
             }
         }
         imports_text := imports.join(",")
@@ -417,7 +416,7 @@ fn apply_web_swap_snapshot(state: &BrowserWebState?, session_id: String, candida
         }
         swap := WebModuleSwapState.new(candidate) ?? return .Err("web swap state rejected: {err}")
         resident.swap = .Val(swap); resident.last_swap = .None; resident.swap_error = .None
-        return .Ok(())
+        return .Ok(_)
     }
     canonical_decision := decision.ok_or_else(() -> {
         error := "web rebuild has no canonical HotSwapDecision; compatibility planning was rejected"
@@ -430,7 +429,7 @@ fn apply_web_swap_snapshot(state: &BrowserWebState?, session_id: String, candida
         return .Err("web swap transaction rejected: {err}")
     }
     resident.last_swap = .Val(receipt); resident.swap_error = .None
-    .Ok(())
+    .Ok(_)
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:837
 fn write_swap_snapshot(output: &String, snapshot: &WebModuleSwapSnapshot) {
@@ -671,7 +670,7 @@ fn diagnostic_file(diagnostic: String) -> String? {
     rest := diagnostic.split("-->").nth(1)?.trim_start() // #4303
     token := rest.split_whitespace().next()?
     file := token.split(':').next()?
-    if file.ends_with(".jet") -> .Val(file) else .None
+    if file.ends_with(".jet") -> .Val(file) else -> .None
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1163
 fn render_page(state: BrowserWebState, placement: BrowserPlacement) -> String {
@@ -709,14 +708,13 @@ fn render_page(state: BrowserWebState, placement: BrowserPlacement) -> String {
         forced := selected_here || open_count > 0 || (!workbench && index == 0 && (frame.status.state == .Building || frame.status.state == .Error))
         initially_open := forced || (workbench && index == 0 && !any_open && selection.is_none())
         html.push_str("<details class=\"group\" data-intent=\""); html.push_str(index.to_string())
-        html.push_str(if forced -> "\" data-active=\"true\"" else "\"")
+        html.push_str(if forced -> "\" data-active=\"true\"" else -> "\"")
         if initially_open -> html.push_str(" open")
         html.push_str("><summary data-focus=\"intent:"); html.push_str(index.to_string())
         html.push_str("\"><span class=\"group-label\">"); html.push_str(html_escape(group.0))
         html.push_str("</span><span class=\"group-meta\">")
-        if selected_here { html.push_str("Selected") }
-        else if open_count > 0 {
-            suffix := if available_count == 1 -> "" else "s"
+        if selected_here { html.push_str("Selected") } else if open_count > 0 {
+            suffix := if available_count == 1 -> "" else -> "s"
             html.push_str("{open_count} open · {available_count} panel{suffix}")
         } else { html.push_str("{available_count} available") }
         html.push_str("</span></summary><div class=\"group-body\">")
@@ -733,8 +731,7 @@ fn render_page(state: BrowserWebState, placement: BrowserPlacement) -> String {
         }
         html.push_str("</div></details>")
     }
-    if frame.panels.is_empty() { html.push_str("<p class=\"empty\">Waiting for the first devtools fact.</p>") }
-    else if frame.panels.iter().all((panel) -> !panel_available(panel)) { html.push_str("<p class=\"empty\">No live panels are available on this host.</p>") }
+    if frame.panels.is_empty() { html.push_str("<p class=\"empty\">Waiting for the first devtools fact.</p>") } else if frame.panels.iter().all((panel) -> !panel_available(panel)) { html.push_str("<p class=\"empty\">No live panels are available on this host.</p>") }
     html.push_str("</section>")
     if workbench -> render_inspector(&html, frame)
     html.push_str("</div><script>const S=JSON.parse(\"")
@@ -793,11 +790,11 @@ fn render_source_tool(html: &String, frame: &BrowserDevtoolsFrame) {
 fn render_panel(html: &String, panel: &BrowserPanelView, selection: &BrowserSelection?) {
     node_id := selection.filter((selection) -> selection.panel_id == panel.panel_id).and_then((selection) -> selection.node_id.as_deref())
     html.push_str("<article class=\"panel\" data-panel-id=\""); html.push_str(html_escape(panel.panel_id))
-    html.push_str("\" data-open=\""); html.push_str(if panel.open -> "true" else "false")
-    html.push_str("\"><header><h2><button class=\"toggle\" data-layout=\""); html.push_str(if panel.open -> "close" else "open")
+    html.push_str("\" data-open=\""); html.push_str(if panel.open -> "true" else -> "false")
+    html.push_str("\"><header><h2><button class=\"toggle\" data-layout=\""); html.push_str(if panel.open -> "close" else -> "open")
     html.push_str("\" data-panel=\""); html.push_str(html_escape(panel.panel_id))
     html.push_str("\" data-focus=\"toggle:"); html.push_str(html_escape(panel.panel_id))
-    html.push_str("\" aria-expanded=\""); html.push_str(if panel.open -> "true" else "false")
+    html.push_str("\" aria-expanded=\""); html.push_str(if panel.open -> "true" else -> "false")
     html.push_str("\"><span class=\"chev\"></span>"); html.push_str(html_escape(panel.title))
     html.push_str("</button></h2><small>"); html.push_str(html_escape(panel.status)); html.push_str("</small></header>")
     if panel.open {
@@ -881,11 +878,14 @@ fn find_path(nodes: [BrowserNode], node_id: String, path: [&BrowserNode]) -> Boo
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1558
 fn panel_from_projection(panel: JetDevtoolsPanelProjection) -> BrowserPanelFact {
     descriptor := panel.availability.descriptor
-    status := if panel.availability.is_available() {
-        panel.events.last().map((event) -> event.kind().to_string()).unwrap_or_else(() -> "available".to_string())
-    } else {
-        reasons := panel.availability.unavailable_reasons().iter().map((reason) -> reason.as_str()).collect().join(",")
-        "unavailable:{reasons}"
+    status := if {
+        panel.availability.is_available() -> {
+            panel.events.last().map((event) -> event.kind().to_string()).unwrap_or_else(() -> "available".to_string())
+        }
+        else -> {
+            reasons := panel.availability.unavailable_reasons().iter().map((reason) -> reason.as_str()).collect().join(",")
+            "unavailable:{reasons}"
+        }
     }
     status = bounded_text(status, "unavailable", MAX_BROWSER_TEXT)
     nodes := [BrowserNode]{[].with_capacity(panel.events.len().max(1))}
@@ -908,14 +908,14 @@ fn panel_from_projection(panel: JetDevtoolsPanelProjection) -> BrowserPanelFact 
 fn parse_revision(value: String) -> U64? { value.parse<U64>().ok() }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1624
 fn bounded_text(value: String, fallback: String, limit: USize) -> String {
-    source := if value.is_empty() -> fallback else value
+    source := if value.is_empty() -> fallback else -> value
     output := String.new()
     loop raw_character in source.chars() {
-        character := if raw_character.is_control() -> ' ' else raw_character
+        character := if raw_character.is_control() -> ' ' else -> raw_character
         if output.len() + character.len_utf8() > limit -> break
         output.push(character)
     }
-    if output.is_empty() -> fallback.to_string() else output
+    if output.is_empty() -> fallback.to_string() else -> output
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1645
 fn bounded_value(value: String) -> String { bounded_text(value, "(none)", MAX_BROWSER_VALUE) }
@@ -1056,10 +1056,10 @@ fn field_u64(output: &String, key: String, value: U64, first: Bool) {
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1827
 fn field_bool(output: &String, key: String, value: Bool, first: Bool) {
     if !first -> output.push(',')
-    quoted(key, output); output.push(':'); output.push_str(if value -> "true" else "false")
+    quoted(key, output); output.push(':'); output.push_str(if value -> "true" else -> "false")
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1836
-fn quoted(value: String, output: &String) { output.push('"'); output.push_str(json_escape(value)); output.push('"') }
+fn quoted(value: String, output: &String) { output.push('"'); output.push_str(foundation_json_escape(value)); output.push('"') }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1844
 fn reconnect_json(state: BrowserWebState, from: U64?, reset: Bool, truncation: Bool) -> String Err! {
     output := String.with_capacity(4096)
@@ -1148,7 +1148,7 @@ fn parse_action(payload: [U8], default_placement: BrowserPlacement) -> BrowserHo
     }
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2009
-fn parse_source_grant(object: [String:DataTree]) -> BrowserSourceGrant Err! {
+fn parse_source_grant(object: [String:Dyn]) -> BrowserSourceGrant Err! {
     grant := nested_object(object, "grant")?
     source := nested_object(grant, "source")?
     function := optional_string(source, "function")
@@ -1156,40 +1156,41 @@ fn parse_source_grant(object: [String:DataTree]) -> BrowserSourceGrant Err! {
     .Ok(BrowserSourceGrant.new(required_string(grant, "session_id")?, required_u64(grant, "revision")?, required_string(grant, "panel_id")?, required_string(grant, "node_id")?, location))
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2028
-fn parse_action_grant(object: [String:DataTree]) -> BrowserActionGrant Err! {
+fn parse_action_grant(object: [String:Dyn]) -> BrowserActionGrant Err! {
     grant := nested_object(object, "grant")?
     .Ok(BrowserActionGrant.new(required_string(grant, "session_id")?, required_u64(grant, "revision")?, required_string(grant, "panel_id")?, required_string(grant, "node_id")?, required_string(grant, "action_id")?))
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2039
-fn nested_object(object: [String:DataTree], key: String) -> [String:DataTree] Err! {
+fn nested_object(object: [String:Dyn], key: String) -> [String:Dyn] Err! {
     value := object.get(key).ok_or("browser action is missing `{key}`")?
     object_map(value).map_err((_) -> "browser action `{key}` must be an object")
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2049
-fn required_string(object: [String:DataTree], key: String) -> String Err! {
+fn required_string(object: [String:Dyn], key: String) -> String Err! {
     value := object.get(key).ok_or("browser action is missing `{key}`")?
     value.as_str().map_err((_) -> "browser action `{key}` must be a string")
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2060
-fn optional_string(object: [String:DataTree], key: String) -> String? { object.get(key).and_then((value) -> value.as_str().ok()) }
+fn optional_string(object: [String:Dyn], key: String) -> String? { object.get(key).and_then((value) -> value.as_str().ok()) }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2064
-fn required_u64(object: [String:DataTree], key: String) -> U64 Err! {
-    if object.get(key) == { .Val(.Int(value)) if value >= 0 -> U64.try_from(value).map_err((_) -> "browser action `{key}` is out of range")
-        else -> .Err("browser action `{key}` must be a non-negative integer") }
+fn required_u64(object: [String:Dyn], key: String) -> U64 Err! {
+    if object.get(key) == {
+        .Val(.Int(value)) if value >= 0 -> U64.try_from(value).map_err((_) -> "browser action `{key}` is out of range") else -> .Err("browser action `{key}` must be a non-negative integer")
+    }
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2075
-fn required_u32(object: [String:DataTree], key: String) -> U32 Err! {
+fn required_u32(object: [String:Dyn], key: String) -> U32 Err! {
     required_u64(object, key).and_then((value) -> U32.try_from(value).map_err((_) -> "browser action `{key}` is out of range"))
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2081
-fn optional_u32(object: [String:DataTree], key: String) -> U32? {
+fn optional_u32(object: [String:Dyn], key: String) -> U32? {
     object.get(key).and_then((value) -> if value == {
-        .Int(n) if n >= 0 -> U32.try_from(n).ok()
+        .Int(n) && n >= 0 -> U32.try_from(n).ok()
         else -> .None
     })
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2088
-fn parse_placement(value: DataTree) -> BrowserPlacement Err! {
+fn parse_placement(value: Dyn) -> BrowserPlacement Err! {
     text := value.as_str() ?? return .Err("browser action placement must be a string")
     if text == {
         "in-app" | "in_app" -> .Ok(.InApp)
@@ -1252,12 +1253,12 @@ fn render_nodes_html(output: &String, panel_id: String, nodes: &[BrowserNode], s
     loop node in nodes {
         is_selected := selected == .Val(node.id.as_str())
         holds := contains_node(node.children, selected)
-        output.push_str("<li data-selected=\""); output.push_str(if is_selected || holds -> "true" else "false")
+        output.push_str("<li data-selected=\""); output.push_str(if is_selected || holds -> "true" else -> "false")
         output.push_str("\"><button class=\"node\" data-select=\"1\" data-panel=\""); output.push_str(html_escape(panel_id))
         output.push_str("\" data-node=\""); output.push_str(html_escape(node.id))
         output.push_str("\" data-focus=\"node:"); output.push_str(html_escape(panel_id))
         output.push(':'); output.push_str(html_escape(node.id))
-        output.push_str("\" aria-pressed=\""); output.push_str(if is_selected -> "true" else "false")
+        output.push_str("\" aria-pressed=\""); output.push_str(if is_selected -> "true" else -> "false")
         output.push_str("\"><span class=\"lbl\">"); output.push_str(html_escape(node.label)); output.push_str("</span>")
         if node.status == .Val(status) { output.push_str("<b>"); output.push_str(html_escape(status)); output.push_str("</b>") }
         output.push_str("</button></li>")

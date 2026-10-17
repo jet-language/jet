@@ -85,12 +85,12 @@ use core.encoding.json as lsp_test_json
     assert_eq(text, `{"start":{"line":1,"character":2},"end":{"line":3,"character":4}}`)
     parsed :: lsp_test_json.parse(text) ?? panic("range JSON")
     assert_eq(lsp_range_from_json(parsed), Val(range))
-    assert_eq(lsp_uinteger(DataTree.Int(0)), Val(0))
-    assert_eq(lsp_uinteger(DataTree.Int(2147483647)), Val(2147483647))
+    assert_eq(lsp_uinteger(Dyn.Int(0)), Val(0))
+    assert_eq(lsp_uinteger(Dyn.Int(2147483647)), Val(2147483647))
     loop number in ([Int]{-1, 2147483648, 4294967296}) {
-        assert_eq(lsp_uinteger(DataTree.Int(number)), None)
+        assert_eq(lsp_uinteger(Dyn.Int(number)), None)
     }
-    loop value in ([DataTree]{DataTree.Float(1.0), DataTree.Text("1"), DataTree.Bool(true), DataTree.Null}) {
+    loop value in ([Dyn]{Dyn.Float(1.0), Dyn.Text("1"), Dyn.Bool(true), Dyn.Null}) {
         assert_eq(lsp_uinteger(value), None)
         assert_eq(lsp_pos_from_json(value), None)
         assert_eq(lsp_range_from_json(value), None)

@@ -52,9 +52,9 @@ impl DebugTier {
     // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:42
     fn parse(value: String?) -> Self Err! {
         if value.unwrap_or("jet-dev-interpreter") == {
-            "jet-dev-interpreter" -> return .Ok(.Interpreter)
-            "native-lldb" -> return .Ok(.NativeLldb)
-            else -> return .Err(debug_error("bad_request", "Canvas debug tier must be `jet-dev-interpreter` or `native-lldb`"))
+            "jet-dev-interpreter" -> { return .Ok(.Interpreter) }
+            "native-lldb" -> { return .Ok(.NativeLldb) }
+            else -> { return .Err(debug_error("bad_request", "Canvas debug tier must be `jet-dev-interpreter` or `native-lldb`")) }
         }
     }
     // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:53
@@ -70,7 +70,7 @@ impl DebugTier {
 // Source/revision-bound ownership of the canonical debugger, not a second interpreter.
 struct DebugSessions {
     next_id: AtomicU64
-    sessions: Mutex[[String: DebugSession]]
+    sessions: Mutex<[String: DebugSession]>
     pause_on_input_end: Bool
 }
 // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:70
@@ -244,11 +244,11 @@ impl DebugSessions {
                 if snapshot == .Val(snapshot) {
                     source :: JetDevtoolsSourceIdentityFact.new(.Val(session.source_id.copy()),
                         session.native.as_ref().and_then((native) -> native.build_id.copy()), .Val(session.revision.copy()), .None)
-                    identity :: SessionIdentity.new(id.copy(), session.source_id.copy(), session.revision.copy(), snapshot.pause_id(), snapshot.frame_id())?
+                    identity :: SessionIdentity.new(id.copy(), session.source_id.copy(), session.revision.copy(), snapshot.pause_id(), snapshot.frame_id())
                     scope_id :: "scope-{id}"
-                    authority :: PausedDebugSessionAdapter.debugger_authority(scope_id)?
+                    authority :: PausedDebugSessionAdapter.debugger_authority(scope_id)
                     if session.paused_adapter.as_mut() == .Val(adapter) {
-                        adapter.refresh_snapshot(^identity, ^snapshot)?
+                        adapter.refresh_snapshot(^identity, ^snapshot)
                     } else {
                         session.paused_adapter = .Val(PausedDebugSessionAdapter.new(^identity, ^source, scope_id, ^snapshot, ^authority)?)
                     }
@@ -280,7 +280,7 @@ impl DebugSessions {
             else if host.session().is_some_and((injected) -> injected.identity.session_id == id) -> host.clear_session()
             session.paused_adapter = .None
         } else if host.session().is_some_and((injected) -> injected.identity.session_id == id) -> host.clear_session()
-        return .Ok(())
+        return .Ok(_)
     }
     // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:487
     fn resume_paused_session(self: &Self, host: &PausedEvaluateHost, id: String) Err! {
@@ -290,23 +290,23 @@ impl DebugSessions {
             else if host.session().is_some_and((injected) -> injected.identity.session_id == id) -> host.clear_session()
             session.paused_adapter = .None
         } else if host.session().is_some_and((injected) -> injected.identity.session_id == id) -> host.clear_session()
-        return .Ok(())
+        return .Ok(_)
     }
     // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:515
     fn cancel_paused_session(self: &Self, host: &PausedEvaluateHost, id: String, reason: String) Err! {
         sessions := self.sessions.lock() ?? return .Err(debug_error("session", "debug session store is unavailable"))
         if sessions.get_mut(id) == .Val(session) {
-            if session.paused_adapter.as_mut() == .Val(adapter) -> adapter.cancel(host, reason)?
+            if session.paused_adapter.as_mut() == .Val(adapter) -> adapter.cancel(host, reason)
             else if host.session().is_some_and((injected) -> injected.identity.session_id == id) -> host.clear_session()
             session.paused_adapter = .None
         } else if host.session().is_some_and((injected) -> injected.identity.session_id == id) -> host.clear_session()
-        return .Ok(())
+        return .Ok(_)
     }
     // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:543
     fn cancel_all_paused_sessions(self: &Self, host: &PausedEvaluateHost, reason: String) Err! {
         ids :: self.sessions.lock().map_err((_) -> debug_error("session", "debug session store is unavailable"))?.keys().cloned().collect()
-        loop id in ids -> self.cancel_paused_session(host, id, reason)?
-        return .Ok(())
+        loop id in ids -> self.cancel_paused_session(host, id, reason)
+        return .Ok(_)
     }
     // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:561
     fn stale_paused_session(self: &Self, host: &PausedEvaluateHost, id: String) Err! {
@@ -316,7 +316,7 @@ impl DebugSessions {
             else if host.session().is_some_and((injected) -> injected.identity.session_id == id) -> host.clear_session()
             session.paused_adapter = .None
         } else if host.session().is_some_and((injected) -> injected.identity.session_id == id) -> host.clear_session()
-        return .Ok(())
+        return .Ok(_)
     }
     // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:590
     fn discard(self: Self, id: String) -> DebugTier? {
@@ -356,21 +356,21 @@ fn validate_debug_limits(commands: &[String], breakpoints: &[Usize], watches: &[
     if commands.iter().chain(watches.iter()).any((value) -> value.len() > MAX_DEBUG_COMMAND_BYTES) {
         return .Err(debug_error("limit", "Canvas debug command and watch names are limited to 256 bytes"))
     }
-    loop command in commands -> validate_debug_command(command)?
+    loop command in commands -> validate_debug_command(command)
     loop watch in watches {
         trimmed := watch.trim() // #4303
         if trimmed.is_empty() || watch.split_whitespace().count() != 1 {
             return .Err(debug_error("unsupported", "Canvas debug watches must be one source-level name"))
         }
     }
-    return .Ok(())
+    return .Ok(_)
 }
 // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:694
 fn validate_debug_breakpoint_anchors(anchors: &[String]) Err! {
     if anchors.len() > MAX_DEBUG_BREAKPOINTS || anchors.iter().any((anchor) -> anchor.len() > MAX_DEBUG_COMMAND_BYTES) {
         return .Err(debug_error("limit", "Canvas debug accepts at most 128 breakpoint spans of 256 bytes each"))
     }
-    return .Ok(())
+    return .Ok(_)
 }
 // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:708
 fn validate_debug_command(command: String) Err! {
@@ -389,7 +389,7 @@ fn validate_debug_command(command: String) Err! {
         "break" | "b" -> arg.and_then((value) -> value.parse[Usize]().ok()).is_some_and((line) -> line >= 1) && !extra
         else -> false
     }
-    if valid -> return .Ok(())
+    if valid -> return .Ok(_)
     return .Err(debug_error("unsupported", "Canvas debug command is not in the source-level debugger vocabulary"))
 }
 
@@ -507,10 +507,13 @@ fn active_line_from_transcript(transcript: String) -> Usize? {
         }
     }
     loop line in transcript.lines().rev() {
-        if line.split_once("breakpoint hit") == .Val((_, rest)) {
-            if rest.split_once("  in ") == .Val((before_in, _)) {
+        if line.split_once("breakpoint hit") == .Val(tuple_0) {
+            rest :: tuple_0._1
+            if rest.split_once("  in ") == .Val(tuple_1) {
+                before_in :: tuple_1._0
                 trimmed := before_in.trim() // #4303
-                if trimmed.rsplit_once(':') == .Val((_, line_no)) {
+                if trimmed.rsplit_once(':') == .Val(tuple_2) {
+                    line_no :: tuple_2._1
                     if line_no.parse[Usize]() == .Ok(line) -> return .Val(line)
                 }
             }
@@ -541,14 +544,14 @@ fn line_of_offset(src: String, offset: Usize) -> Usize {
 }
 // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1051
 fn line_from_anchor(src: String, anchor: String) -> Usize? {
-    span :: anchor_span(src, anchor)?
+    span :: anchor_span(src, anchor)
     return .Val(line_of_offset(src, span.start))
 }
 // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1056
 fn anchor_span(src: String, anchor: String) -> SourceSpan? {
-    (start, end) :: anchor.split_once(':')?
-    start :: start.parse[Usize]().ok()?
-    end :: end.parse[Usize]().ok()?
+    (start, end) :: anchor.split_once(':')
+    start :: start.parse[Usize]().ok()
+    end :: end.parse[Usize]().ok()
     if start >= src.len() || start > end || end > src.len() || !src.is_char_boundary(start) || !src.is_char_boundary(end) -> return .None
     return .Val(SourceSpan { start: start, end: end })
 }
@@ -587,12 +590,12 @@ fn record_width_for_span(json: String, id_key: String, wanted: String) -> Usize?
         trimmed := chunk.trim_start() // #4303
         (id, _) :: parse_json_string(trimmed) ?? next
         if id != wanted -> next
-        pos :: chunk.find("\"source_span\"")?
+        pos :: chunk.find("\"source_span\"")
         rest := chunk[pos + "\"source_span\"".len()..<chunk.len()] // #4303
-        colon :: rest.find(':')?
+        colon :: rest.find(':')
         value := rest[colon + 1..<rest.len()].trim_start() // #4303
-        start :: json_usize_field(value, "start")?
-        end :: json_usize_field(value, "end")?
+        start :: json_usize_field(value, "start")
+        end :: json_usize_field(value, "end")
         return .Val(end.saturating_sub(start))
     }
     return .None
@@ -771,7 +774,7 @@ fn git_root(path: OSPath) -> OSPath? {
     dir :: path.parent().unwrap_or_else(() -> OSPath.new("."))
     command := Command.new("git")
     command.args(["-C"]).arg(dir).args(["rev-parse", "--show-toplevel"])
-    out :: command_output_bounded(&command, MAX_CHILD_OUTPUT_BYTES).ok()?
+    out :: command_output_bounded(&command, MAX_CHILD_OUTPUT_BYTES).ok()
     if !out.status.success() -> return .None
     text := String.from_utf8_lossy(out.stdout).trim().to_string() // #4303
     if text.is_empty() -> return .None
@@ -787,7 +790,7 @@ fn git_relative_path(root: OSPath, path: OSPath) -> String {
 fn git_output(root: OSPath, args: [String]) -> String? {
     command := Command.new("git")
     command.arg("-C").arg(root).args(args)
-    out :: command_output_bounded(&command, MAX_CHILD_OUTPUT_BYTES).ok()?
+    out :: command_output_bounded(&command, MAX_CHILD_OUTPUT_BYTES).ok()
     if out.status.success() -> return .Val(String.from_utf8_lossy(out.stdout).to_string())
     return .None
 }

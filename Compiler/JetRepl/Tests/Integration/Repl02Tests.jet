@@ -22,7 +22,10 @@ use core.sys.target.[selected_os, selected_family]
     reader :: thread.spawn(() -> {
         bytes := [U8].repeat(0, 4096)
         loop {
-            count :: match stdout.read(&bytes) { Ok(count) -> count; Err(_) -> break }
+            count :: if stdout.read(&bytes) == {
+                .Ok(count) -> count
+                .Err(_) -> { break }
+            }
             if count == 0 -> break
             if tx.send(bytes[0..<count].to_vec()).is_err() -> break
         }
@@ -30,7 +33,7 @@ use core.sys.target.[selected_os, selected_family]
     transcript := String.new()
     startup_deadline :: Instant.now() + Duration.from_secs(2)
     loop !transcript.contains("1 user>") && Instant.now() < startup_deadline {
-        if Ok(chunk) :: rx.recv_timeout(Duration.from_millis(50)) -> transcript.push_str(String.from_utf8_lossy(chunk))
+        if rx.recv_timeout(Duration.from_millis(50)) == .Ok(chunk) -> transcript.push_str(String.from_utf8_lossy(chunk))
     }
     stdin.write_all("loop {{ }}{Char{13}}".bytes()).unwrap()
     stdin.flush().unwrap()
@@ -40,7 +43,7 @@ use core.sys.target.[selected_os, selected_family]
     stdin.flush().unwrap()
     latency := Duration?{none}
     loop interrupted_at.elapsed() <= Duration.from_millis(100) {
-        if Ok(chunk) :: rx.recv_timeout(Duration.from_millis(5)) {
+        if rx.recv_timeout(Duration.from_millis(5)) == .Ok(chunk) {
             transcript.push_str(String.from_utf8_lossy(chunk))
             if transcript.contains("Interrupted. External effects already performed were not rolled back.") {
                 latency = interrupted_at.elapsed()
@@ -507,13 +510,18 @@ use core.sys.target.[selected_os, selected_family]
 #Test("repl_terminal_matrix_raw_width_color_eof_and_ctrl_d") {
     if selected_os() != "linux" -> return
     loop cols in [20, 120] {
-        loop (name, flag, no_color, force_color, expect_color) in [
+        loop matrix_row in [
             ("auto", "", false, false, true),
             ("always", "--color=always", true, false, true),
             ("never", "--color=never", false, true, false),
             ("empty-NO_COLOR", "", true, true, false),
             ("FORCE_COLOR", "", false, true, true)
         ] {
+            name :: matrix_row._0
+            flag :: matrix_row._1
+            no_color :: matrix_row._2
+            force_color :: matrix_row._3
+            expect_color :: matrix_row._4
             shell :: "{{ sleep 0.2; printf '1 + 1\\r'; sleep 0.12; printf '\\004'; }} | timeout 8s script -qec 'stty cols {cols}; \"$JET_REPL_BIN\" repl {flag}' /dev/null"
             command := Command.new("sh")
             command.args(["-c", shell]).env("JET_REPL_BIN", env.binary_path("jet")).env("JET_REPL_HISTORY", "off").env_remove("NO_COLOR").env_remove("FORCE_COLOR")

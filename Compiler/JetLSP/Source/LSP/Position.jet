@@ -2,7 +2,7 @@
 // Source/LSP/Server.rs:809–827: bounded protocol uinteger/position/range decoding.
 // All offsets and Span endpoints are UTF-8 bytes; character is UTF-16 units.
 use jet_foundation.[Span, diagnostic_utf8_width]
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 
 struct LSPPos {
     line: Int
@@ -139,20 +139,20 @@ fn lsp_range_json(range: LSPRange) -> String Never! {
     "{{\"start\":{{\"line\":{range.start.line},\"character\":{range.start.character}}},\"end\":{{\"line\":{range.end.line},\"character\":{range.end.character}}}}}"
 }
 
-fn lsp_uinteger(value: DataTree) -> Int? Never! {
+fn lsp_uinteger(value: Dyn) -> Int? Never! {
     if value == .Int(number) {
         if number >= 0 && number <= 2147483647 -> return Val(number)
     }
     None
 }
 
-fn lsp_pos_from_json(value: DataTree) -> LSPPos? Never! {
+fn lsp_pos_from_json(value: Dyn) -> LSPPos? Never! {
     line :: lsp_uinteger(value.field("line") ?? return None) ?? return None
     character :: lsp_uinteger(value.field("character") ?? return None) ?? return None
     Val(LSPPos{line: line, character: character})
 }
 
-fn lsp_range_from_json(value: DataTree) -> LSPRange? Never! {
+fn lsp_range_from_json(value: Dyn) -> LSPRange? Never! {
     start :: lsp_pos_from_json(value.field("start") ?? return None) ?? return None
     end :: lsp_pos_from_json(value.field("end") ?? return None) ?? return None
     Val(LSPRange{start: start, end: end})

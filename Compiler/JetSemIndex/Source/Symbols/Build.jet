@@ -56,7 +56,7 @@ fn semindex_build_semantic_symbol_index(db: SymbolDB, registration: SemaRegistra
         owner := String?{None}
         if owners.get(def.identity) == {
             .Val(index) -> owner = Val(db.members[index].owner.copy())
-            None -> {
+            .None -> {
                 if def.kind == {
                     .Field(_, parent) -> owner = Val(parent)
                     .EnumVariant(parent) -> owner = Val(parent)
@@ -134,7 +134,7 @@ fn semantic_render_trait_contracts(contracts: [TraitContractFact], declaration: 
         loop associated in contract.associated_types {
             if associated.implementation == {
                 .Val(ty) -> &lines.push("  type {associated.name} = {semantic_display_type(names, module_index, ty)}")
-                None -> &lines.push("  type {associated.name}")
+                .None -> &lines.push("  type {associated.name}")
             }
         }
         loop method in contract.methods -> &lines.push("  {method}")
@@ -206,7 +206,7 @@ fn semantic_collect_import_symbols(symbols: &[SemanticSymbol], registration: Sem
                             summary = symbols[index].summary.copy()
                             examples = symbols[index].examples.copy()
                         }
-                        None -> {
+                        .None -> {
                             signature = binding.local.copy()
                             summary = "Imported from {module_alias}."
                         }
@@ -225,7 +225,7 @@ fn semantic_collect_import_symbols(symbols: &[SemanticSymbol], registration: Sem
                 alias :: import_alias(import)
                 alias_name :: if name_facts_effective_alias(names, module_index, alias) == {
                     .Val(effective) -> effective.name
-                    None -> alias
+                    .None -> alias
                 }
                 identity :: name_facts_alias_identity(names, module_index, import.alias_span) ?? semantic_import_identity(module_path, lexical_scope, alias_name)
                 &symbols.push(SemanticSymbol{
@@ -268,7 +268,7 @@ fn semantic_inline_module_scope(db: SymbolDB, module_path: String, module_ref: C
     if identity == None {
         parent_identity := "module:{module_path}"
         if parent_scope == .Val(scope) -> parent_identity = scope.identity.copy()
-        identity = Val("module:{parent_identity}::{module.name}")
+        identity = Val("module:{parent_identity}::{module_ref.name}")
     }
     structural_parent := 0
     loop node in db.nodes {

@@ -42,8 +42,8 @@ use core.process.host.native_process as lsp_doctor_test_process
         assert(receipt.item_recomputes > 0)
         assert_eq(receipt.blast_radius(), receipt.reverified_items.len())
         json :: foundation_parse_protocol_json(receipt.to_json()) ?? panic("actual receipt wire")
-        assert_eq(json.field("schema"), Val(DataTree.Text("jet.reverdict-receipt")))
-        assert_eq(json.field("version"), Val(DataTree.Int(2)))
+        assert_eq(json.field("schema"), Val(Dyn.Text("jet.reverdict-receipt")))
+        assert_eq(json.field("version"), Val(Dyn.Int(2)))
     }
 }
 
@@ -72,7 +72,7 @@ fn lsp_doctor_test_scratch() -[FS, Env, Exec]> LSPDoctorTranscriptScratch Never!
 
 #Test("LSP doctor transcript cursor counts exact json extensions without file type filtering") {
     scratch :: lsp_doctor_test_scratch()
-    loop name in [String]{"a.json", "multiple.part.json", "UPPER.JSON", "no_extension", ".json", "suffix.json.bak"} {
+    loop name in ([String]{"a.json", "multiple.part.json", "UPPER.JSON", "no_extension", ".json", "suffix.json.bak"}) {
         lsp_doctor_native.write(lsp_doctor_test_child(scratch.root, name), [U8]{}) ?? panic("create transcript entry: {err}")
     }
     directory :: lsp_doctor_test_child(scratch.root, "dir.json")

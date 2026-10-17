@@ -66,17 +66,17 @@ fn semindex_s10_extern_boundary_assertions(function: ExternFn, source: String) N
                     assert(reason.required_stage == .Typed)
                     assert_eq(reason.reason, "extern Jet boundary has no checked failure contract")
                 }
-                .Checked(_) -> panic("extern failure facts are not checked")
+                .Checked(_) -> { panic("extern failure facts are not checked") }
             }
             if generics == {
                 .Unavailable(reason) -> {
                     assert(reason.required_stage == .Typed)
                     assert_eq(reason.reason, "extern declarations expose no generic parameter facts")
                 }
-                .Checked(_) -> panic("extern generic facts are not checked")
+                .Checked(_) -> { panic("extern generic facts are not checked") }
             }
         }
-        else -> panic("extern boundary must retain its signature")
+        else -> { panic("extern boundary must retain its signature") }
     }
 }
 

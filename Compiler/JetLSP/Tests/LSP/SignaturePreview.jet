@@ -29,7 +29,7 @@ fn lsp_signature_test_db(definition: ^SymbolDef) -> SymbolDB Never! {
     assert_eq(lsp_compute_signature_change_preview(db, sources, "missing", "bad name", "\n", values), Err("`bad name` is not a valid parameter identifier"))
     assert_eq(lsp_compute_signature_change_preview(db, sources, "missing", "extra", "\n", values), Err("parameter type must be one explicit, single-line type"))
     assert_eq(lsp_compute_signature_change_preview(db, sources, "missing", "extra", "Int", values), Err("no checked callable identity `missing`"))
-    loop ty in [String]{"", "  ", "Int{Char{13}}", "Int\n", "{{Int", "Int}}"} -> assert_eq(lsp_compute_signature_change_preview(db, sources, "missing", "extra", ty, values), Err("parameter type must be one explicit, single-line type"))
+    loop ty in ([String]{"", "  ", "Int{Char{13}}", "Int\n", "{{Int", "Int}}"}) -> assert_eq(lsp_compute_signature_change_preview(db, sources, "missing", "extra", ty, values), Err("parameter type must be one explicit, single-line type"))
 }
 
 #Test("signature declaration rejects noncallable duplicate then variadic before missing source") {
@@ -72,7 +72,7 @@ fn lsp_signature_test_db(definition: ^SymbolDef) -> SymbolDB Never! {
     source :: "fn run() {{}}\nfn caller() {{ run() }}\n"
     tokens :: lex(source.bytes()).tokens
     call_span := SourceSpan{start: 0, end: 0}
-    loop token in tokens { if token.kind == TOKEN_IDENT && token.payload.text == "run" -> call_span = SourceSpan{start: token.span.start, end: token.span.end} }
+    loop token in tokens { if token.kind == TOKEN_IDENT && token.payload.text == "run" -> call_span = ((SourceSpan{start: token.span.start, end: token.span.end})) }
     db := lsp_signature_test_db(lsp_signature_test_definition())
     db.calls = [CallEdge]{CallEdge{caller: "fn:caller", callee: "run", module_path: "main.jet", call_span: call_span}}
     db.refs = [SymRef]{SymRef{name: "run", span: Span{start: call_span.start, end: call_span.end}, module_path: "main.jet", scope_identity: Val("fn:caller"), target: Val(DefinitionAnchor{module_path: "main.jet", kind: "function", def_span: SourceSpan{start: 3, end: 6}, semantic_identity: Val("fn:main::run")}), fact: None}}

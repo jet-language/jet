@@ -7,18 +7,18 @@ use std.time as time
 use std.collections.[VecDeque]
 use core.files.[OSPath]
 use core.sys.target.[selected_os]
-use jet_debug.Dap.*
-use jet_debug.Dap03.*
+use jet_debug.Dap.[BreakpointSpec, DapServer, FrameLocation, ObjectReferences, State, default_exception_filters, has_jet_frame, jet_thread_name, parse_attach_arguments, parse_dap_request, parse_launch_arguments, project_frames, read_message, run_io, take_next_request]
+use jet_debug.Dap03.[default_exception_filters, parse_attach_arguments, parse_dap_request, parse_launch_arguments, read_message]
 use jet_debug.Inferior.[Inferior, RawFrame, ResumeResult]
 use jet_debug.LineMap.[LineMap]
 use jet_debug.[DebugHistory, DebugCheckpoint, ExitCodes]
-use jet_foundation.JSON.[parse_json, json_get, json_str, json_u32, json_escape]
-use jet_foundation.DataTree.[DataTree]
+use jet_foundation.JSON.[parse_json, json_get, json_str, json_u32, foundation_json_escape]
+use jet_foundation.Dyn.[Dyn]
 
 // Rust: crates/jet-debug/src/Dap.rs:4311
-fn breakpoint_lines(args: DataTree?) -> [USize] Err! { breakpoint_lines_for_origin(args, true) }
+fn breakpoint_lines(args: Dyn?) -> [USize] Err! { breakpoint_lines_for_origin(args, true) }
 // Rust: crates/jet-debug/src/Dap.rs:4316
-fn breakpoint_lines_for_origin(args: DataTree?, lines_start_at_1: Bool) -> [USize] Err! {
+fn breakpoint_lines_for_origin(args: Dyn?, lines_start_at_1: Bool) -> [USize] Err! {
     value :: args.and_then((a) -> json_get(a, "breakpoints")) ?? return []
     items :: if value == {
         .Array(items) -> items
@@ -250,13 +250,13 @@ fn frame(body: String) -> String { "Content-Length: {body.len()}{Char{13}}\n{Cha
     map :: root.join("program.jetmap")
     fs.write(program, "program".as_bytes()).unwrap()
     fs.write(map, "map".as_bytes()).unwrap()
-    request :: parse_json("{{\"processId\":1,\"program\":\"{json_escape(program.to_string_lossy())}\",\"map\":\"{json_escape(map.to_string_lossy())}\",\"showRawFrames\":false}}").unwrap()
+    request :: parse_json("{{\"processId\":1,\"program\":\"{foundation_json_escape(program.to_string_lossy())}\",\"map\":\"{foundation_json_escape(map.to_string_lossy())}\",\"showRawFrames\":false}}").unwrap()
     parsed :: parse_attach_arguments(.Val(request)).unwrap()
     assert_eq(parsed.pid, 1)
     assert_eq(parsed.program, fs.canonicalize(program).unwrap())
     assert_eq(parsed.map, fs.canonicalize(map).unwrap())
     assert(!parsed.show_raw_frames)
-    raw_request :: parse_json("{{\"processId\":1,\"program\":\"{json_escape(program.to_string_lossy())}\",\"map\":\"{json_escape(map.to_string_lossy())}\",\"showRawFrames\":true}}").unwrap()
+    raw_request :: parse_json("{{\"processId\":1,\"program\":\"{foundation_json_escape(program.to_string_lossy())}\",\"map\":\"{foundation_json_escape(map.to_string_lossy())}\",\"showRawFrames\":true}}").unwrap()
     assert(parse_attach_arguments(.Val(raw_request)).unwrap().show_raw_frames)
     loop raw in ["{{\"processId\":0}}", "{{\"processId\":1,\"program\":\"missing\",\"map\":\"missing\"}}"] {
         args :: parse_json(raw).unwrap()
@@ -286,7 +286,7 @@ fn frame(body: String) -> String { "Content-Length: {body.len()}{Char{13}}\n{Cha
     map :: root.join("program.jetmap")
     LineMap.write_artifact(map, "main.jet", "", "main.rs", "", program).unwrap()
     target := process.Command.new("sleep").arg("30").spawn().expect("spawn real attach target")
-    input :: frame("{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\"}}}}") + frame("{{\"seq\":2,\"type\":\"request\",\"command\":\"attach\",\"arguments\":{{\"processId\":{target.id()},\"program\":\"{json_escape(program.to_string_lossy())}\",\"map\":\"{json_escape(map.to_string_lossy())}\"}}}}")
+    input :: frame("{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\"}}}}") + frame("{{\"seq\":2,\"type\":\"request\",\"command\":\"attach\",\"arguments\":{{\"processId\":{target.id()},\"program\":\"{foundation_json_escape(program.to_string_lossy())}\",\"map\":\"{foundation_json_escape(map.to_string_lossy())}\"}}}}")
     server := test_server(.New)
     output := [U8]{}
     code :: run_io(&server, io.Cursor.new(input), &output)
@@ -312,7 +312,7 @@ fn frame(body: String) -> String { "Content-Length: {body.len()}{Char{13}}\n{Cha
         program :: fs.canonicalize(OSPath("/proc/{pid}/exe")).expect("resolve real attach target binary")
         map :: root.join("target.jetmap")
         LineMap.write_artifact(map, "main.jet", "", "main.rs", "", program).expect("write matching attach map")
-        input :: frame("{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\"}}}}") + frame("{{\"seq\":2,\"type\":\"request\",\"command\":\"attach\",\"arguments\":{{\"processId\":{pid},\"program\":\"{json_escape(program.to_string_lossy())}\",\"map\":\"{json_escape(map.to_string_lossy())}\"}}}}") + frame("{{\"seq\":3,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{{}}}}")
+        input :: frame("{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\"}}}}") + frame("{{\"seq\":2,\"type\":\"request\",\"command\":\"attach\",\"arguments\":{{\"processId\":{pid},\"program\":\"{foundation_json_escape(program.to_string_lossy())}\",\"map\":\"{foundation_json_escape(map.to_string_lossy())}\"}}}}") + frame("{{\"seq\":3,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{{}}}}")
         server := test_server(.New)
         output := [U8]{}
         code :: run_io(&server, io.Cursor.new(input), &output)
@@ -404,7 +404,7 @@ fn dap_call(server: DapServer, body: String) -> String {
     String.from_utf8(^output).expect("DAP output is UTF-8")
 }
 // Rust: crates/jet-debug/src/Dap.rs:5321
-fn dap_message(output: String) -> DataTree {
+fn dap_message(output: String) -> Dyn {
     reader := io.Cursor.new(output.as_bytes())
     body :: read_message(&reader).expect("DAP response frame").expect("DAP response body")
     parse_json(body).expect("DAP response JSON")
@@ -443,9 +443,9 @@ fn dap_body_id(output: String, collection: String, field: String) -> U32 {
         server.jet_src = jet_src
         server.binary = binary
         assert(dap_call(&server, "{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\"}}}}").contains("\"success\":true"))
-        breakpoint :: dap_call(&server, "{{\"seq\":2,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{{\"source\":{{\"path\":\"{json_escape(jet_file.to_string_lossy())}\"}},\"breakpoints\":[{{\"line\":3}}]}}}}")
+        breakpoint :: dap_call(&server, "{{\"seq\":2,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{{\"source\":{{\"path\":\"{foundation_json_escape(jet_file.to_string_lossy())}\"}},\"breakpoints\":[{{\"line\":3}}]}}}}")
         assert(breakpoint.contains("\"verified\":true"), breakpoint)
-        launch :: dap_call(&server, "{{\"seq\":3,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{{\"program\":\"{json_escape(jet_file.to_string_lossy())}\",\"stopOnEntry\":true}}}}")
+        launch :: dap_call(&server, "{{\"seq\":3,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{{\"program\":\"{foundation_json_escape(jet_file.to_string_lossy())}\",\"stopOnEntry\":true}}}}")
         assert(launch.contains("\"event\":\"initialized\""), launch)
         configured :: dap_call(&server, "{{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{{}}}}")
         assert(configured.contains("\"event\":\"stopped\""), configured)
@@ -469,7 +469,7 @@ fn dap_body_id(output: String, collection: String, field: String) -> U32 {
         assert_eq(server.state, .Stopped)
         breakpoint_stack :: dap_call(&server, "{{\"seq\":101,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{{\"threadId\":1}}}}")
         assert(breakpoint_stack.contains("\"line\":3"), breakpoint_stack)
-        assert(breakpoint_stack.contains(json_escape(jet_file.to_string_lossy())), breakpoint_stack)
+        assert(breakpoint_stack.contains(foundation_json_escape(jet_file.to_string_lossy())), breakpoint_stack)
         // Rename over the busy executable inode rather than overwrite it.
         replacement :: root.join("replacement-debug-binary")
         fs.write(replacement, "replaced binary".as_bytes()).expect("write replacement binary")

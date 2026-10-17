@@ -67,7 +67,7 @@ fn semantic_distinct_conversion_symbol(owner: String, base: Type, ranged: Bool, 
             signature = "{qualified_name}(value: {source}) -> {owner}\nfailure: {error} (CheckedText)"
             summary = "Validates {source} through {owner}.CheckedText."
         }
-        None -> {
+        .None -> {
             suffix :: if fallible -> " !String" else -> ""
             signature = "{qualified_name}(value: {source}) -> {owner}{suffix}"
             summary = "Converts {source} to {owner}."
@@ -229,7 +229,7 @@ impl LexicalScopeIndex {
             }
             if node.parent == {
                 .Val(parent) -> current = parent
-                None -> break
+                .None -> { break }
             }
         }
         if innermost == None {
@@ -280,7 +280,7 @@ fn semantic_shape(name: String, kind: SymKind, owner: String?, names: MIRNameFac
             }
             prefix :: if owner == {
                 .Val(owner_name) -> "{owner_name}.{name}"
-                None -> "fn {name}"
+                .None -> "fn {name}"
             }
             shown := [String]{}
             if effects == .Val(row) {
@@ -299,11 +299,11 @@ fn semantic_shape(name: String, kind: SymKind, owner: String?, names: MIRNameFac
             }
             result :: if result_type == {
                 .Val(ty) -> semantic_display_type(names, module_index, type_name(ty))
-                None -> ""
+                .None -> ""
             }
             ceiling :: if via == {
                 .Val(parameter) -> " -[via {parameter.name}]>"
-                None -> if shown.len() == 0 -> "" else -> " -[{shown.join(", ")}]>"
+                .None -> if shown.len() == 0 -> "" else -> " -[{shown.join(", ")}]>"
             }
             suffix :: if ceiling != "" -> if result == "" -> ceiling else -> "{ceiling} {result}" else if result != "" -> " -> {result}" else -> ""
             failure :: if failure_contract == {
@@ -327,7 +327,7 @@ fn semantic_shape(name: String, kind: SymKind, owner: String?, names: MIRNameFac
         .Local(_, ty) -> {
             shown :: if ty == {
                 .Val(ty) -> semantic_display_type(names, module_index, type_name(ty))
-                None -> "value"
+                .None -> "value"
             }
             SemanticShape{kind: .Local, signature: "{name}: {shown}"}
         }
@@ -349,14 +349,14 @@ fn semantic_marker_declaration_signature(items: [Item], def: SymDef, source: Str
                         variadic :: if parameter.variadic -> "..." else -> ""
                         default :: if parameter.value == {
                             .Val(value) -> "{{{semantic_marker_expr_source(source, value)}}}"
-                            None -> ""
+                            .None -> ""
                         }
                         &parts.push("{parameter.name}: {variadic}{type_name(ty)}{default}")
                     }
-                    None -> {
+                    .None -> {
                         value :: if parameter.value == {
                             .Val(value) -> semantic_marker_expr_source(source, value)
-                            None -> "…"
+                            .None -> "…"
                         }
                         &parts.push("{parameter.name}: {value}")
                     }

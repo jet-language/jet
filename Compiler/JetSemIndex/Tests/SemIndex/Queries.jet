@@ -47,7 +47,7 @@ fn semindex_query_test_member(name: String, kind: MemberKind, origin: MemberOrig
         .EnumVariant{parent: "E"}, .Field{ty: "Int", parent: "S"}, .Local{mutable: true, ty: None}, .Local{mutable: false, ty: Val("String")}, .Param{ty: "Bool"},
     }
     signatures := [String]{}
-    loop kind in kinds -> &signatures.push(semindex_structural_signature(kind, [ViewProvenanceFact]{}))
+    loop kind in kinds -> &signatures.push(semindex_structural_signature(kind, ([ViewProvenanceFact]{})))
     assert_eq(signatures, [String]{"module", "struct{{x:Int,y:Float}}", "enum{{A,B}}", "trait", "tag", "type", "const", "variant:E", "field:S:Int", "local:true:?", "local:false:String", "param:Bool"})
     reversed :: SemIndexSymbolKind.Enum{variants: [String]{"B", "A"}}
     assert(semindex_structural_signature(kinds[2], [ViewProvenanceFact]{}) != semindex_structural_signature(reversed, [ViewProvenanceFact]{}))
@@ -89,11 +89,11 @@ fn semindex_query_test_index(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[Ca
     // #4393: explicit option match; do not use ?? return None for View options.
     if index.lookup("score") == {
         .Val(row) -> assert_eq(row[0].identity, "first")
-        None -> panic("first lookup result absent")
+        .None -> { panic("first lookup result absent") }
     }
     if index.lookup_identity("first") == {
         .Val(row) -> assert_eq(row[0].name, "score")
-        None -> panic("first identity result absent")
+        .None -> { panic("first identity result absent") }
     }
     assert(index.lookup("main::score") == None)
     assert(index.lookup_identity("missing") == None)
@@ -184,11 +184,11 @@ fn semindex_query_test_index(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[Ca
     expected :: if first.id < second.id -> first.id else -> second.id
     if index.derivation_ref("subject") == {
         .Val(reference) -> assert_eq(reference.id, expected)
-        None -> panic("retained subject evidence absent")
+        .None -> { panic("retained subject evidence absent") }
     }
     if index.derivation(first.id) == {
         .Val(record) -> assert_eq(record[0].id, first.id)
-        None -> panic("retained evidence id absent")
+        .None -> { panic("retained evidence id absent") }
     }
     assert(index.derivation("absent") == None)
     assert(index.derivation_ref("absent") == None)
@@ -198,11 +198,11 @@ fn semindex_query_test_index(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[Ca
     assert_eq(&index.invalidate_derivations(changed), 0)
     if index.derivation(first.id) == {
         .Val(record) -> assert(record[0].disposition == .Stale)
-        None -> panic("invalidation must retain exact evidence id")
+        .None -> { panic("invalidation must retain exact evidence id") }
     }
     if index.derivation(retained.id) == {
         .Val(record) -> assert(record[0].disposition == .Redacted)
-        None -> panic("redacted evidence must be retained")
+        .None -> { panic("redacted evidence must be retained") }
     }
 }
 
@@ -291,14 +291,14 @@ fn semindex_query_test_scalar_consumers(index: SemIndex, expected_name: String, 
             assert_eq(facts.name, expected_name)
             assert(package_facts_json(facts).contains("\"name\":{foundation_json_quote(expected_name)}"))
         }
-        .None -> panic("attached package owner absent")
+        .None -> { panic("attached package owner absent") }
     }
     if index.workspace_overlay_policy == {
         .Val(policy) -> {
             assert_eq(policy.allow_unfree, expected_unfree)
             assert(workspace_overlay_policy_json(policy).contains(semindex_json_string_array(expected_unfree)))
         }
-        .None -> panic("attached overlay owner absent")
+        .None -> { panic("attached overlay owner absent") }
     }
     assert_eq(index.effect_projection.required_effects, [String]{"IO"})
     assert_eq(index.effect_projection.granted_effects, [String]{"Net"})

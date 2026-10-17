@@ -188,7 +188,10 @@ use std.process.[Command]
     path :: temp_fixture("state_owner_symbols.jet", "\nstruct Door {{\n    state {{ Closed, Open }}\n}}\nimpl Door {{\n    #Transition(_, Door.State.Closed) fn new() -[]> Door {{ return Door{{}} }}\n    #Transition(Door.State.Closed, Door.State.Open) fn open(self: ^Door) -[]> Door {{ return self }}\n}}\nfn run() {{}}\n")
     index :: open(path).expect("state symbols index")
     closed :: index.definitions().iter().find(definition -> definition.qualified_name.ends_with("Door.State.Closed")).expect("owning struct state definition")
-    assert(match closed.kind { SymbolKind.EnumVariant { parent } -> parent == "Door.State"; else -> false })
+    assert(if closed.kind == {
+        (.EnumVariant{parent}) -> parent == "Door.State"
+        else -> false
+    })
     closed_span :: closed.def_span
     closed_qualified_name :: closed.qualified_name
     marker_reference :: index.references_to("Closed").into_iter().find(reference -> reference.target.is_some_and(target -> target.def_span == closed_span)).expect("qualified marker reference resolves to the state section")
@@ -249,7 +252,10 @@ use std.process.[Command]
     assert_eq(score.signature, "fn score(name: String) -> Int\nfailure: Int (implicit default Err!)")
     assert_eq(score.summary, "Scores one name.")
     assert_eq(score.examples, ["score(\"Ada\")"])
-    assert(match score.provenance { SemanticProvenance.Source { module_path: _ } -> true; else -> false })
+    assert(if score.provenance == {
+        (.Source{module_path}) -> true
+        else -> false
+    })
     local :: symbols.lookup("local_total")
     assert_eq(local.len(), 1)
     assert_eq(local[0].kind, SemanticSymbolKind.Local)
@@ -299,7 +305,10 @@ use std.process.[Command]
     filter :: symbols.lookup_qualified("List.filter").expect("List.filter")
     assert_eq(filter.signature, "List.filter(f: fn(T) -> Bool) List<T>")
     assert_eq(filter.summary, "Keeps items where f(item) is true.")
-    assert(match filter.provenance { SemanticProvenance.Builtin { module_ref: _ } -> true; else -> false })
+    assert(if filter.provenance == {
+        (.Builtin{module_ref}) -> true
+        else -> false
+    })
     assert(symbols.complete("fil", "List").iter().any(s -> s.name == "filter"))
 }
 
@@ -370,7 +379,10 @@ use std.process.[Command]
     path :: temp_fixture("view_provenance.jet", "fn pick(left: [Int], right: [Int], first: Bool) -> View<Int> {{\n    if first {{ return left[0..1] }}\n    return right[0..1]\n}}\nfn run() {{}}\n")
     union :: open(path).expect("multi-source view provenance indexes")
     pick :: union.lookup("pick").expect("pick definition")
-    assert(match pick.kind { .Function { .. } -> true; else -> false })
+    assert(if pick.kind == {
+        .Function { .. } -> true
+        else -> false
+    })
     assert_eq(pick.view_provenance.len(), 1)
     provenance :: pick.view_provenance[0]
     assert(provenance.output_path.is_empty())
@@ -569,7 +581,10 @@ use std.process.[Command]
     path :: temp_fixture("fenced_range_names.jet", "fn run() {{\n    <: t1..t4 :> :: 1\n    print(<: t1, t2, t3, t4 :>)\n}}\n")
     idx :: open(path).expect("fenced range fixture indexes")
     generated :: idx.lookup("t4").expect("generated t4 definition")
-    assert(match generated.kind { SymbolKind.Local { mutable: false, ty } -> ty.is_some(); else -> false })
+    assert(if generated.kind == {
+        (.Local{mutable: false, ty}) -> ty.is_some()
+        else -> false
+    })
     assert_eq(idx.references_to("t4").len(), 1)
 }
 
@@ -578,7 +593,10 @@ use std.process.[Command]
     path :: temp_fixture("loop_label_refs.jet", "fn run() {{\n    outer :: loop {{\n        if true {{ next(outer) }}\n        break(outer)\n    }}\n}}\n")
     idx :: open(path).expect("loop label fixture indexes")
     outer :: idx.lookup("outer").expect("loop label definition")
-    assert(match outer.kind { SymbolKind.Local { mutable: false, ty } -> ty.is_none(); else -> false })
+    assert(if outer.kind == {
+        (.Local{mutable: false, ty}) -> ty.is_none()
+        else -> false
+    })
     assert_eq(idx.references_to("outer").len(), 2)
 }
 

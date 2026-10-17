@@ -146,11 +146,11 @@ fn doc_trait_name_order(left: String?, right: String?) -> Ordering Never! {
     if left == {
         .Val(left_name) -> if right == {
             .Val(right_name) -> left_name <=> right_name
-            None -> 1 <=> 0
+            .None -> 1 <=> 0
         }
-        None -> if right == {
+        .None -> if right == {
             .Val(_) -> 0 <=> 1
-            None -> 0 <=> 0
+            .None -> 0 <=> 0
         }
     }
 }
@@ -299,7 +299,12 @@ fn doc_line_column_bytes(bytes: [U8], offset: Int, line: &Int, column: &Int) Nev
     column = 1
     end :: if offset < bytes.len() -> offset else -> bytes.len()
     loop index in 0..<end {
-        if bytes[index] == 10 -> line += 1; column = 1 else -> column += 1
+        if bytes[index] == 10 {
+            line += 1
+            column = 1
+        } else {
+            column += 1
+        }
     }
 }
 fn doc_line_offset(source: String, line: Int) -> Int Never! {

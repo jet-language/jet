@@ -6,12 +6,12 @@ use std.time.[Instant]
 use jet_devserver.[WatchSession, WATCH_COALESCE_MS, WATCH_POLL_INTERVAL_MS]
 
 // Rust: tests/dev_latency.rs:33
-EXAMPLE :: "Examples/features/collections/wordcount.jet"
+EXAMPLE :: prep { String{"Examples/features/collections/wordcount.jet"} }
 // Rust: tests/dev_latency.rs:38
 // Never widen the 200ms user promise to make a run pass.
 BUDGET_MS :: prep { U128{200} }
 // Rust: tests/dev_latency.rs:42
-ROUNDS :: 5
+ROUNDS :: prep { Int{5} }
 // Rust: tests/dev_latency.rs:43
 WATCH_LATENCY_MARGIN_MS :: prep { U128{20} }
 
@@ -42,7 +42,7 @@ fn measure_watch_latency_ms() -> U128 {
 
 // Rust: tests/dev_latency.rs:79
 fn assert_watch_latency_contract() {
-    assert(WATCH_COALESCE_MS < 5, "watch coalescing must stay below 5ms, got {WATCH_COALESCE_MS}ms")
+    assert(5 > WATCH_COALESCE_MS, "watch coalescing must stay below 5ms, got {WATCH_COALESCE_MS}ms")
     assert(WATCH_POLL_INTERVAL_MS <= 10, "idle watch polling must stay bounded, got {WATCH_POLL_INTERVAL_MS}ms")
     best :: measure_watch_latency_ms()
     budget :: (U128{WATCH_COALESCE_MS}) + WATCH_LATENCY_MARGIN_MS

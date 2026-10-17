@@ -100,7 +100,7 @@ fn semindex_claim_slot_boundary(db: &SymbolDB, ctx: &WalkCtx, name: String) Neve
         if !semindex_block_span_candidate(parent, span, claimed) -> next
         if chosen == {
             .Val(old) -> { if span.start < old.start -> chosen = Val(span) }
-            None -> chosen = Val(span)
+            .None -> chosen = Val(span)
         }
     }
     if chosen == .Val(span) {
@@ -111,7 +111,7 @@ fn semindex_claim_slot_boundary(db: &SymbolDB, ctx: &WalkCtx, name: String) Neve
 
 // The callback is run even for empty/optional slots. Restoration is stack-like,
 // so siblings never inherit a nested child's name or kind.
-fn semindex_structural_slot<T>(db: &SymbolDB, ctx: &WalkCtx, name: String, kind: StructuralSlotKind, f: fn(&SymbolDB, &WalkCtx) T) -> T {
+fn semindex_structural_slot<T>(db: &SymbolDB, ctx: &WalkCtx, name: String, kind: StructuralSlotKind, f: fn(SymbolDB, WalkCtx) -> T) -> T {
     semindex_claim_slot_boundary(&db, &ctx, name)
     old_name :: ctx.structural_slot
     old_kind :: ctx.structural_slot_kind
@@ -329,7 +329,7 @@ fn semindex_record_call_rows(calls: &[CallEdge], caller: CallerFrame?, mp: Strin
 fn semindex_record_call(db: &SymbolDB, ctx: WalkCtx, mp: String, callee: String, span: Span) Never! {
     semindex_record_call_rows(&db.calls, ctx.caller, mp, callee, span)
 }
-fn semindex_with_caller(db: &SymbolDB, ctx: &WalkCtx, frame: CallerFrame, params: [Param], mp: String, f: fn(&SymbolDB, &WalkCtx)) {
+fn semindex_with_caller(db: &SymbolDB, ctx: &WalkCtx, frame: CallerFrame, params: [Param], mp: String, f: fn(SymbolDB, WalkCtx)) {
     previous :: ctx.caller
     ctx.caller = Val(frame)
     f(&db, &ctx)

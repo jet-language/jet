@@ -1,6 +1,6 @@
 use core.files as semops_files
 use core.sys as semops_sys
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use jet_foundation.[foundation_parse_protocol_json]
 
 // Rust SemanticOps.rs:12–39,188–194: persisted operation and blame records.
@@ -72,21 +72,21 @@ fn semops_same_hash(recorded: String, current: String) -> Bool Never! {
 
 // Rust Foundation parse_json: canonical strict bounded codec, enforcing the
 // 64-container/1 MiB boundary during parsing rather than after materialization.
-fn semops_parse_receipt(raw: String) -> DataTree? Never! {
+fn semops_parse_receipt(raw: String) -> Dyn? Never! {
     foundation_parse_protocol_json(raw)
 }
 
 // Rust field/string/optional_string and parse_files/file, ops/op, target.
 // Nonobject rows and rows missing required strings are skipped, not fatal.
-fn semops_field(object: [String: DataTree], key: String) -> DataTree? Never! {
+fn semops_field(object: [String: Dyn], key: String) -> Dyn? Never! {
     object.get(key)
 }
-fn semops_string(object: [String: DataTree], key: String) -> String? Never! {
+fn semops_string(object: [String: Dyn], key: String) -> String? Never! {
     value :: semops_field(object, key) ?? return None
     if value == .Text(text) -> return Val(text)
     None
 }
-fn semops_file(value: DataTree) -> SemanticOpFile? Never! {
+fn semops_file(value: Dyn) -> SemanticOpFile? Never! {
     if value == .Object(object) {
         path :: semops_string(object, "path") ?? return None
         before_hash :: semops_string(object, "before_hash") ?? return None
@@ -95,7 +95,7 @@ fn semops_file(value: DataTree) -> SemanticOpFile? Never! {
     }
     None
 }
-fn semops_parse_files(value: DataTree) -> [SemanticOpFile]? Never! {
+fn semops_parse_files(value: Dyn) -> [SemanticOpFile]? Never! {
     if value == .Array(values) {
         files := [SemanticOpFile]{}
         loop row in values {
@@ -105,7 +105,7 @@ fn semops_parse_files(value: DataTree) -> [SemanticOpFile]? Never! {
     }
     None
 }
-fn semops_target(value: DataTree) -> SemanticOpTarget? Never! {
+fn semops_target(value: Dyn) -> SemanticOpTarget? Never! {
     if value == .Object(object) {
         stable_id :: semops_string(object, "stable_id") ?? return None
         before :: semops_string(object, "before") ?? return None
@@ -116,7 +116,7 @@ fn semops_target(value: DataTree) -> SemanticOpTarget? Never! {
     }
     None
 }
-fn semops_op(value: DataTree) -> SemanticOp? Never! {
+fn semops_op(value: Dyn) -> SemanticOp? Never! {
     if value == .Object(object) {
         kind :: semops_string(object, "kind") ?? return None
         targets := [SemanticOpTarget]{}
@@ -141,7 +141,7 @@ fn semops_op(value: DataTree) -> SemanticOp? Never! {
     }
     None
 }
-fn semops_ops(value: DataTree) -> [SemanticOp]? Never! {
+fn semops_ops(value: Dyn) -> [SemanticOp]? Never! {
     if value == .Array(values) {
         operations := [SemanticOp]{}
         loop row in values {

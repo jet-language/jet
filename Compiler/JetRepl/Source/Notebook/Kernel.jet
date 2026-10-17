@@ -291,9 +291,9 @@ struct Kernel {
             return Err(notebook_kernel_diagnostic_error("E2104", "notebook app function has dynamic effects", "checked function `{function_name}` forwards effects through `{parameter.name}`", "publish a function with a static IO or FS effect row"))
         }
         if function.declared_effects == .Val(declared) {
-            loop effect in declared {
+            loop effect_ref in declared {
                 if !notebook_kernel_app_effect_supported(effect_ref.name) {
-                    return Err(notebook_kernel_diagnostic_error("E2104", "notebook app effect is unsupported", "checked function `{function_name}` declares `{effect.name}`, which the notebook app authority cannot grant", "use only project-confined IO or FS effects for local-app publication"))
+                    return Err(notebook_kernel_diagnostic_error("E2104", "notebook app effect is unsupported", "checked function `{function_name}` declares `{effect_ref.name}`, which the notebook app authority cannot grant", "use only project-confined IO or FS effects for local-app publication"))
                 }
             }
         }
@@ -308,7 +308,7 @@ struct Kernel {
         }
         return_projection :: type_name(func_effective_return_type(function))
         effects := [String]{}
-        if function.declared_effects == .Val(declared) -> loop effect in declared -> &effects.push(effect_ref.name.copy())
+        if function.declared_effects == .Val(declared) -> loop effect_ref in declared -> &effects.push(effect_ref.name.copy())
         material := [U8]{}
         notebook_kernel_append_nul(&material, "jet-notebook-app-compat-v1")
         notebook_kernel_append_nul(&material, function.name)
@@ -320,7 +320,7 @@ struct Kernel {
             notebook_kernel_append_nul(&material, if input.variadic -> "variadic" else -> "single")
         }
         notebook_kernel_append_nul(&material, return_projection)
-        loop effect in effects -> notebook_kernel_append_nul(&material, effect_ref)
+        loop effect_ref in effects -> notebook_kernel_append_nul(&material, effect_ref)
         notebook_kernel_append(&material, if function.is_unsafe -> "authority-required" else -> "authority-free")
         digest :: mir_sha256_hex_bytes(mir_sha256_bytes(material))
         Ok(NotebookAppSchema{function: function.name.copy(), inputs: ^inputs, return_projection: return_projection, effects: ^effects, authority: self.authority_id.copy(), source_identity: self.notebook.source_hash(), compatibility_digest: digest})
@@ -386,7 +386,7 @@ struct Kernel {
     }
     fn stale_ids(self) -> [Int] Never! {
         ids := [Int]{}
-        loop turn in self.session.turns -> if turn.stale -> &ids.push(turn.id)
+        loop turn in self.session.turns { if turn.stale -> &ids.push(turn.id) }
         ids
     }
     fn replay_plan(self, from_id: Int, edited: String?) -> ReplayPlan Err! {
@@ -443,13 +443,13 @@ struct Kernel {
         queued_input :: self.policy.pending_input()
         // #4494: actual retained native clock, not a host fixture or wall clock.
         started :: notebook_kernel_clock.monotonic_ns() ?? panic("native monotonic clock: {err}")
-        eval :: {
-            authorizer := &self.policy.authorizer(None)
+        eval :: (() -> {
+            authorizer := &self.policy.authorizer(.None)
             Comptime.begin_repl_interruptible_turn()
             evaluated :: evaluate_step_with_items(&self.session, source, self.base_dir, &authorizer, true)
             Comptime.end_repl_interruptible_turn()
             ^evaluated
-        }
+        })()
         if self.policy.pending_input() < queued_input -> _ :: &self.stdin_queue.remove(0, .Slot)
         if self.execution_count < (U32{4294967295}) -> self.execution_count += U32{1}
         self.cell_effects[cell_id] = eval.had_effect
@@ -460,7 +460,7 @@ struct Kernel {
             self.cell_errors[cell_id] = eval.text.copy()
         }
         bundle :: notebook_kernel_bundle_for_eval(eval)
-        turn_id :: if self.session.turns.is_empty() -> Int?{None} else -> Val(self.session.turns[self.session.turns.len() - 1].id)
+        turn_id :: if self.session.turns.is_empty() -> (Int?{None}) else -> Val(self.session.turns[self.session.turns.len() - 1].id)
         &self.notebook.store_output(cell_id, bundle.copy(), Int.from_u32(self.execution_count), turn_id) ?? return Err(err.message)
         self.executed_cells[cell_id] = true
         render :: notebook_decide_render(self.trust, mir_sha256_hex(source), self.notebook.environment_hash, client.renderer(), bundle)
@@ -475,7 +475,7 @@ struct Kernel {
         ran := [String]{}
         // One ID index for this wave; execution does not change cell layout.
         indices := [String:Int]{}
-        loop (index, cell) in self.notebook.cells -> if !indices.has_key(cell.id) -> indices[cell.id] = index
+        loop (index, cell) in self.notebook.cells { if !indices.has_key(cell.id) -> indices[cell.id] = index }
         loop cell_id in descendants {
             index :: indices.get(cell_id) ?? next
             cell :: self.notebook.cells[index]
@@ -521,10 +521,10 @@ struct Kernel {
                 break
             }
         }
-        {
-            auth := &self.policy.authorizer(None)
+        _ :: (() -> {
+            auth := &self.policy.authorizer(.None)
             apply_replay_plan_with_stale_quiet(&self.session, plan, stale_from, self.base_dir, false, &auth)
-        }
+        })()
         Ok(self.stale_ids())
     }
     fn grant_capability(&self, cell_id: String, renderer: String) Err! {
@@ -594,7 +594,7 @@ struct Kernel {
             }
             output := StatusValue.Null
             if cell.output == .Val(out) {
-                projected :: if live -> notebook_kernel_display_bundle(self.render_for(cell, out, client), out.bundle) else -> NotebookMIMEBundle{text_plain: out.bundle.text_plain.copy(), mime: [NotebookMIMEEntry]{}, quarantined: out.bundle.quarantined, widget_id: None, requested_origins: [String]{}, requested_messages: [String]{}}
+                projected :: if live -> notebook_kernel_display_bundle(self.render_for(cell, out, client), out.bundle) else -> NotebookMIMEBundle{text_plain: out.bundle.text_plain.copy(), mime: ([NotebookMIMEEntry]{}), quarantined: out.bundle.quarantined, widget_id: None, requested_origins: ([String]{}), requested_messages: ([String]{})}
                 output = StatusValue.Object(StatusFields.new()
                     .with("text", .String(notebook_kernel_bounded_text(projected.text_plain)))
                     .with("quarantined", .Bool(projected.quarantined)).with("live", .Bool(live))
@@ -632,7 +632,7 @@ struct Kernel {
     fn cell_status(self, cell: NotebookCell) -> String Never! { self.cell_status_with_live(cell, self.cell_output_live(cell)) }
     fn cell_status_with_live(self, cell: NotebookCell, live: Bool) -> String Never! {
         if self.pending_effects.has_key(cell.id) -> return "awaiting_confirmation"
-        if self.cell_errors.get(cell.id) == .Val(error) -> if !error.is_empty() -> return "error"
+        if self.cell_errors.get(cell.id) == .Val(error) { if !error.is_empty() -> return "error" }
         if live -> return "live"
         if self.cell_lazy.has_key(cell.id) -> return "stale_lazy"
         if cell.output != None -> "stale" else -> "idle"
@@ -674,7 +674,7 @@ fn notebook_kernel_app_control_type_supported(ty: Type) -> Bool Never! {
         .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> notebook_kernel_app_control_type_supported(inner)
         .Map(key, _, value) -> notebook_kernel_app_control_type_supported(key) && notebook_kernel_app_control_type_supported(value)
         .Tuple(fields) -> {
-            loop field in fields -> if !notebook_kernel_app_control_type_supported(field.ty) -> return false
+            loop field in fields { if !notebook_kernel_app_control_type_supported(field.ty) -> return false }
             true
         }
         .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
@@ -698,7 +698,7 @@ fn notebook_kernel_control_key(function: String, name: String) -> String Never! 
 fn notebook_kernel_control_value_matches(value: String, type_name: String) -> Bool Never! {
     text := value.trim() // #4303
     lexed :: lex(text.bytes())
-    loop diagnostic in lexed.diagnostics -> if diagnostic.severity == DIAGNOSTIC_ERROR -> return false
+    loop diagnostic in lexed.diagnostics { if diagnostic.severity == DIAGNOSTIC_ERROR -> return false }
     first := -1
     loop token in lexed.tokens {
         if token.kind == TOKEN_SEMI || token.kind == TOKEN_EOF || token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT -> next
@@ -727,7 +727,7 @@ fn notebook_kernel_control_value_matches(value: String, type_name: String) -> Bo
     }
 }
 fn notebook_kernel_source_may_have_effect(source: String) -> Bool Never! {
-    loop marker in [String]{"print(", "println(", "eprint(", "io.", "fs.", "net.", "exec.", "write(", "save(", "stdin", "stdout", "stderr", "sleep(", "random(", "clock("} {
+    loop marker in ([String]{"print(", "println(", "eprint(", "io.", "fs.", "net.", "exec.", "write(", "save(", "stdin", "stdout", "stderr", "sleep(", "random(", "clock("}) {
         if source.contains(marker) -> return true
     }
     false

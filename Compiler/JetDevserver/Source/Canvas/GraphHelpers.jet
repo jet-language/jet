@@ -36,8 +36,8 @@ fn span_through_closing_parens(src: String, span: Span) -> SourceSpan {
 
 // Rust: crates/jet-devserver/src/Canvas/graph_helpers.rs:44
 fn graph_id_name_span(graph_id: String) -> SourceSpan? {
-    (_, range) :: graph_id.rsplit_once('@')?
-    (start, end) :: range.split_once('-')?
+    (_, range) :: graph_id.rsplit_once('@')
+    (start, end) :: range.split_once('-')
     .Some(SourceSpan(start: start.parse().ok()?, end: end.parse().ok()?))
 }
 
@@ -52,7 +52,7 @@ fn function_signature_span(src: String, name_span: SourceSpan) -> SourceSpan Err
 
 // Rust: crates/jet-devserver/src/Canvas/graph_helpers.rs:71
 fn insert_offset(src: String, f: &AST.Func) -> Usize {
-    if first :: f.body.first() {
+    if f.body.first() == .Val(first) {
         first_start :: first.span().start
         line :: line_start(src, first_start)
         if src[line..first_start].contains('{') -> return first_start
@@ -135,7 +135,7 @@ fn expr_type(g: GraphBuilder, index: SemIndex, expr: Expr) -> String {
         .Str(_, _) -> "String"
         .Char(_, _) -> "Char"
         .Ident(name, _) -> {
-            if ty :: g.local_types.get(name) -> return ty.clone()
+            if g.local_types.get(name) == .Val(ty) -> return ty.clone()
             loop definition in index.definitions() {
                 if definition.name != name -> next
                 if definition.kind == .Function(params: params, ret: ret, ..) {
@@ -170,7 +170,7 @@ fn call_ret(index: SemIndex, name: String) -> String? {
     loop d in index.definitions() {
         if d.name == name {
             if d.kind == .Function(ret: ret, ..) {
-                if value :: ret -> return .Some(value.clone())
+                if ret == .Val(value) -> return .Some(value.clone())
             }
         }
     }
@@ -189,13 +189,13 @@ fn callable_signature_for_name(index: SemIndex, function: String) -> CallableSig
 
 // Rust: crates/jet-devserver/src/Canvas/graph_helpers.rs:247
 fn effect_badges(index: SemIndex, function: String) -> [String] {
-    if signature :: callable_signature_for_name(index, function) {
+    if callable_signature_for_name(index, function) == .Val(signature) {
         return if signature.effects is {
             .Checked(effects) -> if effects.is_empty() -> [] else -> ["effects"]
             .Unavailable(_) -> ["effects_unavailable"]
         }
     }
-    if effects :: index.effect_of(function) {
+    if index.effect_of(function) == .Val(effects) {
         if !effects.direct.is_empty() || !effects.inferred.is_empty() -> return ["effects"]
         return []
     }
@@ -204,7 +204,7 @@ fn effect_badges(index: SemIndex, function: String) -> [String] {
 
 // Rust: crates/jet-devserver/src/Canvas/graph_helpers.rs:268
 fn call_has_effects(index: SemIndex, function: String) -> Bool {
-    if signature :: callable_signature_for_name(index, function) {
+    if callable_signature_for_name(index, function) == .Val(signature) {
         return if signature.effects is {
             .Checked(effects) -> !effects.is_empty()
             .Unavailable(_) -> true
@@ -231,7 +231,7 @@ fn pure_leaf(expr: Expr) -> Bool {
 // Rust: crates/jet-devserver/src/Canvas/graph_helpers.rs:304
 fn wire_ident_refs(g: &GraphBuilder, expr: &Expr, input_pin: String) {
     if expr == .Ident(name, span) {
-        if out :: g.local_pins.get(name).cloned() {
+        if g.local_pins.get(name).cloned() == .Val(out) {
             add_wire_with_span(g, out, input_pin, "data", .Some(SourceSpan(start: span.start, end: span.end)))
         }
     }
@@ -286,8 +286,8 @@ fn query_result_json(kind: String, title: String, symbol: String, module_path: S
 
 // Rust: crates/jet-devserver/src/Canvas/graph_helpers.rs:414
 fn open_query_context(path: OSPath, src: String) -> (Projection, SemIndex) Err! {
-    projection :: project_file(path).map_err((diags) -> query_diagnostics_error(path, src, diags))?
-    index :: semindex.open(path).map_err((e) -> query_error("check", e.to_string()))?
+    projection :: project_file(path).map_err((diags) -> query_diagnostics_error(path, src, diags))
+    index :: semindex.open(path).map_err((e) -> query_error("check", e.to_string()))
     .Ok((projection, index))
 }
 

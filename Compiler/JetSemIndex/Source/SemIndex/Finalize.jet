@@ -118,7 +118,7 @@ fn semindex_state_graph_fact(owner: String, declarations: [NamedSpan], module_pa
         }
         if span == {
             .Val(location) -> &states.push(StateNodeFact{name: node.name, terminal: node.terminal, reachable: node.reachable, span: semindex_source_span(location)})
-            None -> panic("checked state graph node must have a declaration")
+            .None -> { panic("checked state graph node must have a declaration") }
         }
     }
     transitions := [StateTransitionFact]{}
@@ -139,9 +139,8 @@ fn semindex_add_state_graph_hovers(db: &SymbolDB, registration: SemaRegistration
                                 if node.name != member.name -> next
                                 terminal :: if node.terminal -> "terminal" else -> "nonterminal"
                                 reachability :: if node.reachable == {
-                                    .Val(true) -> "reachable"
-                                    .Val(false) -> "unreachable"
-                                    None -> "reachability unknown"
+                                    .Val(reachable) -> if reachable -> "reachable" else -> "unreachable"
+                                    else -> "reachability unknown"
                                 }
                                 &db.hover.push(HoverEntry{span: member.span, module_path: source.display, text: "state `{definition.name}.State.{member.name}` ({terminal}; {reachability})"})
                                 break
@@ -267,7 +266,7 @@ fn semindex_build_definition_facts(defs: [SymbolDef], nodes: [StructuralNode], r
             if defs[index].def_span.start > node.span.end -> break
             if defs[index].def_span.end > node.span.end -> next
             if defs[index].kind == {
-                .Local(_, _) | .Param(_) | .Field(_, _) | .EnumVariant(_) -> next
+                .Local(_, _) | .Param(_) | .Field(_, _) | .EnumVariant(_) -> { next }
                 else -> {}
             }
             chosen = Val(index)

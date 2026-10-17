@@ -428,10 +428,10 @@ fn console_types_test_response_body(response: ConsoleResponse, body: ^[U8]) -> S
 }
 
 #Test("console_response_status_header_and_body_bounds") {
-    assert_eq(console_types_test_status(U16{99}), "invalid console input: response status 99 is outside 100..=599")
+    assert_eq(console_types_test_status(U16{99}), "invalid console input: response status 99 is outside 100..599")
     assert_eq(console_types_test_status(U16{100}), "100")
     assert_eq(console_types_test_status(U16{599}), "599")
-    assert_eq(console_types_test_status(U16{600}), "invalid console input: response status 600 is outside 100..=599")
+    assert_eq(console_types_test_status(U16{600}), "invalid console input: response status 600 is outside 100..599")
     response :: ConsoleResponse.new("req-1", U16{200}) ?? panic("response")
     assert_eq(console_types_test_response_header(response, "Content-Type", "text/plain"), "text/plain")
     // Responses do not refuse credential header names; only requests do.
@@ -474,7 +474,7 @@ fn console_types_test_response_body(response: ConsoleResponse, body: ^[U8]) -> S
         .Err(error) -> error.message()
         .Ok(_) -> "accepted"
     }
-    assert_eq(status, "invalid console input: response status 99 is outside 100..=599")
+    assert_eq(status, "invalid console input: response status 99 is outside 100..599")
     response.status = U16{200}
     bounds :: if response.validate() == {
         .Err(error) -> error.message()

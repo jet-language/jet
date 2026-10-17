@@ -23,20 +23,20 @@ fn lsp_rebind_checked_reference_identities(db: &SymbolDB) Never! {
         loop definition in db.defs {
             if definition.module_path != anchor.module_path || definition.def_span.start != anchor.def_span.start || definition.def_span.end != anchor.def_span.end || !lsp_navigation_target_kind_matches(definition.kind, anchor.kind) -> next
             if identity == {
-                None -> identity = Val(definition.identity.copy())
+                .None -> identity = Val(definition.identity.copy())
                 .Val(left) -> if left != definition.identity -> identity = Val("")
             }
         }
-        if identity == .Val("") -> identity = None
+        if identity == "" -> identity = None
         if identity == None {
             loop definition in db.defs {
                 if definition.module_path != anchor.module_path || definition.name != db.refs[index].name || !lsp_navigation_target_kind_matches(definition.kind, anchor.kind) -> next
                 if identity == {
-                    None -> identity = Val(definition.identity.copy())
+                    .None -> identity = Val(definition.identity.copy())
                     .Val(left) -> if left != definition.identity -> identity = Val("")
                 }
             }
-            if identity == .Val("") -> identity = None
+            if identity == "" -> identity = None
         }
         // Mutate only the optional target's identity, not copy the reference.
         if db.refs[index].target == .Val(target) -> target.semantic_identity = identity
@@ -127,8 +127,7 @@ fn lsp_add_func_type_references(function: Func, module_idx: Int, module_path: St
 fn lsp_add_checked_type_reference(ty: Type, span: Span, module_idx: Int, module_path: String, source: String, ledger: NameLedger, db: &SymbolDB) Never! {
     name :: if ty == {
         .Named(name) | .Apply(name, _) -> name
-        .TraitObject(names) -> { if names.len() != 1 -> return; names[0] }
-        else -> return
+        .TraitObject(names) -> { if names.len() != 1 -> return; names[0] } else -> { return }
     }
     lsp_add_named_type_reference(name, span, module_idx, module_path, source, ledger, &db)
 }

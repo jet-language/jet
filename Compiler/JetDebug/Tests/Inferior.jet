@@ -1,4 +1,4 @@
-use jet_debug.Inferior.*
+use jet_debug.Inferior.[Inferior, SENTINEL, TargetIdentity, checked_lldb_quote, lldb_quote, parse_breakpoint, parse_current_thread_id, parse_exit_signal, parse_exit_status, resume_settled, sentinel_echo_at_end, valid_frame_expression]
 use std.process.[Command, Stdio]
 use std.io as io
 use std.fs as fs
@@ -23,15 +23,15 @@ use std.sync.mpsc as mpsc
     target := Command.new("sleep").arg("30").spawn().expect("spawn real attach target")
     pid :: target.id()
     result :: (() -> {
-        target_binary :: fs.canonicalize("/proc/{pid}/exe")?
-        identity :: TargetIdentity.capture(target_binary, pid)?
-        identity.verify()?
-        other_binary :: std.env.current_exe()?
+        target_binary :: fs.canonicalize("/proc/{pid}/exe")
+        identity :: TargetIdentity.capture(target_binary, pid)
+        identity.verify()
+        other_binary :: std.env.current_exe()
         if TargetIdentity.capture(other_binary, pid) == {
-            .Err(error) -> if error.kind() != .PermissionDenied -> return .Err(io.Error.new(error.kind(), "wrong-binary attach failed for the wrong reason"))
-            .Ok(_) -> return .Err(io.Error.new(.Other, "wrong-binary attach was accepted"))
+            .Err(error) -> { if error.kind() != .PermissionDenied -> return .Err(io.Error.new(error.kind(), "wrong-binary attach failed for the wrong reason")) }
+            .Ok(_) -> { return .Err(io.Error.new(.Other, "wrong-binary attach was accepted")) }
         }
-        .Ok(())
+        Ok(())
     })()
     _ :: target.kill()
     _ :: target.wait()
@@ -105,35 +105,35 @@ use std.sync.mpsc as mpsc
 }
 // Rust: crates/jet-debug/src/Inferior.rs:1912
 #Test("parses_locals_with_type_prefix") {
-    assert_eq(Inferior.parse_typed_locals("(int) n = 5\n(int) total = 0\n"), [("int", "n", "5"), ("int", "total", "0")])
+    assert_eq(Inferior.parse_typed_locals("(int) n = 5\n(int) total = 0\n"), [(_0: "int", _1: "n", _2: "5"), (_0: "int", _1: "total", _2: "0")])
 }
 // Rust: crates/jet-debug/src/Inferior.rs:1927
 #Test("parses_a_string_summary_and_drops_its_synthetic_children") {
     out :: "(alloc::string::String) text = \"hi\" {{ [0] = 'h' [1] = 'i' }}\n"
-    assert_eq(Inferior.parse_typed_locals(out), [("alloc::string::String", "text", "\"hi\"")])
+    assert_eq(Inferior.parse_typed_locals(out), [(_0: "alloc::string::String", _1: "text", _2: "\"hi\"")])
 }
 // Rust: crates/jet-debug/src/Inferior.rs:1944
 #Test("parses_a_multiline_struct_without_a_summary_provider") {
     locals :: Inferior.parse_typed_locals("(__jet_Point) p = {{\n  x = 1\n  y = 2\n}}\n")
     assert_eq(locals.len(), 1)
-    assert_eq(locals[0].0, "__jet_Point")
-    assert_eq(locals[0].1, "p")
-    assert(locals[0].2.contains("x = 1") && locals[0].2.contains("y = 2"))
+    assert_eq(locals[0]._0, "__jet_Point")
+    assert_eq(locals[0]._1, "p")
+    assert(locals[0]._2.contains("x = 1") && locals[0]._2.contains("y = 2"))
 }
 // Rust: crates/jet-debug/src/Inferior.rs:1954
 #Test("parses_immediate_children_without_exposing_deeper_rows") {
     out :: "(__jet_Point) __jet_point = {{\n  (__int) __jet_x = 1\n  (__jet_Point) __jet_nested = {{\n    (__int) __jet_y = 2\n  }}\n}}\n"
-    assert_eq(Inferior.parse_variable_children(out), [("__int", "__jet_x", "1"), ("__jet_Point", "__jet_nested", "{{")])
+    assert_eq(Inferior.parse_variable_children(out), [(_0: "__int", _1: "__jet_x", _2: "1"), (_0: "__jet_Point", _1: "__jet_nested", _2: "{{")])
 }
 // Rust: crates/jet-debug/src/Inferior.rs:1970
 #Test("parses_immediate_children_after_lldb_command_echo") {
     out :: "(lldb) frame variable __jet_point\n(__jet_Point) __jet_point = {{\n  (__int) __jet_x = 1\n}}\n"
-    assert_eq(Inferior.parse_variable_children(out), [("__int", "__jet_x", "1")])
+    assert_eq(Inferior.parse_variable_children(out), [(_0: "__int", _1: "__jet_x", _2: "1")])
 }
 // Rust: crates/jet-debug/src/Inferior.rs:1979
 #Test("parses_immediate_children_of_a_sized_composite") {
     out :: "(__jet_Array) __jet_values = size=2 {{\n  (__int) [0] = 7\n  (__int) [1] = 8\n}}\n"
-    assert_eq(Inferior.parse_variable_children(out), [("__int", "[0]", "7"), ("__int", "[1]", "8")])
+    assert_eq(Inferior.parse_variable_children(out), [(_0: "__int", _1: "[0]", _2: "7"), (_0: "__int", _1: "[1]", _2: "8")])
 }
 // Rust: crates/jet-debug/src/Inferior.rs:1992
 #Test("recognizes_lldb_sized_composites_as_expandable_values") {

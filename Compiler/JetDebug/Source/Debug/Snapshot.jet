@@ -183,7 +183,7 @@ fn debug_split_expression(value: String) -> DebugExpressionSplit? Never! {
                 }
                 index = close + 1
             }
-            else -> return None
+            else -> { return None }
         }
     }
     root :: String.from_bytes(bytes[0..<root_end]) ?? return None
@@ -216,7 +216,7 @@ fn debug_path_segments(value: String) -> [String]? Never! {
                 &segments.push(String.from_bytes(bytes[index..<(close + 1)]) ?? return None)
                 index = close + 1
             }
-            else -> return None
+            else -> { return None }
         }
     }
     Val(segments)
@@ -258,7 +258,7 @@ fn debug_value(value: ValueSnapshot) -> DebugValue DebugEvaluationError! {
                     if number < -9223372036854775808 || number > 9223372036854775807 -> return Err(debug_evaluation_error(unavailable))
                     return Ok(DebugValue.Int{value: number})
                 }
-                else -> return Err(debug_evaluation_error(unavailable))
+                else -> { return Err(debug_evaluation_error(unavailable)) }
             }
         }
         .Float -> {
@@ -271,14 +271,14 @@ fn debug_value(value: ValueSnapshot) -> DebugValue DebugEvaluationError! {
                     if bits < 0 -> bits = bits + 18446744073709551616
                     return Ok(DebugValue.FloatBits{bits: bits})
                 }
-                else -> return Err(debug_evaluation_error(unavailable))
+                else -> { return Err(debug_evaluation_error(unavailable)) }
             }
         }
         .Unit -> {
             // Rust guard: a Unit type with any other text falls through to shapes.
             if raw == "" || raw == "()" -> return Ok(DebugValue.Unit)
         }
-        .Text -> return Ok(DebugValue.Text{text: debug_unquote_text(raw)})
+        .Text -> { return Ok(DebugValue.Text{text: debug_unquote_text(raw)}) }
         .Other -> {}
     }
     raw_bytes :: raw.bytes()

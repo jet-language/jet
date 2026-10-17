@@ -1,6 +1,6 @@
 // Adapter.rs has no inline original tests. These are behavioral boundary controls
 // over its real typed parsers/transport, not a replacement host or handler.
-fn lsp_editor_test_json(source: String) -> DataTree Never! {
+fn lsp_editor_test_json(source: String) -> Dyn Never! {
     foundation_parse_protocol_json(source) ?? panic("editor adapter JSON fixture")
 }
 fn lsp_editor_test_context() -> LSPRequestContext Never! {
@@ -44,10 +44,10 @@ fn lsp_editor_test_context() -> LSPRequestContext Never! {
     assert_eq(lsp_editor_parse_grants(lsp_editor_test_json("{{\"grants\":[1]}}")), Err(EditorHostError.InvalidRequest("editor host grants must be strings")))
     assert_eq(lsp_editor_parse_grants(lsp_editor_test_json("{{\"grants\":[\"x\\u0085\"]}}")), Err(EditorHostError.InvalidRequest("editor host grants must be nonempty and free of control characters")))
     assert_eq(lsp_editor_parse_grants(lsp_editor_test_json("{{\"grants\":[\"x\\n\"]}}")), Err(EditorHostError.InvalidRequest("editor host grants must be nonempty and free of control characters")))
-    values := [DataTree]{}
-    loop _ in 0..<(EDITOR_MAX_HISTORY + 1) -> &values.push(DataTree.Text("x"))
+    values := [Dyn]{}
+    loop _ in 0..<(EDITOR_MAX_HISTORY + 1) -> &values.push(Dyn.Text("x"))
     // Bounds are tested through the actual parser's same decoded object shape.
-    excessive :: DataTree.Object([String:DataTree]{"grants": DataTree.Array(values)})
+    excessive :: Dyn.Object([String:Dyn]{"grants": Dyn.Array(values)})
     assert_eq(lsp_editor_parse_grants(excessive), Err(EditorHostError.InvalidRequest("editor host grants exceed the bounded limit")))
 }
 
@@ -63,7 +63,7 @@ fn lsp_editor_test_context() -> LSPRequestContext Never! {
 #Test("editor typed transport rejects changed identity URL and duplicate grants") {
     adapter := EditorHostAdapter.new()
     assert_eq(&adapter.dispatch("unknown", None), Err(EditorHostError.InvalidRequest("editor host request is missing `params`")))
-    assert_eq(&adapter.dispatch("unknown", Val(DataTree.Null)), Err(EditorHostError.InvalidRequest("editor host request `params` must be an object")))
+    assert_eq(&adapter.dispatch("unknown", Val(Dyn.Null)), Err(EditorHostError.InvalidRequest("editor host request `params` must be an object")))
     context :: lsp_editor_test_context()
     &adapter.sync_transport(context) ?? panic("real transport initialization")
     &adapter.sync_transport(context) ?? panic("stable real transport")

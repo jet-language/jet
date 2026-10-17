@@ -2,10 +2,10 @@
 // real transaction and UTF16 edit owner, not the gated live process/handlers.
 // Full diagnostic-before-response and closed-pipe ordering additionally need
 // L19's canonical runtime byte stream/concurrency/unwind owners and Driver.
-fn lsp_loop_test_params(text: String) -> DataTree Never! {
+fn lsp_loop_test_params(text: String) -> Dyn Never! {
     foundation_parse_protocol_json(text) ?? panic("valid fixture JSON")
 }
-fn lsp_loop_test_change(uri: String, version: String, changes: String) -> DataTree Never! {
+fn lsp_loop_test_change(uri: String, version: String, changes: String) -> Dyn Never! {
     lsp_loop_test_params("{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)},\"version\":{version}}},\"contentChanges\":[{changes}]}}")
 }
 fn lsp_loop_test_open(state: &LSPDiagnosticState, uri: String, version: Int, source: String) Never! {
@@ -52,7 +52,7 @@ fn lsp_loop_test_open(state: &LSPDiagnosticState, uri: String, version: Int, sou
         assert_eq(state.docs[uri].version, 11)
         assert_eq(state.dirty.len(), 0)
     }
-    loop version in [String]{"12.5", "2147483648"} {
+    loop version in ([String]{"12.5", "2147483648"}) {
         assert_eq(lsp_update_document(&state, Val(lsp_loop_test_change(uri, version, "{{\"text\":\"wide\"}}")), false, lsp_loop_path.PathPlatform.Unix), None)
     }
     final :: "{{\"range\":{{\"start\":{{\"line\":1,\"character\":3}},\"end\":{{\"line\":1,\"character\":8}}}},\"rangeLength\":5,\"text\":\"final\"}}"

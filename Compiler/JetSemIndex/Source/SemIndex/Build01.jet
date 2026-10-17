@@ -103,13 +103,11 @@ fn structural_span_add(offset: Int, extra: Int) -> Int {
 fn structural_expr_span(expr: Expr) -> Span {
     if expr == {
         .Call(call) -> {
-            end :: if call.args.is_empty() -> structural_span_add(call.name_span.end, 2)
-                else -> structural_span_add(structural_expr_span(call.args[call.args.len() - 1].expr).end, 1)
+            end :: if call.args.is_empty() -> structural_span_add(call.name_span.end, 2) else -> structural_span_add(structural_expr_span(call.args[call.args.len() - 1].expr).end, 1)
             Span{start: call.name_span.start, end: end}
         }
         .MethodCall(receiver, _, method_span, _, _, args, _, _, _, _) -> {
-            end :: if args.is_empty() -> structural_span_add(method_span.end, 2)
-                else -> structural_span_add(structural_expr_span(args[args.len() - 1].expr).end, 1)
+            end :: if args.is_empty() -> structural_span_add(method_span.end, 2) else -> structural_span_add(structural_expr_span(args[args.len() - 1].expr).end, 1)
             Span{start: structural_expr_span(receiver).start, end: end}
         }
         else -> expr_span(expr)

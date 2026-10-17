@@ -49,7 +49,7 @@ struct SqlSession {
         }
     }
     // Rust: crates/jet-repl/src/Sql.rs:94
-    fn define_item(&self, source: String) -> [Diagnostic]! {
+    fn define_item(&self, source: String) [Diagnostic]! {
         boot_mir_eval()
         bundle :: type_check_item(self.session, source) ?? return Err(err)
         &self.session.item_srcs.push(source)
@@ -88,12 +88,12 @@ struct SqlSession {
         loop name in checked_core_imports.keys() -> core_imports[name] = checked_core_imports[name]
         // Ordinary read loans replace Rust maps of borrowed Func/StructDef.
         sink := DevSink.new()
-        authorizer := &self.policy.authorizer(None)
+        authorizer := &self.policy.authorizer(.None)
         trial_scope := self.session.scope.copy()
         result :: run_repl_step(executable, self.session.func_defs, self.base_dir, &sink, &trial_scope,
             REPL_FUEL_BUDGET, suppress, core_imports, self.session.struct_defs,
             self.session.binding_types, &authorizer)
-        if result == {
+        return if result == {
             .Ok(value) -> {
                 loop name in newly_moved.values() -> _ :: &trial_scope.remove(name)
                 self.session.scope = ^trial_scope
@@ -112,7 +112,7 @@ struct SqlSession {
             }
             .Err(diagnostic) -> {
                 restored :: restore_move_diagnostic(^diagnostic, self.session.moved_names)
-                Err([Diagnostic]{if restored.code == "E2202" -> e1801(REPL_FUEL_BUDGET) else -> ^restored})
+                return Err([Diagnostic]{if restored.code == "E2202" -> e1801(REPL_FUEL_BUDGET) else -> ^restored})
             }
         }
     }

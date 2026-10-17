@@ -23,7 +23,7 @@ fn semindex_project_text(replacements: [SemIndexPresentationReplacement], text: 
 fn semindex_caller_key(frame: CallerFrame) -> String Never! {
     if frame.owner == {
         .Val(owner) -> "{owner}::{frame.name}"
-        None -> frame.name
+        .None -> frame.name
     }
 }
 
@@ -44,7 +44,7 @@ fn semindex_member_identity(scope: String, parent: String, kind: String, name: S
 fn semindex_callable_identity(scope: String, owner: String?, name: String) -> String Never! {
     if owner == {
         .Val(owner) -> "method:{scope}::{owner}.{name}"
-        None -> "fn:{scope}::{name}"
+        .None -> "fn:{scope}::{name}"
     }
 }
 fn semindex_trait_method_identity(scope: String, owner: String, signature: TraitMethodSig) -> String Never! {
@@ -53,7 +53,7 @@ fn semindex_trait_method_identity(scope: String, owner: String, signature: Trait
 fn semindex_active_scope(ctx: WalkCtx) -> String Never! {
     if ctx.caller == {
         .Val(caller) -> caller.identity
-        None -> ctx.scope_identity
+        .None -> ctx.scope_identity
     }
 }
 fn semindex_local_identity(scope: String, kind: String, name: String) -> String Never! {

@@ -1,4 +1,4 @@
-use jet_devserver.WebHost.*
+use jet_devserver.WebHost.[APPLICATION_PORT_RANGE, CLIENT_TTL_MS, CanvasHostOptions, DeadlineStream, DevRevisionFacts, DevStatus, MAX_CONNECTION_THREADS, MAX_STATIC_RESPONSE_BYTES, WebHost, bind_application_server, canvas_api_path, canvas_request_authorized, constant_time_equal, decode_html, devtools_path, format_build_time, format_line_colored, format_line_plain, frame_lines, handle_connection_with_root_and_policy, header_words, host_header_allowed, html_raw_response_limit, inject_canvas_session, inject_live_reload_with_script, live_reload_script, mint_session_secret, origin_allowed, serve_forever, stage_and_swap, try_acquire_connection, unauthorized]
 use jet_devserver.[Request, ResidentDevSession]
 use jet_devserver.Canvas as Canvas
 use jet_devserver.PausedEvaluate.[PausedEvaluateHost]
@@ -73,8 +73,8 @@ fn bind_web_canvas_options_for_test(file: String, verbose: Bool, fallback_port: 
         _ :: candidate.write_all("G".bytes())
         byte := [U8]{[0]}
         if candidate.read(&byte) == {
-            .Ok(0) -> { rejected = true; break }
-            .Err(error) if error.kind() == .TimedOut | .WouldBlock -> {}
+            .Ok(lit0) && lit0 == 0 -> { rejected = true; break }
+            .Err(error) && error.kind() == .TimedOut | .WouldBlock -> {}
             .Err(_) -> { rejected = true; break }
             .Ok(_) -> {}
         }
@@ -293,7 +293,7 @@ fn bind_web_canvas_options_for_test(file: String, verbose: Bool, fallback_port: 
     terminal_guard :: status.term_lock.lock().unwrap()
     waiter :: Arc.clone(&status)
     (started_tx, started_rx) :: std.sync.mpsc.channel()
-    handle :: thread.spawn(() -> { started_tx.send(()).unwrap(); waiter.write_header_verbose("jet dev  [ready] localhost:8123 · 1 client") })
+    handle :: thread.spawn(() -> { started_tx.send(_).unwrap(); waiter.write_header_verbose("jet dev  [ready] localhost:8123 · 1 client") })
     started_rx.recv().unwrap()
     status.controls_ready.store(false, Ordering.SeqCst)
     *status.header_started.lock().unwrap() = false
@@ -453,13 +453,13 @@ fn post_canvas_transaction(port: U16, secret: String, client: String, body: Stri
     status :: Arc.new(DevStatus.new_with_terminal("app.jet", false, false, false)); status.set_port(port)
     debug_sessions :: Canvas.DebugSessions.default(); session :: Arc.new(ResidentDevSession.new("app.jet", port, 0))
     session.select_output_values(.Val("cli-output"), .Val("cli-target")); secret :: mint_session_secret().unwrap()
-    server :: {
+    server :: (() -> {
         session :: Arc.clone(&session); secret :: secret.clone()
         thread.spawn(() -> {
             (stream, _) :: listener.accept().unwrap()
             handle_connection(^stream, &status, &debug_sessions, &session, "app.jet", .Canvas, "127.0.0.1", secret).unwrap()
         })
-    }
+    })()
     client := TcpStream.connect((_0: "127.0.0.1", _1: port)).unwrap()
     body :: "{{\"op\":\"select_output\",\"output\":\"web\",\"target\":\"browser\"}}"
     request :: "POST /canvas/session HTTP/1.1{Char{13}}\nHost: 127.0.0.1:{port}{Char{13}}\nOrigin: http://127.0.0.1:{port}{Char{13}}\nAuthorization: Bearer {secret}{Char{13}}\nContent-Length: {body.len()}{Char{13}}\nConnection: close{Char{13}}\n{Char{13}}\n{body}"

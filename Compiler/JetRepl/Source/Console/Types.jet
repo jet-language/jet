@@ -376,7 +376,7 @@ struct ConsoleResponse {
     body: [U8]
     fn new(request_id: ^String, status: U16) -> ConsoleResponse ConsoleError! {
         validate_token("response request id", request_id) ?? return Err(err)
-        if status < U16{100} || status > U16{599} -> return Err(ConsoleError.InvalidInput{reason: "response status {status} is outside 100..=599"})
+        if status < (U16{100}) || status > (U16{599}) -> return Err(ConsoleError.InvalidInput{reason: "response status {status} is outside 100..599"})
         Ok(ConsoleResponse{request_id: ^request_id, status: status, headers: [String:String]{}, body: [U8]{}})
     }
     fn with_header(^self, name: String, value: ^String) -> ConsoleResponse ConsoleError! {
@@ -398,7 +398,7 @@ struct ConsoleResponse {
     // Rust private validate: response bounds are checked before publication.
     fn validate(self) ConsoleError! {
         validate_token("response request id", self.request_id) ?? return Err(err)
-        if self.status < U16{100} || self.status > U16{599} -> return Err(ConsoleError.InvalidInput{reason: "response status {self.status} is outside 100..=599"})
+        if self.status < (U16{100}) || self.status > (U16{599}) -> return Err(ConsoleError.InvalidInput{reason: "response status {self.status} is outside 100..599"})
         if self.headers.len() > CONSOLE_MAX_HEADERS -> return Err(ConsoleError.LimitExceeded{what: "response headers"})
         loop (name, value) in self.headers {
             validate_token("response header name", name) ?? return Err(err)

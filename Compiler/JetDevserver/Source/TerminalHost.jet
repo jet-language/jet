@@ -304,11 +304,10 @@ struct TerminalFrame {
         ordered_ids := ids.keys().cloned().collect(); &ordered_ids.sort()
         operations := [TerminalDiffOperation]{}
         loop id in ordered_ids {
-            if (_0: before.get(id), _1: after.get(id)) == {
-                (None, .Val(node)) -> &operations.push(.Insert{id: id.clone(), node: node.clone()})
-                (_0: .Val(_), _1: None) -> &operations.push(.Remove{id: id.clone()})
-                (_0: .Val(old), _1: .Val(new)) -> { if old != new -> &operations.push(.Replace{id: id.clone(), node: new.clone()}) }
-                else -> {}
+            if {
+                before.get(id) == None && after.get(id) == .Val(node) -> &operations.push(.Insert{id: id.clone(), node: node.clone()})
+                before.get(id) == .Val(_) && after.get(id) == None -> &operations.push(.Remove{id: id.clone()})
+                before.get(id) == .Val(old) && after.get(id) == .Val(new) -> { if old != new -> &operations.push(.Replace{id: id.clone(), node: new.clone()}) } else -> {}
             }
         }
         TerminalDiff{
@@ -403,8 +402,7 @@ struct TerminalHost {
         first_event :: self.events.is_empty(); panel_id :: event.panel_id.as_str().to_string(); item_key :: event_key(event)
         if self.events.len() == self.config.max_events -> _ :: &self.events.pop_front()
         &self.events.push_back(^event)
-        if first_event { self.focus = TerminalFocus.item(panel_id.clone(), ^item_key) }
-        else if self.focus.panel_id.is_none() { self.focus.panel_id = .Val(panel_id.clone()) }
+        if first_event { self.focus = TerminalFocus.item(panel_id.clone(), ^item_key) } else if self.focus.panel_id.is_none() { self.focus.panel_id = .Val(panel_id.clone()) }
         self.keyboard.last_action = .Val(.FocusPanel{panel_id: self.focus.panel_id.clone().unwrap_or(^panel_id)})
     }
     // Rust: crates/jet-devserver/src/TerminalHost.rs:1095
@@ -450,8 +448,7 @@ struct TerminalHost {
         if selection == .Val(selection) {
             if descriptors().iter().find((d) -> d.id.as_str() == selection.panel_id) == .Val(descriptor) {
                 panel_id :: descriptor.id.as_str()
-                if selection.item_key.is_empty() { _ :: &self.focus_panel(panel_id) }
-                else { _ :: &self.focus_item(panel_id, selection.item_key) }
+                if selection.item_key.is_empty() { _ :: &self.focus_panel(panel_id) } else { _ :: &self.focus_item(panel_id, selection.item_key) }
                 return
             }
         }
@@ -497,14 +494,13 @@ struct TerminalHost {
             .BackTab | .Up -> &self.move_panel(-1)
             .Enter | .Right -> &self.inspect_focused()
             .Escape | .Left -> {
-                if self.focus.item_key.is_some() { &self.clear_item_focus(); TerminalAction.ReturnToPanel }
-                else { TerminalAction.Ignored }
+                if self.focus.item_key.is_some() -> &self.clear_item_focus(); TerminalAction.ReturnToPanel else -> TerminalAction.Ignored
             }
-            .Character('r') -> if self.config.capabilities.access.actions_enabled() -> TerminalAction.Rerun else -> TerminalAction.Ignored
-            .Character('R') -> if self.config.capabilities.access.actions_enabled() -> TerminalAction.Restart else -> TerminalAction.Ignored
-            .Character('j') -> { _ :: &self.focus_panel("jobs"); TerminalAction.FocusJob }
-            .Character('q') -> TerminalAction.Quit
-            .Character('t') -> &self.move_cursor()
+            .Character(lit0) && lit0 == 'r' -> if self.config.capabilities.access.actions_enabled() -> TerminalAction.Rerun else -> TerminalAction.Ignored
+            .Character(lit0) && lit0 == 'R' -> if self.config.capabilities.access.actions_enabled() -> TerminalAction.Restart else -> TerminalAction.Ignored
+            .Character(lit0) && lit0 == 'j' -> { _ :: &self.focus_panel("jobs"); TerminalAction.FocusJob }
+            .Character(lit0) && lit0 == 'q' -> TerminalAction.Quit
+            .Character(lit0) && lit0 == 't' -> &self.move_cursor()
             .Character(_) -> TerminalAction.Ignored
         }
         self.keyboard.last_action = .Val(action.clone())
@@ -580,8 +576,7 @@ struct TerminalHost {
                 available :: panel_state.map((row) -> row.is_available()).unwrap_or(true)
                 status :: TerminalStatus{
                     label: if available -> freshness.label().to_string() else -> "unavailable",
-                    detail: if available -> "{panel_events.len()} event(s), retained {ordered.len()}/{self.config.max_events}"
-                        else -> panel_state.map((row) -> unavailable_panel_detail(row.unavailable_reasons())).unwrap_or("unavailable"),
+                    detail: if available -> "{panel_events.len()} event(s), retained {ordered.len()}/{self.config.max_events}" else -> panel_state.map((row) -> unavailable_panel_detail(row.unavailable_reasons())).unwrap_or("unavailable"),
                     freshness}
                 &panel_children.push(TerminalNode.status("panel:{panel_id}:status", "freshness", ^status,
                     TerminalBounds.new(0, y, viewport.width, height.min(1)), self.focus.panel_id.as_ref() == .Val(panel_id)))
@@ -706,7 +701,7 @@ fn status_summary(status: DevtoolsStatusFact, reveal: Bool) -> String {
         (_0: "run_target", _1: status.run_target.as_ref()), (_0: "run_output", _1: status.run_output.as_ref()), (_0: "test_state", _1: status.test_state.as_ref())] {
         rendered :: if value == {
             .Val(value) -> if reveal -> value else -> "<redacted>"
-            None -> "-"
+            .None -> "-"
         }
         &fields.push("{key}={rendered}")
     }
@@ -736,8 +731,7 @@ fn event_key(event: TerminalHostEvent) -> String { "event:{event.revision}:{even
 // Rust: crates/jet-devserver/src/TerminalHost.rs:1783
 fn event_summary(event: TerminalHostEvent, capabilities: TerminalHostCapabilities) -> String {
     details_enabled :: capabilities.access.local_details_enabled()
-    published :: if details_enabled -> event.facts.iter().filter((fact) -> fact.published).map((fact) -> fact.display()).collect().join(",")
-        else -> "<redacted>"
+    published :: if details_enabled -> event.facts.iter().filter((fact) -> fact.published).map((fact) -> fact.display()).collect().join(",") else -> "<redacted>"
     values :: if published.is_empty() -> "-" else -> published
     verbose :: if capabilities.verbose -> " details=on" else -> ""
     revision :: if event.revision.is_empty() -> "-" else -> event.revision
@@ -789,7 +783,7 @@ fn render_lines(tree: TerminalPanelTree, viewport: TerminalViewport, capabilitie
 }
 // Rust: crates/jet-devserver/src/TerminalHost.rs:1965
 fn action_label(action: TerminalAction) -> String {
-    if action == { .FocusPanel{..} -> "focus-panel", .Inspect{..} -> "inspect", .ReturnToPanel -> "back", .MoveCursor{..} -> "time"
+    if action == { (.FocusPanel{..}) -> "focus-panel", (.Inspect{..}) -> "inspect", .ReturnToPanel -> "back", (.MoveCursor{..}) -> "time"
         .Rerun -> "rerun", .Restart -> "restart", .FocusJob -> "jobs", .Quit -> "quit", .Ignored -> "ignored" }
 }
 // Rust: crates/jet-devserver/src/TerminalHost.rs:1979
@@ -802,11 +796,10 @@ fn strip_ansi(text: String) -> String {
     loop {
         ch :: &chars.next()
         if ch == .Val(ch) {
-            if ch == Char{27} && &chars.next() == .Val('[') {
+            if ch == (Char{27}) && &chars.next() == '[' {
                 loop {
                     code :: &chars.next()
-                    if code == .Val(code) { if code >= '@' && code <= '~' -> break }
-                    else { break }
+                    if code == .Val(code) { if code >= '@' && code <= '~' -> break } else { break }
                 }
             } else { &output.push(ch) }
         } else { break }
@@ -820,12 +813,11 @@ fn truncate_columns(text: String, width: USize) -> String {
     loop {
         character :: &chars.next()
         if character == .Val(character) {
-            if character == Char{27} && &chars.peek() == .Val('[') {
+            if character == (Char{27}) && &chars.peek() == '[' {
                 &output.push(character); &output.push(&chars.next().expect("CSI introducer follows escape"))
                 loop {
                     code :: &chars.next()
-                    if code == .Val(code) { &output.push(code); if code >= '@' && code <= '~' -> break }
-                    else { break }
+                    if code == .Val(code) { &output.push(code); if code >= '@' && code <= '~' -> break } else { break }
                 }
                 next
             }

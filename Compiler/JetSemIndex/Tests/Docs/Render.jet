@@ -90,13 +90,13 @@ fn doc_render_assert_field_names(value: StatusValue, names: [String]) Never! {
             assert_eq(fields.entries.len(), names.len())
             loop index in 0..<names.len() -> assert_eq(fields.entries[index].name, names[index])
         }
-        else -> panic("documentation row must be a typed Report object")
+        else -> { panic("documentation row must be a typed Report object") }
     }
 }
 fn doc_render_assert_status_text(value: StatusValue, expected: String) Never! {
     if value == {
         .String(text) -> assert_eq(text, expected)
-        else -> panic("documentation text must be a typed Report string")
+        else -> { panic("documentation text must be a typed Report string") }
     }
 }
 fn doc_render_assert_status_strings(value: StatusValue, expected: [String]) Never! {
@@ -105,7 +105,7 @@ fn doc_render_assert_status_strings(value: StatusValue, expected: [String]) Neve
             assert_eq(values.len(), expected.len())
             loop index in 0..<values.len() -> doc_render_assert_status_text(values[index], expected[index])
         }
-        else -> panic("documentation strings must be a typed Report array")
+        else -> { panic("documentation strings must be a typed Report array") }
     }
 }
 #Test("docs_status_projection_preserves_typed_nulls_and_nested_order") {
@@ -120,11 +120,11 @@ fn doc_render_assert_status_strings(value: StatusValue, expected: [String]) Neve
             doc_render_assert_status_text(fields.entries[3].value, "é.jet")
             if fields.entries[4].value == {
                 .Bool(flag) -> assert(flag)
-                else -> panic("public must be bool")
+                else -> { panic("public must be bool") }
             }
             if fields.entries[5].value == {
                 .Bool(flag) -> assert(!flag)
-                else -> panic("package_public must be bool")
+                else -> { panic("package_public must be bool") }
             }
             doc_render_assert_status_text(fields.entries[7].value, "Int")
             doc_render_assert_status_text(fields.entries[8].value, "implicit default !Err")
@@ -132,11 +132,11 @@ fn doc_render_assert_status_strings(value: StatusValue, expected: [String]) Neve
             doc_render_assert_status_strings(fields.entries[11].value, [String]{"Z", "A", "Z"})
             doc_render_assert_field_names(fields.entries[12].value, [String]{"path", "start", "end", "line", "column", "link"})
         }
-        else -> panic("documentation item must be object")
+        else -> { panic("documentation item must be object") }
     }
     if optional_doc_text(None) == {
         .Null -> {}
-        else -> panic("absent doc text must be null")
+        else -> { panic("absent doc text must be null") }
     }
     doc_render_assert_status_text(optional_doc_text(Val("")), "")
     implementation :: DocImpl{kind: "inherent_impl", type_name: "M", trait_name: None, module_path: "é.jet", public: false, methods: [String]{"b", "a"}, source: source}
@@ -146,11 +146,11 @@ fn doc_render_assert_status_strings(value: StatusValue, expected: [String]) Neve
         .Object(fields) -> {
             if fields.entries[2].value == {
                 .Null -> {}
-                else -> panic("inherent trait must be null")
+                else -> { panic("inherent trait must be null") }
             }
             doc_render_assert_status_strings(fields.entries[5].value, [String]{"b", "a"})
         }
-        else -> panic("implementation must be object")
+        else -> { panic("implementation must be object") }
     }
     test :: DocTest{module_path: "é.jet", line: 35, setup: [String]{"x :: 2"}, expectations: [DocExpectation]{DocExpectation{expression: "x", expected: "2"}}, source: source}
     test_value :: doc_test_value(test)
@@ -159,7 +159,7 @@ fn doc_render_assert_status_strings(value: StatusValue, expected: [String]) Neve
         .Object(fields) -> {
             if fields.entries[1].value == {
                 .Integer(line) -> assert_eq(line, 35)
-                else -> panic("line must be integer")
+                else -> { panic("line must be integer") }
             }
             doc_render_assert_status_strings(fields.entries[2].value, [String]{"x :: 2"})
             if fields.entries[3].value == {
@@ -171,13 +171,13 @@ fn doc_render_assert_status_strings(value: StatusValue, expected: [String]) Neve
                             doc_render_assert_status_text(expectation.entries[0].value, "x")
                             doc_render_assert_status_text(expectation.entries[1].value, "2")
                         }
-                        else -> panic("expectation must be object")
+                        else -> { panic("expectation must be object") }
                     }
                 }
-                else -> panic("expectations must be array")
+                else -> { panic("expectations must be array") }
             }
         }
-        else -> panic("doctest must be object")
+        else -> { panic("doctest must be object") }
     }
 }
 

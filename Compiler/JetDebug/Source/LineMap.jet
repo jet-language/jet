@@ -6,14 +6,14 @@ use std.fs as fs
 use std.process as process
 use std.sync.atomic.[AtomicU64, Ordering]
 use core.files.[OSPath]
-use jet_foundation.DataTree.[DataTree]
-use jet_foundation.JSON.[json_escape, json_get, json_int, json_str, parse_json]
+use jet_foundation.Dyn.[Dyn]
+use jet_foundation.JSON.[foundation_json_escape, json_get, json_int, json_str, parse_json]
 use jet_foundation.SHA256.[sha256_file_hex, sha256_hex]
 // Rust: crates/jet-debug/src/LineMap.rs:18
 MAP_SCHEMA_VERSION :: I64{1}
 // Rust: crates/jet-debug/src/LineMap.rs:168
 // GATE #4494: process-local atomic counter, relaxed ordering.
-static MAP_COUNTER: AtomicU64 = AtomicU64.new(0)
+MAP_COUNTER :: AtomicU64.new(0)
 // Rust: crates/jet-debug/src/LineMap.rs:20
 struct LineMap {
     rust_to_jet: [USize:USize]
@@ -99,7 +99,7 @@ impl LineMap {
         map :: LineMap.build(rust_src)
         binary_sha256 :: sha256_file_hex(binary) ?? return .Err(err)
         entries :: map.rust_lines.iter().map((rust) -> "{{\"rust\":{rust},\"jet\":{map.rust_to_jet[rust]}}}").collect[[String]]().join(",")
-        json :: "{{\"schema_version\":{MAP_SCHEMA_VERSION},\"jet_file\":\"{json_escape(jet_file)}\",\"rust_file\":\"{json_escape(rust_file)}\",\"jet_sha256\":\"{sha256_hex(jet_src.as_bytes())}\",\"rust_sha256\":\"{sha256_hex(rust_src.as_bytes())}\",\"binary_sha256\":\"{binary_sha256}\",\"entries\":[{entries}]}}\n"
+        json :: "{{\"schema_version\":{MAP_SCHEMA_VERSION},\"jet_file\":\"{foundation_json_escape(jet_file)}\",\"rust_file\":\"{foundation_json_escape(rust_file)}\",\"jet_sha256\":\"{sha256_hex(jet_src.as_bytes())}\",\"rust_sha256\":\"{sha256_hex(rust_src.as_bytes())}\",\"binary_sha256\":\"{binary_sha256}\",\"entries\":[{entries}]}}\n"
         // GATE #4494: atomic publication via native file rename, process id.
         counter :: MAP_COUNTER.fetch_add(1, Ordering.Relaxed)
         temporary :: path.with_extension("jetmap.tmp-{process.id()}-{counter}")
@@ -111,7 +111,7 @@ impl LineMap {
             _ :: fs.remove_file(temporary)
             return .Err(error)
         }
-        return .Ok(())
+        return .Ok(_)
     }
     // Rust: crates/jet-debug/src/LineMap.rs:185
     fn load_verified(path: OSPath, jet_file: String, jet_src: String, rust_file: String, rust_src: String, binary: OSPath) -> LineMap Err! {
@@ -125,8 +125,8 @@ impl LineMap {
         loop (field, expected) in [(_0: "jet_file", _1: jet_file), (_0: "rust_file", _1: rust_file), (_0: "jet_sha256", _1: jet_sha256), (_0: "rust_sha256", _1: rust_sha256)] {
             actual :: json_get(root, field).and_then(json_str) ?? return .Err("debugger map has no {field}")
             if field.ends_with("_file") {
-                expected_path :: fs.canonicalize(OSPath(expected)).ok().map((p) -> p.display().to_string())
-                if actual != expected && expected_path != .Val(actual) && !(field == "rust_file" && OSPath(actual).file_name() == OSPath(expected).file_name()) -> return .Err("debugger map {field} does not match the target")
+                expected_path :: fs.canonicalize(OSPath.from(expected)).ok().map((p) -> p.display().to_string())
+                if actual != expected && expected_path != .Val(actual) && !(field == "rust_file" && OSPath.from(actual).file_name() == OSPath.from(expected).file_name()) -> return .Err("debugger map {field} does not match the target")
             } else if actual != expected -> return .Err("debugger map {field} does not match the target")
         }
         expected_binary :: sha256_file_hex(binary) ?? return .Err("cannot hash debugger binary: {err}")
@@ -154,8 +154,8 @@ impl LineMap {
 // Rust: crates/jet-debug/src/LineMap.rs:279
 fn source_file_matches(actual: String, expected: String) -> Bool {
     if actual == expected -> return true
-    actual_path :: OSPath(actual)
-    expected_path :: OSPath(expected)
+    actual_path :: OSPath.from(actual)
+    expected_path :: OSPath.from(expected)
     // GATE #4494
     if fs.canonicalize(actual_path).ok() == fs.canonicalize(expected_path).ok() && actual_path.exists() && expected_path.exists() -> return true
     if actual_path.file_name() == .Val(a) && expected_path.file_name() == .Val(e) -> return a == e

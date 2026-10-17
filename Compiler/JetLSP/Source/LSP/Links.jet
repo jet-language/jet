@@ -7,11 +7,11 @@ fn lsp_document_links_for(path: OSPath, workspace_root: OSPath?, src: String, re
     out := [String]{}
     fallback :: if lsp_source_path.parent_span(path) == {
         .Val(extent) -> lsp_source_path.owned_span(path, extent)
-        None -> lsp_source_path.from_text(".", path.platform)
+        .None -> lsp_source_path.from_text(".", path.platform)
     }
     base :: if workspace_root == {
         .Val(root) -> root
-        None -> lsp_normalize_os_path(fallback)
+        .None -> lsp_normalize_os_path(fallback)
     }
     loop (line_index, span) in lsp_source_lines(src) {
         line := src.slice(span.start, span.end) // #4303
@@ -56,8 +56,8 @@ fn lsp_code_lenses_for(uri: String, src: String) -> [String] Never! {
         line := src.slice(span.start, span.end) // #4303
         trimmed := lsp_source_text.trim_start(line) // #4303
         indent :: line.bytes().len() - trimmed.bytes().len()
-        if trimmed.starts_with("fn run") -> &out.push(lsp_code_lens_json(index, indent, line.bytes().len(), "Run file", "jet.runFile", [String]{uri}))
-        else if trimmed.starts_with("#Test") -> &out.push(lsp_code_lens_json(index, indent, line.bytes().len(), "Run test", "jet.testFile", [String]{uri, "{index}"}))
+        if trimmed.starts_with("fn run") -> &out.push(lsp_code_lens_json(index, indent, line.bytes().len(), "Run file", "jet.runFile", ([String]{uri})))
+        else if trimmed.starts_with("#Test") -> &out.push(lsp_code_lens_json(index, indent, line.bytes().len(), "Run test", "jet.testFile", ([String]{uri, "{index}"})))
     }
     out
 }

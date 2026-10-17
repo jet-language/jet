@@ -43,7 +43,7 @@ use Compiler.JetLSP.Tests.Integration.SemanticOps.[fixture]
     root :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap())
     source :: fs.read_to_string(root.join(TOWER_DATATREE_POLICY_SITE)).expect("Tower recipe source is readable")
     violations :: policy.evaluate_source(TOWER_DATATREE_POLICY_SITE, source).expect("Tower recipe parses")
-    assert(violations.is_empty(), "Tower DataTree corpus policy failed:\n{{violations.map((v) -> v.to_string()).collect().join("\n")}}")
+    assert(violations.is_empty(), "Tower DataTree corpus policy failed:\n{violations.map((v) -> v.to_string()).collect().join("\n")}")
 }
 
 // Rust: tests/dev_corpus_gate.rs:33
@@ -68,7 +68,7 @@ use Compiler.JetLSP.Tests.Integration.SemanticOps.[fixture]
 #Test("local_schedule_restart_does_not_replay_a_missed_window") {
     DAY :: prep { U64{86400} }
     THREE_AM :: prep { U64{3 * 3600} }
-    schedule :: [("nightly", JetJobSchedule.WallClockTime{hour: 3, minute: 0})]
+    schedule :: [(_0: "nightly", _1: JetJobSchedule.WallClockTime{hour: 3, minute: 0})]
     missed :: DAY + THREE_AM + 61
     before_restart := JetJobClock.new()
     assert((&before_restart.due_at(schedule, missed)).is_empty(), "a missed local schedule window must not be replayed before restart")
@@ -86,7 +86,7 @@ use Compiler.JetLSP.Tests.Integration.SemanticOps.[fixture]
     assert(no_os.supports_execution_tier(ExecutionTier.Aot).is_ok())
     loop tier in [ExecutionTier.Dev, ExecutionTier.Jit] {
         assert(no_os.supports_execution_tier(tier) == {
-            Err(TargetMachineError.ExecutionTierUnsupported{..}) -> true
+            .Err(TargetMachineError.ExecutionTierUnsupported{..}) -> true
             else -> false
         })
     }
@@ -148,14 +148,14 @@ use Compiler.JetLSP.Tests.Integration.SemanticOps.[fixture]
     // Original source-level guard reads the reference peer, not a fake entropy provider.
     source :: fs.read_to_string(OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Source/CmdNotebook.rs")).unwrap()
     mint_token := source.split_once("fn mint_token()")
-        .and_then((pair) -> pair.1.split_once("fn is_loopback"))
-        .map((pair) -> pair.0).expect("notebook token minting must remain a distinct function") // #4303
+        .and_then((pair) -> pair._1.split_once("fn is_loopback"))
+        .map((pair) -> pair._0).expect("notebook token minting must remain a distinct function") // #4303
     assert(mint_token.contains("read_exact(&mut bytes)"))
     assert(mint_token.contains("map_err(|error| error.to_string())"))
     assert(!mint_token.contains("unwrap_or"), "entropy read errors must not become a deterministic token")
     startup := source.split_once("let token = match explicit_token")
-        .and_then((pair) -> pair.1.split_once("let auto_open"))
-        .map((pair) -> pair.0).expect("notebook startup must handle token creation explicitly") // #4303
+        .and_then((pair) -> pair._1.split_once("let auto_open"))
+        .map((pair) -> pair._0).expect("notebook startup must handle token creation explicitly") // #4303
     assert(startup.contains("exit(ExitCodes::ICE)"))
     assert(!startup.contains("unwrap_or_default"), "token creation failure must stop startup")
 }
@@ -239,21 +239,21 @@ use Compiler.JetLSP.Tests.Integration.SemanticOps.[fixture]
     assert(jet_loss.render().contains("stated-loss") || jet_loss.items.len() >= 2)
     assert(jet_src.contains("answer"))
     ipynb_doc :: CanonicalJson.object([
-        ("nbformat", CanonicalJson.integer("4").unwrap()),
-        ("nbformat_minor", CanonicalJson.integer("5").unwrap()),
-        ("metadata", CanonicalJson.object([]).unwrap()),
-        ("cells", CanonicalJson.Array([CanonicalJson.object([
-            ("id", CanonicalJson.String("keep-me")),
-            ("cell_type", CanonicalJson.String("code")),
-            ("source", CanonicalJson.Array([CanonicalJson.String("1")])),
-            ("metadata", CanonicalJson.object([]).unwrap()),
-            ("outputs", CanonicalJson.Array([CanonicalJson.object([
-                ("output_type", CanonicalJson.String("execute_result")),
-                ("data", CanonicalJson.object([("text/plain", CanonicalJson.String("1"))]).unwrap()),
-                ("metadata", CanonicalJson.object([]).unwrap()),
-                ("execution_count", CanonicalJson.integer("1").unwrap()),
+        (_0: "nbformat", _1: CanonicalJson.integer("4").unwrap()),
+        (_0: "nbformat_minor", _1: CanonicalJson.integer("5").unwrap()),
+        (_0: "metadata", _1: CanonicalJson.object([]).unwrap()),
+        (_0: "cells", _1: CanonicalJson.Array([CanonicalJson.object([
+            (_0: "id", _1: CanonicalJson.String("keep-me")),
+            (_0: "cell_type", _1: CanonicalJson.String("code")),
+            (_0: "source", _1: CanonicalJson.Array([CanonicalJson.String("1")])),
+            (_0: "metadata", _1: CanonicalJson.object([]).unwrap()),
+            (_0: "outputs", _1: CanonicalJson.Array([CanonicalJson.object([
+                (_0: "output_type", _1: CanonicalJson.String("execute_result")),
+                (_0: "data", _1: CanonicalJson.object([(_0: "text/plain", _1: CanonicalJson.String("1"))]).unwrap()),
+                (_0: "metadata", _1: CanonicalJson.object([]).unwrap()),
+                (_0: "execution_count", _1: CanonicalJson.integer("1").unwrap()),
             ]).unwrap()])),
-            ("execution_count", CanonicalJson.Null),
+            (_0: "execution_count", _1: CanonicalJson.Null),
         ]).unwrap()])),
     ]).unwrap()
     (imported, import_loss) :: import_ipynb(String.from_utf8(ipynb_doc.bytes()).unwrap()).unwrap()
@@ -266,13 +266,13 @@ use Compiler.JetLSP.Tests.Integration.SemanticOps.[fixture]
 // Rust: tests/notebook.rs:324
 #Test("rich_output_trust_quarantines_imports_and_binds_grants") {
     store :: TrustStore.default()
-    bundle := MimeBundle{text_plain: "hi", mime: [("text/html", "<b>hi</b>")], quarantined: false, widget_id: Val("w1"), requested_origins: ["https://evil.example"], requested_messages: ["click"]}
+    bundle := MimeBundle{text_plain: "hi", mime: [(_0: "text/html", _1: "<b>hi</b>")], quarantined: false, widget_id: Val("w1"), requested_origins: ["https://evil.example"], requested_messages: ["click"]}
     quarantine_outputs(&bundle)
     assert(decide_render(store, "src", "env", "rend", bundle) == {
         .FallbackPlain{..} -> true
         else -> false
     })
-    live := MimeBundle{text_plain: "chart", mime: [("application/javascript", "1")], quarantined: false, widget_id: Val("sales"), requested_origins: ["https://data.example"], requested_messages: ["SelectionChanged"]}
+    live := MimeBundle{text_plain: "chart", mime: [(_0: "application/javascript", _1: "1")], quarantined: false, widget_id: Val("sales"), requested_origins: ["https://data.example"], requested_messages: ["SelectionChanged"]}
     assert(decide_render(store, "src", "env", "rend", live) == {
         .FallbackPlain{..} -> true
         else -> false
@@ -287,7 +287,7 @@ use Compiler.JetLSP.Tests.Integration.SemanticOps.[fixture]
     })
     &live.requested_origins.clear()
     &live.requested_messages.clear()
-    live.mime = [("image/svg+xml", "<svg/>")]
+    live.mime = [(_0: "image/svg+xml", _1: "<svg/>")]
     assert(decide_render(store, "src", "env", "rend", live) == {
         .AllowPassive{..} -> true
         else -> false
@@ -354,8 +354,8 @@ use Compiler.JetLSP.Tests.Integration.SemanticOps.[fixture]
         eprintln("skipping notebook browser matrix: node is unavailable")
         return
     }
-    browsers :: [("chromium", command_available("chromium", "CHROMIUM")), ("firefox", command_available("firefox", "FIREFOX") && command_available("geckodriver", "GECKODRIVER"))]
-    if !browsers.any((pair) -> pair.1) {
+    browsers :: [(_0: "chromium", _1: command_available("chromium", "CHROMIUM")), (_0: "firefox", _1: command_available("firefox", "FIREFOX") && command_available("geckodriver", "GECKODRIVER"))]
+    if !browsers.any((pair) -> pair._1) {
         eprintln("skipping notebook browser matrix: no supported browser is available")
         return
     }

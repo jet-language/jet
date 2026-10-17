@@ -155,14 +155,14 @@ fn semindex_structure_original_unified_loops_assertions(index: SemIndex, diagnos
         if definition.name != "cursor" -> next
         if inner == {
             .Val(old) -> { if definition.def_span.start > old.start -> inner = Val(definition.def_span) }
-            None -> inner = Val(definition.def_span)
+            .None -> inner = Val(definition.def_span)
         }
     }
     expected :: inner ?? panic("inner state definition")
     loop reference in index.references_to("cursor") {
         if reference[0].target == {
             .Val(target) -> assert_eq(target.def_span, expected)
-            None -> panic("checked cursor target missing")
+            .None -> { panic("checked cursor target missing") }
         }
     }
     failed := false

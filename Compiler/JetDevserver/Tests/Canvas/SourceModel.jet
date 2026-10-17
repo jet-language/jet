@@ -11,46 +11,46 @@ use std.fmt.[format]
 
 // Rust: crates/jet-devserver/src/Canvas/source_model.rs:511
 fn test_replace_after_final_symlink_swap(path: OSPath, outside: OSPath, candidate: [U8]) Err! {
-    target :: open_target(path)?
+    target :: open_target(path)
     moved :: path.with_file_name("main.jet.canvas-test-held")
-    fs.rename(path, moved)?
-    symlink(outside, path)?
-    target.replace(candidate, target.current.map((current) -> current.mode))?
-    .Ok(())
+    fs.rename(path, moved)
+    symlink(outside, path)
+    target.replace(candidate, target.current.map((current) -> current.mode))
+    .Ok(_)
 }
 // Rust: crates/jet-devserver/src/Canvas/source_model.rs:530
 fn test_replace_after_ancestor_symlink_swap(path: OSPath, outside: OSPath, candidate: [U8]) Err! {
-    target :: open_target(path)?
-    parent :: path.parent().ok_or_else(() -> Error.new(ErrorKind.InvalidInput, "test path has no parent"))?
+    target :: open_target(path)
+    parent :: path.parent().ok_or_else(() -> Error.new(ErrorKind.InvalidInput, "test path has no parent"))
     moved :: parent.with_file_name("canvas-test-held")
-    fs.rename(parent, moved)?
-    symlink(outside, parent)?
-    target.replace(candidate, target.current.map((current) -> current.mode))?
-    .Ok(())
+    fs.rename(parent, moved)
+    symlink(outside, parent)
+    target.replace(candidate, target.current.map((current) -> current.mode))
+    .Ok(_)
 }
 // Rust: crates/jet-devserver/src/Canvas/source_model.rs:552
 fn test_read_after_final_symlink_swap(path: OSPath, outside: OSPath) -> [U8] Err! {
-    (parent, name) :: open_parent(path)?
-    file := open_file_at(parent, name, O_RDONLY)?
+    (parent, name) :: open_parent(path)
+    file := open_file_at(parent, name, O_RDONLY)
     moved :: path.with_file_name("main.jet.canvas-test-held")
-    current :: read_opened_file(&file, () -> { fs.rename(path, moved)?; symlink(outside, path) })?
+    current :: read_opened_file(&file, () -> { fs.rename(path, moved)?; symlink(outside, path) })
     .Ok(current.bytes)
 }
 // Rust: crates/jet-devserver/src/Canvas/source_model.rs:569
 fn test_remove_after_final_symlink_swap(path: OSPath, outside: OSPath) Err! {
-    target :: open_target(path)?
+    target :: open_target(path)
     moved :: path.with_file_name("main.jet.canvas-test-held")
-    fs.rename(path, moved)?
-    symlink(outside, path)?
+    fs.rename(path, moved)
+    symlink(outside, path)
     target.remove()
 }
 // Rust: crates/jet-devserver/src/Canvas/source_model.rs:583
 fn test_remove_after_ancestor_symlink_swap(path: OSPath, outside: OSPath) Err! {
-    target :: open_target(path)?
-    parent :: path.parent().ok_or_else(() -> Error.new(ErrorKind.InvalidInput, "test path has no parent"))?
+    target :: open_target(path)
+    parent :: path.parent().ok_or_else(() -> Error.new(ErrorKind.InvalidInput, "test path has no parent"))
     moved :: parent.with_file_name("canvas-test-held")
-    fs.rename(parent, moved)?
-    symlink(outside, parent)?
+    fs.rename(parent, moved)
+    symlink(outside, parent)
     target.remove()
 }
 // Rust: crates/jet-devserver/src/Canvas/source_model.rs:666

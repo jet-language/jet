@@ -6,7 +6,7 @@ fn notebook_protocol_test_kernel() -> Kernel Never! {
 fn notebook_protocol_test_error(kernel: Kernel, line: String, expected: String) Never! {
     if notebook_parse_script_line(kernel, line) == {
         .Err(error) -> assert_eq(error.message, expected)
-        .Ok(_) -> panic("expected protocol parse error")
+        .Ok(_) -> { panic("expected protocol parse error") }
     }
 }
 #Test("notebook_protocol_reply_uses_body_key_for_both_statuses") {
@@ -15,12 +15,12 @@ fn notebook_protocol_test_error(kernel: Kernel, line: String, expected: String) 
     _ :: foundation_json_parse(ProtocolReply.err("quoted").to_json_line()) ?? panic("valid reply JSON")
 }
 #Test("notebook_protocol_client_aliases_and_exact_refusals") {
-    loop alias in [String]{"first", "first-party"} -> assert_eq(notebook_protocol_parse_client(alias) ?? panic("first"), ClientKind.FirstParty)
-    loop alias in [String]{"canvas", "lens"} -> assert_eq(notebook_protocol_parse_client(alias) ?? panic("canvas"), ClientKind.CanvasLens)
-    loop alias in [String]{"jupyter", "jp"} -> assert_eq(notebook_protocol_parse_client(alias) ?? panic("jupyter"), ClientKind.JupyterAdapter)
+    loop alias in ([String]{"first", "first-party"}) -> assert_eq(notebook_protocol_parse_client(alias) ?? panic("first"), ClientKind.FirstParty)
+    loop alias in ([String]{"canvas", "lens"}) -> assert_eq(notebook_protocol_parse_client(alias) ?? panic("canvas"), ClientKind.CanvasLens)
+    loop alias in ([String]{"jupyter", "jp"}) -> assert_eq(notebook_protocol_parse_client(alias) ?? panic("jupyter"), ClientKind.JupyterAdapter)
     if notebook_protocol_parse_client("bad") == {
         .Err(error) -> assert_eq(error.message, "unknown client `bad`")
-        else -> panic("unknown client")
+        else -> { panic("unknown client") }
     }
 }
 #Test("notebook_protocol_ascii_splitn_preserves_empty_and_remainder") {
@@ -64,7 +64,7 @@ fn notebook_protocol_test_error(kernel: Kernel, line: String, expected: String) 
     assert_eq(notebook_parse_script_line(kernel, "add-jet x :: 1") ?? panic("add"), ProtocolMessage.AddCell(NotebookCellKind.Jet, "x :: 1"))
     assert_eq(notebook_parse_script_line(kernel, "add-md # title") ?? panic("md"), ProtocolMessage.AddCell(NotebookCellKind.Markdown, "# title"))
     assert_eq(notebook_parse_script_line(kernel, "delete cell") ?? panic("delete"), ProtocolMessage.Delete("cell"))
-    loop flag in [String]{"off", "false", "0"} -> assert_eq(notebook_parse_script_line(kernel, "lazy cell {flag}") ?? panic("lazy"), ProtocolMessage.SetLazy("cell", false))
+    loop flag in ([String]{"off", "false", "0"}) -> assert_eq(notebook_parse_script_line(kernel, "lazy cell {flag}") ?? panic("lazy"), ProtocolMessage.SetLazy("cell", false))
     assert_eq(notebook_parse_script_line(kernel, "lazy cell") ?? panic("lazy default"), ProtocolMessage.SetLazy("cell", true))
     assert_eq(notebook_parse_script_line(kernel, "control f x   a b") ?? panic("control"), ProtocolMessage.Control("f", "x", "a b"))
     assert_eq(notebook_parse_script_line(kernel, "control f  value") ?? panic("empty argument"), ProtocolMessage.Control("f", "", "value"))
@@ -75,17 +75,17 @@ fn notebook_protocol_test_error(kernel: Kernel, line: String, expected: String) 
     assert_eq(notebook_parse_script_line(kernel, "perf") ?? panic("perf"), ProtocolMessage.PerfAttach)
     if notebook_parse_script_line(kernel, "open folder/../analysis.jetnb") ?? panic("open") == {
         .Open(path) -> assert_eq(notebook_protocol_paths.display(path), "folder/../analysis.jetnb")
-        else -> panic("open variant")
+        else -> { panic("open variant") }
     }
     assert_eq(notebook_parse_script_line(kernel, "reopen") ?? panic("reopen"), ProtocolMessage.Reopen)
     assert_eq(notebook_parse_script_line(kernel, "edit id   body with spaces") ?? panic("edit"), ProtocolMessage.Edit("id", "body with spaces"))
     if notebook_parse_script_line(kernel, "save analysis.jetnb") ?? panic("save") == {
         .Save(path) -> assert_eq(notebook_protocol_paths.display(path), "analysis.jetnb")
-        else -> panic("save variant")
+        else -> { panic("save variant") }
     }
     if notebook_parse_script_line(kernel, "merge theirs.jetnb") ?? panic("merge") == {
         .MergePath(path) -> assert_eq(notebook_protocol_paths.display(path), "theirs.jetnb")
-        else -> panic("merge variant")
+        else -> { panic("merge variant") }
     }
     assert_eq(notebook_parse_script_line(kernel, "import-ipynb {{}}") ?? panic("import"), ProtocolMessage.ImportIpynb("{{}}"))
     assert_eq(notebook_parse_script_line(kernel, "state") ?? panic("state"), ProtocolMessage.State)
@@ -108,29 +108,29 @@ fn notebook_protocol_test_error(kernel: Kernel, line: String, expected: String) 
     result :: handle_message(&kernel, ProtocolMessage.Execute(ClientKind.FirstParty, id))
     if result == {
         .Ok(body) -> { assert(body.contains("status=ok")); assert(body.contains("count=1")); assert(body.contains("text=9\\n")) }
-        else -> panic("execute reply")
+        else -> { panic("execute reply") }
     }
     if handle_message(&kernel, ProtocolMessage.Inspect(id)) == {
         .Ok(body) -> assert(body.contains("kind=Jet; source_len=5; output=9\\n"))
-        else -> panic("inspect reply")
+        else -> { panic("inspect reply") }
     }
     assert_eq(handle_message(&kernel, ProtocolMessage.Debug("missing")), ProtocolReply.err("unknown cell `missing`"))
     assert(kernel.debug_attached())
     assert_eq(handle_message(&kernel, ProtocolMessage.Inspect("missing")), ProtocolReply.err("unknown cell `missing`"))
     parse_error :: if JetNotebook.from_canonical_bytes("not json".bytes()) == {
         .Err(error) -> error.message
-        else -> panic("invalid fixture must fail")
+        else -> { panic("invalid fixture must fail") }
     }
     assert_eq(handle_message(&kernel, ProtocolMessage.Merge("not json")), ProtocolReply.err(parse_error))
     if handle_message(&kernel, ProtocolMessage.Delete(id)) == {
         .Ok(body) -> assert(body.starts_with("deleted={id}; scrubbed="))
-        else -> panic("delete reply")
+        else -> { panic("delete reply") }
     }
 }
 #Test("notebook_protocol_usize_parser_accepts_plus_and_rejects_invalid_digits") {
     assert_eq(notebook_protocol_turn_number("+12") ?? panic("plus"), 12)
     assert_eq(notebook_protocol_turn_number("00") ?? panic("zero"), 0)
-    loop text in [String]{"", "+", "-0", "1x", " 1", "18446744073709551616"} {
+    loop text in ([String]{"", "+", "-0", "1x", " 1", "18446744073709551616"}) {
         assert(if notebook_protocol_turn_number(text) == {
             .Err(_) -> true
             else -> false

@@ -25,7 +25,7 @@ fn palette(visible: Bool, insertable: Bool, category: String, rank: I32, rank_te
     PaletteFacts { visible: visible, insertable: insertable, category: category, rank: rank, rank_terms: rank_terms }
 }
 // Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:73
-NODE_DESCRIPTORS :: [NodeDescriptor]{
+NODE_DESCRIPTORS :: prep { [NodeDescriptor]{[} }
     NodeDescriptor { id: "entry", kind: "entry", archetype: "entry", projected: true,
         presentation: presentation("Entry", "ƒ", "Starts this function.", "archetype", "archetype", "entry", "entry", "node"),
         palette: palette(false, false, "", 0, []), transaction: .None, default_editor: "function_signature" },
@@ -80,7 +80,7 @@ NODE_DESCRIPTORS :: [NodeDescriptor]{
     NodeDescriptor { id: "expression", kind: "expr", archetype: "function_pure", projected: true,
         presentation: presentation("Pure function", "ƒ", "Computes a value.", "archetype", "archetype", "function_pure", "normal", "node"),
         palette: palette(false, false, "Values", 0, ["expression", "value"]), transaction: .None, default_editor: "inline_expr" }
-}
+]
 // Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:436
 fn descriptor_for(kind: String, archetype: String) -> NodeDescriptor {
     validate_catalog() ?? {
@@ -101,7 +101,7 @@ fn descriptor_for_id(id: String) -> NodeDescriptor {
 }
 // Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:452
 fn insert_descriptor_id(transaction: String, pure: Bool) -> String {
-    descriptor := if transaction == "insert_call" -> descriptor_for_id(if pure -> "function_pure" else "function_exec") else
+    descriptor := if transaction == "insert_call" -> descriptor_for_id(if pure -> "function_pure" else -> "function_exec") else
         NODE_DESCRIPTORS.iter().find((descriptor) -> descriptor.transaction == .Val(transaction))
             .unwrap_or_else(() -> panic("missing Canvas node descriptor transaction `{transaction}`"))
     assert(descriptor.palette.insertable, "Canvas action descriptor `{descriptor.id}` is not insertable")
@@ -140,9 +140,9 @@ fn validate_catalog() Err! {
 }
 // Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:553
 fn descriptor_json(descriptor: NodeDescriptor) -> String {
-    projected := if descriptor.projected -> "true" else "false"
-    visible := if descriptor.palette.visible -> "true" else "false"
-    insertable := if descriptor.palette.insertable -> "true" else "false"
+    projected := if descriptor.projected -> "true" else -> "false"
+    visible := if descriptor.palette.visible -> "true" else -> "false"
+    insertable := if descriptor.palette.insertable -> "true" else -> "false"
     terms := descriptor.palette.rank_terms.iter().map((term) -> json_str(term)).collect().join(",")
     transaction := descriptor.transaction.map((value) -> json_str(value)).unwrap_or_else(() -> "null")
     "{{\"id\":{json_str(descriptor.id)},\"kind\":{json_str(descriptor.kind)},\"archetype\":{json_str(descriptor.archetype)},\"projected\":{projected},\"presentation\":{{\"label\":{json_str(descriptor.presentation.label)},\"glyph\":{json_str(descriptor.presentation.glyph)},\"hover\":{json_str(descriptor.presentation.hover)},\"accent\":{json_str(descriptor.presentation.accent)},\"header\":{json_str(descriptor.presentation.header)},\"style_archetype\":{json_str(descriptor.presentation.style_archetype)},\"layout_family\":{json_str(descriptor.presentation.layout_family)},\"shape\":{json_str(descriptor.presentation.shape)}}},\"palette\":{{\"visible\":{visible},\"insertable\":{insertable},\"category\":{json_str(descriptor.palette.category)},\"rank\":{descriptor.palette.rank},\"rank_terms\":[{terms}]}},\"transaction\":{transaction},\"default_editor\":{json_str(descriptor.default_editor)}}}"

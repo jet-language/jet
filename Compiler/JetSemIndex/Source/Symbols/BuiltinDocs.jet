@@ -42,13 +42,13 @@ fn semantic_builtin_signature(owner: String, name: String, labels: [String], par
 fn semantic_builtin_examples(owner: String, name: String, example: String?) -> [String] Never! {
     if example == {
         .Val(text) -> [String]{text}
-        None -> [String]{"{owner}.{name}(...)"}
+        .None -> [String]{"{owner}.{name}(...)"}
     }
 }
 
 fn semantic_builtin_collection_doc(owner: String, name: String, labels: [String], callback_return: Type?, summary: String, example: String?) -> SemanticSymbol Never! {
     element :: Type.Named{name: if owner == "Map" -> "V" else -> "T"}
-    receiver :: if owner == "Map" -> Type.Map{key: Type.Named{name: "K"}, key_span: None, value: element} else -> Type.List{element: element}
+    receiver :: if owner == "Map" -> (Type.Map{key: (Type.Named{name: "K"}), key_span: None, value: element}) else -> Type.List{element: element}
     contract :: sema_collection_method_contract(receiver, name) ?? panic("builtin docs have no checked collection contract: {owner}.{name}")
     seed :: Val(Type.Named{name: "R"})
     parameters := [Type]{}

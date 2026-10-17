@@ -19,7 +19,7 @@ use Compiler.JetLSP.Tests.Integration.Canvas.[temp_dir, write_fixture, json_fiel
     catalog_request :: "{{\"schema_version\":1,\"op\":\"core_catalog\",\"revision\":\"{revision}\",\"query\":\"\"}}"
     catalog :: Canvas.query_json_for_file(path, catalog_request).expect("core catalog")
     catalog_ids := [String:Bool]{}
-    loop module in json_top_level_objects(json_array_field(catalog, "modules")) {
+    loop module_ref in json_top_level_objects(json_array_field(catalog, "modules")) {
         path :: json_field(module_ref, "path")
         loop member in json_top_level_objects(json_array_field(module_ref, "members")) {
             &catalog_ids.insert("canvas.core_catalog:{path}:{json_field(member, "name")}", true)
@@ -389,7 +389,7 @@ use Compiler.JetLSP.Tests.Integration.Canvas.[temp_dir, write_fixture, json_fiel
     // Rust: tests/canvas.rs:4383
     digest :: (json: String) -> {
         json.split_once("\"semantic_digest\":\"")
-            .and_then((pair) -> pair._1.split_once('"').map((parts) -> parts._0.to_string()))
+            .and_then((pair) -> pair.1.split_once('"').map((parts) -> parts.0.to_string()))
             .expect("shared package semantic digest")
     }
     assert_eq(digest(graph), digest(project))

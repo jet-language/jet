@@ -252,7 +252,7 @@ fn notebook_protocol_parse_client(name: String) -> ClientKind Err! {
         "first" | "first-party" -> ClientKind.FirstParty
         "canvas" | "lens" -> ClientKind.CanvasLens
         "jupyter" | "jp" -> ClientKind.JupyterAdapter
-        else -> return Err("unknown client `{name}`")
+        else -> { return Err("unknown client `{name}`") }
     }
 }
 fn notebook_parse_script_line(kernel: Kernel, line: String) -> ProtocolMessage Err! {
@@ -341,7 +341,7 @@ fn notebook_parse_script_line(kernel: Kernel, line: String) -> ProtocolMessage E
             }
             ProtocolMessage.Rerun(client, from, None, ^decisions)
         }
-        else -> return Err("unknown protocol command `{command}`")
+        else -> { return Err("unknown protocol command `{command}`") }
     }
 }
 fn notebook_protocol_turn_number(number: String) -> Int Err! {

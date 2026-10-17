@@ -44,8 +44,7 @@ fn raw_input_is_complete(text: String) -> Bool {
     trimmed := text.trim() // #4303
     if trimmed.is_empty() || trimmed.starts_with(":") || trimmed.starts_with("?") || reject_feature(trimmed) != None -> return true
     if looks_like_item(trimmed) || looks_like_import(trimmed) -> return repl_completeness_probe("", trimmed, "")
-    if starts_with_stmt_keyword(trimmed) || trimmed.ends_with(";") -> repl_completeness_probe("fn __repl__() {{\n", trimmed, "\n}}\n")
-    else -> repl_completeness_probe("fn __repl__() {{\n__repl_echo__ :: ", trimmed, "\n}}\n")
+    if starts_with_stmt_keyword(trimmed) || trimmed.ends_with(";") -> repl_completeness_probe("fn __repl__() {{\n", trimmed, "\n}}\n") else -> repl_completeness_probe("fn __repl__() {{\n__repl_echo__ :: ", trimmed, "\n}}\n")
 }
 
 // Rust: crates/jet-repl/src/lib.rs:1840
@@ -191,7 +190,7 @@ fn repl_executable_stmts(stmts: [Stmt]) -> [Stmt] {
     executable := ^stmts
     loop i in 0..executable.len() {
         if executable[i] == .Val(binding) {
-            if binding.init == .Place(inner, PlaceAccess.Read, _) -> executable[i].Val.init = inner.copy()
+            if binding.init == .Place(inner, .Read, _) -> executable[i].Val.init = inner.copy()
         }
     }
     ^executable
@@ -234,7 +233,9 @@ fn checked_program(src: String) -> ProgramBundle [Diagnostic]! {
     (toks, lex_diags) :: Lexer.lex(src)
     if !lex_diags.is_empty() -> return Err(lex_diags.filter((d) -> d.severity == Severity.Error).collect())
     prog :: Parser.parse_with_source(toks, src) ?? return Err(err)
-    bundle := if prog.imports.is_empty() -> program_bundle(src, ^prog) else {
+    bundle := if {
+        prog.imports.is_empty() -> program_bundle(src, ^prog)
+        else -> {
         if write_unique_temp_file("check", src) == {
             .Err(_) -> program_bundle(src, ^prog)
             .Ok(tmp_path) -> {
@@ -242,6 +243,7 @@ fn checked_program(src: String) -> ProgramBundle [Diagnostic]! {
                 _ :: repl_turn_files.remove_file(tmp_path) // GATE #4494
                 loaded ?? return Err(err)
             }
+        }
         }
     }
     errors :: Sema.check_bundle(&bundle, Sema.CompileMode.Check).filter((d) -> d.severity == Severity.Error).collect()
@@ -415,11 +417,11 @@ fn run_cooked(project_dir: String?, color: Bool, flags: ReplFlags) -> I32 {
         trimmed := text.trim() // #4303
         if trimmed.is_empty() -> next
         if trimmed.strip_prefix(":rerun ") == .Val(arg) {
-            authorizer := &policy.authorizer(None)
+            authorizer := &policy.authorizer(.None)
             rerun_cooked(arg, &stdin_lock, &session, base_dir, color, &authorizer)
             next
         }
-        authorizer := &policy.authorizer(None)
+        authorizer := &policy.authorizer(.None)
         if execute_line(trimmed, &session, base_dir, color, false, false, &authorizer) -> break
     }
     I32{0}
@@ -479,7 +481,7 @@ fn execute_line(trimmed: String, session: &Session, base_dir: OSPath, color: Boo
         }
         .Reject(feature) -> {
             d :: e1802(feature)
-            if !quiet -> render_diags(step_src, trimmed, [Diagnostic]{d}, color)
+            if !quiet -> render_diags(step_src, trimmed, ([Diagnostic]{d}), color)
             &session.record_turn(trimmed, ReplTurnStatus.Error, "E1802")
         }
         .Item(src) -> {
@@ -528,14 +530,17 @@ fn execute_line(trimmed: String, session: &Session, base_dir: OSPath, color: Boo
             sink := DevSink.new()
             tracking_authorizer := TrackingAuthorizer{inner: &authorizer, observed: false}
             trial_scope := session.scope.copy()
-            result :: if Comptime.repl_interruptible_turn_active() {
-                Comptime.run_repl_step_interruptible(stmts, session.func_defs, base_dir, &sink, &trial_scope,
-                    REPL_FUEL_BUDGET, suppress, core_imports, session.struct_defs, session.binding_types, &tracking_authorizer)
-            } else {
-                if Comptime.run_repl_step(stmts, session.func_defs, base_dir, &sink, &trial_scope,
-                    REPL_FUEL_BUDGET, suppress, core_imports, session.struct_defs, session.binding_types, &tracking_authorizer) == {
-                    .Ok(value) -> Ok(value)
-                    .Err(diagnostic) -> Err(Comptime.ReplStepError.Diagnostic(diagnostic))
+            result :: if {
+                Comptime.repl_interruptible_turn_active() -> {
+                    Comptime.run_repl_step_interruptible(stmts, session.func_defs, base_dir, &sink, &trial_scope,
+                        REPL_FUEL_BUDGET, suppress, core_imports, session.struct_defs, session.binding_types, &tracking_authorizer)
+                }
+                else -> {
+                    if Comptime.run_repl_step(stmts, session.func_defs, base_dir, &sink, &trial_scope,
+                        REPL_FUEL_BUDGET, suppress, core_imports, session.struct_defs, session.binding_types, &tracking_authorizer) == {
+                        .Ok(value) -> Ok(value)
+                        .Err(diagnostic) -> Err(Comptime.ReplStepError.Diagnostic(diagnostic))
+                    }
                 }
             }
             if result == {
@@ -565,7 +570,9 @@ fn execute_line(trimmed: String, session: &Session, base_dir: OSPath, color: Boo
                             shown :: display_value(v)
                             fold :: if fold_long_output -> Render.fold_decision_for_value(v) else -> None
                             if fold == {
-                                .Val((count, elem_ty)) -> {
+                                .Val(tuple_10) -> {
+                                    count :: tuple_10._0
+                                    elem_ty :: tuple_10._1
                                     if !quiet -> repl_turn_stdio.println(Render.render_fold_marker(count, elem_ty, color))
                                     &summary.push_str(Render.render_fold_marker(count, elem_ty, false))
                                     pending_unfold = Val(shown)
@@ -599,7 +606,7 @@ fn execute_line(trimmed: String, session: &Session, base_dir: OSPath, color: Boo
                         restored :: restore_move_diagnostic(^diagnostic, session.moved_names)
                         d := if restored.code == "E2202" -> e1801(REPL_FUEL_BUDGET) else -> ^restored
                         reanchor_repl_diagnostic(&d, input_start)
-                        if !quiet -> render_diags(step_src, trimmed, [Diagnostic]{d}, color)
+                        if !quiet -> render_diags(step_src, trimmed, ([Diagnostic]{d}), color)
                         &session.record_turn(trimmed, ReplTurnStatus.Error, "{d.code}: {d.what}")
                     }
                 }
@@ -748,8 +755,7 @@ fn handle_history(arg: String?, history: &ReplHistory) {
     }
     if command.strip_prefix("search ") == .Val(needle) {
         matches :: history.search(needle)
-        if matches.is_empty() -> repl_turn_stdio.println("No history matches.")
-        else -> loop entry in matches -> repl_turn_stdio.println(entry)
+        if matches.is_empty() -> repl_turn_stdio.println("No history matches.") else -> loop entry in matches -> repl_turn_stdio.println(entry)
         return
     }
     repl_turn_stdio.eprintln("usage: :history search <text> | :history clear")
@@ -774,7 +780,7 @@ fn eval_once(src: String, base_dir: OSPath, flags: ReplFlags) -> EvalOnce [Diagn
     structs :: [String:StructDef]{}
     sink := DevSink.new()
     scope := [String:CtValue]{}
-    authorizer := &policy.authorizer(None)
+    authorizer := &policy.authorizer(.None)
     value :: Comptime.run_repl_step(executable, funcs, base_dir, &sink, &scope,
         REPL_FUEL_BUDGET, suppress, core_imports, structs, session.binding_types, &authorizer) ?? return Err([Diagnostic]{err})
     EvalOnce{value: ^value, stdout: ^sink.stdout, stderr: ^sink.stderr}
@@ -874,14 +880,13 @@ fn run_transcript_with(inputs: [String], project_dir: String?, flags: ReplFlags)
                     } else { &out.push_str("turn #{id} does not exist\n") }
                 }
                 "history" -> {
-                    if arg == .Val("clear") {
+                    if arg == "clear" {
                         _ :: &session.history.clear()
                         &out.push_str("History cleared.\n")
                     } else if arg == .Val(command) {
                         if command.strip_prefix("search ") == .Val(needle) {
                             matches :: session.history.search(needle)
-                            if matches.is_empty() -> &out.push_str("No history matches.\n")
-                            else -> loop entry in matches -> &out.push_str("{entry}\n")
+                            if matches.is_empty() -> &out.push_str("No history matches.\n") else -> loop entry in matches -> &out.push_str("{entry}\n")
                         } else { &out.push_str("usage: :history search <text> | :history clear\n") }
                     } else { &out.push_str("usage: :history search <text> | :history clear\n") }
                 }
@@ -941,7 +946,7 @@ fn run_transcript_with(inputs: [String], project_dir: String?, flags: ReplFlags)
                 core_imports := session.core_imports.copy()
                 loop name in checked_core_imports.keys() -> core_imports[name] = checked_core_imports[name]
                 sink := DevSink.new()
-                authorizer := &policy.authorizer(None)
+                authorizer := &policy.authorizer(.None)
                 trial_scope := session.scope.copy()
                 result :: Comptime.run_repl_step(stmts, session.func_defs, base_dir, &sink, &trial_scope,
                     REPL_FUEL_BUDGET, suppress, core_imports, session.struct_defs, session.binding_types, &authorizer)
@@ -975,8 +980,7 @@ fn run_transcript_with(inputs: [String], project_dir: String?, flags: ReplFlags)
                     .Err(diagnostic) -> {
                         restored :: restore_move_diagnostic(^diagnostic, session.moved_names)
                         d :: if restored.code == "E2202" -> e1801(REPL_FUEL_BUDGET) else -> ^restored
-                        if d.code == "E1801" -> &out.push_str(d.render("", ""))
-                        else -> &out.push_str("error [{d.code}]: {d.what}\n")
+                        if d.code == "E1801" -> &out.push_str(d.render("", "")) else -> &out.push_str("error [{d.code}]: {d.what}\n")
                         &session.record_turn(trimmed, ReplTurnStatus.Error, "{d.code}: {d.what}")
                     }
                 }

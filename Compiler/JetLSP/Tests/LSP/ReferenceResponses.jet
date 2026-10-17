@@ -44,7 +44,7 @@ fn lsp_action_fixture(root: lsp_workspace_path.OSPath, src: String, version: Int
 fn lsp_code_actions_for(server: LSPServer, uri: String, src: String, start: Int, end: Int) -[FS, Env]> String {
     range :: LSPRange{start: lsp_byte_offset_to_lsp(src, start), end: lsp_byte_offset_to_lsp(src, end)}
     params :: foundation_parse_protocol_json("{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)}}},\"range\":{lsp_range_json(range)},\"context\":{{\"diagnostics\":[]}}}}") ?? panic("original action params")
-    lsp_code_action_response(server, Val(params), DataTree.Int(1)) ?? panic("original code action response")
+    lsp_code_action_response(server, Val(params), Dyn.Int(1)) ?? panic("original code action response")
 }
 fn lsp_action_uri(root: lsp_workspace_path.OSPath) -> String Never! { lsp_path_to_uri(lsp_workspace_path.display(lsp_action_child(root, "main.jet"))) }
 fn lsp_action_version(uri: String, version: Int) -> String Never! { "\"textDocument\":{{\"uri\":{foundation_json_quote(uri)},\"version\":{version}}}" }

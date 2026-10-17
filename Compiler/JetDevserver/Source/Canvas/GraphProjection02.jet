@@ -44,7 +44,7 @@ fn project_stmt(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, or
             node_id :: "{g.graph_id}:stmt:{ordinal}:binding"
             ty :: binding_type(g, b.name, b)
             add_node(g, node_id, "binding", b.name, binding_source_span(src, b), x, y, ["local"], ["rename_binding", "edit_inline_expr", "source_jump"])
-            if node :: g.nodes.iter_mut().find((node) -> node.id == node_id) { node.meta_json = meta_attr_json(b.meta.as_ref()) }
+            if g.nodes.iter_mut().find((node) == .Val(node) -> node.id == node_id) { node.meta_json = meta_attr_json(b.meta.as_ref()) }
             input_pin :: add_pin(g, node_id, "value", "input", ty, "", false)
             output_pin :: add_pin(g, node_id, b.name, "output", ty, "", false)
             g.local_pins.insert(b.name.clone(), ^output_pin)
@@ -74,7 +74,7 @@ fn project_stmt(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, or
         .Return(expr, span) -> {
             node_id :: "{g.graph_id}:stmt:{ordinal}:return"
             add_node(g, node_id, "return", "return", span.into(), x, y, ["exit"], ["source_jump"])
-            if e :: expr {
+            if expr == .Val(e) {
                 ty :: expr_type(g, index, e)
                 input :: add_pin(g, node_id, "value", "input", ty, "", false)
                 connect_expr_to_input(g, index, src, e, ordinal, "value", node_id, input, x - 220, y)
@@ -100,7 +100,7 @@ fn project_stmt(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, or
             cond_pin :: add_pin(g, node_id, "condition", "input", "Bool", "", false)
             connect_expr_to_input(g, index, src, cond, ordinal * 10 + 1, "condition", node_id, cond_pin, x - 220, y + 30)
             add_inline(g, node_id, ordinal, "cond", src, cond.span())
-            if step_value :: step {
+            if step == .Val(step_value) {
                 afterthought :: if step_value.as_ref() is {
                     .Assign(target: target, value: value, ..) -> .Some((value, Span.new(target.span().start, expr_source_end(value))))
                     .Expr(value) -> .Some((value, value.span()))
@@ -131,7 +131,7 @@ fn project_stmt(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, or
                     connect_expr_to_input(g, index, src, start, ordinal * 10, "range_start", node_id, start_pin, x - 220, y)
                     end_pin :: add_pin(g, node_id, "range_end", "input", "Int", "", false)
                     connect_expr_to_input(g, index, src, end, ordinal * 10 + 1, "range_end", node_id, end_pin, x - 220, y + 30)
-                    if stride :: step {
+                    if step == .Val(stride) {
                         stride_pin :: add_pin(g, node_id, "stride", "input", "Int", "", false)
                         connect_expr_to_input(g, index, src, stride, ordinal * 10 + 2, "stride", node_id, stride_pin, x - 220, y + 60)
                     }
@@ -139,7 +139,7 @@ fn project_stmt(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, or
                 .In(collection: collection, step: step) -> {
                     source_pin :: add_pin(g, node_id, "source", "input", "Iterable", "", false)
                     connect_expr_to_input(g, index, src, collection, ordinal * 10, "source", node_id, source_pin, x - 220, y)
-                    if stride :: step {
+                    if step == .Val(stride) {
                         stride_pin :: add_pin(g, node_id, "stride", "input", "Int", "", false)
                         connect_expr_to_input(g, index, src, stride, ordinal * 10 + 1, "stride", node_id, stride_pin, x - 220, y + 30)
                     }
@@ -156,7 +156,7 @@ fn project_stmt(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, or
                 is_pattern_test :: arm.cond == .PatternTest(..)
                 if is_pattern_test { affordances.push("add_pattern_arm") }
                 add_node(g, node_id, "branch", if is_pattern_test -> "if ==" else -> "if", span.into(), x, y, ["control"], ^affordances)
-                if pattern_type :: pattern_subject_type(g, index, arm.cond) { set_pattern_node_type(g, node_id, pattern_type) }
+                if pattern_subject_type(g, index, arm.cond) == .Val(pattern_type) { set_pattern_node_type(g, node_id, pattern_type) }
                 cond :: add_pin(g, node_id, "cond", "input", "Bool", "", false)
                 if is_pattern_test { _ :: add_arm_pin(g, node_id, "arm1", pattern_pin_label(src, arm.cond), pattern_arm_edit_span(src, arm.cond)) }
                 connect_expr_to_input(g, index, src, arm.cond, ordinal, "cond", node_id, cond, x - 220, y)
@@ -167,7 +167,7 @@ fn project_stmt(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, or
             node_id :: "{g.graph_id}:stmt:{ordinal}:dispatch"
             add_node(g, node_id, "dispatch", if subjectless -> "if guards" else -> "if ==", span.into(), x, y, ["control"], ["add_pattern_arm", "edit_inline_expr", "source_jump"])
             pattern_type :: if subjectless -> arms.first().and_then((arm) -> pattern_subject_type(g, index, arm.cond)) else -> .Some(expr_type(g, index, subject))
-            if ty :: pattern_type { set_pattern_node_type(g, node_id, ty) }
+            if pattern_type == .Val(ty) { set_pattern_node_type(g, node_id, ty) }
             if !subjectless {
                 ty :: expr_type(g, index, subject)
                 subject_pin :: add_pin(g, node_id, "subject", "input", ty, "", false)
@@ -178,7 +178,7 @@ fn project_stmt(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, or
                 add_inline(g, node_id, ordinal, "arm{i + 1}", src, arm.cond.span())
                 project_stmt_block(g, index, src, arm.body, ordinal * 100 + 50 + i * 20, x + 230 + I32{i} * 180, y + 100)
             }
-            if body :: else_body { project_stmt_block(g, index, src, body, ordinal * 100 + 90, x + 460, y + 230) }
+            if else_body == .Val(body) { project_stmt_block(g, index, src, body, ordinal * 100 + 90, x + 460, y + 230) }
         }
         .Break(span) | .Continue(span) | .BreakLabel(_, span) | .ContinueLabel(_, span) -> {
             node_id :: "{g.graph_id}:stmt:{ordinal}:flow"
@@ -243,7 +243,7 @@ fn project_stmt(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, or
             add_node(g, node_id, "branch", "prep if", span.into(), x, y, ["comptime"], ["edit_inline_expr", "source_jump"])
             add_inline(g, node_id, ordinal, "cond", src, cond.span())
             project_stmt_block(g, index, src, then_body, ordinal * 100 + 170, x + 230, y + 70)
-            if body :: else_body { project_stmt_block(g, index, src, body, ordinal * 100 + 180, x + 460, y + 70) }
+            if else_body == .Val(body) { project_stmt_block(g, index, src, body, ordinal * 100 + 180, x + 460, y + 70) }
         }
         .ComptimeBlock(body: body, span: span, ..) -> {
             add_region(g, ordinal, "comptime", "comptime", span)
@@ -282,7 +282,7 @@ fn pattern_subject_type(g: GraphBuilder, index: SemIndex, cond: Expr) -> String?
 
 // Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2607
 fn set_pattern_node_type(g: &GraphBuilder, node_id: String, pattern_type: String) {
-    if node :: g.nodes.iter_mut().find((node) -> node.id == node_id) { node.meta_json = .Some("{{\"pattern_type\":{json_str(pattern_type)}}}") }
+    if g.nodes.iter_mut().find((node) == .Val(node) -> node.id == node_id) { node.meta_json = .Some("{{\"pattern_type\":{json_str(pattern_type)}}}") }
 }
 
 // Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2613
@@ -291,7 +291,7 @@ fn pattern_pin_label(src: String, expr: &Expr) -> String {
     text := raw.trim() // #4303
     balanced :: balance_closing_parens(text)
     if expr == .PatternTest(..) {
-        if pos :: balanced.find("==") {
+        if balanced.find("==") == .Val(pos) {
             label := balanced[pos..<balanced.len()].trim() // #4303
             return label.to_string()
         }
@@ -337,14 +337,14 @@ fn dispatch_arm_pattern_fragment(src: String, expr: &Expr) -> (String, USize) {
         offset += fragment.len() - after_space.len()
         fragment = after_space
     }
-    if after_open :: fragment.strip_prefix('{') {
+    if fragment.strip_prefix('{') == .Val(after_open) {
         offset += 1
         fragment = after_open.trim_start() // #4303
         offset += after_open.len() - fragment.len()
     }
-    if arrow :: fragment.rfind("->") {
+    if fragment.rfind("->") == .Val(arrow) {
         after_arrow :: fragment[arrow + 2..<fragment.len()]
-        if close :: after_arrow.rfind('}') {
+        if after_arrow.rfind('}') == .Val(close) {
             after_body :: after_arrow[close + 1..<after_arrow.len()]
             offset += arrow + 2 + close + 1
             fragment = after_body.trim_start() // #4303
@@ -422,13 +422,13 @@ fn binding_init_span(src: String, binding: &AST.Binding) -> Span {
 // Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2801
 fn connect_expr_to_input_with_span(g: &GraphBuilder, index: &SemIndex, src: String, expr: &Expr, inline_span: Span, ordinal: USize, role: String, owner_node_id: String, input_pin: String, x: I32, y: I32) {
     provider_y :: data_provider_y(y, ordinal)
-    if out :: project_value_node(g, index, src, expr, ordinal, role, x, provider_y) {
+    if project_value_node(g, index, src, expr, ordinal, role, x, provider_y) == .Val(out) {
         add_inline(g, owner_node_id, ordinal, role, src, inline_span)
         add_wire_with_span(g, out, input_pin, "data", .Some(expr.span().into()))
     } else if pure_leaf(expr) && !(expr == .Binary(..)) {
         add_inline(g, owner_node_id, ordinal, role, src, inline_span)
         wire_ident_refs(g, expr, input_pin)
-    } else if out :: project_expr_node(g, index, src, expr, ordinal, x, provider_y, false) {
+    } else if project_expr_node(g, index, src, expr, ordinal, x, provider_y, false) == .Val(out) {
         variant_method :: if expr is { .MethodCall(method: method, ..) -> starts_uppercase(method); _ -> false }
         if details_composite_expr(expr) || expr == .EnumLit(..) || variant_method { add_inline(g, owner_node_id, ordinal, role, src, inline_span) }
         add_wire_with_span(g, out, input_pin, "data", .Some(expr.span().into()))
@@ -452,7 +452,7 @@ fn project_value_node(g: GraphBuilder, index: SemIndex, src: String, expr: Expr,
     if expr == .Ident(name, span) {
         source_span :: SourceSpan{span.into()}
         key :: getter_key(index, name, source_span)
-        if pin :: g.getter_pins.get(key).cloned() -> return .Some(pin)
+        if g.getter_pins.get(key).cloned() == .Val(pin) -> return .Some(pin)
         ty :: expr_type(g, index, expr)
         base_node_id :: "{g.graph_id}:value:get:{canvas_ident_fragment(name)}"
         node_id :: if g.nodes.iter().any((node) -> node.id == base_node_id && node.span != source_span) -> "{base_node_id}:{span.start}-{span.end}" else -> base_node_id
@@ -550,7 +550,7 @@ fn project_expr_node(g: GraphBuilder, index: SemIndex, src: String, expr: Expr, 
             node_id :: "{g.graph_id}:expr:{ordinal}:fallible"
             add_node(g, node_id, "fallible", "?", span.into(), x, y, ["fallible"], ["add_fallback_rail", "source_jump"])
             input :: add_pin(g, node_id, "value", "input", expr_type(g, index, inner), "", true)
-            if out :: project_expr_node(g, index, src, inner, ordinal, x - 180, y, false) { add_wire(g, out, input, "fallible") }
+            if project_expr_node(g, index, src, inner, ordinal, x - 180, y, false) == .Val(out) { add_wire(g, out, input, "fallible") }
             .Some(add_pin(g, node_id, "ok", "output", "unknown", "", false))
         }
         .OrFallback(value: value, ..) -> project_expr_node(g, index, src, value, ordinal, x, y, exec_context)

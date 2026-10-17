@@ -2,7 +2,7 @@
 // requires N1/N2 native gates #4367/#4388/#4392/#4423; retained, not bypassed.
 use core.files as notebook_interop_test_files
 use core.testing as notebook_interop_test_testing
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_object, canonical_json_bytes, canonical_json_parse, foundation_json_parse]
 
 fn notebook_interop_test_cell(id: String, source: String) -> NotebookCell Never! {
@@ -22,7 +22,7 @@ fn notebook_interop_test_import(text: String) -[Rand]> NotebookImportResult Neve
 fn notebook_interop_test_import_error(text: String) -[Rand]> String Never! {
     if notebook_import_ipynb(text) == {
         .Err(error) -> error.message
-        .Ok(_) -> panic("invalid notebook accepted")
+        .Ok(_) -> { panic("invalid notebook accepted") }
     }
 }
 // Original mixed oracle: N2 also retains the save/load assertions; this full
@@ -138,7 +138,7 @@ fn notebook_interop_test_import_error(text: String) -[Rand]> String Never! {
     assert_eq(notebook_interop_test_import_error("[]"), "ipynb root must be an object")
     assert_eq(notebook_interop_test_import_error(`{}`), "ipynb missing cells array")
     assert_eq(notebook_interop_test_import_error("not json"), "ipynb is not valid JSON; export a complete Jupyter notebook")
-    loop format in [String]{"-1", "4294967296", "1.5", "null"} {
+    loop format in ([String]{"-1", "4294967296", "1.5", "null"}) {
         defaults :: notebook_interop_test_import("{{\"nbformat\":{format},\"cells\":[]}}")
         assert(defaults.loss.is_empty())
     }

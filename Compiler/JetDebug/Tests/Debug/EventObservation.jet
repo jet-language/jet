@@ -24,14 +24,14 @@ fn debug_event_test_with(field: String, replacement: String) -> String Never! {
         "priority" -> "\"priority\":17"
         "failure" -> "\"failure\":\"Handler\""
         "terminal" -> "\"terminal\":\"None\""
-        else -> panic("unknown test field {field}")
+        else -> { panic("unknown test field {field}") }
     }
     record.replace(original, replacement)
 }
 
 fn debug_event_test_error(snapshot: String) -> String Never! {
     if render_event_observations(snapshot) == {
-        .Ok(_) -> panic("expected the observation to be refused")
+        .Ok(_) -> { panic("expected the observation to be refused") }
         .Err(error) -> error.message
     }
 }

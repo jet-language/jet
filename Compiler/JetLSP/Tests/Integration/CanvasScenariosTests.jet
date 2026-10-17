@@ -22,7 +22,7 @@ use std.process.[Command]
     (status, root) :: probe("--probe-temp-root", none)
     assert(status.success())
     assert_eq(root.parent(), OSPath.from("/tmp"))
-    override_parent :: env.temp_dir().join("jet-verify-parent-{process.id()}-{thread.current().id():?}")
+    override_parent :: env.temp_dir().join("jet-verify-parent-{process.id()}-{thread.current().id()}")
     fs.create_dir_all(override_parent).unwrap()
     (status, root) :: probe("--probe-temp-root", override_parent)
     assert(status.success())
@@ -37,7 +37,7 @@ use std.process.[Command]
 #Test("strict_full_verification_rejects_each_missing_canvas_tool_once") {
     if core.sys.target.selected_family() == "unix" {
         repo :: OSPath.from(env.manifest_dir())
-        tools :: env.temp_dir().join("jet-canvas-preflight-tools-{process.id()}-{thread.current().id():?}")
+        tools :: env.temp_dir().join("jet-canvas-preflight-tools-{process.id()}-{thread.current().id()}")
         fs.create_dir_all(tools).unwrap()
         chromium :: tools.join("chromium")
         firefox :: tools.join("firefox")
@@ -48,12 +48,17 @@ use std.process.[Command]
         fs.write(geckodriver, "#!/bin/sh\necho 'geckodriver 1'\n").unwrap()
         fs.write(node, "#!/bin/sh\necho 'v1.0.0'\n").unwrap()
         loop path in [chromium, firefox, geckodriver, node] -> fs.set_permissions(path, fs.Permissions.from_mode(0o755)).unwrap()
-        loop (missing, chromium, firefox, geckodriver, node) in [
+        loop scenario_row in [
             ("chromium", tools.join("missing-chromium"), firefox.clone(), geckodriver.clone(), node.clone()),
             ("firefox", chromium.clone(), tools.join("missing-firefox"), geckodriver.clone(), node.clone()),
             ("geckodriver", chromium.clone(), firefox.clone(), tools.join("missing-geckodriver"), node.clone()),
             ("node", chromium, firefox, geckodriver, tools.join("missing-node"))
         ] {
+            missing :: scenario_row._0
+            chromium :: scenario_row._1
+            firefox :: scenario_row._2
+            geckodriver :: scenario_row._3
+            node :: scenario_row._4
             output :: Command.new("bash").current_dir(repo).arg("Tools/agent/verify-full.sh")
                 .env("JET_VERIFY_CANVAS_PREREQUISITES_ONLY", "1").env("JET_VERIFY_TEMP_PROBE_ONLY", "1").env("JET_NIX_TMP_CLEANED", "1")
                 .env("JET_CANVAS_CHROMIUM", chromium).env("JET_CANVAS_FIREFOX", firefox).env("JET_CANVAS_GECKODRIVER", geckodriver).env("JET_CANVAS_NODE", node)
@@ -312,7 +317,7 @@ use std.process.[Command]
 // Rust: tests/canvas_scenarios.rs:974
 #Test("big_project_perf_budget") {
     tools :: canvas_tools().unwrap_or_else(() -> panic("big-project-perf needs dev-shell Chromium and Node; no skipped sample path"))
-    loop clean_run in 1..=2 {
+    loop clean_run in 1..2 {
         eprintln("BIG_PROJECT_PERF clean_run={clean_run}/2")
         run_browser_scenario(BIG_PROJECT_SCENARIO, "chromium", tools.node, [("CHROMIUM", tools.chromium)])
     }

@@ -129,7 +129,7 @@ use core.sys.target.[selected_os]
     sessions :: Canvas.DebugSessions.default()
     request :: "{{\"schema_version\":1,\"source_id\":\"{source_id}\",\"revision\":\"{revision}\",\"tier\":\"native-lldb\",\"commands\":[\"s\"]}}"
     if Canvas.debug_session_json_for_file_with_sessions(path, request, sessions) == {
-        Ok(body) -> {
+        .Ok(body) -> {
             assert(body.contains("\"tier\":\"native-lldb\""), "{body}")
             assert(!body.contains("\"tier\":\"jet-dev-interpreter\""), "{body}")
             assert(body.contains("\"state\":\"running\""), "{body}")
@@ -141,7 +141,7 @@ use core.sys.target.[selected_os]
             stopped :: Canvas.debug_session_json_for_file_with_sessions(path, stop, sessions).expect("native session stop")
             assert(stopped.contains("\"state\":\"stopped\""), "{stopped}")
         }
-        Err(error) -> {
+        .Err(error) -> {
             assert(error.contains("\"kind\":\"diagnostic\""), "{error}")
             assert(!error.contains("rustc rejected"), "{error}")
         }
@@ -302,7 +302,7 @@ use core.sys.target.[selected_os]
     &input.write_all(dap_frame("{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\",\"pathFormat\":\"path\"}}}}").bytes()).expect("send initialize request")
     &input.flush().expect("flush initialize request")
     deadline :: Instant.now() + Duration.from_secs(30)
-    loop if !(binary.is_file() && map.is_file()) {
+    loop !(binary.is_file() && map.is_file()) {
         if (&adapter.try_wait()).expect("check production DAP process").is_some() -> panic("production DAP process exited before writing its debug map")
         assert(Instant.now() < deadline, "production DAP process did not publish its debug map")
         thread.sleep(Duration.from_millis(20))
@@ -345,7 +345,7 @@ use core.sys.target.[selected_os]
     &input.write_all(dap_frame("{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\",\"pathFormat\":\"path\"}}}}").bytes()).expect("send initialize request")
     &input.flush().expect("flush initialize request")
     deadline :: Instant.now() + Duration.from_secs(30)
-    loop if !(binary.is_file() && map.is_file()) {
+    loop !(binary.is_file() && map.is_file()) {
         if (&adapter.try_wait()).expect("check production DAP process").is_some() -> panic("production DAP process exited before writing its debug map")
         assert(Instant.now() < deadline, "production DAP process did not publish its debug map")
         thread.sleep(Duration.from_millis(20))
@@ -357,7 +357,7 @@ use core.sys.target.[selected_os]
     &input.flush().expect("flush attach request")
     attach_deadline :: Instant.now() + Duration.from_secs(30)
     target_stopped := false
-    loop if Instant.now() < attach_deadline {
+    loop Instant.now() < attach_deadline {
         if (&adapter.try_wait()).expect("check production DAP process during attach").is_some() -> break
         state :: linux_process_state(target.id())
         if state == Val("T") || state == Val("t") { target_stopped = true; break }
@@ -377,10 +377,9 @@ use core.sys.target.[selected_os]
         loop {
             state :: linux_process_state(target.id())
             if state == Val("T") || state == Val("t") {
-                if Instant.now() < deadline -> thread.sleep(Duration.from_millis(20))
-                else -> break
+                if Instant.now() < deadline -> thread.sleep(Duration.from_millis(20)) else -> break
             } else if state.is_some() { target_running = true; break }
-            else -> break
+            else -> { break }
         }
     }
     if target_alive -> _ :: &target.kill()
@@ -466,22 +465,22 @@ use core.sys.target.[selected_os]
         chunk := [U8;4096]{0}
         loop {
             if &stdout.read(&chunk) == {
-                Ok(0) | Err(_) -> break
-                Ok(size) -> { if output_tx.send(chunk.slice(0, size).to_vec()).is_err() -> break }
+                .Ok(0) | Err(_) -> { break }
+                .Ok(size) -> { if output_tx.send(chunk.slice(0, size).to_vec()).is_err() -> break }
             }
         }
     })
     deadline :: Instant.now() + Duration.from_secs(30)
     transcript := ""
     paused := false
-    loop if Instant.now() < deadline && !paused {
+    loop Instant.now() < deadline && !paused {
         if output_rx.recv_timeout(Duration.from_millis(100)) == {
-            Ok(chunk) -> {
+            .Ok(chunk) -> {
                 &transcript.push_str(String.from_utf8_lossy(chunk))
                 paused = transcript.contains("\"request_seq\":4,\"success\":true,\"command\":\"pause\"") && transcript.contains("\"event\":\"stopped\"") && transcript.contains("\"reason\":\"pause\"")
             }
-            Err(RecvTimeoutError.Timeout) -> {}
-            Err(RecvTimeoutError.Disconnected) -> break
+            .Err(RecvTimeoutError.Timeout) -> {}
+            .Err(RecvTimeoutError.Disconnected) -> { break }
         }
     }
     threads_ok := false
@@ -489,14 +488,14 @@ use core.sys.target.[selected_os]
         &input_pipe.write_all(dap_frame("{{\"seq\":5,\"type\":\"request\",\"command\":\"threads\",\"arguments\":{{}}}}").bytes()).expect("send threads after pause")
         &input_pipe.flush().expect("flush threads request")
         threads_deadline :: Instant.now() + Duration.from_secs(5)
-        loop if Instant.now() < threads_deadline && !threads_ok {
+        loop Instant.now() < threads_deadline && !threads_ok {
             if output_rx.recv_timeout(Duration.from_millis(100)) == {
-                Ok(chunk) -> {
+                .Ok(chunk) -> {
                     &transcript.push_str(String.from_utf8_lossy(chunk))
                     threads_ok = transcript.contains("\"request_seq\":5,\"success\":true,\"command\":\"threads\"")
                 }
-                Err(RecvTimeoutError.Timeout) -> {}
-                Err(RecvTimeoutError.Disconnected) -> break
+                .Err(RecvTimeoutError.Timeout) -> {}
+                .Err(RecvTimeoutError.Disconnected) -> { break }
             }
         }
         &input_pipe.write_all(dap_frame("{{\"seq\":6,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{{}}}}").bytes()).expect("send disconnect after pause")
@@ -505,15 +504,14 @@ use core.sys.target.[selected_os]
     drop(^input_pipe)
     exit_deadline :: Instant.now() + Duration.from_secs(10)
     status := None
-    loop if Instant.now() < exit_deadline {
+    loop Instant.now() < exit_deadline {
         if (&child.try_wait()).expect("check production DAP process") == Val(result) { status = Val(result); break }
         thread.sleep(Duration.from_millis(20))
     }
     if status.is_none() { _ :: &child.kill(); status = (&child.wait()).ok() }
     _ :: output_reader.join()
     loop {
-        if output_rx.try_recv() == Ok(chunk) -> &transcript.push_str(String.from_utf8_lossy(chunk))
-        else -> break
+        if output_rx.try_recv() == Ok(chunk) -> &transcript.push_str(String.from_utf8_lossy(chunk)) else -> break
     }
     _ :: fs.remove_file(file.as_ref())
     assert(paused, "production DAP pause did not settle:\n{transcript}")
@@ -543,19 +541,19 @@ use core.sys.target.[selected_os]
         chunk := [U8;4096]{0}
         loop {
             if &stdout_pipe.read(&chunk) == {
-                Ok(0) | Err(_) -> break
-                Ok(size) -> { if output_tx.send(chunk.slice(0, size).to_vec()).is_err() -> break }
+                .Ok(0) | Err(_) -> { break }
+                .Ok(size) -> { if output_tx.send(chunk.slice(0, size).to_vec()).is_err() -> break }
             }
         }
     })
     deadline :: Instant.now() + Duration.from_secs(30)
     stdout := ""
     stopped := false
-    loop if Instant.now() < deadline && !stopped {
+    loop Instant.now() < deadline && !stopped {
         if output_rx.recv_timeout(Duration.from_millis(100)) == {
-            Ok(chunk) -> { &stdout.push_str(String.from_utf8_lossy(chunk)); stopped = stdout.contains("\"event\":\"stopped\"") }
-            Err(RecvTimeoutError.Timeout) -> {}
-            Err(RecvTimeoutError.Disconnected) -> break
+            .Ok(chunk) -> { &stdout.push_str(String.from_utf8_lossy(chunk)); stopped = stdout.contains("\"event\":\"stopped\"") }
+            .Err(RecvTimeoutError.Timeout) -> {}
+            .Err(RecvTimeoutError.Disconnected) -> { break }
         }
     }
     assert(stopped, "production DAP did not stop at entry:\n{stdout}")
@@ -685,8 +683,8 @@ use core.sys.target.[selected_os]
         chunk := [U8;4096]{0}
         loop {
             if &stdout_pipe.read(&chunk) == {
-                Ok(0) | Err(_) -> break
-                Ok(size) -> { if output_tx.send(chunk.slice(0, size).to_vec()).is_err() -> break }
+                .Ok(0) | Err(_) -> { break }
+                .Ok(size) -> { if output_tx.send(chunk.slice(0, size).to_vec()).is_err() -> break }
             }
         }
     })

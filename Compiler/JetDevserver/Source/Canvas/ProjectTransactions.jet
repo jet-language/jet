@@ -142,17 +142,17 @@ fn game_field_edit(source: String, source_span: SourceSpan, field: String, value
     field := field.trim() // #4303
     if field is {
         "path" -> {
-            if span :: game_call_argument_span(selected, source_span.start, ["image", "sound"]) -> return .Ok((span, game_string_literal(value)))
+            if game_call_argument_span(selected, source_span.start, ["image", "sound"]) == .Val(span) -> return .Ok((span, game_string_literal(value)))
             if is_quoted_source(selected) && game_source_context_contains(source, source_span, [".image(", ".sound("]) -> return .Ok((source_span, game_string_literal(value)))
             .Err(project_edit_error("bad_request", "game asset path edits must target an image or sound call"))
         }
         "component".bit_or("type").bit_or("name") -> {
-            if span :: game_component_type_span(selected, source_span.start) {
+            if game_component_type_span(selected, source_span.start) == .Val(span) {
                 validate_game_type_name(value)?
                 trimmed := value.trim() // #4303
                 return .Ok((span, trimmed.to_string()))
             }
-            if span :: game_call_argument_span(selected, source_span.start, ["component"]) -> return .Ok((span, game_string_literal(value)))
+            if game_call_argument_span(selected, source_span.start, ["component"]) == .Val(span) -> return .Ok((span, game_string_literal(value)))
             if is_quoted_source(selected) && game_source_context_contains(source, source_span, [".component<", ".component("]) -> return .Ok((source_span, game_string_literal(value)))
             if is_game_type_name(selected.trim()) && game_source_context_contains(source, source_span, [".component<"]) {
                 validate_game_type_name(value)?
@@ -186,9 +186,7 @@ fn game_call_argument_span(selected: String, offset: Usize, methods: [String]) -
     loop index in open + 1..bytes.len() {
         byte :: bytes[index]
         if in_string {
-            if escaped { escaped = false }
-            else if byte == 92 { escaped = true }
-            else if byte == 34 { in_string = false }
+            if escaped { escaped = false } else if byte == 92 { escaped = true } else if byte == 34 { in_string = false }
             next
         }
         if byte is {
@@ -239,8 +237,7 @@ fn is_game_type_name(value: String) -> Bool {
 }
 // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:474
 fn validate_game_type_name(value: String) Err! {
-    if is_game_type_name(value.trim()) -> .Ok(())
-    else -> .Err(project_edit_error("bad_request", "component type must be a qualified Jet type name"))
+    if is_game_type_name(value.trim()) -> .Ok(_) else -> .Err(project_edit_error("bad_request", "component type must be a qualified Jet type name"))
 }
 // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:485
 fn game_string_literal(value: String) -> String {
@@ -271,9 +268,7 @@ fn json_object_body(text: String, key: String) -> String? {
     escaped := false
     loop (index, byte) in rest.bytes().enumerate() {
         if in_string {
-            if escaped { escaped = false }
-            else if byte == 92 { escaped = true }
-            else if byte == 34 { in_string = false }
+            if escaped { escaped = false } else if byte == 92 { escaped = true } else if byte == 34 { in_string = false }
             next
         }
         if byte is {
@@ -299,13 +294,13 @@ fn validate_touched_project_files(ctx: &ProjectContext, touched: [TouchedProject
         }
         if current.revision != file.revision -> return .Err(project_edit_conflict("source file changed since this Canvas project was drawn", ctx.project_revision))
     }
-    .Ok(())
+    .Ok(_)
 }
 
 // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:587
 // The selected semantic definition anchor owns the preview and transaction edit set.
 fn prepare_project_rename(ctx: ProjectContext, selected_path: OSPath, from: String, to: String, touched: [TouchedProjectFile]?) -> ProjectRenamePlan ProjectRenameError! {
-    if diagnostic :: ctx.authority_diagnostic -> return .Err(ProjectRenameError.new("stale", diagnostic.what))
+    if ctx.authority_diagnostic == .Val(diagnostic) -> return .Err(ProjectRenameError.new("stale", diagnostic.what))
     sources :: project_rename_sources(ctx)?
     selected :: sources.iter().find((source) -> source.path == selected_path) ?? return .Err(ProjectRenameError.new("not_found", "Canvas rename source is not in the projected project"))
     anchor :: selected_rename_anchor(ctx, selected, from)?
@@ -333,7 +328,7 @@ fn prepare_project_rename(ctx: ProjectContext, selected_path: OSPath, from: Stri
         changes.push(ProjectChange(path: source.path, rel: source.source_id, before: source.source, after: after, existed: true))
     }
     changes.sort_by((left, right) -> left.rel.cmp(right.rel))
-    if touched :: touched {
+    if touched == .Val(touched) {
         loop change in changes {
             require_touched_revision(touched, change.rel, source_revision(change.before)).map_err((error) -> ProjectRenameError.new("bad_request", error))?
         }
@@ -402,8 +397,8 @@ fn definition_matches_anchor(definition: SymbolDef, anchor: DefinitionAnchor) ->
 fn reference_matches_anchor(reference: SymbolRef, anchor: DefinitionAnchor) -> Bool {
     target :: reference.target ?? return false
     if target.def_span != anchor.def_span -> return false
-    if left :: target.semantic_identity {
-        if right :: anchor.semantic_identity -> return left == right
+    if target.semantic_identity == .Val(left) {
+        if anchor.semantic_identity == .Val(right) -> return left == right
     }
     target.module_path == anchor.module_path
 }
@@ -470,8 +465,8 @@ fn apply_project_add_target(ctx: ProjectContext, request: String, touched: [Touc
 // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:989
 fn project_manifest_rel(ctx: ProjectContext, request: String) -> String Err! {
     relative :: json_string_field(request, "manifest").unwrap_or_else(() -> {
-        if root :: ctx.manifest_root -> return rel_path(ctx.project_root, root.join(Syntax.PAYLOAD_FILE))
-        if root :: ctx.ecosystem_root -> return rel_path(ctx.project_root, root.join(Syntax.PACKAGE_FILE))
+        if ctx.manifest_root == .Val(root) -> return rel_path(ctx.project_root, root.join(Syntax.PAYLOAD_FILE))
+        if ctx.ecosystem_root == .Val(root) -> return rel_path(ctx.project_root, root.join(Syntax.PACKAGE_FILE))
         Syntax.PAYLOAD_FILE.to_string()
     })
     clean_project_rel_path(relative)
@@ -498,11 +493,14 @@ fn apply_project_create_package(ctx: ProjectContext, request: String, touched: [
     output_kind :: if target is { "library" -> "Library"; "test" -> "Check"; "executable" | "example" -> "Executable"; _ -> "Executable" }
     manifest :: "name: \"{name}\"\nversion: \"0.1.0\"\n{name} :: Output.{output_kind}{{ name: \"{name}\", entry: run }}\n"
     Package.PackageFacts.parse(manifest, manifest_rel).map_err((e) -> project_edit_error("diagnostic", "{e}"))?
-    entry :: if target == "library" {
-        "pub fn {name}_ready() -> Bool {{\n    return true\n}}\n"
-    } else { "fn run() -> {{\n    print(\"{name}\")\n}}\n" }
+    entry :: if {
+        target == "library" -> {
+            "pub fn {name}_ready() -> Bool {{\n    return true\n}}\n"
+        }
+        else -> { "fn run() -> {{\n    print(\"{name}\")\n}}\n" }
+    }
     (tokens, lex_diags) :: Lexer.lex(entry)
-    if d :: lex_diags.into_iter().find((d) -> d.severity == Severity.Error) -> return .Err(project_edit_error("diagnostic", d.what))
+    if lex_diags.into_iter().find((d) == .Val(d) -> d.severity == Severity.Error) -> return .Err(project_edit_error("diagnostic", d.what))
     Parser.parse_with_source(tokens, entry).map((_) -> ()).map_err((diags) -> {
         diags := diags
         what :: diags.pop().map((d) -> d.what).unwrap_or("created package entry did not parse")
@@ -558,15 +556,15 @@ fn apply_project_add_env_service(ctx: ProjectContext, request: String, touched: 
 // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1228
 fn env_service_source(request: String, name: String) -> String Err! {
     fields := ["enable: {if json_bool_field(request, "enable").unwrap_or(true) { "true" } else { "false" }}"]
-    if port :: json_usize_field(request, "port") -> fields.push("ports: [{port}]")
+    if json_usize_field(request, "port") == .Val(port) -> fields.push("ports: [{port}]")
     if request.contains("\"init\"") && json_string_array(request, "run").is_empty() -> return .Err(project_edit_error("bad_request", "service start commands use typed `run: [program, args…]`, not `init`"))
     run :: json_string_array(request, "run")
     if !run.is_empty() {
         rendered :: run.iter().map((arg) -> "\"{manifest_string(arg)}\"").collect().join(", ")
         fields.push("run: [{rendered}]")
     }
-    if ready :: json_string_field(request, "ready") -> fields.push("ready: \"{manifest_string(ready)}\"")
-    if shutdown :: json_string_field(request, "shutdown") {
+    if json_string_field(request, "ready") == .Val(ready) -> fields.push("ready: \"{manifest_string(ready)}\"")
+    if json_string_field(request, "shutdown") == .Val(shutdown) {
         policy :: if shutdown is {
             "kill" | "Kill" -> ".Kill"
             "term" | "Term" | "graceful" | "Graceful" -> ".Term"
@@ -574,7 +572,7 @@ fn env_service_source(request: String, name: String) -> String Err! {
         }
         fields.push("shutdown: {policy}")
     }
-    if data_dir :: json_string_field(request, "data_dir") -> fields.push("data_dir: \"{manifest_string(data_dir)}\"")
+    if json_string_field(request, "data_dir") == .Val(data_dir) -> fields.push("data_dir: \"{manifest_string(data_dir)}\"")
     .Ok("{name}: {{ {fields.join(", ")} }}")
 }
 // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1276
@@ -630,22 +628,24 @@ fn workspace_find_covers(src: String, member_path: String) -> Bool {
 fn validate_payload_field(field: String, value: String) Err! {
     if field is {
         "name" -> validate_ident_for_project(value)
-        "version".bit_or("jet").bit_or("description").bit_or("license").bit_or("repository").bit_or("edition") -> .Ok(())
+        "version".bit_or("jet").bit_or("description").bit_or("license").bit_or("repository").bit_or("edition") -> .Ok(_)
         _ -> .Err(project_edit_error("bad_request", "Canvas can edit known payload string fields only"))
     }
 }
 // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1379
 fn is_canonical_package_file(path: String) -> Bool {
-    OSPath.new(path).file_name().and_then((name) -> name.to_str()) == .Some(Syntax.PACKAGE_FILE)
+    OSPath.new(path).file_name().and_then((name) -> name.to_str()) == .Some(.PACKAGE_FILE)
 }
 // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1389
 // Use the shared comment- and order-preserving dependency edit engine.
 fn apply_canonical_dependency(ctx: &ProjectContext, request: String, manifest_rel: String, before: String, name: String, add: (String, Manifest.DepSpec)?) -> String Err! {
     adding :: add.is_some()
     after :: if add is {
-        .Some((spec_text, spec)) -> {
+        .Some(tuple_8) -> {
+            spec_text :: tuple_8._0
+            spec :: tuple_8._1
             facts :: Package.PackageFacts.parse(before, manifest_rel).map_err((error) -> project_edit_error("diagnostic", error.to_string()))?
-            if existing :: facts.deps.get(name) {
+            if facts.deps.get(name) == .Val(existing) {
                 if Package.dep_display_redacted(existing) != spec_text -> return .Err(project_edit_error("conflict", "the canonical Package already declares this dependency with another spec"))
             }
             Manifest.add_dependency(before, name, spec)
@@ -677,9 +677,7 @@ fn replace_top_level_field(src: String, field: String, replacement: String) -> S
     }
     loop (index, byte) in src.bytes().enumerate() {
         if quoted {
-            if escaped { escaped = false }
-            else if byte == 92 { escaped = true }
-            else if byte == 34 { quoted = false }
+            if escaped { escaped = false } else if byte == 92 { escaped = true } else if byte == 34 { quoted = false }
             next
         }
         if byte is {
@@ -720,9 +718,7 @@ fn block_body_span(src: String, label: String) -> (Usize, Usize)? {
     loop i in open..bytes.len() {
         b :: bytes[i]
         if in_string {
-            if escaped { escaped = false }
-            else if b == 92 { escaped = true }
-            else if b == 34 { in_string = false }
+            if escaped { escaped = false } else if b == 92 { escaped = true } else if b == 34 { in_string = false }
             next
         }
         if b is {
@@ -738,7 +734,7 @@ fn block_body_span(src: String, label: String) -> (Usize, Usize)? {
 fn manifest_string(value: String) -> String { value.replace('\\', "\\\\").replace('"', "\\\"") }
 // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1541
 fn require_touched_revision(touched: [TouchedProjectFile], path: String, revision: String) Err! {
-    if touched.iter().any((file) -> file.path == path && file.revision == revision) -> return .Ok(())
+    if touched.iter().any((file) -> file.path == path && file.revision == revision) -> return .Ok(_)
     .Err(project_edit_error("bad_request", "project transaction touched files do not match the operation"))
 }
 // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1558
@@ -771,17 +767,17 @@ fn validate_project_path(root: OSPath, path: OSPath, relative: String) Err! {
     loop (index, component) in components.iter().enumerate() {
         current.push(component.as_os_str())
         if fs.symlink_metadata(current) is {
-            .Ok(metadata) if metadata.file_type().is_symlink() -> return .Err(project_edit_error("io", "Canvas project paths must not traverse symlinks"))
-            .Ok(metadata) if index + 1 < components.len() && !metadata.is_dir() -> return .Err(project_edit_error("io", "Canvas project path has a non-directory parent"))
+            .Ok(metadata) && metadata.file_type().is_symlink() -> { return .Err(project_edit_error("io", "Canvas project paths must not traverse symlinks")) }
+            .Ok(metadata) && index + 1 < components.len() && !metadata.is_dir() -> { return .Err(project_edit_error("io", "Canvas project path has a non-directory parent")) }
             .Ok(_) -> {
                 canonical :: fs.canonicalize(current).map_err((error) -> project_edit_error("io", "could not resolve Canvas project path: {error}"))?
                 if !canonical.starts_with(canonical_root) -> return .Err(project_edit_error("io", "Canvas project path escapes the project root"))
             }
-            .Err(error) if error.kind() == ErrorKind.NotFound -> break // GATE #4409
-            .Err(error) -> return .Err(project_edit_error("io", "could not inspect Canvas project path: {error}"))
+            .Err(error) && error.kind() == ErrorKind.NotFound -> { break // GATE #4409 }
+            .Err(error) -> { return .Err(project_edit_error("io", "could not inspect Canvas project path: {error}")) }
         }
     }
-    .Ok(())
+    .Ok(_)
 }
 // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1669
 fn is_reserved_project_path_part(part: String) -> Bool { part == ".git".bit_or(".jet").bit_or("target").bit_or("build") }
@@ -810,8 +806,7 @@ fn finish_project_changes(ctx: ProjectContext, request: String, op: String, chan
 fn finish_project_changes_with_audit(ctx: ProjectContext, request: String, op: String, changes: [ProjectChange], audit: String) -> String Err! {
     changes := changes
     loop change in changes { validate_project_path(ctx.project_root, change.path, change.rel)? }
-    if op == "rename_binding".bit_or("rename_function") { normalize_and_format_project_changes(ctx, &changes)? }
-    else { normalize_and_validate_project_changes(ctx, &changes)? }
+    if op == "rename_binding".bit_or("rename_function") { normalize_and_format_project_changes(ctx, &changes)? } else { normalize_and_validate_project_changes(ctx, &changes)? }
     if op == "rename_binding".bit_or("rename_function") -> validate_project_rename_overlay(ctx, changes)?
     preview :: json_bool_field(request, "preview").unwrap_or(false) || op.starts_with("preview_")
     changed :: changes.iter().any((c) -> c.before != c.after)
@@ -849,12 +844,12 @@ fn normalize_and_validate_project_changes_inner(ctx: &ProjectContext, changes: &
             WorkspaceFile.evaluate(change.after, ctx.project_root).map_err((d) -> project_edit_error("diagnostic", d.what))?
         } else if change.rel.ends_with("/{Syntax.ENV_FILE}") || change.rel == Syntax.ENV_FILE {
             ModuleEval.evaluate_env(change.after, ctx.project_root).map_err((d) -> project_edit_error("diagnostic", d.what))?
-        } else if change.path.extension().and_then((e) -> e.to_str()) == .Some(Syntax.FILE_EXT) {
+        } else if change.path.extension().and_then((e) -> e.to_str()) == .Some(.FILE_EXT) {
             change.after = Formatter.format_source(change.after).map_err((diags) -> project_edit_error("diagnostic", render_all(change.path.display().to_string(), change.after, diags)))?
             if check_source -> validate_project_jet_overlay(change.path, change.after)?
         } else { return .Err(project_edit_error("bad_request", "Canvas project transactions may only write Jet source truth")) }
     }
-    .Ok(())
+    .Ok(_)
 }
 // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1852
 fn validate_project_rename_overlay(ctx: &ProjectContext, changes: [ProjectChange]) Err! {
@@ -864,12 +859,15 @@ fn validate_project_rename_overlay(ctx: &ProjectContext, changes: [ProjectChange
 // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1865
 fn validate_project_jet_overlay(path: OSPath, src: String) Err! {
     shown :: path.display().to_string()
-    diags :: if path.exists() {
-        (diags, _) :: Driver.check_file(shown, .Some((path, src)), false)
-        diags
-    } else { Driver.check_eval(src, shown) }
+    diags :: if {
+        path.exists() -> {
+            (diags, _) :: Driver.check_file(shown, .Some((path, src)), false)
+            diags
+        }
+        else -> { Driver.check_eval(src, shown) }
+    }
     errors :: diags.into_iter().filter((d) -> d.severity == Severity.Error).collect()
-    if errors.is_empty() -> return .Ok(())
+    if errors.is_empty() -> return .Ok(_)
     .Err(project_edit_error("diagnostic", render_all(shown, src, errors)))
 }
 
@@ -882,7 +880,7 @@ fn write_project_changes_with_rollback(ctx: &ProjectContext, changes: [ProjectCh
         loop change in changes {
             if change.before == change.after -> next
             validate_project_path(ctx.project_root, change.path, change.rel).map_err((error) -> SourceWriteError.Io(Error.new(ErrorKind.PermissionDenied, error)))? // GATE #4409
-            if parent :: change.path.parent() {
+            if change.path.parent() == .Val(parent) {
                 if ensure_no_symlink_directory(parent) == .Err(error) {
                     rollback_project_writes(written)
                     return .Err(SourceWriteError.Io(error))
@@ -895,7 +893,7 @@ fn write_project_changes_with_rollback(ctx: &ProjectContext, changes: [ProjectCh
             }
             written.push(ProjectWriteBackup(path: change.path, before: change.before, after: change.after, existed: change.existed))
         }
-        .Ok(())
+        .Ok(_)
     }).map_err((error) -> if error is {
         .Conflict -> {
             current_revision :: project_context_for_entry(ctx.entry_path).project_revision
@@ -906,8 +904,8 @@ fn write_project_changes_with_rollback(ctx: &ProjectContext, changes: [ProjectCh
 }
 // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1945
 fn record_project_rename(ctx: &ProjectContext, changes: [ProjectChange], from: String, to: String) Err! {
-    source_changes :: changes.iter().filter((change) -> change.before != change.after && change.path.extension().and_then((extension) -> extension.to_str()) == .Some(Syntax.FILE_EXT)).collect()
-    if source_changes.is_empty() -> return .Ok(())
+    source_changes :: changes.iter().filter((change) -> change.before != change.after && change.path.extension().and_then((extension) -> extension.to_str()) == .Some(.FILE_EXT)).collect()
+    if source_changes.is_empty() -> return .Ok(_)
     overlays :: source_changes.iter().map((change) -> (change.path, change.before)).collect()
     before_index :: semindex.open_with_overlays(ctx.entry_path, overlays).map_err((error) -> project_edit_error("diagnostic", error.to_string()))?
     targets :: before_index.definition_facts().iter().filter((fact) -> fact.name == from).filter((fact) -> source_changes.iter().any((change) -> module_belongs_to(ctx.project_root, change.path, fact.module_path))).map((fact) -> "{{\"stable_id\":{json_str(fact.stable_id)},\"before\":{json_str(fact.human_identity)},\"after\":{json_str(format("{}::{}", fact.module_path, to))},\"kind\":{json_str(fact.kind)},\"module_path\":{json_str(fact.module_path)}}}").collect().join(",")
@@ -923,12 +921,12 @@ fn record_project_rename(ctx: &ProjectContext, changes: [ProjectChange], from: S
     log :: "{{\"schema\":2,\"name\":{json_str(base)},\"project\":{json_str(ctx.project_root.display().to_string())},\"semantic_ops\":[{op}],\"files\":[{files}]}}\n"
     loop {
         if write_new_file_without_symlinks(receipt, log.as_bytes()) is {
-            .Ok(()) -> return .Ok(())
-            .Err(error) if error.kind() == ErrorKind.AlreadyExists -> {
+            .Ok(_) -> { return .Ok(_) }
+            .Err(error) && error.kind() == ErrorKind.AlreadyExists -> {
                 suffix += 1
                 receipt = directory.join("{base}-{suffix}.log.json")
             }
-            .Err(error) -> return .Err(project_edit_error("io", "could not record project rename: {error}"))
+            .Err(error) -> { return .Err(project_edit_error("io", "could not record project rename: {error}")) }
         }
     }
 }
@@ -936,8 +934,7 @@ fn record_project_rename(ctx: &ProjectContext, changes: [ProjectChange], from: S
 fn project_revision_after_changes(ctx: ProjectContext, changes: [ProjectChange]) -> String {
     files := ctx.files.clone()
     loop change in changes {
-        if file :: files.iter_mut().find((file) -> file.path == change.rel) { file.revision = source_revision(change.after) }
-        else { files.push(ProjectFileRec(path: change.rel, revision: source_revision(change.after), kind: project_file_kind_for_rel(change.rel))) }
+        if files.iter_mut().find((file) == .Val(file) -> file.path == change.rel) -> file.revision = source_revision(change.after) else -> files.push(ProjectFileRec(path: change.rel, revision: source_revision(change.after), kind: project_file_kind_for_rel(change.rel)))
     }
     files.sort_by((left, right) -> left.path.cmp(right.path))
     project_revision_from_files(files)
@@ -954,12 +951,7 @@ fn rollback_project_writes(written: [ProjectWriteBackup]) {
 struct ProjectWriteBackup { path: OSPath, before: String, after: String, existed: Bool }
 // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:2084
 fn project_file_kind_for_rel(rel: String) -> String {
-    if is_canonical_package_file(rel) { "package" }
-    else if rel.ends_with("/{Syntax.PAYLOAD_FILE}") || rel == Syntax.PAYLOAD_FILE { "manifest" }
-    else if rel.ends_with("/{Syntax.WORKSPACE_FILE}") || rel == Syntax.WORKSPACE_FILE { "workspace" }
-    else if rel.ends_with("/{Syntax.ENV_FILE}") || rel == Syntax.ENV_FILE { "env" }
-    else if rel == Syntax.UNIFIED_LOCK_FILE { "lock" }
-    else { "source" }
+    if is_canonical_package_file(rel) { "package" } else if rel.ends_with("/{Syntax.PAYLOAD_FILE}") || rel == Syntax.PAYLOAD_FILE { "manifest" } else if rel.ends_with("/{Syntax.WORKSPACE_FILE}") || rel == Syntax.WORKSPACE_FILE { "workspace" } else if rel.ends_with("/{Syntax.ENV_FILE}") || rel == Syntax.ENV_FILE { "env" } else if rel == Syntax.UNIFIED_LOCK_FILE { "lock" } else { "source" }
 }
 // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:2106
 fn diagnostic_json(d: Diagnostic) -> String {

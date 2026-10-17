@@ -13,7 +13,7 @@ use std.time.[Duration, Instant, SystemTime]
 use jet_driver.Diagnostics.[Diagnostic]
 use jet_driver.Loader as Loader
 use jet_driver.Syntax.[PACKAGE_FILE, PAYLOAD_FILE]
-use jet_foundation.JSON.[json_escape]
+use jet_foundation.JSON.[foundation_json_escape]
 use jet_foundation.Game.[JetGameChangeKind]
 use jet_foundation.SHA256 as SHA256
 use core.sys.target.[selected_os]
@@ -61,7 +61,7 @@ struct PathStamp {
 struct WatchWake {
     sender: mpsc.Sender<()>
     // Rust: crates/jet-devserver/src/WatchService.rs:108
-    fn wake(self) -> () { _ :: self.sender.send(()) }
+    fn wake(self) -> () { _ :: self.sender.send(_) }
 }
 // Rust: crates/jet-devserver/src/WatchService.rs:113
 struct EventWaiter {
@@ -81,7 +81,7 @@ struct EventWaiter {
         if selected_os() == "linux" && self.native.is_some() {
             return if timeout == {
                 .Val(timeout) -> self.receiver.recv_timeout(timeout).is_ok()
-                None -> self.receiver.recv().is_ok()
+                .None -> self.receiver.recv().is_ok()
             }
         }
         timeout :: timeout.unwrap_or(Duration.from_millis(WATCH_POLL_INTERVAL_MS))
@@ -209,7 +209,7 @@ fn run(control_read: I32, paths: Arc<Mutex<[OSPath]>>, stop: Arc<AtomicBool>, se
         fds := [PollFd{fd: control_read, events: POLLIN, revents: 0}, PollFd{fd: notify_fd, events: POLLIN, revents: 0}]
         count :: if notify_fd >= 0 -> 2 else -> 1; result :: poll(&fds.as_mut_ptr(), count, -1)
         if result < 0 {
-            if std.io.Error.last_os_error().raw_os_error() == .Val(4) -> next
+            if std.io.Error.last_os_error().raw_os_error() == 4 -> next
             break
         }
         if fds[0].revents != 0 {
@@ -225,7 +225,7 @@ fn run(control_read: I32, paths: Arc<Mutex<[OSPath]>>, stop: Arc<AtomicBool>, se
                 if count <= 0 -> break
                 changed = true
             }
-            if changed -> _ :: sender.send(())
+            if changed -> _ :: sender.send(_)
         }
     }
     if notify_fd >= 0 -> _ :: close(notify_fd)
@@ -254,19 +254,19 @@ struct DevWatchEntry {
 struct WatchNode { path: OSPath; kind: RootKind; stamp: PathStamp; is_dir: Bool }
 // Rust: crates/jet-devserver/src/WatchService.rs:508
 fn join_optional_quoted(items: [String?]) -> String {
-    items.iter().map((item) -> item.as_ref().map((value) -> "\"{json_escape(value)}\"").unwrap_or("null")).collect().join(",")
+    items.iter().map((item) -> item.as_ref().map((value) -> "\"{foundation_json_escape(value)}\"").unwrap_or("null")).collect().join(",")
 }
 // Rust: crates/jet-devserver/src/WatchService.rs:520
-fn join_quoted(items: [String]) -> String { items.iter().map((item) -> "\"{json_escape(item)}\"").collect().join(",") }
+fn join_quoted(items: [String]) -> String { items.iter().map((item) -> "\"{foundation_json_escape(item)}\"").collect().join(",") }
 // Rust: crates/jet-devserver/src/WatchService.rs:528
 fn join_dev_entries(entries: [DevWatchEntry]) -> String {
     entries.iter().map((entry) -> {
-        optional :: (value: String?) -> value.map((value) -> "\"{json_escape(value)}\"").unwrap_or("null")
-        "{{\"path\":\"{json_escape(entry.path.display().to_string())}\",\"change_kind\":\"{entry.change_kind}\",\"game_kind\":\"{entry.game_kind.as_str()}\",\"old_digest\":{optional(entry.old_digest.as_ref())},\"new_digest\":{optional(entry.new_digest.as_ref())},\"old_schema_id\":{optional(entry.old_schema_id.as_ref())},\"new_schema_id\":{optional(entry.new_schema_id.as_ref())}}}"
+        optional :: (value: String?) -> value.map((value) -> "\"{foundation_json_escape(value)}\"").unwrap_or("null")
+        "{{\"path\":\"{foundation_json_escape(entry.path.display().to_string())}\",\"change_kind\":\"{entry.change_kind}\",\"game_kind\":\"{entry.game_kind.as_str()}\",\"old_digest\":{optional(entry.old_digest.as_ref())},\"new_digest\":{optional(entry.new_digest.as_ref())},\"old_schema_id\":{optional(entry.old_schema_id.as_ref())},\"new_schema_id\":{optional(entry.new_schema_id.as_ref())}}}"
     }).collect().join(",")
 }
 // Rust: crates/jet-devserver/src/WatchService.rs:553
-fn join_paths(paths: [OSPath]) -> String { paths.iter().map((p) -> "\"{json_escape(p.display().to_string())}\"").collect().join(",") }
+fn join_paths(paths: [OSPath]) -> String { paths.iter().map((p) -> "\"{foundation_json_escape(p.display().to_string())}\"").collect().join(",") }
 // Rust: crates/jet-devserver/src/WatchService.rs:564
 struct WatchGraph {
     nodes: [OSPath:WatchNode]; asset_roots: [OSPath:Bool]; runtime_input_roots: [OSPath:Bool]
@@ -362,8 +362,7 @@ struct WatchGraph {
         path :: canonicalize_loose(path)
         if visited.contains_key(path) -> return
         &visited.insert(path.clone(), true); is_dir :: path.is_dir(); exists :: fs.metadata(path).is_ok()
-        if &self.nodes.get_mut(path) == .Val(node) { if exists -> node.is_dir = is_dir }
-        else {
+        if &self.nodes.get_mut(path) == .Val(node) { if exists -> node.is_dir = is_dir } else {
             &self.nodes.insert(path.clone(), WatchNode{path: path.clone(), kind: .Asset,
                 stamp: PathStamp{exists: false, mtime: None, len: None, digest: None}, is_dir})
         }
@@ -412,9 +411,9 @@ struct WatchGraph {
         }
         extension :: path.extension().and_then((e) -> e.to_str()).map((e) -> e.to_ascii_lowercase())
         if extension == {
-            .Val("jet") -> .Import
+            .Val(lit0) && lit0 == "jet" -> .Import
             .Val("html") | .Val("htm") -> .HTML
-            .Val("css") -> .Style
+            .Val(lit0) && lit0 == "css" -> .Style
             .Val("png") | .Val("jpg") | .Val("jpeg") | .Val("gif") | .Val("svg") | .Val("webp") | .Val("woff") | .Val("woff2") | .Val("ttf") | .Val("otf") -> .Asset
             .Val("toml") | .Val("json") | .Val("yaml") | .Val("yml") -> .BuildInput
             else -> if name.starts_with("target.") || name.contains("target_fact") -> .TargetFact else -> .BuildInput
@@ -471,8 +470,7 @@ struct WatchGraph {
         if visited.contains_key(path) -> return
         &visited.insert(path.clone(), true); exists :: fs.metadata(path).is_ok(); is_dir :: path.is_dir() || (dir_hint && !exists)
         kind :: if is_dir -> RootKind.Asset else -> WatchGraph.classify(path)
-        if &self.nodes.get_mut(path) == .Val(node) { if exists { node.is_dir = is_dir; if is_dir -> node.kind = .Asset } }
-        else { &self.upsert_with_dir_hint(path.clone(), kind, dir_hint && !exists) }
+        if &self.nodes.get_mut(path) == .Val(node) { if exists { node.is_dir = is_dir; if is_dir -> node.kind = .Asset } } else { &self.upsert_with_dir_hint(path.clone(), kind, dir_hint && !exists) }
         if register_root && dir_hint -> &self.runtime_input_roots.insert(path.clone(), true)
         if self.entry == .Val(entry) -> &self.link(entry.clone(), path.clone())
         if !is_dir -> return
@@ -503,7 +501,7 @@ struct WatchGraph {
         deps :: if Loader.load_entry_with_overlays_and_dependencies(entry_str, [], false) == {
             (.Ok(bundle), deps) -> {
                 paths := ^deps
-                loop module in bundle.modules { &paths.push(module_ref.path.clone()) }
+                loop module_ref in bundle.modules { &paths.push(module_ref.path.clone()) }
                 if bundle.modules.get(bundle.entry) == .Val(module_ref) {
                     if (module_ref.path.parent(), module_ref.html_path.as_ref()) == (.Val(parent), .Val(html)) {
                         if local_reference_path(parent, html) == .Val(path) -> &paths.push(path)
@@ -541,7 +539,9 @@ fn runtime_file_inputs(source: String) -> [RuntimeFileInput] {
                 if bytes.get(cursor) != .Val(U8{40}) { offset = cursor; next }
                 cursor += 1
                 loop { if !bytes.get(cursor).is_some_and((b) -> b.is_ascii_whitespace()) -> break; cursor += 1 }
-                if quoted_literal(source, cursor) == .Val((value, end)) {
+                if quoted_literal(source, cursor) == .Val(tuple_9) {
+                    value :: tuple_9._0
+                    end :: tuple_9._1
                     if !value.is_empty() && !value.contains('{') && !value.contains('}') && !value.contains("://") {
                         &inputs.entry(value.to_string()).and_modify((seen_dir) -> seen_dir |= is_dir).or_insert(is_dir)
                     }
@@ -561,10 +561,9 @@ fn quoted_literal(source: String, start: USize) -> (String, USize)? {
         value_start :: start + 1; cursor := value_start
         loop {
             if cursor >= bytes.len() -> break
-            if bytes[cursor] == 92 { cursor = cursor.saturating_add(2) }
-            else if bytes[cursor] == quote {
+            if bytes[cursor] == 92 { cursor = cursor.saturating_add(2) } else if bytes[cursor] == quote {
                 value := source[value_start..cursor] // #4303
-                return .Val((value, cursor))
+                return .Val((_0: value, _1: cursor))
             } else { cursor += 1 }
         }
     }
@@ -588,11 +587,11 @@ fn local_reference_path(base: OSPath, raw: String) -> OSPath? {
 // Rust: crates/jet-devserver/src/WatchService.rs:1279
 fn referenced_paths(path: OSPath, source: String) -> [String] {
     references := [String]{}; extension :: path.extension().and_then((e) -> e.to_str()).map((e) -> e.to_ascii_lowercase())
-    if extension == .Val("html") || extension == .Val("htm") {
+    if extension == "html" || extension == "htm" {
         loop attribute in ["src", "href", "poster", "srcset"] { extract_values_after(source, attribute, .Val(U8{61}), false, attribute == "srcset", &references) }
     }
-    if extension == .Val("html") || extension == .Val("htm") || extension == .Val("css") -> extract_values_after(source, "url", .Val(U8{40}), false, false, &references)
-    if extension == .Val("js") || extension == .Val("mjs") {
+    if extension == "html" || extension == "htm" || extension == "css" -> extract_values_after(source, "url", .Val(U8{40}), false, false, &references)
+    if extension == "js" || extension == "mjs" {
         extract_values_after(source, "from", None, false, false, &references); extract_values_after(source, "import", None, true, false, &references)
     }
     ^references
@@ -616,13 +615,13 @@ fn extract_values_after(source: String, keyword: String, delimiter: U8?, optiona
                     cursor += 1
                     loop { if !bytes.get(cursor).is_some_and((b) -> b.is_ascii_whitespace()) -> break; cursor += 1 }
                 }
-                None -> {
+                .None -> {
                     if optional_parentheses && bytes.get(cursor) == .Val(U8{40}) {
                         cursor += 1
                         loop { if !bytes.get(cursor).is_some_and((b) -> b.is_ascii_whitespace()) -> break; cursor += 1 }
                     }
                 }
-                else -> panic("unreachable delimiter")
+                else -> { panic("unreachable delimiter") }
             }
             quote :: bytes.get(cursor).copied().filter((b) -> b == 39 || b == 34)
             if quote.is_some() -> cursor += 1
@@ -630,7 +629,7 @@ fn extract_values_after(source: String, keyword: String, delimiter: U8?, optiona
             value_start :: cursor
             value_end :: if quote == {
                 .Val(quote) -> source[cursor..<source.len()].find(Char(quote)).map((i) -> cursor + i).unwrap_or(source.len())
-                None -> source[cursor..<source.len()].find((ch) -> ch.is_ascii_whitespace() || ch == '>' || (delimiter == .Val(U8{40}) && ch == ')')).map((i) -> cursor + i).unwrap_or(source.len())
+                .None -> source[cursor..<source.len()].find((ch) -> ch.is_ascii_whitespace() || ch == '>' || (delimiter == .Val(U8{40}) && ch == ')')).map((i) -> cursor + i).unwrap_or(source.len())
             }
             if value_start < value_end {
                 value := source[value_start..value_end] // #4303
@@ -688,11 +687,11 @@ struct WatchSession {
         loop node in self.graph.nodes() {
             now :: PathStamp.capture(node.path)
             if !node.stamp.changed_since(now) -> next
-            kind :: if (_0: node.stamp.exists, _1: now.exists) == {
-                (false, true) -> ChangeKind.Created
-                (_0: true, _1: false) -> ChangeKind.Deleted
-                (_0: true, _1: true) -> ChangeKind.Modified
-                (_0: false, _1: false) -> next
+            kind :: if {
+                node.stamp.exists == false && now.exists == true -> ChangeKind.Created
+                node.stamp.exists == true && now.exists == false -> ChangeKind.Deleted
+                node.stamp.exists == true && now.exists == true -> ChangeKind.Modified
+                node.stamp.exists == false && now.exists == false -> next
             }
             &changed.push(node.path.clone()); &change_kinds.push(kind)
         }
@@ -703,7 +702,7 @@ struct WatchSession {
         settled := [OSPath]{}; settled_kinds := [ChangeKind]{}; settled_root_kinds := [RootKind]{}
         settled_old_digests := [String?]{}; settled_digests := [String?]{}
         loop (path, change_kind) in changed.into_iter().zip(change_kinds.into_iter()) {
-            (root_kind, is_dir) :: self.graph.nodes.get(path).map((node) -> (node.kind, node.is_dir)).unwrap_or_else(() -> (WatchGraph.classify(path), path.is_dir()))
+            (root_kind, is_dir) :: self.graph.nodes.get(path).map((node) -> (_0: node.kind, _1: node.is_dir)).unwrap_or_else(() -> (_0: WatchGraph.classify(path), _1: path.is_dir()))
             now :: PathStamp.capture(path)
             previous :: self.graph.nodes.get(path).map((node) -> node.stamp.clone()).unwrap_or(PathStamp{exists: false, mtime: None, len: None, digest: None})
             if !previous.changed_since(now) && change_kind != ChangeKind.Renamed -> next
@@ -729,8 +728,7 @@ struct WatchSession {
                 content_digests: stale_digests, dev_entries, edit_to_visible_ms: None})
         }
         loop path in settled {
-            if &self.graph.nodes.get_mut(path) == .Val(node) { node.stamp = PathStamp.capture(path) }
-            else { &self.graph.upsert(path.clone(), WatchGraph.classify(path)) }
+            if &self.graph.nodes.get_mut(path) == .Val(node) -> node.stamp = PathStamp.capture(path) else -> &self.graph.upsert(path.clone(), WatchGraph.classify(path))
         }
         closure :: self.graph.closure_of(settled); edit_to_visible_ms :: self.edit_started.map((started) -> started.elapsed().as_millis())
         self.edit_started = None
@@ -748,7 +746,7 @@ struct WatchSession {
             if Instant.now() >= deadline -> break
             truncated :: paths.iter().zip(previous).any((pair) -> {
                 (path, now) :: pair
-                now.len == .Val(0) && self.graph.nodes.get(path).and_then((node) -> node.stamp.len).is_some_and((len) -> len > 0)
+                now.len == 0 && self.graph.nodes.get(path).and_then((node) -> node.stamp.len).is_some_and((len) -> len > 0)
             })
             self.events.coalesce(self.coalesce)
             current :: paths.iter().map((path) -> PathStamp.capture(path)).collect()
@@ -810,7 +808,7 @@ fn detect_renames(changed: [OSPath], change_kinds: [ChangeKind], graph: WatchGra
 fn make_dev_entries(graph: WatchGraph, paths: [OSPath], change_kinds: [ChangeKind], root_kinds: [RootKind], old_digests: [String?], new_digests: [String?]) -> [DevWatchEntry] {
     paths.iter().enumerate().filter_map((pair) -> {
         (index, path) :: pair
-        game_kind :: graph.game_kind_for(path).or_else(() -> if root_kinds.get(index) == .Val(RootKind.Asset) -> .Val(JetGameChangeKind.Asset) else -> None)
+        game_kind :: graph.game_kind_for(path).or_else(() -> if root_kinds.get(index) == .Val(.Asset) -> .Val(JetGameChangeKind.Asset) else -> None)
         if game_kind == .Val(game_kind) {
             (old_schema_id, new_schema_id) :: graph.game_schema_ids_for(path)
             .Val(DevWatchEntry{path: path.clone(), change_kind: change_kinds.get(index).copied().map((kind) -> change_kind_name(kind)).unwrap_or("modified"),
@@ -880,7 +878,7 @@ struct HotReplaceTxn {
         &self.decisions.clear(); rejected := String?{None}
         loop entry in candidate.persist.entries() {
             outcome :: self.prior.persist.plan_migrate(entry.module_ref, entry.name, entry.shape, entry.payload)
-            if outcome == .Rejected{reason, prior} -> rejected = .Val("`{prior.key()}`: {reason.message()}")
+            if outcome == (.Rejected{reason, prior}) -> rejected = .Val("`{prior.key()}`: {reason.message()}")
             &self.decisions.push(outcome)
         }
         loop old in self.prior.persist.entries() {
@@ -943,7 +941,7 @@ fn any_stamp_changed(graph: WatchGraph) -> Bool { graph.nodes().any((node) -> { 
 // Rust: crates/jet-devserver/src/WatchService.rs:2142
 struct SessionBroker {
     source_transactions: Mutex<()>
-    fn default() -> SessionBroker { SessionBroker{source_transactions: Mutex.new(())} }
+    fn default() -> SessionBroker { SessionBroker{source_transactions: Mutex.new(_)} }
     // Rust: crates/jet-devserver/src/WatchService.rs:2147
     fn lock_source_transaction(self) -> MutexGuard<()> { self.source_transactions.lock().unwrap() }
 }

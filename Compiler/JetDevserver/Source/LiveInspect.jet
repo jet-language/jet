@@ -3,7 +3,7 @@
 // Rust: crates/jet-devserver/src/LiveInspect.rs:5
 use jet_foundation.Devtools.[JetDevtoolsEnvelope, JET_DEVTOOLS_MAX_ENVELOPE_BYTES]
 use jet_foundation.DevtoolsControl.[JetDevtoolsDecodedEnvelope]
-use jet_foundation.DataTree.[DataTree]
+use jet_foundation.Dyn.[Dyn]
 use jet_foundation.JSON.[json_get, json_int, json_str, parse_json, quote]
 use jet_foundation.MIR.[MirDecisionLedger]
 use jet_devserver.WebHost.[decode_devtools_envelope]
@@ -69,7 +69,7 @@ struct LiveSnapshot {
 }
 
 // Rust: crates/jet-devserver/src/LiveInspect.rs:124
-fn checked_object(value: DataTree, required: [String], optional: [String], label: String) -> [String: DataTree] Err! {
+fn checked_object(value: Dyn, required: [String], optional: [String], label: String) -> [String: Dyn] Err! {
     fields :: if value == {
         .Object(fields) -> fields.iter().cloned().collect()
         else -> { return .Err("{label} must be an object") }
@@ -80,15 +80,15 @@ fn checked_object(value: DataTree, required: [String], optional: [String], label
     return fields
 }
 // Rust: crates/jet-devserver/src/LiveInspect.rs:144
-fn int_field(object: DataTree, key: String, label: String, nonnegative: Bool) -> I64 Err! {
+fn int_field(object: Dyn, key: String, label: String, nonnegative: Bool) -> I64 Err! {
     value :: json_get(object, key).and_then(json_int) ?? return .Err("{label} has invalid `{key}`")
     if nonnegative && value < 0 -> return .Err("{label} has negative `{key}`")
     return value
 }
 // Rust: crates/jet-devserver/src/LiveInspect.rs:154
-fn optional_int_field(object: DataTree, key: String, label: String) -> I64? Err! {
+fn optional_int_field(object: Dyn, key: String, label: String) -> I64? Err! {
     if json_get(object, key) == {
-        .None | .Val(.Null) -> return .None
+        .None | .Val(.Null) -> { return .None }
         .Val(value) -> {
             number :: json_int(value) ?? return .Err("{label} has invalid `{key}`")
             return .Val(number)
@@ -96,31 +96,31 @@ fn optional_int_field(object: DataTree, key: String, label: String) -> I64? Err!
     }
 }
 // Rust: crates/jet-devserver/src/LiveInspect.rs:167
-fn string_field(object: DataTree, key: String, label: String) -> String Err! {
+fn string_field(object: Dyn, key: String, label: String) -> String Err! {
     value :: json_get(object, key).and_then(json_str) ?? return .Err("{label} has invalid `{key}`")
     if value.chars().any((c) -> c.is_control()) -> return .Err("{label} has control characters in `{key}`")
     return value.to_string()
 }
 // Rust: crates/jet-devserver/src/LiveInspect.rs:177
-fn bool_field(object: DataTree, key: String, label: String) -> Bool Err! {
+fn bool_field(object: Dyn, key: String, label: String) -> Bool Err! {
     if json_get(object, key) == {
-        .Val(.Bool(value)) -> return value
-        else -> return .Err("{label} has invalid `{key}`")
+        .Val(.Bool(value)) -> { return value }
+        else -> { return .Err("{label} has invalid `{key}`") }
     }
 }
 // Rust: crates/jet-devserver/src/LiveInspect.rs:184
-fn canonical_json_value(value: DataTree) -> String Err! {
+fn canonical_json_value(value: Dyn) -> String Err! {
     if value == {
-        .Null -> return "null"
-        .Bool(value) -> return value.to_string()
-        .Int(value) -> return value.to_string()
+        .Null -> { return "null" }
+        .Bool(value) -> { return value.to_string() }
+        .Int(value) -> { return value.to_string() }
         .Float(value) -> {
             if !value.is_finite() -> return .Err("decision ledger contains a non-finite number")
             return value.to_string()
         }
-        .Number(value) -> return value.copy()
-        .TypedText(value) | .Text(value) -> return quote(value)
-        .Bytes(values) -> return "[{values.iter().map((v) -> v.to_string()).collect().join(",")}]"
+        .Number(value) -> { return value.copy() }
+        .TypedText(value) | .Text(value) -> { return quote(value) }
+        .Bytes(values) -> { return "[{values.iter().map((v) -> v.to_string()).collect().join(",")}]" }
         .Array(values) -> {
             rendered := [String]{}
             loop value in values -> rendered.push(canonical_json_value(value)?)
@@ -128,18 +128,18 @@ fn canonical_json_value(value: DataTree) -> String Err! {
         }
         .Object(fields) -> {
             fields := fields.iter().collect()
-            fields.sort_by((left, right) -> left.0.cmp(right.0))
+            fields.sort_by((left, right) -> left._0.cmp(right._0))
             rendered := [String]{}
-            loop (key, value) in fields -> rendered.push("{quote(key)}:{canonical_json_value(value)?}")
+            loop (key, value) in fields -> rendered.push("{quote(key)}:{canonical_json_value(value)}")
             return "{{{rendered.join(",")}}}"
         }
     }
 }
 // Rust: crates/jet-devserver/src/LiveInspect.rs:229
-fn parse_decision_ledger(value: DataTree?) -> MirDecisionLedger? Err! {
+fn parse_decision_ledger(value: Dyn?) -> MirDecisionLedger? Err! {
     value :: value ?? return .None
     if value == .Null -> return .None
-    payload :: canonical_json_value(&value)?
+    payload :: canonical_json_value(&value)
     if payload.len() > 512 * 1024 -> return .Err("live decision ledger exceeds its transport limit")
     return .Val(MirDecisionLedger.from_json(payload)?)
 }
@@ -148,20 +148,20 @@ fn parse_live_snapshot(snapshot: String) -> LiveSnapshot Err! {
     root :: parse_json(snapshot) ?? return .Err("live runtime snapshot is not valid JSON")
     root_fields :: checked_object(&root,
         &["protocol", "session_id", "source_id", "build_id", "revision", "world_id", "values", "schema_version", "pid", "start_id", "captured_ms", "tasks", "channels", "effects", "resources"],
-        &["event_observations", "decisions", "runtime"], "live runtime snapshot")?
-    decision_ledger :: parse_decision_ledger(root_fields.get("decisions"))?
-    schema_version :: int_field(&root, "schema_version", "live runtime snapshot", true)?
-    protocol :: string_field(&root, "protocol", "live runtime snapshot")?
+        &["event_observations", "decisions", "runtime"], "live runtime snapshot")
+    decision_ledger :: parse_decision_ledger(root_fields.get("decisions"))
+    schema_version :: int_field(&root, "schema_version", "live runtime snapshot", true)
+    protocol :: string_field(&root, "protocol", "live runtime snapshot")
     if protocol != "jet.live.v1" -> return .Err("live runtime snapshot protocol must be jet.live.v1")
-    session_id :: string_field(&root, "session_id", "live runtime snapshot")?
-    source_id :: string_field(&root, "source_id", "live runtime snapshot")?
-    build_id :: string_field(&root, "build_id", "live runtime snapshot")?
-    revision :: string_field(&root, "revision", "live runtime snapshot")?
-    world_id :: string_field(&root, "world_id", "live runtime snapshot")?
+    session_id :: string_field(&root, "session_id", "live runtime snapshot")
+    source_id :: string_field(&root, "source_id", "live runtime snapshot")
+    build_id :: string_field(&root, "build_id", "live runtime snapshot")
+    revision :: string_field(&root, "revision", "live runtime snapshot")
+    world_id :: string_field(&root, "world_id", "live runtime snapshot")
     if schema_version != 1 -> return .Err("live runtime snapshot has an unsupported schema version")
-    pid :: int_field(&root, "pid", "live runtime snapshot", true)?
-    start_id :: string_field(&root, "start_id", "live runtime snapshot")?
-    captured :: int_field(&root, "captured_ms", "live runtime snapshot", true)?
+    pid :: int_field(&root, "pid", "live runtime snapshot", true)
+    start_id :: string_field(&root, "start_id", "live runtime snapshot")
+    captured :: int_field(&root, "captured_ms", "live runtime snapshot", true)
     captured_ms :: U128.try_from(captured) ?? return .Err("live runtime snapshot capture time is out of range")
 
     values_value :: root_fields.get("values") ?? return .Err("live runtime snapshot has no values")
@@ -172,8 +172,8 @@ fn parse_live_snapshot(snapshot: String) -> LiveSnapshot Err! {
     if value_values.len() > MAX_SNAPSHOT_ITEMS -> return .Err("live runtime snapshot has too many values")
     values := [LiveInspectValue]{[].with_capacity(value_values.len())}
     loop value in value_values {
-        _ :: checked_object(&value, &["value_id", "type_identity", "disposition", "reason"], &["rendered_value"], "live value")?
-        disposition :: string_field(&value, "disposition", "live value")?
+        _ :: checked_object(&value, &["value_id", "type_identity", "disposition", "reason"], &["rendered_value"], "live value")
+        disposition :: string_field(&value, "disposition", "live value")
         if !["kept", "migrated", "reset", "rejected"].contains(disposition) -> return .Err("live value has an unsupported disposition")
         rendered_value :: if json_get(&value, "rendered_value") == {
             .None | .Val(.Null) -> .None
@@ -185,7 +185,7 @@ fn parse_live_snapshot(snapshot: String) -> LiveSnapshot Err! {
             else -> { return .Err("live value has invalid `rendered_value`") }
         }
         values.push(LiveInspectValue {
-            value_id: string_field(&value, "value_id", "live value")?,
+            value_id: string_field(&value, "value_id", "live value"),
             type_identity: string_field(&value, "type_identity", "live value")?, disposition,
             reason: string_field(&value, "reason", "live value")?, rendered_value
         })
@@ -198,9 +198,9 @@ fn parse_live_snapshot(snapshot: String) -> LiveSnapshot Err! {
     if task_values.len() > MAX_SNAPSHOT_ITEMS -> return .Err("live runtime snapshot has too many tasks")
     tasks := [LiveTask]{[].with_capacity(task_values.len())}
     loop value in task_values {
-        _ :: checked_object(&value, &["id", "parent", "state", "wait", "deadline_ms", "cancelled"], &["label", "spawn_site"], "live task")?
+        _ :: checked_object(&value, &["id", "parent", "state", "wait", "deadline_ms", "cancelled"], &["label", "spawn_site"], "live task")
         tasks.push(LiveTask {
-            id: int_field(&value, "id", "live task", true)?, parent: int_field(&value, "parent", "live task", true)?,
+            id: int_field(&value, "id", "live task", true), parent: int_field(&value, "parent", "live task", true)?,
             state: string_field(&value, "state", "live task")?, wait: string_field(&value, "wait", "live task")?,
             deadline_ms: optional_int_field(&value, "deadline_ms", "live task")?, cancelled: bool_field(&value, "cancelled", "live task")?
         })
@@ -213,15 +213,15 @@ fn parse_live_snapshot(snapshot: String) -> LiveSnapshot Err! {
     if channel_values.len() > MAX_SNAPSHOT_ITEMS -> return .Err("live runtime snapshot has too many channels")
     channels := [LiveChannel]{[].with_capacity(channel_values.len())}
     loop value in channel_values {
-        _ :: checked_object(&value, &["id", "depth", "capacity", "send_waiters", "recv_waiters", "closed"], &[], "live channel")?
+        _ :: checked_object(&value, &["id", "depth", "capacity", "send_waiters", "recv_waiters", "closed"], &[], "live channel")
         channels.push(LiveChannel {
-            id: int_field(&value, "id", "live channel", true)?, depth: int_field(&value, "depth", "live channel", true)?,
+            id: int_field(&value, "id", "live channel", true), depth: int_field(&value, "depth", "live channel", true)?,
             capacity: optional_int_field(&value, "capacity", "live channel")?, send_waiters: int_field(&value, "send_waiters", "live channel", true)?,
             recv_waiters: int_field(&value, "recv_waiters", "live channel", true)?, closed: bool_field(&value, "closed", "live channel")?
         })
     }
     effects :: root_fields.get("effects") ?? return .Err("live runtime snapshot has no effects")
-    _ :: checked_object(&effects, &["compute", "waiting", "channel", "time", "io"], &[], "live effects")?
+    _ :: checked_object(&effects, &["compute", "waiting", "channel", "time", "io"], &[], "live effects")
     effects :: LiveEffects {
         compute: int_field(&effects, "compute", "live effects", true)?, waiting: int_field(&effects, "waiting", "live effects", true)?,
         channel: int_field(&effects, "channel", "live effects", true)?, time: int_field(&effects, "time", "live effects", true)?, io: int_field(&effects, "io", "live effects", true)?
@@ -285,7 +285,7 @@ fn read_devtools_relay_path(path: OSPath) -> JetDevtoolsEnvelope Err! {
     if metadata.len() > MAX_DEVTOOLS_RELAY_BYTES -> return .Err("jet.devtools.v1 relay exceeds its byte limit")
     bytes := [U8]{}
     file.take(MAX_DEVTOOLS_RELAY_BYTES + 1).read_to_end(&bytes) ?? return .Err("cannot read jet.devtools.v1 relay: {err}")
-    if U64{bytes.len()} > MAX_DEVTOOLS_RELAY_BYTES -> return .Err("jet.devtools.v1 relay exceeds its byte limit")
+    if (U64{bytes.len()}) > MAX_DEVTOOLS_RELAY_BYTES -> return .Err("jet.devtools.v1 relay exceeds its byte limit")
     offset := Usize{0}
     latest := (_0: Usize, _1: Usize)?{.None}
     loop offset < bytes.len() {
@@ -302,14 +302,14 @@ fn read_devtools_relay_path(path: OSPath) -> JetDevtoolsEnvelope Err! {
     (start, end) :: latest ?? return .Err("jet.devtools.v1 relay has no envelope frame")
     payload :: std.str.from_utf8(bytes[start..end]) ?? return .Err("jet.devtools.v1 relay envelope is not UTF-8")
     if decode_devtools_envelope(payload)? == {
-        .Events(envelope) -> return envelope
-        .Commands(_) -> return .Err("jet.devtools.v1 relay must contain runtime events, not host commands")
+        .Events(envelope) -> { return envelope }
+        .Commands(_) -> { return .Err("jet.devtools.v1 relay must contain runtime events, not host commands") }
     }
 }
 // Rust: crates/jet-devserver/src/LiveInspect.rs:581
 fn read_devtools_relay_path_with_identity(path: OSPath, expected_session_id: String?, expected_source_id: String?, expected_build_id: String?, expected_revision: String?, expected_world_id: String?) -> JetDevtoolsEnvelope Err! {
-    envelope :: read_devtools_relay_path(path)?
-    validate_devtools_relay_identity(&envelope, expected_session_id, expected_source_id, expected_build_id, expected_revision, expected_world_id)?
+    envelope :: read_devtools_relay_path(path)
+    validate_devtools_relay_identity(&envelope, expected_session_id, expected_source_id, expected_build_id, expected_revision, expected_world_id)
     return envelope
 }
 // Rust: crates/jet-devserver/src/LiveInspect.rs:603
@@ -324,7 +324,7 @@ fn validate_devtools_relay_identity(envelope: &JetDevtoolsEnvelope, expected_ses
     identity :: envelope.source_identity.as_ref()
     if identity_expected && identity.is_none() -> return .Err("jet.devtools.v1 relay is missing source/build identity")
     if identity == .Val(identity) {
-        identity.validate()?
+        identity.validate()
         for (expected, actual, label) in [
             (expected_source_id, identity.source_id.as_deref(), "source"),
             (expected_build_id, identity.build_id.as_deref(), "build"),
@@ -363,7 +363,7 @@ fn read(pid: U32) -> String Err! {
     if metadata.len() > MAX_SNAPSHOT_BYTES -> return .Err("live runtime snapshot exceeds the 1 MiB safety limit")
     snapshot := ""
     file.take(MAX_SNAPSHOT_BYTES + 1).read_to_string(&snapshot) ?? return .Err("cannot read live runtime snapshot: {err}")
-    if U64{snapshot.len()} > MAX_SNAPSHOT_BYTES -> return .Err("live runtime snapshot exceeds the 1 MiB safety limit")
+    if (U64{snapshot.len()}) > MAX_SNAPSHOT_BYTES -> return .Err("live runtime snapshot exceeds the 1 MiB safety limit")
     parsed :: parse_live_snapshot(snapshot) ?? return .Err("live runtime snapshot has an invalid or unsafe schema: {err}")
     if parsed.pid != I64.from(pid) -> return .Err("live runtime snapshot does not belong to process {pid}")
     _ :: render_event_observations(snapshot) ?? return .Err("live runtime event observations are invalid: {err}")
@@ -383,8 +383,8 @@ fn read(pid: U32) -> String Err! {
 // All inspect planes share the canonical live value/type identity projection.
 fn read_plane(pid: U32, plane: String) -> LiveInspectProjection Err! {
     if !["types", "rights", "claims", "shapes", "structure", "build", "gates", "decisions"].contains(plane) -> return .Err("unknown live inspect plane `{plane}`")
-    snapshot :: read(pid)?
-    parsed :: parse_live_snapshot(snapshot)?
+    snapshot :: read(pid)
+    parsed :: parse_live_snapshot(snapshot)
     pid :: U32.try_from(parsed.pid) ?? return .Err("live runtime snapshot pid is out of range")
     shape_values := [String: [String]]{}
     loop value in &parsed.values -> shape_values.entry(value.type_identity.copy()).or_default().push(value.value_id.copy())
@@ -410,10 +410,10 @@ fn render(snapshot: String) -> String {
     out := "jet inspect live · pid {pid}\nprotocol={parsed.protocol} session={parsed.session_id} source={parsed.source_id} build={parsed.build_id} revision={parsed.revision} world={parsed.world_id}\n\ntask tree\n"
     if parsed.tasks.is_empty() -> out.push_str("  (no live tasks)\n")
     else {
-        loop task in &parsed.tasks {
+        loop task_ref in &parsed.tasks {
             deadline :: task_ref.deadline_ms.map_or_else(() -> "-", (deadline) -> deadline.to_string())
             wait :: if task_ref.wait.is_empty() -> "-" else -> task_ref.wait
-            out.push_str("  task {task.id:<5} parent {task.parent:<5} {task.state:<8} wait={wait} deadline={deadline} cancelled={task.cancelled}\n")
+            out.push_str("  task {task_ref.id:<5} parent {task_ref.parent:<5} {task_ref.state:<8} wait={wait} deadline={deadline} cancelled={task_ref.cancelled}\n")
         }
     }
     out.push_str("\nchannels\n")

@@ -14,8 +14,8 @@ use jet_debug.Inferior.[parse_current_thread_id, parse_exit_signal, Inferior, Ra
 use jet_debug.LineMap.[LineMap]
 use jet_debug.Native.[build_native_candidate, NativeCandidateArtifact]
 use jet_debug.[DebugCheckpoint, DebugEvent, DebugHistory, DebugWrite, FrameSnapshot, ValueSnapshot, native_checkpoint_shape, ExitCodes]
-use jet_foundation.DataTree.[DataTree]
-use jet_foundation.JSON.[json_escape, json_get, json_str, json_u32, parse_json_with_limit, MAX_PROTOCOL_HEADER_BYTES, MAX_PROTOCOL_HEADER_COUNT]
+use jet_foundation.Dyn.[Dyn]
+use jet_foundation.JSON.[foundation_json_escape, json_get, json_str, json_u32, parse_json_with_limit, MAX_PROTOCOL_HEADER_BYTES, MAX_PROTOCOL_HEADER_COUNT]
 
 // Rust: crates/jet-debug/src/Dap.rs:48
 MAX_DAP_MESSAGE_BYTES :: 16 * 1024 * 1024
@@ -81,7 +81,7 @@ fn run_io(server: DapServer, reader: io.BufRead, out: io.Write) -> I32 {
             if input_tx.send(^message).is_err() || done -> break
         }
     })
-    requests := VecDeque[DataTree].new()
+    requests := VecDeque[Dyn].new()
     input_closed := false
     loop {
         &server.poll_resume(out)
@@ -103,7 +103,7 @@ fn run_io(server: DapServer, reader: io.BufRead, out: io.Write) -> I32 {
                     }
                 }
             }
-            .Ok(.Ok(None)) -> input_closed = true
+            .Ok(.Ok(.None)) -> input_closed = true
             .Ok(.Err(error)) -> {
                 // Uncorrelated framing/UTF-8 failures produce no fabricated reply.
                 io.eprintln("error: invalid DAP frame: {error}")
@@ -117,14 +117,14 @@ fn run_io(server: DapServer, reader: io.BufRead, out: io.Write) -> I32 {
 }
 
 // Rust: crates/jet-debug/src/Dap.rs:201
-fn is_running_control_request(msg: DataTree) -> Bool {
+fn is_running_control_request(msg: Dyn) -> Bool {
     command :: json_str(json_get(msg, "command") ?? return false) ?? return false
     return command == "cancel" || command == "disconnect" || command == "pause" ||
         command == "restart" || command == "setBreakpoints" ||
         command == "setDataBreakpoints" || command == "terminate"
 }
 // Rust: crates/jet-debug/src/Dap.rs:216
-fn take_next_request(requests: VecDeque[DataTree], resume_pending: Bool) -> DataTree? {
+fn take_next_request(requests: VecDeque<Dyn>, resume_pending: Bool) -> Dyn? {
     if resume_pending {
         loop (position, request) in requests {
             if is_running_control_request(request) -> return &requests.remove(position)
@@ -202,8 +202,8 @@ enum ResumeControl { Interrupt; Stop }
 struct ResumeEvent { inferior: Inferior; result: io.Result[ResumeResult]; mode: ResumeMode }
 // Rust: crates/jet-debug/src/Dap.rs:313
 struct ResumeTask {
-    control: mpsc.Sender[ResumeControl]
-    events: mpsc.Receiver[ResumeEvent]
+    control: mpsc.Sender<ResumeControl>
+    events: mpsc.Receiver<ResumeEvent>
     join: JoinHandle[()]?
 }
 // Rust: crates/jet-debug/src/Dap.rs:319
@@ -228,7 +228,7 @@ impl ResumeTask {
                                 worker_interrupted.store(true, Ordering.Release)
                                 _ :: signal_debugger(pid)
                             }
-                            .Stop -> break
+                            .Stop -> { break }
                         }
                     }
                 }
@@ -253,8 +253,8 @@ impl ResumeTask {
                 if &self.join.take() == .Val(join) -> _ :: join.join()
                 return .Ok(.Val(^event))
             }
-            .Err(.Empty) -> return .Ok(None)
-            .Err(.Disconnected) -> return .Err(())
+            .Err(.Empty) -> { return .Ok(.None) }
+            .Err(.Disconnected) -> { return .Err(_) }
         }
     }
     // Rust: crates/jet-debug/src/Dap.rs:377
@@ -274,8 +274,8 @@ fn signal_debugger(pid: U32) IOError! {
     // GATE #4483: dispatch on selected target, never host cfg.
     if selected_family() == .Unix {
         // GATE #4494: native process spawn/wait. #4409 retains error kinds.
-        status :: std.process.Command.new("kill").args(["-INT", pid.to_string()]).status()?
-        if status.success() -> return .Ok(())
+        status :: std.process.Command.new("kill").args(["-INT", pid.to_string()]).status()
+        if status.success() -> return .Ok(_)
         return .Err(io.Error.new(.Other, "native debugger rejected the interrupt signal"))
     }
     return .Err(io.Error.new(.Unsupported, "native debugger interruption is unsupported on this platform"))
@@ -452,7 +452,7 @@ impl DapServer {
             result :: &task_ref.take_event()
             if result == {
                 .Ok(value) -> event = ^value
-                .Err(()) -> {
+                .Err(_) -> {
                     self.resume_task = None
                     &self.terminate_with_diagnostic(out, "E2234", "the native debugger resume worker closed unexpectedly")
                     return
@@ -474,9 +474,9 @@ impl DapServer {
     }
     // Rust: crates/jet-debug/src/Dap.rs:739
     fn settle_resume(self: &DapServer) IOError! {
-        (_, result) :: &self.take_resume_result()?
+        (_, result) :: &self.take_resume_result()
         if result == .Err(error) -> return .Err(^error)
-        return .Ok(())
+        return .Ok(_)
     }
     // Rust: crates/jet-debug/src/Dap.rs:744
     fn take_resume_result(self: DapServer) -> (_0: ResumeMode, _1: io.Result[ResumeResult]) IOError! {
@@ -506,7 +506,7 @@ impl DapServer {
         &self.invalidate_references()
         terminate :: self.target == .Val(.Launched)
         closed :: &self.close_target(terminate)
-        if closed == .Ok(()) {
+        if closed == .Ok(_) {
             if !self.terminal_failure -> return code
             return ExitCodes.USER_ERROR
         }
@@ -519,7 +519,7 @@ impl DapServer {
     }
     // Rust: crates/jet-debug/src/Dap.rs:785
     fn close_target(self: &DapServer, terminate: Bool) IOError! {
-        inf := &self.inf.take() ?? { self.target = None; return .Ok(()) }
+        inf := &self.inf.take() ?? { self.target = None; return .Ok(_) }
         _entry_breakpoint :: &self.entry_breakpoint_id.take()
         // Non-terminating disconnect must really detach before LLDB exits.
         action :: if terminate -> &inf.terminate_debuggee() else -> &inf.detach()
@@ -569,7 +569,7 @@ impl DapServer {
             if position < start_frame -> next
             if entries.len() == limit -> break
             id :: &self.references.issue_frame(thread_id, position)
-            &entries.push("{{\"id\":{id},\"name\":\"{json_escape(frame.function)}\",\"source\":{{\"path\":\"{json_escape(self.source_path())}\"}},\"line\":{self.dap_line(frame.line)},\"column\":{self.dap_column(1)}}}")
+            &entries.push("{{\"id\":{id},\"name\":\"{foundation_json_escape(frame.function)}\",\"source\":{{\"path\":\"{foundation_json_escape(self.source_path())}\"}},\"line\":{self.dap_line(frame.line)},\"column\":{self.dap_column(1)}}}")
         }
         return "{{\"stackFrames\":[{entries.join(",")}],\"totalFrames\":{total_frames}}}"
     }
@@ -577,7 +577,7 @@ impl DapServer {
     fn history_variables_body(self) -> String? {
         event :: self.history_event() ?? return None
         entries := [String]{}
-        loop value in event.locals -> &entries.push("{{\"name\":\"{json_escape(value.name)}\",\"value\":\"{json_escape(value.value)}\",\"type\":\"{json_escape(value.type_name)}\",\"variablesReference\":0}}")
+        loop value in event.locals -> &entries.push("{{\"name\":\"{foundation_json_escape(value.name)}\",\"value\":\"{foundation_json_escape(value.value)}\",\"type\":\"{foundation_json_escape(value.type_name)}\",\"variablesReference\":0}}")
         return "{{\"variables\":[{entries.join(",")}],\"namedVariables\":{entries.len()}}}"
     }
     // Rust: crates/jet-debug/src/Dap.rs:910
@@ -629,7 +629,7 @@ impl DapServer {
             description = "recorded event {event.sequence} at {self.source_path()}:{self.dap_line(event.line)}"
             if event.writes.first() == .Val(write) -> description += " (write {write.place}: {write.old_value} -> {write.new_value})"
         }
-        &self.event(out, "stopped", "{{\"reason\":\"{json_escape(reason)}\",\"description\":\"{json_escape(description)}\",\"threadId\":{thread_id},\"allThreadsStopped\":true}}")
+        &self.event(out, "stopped", "{{\"reason\":\"{foundation_json_escape(reason)}\",\"description\":\"{foundation_json_escape(description)}\",\"threadId\":{thread_id},\"allThreadsStopped\":true}}")
     }
     // Rust: crates/jet-debug/src/Dap.rs:1030
     fn replay_native_history(self: DapServer, command: String, start: USize, include_controls: Bool) -> DebugHistory Err! {
@@ -662,7 +662,7 @@ impl DapServer {
         return false
     }
     // Rust: crates/jet-debug/src/Dap.rs:1090
-    fn data_breakpoint_info(self: &DapServer, out: &io.Write, request_seq: I64, command: String, args: DataTree?) {
+    fn data_breakpoint_info(self: &DapServer, out: &io.Write, request_seq: I64, command: String, args: Dyn?) {
         if self.state == .Terminated {
             &self.respond_jet_error(out, request_seq, command, 22031, "data breakpoint information is unavailable after target termination")
             return
@@ -680,10 +680,10 @@ impl DapServer {
             &self.respond_jet_error(out, request_seq, command, 22032, "dataBreakpointInfo requires a bounded Jet local path in `name`")
             return
         }
-        &self.respond(out, request_seq, command, true, "{{\"dataId\":\"{json_escape(selected)}\",\"description\":\"Jet write watch: {json_escape(selected)}\",\"accessTypes\":[\"write\"],\"canPersist\":false}}")
+        &self.respond(out, request_seq, command, true, "{{\"dataId\":\"{foundation_json_escape(selected)}\",\"description\":\"Jet write watch: {foundation_json_escape(selected)}\",\"accessTypes\":[\"write\"],\"canPersist\":false}}")
     }
     // Rust: crates/jet-debug/src/Dap.rs:1134
-    fn set_data_breakpoints(self: &DapServer, out: &io.Write, request_seq: I64, command: String, args: DataTree?) {
+    fn set_data_breakpoints(self: &DapServer, out: &io.Write, request_seq: I64, command: String, args: Dyn?) {
         if self.state != .Ready && self.state != .Configuring && self.state != .Running && self.state != .Stopped {
             &self.respond_jet_error(out, request_seq, command, 22031, "data breakpoints are not legal after the target terminated")
             return
@@ -694,7 +694,7 @@ impl DapServer {
         self.data_watches = [String:Bool]{}
         loop place in places -> self.data_watches[place.copy()] = true
         breakpoints := [String]{}
-        loop (index, place) in places -> &breakpoints.push("{{\"id\":{index + 1},\"verified\":true,\"dataId\":\"{json_escape(place)}\",\"message\":\"session write watch: {json_escape(place)}\"}}")
+        loop (index, place) in places -> &breakpoints.push("{{\"id\":{index + 1},\"verified\":true,\"dataId\":\"{foundation_json_escape(place)}\",\"message\":\"session write watch: {foundation_json_escape(place)}\"}}")
         &self.respond(out, request_seq, command, true, "{{\"breakpoints\":[{breakpoints.join(",")}]}}")
     }
     // Rust: crates/jet-debug/src/Dap.rs:1183
@@ -757,7 +757,7 @@ impl DapServer {
         &self.respond(out, request_seq, response_command, true, "{{}}")
     }
     // Rust: crates/jet-debug/src/Dap.rs:1294
-    fn apply_fix(self: &DapServer, out: &io.Write, request_seq: I64, command: String, _args: DataTree?) {
+    fn apply_fix(self: &DapServer, out: &io.Write, request_seq: I64, command: String, _args: Dyn?) {
         if !self.state.is_stopped() {
             &self.respond_jet_error(out, request_seq, command, 22031, "source repair requires a stopped target")
             return
@@ -818,9 +818,9 @@ impl DapServer {
         self.history_cursor = .Val(current)
         self.replay_only_after_fix = false
         changed := [String]{}
-        loop name in receipt.changed -> &changed.push("\"{json_escape(name)}\"")
+        loop name in receipt.changed -> &changed.push("\"{foundation_json_escape(name)}\"")
         sequence :: if self.history.events.get(current) == .Val(event) -> event.sequence else -> 0
-        body :: "{{\"checkpoint\":\"compatible\",\"native\":\"committed\",\"buildId\":\"{json_escape(candidate.build_id)}\",\"changed\":[{changed.join(",")}],\"source\":\"{json_escape(self.source_path())}\",\"historySequence\":{sequence}}}"
+        body :: "{{\"checkpoint\":\"compatible\",\"native\":\"committed\",\"buildId\":\"{foundation_json_escape(candidate.build_id)}\",\"changed\":[{changed.join(",")}],\"source\":\"{foundation_json_escape(self.source_path())}\",\"historySequence\":{sequence}}}"
         &self.candidate_artifacts.push(^candidate)
         &self.respond(out, request_seq, command, true, body)
     }
@@ -920,7 +920,7 @@ impl DapServer {
         &self.event(out, "thread", "{{\"reason\":\"started\",\"threadId\":1}}")
     }
     // Rust: crates/jet-debug/src/Dap.rs:1614
-    fn raw_frames_for_request(self, args: DataTree?) -> Bool Err! {
+    fn raw_frames_for_request(self, args: Dyn?) -> Bool Err! {
         if args == .Val(arguments) {
             if json_get(arguments, "showRawFrames") == .Val(value) {
                 requested :: json_bool(value) ?? return .Err("showRawFrames must be a boolean")
@@ -939,14 +939,14 @@ impl DapServer {
                 if ch.is_ascii_alphabetic() -> escape = false
                 next
             }
-            if ch == Char{27} -> escape = true else -> &clean.push(ch)
+            if ch == (Char{27}) -> escape = true else -> &clean.push(ch)
         }
         return clean
     }
     // Rust: crates/jet-debug/src/Dap.rs:1645
-    fn spawn_target(self) -> (_0: Inferior, _1: USize?) IOError! {
-        inf := Inferior.spawn(self.binary)?
-        setup := .Ok(None) as io.Result[USize?]
+    fn spawn_target(self) -> (Inferior, USize?) IOError! {
+        inf := Inferior.spawn(self.binary)
+        setup := .Ok(.None) as io.Result[USize?]
         if self.stop_on_entry {
             line :: self.map.main_entry_line(self.rust_src)
             if line == .Val(entry_line) {
@@ -964,7 +964,7 @@ impl DapServer {
         }
     }
     // Rust: crates/jet-debug/src/Dap.rs:1669
-    fn attach_target(self, args: DataTree?) -> (Inferior, LineMap, Bool) !AttachFailure {
+    fn attach_target(self, args: Dyn?) -> (Inferior, LineMap, Bool) !AttachFailure {
         parsed :: parse_attach_arguments(args)
         if parsed == .Err(_) -> return .Err(.InvalidArguments)
         attach :: parsed ?? panic("failed attach argument branch returned")
@@ -980,12 +980,12 @@ impl DapServer {
         return .Ok((_0: ^inferior, _1: ^map, _2: attach.show_raw_frames))
     }
     // Rust: crates/jet-debug/src/Dap.rs:1696
-    fn install_breakpoints(map: LineMap, rust_file: String, lines: [USize], inf: &Inferior) -> (_0: [USize], _1: [Bool]) IOError! {
+    fn install_breakpoints(map: LineMap, rust_file: String, lines: [USize], inf: &Inferior) -> ([USize], [Bool]) IOError! {
         ids := [USize]{}
         verified := [Bool]{}
         loop jline in lines {
             if map.rust_line_for(jline) == .Val(rust_line) {
-                breakpoint :: &inf.set_breakpoint(rust_file, rust_line)?
+                breakpoint :: &inf.set_breakpoint(rust_file, rust_line)
                 &ids.push(breakpoint.id)
                 &verified.push(breakpoint.resolved)
             } else { &verified.push(false) }
@@ -1000,8 +1000,8 @@ impl DapServer {
         map :: self.map
         rust_file :: self.rust_file
         inf :: self.inf ?? return .Err(io.Error.new(.InvalidInput, "target is not launched"))
-        loop id in old -> &inf.delete_breakpoint(id)?
-        (ids, verified) :: DapServer.install_breakpoints(map, rust_file, lines, &inf)?
+        loop id in old -> &inf.delete_breakpoint(id)
+        (ids, verified) :: DapServer.install_breakpoints(map, rust_file, lines, &inf)
         self.source_breakpoint_ids = ^ids
         return .Ok(^verified)
     }
@@ -1017,15 +1017,15 @@ impl DapServer {
             if spec.hit_condition == .Val(condition) -> verified = verified && valid_hit_condition(condition)
             line :: self.dap_line(spec.line)
             breakpoint :: if verified ->
-                "{{\"id\":{id},\"verified\":true,\"line\":{line},\"source\":{{\"path\":\"{json_escape(source_path)}\"}}}}" else ->
-                "{{\"id\":{id},\"verified\":false,\"line\":{line},\"source\":{{\"path\":\"{json_escape(source_path)}\"}},\"message\":\"E2235: no stoppable Jet statement at {json_escape(source_path)}:{line}\"}}"
+                "{{\"id\":{id},\"verified\":true,\"line\":{line},\"source\":{{\"path\":\"{foundation_json_escape(source_path)}\"}}}}" else ->
+                "{{\"id\":{id},\"verified\":false,\"line\":{line},\"source\":{{\"path\":\"{foundation_json_escape(source_path)}\"}},\"message\":\"E2235: no stoppable Jet statement at {foundation_json_escape(source_path)}:{line}\"}}"
             &self.event(out, "breakpoint", "{{\"reason\":\"changed\",\"breakpoint\":{breakpoint}}}")
         }
     }
     // Rust: crates/jet-debug/src/Dap.rs:1772
     fn invalidate_references(self: &DapServer) { &self.references.invalidate() }
     // Rust: crates/jet-debug/src/Dap.rs:1776
-    fn select_resume_thread(self: &DapServer, args: DataTree?) !(I64, String) {
+    fn select_resume_thread(self: &DapServer, args: Dyn?) !(I64, String) {
         arguments :: args ?? return .Err((_0: 22032, _1: "run control requires a positive threadId"))
         value :: json_get(arguments, "threadId") ?? return .Err((_0: 22032, _1: "run control requires a positive threadId"))
         thread_id :: json_u32(value) ?? return .Err((_0: 22032, _1: "run control requires a positive threadId"))
@@ -1039,7 +1039,7 @@ impl DapServer {
         backtrace :: trace ?? panic("failed backtrace branch returned")
         if !has_jet_frame(Inferior.parse_frames(backtrace), map, rust_file) -> return .Err((_0: 22039, _1: "the requested thread has no verified Jet source location"))
         self.current_thread = thread_id
-        return .Ok(())
+        return .Ok(_)
     }
 }
 

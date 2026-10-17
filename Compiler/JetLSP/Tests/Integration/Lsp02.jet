@@ -16,16 +16,16 @@ fn run_transcript(source: &String, steps: &[TranscriptStep]) {
     tmp_path :: OSPath.from("/tmp/lsp_transcript_{process.id()}.jet")
     loop step in steps {
         if step == {
-            TranscriptStep.Send { msg, expect_contains } -> {
+            .Send{msg, expect_contains} -> {
                 send_msg(&stdin, msg)
-                if expects :: expect_contains {
+                if expect_contains == .Val(expects) {
                     resp :: read_msg(&stdout)
                     loop expect in expects {
                         assert(resp.contains(expect), "transcript step: expected {expect} in response, got:\n{resp}")
                     }
                 }
             }
-            TranscriptStep.Open { uri, expect_notification } -> {
+            .Open{uri, expect_notification} -> {
                 open :: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}"
                 send_msg(&stdin, open)
                 if expect_notification {
@@ -42,8 +42,8 @@ fn run_transcript(source: &String, steps: &[TranscriptStep]) {
 
 // Rust: tests/lsp.rs:2146
 enum TranscriptStep {
-    Send { msg: String, expect_contains: [String]? }
-    Open { uri: String, expect_notification: Bool }
+    Send(msg: String, expect_contains: [String]?)
+    Open(uri: String, expect_notification: Bool)
 }
 
 // Rust: tests/lsp.rs:3469

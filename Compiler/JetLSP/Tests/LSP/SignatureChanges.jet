@@ -3,9 +3,9 @@
 #Test("signature parameter presence wins over alias and document lookup") {
     server :: lsp_handler_test_server("fn run() {{}}\n")
     params :: lsp_handler_test_params("{{\"arguments\":[\"file:///closed.jet\",\"fn:run\",{{\"name\":\"extra\",\"type\":null,\"ty\":\"Int\"}}]}}")
-    assert_eq(lsp_signature_change_response(server, params, DataTree.Int(1)), lsp_error_response(DataTree.Int(1), -32602, "jet.changeSignature requires parameter.type"))
+    assert_eq(lsp_signature_change_response(server, params, Dyn.Int(1)), lsp_error_response(Dyn.Int(1), -32602, "jet.changeSignature requires parameter.type"))
     good :: lsp_handler_test_params("{{\"arguments\":[\"file:///closed.jet\",\"fn:run\",{{\"name\":\"extra\",\"ty\":\"Int\"}}]}}")
-    assert_eq(lsp_signature_change_response(server, good, DataTree.Int(1)), lsp_error_response(DataTree.Int(1), -32602, "document not open in LSP session"))
+    assert_eq(lsp_signature_change_response(server, good, Dyn.Int(1)), lsp_error_response(Dyn.Int(1), -32602, "document not open in LSP session"))
 }
 
 #Test("signature edit ordering is stable descending start then end without copying edit payloads") {
@@ -29,6 +29,6 @@
     assert(!lsp_signature_edit_valid(source, split))
     assert(!lsp_signature_edit_valid(source, reversed))
     assert(!lsp_signature_edit_valid(source, outside))
-    assert_eq(lsp_data_tree_text(DataTree.TypedText("Int")), Val("Int"))
-    assert_eq(lsp_data_tree_text(DataTree.Int(1)), None)
+    assert_eq(lsp_data_tree_text(Dyn.TypedText("Int")), Val("Int"))
+    assert_eq(lsp_data_tree_text(Dyn.Int(1)), None)
 }

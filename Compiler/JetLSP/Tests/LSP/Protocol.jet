@@ -22,15 +22,15 @@
 }
 
 #Test("RPC IDs and error messages preserve JSON escaping and null identity") {
-    value :: foundation_parse_protocol_json(lsp_response(DataTree.Text("a\"b\\c\n"), "true")) ?? panic("response JSON")
-    assert(value.field("id") == (Val(DataTree.Text("a\"b\\c\n"))))
-    assert(value.field("result") == (Val(DataTree.Bool(true))))
-    failure :: foundation_parse_protocol_json(lsp_error_response(DataTree.Int(7), -32800, "Request cancelled")) ?? panic("error JSON")
+    value :: foundation_parse_protocol_json(lsp_response(Dyn.Text("a\"b\\c\n"), "true")) ?? panic("response JSON")
+    assert(value.field("id") == (Val(Dyn.Text("a\"b\\c\n"))))
+    assert(value.field("result") == (Val(Dyn.Bool(true))))
+    failure :: foundation_parse_protocol_json(lsp_error_response(Dyn.Int(7), -32800, "Request cancelled")) ?? panic("error JSON")
     error :: failure.field("error") ?? panic("error field")
-    assert(error.field("code") == (Val(DataTree.Int(-32800))))
+    assert(error.field("code") == (Val(Dyn.Int(-32800))))
     assert_eq(failure.field("result"), None)
-    assert_eq(lsp_serialize_id(DataTree.Null), "null")
-    assert_eq(lsp_serialize_id(DataTree.Bool(true)), "null")
+    assert_eq(lsp_serialize_id(Dyn.Null), "null")
+    assert_eq(lsp_serialize_id(Dyn.Bool(true)), "null")
 }
 
 #Test("cancellation keys distinguish numeric from text and retain first-field precedence") {
@@ -49,7 +49,7 @@
         .Ok(_) -> {}
         .Err(_) -> assert(false)
     }
-    loop raw in [String]{"{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":true}}", "[]", "null"} {
+    loop raw in ([String]{"{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":true}}", "[]", "null"}) {
         if lsp_parse_rpc_message(raw) == {
             .Ok(_) -> assert(false)
             .Err(error) -> assert_eq(error.code, -32600)

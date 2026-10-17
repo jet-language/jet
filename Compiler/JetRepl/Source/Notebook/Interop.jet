@@ -1,7 +1,7 @@
 // Rust Notebook/document.rs:1038-1423: merge and stated-loss projections.
-// Canonical Foundation JSON first; general Core DataTree fallback has seven
+// Canonical Foundation JSON first; general Core Dyn fallback has seven
 // public variants (exact Int and Float), not Rust's typed-decoder-only tags.
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_object, canonical_json_parse, canonical_json_bytes, foundation_json_parse, mir_sha256_hex]
 
 struct NotebookImportResult { notebook: JetNotebook, loss: NotebookLossReport }
@@ -33,8 +33,7 @@ fn notebook_merge_by_id(base: JetNotebook, theirs: JetNotebook) -> JetNotebook N
                 base_key :: notebook_interop_output_key(cell.output)
                 their_key :: notebook_interop_output_key(other.output)
                 if !(base_key != None && their_key != None && base_key != their_key) {
-                    if cell.output == None -> merged.output = other.output.copy()
-                    else -> merged.output = cell.output.copy()
+                    if cell.output == None -> merged.output = other.output.copy() else -> merged.output = cell.output.copy()
                 }
             } else {
                 if !conflicts.has_key(cell.id) {
@@ -136,7 +135,7 @@ fn notebook_import_ipynb(text: String) -[Rand]> NotebookImportResult NotebookErr
 }
 // Rust json_value_to_canonical. Core JSON's exact Int is retained; Float
 // becomes text, just as Rust Float/Number did, never a rounded JSON integer.
-fn notebook_interop_json_to_canonical(value: DataTree) -> CanonicalJSON Never! {
+fn notebook_interop_json_to_canonical(value: Dyn) -> CanonicalJSON Never! {
     if value == {
         .Null -> CanonicalJSON.Null
         .Bool(flag) -> CanonicalJSON.Bool(flag)
@@ -151,7 +150,7 @@ fn notebook_interop_json_to_canonical(value: DataTree) -> CanonicalJSON Never! {
         .Object(fields) -> {
             rows := [CanonicalJSONField]{}
             loop (key, row) in fields -> &rows.push(notebook_codec_field(key, notebook_interop_json_to_canonical(row)))
-            // DataTree object maps have unique keys before canonical projection.
+            // Dyn object maps have unique keys before canonical projection.
             canonical_json_object(rows) ?? panic("parsed JSON has unique keys")
         }
     }

@@ -9,8 +9,7 @@ fn repl_name_at_cursor(buf: [String], cursor: Int) -> String? Never! {
     if buf.len() == 0 -> return None
     index := if cursor < buf.len() -> cursor else -> cursor - 1
     if !repl_completion_name_char(buf[index]) {
-        if index > 0 && repl_completion_name_char(buf[index - 1]) -> index -= 1
-        else -> return None
+        if index > 0 && repl_completion_name_char(buf[index - 1]) -> index -= 1 else -> return None
     }
     start := index
     loop start > 0 && repl_completion_name_char(buf[start - 1]) -> start -= 1
@@ -42,8 +41,7 @@ fn repl_completion_menu(candidates: [SemanticSymbol], selected: Int, color: Bool
         // Rust format width counts scalars, not display cells or UTF-8 bytes.
         padded :: repl_completion_text.pad_end(symbol.qualified_name, 20, " ")
         line :: "{marker} {padded} {symbol.signature}"
-        if index == selected && color -> &rows.push(diagnostic_theme_invert(true, line))
-        else -> &rows.push(^line)
+        if index == selected && color -> &rows.push(diagnostic_theme_invert(true, line)) else -> &rows.push(^line)
     }
     &rows.push("")
     crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF is UTF-8")

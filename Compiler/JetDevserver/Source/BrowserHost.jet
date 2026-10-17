@@ -285,7 +285,7 @@ impl PanelLayout { fn default() -> PanelLayout { PanelLayout { open: false, dock
 // Rust: crates/jet-devserver/src/BrowserHost.rs:791
 struct BrowserHost {
     session_id: String; revision: U64?; sequence: U64?; observed_at_ms: U64?; state: BrowserSessionState;
-    cursor: BrowserReconnectCursor?; selection: BrowserSelection?; panels: [String:PanelState]; history: VecDeque[BrowserHostEvent]
+    cursor: BrowserReconnectCursor?; selection: BrowserSelection?; panels: [String:PanelState]; history: VecDeque<BrowserHostEvent>
 }
 impl BrowserHost {
     // Rust: crates/jet-devserver/src/BrowserHost.rs:805
@@ -476,7 +476,7 @@ impl BrowserHost {
     fn node_exists(self, panel_id: String, node_id: String?) -> Bool {
         if node_id == {
             .Val(id) -> self.require_node(panel_id, id).is_ok()
-            None -> self.panels.contains(panel_id)
+            .None -> self.panels.contains(panel_id)
         }
     }
     // Rust: crates/jet-devserver/src/BrowserHost.rs:1284
@@ -530,7 +530,7 @@ fn derive_session_state(panels: [BrowserPanelFact]) -> BrowserSessionState {
             "runtime_failure" | "runtime-failure" | "runtime failure" -> .RuntimeFailure
             "hot_reload" | "hot-reload" | "hot reload" -> .HotReload
             "tests_failing" | "tests-failing" | "tests failing" -> .TestsFailing
-            else -> next
+            else -> { next }
         }
         state = prefer_state(state, candidate)
     }

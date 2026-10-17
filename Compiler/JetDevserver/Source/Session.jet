@@ -8,8 +8,8 @@ use jet_foundation.Devtools.[JetDevtoolsEnvelope, JetDevtoolsEvent, JetDevtoolsE
 use jet_foundation.DevtoolsControl.[JetDevtoolsCommand, JetDevtoolsCommandEnvelope, JetDevtoolsCommandReceipt, JetDevtoolsDatabaseExplainRequest, JetDevtoolsDatabaseExplainResult, JetDevtoolsDecodedEnvelope, JetDevtoolsGameControlRequest, JetDevtoolsProjectRebuildRequest, JET_DEVTOOLS_MAX_COMMANDS]
 use jet_devserver.SessionRecording.[RecordingError, ReplayCursor, ReplayProjection, SessionCheckpoint, SessionEvent, SessionIdentity, SessionRecording, TruncationFacts]
 use jet_foundation.HotSwap.[HotSwapDecision, StateRetentionDecision]
-use jet_foundation.DataTree.[DataTree]
-use jet_foundation.JSON.[json_escape, parse_json, parse_json_with_limit]
+use jet_foundation.Dyn.[Dyn]
+use jet_foundation.JSON.[foundation_json_escape, parse_json, parse_json_with_limit]
 use jet_foundation.Persist.[PersistRejectReason]
 use jet_devserver.CapturePolicy.[CaptureFaultFact, CaptureIdentity, CaptureSkip, CaptureStartFact]
 use jet_devserver.WatchService.[PersistOutcome, SessionSnapshot, SessionBroker]
@@ -21,7 +21,7 @@ MAX_CLIENT_ID :: prep { USize{128} }
 // Rust: crates/jet-devserver/src/Session.rs:45
 MAX_CLIENTS :: prep { USize{256} }
 // Rust: crates/jet-devserver/src/Session.rs:46
-CLIENT_TTL_MS :: U64{160}
+CLIENT_TTL_MS :: prep { U64{160} }
 // Rust: crates/jet-devserver/src/Session.rs:47
 CLIENT_TTL :: prep { Duration.from_millis(CLIENT_TTL_MS) }
 // Rust: crates/jet-devserver/src/Session.rs:48
@@ -30,7 +30,7 @@ MAX_RECEIPTS :: prep { USize{128} }
 MAX_RETAINED_VIEW_BYTES :: prep { USize{2 * 1024 * 1024} }
 // Rust: crates/jet-devserver/src/Session.rs:50
 // GATE #4494: canonical atomic storage and relaxed fetch-add.
-static NEXT_SESSION_ID: AtomicU64 = AtomicU64.new(1)
+NEXT_SESSION_ID :: AtomicU64.new(1)
 // Rust: crates/jet-devserver/src/Session.rs:54
 struct LiveLineage { protocol: String; session_id: String; source_id: String; build_id: String; revision: String; world_id: String }
 // Rust: crates/jet-devserver/src/Session.rs:64
@@ -114,7 +114,7 @@ impl BrowserAssetWatcher {
     // Rust: crates/jet-devserver/src/Session.rs:247
     fn stamp(path: OSPath) -> BrowserAssetStamp? {
         // GATE #4494: filesystem metadata and timestamps.
-        metadata :: fs.symlink_metadata(path).ok()?
+        metadata :: fs.symlink_metadata(path).ok()
         if !metadata.file_type().is_file() -> return .None
         .Val(BrowserAssetStamp { modified: metadata.modified().ok(), len: metadata.len() })
     }
@@ -125,8 +125,7 @@ impl BrowserAssetWatcher {
         if metadata.file_type().is_symlink() { *skipped = skipped.saturating_add(1); return }
         if metadata.file_type().is_file() {
             if Self.stamp(path) == .Val(stamp) {
-                if path.to_string_lossy().len() <= BROWSER_ASSET_WATCH_MAX_PATH_BYTES -> files.insert(path.copy(), ^stamp)
-                else -> *skipped = skipped.saturating_add(1)
+                if path.to_string_lossy().len() <= BROWSER_ASSET_WATCH_MAX_PATH_BYTES -> files.insert(path.copy(), ^stamp) else -> *skipped = skipped.saturating_add(1)
             }
             return
         }
@@ -157,8 +156,8 @@ impl BrowserAssetWatcher {
         loop path in paths {
             kind :: if self.known.get(&path) == {
                 .None -> "created"
-                .Val(previous) if previous != current.get(&path).unwrap() -> "changed"
-                .Val(_) -> next
+                .Val(previous) && previous != current.get(&path).unwrap() -> "changed"
+                .Val(_) -> { next }
             }
             changes.push(BrowserAssetChange { path: ^path, kind })
         }
@@ -170,18 +169,18 @@ impl BrowserAssetWatcher {
         skipped = skipped.saturating_add(changes.len().saturating_sub(BROWSER_ASSET_WATCH_MAX_EVENTS))
         changes.truncate(BROWSER_ASSET_WATCH_MAX_EVENTS)
         self.known = ^current
-        (changes, skipped)
+        (_0: changes, _1: skipped)
     }
     // Rust: crates/jet-devserver/src/Session.rs:343
     fn frame(self: Self, session_id: String) -> String {
         (changes, skipped) :: self.poll()
         events :: changes.into_iter().filter_map((change) -> {
-            logical :: change.path.strip_prefix(&self.root).ok()?
+            logical :: change.path.strip_prefix(&self.root).ok()
             text :: logical.to_string_lossy().replace('\\', "/")
             if text.is_empty() -> return .None
-            .Val("{{\"root\":{{\"id\":\"game\",\"path\":\".\"}},\"logical_path\":\"{json_escape("assets/{text}")}\",\"kind\":\"{json_escape(change.kind)}\"}}")
+            .Val("{{\"root\":{{\"id\":\"game\",\"path\":\".\"}},\"logical_path\":\"{foundation_json_escape("assets/{text}")}\",\"kind\":\"{foundation_json_escape(change.kind)}\"}}")
         }).collect().join(",")
-        "{{\"protocol\":\"jet.devtools.v1\",\"session_id\":\"{json_escape(session_id)}\",\"started_at_ms\":{unix_time_ms()},\"direction\":\"host_to_runtime\",\"events\":[{events}],\"skipped\":{skipped}}}"
+        "{{\"protocol\":\"jet.devtools.v1\",\"session_id\":\"{foundation_json_escape(session_id)}\",\"started_at_ms\":{unix_time_ms()},\"direction\":\"host_to_runtime\",\"events\":[{events}],\"skipped\":{skipped}}}"
     }
 }
 // Rust: crates/jet-devserver/src/Session.rs:371
@@ -253,7 +252,7 @@ impl ResidentDevSession {
         selected := [JetDevtoolsGameControlRequest]{}
         loop _ in 0..32 {
             request :: queued.pop_front() ?? break
-            frame.enqueue_command(.GameControl(request.copy()))?
+            frame.enqueue_command(.GameControl(request.copy()))
             selected.push(^request)
         }
         if frame.serialize() == {
@@ -323,11 +322,11 @@ impl ResidentDevSession {
         if [source_id, build_id, revision, world_id].iter().any((value) -> value.is_empty() || value.chars().any((ch) -> ch.is_control())) -> return .Err("live lineage is incomplete")
         *self.live_lineage.lock().unwrap() = .Val(LiveLineage { protocol: "jet.live.v1", session_id: self.id.copy(), source_id, build_id, revision, world_id })
         self.observe_source(revision)
-        self.set_devtools_source_identity(.Val(source_id), .Val(build_id), .Val(revision), .Val(world_id))?
+        self.set_devtools_source_identity(.Val(source_id), .Val(build_id), .Val(revision), .Val(world_id))
     }
     // Rust: crates/jet-devserver/src/Session.rs:699
     fn record_capture_start(self: &Self, fact: &CaptureStartFact) Err! {
-        self.validate_capture_identity(&fact.identity)?
+        self.validate_capture_identity(&fact.identity)
         facts :: self.capture_facts.lock().unwrap()
         facts.push(.Start(fact.copy()))
         if fact.eligibility.skip() == .Val(skip) -> facts.push(.Skip(skip.copy()))
@@ -335,7 +334,7 @@ impl ResidentDevSession {
     }
     // Rust: crates/jet-devserver/src/Session.rs:711
     fn record_capture_fault(self: &Self, fact: &CaptureFaultFact) Err! {
-        self.validate_capture_identity(&fact.identity)?
+        self.validate_capture_identity(&fact.identity)
         facts :: self.capture_facts.lock().unwrap()
         facts.push(.Fault(fact.copy()))
         trim_capture_facts(&facts)
@@ -353,7 +352,7 @@ impl ResidentDevSession {
     // Rust: crates/jet-devserver/src/Session.rs:745
     fn record_live_transaction(self: &Self, snapshot: &SessionSnapshot, decisions: &[PersistOutcome]) Err! {
         before :: (*self.accepted_revision.lock().unwrap()).copy()
-        self.set_live_lineage(snapshot.source_id, snapshot.build_id, snapshot.revision, snapshot.world_id)?
+        self.set_live_lineage(snapshot.source_id, snapshot.build_id, snapshot.revision, snapshot.world_id)
         values :: decisions.iter().map(persist_outcome_fact).collect()
         *self.live_values.lock().unwrap() = values.copy()
         lineage :: self.live_lineage.lock().unwrap().clone().expect("validated live lineage")
@@ -393,7 +392,7 @@ impl ResidentDevSession {
     fn devtools_panel_catalog(self: Self) -> JetDevtoolsPanelCatalog JetDevtoolsPanelCatalogError! { JetDevtoolsPanelCatalog.canonical() }
     // Rust: crates/jet-devserver/src/Session.rs:825
     fn devtools_panels(self: Self, host: JetDevtoolsHostKind, grants: [JetDevtoolsPanelCapability]) -> [JetDevtoolsPanelProjection] JetDevtoolsPanelCatalogError! {
-        catalog :: self.devtools_panel_catalog()?
+        catalog :: self.devtools_panel_catalog()
         state :: self.devtools_lock()
         catalog.project(&state.envelope, host, grants)
     }
@@ -419,7 +418,7 @@ impl ResidentDevSession {
     fn project_rebuild_executor_available(self: Self) -> Bool { self.project_rebuild_executor.lock().map((available) -> *available).unwrap_or(false) }
     // Rust: crates/jet-devserver/src/Session.rs:883
     fn validate_devtools_command_admission(self: &Self, command: &JetDevtoolsCommand) Err! {
-        command.validate()?
+        command.validate()
         if command.session_id() != self.id -> return .Err("jet.devtools.v1 command session identity mismatch")
         if command == .ProjectRebuild(request) {
             if !self.project_rebuild_executor_available() -> return .Err("no rebuild executor is registered for this host")
@@ -428,7 +427,7 @@ impl ResidentDevSession {
     }
     // Rust: crates/jet-devserver/src/Session.rs:902
     fn enqueue_devtools_command(self: &Self, command: JetDevtoolsCommand) Err! {
-        self.validate_devtools_command_admission(&command)?
+        self.validate_devtools_command_admission(&command)
         jet_foundation.DevtoolsControl.jet_devtools_enqueue_command(^command)
     }
     // Rust: crates/jet-devserver/src/Session.rs:907
@@ -452,13 +451,13 @@ impl ResidentDevSession {
             self.update_command_receipt(request.request_id, "building", .None)
             .Val(^request)
         } else {
-            jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(^command)?
+            jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(^command)
             .None
         }
     }
     // Rust: crates/jet-devserver/src/Session.rs:939
     fn finish_project_rebuild(self: &Self, request: &JetDevtoolsProjectRebuildRequest, result: Result<Unit,String>) Err! {
-        request.validate()?
+        request.validate()
         if request.session_id != self.id -> return .Err("jet.devtools.v1 command session identity mismatch")
         if result == {
             .Ok(_) -> jet_foundation.DevtoolsControl.jet_devtools_update_command_receipt(self.id, request.request_id, "completed", .None)
@@ -486,7 +485,7 @@ impl ResidentDevSession {
             if command == {
                 .DatabaseExplain(request) -> {
                     if request.session_id != self.id {
-                        jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.DatabaseExplain(^request))?
+                        jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.DatabaseExplain(^request))
                         return .Err("jet.devtools.v1 command session identity mismatch")
                     }
                     if jet_foundation.Devtools.jet_devtools_dispatch_database_explain(request.session_id, request.request_id, request.statement_identity, request.timeout_ms, request.max_rows) == {
@@ -494,9 +493,9 @@ impl ResidentDevSession {
                             self.update_command_receipt(request.request_id, "dispatched", .None)
                             dispatched = dispatched.saturating_add(1)
                         }
-                        .Err(error) if error == "database EXPLAIN runtime callback is unavailable" -> {
+                        .Err(error) && error == "database EXPLAIN runtime callback is unavailable" -> {
                             self.update_command_receipt(request.request_id, "waiting", .Val(error.copy()))
-                            jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.DatabaseExplain(^request))?
+                            jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.DatabaseExplain(^request))
                             return dispatched
                         }
                         .Err(error) -> {
@@ -505,7 +504,7 @@ impl ResidentDevSession {
                                 "error", 0, false, 0, [], .Val("dispatch_failed"), .Val(^error))
                                 .and_then((result) -> self.publish_database_explain_result(^result, unix_time_ms(), "devserver"))
                             if result == .Err(publish_error) {
-                                jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.DatabaseExplain(^request))?
+                                jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.DatabaseExplain(^request))
                                 return .Err(^publish_error)
                             }
                             dispatched = dispatched.saturating_add(1)
@@ -514,7 +513,7 @@ impl ResidentDevSession {
                 }
                 .GameControl(request) -> {
                     if request.session_id != self.id {
-                        jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.GameControl(^request))?
+                        jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.GameControl(^request))
                         return .Err("jet.devtools.v1 game control session identity mismatch")
                     }
                     payload :: request.render_json()
@@ -523,7 +522,7 @@ impl ResidentDevSession {
                             self.update_command_receipt(request.request_id, "dispatched", .None)
                             dispatched = dispatched.saturating_add(1)
                         }
-                        .Err(error) if error == "game control runtime callback is unavailable" -> {
+                        .Err(error) && error == "game control runtime callback is unavailable" -> {
                             if jet_foundation.Devtools.jet_devtools_write_game_control_relay(request.session_id, payload) == {
                                 .Ok(_) -> {
                                     self.update_command_receipt(request.request_id, "relayed", .Val(error.copy()))
@@ -531,20 +530,20 @@ impl ResidentDevSession {
                                 }
                                 .Err(relay_error) -> {
                                     self.update_command_receipt(request.request_id, "waiting", .Val(relay_error.copy()))
-                                    jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.GameControl(^request))?
+                                    jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.GameControl(^request))
                                     return .Err(^relay_error)
                                 }
                             }
                         }
                         .Err(error) -> {
                             self.update_command_receipt(request.request_id, "rejected", .Val(error.copy()))
-                            jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.GameControl(^request))?
+                            jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.GameControl(^request))
                             return .Err(^error)
                         }
                     }
                 }
                 .ProjectRebuild(request) -> {
-                    jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.ProjectRebuild(^request))?
+                    jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.ProjectRebuild(^request))
                     return dispatched
                 }
             }
@@ -556,21 +555,21 @@ impl ResidentDevSession {
     // Rust: crates/jet-devserver/src/Session.rs:1159
     fn publish_database_explain_result(self: Self, result: JetDevtoolsDatabaseExplainResult, timestamp_ms: U64, source: String) -> U64 Err! {
         if result.session_id != self.id -> return .Err("jet.devtools.v1 EXPLAIN result session identity mismatch")
-        result.validate()?
-        event :: JetDevtoolsEvent.from_parts(timestamp_ms, source, "DatabaseExplainResult", result.statement_identity.copy(), result.render_json())?
+        result.validate()
+        event :: JetDevtoolsEvent.from_parts(timestamp_ms, source, "DatabaseExplainResult", result.statement_identity.copy(), result.render_json())
         self.publish_devtools_event_typed(^event)
     }
     // Rust: crates/jet-devserver/src/Session.rs:1179
     fn ingest_devtools_envelope(self: Self, decoded: JetDevtoolsDecodedEnvelope) -> USize Err! {
-        decoded.validate()?
+        decoded.validate()
         if decoded.session_id() != self.id -> return .Err("jet.devtools.v1 envelope session identity mismatch")
         if decoded == {
             .Events(envelope) -> {
                 if envelope.source_identity.as_ref() == .Val(identity) {
-                    self.set_devtools_source_identity(identity.source_id.copy(), identity.build_id.copy(), identity.revision.copy(), identity.world_id.copy())?
+                    self.set_devtools_source_identity(identity.source_id.copy(), identity.build_id.copy(), identity.revision.copy(), identity.world_id.copy())
                 }
                 events :: envelope.events().cloned().collect()
-                count :: self.publish_panel_events(^events)?
+                count :: self.publish_panel_events(^events)
                 state :: self.devtools_lock()
                 state.envelope.set_selection(envelope.selection().cloned())
                 state.envelope.set_cursor(envelope.cursor())
@@ -586,7 +585,7 @@ impl ResidentDevSession {
             .Commands(envelope) -> {
                 commands :: envelope.commands().cloned().collect()
                 count :: commands.len()
-                loop command in &commands -> self.validate_devtools_command_admission(command)?
+                loop command in &commands -> self.validate_devtools_command_admission(command)
                 game_count :: commands.iter().filter((command) -> if command == {
                     .GameControl(_) -> true
                     else -> false
@@ -601,9 +600,9 @@ impl ResidentDevSession {
                         .GameControl(request) -> {
                             game_command :: JetDevtoolsCommand.GameControl(request.copy())
                             browser_controls.push_back(^request)
-                            jet_foundation.DevtoolsControl.jet_devtools_record_command_receipt(JetDevtoolsCommandReceipt.for_command(&game_command, "queued", .None))?
+                            jet_foundation.DevtoolsControl.jet_devtools_record_command_receipt(JetDevtoolsCommandReceipt.for_command(&game_command, "queued", .None))
                         }
-                        command -> jet_foundation.DevtoolsControl.jet_devtools_enqueue_command(^command)?
+                        command -> jet_foundation.DevtoolsControl.jet_devtools_enqueue_command(^command)
                     }
                 }
                 count
@@ -614,85 +613,85 @@ impl ResidentDevSession {
     fn publish_panel_events(self: Self, events: IntoIterator<JetDevtoolsEvent>) -> USize Err! {
         count := USize{0}
         loop event in events {
-            _ :: self.publish_devtools_event_typed(^event)?
+            _ :: self.publish_devtools_event_typed(^event)
             count = count.saturating_add(1)
         }
         count
     }
     // Rust: crates/jet-devserver/src/Session.rs:1266
     fn publish_job_fact(self: Self, fact: JetDevtoolsJobPanelFact, source: String) -> U64 Err! {
-        event :: fact.to_protocol_event(source)?
+        event :: fact.to_protocol_event(source)
         self.publish_devtools_event_typed(^event)
     }
     // Rust: crates/jet-devserver/src/Session.rs:1276
     fn scrub(self: Self, sequence: U64) -> ReplayProjection Err! {
-        projection :: {
+        projection :: (() -> {
             recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
             state :: recording.as_mut() ?? return .Err(recording_unavailable())
             state.cursor.seek(&state.recording, sequence).map_err(recording_error)
-        }
+        })()
         if projection.as_ref() == .Ok(value) -> self.sync_replay_cursor(value)
         projection
     }
     // Rust: crates/jet-devserver/src/Session.rs:1296
     fn scrub_time(self: Self, timestamp_ms: U64) -> ReplayProjection Err! {
-        projection :: {
+        projection :: (() -> {
             recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
             state :: recording.as_mut() ?? return .Err(recording_unavailable())
             state.cursor.seek_time(&state.recording, timestamp_ms).map_err(recording_error)
-        }
+        })()
         if projection.as_ref() == .Ok(value) -> self.sync_replay_cursor(value)
         projection
     }
     // Rust: crates/jet-devserver/src/Session.rs:1316
     fn step(self: Self) -> ReplayProjection Err! {
-        projection :: {
+        projection :: (() -> {
             recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
             state :: recording.as_mut() ?? return .Err(recording_unavailable())
             state.cursor.step_forward(&state.recording).map_err(recording_error)
-        }
+        })()
         if projection.as_ref() == .Ok(value) -> self.sync_replay_cursor(value)
         projection
     }
     // Rust: crates/jet-devserver/src/Session.rs:1336
     fn skip(self: Self, count: U64) -> ReplayProjection Err! {
-        projection :: {
+        projection :: (() -> {
             recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
             state :: recording.as_mut() ?? return .Err(recording_unavailable())
-            loop _ in 0..count -> _ :: state.cursor.step_forward(&state.recording).map_err(recording_error)?
+            loop _ in 0..count -> _ :: state.cursor.step_forward(&state.recording).map_err(recording_error)
             state.recording.projection(&state.cursor).map_err(recording_error)
-        }
+        })()
         if projection.as_ref() == .Ok(value) -> self.sync_replay_cursor(value)
         projection
     }
     // Rust: crates/jet-devserver/src/Session.rs:1362
     fn checkpoint(self: Self, name: String) -> SessionCheckpoint Err! {
-        validate_devtools_text(name, "checkpoint name")?
+        validate_devtools_text(name, "checkpoint name")
         recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
         state :: recording.as_mut() ?? return .Err(recording_unavailable())
-        checkpoint :: state.recording.checkpoint(&state.cursor).map_err(recording_error)?
+        checkpoint :: state.recording.checkpoint(&state.cursor).map_err(recording_error)
         state.checkpoints.insert(name, checkpoint.copy())
         checkpoint
     }
     // Rust: crates/jet-devserver/src/Session.rs:1381
     fn restore(self: Self, name: String) -> ReplayProjection Err! {
-        validate_devtools_text(name, "checkpoint name")?
-        projection :: {
+        validate_devtools_text(name, "checkpoint name")
+        projection :: (() -> {
             recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
             state :: recording.as_mut() ?? return .Err(recording_unavailable())
             checkpoint :: state.checkpoints.get(name).cloned() ?? return .Err(RecordingError.CheckpointUnavailable.to_string())
-            state.cursor = state.recording.restore_checkpoint(&checkpoint).map_err(recording_error)?
+            state.cursor = state.recording.restore_checkpoint(&checkpoint).map_err(recording_error)
             state.recording.projection(&state.cursor).map_err(recording_error)
-        }
+        })()
         if projection.as_ref() == .Ok(value) -> self.sync_replay_cursor(value)
         projection
     }
     // Rust: crates/jet-devserver/src/Session.rs:1411
     fn divergence(self: Self) -> DevtoolsRecordingDivergence Err! {
-        (envelope_sequence, envelope_identity) :: {
+        (envelope_sequence, envelope_identity) :: (() -> {
             state :: self.devtools_lock()
             (_0: state.envelope.latest_sequence(), _1: state.envelope.source_identity.copy())
-        }
+        })()
         recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
         state :: recording.as_ref() ?? return .Err(recording_unavailable())
         expected_sequence :: state.first_sequence.and_then((first) -> envelope_sequence.filter((sequence) -> *sequence >= first))
@@ -715,16 +714,16 @@ impl ResidentDevSession {
         if operation == {
             "scrub" -> {
                 sequence :: object.get("sequence").and_then(json_u64) ?? return .Err("recording scrub requires non-negative sequence")
-                _ :: self.scrub(sequence)?
+                _ :: self.scrub(sequence)
             }
             "scrub_time" -> {
                 timestamp_ms :: object.get("timestamp_ms").and_then(json_u64) ?? return .Err("recording scrub_time requires non-negative timestamp_ms")
-                _ :: self.scrub_time(timestamp_ms)?
+                _ :: self.scrub_time(timestamp_ms)
             }
             "step" -> if object.get("direction").and_then(json_string) == {
                 .None | .Val("forward") -> _ :: self.step()?
-                .Val("backward") | .Val("reverse") -> return .Err("recording step is forward-only")
-                .Val(direction) -> return .Err("unknown recording step direction `{direction}`")
+                .Val("backward") | .Val("reverse") -> { return .Err("recording step is forward-only") }
+                .Val(direction) -> { return .Err("unknown recording step direction `{direction}`") }
             }
             "skip" -> {
                 count :: object.get("count").and_then(json_u64) ?? return .Err("recording skip requires non-negative count")
@@ -739,7 +738,7 @@ impl ResidentDevSession {
                 _ :: self.restore(name)?
             }
             "divergence" -> _ :: self.divergence()?
-            else -> return .Err("unknown recording operation `{operation}`")
+            else -> { return .Err("unknown recording operation `{operation}`") }
         }
         self.recording_json()
     }
@@ -753,19 +752,19 @@ impl ResidentDevSession {
     }
     // Rust: crates/jet-devserver/src/Session.rs:1546
     fn set_devtools_source_identity(self: &Self, source_id: String?, build_id: String?, revision: String?, world_id: String?) Err! {
-        recording_identity :: if (_0: source_id.as_ref(), _1: build_id.as_ref()) == {
-            (.Val(source), .Val(build)) -> .Val(SessionIdentity.new(source, build).map_err(recording_error)?)
+        recording_identity :: if {
+            source_id.as_ref() == .Val(source) && build_id.as_ref() == .Val(build) -> .Val(SessionIdentity.new(source, build).map_err(recording_error)?)
             else -> .None
         }
         identity :: JetDevtoolsSourceIdentityFact.new(^source_id, ^build_id, ^revision, ^world_id)
-        first_sequence :: {
+        first_sequence :: (() -> {
             state :: self.devtools_lock()
-            state.envelope.set_source_identity(.Val(^identity))?
+            state.envelope.set_source_identity(.Val(^identity))
             if state.envelope.latest_sequence() == {
                 .Val(sequence) -> .Val(sequence.checked_add(1) ?? return .Err("devtools event sequence exhausted"))
                 .None -> .Val(1)
             }
-        }
+        })()
         self.set_recording_identity(^recording_identity, first_sequence)
     }
     // Rust: crates/jet-devserver/src/Session.rs:1576
@@ -775,13 +774,13 @@ impl ResidentDevSession {
             if state.recording.identity() == identity -> return
         }
         *recording = if identity == {
-            .Val(identity) -> .Val(ResidentRecordingState.new(SessionRecording.new(^identity).map_err(recording_error)?, first_sequence))
+            .Val(identity) -> .Val(ResidentRecordingState.new(SessionRecording.new(^identity).map_err(recording_error), first_sequence))
             .None -> .None
         }
     }
     // Rust: crates/jet-devserver/src/Session.rs:1602
     fn publish_hot_swap_decision(self: &Self, decision: &HotSwapDecision) Err! {
-        validate_devtools_text(decision.module_ref, "HotSwap module")?
+        validate_devtools_text(decision.module_ref, "HotSwap module")
         compatibility :: if decision.is_compatible() -> "compatible" else -> "incompatible"
         reason :: decision.compatibility.reason().unwrap_or("")
         (kept, reset) :: decision.state.iter().partition((fact) -> fact.is_preserved())
@@ -789,9 +788,9 @@ impl ResidentDevSession {
         change_facts :: decision.change_facts.iter().map(game_change_fact_json).collect().join(",")
         kept_keys :: kept.iter().map((fact) -> fact.key.copy()).collect()
         reset_keys :: reset.iter().map((fact) -> fact.key.copy()).collect()
-        fields :: "{{\"module\":{json_value(decision.module)},\"compatibility\":{json_value(compatibility)},\"reason\":{json_value(reason)},\"changed\":{string_array_json(&decision.changed)},\"changed_functions\":{string_array_json(&decision.changed_functions)},\"state\":[{state}],\"kept\":{string_array_json(&kept_keys)},\"reset\":{string_array_json(&reset_keys)},\"rechecked_items\":{string_array_json(&decision.rechecked_items)},\"change_facts\":[{change_facts}]}}"
-        event :: JetDevtoolsEvent.from_parts(unix_time_ms(), "sema", "HotSwap", "module", ^fields)?
-        _ :: self.publish_devtools_event_typed(^event)?
+        fields :: "{{\"module\":{json_value(decision.module_ref)},\"compatibility\":{json_value(compatibility)},\"reason\":{json_value(reason)},\"changed\":{string_array_json(&decision.changed)},\"changed_functions\":{string_array_json(&decision.changed_functions)},\"state\":[{state}],\"kept\":{string_array_json(&kept_keys)},\"reset\":{string_array_json(&reset_keys)},\"rechecked_items\":{string_array_json(&decision.rechecked_items)},\"change_facts\":[{change_facts}]}}"
+        event :: JetDevtoolsEvent.from_parts(unix_time_ms(), "sema", "HotSwap", "module", ^fields)
+        _ :: self.publish_devtools_event_typed(^event)
     }
     // Rust: crates/jet-devserver/src/Session.rs:1664
     fn set_devtools_selection(self: &Self, request: String) Err! {
@@ -800,16 +799,16 @@ impl ResidentDevSession {
         nested :: object.get("selection").and_then(object_map)
         field :: (key: String) -> object.get(key).or_else(() -> nested.as_ref().and_then((selection) -> selection.get(key))).and_then(json_string).map((text) -> text.to_string())
         clear :: object.get("clear").is_some_and((value) -> if value == {
-            .Bool(true) -> true
+            .Bool(lit0) && lit0 == true -> true
             else -> false
         })
             || object.get("selection") == .Val(.Null)
         panel_id :: field("panel_id").or_else(() -> field("target"))
         item_key :: field("item_key").or_else(() -> field("source_id")).or_else(() -> field("output"))
         origin :: field("origin").unwrap_or("host")
-        validate_devtools_text(origin, "selection origin")?
+        validate_devtools_text(origin, "selection origin")
         loop (value, label) in [(_0: panel_id.as_ref(), _1: "panel_id"), (_0: item_key.as_ref(), _1: "item_key")] {
-            if value == .Val(value) -> validate_devtools_text(value, label)?
+            if value == .Val(value) -> validate_devtools_text(value, label)
         }
         if !clear && panel_id.is_none() && item_key.is_none() -> return .Err("devtools selection has no selected value")
         source_id :: field("source_id")
@@ -823,7 +822,7 @@ impl ResidentDevSession {
             if source_id.as_ref().or(item_key.as_ref()) == .Val(source) -> self.select_project_source(source)
             self.select_output_values(output.as_ref(), target.as_ref().or(panel_id.as_ref()))
         }
-        {
+        _ :: (() -> {
             state :: self.devtools_lock()
             if clear -> state.envelope.set_selection(.None)
             else {
@@ -832,24 +831,24 @@ impl ResidentDevSession {
                 selected_item :: item_key.clone().or_else(() -> state.envelope.view().selection().and_then((selection) -> selection.item_key.copy()))
                 state.envelope.set_selection(.Val(JetDevtoolsSelection.new(^selected_panel, ^selected_item)))
             }
-        }
+        })()
         panel_json :: if clear -> "null" else -> panel_id.as_ref().map(json_value).unwrap_or("null")
         item_json :: if clear -> "null" else -> item_key.as_ref().map(json_value).unwrap_or("null")
         fields :: "{{\"panel_id\":{panel_json},\"item_key\":{item_json},\"cleared\":{clear}}}"
-        event :: JetDevtoolsEvent.from_parts(unix_time_ms(), origin, "Selection", "session", ^fields)?
-        _ :: self.publish_devtools_event_typed(^event)?
+        event :: JetDevtoolsEvent.from_parts(unix_time_ms(), origin, "Selection", "session", ^fields)
+        _ :: self.publish_devtools_event_typed(^event)
     }
     // Rust: crates/jet-devserver/src/Session.rs:1773
     fn set_devtools_cursor(self: &Self, request: String) Err! {
         root :: parse_json(request) ?? return .Err("devtools cursor must be valid JSON")
         object :: object_map(&root) ?? return .Err("devtools cursor must be an object")
         origin :: object.get("origin").and_then(json_string).unwrap_or("host")
-        validate_devtools_text(origin, "cursor origin")?
+        validate_devtools_text(origin, "cursor origin")
         cursor_value :: object.get("cursor").or_else(() -> object.get("sequence"))
         sequence :: if cursor_value == {
             .None | .Val(.Null) -> .None
             .Val(.Object(entries)) -> {
-                cursor :: [String:DataTree]{entries.iter().cloned().collect()}
+                cursor :: [String:Dyn]{entries.iter().cloned().collect()}
                 value :: cursor.get("sequence") ?? return .Err("devtools cursor must be a sequence")
                 .Val(json_u64(value) ?? return .Err("devtools cursor must be a sequence"))
             }
@@ -858,7 +857,7 @@ impl ResidentDevSession {
         { self.devtools_lock().envelope.set_cursor(sequence) }
         sequence_json :: sequence.map((value) -> value.to_string()).unwrap_or("null")
         fields :: "{{\"sequence\":{sequence_json}}}"
-        event :: JetDevtoolsEvent.from_parts(unix_time_ms(), origin, "Cursor", "session", ^fields)?
-        _ :: self.publish_devtools_event_typed(^event)?
+        event :: JetDevtoolsEvent.from_parts(unix_time_ms(), origin, "Cursor", "session", ^fields)
+        _ :: self.publish_devtools_event_typed(^event)
     }
 }

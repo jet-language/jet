@@ -1,5 +1,5 @@
 // Private continuation of jet_devserver.WebHost.
-use jet_devserver.WebHost.*
+use jet_devserver.WebHost.[DevStatus, MAX_CONNECTION_THREADS, REQUEST_DEADLINE, WebHost, current_revision_for_request, current_revision_for_source_id, decode_devtools_envelope, devtools_path, inject_canvas_session, is_application_control_path, is_loopback_host, method_not_allowed, next_web_error_request_id, object_map, paused_evaluate_error_status, read_source_without_symlinks, serve_static_from_root, session_response, source_id_from_payload, source_tool_path, wait_for_shutdown, web_stream_path, with_session]
 use std.io.[Read, Write, BufReader, Error, ErrorKind]
 use std.net.[TcpStream, TcpListener, SocketAddr, IpAddr, Ipv4Addr]
 use std.sync.[Arc, Mutex]
@@ -15,8 +15,8 @@ use jet_devserver.Devtools as Devtools
 use jet_devserver.PausedEvaluate.[PausedEvaluateHost]
 use jet_devserver.TerminalStyleReload.[TerminalStyleHostAdapter]
 use jet_driver.Package.[ReleaseDevtoolsPolicy]
-use jet_foundation.DataTree.[DataTree]
-use jet_foundation.JSON.[json_escape, parse_json_with_limit]
+use jet_foundation.Dyn.[Dyn]
+use jet_foundation.JSON.[foundation_json_escape, parse_json_with_limit]
 // Rust: crates/jet-devserver/src/WebHost.rs:3789
 // Canonical WebPending implementation, not the Rust include bridge.
 use jet_codegen.Prelude.Core.WebPending as web_stream_bridge
@@ -24,9 +24,9 @@ use jet_codegen.Prelude.Core.WebPending as web_stream_bridge
 fn canvas_api_path(path: String, target: String) -> Bool {
     return path == "/__jet_canvas".bit_or("/__jet_canvas/").bit_or("/__jet_canvas/app.js").bit_or("/__jet_canvas/session").bit_or("/__jet_canvas/live").bit_or("/__jet_canvas/graph").bit_or("/__jet_canvas/project").bit_or("/__jet_canvas/source-control").bit_or("/__jet_canvas/core-catalog").bit_or("/__jet_canvas/proof").bit_or("/__jet_canvas/source").bit_or("/__jet_canvas/command").bit_or("/__jet_canvas/transaction").bit_or("/__jet_canvas/project/transaction").bit_or("/__jet_canvas/query").bit_or("/__jet_canvas/debug").bit_or("/canvas").bit_or("/canvas/").bit_or("/canvas/app.js").bit_or("/canvas/session").bit_or("/canvas/graph").bit_or("/canvas/project").bit_or("/canvas/source-control").bit_or("/canvas/core-catalog").bit_or("/canvas/proof").bit_or("/canvas/source").bit_or("/canvas/command").bit_or("/canvas/transaction").bit_or("/canvas/project/transaction").bit_or("/canvas/query").bit_or("/canvas/debug").bit_or("/panel").bit_or("/panel/").bit_or("/panel/app.js").bit_or("/panel/session").bit_or("/panel/graph").bit_or("/panel/project").bit_or("/panel/source-control").bit_or("/panel/core-catalog").bit_or("/panel/proof").bit_or("/panel/source").bit_or("/panel/command").bit_or("/panel/transaction").bit_or("/panel/project/transaction").bit_or("/panel/query").bit_or("/panel/debug").bit_or("/__jet_dev_version").bit_or("/__jet_dev_status").bit_or("/__jet_dev_disconnect").bit_or("/__jet_perf_browser").bit_or("/__jet_web/stream")
         || devtools_path(path)
-        || (path == "/" && (query_param(target, "jet_panel") == .Val("1")
-            || query_param(target, "jet_panel_app") == .Val("1")
-            || query_param(target, "jet_panel_graph") == .Val("1")))
+        || (path == "/" && (query_param(target, "jet_panel") == "1"
+            || query_param(target, "jet_panel_app") == "1"
+            || query_param(target, "jet_panel_graph") == "1"))
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:3650
 fn canvas_request_authorized(request: Request, target: String, bind_host: String, port: U16, session_secret: String) -> Bool {
@@ -45,12 +45,15 @@ fn canvas_request_authorized(request: Request, target: String, bind_host: String
         if !origin_allowed(value, bind_host, port) -> return false
     } else if !canvas_bootstrap_path(path, target) && !same_origin -> return false
     authorization :: request.headers.get("authorization")
-    query_session :: match unique_session_param(target) { .Ok(v) -> v; .Err(_) -> return false }
-    session_valid :: if (authorization, query_session) == {
-        (_0: .Val(auth), _1: .Val(query)) -> auth.strip_prefix("Bearer ").is_some_and((token) -> constant_time_equal(token, session_secret)) && constant_time_equal(query, session_secret)
-        (_0: .Val(auth), _1: .None) -> auth.strip_prefix("Bearer ").is_some_and((token) -> constant_time_equal(token, session_secret))
-        (_0: .None, _1: .Val(query)) -> constant_time_equal(query, session_secret)
-        (_0: .None, _1: .None) -> false
+    query_session :: if unique_session_param(target) == {
+        .Ok(v) -> v
+        .Err(_) -> { return false }
+    }
+    session_valid :: if {
+        authorization == .Val(auth) && query_session == .Val(query) -> auth.strip_prefix("Bearer ").is_some_and((token) -> constant_time_equal(token, session_secret)) && constant_time_equal(query, session_secret)
+        authorization == .Val(auth) && query_session == .None -> auth.strip_prefix("Bearer ").is_some_and((token) -> constant_time_equal(token, session_secret))
+        authorization == .None && query_session == .Val(query) -> constant_time_equal(query, session_secret)
+        authorization == .None && query_session == .None -> false
     }
     return session_valid && (origin.is_some() || canvas_bootstrap_path(path, target) || same_origin)
 }
@@ -61,7 +64,7 @@ fn unique_session_param(target: String) -> String? Unit! {
     loop part in query.split('&') {
         name :: part.split_once('=').map(((_0: name, _1: _)) -> name).unwrap_or(part)
         if name == "session" {
-            if found -> return .Err(())
+            if found -> return .Err(_)
             found = true
         }
     }
@@ -106,13 +109,13 @@ fn constant_time_equal(left: String, right: String) -> Bool {
     return difference == 0
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:3794
-fn web_stream_json_string(value: String) -> String { "\"{json_escape(value)}\"" }
+fn web_stream_json_string(value: String) -> String { "\"{foundation_json_escape(value)}\"" }
 // Rust: crates/jet-devserver/src/WebHost.rs:3798
 fn web_stream_error(error: web_stream_bridge.JetWebPendingError) -> (String, String) { (_0: error.code().to_string(), _1: error.message()) }
 // Rust: crates/jet-devserver/src/WebHost.rs:3802
 fn web_stream_request_error(message: String) -> (String, String) { (_0: "invalid_request", _1: ^message) }
 // Rust: crates/jet-devserver/src/WebHost.rs:3806
-fn web_stream_required_string(object: [String:DataTree], key: String) -> Result<String, (String, String)> {
+fn web_stream_required_string(object: [String:Dyn], key: String) -> Result<String, (String, String)> {
     return if object.get(key) == {
         .Val(.Text(value)) if !value.is_empty() -> .Ok(value.clone())
         .Val(.Text(_)) -> .Err(web_stream_request_error("web stream `{key}` must not be empty"))
@@ -121,7 +124,7 @@ fn web_stream_required_string(object: [String:DataTree], key: String) -> Result<
     }
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:3823
-fn web_stream_required_text(object: [String:DataTree], key: String) -> Result<String, (String, String)> {
+fn web_stream_required_text(object: [String:Dyn], key: String) -> Result<String, (String, String)> {
     return if object.get(key) == {
         .Val(.Text(value)) -> .Ok(value.clone())
         .Val(_) -> .Err(web_stream_request_error("web stream `{key}` must be a string"))
@@ -129,7 +132,7 @@ fn web_stream_required_text(object: [String:DataTree], key: String) -> Result<St
     }
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:3838
-fn web_stream_required_u64(object: [String:DataTree], key: String) -> Result<U64, (String, String)> {
+fn web_stream_required_u64(object: [String:Dyn], key: String) -> Result<U64, (String, String)> {
     return if object.get(key) == {
         .Val(.Int(value)) if value >= 0 -> .Ok(U64{value})
         .Val(.Int(_)) -> .Err(web_stream_request_error("web stream `{key}` must be non-negative"))
@@ -138,7 +141,7 @@ fn web_stream_required_u64(object: [String:DataTree], key: String) -> Result<U64
     }
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:3856
-fn web_stream_required_bool(object: [String:DataTree], key: String) -> Result<Bool, (String, String)> {
+fn web_stream_required_bool(object: [String:Dyn], key: String) -> Result<Bool, (String, String)> {
     return if object.get(key) == {
         .Val(.Bool(value)) -> .Ok(value)
         .Val(_) -> .Err(web_stream_request_error("web stream `{key}` must be a boolean"))
@@ -146,43 +149,43 @@ fn web_stream_required_bool(object: [String:DataTree], key: String) -> Result<Bo
     }
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:3870
-fn web_stream_required_usize(object: [String:DataTree], key: String) -> Result<USize, (String, String)> {
-    value :: web_stream_required_u64(object, key)?
+fn web_stream_required_usize(object: [String:Dyn], key: String) -> Result<USize, (String, String)> {
+    value :: web_stream_required_u64(object, key)
     return USize.try_from(value).map_err((_) -> web_stream_request_error("web stream `{key}` is too large")) // GATE #4483: selected pointer width.
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:3879
-fn web_stream_object(object: [String:DataTree], key: String) -> Result<[String:DataTree], (String, String)> {
-    value :: object.get(key).ok_or_else(() -> web_stream_request_error("web stream request has no `{key}`"))?
+fn web_stream_object(object: [String:Dyn], key: String) -> Result<[String:Dyn], (String, String)> {
+    value :: object.get(key).ok_or_else(() -> web_stream_request_error("web stream request has no `{key}`"))
     return object_map(value).ok_or_else(() -> web_stream_request_error("web stream `{key}` must be an object"))
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:3890
-fn web_stream_identity(object: [String:DataTree], key: String) -> Result<web_stream_bridge.JetWebIslandIdentity, (String, String)> {
-    identity :: web_stream_object(object, key)?
-    island_id :: web_stream_required_string(&identity, "island_id")?
-    source_id :: web_stream_required_string(&identity, "source_id")?
-    build_id :: web_stream_required_string(&identity, "build_id")?
-    revision :: web_stream_required_string(&identity, "revision")?
+fn web_stream_identity(object: [String:Dyn], key: String) -> Result<web_stream_bridge.JetWebIslandIdentity, (String, String)> {
+    identity :: web_stream_object(object, key)
+    island_id :: web_stream_required_string(&identity, "island_id")
+    source_id :: web_stream_required_string(&identity, "source_id")
+    build_id :: web_stream_required_string(&identity, "build_id")
+    revision :: web_stream_required_string(&identity, "revision")
     return web_stream_bridge.JetWebIslandIdentity.new(^island_id, ^source_id, ^build_id, ^revision).map_err(web_stream_error)
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:3903
-fn web_stream_boundary_id(object: [String:DataTree], key: String) -> Result<web_stream_bridge.JetWebBoundaryId, (String, String)> {
+fn web_stream_boundary_id(object: [String:Dyn], key: String) -> Result<web_stream_bridge.JetWebBoundaryId, (String, String)> {
     return web_stream_bridge.JetWebBoundaryId.new(web_stream_required_string(object, key)?).map_err(web_stream_error)
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:3911
-fn web_stream_id(object: [String:DataTree], key: String) -> Result<web_stream_bridge.JetWebStreamId, (String, String)> {
-    stream :: web_stream_object(object, key)?
-    boundary_id :: web_stream_bridge.JetWebBoundaryId.new(web_stream_required_string(&stream, "boundary_id")?).map_err(web_stream_error)?
-    generation :: web_stream_required_u64(&stream, "generation")?
-    identity :: web_stream_identity(&stream, "identity")?
+fn web_stream_id(object: [String:Dyn], key: String) -> Result<web_stream_bridge.JetWebStreamId, (String, String)> {
+    stream :: web_stream_object(object, key)
+    boundary_id :: web_stream_bridge.JetWebBoundaryId.new(web_stream_required_string(&stream, "boundary_id")?).map_err(web_stream_error)
+    generation :: web_stream_required_u64(&stream, "generation")
+    identity :: web_stream_identity(&stream, "identity")
     return web_stream_bridge.JetWebStreamId.from_parts(^boundary_id, generation, ^identity).map_err(web_stream_error)
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:3927
-fn web_stream_trigger(object: [String:DataTree], key: String) -> Result<web_stream_bridge.JetWebHydrationTrigger, (String, String)> {
-    value :: web_stream_required_string(object, key)?
+fn web_stream_trigger(object: [String:Dyn], key: String) -> Result<web_stream_bridge.JetWebHydrationTrigger, (String, String)> {
+    value :: web_stream_required_string(object, key)
     return web_stream_bridge.JetWebHydrationTrigger.parse(value).ok_or_else(() -> web_stream_request_error("web stream `{key}` has an unknown hydration trigger"))
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:3939
-fn web_stream_target(object: [String:DataTree], key: String) -> Result<web_stream_bridge.JetWebPendingProjectionTarget, (String, String)> {
+fn web_stream_target(object: [String:Dyn], key: String) -> Result<web_stream_bridge.JetWebPendingProjectionTarget, (String, String)> {
     return if web_stream_required_string(object, key)? == {
         "server" -> .Ok(.Server)
         "client" -> .Ok(.Client)
@@ -190,8 +193,8 @@ fn web_stream_target(object: [String:DataTree], key: String) -> Result<web_strea
     }
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:3952
-fn web_stream_failure(object: [String:DataTree]) -> Result<web_stream_bridge.JetWebPendingError, (String, String)> {
-    error :: web_stream_object(object, "error")?
+fn web_stream_failure(object: [String:Dyn]) -> Result<web_stream_bridge.JetWebPendingError, (String, String)> {
+    error :: web_stream_object(object, "error")
     return if web_stream_required_string(&error, "code")? == {
         "missing_final_chunk" -> .Ok(.MissingFinalChunk)
         "invalid_lifecycle" -> .Ok(.InvalidLifecycle(state: .Pending, operation: "web_stream_fail"))
@@ -210,7 +213,7 @@ fn handle_web_stream_request(stream: &impl Write, request: &Request) Err! {
     if request.method != "POST" -> return method_not_allowed(stream)
     text :: match std.str.from_utf8(&request.body) { // GATE #4494: borrowed UTF-8 byte view.
         .Ok(text) -> text
-        .Err(_) -> return write_response(stream, "400 Bad Request", "application/json; charset=utf-8", web_stream_failure_json("invalid_request", "web stream request must be UTF-8 JSON").as_bytes())
+        .Err(_) -> { return write_response(stream, "400 Bad Request", "application/json; charset=utf-8", web_stream_failure_json("invalid_request", "web stream request must be UTF-8 JSON").as_bytes()) }
     }
     root :: if parse_json_with_limit(text, MAX_REQUEST_BODY_BYTES) == {
         .Ok(root) -> root
@@ -335,7 +338,7 @@ impl DeadlineStream {
     // Rust: crates/jet-devserver/src/WebHost.rs:4320
     fn new(stream: TcpStream, deadline: Instant) -> Self { Self(stream: ^stream, deadline: deadline) }
     // Rust: crates/jet-devserver/src/WebHost.rs:4324
-    fn try_clone(self: Self) -> Self Err! { .Ok(Self.new(self.stream.try_clone()?, self.deadline)) }
+    fn try_clone(self: Self) -> Self Err! { .Ok(Self.new(self.stream.try_clone(), self.deadline)) }
     // Rust: crates/jet-devserver/src/WebHost.rs:4328
     fn remaining(self: Self) -> Duration Err! {
         remaining :: self.deadline.saturating_duration_since(Instant.now()) // GATE #4494: monotonic clock.
@@ -345,7 +348,7 @@ impl DeadlineStream {
 impl DeadlineStream.Read {
     // Rust: crates/jet-devserver/src/WebHost.rs:4342
     fn read(self: Self, buffer: [U8]) -> USize Err! {
-        remaining :: self.remaining()?
+        remaining :: self.remaining()
         self.stream.set_read_timeout(.Val(remaining))? // GATE #4494: retained native socket timeout.
         return self.stream.read(buffer)
     }
@@ -353,14 +356,14 @@ impl DeadlineStream.Read {
 impl DeadlineStream.Write {
     // Rust: crates/jet-devserver/src/WebHost.rs:4350
     fn write(self: Self, buffer: [U8]) -> USize Err! {
-        remaining :: self.remaining()?
+        remaining :: self.remaining()
         self.stream.set_write_timeout(.Val(remaining))? // GATE #4494
         return self.stream.write(buffer)
     }
     // Rust: crates/jet-devserver/src/WebHost.rs:4356
     fn flush(self: &Self) Err! {
-        remaining :: self.remaining()?
-        self.stream.set_write_timeout(.Val(remaining))?
+        remaining :: self.remaining()
+        self.stream.set_write_timeout(.Val(remaining))
         return self.stream.flush()
     }
 }
@@ -371,7 +374,9 @@ fn serve_forever(listener: TcpListener, status: Arc<DevStatus>, debug_sessions: 
     active_connections :: Arc.new(AtomicUsize.new(0)) // GATE #4494: native atomic and thread substrate.
     loop !shutdown.load(Ordering.SeqCst) {
         if listener.accept() == {
-            .Ok((stream, peer_addr)) -> {
+            .Ok(tuple_10) -> {
+                stream :: tuple_10._0
+                peer_addr :: tuple_10._1
                 if !try_acquire_connection(&active_connections) { drop(^stream); next }
                 status :: Arc.clone(&status)
                 debug_sessions :: Arc.clone(&debug_sessions)
@@ -390,8 +395,8 @@ fn serve_forever(listener: TcpListener, status: Arc<DevStatus>, debug_sessions: 
                     _ :: active_connections.fetch_sub(1, Ordering.AcqRel)
                 })
             }
-            .Err(error) if error.kind() == ErrorKind.WouldBlock -> { _ :: wait_for_shutdown(&shutdown, Duration.from_millis(10)) }
-            .Err(_) -> return
+            .Err(error) && error.kind() == ErrorKind.WouldBlock -> { _ :: wait_for_shutdown(&shutdown, Duration.from_millis(10)) }
+            .Err(_) -> { return }
         }
     }
 }
@@ -401,7 +406,7 @@ fn try_acquire_connection(active: AtomicUsize) -> Bool {
     loop {
         if current >= MAX_CONNECTION_THREADS -> return false
         if active.compare_exchange(current, current + 1, Ordering.AcqRel, Ordering.Acquire) == {
-            .Ok(_) -> return true
+            .Ok(_) -> { return true }
             .Err(next) -> current = next
         }
     }
@@ -411,7 +416,7 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
     deadline :: Instant.now() + REQUEST_DEADLINE
     stream := DeadlineStream.new(^stream, deadline)
     reader := BufReader.new(stream.try_clone()?)
-    request :: Request.read(&reader)? ?? return .Ok(())
+    request :: Request.read(&reader) ?? return .Ok(_)
     method :: request.method.as_str()
     target :: request.target.as_str()
     body :: request.body.as_slice()
@@ -433,18 +438,21 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
         if method != "GET" -> return method_not_allowed(&stream)
         started :: Instant.now()
         nonce :: status.browser_relay.lock().unwrap().as_ref().map((relay) -> relay.nonce().to_string()).unwrap_or_default()
-        code :: serve_static_from_root(&stream, static_root, path, nonce, session_secret)?
+        code :: serve_static_from_root(&stream, static_root, path, nonce, session_secret)
         status.log_request(method, path, code, started.elapsed())
-        return .Ok(())
+        return .Ok(_)
     }
     if listener_kind == .Application && web_stream_path(path) -> return handle_web_stream_request(&stream, &request)
     if devtools_path(path) {
         if query_param(target, "client_id") == .Val(client) -> session.note_client(client)
-        placement :: match path { "/__jet_devtools/workbench" -> BrowserHost.BrowserPlacement.Workbench; _ -> BrowserHost.BrowserPlacement.InApp }
+        placement :: if path == {
+            "/__jet_devtools/workbench" -> BrowserHost.BrowserPlacement.Workbench
+            else -> BrowserHost.BrowserPlacement.InApp
+        }
         if method == "GET" && listener_kind == .Application && path == "/__jet_devtools".bit_or("/__jet_devtools/workbench") {
             state := browser_state.lock().unwrap()
             return if browser_web_adapter.sync_session(&state, session) == {
-                .Ok(()) -> {
+                .Ok(_) -> {
                     body :: browser_web_adapter.render_page(state.as_ref().expect("browser web state initialized"), placement)
                     write_response(&stream, "200 OK", "text/html; charset=utf-8", body.as_bytes())
                 }
@@ -461,7 +469,7 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
             }
             state := browser_state.lock().unwrap()
             return if browser_web_adapter.sync_session(&state, session) == {
-                .Ok(()) -> {
+                .Ok(_) -> {
                     projection :: session.devtools_events_since(cursor)
                     state :: state.as_ref().expect("browser web state initialized")
                     if browser_web_adapter.reconnect_json(state, cursor, projection.reset, projection.truncation) == {
@@ -475,7 +483,7 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
         if path == "/__jet_devtools/state" && method == "GET" {
             state := browser_state.lock().unwrap()
             return if browser_web_adapter.sync_session(&state, session) == {
-                .Ok(()) -> {
+                .Ok(_) -> {
                     body :: browser_web_adapter.view_json(state.as_ref().expect("browser web state initialized"), placement)
                     write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
                 }
@@ -485,7 +493,7 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
         if path == "/__jet_devtools/swap" && method == "GET" {
             state := browser_state.lock().unwrap()
             return if browser_web_adapter.sync_session(&state, session) == {
-                .Ok(()) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", browser_web_adapter.swap_json(state.as_ref().expect("browser web state initialized")).as_bytes())
+                .Ok(_) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", browser_web_adapter.swap_json(state.as_ref().expect("browser web state initialized")).as_bytes())
                 .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
             }
         }
@@ -493,25 +501,29 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
             state := browser_state.lock().unwrap()
             result :: browser_web_adapter.sync_session(&state, session).and_then((()) -> browser_web_adapter.record_dom_snapshot(&state, session.id(), body))
             return if result == {
-                .Ok(()) -> write_response(&stream, "204 No Content", "text/plain; charset=utf-8", "".bytes())
+                .Ok(_) -> write_response(&stream, "204 No Content", "text/plain; charset=utf-8", "".bytes())
                 .Err(error) -> write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", error.as_bytes())
             }
         }
         if path == "/__jet_devtools/recording" && release_policy.is_release() -> return write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", "recording endpoint absent in release builds".bytes())
         if path == "/__jet_devtools/recording" && method == "GET" {
-            body :: if query_param(target, "sequence") == .Val(value) {
-                sequence :: if value.parse<U64>() == {
-                    .Ok(sequence) -> sequence
-                    .Err(_) -> { return write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", "sequence must be a non-negative integer".bytes()) }
+            body :: if {
+                query_param(target, "sequence") == .Val(value) -> {
+                    sequence :: if value.parse<U64>() == {
+                        .Ok(sequence) -> sequence
+                        .Err(_) -> { return write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", "sequence must be a non-negative integer".bytes()) }
+                    }
+                    session.recording_control("{{\"op\":\"scrub\",\"sequence\":{sequence}}}")
                 }
-                session.recording_control("{{\"op\":\"scrub\",\"sequence\":{sequence}}}")
-            } else if query_param(target, "timestamp_ms") == .Val(value) {
-                timestamp_ms :: if value.parse<U64>() == {
-                    .Ok(timestamp_ms) -> timestamp_ms
-                    .Err(_) -> { return write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", "timestamp_ms must be a non-negative integer".bytes()) }
+                query_param(target, "timestamp_ms") == .Val(value) -> {
+                    timestamp_ms :: if value.parse<U64>() == {
+                        .Ok(timestamp_ms) -> timestamp_ms
+                        .Err(_) -> { return write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", "timestamp_ms must be a non-negative integer".bytes()) }
+                    }
+                    session.recording_control("{{\"op\":\"scrub_time\",\"timestamp_ms\":{timestamp_ms}}}")
                 }
-                session.recording_control("{{\"op\":\"scrub_time\",\"timestamp_ms\":{timestamp_ms}}}")
-            } else { .Ok(session.recording_json()) }
+                else -> { .Ok(session.recording_json()) }
+            }
             return if body == {
                 .Ok(body) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
                 .Err(error) -> write_response(&stream, "409 Conflict", "text/plain; charset=utf-8", error.as_bytes())
@@ -531,7 +543,7 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
             }
             state := browser_state.lock().unwrap()
             return if browser_web_adapter.sync_session(&state, session) == {
-                .Ok(()) -> if browser_web_adapter.dispatch_action(state.as_mut().expect("browser web state initialized"), ^action) == {
+                .Ok(_) -> if browser_web_adapter.dispatch_action(state.as_mut().expect("browser web state initialized"), ^action) == {
                     .Ok(body) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
                     .Err(error) -> write_response(&stream, "403 Forbidden", "text/plain; charset=utf-8", error.to_string().as_bytes())
                 }
@@ -553,7 +565,7 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
         if method == "GET" && path == "/__jet_devtools".bit_or("/__jet_canvas/devtools").bit_or("/canvas/devtools").bit_or("/panel/devtools") {
             state := browser_state.lock().unwrap()
             return if browser_web_adapter.sync_session(&state, session) == {
-                .Ok(()) -> {
+                .Ok(_) -> {
                     body :: browser_web_adapter.view_json(state.as_ref().expect("browser web state initialized"), placement)
                     write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
                 }
@@ -561,15 +573,15 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
             }
         }
         if path == "/__jet_devtools" && method == "POST" {
-            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "devtools event must be UTF-8"))?
+            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "devtools event must be UTF-8"))
             return if decode_devtools_envelope(payload).and_then((decoded) -> == {
                 session.ingest_devtools_envelope(^decoded)?
                 session.dispatch_pending_database_explain().map((_) -> ())
             }) {
-                .Ok(()) -> {
+                .Ok(_) -> {
                     state := browser_state.lock().unwrap()
                     if browser_web_adapter.sync_session(&state, session) == {
-                        .Ok(()) -> {
+                        .Ok(_) -> {
                             body :: browser_web_adapter.view_json(state.as_ref().expect("browser web state initialized"), placement)
                             write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
                         }
@@ -584,19 +596,20 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
                 .Ok(selection) -> selection
                 .Err(error) -> { return write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", error.as_bytes()) }
             }
-            if selection == .Val((panel_id, _)) {
+            if selection == .Val(tuple_11) {
+                panel_id :: tuple_11._0
                 panels :: if session.devtools_panels(Devtools.JetDevtoolsHostKind.BrowserInApp, &Devtools.JetDevtoolsPanelCapability.ALL) == {
                     .Ok(panels) -> panels
                     .Err(error) -> { return write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.to_string().as_bytes()) }
                 }
                 if !panels.iter().any((panel) -> panel.availability.descriptor.id.as_str() == panel_id) -> return write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", "browser selection panel_id must match the canonical panel catalog".bytes())
             }
-            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "devtools selection must be UTF-8"))?
+            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "devtools selection must be UTF-8"))
             return if session.set_devtools_selection(payload) == {
-                .Ok(()) -> {
+                .Ok(_) -> {
                     state := browser_state.lock().unwrap()
                     if browser_web_adapter.sync_session(&state, session) == {
-                        .Ok(()) -> {
+                        .Ok(_) -> {
                             body :: browser_web_adapter.view_json(state.as_ref().expect("browser web state initialized"), placement)
                             write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
                         }
@@ -607,12 +620,12 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
             }
         }
         if path == "/__jet_devtools/cursor" && method == "POST" {
-            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "devtools cursor must be UTF-8"))?
+            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "devtools cursor must be UTF-8"))
             return if session.set_devtools_cursor(payload) == {
-                .Ok(()) -> {
+                .Ok(_) -> {
                     state := browser_state.lock().unwrap()
                     if browser_web_adapter.sync_session(&state, session) == {
-                        .Ok(()) -> {
+                        .Ok(_) -> {
                             body :: browser_web_adapter.view_json(state.as_ref().expect("browser web state initialized"), placement)
                             write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
                         }
@@ -631,17 +644,20 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
                 std.fs.read_to_string(static_root.join("web.manifest.json")).ok().and_then((manifest) -> browser_web_adapter.manifest_artifact_identity(manifest).ok())
             }) ?? return write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", "error identity unavailable".bytes())
             accept :: request.headers.get("accept").map((v) -> v.as_str()).unwrap_or("*/*")
-            identity :: jet_devserver.WebErrorPage.WebErrorPageIdentity.new(^request_id, session.id(), source_id.clone(), ^build_id, devtools_projection.revision.clone()).map_err((error) -> Error.new(ErrorKind.InvalidData, error.to_string()))?
+            identity :: jet_devserver.WebErrorPage.WebErrorPageIdentity.new(^request_id, session.id(), source_id.clone(), ^build_id, devtools_projection.revision.clone()).map_err((error) -> Error.new(ErrorKind.InvalidData, error.to_string()))
             rendered :: if !facts.is_error() { .Ok(.None) } else {
                 source_excerpts :: Canvas.read_source_without_symlinks(OSPath.new(canvas_file)).ok().and_then((source) -> {
                     excerpt :: source.chars().take(jet_devserver.WebErrorPage.MAX_WEB_ERROR_SOURCE_BYTES).collect<String>()
                     jet_devserver.WebErrorPage.WebErrorSourceExcerpt.without_span(source_id.clone(), "failure source", .Val(^excerpt)).ok()
                 }).into_iter().collect<[_]>()
                 action_links :: [("Open devtools", "/__jet_devtools"), ("Reconnect", "/__jet_devtools/reconnect"), ("Open recording", "/__jet_devtools/recording")].into_iter().filter_map(((label, href)) -> jet_devserver.WebErrorPage.WebErrorActionLink.new(label, href).ok()).collect<[_]>()
-                page :: if facts.is_internal_failure() {
-                    jet_devserver.WebErrorPage.WebErrorPage.from_internal(^identity, facts.code.clone(), facts.diagnostic.clone(), ^action_links).and_then((page) -> page.with_source_excerpts(^source_excerpts))
-                } else {
-                    jet_devserver.WebErrorPage.WebErrorDiagnosticFact.from_dev_status(&facts).and_then((diagnostic) -> jet_devserver.WebErrorPage.WebErrorPage.new_with_status(500, ^identity, ^diagnostic, ^source_excerpts, .None, ^action_links))
+                page :: if {
+                    facts.is_internal_failure() -> {
+                        jet_devserver.WebErrorPage.WebErrorPage.from_internal(^identity, facts.code.clone(), facts.diagnostic.clone(), ^action_links).and_then((page) -> page.with_source_excerpts(^source_excerpts))
+                    }
+                    else -> {
+                        jet_devserver.WebErrorPage.WebErrorDiagnosticFact.from_dev_status(&facts).and_then((diagnostic) -> jet_devserver.WebErrorPage.WebErrorPage.new_with_status(500, ^identity, ^diagnostic, ^source_excerpts, .None, ^action_links))
+                    }
                 }
                 page.and_then((page) -> page.project(accept, jet_devserver.WebErrorPage.WebErrorCapabilities.local()).map((p) -> .Val(^p))).map_err((error) -> error.to_string())
             }
@@ -654,8 +670,7 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
                         422 -> "422 Unprocessable Content"; 429 -> "429 Too Many Requests"
                         500 -> "500 Internal Server Error"; 501 -> "501 Not Implemented"; 502 -> "502 Bad Gateway"
                         503 -> "503 Service Unavailable"; 504 -> "504 Gateway Timeout"
-                        _ if projection.status >= 400 && projection.status < 500 -> "400 Bad Request"
-                        else -> "500 Internal Server Error"
+                        _ if projection.status >= 400 && projection.status < 500 -> "400 Bad Request" else -> "500 Internal Server Error"
                     }
                     write_response(&stream, status, projection.content_type.as_str(), projection.body.as_bytes())
                 }
@@ -664,7 +679,7 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
             }
         }
         if path == "/__jet_devtools/paused/inspect" && method == "POST" {
-            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "paused inspect body must be UTF-8"))?
+            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "paused inspect body must be UTF-8"))
             request :: if jet_devserver.PausedEvaluate.InspectRequest.from_json(payload) == {
                 .Ok(request) -> request
                 .Err(error) -> {
@@ -692,7 +707,7 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
             }
         }
         if path == "/__jet_devtools/paused/evaluate" && method == "POST" {
-            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "paused evaluate body must be UTF-8"))?
+            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "paused evaluate body must be UTF-8"))
             request :: if jet_devserver.PausedEvaluate.EvaluateRequest.from_json(payload) == {
                 .Ok(request) -> request
                 .Err(error) -> {
@@ -725,7 +740,7 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
             return write_response(&stream, "200 OK", "application/json; charset=utf-8", event.as_bytes())
         }
         if path == "/__jet_devtools/style" && method == "POST" {
-            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "style request must be UTF-8"))?
+            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "style request must be UTF-8"))
             (_, event) :: terminal_style.apply_json(payload)
             return write_response(&stream, "200 OK", "application/json; charset=utf-8", event.as_bytes())
         }
@@ -744,7 +759,7 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
     }
     if path == "/__jet_canvas/live" {
         if method != "GET" -> return method_not_allowed(&stream)
-        pid :: query_param(target, "pid").and_then((value) -> value.parse<U32>().ok()).ok_or_else(() -> Error.new(ErrorKind.InvalidInput, "missing live pid"))?
+        pid :: query_param(target, "pid").and_then((value) -> value.parse<U32>().ok()).ok_or_else(() -> Error.new(ErrorKind.InvalidInput, "missing live pid"))
         source_id :: query_param(target, "source_id").unwrap_or_default()
         return if jet_devserver.LiveInspect.read(pid) == {
             .Ok(snapshot) -> {
@@ -930,7 +945,7 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
         relay :: relay.as_ref() ?? return write_response(&stream, "503 Service Unavailable", "text/plain; charset=utf-8", "browser trace relay unavailable".bytes())
         if query_param(target, "nonce") != .Val(relay.nonce()) -> return write_response(&stream, "403 Forbidden", "text/plain; charset=utf-8", "stale or foreign browser trace session".bytes())
         return if relay.record(body) == {
-            .Ok(()) -> write_response(&stream, "204 No Content", "text/plain; charset=utf-8", "".bytes())
+            .Ok(_) -> write_response(&stream, "204 No Content", "text/plain; charset=utf-8", "".bytes())
             .Err(jet_devserver.BrowserTrace.RecordError.Oversized) -> write_response(&stream, "413 Payload Too Large", "text/plain; charset=utf-8", "browser trace envelope exceeds 512 bytes".bytes())
             .Err(jet_devserver.BrowserTrace.RecordError.Malformed) -> write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", "browser trace envelope is malformed".bytes())
             .Err(jet_devserver.BrowserTrace.RecordError.Unavailable) -> write_response(&stream, "503 Service Unavailable", "text/plain; charset=utf-8", "browser trace relay unavailable".bytes())
@@ -940,8 +955,8 @@ fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus,
     // Page/asset GETs alone get a request-log line; polling noise is excluded.
     started :: Instant.now()
     nonce :: status.browser_relay.lock().unwrap().as_ref().map((relay) -> relay.nonce().to_string()).unwrap_or_default()
-    code :: serve_static_from_root(&stream, static_root, path, nonce, session_secret)?
+    code :: serve_static_from_root(&stream, static_root, path, nonce, session_secret)
     status.log_request(method, path, code, started.elapsed())
-    return .Ok(())
+    return .Ok(_)
 }
 

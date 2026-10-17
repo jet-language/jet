@@ -59,7 +59,7 @@ fn doc_collect_items(items: [Item], module_path: String, parent: String, inherit
                 // Trait method signatures are not Func nodes. Their source
                 // spans/visibility are collected directly; S24 consumes the
                 // canonical checked method failure/effective-return facts.
-                loop method in definition.methods -> doc_add_item(&items_out, "function", method.name, owner, module_path, public, false, method.span, method.name_span, [Marker]{}, file_path, display_path, source, project_root)
+                loop method in definition.methods -> doc_add_item(&items_out, "function", method.name, owner, module_path, public, false, method.span, method.name_span, ([Marker]{}), file_path, display_path, source, project_root)
             }
             .Tag(definition) -> doc_add_item(&items_out, "tag", definition.name, parent, module_path, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, [Marker]{}, file_path, display_path, source, project_root)
             .ProtocolDecl(definition) -> doc_add_item(&items_out, "protocol", definition.name, parent, module_path, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, [Marker]{}, file_path, display_path, source, project_root)

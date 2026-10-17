@@ -46,7 +46,7 @@ fn lsp_workspace_sources(server: LSPServer, root_hint: lsp_workspace_path.OSPath
                 parent :: lsp_workspace_path.parent_span(path)
                 fallback :: if parent == {
                     .Val(extent) -> lsp_workspace_path.owned_span(path, extent)
-                    None -> lsp_workspace_path.from_text(".", path.platform)
+                    .None -> lsp_workspace_path.from_text(".", path.platform)
                 }
                 root = Val(lsp_normalize_os_path(fallback))
             }
@@ -95,8 +95,8 @@ fn lsp_collect_jet_files(dir: lsp_workspace_path.OSPath, out: &[lsp_workspace_pa
         // native owner must advance after yielding each per-entry error.
         row := entries.next()
         if row == {
-            .Err(_) -> next
-            .Ok(None) -> break
+            .Err(_) -> { next }
+            .Ok(.None) -> { break }
             .Ok(.Val(entry)) -> {
                 path :: entry.path()
                 name :: entry.file_name()

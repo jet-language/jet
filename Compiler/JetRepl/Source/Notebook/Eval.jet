@@ -10,7 +10,7 @@ use jet_driver.[boot_mir_eval]
 
 // #4500: inner retains the caller's mutable authorizer loan for this turn.
 struct NotebookTrackingAuthorizer {
-    inner: &ReplAuthorizer
+    inner: ReplAuthorizer
     observed: Bool
 }
 impl NotebookTrackingAuthorizer.ReplAuthorizer {
@@ -61,9 +61,7 @@ fn evaluate_step_with_items(session: Session, input: String, base_dir: OSPath, a
     session.step = session.step + 1
     // File-wide item preload is parser-plane, not a keyword-head heuristic.
     // Hard rejects still precede item recognition.
-    classified :: if notebook_items_preloaded && reject_feature(trimmed) == None && is_item_input(trimmed) {
-        Ok(InputKind.Item("{trimmed}\n"))
-    } else -> classify(trimmed, session.step)
+    classified :: if notebook_items_preloaded && reject_feature(trimmed) == None && is_item_input(trimmed) -> Ok(InputKind.Item("{trimmed}\n")) else -> classify(trimmed, session.step)
     kind :: classified ?? return notebook_eval_errors(&session, trimmed, err)
     if kind == {
         .Empty -> notebook_eval_result("", ReplTurnStatus.Ok, false, false, None)
@@ -114,12 +112,15 @@ fn evaluate_step_with_items(session: Session, input: String, base_dir: OSPath, a
             trial_scope := session.scope.copy()
             sink := DevSink.new()
             tracking := NotebookTrackingAuthorizer{inner: &authorizer, observed: false}
-            result :: if repl_interruptible_turn_active() {
-                run_repl_step_interruptible(executable, session.func_defs, base_dir, &sink, &trial_scope, REPL_FUEL_BUDGET, suppress, core_imports, session.struct_defs, session.binding_types, &tracking)
-            } else {
-                if run_repl_step(executable, session.func_defs, base_dir, &sink, &trial_scope, REPL_FUEL_BUDGET, suppress, core_imports, session.struct_defs, session.binding_types, &tracking) == {
-                    .Ok(value) -> Ok(value)
-                    .Err(diagnostic) -> Err(ReplStepError.Diagnostic(diagnostic))
+            result :: if {
+                repl_interruptible_turn_active() -> {
+                    run_repl_step_interruptible(executable, session.func_defs, base_dir, &sink, &trial_scope, REPL_FUEL_BUDGET, suppress, core_imports, session.struct_defs, session.binding_types, &tracking)
+                }
+                else -> {
+                    if run_repl_step(executable, session.func_defs, base_dir, &sink, &trial_scope, REPL_FUEL_BUDGET, suppress, core_imports, session.struct_defs, session.binding_types, &tracking) == {
+                        .Ok(value) -> Ok(value)
+                        .Err(diagnostic) -> Err(ReplStepError.Diagnostic(diagnostic))
+                    }
                 }
             }
             if result == {

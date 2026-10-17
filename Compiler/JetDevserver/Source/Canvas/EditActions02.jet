@@ -1,4 +1,4 @@
-use jet_devserver.Canvas.EditActions.*
+
 use jet_parser.AST.[Stmt, Expr, Item, ProgramBundle, LValue]
 use jet_foundation.[SourceSpan, Severity]
 use jet_driver.Driver.[check_file]
@@ -21,8 +21,10 @@ fn apply_reorder_statements(path: OSPath, src: String, graph_id: String, moved: 
     if moved_loc.block != anchor_loc.block -> return .Err(edit_error("bad_request", "can't move a step into a different branch yet"))
     if moved_loc.index == anchor_loc.index -> return .Ok(edit_ok(false, path))
     if moved_loc.full.start <= anchor_loc.full.start && anchor_loc.full.start < moved_loc.full.end -> return .Err(edit_error("bad_request", "can't anchor a step inside the moved source yet"))
-    insert := if position == { "before" -> anchor_loc.full.start, "after" -> anchor_loc.full.end
-        else -> { return .Err(edit_error("bad_request", "Canvas reorder position must be before or after")) } }
+    insert := if position == {
+        "before" -> anchor_loc.full.start
+        "after" -> anchor_loc.full.end else -> { return .Err(edit_error("bad_request", "Canvas reorder position must be before or after")) }
+    }
     chunk := src.get(moved_loc.full.start..moved_loc.full.end).ok_or_else(() -> edit_error("bad_request", "Canvas moved source span is stale"))?.to_string()
     changed := String.with_capacity(src.len())
     changed.push_str(src[0..<moved_loc.full.start]); changed.push_str(src[moved_loc.full.end..<src.len()])
@@ -34,22 +36,22 @@ fn apply_reorder_statements(path: OSPath, src: String, graph_id: String, moved: 
 }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1928
 fn apply_exec_convergence(path: OSPath, src: String, graph_id: String, from_span: SourceSpan, target_span: SourceSpan, from_pin_name: String, strategy: String, function: String, helper_name: String?) -> String Err! {
-    validate_ident(function)?
+    validate_ident(function)
     if !["extract", "helper", "duplicate"].contains(strategy) -> return .Err(edit_error("bad_request", "Canvas convergence strategy must be extract, helper, or duplicate"))
     if same_span(from_span, target_span) -> return .Err(edit_error("bad_request", "Canvas convergence needs two different source pins"))
-    func := checked_func_for_graph(path, src, graph_id)?
+    func := checked_func_for_graph(path, src, graph_id)
     target := find_expression_selection(func.body, target_span, src) ?? return .Err(edit_error("not_found", "Canvas convergence target source selection no longer exists"))
     target_view := src.get(target.span.start..target.span.end).ok_or_else(() -> edit_error("bad_request", "Canvas convergence target span is stale"))?.trim() // #4303
     target_text := target_view.to_string()
     if target_text.is_empty() -> return .Err(edit_error("ambiguous", "Canvas needs one or more complete ordinary source statements to converge"))
-    insertion := find_exec_insertion(src, func.body, from_span, from_pin_name)? ?? return .Err(edit_error("not_found", "Canvas convergence source path no longer exists"))
+    insertion := find_exec_insertion(src, func.body, from_span, from_pin_name) ?? return .Err(edit_error("not_found", "Canvas convergence source path no longer exists"))
     if insertion.branch && target.span.start >= insertion.owner.end -> return .Err(edit_error("structured_join", "This source already has a structured join after the branch; keep the downstream step single"))
-    params := convergence_params(path, target.span)?
+    params := convergence_params(path, target.span)
     args := params.iter().map((param) -> param._0.as_str()).collect().join(", ")
-    call_name := if strategy == "helper" -> helper_name.unwrap_or(function) else function
+    call_name := if strategy == "helper" -> helper_name.unwrap_or(function) else -> function
     call := "{call_name}({args})"
-    incoming_source := if strategy == "duplicate" -> target_text.clone() else call.clone()
-    bundle := checked_bundle(path, src)?
+    incoming_source := if strategy == "duplicate" -> target_text.clone() else -> call.clone()
+    bundle := checked_bundle(path, src)
     exact_helper := exact_body_helper_name(bundle, src, target_text, func.name)
     edits := []
     insertion_text := "{insertion.indent}{incoming_source}\n"
@@ -57,12 +59,12 @@ fn apply_exec_convergence(path: OSPath, src: String, graph_id: String, from_span
     if strategy == {
         "helper" -> {
             name := helper_name.filter((name) -> !name.is_empty()) ?? return .Err(edit_error("bad_request", "Canvas exact-body helper choice has no helper name"))
-            validate_ident(name)?
+            validate_ident(name)
             if exact_helper.as_deref() != .Val(name) -> return .Err(edit_error("stale", "The selected helper body no longer matches the converged source"))
         }
         "extract" -> {
             if function_name_exists(bundle, function) -> return .Err(edit_error("bad_request", "Canvas helper name already exists; choose another name"))
-            signature := params.iter().map((param) -> "{param.0}: {param.1}").collect().join(", ")
+            signature := params.iter().map((param) -> "{param._0}: {param._1}").collect().join(", ")
             body := target_text.lines().map((line) -> {
                 trimmed := line.trim() // #4303
                 "    {trimmed}\n"
@@ -74,7 +76,7 @@ fn apply_exec_convergence(path: OSPath, src: String, graph_id: String, from_span
         else -> unreachable()
     }
     if strategy != "duplicate" {
-        suffix := src.get(target.span.end..target.full.end).ok_or_else(() -> edit_error("bad_request", "Canvas convergence target line is stale"))?
+        suffix := src.get(target.span.end..target.full.end).ok_or_else(() -> edit_error("bad_request", "Canvas convergence target line is stale"))
         replacement := "{indentation_at(src, target.full.start)}{call}{suffix}"
         edits.push(edit(target.full, replacement))
     }
@@ -92,8 +94,8 @@ fn convergence_params(path: OSPath, target: SourceSpan) -> [(String, String)] Er
         definition := index.definitions().iter().find((definition) -> definition.module_path == target_def.module_path && definition.def_span == target_def.def_span) ?? next
         ty := if definition.kind == {
             .Local { ty: .Val(ty), .. } | .Param { ty } -> ty.clone()
-            .Local { ty: .None, .. } -> return .Err(edit_error("ambiguous", "Canvas could not preserve a convergence capture type"))
-            else -> next
+            .Local { ty: .None, .. } -> { return .Err(edit_error("ambiguous", "Canvas could not preserve a convergence capture type")) }
+            else -> { next }
         }
         if !params.iter().any((param) -> param._0 == reference.name) -> params.push((_0: reference.name.clone(), _1: ty))
     }
@@ -117,7 +119,7 @@ fn find_expression_selection_in_block(stmts: [Stmt], target: SourceSpan, src: St
     loop (index, stmt) in stmts.iter().enumerate() {
         expr := if stmt == {
             .Expr(expr) -> expr
-            else -> next
+            else -> { next }
         }
         anchor := SourceSpan{expr.span().into()}
         expr_span := source_expression_span(src, expr)
@@ -125,9 +127,9 @@ fn find_expression_selection_in_block(stmts: [Stmt], target: SourceSpan, src: St
             _ :: first.get_or_insert(index); last = .Val(index)
         }
     }
-    begin := first?; end := last?
+    begin := first?; end := last
     selected := [SourceSpan]{[].with_capacity(end - begin + 1)}
-    loop stmt in stmts[begin..=end] {
+    loop stmt in stmts[begin..end] {
         expr := if stmt == {
             .Expr(expr) -> expr
             else -> { return .None }
@@ -185,7 +187,7 @@ fn find_expression_selection_in_children(stmt: Stmt, target: SourceSpan, src: St
 fn find_exec_insertion(src: String, stmts: &[Stmt], node_span: SourceSpan, pin_name: String) -> ExecInsertion? Err! {
     loop stmt in stmts {
         if exec_branch_node_matches(stmt, node_span) {
-            body := matching_exec_branch(stmt, node_span, pin_name).ok_or_else(() -> edit_error("ambiguous", "Canvas convergence pin has no source-backed branch body"))?
+            body := matching_exec_branch(stmt, node_span, pin_name).ok_or_else(() -> edit_error("ambiguous", "Canvas convergence pin has no source-backed branch body"))
             owner := branch_source_span(src, stmt)
             return branch_exec_insertion(src, body, owner).map((value) -> .Val(value))
         }
@@ -231,7 +233,7 @@ fn find_word(src: String, start: USize, word: String) -> USize? {
         found := cursor + relative
         before := found.checked_sub(1).and_then((i) -> src.as_bytes().get(i))
         after := src.as_bytes().get(found + word.len())
-        if !before.is_some_and((b) -> b.is_ascii_alphanumeric()) && !before.is_some_and((b) -> b == U8{'_'}) &&
+        if !before.is_some_and((b) -> b.is_ascii_alphanumeric()) && !before.is_some_and((b) -> b == (U8{'_'})) &&
             !after.is_some_and((b) -> b.is_ascii_alphanumeric()) && !after.is_some_and((b) -> b == U8{'_'}) -> return .Val(found)
         cursor = found + word.len()
     }
@@ -241,14 +243,11 @@ fn find_word(src: String, start: USize, word: String) -> USize? {
 fn find_unquoted_char(src: String, start: USize, wanted: Char) -> USize? {
     quote := Char?{.None}; escaped := false; line_comment := false; cursor := start.min(src.len())
     loop cursor < src.len() {
-        ch := src[cursor..<src.len()].chars().next()?
+        ch := src[cursor..<src.len()].chars().next()
         width := ch.len_utf8(); next := src[cursor + width..<src.len()].chars().next()
-        if line_comment { if ch == '\n' -> line_comment = false }
-        else if quote == .Val(quoted) {
+        if line_comment { if ch == '\n' -> line_comment = false } else if quote == .Val(quoted) {
             if escaped { escaped = false } else if ch == '\\' { escaped = true } else if ch == quoted { quote = .None }
-        } else if ch == '"' || ch == Char{39} { quote = .Val(ch) }
-        else if ch == '/' && next == .Val('/') { line_comment = true; cursor += width }
-        else if ch == wanted { return .Val(cursor) }
+        } else if ch == '"' || ch == (Char{39}) { quote = .Val(ch) } else if ch == '/' && next == '/' { line_comment = true; cursor += width } else if ch == wanted { return .Val(cursor) }
         cursor += width
     }
     .None
@@ -257,15 +256,11 @@ fn find_unquoted_char(src: String, start: USize, wanted: Char) -> USize? {
 fn matching_delimiter(src: String, open: USize, opening: Char, closing: Char) -> USize? {
     depth := USize{0}; quote := Char?{.None}; escaped := false; line_comment := false; cursor := open.min(src.len())
     loop cursor < src.len() {
-        ch := src[cursor..<src.len()].chars().next()?
+        ch := src[cursor..<src.len()].chars().next()
         width := ch.len_utf8(); next := src[cursor + width..<src.len()].chars().next()
-        if line_comment { if ch == '\n' -> line_comment = false }
-        else if quote == .Val(quoted) {
+        if line_comment { if ch == '\n' -> line_comment = false } else if quote == .Val(quoted) {
             if escaped { escaped = false } else if ch == '\\' { escaped = true } else if ch == quoted { quote = .None }
-        } else if ch == '"' || ch == Char{39} { quote = .Val(ch) }
-        else if ch == '/' && next == .Val('/') { line_comment = true; cursor += width }
-        else if ch == opening { depth += 1 }
-        else if ch == closing { depth = depth.saturating_sub(1); if depth == 0 -> return .Val(cursor) }
+        } else if ch == '"' || ch == (Char{39}) { quote = .Val(ch) } else if ch == '/' && next == '/' { line_comment = true; cursor += width } else if ch == opening { depth += 1 } else if ch == closing { depth = depth.saturating_sub(1); if depth == 0 -> { return .Val(cursor) } }
         cursor += width
     }
     .None
@@ -314,7 +309,7 @@ fn matching_exec_branch(stmt: Stmt, node_span: SourceSpan, pin_name: String) -> 
 }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2584
 fn branch_exec_insertion(src: String, body: &[Stmt], owner: SourceSpan) -> ExecInsertion Err! {
-    last := body.last().ok_or_else(() -> edit_error("ambiguous", "Canvas needs a non-empty source-backed branch body to converge"))?
+    last := body.last().ok_or_else(() -> edit_error("ambiguous", "Canvas needs a non-empty source-backed branch body to converge"))
     structured := if last == {
         .While { .. } | .For { .. } | .Loop { .. } | .CountedLoop { .. } | .Switch { .. } | .ComptimeSwitch { .. } | .ComptimeIf { .. } -> true
         else -> false
@@ -322,14 +317,17 @@ fn branch_exec_insertion(src: String, body: &[Stmt], owner: SourceSpan) -> ExecI
     if execution_terminates(last) || structured -> return .Err(edit_error("ambiguous", "Canvas cannot prove a convergence path after this branch body"))
     full := stmt_text_span(src, last)
     inline := full.end > owner.end
-    (offset, indent) := if inline {
-        last_end := if last == {
-            .Expr(expr) -> source_expression_span(src, expr).end
-            else -> stmt_source_span(last).end
+    (offset, indent) := if {
+        inline -> {
+            last_end := if last == {
+                .Expr(expr) -> source_expression_span(src, expr).end
+                else -> stmt_source_span(last).end
+            }
+            close := find_unquoted_char(src, last_end, '}').filter((offset) -> offset < owner.end).ok_or_else(() -> edit_error("ambiguous", "Canvas could not locate the source-backed branch body boundary"))
+            (_0: close, _1: "\n{indentation_at(src, owner.start)}    ")
         }
-        close := find_unquoted_char(src, last_end, '}').filter((offset) -> offset < owner.end).ok_or_else(() -> edit_error("ambiguous", "Canvas could not locate the source-backed branch body boundary"))?
-        (close, "\n{indentation_at(src, owner.start)}    ")
-    } else { (full.end, indentation_at(src, full.start)) }
+        else -> { (_0: full.end, _1: indentation_at(src, full.start)) }
+    }
     .Ok(ExecInsertion { offset: offset, indent: indent, owner: owner, branch: true })
 }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2642
@@ -346,19 +344,19 @@ fn exact_body_helper_name(bundle: ProgramBundle, src: String, target: String, cu
     fn in_items(items: [Item], src: String, target: String, current: String) -> String? {
         loop item in items {
             if item == {
-                .Func(func) if func.name != current -> {
+                .Func(func) && func.name != current -> {
                     if expression_body_source(src, func.body).is_some_and((body) -> formatted_expression_matches(body, target)) -> return .Val(func.name.clone())
                 }
                 .Struct(structure) -> {
                     if structure.methods.iter().find_map((method) -> {
                         if method.name == current -> return .None
-                        expression_body_source(src, method.body).and_then((body) -> if formatted_expression_matches(body, target) -> .Val(method.name.clone()) else .None)
+                        expression_body_source(src, method.body).and_then((body) -> if formatted_expression_matches(body, target) -> .Val(method.name.clone()) else -> .None)
                     }) == .Val(found) -> return .Val(found)
                 }
                 .Impl(implementation) -> {
                     if implementation.methods.iter().find_map((method) -> {
                         if method.name == current -> return .None
-                        expression_body_source(src, method.body).and_then((body) -> if formatted_expression_matches(body, target) -> .Val(method.name.clone()) else .None)
+                        expression_body_source(src, method.body).and_then((body) -> if formatted_expression_matches(body, target) -> .Val(method.name.clone()) else -> .None)
                     }) == .Val(found) -> return .Val(found)
                 }
                 .CodeModule(module_ref) -> {
@@ -404,8 +402,7 @@ fn normalized_source_shape(source: String) -> String {
         if quote == .Val(quoted) {
             normalized.push(ch)
             if escaped { escaped = false } else if ch == '\\' { escaped = true } else if ch == quoted { quote = .None }
-        } else if ch == '"' || ch == Char{39} { quote = .Val(ch); normalized.push(ch) }
-        else if !ch.is_whitespace() { normalized.push(ch) }
+        } else if ch == '"' || ch == (Char{39}) { quote = .Val(ch); normalized.push(ch) } else if !ch.is_whitespace() { normalized.push(ch) }
     }
     normalized
 }
@@ -424,7 +421,7 @@ fn function_name_exists(bundle: ProgramBundle, name: String) -> Bool {
 }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2792
 fn apply_add_pattern_arm(path: OSPath, src: String, graph_id: String, node_span: SourceSpan, pattern: String) -> String Err! {
-    func := checked_func_for_graph(path, src, graph_id)?
+    func := checked_func_for_graph(path, src, graph_id)
     head := normalize_pattern_arm_head(pattern)
     if head.is_empty() -> return .Err(edit_error("bad_request", "pattern arm text is empty"))
     target := PatternTarget?{.None}
@@ -432,11 +429,9 @@ fn apply_add_pattern_arm(path: OSPath, src: String, graph_id: String, node_span:
     selected := target ?? return .Err(edit_error("not_found", "Canvas pattern node no longer exists"))
     body := fresh_arm_body(func)
     changed := if selected == {
-        .Classic { arm, else_body, span } -> add_arm_to_classic_switch(src, arm, else_body, span, head, body)?
+        .Classic { arm, else_body, span } -> add_arm_to_classic_switch(src, arm, else_body, span, head, body)
         .Switch { arms, else_body, span, .. } -> {
-            insert := if arms.last() == .Val(last) { line_after(src, last.span.end) }
-                else if else_body == .Val(else_body) { line_start(src, first_stmt_start(else_body).unwrap_or(span.end)) }
-                else { dispatch_body_insert_offset(src, span) }
+            insert := if arms.last() == .Val(last) { line_after(src, last.span.end) } else if else_body == .Val(else_body) { line_start(src, first_stmt_start(else_body).unwrap_or(span.end)) } else { dispatch_body_insert_offset(src, span) }
             indent := indentation_at(src, insert)
             arm := "{indent}{head} -> {{\n{indent}    {body}\n{indent}}}\n"
             FixEngine.apply_edits(src, [edit(SourceSpan { start: insert, end: insert }, arm)]) ?? return .Err(edit_error("overlap", "Canvas pattern arm insert overlapped"))
@@ -446,7 +441,7 @@ fn apply_add_pattern_arm(path: OSPath, src: String, graph_id: String, node_span:
 }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2854
 fn apply_edit_pattern_arm(path: OSPath, src: String, graph_id: String, pattern_span: SourceSpan, pattern: String) -> String Err! {
-    func := checked_func_for_graph(path, src, graph_id)?
+    func := checked_func_for_graph(path, src, graph_id)
     head := normalize_pattern_arm_head(pattern)
     if head.is_empty() -> return .Err(edit_error("bad_request", "pattern arm text is empty"))
     if !pattern_span_belongs_to_graph(src, func.body, pattern_span) -> return .Err(edit_error("not_found", "Canvas pattern arm no longer exists"))
@@ -455,7 +450,7 @@ fn apply_edit_pattern_arm(path: OSPath, src: String, graph_id: String, pattern_s
 }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2877
 fn apply_remove_pattern_arm(path: OSPath, src: String, graph_id: String, pattern_span: SourceSpan) -> String Err! {
-    func := checked_func_for_graph(path, src, graph_id)?
+    func := checked_func_for_graph(path, src, graph_id)
     arm := RemoveArmInfo?{.None}
     find_pattern_arm_remove_span(src, func.body, pattern_span, &arm)
     info := arm ?? return .Err(edit_error("not_found", "Canvas pattern arm no longer exists"))
@@ -465,14 +460,14 @@ fn apply_remove_pattern_arm(path: OSPath, src: String, graph_id: String, pattern
 }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2903
 fn apply_toggle_switch_state(path: OSPath, src: String, graph_id: String, node_span: SourceSpan) -> String Err! {
-    func := checked_func_for_graph(path, src, graph_id)?
+    func := checked_func_for_graph(path, src, graph_id)
     if find_switched_node(func.body, node_span) == {
         .Val(.Marker(marker_span)) -> {
             changed := FixEngine.apply_edits(src, [edit(marker_span, "")]) ?? return .Err(edit_error("overlap", "Canvas statement-state toggle overlapped"))
             write_checked_formatted(path, src, changed)
         }
         .Val(.Nested) -> .Err(edit_error("bad_request", "Canvas node is already inside a statement state"))
-        .None if !statement_contains_span(func.body, node_span) || same_span(func.name_span.into(), node_span) -> .Err(edit_error("not_found", "Canvas statement node no longer exists"))
+        .None && !statement_contains_span(func.body, node_span) || same_span(func.name_span.into(), node_span) -> .Err(edit_error("not_found", "Canvas statement node no longer exists"))
         .None -> {
             insert := line_start(src, node_span.start)
             changed := FixEngine.apply_edits(src, [edit(SourceSpan { start: insert, end: insert }, "#Off ")]) ?? return .Err(edit_error("overlap", "Canvas statement-state toggle overlapped"))
@@ -519,23 +514,23 @@ fn statement_contains_span(stmts: [Stmt], node_span: SourceSpan) -> Bool { stmts
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3034
 fn apply_append_multi_input(path: OSPath, src: String, node_span: SourceSpan, element: String) -> String Err! {
     target := MultiInputTarget?{.None}
-    func := checked_func_containing_span(path, src, node_span)?
+    func := checked_func_containing_span(path, src, node_span)
     find_multi_input_target(func.body, node_span, &target)
     selected := target ?? return .Err(edit_error("not_found", "Canvas multi-input node no longer exists"))
     (span, item_spans) := if selected == { .List { span, item_spans } -> (_0: span, _1: item_spans) }
-    list_source := src.get(span.start..span.end).ok_or_else(() -> edit_error("bad_request", "Canvas multi-input source span is stale"))?
+    list_source := src.get(span.start..span.end).ok_or_else(() -> edit_error("bad_request", "Canvas multi-input source span is stale"))
     insert := if item_spans.last() == .Val(item) { item.end } else {
         list_source.rfind(']').map((idx) -> span.start + idx).ok_or_else(() -> edit_error("bad_request", "Canvas multi-input source span is stale"))?
     }
-    prefix := if item_spans.is_empty() -> "" else ", "
+    prefix := if item_spans.is_empty() -> "" else -> ", "
     changed := FixEngine.apply_edits(src, [edit(SourceSpan { start: insert, end: insert }, "{prefix}{element}")]) ?? return .Err(edit_error("overlap", "Canvas multi-input append overlapped"))
     write_checked_formatted(path, src, changed)
 }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3078
 fn apply_remove_multi_input_element(path: OSPath, src: String, node_span: SourceSpan, element_span: SourceSpan) -> String Err! {
-    func := checked_func_containing_span(path, src, node_span)?
+    func := checked_func_containing_span(path, src, node_span)
     if !multi_input_element_belongs_to_graph(func.body, node_span, element_span) -> return .Err(edit_error("not_found", "Canvas multi-input element no longer exists"))
-    remove := comma_separated_remove_span(src, node_span, element_span)?
+    remove := comma_separated_remove_span(src, node_span, element_span)
     changed := FixEngine.apply_edits(src, [edit(remove, "")]) ?? return .Err(edit_error("overlap", "Canvas multi-input delete overlapped"))
     write_checked_formatted(path, src, changed)
 }
@@ -546,13 +541,13 @@ fn checked_func_for_graph(path: OSPath, src: String, graph_id: String) -> jet_pa
 }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3111
 fn checked_func_containing_span(path: OSPath, src: String, span: SourceSpan) -> jet_parser.AST.Func Err! {
-    bundle := checked_bundle(path, src)?
+    bundle := checked_bundle(path, src)
     func := bundle.modules.iter().find_map((module_ref) -> find_func_containing_span(module_ref.items, span)) ?? return .Err(edit_error("not_found", "Canvas source node no longer belongs to a function"))
     .Ok(func)
 }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3130
 fn checked_func_by_name_span(path: OSPath, src: String, name_span: SourceSpan) -> jet_parser.AST.Func Err! {
-    bundle := checked_bundle(path, src)?
+    bundle := checked_bundle(path, src)
     func := find_func_by_name_span(bundle, name_span) ?? return .Err(edit_error("not_found", "Canvas graph no longer exists"))
     .Ok(func)
 }
@@ -630,7 +625,7 @@ fn find_pattern_arm_remove_span(src: String, stmts: &[Stmt], pattern_span: Sourc
                 loop arm in arms {
                     classic := jet_parser.AST.is_subjectless_guard(subject, span) && jet_parser.AST.uses_classic_if_spelling(src, span, arm.cond.span())
                     if same_span(switch_arm_edit_span(src, subject, span, arm), pattern_span) {
-                        out = .Val(RemoveArmInfo { remove_span: if classic -> stmt_text_span(src, stmt) else stmt_arm_text_span(src, arm),
+                        out = .Val(RemoveArmInfo { remove_span: if classic -> stmt_text_span(src, stmt) else -> stmt_arm_text_span(src, arm),
                             only_arm_without_else: classic || (arms.len() == 1 && else_body.is_none()) }); return
                     }
                     find_pattern_arm_remove_span(src, arm.body, pattern_span, out)
@@ -769,7 +764,7 @@ fn find_multi_input_in_lvalue(target: &LValue, node_span: SourceSpan, out: &Mult
 fn find_multi_input_in_expr(expr: &Expr, node_span: SourceSpan, out: &MultiInputTarget?) {
     if out.is_some() -> return
     if expr == {
-        .ListLit(items, span) if same_span(span.into(), node_span) -> out = .Val(.List { span: span.into(), item_spans: items.iter().map((item) -> item.span().into()).collect() })
+        .ListLit(items, span) && same_span(span.into(), node_span) -> out = .Val(.List { span: span.into(), item_spans: items.iter().map((item) -> item.span().into()).collect() })
         else -> walk_expr_children_for_multi_input(expr, node_span, out)
     }
 }
@@ -785,8 +780,7 @@ fn walk_expr_children_for_multi_input(expr: &Expr, node_span: SourceSpan, out: &
         .Index { base, index, .. } -> { find_multi_input_in_expr(base, node_span, out); find_multi_input_in_expr(index, node_span, out) }
         .Slice { base, start, end, range, .. } -> {
             find_multi_input_in_expr(base, node_span, out)
-            if range == .Val(range) { find_multi_input_in_expr(range, node_span, out) }
-            else { find_multi_input_in_expr(start, node_span, out); find_multi_input_in_expr(end, node_span, out) }
+            if range == .Val(range) { find_multi_input_in_expr(range, node_span, out) } else { find_multi_input_in_expr(start, node_span, out); find_multi_input_in_expr(end, node_span, out) }
         }
         .MapLit(items, _) -> {
             loop (key, value) in items { find_multi_input_in_expr(key, node_span, out); find_multi_input_in_expr(value, node_span, out) }
@@ -828,7 +822,7 @@ fn normalize_pattern_arm_head(pattern: String) -> String {
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3791
 fn fresh_arm_body(func: jet_parser.AST.Func) -> String {
     if func.return_type.as_ref().map(jet_parser.AST.Type.name) == {
-        .Val(ret) if ret != "Void" -> "return {default_arg_for_type(ret)}", _ -> "print(\"canvas arm\")"
+        .Val(ret) && ret != "Void" -> "return {default_arg_for_type(ret)}", _ -> "print(\"canvas arm\")"
     }
 }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3798
@@ -840,16 +834,21 @@ fn switch_arm_edit_span(src: String, subject: &Expr, switch_span: jet_foundation
 }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3814
 fn add_arm_to_classic_switch(src: String, arm: &jet_parser.AST.SwitchArm, else_body: &[Stmt]?, span: SourceSpan, new_head: String, fresh_body: String) -> String Err! {
-    (subject, pattern) := if arm.cond == { .PatternTest { subject, pattern, .. } -> (_0: subject, _1: pattern)
-        else -> { return .Err(edit_error("bad_request", "Canvas branch is not a pattern branch")) } }
+    (subject, pattern) := if arm.cond == {
+        .PatternTest { subject, pattern, .. } -> (_0: subject, _1: pattern)
+        else -> { return .Err(edit_error("bad_request", "Canvas branch is not a pattern branch")) }
+    }
     subject_src := snippet(src, subject.span())
     pattern_span := span_through_closing_parens(src, pattern.span())
     head := src.get(pattern_span.start..pattern_span.end).map((s) -> s.to_owned()).unwrap_or_else(() -> snippet(src, pattern.span()))
     then_body := block_body_source(src, arm.body, 2)
-    else_text := if else_body == .Val(body) {
-        body_text := block_body_source(src, body, 2)
-        "    else -> {{\n{body_text}    }}\n"
-    } else { String.new() }
+    else_text := if {
+        else_body == .Val(body) -> {
+            body_text := block_body_source(src, body, 2)
+            "    else -> {{\n{body_text}    }}\n"
+        }
+        else -> { String.new() }
+    }
     replacement := "if {subject_src} == {{\n    {head} -> {{\n{then_body}    }}\n    {new_head} -> {{\n        {fresh_body}\n    }}\n{else_text}}}\n"
     FixEngine.apply_edits(src, [edit(span, replacement)]).map_err((_) -> edit_error("overlap", "Canvas pattern branch conversion overlapped"))
 }
@@ -907,11 +906,10 @@ fn consume_leading_space_back(before: String, comma: USize) -> USize {
 fn find_func_containing_span(items: [Item], span: SourceSpan) -> jet_parser.AST.Func? {
     loop item in items {
         if item == {
-            .Func(f) if span_within(span, func_source_span(f)) -> return .Val(f)
+            .Func(f) && span_within(span, func_source_span(f)) -> { return .Val(f) }
             .Struct(s) -> { loop method in s.methods { if span_within(span, func_source_span(method)) -> return .Val(method) } }
             .Impl(i) -> { loop method in i.methods { if span_within(span, func_source_span(method)) -> return .Val(method) } }
-            .CodeModule(m) -> { if m.body == .Val(body) && find_func_containing_span(body, span) == .Val(found) -> return .Val(found) }
-            else -> {}
+            .CodeModule(m) -> { if m.body == .Val(body) && find_func_containing_span(body, span) == .Val(found) -> return .Val(found) } else -> {}
         }
     }
     .None
@@ -924,16 +922,15 @@ fn find_func_by_name_span(bundle: ProgramBundle, name_span: SourceSpan) -> jet_p
     fn find_in_items(items: [Item], name_span: SourceSpan) -> jet_parser.AST.Func? {
         loop item in items {
             if item == {
-                .Func(f) if same_span(f.name_span.into(), name_span) -> return .Val(f)
+                .Func(f) && same_span(f.name_span.into(), name_span) -> { return .Val(f) }
                 .Struct(s) -> { loop method in s.methods { if same_span(method.name_span.into(), name_span) -> return .Val(method) } }
                 .Impl(i) -> { loop method in i.methods { if same_span(method.name_span.into(), name_span) -> return .Val(method) } }
-                .CodeModule(m) -> { if m.body == .Val(body) && find_in_items(body, name_span) == .Val(found) -> return .Val(found) }
-                else -> {}
+                .CodeModule(m) -> { if m.body == .Val(body) && find_in_items(body, name_span) == .Val(found) -> return .Val(found) } else -> {}
             }
         }
         .None
     }
-    loop module in bundle.modules { if find_in_items(module_ref.items, name_span) == .Val(found) -> return .Val(found) }
+    loop module_ref in bundle.modules { if find_in_items(module_ref.items, name_span) == .Val(found) -> return .Val(found) }
     .None
 }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4019

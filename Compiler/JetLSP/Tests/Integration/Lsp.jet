@@ -1,6 +1,6 @@
 // Rust: tests/lsp.rs:1
 // M13 LSP integration suite: scripted JSON transcripts and latency bench.
-use jet_foundation.DataTree.[DataTree]
+use jet_foundation.Dyn.[Dyn]
 use jet_foundation.JSON.[json_get, json_str, parse_json]
 use std.[fs, env, thread]
 use std.process.[Command, Stdio]
@@ -13,8 +13,8 @@ use common.[Scratch]
 fn jet_bin() -> OSPath { OSPath.from(env.binary_path("jet")) }
 // Rust: tests/lsp.rs:26
 fn lsp_process_lock() -> Mutex<()> {
-    static LOCK :: OnceLock<Mutex<()>>.new()
-    LOCK.get_or_init(() -> Mutex.new(()))
+    LOCK :: OnceLock<Mutex<()>>.new()
+    LOCK.get_or_init(() -> Mutex.new(_))
 }
 // Rust: tests/lsp.rs:31
 fn lock_unpoisoned<T>(mutex: Mutex<T>) -> MutexGuard<T> {
@@ -48,29 +48,29 @@ fn request_lsp(stdin: Write, stdout: Read, id: I64, method: String, params: Stri
     loop {
         body :: read_msg(stdout)
         parsed :: parse_json(body).expect("valid LSP response")
-        if json_get(parsed, "id") == DataTree.Int(id) -> return ^body
+        if json_get(parsed, "id") == Dyn.Int(id) -> return ^body
     }
 }
 // Rust: tests/lsp.rs:101
 // Keep every message preceding the matching response, preserving arrival order.
-fn request_lsp_collect(stdin: Write, stdout: Read, id: I64, method: String, params: String) -> (DataTree, [DataTree]) {
+fn request_lsp_collect(stdin: Write, stdout: Read, id: I64, method: String, params: String) -> (Dyn, [Dyn]) {
     send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":{id},\"method\":\"{method}\",\"params\":{params}}}")
-    before := [DataTree]()
+    before := [Dyn]()
     loop {
         parsed :: parse_json(read_msg(stdout)).expect("valid LSP message")
-        if json_get(parsed, "id") == DataTree.Int(id) -> return (_0: ^parsed, _1: ^before)
+        if json_get(parsed, "id") == Dyn.Int(id) -> return (_0: ^parsed, _1: ^before)
         before.push(^parsed)
     }
 }
 // Rust: tests/lsp.rs:123
-fn published_diagnostics_for(messages: [DataTree], uri: String) -> [&DataTree] {
+fn published_diagnostics_for(messages: [Dyn], uri: String) -> [&Dyn] {
     messages.iter().filter(message -> json_get(message, "method").and_then(json_str) == "textDocument/publishDiagnostics")
         .filter_map(message -> json_get(message, "params"))
         .filter(params -> json_get(params, "uri").and_then(json_str) == uri).collect()
 }
 // Rust: tests/lsp.rs:134
-fn error_count(published: DataTree) -> USize {
-    json_array_field(published, "diagnostics").iter().filter(diagnostic -> json_get(diagnostic, "severity") == DataTree.Int(1)).count()
+fn error_count(published: Dyn) -> USize {
+    json_array_field(published, "diagnostics").iter().filter(diagnostic -> json_get(diagnostic, "severity") == Dyn.Int(1)).count()
 }
 // Rust: tests/lsp.rs:141
 fn json_string(s: String) -> String {
@@ -89,32 +89,35 @@ fn json_string(s: String) -> String {
     ^out
 }
 // Rust: tests/lsp.rs:157
-fn json_object_field(value: DataTree, key: String) -> DataTree {
+fn json_object_field(value: Dyn, key: String) -> Dyn {
     json_get(value, key).unwrap_or_else(() -> panic("missing JSON field `{key}`"))
 }
 // Rust: tests/lsp.rs:161
-fn json_array(value: DataTree, context: String) -> [DataTree] {
-    match value { .Array(values) -> values; else -> panic("{context} is not an array: {value}") }
+fn json_array(value: Dyn, context: String) -> [Dyn] {
+    if value == {
+        .Array(values) -> values
+        else -> { panic("{context} is not an array: {value}") }
+    }
 }
 // Rust: tests/lsp.rs:168
-fn json_array_field(value: DataTree, key: String) -> [DataTree] { json_array(json_object_field(value, key), "JSON field `{key}`") }
+fn json_array_field(value: Dyn, key: String) -> [Dyn] { json_array(json_object_field(value, key), "JSON field `{key}`") }
 // Rust: tests/lsp.rs:175
-fn json_values_equal(left: DataTree, right: DataTree) -> Bool {
-    if (left, right) == {
-        (_0: DataTree.Null, _1: DataTree.Null) -> true
-        (_0: DataTree.Bool(left), _1: DataTree.Bool(right)) -> left == right
-        (_0: DataTree.Int(left), _1: DataTree.Int(right)) -> left == right
-        (_0: DataTree.Float(left), _1: DataTree.Float(right)) -> left == right
-        (_0: DataTree.Number(left), _1: DataTree.Number(right)) -> left == right
-        (_0: DataTree.Text(left).bit_or(DataTree.TypedText(left)), _1: DataTree.Text(right).bit_or(DataTree.TypedText(right))) -> left == right
-        (_0: DataTree.Bytes(left), _1: DataTree.Bytes(right)) -> left == right
-        (_0: DataTree.Array(left), _1: DataTree.Array(right)) -> left.len() == right.len() && left.iter().zip(right).all((left, right) -> json_values_equal(left, right))
-        (_0: DataTree.Object(left), _1: DataTree.Object(right)) -> left.len() == right.len() && left.iter().all((key, left) -> right.iter().find_map((right_key, right) -> if right_key == key -> right else -> none).is_some_and(right -> json_values_equal(left, right)))
+fn json_values_equal(left: Dyn, right: Dyn) -> Bool {
+    if {
+        left == Dyn.Null && right == Dyn.Null -> true
+        left == Dyn.Bool(left) && right == Dyn.Bool(right) -> left == right
+        left == Dyn.Int(left) && right == Dyn.Int(right) -> left == right
+        left == Dyn.Float(left) && right == Dyn.Float(right) -> left == right
+        left == Dyn.Number(left) && right == Dyn.Number(right) -> left == right
+        left == Dyn.Text(left).bit_or(Dyn.TypedText(left)) && right == Dyn.Text(right).bit_or(Dyn.TypedText(right)) -> left == right
+        left == Dyn.Bytes(left) && right == Dyn.Bytes(right) -> left == right
+        left == Dyn.Array(left) && right == Dyn.Array(right) -> left.len() == right.len() && left.iter().zip(right).all((left, right) -> json_values_equal(left, right))
+        left == Dyn.Object(left) && right == Dyn.Object(right) -> left.len() == right.len() && left.iter().all((key, left) -> right.iter().find_map((right_key, right) -> if right_key == key -> right else -> none).is_some_and(right -> json_values_equal(left, right)))
         else -> false
     }
 }
 // Rust: tests/lsp.rs:206
-fn assert_json_values_equal(label: &String, actual: &DataTree, expected: &DataTree) {
+fn assert_json_values_equal(label: &String, actual: &Dyn, expected: &Dyn) {
     assert(json_values_equal(actual, expected), "{label}: actual={actual}, expected={expected}")
 }
 // Rust: tests/lsp.rs:214
@@ -203,8 +206,8 @@ fn advertised_capabilities(init: String) -> [String] {
         b :: bytes[i]
         if in_string {
             if escape -> escape = false
-            else if b == U8{92} -> escape = true
-            else if b == U8{34} {
+            else if b == (U8{92}) -> escape = true
+            else if b == (U8{34}) {
                 last_string = init[string_start..i].to_string()
                 in_string = false
             }
@@ -212,11 +215,10 @@ fn advertised_capabilities(init: String) -> [String] {
             next
         }
         if b == {
-            U8{34} -> { in_string = true; string_start = i + 1 }
-            U8{123} -> depth += 1
-            U8{125} -> { depth = depth.saturating_sub(1); if depth == 0 -> break }
-            U8{58} -> if depth == 1 { key :: last_string.take(); if key != none -> out.push(^key.unwrap()) }
-            else -> {}
+            34 -> { in_string = true; string_start = i + 1 }
+            123 -> depth += 1
+            125 -> { depth = depth.saturating_sub(1); if depth == 0 -> break }
+            58 -> if depth == 1 { key :: last_string.take(); if key != none -> out.push(^key.unwrap()) } else -> {}
         }
         i += 1
     }
@@ -258,8 +260,8 @@ module transcript_parser {
                 some('u') -> {
                     hex :: chars.by_ref().take(4).collect<String>()
                     if U32.from_str_radix(hex, 16) == {
-                        Ok(n) -> { c :: Char.from_u32(n); if c != none -> out.push(c.unwrap()) }
-                        Err(_) -> {}
+                        .Ok(n) -> { c :: Char.from_u32(n); if c != none -> out.push(c.unwrap()) }
+                        .Err(_) -> {}
                     }
                 }
                 some(other) -> { out.push('\\'); out.push(other) }
@@ -271,7 +273,7 @@ module transcript_parser {
     // Rust: tests/lsp.rs:489
     fn extract_string_field(json: String, key: String) -> String? {
         needle :: "\"{key}\""
-        pos :: json.find(needle)?
+        pos :: json.find(needle)
         after := json[pos + needle.len()..<json.len()].trim_start() // #4303
         after := after.strip_prefix(':')?.trim_start() // #4303
         after := after.strip_prefix('"')? // #4303
@@ -279,8 +281,8 @@ module transcript_parser {
         bytes :: after.as_bytes()
         loop {
             if end >= bytes.len() -> return none
-            if bytes[end] == U8{92} { end += 2; next }
-            if bytes[end] == U8{34} -> break
+            if bytes[end] == (U8{92}) { end += 2; next }
+            if bytes[end] == (U8{34}) -> break
             end += 1
         }
         unescape(after[0..<end])
@@ -296,13 +298,13 @@ module transcript_parser {
         loop i < bytes.len() {
             b :: bytes[i]
             if in_str {
-                if b == U8{92} { i += 2; next }
-                if b == U8{34} -> in_str = false
+                if b == (U8{92}) { i += 2; next }
+                if b == (U8{34}) -> in_str = false
             } else {
                 c :: s[i..<s.len()].chars().next().unwrap()
                 if c == '"' -> in_str = true
                 else if c == open -> depth += 1
-                else if c == close { depth -= 1; if depth == 0 -> return i }
+                else if c == close { depth -= 1; if depth == 0 -> { return i } }
             }
             i += c_len(bytes, i)
         }
@@ -331,8 +333,8 @@ module transcript_parser {
                 bytes :: rest.as_bytes()
                 loop {
                     if end >= bytes.len() -> break
-                    if bytes[end] == U8{92} { end += 2; next }
-                    if bytes[end] == U8{34} -> break
+                    if bytes[end] == (U8{92}) { end += 2; next }
+                    if bytes[end] == (U8{34}) -> break
                     end += 1
                 }
                 result.push(unescape(rest[0..<end]))
@@ -343,11 +345,11 @@ module transcript_parser {
         ^result
     }
     // Rust: tests/lsp.rs:612
-    fn extract_object(s: String) -> (_0: String, _1: &String)? {
+    fn extract_object(s: String) -> (String, String)? {
         s := skip_ws(s) // #4303
         if !s.starts_with('{') -> return none
-        close :: find_matching_close(s, '{', '}')?
-        (s[0..<close + 1].to_string(), s[close + 1..<s.len()])
+        close :: find_matching_close(s, '{', '}')
+        (_0: s[0..<close + 1].to_string(), _1: s[close + 1..<s.len()])
     }
     // Rust: tests/lsp.rs:621
     fn parse(content: String) -> Transcript {

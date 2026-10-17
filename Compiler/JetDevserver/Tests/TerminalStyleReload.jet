@@ -1,4 +1,4 @@
-use jet_devserver.TerminalStyleReload.*
+use jet_devserver.TerminalStyleReload.[TerminalCapabilityFacts, TerminalColorProfile, TerminalStyleChangeKind, TerminalStyleDependency, TerminalStyleDocument, TerminalStyleEdit, TerminalStyleErrorCode, TerminalStyleFingerprintFacts, TerminalStyleHostAdapter, TerminalStyleHostOutcome, TerminalStyleHostSource, TerminalStyleReload, TerminalStyleValue]
 // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1696
 fn edit(source: String) -> TerminalStyleEdit { TerminalStyleEdit.new("app/style", source.to_string()) }
 // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1700
@@ -89,7 +89,7 @@ fn edit(source: String) -> TerminalStyleEdit { TerminalStyleEdit.new("app/style"
     (outcome, event) :: adapter.apply_json("{{\"source\":\"accent=1;;96\"}}")
     if outcome == {
         .Rejected(.Invalid(fact)) -> assert_eq(fact.code, TerminalStyleErrorCode.InvalidStyle)
-        else -> panic("expected a rejected invalid style, got {outcome}")
+        else -> { panic("expected a rejected invalid style, got {outcome}") }
     }
     assert(event.contains("\"outcome\":\"rejected\""))
 }

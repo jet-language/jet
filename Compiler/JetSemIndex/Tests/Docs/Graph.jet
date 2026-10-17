@@ -249,7 +249,7 @@ fn doc_test_checked_text_contract_is_rendered_in_generated_docs(json_ok: Bool, j
     assert(json_text.contains("type Error = PatternError"))
     assert(json_text.contains("encode_hole"))
     assert(local_ok)
-    loop output in [String]{markdown, html} {
+    loop output in ([String]{markdown, html}) {
         assert(output.contains("Pattern :: distinct String"))
         assert(output.contains("implements CheckedText"))
         assert(output.contains("type Error = PatternError"))
@@ -284,7 +284,7 @@ fn doc_test_checked_graph_uses_only_original_loaded_membership(registration: Sem
         if !expected.has_key(path) -> expected[path] = 0
         expected[path] += 1
         found := false
-        loop module in graph.modules {
+        loop module_ref in graph.modules {
             if module_ref.path != path || module_ref.name != doc_module_name(path, loaded.alias, platform) -> next
             if module_ref.public != loaded.pub_file || module_ref.summary != doc_leading_summary(loaded.loaded_source) -> next
             assert_eq(module_ref.source.link, "{path}#L1")
@@ -292,7 +292,7 @@ fn doc_test_checked_graph_uses_only_original_loaded_membership(registration: Sem
         }
         assert(found)
     }
-    loop module in graph.modules {
+    loop module_ref in graph.modules {
         assert(expected.has_key(module_ref.path))
         assert(expected[module_ref.path] > 0)
         expected[module_ref.path] -= 1

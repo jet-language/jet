@@ -78,7 +78,9 @@ fn lookup(session: Session, name: String) -> String? {
     if Syntax.lookup(name) == .Val(row) -> return Val("{Syntax.display(row)}\n{Syntax.plain_text(row)}")
     index :: symbol_index(session)
     if index.resolve_visible(name) == .Val(symbol) -> return Val(render(symbol))
-    if name.split_once(".") == .Val((alias, member)) {
+    if name.split_once(".") == .Val(tuple_9) {
+        alias :: tuple_9._0
+        member :: tuple_9._1
         if session.core_imports.get(alias) == .Val(module_ref) {
             if SemanticSymbolIndex.lookup_core_module_member(module_ref, member) == .Val(symbol) -> return Val(render(symbol))
         }

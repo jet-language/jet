@@ -18,12 +18,12 @@ fn semindex_collect_item_facts(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts
     if item == {
         // These six belong to the root's nominal dispatch. Explicit invariant
         // arms keep new AST variants from silently disappearing in a catch-all.
-        .Func(_) -> panic("nominal item must be dispatched by semindex_collect_item")
-        .Struct(_) -> panic("nominal item must be dispatched by semindex_collect_item")
-        .Enum(_) -> panic("nominal item must be dispatched by semindex_collect_item")
-        .Trait(_) -> panic("nominal item must be dispatched by semindex_collect_item")
-        .Tag(_) -> panic("nominal item must be dispatched by semindex_collect_item")
-        .Impl(_) -> panic("nominal item must be dispatched by semindex_collect_item")
+        .Func(_) -> { panic("nominal item must be dispatched by semindex_collect_item") }
+        .Struct(_) -> { panic("nominal item must be dispatched by semindex_collect_item") }
+        .Enum(_) -> { panic("nominal item must be dispatched by semindex_collect_item") }
+        .Trait(_) -> { panic("nominal item must be dispatched by semindex_collect_item") }
+        .Tag(_) -> { panic("nominal item must be dispatched by semindex_collect_item") }
+        .Impl(_) -> { panic("nominal item must be dispatched by semindex_collect_item") }
         // These four are intentional original Rust no-index branches, not gates.
         .EffectDecl(_) -> {}
         .CModule(_) -> {}
@@ -57,7 +57,7 @@ fn semindex_collect_item_facts(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts
         .CodeModule(value) -> {
             identity :: if value.instance_identity == {
                 .Val(instance) -> "instance:{instance.fingerprint}"
-                None -> semindex_module_identity(ctx.scope_identity, value.name)
+                .None -> semindex_module_identity(ctx.scope_identity, value.name)
             }
             &db.defs.push(SymDef{identity: identity, name: value.name, def_span: value.name_span, module_path: mp, kind: .Module})
             if value.body == .Val(body) {
@@ -71,7 +71,7 @@ fn semindex_collect_item_facts(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts
         }
         .Distinct(value) -> {
             derives := [String]{}
-            loop derive in value.derives -> &derives.push(derive.name)
+            loop derive_ref in value.derives -> &derives.push(derive_ref.name)
             &db.defs.push(SymDef{identity: semindex_type_identity(ctx.scope_identity, value.name), name: value.name, def_span: value.name_span, module_path: mp, kind: .Type{derives: derives}})
             semindex_structural_slot(&db, &ctx, "base", .Scalar, (db: SymbolDB, ctx: WalkCtx) -> {
                 _ := semindex_record_node(&db, ctx, "type", "type", mp, value.base_span)
@@ -89,14 +89,14 @@ fn semindex_collect_item_facts(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts
             // core.units Time's fixed-carrier exception; no local sugar/provider.
             loop definition in unit_family_distinct_defs(value) {
                 derives := [String]{}
-                loop derive in definition.derives -> &derives.push(derive.name)
+                loop derive_ref in definition.derives -> &derives.push(derive_ref.name)
                 &db.defs.push(SymDef{identity: semindex_type_identity(ctx.scope_identity, definition.name), name: definition.name, def_span: definition.name_span, module_path: mp, kind: .Type{derives: derives}})
             }
             loop member in value.members -> &db.defs.push(SymDef{identity: "unit:{ctx.scope_identity}::{member.name}", name: member.name, def_span: member.name_span, module_path: mp, kind: .Const})
         }
         .ProtocolDecl(value) -> {
             &db.defs.push(SymDef{identity: semindex_type_identity(ctx.scope_identity, value.name), name: value.name, def_span: value.name_span, module_path: mp, kind: .Type{derives: [String]{}}})
-            loop message in value.messages -> &db.defs.push(SymDef{identity: "protocol:{ctx.scope_identity}::{message.name}", name: message.name, def_span: message.name_span, module_path: mp, kind: .EnumVariant{parent: value.name}})
+            loop message in value.messages -> &db.defs.push(SymDef{identity: "protocol:{ctx.scope_identity}::{message.name}", name: message.name, def_span: message.name_span, module_path: mp, kind: (.EnumVariant{parent: value.name})})
         }
         .UserDerive(value) -> {
             &db.refs.push(semindex_scoped_ref(&db, ctx, names, value.trait_name, value.trait_span, mp))
@@ -179,7 +179,7 @@ fn semindex_hover_for_fn(function: Func) -> String Never! {
         }
         head :: if parameter.zone == .PositionalOnly -> parameter.name else if parameter.public_label == {
             .Val(label) -> "{label.name} {parameter.name}"
-            None -> parameter.name
+            .None -> parameter.name
         }
         default :: if parameter.default != None -> "{{…}}" else -> ""
         rest :: if parameter.variadic -> "..." else -> ""
@@ -193,7 +193,7 @@ fn semindex_hover_for_fn(function: Func) -> String Never! {
     arrow := ""
     if function.effect_via == {
         .Val(via) -> arrow = " -[via {via.name}]>"
-        None -> {
+        .None -> {
             if function.declared_effects == .Val(row) {
                 effects := [String]{}
                 loop fact in row -> &effects.push(fact.name)

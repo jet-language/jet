@@ -8,7 +8,7 @@ fn lsp_module_file_path(current_path: OSPath, workspace_root: OSPath?, module_pa
     if lsp_completion_path.is_absolute(module_path) -> return Val(module_path.copy())
     base := if workspace_root == {
         .Val(root) -> root.copy()
-        None -> lsp_completion_path.owned_span(current_path, parent)
+        .None -> lsp_completion_path.owned_span(current_path, parent)
     }
     lsp_completion_path.push(&base, module_path)
     Val(base)
@@ -17,7 +17,7 @@ fn lsp_use_statement_for_module(current_path: OSPath, workspace_root: OSPath?, m
     parent :: lsp_completion_path.parent_span(current_path) ?? return None
     base :: if workspace_root == {
         .Val(root) -> root
-        None -> lsp_completion_path.owned_span(current_path, parent)
+        .None -> lsp_completion_path.owned_span(current_path, parent)
     }
     module_ref :: lsp_module_file_path(current_path, workspace_root, module_path) ?? return None
     relative :: lsp_completion_path.strip_prefix_span(module_ref, base) ?? return None

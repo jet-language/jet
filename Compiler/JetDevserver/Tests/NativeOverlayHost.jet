@@ -1,4 +1,4 @@
-use jet_devserver.NativeOverlayHost.*
+use jet_devserver.NativeOverlayHost.[MAX_OVERLAY_NODES, NativeOverlayEvent, NativeOverlayHost, NativeOverlayInput, NativeOverlayInputRoute, NativeOverlayNode, NativeOverlayPanelFact]
 
 // Rust: crates/jet-devserver/src/NativeOverlayHost.rs:1186
 fn panel(id: String, freshness: U64) -> NativeOverlayPanelFact {
@@ -59,7 +59,7 @@ fn panel(id: String, freshness: U64) -> NativeOverlayPanelFact {
 // Rust: crates/jet-devserver/src/NativeOverlayHost.rs:1348
 #Test("frame_history_is_bounded") {
     host := NativeOverlayHost.new().with_frame_capacity(2)
-    loop sequence in 1..=4 -> host.ingest(NativeOverlayEvent.current("session", "revision", sequence, sequence, [panel("Build", sequence)])).unwrap()
+    loop sequence in 1..4 -> host.ingest(NativeOverlayEvent.current("session", "revision", sequence, sequence, [panel("Build", sequence)])).unwrap()
     assert_eq(host.frame_count(), 2)
     assert_eq(host.frame().unwrap().sequence, 4)
 }

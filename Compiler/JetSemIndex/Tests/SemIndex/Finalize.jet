@@ -58,10 +58,10 @@ fn semindex_finalize_test_omitted_inferred_effects(registration: SemaRegistratio
             .Function(_, _, _, _, _, _, _, _, effects, _, _, _, _, _) -> {
                 if effects == {
                     .Val(row) -> { assert_eq(row.len(), 1); assert_eq(row[0].name, "IO"); assert_eq(row[0].span, definition.def_span) }
-                    None -> panic("checked solved effects were not applied")
+                    .None -> { panic("checked solved effects were not applied") }
                 }
             }
-            else -> panic("announce is not a checked function")
+            else -> { panic("announce is not a checked function") }
         }
         loop hover in db.hover {
             if hover.module_path != definition.module_path || hover.span != definition.def_span -> next

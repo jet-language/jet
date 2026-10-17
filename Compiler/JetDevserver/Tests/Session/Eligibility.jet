@@ -23,12 +23,12 @@ fn capture_eligibility_assert_skip(outcome: CaptureEligibility, reason: CaptureS
 }
 
 #Test("capture_policy_precedence_override_package_release_before_consent") {
-    loop release in [Bool]{false, true} {
-        loop setting in [PackageCaptureSetting]{PackageCaptureSetting.Default, PackageCaptureSetting.On, PackageCaptureSetting.Off} {
-            loop override_active in [Bool]{false, true} {
-                loop explicit_capture in [Bool]{false, true} {
-                    loop terminal_available in [Bool]{false, true} {
-                        policy := CapturePolicy.new(if release -> CaptureMode.Release else -> CaptureMode.Development, PackageCapturePolicy.new(setting, CaptureBudget.new_unchecked(U64{41})), NoCaptureOverrideFact{active: override_active})
+    loop release in ([Bool]{false, true}) {
+        loop setting in ([PackageCaptureSetting]{PackageCaptureSetting.Default, PackageCaptureSetting.On, PackageCaptureSetting.Off}) {
+            loop override_active in ([Bool]{false, true}) {
+                loop explicit_capture in ([Bool]{false, true}) {
+                    loop terminal_available in ([Bool]{false, true}) {
+                        policy := CapturePolicy.new(if release -> CaptureMode.Release else -> CaptureMode.Development, PackageCapturePolicy.new(setting, CaptureBudget.new_unchecked(U64{41})), (NoCaptureOverrideFact{active: override_active}))
                         policy.explicit_capture = explicit_capture
                         attempt := capture_eligibility_test_granted(policy)
                         attempt.terminal_available = terminal_available
@@ -64,7 +64,7 @@ fn capture_eligibility_assert_skip(outcome: CaptureEligibility, reason: CaptureS
 #Test("capture_empty_and_clock_sources_are_safe_without_terminal_or_consent") {
     policy := CapturePolicy.development()
     policy.package.budget = CaptureBudget.new_unchecked(U64{29})
-    loop sources in [[CaptureSourceFact]]{[CaptureSourceFact]{}, [CaptureSourceFact]{CaptureSourceFact.new(CaptureSource.Clock, None), CaptureSourceFact.at(CaptureSource.Clock, "clock.jet", U32{3})}} {
+    loop sources in ([[CaptureSourceFact]]{([CaptureSourceFact]{}), ([CaptureSourceFact]{CaptureSourceFact.new(CaptureSource.Clock, None), CaptureSourceFact.at(CaptureSource.Clock, "clock.jet", (U32{3}))})}) {
         attempt := CaptureAttempt.new(capture_eligibility_test_identity()).with_sources(sources.copy())
         attempt.terminal_available = false
         assert(policy.eligibility(attempt) == CaptureEligibility.SafeClock(CaptureBudget.new_unchecked(U64{29})))
@@ -78,7 +78,7 @@ fn capture_eligibility_assert_skip(outcome: CaptureEligibility, reason: CaptureS
 
 #Test("capture_first_unsafe_source_and_full_location_survive_both_denials") {
     policy :: CapturePolicy.development()
-    loop first_kind in [CaptureSource]{CaptureSource.Randomness, CaptureSource.RawInput, CaptureSource.Network} {
+    loop first_kind in ([CaptureSource]{CaptureSource.Randomness, CaptureSource.RawInput, CaptureSource.Network}) {
         first :: CaptureSourceFact.new(first_kind, Val(CaptureLocation.new("first.jet", U32{13}).with_column(U32{4})))
         attempt := CaptureAttempt.new(capture_eligibility_test_identity()).with_sources([CaptureSourceFact]{CaptureSourceFact.new(CaptureSource.Clock, None), first.copy(), CaptureSourceFact.at(CaptureSource.Network, "later.jet", U32{99})})
         capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.UnsafeSource(first.copy()), true)

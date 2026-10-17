@@ -1,13 +1,13 @@
 // Source/LSP/Server.rs:1033–1139. Pending W38 Server ABI reconciliation.
 // Fix is the sole Check/Fixes owner; RefactorAction and its checked computation
 // belong to Features (0736/0737), never a second action engine here.
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use jet_foundation.[Span, TextEdit, foundation_json_quote]
 use jet_semindex.[SymbolDB]
 use core.files.runtime.kernel_path_components as lsp_action_path
 use core.files.host.retained_descriptor as lsp_action_fs
 
-fn lsp_code_action_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_code_action_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri_value :: td.field("uri") ?? return None

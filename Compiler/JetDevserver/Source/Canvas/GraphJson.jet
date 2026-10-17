@@ -36,12 +36,12 @@ fn add_arm_pin(g: GraphBuilder, node_id: String, name: String, pattern_source: S
 
 // Rust: crates/jet-devserver/src/Canvas/graph_json.rs:104
 fn set_pin_source_span(g: &GraphBuilder, pin_id: String, span: SourceSpan) {
-    if pin :: g.pins.iter_mut().find((pin) -> pin.id == pin_id) { pin.span = span }
+    if g.pins.iter_mut().find((pin) == .Val(pin) -> pin.id == pin_id) { pin.span = span }
 }
 
 // Rust: crates/jet-devserver/src/Canvas/graph_json.rs:110
 fn set_pin_append(g: &GraphBuilder, pin_id: String, op: String, index: Usize) {
-    if pin :: g.pins.iter_mut().find((pin) -> pin.id == pin_id) {
+    if g.pins.iter_mut().find((pin) == .Val(pin) -> pin.id == pin_id) {
         pin.append_op = .Some(op.to_string())
         pin.element_index = .Some(index)
     }
@@ -140,7 +140,7 @@ fn add_execution_overlay(g: &GraphBuilder, src: String, body: &[AST.Stmt]) {
     entry_id :: entry.id.clone()
     entry_span :: entry.span
     flow :: execution_block(g, src, body)
-    if input :: flow.entry { add_control_wire_once(g, "{entry_id}:output:then", input.pin, entry_span, input.span) }
+    if flow.entry == .Val(input) { add_control_wire_once(g, "{entry_id}:output:then", input.pin, entry_span, input.span) }
 }
 
 // Rust: crates/jet-devserver/src/Canvas/graph_json.rs:334
@@ -198,9 +198,9 @@ fn execution_stmt(g: GraphBuilder, src: String, stmt: AST.Stmt) -> ExecutionFlow
                 append_branch_path(g, src, output, arm.body, node.span, &exits)
             }
             else_output :: exec_output(g, node.id, "else")
-            if body :: else_body.as_ref() {
+            if else_body.as_ref() == .Val(body) {
                 append_branch_path(g, src, else_output, body, node.span, &exits)
-            } else if output :: else_output {
+            } else if else_output == .Val(output) {
                 exits.push(ExecutionEndpoint(pin: ^output, span: node.span))
             }
             ExecutionFlow(entry: exec_input(node), exits: ^exits)
@@ -210,10 +210,10 @@ fn execution_stmt(g: GraphBuilder, src: String, stmt: AST.Stmt) -> ExecutionFlow
             exits := [ExecutionEndpoint]{}
             then_output :: exec_output(g, node.id, "then")
             append_branch_path(g, src, then_output, then_body, node.span, &exits)
-            if body :: else_body.as_ref() {
+            if else_body.as_ref() == .Val(body) {
                 else_output :: exec_output(g, node.id, "else")
                 append_branch_path(g, src, else_output, body, node.span, &exits)
-            } else if output :: exec_output(g, node.id, "else") {
+            } else if exec_output(g, node.id, "else") == .Val(output) {
                 exits.push(ExecutionEndpoint(pin: ^output, span: node.span))
             }
             ExecutionFlow(entry: exec_input(node), exits: ^exits)
@@ -222,8 +222,8 @@ fn execution_stmt(g: GraphBuilder, src: String, stmt: AST.Stmt) -> ExecutionFlow
             node :: direct_execution_node(g, stmt) ?? return ExecutionFlow.default()
             body_output :: exec_output(g, node.id, "body")
             body_flow :: execution_block(g, src, body)
-            if output :: body_output {
-                if body_entry :: body_flow.entry { add_control_wire_once(g, output, body_entry.pin, node.span, body_entry.span) }
+            if body_output == .Val(output) {
+                if body_flow.entry == .Val(body_entry) { add_control_wire_once(g, output, body_entry.pin, node.span, body_entry.span) }
                 loop exit in body_flow.exits { add_control_wire_once(g, exit.pin, "{node.id}:input:exec", exit.span, node.span) }
             }
             exits :: exec_output(g, node.id, "done").into_iter().map((pin) -> ExecutionEndpoint(pin: ^pin, span: node.span)).collect()
@@ -249,7 +249,7 @@ fn execution_stmt(g: GraphBuilder, src: String, stmt: AST.Stmt) -> ExecutionFlow
 fn append_branch_path(g: &GraphBuilder, src: String, output: String?, body: &[AST.Stmt], owner_span: SourceSpan, exits: &[ExecutionEndpoint]) {
     pin :: output ?? return
     body_flow := execution_block(g, src, body)
-    if entry :: body_flow.entry {
+    if body_flow.entry == .Val(entry) {
         add_control_wire_once(g, pin, entry.pin, owner_span, entry.span)
         exits.extend(^body_flow.exits)
     } else {
@@ -341,7 +341,7 @@ fn canvas_comment_hints(src: String) -> [CommentHint] {
     offset := Usize{0}
     loop line in src.split_inclusive('\n') {
         trimmed := line.trim() // #4303
-        if body :: trimmed.strip_prefix("// canvas:comment") {
+        if trimmed.strip_prefix("// canvas:comment") == .Val(body) {
             anchor :: attr_span(body, "span").unwrap_or(SourceSpan(start: 0, end: 0))
             out.push(CommentHint(anchor: anchor, hint_span: SourceSpan(start: offset, end: offset + line.trim_end_matches('\n').len()), title: attr_string(body, "title").unwrap_or("Comment"), color: attr_string(body, "color").unwrap_or("#2563eb"), alpha: attr_string(body, "alpha").unwrap_or("0.18"), bounds: attr_bounds(body, "bounds").unwrap_or((0, 0, 360, 180))))
         }
@@ -361,7 +361,7 @@ fn canvas_collapse_hints(src: String) -> [CommentHint] {
     offset := Usize{0}
     loop line in src.split_inclusive('\n') {
         trimmed := line.trim() // #4303
-        if body :: trimmed.strip_prefix("// canvas:collapse") {
+        if trimmed.strip_prefix("// canvas:collapse") == .Val(body) {
             anchor :: attr_span(body, "span").unwrap_or(SourceSpan(start: 0, end: 0))
             out.push(CommentHint(anchor: anchor, hint_span: SourceSpan(start: offset, end: offset + line.trim_end_matches('\n').len()), title: attr_string(body, "title").unwrap_or("Collapsed"), color: "#64748b", alpha: "0.16", bounds: (0, 0, 360, 120)))
         }
@@ -422,7 +422,7 @@ fn function_signature_text(src: String, f: &AST.Func, visibility: String) -> Str
     out.push('(')
     out.push_str(f.params.iter().map((p) -> {
         s := "{p.name}: {p.ty.name()}"
-        if default :: p.default.as_ref() {
+        if p.default.as_ref() == .Val(default) {
             s.push('{')
             s.push_str(snippet(src, default.span()))
             s.push('}')
@@ -436,7 +436,7 @@ fn function_signature_text(src: String, f: &AST.Func, visibility: String) -> Str
         out.push_str(" -[via ")
         out.push_str(param)
         out.push_str("]>")
-    } else if effects :: f.declared_effects.as_ref() {
+    } else if f.declared_effects.as_ref() == .Val(effects) {
         out.push_str(" -[")
         out.push_str(effects.iter().map(((name, _)) -> name.as_str()).collect().join(", "))
         out.push_str("]>")
@@ -452,7 +452,7 @@ fn doc_comment_before(src: String, name_start: Usize) -> String {
         prev_end :: cursor.saturating_sub(1)
         prev_start :: line_start(src, prev_end)
         line := src[prev_start..prev_end].trim() // #4303
-        if doc :: line.strip_prefix("///") {
+        if line.strip_prefix("///") == .Val(doc) {
             text := doc.trim() // #4303
             docs.push(text.to_string())
             cursor = prev_start

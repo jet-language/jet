@@ -120,7 +120,7 @@ fn semindex_expressions_original_indexes_generated_fenced_range_names(index: Sem
             assert(!mutable)
             assert(ty != None)
         }
-        else -> panic("generated t4 must be a typed immutable local")
+        else -> { panic("generated t4 must be a typed immutable local") }
     }
     assert_eq(index.references_to("t4").len(), 1)
 }
@@ -184,8 +184,8 @@ fn semindex_expressions_optional_method_assertions(index: SemIndex, receiver_sta
     field_found := false
     call_found := false
     loop node in index.structural_nodes() {
-        if node.class == "expr" && node.shape == "Discriminant(26)" && node.span == SourceSpan{start: receiver_start, end: method_end} -> field_found = true
-        if node.class == "expr" && node.shape == "Discriminant(45)" && node.span == SourceSpan{start: paren_start, end: paren_end} -> call_found = true
+        if node.class == "expr" && node.shape == "Discriminant(26)" && node.span == (SourceSpan{start: receiver_start, end: method_end}) -> field_found = true
+        if node.class == "expr" && node.shape == "Discriminant(45)" && node.span == (SourceSpan{start: paren_start, end: paren_end}) -> call_found = true
     }
     assert(field_found && call_found)
 }
@@ -251,7 +251,7 @@ fn semindex_expressions_test_parsed_optional_method_projection(names: MIRNameFac
             assert_eq(target.kind, reference.kind)
             assert_eq(target.semantic_identity, reference.semantic_identity)
         }
-        None -> assert_eq(db.refs[1].target, None)
+        .None -> assert_eq(db.refs[1].target, None)
     }
     assert_eq(ctx.structural_parents.len(), 0)
     assert_eq(ctx.structural_slot, "root")

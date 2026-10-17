@@ -173,7 +173,7 @@ fn repl_history_load_bytes(bytes: [U8]) -> ReplHistoryLoaded Never! {
             record := bytes[start..<end] // #4303: borrowed bytes, no record copy.
             if repl_history_decode(record) == {
                 .Val(entry) -> &entries.push(^entry)
-                .None -> return ReplHistoryLoaded{entries: ^entries, corrupt: true}
+                .None -> { return ReplHistoryLoaded{entries: ^entries, corrupt: true} }
             }
             start = end + 1
         }

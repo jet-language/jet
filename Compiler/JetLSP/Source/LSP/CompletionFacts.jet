@@ -196,8 +196,8 @@ fn lsp_semantic_member_owner(db: SymbolDB, receiver: String) -> String? Never! {
     loop definition in db.defs {
         if definition.name != receiver -> next
         if definition.kind == {
-            .Struct(_, _) | .Type(_) -> return Val(definition.name.copy())
-            .Local(_, .Val(ty)) | .Param(ty) -> return lsp_semantic_owner(ty)
+            .Struct(_, _) | .Type(_) -> { return Val(definition.name.copy()) }
+            .Local(_, .Val(ty)) | .Param(ty) -> { return lsp_semantic_owner(ty) }
             else -> {}
         }
         break

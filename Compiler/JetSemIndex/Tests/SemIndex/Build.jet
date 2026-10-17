@@ -217,19 +217,19 @@ fn semindex_build_test_reference(kind: String, path: String, start: Int, end: In
     &db.align_reference_targets()
     if db.refs[0].target == {
         .Val(target) -> assert_eq(target.semantic_identity, Val("instance:a"))
-        else -> panic("import anchor lost")
+        else -> { panic("import anchor lost") }
     }
     if db.refs[1].target == {
         .Val(target) -> assert_eq(target.semantic_identity, Val("const:a"))
-        else -> panic("const anchor lost")
+        else -> { panic("const anchor lost") }
     }
     if db.refs[2].target == {
         .Val(target) -> assert_eq(target.semantic_identity, Val("retained"))
-        else -> panic("ambiguous anchor lost")
+        else -> { panic("ambiguous anchor lost") }
     }
     if db.refs[3].target == {
         .Val(target) -> assert_eq(target.semantic_identity, Val("unmatched"))
-        else -> panic("unmatched anchor lost")
+        else -> { panic("unmatched anchor lost") }
     }
     assert_eq(db.refs[4].target, None)
 }
@@ -255,7 +255,7 @@ fn semindex_build_test_semindex_projects_arithmetic_policy_and_exact_scope(db: S
             assert(hover[0].text.contains("fixed-width add: .Wrapping"))
             assert(hover[0].text.contains("scope = "))
         }
-        else -> panic("arithmetic hover absent")
+        else -> { panic("arithmetic hover absent") }
     }
 }
 
@@ -318,7 +318,7 @@ fn semindex_build_test_semindex_reconstructs_checked_output_callable(index: SemI
         found = true
     }
     assert(found)
-    loop field in [String]{"\"outputs\":[{{", "\"entry\":{{\"identity\"", "\"failure_contract\":\"!Err\"", "\"failure_source\":\"implicit default !Err\"", "\"authority\":\"safe-jet\"", "\"effects\":[\"IO\"]"} -> assert(json.contains(field))
+    loop field in ([String]{"\"outputs\":[{{", "\"entry\":{{\"identity\"", "\"failure_contract\":\"!Err\"", "\"failure_source\":\"implicit default !Err\"", "\"authority\":\"safe-jet\"", "\"effects\":[\"IO\"]"}) -> assert(json.contains(field))
 }
 
 // lib.rs:762–816 (main.jet), exact equivalent generic applications.
@@ -360,7 +360,7 @@ fn semindex_build_test_reference_main_source() -> String Never! {
     "use \"./library\" as api\nuse api.[report as alias_report]\n\nstruct Worker {{ value: Int }}\nimpl Worker {{\n    fn step(self) {{ print(\"worker\") }}\n}}\nstruct Other {{ value: Int }}\nimpl Other {{\n    fn step(self) {{ print(\"other\") }}\n}}\n\nfn run() {{\n    api.report()\n    alias_report()\n    worker :: Worker{{value: 1}}\n    worker.step()\n    other :: Other{{value: 2}}\n    other.step()\n}}\n"
 }
 fn semindex_build_test_checked_reference_facts_cover_import_members_aliases_and_receivers(index: SemIndex) {
-    loop expected in [String]{"api", "report", "alias_report", "step"} {
+    loop expected in ([String]{"api", "report", "alias_report", "step"}) {
         found := false
         loop reference in index.references() {
             if reference.name != expected -> next
@@ -382,7 +382,7 @@ fn semindex_build_test_checked_reference_facts_cover_import_members_aliases_and_
                     assert_eq(target.semantic_identity, Val(definition.identity))
                     alias_found = true
                 }
-                else -> panic("module alias reference target absent")
+                else -> { panic("module alias reference target absent") }
             }
             break
         }
@@ -436,14 +436,14 @@ fn semindex_build_test_semindex_projects_omitted_inferred_effects(index: SemInde
             assert_eq(announce.provenance[0].call_path, [String]{"announce"})
             assert_eq(announce.provenance[0].spans.len(), 1)
         }
-        else -> panic("announce effects absent")
+        else -> { panic("announce effects absent") }
     }
     if index.effect_of("run") == {
         .Val(rows) -> {
             assert_eq(rows[0].provenance[0].call_path, [String]{"run", "inferred_effect_signature::announce"})
             assert_eq(rows[0].provenance[0].spans.len(), 2)
         }
-        else -> panic("run effects absent")
+        else -> { panic("run effects absent") }
     }
 }
 

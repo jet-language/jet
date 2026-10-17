@@ -46,14 +46,14 @@ fn semindex_package_status_consumer(raw: String, value: StatusValue, exact: Bool
                 expected :: "invalid number `{spelling}`"
                 assert_eq(error.message, expected)
             }
-            .Ok(_) -> panic("typed envelope accepted an overflowing integer atom")
+            .Ok(_) -> { panic("typed envelope accepted an overflowing integer atom") }
         }
         assert_eq(semindex_json_output_payload(OutputPayload.Number(spelling)), spelling)
     }
     // Refusal propagates through arrays rather than accepting a raw lexeme.
     if semindex_status_output_payload(OutputPayload.Array([OutputPayload]{OutputPayload.Number("18446744073709551615")})) == {
         .Err(_) -> {}
-        .Ok(_) -> panic("typed nested payload accepted an overflowing integer atom")
+        .Ok(_) -> { panic("typed nested payload accepted an overflowing integer atom") }
     }
 }
 
@@ -110,7 +110,7 @@ fn semindex_package_status_consumer(raw: String, value: StatusValue, exact: Bool
     // Report consumer must refuse, not collapse them or clone a codec model.
     if semindex_status_package_authority(authority) == {
         .Err(error) -> assert_eq(error.message, "duplicate status field `z`")
-        .Ok(_) -> panic("canonical Report accepted duplicate grants")
+        .Ok(_) -> { panic("canonical Report accepted duplicate grants") }
     }
     unique := PackageAuthority.default()
     unique.holds.allow = Val([String]{"IO", "IO"})
@@ -120,7 +120,7 @@ fn semindex_package_status_consumer(raw: String, value: StatusValue, exact: Bool
     trust_only.trust = Val(trust)
     if semindex_status_package_authority(trust_only) == {
         .Err(error) -> assert_eq(error.message, "duplicate status field `z`")
-        .Ok(_) -> panic("canonical Report accepted duplicate trust services")
+        .Ok(_) -> { panic("canonical Report accepted duplicate trust services") }
     }
 }
 
@@ -191,7 +191,7 @@ fn semindex_package_codec_test_shared_package(facts: PackageFacts, index_json: S
     assert(facts.outputs.has_key("app"))
     assert_eq(facts.configs, [String]{"release.jet"})
     found := false
-    loop origin in facts.provenance["outputs.app"] -> if origin.ends_with("release.jet") -> found = true
+    loop origin in facts.provenance["outputs.app"] { if origin.ends_with("release.jet") -> found = true }
     assert(found)
     fields :: [String]{`"package_facts"`, `"semantic_digest":"`, `"jet":"0.4"`, `"services":{"cache"`, `"environments":{"dev"`, `"defaults":{"run":"app"}`, `"resolved_config_paths":["release.jet"]`, `"inline_configs":{"dev"`, `"kind":"executable"`, `"authority":{"holds":{"allow":["FS"],"deny":["Net"]},"grants":{"textkit":["IO"]}`, `"required_effects":[]`, `"granted_effects":["FS"]`, `"denied_effects":["Net"]`, `"authority":"package.jet authority.holds"`}
     loop field in fields -> assert(index_json.contains(field))
@@ -234,7 +234,7 @@ fn semindex_package_codec_test_checked_instance(instances: [InstanceFact], defin
     assert_eq(instance.template_definition_id.len(), 64)
     names := [String]{}
     identity :: "instance:{instance.fingerprint}"
-    loop definition in definitions -> if definition.identity == identity -> &names.push(definition.name)
+    loop definition in definitions { if definition.identity == identity -> &names.push(definition.name) }
     assert_eq(names, [String]{"a", "b"})
     assert(index_json.contains(instance.fingerprint))
     assert(index_json.contains(instance.full_key_hex))
@@ -260,8 +260,8 @@ fn semindex_package_codec_test_checked_output(output: SemIndexOutputFact, index_
 // assertion; callers must check the original two source fixtures, not records
 // fabricated to agree. No codec hashes or second identity producer here.
 fn semindex_package_codec_test_reorder_identities(before: [SymbolDef], after: [SymbolDef]) {
-    before_ids := loop definition in before -> definition.identity
-    after_ids := loop definition in after -> definition.identity
+    before_ids := (loop definition in before -> definition.identity)
+    after_ids := (loop definition in after -> definition.identity)
     &before_ids.sort()
     &after_ids.sort()
     assert_eq(before_ids, after_ids)
@@ -442,7 +442,7 @@ fn run() {}
     }
     if package_facts_status_value(facts) == {
         .Err(error) -> assert_eq(error.message, "duplicate status field `same`")
-        .Ok(_) -> panic("canonical Report silently collapsed provider duplicates")
+        .Ok(_) -> { panic("canonical Report silently collapsed provider duplicates") }
     }
 }
 

@@ -86,7 +86,7 @@ fn semindex_open_structural_with_overlays(entry: OSPath, overlays: [(OSPath, Str
 // Rust: crates/jet-semindex/src/lib.rs:264
 fn semindex_open_with_overlays_and_diagnostics(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> (SemIndex, [Diagnostic]) SemIndexError! {
     (index, diagnostics, _) :: semindex_open_with_overlays_diagnostics_and_inputs(entry, overlays)
-    Ok((_0: ^index, _1: ^diagnostics))
+    Ok((^index, ^diagnostics))
 }
 
 // Rust: crates/jet-semindex/src/lib.rs:275
@@ -97,11 +97,11 @@ fn semindex_open_with_overlays_diagnostics_and_inputs(entry: OSPath, overlays: [
         .Val(checked_bundle) -> {
             // Preserve physical loader membership and order, including modules
             // with no definitions. Expected diagnostics do not reject a bundle.
-            inputs :: loop module in checked_bundle.modules -> module_ref.path.copy()
+            inputs :: loop module_ref in checked_bundle.modules -> module_ref.path.copy()
             index := build_index(checked_bundle, facts)
             cache := WorkspaceDeclarationCache.new()
             semindex_attach_package_facts(&index, &cache, entry_str)
-            Ok((_0: ^index, _1: ^diags, _2: ^inputs))
+            Ok((^index, ^diags, ^inputs))
         }
         .None -> Err(SemIndexError.Load{diagnostics: ^diags})
     }

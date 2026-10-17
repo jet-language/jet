@@ -47,22 +47,22 @@
 }
 
 #Test("initialize advertises incremental edits range delta tokens and workspace folder changes") {
-    response :: foundation_parse_protocol_json(lsp_initialize_response(DataTree.Int(1))) ?? panic("initialize response")
+    response :: foundation_parse_protocol_json(lsp_initialize_response(Dyn.Int(1))) ?? panic("initialize response")
     result :: response.field("result") ?? panic("result")
-    assert_eq(result.field("protocolVersion"), Val(DataTree.Text("2025-11-25")))
+    assert_eq(result.field("protocolVersion"), Val(Dyn.Text("2025-11-25")))
     caps :: result.field("capabilities") ?? panic("capabilities")
-    assert_eq(caps.field("textDocumentSync"), Val(DataTree.Int(2)))
+    assert_eq(caps.field("textDocumentSync"), Val(Dyn.Int(2)))
     tokens :: caps.field("semanticTokensProvider") ?? panic("semantic tokens")
-    assert_eq(tokens.field("range"), Val(DataTree.Bool(true)))
+    assert_eq(tokens.field("range"), Val(Dyn.Bool(true)))
     full :: tokens.field("full") ?? panic("full")
-    assert_eq(full.field("delta"), Val(DataTree.Bool(true)))
+    assert_eq(full.field("delta"), Val(Dyn.Bool(true)))
     workspace :: caps.field("workspace") ?? panic("workspace")
     folders :: workspace.field("workspaceFolders") ?? panic("folders")
-    assert_eq(folders.field("supported"), Val(DataTree.Bool(true)))
-    assert_eq(folders.field("changeNotifications"), Val(DataTree.Bool(true)))
+    assert_eq(folders.field("supported"), Val(Dyn.Bool(true)))
+    assert_eq(folders.field("changeNotifications"), Val(Dyn.Bool(true)))
     on_type :: caps.field("documentOnTypeFormattingProvider") ?? panic("on type")
-    assert_eq(on_type.field("firstTriggerCharacter"), Val(DataTree.Text("\n")))
-    assert_eq(on_type.field("moreTriggerCharacter"), Val(DataTree.Array([DataTree]{DataTree.Text("}}") })))
+    assert_eq(on_type.field("firstTriggerCharacter"), Val(Dyn.Text("\n")))
+    assert_eq(on_type.field("moreTriggerCharacter"), Val(Dyn.Array([Dyn]{Dyn.Text("}}") })))
 }
 
 #Test("request dispatch initializes the sole server and handles ping shutdown and unknown methods") {
@@ -71,19 +71,19 @@
     assert_eq(server.diagnostic_state.dirty.len(), 0)
     assert(!server.shutdown)
     params :: foundation_parse_protocol_json("{{\"rootUri\":\"file:///workspace/root\",\"workspaceFolders\":[{{\"uri\":\"file:///workspace/folder\"}}]}}") ?? panic("initialize params")
-    initialized :: lsp_handle_request(&server, "initialize", Val(params), DataTree.Text("initialize")) ?? panic("initialize response")
+    initialized :: lsp_handle_request(&server, "initialize", Val(params), Dyn.Text("initialize")) ?? panic("initialize response")
     result :: foundation_parse_protocol_json(initialized) ?? panic("response JSON")
-    assert_eq(result.field("id"), Val(DataTree.Text("initialize")))
+    assert_eq(result.field("id"), Val(Dyn.Text("initialize")))
     assert(server.workspace_folders)
     assert_eq(server.workspace_roots.len(), 1)
     assert(lsp_request_path.equals(server.workspace_roots[0], lsp_request_path.from_text("/workspace/folder", server.snapshot.cwd.platform)))
-    ping :: lsp_handle_request(&server, "ping", None, DataTree.Int(7)) ?? panic("ping response")
-    assert_eq(ping, lsp_response(DataTree.Int(7), "{{}}"))
-    unknown :: lsp_handle_request(&server, "not/a/known/method", None, DataTree.Int(8)) ?? panic("unknown response")
-    assert_eq(unknown, lsp_response(DataTree.Int(8), "null"))
+    ping :: lsp_handle_request(&server, "ping", None, Dyn.Int(7)) ?? panic("ping response")
+    assert_eq(ping, lsp_response(Dyn.Int(7), "{{}}"))
+    unknown :: lsp_handle_request(&server, "not/a/known/method", None, Dyn.Int(8)) ?? panic("unknown response")
+    assert_eq(unknown, lsp_response(Dyn.Int(8), "null"))
     assert(!server.shutdown)
-    shutdown :: lsp_handle_request(&server, "shutdown", None, DataTree.Null) ?? panic("shutdown response")
-    assert_eq(shutdown, lsp_response(DataTree.Null, "null"))
+    shutdown :: lsp_handle_request(&server, "shutdown", None, Dyn.Null) ?? panic("shutdown response")
+    assert_eq(shutdown, lsp_response(Dyn.Null, "null"))
     assert(server.shutdown)
 }
 
@@ -97,7 +97,7 @@
     assert_eq(server.diagnostic_state.docs[uri].text, "new")
     assert_eq(server.diagnostic_state.docs[uri].version, 2)
     assert_eq(server.diagnostic_state.dirty.get(uri), Val(true))
-    loop method in [String]{"initialized", "notifications/initialized", "$/cancelRequest", "notifications/cancelled", "unknown/notification"} {
+    loop method in ([String]{"initialized", "notifications/initialized", "$/cancelRequest", "notifications/cancelled", "unknown/notification"}) {
         lsp_handle_notification(&server, method, None, &stdout) ?? panic("notification")
         assert(!server.shutdown)
         assert_eq(server.diagnostic_state.docs[uri].version, 2)

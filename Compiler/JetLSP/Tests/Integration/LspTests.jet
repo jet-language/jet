@@ -1,7 +1,7 @@
 use std.[fs, env, thread, process]
 use std.process.[Command, Stdio]
 use std.sync.[Arc, Mutex]
-use jet_foundation.DataTree.[DataTree]
+use jet_foundation.Dyn.[Dyn]
 use jet_foundation.JSON.[json_get, json_str, parse_json]
 use jet.Diagnostics.[Severity, ReportPath]
 use jet.[check_document, render_all_json, compile_with_path]
@@ -11,7 +11,7 @@ use common.[Scratch]
 
 // Rust: tests/lsp.rs:42
 #Test("lsp_process_lock_recovers_from_poison") {
-    mutex :: Arc.new(Mutex.new(()))
+    mutex :: Arc.new(Mutex.new(_))
     poisoned_mutex :: Arc.clone(mutex)
     poisoned :: thread.spawn(() -> {
         _guard :: poisoned_mutex.lock().unwrap()
@@ -297,7 +297,7 @@ use common.[Scratch]
     assert_eq(aot[0].code, "E0311", "AOT diagnostic code drifted")
     // Retired JIT/interpreter representations are replaced by real CLI journeys.
     // Each failing front end must preserve the same report before code generation.
-    tier_reports := [(String, DataTree)]()
+    tier_reports := [(String, Dyn)]()
     loop (tier, arguments) in [
         ("O0", ["run", "--json"]),
         ("O1", ["build", "--json"]),

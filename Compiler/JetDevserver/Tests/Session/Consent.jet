@@ -228,13 +228,13 @@ fn capture_consent_test_scope() -> CaptureConsentScope Never! {
     reason :: CaptureSkipReason.UnsafeSource{source: fact}
     if reason.source() == {
         .Val(source) -> assert_eq(source[0].reason_text(), "Rand at rand.jet:11")
-        .None -> panic("source lost")
+        .None -> { panic("source lost") }
     }
     skip :: CaptureSkip{reason, terminal_available: false}
     eligibility :: CaptureEligibility.Skipped{skip}
     if eligibility.skip() == {
         .Val(view) -> assert_eq(view[0].status_line(), "capture: skipped (Rand at rand.jet:11); no terminal to consent")
-        .None -> panic("skip lost")
+        .None -> { panic("skip lost") }
     }
 }
 

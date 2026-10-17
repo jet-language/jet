@@ -38,13 +38,13 @@ fn repl_replay_test_turn(id: Int, input: String, had_effect: Bool, bound_name: S
     turns :: [ReplTurn]{repl_replay_test_turn(1, "x :: 1", false, Val("x"))}
     error :: if build_replay_plan(turns, 5, None) == {
         .Err(error) -> error.message
-        .Ok(_) -> panic("unknown turn accepted")
+        .Ok(_) -> { panic("unknown turn accepted") }
     }
     assert_eq(error, "turn #5 does not exist")
     empty :: [ReplTurn]{}
     if build_replay_plan(empty, 1, None) == {
         .Err(empty_error) -> assert_eq(empty_error.message, "turn #1 does not exist")
-        .Ok(_) -> panic("empty turn ledger accepted")
+        .Ok(_) -> { panic("empty turn ledger accepted") }
     }
 }
 

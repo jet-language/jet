@@ -26,7 +26,7 @@ struct TestProject {
             // GATE #4494: native temp directory, process id and atomic counter.
             candidate :: entry_path.join(entry_env.temp_dir(), entry_path.from_text("jet-lsp-unit-{entry_process.id()}-{NEXT_TEST_PROJECT.fetch_add(1, Ordering.Relaxed)}", core.sys.target.selected_path_platform()))
             if entry_fs.create_dir(candidate) == {
-                .Ok(_) -> break candidate
+                .Ok(_) -> { break candidate }
                 .Err(error) -> {
                     if error.kind() == .AlreadyExists -> next
                     panic("create isolated LSP test project: {error}")
@@ -56,7 +56,7 @@ impl TestProject.Close {
 fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
     project :: TestProject.new()
     (diagnostics, bundle, facts) :: check_document_with_bundle(project.entry(), text)
-    (_0: project, _1: diagnostics, _2: bundle, _3: facts)
+    (project, diagnostics, bundle, facts)
 }
 
 // Rust: Source/LSP/mod.rs:104
@@ -94,7 +94,7 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     source :: "abcdefghij"
     (text, applied, deferred) :: lsp_apply_non_overlapping(source, [fix(2, 4, "X"), fix(0, 6, "OUTER"), fix(8, 9, "Y")])
     assert_eq(text, "OUTERghYj")
-    assert_eq((_0: applied, _1: deferred), (_0: 2, _1: 1))
+    assert_eq((applied, deferred), (2, 1))
 }
 
 // Rust: Source/LSP/mod.rs:175
@@ -257,7 +257,7 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert_eq(definition_path, project.entry())
     assert_eq(src[definition_span.start..<definition_span.end], "speed")
     references :: compute_references(db, tokens, project.entry(), origin_offset, true)
-    assert(references.iter().any((pair) -> { src[pair._1.start..<pair._1.end] == "speed" }), "origin receiver references missing: {references:Debug}")
+    assert(references.iter().any((pair) -> { src[pair.1.start..<pair.1.end] == "speed" }), "origin receiver references missing: {references:Debug}")
     rename_error :: compute_rename(db, tokens, project.entry(), origin_offset, "other").err() ?? panic("compiler facts are not renameable")
     assert(rename_error.contains("compiler-owned @origin"), "{rename_error}")
 }
@@ -270,7 +270,7 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     (toks, _) :: lex(src)
     spans :: compute_rename(db, toks, project.entry(), 3, "hello") ?? panic("rename ok")
     assert(!spans.is_empty())
-    assert(spans.iter().any((pair) -> { pair._1.start <= 3 && 3 <= pair._1.end }))
+    assert(spans.iter().any((pair) -> { pair.1.start <= 3 && 3 <= pair.1.end }))
 }
 
 // Rust: Source/LSP/mod.rs:507
@@ -349,8 +349,7 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     character := U32{0}
     saw_string := false
     loop chunk in data.chunks_exact(5) {
-        if chunk[0] == 0 { character += chunk[1] }
-        else { line += chunk[0]; character = chunk[1] }
+        if chunk[0] == 0 -> character += chunk[1] else -> line += chunk[0]; character = chunk[1]
         start :: lsp_pos_to_offset(src, LSPPos{line: Int{line}, character: Int{character}})
         tok_end :: start + Int{chunk[2]}
         if tok_end > quote && start < end {

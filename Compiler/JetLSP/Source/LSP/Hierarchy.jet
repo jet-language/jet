@@ -1,10 +1,10 @@
 // Source/LSP/Server.rs:1977–2160. Sole W38 Server/W36 documents and the SAME
 // retained Driver check result. Hierarchy item/trait projections are 0740/0741.
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use jet_foundation.[Span]
 use core.files.runtime.kernel_path_components as lsp_hierarchy_path
 
-fn lsp_call_hierarchy_incoming_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_call_hierarchy_incoming_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     value :: params ?? return None
     item :: value.field("item") ?? return None
     name_value :: item.field("name") ?? return None
@@ -35,7 +35,7 @@ fn lsp_call_hierarchy_incoming_response(server: LSPServer, params: DataTree?, id
     None
 }
 
-fn lsp_call_hierarchy_outgoing_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_call_hierarchy_outgoing_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     value :: params ?? return None
     item :: value.field("item") ?? return None
     name_value :: item.field("name") ?? return None
@@ -63,7 +63,7 @@ fn lsp_call_hierarchy_outgoing_response(server: LSPServer, params: DataTree?, id
     None
 }
 
-fn lsp_prepare_type_hierarchy_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_prepare_type_hierarchy_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri_value :: td.field("uri") ?? return None
@@ -85,7 +85,7 @@ fn lsp_prepare_type_hierarchy_response(server: LSPServer, params: DataTree?, id:
     None
 }
 
-fn lsp_type_hierarchy_supertypes_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_type_hierarchy_supertypes_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     request :: lsp_type_hierarchy_item_params(params) ?? return None
     doc :: server.diagnostic_state.docs.get(request.0) ?? return None
     checked :: server.check_with_bundle(doc)
@@ -99,7 +99,7 @@ fn lsp_type_hierarchy_supertypes_response(server: LSPServer, params: DataTree?, 
             if def.name != name -> next
             if def.kind == {
                 .Trait | .Tag -> {}
-                else -> next
+                else -> { next }
             }
             source :: lsp_module_source(result, def.module_path) ?? doc.text
             if lsp_type_hierarchy_item_json(def, source) == .Val(item) -> &rows.push(item)
@@ -109,7 +109,7 @@ fn lsp_type_hierarchy_supertypes_response(server: LSPServer, params: DataTree?, 
     Val(lsp_response(id, "[{rows.join(",")}]"))
 }
 
-fn lsp_type_hierarchy_subtypes_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_type_hierarchy_subtypes_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     request :: lsp_type_hierarchy_item_params(params) ?? return None
     doc :: server.diagnostic_state.docs.get(request.0) ?? return None
     checked :: server.check_with_bundle(doc)
@@ -123,7 +123,7 @@ fn lsp_type_hierarchy_subtypes_response(server: LSPServer, params: DataTree?, id
             if def.name != name -> next
             if def.kind == {
                 .Struct(_, _) | .Enum(_, _) -> {}
-                else -> next
+                else -> { next }
             }
             source :: lsp_module_source(result, def.module_path) ?? doc.text
             if lsp_type_hierarchy_item_json(def, source) == .Val(item) -> &rows.push(item)

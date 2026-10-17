@@ -268,8 +268,7 @@ use std.path.[PathBuf]
     discovered := fs.read_dir(asset_dir).unwrap_or_else(err -> panic("read {asset_dir.display()}: {err}"))
         .filter_map(entry -> {
             path :: entry.expect("read Canvas JS asset entry").path()
-            if path.extension().and_then(ext -> ext.to_str()) == "js" -> path.file_name().unwrap().to_string_lossy().into_owned()
-            else -> none
+            if path.extension().and_then(ext -> ext.to_str()) == "js" -> path.file_name().unwrap().to_string_lossy().into_owned() else -> none
         }).collect()
     discovered.sort()
     expected := ASSETS.iter().map(asset -> asset.to_string()).collect()
@@ -549,16 +548,19 @@ use std.path.[PathBuf]
         (_0: "rails", _1: CANVAS_RAILS_FIXTURE, _2: ["\"wire_kind\":\"fallible\"", "\"kind\":\"unsafe\"", "\"proof\"", "\"debug_overlay\":\"idle\"", "\"source\":\"front-end facts\""]),
         (_0: "task", _1: CANVAS_TASK_RAIL_FIXTURE, _2: ["\"async\"", "\"kind\":\"structured_task_scope\"", "\"source\":\"task.group\"", "\"pins\"", "\"wires\""])
     ]
-    loop (tag_ref, src, required) in cases {
-        path :: write_fixture("hardening_{tag}", src)
+    loop case_row in cases {
+        tag_ref :: case_row._0
+        src :: case_row._1
+        required :: case_row._2
+        path :: write_fixture("hardening_{tag_ref}", src)
         first :: Canvas.graph_json_for_file(path).expect("first projection")
         second :: Canvas.graph_json_for_file(path).expect("second projection")
-        assert_eq(first, second, "{tag} projection/layout drifted")
-        assert(count_occurrences(first, "\"graph_id\":\"fn:") >= 1, "{tag} graph should expose at least one function graph: {first}")
-        assert(count_occurrences(first, "\"node_id\":\"fn:") >= 2, "{tag} graph should expose multiple source-backed nodes: {first}")
-        assert(count_occurrences(first, "\"source_span\":{{\"start\":") >= 2, "{tag} graph should expose source spans for nodes/pins/inline facts: {first}")
-        assert(!first.contains("\"kind\":\"source\""), "{tag} supported Canvas construct fell back to opaque source node: {first}")
-        loop field in required -> assert(first.contains(field), "{tag} missing {field}: {first}")
+        assert_eq(first, second, "{tag_ref} projection/layout drifted")
+        assert(count_occurrences(first, "\"graph_id\":\"fn:") >= 1, "{tag_ref} graph should expose at least one function graph: {first}")
+        assert(count_occurrences(first, "\"node_id\":\"fn:") >= 2, "{tag_ref} graph should expose multiple source-backed nodes: {first}")
+        assert(count_occurrences(first, "\"source_span\":{{\"start\":") >= 2, "{tag_ref} graph should expose source spans for nodes/pins/inline facts: {first}")
+        assert(!first.contains("\"kind\":\"source\""), "{tag_ref} supported Canvas construct fell back to opaque source node: {first}")
+        loop field in required -> assert(first.contains(field), "{tag_ref} missing {field}: {first}")
     }
 }
 

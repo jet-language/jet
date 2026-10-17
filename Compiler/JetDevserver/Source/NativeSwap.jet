@@ -5,7 +5,7 @@ use jet_foundation.HotSwap.[HotSwapDecision, StateRetentionDecision]
 use std.fmt
 
 // Rust: crates/jet-devserver/src/NativeSwap.rs:27
-NATIVE_SWAP_PROTOCOL :: "jet.native.swap.v1"
+NATIVE_SWAP_PROTOCOL :: prep { String{"jet.native.swap.v1"} }
 // Rust: crates/jet-devserver/src/NativeSwap.rs:29
 MAX_NATIVE_SWAP_ID_BYTES :: prep { USize{256} }
 // Rust: crates/jet-devserver/src/NativeSwap.rs:31
@@ -26,7 +26,7 @@ impl NativeSwapSourceIdentity {
     }
     // Rust: crates/jet-devserver/src/NativeSwap.rs:71
     fn canonical(self: Self) -> String {
-        if self.source_id == self.module_ref -> self.source_id.copy() else -> "{self.source_id}::{self.module}"
+        if self.source_id == self.module_ref -> self.source_id.copy() else -> "{self.source_id}::{self.module_ref}"
     }
     // Rust: crates/jet-devserver/src/NativeSwap.rs:80
     fn matches(self: Self, other: Self) -> Bool { self == other }
@@ -73,7 +73,7 @@ struct NativeSwapRevision { code: NativeSwapCodeRevision; data: NativeSwapDataRe
 impl NativeSwapRevision {
     // Rust: crates/jet-devserver/src/NativeSwap.rs:152
     fn new(code: String, data: String) -> Self NativeSwapError! {
-        Self { code: NativeSwapCodeRevision.new(^code)?, data: NativeSwapDataRevision.new(^data)? }
+        Self { code: NativeSwapCodeRevision.new(^code), data: NativeSwapDataRevision.new(^data)? }
     }
     // Rust: crates/jet-devserver/src/NativeSwap.rs:163
     fn code_revision(self: Self) -> String { self.code.as_str() }
@@ -442,9 +442,9 @@ impl NativeSwapRestartBoundary {
     }
     // Rust: crates/jet-devserver/src/NativeSwap.rs:1090
     fn validate(self: &Self, source_id: String) NativeSwapError! {
-        validate_fact_list(source_id, &self.affected)?
-        validate_fact_list(source_id, &self.kept)?
-        validate_fact_list(source_id, &self.reset)?
+        validate_fact_list(source_id, &self.affected)
+        validate_fact_list(source_id, &self.kept)
+        validate_fact_list(source_id, &self.reset)
         if self.required && self.reason.is_none() -> return .Err(NativeSwapError.input(source_id, .RestartRequired, "restart boundary is required but has no blocking fact"))
         if !self.required && self.reason.is_some() -> return .Err(NativeSwapError.input(source_id, .RestartRequired, "in-place boundary carries a restart reason"))
         if self.reason == .Val(reason) {
@@ -483,7 +483,7 @@ impl NativeSwapPlan {
     // Rust: crates/jet-devserver/src/NativeSwap.rs:1176
     fn new(source: NativeSwapSourceIdentity, from: NativeSwapExecutable, to: NativeSwapExecutable, capability: NativeSwapCapability, decision: HotSwapDecision) -> Self NativeSwapError! {
         source_id :: source.canonical()
-        validate_hot_swap_decision(source_id, &source, &decision)?
+        validate_hot_swap_decision(source_id, &source, &decision)
         if !from.source.matches(&source) || !to.source.matches(&source) -> return .Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "plan source does not match both executable identities"))
         if to.generation <= from.generation -> return .Err(NativeSwapError.input(source.canonical(), .StalePlan, "candidate generation must advance beyond the resident generation"))
         restart_boundary :: if decision.is_compatible() -> NativeSwapRestartBoundary.in_place() else -> decision_restart_boundary(&decision)
@@ -543,14 +543,14 @@ impl NativeSwapPlan {
         }
         if !self.from.source.matches(&self.source) || !self.to.source.matches(&self.source) -> return .Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "plan source does not match both executable identities"))
         if self.to.generation <= self.from.generation -> return .Err(NativeSwapError.input(source_id, .StalePlan, "candidate generation must advance beyond the resident generation"))
-        validate_hot_swap_decision(source_id, &self.source, &self.decision)?
-        self.restart_boundary.validate(source_id)?
-        validate_fact_list(source_id, &self.changed_items)?
-        validate_fact_list(source_id, &self.removed_definitions)?
-        validate_fact_list(source_id, &self.relocation.code_symbols)?
-        validate_fact_list(source_id, &self.relocation.data_slots)?
-        validate_listener_plan_facts(source_id, &self.source, &self.preserve_listeners)?
-        validate_connection_plan_facts(source_id, &self.source, &self.preserve_connections)?
+        validate_hot_swap_decision(source_id, &self.source, &self.decision)
+        self.restart_boundary.validate(source_id)
+        validate_fact_list(source_id, &self.changed_items)
+        validate_fact_list(source_id, &self.removed_definitions)
+        validate_fact_list(source_id, &self.relocation.code_symbols)
+        validate_fact_list(source_id, &self.relocation.data_slots)
+        validate_listener_plan_facts(source_id, &self.source, &self.preserve_listeners)
+        validate_connection_plan_facts(source_id, &self.source, &self.preserve_connections)
         loop (label, identity) in [("resident link identity", self.link.resident_identity), ("candidate link identity", self.link.candidate_identity)] {
             _ :: validate_identity(identity, label) ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
         }
@@ -647,8 +647,8 @@ impl NativeSwapState {
     fn new(executable: NativeSwapExecutable, listeners: [NativeSwapListenerHandle], connections: [NativeSwapConnectionHandle]) -> Self NativeSwapError! {
         source_id :: executable.source.canonical()
         _ :: validate_source_identity(&executable.source, "executable") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        listener_map :: listener_map(source_id, &executable, ^listeners)?
-        connection_map :: connection_map(source_id, &executable, ^connections, &listener_map)?
+        listener_map :: listener_map(source_id, &executable, ^listeners)
+        connection_map :: connection_map(source_id, &executable, ^connections, &listener_map)
         Self { executable: ^executable, listeners: ^listener_map, connections: ^connection_map,
             phase: .Ready, checkpoint: .None, pending_plan: .None, working_receipt: .None }
     }
@@ -698,7 +698,7 @@ impl NativeSwapState {
     // Rust: crates/jet-devserver/src/NativeSwap.rs:1652
     fn pause(self: &Self, plan: &NativeSwapPlan) NativeSwapError! {
         if self.phase != .Ready -> return .Err(self.phase_error("pause requires a ready transaction"))
-        self.validate_plan(plan)?
+        self.validate_plan(plan)
         checkpoint :: NativeSwapCheckpoint { executable: self.executable.copy(), listeners: self.listeners.copy(), connections: self.connections.copy() }
         self.checkpoint = .Val(^checkpoint)
         self.pending_plan = .Val(plan.copy())
@@ -709,7 +709,7 @@ impl NativeSwapState {
     fn apply(self: &Self, plan: &NativeSwapPlan) NativeSwapError! {
         if self.phase != .Paused -> return .Err(self.phase_error("apply requires a paused transaction"))
         if self.pending_plan.as_ref() != .Val(plan) -> return .Err(NativeSwapError.input(self.source().canonical(), .StalePlan, "apply plan does not match the paused plan"))
-        self.validate_plan(plan)?
+        self.validate_plan(plan)
         checkpoint :: self.checkpoint.as_ref() ?? return .Err(self.error(.RollbackUnavailable, "apply checkpoint is missing"))
         preserved_listener_ids := [String:Bool]{}
         loop handle in plan.preserve_listeners -> preserved_listener_ids.insert(handle.id.copy(), true)

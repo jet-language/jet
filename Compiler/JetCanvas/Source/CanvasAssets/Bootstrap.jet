@@ -1,11 +1,11 @@
-use jet_foundation.[json_escape]
+use jet_foundation.[foundation_json_escape]
 
 // crates/jet-canvas/src/html.rs:7–14: BOTH base insertions use Foundation's
 // unquoted JSON payload escape, including the script-src position. This is
 // deliberately not HTML escaping, URL normalization, or a script-end filter;
 // changing that historical contract requires the asset/host owner's ruling.
 fn canvas_bootstrap_for(base: String) -> String Never! {
-    escaped :: json_escape(base)
+    escaped :: foundation_json_escape(base)
     "<script>window.__JET_CANVAS_BASE__ = \"{escaped}\";</script>\n<script src=\"{escaped}/app.js?canvas_ui=blueprint23\"></script>"
 }
 

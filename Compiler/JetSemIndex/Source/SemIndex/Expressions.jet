@@ -31,7 +31,7 @@ fn semindex_arithmetic_operation_label(operation: ArithmeticOperation) -> String
 fn semindex_format_arithmetic_hover(fact: ArithmeticPolicyFact, module_path: String) -> String Never! {
     operation :: if fact.operation == {
         .Val(operation) -> semindex_arithmetic_operation_label(operation)
-        None -> "operation"
+        .None -> "operation"
     }
     policy :: semindex_arithmetic_mode_label(fact.mode)
     "fixed-width {operation}: .{policy}; scope = {module_path}:{fact.scope_span.start}..{fact.scope_span.end}"
@@ -66,7 +66,7 @@ fn semindex_expr_child(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, progra
 // The same stateless provider-impl convention as CanonicalASTDefaultProvider.
 // Complete synchronous CallValue/OptField projection before generic node insertion.
 enum SemIndexOptionalCallVisitor { Borrowed }
-impl SemIndexOptionalCallVisitor.CanonicalASTOptionalCallVisitor<SymbolDB, WalkCtx, MIRNameFacts, Program, String, String> {
+impl SemIndexOptionalCallVisitor.CanonicalASTOptionalCallVisitor {
     fn visit_optional_method_call(self, db: &SymbolDB, context: &WalkCtx, names: MIRNameFacts, program: Program, source: String, module_path: String, receiver: Expr, receiver_span: Span, method: String, method_span: Span, type_args: [Type], args: [CallArg], call_span: Span) Never! {
         call_id :: semindex_record_node(&db, context, "expr", "Discriminant(45)", module_path, call_span)
         if call_id == .Val(id) -> &context.structural_parents.push(id)
@@ -162,7 +162,7 @@ fn semindex_collect_expr(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, prog
             semindex_expr_child(&db, &ctx, names, program, source, base, mp, "base")
             if range == {
                 .Val(range) -> semindex_expr_child(&db, &ctx, names, program, source, range, mp, "range")
-                None -> {
+                .None -> {
                     semindex_expr_child(&db, &ctx, names, program, source, start, mp, "start")
                     semindex_expr_child(&db, &ctx, names, program, source, end, mp, "end")
                 }
@@ -257,7 +257,7 @@ fn semindex_collect_expr(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, prog
         }
         .PatternTest(subject, _, _) -> semindex_expr_child(&db, &ctx, names, program, source, subject, mp, "subject")
         .Lambda(lambda) -> {
-            loop param in lambda.params -> &db.defs.push(SymDef{identity: semindex_scoped_local_identity(ctx, "param", param.name), name: param.name, def_span: param.name_span, module_path: mp, kind: SymKind.Param{ty: param.ty ?? Type.Int}})
+            loop param in lambda.params -> &db.defs.push(SymDef{identity: semindex_scoped_local_identity(ctx, "param", param.name), name: param.name, def_span: param.name_span, module_path: mp, kind: (SymKind.Param{ty: param.ty ?? Type.Int})})
             if lambda.body == {
                 .Expr(value) -> semindex_expr_child(&db, &ctx, names, program, source, value, mp, "body")
                 .Block(body) -> semindex_structural_slot(&db, &ctx, "body", StructuralSlotKind.List, (db: SymbolDB, ctx: WalkCtx) -> {

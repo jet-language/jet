@@ -91,7 +91,7 @@ fn semindex_collect_item(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, prog
             if function.is_unsafe && rule_allows("Unsafe", RuleSite.Function) -> hover += "\nrule: #Unsafe (function, site-bound)"
             if function.is_pure && rule_allows("Pure", RuleSite.Function) -> hover += "\nrule: #Pure (function, site-bound)"
             if function.is_replayable && rule_allows("Replayable", RuleSite.Function) -> hover += "\nrule: #Replayable (function, site-bound)"
-            if function.scrub_tag == .Val(tag_ref) -> hover += "\nrule: #Scrub({tag}) (function, site-bound)"
+            if function.scrub_tag == .Val(tag_ref) -> hover += "\nrule: #Scrub({tag_ref}) (function, site-bound)"
             declarations := [PolicyDeclaration]{}
             loop declaration in program.policy_declarations {
                 if semindex_policy_applies_to_function(declaration, function.span) -> &declarations.push(declaration)
@@ -109,7 +109,7 @@ fn semindex_collect_item(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, prog
                 if parameter.name == "self" -> next
                 text :: if parameter.public_label == {
                     .Val(label) -> "`{parameter.name}`: {type_name(parameter.ty)} — callers write `{label.name}:`"
-                    None -> "`{parameter.name}`: {type_name(parameter.ty)}"
+                    .None -> "`{parameter.name}`: {type_name(parameter.ty)}"
                 }
                 &db.hover.push(HoverEntry{span: parameter.name_span, module_path: mp, text: text})
             }
@@ -135,7 +135,7 @@ fn semindex_collect_item(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, prog
             fields := [SymNameType]{}
             loop field in definition.fields -> &fields.push(SymNameType{name: field.name, ty: field.ty})
             derives := [String]{}
-            loop derive in definition.derives -> &derives.push(derive.name)
+            loop derive_ref in definition.derives -> &derives.push(derive_ref.name)
             &db.defs.push(SymDef{identity: semindex_type_identity(ctx.scope_identity, definition.name), name: definition.name, def_span: definition.name_span, module_path: mp, kind: .Struct{fields: ^fields, derives: ^derives}})
             &db.hover.push(HoverEntry{span: definition.name_span, module_path: mp, text: "struct `{definition.name}`"})
             if definition.state == .Val(state) {
@@ -157,7 +157,7 @@ fn semindex_collect_item(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, prog
             loop implementation in definition.trait_impls {
                 reference :: semindex_declaration_ref(&db, ctx, names, implementation.trait_name, implementation.trait_span, mp)
                 &db.refs.push(reference)
-                loop method in implementation.methods -> semindex_collect_item_method(&db, &ctx, names, program, source, method, definition.name, .TraitImpl{trait_name: implementation.trait_name}, false, false, mp)
+                loop method in implementation.methods -> semindex_collect_item_method(&db, &ctx, names, program, source, method, definition.name, (.TraitImpl{trait_name: implementation.trait_name}), false, false, mp)
             }
         }
         .Enum(definition) -> {
@@ -175,7 +175,7 @@ fn semindex_collect_item(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, prog
             variants := [String]{}
             loop variant in definition.variants -> &variants.push(variant.name)
             derives := [String]{}
-            loop derive in definition.derives -> &derives.push(derive.name)
+            loop derive_ref in definition.derives -> &derives.push(derive_ref.name)
             &db.defs.push(SymDef{identity: semindex_type_identity(ctx.scope_identity, definition.name), name: definition.name, def_span: definition.name_span, module_path: mp, kind: .Enum{variants: variants, derives: ^derives}})
             &db.hover.push(HoverEntry{span: definition.name_span, module_path: mp, text: "enum `{definition.name}` — variants: {variants.join(", ")}"})
             loop variant in definition.variants {
@@ -188,7 +188,7 @@ fn semindex_collect_item(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, prog
             loop implementation in definition.trait_impls {
                 reference :: semindex_declaration_ref(&db, ctx, names, implementation.trait_name, implementation.trait_span, mp)
                 &db.refs.push(reference)
-                loop method in implementation.methods -> semindex_collect_item_method(&db, &ctx, names, program, source, method, definition.name, .TraitImpl{trait_name: implementation.trait_name}, false, false, mp)
+                loop method in implementation.methods -> semindex_collect_item_method(&db, &ctx, names, program, source, method, definition.name, (.TraitImpl{trait_name: implementation.trait_name}), false, false, mp)
             }
         }
         .Trait(definition) -> {
@@ -211,7 +211,7 @@ fn semindex_collect_item(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, prog
             }
             origin :: if implementation.trait_name == {
                 .Val(name) -> MemberOrigin.TraitImpl{trait_name: name}
-                None -> MemberOrigin.InherentImpl
+                .None -> MemberOrigin.InherentImpl
             }
             loop method in implementation.methods -> semindex_collect_item_method(&db, &ctx, names, program, source, method, implementation.type_name, origin, true, false, mp)
         }

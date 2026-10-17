@@ -2,9 +2,9 @@ fn devserver_test_request(raw: String) -> DevserverRequest Never! {
     if DevserverRequest.read(raw.bytes()) == {
         .Ok(value) -> if value == {
             .Val(request) -> request
-            None -> panic("missing request")
+            .None -> { panic("missing request") }
         }
-        .Err(_) -> panic("request rejected")
+        .Err(_) -> { panic("request rejected") }
     }
 }
 fn devserver_test_request_fails(raw: String) -> Bool Never! {
@@ -16,7 +16,7 @@ fn devserver_test_request_fails(raw: String) -> Bool Never! {
 fn devserver_test_header_error(lines: [String]) -> String Never! {
     if devserver_request_headers(devserver_http.headers_parse(lines)) == {
         .Err(.InvalidData(message)) -> message
-        else -> panic("missing devserver header refusal")
+        else -> { panic("missing devserver header refusal") }
     }
 }
 
@@ -71,7 +71,7 @@ fn devserver_test_header_error(lines: [String]) -> String Never! {
     cr :: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
     assert(if DevserverRequest.read([U8]{}) == {
         .Ok(value) -> if value == {
-            None -> true
+            .None -> true
             else -> false
         }
         .Err(_) -> false

@@ -40,7 +40,7 @@ struct CapturePolicy {
                     if consent.matches(attempt.identity, expected_scope) -> return CaptureEligibility.Sensitive(self.budget())
                     return CaptureEligibility.Skipped(CaptureSkip{reason: CaptureSkipReason.SensitiveConsentScopeChanged(source.copy()), terminal_available: true})
                 }
-                .None -> return CaptureEligibility.Skipped(CaptureSkip{reason: CaptureSkipReason.UnsafeSource(source.copy()), terminal_available: true})
+                .None -> { return CaptureEligibility.Skipped(CaptureSkip{reason: CaptureSkipReason.UnsafeSource(source.copy()), terminal_available: true}) }
             }
         }
         // Includes an empty source list; no terminal or grant is needed.

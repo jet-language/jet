@@ -1,4 +1,4 @@
-use jet_devserver.Canvas.EditActions.*
+use jet_devserver.Canvas.EditActions.[core_import_insert_point, core_imports, ident_prefix, imported_core_prefix]
 
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1173
 #Test("canvas_core_imports_preserve_module_alias_and_ignore_comments") {
@@ -14,9 +14,9 @@ use jet_devserver.Canvas.EditActions.*
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1147
 #Test("canvas_core_prefix_selects_longest_existing_import") {
     src :: "use core as base\nuse core.io as output\nuse core.io.file as files\n"
-    assert(imported_core_prefix(src, "core.io.file") == .Val("files"))
-    assert(imported_core_prefix(src, "core.io.file.read") == .Val("files.read"))
-    assert(imported_core_prefix(src, "core.io.net") == .Val("output.net"))
+    assert(imported_core_prefix(src, "core.io.file") == "files")
+    assert(imported_core_prefix(src, "core.io.file.read") == "files.read")
+    assert(imported_core_prefix(src, "core.io.net") == "output.net")
     assert(imported_core_prefix(src, "other") == .None)
 }
 

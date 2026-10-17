@@ -4,7 +4,7 @@
 // runtime enum fact exactly. The closed value lists below are Rust's own
 // consumer validators (EventObservation.rs:31-114); the runtime producer
 // (Observe/jet_event_observe) has no Jet owner yet, so no real feed runs here.
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use jet_foundation.[foundation_parse_protocol_json]
 
 // Rust MAX_SNAPSHOT_BYTES / MAX_EVENTS.
@@ -37,18 +37,18 @@ fn render_event_observations(snapshot: String) -> String DebugEventObservationEr
                             }
                             return debug_render_event_rows(rows)
                         }
-                        else -> return Err(debug_event_error(no_sequence))
+                        else -> { return Err(debug_event_error(no_sequence)) }
                     }
                 }
-                else -> return Err(debug_event_error(no_sequence))
+                else -> { return Err(debug_event_error(no_sequence)) }
             }
         }
-        else -> return Err(debug_event_error(no_sequence))
+        else -> { return Err(debug_event_error(no_sequence)) }
     }
 }
 
 // Rust `render` record loop: rows are read in place, never copied out.
-fn debug_render_event_rows(events: [DataTree]) -> String DebugEventObservationError! {
+fn debug_render_event_rows(events: [Dyn]) -> String DebugEventObservationError! {
     previous := 0
     lines := [String]{}
     loop event in events {
@@ -83,7 +83,7 @@ fn debug_render_event_rows(events: [DataTree]) -> String DebugEventObservationEr
                 terminal :: debug_event_closed(fields, "terminal") ?? return Err(err)
                 &lines.push("sequence={sequence} source={source} event={event_id} owner={owner_id} subscription={subscription_id} dispatch={dispatch_id} lifecycle={lifecycle} queued={queued} blocked={blocked} running={running} capacity={capacity} overflow={overflow} priority={priority} failure={failure} terminal={terminal}")
             }
-            else -> return Err(debug_event_error("runtime event observation is not an object"))
+            else -> { return Err(debug_event_error("runtime event observation is not an object")) }
         }
     }
     Ok(lines.join("\n"))
@@ -125,7 +125,7 @@ fn debug_event_allowed(key: String, value: String) -> Bool Never! {
 }
 
 // Rust `integer`: only a protocol Int (already i64-bounded by the parser).
-fn debug_event_integer(object: [String: DataTree], key: String) -> Int DebugEventObservationError! {
+fn debug_event_integer(object: [String: Dyn], key: String) -> Int DebugEventObservationError! {
     if object.get(key) == .Val(value) {
         if value == .Int(number) -> return Ok(number)
     }
@@ -133,21 +133,21 @@ fn debug_event_integer(object: [String: DataTree], key: String) -> Int DebugEven
 }
 
 // Rust `unsigned`.
-fn debug_event_unsigned(object: [String: DataTree], key: String) -> Int DebugEventObservationError! {
+fn debug_event_unsigned(object: [String: Dyn], key: String) -> Int DebugEventObservationError! {
     value :: debug_event_integer(object, key) ?? return Err(err)
     if value < 0 -> return Err(debug_event_error("runtime event observation has negative `{key}`"))
     Ok(value)
 }
 
 // Rust `count`: -1 is the published "unavailable" count.
-fn debug_event_count(object: [String: DataTree], key: String) -> Int DebugEventObservationError! {
+fn debug_event_count(object: [String: Dyn], key: String) -> Int DebugEventObservationError! {
     value :: debug_event_integer(object, key) ?? return Err(err)
     if value < -1 -> return Err(debug_event_error("runtime event observation has invalid `{key}`"))
     Ok(value)
 }
 
 // Rust `closed`.
-fn debug_event_closed(object: [String: DataTree], key: String) -> String DebugEventObservationError! {
+fn debug_event_closed(object: [String: Dyn], key: String) -> String DebugEventObservationError! {
     if object.get(key) == .Val(value) {
         if value == .Text(text) {
             if !debug_event_allowed(key, text) -> return Err(debug_event_error("runtime event observation has unknown `{key}` value"))

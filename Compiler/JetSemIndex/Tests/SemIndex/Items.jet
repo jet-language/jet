@@ -51,7 +51,7 @@ fn semindex_s9_state_owner_assertions(index: SemIndex, source: String, json: Str
         if !definition.qualified_name.ends_with("Door.State.Closed") -> next
         if definition.kind == {
             .EnumVariant(parent) -> assert_eq(parent, "Door.State")
-            else -> panic("owning struct state definition kind")
+            else -> { panic("owning struct state definition kind") }
         }
         definition_found = true
         loop window in index.references_to("Closed") {

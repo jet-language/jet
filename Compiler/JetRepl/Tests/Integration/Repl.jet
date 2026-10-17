@@ -12,7 +12,7 @@ fn run_repl_process(state: OSPath, input: [U8], limit: String?) -> Output {
     command := Command.new(OSPath.from(env.binary_path("jet")))
     command.arg("repl").env("XDG_STATE_HOME", state).env_remove("JET_REPL_HISTORY").env("NO_COLOR", "1")
         .stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped())
-    if value :: limit { command.env("JET_REPL_HISTORY_LIMIT", value) }
+    if limit == .Val(value) { command.env("JET_REPL_HISTORY_LIMIT", value) }
     child := command.spawn().expect("start repl")
     child.stdin.as_mut().unwrap().write_all(input).unwrap()
     child.wait_with_output().expect("finish repl")
@@ -50,7 +50,7 @@ fn parse_transcript(txt: String) -> ([String], [String]) {
     loop line in txt.lines() {
         if line.starts_with("# ") || line == "#" {
             // Comment.
-        } else if input :: line.strip_prefix("> ") {
+        } else if line.strip_prefix("> ") == .Val(input) {
             inputs.push(input.to_string())
         } else {
             expected.push(line.to_string())
@@ -74,9 +74,9 @@ fn run_transcript_file_strict_with_flags(txt: &String, allow: &[String]) {
 // Rust: tests/repl.rs:541
 fn run_transcript_file_with_trailing_policy_and_flags(txt: &String, allow_trailing: Bool, allow: &[String], deny: &[String]) {
     (inputs, expected_lines) :: parse_transcript(txt)
-    input_refs :: inputs.iter().map(input -> &input).collect<[&String]>()
+    input_refs :: inputs.copy()
     actual :: run_transcript_with_flags(input_refs, none, allow, deny)
-    actual_lines :: actual.lines().collect<[String]>()
+    actual_lines :: actual.lines().collect()
     ai := 0
     loop (i, exp) in expected_lines.iter().enumerate() {
         if exp.is_empty() -> next

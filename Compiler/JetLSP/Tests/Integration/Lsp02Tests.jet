@@ -1,6 +1,6 @@
 use Compiler.JetLSP.Tests.Integration.Lsp.[jet_bin, lock_lsp_process, send_msg, read_msg, request_lsp, request_lsp_collect, published_diagnostics_for, error_count, json_string, json_object_field, assert_json_values_equal]
 use Compiler.JetLSP.Tests.Integration.Lsp02.[run_transcript, TranscriptStep, costly_source]
-use jet_foundation.DataTree.[DataTree]
+use jet_foundation.Dyn.[Dyn]
 use jet_foundation.JSON.[json_get, parse_json]
 use jet.[check_document]
 use jet.LSP as LSP
@@ -25,7 +25,12 @@ use std.process.[Command, Stdio]
         (_0: "fn run() {{ SQL{{\n\"value\"}} }}\n", _1: 1, _2: 0, _3: "\"\\n\"", _4: ["\"result\":[]"]),
         (_0: "// }}\n", _1: 0, _2: 4, _3: "\"}}\"", _4: ["\"result\":[]"])
     ]
-    loop (index, (source, line, character, trigger, expected)) in cases.into_iter().enumerate() {
+    loop (index, row_0) in cases {
+        source :: row_0._0
+        line :: row_0._1
+        character :: row_0._2
+        trigger :: row_0._3
+        expected :: row_0._4
         uri :: "file:///tmp/lsp_on_type_formatting_test_{index}.jet"
         run_transcript(source, [
             TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: if index == 0 -> ["documentOnTypeFormattingProvider", "moreTriggerCharacter"] else -> [] },
@@ -497,7 +502,7 @@ use std.process.[Command, Stdio]
     assert(opened.contains("publishDiagnostics") && opened.contains("\"version\":10"), "open must publish the checked base revision: {opened}")
     // Queue the checked/indexed request before overlapping edits; no timing assumption.
     send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/documentSymbol\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}")
-    edit :: (version: I32, marker: &String) -> {
+    edit :: (version: I32, marker: String) -> {
         "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":{version}}},\"contentChanges\":[{{\"range\":{{\"start\":{{\"line\":1,\"character\":3}},\"end\":{{\"line\":1,\"character\":13}}}},\"rangeLength\":10,\"text\":\"{marker}\"}}]}}}}"
     }
     send_msg(&stdin, edit(11, "marker_two"))
@@ -550,7 +555,7 @@ use std.process.[Command, Stdio]
     main_opened :: published_diagnostics_for(opened, main_uri)
     assert_eq(main_opened.len(), 1, "open publishes the importer once: {opened}")
     assert_eq(error_count(main_opened[0]), 0, "Int helper checks clean: {opened}")
-    change :: (version: I32, text: &String) -> {
+    change :: (version: I32, text: String) -> {
         "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{helper_uri}\",\"version\":{version}}},\"contentChanges\":[{{\"text\":{json_string(text)}}}]}}}}"
     }
     // Only the sibling changes; its importer must follow.
@@ -568,7 +573,7 @@ use std.process.[Command, Stdio]
     assert_eq(main_repaired.len(), 1, "one importer verdict per flush: {repaired}")
     assert_eq(error_count(main_repaired[0]), 0, "the importer verdict reflects sibling revision 4: {repaired}")
     helper_published :: published_diagnostics_for(repaired, helper_uri)
-    assert(helper_published.iter().all(params -> json_get(params, "version") == DataTree.Int(4)), "sibling reports carry only its newest revision: {repaired}")
+    assert(helper_published.iter().all(params -> json_get(params, "version") == Dyn.Int(4)), "sibling reports carry only its newest revision: {repaired}")
     assert(published_diagnostics_for(repaired, other_uri).is_empty(), "{repaired}")
     _ :: request_lsp(&stdin, &stdout, 99, "shutdown", "{{}}")
     drop(^stdin)
@@ -592,20 +597,20 @@ use std.process.[Command, Stdio]
     symbols :: "{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}"
     send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":50,\"method\":\"textDocument/documentSymbol\",\"params\":{symbols}}}")
     send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"$/cancelRequest\",\"params\":{{\"id\":50}}}}")
-    before := [DataTree]()
+    before := [Dyn]()
     cancelled :: loop {
         message :: parse_json(read_msg(&stdout)).expect("valid LSP message")
-        if json_get(message, "id") == DataTree.Int(50) -> break ^message
+        if json_get(message, "id") == Dyn.Int(50) -> break ^message
         before.push(^message)
     }
     error :: json_object_field(cancelled, "error")
-    assert_json_values_equal("cancel code", json_object_field(error, "code"), DataTree.Int(-32800))
+    assert_json_values_equal("cancel code", json_object_field(error, "code"), Dyn.Int(-32800))
     assert(json_get(cancelled, "result").is_none(), "{cancelled}")
     loop published in published_diagnostics_for(before, uri) {
-        assert_json_values_equal("flushed revision", json_object_field(published, "version"), DataTree.Int(2))
+        assert_json_values_equal("flushed revision", json_object_field(published, "version"), Dyn.Int(2))
     }
     (current, after) :: request_lsp_collect(&stdin, &stdout, 51, "textDocument/documentSymbol", symbols)
-    assert(after.iter().all(message -> json_get(message, "id") != DataTree.Int(50)), "cancelled request 50 must never answer again: {after}")
+    assert(after.iter().all(message -> json_get(message, "id") != Dyn.Int(50)), "cancelled request 50 must never answer again: {after}")
     current_text :: "{current}"
     assert(current_text.contains("marker_new") && !current_text.contains("marker_old"), "the next request sees the newest revision: {current_text}")
     _ :: request_lsp(&stdin, &stdout, 99, "shutdown", "{{}}")

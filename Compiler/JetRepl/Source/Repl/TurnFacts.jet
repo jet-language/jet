@@ -177,14 +177,13 @@ impl Session {
         }
     }
     fn import_src(self) -> String Never! {
-        if self.import_srcs.is_empty() -> "" else -> "{{self.import_srcs.join("\n")}}\n"
+        if self.import_srcs.is_empty() -> "" else -> "{self.import_srcs.join("\n")}\n"
     }
     fn record_stmts(&self, stmts: [Stmt]) Never! {
         loop stmt in stmts {
             if stmt == .Val(binding) {
                 if binding.name == "__repl_echo__" -> next
-                if binding.mutable -> &self.mutable_names.insert(binding.name.copy())
-                else -> _ :: &self.mutable_names.remove(binding.name)
+                if binding.mutable -> &self.mutable_names.insert(binding.name.copy()) else -> _ :: &self.mutable_names.remove(binding.name)
                 if binding.ty == .Val(ty) -> &self.binding_types.insert(binding.name.copy(), ty.copy())
             }
             &self.sema_stmts.push(stmt.copy())
@@ -205,12 +204,12 @@ fn strip_terminal_control_bytes(input: String) -> String Never! {
     at := 0
     loop at < bytes.len() {
         byte :: bytes[at]
-        if byte < U8{32} && byte != U8{9} && byte != U8{10} && byte != U8{13} {
+        if byte < (U8{32}) && byte != (U8{9}) && byte != (U8{10}) && byte != (U8{13}) {
             at += 1
             next
         }
-        if byte == U8{127} { at += 1; next }
-        if byte == U8{194} && at + 1 < bytes.len() && bytes[at + 1] >= U8{128} && bytes[at + 1] <= U8{159} {
+        if byte == (U8{127}) { at += 1; next }
+        if byte == (U8{194}) && at + 1 < bytes.len() && bytes[at + 1] >= (U8{128}) && bytes[at + 1] <= (U8{159}) {
             at += 2
             next
         }
@@ -222,8 +221,8 @@ fn strip_terminal_control_bytes(input: String) -> String Never! {
 fn normalize_repl_input(input: String) -> String Never! {
     bytes :: input.bytes()
     end := bytes.len()
-    loop end > 0 && bytes[end - 1] == U8{10} -> end -= 1
-    loop end > 0 && bytes[end - 1] == U8{13} -> end -= 1
+    loop end > 0 && bytes[end - 1] == (U8{10}) -> end -= 1
+    loop end > 0 && bytes[end - 1] == (U8{13}) -> end -= 1
     text := input.slice(0, end) // #4303
     strip_terminal_control_bytes(text)
 }
@@ -246,7 +245,7 @@ fn e1802(feature: String) -> Diagnostic Never! {
 fn repl_line_count(text: String) -> Int Never! {
     if text.is_empty() -> return 0
     count := 0
-    loop byte in text.bytes() { if byte == U8{10} -> count += 1 }
+    loop byte in text.bytes() { if byte == ((U8{10})) -> count += 1 }
     if !text.ends_with("\n") -> count += 1
     count
 }
@@ -256,11 +255,11 @@ fn turn_summary(raw: String) -> String Never! {
     bytes :: trimmed.bytes()
     end := 0
     count := 0
-    loop end < bytes.len() && bytes[end] != U8{10} && count < 96 {
+    loop end < bytes.len() && bytes[end] != (U8{10}) && count < 96 {
         end += utf8_width_at(bytes, end)
         count += 1
     }
-    if end < bytes.len() && bytes[end] == U8{10} && end > 0 && bytes[end - 1] == U8{13} -> end -= 1
+    if end < bytes.len() && bytes[end] == (U8{10}) && end > 0 && bytes[end - 1] == (U8{13}) -> end -= 1
     summary := trimmed.slice(0, end) // #4303
     summary.copy()
 }
@@ -269,19 +268,19 @@ fn parse_turn_id(arg: String?) -> Int Err! {
     trimmed := raw.trim() // #4303
     bytes :: trimmed.bytes()
     index := 0
-    if !bytes.is_empty() && bytes[0] == U8{43} -> index = 1
+    if !bytes.is_empty() && bytes[0] == (U8{43}) -> index = 1
     if index == bytes.len() -> return Err("`{raw}` is not a turn id")
     id := U64{0}
     limit :: repl_target.usize_max() // #4483, never host/exact-Int width.
     loop index < bytes.len() {
         byte :: bytes[index]
-        if byte < U8{48} || byte > U8{57} -> return Err("`{raw}` is not a turn id")
+        if byte < (U8{48}) || byte > (U8{57}) -> return Err("`{raw}` is not a turn id")
         digit :: U64{Int.from_u8(byte) - 48}
-        if id > (limit - digit) / U64{10} -> return Err("`{raw}` is not a turn id")
+        if id > (limit - digit) / (U64{10}) -> return Err("`{raw}` is not a turn id")
         id = id * U64{10} + digit
         index += 1
     }
-    if id == U64{0} -> return Err("turn ids start at 1")
+    if id == (U64{0}) -> return Err("turn ids start at 1")
     Ok(Int{id})
 }
 fn status_word(status: ReplTurnStatus) -> String Never! {
@@ -354,8 +353,7 @@ fn repl_note_move(name: String, bindings: Set<String>, scope: [String:CtValue], 
 fn collect_moved_in_stmt(stmt: Stmt, bindings: Set<String>, scope: [String:CtValue], moved: &Set<String>) Never! {
     if stmt == {
         .Val(binding) -> {
-            if binding.init == .Ident(name, _) -> repl_note_move(name, bindings, scope, &moved)
-            else -> collect_moved_in_expr(binding.init, bindings, scope, &moved)
+            if binding.init == .Ident(name, _) -> repl_note_move(name, bindings, scope, &moved) else -> collect_moved_in_expr(binding.init, bindings, scope, &moved)
         }
         .Assign(_, _, _, value) -> collect_moved_in_expr(value, bindings, scope, &moved)
         .Expr(expr) -> collect_moved_in_expr(expr, bindings, scope, &moved)
@@ -394,12 +392,11 @@ fn bracket_balance(s: String) -> I32 Never! {
     loop byte in s.bytes() {
         if escaped { escaped = false; next }
         if byte == {
-            U8{34} -> { if !in_char -> in_string = !in_string }
-            U8{39} -> { if !in_string -> in_char = !in_char }
-            U8{92} -> { if in_string || in_char -> escaped = true }
-            U8{123} | U8{40} | U8{91} -> { if !in_string && !in_char -> balance += I32{1} }
-            U8{125} | U8{41} | U8{93} -> { if !in_string && !in_char -> balance -= I32{1} }
-            else -> {}
+            34 -> { if !in_char -> in_string = !in_string }
+            39 -> { if !in_string -> in_char = !in_char }
+            92 -> { if in_string || in_char -> escaped = true }
+            U8{123} | U8{40} | U8{91} -> { if !in_string && !in_char -> balance += (I32{1}) }
+            U8{125} | U8{41} | U8{93} -> { if !in_string && !in_char -> balance -= (I32{1}) } else -> {}
         }
     }
     balance
@@ -413,19 +410,19 @@ fn skip_leading_comments(text: String) -> String Never! {
         tail := text.slice(at, bytes.len()).trim_start() // #4303
         at = bytes.len() - tail.bytes().len()
         if at + 1 >= bytes.len() -> return tail
-        if bytes[at] == U8{47} && bytes[at + 1] == U8{47} {
-            loop at < bytes.len() && bytes[at] != U8{10} -> at += 1
+        if bytes[at] == (U8{47}) && bytes[at + 1] == (U8{47}) {
+            loop at < bytes.len() && bytes[at] != (U8{10}) -> at += 1
             if at < bytes.len() -> at += 1
             next
         }
-        if bytes[at] != U8{47} || bytes[at + 1] != U8{42} -> return tail
+        if bytes[at] != (U8{47}) || bytes[at + 1] != (U8{42}) -> return tail
         depth := 1
         at += 2
         loop depth > 0 {
             if at == bytes.len() -> return ""
-            if at + 1 < bytes.len() && bytes[at] == U8{47} && bytes[at + 1] == U8{42} {
+            if at + 1 < bytes.len() && bytes[at] == (U8{47}) && bytes[at + 1] == (U8{42}) {
                 depth += 1; at += 2
-            } else if at + 1 < bytes.len() && bytes[at] == U8{42} && bytes[at + 1] == U8{47} {
+            } else if at + 1 < bytes.len() && bytes[at] == (U8{42}) && bytes[at + 1] == (U8{47}) {
                 depth -= 1; at += 2
             } else { at += 1 }
         }
@@ -468,7 +465,7 @@ fn reject_feature(text: String) -> String? Never! {
         end := start
         loop end < bytes.len() && !repl_ascii_whitespace(bytes[end]) -> end += 1
         if end > start {
-            loop end > start && bytes[end - 1] == U8{59} -> end -= 1
+            loop end > start && bytes[end - 1] == (U8{59}) -> end -= 1
             import = Val(rest.slice(start, end)) // #4303
         }
     }
@@ -526,8 +523,8 @@ impl ReplPolicy {
     }
 }
 struct ReplAuthorization {
-    policy: &ReplPolicy
-    prompt: &EffectPrompt?
+    policy: ReplPolicy
+    prompt: EffectPrompt?
 }
 impl ReplAuthorization {
     fn e1803(self, request: ReplEffectRequest, why: String, span: Span) -> Diagnostic Never! {
@@ -584,15 +581,15 @@ impl ReplAuthorization.ReplAuthorizer {
         prompt :: self.prompt ?? return Err(self.e1803(request, "non-TTY REPL sessions never prompt and no matching `--allow` flag was supplied", span))
         choice :: &prompt.choose(request, reused)
         if choice == {
-            .Once | .Continue -> return Ok()
+            .Once | .Continue -> { return Ok() }
             .Session -> { &self.policy.session.insert(request.copy()); return Ok() }
-            .Deny -> return Err(self.e1803(request, "interactive authority was denied", span))
+            .Deny -> { return Err(self.e1803(request, "interactive authority was denied", span)) }
             .Revoke -> {
                 _ :: &self.policy.session.remove(request)
                 if &prompt.choose(request, false) == {
-                    .Once | .Continue -> return Ok()
+                    .Once | .Continue -> { return Ok() }
                     .Session -> { &self.policy.session.insert(request.copy()); return Ok() }
-                    else -> return Err(self.e1803(request, "session authority was revoked and the replacement request was denied", span))
+                    else -> { return Err(self.e1803(request, "session authority was revoked and the replacement request was denied", span)) }
                 }
             }
         }
@@ -679,7 +676,7 @@ fn read_input(color: Bool, prompt: String) -[IO]> String? Never! {
     normalized :: normalize_repl_input(first)
     balance := bracket_balance(normalized)
     full := normalized.bytes()
-    loop balance > I32{0} {
+    loop balance > (I32{0}) {
         print("{shift}{dim("...  ", color)}")
         _ :: repl_stdio.stdout_flush()
         continuation := ""
@@ -709,7 +706,7 @@ fn repl_rooted_components(path: OSPath) -> [PathComponent] IOError! {
         if component.kind == {
             .Normal -> &names.push(component)
             .CurDir -> {}
-            else -> return Err(IOError.PermissionDenied(repl_io_context("path traversal is outside the REPL root")))
+            else -> { return Err(IOError.PermissionDenied(repl_io_context("path traversal is outside the REPL root"))) }
         }
     }
     if names.is_empty() -> return Err(IOError.InvalidInput(repl_io_context("empty filesystem path")))
@@ -719,7 +716,7 @@ fn repl_c_name(path: OSPath, name: PathComponent) -> [U8] IOError! {
     bytes := [U8]{}
     loop index in name.span.start..<name.span.end {
         byte :: path.encoded[index]
-        if byte == U8{0} -> return Err(IOError.InvalidInput(repl_io_context("path contains NUL")))
+        if byte == (U8{0}) -> return Err(IOError.InvalidInput(repl_io_context("path contains NUL")))
         &bytes.push(byte)
     }
     &bytes.push(U8{0})
@@ -755,9 +752,9 @@ fn repl_with_parent(root: FileReader, path: OSPath) -[FS]> ReplRootParent IOErro
     loop index in 0..<names.len() - 1 {
         name :: repl_c_name(path, names[index]) ?? return Err(err)
         #Unsafe("each openat borrows terminated component bytes and retains every parent owner through the final operation; #4494/#4500") {
-            p :: repl_mem.Ptr<I8>.from_addr(repl_mem.address_of(repl_buffers.bytes_ptr(name, 0).*))
+            p :: repl_mem.from_addr<I8>(repl_mem.address_of(repl_buffers.bytes_ptr(name, 0).*))
             fd :: repl_libc.openat(parent.fd, p, I32{(65536).bit_or(131072).bit_or(524288)}, U32{0})
-            if fd < I32{0} -> return Err(repl_unix.last_error(.Resolve, Val(path)))
+            if fd < (I32{0}) -> return Err(repl_unix.last_error(.Resolve, Val(path)))
             &parent.parents.push(ReplFd{fd: fd})
             parent.fd = fd
         }
@@ -769,9 +766,9 @@ fn repl_rooted_open(root: FileReader, path: OSPath, flags: I32, mode: U32) -[FS]
     parent :: repl_with_parent(root, path) ?? return Err(err)
     defer close(^parent)
     #Unsafe("final openat is NOFOLLOW+CLOEXEC and descriptor-relative; capture errno before parent cleanup") {
-        p :: repl_mem.Ptr<I8>.from_addr(repl_mem.address_of(repl_buffers.bytes_ptr(parent.name, 0).*))
+        p :: repl_mem.from_addr<I8>(repl_mem.address_of(repl_buffers.bytes_ptr(parent.name, 0).*))
         fd :: repl_libc.openat(parent.fd, p, flags.bit_or(I32{(131072).bit_or(524288)}), mode)
-        if fd < I32{0} -> return Err(repl_unix.last_error(.Resolve, Val(path)))
+        if fd < (I32{0}) -> return Err(repl_unix.last_error(.Resolve, Val(path)))
         Ok(ReplFd{fd: fd})
     }
 }
@@ -795,7 +792,7 @@ fn repl_rooted_read(root: FileReader, path: OSPath) -[FS]> [U8] IOError! {
         loop {
             #Unsafe("read fills initialized output storage in place, retries only EINTR, and retains payload loan through native call") {
                 amount = repl_libc.read(file.fd, repl_buffers.bytes_mut_ptr(&bytes, start), U64{8192})
-                if amount < I64{0} {
+                if amount < (I64{0}) {
                     error :: repl_unix.last_error(.Read, Val(path))
                     if repl_errno_is(error, 4) -> next
                     return Err(error)
@@ -805,7 +802,7 @@ fn repl_rooted_read(root: FileReader, path: OSPath) -[FS]> [U8] IOError! {
         }
         end :: start + Int.from_i64(amount)
         loop bytes.len() > end -> _ :: &bytes.pop()
-        if amount == I64{0} -> return Ok(bytes)
+        if amount == (I64{0}) -> return Ok(bytes)
     }
 }
 fn repl_rooted_write(root: FileReader, path: OSPath, bytes: [U8], append: Bool) IOError! -[FS]> {
@@ -820,19 +817,19 @@ fn repl_rooted_write(root: FileReader, path: OSPath, bytes: [U8], append: Bool) 
         count :: if remaining > limit -> limit else -> remaining
         #Unsafe("write borrows original remaining bytes, handles short writes/EINTR, and captures errno before close") {
             amount :: repl_libc.write(file.fd, repl_buffers.bytes_ptr(bytes, at), U64{count})
-            if amount < I64{0} {
+            if amount < (I64{0}) {
                 error :: repl_unix.last_error(.Write, Val(path))
                 if repl_errno_is(error, 4) -> next
                 return Err(error)
             }
-            if amount == I64{0} -> return Err(IOError.WriteZero(IOContext{operation: .Write, resource: None, os_code: None, cause: Val("failed to write whole buffer")}))
+            if amount == (I64{0}) -> return Err(IOError.WriteZero(IOContext{operation: .Write, resource: None, os_code: None, cause: Val("failed to write whole buffer")}))
             at += Int.from_i64(amount)
         }
     }
 }
 fn repl_rooted_exists(root: FileReader, path: OSPath) -[FS]> Bool IOError! {
     if repl_target.selected_os() != .Linux -> return Err(repl_rooted_unsupported())
-    if repl_rooted_open(root, path, I32{2048}, U32{0}) == {
+    if repl_rooted_open(root, path, (I32{2048}), (U32{0})) == {
         .Ok(file) -> { close(^file); Ok(true) }
         .Err(.NotFound(_)) -> Ok(false)
         .Err(error) -> Err(error)
@@ -840,11 +837,10 @@ fn repl_rooted_exists(root: FileReader, path: OSPath) -[FS]> Bool IOError! {
 }
 fn repl_rooted_is_dir(root: FileReader, path: OSPath) -[FS]> Bool IOError! {
     if repl_target.selected_os() != .Linux -> return Err(repl_rooted_unsupported())
-    if repl_rooted_open(root, path, I32{65536}, U32{0}) == {
+    if repl_rooted_open(root, path, (I32{65536}), (U32{0})) == {
         .Ok(file) -> { close(^file); Ok(true) }
         .Err(error) -> {
-            if repl_errno_is(error, 20) || error == .NotFound(_) -> Ok(false)
-            else -> Err(error)
+            if repl_errno_is(error, 20) || error == .NotFound(_) -> Ok(false) else -> Err(error)
         }
     }
 }
@@ -853,8 +849,8 @@ fn repl_rooted_create_dir(root: FileReader, path: OSPath) IOError! -[FS]> {
     parent :: repl_with_parent(root, path) ?? return Err(err)
     defer close(^parent)
     #Unsafe("mkdirat creates mode0777 subject to native umask relative to held parent; errno survives cleanup") {
-        p :: repl_mem.Ptr<I8>.from_addr(repl_mem.address_of(repl_buffers.bytes_ptr(parent.name, 0).*))
-        if repl_libc.mkdirat(parent.fd, p, U32{511}) < I32{0} -> return Err(repl_unix.last_error(.Write, Val(path)))
+        p :: repl_mem.from_addr<I8>(repl_mem.address_of(repl_buffers.bytes_ptr(parent.name, 0).*))
+        if repl_libc.mkdirat(parent.fd, p, (U32{511})) < (I32{0}) -> return Err(repl_unix.last_error(.Write, Val(path)))
     }
 }
 fn repl_rooted_remove(root: FileReader, path: OSPath) IOError! -[FS]> {
@@ -862,17 +858,17 @@ fn repl_rooted_remove(root: FileReader, path: OSPath) IOError! -[FS]> {
     parent :: repl_with_parent(root, path) ?? return Err(err)
     defer close(^parent)
     #Unsafe("unlinkat retries AT_REMOVEDIR ONLY after original EISDIR, never after other errors; retains same parent/name") {
-        p :: repl_mem.Ptr<I8>.from_addr(repl_mem.address_of(repl_buffers.bytes_ptr(parent.name, 0).*))
-        if repl_libc.unlinkat(parent.fd, p, I32{0}) == I32{0} -> return Ok()
+        p :: repl_mem.from_addr<I8>(repl_mem.address_of(repl_buffers.bytes_ptr(parent.name, 0).*))
+        if repl_libc.unlinkat(parent.fd, p, (I32{0})) == (I32{0}) -> return Ok()
         first :: repl_unix.last_error(.Write, Val(path))
         if !repl_errno_is(first, 21) -> return Err(first)
-        if repl_libc.unlinkat(parent.fd, p, I32{512}) < I32{0} -> return Err(repl_unix.last_error(.Write, Val(path)))
+        if repl_libc.unlinkat(parent.fd, p, (I32{512})) < (I32{0}) -> return Err(repl_unix.last_error(.Write, Val(path)))
     }
 }
 
 fn unique_temp_name(tag_ref: String) -[Exec]> String Never! {
     // #4494: SAME runtime process-static old-value Relaxed U64, wraps exactly.
-    "__jet_repl_{tag}_{repl_process.id()}_{repl_counter.temp_counter_next()}.jet"
+    "__jet_repl_{tag_ref}_{repl_process.id()}_{repl_counter.temp_counter_next()}.jet"
 }
 fn write_unique_temp_file(tag_ref: String, source: String) -[FS, Env, Exec]> OSPath IOError! {
     path := repl_files.temp_dir()
@@ -886,7 +882,7 @@ fn write_temp_file_at(path: OSPath, source: String) IOError! -[FS]> {
         if repl_target.selected_os() == {
             .Linux | .Android -> flags = Val(U32{131072})
             .MacOS | .IOS -> flags = Val(U32{256})
-            else -> return Err(IOError.Unsupported(repl_io_context("this Unix target cannot enforce no-follow temporary-file creation")))
+            else -> { return Err(IOError.Unsupported(repl_io_context("this Unix target cannot enforce no-follow temporary-file creation"))) }
         }
     }
     file :: repl_files.create_new(path, repl_files.CreateOptions{read: false, write: true, access_mode: None, share_mode: None, mode: None, delete_on_close: false, open_reparse_point: false, custom_flags: flags}) ?? return Err(err)
@@ -927,8 +923,7 @@ fn repl_materialize_run(session: Session) -> String Never! {
     if session.func_defs.contains_key("run") -> return "{imports}{items}\n"
     body :: session.stmt_srcs.join("\n")
     trimmed := body.trim() // #4303
-    if trimmed.is_empty() -> "{imports}{items}\nfn run() {{}}\n"
-    else -> "{imports}{items}\nfn run() {{\n{body}\n}}\n"
+    if trimmed.is_empty() -> "{imports}{items}\nfn run() {{}}\n" else -> "{imports}{items}\nfn run() {{\n{body}\n}}\n"
 }
 fn cmd_run_native(session: Session, color: Bool, out_sink: &Write) Never! -[Exec, IO, FS, Env]> {
     if session.stmt_srcs.is_empty() && session.item_srcs.is_empty() {
@@ -968,12 +963,12 @@ fn cmd_run_transcript(session: Session) -> String Never! {
     loop (owner, definition) in session.struct_defs {
         loop index in 0..<definition.methods.len() {
             method :: definition.methods[index]
-            &methods.insert((owner.copy(), method.name.copy()), definition.methods[index..<index + 1])
+            &methods.insert((_0: owner.copy(), _1: method.name.copy()), definition.methods[index..<index + 1])
         }
     }
     base_dir :: repl_paths.from_text(".", repl_native_path_platform())
     sink := DevSink.new()
-    if run_repl_main_with_fuel(main, session.func_defs, base_dir, &sink, U64{1000000000}, session.core_imports, methods, session.struct_defs) == {
+    if run_repl_main_with_fuel(main, session.func_defs, base_dir, &sink, (U64{1000000000}), session.core_imports, methods, session.struct_defs) == {
         .Ok(_) -> ^sink.stdout
         .Err(diagnostic) -> "error [{diagnostic.code}]: {diagnostic.what}\n"
     }
@@ -982,7 +977,7 @@ fn load_project_items(project_dir: OSPath, session: &Session, out_sink: &Write) 
     src := project_dir.copy()
     repl_paths.push(&src, repl_paths.from_text("src", project_dir.platform))
     loaded := 0
-    loop dir in [OSPath]{^src, project_dir.copy()} {
+    loop dir in ([OSPath]{^src, project_dir.copy()}) {
         entries := repl_files.read_dir(dir) ?? next
         defer close(^entries)
         loop {
@@ -1033,7 +1028,7 @@ fn repl_core_import_module(target: String) -> String? Never! {
     at := bytes.len()
     loop at > 0 {
         at -= 1
-        if bytes[at] != U8{46} -> next
+        if bytes[at] != (U8{46}) -> next
         parent := target.slice(0, at) // #4303
         if is_known_core_module(parent) -> return Val(parent.copy())
         return None

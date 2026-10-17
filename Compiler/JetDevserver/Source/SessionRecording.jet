@@ -1,7 +1,7 @@
 // Bounded transport-fact recorder; replay fails closed on identity/generation changes.
 use jet_foundation.Devtools.[JET_DEVTOOLS_PROTOCOL]
-use jet_foundation.DataTree.[DataTree]
-use jet_foundation.JSON.[json_escape, parse_json_with_limit]
+use jet_foundation.Dyn.[Dyn]
+use jet_foundation.JSON.[foundation_json_escape, parse_json_with_limit]
 use std.collections.[VecDeque]
 use std.fmt
 
@@ -19,8 +19,8 @@ impl SessionIdentity {
     // Rust: crates/jet-devserver/src/SessionRecording.rs:33
     fn new(source_id: String, build_id: String) -> Self RecordingError! {
         identity :: Self { source_id: ^source_id, build_id: ^build_id }
-        validate_id(identity.source_id, "source_id")?
-        validate_id(identity.build_id, "build_id")?
+        validate_id(identity.source_id, "source_id")
+        validate_id(identity.build_id, "build_id")
         identity
     }
     // Rust: crates/jet-devserver/src/SessionRecording.rs:44
@@ -46,18 +46,18 @@ struct SessionEvent {
 impl SessionEvent {
     // Rust: crates/jet-devserver/src/SessionRecording.rs:106
     fn new(sequence: U64, timestamp_ms: U64, source: String, kind: String, entity: String, fields_json: String, payload_json: String?) -> Self RecordingError! {
-        validate_text(source, "event source")?
-        validate_text(kind, "event kind")?
-        validate_text(entity, "event entity")?
-        fields :: canonical_object(fields_json, "event fields")?
+        validate_text(source, "event source")
+        validate_text(kind, "event kind")
+        validate_text(entity, "event entity")
+        fields :: canonical_object(fields_json, "event fields")
         payload :: if payload_json == {
             .None -> .None
             .Val(payload) -> {
-                value :: parse_json_value(payload, "event payload")?
+                value :: parse_json_value(payload, "event payload")
                 if value == {
                     .Null -> .None
                     .Object(_) -> .Val(canonical_json(&value))
-                    else -> return .Err(.InvalidEvent("event payload must be an object or null"))
+                    else -> { return .Err(.InvalidEvent("event payload must be an object or null")) }
                 }
             }
         }
@@ -140,7 +140,7 @@ impl ReplayCursor {
     fn generation(self: Self) -> U64 { self.generation }
     // Rust: crates/jet-devserver/src/SessionRecording.rs:327
     fn seek(self: Self, recording: SessionRecording, sequence: U64) -> ReplayProjection RecordingError! {
-        self.check(recording)?
+        self.check(recording)
         index :: recording.events.iter().position((event) -> event.sequence == sequence) ?? return .Err(.CursorUnavailable { sequence })
         self.position = index + 1
         self.sequence = .Val(sequence)
@@ -148,7 +148,7 @@ impl ReplayCursor {
     }
     // Rust: crates/jet-devserver/src/SessionRecording.rs:348
     fn seek_time(self: Self, recording: SessionRecording, timestamp_ms: U64) -> ReplayProjection RecordingError! {
-        self.check(recording)?
+        self.check(recording)
         if recording.events.front() == .Val(first) {
             if timestamp_ms < first.timestamp_ms && recording.dropped_events != 0 -> return .Err(.CursorUnavailable { sequence: first.sequence })
         }
@@ -166,7 +166,7 @@ impl ReplayCursor {
     }
     // Rust: crates/jet-devserver/src/SessionRecording.rs:388
     fn step_forward(self: Self, recording: SessionRecording) -> ReplayProjection RecordingError! {
-        self.check(recording)?
+        self.check(recording)
         event :: recording.events.get(self.position) ?? return .Err(.ReplayAtEnd)
         self.position += 1
         self.sequence = .Val(event.sequence)
@@ -174,7 +174,7 @@ impl ReplayCursor {
     }
     // Rust: crates/jet-devserver/src/SessionRecording.rs:401
     fn step_backward(self: Self, recording: SessionRecording) -> ReplayProjection RecordingError! {
-        self.check(recording)?
+        self.check(recording)
         if self.position == 0 -> return .Err(.ReplayAtBeginning)
         self.position -= 1
         self.sequence = self.position.checked_sub(1).and_then((index) -> recording.events.get(index)).map((event) -> event.sequence)
@@ -240,9 +240,9 @@ impl SessionRecording {
     fn new(identity: SessionIdentity) -> Self RecordingError! { Self.with_limits(^identity, SessionRecordingLimits.default()) }
     // Rust: crates/jet-devserver/src/SessionRecording.rs:546
     fn with_limits(identity: SessionIdentity, limits: SessionRecordingLimits) -> Self RecordingError! {
-        validate_id(identity.source_id, "source_id")?
-        validate_id(identity.build_id, "build_id")?
-        limits.validate()?
+        validate_id(identity.source_id, "source_id")
+        validate_id(identity.build_id, "build_id")
+        limits.validate()
         Self { identity: ^identity, limits, events: VecDeque.new(), retained_bytes: 0, dropped_events: 0, dropped_bytes: 0,
             event_limit_reached: false, byte_limit_reached: false, first_dropped_sequence: .None, last_dropped_sequence: .None,
             last_sequence: .None, last_timestamp_ms: .None, generation: 0 }
@@ -269,7 +269,7 @@ impl SessionRecording {
     }
     // Rust: crates/jet-devserver/src/SessionRecording.rs:614
     fn append_event(self: Self, event: SessionEvent) -> U64 RecordingError! {
-        self.validate_next(&event)?
+        self.validate_next(&event)
         sequence :: event.sequence
         self.append_event_unchecked(^event)
         sequence
@@ -277,8 +277,8 @@ impl SessionRecording {
     // Rust: crates/jet-devserver/src/SessionRecording.rs:623
     fn record_envelope(self: Self, bytes: [U8]) -> USize RecordingError! {
         if bytes.len() > MAX_RECORDING_BYTES -> return .Err(.EnvelopeTooLarge { bytes: bytes.len(), limit: MAX_RECORDING_BYTES })
-        events :: parse_envelope(bytes, &self.identity)?
-        self.preflight(&events)?
+        events :: parse_envelope(bytes, &self.identity)
+        self.preflight(&events)
         count :: events.len()
         loop event in events -> self.append_event_unchecked(^event)
         count
@@ -287,19 +287,19 @@ impl SessionRecording {
     fn replay(self: Self) -> ReplayCursor { ReplayCursor { identity: self.identity.copy(), generation: self.generation, position: 0, sequence: .None } }
     // Rust: crates/jet-devserver/src/SessionRecording.rs:651
     fn replay_for(self: Self, identity: SessionIdentity) -> ReplayCursor RecordingError! {
-        validate_id(identity.source_id, "source_id")?
-        validate_id(identity.build_id, "build_id")?
+        validate_id(identity.source_id, "source_id")
+        validate_id(identity.build_id, "build_id")
         if !self.identity.matches(identity) -> return .Err(.IdentityMismatch { expected: self.identity.copy(), found: identity.copy() })
         self.replay()
     }
     // Rust: crates/jet-devserver/src/SessionRecording.rs:663
     fn projection(self: Self, cursor: ReplayCursor) -> ReplayProjection RecordingError! {
-        cursor.check(self)?
+        cursor.check(self)
         self.make_projection(cursor)
     }
     // Rust: crates/jet-devserver/src/SessionRecording.rs:668
     fn checkpoint(self: Self, cursor: ReplayCursor) -> SessionCheckpoint RecordingError! {
-        cursor.check(self)?
+        cursor.check(self)
         timestamp_ms :: cursor.position.checked_sub(1).and_then((index) -> self.events.get(index)).map((event) -> event.timestamp_ms)
         SessionCheckpoint { identity: self.identity.copy(), generation: self.generation, position: cursor.position, sequence: cursor.sequence, timestamp_ms,
             first_retained_sequence: self.events.front().map((event) -> event.sequence), last_retained_sequence: self.events.back().map((event) -> event.sequence) }
@@ -376,10 +376,10 @@ impl SessionRecording {
 // Rust: crates/jet-devserver/src/SessionRecording.rs:841
 fn parse_envelope(bytes: [U8], expected_identity: SessionIdentity) -> [SessionEvent] RecordingError! {
     text :: std.str.from_utf8(bytes) ?? return .Err(.InvalidEnvelope("envelope is not UTF-8"))
-    root :: parse_json_value(text, "devtools envelope")?
-    object :: [String:DataTree]{if root == {
+    root :: parse_json_value(text, "devtools envelope")
+    object :: [String:Dyn]{if root == {
         .Object(object) -> object.into_iter().collect()
-        else -> return .Err(.InvalidEnvelope("envelope must be an object"))
+        else -> { return .Err(.InvalidEnvelope("envelope must be an object")) }
     }}
     protocol :: object.get("protocol").and_then((value) -> if value == {
         .Text(protocol) -> .Val(protocol)
@@ -387,7 +387,7 @@ fn parse_envelope(bytes: [U8], expected_identity: SessionIdentity) -> [SessionEv
     })
         ?? return .Err(.InvalidEnvelope("missing string `protocol`"))
     if protocol != JET_DEVTOOLS_PROTOCOL -> return .Err(.InvalidEnvelope("protocol is `{protocol}`, expected `{JET_DEVTOOLS_PROTOCOL}`"))
-    validate_optional_envelope_identity(&object, expected_identity)?
+    validate_optional_envelope_identity(&object, expected_identity)
     values :: object.get("events") ?? return .Err(.InvalidEnvelope("missing `events` array"))
     if values == .Array(values) {
         events := [SessionEvent]{}
@@ -396,16 +396,16 @@ fn parse_envelope(bytes: [U8], expected_identity: SessionIdentity) -> [SessionEv
     } else { .Err(.InvalidEnvelope("envelope `events` must be an array")) }
 }
 // Rust: crates/jet-devserver/src/SessionRecording.rs:883
-fn parse_event(value: DataTree) -> SessionEvent RecordingError! {
-    object :: [String:DataTree]{if value == {
+fn parse_event(value: Dyn) -> SessionEvent RecordingError! {
+    object :: [String:Dyn]{if value == {
         .Object(object) -> object.iter().cloned().collect()
-        else -> return .Err(.InvalidEvent("event must be an object"))
+        else -> { return .Err(.InvalidEvent("event must be an object")) }
     }}
-    sequence :: required_u64(&object, "sequence")?
-    timestamp_ms :: required_u64(&object, "timestamp_ms")?
-    source :: required_string(&object, "source")?
-    kind :: required_string(&object, "kind")?
-    entity :: required_string(&object, "entity")?
+    sequence :: required_u64(&object, "sequence")
+    timestamp_ms :: required_u64(&object, "timestamp_ms")
+    source :: required_string(&object, "source")
+    kind :: required_string(&object, "kind")
+    entity :: required_string(&object, "entity")
     fields :: object.get("fields") ?? return .Err(.InvalidEvent("missing event `fields`"))
     fields_json :: if fields == {
         .Object(_) -> canonical_json(fields)
@@ -413,37 +413,35 @@ fn parse_event(value: DataTree) -> SessionEvent RecordingError! {
     }
     payload_json :: if object.get("payload") == {
         .None | .Val(.Null) -> .None
-        .Val(value) if value == .Object(_) -> .Val(canonical_json(value))
+        .Val(value) && value == .Object(_) -> .Val(canonical_json(value))
         .Val(_) -> { return .Err(.InvalidEvent("event payload must be an object or null")) }
     }
     SessionEvent.new(sequence, timestamp_ms, ^source, ^kind, ^entity, ^fields_json, ^payload_json)
 }
 // Rust: crates/jet-devserver/src/SessionRecording.rs:928
-fn parse_json_value(text: String, label: String) -> DataTree RecordingError! {
+fn parse_json_value(text: String, label: String) -> Dyn RecordingError! {
     if text.len() > MAX_RECORDING_BYTES -> return .Err(.InvalidEvent("{label} exceeds the {MAX_RECORDING_BYTES}-byte limit"))
     parse_json_with_limit(text, MAX_RECORDING_BYTES).map_err((_) ->
-        if label == "devtools envelope" -> RecordingError.InvalidEnvelope("{label} is not valid bounded JSON")
-        else -> RecordingError.InvalidEvent("{label} is not valid bounded JSON"))
+        if label == "devtools envelope" -> RecordingError.InvalidEnvelope("{label} is not valid bounded JSON") else -> RecordingError.InvalidEvent("{label} is not valid bounded JSON"))
 }
 // Rust: crates/jet-devserver/src/SessionRecording.rs:944
 fn canonical_object(text: String, label: String) -> String RecordingError! {
     if text.len() > MAX_RECORDING_TEXT_BYTES -> return .Err(.InvalidEvent("{label} exceeds the {MAX_RECORDING_TEXT_BYTES}-byte JSON object limit"))
-    value :: parse_json_value(text, label)?
-    if value == .Object(_) -> canonical_json(&value)
-    else -> .Err(.InvalidEvent("{label} must be an object"))
+    value :: parse_json_value(text, label)
+    if value == .Object(_) -> canonical_json(&value) else -> .Err(.InvalidEvent("{label} must be an object"))
 }
 // Rust: crates/jet-devserver/src/SessionRecording.rs:958
-fn required_string(object: [String:DataTree], key: String) -> String RecordingError! {
+fn required_string(object: [String:Dyn], key: String) -> String RecordingError! {
     value :: object.get(key).and_then((value) -> if value == {
         .Text(value) -> .Val(value.copy())
         else -> .None
     })
         ?? return .Err(.InvalidEvent("missing string `{key}`"))
-    validate_text(value, "event {key}")?
+    validate_text(value, "event {key}")
     value
 }
 // Rust: crates/jet-devserver/src/SessionRecording.rs:970
-fn required_u64(object: [String:DataTree], key: String) -> U64 RecordingError! {
+fn required_u64(object: [String:Dyn], key: String) -> U64 RecordingError! {
     if object.get(key) == {
         .Val(.Int(value)) -> U64.try_from(*value) ?? return .Err(.InvalidEvent("event `{key}` must be a non-negative integer"))
         .Val(_) -> .Err(.InvalidEvent("event `{key}` must be an exact integer"))
@@ -451,7 +449,7 @@ fn required_u64(object: [String:DataTree], key: String) -> U64 RecordingError! {
     }
 }
 // Rust: crates/jet-devserver/src/SessionRecording.rs:982
-fn validate_optional_envelope_identity(object: &[String:DataTree], expected: &SessionIdentity) RecordingError! {
+fn validate_optional_envelope_identity(object: &[String:Dyn], expected: &SessionIdentity) RecordingError! {
     source :: object.get("source_id")
     build :: object.get("build_id")
     if source.is_none() && build.is_none() -> return
@@ -477,9 +475,9 @@ fn validate_text(value: String, label: String) RecordingError! {
     if value.len() > MAX_RECORDING_TEXT_BYTES -> return .Err(.InvalidEvent("{label} exceeds the {MAX_RECORDING_TEXT_BYTES}-byte text limit"))
 }
 // Rust: crates/jet-devserver/src/SessionRecording.rs:1043
-fn quoted(value: String) -> String { "\"{json_escape(value)}\"" }
+fn quoted(value: String) -> String { "\"{foundation_json_escape(value)}\"" }
 // Rust: crates/jet-devserver/src/SessionRecording.rs:1047
-fn canonical_json(value: DataTree) -> String {
+fn canonical_json(value: Dyn) -> String {
     if value == {
         .Null -> "null"
         .Bool(value) -> value.to_string()

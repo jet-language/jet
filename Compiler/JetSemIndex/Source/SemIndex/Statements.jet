@@ -14,7 +14,7 @@ fn semindex_collect_stmts(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, pro
 }
 
 fn semindex_collect_loop_label_def(db: &SymbolDB, ctx: WalkCtx, label: NamedSpan?, mp: String) Never! {
-    if label == .Val(label) -> &db.defs.push(SymDef{identity: semindex_scoped_local_identity(ctx, "loop_label", label.name), name: label.name, def_span: label.span, module_path: mp, kind: .Local{mutable: false, ty: None}})
+    if label == .Val(label) -> &db.defs.push(SymDef{identity: semindex_scoped_local_identity(ctx, "loop_label", label.name), name: label.name, def_span: label.span, module_path: mp, kind: (.Local{mutable: false, ty: None})})
 }
 // Rust2924: byte length, not String scalar length. The label span can include
 // punctuation after the token; the reference covers only the label's name.
@@ -55,7 +55,7 @@ fn semindex_collect_stmt(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, prog
         .For(var, var_span, var2, kind, body, _, _, label, _) -> {
             semindex_collect_loop_label_def(&db, ctx, label, mp)
             &db.defs.push(SymDef{identity: semindex_scoped_local_identity(ctx, "local", var), name: var, def_span: var_span, module_path: mp, kind: .Local{mutable: false, ty: None}})
-            if var2 == .Val(second) -> &db.defs.push(SymDef{identity: semindex_scoped_local_identity(ctx, "local", second.name), name: second.name, def_span: second.span, module_path: mp, kind: .Local{mutable: false, ty: None}})
+            if var2 == .Val(second) -> &db.defs.push(SymDef{identity: semindex_scoped_local_identity(ctx, "local", second.name), name: second.name, def_span: second.span, module_path: mp, kind: (.Local{mutable: false, ty: None})})
             if kind == {
                 .Range(start, end, step, _) -> {
                     semindex_structural_slot(&db, &ctx, "range_start", StructuralSlotKind.Scalar, (db: SymbolDB, ctx: WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, start, mp))
@@ -153,7 +153,7 @@ fn semindex_collect_binding(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, p
         // CP-AST owns the canonical borrowed BindPattern::names projection.
         // Rust3190–3199 uses n.name/n.span exactly, not n.rename or a guessed
         // span derived from spelling. Initializer precedes destructured defs.
-        loop name in bind_pattern_names(pattern) -> &db.defs.push(SymDef{identity: semindex_scoped_local_identity(ctx, "local", name.name), name: name.name, def_span: name.span, module_path: mp, kind: .Local{mutable: binding.mutable, ty: None}})
+        loop name in bind_pattern_names(pattern) -> &db.defs.push(SymDef{identity: semindex_scoped_local_identity(ctx, "local", name.name), name: name.name, def_span: name.span, module_path: mp, kind: (.Local{mutable: binding.mutable, ty: None})})
         return
     }
     &db.defs.push(SymDef{identity: semindex_scoped_local_identity(ctx, "local", binding.name), name: binding.name, def_span: binding.name_span, module_path: mp, kind: .Local{mutable: binding.mutable, ty: binding.ty}})
@@ -168,7 +168,7 @@ fn semindex_collect_binding(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, p
 // Rust3243–3272: binder facts are already checked. No source declaration lookup,
 // policy resolver, textual parameter inference or re-binding supplied args.
 fn semindex_collect_call_inlay_hints(db: &SymbolDB, args: [CallArg], mp: String) {
-    seen_slots := [Int:Bool]{:}
+    seen_slots := [Int:Bool]{}
     loop arg in args {
         if arg.label != None -> next
         if arg.flags.binder_label == .Val(label) {

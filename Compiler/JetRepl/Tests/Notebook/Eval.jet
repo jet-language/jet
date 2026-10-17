@@ -11,7 +11,7 @@
 fn notebook_eval_test_turn(session: Session, source: String, preloaded: Bool) -> EvalResult Never! {
     root :: notebook_native_path(".")
     policy := ReplPolicy.for_notebook(ReplFlags.new([String]{}, [String]{}), root)
-    authorizer := &policy.authorizer(None)
+    authorizer := &policy.authorizer(.None)
     evaluate_step_with_items(&session, source, root, &authorizer, preloaded)
 }
 #Test("notebook_eval_empty_and_quit_do_not_record_turns") {
@@ -21,7 +21,7 @@ fn notebook_eval_test_turn(session: Session, source: String, preloaded: Bool) ->
     assert_eq(empty.status, ReplTurnStatus.Ok)
     assert(!empty.had_effect && !empty.quit && empty.value == None)
     assert_eq(session.step, 0)
-    loop command in [String]{":quit", ":q", ":exit"} {
+    loop command in ([String]{":quit", ":q", ":exit"}) {
         result :: notebook_eval_test_turn(&session, command, false)
         assert_eq(result.text, "bye\n")
         assert(result.quit)

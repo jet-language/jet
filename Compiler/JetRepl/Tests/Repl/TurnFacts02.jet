@@ -14,7 +14,7 @@ use std.os.unix.fs.[symlink] // GATE #4494: native symlink primitive.
 struct CountingPrompt { count: Int }
 // Rust: crates/jet-repl/src/lib.rs:3940
 impl CountingPrompt.EffectPrompt {
-    fn choose(&self, _: ReplEffectRequest, _: Bool) -> PromptChoice {
+    fn choose(&self, _p0: ReplEffectRequest, _p1: Bool) -> PromptChoice {
         self.count = self.count + 1
         PromptChoice.Once
     }
@@ -30,16 +30,16 @@ impl CountingPrompt.EffectPrompt {
     policy.handles_available = false
     prompt := CountingPrompt{count: 0}
     request :: ReplEffectRequest{root: "FS", operation: "Write", resource: "must-not-exist.txt"}
-    {
+    _ :: (() -> {
         authorization := &policy.authorizer(Val(&prompt))
         result :: &authorization.preflight(request, Span.new(0, 1))
         error :: if result == {
             .Err(error) -> error
-            .Ok(_) -> panic("unavailable confinement backend must fail closed")
+            .Ok(_) -> { panic("unavailable confinement backend must fail closed") }
         }
         assert_eq(error.code, "E1803")
         assert(error.why.contains("no runtime authority was offered"))
-    }
+    })()
     assert_eq(prompt.count, 0)
     assert(!repl_turn_test_files.exists(target))
     _ :: repl_turn_test_files.remove_dir_all(root)
@@ -69,7 +69,7 @@ impl CountingPrompt.EffectPrompt {
     assert(flags.allow.contains(expected))
     policy := ReplPolicy.new(flags, native_path("."))
     request :: ReplEffectRequest{root: expected, operation: "Read", resource: "authority-substrate"}
-    authorization := &policy.authorizer(None)
+    authorization := &policy.authorizer(.None)
     &authorization.preflight(request, Span.new(0, 1)) ?? panic("repl preflight")
     &authorization.authorize(request, Span.new(0, 1)) ?? panic("repl authority")
 }
@@ -112,7 +112,7 @@ impl CountingPrompt.EffectPrompt {
         result :: write_temp_file_at(path, "must not be written\n")
         error :: if result == {
             .Err(error) -> error
-            .Ok(_) -> panic("unsupported Unix target must fail closed")
+            .Ok(_) -> { panic("unsupported Unix target must fail closed") }
         }
         assert_eq(error.kind(), .Unsupported) // GATE #4409: exact IO kind.
     }
@@ -130,7 +130,7 @@ impl CountingPrompt.EffectPrompt {
                 else -> false
             })
         }
-        else -> panic("expected statement input")
+        else -> { panic("expected statement input") }
     }
 }
 // Rust: crates/jet-repl/src/lib.rs:4112
@@ -138,7 +138,7 @@ impl CountingPrompt.EffectPrompt {
     kind :: classify("t :: s", 1) ?? panic("classify")
     stmts :: if kind == {
         .Stmts(stmts, _, _) -> stmts
-        else -> panic("expected statement input")
+        else -> { panic("expected statement input") }
     }
     names := Set<String>.new()
     _ :: &names.insert("s")
@@ -159,7 +159,7 @@ impl CountingPrompt.EffectPrompt {
                 else -> false
             })
         }
-        else -> panic("expected statement input")
+        else -> { panic("expected statement input") }
     }
 }
 // Rust: crates/jet-repl/src/lib.rs:4136

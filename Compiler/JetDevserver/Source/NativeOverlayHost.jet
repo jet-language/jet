@@ -57,18 +57,18 @@ impl NativeOverlayNode {
     // Rust: crates/jet-devserver/src/NativeOverlayHost.rs:130
     fn validate(self: &Self, depth: Usize, count: &Usize, ids: &[String: Bool]) Err! {
         if depth > MAX_OVERLAY_DEPTH -> return .Err("native overlay node tree exceeds its depth budget")
-        validate_text(self.id, "native overlay node id", false)?
-        validate_text(self.label, "native overlay node label", false)?
+        validate_text(self.id, "native overlay node id", false)
+        validate_text(self.label, "native overlay node label", false)
         if ids.insert(self.id.copy(), true).is_some() -> return .Err("native overlay node id `{self.id}` is duplicated")
         count = count.checked_add(1) ?? return .Err("native overlay node count overflowed")
         if count > MAX_OVERLAY_NODES -> return .Err("native overlay frame exceeds its node budget")
-        if self.value.as_deref() == .Val(value) -> validate_text(value, "native overlay node value", true)?
-        if self.status.as_deref() == .Val(status) -> validate_text(status, "native overlay node status", true)?
-        if (self.kind, self.action.as_ref()) == {
-            (_0: .Action, _1: .None) -> return .Err("native overlay action node `{self.id}` has no typed action")
-            (_0: .Action, _1: .Val(action)) -> validate_text(action.action_id, "native overlay action id", false)?
-            (_0: _, _1: .Val(_)) -> return .Err("native overlay node `{self.id}` carries an action but is not an action node")
-            (_0: _, _1: .None) -> {}
+        if self.value.as_deref() == .Val(value) -> validate_text(value, "native overlay node value", true)
+        if self.status.as_deref() == .Val(status) -> validate_text(status, "native overlay node status", true)
+        if {
+            self.kind == .Action && self.action.as_ref() == .None -> return .Err("native overlay action node `{self.id}` has no typed action")
+            self.kind == .Action && self.action.as_ref() == .Val(action) -> validate_text(action.action_id, "native overlay action id", false)
+            self.action.as_ref() == .Val(_) -> return .Err("native overlay node `{self.id}` carries an action but is not an action node")
+            self.action.as_ref() == .None -> {}
         }
         loop child in &self.children -> child.validate(depth + 1, count, ids)?
         return ()
@@ -87,11 +87,11 @@ impl NativeOverlayPanelFact {
     }
     // Rust: crates/jet-devserver/src/NativeOverlayHost.rs:212
     fn validate(self: &Self, count: &Usize) Err! {
-        validate_text(self.panel_id, "native overlay panel id", false)?
-        validate_text(self.title, "native overlay panel title", false)?
-        validate_text(self.status, "native overlay panel status", true)?
+        validate_text(self.panel_id, "native overlay panel id", false)
+        validate_text(self.title, "native overlay panel title", false)
+        validate_text(self.status, "native overlay panel status", true)
         ids := [String: Bool]{}
-        loop node in &self.nodes -> node.validate(0, count, &ids)?
+        loop node in &self.nodes -> node.validate(0, count, &ids)
         return ()
     }
 }
@@ -112,14 +112,14 @@ impl NativeOverlayEvent {
     // Rust: crates/jet-devserver/src/NativeOverlayHost.rs:273
     fn validate(self: &Self) Err! {
         if self.protocol != JET_DEVTOOLS_PROTOCOL -> return .Err("native overlay protocol must be `{JET_DEVTOOLS_PROTOCOL}`")
-        validate_text(self.revision, "native overlay revision", false)?
+        validate_text(self.revision, "native overlay revision", false)
         if self.sequence == 0 -> return .Err("native overlay event sequence must be greater than zero")
         if self.panels.len() > MAX_OVERLAY_PANELS -> return .Err("native overlay event exceeds its panel budget")
         panel_ids := [String: Bool]{}
         count := Usize{0}
         loop panel in &self.panels {
             if panel_ids.insert(panel.panel_id.copy(), true).is_some() -> return .Err("native overlay event repeats panel `{panel.panel_id}`")
-            panel.validate(&count)?
+            panel.validate(&count)
         }
         return ()
     }
@@ -131,13 +131,13 @@ impl NativeOverlayViewport {
     // Rust: crates/jet-devserver/src/NativeOverlayHost.rs:311
     fn new(width: U32, height: U32, scale_milli: U32) -> Self Err! {
         viewport :: Self { width, height, scale_milli }
-        viewport.validate()?
+        viewport.validate()
         return viewport
     }
     // Rust: crates/jet-devserver/src/NativeOverlayHost.rs:321
     fn validate(self: &Self) Err! {
         if self.width == 0 || self.height == 0 -> return .Err("native overlay viewport dimensions must be non-zero")
-        if self.width > U32{I32.MAX} || self.height > U32{I32.MAX} -> return .Err("native overlay viewport exceeds coordinate range")
+        if self.width > (U32{I32.MAX}) || self.height > (U32{I32.MAX}) -> return .Err("native overlay viewport exceeds coordinate range")
         if self.scale_milli == 0 || self.scale_milli > 10_000 -> return .Err("native overlay scale must be between 1 and 10000 milli-units")
         return ()
     }
@@ -214,7 +214,7 @@ struct NativeOverlayHost {
     state: NativeOverlayState; viewport: NativeOverlayViewport; toggle_key: String; release_build: Bool
     session_id: String?; revision: String?; sequence: U64?; view: JetDevtoolsViewState; observed_at_ms: U64
     panels: [String: NativeOverlayPanelFact]; next_frame_id: U64; max_frames: Usize
-    frames: VecDeque[NativeOverlayFrame]
+    frames: VecDeque<NativeOverlayFrame>
     // One real game-backend draw callback, bounded independently of frame history.
     last_native_draw: JetDevtoolsNativeDrawCommand?
 }
@@ -270,7 +270,7 @@ impl NativeOverlayHost {
     fn toggle_key(self: Self) -> String { return self.toggle_key }
     // Rust: crates/jet-devserver/src/NativeOverlayHost.rs:610
     fn set_viewport(self: &Self, viewport: NativeOverlayViewport) Err! {
-        viewport.validate()?
+        viewport.validate()
         self.viewport = viewport
         self.push_frame()
         return ()
@@ -303,7 +303,7 @@ impl NativeOverlayHost {
     // Strictly increasing sequence; revision identity and freshness gates before mutation.
     fn ingest(self: &Self, event: NativeOverlayEvent) Err! {
         if self.release_build -> return .Err("native overlay is excluded from release builds")
-        event.validate()?
+        event.validate()
         if self.session_id.as_deref() == .Val(session_id) {
             if session_id != event.session_id -> return .Err("native overlay event belongs to a different session")
         }
@@ -347,14 +347,14 @@ impl NativeOverlayHost {
             item :: if !selection.item_key.is_empty() -> .Val(selection.item_key.copy()) else -> .None
             return JetDevtoolsSelection.new(selection.panel_id, item)
         })
-        if update.event.clone() == .Val(event) -> self.ingest(^event)?
+        if update.event.clone() == .Val(event) -> self.ingest(^event)
         else if self.sequence.is_some() -> self.push_frame()
         return ()
     }
     // Rust: crates/jet-devserver/src/NativeOverlayHost.rs:780
     fn frame(self: Self) -> NativeOverlayFrame? { return self.frames.back() }
     // Rust: crates/jet-devserver/src/NativeOverlayHost.rs:784
-    fn frames(self: Self) -> Iterator[&NativeOverlayFrame] { return self.frames.iter() }
+    fn frames(self: Self) -> Iterator<NativeOverlayFrame> { return self.frames.iter() }
     // Rust: crates/jet-devserver/src/NativeOverlayHost.rs:788
     fn frame_count(self: Self) -> Usize { return self.frames.len() }
     // Rust: crates/jet-devserver/src/NativeOverlayHost.rs:791
@@ -424,7 +424,7 @@ impl NativeOverlayHost {
     fn headless_projection(event: NativeOverlayEvent) -> NativeOverlayFrame Err! {
         host := Self.new()
         host.open()
-        host.ingest(event.copy())?
+        host.ingest(event.copy())
         return host.frame().cloned() ?? return .Err("native overlay did not produce a headless frame")
     }
     // Rust: crates/jet-devserver/src/NativeOverlayHost.rs:957
@@ -467,12 +467,12 @@ fn append_native_node_commands(commands: [JetDevtoolsNativeDrawCommand], node: N
 // Foundation callbacks installed by jet dev, joining resident session to actual
 // window hooks without importing devserver into the generated Prelude.
 struct NativeOverlayHostBridge {
-    session: Arc[ResidentDevSession]; adapter: Mutex[NativeOverlayAdapter]
-    host: Mutex[NativeOverlayHost]; toggle_key_state: Mutex[[String: Bool]]
+    session: Arc<ResidentDevSession>; adapter: Mutex<NativeOverlayAdapter>
+    host: Mutex<NativeOverlayHost>; toggle_key_state: Mutex<[String: Bool]>
 }
 impl NativeOverlayHostBridge {
     // Rust: crates/jet-devserver/src/NativeOverlayHost.rs:1050
-    fn new(session: Arc[ResidentDevSession], release_build: Bool) -> Self {
+    fn new(session: Arc<ResidentDevSession>, release_build: Bool) -> Self {
         // GATE #4494: native Arc ownership and mutex guards at callback boundaries.
         adapter :: NativeOverlayAdapter.for_session(&session).with_release_build(release_build)
         host :: NativeOverlayHost.new().with_release_build(release_build)

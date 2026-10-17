@@ -88,8 +88,8 @@ fn lsp_doctor_transcript_count(transcripts: OSPath) -[FS]> Int Never! {
         if directory.entries() == .Ok(entries) {
             loop {
                 if entries.next() == {
-                    .Err(_) -> next
-                    .None -> break
+                    .Err(_) -> { next }
+                    .None -> { break }
                     .Val(entry) -> {
                         path :: entry.path()
                         if lsp_doctor_path.extension_span(path) == .Val(extension) {
@@ -117,17 +117,13 @@ fn lsp_run_doctor(snapshot: JetDriverQuerySnapshot, manifest_dir: OSPath) -[IO, 
     print("--------------")
     source :: "fn run() {{ print(\"hello\") }}\n"
     lexed :: lex(source.bytes())
-    if lexed.diagnostics.len() == 0 -> print("  [ok] lexer")
-    else -> print("  [FAIL] lexer: {lexed.diagnostics.len()} errors")
+    if lexed.diagnostics.len() == 0 -> print("  [ok] lexer") else -> print("  [FAIL] lexer: {lexed.diagnostics.len()} errors")
     parsed :: parse_with_source(lexed.tokens, source.bytes())
-    if parsed.program != None -> print("  [ok] parser")
-    else -> print("  [FAIL] parser: {parsed.diagnostics.len()} errors")
+    if parsed.program != None -> print("  [ok] parser") else -> print("  [FAIL] parser: {parsed.diagnostics.len()} errors")
     queries := JetDriverCompilerQueries.new()
     diagnostics :: lsp_check_document(&queries, snapshot, lsp_doctor_path.from_text("test.jet", snapshot.cwd.platform), source)
-    if diagnostics.len() == 0 -> print("  [ok] sema")
-    else -> print("  [FAIL] sema: {diagnostics.len()} diagnostics")
-    if jet_format_source(source).source != None -> print("  [ok] formatter")
-    else -> print("  [FAIL] formatter")
+    if diagnostics.len() == 0 -> print("  [ok] sema") else -> print("  [FAIL] sema: {diagnostics.len()} diagnostics")
+    if jet_format_source(source).source != None -> print("  [ok] formatter") else -> print("  [FAIL] formatter")
     print("  [ok] JSON-RPC framing")
 
     transcripts := manifest_dir.copy()
@@ -138,12 +134,10 @@ fn lsp_run_doctor(snapshot: JetDriverQuerySnapshot, manifest_dir: OSPath) -[IO, 
     } else { print("  [WARN] transcript runner: tests/lsp/ not found") }
     grammar := manifest_dir.copy()
     lsp_doctor_path.push(&grammar, lsp_doctor_path.from_text("Tools/editors/tree-sitter/grammar.js", manifest_dir.platform))
-    if lsp_doctor_native.exists(grammar) -> print("  [ok] Tools/editors/tree-sitter/grammar.js present")
-    else -> print("  [WARN] Tools/editors/tree-sitter/grammar.js not found — run `tree-sitter generate` to build")
+    if lsp_doctor_native.exists(grammar) -> print("  [ok] Tools/editors/tree-sitter/grammar.js present") else -> print("  [WARN] Tools/editors/tree-sitter/grammar.js not found — run `tree-sitter generate` to build")
     textmate := manifest_dir.copy()
     lsp_doctor_path.push(&textmate, lsp_doctor_path.from_text("Tools/editors/jet.tmGrammar", manifest_dir.platform))
-    if lsp_doctor_native.exists(textmate) -> print("  [ok] Tools/editors/jet.tmGrammar present")
-    else -> print("  [WARN] Tools/editors/jet.tmGrammar not found")
+    if lsp_doctor_native.exists(textmate) -> print("  [ok] Tools/editors/jet.tmGrammar present") else -> print("  [WARN] Tools/editors/jet.tmGrammar not found")
     // Original prints this even after FAIL/WARN; do not silently change policy.
     print("all checks passed — the language server is healthy")
 }

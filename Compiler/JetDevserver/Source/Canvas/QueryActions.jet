@@ -71,7 +71,7 @@ fn canvas_project_find(entry: OSPath, selected_path: OSPath, selected_src: Strin
                 }
                 loop span in text_matches(source.source, needle) { push_project_result(&results, &seen, "source", needle, needle, source.source_id, span, source, projection, context.selected_path) }
             }
-            if projection :: projection {
+            if projection == .Val(projection) {
                 loop node in projection.node_refs {
                     if contains_ci(node.title, needle) || contains_ci(node.kind, needle) {
                         selected_source :: context.sources.iter().find((source) -> source.path == context.selected_path) ?? return .Err(query_error("not_found", "Canvas query source is not in the projected project"))
@@ -149,8 +149,8 @@ fn canvas_project_preview_rename(entry: OSPath, selected_path: OSPath, selected_
 // Rust: crates/jet-devserver/src/Canvas/query_actions.rs:556
 fn open_project_query_context(entry: OSPath, selected_path: OSPath, selected_src: String, expected_project_revision: String?) -> ProjectQueryContext Err! {
     project :: project_context_for_entry(entry)
-    if diagnostic :: project.authority_diagnostic -> return .Err(query_error("stale", diagnostic.what))
-    if expected :: expected_project_revision {
+    if project.authority_diagnostic == .Val(diagnostic) -> return .Err(query_error("stale", diagnostic.what))
+    if expected_project_revision == .Val(expected) {
         if expected != project.project_revision -> return .Err(query_error("conflict", "project changed since this Canvas query was drawn"))
     }
     selected_source_id :: rel_path(project.project_root, selected_path)
@@ -205,7 +205,7 @@ fn canvas_source_to_graph(path: OSPath, src: String, span: SourceSpan) -> String
     projection :: project_file(path).map_err((diags) -> query_diagnostics_error(path, src, diags))?
     results := projection.node_refs.iter().filter((node) -> spans_overlap(node.span, span)).map((node) -> query_result_json("source_to_graph", node.title, node.title, "", node.span, .Some(node), src)).collect()
     if results.is_empty() {
-        if node :: nearest_node(projection, span.start) -> results.push(query_result_json("source_to_graph", node.title, node.title, "", node.span, .Some(node), src))
+        if nearest_node(projection, span.start) == .Val(node) -> results.push(query_result_json("source_to_graph", node.title, node.title, "", node.span, .Some(node), src))
     }
     .Ok(query_ok("source_to_graph", src, "[{results.join(",")}]", "\"impact\":null,\"diff\":null"))
 }
@@ -317,7 +317,7 @@ fn core_catalog_entries(query: String) -> [CoreCatalogModule] {
         }).collect()
     }
     modules.sort_by((a, b) -> a.path.cmp(b.path))
-    loop module in &modules { module_ref.members.sort_by((a, b) -> a.name.cmp(b.name)) }
+    loop module_ref in &modules { module_ref.members.sort_by((a, b) -> a.name.cmp(b.name)) }
     modules
 }
 // Rust: crates/jet-devserver/src/Canvas/query_actions.rs:1042
@@ -337,11 +337,10 @@ fn merge_sema_core_registry(modules: &[CoreCatalogModule], registry: String) {
 }
 // Rust: crates/jet-devserver/src/Canvas/query_actions.rs:1082
 fn mark_core_catalog_availability(modules: &[CoreCatalogModule], exports: [(String, [String])]) {
-    loop module in modules {
+    loop module_ref in modules {
         loop member in &module_ref.members {
             if core_export_resolves(exports, module_ref.path, member.name) {
-                if (code, reason) :: core_member_direct_exclusion(module_ref.path, member) { set_core_member_status(module_ref.path, member, code, reason) }
-                else { set_core_member_status(module_ref.path, member, "", "") }
+                if (code, reason) :: core_member_direct_exclusion(module_ref.path, member) -> set_core_member_status(module_ref.path, member, code, reason) else -> set_core_member_status(module_ref.path, member, "", "")
             } else {
                 (code, reason) :: core_member_unavailable_reason(module_ref.path, member)
                 set_core_member_status(module_ref.path, member, code, reason)
@@ -446,7 +445,7 @@ fn parse_sema_core_module_items(registry: String) -> [(String, [String])] {
 }
 // Rust: crates/jet-devserver/src/Canvas/query_actions.rs:1335
 fn user_core_module_path(path: String) -> String {
-    if ring :: path.strip_prefix("jet.") -> "core.{ring}" else -> path.to_string()
+    if path.strip_prefix("jet.") == .Val(ring) -> "core.{ring}" else -> path.to_string()
 }
 // Rust: crates/jet-devserver/src/Canvas/query_actions.rs:1343
 fn quoted_strings(line: String) -> [String] {
@@ -474,19 +473,19 @@ fn parse_core_catalog_markdown(markdown: String) -> [CoreCatalogModule] {
     modules := [CoreCatalogModule]{}
     current := CoreCatalogModule?{.None}
     loop line in markdown.lines() {
-        if path :: core_heading_path(line) {
-            if module_ref :: current.take() -> modules.push(module_ref)
+        if core_heading_path(line) == .Val(path) {
+            if current.take() == .Val(module_ref) -> modules.push(module_ref)
             current = .Some(CoreCatalogModule(path: path, title: strip_markdown_heading(line), summary: "", members: []))
             next
         }
         module_ref :: current.as_mut() ?? next
         trimmed := line.trim() // #4303
         if module_ref.summary.is_empty() && !trimmed.is_empty() && !trimmed.starts_with('|') && !trimmed.starts_with("```") && !trimmed.starts_with('#') -> module_ref.summary = strip_markdown_inline(trimmed)
-        if member :: core_catalog_member_from_line(trimmed) {
+        if core_catalog_member_from_line(trimmed) == .Val(member) {
             if !module_ref.members.iter().any((existing) -> existing.signature == member.signature) -> module_ref.members.push(member)
         }
     }
-    if module_ref :: current -> modules.push(module_ref)
+    if current == .Val(module_ref) -> modules.push(module_ref)
     loop path in core_paths_in_markdown(markdown) {
         if !modules.iter().any((module_ref) -> module_ref.path == path) -> modules.push(CoreCatalogModule(title: path, path: path, summary: "Listed in the canonical Core library reference.", members: []))
     }
@@ -528,8 +527,7 @@ fn core_catalog_member_from_line(line: String) -> CoreCatalogMember? {
 }
 // Rust: crates/jet-devserver/src/Canvas/query_actions.rs:1497
 fn core_source_callee(src: String, module_path: String) -> String {
-    if alias :: imported_core_alias(src, module_path) { alias }
-    else { module_path.rsplit('.').next().unwrap_or(module_path).to_string() }
+    if imported_core_alias(src, module_path) == .Val(alias) -> alias else -> module_path.rsplit('.').next().unwrap_or(module_path).to_string()
 }
 // Rust: crates/jet-devserver/src/Canvas/query_actions.rs:1509
 fn imported_core_alias(src: String, module_path: String) -> String? {
@@ -549,7 +547,7 @@ fn core_member_pure_for_signature(signature: String) -> Bool {
     if parts.len() >= 2 {
         name :: parts.last().copied().unwrap_or(head)
         module_ref :: parts[0..<parts.len() - 1].join(".")
-        return core_member_pure("core.{module}", name)
+        return core_member_pure("core.{module_ref}", name)
     }
     true
 }
@@ -586,7 +584,7 @@ fn function_signature_from_parts(name: String, params: [(String, String)], ret: 
 // Rust: crates/jet-devserver/src/Canvas/query_actions.rs:1669
 fn core_module_json(src: String, module_ref: &CoreCatalogModule) -> String {
     members :: module_ref.members.iter().map((member) -> core_member_json(src, module_ref.path, member)).collect().join(",")
-    "{{\"path\":{json_str(module.path)},\"title\":{json_str(module.title)},\"summary\":{json_str(module.summary)},\"source\":{json_str("Docs/spec/reference/core-library.md")},\"members\":[{members}]}}"
+    "{{\"path\":{json_str(module_ref.path)},\"title\":{json_str(module_ref.title)},\"summary\":{json_str(module_ref.summary)},\"source\":{json_str("Docs/spec/reference/core-library.md")},\"members\":[{members}]}}"
 }
 // Rust: crates/jet-devserver/src/Canvas/query_actions.rs:1686
 fn core_member_json(src: String, module_path: String, member: &CoreCatalogMember) -> String {
@@ -609,7 +607,7 @@ fn core_member_status_json(member: CoreCatalogMember) -> String {
 // Rust: crates/jet-devserver/src/Canvas/query_actions.rs:1743
 fn core_member_pins_json(params: [(String, String)], receiver_type: String?) -> String {
     pins := [String]{}
-    if receiver_type :: receiver_type.filter((ty) -> !ty.is_empty()) -> pins.push("{{\"name\":\"receiver\",\"direction\":\"input\",\"type\":{json_str(receiver_type)}}}")
+    if receiver_type.filter((ty) == .Val(receiver_type) -> !ty.is_empty()) -> pins.push("{{\"name\":\"receiver\",\"direction\":\"input\",\"type\":{json_str(receiver_type)}}}")
     pins.extend(params.iter().map(((name, ty)) -> "{{\"name\":{json_str(name)},\"direction\":\"input\",\"type\":{json_str(ty)}}}"))
     pins.join(",")
 }
@@ -640,7 +638,7 @@ fn canvas_builtin_action_json(callee: String, title: String, params: [(String, S
 }
 // Rust: crates/jet-devserver/src/Canvas/query_actions.rs:1866
 fn core_member_params(module_path: String, member_name: String, signature: String) -> [(String, String)] {
-    if params :: params_from_signature(signature) -> return params
+    if params_from_signature(signature) == .Val(params) -> return params
     jet_driver.Sema.core_call_surface_signature(module_path, member_name).map(((params, _)) -> params.into_iter().enumerate().map(((index, (_, ty))) -> ("arg{index + 1}", ty.name())).collect()).unwrap_or_default()
 }
 // Rust: crates/jet-devserver/src/Canvas/query_actions.rs:1885
@@ -657,8 +655,7 @@ fn params_from_signature(signature: String) -> [(String, String)]? {
     loop (i, raw) in body.split(',').enumerate() {
         part := raw.trim() // #4303
         if part.is_empty() -> next
-        (name, ty) :: if (name, ty) :: part.split_once(':') { (name.trim(), normalize_param_type(ty.trim())) }
-        else {
+        (name, ty) :: if (name, ty) :: part.split_once(':') { (name.trim(), normalize_param_type(ty.trim())) } else {
             name := part.split((c) -> !(c.is_ascii_alphanumeric() || c == '_')).next().unwrap_or("").trim() // #4303
             (name, type_for_param_name(name))
         }
@@ -715,8 +712,7 @@ fn canvas_game_patch_value(fact: CanvasGameFact) -> String {
                 other -> { out.push('\\'); out.push(other) }
             }
             escaped = false
-        } else if character == '\\' { escaped = true }
-        else { out.push(character) }
+        } else if character == '\\' { escaped = true } else { out.push(character) }
     }
     if escaped -> out.push('\\')
     out

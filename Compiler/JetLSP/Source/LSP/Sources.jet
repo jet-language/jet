@@ -112,7 +112,7 @@ fn lsp_checked_source_snapshot(state: LSPDiagnosticState, result: JetDriverCompi
             if checked_versions.get(identity) != Val(version) -> return None
             return Val((module_index: row, version: Val(version)))
         }
-        None -> {
+        .None -> {
             if checked_versions.has_key(identity) -> return None
             return Val((module_index: row, version: None))
         }
@@ -140,7 +140,7 @@ fn lsp_workspace_root_for_path(workspace_roots: [OSPath], path: OSPath) -[FS, En
     loop root in workspace_roots {
         if !lsp_source_path.starts_with(native, root) -> next
         if best == {
-            None -> best = Val(root)
+            .None -> best = Val(root)
             .Val(previous) -> if root.encoded.len() >= previous.encoded.len() -> best = Val(root)
         }
     }
@@ -175,12 +175,11 @@ fn lsp_load_discovery_index(path: String, platform: PathPlatform) -[FS]> Package
 // Use original LoadedModule.items, never Sema's expanded registration programs.
 fn lsp_type_hierarchy_trait_impls(bundle: ProgramBundle, type_name: String) -> [String] Never! {
     out := [String]{}
-    loop module in bundle.modules {
+    loop module_ref in bundle.modules {
         loop item in module_ref.items {
             if item == {
-                .Struct(value) -> if value.name == type_name -> loop implementation in value.trait_impls -> &out.push(implementation.trait_name.copy())
-                .Enum(value) -> if value.name == type_name -> loop implementation in value.trait_impls -> &out.push(implementation.trait_name.copy())
-                else -> {}
+                .Struct(value) -> { if value.name == type_name { loop implementation in value.trait_impls -> &out.push(implementation.trait_name.copy()) } }
+                .Enum(value) -> { if value.name == type_name { loop implementation in value.trait_impls -> &out.push(implementation.trait_name.copy()) } } else -> {}
             }
         }
     }
@@ -188,7 +187,7 @@ fn lsp_type_hierarchy_trait_impls(bundle: ProgramBundle, type_name: String) -> [
 }
 fn lsp_type_hierarchy_subtype_names(bundle: ProgramBundle, trait_name: String) -> [String] Never! {
     out := [String]{}
-    loop module in bundle.modules {
+    loop module_ref in bundle.modules {
         loop item in module_ref.items {
             if item == {
                 .Struct(value) -> loop implementation in value.trait_impls {
@@ -334,12 +333,12 @@ fn lsp_selection_ranges_for(src: String, tokens: [Token], blocks: [LSPBlockSpan]
     loop block in blocks {
         if block.start <= offset && offset <= block.end {
             if smallest == {
-                None -> smallest = Val(block)
+                .None -> smallest = Val(block)
                 .Val(previous) -> if block.end - block.start < previous.end - previous.start -> smallest = Val(block)
             }
         }
     }
-    if smallest == .Val(block) -> &ranges.push(lsp_byte_span_to_range(src, Span{start: block.start, end: block.end}))
+    if smallest == .Val(block) -> &ranges.push(lsp_byte_span_to_range(src, (Span{start: block.start, end: block.end})))
     &ranges.push(lsp_full_document_range(src))
     lsp_dedup_ranges(ranges)
 }

@@ -1,13 +1,13 @@
 // Source/LSP/Server.rs:1943–1975,2162–2351. Sole W38 retained request witness.
 // Features/Discovery/generated build-plan providers remain explicit publication
 // gates; this file never guesses generated source or falls back to disk bytes.
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use jet_foundation.[foundation_json_quote]
 use jet_semindex.[semindex_package_facts_for_entry]
 use jet_pkg_model.[WorkspaceDeclarationCache, pkg_render_effect_projection_line]
 use core.files.runtime.kernel_path_components as lsp_navigation_path
 
-fn lsp_prepare_call_hierarchy_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_prepare_call_hierarchy_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri_value :: td.field("uri") ?? return None
@@ -33,7 +33,7 @@ fn lsp_prepare_call_hierarchy_response(server: LSPServer, params: DataTree?, id:
     None
 }
 
-fn lsp_hover_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_hover_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri_value :: td.field("uri") ?? return None
@@ -70,7 +70,7 @@ fn lsp_hover_response(server: LSPServer, params: DataTree?, id: DataTree) -> Str
     None
 }
 
-fn lsp_definition_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+fn lsp_definition_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     value :: params ?? return None
     td :: value.field("textDocument") ?? return None
     uri_value :: td.field("uri") ?? return None
@@ -113,7 +113,7 @@ fn lsp_definition_response(server: LSPServer, params: DataTree?, id: DataTree) -
             status :: if declaration.module_name.is_empty() && declaration.plugin == None -> "missing" else -> "available"
             plugin :: if declaration.plugin == {
                 .Val(name) -> foundation_json_quote(name)
-                None -> "null"
+                .None -> "null"
             }
             origin :: "{{\"status\":\"{status}\",\"generator\":{foundation_json_quote(declaration.module_name)},\"schema\":null,\"source\":{foundation_json_quote(artifact)},\"plugin\":{plugin}}}"
             data :: "{{\"identity\":{foundation_json_quote(declaration.identity)},\"generated\":true,\"artifact\":{foundation_json_quote(artifact)},\"origin\":{origin}}}"
@@ -130,6 +130,7 @@ fn lsp_definition_response(server: LSPServer, params: DataTree?, id: DataTree) -
         if lsp_semantic_symbol_at_span(db, def_path, def_span) == .Val(symbol) {
             if lsp_semantic_symbol_metadata_json(db, symbol) == .Val(json) -> data = ",\"data\":{json}"
         }
-        Val(lsp_response(id, "{{\"uri\":{foundation_json_quote(uri)},\"range\":{lsp_range_json(range)}{data}}}"))
-    } else { None }
+        return Val(lsp_response(id, "{{\"uri\":{foundation_json_quote(uri)},\"range\":{lsp_range_json(range)}{data}}}"))
+    }
+    None
 }

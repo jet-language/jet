@@ -486,8 +486,8 @@ fn semindex_status_callable_signature(signature: CallableSignatureFact) -> Statu
     effect_facts := StatusValue.Null
     if signature.effects == {
         .Checked(values) -> {
-            names :: loop effect in values -> effect_ref.display_name()
-            facts :: loop effect in values -> if effect_ref == {
+            names :: loop effect_ref in values -> effect_ref.display_name()
+            facts :: loop effect_ref in values -> if effect_ref == {
                 .Named(name, source) -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("named")).with("name", StatusValue.String(name)).with("source", semindex_status_span(source)))
                 .ViaParameter(name, source) -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("via_parameter")).with("name", StatusValue.String(name)).with("source", semindex_status_span(source)))
             }

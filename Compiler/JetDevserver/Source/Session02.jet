@@ -1,7 +1,7 @@
 use std.sync.[Arc, MutexGuard]
 use std.time.[Instant, SystemTime, UNIX_EPOCH]
-use jet_foundation.DataTree.[DataTree]
-use jet_foundation.JSON.[json_escape, parse_json]
+use jet_foundation.Dyn.[Dyn]
+use jet_foundation.JSON.[foundation_json_escape, parse_json]
 use jet_foundation.HotSwap.[StateRetentionFact, StateRetentionDecision]
 use jet_foundation.Game.[JetGameChangeFact]
 use jet_devserver.CapturePolicy.[RecordIndexCaptureSink]
@@ -10,8 +10,7 @@ impl ResidentDevSession {
     // Rust: crates/jet-devserver/src/Session.rs:1824
     fn publish_session_state(self: Self, state_name: String, code: String, diagnostic: String) -> Unit {
         lifecycle :: devtools_session_state(state_name)
-        freshness :: if lifecycle == .Ready -> JetDevtoolsFreshnessFact.fresh(unix_time_ms()) else -> JetDevtoolsFreshnessFact.stale(unix_time_ms())
-        {
+        freshness :: if lifecycle == .Ready -> JetDevtoolsFreshnessFact.fresh(unix_time_ms()) else -> JetDevtoolsFreshnessFact.stale(unix_time_ms()) {
             state :: self.devtools_lock()
             state.envelope.set_lifecycle(lifecycle)
             state.envelope.set_freshness(freshness)
@@ -31,13 +30,13 @@ impl ResidentDevSession {
         recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
         if recording.as_mut() == .Val(state) {
             recorded :: SessionEvent.new(sequence, event.timestamp_ms, event.source().to_string(), event.kind().to_string(),
-                event.entity().to_string(), event.fields_json().to_string(), event.payload_json().map((text) -> text.to_string())).map_err(recording_error)?
-            state.recording.append_event(^recorded).map_err(recording_error)?
+                event.entity().to_string(), event.fields_json().to_string(), event.payload_json().map((text) -> text.to_string())).map_err(recording_error)
+            state.recording.append_event(^recorded).map_err(recording_error)
         }
         assigned :: devtools.envelope.push(^event)
         if recording.as_mut() == .Val(state) {
             cursor := state.recording.replay()
-            loop _ in 0..state.recording.event_count() -> _ :: cursor.step_forward(&state.recording).map_err(recording_error)?
+            loop _ in 0..state.recording.event_count() -> _ :: cursor.step_forward(&state.recording).map_err(recording_error)
             state.cursor = ^cursor
             state.checkpoints.clear()
         }
@@ -67,9 +66,9 @@ impl ResidentDevSession {
     // Rust: crates/jet-devserver/src/Session.rs:1942
     fn last_good_view(self: Self, kind: String, source_id: String) -> (String,String)? {
         views :: self.last_good_views.lock().unwrap()
-        view :: views.get(kind)?
+        view :: views.get(kind)
         if view.source_id != source_id -> return .None
-        .Val((view.revision.copy(), view.payload.copy()))
+        .Val((_0: view.revision.copy(), _1: view.payload.copy()))
     }
     // Rust: crates/jet-devserver/src/Session.rs:1955
     fn clear_last_good_view(self: Self, kind: String) -> Unit { self.last_good_views.lock().unwrap().remove(kind) }
@@ -122,7 +121,7 @@ impl ResidentDevSession {
         self.record_debug(request)
         if request_bool(request, "stop") -> return
         snapshot :: find_debugger_snapshot(response) ?? return
-        (source_id, debugger_revision) :: {
+        (source_id, debugger_revision) :: (() -> {
             debugger :: self.debugger.lock().unwrap()
             state :: if snapshot.state == {
                 "running" -> "active"
@@ -132,8 +131,8 @@ impl ResidentDevSession {
             *debugger = DebuggerSnapshot { state: ^state, session_id: ^snapshot.session_id, source_id: ^snapshot.source_id,
                 revision: ^snapshot.revision, tier: ^snapshot.tier }
             source_id :: if debugger.source_id.is_empty() -> request_string(request, "source_id") else -> debugger.source_id.copy()
-            (source_id, debugger.revision.copy())
-        }
+            (_0: source_id, _1: debugger.revision.copy())
+        })()
         revision :: if debugger_revision.is_empty() {
             requested :: request_string(request, "revision")
             if requested.is_empty() -> (*self.current_revision.lock().unwrap()).copy() else -> ^requested
@@ -196,8 +195,8 @@ impl ResidentDevSession {
         live_lineage :: (*self.live_lineage.lock().unwrap()).copy()
         live_values :: (*self.live_values.lock().unwrap()).copy()
         (live_protocol, live_session_id, live_source_id, live_build_id, live_revision, live_world_id) :: live_lineage.as_ref().map((lineage) ->
-            (json_value(lineage.protocol), json_value(lineage.session_id), json_value(lineage.source_id), json_value(lineage.build_id),
-                json_value(lineage.revision), json_value(lineage.world_id))).unwrap_or(("null", "null", "null", "null", "null", "null"))
+            (_0: json_value(lineage.protocol), _1: json_value(lineage.session_id), _2: json_value(lineage.source_id), _3: json_value(lineage.build_id),
+                _4: json_value(lineage.revision), _5: json_value(lineage.world_id))).unwrap_or((_0: "null", _1: "null", _2: "null", _3: "null", _4: "null", _5: "null"))
         live_values_json :: live_values.iter().map(live_value_fact_json).collect().join(",")
         now :: Instant.now()
         client_state :: self.clients.lock().unwrap()
@@ -338,22 +337,22 @@ fn recording_divergence_json(divergence: DevtoolsRecordingDivergence) -> String 
 // Rust: crates/jet-devserver/src/Session.rs:2538
 fn optional_u64_json(value: U64?) -> String { value.map((value) -> value.to_string()).unwrap_or("null") }
 // Rust: crates/jet-devserver/src/Session.rs:2544
-fn json_value(value: String) -> String { if value.is_empty() -> "null" else -> "\"{json_escape(value)}\"" }
+fn json_value(value: String) -> String { if value.is_empty() -> "null" else -> "\"{foundation_json_escape(value)}\"" }
 // Rust: crates/jet-devserver/src/Session.rs:2552
 fn unix_time_ms() -> U64 {
     // GATE #4494: wall clock uses epoch duration with original failure/overflow behavior.
     SystemTime.now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis().try_into().unwrap_or(U64.MAX)
 }
 // Rust: crates/jet-devserver/src/Session.rs:2561
-fn json_string(value: DataTree) -> String? { if value == {
+fn json_string(value: Dyn) -> String? { if value == {
     .Text(value) | .TypedText(value) -> .Val(value)
     else -> .None
 } }
 // Rust: crates/jet-devserver/src/Session.rs:2568
-fn json_u64(value: DataTree) -> U64? {
+fn json_u64(value: Dyn) -> U64? {
     if value == {
-        .Int(value) if *value >= 0 -> U64.try_from(*value).ok()
-        .Float(value) if value.fract() == 0.0 && *value >= 0.0 && *value <= F64{U64.MAX} -> .Val(U64{*value})
+        .Int(value) && *value >= 0 -> U64.try_from(*value).ok()
+        .Float(value) && value.fract() == 0.0 && *value >= 0.0 && *value <= F64{U64.MAX} -> .Val(U64{*value})
         else -> .None
     }
 }
@@ -366,8 +365,8 @@ fn string_array_json(values: [String]) -> String { "[{values.iter().map((value) 
 // Rust: crates/jet-devserver/src/Session.rs:2599
 fn retention_fact_json(fact: StateRetentionFact) -> String {
     (decision, reason) :: if fact.decision == {
-        .Preserve -> ("preserve", "")
-        .Fresh { reason } -> ("fresh", reason)
+        .Preserve -> (_0: "preserve", _1: "")
+        .Fresh { reason } -> (_0: "fresh", _1: reason)
     }
     "{{\"key\":{json_value(fact.key)},\"decision\":{json_value(decision)},\"reason\":{json_value(reason)}}}"
 }
@@ -378,7 +377,7 @@ fn game_change_fact_json(fact: JetGameChangeFact) -> String {
     "{{\"path\":{json_value(fact.path)},\"kind\":{json_value(fact.kind.as_str())},\"old_schema_id\":{old_schema},\"new_schema_id\":{new_schema},\"migration\":{json_value(fact.migration.as_str())},\"reason\":{json_value(fact.reason)}}}"
 }
 // Rust: crates/jet-devserver/src/Session.rs:2630
-fn render_json(value: DataTree) -> String {
+fn render_json(value: Dyn) -> String {
     if value == {
         .Null -> "null"
         .Bool(value) -> value.to_string()
@@ -392,7 +391,7 @@ fn render_json(value: DataTree) -> String {
     }
 }
 // Rust: crates/jet-devserver/src/Session.rs:2660
-fn object_map(value: DataTree) -> [String:DataTree]? {
+fn object_map(value: Dyn) -> [String:Dyn]? {
     if value == {
         .Object(values) -> .Val(values.iter().cloned().collect())
         else -> .None
@@ -407,7 +406,7 @@ fn request_string(text: String, key: String) -> String {
 fn request_bool(text: String, key: String) -> Bool {
     value :: parse_json(text) ?? return false
     object_map(&value).and_then((object) -> object.get(key).cloned()).is_some_and((value) -> if value == {
-        .Bool(true) -> true
+        .Bool(lit0) && lit0 == true -> true
         else -> false
     })
 }
@@ -417,9 +416,9 @@ fn set_if_present(target: String, value: String) -> Unit { if !value.is_empty() 
 fn idle_debugger() -> DebuggerSnapshot { DebuggerSnapshot { state: "idle", session_id: "", source_id: "", revision: "", tier: "" } }
 // Rust: crates/jet-devserver/src/Session.rs:2701
 fn json_string_any(text: String, key: String) -> String? {
-    value :: parse_json(text).ok()?
+    value :: parse_json(text).ok()
     // Rust: crates/jet-devserver/src/Session.rs:2704
-    fn find(value: DataTree, key: String) -> String? {
+    fn find(value: Dyn, key: String) -> String? {
         if value == {
             .Object(object) -> {
                 if object.iter().find_map(((name, value)) -> if name == key -> .Val(value) else -> .None) == .Val(found) {
@@ -435,9 +434,9 @@ fn json_string_any(text: String, key: String) -> String? {
 }
 // Rust: crates/jet-devserver/src/Session.rs:2722
 fn find_debugger_snapshot(text: String) -> DebuggerSnapshot? {
-    value :: parse_json(text).ok()?
+    value :: parse_json(text).ok()
     // Rust: crates/jet-devserver/src/Session.rs:2725
-    fn find(value: DataTree) -> DebuggerSnapshot? {
+    fn find(value: Dyn) -> DebuggerSnapshot? {
         if value == {
             .Object(object) -> {
                 if object.iter().find_map(((name, value)) -> if name == "id" -> .Val(value) else -> .None).and_then(json_string) == .Val(session_id) {

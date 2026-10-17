@@ -1,6 +1,6 @@
 use Compiler.JetLSP.Tests.Integration.Lsp.[jet_bin, lock_lsp_process, send_msg, read_msg, request_lsp, request_lsp_collect, json_string, json_object_field, json_array, json_array_field, json_values_equal, assert_json_values_equal, decode_semantic_tokens, assert_semantic_token]
 use Compiler.JetLSP.Tests.Integration.Lsp02.[run_transcript, TranscriptStep, costly_source, percentile]
-use jet_foundation.DataTree.[DataTree]
+use jet_foundation.Dyn.[Dyn]
 use jet_foundation.JSON.[json_get, json_str, parse_json]
 use std.[fs, env, process]
 use std.process.[Command, Stdio, ChildStdin, ChildStdout]
@@ -33,7 +33,7 @@ use jet.SHA256.[sha256_hex]
     releases := [Duration]()
     late_cancels := 0usize
     peak_waiting := 0usize
-    loop edit in 1..=EDITS {
+    loop edit in 1..EDITS {
         version :: edit + 1
         marker :: "marker_{edit}"
         started :: Instant.now()
@@ -54,15 +54,15 @@ use jet.SHA256.[sha256_hex]
         loop waiting > 0 {
             message :: parse_json(read_msg(&stdout)).expect("valid LSP message")
             params :: json_get(message, "params")
-            if verdict.is_none() && json_get(message, "method").and_then(json_str) == "textDocument/publishDiagnostics" && params.and_then(params -> json_get(params, "version")) == DataTree.Int(version) {
+            if verdict.is_none() && json_get(message, "method").and_then(json_str) == "textDocument/publishDiagnostics" && params.and_then(params -> json_get(params, "version")) == Dyn.Int(version) {
                 verdict = started.elapsed()
             }
             if json_get(message, "id") == {
-                .Int(id) if id == request_id -> {
+                .Int(id) && id == request_id -> {
                     assert("{message}".contains(marker), "stale symbols: {message}")
                     waiting -= 1
                 }
-                .Int(id) if id == cancel_id -> {
+                .Int(id) && id == cancel_id -> {
                     releases.push(cancel_sent.expect("cancel was sent").elapsed())
                     if json_get(message, "error").is_none() -> late_cancels += 1
                     waiting -= 1
@@ -77,8 +77,8 @@ use jet.SHA256.[sha256_hex]
     assert(child.wait().unwrap().success())
     print("binary: {jet_bin().display()} sha256={sha256_hex(binary)}")
     print("input: {EDITS} full-text edits of a {CALLERS}-caller document ({base.len()} bytes, sha256={sha256_hex(base.as_bytes())}), one documentSymbol per edit, a cancelled documentSymbol every 10th edit")
-    print("edit-to-current-verdict: p50={percentile(&verdicts, 50):?} p95={percentile(&verdicts, 95):?}")
-    print("cancel-to-release: p50={percentile(&releases, 50):?} p95={percentile(&releases, 95):?} ({releases.len()} cancels, {late_cancels} completed before the cancel was seen)")
+    print("edit-to-current-verdict: p50={percentile(&verdicts, 50)} p95={percentile(&verdicts, 95)}")
+    print("cancel-to-release: p50={percentile(&releases, 50)} p95={percentile(&releases, 95)} ({releases.len()} cancels, {late_cancels} completed before the cancel was seen)")
     print("peak client requests awaiting an answer: {peak_waiting}; server loop checks one request at a time")
 }
 
@@ -131,7 +131,7 @@ use jet.SHA256.[sha256_hex]
     main :: "use scoring as grades\nuse \"util\"\nfn run() {{\n    print(grades.letter(91))\n    print(util.letter(91))\n}}\nfn shadow(letter: Int) {{ print(letter) }}\n"
     scoring :: "pub fn letter(score: Int) -> String -> \"A\"\n"
     util :: "pub fn letter(score: Int) -> String -> \"unrelated\"\n"
-    sources :: [("run.jet", main), ("scoring.jet", scoring), ("util.jet", util)]
+    sources :: [(_0: "run.jet", _1: main), (_0: "scoring.jet", _1: scoring), (_0: "util.jet", _1: util)]
     loop (name, source) in sources -> fs.write(root.join(name), source).unwrap()
     file_uri :: (name: String) -> "file://{root.join(name).display()}".replace('%', "%25").replace(' ', "%20").replace('(', "%28").replace(')', "%29")
     main_uri :: file_uri("run.jet")
@@ -174,11 +174,11 @@ use jet.SHA256.[sha256_hex]
     loop change in changes {
         document :: json_object_field(change, "textDocument")
         uri :: json_str(json_object_field(document, "uri")).unwrap()
-        (version, expected) :: if uri == main_uri -> (1, &expected_call_range) else -> {
+        (version, expected) :: if uri == main_uri -> (_0: 1, _1: &expected_call_range) else -> {
             assert_eq(uri, scoring_uri)
-            (2, &expected_definition_range)
+            (_0: 2, _1: &expected_definition_range)
         }
-        assert_json_values_equal("checked document version", json_object_field(document, "version"), DataTree.Int(version))
+        assert_json_values_equal("checked document version", json_object_field(document, "version"), Dyn.Int(version))
         edits :: json_array_field(change, "edits")
         assert_eq(edits.len(), 1)
         assert_json_values_equal("rename range", json_object_field(edits[0], "range"), expected)
@@ -188,13 +188,14 @@ use jet.SHA256.[sha256_hex]
     assert_eq(targets.len(), 1, "{targets}")
     assert_eq(json_str(json_object_field(targets[0], "before")), "fn:module:scoring::letter")
     assert_eq(json_str(json_object_field(targets[0], "after")), "fn:module:scoring::grade")
-    updated_main :: "// moved\n{main.replace("    print(grades", "    print("🚀"); print(grades")}"
+    moved_main :: main.replace("    print(grades", "    print(\"🚀\"); print(grades")
+    updated_main :: "// moved\n{moved_main}"
     send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{main_uri}\",\"version\":3}},\"contentChanges\":[{{\"text\":{json_string(updated_main)}}}]}}}}")
     moved :: request(&stdin, &stdout, "textDocument/rename", "{{\"textDocument\":{{\"uri\":\"{main_uri}\"}},\"position\":{{\"line\":4,\"character\":31}},\"newName\":\"grade\"}}")
     moved_changes :: json_array_field(json_object_field(moved, "result"), "documentChanges")
     assert_eq(moved_changes.len(), 2, "{moved}")
     moved_main :: moved_changes.iter().find(change -> json_str(json_object_field(json_object_field(change, "textDocument"), "uri")) == main_uri).unwrap()
-    assert_json_values_equal("new snapshot version", json_object_field(json_object_field(moved_main, "textDocument"), "version"), DataTree.Int(3))
+    assert_json_values_equal("new snapshot version", json_object_field(json_object_field(moved_main, "textDocument"), "version"), Dyn.Int(3))
     moved_range :: parse_json("{{\"start\":{{\"line\":4,\"character\":30}},\"end\":{{\"line\":4,\"character\":36}}}}").unwrap()
     assert_json_values_equal("shifted UTF-16 occurrence", json_object_field(json_array_field(moved_main, "edits")[0], "range"), moved_range)
     _ :: request(&stdin, &stdout, "shutdown", "{{}}")
@@ -219,7 +220,7 @@ use jet.SHA256.[sha256_hex]
     stdout := child.stdout.take().unwrap()
     request :: (stdin: ChildStdin, stdout: ChildStdout, method: String, params: String) -> request_lsp_collect(stdin, stdout, 7, method, params)
     _ :: request(&stdin, &stdout, "initialize", "{{\"capabilities\":{{}}}}")
-    loop (uri, source) in [(main_uri, main), (scoring_uri, scoring)] {
+    loop (uri, source) in [(_0: main_uri, _1: main), (_0: scoring_uri, _1: scoring)] {
         send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}")
     }
     overlay :: "// unsaved {Char{128640}}\n\n{scoring}"
@@ -227,21 +228,21 @@ use jet.SHA256.[sha256_hex]
     action_params :: (uri: String) -> "{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"range\":{{\"start\":{{\"line\":0,\"character\":0}},\"end\":{{\"line\":9,\"character\":0}}}},\"context\":{{\"diagnostics\":[]}}}}"
     (main_actions, notifications) :: request(&stdin, &stdout, "textDocument/codeAction", action_params(main_uri))
     reports :: (uri: String) -> notifications.iter().rev().find_map(notification -> {
-        params :: json_get(notification, "params")?
+        params :: json_get(notification, "params")
         if json_get(params, "uri").and_then(json_str) == uri -> params else -> none
     }).unwrap()
     imported :: reports(scoring_uri)
-    assert_json_values_equal("imported checked version", json_object_field(imported, "version"), DataTree.Int(2))
+    assert_json_values_equal("imported checked version", json_object_field(imported, "version"), Dyn.Int(2))
     imported_errors :: json_array_field(imported, "diagnostics").iter().filter(diagnostic -> json_get(diagnostic, "code").and_then(json_str) == "E0107").collect()
     assert_eq(imported_errors.len(), 3, "{imported}")
     first :: json_object_field(json_object_field(imported_errors[0], "range"), "start")
-    assert_json_values_equal("imported body line", json_object_field(first, "line"), DataTree.Int(3))
+    assert_json_values_equal("imported body line", json_object_field(first, "line"), Dyn.Int(3))
     caller :: reports(main_uri)
     caller_errors :: json_array_field(caller, "diagnostics")
     assert(caller_errors.iter().all(diagnostic -> json_get(diagnostic, "code").and_then(json_str) != "E0107"), "{caller}")
     missing_arg :: caller_errors.iter().find(diagnostic -> json_get(diagnostic, "code").and_then(json_str) == "E0104").expect("missing argument remains a caller diagnostic")
     caller_start :: json_object_field(json_object_field(missing_arg, "range"), "start")
-    assert_json_values_equal("caller line", json_object_field(caller_start, "line"), DataTree.Int(1))
+    assert_json_values_equal("caller line", json_object_field(caller_start, "line"), Dyn.Int(1))
     assert(json_array(json_object_field(main_actions, "result"), "caller actions").iter()
         .flat_map(action -> json_array_field(json_object_field(action, "edit"), "documentChanges"))
         .flat_map(change -> json_array_field(change, "edits"))
@@ -260,7 +261,7 @@ use jet.SHA256.[sha256_hex]
         loop change in json_array_field(json_object_field(action, "edit"), "documentChanges") {
             document :: json_object_field(change, "textDocument")
             assert_eq(json_get(document, "uri").and_then(json_str), scoring_uri)
-            assert_json_values_equal("repair snapshot", json_object_field(document, "version"), DataTree.Int(2))
+            assert_json_values_equal("repair snapshot", json_object_field(document, "version"), Dyn.Int(2))
         }
     }
     _ :: request(&stdin, &stdout, "shutdown", "{{}}")
@@ -353,7 +354,7 @@ use jet.SHA256.[sha256_hex]
     initialize :: request_lsp(&stdin, &stdout, 1, "initialize", "{{\"capabilities\":{{}}}}")
     assert(initialize.contains("definitionProvider"), "{initialize}")
     send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
-    loop (document_uri, source) in [(main_uri, main_source), (scoring_uri, scoring_source), (util_uri, util_source)] {
+    loop (document_uri, source) in [(_0: main_uri, _1: main_source), (_0: scoring_uri, _1: scoring_source), (_0: util_uri, _1: util_source)] {
         send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{document_uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}")
         diagnostics :: read_msg(&stdout)
         assert(diagnostics.contains("publishDiagnostics"), "{diagnostics}")
@@ -405,7 +406,7 @@ use jet.SHA256.[sha256_hex]
     fs.write(root.join("package.jet"), "name: \"main\"\nversion: \"0.1.0\"\n").expect("write generated identity package manifest")
     fs.write(root.join("workspace.jet"), "module workspace {{ members: [] }}\n").expect("write generated identity workspace authority")
     source_for :: (first: String, second: String, selected: String) -> "fn build(b: BuildContext) -> BuildPlan {{\n    b.generate(\"{first}\") {{\n        fn generated_value() -> String {{ \"{first}\" }}\n    }}\n    b.generate(\"{second}\") {{\n        fn generated_value() -> String {{ \"{second}\" }}\n    }}\n    app :: b.add_executable(\"app\", [\"main.jet\", \".jet/generated/main/{selected}.jet\"], [])\n    return b.plan(app)\n}}\nfn run() {{\n    generated_value()\n}}\n"
-    run_case :: (source: String, selected: &String) -> {
+    run_case :: (source: String, selected: String) -> {
         fs.write(root.join("main.jet"), source).expect("write selected generated source")
         uri :: "file://{root.join("main.jet").display()}"
         run_transcript(source, [
@@ -595,7 +596,7 @@ use jet.SHA256.[sha256_hex]
         prefix := text[0..<offset] // #4303
         line :: prefix.bytes().filter(byte -> byte == U8{10}).count()
         character :: prefix.rsplit_once('\n').map_or(prefix.len(), (_, line_text) -> line_text.len())
-        (line, character)
+        (_0: line, _1: character)
     }
     range :: (text: String, start: USize, end: USize) -> {
         (start_line, start_character) :: position(text, start)
@@ -624,10 +625,10 @@ use jet.SHA256.[sha256_hex]
         (line, character) :: position(text, offset)
         "{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":{line},\"character\":{character}}}}}"
     }
-    assert_completion :: (response: DataTree, expected: [String]) -> {
+    assert_completion :: (response: Dyn, expected: [String]) -> {
         assert(json_get(response, "error").is_none(), "completion error: {response}")
         result :: json_object_field(response, "result")
-        assert_json_values_equal("completion isIncomplete", json_object_field(result, "isIncomplete"), DataTree.Bool(false))
+        assert_json_values_equal("completion isIncomplete", json_object_field(result, "isIncomplete"), Dyn.Bool(false))
         items :: json_array_field(result, "items")
         labels :: items.iter().map(item -> json_str(json_object_field(item, "label")).expect("completion label")).collect()
         assert_eq(labels.len(), expected.len(), "completion items: {items}")
@@ -638,22 +639,22 @@ use jet.SHA256.[sha256_hex]
         assert(!labels.iter().any(actual -> actual == "wire-ready"), "completion exposed the string wire name: {labels}")
         loop wanted in expected {
             item :: items.iter().find(item -> json_str(json_object_field(item, "label")) == wanted).expect("expected enum completion item")
-            assert_json_values_equal("enum completion kind", json_object_field(item, "kind"), DataTree.Int(20))
+            assert_json_values_equal("enum completion kind", json_object_field(item, "kind"), Dyn.Int(20))
             assert_eq(json_str(json_object_field(item, "detail")), "variant of Choice")
             variant :: wanted.strip_prefix('.').expect("dot enum completion label")
             expected_insert :: "{variant} -> {{}}"
             assert_eq(json_str(json_object_field(item, "insertText")), expected_insert)
-            assert_json_values_equal("enum completion insert format", json_object_field(item, "insertTextFormat"), DataTree.Int(2))
+            assert_json_values_equal("enum completion insert format", json_object_field(item, "insertTextFormat"), Dyn.Int(2))
             assert(json_get(item, "additionalTextEdits").is_none(), "same-document enum completion unexpectedly imported a module: {item}")
         }
     }
-    assert_definition :: (response: DataTree, expected_range: DataTree) -> {
+    assert_definition :: (response: Dyn, expected_range: Dyn) -> {
         assert(json_get(response, "error").is_none(), "definition error: {response}")
         result :: json_object_field(response, "result")
         assert_eq(json_str(json_object_field(result, "uri")), uri)
         assert_json_values_equal("enum definition range", json_object_field(result, "range"), expected_range)
     }
-    assert_references :: (response: DataTree, text: String, offsets: [USize], variant: String) -> {
+    assert_references :: (response: Dyn, text: String, offsets: [USize], variant: String) -> {
         assert(json_get(response, "error").is_none(), "references error: {response}")
         references :: json_array(json_object_field(response, "result"), "enum references")
         expected_ranges :: offsets.iter().map(offset -> range(text, offset, offset + variant.len())).collect()
@@ -667,7 +668,7 @@ use jet.SHA256.[sha256_hex]
             assert_eq(references.iter().filter(reference -> json_values_equal(json_object_field(reference, "range"), expected)).count(), 1, "reference occurrence was duplicated or missing: {references}")
         }
     }
-    assert_rename :: (response: DataTree, text: String, offsets: [USize], old_name: String, new_name: String, version: I64) -> {
+    assert_rename :: (response: Dyn, text: String, offsets: [USize], old_name: String, new_name: String, version: I64) -> {
         assert(json_get(response, "error").is_none(), "rename error: {response}")
         result :: json_object_field(response, "result")
         changes :: json_array_field(result, "documentChanges")
@@ -675,7 +676,7 @@ use jet.SHA256.[sha256_hex]
         change :: changes[0]
         document :: json_object_field(change, "textDocument")
         assert_eq(json_str(json_object_field(document, "uri")), uri)
-        assert_json_values_equal("rename checked document version", json_object_field(document, "version"), DataTree.Int(version))
+        assert_json_values_equal("rename checked document version", json_object_field(document, "version"), Dyn.Int(version))
         edits :: json_array_field(change, "edits")
         expected_ranges :: offsets.iter().map(offset -> range(text, offset, offset + old_name.len())).collect()
         assert_eq(edits.len(), expected_ranges.len(), "rename lost or duplicated an enum occurrence: {edits}")
@@ -722,8 +723,8 @@ use jet.SHA256.[sha256_hex]
         .replacen("fn bare_case(Ready)", "fn bare_case(Queued)", 1)
         .replacen("Choice.Ready", "Choice.Queued", 1)
     assert(updated.contains("#Rename(\"wire-ready\") Queued"))
-    initial_checked :: "{check_document("lsp_enum_variant_protocol_test.jet", source):?}"
-    updated_checked :: "{check_document("lsp_enum_variant_protocol_test.jet", updated):?}"
+    initial_checked :: "{check_document("lsp_enum_variant_protocol_test.jet", source)}"
+    updated_checked :: "{check_document("lsp_enum_variant_protocol_test.jet", updated)}"
     assert_ne(updated_checked, initial_checked, "changing the enum case set must refresh checked diagnostics")
     assert(updated_checked.contains("Waiting"), "removing Waiting must retain a diagnostic for the stale case")
     change :: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":2}},\"contentChanges\":[{{\"text\":{json_string(updated)}}}]}}}}"
@@ -755,7 +756,7 @@ use jet.SHA256.[sha256_hex]
     updated_rename :: request("textDocument/rename", "{updated_rename_prefix},\"newName\":\"Finished\"}}")
     assert_rename(updated_rename, updated, updated_offsets, "Queued", "Finished", 2)
     shutdown :: request("shutdown", "{{}}")
-    assert_json_values_equal("shutdown result", json_object_field(shutdown, "result"), DataTree.Null)
+    assert_json_values_equal("shutdown result", json_object_field(shutdown, "result"), Dyn.Null)
     drop(^request)
     drop(^stdin)
     assert(child.wait().expect("wait for jet self lsp").success())
@@ -902,8 +903,8 @@ use jet.SHA256.[sha256_hex]
     loop name in ["print", "input", "panic"] {
         assert_eq(CorePrelude.entry(name).map(entry -> entry.target), Target.Builtin, "always-ambient ident must stay a builtin: {name}")
     }
-    comptime :: CorePrelude.entries().iter().filter(entry -> entry.target == Target.Comptime).map(entry -> entry.name).collect()
-    assert_eq(comptime, ["embed_file", "embed_bytes", "find", "fetch"])
+    comptime_ref :: CorePrelude.entries().iter().filter(entry -> entry.target == Target.Comptime).map(entry -> entry.name).collect()
+    assert_eq(comptime_ref, ["embed_file", "embed_bytes", "find", "fetch"])
 }
 
 // Rust: tests/lsp.rs:5883

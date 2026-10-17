@@ -49,7 +49,7 @@ fn lsp_reasoning_inlay_hints(db: SymbolDB, path: String) -> [InlayHint] Never! {
     loop record in db.index.derivations() {
         loop fact in db.index.definition_facts() {
             if fact.stable_id != record.subject -> next
-            if fact.module_path == path -> &hints.push(InlayHint{span: Span{start: fact.span.start, end: fact.span.end}, module_path: fact.module_path.copy(), label: "reason: {record.claim} · {derivation_disposition_text(record.disposition)}"})
+            if fact.module_path == path -> &hints.push(InlayHint{span: (Span{start: fact.span.start, end: fact.span.end}), module_path: fact.module_path.copy(), label: "reason: {record.claim} · {derivation_disposition_text(record.disposition)}"})
             break
         }
         if hints.len() == 64 -> break
@@ -85,11 +85,11 @@ fn lsp_reasoning_observation_json(observation: DerivationObservation?) -> String
     row :: observation ?? return "null"
     event :: if row.event_id == {
         .Val(value) -> foundation_json_quote(value)
-        None -> "null"
+        .None -> "null"
     }
     counterexample :: if row.counterexample_id == {
         .Val(value) -> foundation_json_quote(value)
-        None -> "null"
+        .None -> "null"
     }
     "{{\"event\":{event},\"counterexample\":{counterexample}}}"
 }
@@ -131,11 +131,11 @@ fn lsp_reasoning_family(record: DerivationRecord) -> String Never! {
     families :: [(String, [String])]{
         (_0: "value", _1: [String]{"value", "observed"}),
         (_0: "ownership", _1: [String]{"owner", "ownership", "lifetime", "borrow"}),
-        ("state", [String]{"state", "transition"}),
-        ("effects", [String]{"effect", "event", "callback", "task"}),
-        ("dependencies", [String]{"depend", "premise", "input"}),
-        ("impact", [String]{"impact", "changed", "change"}),
-        ("optimization", [String]{"optim", "copy", "cost", "vector"}),
+        (_0: "state", _1: [String]{"state", "transition"}),
+        (_0: "effects", _1: [String]{"effect", "event", "callback", "task"}),
+        (_0: "dependencies", _1: [String]{"depend", "premise", "input"}),
+        (_0: "impact", _1: [String]{"impact", "changed", "change"}),
+        (_0: "optimization", _1: [String]{"optim", "copy", "cost", "vector"}),
         ("counterexamples", [String]{"counterexample", "witness"}),
     }
     loop (family, needles) in families {
@@ -164,7 +164,7 @@ fn lsp_callable_definition_for_selection(db: SymbolDB, selection: String?) -> Vi
             loop fact in db.index.definition_facts() {
                 subject_match :: if subject_index == {
                     .Val(index) -> fact.stable_id == records[index].subject
-                    None -> fact.stable_id == ""
+                    .None -> fact.stable_id == ""
                 }
                 if subject_match && fact.human_identity == definition.identity { matched = true; break }
             }
@@ -216,7 +216,7 @@ fn lsp_callable_summary_json(db: SymbolDB, selection: String?) -> String Never! 
             loop span in witness.spans -> &spans.push("{{\"start\":{span.start},\"end\":{span.end}}}")
             &witnesses.push("{{\"effect\":{foundation_json_quote(witness.effect_name)},\"call_path\":[{lsp_json_string_array(witness.call_path)}],\"spans\":[{spans.join(",")}]}}")
         }
-        effects = "{{\"status\":\"checked\",\"direct\":[{lsp_json_string_array(effect.direct)}],\"inferred\":[{lsp_json_string_array(effect.inferred)}],\"callees\":[{lsp_json_string_array(effect.callees)}],\"maximal\":{effect.maximal},\"provenance\":[{witnesses.join(",")}]}}"
+        effects = "{{\"status\":\"checked\",\"direct\":[{lsp_json_string_array(effect_ref.direct)}],\"inferred\":[{lsp_json_string_array(effect_ref.inferred)}],\"callees\":[{lsp_json_string_array(effect_ref.callees)}],\"maximal\":{effect_ref.maximal},\"provenance\":[{witnesses.join(",")}]}}"
     }
     checked_rows := [String]{}
     loop (position, index) in selected {
@@ -259,14 +259,14 @@ fn lsp_reasoning_view_json(db: SymbolDB, path: String, selection: String?, expan
         &lens_rows[family].push(foundation_json_quote(record.id))
     }
     lenses := [String]{}
-    loop name in [String]{"value", "ownership", "state", "effects", "dependencies", "impact", "optimization", "counterexamples", "relationships"} {
+    loop name in ([String]{"value", "ownership", "state", "effects", "dependencies", "impact", "optimization", "counterexamples", "relationships"}) {
         rows := ""
         if lens_rows.get(name) == .Val(items) -> rows = items.join(",")
         &lenses.push("{{\"name\":\"{name}\",\"records\":[{rows}]}}")
     }
     selected_json :: if selected == {
         .Val(value) -> foundation_json_quote(value)
-        None -> "\"all\""
+        .None -> "\"all\""
     }
     "{{\"kind\":\"jet.reasoning/v1\",\"source\":{foundation_json_quote(path)},\"selection\":{selected_json},\"summary\":{lsp_callable_summary_json(db, selected)},\"records\":[{rendered.join(",")}],\"lenses\":[{lenses.join(",")}],\"limits\":{{\"records\":64,\"records_truncated\":{count > 64},\"expanded\":{expanded}}}}}"
 }

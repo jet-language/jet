@@ -2,13 +2,13 @@
 // handler that treats an unavailable staged check as successful. Feature-owned
 // SignatureChangeEdit/preview remain canonical (0737). Native map key equality
 // is #4499; Driver sealed snapshot/retained bytes and Core replacement are gates.
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use jet_foundation.[foundation_json_quote]
 use jet_driver.[JetDriverCompilerCheckResult, JetDriverCompilerQueries]
 use core.files.runtime.kernel_path_components as lsp_signature_path
 
-fn lsp_signature_change_response(server: LSPServer, params: DataTree, id: DataTree) -> String {
-    usage :: "jet.changeSignature expects arguments [uri, identity, {name, type, values}]"
+fn lsp_signature_change_response(server: LSPServer, params: Dyn, id: Dyn) -> String {
+    usage :: "jet.changeSignature expects arguments [uri, identity, {{name, type, values}}]"
     arguments :: params.field("arguments") ?? return lsp_error_response(id, -32602, usage)
     if arguments != .Array(_) -> return lsp_error_response(id, -32602, usage)
     if arguments == .Array(args) {
@@ -112,7 +112,7 @@ fn lsp_signature_change_response(server: LSPServer, params: DataTree, id: DataTr
             }
             value :: if caller.value == {
                 .Val(text) -> foundation_json_quote(text)
-                None -> "null"
+                .None -> "null"
             }
             &callers.push("{{\"identity\":{foundation_json_quote(caller.identity)},\"source\":{foundation_json_quote(caller.path)},\"range\":{range},\"value\":{value},\"status\":\"{caller.status}\"}}")
         }
@@ -124,7 +124,7 @@ fn lsp_signature_change_response(server: LSPServer, params: DataTree, id: DataTr
             uri :: lsp_path_to_uri(lsp_signature_path.display(path))
             version :: if checked.checked_versions.get(uri) == {
                 .Val(number) -> "{number}"
-                None -> "null"
+                .None -> "null"
             }
             &edits.push("{{\"uri\":{foundation_json_quote(uri)},\"version\":{version},\"range\":{lsp_range_json(range)},\"newText\":{foundation_json_quote(edit.new_text)}}}")
         }
@@ -145,7 +145,7 @@ fn lsp_signature_change_response(server: LSPServer, params: DataTree, id: DataTr
     lsp_error_response(id, -32602, usage)
 }
 
-fn lsp_data_tree_text(value: DataTree) -> String? Never! {
+fn lsp_data_tree_text(value: Dyn) -> String? Never! {
     if value == {
         .Text(text) | .TypedText(text) -> Val(text)
         else -> None

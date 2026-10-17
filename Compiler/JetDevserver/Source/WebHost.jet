@@ -11,11 +11,11 @@ use std.time.[Duration, Instant]
 use jet_devserver.TerminalStyleReload.[TerminalCapabilityFacts, TerminalColorMode, TerminalStyleHostAdapter, TerminalStyleHostSource]
 use jet_driver.Diagnostics.[ColorChoice]
 use jet_driver.Package.[ReleaseDevtoolsPolicy]
-use jet_foundation.DataTree.[DataTree]
+use jet_foundation.Dyn.[Dyn]
 use jet_foundation.Devtools.[JetDevtoolsEnvelope, JetDevtoolsEvent, JetDevtoolsEventBody, JetDevtoolsFormState, JetDevtoolsFreshnessFact, JetDevtoolsFreshnessState, JetDevtoolsFunctionIdentity, JetDevtoolsGameLaunchPhase, JetDevtoolsLifecycleState, JetDevtoolsMutationLifecycle, JetDevtoolsPrivacy, JetDevtoolsQueryState, JetDevtoolsSourceIdentityFact, JetDevtoolsSourceSpan, JetDevtoolsTraceKind, JetDevtoolsSelection, JET_DEVTOOLS_PROTOCOL, JET_DEVTOOLS_MAX_ENVELOPE_BYTES, JET_DEVTOOLS_MAX_EVENTS]
 use jet_foundation.DevtoolsControl.[JetDevtoolsCommand, JetDevtoolsCommandEnvelope, JetDevtoolsDatabaseExplainRequest, JetDevtoolsDecodedEnvelope, JetDevtoolsGameControlKind, JetDevtoolsGameControlRequest, JetDevtoolsProjectRebuildRequest, JET_DEVTOOLS_MAX_COMMANDS]
 use jet_foundation.HotSwap.[HotSwapDecision]
-use jet_foundation.JSON.[json_escape, parse_json_with_limit]
+use jet_foundation.JSON.[foundation_json_escape, parse_json_with_limit]
 use jet_devserver.[content_type_for, query_param, read_static_file_bounded, static_relative_path, write_response, Request, MAX_REQUEST_BODY_BYTES, ResidentDevSession]
 use jet_devserver.Session as Session
 use jet_devserver.BrowserTrace as BrowserTrace
@@ -24,7 +24,7 @@ use jet_devserver.WebErrorPage.[WebErrorDevStatusFacts]
 use jet_devserver.Canvas.[DebugSessions]
 use jet_devserver.PausedEvaluate.[PausedEvaluateHost]
 // Rust: crates/jet-devserver/src/WebHost.rs:55
-APPLICATION_PORT_RANGE :: 8080..=8089
+APPLICATION_PORT_RANGE :: 8080..8089
 // Rust: crates/jet-devserver/src/WebHost.rs:56
 CANVAS_SESSION_BYTES :: 32
 // Rust: crates/jet-devserver/src/WebHost.rs:57
@@ -46,11 +46,11 @@ PUBLICATION_COUNTER :: AtomicU64.new(0)
 fn decode_devtools_envelope(payload: String) -> JetDevtoolsDecodedEnvelope Err! {
     root :: parse_json_with_limit(payload, JET_DEVTOOLS_MAX_ENVELOPE_BYTES) ?? return .Err("devtools envelope is not valid bounded JSON")
     object :: object_map(&root) ?? return .Err("devtools envelope must be an object")
-    protocol :: devtools_required_string(&object, "protocol")?
+    protocol :: devtools_required_string(&object, "protocol")
     if protocol != JET_DEVTOOLS_PROTOCOL -> return .Err("devtools envelope protocol does not match jet.devtools.v1")
     if object.contains_key("history") -> return .Err("devtools envelope must use the single `events` stream")
-    session_id :: devtools_required_string(&object, "session_id")?
-    started_at_ms :: devtools_required_u64(&object, "started_at_ms")?
+    session_id :: devtools_required_string(&object, "session_id")
+    started_at_ms :: devtools_required_u64(&object, "started_at_ms")
     if object.get("direction") == .Val(direction) {
         if devtools_required_value_string(direction, "direction")? == {
             "host_to_runtime" -> {
@@ -61,25 +61,28 @@ fn decode_devtools_envelope(payload: String) -> JetDevtoolsDecodedEnvelope Err! 
                 if object.contains_key("commands") -> return .Err("devtools event envelope cannot contain a commands stream")
                 return .Events(decode_devtools_events(&object, session_id, started_at_ms)?)
             }
-            else -> return .Err("devtools envelope direction is not recognized")
+            else -> { return .Err("devtools envelope direction is not recognized") }
         }
     }
     if object.contains_key("commands") -> return .Err("devtools command envelope requires direction")
     return .Events(decode_devtools_events(&object, session_id, started_at_ms)?)
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:123
-fn decode_devtools_events(object: [String:DataTree], session_id: String, started_at_ms: U64) -> JetDevtoolsEnvelope Err! {
-    events :: match object.get("events") { .Val(.Array(v)) -> v; _ -> return .Err("devtools envelope `events` must be an array") }
+fn decode_devtools_events(object: [String:Dyn], session_id: String, started_at_ms: U64) -> JetDevtoolsEnvelope Err! {
+    events :: if object.get("events") == {
+        .Val(.Array(v)) -> v
+        else -> { return .Err("devtools envelope `events` must be an array") }
+    }
     if events.len() > JET_DEVTOOLS_MAX_EVENTS -> return .Err("devtools envelope exceeds the retained event limit")
     envelope := JetDevtoolsEnvelope.new(session_id.to_string(), started_at_ms)
     loop value in events {
         event :: object_map(value) ?? return .Err("devtools envelope event must be an object")
-        sequence :: devtools_required_u64(&event, "sequence")?
+        sequence :: devtools_required_u64(&event, "sequence")
         if sequence == 0 -> return .Err("devtools envelope event sequence must be positive")
-        timestamp_ms :: devtools_required_u64(&event, "timestamp_ms")?
-        source :: devtools_required_string(&event, "source")?
-        kind :: devtools_required_string(&event, "kind")?
-        entity :: devtools_required_string(&event, "entity")?
+        timestamp_ms :: devtools_required_u64(&event, "timestamp_ms")
+        source :: devtools_required_string(&event, "source")
+        kind :: devtools_required_string(&event, "kind")
+        entity :: devtools_required_string(&event, "entity")
         fields_value :: event.get("fields") ?? return .Err("devtools envelope missing `fields`")
         _ :: object_map(fields_value) ?? return .Err("devtools envelope `fields` must be an object")
         fields :: Session.render_json(fields_value)
@@ -88,14 +91,14 @@ fn decode_devtools_events(object: [String:DataTree], session_id: String, started
             .Val(.Object(_)) -> .Val(devtools_required_object_json(&event, "payload")?)
             else -> { return .Err("devtools event payload must be an object or null") }
         }
-        decoded :: decode_devtools_body(kind, entity, fields_value)?
+        decoded :: decode_devtools_body(kind, entity, fields_value)
         typed :: if decoded == {
             .Val(body) -> {
-                typed :: JetDevtoolsEvent.from_wire(sequence, timestamp_ms, ^source, ^body, ^fields, ^payload)?
+                typed :: JetDevtoolsEvent.from_wire(sequence, timestamp_ms, ^source, ^body, ^fields, ^payload)
                 if typed.kind() != kind || typed.entity() != entity -> return .Err("devtools event identity does not match its typed body")
                 typed
             }
-            .None -> JetDevtoolsEvent.from_parts_with_payload(timestamp_ms, ^source, ^kind, ^entity, ^fields, ^payload)?
+            .None -> JetDevtoolsEvent.from_parts_with_payload(timestamp_ms, ^source, ^kind, ^entity, ^fields, ^payload)
         }
         envelope.push(^typed)
     }
@@ -104,66 +107,69 @@ fn decode_devtools_events(object: [String:DataTree], session_id: String, started
             .Null -> envelope.set_selection(.None)
             .Object(v) -> {
                 selection :: object_map_entries(v)
-                envelope.set_selection(.Val(JetDevtoolsSelection.new(devtools_required_string(&selection, "panel_id")?, devtools_optional_string(&selection, "item_key")?)))
+                envelope.set_selection(.Val(JetDevtoolsSelection.new(devtools_required_string(&selection, "panel_id"), devtools_optional_string(&selection, "item_key")?)))
             }
-            else -> return .Err("devtools envelope selection must be an object or null")
+            else -> { return .Err("devtools envelope selection must be an object or null") }
         }
     }
     if object.get("cursor") == .Val(cursor) {
         envelope.set_cursor(if cursor == {
             .Null -> .None
-            .Int(v) if v >= 0 -> .Val(U64{v})
-            .Float(v) if v.fract() == 0.0 && v >= 0.0 && v <= F64{U64.MAX} -> .Val(U64{v})
+            .Int(v) && v >= 0 -> .Val(U64{v})
+            .Float(v) && v.fract() == 0.0 && v >= 0.0 && v <= F64{U64.MAX} -> .Val(U64{v})
             else -> { return .Err("devtools envelope cursor must be a sequence") }
         })
     }
     if object.get("lifecycle") == .Val(v) -> envelope.set_lifecycle(devtools_lifecycle(devtools_required_value_string(v, "lifecycle")?)?)
     if object.get("freshness") == .Val(v) {
         freshness :: object_map(v) ?? return .Err("devtools envelope freshness must be an object")
-        envelope.set_freshness(JetDevtoolsFreshnessFact { state: devtools_freshness_state(devtools_required_string(&freshness, "state")?)?, observed_at_ms: devtools_required_u64(&freshness, "observed_at_ms")? })
+        envelope.set_freshness(JetDevtoolsFreshnessFact { state: devtools_freshness_state(devtools_required_string(&freshness, "state")?), observed_at_ms: devtools_required_u64(&freshness, "observed_at_ms")? })
     }
     if object.get("privacy") == .Val(v) {
         privacy :: object_map(v) ?? return .Err("devtools envelope privacy must be an object")
-        envelope.privacy = JetDevtoolsPrivacy { loopback_only: devtools_required_bool(&privacy, "loopback_only")?, payload_free_by_default: devtools_required_bool(&privacy, "payload_free_by_default")?, published_payloads: devtools_required_bool(&privacy, "published_payloads")? }
+        envelope.privacy = JetDevtoolsPrivacy { loopback_only: devtools_required_bool(&privacy, "loopback_only"), payload_free_by_default: devtools_required_bool(&privacy, "payload_free_by_default")?, published_payloads: devtools_required_bool(&privacy, "published_payloads")? }
     }
     if object.get("source_identity") == .Val(v) {
         envelope.source_identity = if v == {
             .Null -> .None
             .Object(v) -> {
                 identity :: object_map_entries(v)
-                .Val(JetDevtoolsSourceIdentityFact.new(devtools_optional_string(&identity, "source_id")?, devtools_optional_string(&identity, "build_id")?, devtools_optional_string(&identity, "revision")?, devtools_optional_string(&identity, "world_id")?))
+                .Val(JetDevtoolsSourceIdentityFact.new(devtools_optional_string(&identity, "source_id"), devtools_optional_string(&identity, "build_id")?, devtools_optional_string(&identity, "revision")?, devtools_optional_string(&identity, "world_id")?))
             }
             else -> { return .Err("devtools envelope source_identity must be an object or null") }
         }
     }
-    if object.contains_key("reset") -> envelope.reset = devtools_required_bool(object, "reset")?
-    if object.contains_key("truncated") -> envelope.truncated = devtools_required_bool(object, "truncated")?
+    if object.contains_key("reset") -> envelope.reset = devtools_required_bool(object, "reset")
+    if object.contains_key("truncated") -> envelope.truncated = devtools_required_bool(object, "truncated")
     return envelope
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:261
-fn decode_devtools_command_envelope(object: [String:DataTree], session_id: String, started_at_ms: U64) -> JetDevtoolsCommandEnvelope Err! {
+fn decode_devtools_command_envelope(object: [String:Dyn], session_id: String, started_at_ms: U64) -> JetDevtoolsCommandEnvelope Err! {
     expected :: ["protocol", "session_id", "started_at_ms", "direction", "commands"]
     if !devtools_has_exact_fields(object, &expected) -> return .Err("devtools command envelope has unexpected top-level fields")
-    direction :: devtools_required_value_string(object.get("direction") ?? return .Err("devtools command envelope requires direction"), "direction")?
+    direction :: devtools_required_value_string(object.get("direction") ?? return .Err("devtools command envelope requires direction"), "direction")
     if direction != "host_to_runtime" -> return .Err("devtools command envelope direction must be host_to_runtime")
-    commands :: match object.get("commands") { .Val(.Array(v)) -> v; _ -> return .Err("devtools envelope `commands` must be an array") }
+    commands :: if object.get("commands") == {
+        .Val(.Array(v)) -> v
+        else -> { return .Err("devtools envelope `commands` must be an array") }
+    }
     if commands.len() > JET_DEVTOOLS_MAX_COMMANDS -> return .Err("devtools envelope exceeds the retained command limit")
     envelope := JetDevtoolsCommandEnvelope.new(session_id.to_string(), started_at_ms)
     loop value in commands {
         command :: object_map(value) ?? return .Err("devtools envelope command must be an object")
         if command.len() != 2 || !command.contains_key("kind") || !command.contains_key("payload") -> return .Err("devtools envelope command must contain only kind and payload")
-        kind :: devtools_required_string(&command, "kind")?
+        kind :: devtools_required_string(&command, "kind")
         payload :: command.get("payload").and_then(object_map) ?? return .Err("devtools envelope command payload must be an object")
         if kind == {
             "DatabaseExplain" -> {
                 if !devtools_has_exact_fields(&payload, &["session_id", "request_id", "statement_identity", "timeout_ms", "max_rows"]) -> return .Err("devtools envelope database command payload has unexpected fields")
-                request :: JetDevtoolsDatabaseExplainRequest.new(devtools_required_string(&payload, "session_id")?, devtools_required_string(&payload, "request_id")?, devtools_required_string(&payload, "statement_identity")?, devtools_required_u64(&payload, "timeout_ms")?, devtools_required_u64(&payload, "max_rows")?)?
-                envelope.enqueue_command(.DatabaseExplain(^request))?
+                request :: JetDevtoolsDatabaseExplainRequest.new(devtools_required_string(&payload, "session_id"), devtools_required_string(&payload, "request_id")?, devtools_required_string(&payload, "statement_identity")?, devtools_required_u64(&payload, "timeout_ms")?, devtools_required_u64(&payload, "max_rows")?)?
+                envelope.enqueue_command(.DatabaseExplain(^request))
             }
             "GameControl" -> {
                 if !devtools_has_exact_fields(&payload, &["session_id", "request_id", "kind", "source_id", "revision", "world_id", "actor_id", "component_id", "authored_instance_id", "source_span_start", "source_span_end", "field", "value", "category", "expression", "required_authority", "frame_id", "budget"]) -> return .Err("devtools envelope game control payload has unexpected fields")
                 request :: JetDevtoolsGameControlRequest {
-                    session_id: devtools_required_string(&payload, "session_id")?, request_id: devtools_required_string(&payload, "request_id")?,
+                    session_id: devtools_required_string(&payload, "session_id"), request_id: devtools_required_string(&payload, "request_id")?,
                     kind: JetDevtoolsGameControlKind.from_str(devtools_required_string(&payload, "kind")?)?,
                     source_id: devtools_optional_string(&payload, "source_id")?, revision: devtools_optional_string(&payload, "revision")?,
                     world_id: devtools_optional_string(&payload, "world_id")?, actor_id: devtools_optional_string(&payload, "actor_id")?,
@@ -173,30 +179,30 @@ fn decode_devtools_command_envelope(object: [String:DataTree], session_id: Strin
                     category: devtools_optional_string(&payload, "category")?, expression: devtools_optional_string(&payload, "expression")?,
                     required_authority: devtools_optional_string(&payload, "required_authority")?, frame_id: devtools_optional_u64(&payload, "frame_id")?, budget: devtools_optional_u64(&payload, "budget")?
                 }
-                request.validate()?
-                envelope.enqueue_command(.GameControl(^request))?
+                request.validate()
+                envelope.enqueue_command(.GameControl(^request))
             }
             "ProjectRebuild" -> {
                 if !devtools_has_exact_fields(&payload, &["session_id", "request_id", "expected_revision"]) -> return .Err("devtools envelope project rebuild payload has unexpected fields")
                 request :: JetDevtoolsProjectRebuildRequest.new(devtools_required_string(&payload, "session_id")?, devtools_required_string(&payload, "request_id")?, devtools_required_string(&payload, "expected_revision")?)?
                 envelope.enqueue_command(.ProjectRebuild(^request))?
             }
-            else -> return .Err("devtools envelope contains an unsupported command kind")
+            else -> { return .Err("devtools envelope contains an unsupported command kind") }
         }
     }
-    envelope.validate()?
+    envelope.validate()
     return envelope
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:423
-fn decode_devtools_body(kind: String, _entity: String, fields: &DataTree) -> JetDevtoolsEventBody? Err! {
+fn decode_devtools_body(kind: String, _entity: String, fields: &Dyn) -> JetDevtoolsEventBody? Err! {
     object :: object_map(fields) ?? return .Err("devtools event fields must be an object")
     if devtools_expected_fields(kind) == .Val(expected) {
         if !devtools_has_exact_fields(&object, &expected) -> return .None
     }
     body :: if kind == {
         "Build" -> {
-            devtools_exact_fields(&object, &["status", "tier", "diagnostics", "kept", "reset"])?
-            JetDevtoolsEventBody.Build { status: devtools_required_string(&object, "status")?, tier: devtools_required_string(&object, "tier")?, diagnostics: devtools_required_string_array(&object, "diagnostics")?, kept: devtools_required_u64(&object, "kept")?, reset: devtools_required_u64(&object, "reset")? }
+            devtools_exact_fields(&object, &["status", "tier", "diagnostics", "kept", "reset"])
+            JetDevtoolsEventBody.Build { status: devtools_required_string(&object, "status"), tier: devtools_required_string(&object, "tier")?, diagnostics: devtools_required_string_array(&object, "diagnostics")?, kept: devtools_required_u64(&object, "kept")?, reset: devtools_required_u64(&object, "reset")? }
         }
         "Route" -> {
             devtools_exact_fields(&object, &["path", "matched", "render_mode", "reason"])?
@@ -204,17 +210,35 @@ fn decode_devtools_body(kind: String, _entity: String, fields: &DataTree) -> Jet
         }
         "Query" -> {
             devtools_exact_fields(&object, &["name", "state", "footprint"])?
-            state :: JetDevtoolsQueryState{match devtools_required_string(&object, "state")? { "fetching" -> .Fetching; "fresh" -> .Fresh; "stale" -> .Stale; "invalidated" -> .Invalidated; _ -> return .Err("devtools Query state is not recognized") }}
+            state :: JetDevtoolsQueryState{if devtools_required_string(&object, "state")? == {
+                "fetching" -> .Fetching
+                "fresh" -> .Fresh
+                "stale" -> .Stale
+                "invalidated" -> .Invalidated
+                else -> { return .Err("devtools Query state is not recognized") }
+            }}
             JetDevtoolsEventBody.Query { name: devtools_required_string(&object, "name")?, state, footprint: devtools_required_u64(&object, "footprint")? }
         }
         "Mutation" -> {
             devtools_exact_fields(&object, &["name", "lifecycle", "rollback"])?
-            lifecycle :: JetDevtoolsMutationLifecycle{match devtools_required_string(&object, "lifecycle")? { "started" -> .Started; "committed" -> .Committed; "failed" -> .Failed; "rolled_back" -> .RolledBack; _ -> return .Err("devtools Mutation lifecycle is not recognized") }}
+            lifecycle :: JetDevtoolsMutationLifecycle{if devtools_required_string(&object, "lifecycle")? == {
+                "started" -> .Started
+                "committed" -> .Committed
+                "failed" -> .Failed
+                "rolled_back" -> .RolledBack
+                else -> { return .Err("devtools Mutation lifecycle is not recognized") }
+            }}
             JetDevtoolsEventBody.Mutation { name: devtools_required_string(&object, "name")?, lifecycle, rollback: devtools_required_bool(&object, "rollback")? }
         }
         "Form" -> {
             devtools_exact_fields(&object, &["name", "field", "state", "validation"])?
-            state :: JetDevtoolsFormState{match devtools_required_string(&object, "state")? { "pristine" -> .Pristine; "dirty" -> .Dirty; "valid" -> .Valid; "invalid" -> .Invalid; _ -> return .Err("devtools Form state is not recognized") }}
+            state :: JetDevtoolsFormState{if devtools_required_string(&object, "state")? == {
+                "pristine" -> .Pristine
+                "dirty" -> .Dirty
+                "valid" -> .Valid
+                "invalid" -> .Invalid
+                else -> { return .Err("devtools Form state is not recognized") }
+            }}
             JetDevtoolsEventBody.Form { name: devtools_required_string(&object, "name")?, field: devtools_required_string(&object, "field")?, state, validation: devtools_required_string(&object, "validation")? }
         }
         "Table" -> {
@@ -227,7 +251,14 @@ fn decode_devtools_body(kind: String, _entity: String, fields: &DataTree) -> Jet
         }
         "Trace" -> {
             devtools_exact_fields(&object, &["name", "kind", "request", "duration_ms", "status"])?
-            trace_kind :: JetDevtoolsTraceKind{match devtools_required_string(&object, "kind")? { "request" -> .Request; "render" -> .Render; "job" -> .Job; "reload" -> .Reload; "frame" -> .Frame; _ -> return .Err("devtools Trace kind is not recognized") }}
+            trace_kind :: JetDevtoolsTraceKind{if devtools_required_string(&object, "kind")? == {
+                "request" -> .Request
+                "render" -> .Render
+                "job" -> .Job
+                "reload" -> .Reload
+                "frame" -> .Frame
+                else -> { return .Err("devtools Trace kind is not recognized") }
+            }}
             JetDevtoolsEventBody.Trace { name: devtools_required_string(&object, "name")?, kind: trace_kind, request: devtools_required_string(&object, "request")?, duration_ms: devtools_required_u64(&object, "duration_ms")?, status: devtools_required_string(&object, "status")? }
         }
         "Cost" -> {
@@ -311,116 +342,151 @@ fn devtools_expected_fields(kind: String) -> [String]? {
     }
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:798
-fn object_map(value: DataTree) -> [String:DataTree]? {
-    return match value { .Object(fields) -> .Val(fields.iter().cloned().collect()); _ -> .None }
+fn object_map(value: Dyn) -> [String:Dyn]? {
+    return if value == {
+        .Object(fields) -> .Val(fields.iter().cloned().collect())
+        else -> .None
+    }
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:805
-fn object_map_entries(fields: &[(String, DataTree)]) -> [String:DataTree] { return fields.iter().cloned().collect() }
+fn object_map_entries(fields: &[(String, Dyn)]) -> [String:Dyn] { return fields.iter().cloned().collect() }
 // Rust: crates/jet-devserver/src/WebHost.rs:811
-fn devtools_has_exact_fields(object: [String:DataTree], expected: [String]) -> Bool {
+fn devtools_has_exact_fields(object: [String:Dyn], expected: [String]) -> Bool {
     return object.len() == expected.len() && object.keys().all((key) -> expected.iter().any((name) -> name == key))
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:821
-fn devtools_exact_fields(object: &[String:DataTree], expected: &[String]) Err! {
+fn devtools_exact_fields(object: &[String:Dyn], expected: &[String]) Err! {
     if !devtools_has_exact_fields(object, expected) -> return .Err("devtools event fields do not match the typed body")
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:831
-fn devtools_required_game_launch_phases(object: [String:DataTree], key: String) -> [JetDevtoolsGameLaunchPhase] Err! {
-    values :: match object.get(key) { .Val(.Array(v)) -> v; _ -> return .Err("devtools event `{key}` must be an array") }
+fn devtools_required_game_launch_phases(object: [String:Dyn], key: String) -> [JetDevtoolsGameLaunchPhase] Err! {
+    values :: if object.get(key) == {
+        .Val(.Array(v)) -> v
+        else -> { return .Err("devtools event `{key}` must be an array") }
+    }
     if values.len() > 256 -> return .Err("devtools event `{key}` exceeds 256 entries")
     phases := [JetDevtoolsGameLaunchPhase]{}
     loop value in values {
         phase :: object_map(value) ?? return .Err("devtools event `{key}` must contain objects")
-        devtools_exact_fields(&phase, &["phase", "status", "detail"])?
-        phases.push(JetDevtoolsGameLaunchPhase.new(devtools_required_string(&phase, "phase")?, devtools_required_string(&phase, "status")?, devtools_required_string(&phase, "detail")?))
+        devtools_exact_fields(&phase, &["phase", "status", "detail"])
+        phases.push(JetDevtoolsGameLaunchPhase.new(devtools_required_string(&phase, "phase"), devtools_required_string(&phase, "status")?, devtools_required_string(&phase, "detail")?))
     }
     return phases
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:857
-fn devtools_required_string_array(object: [String:DataTree], key: String) -> [String] Err! {
-    values :: match object.get(key) { .Val(.Array(v)) -> v; _ -> return .Err("devtools event `{key}` must be an array") }
+fn devtools_required_string_array(object: [String:Dyn], key: String) -> [String] Err! {
+    values :: if object.get(key) == {
+        .Val(.Array(v)) -> v
+        else -> { return .Err("devtools event `{key}` must be an array") }
+    }
     strings := [String]{}
     loop value in values {
         if value == {
-            .Text(v) if !v.is_empty() -> strings.push(v.clone())
-            .Text(_) -> return .Err("devtools event `{key}` has an empty string")
-            else -> return .Err("devtools event `{key}` must contain strings")
+            .Text(v) && !v.is_empty() -> strings.push(v.clone())
+            .Text(_) -> { return .Err("devtools event `{key}` has an empty string") }
+            else -> { return .Err("devtools event `{key}` must contain strings") }
         }
     }
     return strings
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:875
-fn devtools_required_u16(object: [String:DataTree], key: String) -> U16 Err! {
+fn devtools_required_u16(object: [String:Dyn], key: String) -> U16 Err! {
     return U16.try_from(devtools_required_u64(object, key)?) ?? return .Err("devtools event `{key}` is outside the u16 range")
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:883
-fn devtools_optional_u64(object: [String:DataTree], key: String) -> U64? Err! {
+fn devtools_optional_u64(object: [String:Dyn], key: String) -> U64? Err! {
     if object.get(key) == {
-        .None | .Val(.Null) -> return .None
-        .Val(.Int(v)) if v >= 0 -> return .Val(U64.try_from(v) ?? return .Err("devtools event `{key}` must be non-negative"))
-        .Val(.Int(_)) -> return .Err("devtools event `{key}` must be non-negative")
-        else -> return .Err("devtools event `{key}` must be an integer or null")
+        .None | .Val(.Null) -> { return .None }
+        .Val(.Int(v)) if v >= 0 -> { return .Val(U64.try_from(v) ?? return .Err("devtools event `{key}` must be non-negative")) }
+        .Val(.Int(_)) -> { return .Err("devtools event `{key}` must be non-negative") }
+        else -> { return .Err("devtools event `{key}` must be an integer or null") }
     }
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:897
-fn devtools_required_function(object: [String:DataTree], key: String) -> JetDevtoolsFunctionIdentity Err! {
+fn devtools_required_function(object: [String:Dyn], key: String) -> JetDevtoolsFunctionIdentity Err! {
     function :: object.get(key).and_then(object_map) ?? return .Err("devtools event `{key}` must be an object")
     source :: function.get("source").and_then(object_map) ?? return .Err("devtools event `{key}.source` must be an object")
-    return JetDevtoolsFunctionIdentity.new(devtools_required_string(&function, "function_id")?, devtools_required_string(&function, "name")?, JetDevtoolsSourceSpan.new(devtools_required_string(&source, "source_id")?, devtools_required_string(&source, "file")?, devtools_required_u32(&source, "start_line")?, devtools_required_u32(&source, "start_column")?, devtools_required_u32(&source, "end_line")?, devtools_required_u32(&source, "end_column")?))
+    return JetDevtoolsFunctionIdentity.new(devtools_required_string(&function, "function_id"), devtools_required_string(&function, "name")?, JetDevtoolsSourceSpan.new(devtools_required_string(&source, "source_id")?, devtools_required_string(&source, "file")?, devtools_required_u32(&source, "start_line")?, devtools_required_u32(&source, "start_column")?, devtools_required_u32(&source, "end_line")?, devtools_required_u32(&source, "end_column")?))
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:923
-fn devtools_optional_function(object: [String:DataTree], key: String) -> JetDevtoolsFunctionIdentity? Err! {
-    match object.get(key) { .None | .Val(.Null) -> return .None; .Val(.Object(_)) -> return .Val(devtools_required_function(object, key)?); _ -> return .Err("devtools event `{key}` must be an object or null") }
+fn devtools_optional_function(object: [String:Dyn], key: String) -> JetDevtoolsFunctionIdentity? Err! {
+    if object.get(key) == {
+        .None | .Val(.Null) -> { return .None }
+        .Val(.Object(_)) -> { return .Val(devtools_required_function(object, key)?) }
+        else -> { return .Err("devtools event `{key}` must be an object or null") }
+    }
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:934
-fn devtools_required_u32(object: [String:DataTree], key: String) -> U32 Err! {
+fn devtools_required_u32(object: [String:Dyn], key: String) -> U32 Err! {
     return U32.try_from(devtools_required_u64(object, key)?) ?? return .Err("devtools event `{key}` is outside the u32 range")
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:942
-fn devtools_required_string(object: [String:DataTree], key: String) -> String Err! {
+fn devtools_required_string(object: [String:Dyn], key: String) -> String Err! {
     value :: object.get(key) ?? return .Err("devtools envelope missing `{key}`")
     return devtools_required_value_string(value, key)
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:958
-fn devtools_required_value_string(value: DataTree, key: String) -> String Err! {
+fn devtools_required_value_string(value: Dyn, key: String) -> String Err! {
     if value == {
-        .Text(v) -> { if v.is_empty() -> return .Err("devtools envelope `{key}` must not be empty"); return v.clone() }
-        else -> return .Err("devtools envelope `{key}` must be a string")
+        .Text(v) -> { if v.is_empty() -> return .Err("devtools envelope `{key}` must not be empty"); return v.clone() } else -> { return .Err("devtools envelope `{key}` must be a string") }
     }
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:968
-fn devtools_optional_string(object: [String:DataTree], key: String) -> String? Err! {
+fn devtools_optional_string(object: [String:Dyn], key: String) -> String? Err! {
     if object.get(key) == {
-        .None | .Val(.Null) -> return .None
-        .Val(.Text(v)) if !v.is_empty() -> return .Val(v.clone())
-        .Val(.Text(_)) -> return .Err("devtools envelope `{key}` must not be empty")
-        else -> return .Err("devtools envelope `{key}` must be a string or null")
+        .None | .Val(.Null) -> { return .None }
+        .Val(.Text(v)) if !v.is_empty() -> { return .Val(v.clone()) }
+        .Val(.Text(_)) -> { return .Err("devtools envelope `{key}` must not be empty") }
+        else -> { return .Err("devtools envelope `{key}` must be a string or null") }
     }
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:982
-fn devtools_required_u64(object: [String:DataTree], key: String) -> U64 Err! {
+fn devtools_required_u64(object: [String:Dyn], key: String) -> U64 Err! {
     value :: object.get(key) ?? return .Err("devtools envelope missing `{key}`")
-    match value { .Int(v) -> return U64.try_from(v) ?? return .Err("devtools envelope `{key}` must be non-negative"); _ -> return .Err("devtools envelope `{key}` must be an integer") }
+    if value == {
+        .Int(v) -> { return U64.try_from(v) ?? return .Err("devtools envelope `{key}` must be non-negative") }
+        else -> { return .Err("devtools envelope `{key}` must be an integer") }
+    }
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:996
-fn devtools_required_bool(object: [String:DataTree], key: String) -> Bool Err! {
-    match object.get(key) { .Val(.Bool(v)) -> return v; .Val(_) -> return .Err("devtools envelope `{key}` must be a boolean"); .None -> return .Err("devtools envelope missing `{key}`") }
+fn devtools_required_bool(object: [String:Dyn], key: String) -> Bool Err! {
+    if object.get(key) == {
+        .Val(.Bool(v)) -> { return v }
+        .Val(_) -> { return .Err("devtools envelope `{key}` must be a boolean") }
+        .None -> { return .Err("devtools envelope missing `{key}`") }
+    }
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:1007
-fn devtools_required_object_json(object: [String:DataTree], key: String) -> String Err! {
+fn devtools_required_object_json(object: [String:Dyn], key: String) -> String Err! {
     value :: object.get(key) ?? return .Err("devtools envelope missing `{key}`")
-    match value { .Object(_) -> return Session.render_json(value); _ -> return .Err("devtools envelope `{key}` must be an object") }
+    if value == {
+        .Object(_) -> { return Session.render_json(value) }
+        else -> { return .Err("devtools envelope `{key}` must be an object") }
+    }
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:1020
 fn devtools_lifecycle(value: String) -> JetDevtoolsLifecycleState Err! {
-    return match value { "starting" -> .Starting; "building" -> .Building; "ready" -> .Ready; "error" -> .Error; "unavailable" -> .Unavailable; "stopped" -> .Stopped; _ -> return .Err("devtools envelope lifecycle is not recognized") }
+    return if value == {
+        "starting" -> .Starting
+        "building" -> .Building
+        "ready" -> .Ready
+        "error" -> .Error
+        "unavailable" -> .Unavailable
+        "stopped" -> .Stopped
+        else -> { return .Err("devtools envelope lifecycle is not recognized") }
+    }
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:1032
 fn devtools_freshness_state(value: String) -> JetDevtoolsFreshnessState Err! {
-    return match value { "fresh" -> .Fresh; "stale" -> .Stale; "unknown" -> .Unknown; _ -> return .Err("devtools envelope freshness state is not recognized") }
+    return if value == {
+        "fresh" -> .Fresh
+        "stale" -> .Stale
+        "unknown" -> .Unknown
+        else -> { return .Err("devtools envelope freshness state is not recognized") }
+    }
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:1041
-fn terminal_style_adapter(file: String) -> Arc[TerminalStyleHostAdapter] Err! {
+fn terminal_style_adapter(file: String) -> Arc<TerminalStyleHostAdapter> Err! {
     is_tty :: std.io.stderr().is_terminal()
     capabilities :: TerminalCapabilityFacts.from_environment(std.env.var("TERM").ok().as_deref(), std.env.var("COLORTERM").ok().as_deref(), is_tty, std.env.var_os("NO_COLOR").is_some(), .Auto)
     source :: TerminalStyleHostSource.new(file, capabilities) ?? return .Err("could not inject terminal style source: {err}")
@@ -434,12 +500,12 @@ struct DevRevisionFacts { accepted: U64?; candidate: U64?; diagnostic: U64? }
 struct DevStatusSnapshot { state: String; code: String; diagnostic: String; last_build_ms: U128; candidate: U64? }
 // Rust: crates/jet-devserver/src/WebHost.rs:1088
 struct DevStatus {
-    version: AtomicU64; clients: Mutex[[String:Instant]]; state: Mutex[DevStatusSnapshot]
-    browser_relay: Mutex[BrowserTrace.Relay?]; browser_trace_enabled: AtomicBool; command_receipt: Mutex[String?]
+    version: AtomicU64; clients: Mutex<[String:Instant]>; state: Mutex<DevStatusSnapshot>
+    browser_relay: Mutex<BrowserTrace.Relay?>; browser_trace_enabled: AtomicBool; command_receipt: Mutex<String?>
     watched_file: String; web_root: OSPath; port: AtomicU64; canvas_port: AtomicU64; canvas_enabled: AtomicBool
     verbose: AtomicBool; active: AtomicBool; exit_code: AtomicU64; published: AtomicBool
     controls_ready: AtomicBool; reconnecting: AtomicBool; color: Bool; pin: Bool
-    term_lock: Mutex[Unit]; last_block_lines: Mutex[Usize]; header_started: Mutex[Bool]
+    term_lock: Mutex<Unit>; last_block_lines: Mutex<Usize>; header_started: Mutex<Bool>
 }
 impl DevStatus {
     // Rust: crates/jet-devserver/src/WebHost.rs:1145
@@ -463,7 +529,7 @@ impl DevStatus {
             watched_file: file.to_string(), web_root: OSPath.from("build"), port: AtomicU64.new(0), canvas_port: AtomicU64.new(0),
             canvas_enabled: AtomicBool.new(true), verbose: AtomicBool.new(verbose), active: AtomicBool.new(false), exit_code: AtomicU64.new(0),
             published: AtomicBool.new(false), controls_ready: AtomicBool.new(false), reconnecting: AtomicBool.new(false), color, pin: is_tty,
-            term_lock: Mutex.new(()), last_block_lines: Mutex.new(0), header_started: Mutex.new(false)
+            term_lock: Mutex.new(_), last_block_lines: Mutex.new(0), header_started: Mutex.new(false)
         }
     }
     // Rust: crates/jet-devserver/src/WebHost.rs:1193
@@ -669,7 +735,7 @@ impl DevStatus {
         (word, rest) :: self.header_text_for(&snap)
         message :: "{word} · {rest}"
         number :: (value: U64?) -> value.map_or_else(() -> "null", (n) -> n.to_string())
-        return "{{" + "\"version\":" + self.version.load(.SeqCst).to_string() + ",\"state\":\"" + json_escape(word) + "\",\"message\":\"" + json_escape(message) + "\",\"file\":\"" + json_escape(self.watched_file) + "\",\"code\":\"" + json_escape(snap.code) + "\",\"diagnostic\":\"" + json_escape(snap.diagnostic) + "\",\"clients\":" + self.client_count().to_string() + ",\"last_build_ms\":" + snap.last_build_ms.to_string() + ",\"candidate\":" + number(revisions.candidate) + ",\"diagnostic_revision\":" + number(revisions.diagnostic) + ",\"accepted_revision\":" + number(revisions.accepted) + ",\"last_good_revision\":" + number(revisions.accepted) + "}}"
+        return "{{" + "\"version\":" + self.version.load(.SeqCst).to_string() + ",\"state\":\"" + foundation_json_escape(word) + "\",\"message\":\"" + foundation_json_escape(message) + "\",\"file\":\"" + foundation_json_escape(self.watched_file) + "\",\"code\":\"" + foundation_json_escape(snap.code) + "\",\"diagnostic\":\"" + foundation_json_escape(snap.diagnostic) + "\",\"clients\":" + self.client_count().to_string() + ",\"last_build_ms\":" + snap.last_build_ms.to_string() + ",\"candidate\":" + number(revisions.candidate) + ",\"diagnostic_revision\":" + number(revisions.diagnostic) + ",\"accepted_revision\":" + number(revisions.accepted) + ",\"last_good_revision\":" + number(revisions.accepted) + "}}"
     }
     // Rust: crates/jet-devserver/src/WebHost.rs:1574
     fn activate(self: Self) -> Unit { self.active.store(true, .SeqCst); self.refresh() }
@@ -720,7 +786,7 @@ impl DevStatus {
     fn command_receipt(self: Self) -> String? { return self.command_receipt.lock().unwrap().clone() }
     // Rust: crates/jet-devserver/src/WebHost.rs:1646
     fn activate_browser_trace(self: &Self, manifest: String) Err! {
-        relay :: BrowserTrace.Relay.new(manifest)?
+        relay :: BrowserTrace.Relay.new(manifest)
         *self.browser_relay.lock().unwrap() = .Val(^relay)
         self.browser_trace_enabled.store(true, .SeqCst)
         _ :: self.version.fetch_add(1, .SeqCst)
@@ -742,14 +808,14 @@ impl CanvasHostOptions.Default {
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:1689
 struct WebHost {
-    listener: Mutex[TcpListener?]; application_listener: Mutex[TcpListener?]; started: AtomicBool
-    shutdown: Arc[AtomicBool]; server_threads: Mutex[[thread.JoinHandle[Unit]]]
-    poll_thread: Mutex[thread.JoinHandle[Unit]?]; terminal_thread: Mutex[thread.JoinHandle[Unit]?]
-    status: Arc[DevStatus]; debug_sessions: Arc[DebugSessions]; session: Arc[ResidentDevSession]
+    listener: Mutex<TcpListener?>; application_listener: Mutex<TcpListener?>; started: AtomicBool
+    shutdown: Arc<AtomicBool>; server_threads: Mutex[[thread.JoinHandle[Unit]]]
+    poll_thread: Mutex<thread.JoinHandle[Unit]?>; terminal_thread: Mutex<thread.JoinHandle[Unit]?>
+    status: Arc<DevStatus>; debug_sessions: Arc<DebugSessions>; session: Arc<ResidentDevSession>
     canvas_file: String; bind_host: String; session_secret: String; release_policy: ReleaseDevtoolsPolicy
-    static_root: OSPath; browser_state: Arc[Mutex[BrowserWebState?]]; web_swap_enabled: Bool
-    hot_swap_decision: Mutex[HotSwapDecision?]; paused_evaluate: Arc[Mutex[PausedEvaluateHost]]
-    terminal_style: Arc[TerminalStyleHostAdapter]
+    static_root: OSPath; browser_state: Arc<Mutex<BrowserWebState?>>; web_swap_enabled: Bool
+    hot_swap_decision: Mutex<HotSwapDecision?>; paused_evaluate: Arc<Mutex<PausedEvaluateHost>>
+    terminal_style: Arc<TerminalStyleHostAdapter>
 }
 impl WebHost {
     // Rust: crates/jet-devserver/src/WebHost.rs:1720
@@ -757,7 +823,7 @@ impl WebHost {
         return Self.bind_application_only_with_policy(file, verbose, port, static_root.to_path_buf(), release_policy, true)
     }
     // Rust: crates/jet-devserver/src/WebHost.rs:1742
-    fn bind_static_with_policy(file: String, root: &OSPath, verbose: Bool, application_listener: TcpListener, session: Arc[ResidentDevSession], release_policy: ReleaseDevtoolsPolicy) -> Self Err! {
+    fn bind_static_with_policy(file: String, root: &OSPath, verbose: Bool, application_listener: TcpListener, session: Arc<ResidentDevSession>, release_policy: ReleaseDevtoolsPolicy) -> Self Err! {
         static_root :: fs.canonicalize(root) ?? return .Err("error: couldn't open static output `{root.display()}`: {err}")
         application_port :: application_listener.local_addr().map((address) -> address.port()).unwrap_or(0)
         if session.application_port() != application_port -> return .Err("error: shared devtools session application port {session.application_port()} does not match static preview port {application_port}")
@@ -767,7 +833,7 @@ impl WebHost {
     fn bind_application_preview_listener(port: U16?) -> TcpListener Err! { return bind_application_server(port) }
     // Rust: crates/jet-devserver/src/WebHost.rs:1784
     fn bind_application_only_with_policy(file: String, verbose: Bool, port: U16?, static_root: OSPath, release_policy: ReleaseDevtoolsPolicy, web_swap_enabled: Bool) -> Self Err! {
-        application_listener :: bind_application_server(port)?
+        application_listener :: bind_application_server(port)
         application_port :: application_listener.local_addr().map((address) -> address.port()).unwrap_or(0)
         session :: Arc.new(ResidentDevSession.new(file, 0, application_port))
         return Self.bind_application_only_with_listener(file, verbose, ^static_root, release_policy, web_swap_enabled, ^application_listener, ^session)

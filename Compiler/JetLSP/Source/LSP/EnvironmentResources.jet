@@ -2,7 +2,7 @@
 // This read-only resource projects `jet env info --json`, never evaluates a
 // second environment model. OSPath preserves native workspace/executable/cwd
 // identities. Core owns filesystem/process/error/cleanup laws (#4494/#4483).
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use core.files.runtime.kernel_path_components.[OSPath]
 use core.files.runtime.kernel_path_components as lsp_env_path
 use core.files.host.retained_descriptor as lsp_env_files
@@ -75,14 +75,14 @@ fn lsp_environment_resource_contents_json(uri: String, text: String) -> String N
     "{{\"contents\":[{{\"uri\":{foundation_json_quote(uri)},\"mimeType\":\"{{@LSP_ENVIRONMENT_RESOURCE_MIME_TYPE}}\",\"text\":{foundation_json_quote(text)}}}]}}"
 }
 
-fn lsp_environment_resource_read_response(server: LSPServer, params: DataTree?, id: DataTree) -[FS, Env, Exec, IO, Time.Wait]> String? Never! {
+fn lsp_environment_resource_read_response(server: LSPServer, params: Dyn?, id: Dyn) -[FS, Env, Exec, IO, Time.Wait]> String? Never! {
     value :: params ?? return Val(lsp_error_response(id, -32602, "resources/read requires a URI"))
     uri_value :: value.field("uri") ?? return Val(lsp_error_response(id, -32602, "resources/read requires a URI"))
     if uri_value == .Text(uri) {
         if lsp_environment_resource_read_json(server.workspace_roots, uri) == {
-            .Ok(text) -> return Val(lsp_response(id, lsp_environment_resource_contents_json(uri, text)))
-            .Err(.NotFound) -> return Val(lsp_error_response(id, -32002, "environment resource not found"))
-            .Err(.Unavailable) -> return Val(lsp_error_response(id, -32002, "environment resource unavailable"))
+            .Ok(text) -> { return Val(lsp_response(id, lsp_environment_resource_contents_json(uri, text))) }
+            .Err(.NotFound) -> { return Val(lsp_error_response(id, -32002, "environment resource not found")) }
+            .Err(.Unavailable) -> { return Val(lsp_error_response(id, -32002, "environment resource unavailable")) }
         }
     }
     Val(lsp_error_response(id, -32602, "resources/read requires a URI"))

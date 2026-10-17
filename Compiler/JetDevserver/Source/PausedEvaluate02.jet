@@ -1,5 +1,5 @@
-use jet_foundation.DataTree.[DataTree]
-use jet_foundation.JSON.[json_escape, json_int, parse_json_with_limit]
+use jet_foundation.Dyn.[Dyn]
+use jet_foundation.JSON.[foundation_json_escape, json_int, parse_json_with_limit]
 
 impl PausedEvaluateHostError {
     // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1792
@@ -7,7 +7,7 @@ impl PausedEvaluateHostError {
         if self == {
             .SessionUnavailable -> "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"ok\":false,\"error\":\"session_unavailable\"}}"
             .EvaluatorUnavailable -> "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"ok\":false,\"error\":\"evaluator_unavailable\"}}"
-            .InvalidRequest(detail) -> "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"ok\":false,\"error\":\"invalid_request\",\"detail\":\"{json_escape(detail)}\"}}"
+            .InvalidRequest(detail) -> "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"ok\":false,\"error\":\"invalid_request\",\"detail\":\"{foundation_json_escape(detail)}\"}}"
             .Rejected(err) -> err.json()
         }
     }
@@ -91,7 +91,7 @@ fn evaluate_authority(request: EvaluateRequest) -> [AuthorityRequirement] {
 }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1987
 fn validate_common(session: &PausedSession, identity: &SessionIdentity, request_id: String, scope_id: String,
-    budget: &EvaluationBudget, cancellation: &Cancellation, authority: &[AuthorityRequirement]) RejectReason! {
+    budget: EvaluationBudget, cancellation: &Cancellation, authority: &[AuthorityRequirement]) RejectReason! {
     if session.state == .Stale -> return .Err(.StaleSession)
     if session.state != .Paused {
         return .Err(if session.state == .Cancelled || cancellation.requested -> .Cancelled else -> .SessionNotPaused)
@@ -111,7 +111,7 @@ fn validate_common(session: &PausedSession, identity: &SessionIdentity, request_
 }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:2044
 fn reject(operation: String, request_id: String, identity: &SessionIdentity, scope_id: String,
-    authority: &[AuthorityRequirement], reason: RejectReason, usage: EvaluationUsage) -> RequestError {
+    authority: [AuthorityRequirement], reason: RejectReason, usage: EvaluationUsage) -> RequestError {
     RequestError { reason, audit: AuditReceipt.new(operation, request_id, identity, scope_id, authority,
         .Rejected, .Val(reason), usage, false, 0, 0, .None) }
 }
@@ -130,8 +130,7 @@ fn project_node(value: &ValueProjection, identity: &SessionIdentity, budget: Eva
         stats.truncated = true
         return .None
     }
-    if *nodes < budget.max_nodes -> *nodes = nodes.saturating_add(1)
-    else -> stats.truncated = true
+    if *nodes < budget.max_nodes -> *nodes = nodes.saturating_add(1) else -> stats.truncated = true
     stats.usage.nodes = *nodes
     stats.usage.depth = stats.usage.depth.max(depth)
     metadata :: value.metadata_bytes()
@@ -191,23 +190,22 @@ fn valid_text(value: String, label: String, max_bytes: USize) Err! {
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:2183
 fn array_json(values: Iterator<String>) -> String { "[{values.collect().join(",")}]" }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:2187
-fn object(raw: String) -> [String:DataTree] Err! {
+fn object(raw: String) -> [String:Dyn] Err! {
     root :: parse_json_with_limit(raw, MAX_REQUEST_BYTES) ?? return .Err("paused request is not valid bounded JSON")
-    if root == .Object(fields) -> fields.into_iter().collect()
-    else -> .Err("paused request must be a JSON object")
+    if root == .Object(fields) -> fields.into_iter().collect() else -> .Err("paused request must be a JSON object")
 }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:2196
-fn required_string(fields: [String:DataTree], key: String) -> String Err! {
+fn required_string(fields: [String:Dyn], key: String) -> String Err! {
     value :: fields.get(key).and_then((value) -> if value == {
         .Text(value) -> .Val(value.copy())
         else -> .None
     })
         ?? return .Err("paused request requires string `{key}`")
-    valid_text(value, key, 256)?
+    valid_text(value, key, 256)
     value
 }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:2211
-fn optional_string(fields: [String:DataTree], key: String) -> String? Err! {
+fn optional_string(fields: [String:Dyn], key: String) -> String? Err! {
     if fields.get(key) == {
         .None | .Val(.Null) -> .None
         .Val(.Text(value)) -> {
@@ -218,17 +216,17 @@ fn optional_string(fields: [String:DataTree], key: String) -> String? Err! {
     }
 }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:2225
-fn required_u64(fields: [String:DataTree], key: String) -> U64 Err! {
+fn required_u64(fields: [String:Dyn], key: String) -> U64 Err! {
     fields.get(key).and_then(json_int).and_then((value) -> U64.try_from(value).ok())
         ?? return .Err("paused request requires non-negative integer `{key}`")
 }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:2237
-fn required_u32(fields: [String:DataTree], key: String) -> U32 Err! {
-    value :: required_u64(fields, key)?
+fn required_u32(fields: [String:Dyn], key: String) -> U32 Err! {
+    value :: required_u64(fields, key)
     U32.try_from(value) ?? return .Err("paused request integer `{key}` is too large")
 }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:2245
-fn optional_bool(fields: [String:DataTree], key: String) -> Bool Err! {
+fn optional_bool(fields: [String:Dyn], key: String) -> Bool Err! {
     if fields.get(key) == {
         .None -> false
         .Val(.Bool(value)) -> *value
@@ -236,39 +234,39 @@ fn optional_bool(fields: [String:DataTree], key: String) -> Bool Err! {
     }
 }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:2256
-fn parse_identity(fields: [String:DataTree]) -> SessionIdentity Err! {
-    identity :: [String:DataTree]{if fields.get("identity") == {
+fn parse_identity(fields: [String:Dyn]) -> SessionIdentity Err! {
+    identity :: [String:Dyn]{if fields.get("identity") == {
         .Val(.Object(identity)) -> identity.iter().cloned().collect()
-        .Val(_) -> return .Err("paused request `identity` must be an object")
+        .Val(_) -> { return .Err("paused request `identity` must be an object") }
         .None -> fields.copy()
     }}
-    SessionIdentity.new(required_string(&identity, "session_id")?, required_string(&identity, "source_id")?,
+    SessionIdentity.new(required_string(&identity, "session_id"), required_string(&identity, "source_id")?,
         required_string(&identity, "source_revision")?, required_string(&identity, "pause_id")?, required_string(&identity, "frame_id")?)
 }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:2273
-fn parse_budget(fields: [String:DataTree]) -> EvaluationBudget Err! {
+fn parse_budget(fields: [String:Dyn]) -> EvaluationBudget Err! {
     if fields.get("budget") == .Val(.Object(entries)) {
-        budget :: [String:DataTree]{entries.iter().cloned().collect()}
-        EvaluationBudget.new(required_u32(&budget, "max_depth")?, required_u64(&budget, "max_nodes")?,
+        budget :: [String:Dyn]{entries.iter().cloned().collect()}
+        EvaluationBudget.new(required_u32(&budget, "max_depth"), required_u64(&budget, "max_nodes")?,
             required_u64(&budget, "max_bytes")?, required_u64(&budget, "max_steps")?)
     } else { DEFAULT_EVALUATION_BUDGET }
 }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:2289
-fn parse_authority(fields: [String:DataTree]) -> [AuthorityRequirement] Err! {
+fn parse_authority(fields: [String:Dyn]) -> [AuthorityRequirement] Err! {
     value :: fields.get("authority") ?? return []
     if value == .Array(values) {
         authority := [AuthorityRequirement]{}
         loop value in values {
             if value == .Object(entries) {
-                fields :: [String:DataTree]{entries.iter().cloned().collect()}
-                authority.push(AuthorityRequirement.new(required_string(&fields, "capability")?, required_string(&fields, "scope_id")?)?)
+                fields :: [String:Dyn]{entries.iter().cloned().collect()}
+                authority.push(AuthorityRequirement.new(required_string(&fields, "capability"), required_string(&fields, "scope_id")?)?)
             } else { return .Err("paused authority requirement must be an object") }
         }
         authority
     } else { .Err("paused request `authority` must be an array") }
 }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:2314
-fn validate_header(fields: &[String:DataTree], kind: String) Err! {
+fn validate_header(fields: &[String:Dyn], kind: String) Err! {
     if required_string(fields, "protocol")? != PAUSED_EVALUATE_PROTOCOL -> return .Err("paused request protocol does not match jet.devtools.v1")
     schema :: fields.get("schema_version").and_then(json_int).and_then((value) -> U32.try_from(value).ok())
         ?? return .Err("paused request schema_version is missing or invalid")
@@ -277,19 +275,19 @@ fn validate_header(fields: &[String:DataTree], kind: String) Err! {
 }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:2335
 fn parse_inspect_request(raw: String) -> InspectRequest Err! {
-    fields :: object(raw)?
-    validate_header(&fields, "paused.inspect")?
-    request := InspectRequest.new(required_string(&fields, "request_id")?, parse_identity(&fields)?,
+    fields :: object(raw)
+    validate_header(&fields, "paused.inspect")
+    request := InspectRequest.new(required_string(&fields, "request_id"), parse_identity(&fields)?,
         required_string(&fields, "scope_id")?, parse_budget(&fields)?, parse_authority(&fields)?)?
-    request.value_id = optional_string(&fields, "value_id")?
-    request.cancellation = if optional_bool(&fields, "cancelled")? -> Cancellation.requested("request cancelled")? else -> Cancellation.none()
-    request.validate_shape()?
+    request.value_id = optional_string(&fields, "value_id")
+    request.cancellation = if optional_bool(&fields, "cancelled") -> Cancellation.requested("request cancelled")? else -> Cancellation.none()
+    request.validate_shape()
     request
 }
 // Rust: crates/jet-devserver/src/PausedEvaluate.rs:2355
 fn parse_evaluate_request(raw: String) -> EvaluateRequest Err! {
-    fields :: object(raw)?
-    validate_header(&fields, "paused.evaluate")?
+    fields :: object(raw)
+    validate_header(&fields, "paused.evaluate")
     mode :: if required_string(&fields, "mode")? == {
         "read_only" -> EvaluationMode.ReadOnly
         "mutate" -> EvaluationMode.Mutate
@@ -301,17 +299,17 @@ fn parse_evaluate_request(raw: String) -> EvaluateRequest Err! {
         .Val(.Array(values)) -> {
             loop value in values {
                 if value == .Text(value) {
-                    valid_id(value, "evaluation effect")?
+                    valid_id(value, "evaluation effect")
                     effects.push(value.copy())
                 } else { return .Err("paused evaluation effects must be strings") }
             }
         }
-        .Val(_) -> return .Err("paused evaluation `effects` must be an array")
+        .Val(_) -> { return .Err("paused evaluation `effects` must be an array") }
     }
-    request := EvaluateRequest.new(required_string(&fields, "request_id")?, parse_identity(&fields)?,
+    request := EvaluateRequest.new(required_string(&fields, "request_id"), parse_identity(&fields)?,
         required_string(&fields, "scope_id")?, required_string(&fields, "expression")?, mode, ^effects,
         parse_authority(&fields)?, parse_budget(&fields)?)?
-    request.cancellation = if optional_bool(&fields, "cancelled")? -> Cancellation.requested("request cancelled")? else -> Cancellation.none()
-    request.validate_shape()?
+    request.cancellation = if optional_bool(&fields, "cancelled") -> Cancellation.requested("request cancelled")? else -> Cancellation.none()
+    request.validate_shape()
     request
 }

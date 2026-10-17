@@ -76,8 +76,8 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
     assert(rows[visible].public)
     assert(!rows[sibling].public)
     assert(rows[sibling].package_public)
-    loop name in [String]{"Outer::Box::method", "Outer::Service::call", "Outer::work"} -> assert(rows[doc_collect_test_item(rows, name, "function")].public)
-    loop name in [String]{"Outer::Choice::First", "Outer::Choice::Second"} {
+    loop name in ([String]{"Outer::Box::method", "Outer::Service::call", "Outer::work"}) -> assert(rows[doc_collect_test_item(rows, name, "function")].public)
+    loop name in ([String]{"Outer::Choice::First", "Outer::Choice::Second"}) {
         variant :: doc_collect_test_item(rows, name, "variant")
         assert(rows[variant].public)
         assert(!rows[variant].package_public)
@@ -103,7 +103,7 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
     assert_eq(impls[1].source, rows[box].source)
     assert(rows[doc_collect_test_item(rows, "Outer::Box::own", "function")].public)
     // Nested impl methods intentionally use the leaf type, not Outer::Box.
-    loop name in [String]{"Box::z", "Box::a", "Box::alpha", "Choice::choose"} -> assert(rows[doc_collect_test_item(rows, name, "function")].public)
+    loop name in ([String]{"Box::z", "Box::a", "Box::alpha", "Choice::choose"}) -> assert(rows[doc_collect_test_item(rows, name, "function")].public)
     assert_eq(rows[doc_collect_test_item(rows, "Box::z", "function")].source.line, 4)
     loop row in impls -> assert(row.public)
 }
@@ -215,9 +215,9 @@ fn doc_collect_test_original_run_fixture(items: [Item], source: String, inherite
     rows := [DocItem]{}
     impls := [DocImpl]{}
     doc_collect_items(items, "run.jet", "", inherited_public, doc_test_os_path("/project/run.jet"), "run", source, doc_test_os_path("/project"), names, &rows, &impls)
-    loop name in [String]{"Checked", "Payment", "Widget", "Choice", "Displayable", "answer"} {
+    loop name in ([String]{"Checked", "Payment", "Widget", "Choice", "Displayable", "answer"}) {
         found := false
-        loop row in rows -> if row.qualified_name == name -> found = true
+        loop row in rows { if row.qualified_name == name -> found = true }
         assert(found)
     }
     assert(rows[doc_collect_test_item(rows, "Widget::value", "field")].public)
