@@ -4,25 +4,8 @@
 // foundation_parse_protocol_json_with_limit, without a second parser.
 use core.encoding.json as protocol_json
 
-#Error
-struct FoundationJSONError {
-    message: String
-}
-
-// D-JSON=C: Rust JSON::parse retires into Core's strict parser; keep its reason.
-fn foundation_json_parse(text: String) -> Dyn FoundationJSONError! {
-    value :: protocol_json.parse(text) ?? return Err(FoundationJSONError{message: err.reason})
-    Ok(value)
-}
-
 fn foundation_parse_protocol_json(text: String) -> Dyn? Never! {
-    foundation_parse_protocol_json_with_limit(text, 1048576)
-}
-
-// JSON.rs::parse_json_with_limit: DAP supplies 16 MiB without widening the
-// 1 MiB LSP default; the depth and i64 domain checks are shared.
-fn foundation_parse_protocol_json_with_limit(text: String, max_bytes: Int) -> Dyn? Never! {
-    if text.bytes().len() > max_bytes -> return None
+    if text.bytes().len() > 1048576 -> return None
     value :: protocol_json.parse(text) ?? return None
     if !foundation_protocol_json_valid(value, 0) -> return None
     Val(value)
