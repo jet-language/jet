@@ -33,7 +33,7 @@ for (const line of (result.stdout ?? "").split(/\r?\n/)) {
   const match = /^X64 EXEC ([\w-]+)$/.exec(line);
   if (match) witnesses.add(match[1]);
 }
-for (const name of ["parallel", "scalar", "spill", "abi-f32", "abi-f64", "entry", "memory-address", "address-arithmetic", "frame-branch"]) {
+for (const name of ["parallel", "scalar", "spill", "abi-f32", "abi-f64", "entry", "memory-address", "address-arithmetic", "frame-branch", "split-loop"]) {
   const path = resolve(out, `${name}.elf`);
   if (!witnesses.has(name) || !existsSync(path)) { console.error(`missing machine witness ${name}`); failed = true; continue; }
   const run = spawnSync(path, [], { encoding: "utf8", timeout: 10000 });

@@ -1,20 +1,37 @@
-// Linear-scan register allocation (Poletto and Sarkar) for x86-64 System V.
+// Linear-scan register allocation (Poletto and Sarkar) for x86-64 System V,
+// with live ranges split at block boundaries (Docs/O1.md G7).
 //
 // Blocks are laid out in function order and every block start, instruction and
-// terminator gets one position. Block-level liveness extends each value's
-// interval over the blocks it is live through, so one conservative interval
-// per value covers loops. Intervals are scanned by start; an interval expires
-// strictly before the next one starts, except that an instruction's result may
-// take the register of an operand whose interval ends at that instruction, in
-// the operand positions instruction selection reads before it writes the
-// result (x64_share_candidates). A word live across a call may only take a
-// callee-saved register; a Float crossing a call spills (all xmm are volatile).
-// Otherwise a value first tries the registers of the
-// values it is moved to or from on a block edge, then its ABI register as an
-// entry parameter or call argument, then the pool in order, so edge, entry and
-// argument moves become no-ops where intervals allow. When no register is
-// free, the interval that ends last is spilled to its own frame slot for its
-// whole life.
+// terminator gets one position. Block-level liveness splits each value's live
+// range into one segment per block where it is live: from the block start (a
+// parameter or live-in value) or its definition, through its last use in the
+// block or the terminator (a live-out value). A segment holds one location;
+// different segments of one value may hold different locations, and
+// instruction selection moves the value on each CFG edge where its location
+// changes, in the same parallel move as the edge's block arguments. A value
+// is not live, and holds no register, in the blocks between its uses that it
+// does not live through.
+//
+// Blocks are allocated deepest loop first (a loop is a header row with a back
+// edge from the same or a later row; ties keep layout order), so a value
+// first takes registers where its code runs most and the shallower blocks
+// around a loop adapt to it: their edge moves land outside the loop. Within a
+// block, segments are scanned by start; a segment expires strictly before the
+// next one starts, except that an instruction's result may take the register
+// of an operand whose segment ends at that instruction, in the operand
+// positions instruction selection reads before it writes the result
+// (x64_share_candidates). A word segment crossing a call may only take a
+// callee-saved register; a Float segment crossing a call spills (all xmm are
+// volatile). Otherwise a segment first tries the register its value held in
+// the block allocated last, then the registers of the values it is moved to
+// or from on a block edge, then its ABI register as an entry parameter or call
+// argument, then the pool in order, so edge, entry and argument moves become
+// no-ops where segments allow. When no register is free, the segment with the
+// lowest use density (uses, definition and block boundaries per position;
+// ties to the one ending last) among the new one and the active ones in its
+// pool is spilled: that value lives in its frame slot for that block.
+// Values whose slot spans are disjoint share one frame slot (see the end of
+// x64_allocate).
 //
 // A value defined by Const takes no register: its location is the immediate
 // itself, which instruction selection encodes into the instruction using it
@@ -39,15 +56,27 @@ enum X64Loc {
 }
 
 struct X64Allocation {
+    // Per value, its location in the block that defines it (a parameter's
+    // block). Const, StackSlot and eliminated address values hold one
+    // location everywhere. Instruction selection points each other value at
+    // its segment's location on entering a block (x64_enter_block).
     locations: [X64Loc]
     spill_slots: Int
     // Callee-saved registers the function writes, in push order.
     callee_saved: [Int]
-    // Per value, the first and last position of its interval (-1: unused);
-    // a value holds its location over the whole interval. Positions count
-    // each block start, instruction and terminator in function order.
-    starts: [Int]
-    ends: [Int]
+    // One segment per value and block where the value is live. Block row
+    // b's segments are `segment_*[block_segments[b]..<block_segments[b + 1]]`:
+    // its parameters (in order), then its live-in values, then the values its
+    // instructions define, in position order; the first `block_entries[b]`
+    // start at the block's start. A segment holds its location from its
+    // first through its last position; positions count each block start,
+    // instruction and terminator in function order.
+    segment_values: [Int]
+    segment_locations: [X64Loc]
+    segment_starts: [Int]
+    segment_ends: [Int]
+    block_segments: [Int]
+    block_entries: [Int]
     folds: X64AddressFolds
 }
 
@@ -419,28 +448,128 @@ fn x64_hint_arguments(function: LIRFunction, values: [LIRValueID], hint_regs: &[
     }
 }
 
+// Loop depth per block row: a loop is a header row with a back edge from the
+// same or a later row and spans the header through its last such row; a
+// row's depth counts the spans holding it (one difference array, one pass).
+fn x64_block_depths(function: LIRFunction, block_rows: [Int:Int]) -> [Int] Never! {
+    latest := [Int]{}
+    deltas := [Int]{0}
+    loop _ in function.blocks {
+        &latest.push(-1)
+        &deltas.push(0)
+    }
+    loop (row, block) in function.blocks {
+        loop target in lir_terminator_targets(block.terminator) {
+            header :: block_rows.get(target.block.value) ?? -1
+            if header >= 0 && header <= row && row > latest[header] -> latest[header] = row
+        }
+    }
+    loop (header, last) in latest {
+        if last < 0 -> next
+        deltas[header] = deltas[header] + 1
+        deltas[last + 1] = deltas[last + 1] - 1
+    }
+    depths := [Int]{}
+    depth := 0
+    loop row in 0..<function.blocks.len() {
+        depth += deltas[row]
+        &depths.push(depth)
+    }
+    depths
+}
+
+// Block rows deepest first; rows of one depth keep layout order.
+fn x64_block_order(depths: [Int]) -> [Int] Never! {
+    deepest := 0
+    loop depth in depths { if depth > deepest -> deepest = depth }
+    buckets := [[Int]]{}
+    loop _ in 0..<(deepest + 1) -> &buckets.push([Int]{})
+    loop (row, depth) in depths -> &buckets[depth].push(row)
+    order := [Int]{}
+    level := deepest
+    loop level >= 0 {
+        loop row in buckets[level] -> &order.push(row)
+        level -= 1
+    }
+    order
+}
+
+// Segments under construction: `open_at[value]` is the value's segment in
+// the block whose mark (row + 1) `open_marks[value]` holds. A segment's
+// weight counts its value's uses and definition in it and its block
+// boundaries (live in, live out).
+struct X64SegmentBuild {
+    values: [Int]
+    starts: [Int]
+    ends: [Int]
+    weights: [Int]
+    open_marks: [Int]
+    open_at: [Int]
+}
+
+// Extend `value`'s segment in the block marked `mark` through `position`,
+// opening it there when the block has none yet, and add `weight`.
+fn x64_segment_touch(build: &X64SegmentBuild, value: Int, mark: Int, position: Int, weight: Int) Never! {
+    if build.open_marks[value] != mark {
+        build.open_marks[value] = mark
+        build.open_at[value] = build.values.len()
+        &build.values.push(value)
+        &build.starts.push(position)
+        &build.ends.push(position)
+        &build.weights.push(0)
+    }
+    at :: build.open_at[value].copy()
+    if position > build.ends[at] -> build.ends[at] = position
+    build.weights[at] = build.weights[at] + weight
+}
+
+// Among `segment` and the active segments holding a register of `pool`, the
+// one with the lowest use density (weight per position, compared
+// cross-multiplied); ties take the one ending last, then the earlier
+// candidate. -1 when that is `segment` itself.
+fn x64_cheapest_victim(segment: Int, active: [Int], registers: [Int], pool: [Int], build: X64SegmentBuild) -> Int Never! {
+    best := segment
+    loop other in active {
+        if !x64_pool_has(pool, registers[other]) -> next
+        other_cost :: build.weights[other] * (build.ends[best] - build.starts[best] + 1)
+        best_cost :: build.weights[best] * (build.ends[other] - build.starts[other] + 1)
+        if other_cost < best_cost || (other_cost == best_cost && build.ends[other] > build.ends[best]) -> best = other
+    }
+    if best == segment -> -1 else -> best
+}
+
+// The location of `value` holding register `reg` (-1: none), else frame
+// slot `slot`.
+fn x64_value_location(function: LIRFunction, folds: X64AddressFolds, immediate: [Bool], immediates: [Int], frame: [Bool], value: Int, reg: Int, slot: Int) -> X64Loc Never! {
+    if {
+        folds.skipped[value] -> X64Loc.Folded
+        immediate[value] -> X64Loc.Imm{value: immediates[value]}
+        frame[value] -> X64Loc.Frame{value: value}
+        reg >= 16 -> X64Loc.Xmm{reg: reg - 16, single: function.values[value].layout == lir_layout_float32()}
+        reg >= 0 -> X64Loc.Reg{reg: reg}
+        function.values[value].layout.class == .Float -> X64Loc.FloatStack{slot: slot, single: function.values[value].layout == lir_layout_float32()}
+        else -> X64Loc.Stack{slot: slot}
+    }
+}
+
 fn x64_allocate(function: LIRFunction) -> X64Allocation Never! {
     folds :: x64_address_folds(function)
     count :: function.values.len()
     liveness :: x64_liveness(function, folds)
-    starts := [Int]{}
-    ends := [Int]{}
-    loop _ in 0..<count {
-        &starts.push(-1)
-        &ends.push(-1)
-    }
-    calls := [Int]{}
     // Where each instruction-defined value is defined, and the operands its
-    // register may come from (x64_share_candidates).
+    // register may come from (x64_share_candidates); per value the segment
+    // that defines it.
     def_at := [Int]{}
     shares := [[Int]]{}
     hint_values := [[Int]]{}
     hint_regs := [[Int]]{}
+    homes := [Int]{}
     loop _ in 0..<count {
         &def_at.push(-1)
         &shares.push([Int]{})
         &hint_values.push([Int]{})
         &hint_regs.push([Int]{})
+        &homes.push(-1)
     }
     block_rows := [Int:Int]{}
     loop (index, block) in function.blocks {
@@ -468,72 +597,6 @@ fn x64_allocate(function: LIRFunction) -> X64Allocation Never! {
         }
     }
     if function.blocks.len() > 0 -> x64_hint_arguments(function, function.blocks[0].params, &hint_regs)
-    position := 0
-    loop (block_index, block) in function.blocks {
-        touched := [Int]{}
-        loop at in liveness.in_starts[block_index]..<liveness.in_starts[block_index + 1] -> &touched.push(liveness.live_in[at])
-        loop param in block.params -> &touched.push(param.value)
-        loop value in touched {
-            if starts[value] < 0 || position < starts[value] -> starts[value] = position
-            if position > ends[value] -> ends[value] = position
-        }
-        position += 1
-        loop inst in block.insts {
-            touched = [Int]{}
-            loop used in x64_selected_uses(inst, folds) -> &touched.push(used.value)
-            if x64_selected_def(inst, folds) == .Val(dst) {
-                &touched.push(dst.value)
-                def_at[dst.value] = position
-                loop operand in x64_share_candidates(inst, folds) -> &shares[dst.value].push(operand.value)
-            }
-            loop value in touched {
-                if starts[value] < 0 || position < starts[value] -> starts[value] = position
-                if position > ends[value] -> ends[value] = position
-            }
-            if x64_inst_is_call(inst) -> &calls.push(position)
-            position += 1
-        }
-        touched = [Int]{}
-        loop used in lir_terminator_uses(block.terminator) -> &touched.push(used.value)
-        loop at in liveness.out_starts[block_index]..<liveness.out_starts[block_index + 1] -> &touched.push(liveness.live_out[at])
-        loop value in touched {
-            if starts[value] < 0 || position < starts[value] -> starts[value] = position
-            if position > ends[value] -> ends[value] = position
-        }
-        position += 1
-    }
-
-    // calls_below[p] counts call positions below p, so a value crosses a call
-    // when one lies strictly between its start and end.
-    is_call := x64_falses(position + 1)
-    loop call in calls -> is_call[call] = true
-    calls_below := [Int]{0}
-    loop at in 0..<(position + 1) -> &calls_below.push(if is_call[at] -> calls_below[at] + 1 else -> calls_below[at])
-    crosses := [Bool]{}
-    loop value in 0..<count {
-        &crosses.push(ends[value] > starts[value] + 1 && calls_below[ends[value]] - calls_below[starts[value] + 1] > 0)
-    }
-
-    // Values in start order; ties keep value order: a counting sort over the
-    // start positions (-1 for an unused value) replaces repeated minimum scans.
-    buckets := [[Int]]{}
-    loop _ in 0..<(position + 1) -> &buckets.push([Int]{})
-    loop value in 0..<count -> &buckets[starts[value] + 1].push(value)
-    order := [Int]{}
-    loop bucket in buckets {
-        loop value in bucket -> &order.push(value)
-    }
-
-    registers := [Int]{}
-    slots := [Int]{}
-    loop _ in 0..<count {
-        &registers.push(-1)
-        &slots.push(-1)
-    }
-    owners := [Int]{}
-    loop _ in 0..<32 -> &owners.push(-1)
-    spill_slots := 0
-    active := [Int]{}
     // Const-defined values live in their instructions as immediates, and
     // StackSlot addresses as rbp displacements.
     immediate := x64_falses(count)
@@ -552,90 +615,230 @@ fn x64_allocate(function: LIRFunction) -> X64Allocation Never! {
             }
         }
     }
-    loop value in order {
-        if immediate[value] || frame[value] || folds.skipped[value] -> next
-        kept := [Int]{}
-        loop other in active {
-            if ends[other] < starts[value] {
-                owners[registers[other]] = -1
-            } else {
-                &kept.push(other)
+
+    // One segment per value and block where it is live, in the order
+    // X64Allocation documents.
+    build := X64SegmentBuild{values: [Int]{}, starts: [Int]{}, ends: [Int]{}, weights: [Int]{}, open_marks: [Int]{}, open_at: [Int]{}}
+    loop _ in 0..<count {
+        &build.open_marks.push(0)
+        &build.open_at.push(-1)
+    }
+    block_segments := [Int]{0}
+    block_entries := [Int]{}
+    calls := [Int]{}
+    terminators := [Int]{}
+    position := 0
+    loop (block_index, block) in function.blocks {
+        mark :: block_index + 1
+        first :: build.values.len()
+        loop param in block.params {
+            x64_segment_touch(&build, param.value, mark, position, 1)
+            homes[param.value] = build.open_at[param.value].copy()
+        }
+        loop at in liveness.in_starts[block_index]..<liveness.in_starts[block_index + 1] -> x64_segment_touch(&build, liveness.live_in[at], mark, position, 1)
+        &block_entries.push(build.values.len() - first)
+        position += 1
+        loop inst in block.insts {
+            loop used in x64_selected_uses(inst, folds) -> x64_segment_touch(&build, used.value, mark, position, 1)
+            if x64_selected_def(inst, folds) == .Val(dst) {
+                x64_segment_touch(&build, dst.value, mark, position, 1)
+                def_at[dst.value] = position
+                homes[dst.value] = build.open_at[dst.value].copy()
+                loop operand in x64_share_candidates(inst, folds) -> &shares[dst.value].push(operand.value)
             }
+            if x64_inst_is_call(inst) -> &calls.push(position)
+            position += 1
         }
-        active = kept
-        pool := [Int]{}
-        is_float :: function.values[value].layout.class == .Float
-        if is_float {
-            if !crosses[value] { loop reg in X64_FLOAT_POOL -> &pool.push(reg) }
-        } else {
-            if !crosses[value] { loop reg in X64_CALLER_SAVED_POOL -> &pool.push(reg) }
-            loop reg in X64_CALLEE_SAVED_POOL -> &pool.push(reg)
-        }
-        chosen := -1
-        // A dying operand of the defining instruction hands its register over.
-        if def_at[value] == starts[value] {
-            loop operand in shares[value] {
-                reg :: registers[operand]
-                if chosen < 0 && reg >= 0 && ends[operand] == starts[value] && owners[reg] == operand && x64_pool_has(pool, reg) {
-                    chosen = reg
+        loop used in lir_terminator_uses(block.terminator) -> x64_segment_touch(&build, used.value, mark, position, 1)
+        loop at in liveness.out_starts[block_index]..<liveness.out_starts[block_index + 1] -> x64_segment_touch(&build, liveness.live_out[at], mark, position, 1)
+        &terminators.push(position)
+        position += 1
+        &block_segments.push(build.values.len())
+    }
+
+    // calls_below[p] counts call positions below p, so a segment crosses a
+    // call when one lies strictly between its start and end.
+    is_call := x64_falses(position + 1)
+    loop call in calls -> is_call[call] = true
+    calls_below := [Int]{0}
+    loop at in 0..<(position + 1) -> &calls_below.push(if is_call[at] -> calls_below[at] + 1 else -> calls_below[at])
+
+    // Per segment its register (-1: its value's frame slot); per value its
+    // frame slot (-1: none) and the register its last allocated segment took.
+    registers := [Int]{}
+    loop _ in build.values -> &registers.push(-1)
+    slots := [Int]{}
+    last_regs := [Int]{}
+    loop _ in 0..<count {
+        &slots.push(-1)
+        &last_regs.push(-1)
+    }
+    owners := [Int]{}
+    loop _ in 0..<32 -> &owners.push(-1)
+    spill_slots := 0
+    // Segments never cross a block boundary, so each block is a scan of its
+    // own, with every register free at its start.
+    loop row in x64_block_order(x64_block_depths(function, block_rows)) {
+        loop reg in 0..<32 -> owners[reg] = -1
+        active := [Int]{}
+        loop segment in block_segments[row]..<block_segments[row + 1] {
+            value :: build.values[segment]
+            if immediate[value] || frame[value] || folds.skipped[value] -> next
+            start :: build.starts[segment]
+            end :: build.ends[segment]
+            kept := [Int]{}
+            loop other in active {
+                if build.ends[other] < start {
+                    owners[registers[other]] = -1
+                } else {
+                    &kept.push(other)
+                }
+            }
+            active = kept
+            crosses :: end > start + 1 && calls_below[end] - calls_below[start + 1] > 0
+            pool := [Int]{}
+            is_float :: function.values[value].layout.class == .Float
+            if is_float {
+                if !crosses { loop reg in X64_FLOAT_POOL -> &pool.push(reg) }
+            } else {
+                if !crosses { loop reg in X64_CALLER_SAVED_POOL -> &pool.push(reg) }
+                loop reg in X64_CALLEE_SAVED_POOL -> &pool.push(reg)
+            }
+            chosen := -1
+            // A dying operand of the defining instruction hands its register over.
+            if def_at[value] == start {
+                shared := -1
+                loop operand in shares[value] {
+                    loop other in active {
+                        reg :: registers[other]
+                        if shared < 0 && build.values[other] == operand && build.ends[other] == start && owners[reg] == other && x64_pool_has(pool, reg) {
+                            shared = other
+                            chosen = reg
+                        }
+                    }
+                }
+                if shared >= 0 {
                     kept = [Int]{}
-                    loop other in active { if other != operand -> &kept.push(other) }
+                    loop other in active { if other != shared -> &kept.push(other) }
                     active = kept
                 }
             }
-        }
-        loop partner in hint_values[value] {
-            reg :: registers[partner]
-            if chosen < 0 && reg >= 0 && owners[reg] < 0 && x64_pool_has(pool, reg) -> chosen = reg
-        }
-        loop reg in hint_regs[value] {
-            if chosen < 0 && owners[reg] < 0 && x64_pool_has(pool, reg) -> chosen = reg
-        }
-        loop reg in pool { if chosen < 0 && owners[reg] < 0 -> chosen = reg }
-        if chosen >= 0 {
-            registers[value] = chosen
-            owners[chosen] = value
-            &active.push(value)
-        } else {
-            victim := -1
-            loop other in active {
-                if x64_pool_has(pool, registers[other]) && (victim < 0 || ends[other] > ends[victim]) -> victim = other
+            last :: last_regs[value].copy()
+            if chosen < 0 && last >= 0 && owners[last] < 0 && x64_pool_has(pool, last) -> chosen = last
+            loop partner in hint_values[value] {
+                reg :: last_regs[partner]
+                if chosen < 0 && reg >= 0 && owners[reg] < 0 && x64_pool_has(pool, reg) -> chosen = reg
             }
-            if victim >= 0 && ends[victim] > ends[value] {
-                reg :: registers[victim].copy()
-                registers[victim] = -1
-                slots[victim] = spill_slots
-                spill_slots += 1
-                kept = [Int]{}
-                loop other in active { if other != victim -> &kept.push(other) }
-                active = kept
-                registers[value] = reg
-                owners[reg] = value
-                &active.push(value)
-            } else {
-                slots[value] = spill_slots
-                spill_slots += 1
+            loop reg in hint_regs[value] {
+                if chosen < 0 && owners[reg] < 0 && x64_pool_has(pool, reg) -> chosen = reg
+            }
+            loop reg in pool { if chosen < 0 && owners[reg] < 0 -> chosen = reg }
+            if chosen < 0 {
+                victim :: x64_cheapest_victim(segment, active, registers, pool, build)
+                if victim >= 0 {
+                    chosen = registers[victim].copy()
+                    registers[victim] = -1
+                    victim_value :: build.values[victim]
+                    if slots[victim_value] < 0 {
+                        slots[victim_value] = spill_slots
+                        spill_slots += 1
+                    }
+                    kept = [Int]{}
+                    loop other in active { if other != victim -> &kept.push(other) }
+                    active = kept
+                } else if slots[value] < 0 {
+                    slots[value] = spill_slots
+                    spill_slots += 1
+                }
+            }
+            if chosen >= 0 {
+                registers[segment] = chosen
+                owners[chosen] = segment
+                last_regs[value] = chosen
+                &active.push(segment)
             }
         }
     }
 
+    // Spilled values share frame slots (M2 of 6510753fc, over segments). A
+    // value's slot span runs from the first to the last position where its
+    // slot is read or written: its spilled segments and, for a spilled
+    // segment its block starts with, every predecessor's terminator, where
+    // the edge's parallel move writes the slot. Between a write and a read
+    // of the slot, control stays in spilled segments of the value and the
+    // edges joining them, all inside the span. Spans in start order (ties in
+    // value order) take the first slot whose holders all ended strictly
+    // before the span starts, the register expiry rule, so the frame holds
+    // the most values spilled at once.
+    span_starts := [Int]{}
+    span_ends := [Int]{}
+    loop _ in 0..<count {
+        &span_starts.push(-1)
+        &span_ends.push(-1)
+    }
+    loop (segment, value) in build.values {
+        if registers[segment] >= 0 || slots[value] < 0 -> next
+        if span_starts[value] < 0 || build.starts[segment] < span_starts[value] -> span_starts[value] = build.starts[segment]
+        if build.ends[segment] > span_ends[value] -> span_ends[value] = build.ends[segment]
+    }
+    loop (row, block) in function.blocks {
+        loop target in lir_terminator_targets(block.terminator) {
+            successor :: block_rows.get(target.block.value) ?? -1
+            if successor < 0 -> next
+            loop segment in block_segments[successor]..<(block_segments[successor] + block_entries[successor]) {
+                value :: build.values[segment]
+                if registers[segment] >= 0 || slots[value] < 0 -> next
+                written :: terminators[row]
+                if span_starts[value] < 0 || written < span_starts[value] -> span_starts[value] = written
+                if written > span_ends[value] -> span_ends[value] = written
+            }
+        }
+    }
+    spans := [[Int]]{}
+    loop _ in 0..<(position + 1) -> &spans.push([Int]{})
+    loop value in 0..<count {
+        if slots[value] >= 0 -> &spans[span_starts[value]].push(value)
+    }
+    slot_ends := [Int]{}
+    loop bucket in spans {
+        loop value in bucket {
+            reuse := -1
+            loop (slot, last) in slot_ends { if reuse < 0 && last < span_starts[value] -> reuse = slot }
+            if reuse < 0 {
+                reuse = slot_ends.len()
+                &slot_ends.push(span_ends[value])
+            } else {
+                slot_ends[reuse] = span_ends[value]
+            }
+            slots[value] = reuse
+        }
+    }
+    spill_slots = slot_ends.len()
+
+    segment_locations := [X64Loc]{}
+    loop (segment, value) in build.values {
+        &segment_locations.push(x64_value_location(function, folds, immediate, immediates, frame, value, registers[segment], slots[value]))
+    }
     locations := [X64Loc]{}
     loop value in 0..<count {
-        &locations.push(if {
-            folds.skipped[value] -> X64Loc.Folded
-            immediate[value] -> X64Loc.Imm{value: immediates[value]}
-            frame[value] -> X64Loc.Frame{value: value}
-            registers[value] >= 16 -> X64Loc.Xmm{reg: registers[value] - 16, single: function.values[value].layout == lir_layout_float32()}
-            registers[value] >= 0 -> X64Loc.Reg{reg: registers[value]}
-            function.values[value].layout.class == .Float -> X64Loc.FloatStack{slot: slots[value], single: function.values[value].layout == lir_layout_float32()}
-            else -> X64Loc.Stack{slot: slots[value]}
-        })
+        &locations.push(if homes[value] >= 0 -> segment_locations[homes[value]] else -> x64_value_location(function, folds, immediate, immediates, frame, value, -1, slots[value]))
     }
     callee_saved := [Int]{}
     loop reg in X64_CALLEE_SAVED_POOL {
         used := false
-        loop value in 0..<count { if registers[value] == reg -> used = true }
+        loop held in registers { if held == reg -> used = true }
         if used -> &callee_saved.push(reg)
     }
-    X64Allocation{locations: locations, spill_slots: spill_slots, callee_saved: callee_saved, starts: starts, ends: ends, folds: folds}
+    X64Allocation{
+        locations: locations,
+        spill_slots: spill_slots,
+        callee_saved: callee_saved,
+        segment_values: build.values,
+        segment_locations: segment_locations,
+        segment_starts: build.starts,
+        segment_ends: build.ends,
+        block_segments: block_segments,
+        block_entries: block_entries,
+        folds: folds,
+    }
 }

@@ -348,11 +348,30 @@ fn x64_block_row(rows: [Int:Int], id: LIRBlockID) -> Int Never! {
     rows.get(id.value) ?? -1
 }
 
+// The parallel move on the edge to `target`: each block argument into its
+// parameter, and each value live into the target block whose segment there
+// holds another location than its segment here. `allocation.locations`
+// holds this block's locations (x64_enter_block). No-op moves are left out.
 fn x64_edge_moves(function: LIRFunction, allocation: X64Allocation, target: LIRJumpTarget, target_row: Int) -> [X64Move] Never! {
-    params :: function.blocks[target_row].params
+    first :: allocation.block_segments[target_row]
     moves := [X64Move]{}
-    loop (position, arg) in target.args -> &moves.push(X64Move{src: allocation.locations[arg.value], dst: allocation.locations[params[position].value]})
+    loop (position, arg) in target.args {
+        move :: X64Move{src: allocation.locations[arg.value], dst: allocation.segment_locations[first + position]}
+        if move.src != move.dst -> &moves.push(move)
+    }
+    loop segment in (first + function.blocks[target_row].params.len())..<(first + allocation.block_entries[target_row]) {
+        move :: X64Move{src: allocation.locations[allocation.segment_values[segment]], dst: allocation.segment_locations[segment]}
+        if move.src != move.dst -> &moves.push(move)
+    }
     moves
+}
+
+// Point `allocation.locations` at block row `row`'s segments: inside a block
+// every value it reads holds its segment's location there.
+fn x64_enter_block(allocation: &X64Allocation, row: Int) Never! {
+    loop segment in allocation.block_segments[row]..<allocation.block_segments[row + 1] {
+        allocation.locations[allocation.segment_values[segment]] = allocation.segment_locations[segment]
+    }
 }
 
 fn x64_emit_jump(emitter: &X64Emitter, block: Int) Never! {
@@ -526,8 +545,8 @@ fn x64_debug_line(lines: &[X64LineRow], at: Int, line: Int) Never! {
 fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64CompileResult Never! {
     gaps :: x64_selection_gaps(program, function)
     if gaps.len() > 0 -> return X64CompileResult{function: None, debug: None, errors: gaps}
-    allocation :: x64_allocate(function)
-    uses :: allocation.folds.uses
+    allocation := x64_allocate(function)
+    x64_enter_block(&allocation, 0)
     frame :: x64_frame(function, allocation.callee_saved.len(), allocation.spill_slots)
     emitter := X64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, fixups: [X64BlockFixup]{}, saved: allocation.callee_saved, stack: frame.stack, returns: [Int]{}}
 
@@ -612,6 +631,7 @@ fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Compile
     block_offsets := [Int]{}
     block_rows :: x64_block_rows(function)
     loop (block_index, block) in function.blocks {
+        x64_enter_block(&allocation, block_index)
         &block_offsets.push(emitter.code.len())
         &positions.push(emitter.code.len())
         &defining.push(false)
@@ -622,8 +642,8 @@ fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Compile
         if block.terminator == .Branch(condition, _, _) {
             if block.insts.len() > 0 {
                 if block.insts[block.insts.len() - 1] == {
-                    .Compare(dst, _, left, _) -> fused = dst == condition && uses[dst.value] == 1 && !x64_is_float(function, left)
-                    .Overflows(dst, _, _, _) -> fused = dst == condition && uses[dst.value] == 1
+                    .Compare(dst, _, left, _) -> fused = dst == condition && allocation.folds.uses[dst.value] == 1 && !x64_is_float(function, left)
+                    .Overflows(dst, _, _, _) -> fused = dst == condition && allocation.folds.uses[dst.value] == 1
                     else -> {}
                 }
             }
@@ -658,32 +678,73 @@ fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Compile
     }
 }
 
-// Where each debug binding's value lives: its location over the code of its
-// interval, from after its definition (or its block's start, for a block
-// parameter) through its last position. A value bound twice to one
-// variable yields one range.
+// The debug location of a value held at `loc`; None for one with no storage.
+fn x64_debug_location(loc: X64Loc, saved: Int, stack: [Int]) -> X64DebugLocation? Never! {
+    if loc == {
+        .Reg(reg) -> Val(X64DebugLocation.Register{reg: reg})
+        .Xmm(reg, _) -> Val(X64DebugLocation.Register{reg: 16 + reg})
+        .Stack(slot) | .FloatStack(slot, _) -> Val(X64DebugLocation.Frame{offset: x64_slot_disp(saved, slot)})
+        .Frame(slot) -> Val(X64DebugLocation.FrameAddress{offset: stack[slot]})
+        .Imm(_) | .Folded -> None
+    }
+}
+
+// Where each debug binding's value lives: over the code of each of its
+// segments, from after its definition (or its block's start, for a block
+// parameter or live-in value) through the segment's last position, in that
+// segment's location. Segments that follow one another in the code in one
+// location yield one range. A value bound twice to one variable yields its
+// ranges once.
 fn x64_variable_ranges(function: LIRFunction, allocation: X64Allocation, stack: [Int], positions: [Int], defining: [Bool]) -> [X64VariableRange] Never! {
+    count :: function.values.len()
+    // Each value's segments in function order, as a chain from heads[value]
+    // through links.
+    heads := [Int]{}
+    tails := [Int]{}
+    loop _ in 0..<count {
+        &heads.push(-1)
+        &tails.push(-1)
+    }
+    links := [Int]{}
+    loop (segment, value) in allocation.segment_values {
+        &links.push(-1)
+        if heads[value] < 0 {
+            heads[value] = segment
+        } else {
+            links[tails[value]] = segment
+        }
+        tails[value] = segment
+    }
     ranges := [X64VariableRange]{}
     seen := [Int:Bool]{}
-    count :: function.values.len()
+    saved :: allocation.callee_saved.len()
     loop binding in function.debug.bindings {
         value :: binding.value.value
-        first :: allocation.starts[value]
-        if first < 0 -> next
+        if heads[value] < 0 -> next
         key :: binding.variable * count + value
         if seen.get(key) != None -> next
         &seen.add(key, true).drop("checked absent above")
-        start :: if defining[first] -> positions[first + 1] else -> positions[first]
-        end :: positions[allocation.ends[value] + 1]
-        if start >= end -> next
-        location :: if allocation.locations[value] == {
-            .Reg(reg) -> X64DebugLocation.Register{reg: reg}
-            .Xmm(reg, _) -> X64DebugLocation.Register{reg: 16 + reg}
-            .Stack(slot) | .FloatStack(slot, _) -> X64DebugLocation.Frame{offset: x64_slot_disp(allocation.callee_saved.len(), slot)}
-            .Frame(slot) -> X64DebugLocation.FrameAddress{offset: stack[slot]}
-            .Imm(_) | .Folded -> { next }
+        open_start := -1
+        open_end := -1
+        open_location := X64DebugLocation.Register{reg: 0}
+        segment := heads[value]
+        loop segment >= 0 {
+            first :: allocation.segment_starts[segment]
+            start :: if defining[first] -> positions[first + 1] else -> positions[first]
+            end :: positions[allocation.segment_ends[segment] + 1]
+            if start < end && x64_debug_location(allocation.segment_locations[segment], saved, stack) == .Val(location) {
+                if open_start >= 0 && open_end == start && open_location == location {
+                    open_end = end
+                } else {
+                    if open_start >= 0 -> &ranges.push(X64VariableRange{variable: binding.variable, start: open_start, end: open_end, location: open_location})
+                    open_start = start
+                    open_end = end
+                    open_location = location
+                }
+            }
+            segment = links[segment]
         }
-        &ranges.push(X64VariableRange{variable: binding.variable, start: start, end: end, location: location})
+        if open_start >= 0 -> &ranges.push(X64VariableRange{variable: binding.variable, start: open_start, end: open_end, location: open_location})
     }
     ranges
 }
