@@ -2318,7 +2318,17 @@ fn sema_ownership_binding_for_expr(state: &SemaOwnershipState, expr: Expr, scope
     Val(scopes.bindings[index])
 }
 
+// The first binding of the root's symbol decides. Every binding of one symbol
+// key has that symbol's kind (symbol_id spells the kind into the key), so a
+// binding found among the bindings named like the root answers without
+// scanning the whole table, which holds every module-level symbol; a root bound
+// under another name falls back to the scan.
 fn sema_ownership_place_is_static(place: SemaOwnershipPlace, scopes: SemaScopeTable) -> Bool Never! {
+    if scopes.name_slots.get(place.root) == .Val(slot) {
+        loop position in scopes.name_positions[slot] {
+            if scopes.bindings[position].symbol.id.key == place.root_key -> return scopes.bindings[position].symbol.kind == SymbolKind.Constant
+        }
+    }
     loop binding_index in 0..<scopes.bindings.len() {
         if scopes.bindings[binding_index].symbol.id.key == place.root_key -> return scopes.bindings[binding_index].symbol.kind == SymbolKind.Constant
     }
