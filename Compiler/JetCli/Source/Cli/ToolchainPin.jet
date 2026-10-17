@@ -2,8 +2,6 @@
 // canonical package lock writer. Unlike CmdPkg's dependency status, this human
 // status goes to stderr and is suppressed by --json/--quiet. Typed pin
 // diagnostics always remain diagnostics on stderr, even in machine mode.
-use jetpack.trust_pin_move
-
 fn jet_cli_update_jet_pin(root: String, channel: String?, running_version: String, color: Bool, json: Bool, quiet: Bool) -[FS, Env, Exec, Time, Time.Wait]> JetDriverVerbOutput Never! {
     if trust_pin_move(root, channel, running_version) == {
         .Ok(message) -> JetDriverVerbOutput{stdout: "", stderr: if !json && !quiet -> "{message}\n" else -> "", exit_code: JET_DRIVER_EXIT_OK}
