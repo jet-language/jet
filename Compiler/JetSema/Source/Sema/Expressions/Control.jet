@@ -1566,7 +1566,10 @@ fn sema_expression_check_pattern_condition(subject: Expr, pattern: Pattern, span
                 .List(_, _, _) | .Map(_, _, _) -> true
                 else -> false
             }
-            if !window && !collection -> sema_ownership_note_pattern_sources(&state, symbol, sources)
+            // copy: the ownership state keeps the payload's subject places
+            // for a later `^name`, while the condition binding keeps them for
+            // its view provenance (sema_ownership_record_pattern_views).
+            if !window && !collection -> sema_ownership_note_pattern_sources(&state, symbol, sources.copy())
             &bindings.push(SemaConditionBinding{symbol: symbol, window: window, sources: sources})
         }
         &facts.push(updated)

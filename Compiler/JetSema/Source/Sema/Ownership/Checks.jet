@@ -1455,8 +1455,8 @@ fn sema_ownership_payload_key(name: String, span: Span) -> String Never! {
     "{name}@{span.start}"
 }
 
-fn sema_ownership_note_pattern_sources(state: &SemaOwnershipState, symbol: Symbol, sources: [Expr]) Never! {
-    state.pattern_sources[sema_ownership_payload_key(symbol.name, symbol.span)] = sources
+fn sema_ownership_note_pattern_sources(state: &SemaOwnershipState, symbol: Symbol, sources: ^[Expr]) Never! {
+    state.pattern_sources[sema_ownership_payload_key(symbol.name, symbol.span)] = ^sources
 }
 
 // `expr` (`p` or `p.f`) with its root name replaced by `source`.
@@ -1464,6 +1464,8 @@ fn sema_ownership_rebase_root(expr: Expr, source: Expr) -> Expr Never! {
     if expr == {
         .Field(base, member, span) -> Expr.Field{base: sema_ownership_rebase_root(base, source), member: member, span: span}
         .Paren(inner, _) -> sema_ownership_rebase_root(inner, source)
+        // copy: the moved place is a new path built on the binding's recorded
+        // subject, which stays recorded for another `^` of the same binding.
         else -> source.copy()
     }
 }
@@ -1479,7 +1481,10 @@ fn sema_ownership_rebase_root(expr: Expr, source: Expr) -> Expr Never! {
 // -1: rejected; 0: not a match payload binding; 1: the payload is taken.
 fn sema_ownership_move_pattern_payload(state: &SemaOwnershipState, expr: Expr, mark_span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Int {
     root :: sema_ownership_binding_for_expr(&state, expr, scopes) ?? return 0
-    sources :: state.pattern_sources.get(sema_ownership_payload_key(root.symbol.name, root.symbol.span)) ?? return 0
+    key :: sema_ownership_payload_key(root.symbol.name, root.symbol.span)
+    // Taken out while the subject places are marked (marking writes the
+    // state), then recorded again for another `^` of the same binding.
+    sources :: &state.pattern_sources.remove(key) ?? return 0
     taken := 0
     loop source in sources {
         if source == {
@@ -1510,6 +1515,7 @@ fn sema_ownership_move_pattern_payload(state: &SemaOwnershipState, expr: Expr, m
         if !sema_ownership_mark_move(&state, place, scopes, "the move `^{root.symbol.name}`", &diagnostics) -> return -1
         taken = 1
     }
+    state.pattern_sources[key] = ^sources
     taken
 }
 

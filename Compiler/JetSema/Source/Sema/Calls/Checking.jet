@@ -566,7 +566,7 @@ fn sema_call_marked_move_value(state: &SemaOwnershipState, taken: Bool, expr: Ex
     start :: expr_span(expr).start
     payload :: sema_ownership_move_pattern_payload(&state, expr, Span{start: start - 1, end: start}, scopes, &diagnostics)
     if payload < 0 -> return None
-    moved :: if payload > 0 -> sema_expression_payload_take(value) else -> ^value
+    moved :: if payload > 0 -> sema_expression_payload_take(^value) else -> ^value
     Val(sema_tir_node(moved.ty, TExprKind.Move{value: moved}, moved.span))
 }
 

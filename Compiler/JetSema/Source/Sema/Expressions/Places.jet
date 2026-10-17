@@ -154,23 +154,20 @@ fn sema_expression_exact_move(value: Expr, span: Span, expected: Type?, environm
     payload :: sema_ownership_move_pattern_payload(&state, value, mark_span, scopes, &diagnostics)
     if payload < 0 -> return None
     if !sema_ownership_consume_expression(&state, Expr.Place{value: value, access: PlaceAccess.Take, span: span}, scopes, "the move `^{sema_expression_move_mark_text(value)}`", &diagnostics) -> return None
-    moved :: if payload > 0 -> sema_expression_payload_take(checked) else -> checked
+    moved :: if payload > 0 -> sema_expression_payload_take(^checked) else -> ^checked
     Val(sema_tir_node(moved.ty, TExprKind.Move{value: moved}, span))
 }
 
 // Marks the checked `^p` of a match payload binding (TLocal.payload_take):
 // lowering may take the payload out of the subject's storage, which sema
 // has marked moved (sema_ownership_move_pattern_payload).
-fn sema_expression_payload_take(value: TExpr) -> TExpr Never! {
-    if value.kind == {
-        .Local(local) -> {
-            taken := local
-            taken.payload_take = true
-            return sema_tir_node(value.ty, TExprKind.Local{local: taken}, value.span)
-        }
+fn sema_expression_payload_take(value: ^TExpr) -> TExpr Never! {
+    taken := value
+    if &taken.kind == {
+        .Local(local) -> local.payload_take = true
         else -> {}
     }
-    value.copy()
+    taken
 }
 
 fn sema_expression_place(value: Expr, access: PlaceAccess, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
