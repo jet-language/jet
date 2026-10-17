@@ -187,9 +187,11 @@ fn build_action_shares_network(grants: [BuildEffect], caps: [BuildEffect]) -> Bo
 
 // Rust `execute_one_action` on the local path: snapshot inputs, key the
 // action, restore a cached record, else run it in a fresh private work tree
-// under the native sandbox and publish only its declared outputs.
+// under the native sandbox and publish only its declared outputs. The work
+// tree receives exactly the input bytes the key hashed.
 fn build_execute_one_action(plan: HermeticBuildPlan, action: HermeticBuildAction, handle: HermeticActionHandle, project_root: String, artifact_store: BuildArtifactStoreHandle, grants: [BuildEffect], probe_facts: [BuildProbeFact]) -[FS, Env, Exec, Time, Time.Wait, Rand]> ActionOutcome BuildExecutionError! {
-    snapshots :: build_snapshot_declared_inputs(artifact_store, project_root, action) ?? return Err(build_io_action(action, err))
+    inputs :: build_snapshot_declared_inputs(artifact_store, project_root, action) ?? return Err(build_io_action(action, err))
+    snapshots :: loop input in inputs -> input.snapshot
     executable :: build_resolve_program_path(plan, action.toolchain, action.argv[0]) ?? return Err(BuildExecutionError.IO{action: action.name, detail: "tool {action.argv[0]} was not found"})
     executable_bytes :: if files.is_file(executable) -> (files.read_bytes(executable) ?? return Err(build_io_action(action, BuildIOError.from(err)))) else -> action.argv[0].bytes()
     executable_digest :: ContentDigest.from_bytes(executable_bytes)
@@ -234,13 +236,11 @@ fn build_execute_one_action(plan: HermeticBuildPlan, action: HermeticBuildAction
         .Err(_) -> {}
     }
     build_ensure_real_directory(sandbox) ?? return Err(build_io_action(action, err))
-    loop input in action.inputs {
-        from :: build_resolve_under(project_root, input) ?? return Err(build_io_action(action, err))
-        to :: build_resolve_under(sandbox, input) ?? return Err(build_io_action(action, err))
+    loop input in inputs {
+        to :: build_resolve_under(sandbox, input.snapshot.path) ?? return Err(build_io_action(action, err))
         parent :: files.dirname(to)
         if parent != "" -> files.create_dir_all(parent) ?? return Err(build_io_action(action, BuildIOError.from(err)))
-        bytes :: build_secure_read_file(project_root, from) ?? return Err(build_io_action(action, err))
-        files.write_bytes(to, bytes) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+        files.write_bytes(to, input.bytes) ?? return Err(build_io_action(action, BuildIOError.from(err)))
     }
     loop output in action.outputs {
         path :: build_resolve_under(sandbox, output) ?? return Err(build_io_action(action, err))
@@ -272,13 +272,7 @@ fn build_execute_one_action(plan: HermeticBuildPlan, action: HermeticBuildAction
         }
         return Err(BuildExecutionError.Reported{report})
     }
-    loop declared in action.outputs {
-        from :: build_resolve_under(sandbox, declared) ?? return Err(build_io_action(action, err))
-        to :: build_resolve_under(project_root, declared) ?? return Err(build_io_action(action, err))
-        bytes :: build_secure_read_file(sandbox, from) ?? return Err(build_io_action(action, err))
-        build_prepare_output_destination(project_root, to) ?? return Err(build_io_action(action, err))
-        build_atomic_restore_file(project_root, to, bytes) ?? return Err(build_io_action(action, err))
-    }
+    build_publish_sandbox_outputs(sandbox, project_root, action) ?? return Err(build_io_action(action, err))
     outcome :: ActionOutcome.Succeeded{exit_code: code}
     if action.cache == ActionCache.Cached {
         record :: build_capture_declared_outputs(artifact_store, project_root, action, key, outcome, ActionCacheStatus.Miss(.NoLocalActionRecord)) ?? return Err(build_io_action(action, err))
@@ -287,6 +281,28 @@ fn build_execute_one_action(plan: HermeticBuildPlan, action: HermeticBuildAction
     }
     files.remove_all(sandbox) ?? return Err(build_io_action(action, BuildIOError.from(err)))
     Ok(outcome)
+}
+
+// Rust `execute_one_action` output publication: every declared output is
+// read from the work tree through the bounded no-follow reader (a FIFO or
+// other special file is refused before any blocking open; the per-file and
+// per-action limits are checked against the opened file's size before a byte
+// is read). Only when all of them are read are they restored atomically
+// under the project root, so a refused output publishes nothing.
+fn build_publish_sandbox_outputs(sandbox: String, project_root: String, action: HermeticBuildAction) BuildIOError! -[FS, Rand]> {
+    contents := [[U8]]{}
+    total := 0
+    loop declared in action.outputs {
+        from :: build_resolve_under(sandbox, declared)
+        bytes :: build_secure_read_file(sandbox, from, build_read_budget(total))
+        total += bytes.len()
+        &contents.push(bytes)
+    }
+    loop index in 0..<action.outputs.len() {
+        to :: build_resolve_under(project_root, action.outputs[index])
+        build_prepare_output_destination(project_root, to)
+        build_atomic_restore_file(project_root, to, contents[index])
+    }
 }
 
 // Rust `execute_probes`: each selected probe resolves through its toolchain
@@ -306,7 +322,7 @@ fn build_execute_probes(plan: HermeticBuildPlan, selected: [Int]) -[FS, Env, Exe
                     .Val(version) -> "{package} >= {version}"
                     .None -> package
                 }
-                receipt :: build_run_probe_sandboxed(pkg_config, [String]{"--exists", requirement}, None)
+                receipt :: build_run_probe_sandboxed(pkg_config, [String]{"--exists", requirement}, None, time.duration_ms(NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS))
                 (success: receipt.success, detail: "pkg-config exit {build_receipt_code(receipt)}")
             }
             .HeaderCheck(header) -> build_run_compile_probe(plan, probe.toolchain, "#include <{header}>\nint main(void) {{ return 0; }}\n")
@@ -329,8 +345,10 @@ fn build_receipt_code(receipt: ProcessReceipt) -> Int Never! {
 
 // Rust `run_probe_sandboxed`: a private temporary root, the optional probe
 // source written into it, one sandboxed run with an empty environment and
-// no network, then the root removed.
-fn build_run_probe_sandboxed(executable: String, args: [String], source: (path: String, contents: String)?) -[FS, Env, Exec, Time.Wait, Rand]> ProcessReceipt BuildExecutionError! {
+// no network, then the root removed. Unlike Rust, the run has the same
+// finite wall-clock budget as an action: a probe past `timeout` is killed and
+// fails the build.
+fn build_run_probe_sandboxed(executable: String, args: [String], source: (path: String, contents: String)?, timeout: Duration) -[FS, Env, Exec, Time.Wait, Rand]> ProcessReceipt BuildExecutionError! {
     nonce :: random.bytes(8) ?? return Err(BuildExecutionError.IO{action: "build probe sandbox", detail: "{err}"})
     root :: files.join(sys.temp_dir(), "jet-build-probe-{sys.pid()}-{build_hex_encode(nonce)}")
     if files.create_dir_all(root) == .Err(error) {
@@ -343,7 +361,7 @@ fn build_run_probe_sandboxed(executable: String, args: [String], source: (path: 
             return Err(BuildExecutionError.IO{action: "build probe input", detail: "{error}"})
         }
     }
-    result :: foundation_run_native_sandboxed(executable, args, root, None, [String: String]{}, false)
+    result :: foundation_run_native_sandboxed_with_timeout_and_mounts(executable, args, root, None, [String: String]{}, false, [NativeSandboxMount]{}, Val(timeout))
     _ := files.remove_all(root)
     if result == {
         .Ok(output) -> Ok(output.receipt)
@@ -363,7 +381,7 @@ fn build_run_compile_probe(plan: HermeticBuildPlan, toolchain: ToolchainHandle, 
         if compiler == None -> compiler = build_resolve_program_path(plan, toolchain, name)
     }
     found :: compiler ?? return Ok((success: false, detail: "no C compiler (`cc`, `clang`, or `gcc`) was found"))
-    receipt :: build_run_probe_sandboxed(found, [String]{"-x", "c", "-fsyntax-only", "probe.c"}, Val((path: "probe.c", contents: source)))
+    receipt :: build_run_probe_sandboxed(found, [String]{"-x", "c", "-fsyntax-only", "probe.c"}, Val((path: "probe.c", contents: source)), time.duration_ms(NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS))
     if receipt.success -> return Ok((success: true, detail: "{found} accepted the syntax probe"))
     detail :: receipt.errors.trim()
     Ok((success: false, detail: if detail == "" -> "{found} rejected the syntax probe" else -> "{found}: {detail}"))
@@ -388,13 +406,20 @@ fn build_canonical_executable_path(program: String) -[FS, Env]> String? Never! {
 }
 
 // Rust `find_program_path`: a path with several components directly, else
-// the first regular file of that name on PATH, canonicalized.
+// the first regular file of that name in an absolute PATH directory,
+// canonicalized. Unlike Rust, an empty or relative PATH entry is skipped,
+// so the working directory never supplies a tool, and the result must be
+// absolute.
 fn build_find_program_path(program: String) -[FS, Env]> String? Never! {
     if build_path_component_count(program) > 1 && files.is_file(program) -> return files.canonicalize(program) ?? None
     paths :: sys.get("PATH") ?? return None
     loop directory in paths.split(":") {
-        candidate :: if directory == "" -> program else -> files.join(directory, program)
-        if files.is_file(candidate) -> return files.canonicalize(candidate) ?? None
+        if !directory.starts_with("/") -> next
+        candidate :: files.join(directory, program)
+        if files.is_file(candidate) {
+            resolved :: files.canonicalize(candidate) ?? return None
+            return if resolved.starts_with("/") -> Val(resolved) else -> None
+        }
     }
     None
 }
@@ -433,25 +458,42 @@ fn build_target_matches_running_host(triple: String) -[Env]> Bool Never! {
 
 // Rust `canonical_tool_path`: a declared tool under a mount destination maps
 // to the mount source (a `..` component refuses it); otherwise the declared
-// path itself.
+// path itself. Matching and joining use path components, so `//` or `.`
+// after a destination stays under its source.
 fn build_canonical_tool_path(toolchain: HermeticBuildToolchain, declared: String) -[FS, Env]> String? Never! {
     loop mount in toolchain.mounts {
         relative :: build_strip_path_prefix(declared, mount.destination) ?? next
-        loop part in relative.split("/") {
-            if part == ".." -> return None
-        }
-        source :: if relative == "" -> mount.source else -> files.join(mount.source, relative)
+        if relative.contains("..") -> return None
+        source := mount.source
+        loop part in relative -> source = files.join(source, part)
         return build_canonical_executable_path(source)
     }
     build_canonical_executable_path(declared)
 }
 
-// Rust `Path::strip_prefix` over whole components.
-fn build_strip_path_prefix(path: String, prefix: String) -> String? Never! {
-    trimmed :: prefix.removesuffix("/")
-    if path == trimmed || path == prefix -> return Val("")
-    if path.starts_with("{trimmed}/") -> return Val(path.removeprefix("{trimmed}/"))
-    None
+// Rust `Path::components` of a `/`-separated path: empty and `.` parts
+// dropped, `..` kept for the caller to refuse.
+fn build_path_parts(path: String) -> [String] Never! {
+    parts := [String]{}
+    loop part in path.split("/") {
+        if part == "" || part == "." -> next
+        &parts.push(part)
+    }
+    parts
+}
+
+// Rust `Path::strip_prefix` over whole components: the components of
+// `path` after `prefix`, or None when `prefix`'s components do not lead
+// `path` (an absolute and a relative path never match).
+fn build_strip_path_prefix(path: String, prefix: String) -> [String]? Never! {
+    if path.starts_with("/") != prefix.starts_with("/") -> return None
+    path_parts :: build_path_parts(path)
+    prefix_parts :: build_path_parts(prefix)
+    if prefix_parts.len() > path_parts.len() -> return None
+    loop index in 0..<prefix_parts.len() {
+        if path_parts[index] != prefix_parts[index] -> return None
+    }
+    Val(path_parts.slice(prefix_parts.len(), path_parts.len()))
 }
 
 // Rust `runtime_toolchain_arguments`: Linux keeps declared virtual paths

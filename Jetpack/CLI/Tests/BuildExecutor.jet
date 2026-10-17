@@ -17,6 +17,32 @@ fn build_test_restore_env(name: String, previous: String?) -[Env]> {
     }
 }
 
+// The sandbox PATH is `/nix/store`, a directory of store paths rather than a
+// bin directory, so `cp`, `sleep` and other host tools are not commands inside
+// it (Rust execution_runtime.rs tests). Sandboxed fixture scripts use shell
+// builtins only.
+BUILD_TEST_COPY_SCRIPT :: prep { "read -r line < input.txt; printf %s \"$line\" > out.txt" }
+
+// A fixture that exercises the native boundary fails when the backend is
+// missing; it never passes without running anything.
+fn build_test_require_sandbox() -[FS, Env, Exec, Time.Wait]> {
+    status :: foundation_native_sandbox_status()
+    if !status.available -> panic("this fixture needs the native sandbox backend ({status.mechanism}): {status.reason}")
+}
+
+// Rust `delayed_descendant_script`: a background descendant that holds the
+// output pipes for two seconds of Bash's builtin `SECONDS` clock, then writes
+// `marker`; `rest` runs in the foreground.
+fn build_test_delayed_descendant(marker: String, rest: String) -> String Never! {
+    "(start=$SECONDS; while [ $((SECONDS-start)) -lt 2 ]; do :; done; printf leaked > {marker}) & {rest}"
+}
+
+// Rust `assert_descendant_reaped`: the descendant's marker never appears.
+fn build_test_assert_descendant_reaped(marker: String) -[FS, Time]> {
+    time.sleep(time.duration_ms(3000))
+    assert(!files.exists(marker))
+}
+
 // One host action `sh -c <script>` reading `input.txt` and writing `out.txt`.
 fn build_test_plan(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildPlan Never! {
     build := HermeticBuildContext.new()
@@ -63,7 +89,7 @@ fn build_test_plan(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildPl
     files.write(files.join(root, "input.txt"), "input") ?? panic("input")
     store :: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
     marker :: files.join(root, "ran")
-    plan :: build_test_plan([BuildEffect]{BuildEffect.Exec, BuildEffect.Net}, "printf ran > '{marker}'; cp input.txt out.txt")
+    plan :: build_test_plan([BuildEffect]{BuildEffect.Exec, BuildEffect.Net}, "printf ran > '{marker}'; {BUILD_TEST_COPY_SCRIPT}")
     if build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) == {
         .Err(error) -> assert(error == BuildExecutionError.MissingGrant{action: "write", capability: BuildEffect.Net})
         .Ok(_) -> panic("an ungranted Net ability must be refused")
@@ -113,7 +139,7 @@ fn build_test_plan(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildPl
     root :: build_test_root("unavailable")
     files.write(files.join(root, "input.txt"), "input") ?? panic("input")
     store :: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
-    plan :: build_test_plan([BuildEffect]{BuildEffect.Exec}, "cp input.txt out.txt")
+    plan :: build_test_plan([BuildEffect]{BuildEffect.Exec}, BUILD_TEST_COPY_SCRIPT)
     previous :: sys.get("JETPACK_FAKE_SANDBOX")
     sys.set("JETPACK_FAKE_SANDBOX", "1")
     refused :: build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec})
@@ -127,11 +153,10 @@ fn build_test_plan(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildPl
     assert(build_native_sandbox_error(plan.actions[0], NativeSandboxError.IO("disk")) == BuildExecutionError.IO{action: "write", detail: "disk"})
     // The allowed neighbour: with the native backend available the same plan
     // runs and publishes only its declared output.
-    if foundation_native_sandbox_status().available {
-        result :: build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) ?? panic("sandboxed action should run")
-        assert_eq(result.report.metrics.actions_total, 1)
-        assert_eq(files.read(files.join(root, "out.txt")) ?? panic("declared output"), "input")
-    }
+    build_test_require_sandbox()
+    result :: build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) ?? panic("sandboxed action should run")
+    assert_eq(result.report.metrics.actions_total, 1)
+    assert_eq(files.read(files.join(root, "out.txt")) ?? panic("declared output"), "input")
     files.remove_all(root).drop("test cleanup")
 }
 
@@ -142,7 +167,7 @@ fn build_test_plan(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildPl
     store :: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
     files.create_dir_all(files.join(root, ".jet")) ?? panic("state dir")
     files.symlink(outside, files.join(root, ".jet/build-sandbox")) ?? panic("link sandbox root")
-    plan :: build_test_plan([BuildEffect]{BuildEffect.Exec}, "cp input.txt out.txt")
+    plan :: build_test_plan([BuildEffect]{BuildEffect.Exec}, BUILD_TEST_COPY_SCRIPT)
     if build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) == {
         .Err(error) -> if error == {
             .IO(action, detail) -> {
@@ -167,21 +192,86 @@ fn build_test_plan(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildPl
     files.create_dir_all(files.join(root, "dir")) ?? panic("dir")
     files.write(files.join(root, "dir/file.txt"), "inside") ?? panic("file")
     files.write(files.join(outside, "secret.txt"), "secret") ?? panic("secret")
-    assert_eq(build_secure_read_file(root, files.join(root, "dir/file.txt")) ?? panic("regular file"), "inside".bytes())
+    assert_eq(build_secure_read_file(root, files.join(root, "dir/file.txt"), BUILD_MAX_ACTION_FILE_BYTES) ?? panic("regular file"), "inside".bytes())
+    assert_eq(build_secure_read_file(root, files.join(root, "dir/file.txt"), 6) ?? panic("a file at its exact limit"), "inside".bytes())
+    if build_secure_read_file(root, files.join(root, "dir/file.txt"), 5) == {
+        .Err(error) -> assert(error == BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
+        .Ok(_) -> panic("a file over its limit must be refused")
+    }
     files.symlink(files.join(outside, "secret.txt"), files.join(root, "dir/link.txt")) ?? panic("final link")
-    assert(build_secure_read_file(root, files.join(root, "dir/link.txt")) == .Err(_))
+    assert(build_secure_read_file(root, files.join(root, "dir/link.txt"), BUILD_MAX_ACTION_FILE_BYTES) == .Err(_))
     files.symlink(outside, files.join(root, "linked")) ?? panic("parent link")
-    assert(build_secure_read_file(root, files.join(root, "linked/secret.txt")) == .Err(_))
-    if build_secure_read_file(root, files.join(root, "dir")) == {
+    assert(build_secure_read_file(root, files.join(root, "linked/secret.txt"), BUILD_MAX_ACTION_FILE_BYTES) == .Err(_))
+    if build_secure_read_file(root, files.join(root, "dir"), BUILD_MAX_ACTION_FILE_BYTES) == {
         .Err(_) -> {}
         .Ok(_) -> panic("a directory is not a regular file")
     }
-    if build_secure_read_file(root, "/etc/hostname") == {
+    if build_secure_read_file(root, "/etc/hostname", BUILD_MAX_ACTION_FILE_BYTES) == {
         .Err(error) -> assert(error == BuildIOError.new(.InvalidInput, "cache path escapes root"))
         .Ok(_) -> panic("a path outside the base must be refused")
     }
     files.remove_all(root).drop("test cleanup")
     files.remove_all(outside).drop("test cleanup")
+}
+
+// One cached action `cc` declaring `outputs`, for the work-tree publication
+// fixtures.
+fn build_test_output_action(outputs: [String]) -[Rand]> HermeticBuildAction Never! {
+    build := HermeticBuildContext.new()
+    handle :: &build.action("cc", ActionSpec.cached([String]{"cc"}).with_outputs(outputs)) ?? panic("declare action")
+    plan :: build.plan() ?? panic("plan")
+    plan.actions[handle.id]
+}
+
+#Test("sandbox outputs: regular outputs publish, a FIFO output is refused at once and nothing is published") {
+    root :: build_test_root("fifo-output")
+    sandbox :: build_test_root("fifo-output-sandbox")
+    action :: build_test_output_action([String]{"a.o", "b.o"})
+    files.write(files.join(sandbox, "a.o"), "object") ?? panic("first output")
+    files.write(files.join(sandbox, "b.o"), "second") ?? panic("second output")
+    build_publish_sandbox_outputs(sandbox, root, action) ?? panic("regular outputs publish")
+    assert_eq(files.read(files.join(root, "b.o")) ?? panic("published output"), "second")
+    files.remove(files.join(root, "a.o")) ?? panic("reset first output")
+    files.remove(files.join(root, "b.o")) ?? panic("reset second output")
+    // A FIFO with no writer would block a plain open forever.
+    files.remove(files.join(sandbox, "b.o")) ?? panic("drop second output")
+    made :: process.cmd([String]{"mkfifo", files.join(sandbox, "b.o")}).run() ?? panic("run host mkfifo")
+    assert(made.success)
+    started :: time.instant()
+    if build_publish_sandbox_outputs(sandbox, root, action) == {
+        .Err(error) -> assert(error == BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
+        .Ok(_) -> panic("a FIFO output must be refused")
+    }
+    assert(started.elapsed_millis() < 3000)
+    assert(!files.exists(files.join(root, "a.o")))
+    assert(!files.exists(files.join(root, "b.o")))
+    files.remove_all(root).drop("test cleanup")
+    files.remove_all(sandbox).drop("test cleanup")
+}
+
+#Test("sandbox outputs: an output at its limit is read, an oversized sparse output is refused without being read") {
+    root :: build_test_root("sparse-output")
+    sandbox :: build_test_root("sparse-output-sandbox")
+    action :: build_test_output_action([String]{"a.o", "big.o"})
+    files.write(files.join(sandbox, "a.o"), "object") ?? panic("first output")
+    // One byte past the per-file limit after a hole: no disk is used, and a
+    // reader that read it would allocate the whole limit.
+    big :: files.join(sandbox, "big.o")
+    files.write(big, "") ?? panic("sparse output")
+    files.write_at(big, BUILD_MAX_ACTION_FILE_BYTES, "x".bytes()) ?? panic("extend sparse output")
+    assert_eq((files.stat(big) ?? panic("sparse size")).size, BUILD_MAX_ACTION_FILE_BYTES + 1)
+    started :: time.instant()
+    if build_publish_sandbox_outputs(sandbox, root, action) == {
+        .Err(error) -> assert(error == BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
+        .Ok(_) -> panic("an oversized output must be refused")
+    }
+    assert(started.elapsed_millis() < 3000)
+    assert(!files.exists(files.join(root, "a.o")))
+    // The per-action limit lowers the next file's limit.
+    assert_eq(build_read_budget(0), BUILD_MAX_ACTION_FILE_BYTES)
+    assert_eq(build_read_budget(BUILD_MAX_ACTION_TOTAL_BYTES - 5), 5)
+    files.remove_all(root).drop("test cleanup")
+    files.remove_all(sandbox).drop("test cleanup")
 }
 
 #Test("atomic restore: outputs land under real parents, a linked parent is refused without writing outside") {
@@ -229,7 +319,25 @@ fn build_test_plan(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildPl
     assert_eq(build_resolve_program_path(plan, ToolchainHandle{id: 0, context: plan.context}, "sh") ?? panic("host PATH tool"), sh)
 }
 
-#Test("mounted tools: a tool under a mount maps to its source, a parent component is refused") {
+#Test("PATH resolution: an absolute PATH entry resolves, empty and relative entries never resolve to the working directory") {
+    root :: build_test_root("path-cwd")
+    tool :: "jet-build-cwd-tool-{sys.pid()}"
+    files.write(files.join(root, tool), "#!/bin/sh\n") ?? panic("tool in the working directory")
+    previous_path :: sys.get("PATH")
+    previous_cwd :: sys.current_dir() ?? panic("working directory")
+    sys.set_current_dir(root) ?? panic("enter the fixture root")
+    sys.set("PATH", ":.:relative/bin:")
+    from_cwd :: build_find_program_path(tool)
+    sys.set("PATH", "/nonexistent-jet-path:{root}")
+    from_absolute :: build_find_program_path(tool)
+    sys.set_current_dir(previous_cwd) ?? panic("restore the working directory")
+    build_test_restore_env("PATH", previous_path)
+    assert(from_cwd == None)
+    assert_eq(from_absolute ?? panic("absolute PATH entry"), files.join(root, tool))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("mounted tools: a tool under a mount maps to its source by path components; `..`, `//` escapes and partial components are refused") {
     root :: build_test_root("mounted-tool")
     files.create_dir_all(files.join(root, "bin")) ?? panic("bin")
     files.write(files.join(root, "bin/cc"), "#!/bin/sh\n") ?? panic("tool")
@@ -240,6 +348,21 @@ fn build_test_plan(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildPl
     }
     assert_eq(build_canonical_tool_path(toolchain, "/toolchain/bin/cc") ?? panic("mounted tool"), files.join(root, "bin/cc"))
     assert(build_canonical_tool_path(toolchain, "/toolchain/../etc/passwd") == None)
+    // `//` and `.` after the destination stay under the mount source; a
+    // string join would have made `/toolchain//etc/passwd` the host file.
+    assert_eq(build_canonical_tool_path(toolchain, "/toolchain//bin/cc") ?? panic("`//` mounted tool"), files.join(root, "bin/cc"))
+    assert_eq(build_canonical_tool_path(toolchain, "/toolchain/./bin//cc") ?? panic("`.` mounted tool"), files.join(root, "bin/cc"))
+    assert(build_canonical_tool_path(toolchain, "/toolchain//etc/passwd") == None)
+    // A destination is matched by whole components, never by string prefix.
+    assert(build_canonical_tool_path(toolchain, "/toolchainx/bin/cc") == None)
+    // A non-normalized destination still matches its normalized tool paths.
+    nested :: HermeticBuildToolchain{
+        id: 2, name: "nested", role: ToolchainRole.Target, host_triple: "host", target_triple: "x", sdk: None, linker: None, sysroot: None,
+        tools: [String: String]{}, resolution: ToolchainResolution.DeclaredOnly,
+        mounts: [BuildMount]{BuildMount{source: root, destination: "/tc//nested/", identity: ""}}, provenance: BuildProvenance.inferred_host(),
+    }
+    assert_eq(build_canonical_tool_path(nested, "/tc/nested/bin/cc") ?? panic("non-normalized destination"), files.join(root, "bin/cc"))
+    assert(build_canonical_tool_path(nested, "/tc/nested//etc/passwd") == None)
     files.remove_all(root).drop("test cleanup")
 }
 
@@ -345,7 +468,12 @@ fn build_test_plan(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildPl
     store :: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
     plan :: build_test_plan([BuildEffect]{BuildEffect.Exec}, "exit 3")
     action :: plan.actions[0]
-    snapshots :: build_snapshot_declared_inputs(store, root, action) ?? panic("snapshot")
+    inputs :: build_snapshot_declared_inputs(store, root, action) ?? panic("snapshot")
+    // The captured bytes are the hashed bytes the work tree receives.
+    assert_eq(inputs.len(), 1)
+    assert_eq(inputs[0].bytes, "input".bytes())
+    assert(inputs[0].snapshot.digest == ContentDigest.from_bytes("input".bytes()))
+    snapshots :: loop input in inputs -> input.snapshot
     executable :: build_resolve_program_path(plan, action.toolchain, "sh") ?? panic("sh")
     key :: build_canonical_effective_action_key(plan, action, snapshots, [BuildEffect]{BuildEffect.Exec}, ContentDigest.from_bytes(files.read_bytes(executable) ?? panic("sh bytes")), [BuildProbeFact]{})
     report :: build_action_failure_report("write", 3, "")
@@ -361,16 +489,53 @@ fn build_test_plan(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildPl
     files.remove_all(root).drop("test cleanup")
 }
 
-#Test("action timeout: a child inside its budget completes, one past it is killed with the backend message") {
-    if !foundation_native_sandbox_status().available -> return
+#Test("action timeout: a child inside its budget completes, one past it is killed, and a pipe-holding descendant is reaped on both paths") {
+    build_test_require_sandbox()
     root :: build_test_root("timeout")
-    sh :: build_find_program_path("sh") ?? panic("sh")
-    quick :: foundation_run_native_sandboxed_with_timeout_and_mounts(sh, [String]{"-c", "exit 0"}, root, None, [String: String]{}, false, [NativeSandboxMount]{}, Val(time.duration_ms(5000))) ?? panic("quick child")
+    bash :: build_find_program_path("bash") ?? panic("bash is required for the sandbox descendant fixtures")
+    exit_started :: time.instant()
+    quick :: foundation_run_native_sandboxed_with_timeout_and_mounts(bash, [String]{"-c", build_test_delayed_descendant("exit-marker", "exit 0")}, root, None, [String: String]{}, false, [NativeSandboxMount]{}, Val(time.duration_ms(5000))) ?? panic("quick child")
     assert(quick.receipt.success)
-    if foundation_run_native_sandboxed_with_timeout_and_mounts(sh, [String]{"-c", "sleep 30"}, root, None, [String: String]{}, false, [NativeSandboxMount]{}, Val(time.duration_ms(500))) == {
+    assert(exit_started.elapsed_millis() < 3000)
+    build_test_assert_descendant_reaped(files.join(root, "exit-marker"))
+    timeout_started :: time.instant()
+    if foundation_run_native_sandboxed_with_timeout_and_mounts(bash, [String]{"-c", build_test_delayed_descendant("timeout-marker", "while :; do :; done")}, root, None, [String: String]{}, false, [NativeSandboxMount]{}, Val(time.duration_ms(500))) == {
         .Err(error) -> assert(error == NativeSandboxError.IO("sandbox process timed out after 500ms"))
         .Ok(_) -> panic("a child past its budget must be killed")
     }
+    assert(timeout_started.elapsed_millis() < 3000)
+    build_test_assert_descendant_reaped(files.join(root, "timeout-marker"))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("probe budget: a probe inside its budget completes, one past it is killed and fails") {
+    build_test_require_sandbox()
+    bash :: build_find_program_path("bash") ?? panic("bash is required for the sandbox probe fixture")
+    quick :: build_run_probe_sandboxed(bash, [String]{"-c", "exit 0"}, None, time.duration_ms(5000)) ?? panic("quick probe")
+    assert(quick.success)
+    started :: time.instant()
+    if build_run_probe_sandboxed(bash, [String]{"-c", "while :; do :; done"}, None, time.duration_ms(500)) == {
+        .Err(error) -> assert(error == BuildExecutionError.IO{action: "build probe sandbox", detail: "sandbox process timed out after 500ms"})
+        .Ok(_) -> panic("a probe past its budget must be killed")
+    }
+    assert(started.elapsed_millis() < 3000)
+}
+
+#Test("cache observation: an event path inside $HOME/.cache is appended, a `..` path is refused") {
+    home :: sys.get("HOME") ?? panic("build executor fixtures require HOME")
+    root :: build_test_root("observe")
+    // The same directory spelled under $HOME, as the prefix check sees it.
+    spelled :: files.join(home, ".cache/jet-dev/scratch/jet-build-executor-observe-{sys.pid()}")
+    name :: "JET_COMPTIME_CACHE_OBSERVATION_PATH"
+    previous :: sys.get(name)
+    sys.set(name, "{spelled}/sub/../escaped.jsonl")
+    build_record_cache_event("cc", "act-sha256:k", ActionCacheStatus.Miss(.NoLocalActionRecord), "lookup", None)
+    sys.set(name, "{spelled}/events.jsonl")
+    build_record_cache_event("cc", "act-sha256:k", ActionCacheStatus.Miss(.NoLocalActionRecord), "lookup", None)
+    build_test_restore_env(name, previous)
+    assert(!files.exists(files.join(root, "escaped.jsonl")))
+    assert(!files.exists(files.join(root, "sub")))
+    assert((files.read(files.join(root, "events.jsonl")) ?? panic("appended event")).contains("\"schema\":\"jet.comptime-cache-event.v1\""))
     files.remove_all(root).drop("test cleanup")
 }
 

@@ -5,6 +5,14 @@
 // openat/mkdirat/renameat FFI is the ratified Core directory handle
 // (D-CORE-FILEDIR1), whose relative opens refuse links.
 
+// Host reads of build files (declared inputs, work-tree outputs, published
+// outputs) are bounded: one file at most 512 MiB and one action's files at
+// most 1 GiB together, checked against the opened file's size before any
+// byte is read and enforced again while reading.
+BUILD_MAX_ACTION_FILE_BYTES :: prep { 536870912 }
+BUILD_MAX_ACTION_TOTAL_BYTES :: prep { 1073741824 }
+BUILD_READ_CHUNK_BYTES :: prep { 1048576 }
+
 // Rust `io::Error`: the kind the cache decisions branch on, and the message
 // `io_action` reports.
 enum BuildIOKind {
@@ -45,6 +53,14 @@ struct ActionInputSnapshot {
     path: String
     digest: ContentDigest
     byte_len: Int
+}
+
+// One declared input as it was hashed: the snapshot the action key uses and
+// the exact bytes the work tree receives, so execution never reads the input
+// a second time.
+struct ActionInputCapture {
+    snapshot: ActionInputSnapshot
+    bytes: [U8]
 }
 
 struct ActionOutputRecord {
@@ -91,14 +107,17 @@ struct ActionResultRecord {
 }
 
 // Rust `snapshot_declared_inputs`: every declared input read without
-// following links and published to the CAS.
-fn build_snapshot_declared_inputs(store: BuildArtifactStoreHandle, base: String, action: HermeticBuildAction) -[FS, Env, Exec, Time, Rand]> [ActionInputSnapshot] BuildIOError! {
-    inputs := [ActionInputSnapshot]{}
+// following links, bounded, and published to the CAS. The captured bytes are
+// the ones the work tree receives.
+fn build_snapshot_declared_inputs(store: BuildArtifactStoreHandle, base: String, action: HermeticBuildAction) -[FS, Env, Exec, Time, Rand]> [ActionInputCapture] BuildIOError! {
+    inputs := [ActionInputCapture]{}
+    total := 0
     loop input in action.inputs {
         path :: build_resolve_under(base, input)
-        bytes :: build_secure_read_file(base, path)
+        bytes :: build_secure_read_file(base, path, build_read_budget(total))
+        total += bytes.len()
         digest :: store.put_blob(bytes)
-        &inputs.push(ActionInputSnapshot{path: input, digest, byte_len: bytes.len()})
+        &inputs.push(ActionInputCapture{snapshot: ActionInputSnapshot{path: input, digest, byte_len: bytes.len()}, bytes})
     }
     Ok(inputs)
 }
@@ -106,13 +125,22 @@ fn build_snapshot_declared_inputs(store: BuildArtifactStoreHandle, base: String,
 // Rust `capture_declared_outputs`.
 fn build_capture_declared_outputs(store: BuildArtifactStoreHandle, base: String, action: HermeticBuildAction, key: String, outcome: ActionOutcome, status: ActionCacheStatus) -[FS, Env, Exec, Time, Rand]> ActionResultRecord BuildIOError! {
     outputs := [ActionOutputRecord]{}
+    total := 0
     loop output in action.outputs {
         path :: build_resolve_under(base, output)
-        bytes :: build_secure_read_file(base, path)
+        bytes :: build_secure_read_file(base, path, build_read_budget(total))
+        total += bytes.len()
         digest :: store.put_blob(bytes)
         &outputs.push(ActionOutputRecord{path: output, digest, byte_len: bytes.len()})
     }
     Ok(ActionResultRecord{key, outcome, outputs, failure_report: None, status})
+}
+
+// The byte limit of the next file of one action after `used` bytes: the
+// per-file limit, lowered to what remains of the per-action limit.
+fn build_read_budget(used: Int) -> Int Never! {
+    remaining :: BUILD_MAX_ACTION_TOTAL_BYTES - used
+    if remaining < BUILD_MAX_ACTION_FILE_BYTES -> remaining else -> BUILD_MAX_ACTION_FILE_BYTES
 }
 
 // Rust `restore_action_outputs`: the record must name exactly the declared
@@ -152,25 +180,38 @@ fn build_relative_components(base: String, path: String, escape: String) -> [Str
     Ok(parts)
 }
 
-// Rust `secure_read_file`: open `base` as a real directory, walk every
-// parent component without following links, open the final name without
-// following a link, and refuse anything that is not a regular file.
-fn build_secure_read_file(base: String, path: String) -[FS]> [U8] BuildIOError! {
+// Rust `secure_read_file_bounded`: open `base` as a real directory and walk
+// every parent component without following links. The final name is
+// inspected through the held parent without following a link and must be a
+// regular file before it is opened; the open itself never waits on a FIFO or
+// device peer (Core's non-blocking reader, the `jet self completions --for`
+// pattern), and the opened file must be that same inode. Its size is checked
+// against `limit` before any byte is read, and the read stops one byte past
+// `limit`.
+fn build_secure_read_file(base: String, path: String, limit: Int) -[FS]> [U8] BuildIOError! {
     parts :: build_relative_components(base, path, "cache path escapes root")
     if parts.len() == 0 -> return Err(BuildIOError.new(.InvalidInput, "cache path has no file name"))
     directory := files.open_directory(base) ?? return Err(BuildIOError.from(err))
     loop index in 0..<parts.len() - 1 {
         directory = directory.open_directory(parts[index]) ?? return Err(BuildIOError.from(err))
     }
-    reader :: directory.open(parts[parts.len() - 1]) ?? return Err(BuildIOError.from(err))
+    name :: parts[parts.len() - 1]
+    entry :: directory.entry_stat(name) ?? return Err(BuildIOError.from(err))
+    if entry.is_symlink || !entry.is_file -> return Err(BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
+    if entry.size > limit -> return Err(BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
+    reader :: files.jet_std_files_open_reader_nonblocking(files.join(directory.path, name)) ?? return Err(BuildIOError.from(err))
     info :: reader.stat() ?? return Err(BuildIOError.from(err))
     if !info.is_file -> return Err(BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
+    if info.id != entry.id -> return Err(BuildIOError.new(.PermissionDenied, "cache entry changed while it was opened"))
+    if info.size > limit -> return Err(BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
     bytes := [U8]{}
-    loop {
-        chunk :: reader.read(65536) ?? return Err(BuildIOError.from(err))
+    loop bytes.len() <= limit {
+        want :: limit + 1 - bytes.len()
+        chunk :: reader.read(if want < BUILD_READ_CHUNK_BYTES -> want else -> BUILD_READ_CHUNK_BYTES) ?? return Err(BuildIOError.from(err))
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
+        &bytes.extend(chunk)
     }
+    if bytes.len() > limit -> return Err(BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
     Ok(bytes)
 }
 
@@ -425,12 +466,17 @@ fn build_record_lines(text: String) -> [String] Never! {
 
 // Rust `record_comptime_cache_event`: opt-in proof evidence appended to
 // `JET_COMPTIME_CACHE_OBSERVATION_PATH` when it is absolute and inside
-// `$HOME/.cache`. It never supplies or influences a cache decision.
+// `$HOME/.cache`. A `.` or `..` component is refused, so the prefix check
+// confines the path, and a final link is never followed. It never supplies
+// or influences a cache decision.
 fn build_record_cache_event(action: String, key: String, status: ActionCacheStatus, phase: String, outcome: ActionOutcome?) -[FS, Env]> {
     path :: sys.get("JET_COMPTIME_CACHE_OBSERVATION_PATH") ?? return
     home :: sys.get("HOME") ?? return
     allowed_root :: files.join(home, ".cache")
     if !path.starts_with("/") || !(path == allowed_root || path.starts_with("{allowed_root}/")) -> return
+    loop part in path.split("/") {
+        if part == "." || part == ".." -> return
+    }
     labels :: if status == {
         .Hit(.LocalActionRecordMatched) -> (status: "hit", reason: "local_action_record_matched")
         .Hit(.DeclaredOutputsRestored) -> (status: "hit", reason: "declared_outputs_restored")
@@ -452,7 +498,7 @@ fn build_record_cache_event(action: String, key: String, status: ActionCacheStat
     payload :: "{{\"schema\":\"jet.comptime-cache-event.v1\",\"mode\":{foundation_json_quote(mode)},\"operation_id\":{foundation_json_quote(operation_id)},\"action\":{foundation_json_quote(action)},\"key\":{foundation_json_quote(key)},\"phase\":{foundation_json_quote(phase)},\"status\":{foundation_json_quote(labels.status)},\"reason\":{foundation_json_quote(labels.reason)},\"outcome\":{rendered_outcome}}}\n"
     parent :: files.dirname(path)
     if parent != "" -> _ := files.create_dir_all(parent)
-    writer :: files.append(path) ?? return
+    writer :: files.append(path, links: .Refuse) ?? return
     _ := writer.write_all(payload.bytes())
     _ := writer.flush()
 }
