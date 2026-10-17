@@ -92,11 +92,7 @@ fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String) -> Je
     }
     // copy: a three-field row; the request moves into the compiler below.
     compiler_threads :: request.compiler_threads.copy()
-    // A native program uses returning-stop MIR, as `jet build` does
-    // (Request.jet jet_cli_compile_for_target); the library object stays plain.
-    selected := ^request
-    selected.native_stop_points = true
-    result := jet_bootstrap_mir(^selected) ?? return jet_bootstrap_native_escaped([String]{}, "the native front end failed outside every compile stage")
+    result := jet_bootstrap_mir(^request) ?? return jet_bootstrap_native_escaped([String]{}, "the native front end failed outside every compile stage")
     result.compiler_threads = compiler_threads
     keep_going :: jet_cli_keep_going_enabled()
     if keep_going && result.mir == None -> return result

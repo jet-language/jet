@@ -972,10 +972,6 @@ fn jet_cli_compile_for_target(anchor: String, entry: String, overlays: [JetCLIOv
             selected.target = target
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)
             library_prefix :: if target == .Native -> cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") else -> None
-            // Native Program/Test artifacts use returning-stop MIR (Identity.jet
-            // `native_stop_points`); Rust emission, the runtime library object
-            // and Doc/Check/Comptime queries keep plain MIR.
-            selected.native_stop_points = target == .Native && !emit_rust && library_prefix == None && (mode == .Program || mode == .Test)
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads :: selected.compiler_threads.copy()
             result := jet_cli_compile_request(^selected, emit_rust && library_prefix == None, trace_sink)
