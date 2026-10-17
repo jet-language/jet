@@ -228,7 +228,7 @@ fn lower_receiver_header(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
         lower_fail(&m, &f, "{what} mutation without a Write receiver place is not lowered at O0 yet")
         return None
     }
-    row_place :: lower_place_row(c.mir, place) ?? {
+    row_place :: lower_place_row(c.mir, c.place_rows, place) ?? {
         lower_fail(&m, &f, "{what} receiver place is missing")
         return None
     }

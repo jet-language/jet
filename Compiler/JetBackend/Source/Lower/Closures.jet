@@ -259,7 +259,7 @@ fn lower_cell_dropped(p: MIRProgram, c: LowerContext, f: &LowerFunction, slot: I
 
 // The address of a place a closure captures by reference.
 fn lower_place_address(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, place: MIRPlaceID) -> LIRValueID? {
-    row :: lower_place_row(c.mir, place) ?? {
+    row :: lower_place_row(c.mir, c.place_rows, place) ?? {
         lower_fail(&m, &f, "captured place {place.value} is missing")
         return None
     }

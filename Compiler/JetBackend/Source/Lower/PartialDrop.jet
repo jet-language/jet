@@ -156,7 +156,7 @@ fn lower_partial_frame(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
             path := [LowerGlueField]{}
             if instruction.operation == {
                 .MovePlace(place) -> {
-                    row :: lower_place_row(c.mir, place) ?? next
+                    row :: lower_place_row(c.mir, c.place_rows, place) ?? next
                     if row.projections.len() == 0 -> next
                     slot :: c.place_slots.get(place.value) ?? next
                     path = lower_partial_field_path(p, c.slots[slot].ty, row.projections) ?? next
@@ -444,7 +444,7 @@ fn lower_partial_may_clear(p: MIRProgram, c: LowerContext, f: LowerFunction, own
             .WritePlace(place, value) | .ReplacePlace(place, value) -> {
                 slot :: c.place_slots.get(place.value) ?? next
                 if owner != "slot.{slot}" -> next
-                target :: lower_place_row(c.mir, place) ?? next
+                target :: lower_place_row(c.mir, c.place_rows, place) ?? next
                 prefix :: lower_partial_field_path(p, c.slots[slot].ty, target.projections) ?? next
                 if !lower_partial_prefix(path, prefix) -> next
                 if prefix.len() != 0 -> return false

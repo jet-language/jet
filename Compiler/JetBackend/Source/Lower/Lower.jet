@@ -295,6 +295,8 @@ struct LowerContext {
     block_index: [U64:Int]
     slots: [LowerSlot]
     place_slots: [U64:Int]
+    // MIR place id -> its first row in `mir.places` (lower_place_rows).
+    place_rows: [U64:Int]
     // MIR local id -> its root slot (require diagnostics read current local storage).
     local_slots: [U64:Int]
     // MIR value read or moved out of a root place -> its slot.
@@ -1684,7 +1686,7 @@ fn lower_operation_can_stop(p: MIRProgram, c: LowerContext, m: LowerModule, oper
     operand_type := MIRType?{None}
     if mir_operation_stop_operand(operation) == .Val(value) -> operand_type = lower_value_type(c, value)
     accessed_place := MIRPlace?{None}
-    if mir_operation_stop_place(operation) == .Val(place) -> accessed_place = lower_place_row(c.mir, place)
+    if mir_operation_stop_place(operation) == .Val(place) -> accessed_place = lower_place_row(c.mir, c.place_rows, place)
     mir_operation_can_stop(operation, operand_type, accessed_place, p.prelude_calls, m.prelude_positions)
 }
 
@@ -2080,6 +2082,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
     base_slots := [String:Int]{}
     local_rows := [U64:Int]{}
     loop (index, row) in function.locals -> _ := &local_rows.add(row.id.value, index)
+    place_rows := lower_place_rows(function)
     loop place in function.places {
         if place.base == .Static(_) -> next
         slot := -1
@@ -2197,7 +2200,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
             result_value :: instruction.result ?? next
             if instruction.operation == {
                 .ReadPlace(place) | .MovePlace(place) -> {
-                    if lower_place_row(function, place) == .Val(row) {
+                    if lower_place_row(function, place_rows, place) == .Val(row) {
                         if row.projections.len() == 0 {
                             if place_slots.get(place.value) == .Val(slot) -> _ := &read_slots.add(result_value.value, slot)
                         }
@@ -2254,6 +2257,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         block_index: block_index,
         slots: slots,
         place_slots: place_slots,
+        place_rows: place_rows,
         local_slots: local_slots,
         read_slots: read_slots,
         defined_slots: defined_slots,
@@ -2812,6 +2816,7 @@ fn lower_release_schedule(plan: &LowerReleasePlan, function: MIRFunction, succes
         }
     }
     blocks := [Int]{def_block}
+    last_uses :: lower_release_last_uses(effective)
     loop block in pending -> &blocks.push(block)
     loop block in blocks {
         if live_out.get(block) != None {
@@ -2822,19 +2827,19 @@ fn lower_release_schedule(plan: &LowerReleasePlan, function: MIRFunction, succes
             }
             next
         }
-        last :: lower_release_last_use(effective, block)
+        last :: last_uses.get(block)
         at :: if last == .Val(used) -> used.position else -> def_position
         if at >= function.blocks[block].instructions.len() || lower_release_takes(last) -> next
         lower_release_add(&plan.after, function.blocks[block].instructions[at].id.value, value)
     }
 }
 
-// The last use of a temporary in `block`; of two uses by one instruction,
-// the one that takes it.
-fn lower_release_last_use(effective: [LowerReleaseUse], block: Int) -> LowerReleaseUse? Never! {
-    found := LowerReleaseUse?{None}
+// The last use of a temporary in each block it is used in, in one pass over
+// its uses; of two uses by one instruction, the one that takes it.
+fn lower_release_last_uses(effective: [LowerReleaseUse]) -> [Int:LowerReleaseUse] Never! {
+    found := [Int:LowerReleaseUse]{}
     loop used in effective {
-        if used.block == block && lower_release_follows(used, found) -> found = Val(used.copy())
+        if lower_release_follows(used, found.get(used.block)) -> found[used.block] = used.copy()
     }
     found
 }
@@ -2869,14 +2874,18 @@ fn lower_release_write_drops(plan: &LowerReleasePlan, p: MIRProgram, m: LowerMod
         if lower_release_write_slot(row, bound_locals) -> _ := &eligible.add(slot, true)
     }
     if eligible.len() == 0 -> return
-    // Per slot: block, read position and last use position of each borrowed
-    // read. Per block * slot count + slot: the kind of the block's last move
+    // Per block * slot count + slot: block, read position and last use
+    // position of each borrowed read of the slot in that block (one short row
+    // per block, so adding a read never copies the slot's other blocks' reads).
+    // Per block * slot count + slot: the kind of the block's last move
     // (LOWER_SLOT_EMPTIED) or whole-root write (LOWER_SLOT_FILLED) of it;
-    // per slot: the blocks with one.
+    // per slot: the blocks with one, chained (event_heads / event_next).
     spans := [Int:[Int]]{}
     count :: slots.len()
     events := [Int:Int]{}
-    event_blocks := [Int:[Int]]{}
+    event_heads := [Int:Int]{}
+    event_block := [Int]{}
+    event_next := [Int]{}
     loop (block, row) in function.blocks {
         if !reachable[block] -> next
         loop (position, instruction) in row.instructions {
@@ -2884,7 +2893,11 @@ fn lower_release_write_drops(plan: &LowerReleasePlan, p: MIRProgram, m: LowerMod
             if event != 0 && eligible.get(lower_release_event_slot(event)) != None {
                 slot :: lower_release_event_slot(event)
                 key :: block * count + slot
-                if events.get(key) == None -> lower_release_add_row(&event_blocks, slot, [Int]{block})
+                if events.get(key) == None {
+                    &event_block.push(block)
+                    &event_next.push(event_heads.get(slot) ?? -1)
+                    event_heads[slot] = event_block.len() - 1
+                }
                 _ := &events.add(key, lower_release_event_kind(event))
             }
             if instruction.operation == .InitializeUninit(place) {
@@ -2906,7 +2919,7 @@ fn lower_release_write_drops(plan: &LowerReleasePlan, p: MIRProgram, m: LowerMod
                     _ := &eligible.remove(slot)
                     next
                 }
-                lower_release_add_row(&spans, slot, [Int]{block, position, span})
+                lower_release_add_row(&spans, block * count + slot, [Int]{block, position, span})
             }
         }
     }
@@ -2924,7 +2937,7 @@ fn lower_release_write_drops(plan: &LowerReleasePlan, p: MIRProgram, m: LowerMod
             event :: lower_release_slot_event(projected_places, place_slots, instruction)
             if instruction.operation == .WritePlace(place, _) {
                 slot :: place_slots.get(place.value) ?? -1
-                if slot >= 0 && eligible.get(slot) != None && !lower_release_span_open(spans.get(slot) ?? [Int]{}, block, position) {
+                if slot >= 0 && eligible.get(slot) != None && !lower_release_span_open(spans.get(block * count + slot) ?? [Int]{}, block, position) {
                     cleared :: lower_release_cleared_slot(slots[slot])
                     empty := false
                     full := true
@@ -2934,7 +2947,12 @@ fn lower_release_write_drops(plan: &LowerReleasePlan, p: MIRProgram, m: LowerMod
                     } else {
                         if flowed.get(slot) == None {
                             _ := &flowed.add(slot, true)
-                            starts :: event_blocks.get(slot) ?? [Int]{}
+                            starts := [Int]{}
+                            at := event_heads.get(slot) ?? -1
+                            loop at >= 0 {
+                                &starts.push(event_block[at])
+                                at = event_next[at]
+                            }
                             lower_release_slot_flow(&empty_in, successors, events, starts, count, slot, LOWER_SLOT_EMPTIED, if cleared -> entry else -> -1)
                             lower_release_slot_flow(&full_in, successors, events, starts, count, slot, LOWER_SLOT_FILLED, if cleared -> -1 else -> entry)
                         }
@@ -2967,6 +2985,7 @@ fn lower_release_write_drops(plan: &LowerReleasePlan, p: MIRProgram, m: LowerMod
 // written with a value anything else also uses is left alone.
 fn lower_release_slot_deaths(plan: &LowerReleasePlan, p: MIRProgram, m: LowerModule, function: MIRFunction, uses: [U64:[LowerReleaseUse]], eligible: [Int:Bool], reachable: [Bool], successors: [[Int]], slots: [LowerSlot], place_slots: [U64:Int], projected_places: [U64:Bool], live: [[Int]]) Never! {
     dying := [Int:Bool]{}
+    place_rows :: lower_place_rows(function)
     owned := [Int:Bool]{}
     loop (slot, row) in slots {
         if eligible.get(slot) == None || !row.carried || row.cell || row.write_param >= 0 -> next
@@ -2992,7 +3011,7 @@ fn lower_release_slot_deaths(plan: &LowerReleasePlan, p: MIRProgram, m: LowerMod
             if instruction.operation == .WritePlace(place, value) | .ReplacePlace(place, value) {
                 slot :: place_slots.get(place.value) ?? next
                 if dying.get(slot) == None -> next
-                target :: lower_place_row(function, place) ?? next
+                target :: lower_place_row(function, place_rows, place) ?? next
                 if target.projections.len() > 0 || (uses.get(value.value) ?? [LowerReleaseUse]{}).len() != 1 {
                     _ := &dying.remove(slot)
                     next
@@ -3004,8 +3023,19 @@ fn lower_release_slot_deaths(plan: &LowerReleasePlan, p: MIRProgram, m: LowerMod
     count :: function.blocks.len()
     loop (block, row) in function.blocks {
         if !reachable[block] -> next
-        loop slot in 0..<slots.len() {
-            if dying.get(slot) == None || !(live[block].contains(slot) || written[block].contains(slot)) -> next
+        // The dying slots live into the block or written in it, ascending:
+        // only those, not every slot of the function per block.
+        held := [Int:Bool]{}
+        loop slot in live[block] {
+            if dying.get(slot) != None -> held[slot] = true
+        }
+        loop slot in written[block] {
+            if dying.get(slot) != None -> held[slot] = true
+        }
+        candidates := [Int]{}
+        loop (slot, _) in held -> &candidates.push(slot)
+        &candidates.sort()
+        loop slot in candidates {
             if successors[block].len() == 0 {
                 if row.terminator == .Return(_) && owned.get(slot) == None -> lower_release_add_slot(&plan.slot_returns, block, slot)
                 next
@@ -3231,11 +3261,19 @@ fn lower_write_param_index(function: MIRFunction, value: MIRValueID) -> Int Neve
     -1
 }
 
-fn lower_place_row(function: MIRFunction, place: MIRPlaceID) -> MIRPlace? {
-    loop row in function.places {
-        if row.id == place -> return Val(row)
+// MIR place id value -> the place's first row in `function.places`, built
+// once per function so a place lookup is one map probe, not a row scan.
+fn lower_place_rows(function: MIRFunction) -> [U64:Int] Never! {
+    rows := [U64:Int]{}
+    loop (index, row) in function.places {
+        if rows.get(row.id.value) == None -> &rows.add(row.id.value, index).drop("checked absent above")
     }
-    None
+    rows
+}
+
+fn lower_place_row(function: MIRFunction, rows: [U64:Int], place: MIRPlaceID) -> MIRPlace? {
+    row :: rows.get(place.value) ?? return None
+    Val(function.places[row])
 }
 
 // A dynamic trait call that no lowered implementation answers cannot return
@@ -4168,9 +4206,9 @@ fn lower_instruction_operation(p: MIRProgram, c: LowerContext, m: &LowerModule, 
 // outer Option. A present cache also remembers a missing key, so repeated
 // arms do not search again. map.find is the same native Map ABI as has_key.
 fn lower_map_lookup(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, map_place: MIRPlaceID, key_value: MIRValueID, cache_place: MIRPlaceID) Never! {
-    map_row :: lower_place_row(c.mir, map_place) ?? return lower_fail(&m, &f, "MapLookup map place is missing")
+    map_row :: lower_place_row(c.mir, c.place_rows, map_place) ?? return lower_fail(&m, &f, "MapLookup map place is missing")
     shape :: lower_map_shape(p, map_row.ty) ?? return lower_fail(&m, &f, "MapLookup requires a Map place")
-    cache_row :: lower_place_row(c.mir, cache_place) ?? return lower_fail(&m, &f, "MapLookup cache place is missing")
+    cache_row :: lower_place_row(c.mir, c.place_rows, cache_place) ?? return lower_fail(&m, &f, "MapLookup cache place is missing")
     slot :: c.place_slots.get(cache_place.value) ?? return lower_fail(&m, &f, "MapLookup cache has no lowered root")
     cached :: lower_slot_root(p, c, &m, &f, slot) ?? return lower_fail(&m, &f, "MapLookup cache is uninitialized")
     lookup_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "MapLookup has no checked type")
@@ -4538,7 +4576,7 @@ fn lower_drop_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 // own first, since its bytes in the parent are then zeroed. A cell slot's
 // places are read from memory like projections (Closures.jet).
 fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, place: MIRPlaceID, moving: Bool) Never! {
-    row :: lower_place_row(c.mir, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
+    row :: lower_place_row(c.mir, c.place_rows, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
     if lower_repr_of(p, &f, row.ty) == .Absent -> return lower_alias_absent(&f, instruction)
     inline :: lower_inline_of(p, &f, row.ty)
     if moving && row.projections.len() > 0 && !lower_projected_move_supported(&m, &f, row.projections) -> return
@@ -4663,7 +4701,7 @@ fn lower_stored_operands(operation: MIROperation) -> [MIRValueID] Never! {
 // as a Rust assignment does (lower_release_write_drops); `guard` releases a
 // root slot's value only when it is not the slot's null placeholder.
 fn lower_write_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, place: MIRPlaceID, value: MIRValueID, replace: Bool, guard: Bool) Never! {
-    row :: lower_place_row(c.mir, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
+    row :: lower_place_row(c.mir, c.place_rows, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
     if row.base == .Static(name) {
         if lower_is_absent(f, value) -> return
         stored :: lower_use(&m, &f, value) ?? return
@@ -4743,7 +4781,7 @@ fn lower_write_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
 // writing any payload; sema admits reads only after every slot is written.
 // Any other uninit place needs no storage before its first write.
 fn lower_initialize_uninit(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, place: MIRPlaceID) Never! {
-    row :: lower_place_row(c.mir, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
+    row :: lower_place_row(c.mir, c.place_rows, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
     fixed := false
     count := -1
     elem := row.ty
@@ -6553,7 +6591,7 @@ fn lower_write_arg(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
 }
 
 fn lower_write_place_arg(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, place: MIRPlaceID) -> LowerWriteBack? {
-    row :: lower_place_row(c.mir, place) ?? {
+    row :: lower_place_row(c.mir, c.place_rows, place) ?? {
         lower_fail(&m, &f, "place {place.value} is missing")
         return None
     }
@@ -6624,7 +6662,7 @@ fn lower_value_place(c: LowerContext, value: MIRValueID) -> MIRPlaceID? {
 // After the call: the place takes the value the callee left in the cell (the
 // callee already dropped a replaced value).
 fn lower_write_back(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, writeback: LowerWriteBack, rebound: MIRValueID?) Never! {
-    row :: lower_place_row(c.mir, writeback.place) ?? return
+    row :: lower_place_row(c.mir, c.place_rows, writeback.place) ?? return
     repr :: lower_repr(p, row.ty)
     if repr == .Inline(_) -> return
     if c.slots[writeback.slot].cell {

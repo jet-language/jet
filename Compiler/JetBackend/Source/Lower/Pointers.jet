@@ -17,7 +17,7 @@ fn lower_ptr_element(ty: MIRType) -> MIRType? {
 // `*place`: the registered address of the place's storage, as a Ptr word or
 // an exact Int.
 fn lower_raw_address_of(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, place: MIRPlaceID) Never! {
-    row :: lower_place_row(c.mir, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
+    row :: lower_place_row(c.mir, c.place_rows, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
     slot :: c.place_slots.get(place.value) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
     if !c.slots[slot].cell -> return lower_fail(&m, &f, "raw address of a place without storage is not lowered at O0 yet")
     walk :: lower_cell_walk(p, c, &m, &f, slot, row) ?? return
