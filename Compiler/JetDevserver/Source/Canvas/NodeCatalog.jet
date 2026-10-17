@@ -102,7 +102,7 @@ fn descriptor_for_id(id: String) -> NodeDescriptor {
 // Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:452
 fn insert_descriptor_id(transaction: String, pure: Bool) -> String {
     descriptor := if transaction == "insert_call" -> descriptor_for_id(if pure -> "function_pure" else -> "function_exec") else
-        NODE_DESCRIPTORS.iter().find((descriptor) -> descriptor.transaction == .Val(transaction))
+        NODE_DESCRIPTORS.iter().find((descriptor) -> descriptor.transaction == Val((transaction)))
             .unwrap_or_else(() -> panic("missing Canvas node descriptor transaction `{transaction}`"))
     assert(descriptor.palette.insertable, "Canvas action descriptor `{descriptor.id}` is not insertable")
     descriptor.id

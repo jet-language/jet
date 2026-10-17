@@ -13,7 +13,7 @@ fn flash_test_profile(tools: [JetCLIFlashToolDeclaration]) -> JetCLIFlashProfile
 #Test("flash adapters and exact argv preserve optional facts and reset") {
     assert(jet_cli_flash_adapter_parse("Probe-Rs") == None)
     adapters :: [JetCLIFlashAdapter]{JetCLIFlashAdapter.Emulator, JetCLIFlashAdapter.ProbeRs, JetCLIFlashAdapter.OpenOcd}
-    loop adapter in adapters -> assert(jet_cli_flash_adapter_parse(jet_cli_flash_adapter_name(adapter)) == Val(adapter))
+    loop adapter in adapters -> assert(jet_cli_flash_adapter_parse(jet_cli_flash_adapter_name(adapter)) == Val((adapter)))
     emulator :: jet_cli_flash_tool_from_facts(flash_test_facts(MIRTargetProgrammerAdapter.Emulator))
     assert_eq(jet_cli_flash_tool_argv(emulator, "evil; file.elf") ?? panic("argv"), [String]{"-machine", "machine", "-cpu", "cpu", "-nographic", "-kernel", "evil; file.elf"})
     probe :: jet_cli_flash_tool_from_facts(flash_test_facts(MIRTargetProgrammerAdapter.ProbeRs))

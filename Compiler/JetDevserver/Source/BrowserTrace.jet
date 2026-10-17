@@ -187,7 +187,7 @@ fn take_request() -> Bool Err! {
     parts := raw.trim_end().split('\t')
     current :: process_start_marker(pid) ?? return .Err("browser trace process identity cannot be verified")
     pid_text :: pid.to_string()
-    valid :: parts.next() == .Val(REQUEST_SCHEMA) && parts.next() == .Val(pid_text) && parts.next() == .Val(current) && parts.next().is_none()
+    valid :: parts.next() == .Val(REQUEST_SCHEMA) && parts.next() == Val((pid_text)) && parts.next() == Val((current)) && parts.next().is_none()
     _ :: fs.remove_file(path)
     if !valid -> return .Err("browser trace request belongs to a stale process session")
     return true

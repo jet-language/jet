@@ -821,9 +821,12 @@ fn sema_pattern_reused_hole(name: String, hole_span: Span, diagnostics: &[Diagno
 }
 
 // S31/D-OPT-LIFT1=A with D-PATTERN-HOLE-NAME1=A (#4713): `subject == Val(name)`
-// binds `name` in every expression position, so one already holding a value
-// is E0118 in a value and in a condition alike. `Val((name))` is the
-// comparison with the held value: a parenthesized payload constructs it.
+// binds `name` in every expression position. In a value position a name that
+// already holds a value is this E0118; `Val((name))` is the comparison with
+// the held value (a parenthesized payload constructs it). Conditions report a
+// held name when they declare their bindings
+// (sema_expression_declare_condition_bindings), which keeps the D-FLOWTYPE1
+// refinement `x == .Val(x)` that every `x != None` test is rewritten into.
 fn sema_pattern_test_reused_payload_name(pattern: Pattern, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     name := ""
     name_span := Span{start: 0, end: 0}

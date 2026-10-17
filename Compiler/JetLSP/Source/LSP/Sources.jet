@@ -81,13 +81,13 @@ fn lsp_checked_module(result: JetDriverCompilerCheckResult, path: String, platfo
     target :: lsp_canonical_source_uri(path, result.project_root, platform) ?? return None
     path_count := 0
     loop row in jet_driver_compiler_check_loaded_module_rows(result) {
-        if lsp_checked_module_path_identity(result, result.module_sources[row], platform) == Val(target) -> path_count += 1
+        if lsp_checked_module_path_identity(result, result.module_sources[row], platform) == Val((target)) -> path_count += 1
         if path_count > 1 -> return None
     }
     found := Int?{None}
     loop row in jet_driver_compiler_check_loaded_module_rows(result) {
         module_ref :: result.module_sources[row]
-        matches :: lsp_checked_module_path_identity(result, module_ref, platform) == Val(target) || lsp_checked_module_display_identity(result, module_ref, platform) == Val(target)
+        matches :: lsp_checked_module_path_identity(result, module_ref, platform) == Val((target)) || lsp_checked_module_display_identity(result, module_ref, platform) == Val((target))
         if !matches -> next
         if found != None -> return None
         found = Val(row)

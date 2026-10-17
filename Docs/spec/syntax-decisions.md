@@ -918,10 +918,13 @@ literal.
 In an equality RHS, `Val(v)` with a bare name introduces the S31 binding even
 if that name is already in scope (ordinary no-shadowing checks still apply).
 A name that already holds a value is therefore E0118 in a value position
-(`same :: code == Val(wanted)`) and in a condition alike, and its fix teaches
-the comparison `code == Val((wanted))`: a parenthesized payload is a
-constructor value (#4713). `Val(true)`, `Val(object.field)`, and
-`Val(compute(value))` are constructor values too. `!=` introduces no binding.
+(`same :: code == Val(wanted)`), whose fix teaches the comparison
+`code == Val((wanted))`: a parenthesized payload is a constructor value
+(#4713). In a condition it is the no-shadowing E0118, except the D-FLOWTYPE1
+refinement `x == .Val(x)` (which every `x != None` test becomes). A test
+under `||`, `!` or a call is a value, not a condition. `Val(true)`,
+`Val(object.field)`, and `Val(compute(value))` are constructor values too.
+`!=` introduces no binding.
 Dispatch-arm and nested leading-dot patterns retain their own pattern grammar.
 
 **D-ENUMDOT1 / D-ENUMDOT2 — Leading-dot variants**: match-arm patterns require a
