@@ -430,12 +430,41 @@ struct SemaGraphResult {
     memory_projections: [SemaMemoryProjectionRow]{[SemaMemoryProjectionRow]{}}
 }
 
-// Releases the rows of a checked graph that only checking, comptime and Doc
-// read: call-site, compute and memory facts, comptime requests and body
-// sources, retained programs, Outputs and the checker's own diagnostics. MIR
-// lowering, assembly and the backend read none of them; the driver releases
-// them before lowering (jet_driver_compile_loaded_stages).
-fn sema_graph_result_release_checking_facts(graph: &SemaGraphResult) Never! {
+// The rows of a checked graph that only checking, comptime and Doc read:
+// call-site, compute and memory facts, comptime requests and body sources,
+// retained programs, Outputs and the checker's own diagnostics. MIR
+// lowering, assembly and the backend read none of them.
+struct SemaGraphCheckingFacts {
+    call_facts: [SemaCallSiteFact]
+    comptime_requests: [SemaComptimeRequest]
+    comptime_body_sources: [SemaComptimeBodySource]
+    compute_facts: [SemaComputeFunctionFacts]
+    diagnostics: [Diagnostic]
+    inferred_infallible: [String]
+    programs: [Program]
+    outputs: [ResolvedOutput]
+    memory_declarations: [SemaMemoryFactDeclaration]
+    memory_projections: [SemaMemoryProjectionRow]
+}
+
+// Moves the checking facts out of a checked graph and leaves those rows
+// empty and unallocated, so the driver drops them off its serial path before
+// lowering (jet_driver_compile_loaded_stages). Each row moves
+// (compiler_take_rows); none is copied.
+fn sema_graph_result_take_checking_facts(graph: &SemaGraphResult) -> SemaGraphCheckingFacts Never! {
+    facts := SemaGraphCheckingFacts{
+        call_facts: compiler_take_rows<SemaCallSiteFact>(&graph.call_facts),
+        comptime_requests: compiler_take_rows<SemaComptimeRequest>(&graph.comptime_requests),
+        comptime_body_sources: compiler_take_rows<SemaComptimeBodySource>(&graph.comptime_body_sources),
+        compute_facts: compiler_take_rows<SemaComputeFunctionFacts>(&graph.compute_facts),
+        diagnostics: compiler_take_rows<Diagnostic>(&graph.diagnostics),
+        inferred_infallible: compiler_take_rows<String>(&graph.inferred_infallible),
+        programs: compiler_take_rows<Program>(&graph.programs),
+        outputs: compiler_take_rows<ResolvedOutput>(&graph.outputs),
+        memory_declarations: compiler_take_rows<SemaMemoryFactDeclaration>(&graph.memory_declarations),
+        memory_projections: compiler_take_rows<SemaMemoryProjectionRow>(&graph.memory_projections),
+    }
+    // The emptied lists still hold their buffers; fresh ones free them.
     graph.call_facts = [SemaCallSiteFact]{}
     graph.comptime_requests = [SemaComptimeRequest]{}
     graph.comptime_body_sources = [SemaComptimeBodySource]{}
@@ -446,6 +475,7 @@ fn sema_graph_result_release_checking_facts(graph: &SemaGraphResult) Never! {
     graph.outputs = [ResolvedOutput]{}
     graph.memory_declarations = [SemaMemoryFactDeclaration]{}
     graph.memory_projections = [SemaMemoryProjectionRow]{}
+    facts
 }
 
 // Releases the module rows, resolved imports and name facts of a checked
@@ -455,17 +485,6 @@ fn sema_graph_result_release_rows(graph: &SemaGraphResult) Never! {
     graph.modules = [SemaGraphModuleResult]{}
     graph.imports = [SemaRegistrationImport]{}
     graph.names = sema_name_facts_empty()
-}
-
-// Releases what the declaration pass handed to finalization, the body
-// recheck and checked-text validation (its modules, imports, names and item
-// sources) once the last of them has run.
-fn sema_comptime_stage_release(stage: &SemaComptimeDeclarationStage) Never! {
-    stage.modules = [SemaGraphModuleResult]{}
-    stage.imports = [SemaRegistrationImport]{}
-    stage.names = sema_name_facts_empty()
-    stage.sources = [SemaComptimeItemSource]{}
-    stage.diagnostics = [Diagnostic]{}
 }
 
 fn sema_name_facts_empty() -> MIRNameFacts Never! {

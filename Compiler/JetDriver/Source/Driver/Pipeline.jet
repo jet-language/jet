@@ -112,6 +112,8 @@ use jet_foundation.[
     TOutputCheckFact,
     TTestFact,
     compiler_transfer_rows,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
     core_module_export,
     diagnostic_with_source_mapping,
     jet_ring_prelude_closure_layer,
@@ -168,6 +170,7 @@ use jet_sema.[
     SemaGraphTrail,
     SemaGraphModuleResult,
     SemaGraphResult,
+    SemaGraphCheckingFacts,
     SemaCheckedMemoryFacts,
     sema_comptime_reflection_layout_engine,
     sema_checked_layout_projections,
@@ -218,6 +221,7 @@ use jet_sema.[
     sema_host_hook_access,
     sema_graph_trail_init,
     sema_graph_trail_undo,
+    sema_graph_result_take_checking_facts,
     sema_name_build_facts,
     sema_name_structure_facts,
     sema_registration_lookup_counts,
@@ -2055,6 +2059,109 @@ fn jet_driver_comptime_globals_add(globals: &[String:TComptimeValue], values: [S
     }
 }
 
+
+// Rows the compile has finished reading. Dropping a row writes nothing any
+// later step reads, so they drop on one more compiler thread while MIR
+// lowering (jet_driver_lower_releasing) or assembly
+// (jet_driver_assemble_releasing) runs, instead of on the serial path
+// between the phases; the outputs and diagnostics are the same with any
+// thread count.
+struct JetDriverReleased {
+    stages: [SemaComptimeDeclarationStage]
+    closures: [[SemaComptimeFunctionResult]]
+    values: [[SemaComptimeItemValue]]
+    registrations: [SemaRegistrationGraph]
+    checking: [SemaGraphCheckingFacts]
+    functions: [TFunc]
+}
+
+fn jet_driver_released_empty() -> JetDriverReleased Never! {
+    JetDriverReleased{stages: [SemaComptimeDeclarationStage]{}, closures: [[SemaComptimeFunctionResult]]{}, values: [[SemaComptimeItemValue]]{}, registrations: [SemaRegistrationGraph]{}, checking: [SemaGraphCheckingFacts]{}, functions: [TFunc]{}}
+}
+
+// The released rows while the release thread drops them: moved in as the
+// one row of `released` and dropped there, never copied.
+struct JetDriverReleaseSlot {
+    released: [JetDriverReleased]
+}
+
+// One task (or, on one thread, the caller): drops the slot's rows where it
+// runs and returns how many it dropped.
+fn jet_driver_release_rows(slot: Shared<JetDriverReleaseSlot>) -> Int {
+    permit :: slot.guard_edit()
+    dropped := 0
+    // Each popped row drops at the end of its turn, on this thread.
+    loop permit.value.released.len() > 0 {
+        rows :: &permit.value.released.pop() ?? break
+        dropped += rows.stages.len() + rows.closures.len() + rows.values.len() + rows.registrations.len() + rows.checking.len() + rows.functions.len()
+    }
+    dropped
+}
+
+// Whether the release runs beside its phase: only when the threads admit
+// two, so `--threads 1` drops the rows first, on the calling thread.
+fn jet_driver_release_beside(threads: CompilerThreads) -> Bool Never! {
+    compiler_threads_admit(threads, 2, 2, 1, 0, 0) > 1
+}
+
+// lower_functions with `released` dropped beside it (jet_driver_release_rows).
+// Lowering reads none of the released rows, so it lowers the same functions
+// either way.
+fn jet_driver_lower_releasing(released: ^JetDriverReleased, functions: &[TFunc], modules: &[SemaGraphModuleResult], source_files: [MIRSourceFile], threads: CompilerThreads, trace_sink: CompilerTraceSink?, native_stop_points: Bool, edition: String, keep_going: Bool) -> JetCodegenFunctions {
+    slot :: shared JetDriverReleaseSlot{released: [JetDriverReleased]{^released}}
+    if !jet_driver_release_beside(threads) {
+        _ :: jet_driver_release_rows(slot)
+        return lower_functions(&functions, &modules, source_files, threads, trace_sink, native_stop_points, edition, keep_going)
+    }
+    lowered := [JetCodegenFunctions]{}
+    task.group lower_release {
+        dropping :: task jet_driver_release_rows(slot)
+        &lowered.push(lower_functions(&functions, &modules, source_files, threads, trace_sink, native_stop_points, edition, keep_going))
+        _ :: dropping.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    &lowered.pop() ?? panic("MIR lowering returned nothing beside the release thread")
+}
+
+// jet_driver_assemble_mir with `released` dropped beside it
+// (jet_driver_release_rows). Assembly reads none of the released rows, so
+// it assembles the same program either way.
+fn jet_driver_assemble_releasing(
+    released: ^JetDriverReleased,
+    threads: CompilerThreads,
+    load: JetDriverLoadResult,
+    semantic_modules: [SemaGraphModuleResult],
+    semantic_imports: [SemaRegistrationImport],
+    names: MIRNameFacts,
+    lowered_rows: ^JetCodegenFunctions,
+    foreign_artifacts: JetCodegenForeignArtifacts,
+    facts: MIRPackageFacts,
+    include_imports: Bool,
+    keep_going: Bool,
+    diagnostics: &[Diagnostic],
+) -> MIRProgram? {
+    slot :: shared JetDriverReleaseSlot{released: [JetDriverReleased]{^released}}
+    if !jet_driver_release_beside(threads) {
+        _ :: jet_driver_release_rows(slot)
+        return jet_driver_assemble_mir(load, semantic_modules, semantic_imports, names, ^lowered_rows, foreign_artifacts, facts, include_imports, keep_going, &diagnostics)
+    }
+    programs := [MIRProgram?]{}
+    task.group assemble_release {
+        dropping :: task jet_driver_release_rows(slot)
+        &programs.push(jet_driver_assemble_mir(load, semantic_modules, semantic_imports, names, ^lowered_rows, foreign_artifacts, facts, include_imports, keep_going, &diagnostics))
+        _ :: dropping.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    &programs.pop() ?? panic("MIR assembly returned nothing beside the release thread")
+}
+
+// `driver.prelower.*` and `driver.preassemble.*`: each serial step between
+// comptime.validate, lower and assemble is its own span.
+fn jet_driver_trace_step_begin(trace_sink: CompilerTraceSink?, name: String) {
+    if trace_sink == .Val(sink) -> sink.begin(name, "", -1, -1)
+}
+
+fn jet_driver_trace_step_end(trace_sink: CompilerTraceSink?, name: String, items: Int) {
+    if trace_sink == .Val(sink) -> sink.end(name, items)
+}
 
 // Moves the rows of `functions` flagged in `mask` onto `kept` and the others
 // onto `rest`, both in order, leaving `functions` empty. Each pop moves one
@@ -5967,8 +6074,10 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     if request.trace_sink == .Val(sink) -> sink.end("comptime.validate", validation.values.len())
     load.diagnostics = stage_diagnostics
     // Finalization, the body recheck and checked-text validation were the
-    // declaration pass's last readers.
-    sema_comptime_stage_release(&comptime_stage)
+    // declaration pass's last readers: it drops beside lowering
+    // (jet_driver_lower_releasing), off the serial path.
+    prelower_released := jet_driver_released_empty()
+    &prelower_released.stages.push(^comptime_stage)
     validated_registration := ^validation.registration
     validation.registration = None
     registration_graph = ^validated_registration ?? return jet_driver_compile_internal_result(load, trace, "checked text validation lost the registration graph")
@@ -5991,7 +6100,9 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     comptime_functions = ^validation.functions
     validation.functions = [SemaComptimeFunctionResult]{}
     if request.capture_build_nodes && checked_graph.complete && !jet_driver_has_errors(load.diagnostics) {
+        jet_driver_trace_step_begin(request.trace_sink, "driver.prelower.build_nodes")
         load.build_nodes = jet_driver_build_compiler_nodes(request, load, checked_graph, canonical_effect_module_identity)
+        jet_driver_trace_step_end(request.trace_sink, "driver.prelower.build_nodes", -1)
         if load.build_nodes == None -> return jet_driver_compile_internal_result(load, trace, "the final checked build bundle lost its exact source bytes or node identity")
     }
     // A Comptime compile ends with its evaluated build-time values; nothing
@@ -6005,11 +6116,15 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     }
     // The merge reads unchanged registration name facts. Declaration consumers
     // below apply values only when they need the resolved graph.
-    if !jet_driver_merge_checked_text_functions(&checked_graph, registration_graph, comptime_functions) {
+    jet_driver_trace_step_begin(request.trace_sink, "driver.prelower.merge")
+    merged :: jet_driver_merge_checked_text_functions(&checked_graph, registration_graph, comptime_functions)
+    jet_driver_trace_step_end(request.trace_sink, "driver.prelower.merge", comptime_functions.len())
+    if !merged {
         if !kg.enabled -> return jet_driver_compile_internal_result(load, trace, "staged method closure lost its checked function or registered owner")
         jet_driver_keep_going_row(&kg, "comptime.validate", "-", "ICE", "staged method closure lost its checked function or registered owner", "-")
     }
     // The merge was the staged closures' last reader.
+    &prelower_released.closures.push(^comptime_functions)
     comptime_functions = [SemaComptimeFunctionResult]{}
     if checked_projection {
         resolved_registration := sema_comptime_graph_with_values(^registration_graph, comptime_values)
@@ -6027,6 +6142,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         registration_graph = ^resolved_registration
     }
     if request.capture_build_program {
+        jet_driver_trace_step_begin(request.trace_sink, "driver.prelower.build_program")
         resolved_registration := sema_comptime_graph_with_values(^registration_graph, comptime_values)
         module_sources := [SemaCompilerModuleSource]{}
         source_positions :: jet_driver_source_file_positions(load.source_files)
@@ -6037,16 +6153,21 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         &module_sources.push(SemaCompilerModuleSource{module_identity: canonical_effect_module_identity, source: request.canonical_effect_source})
         load.build_program = jet_eval_compiler_services_program_info(resolved_registration, checked_graph, jet_driver_source_text_at(load.source_files, source_positions, request.authorized_sources.entry_path), module_sources)
         registration_graph = ^resolved_registration
+        jet_driver_trace_step_end(request.trace_sink, "driver.prelower.build_program", module_sources.len())
         if load.build_program == None -> return jet_driver_compile_internal_result(load, trace, "the checked build program reflection snapshot is incomplete")
     }
     // Only a REPL session reads the build-time values past this point.
-    if request.mode != JetDriverCompileMode.Repl -> comptime_values = [SemaComptimeItemValue]{}
+    if request.mode != JetDriverCompileMode.Repl {
+        &prelower_released.values.push(^comptime_values)
+        comptime_values = [SemaComptimeItemValue]{}
+    }
     if request.mode == JetDriverCompileMode.Eval {
         selected_name :: request.selected_entry ?? "run"
         key :: symbol_id(SymbolKind.Function, load.entry_module_identity, "", selected_name).key
         loop diagnostic in check_pure_program_root(key, checked_graph.modules) -> &load.diagnostics.push(diagnostic)
     }
 
+    jet_driver_trace_step_begin(request.trace_sink, "driver.prelower.owners")
     // Every checked function moves out of its graph module into one list, so
     // the checked TIR is resident once from here on: the rows return to their
     // modules after lowering for the entry and foreign lookups
@@ -6111,6 +6232,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     // Every checked function has its owner now.
     registered_function_keys = [String:[String:Bool]]{}
     loaded_identity_counts = [String:Int]{}
+    jet_driver_trace_step_end(request.trace_sink, "driver.prelower.owners", checked_row)
     // E0601 only when neither named tests nor selected Check Outputs exist.
     if request.mode == JetDriverCompileMode.Test && jet_driver_runnable_test_count(registration_graph) == 0 {
         &load.diagnostics.push(jet_driver_diagnostic_without_span("E0601", "no `#Test` blocks found to run", "add at least one top-level block: #Test(\"describes what this checks\") {{ ... }}", "use `assert` and `assert_eq` inside the block to check results"))
@@ -6122,7 +6244,9 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     // module's C export rows, the Rust foreign facts, a Sandbox export
     // surface and a REPL session. Read the export rows now and keep the graph
     // only for a route that reads it later, so MIR lowering, assembly, the
-    // optimizer and the native backend never hold every registered module.
+    // optimizer and the native backend never hold every registered module;
+    // otherwise it drops beside lowering (jet_driver_lower_releasing).
+    jet_driver_trace_step_begin(request.trace_sink, "driver.prelower.registration")
     c_export_rows :: jet_driver_c_export_rows(registration_graph, load.entry_module_identity)
     sandbox_target := if request.target == {
         .Sandbox(_, _, _) -> true
@@ -6130,10 +6254,17 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     }
     keep_registration :: sandbox_target || request.mode == JetDriverCompileMode.Repl || jet_driver_rust_foreign_present(registration_graph)
     late_registration := SemaRegistrationGraph?{None}
-    late_registration = Val(^registration_graph)
-    if !keep_registration -> late_registration = None
-    // Lowering and assembly read only the checked modules, imports and names.
-    sema_graph_result_release_checking_facts(&checked_graph)
+    if keep_registration {
+        late_registration = Val(^registration_graph)
+    } else {
+        &prelower_released.registrations.push(^registration_graph)
+    }
+    jet_driver_trace_step_end(request.trace_sink, "driver.prelower.registration", c_export_rows.len())
+    // Lowering and assembly read only the checked modules, imports and names;
+    // the checking facts drop beside lowering too.
+    jet_driver_trace_step_begin(request.trace_sink, "driver.prelower.release")
+    &prelower_released.checking.push(sema_graph_result_take_checking_facts(&checked_graph))
+    jet_driver_trace_step_end(request.trace_sink, "driver.prelower.release", prelower_released.checking.len())
 
     // #3980: lower only the Core source bodies the program reaches (Rust
     // TIR `should_lower_imported_core_body`).
@@ -6150,16 +6281,21 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
 
-    lowered := lower_functions(&sema_functions, &runtime_semantic_modules, load.source_files, request.compiler_threads, request.trace_sink, request.native_stop_points, jet_driver_resolved_package_edition(load), kg.enabled)
+    lowered := jet_driver_lower_releasing(^prelower_released, &sema_functions, &runtime_semantic_modules, load.source_files, request.compiler_threads, request.trace_sink, request.native_stop_points, jet_driver_resolved_package_edition(load), kg.enabled)
     if request.trace_sink == .Val(sink) -> sink.end("lower", lowered.functions.len())
+    jet_driver_trace_step_begin(request.trace_sink, "driver.preassemble.counters")
     jet_driver_trace_lower_counters(request.trace_sink, sema_functions, lowered.functions, lowered.nested_functions, comptime_run.lowered_keys)
+    jet_driver_trace_step_end(request.trace_sink, "driver.preassemble.counters", sema_functions.len())
     // JET_KEEP_GOING: each function whose lowering stopped lowered as a trap.
     loop failure in lowered.lowering_failures -> jet_driver_keep_going_row(&kg, "lower", "{failure.name} [{failure.key}]", "TRAPPED", "lowered as a trap: lowering it stopped: {failure.message}", "{failure.source_file}:{failure.span.start}..{failure.span.end}")
     if lowered.functions.len() != sema_functions.len() {
         &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "MIR lowering did not return every checked function", "a successful lowering preserves the complete checked function set", "report this incomplete codegen result as a compiler defect"))
         if !kg.enabled -> return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Lower), false, trace)
     }
+    jet_driver_trace_step_begin(request.trace_sink, "driver.preassemble.restore")
     jet_driver_restore_checked_functions(&checked_graph, module_function_counts, lowering_rows, &sema_functions, &unlowered_functions)
+    jet_driver_trace_step_end(request.trace_sink, "driver.preassemble.restore", lowering_rows.len())
+    jet_driver_trace_step_begin(request.trace_sink, "driver.preassemble.owners")
     function_index := 0
     loop function_index < lowered.functions.len() {
         function :: lowered.functions[function_index]
@@ -6179,12 +6315,14 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     }
     // The owner check above was the owner map's last reader.
     function_owners = [String:String]{}
+    jet_driver_trace_step_end(request.trace_sink, "driver.preassemble.owners", lowered.functions.len())
     if kg.enabled {
         jet_driver_keep_going_diagnostics(&kg, "lower", load.diagnostics)
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
     if jet_driver_has_errors(load.diagnostics) && !kg.enabled -> return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Lower), false, trace)
 
+    jet_driver_trace_step_begin(request.trace_sink, "driver.preassemble.entry")
     stage_diagnostics = load.diagnostics
     load.diagnostics = [Diagnostic]{}
     // Rust `lower_tir_artifact_facts_for_request`: a TestExecutable has no
@@ -6202,6 +6340,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         request.mode != JetDriverCompileMode.Test -> entry_function = jet_driver_resolve_entry_function(load, checked_graph, lowered.functions, &stage_diagnostics)
     }
     load.diagnostics = stage_diagnostics
+    jet_driver_trace_step_end(request.trace_sink, "driver.preassemble.entry", -1)
     web_target := if request.target == {
         .Web(_, _, _) -> true
         .Native | .Sandbox(_, _, _) -> false
@@ -6212,6 +6351,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     }
     if kg.enabled -> jet_driver_keep_going_diagnostics(&kg, "assemble", load.diagnostics)
     if jet_driver_has_errors(load.diagnostics) && !kg.enabled -> return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Assemble), false, trace)
+    jet_driver_trace_step_begin(request.trace_sink, "driver.preassemble.facts")
     stage_diagnostics = load.diagnostics
     load.diagnostics = [Diagnostic]{}
     package_facts_option := jet_driver_package_facts(
@@ -6231,15 +6371,25 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     // harness, lowered while the tests' checked TIR rows are still resident.
     test_artifacts := JetCodegenJobTestArtifacts?{None}
     if request.mode == JetDriverCompileMode.Test -> test_artifacts = Val(jet_driver_test_artifacts(load.package_identity, load.entry_module_identity, &checked_graph, &lowered.functions, &load.diagnostics))
+    jet_driver_trace_step_end(request.trace_sink, "driver.preassemble.facts", -1)
     // The checked TIR functions are as large as the MIR lowered from them;
-    // release them before MIR assembly and optimization.
+    // they leave the graph before MIR assembly and optimization and drop
+    // beside assembly (jet_driver_assemble_releasing).
+    jet_driver_trace_step_begin(request.trace_sink, "driver.preassemble.release")
+    preassemble_released := jet_driver_released_empty()
     if request.mode != JetDriverCompileMode.Repl {
-        loop module_index in 0..<checked_graph.modules.len() -> checked_graph.modules[module_index].functions = [TFunc]{}
+        loop module_index in 0..<checked_graph.modules.len() {
+            compiler_transfer_rows<TFunc>(&preassemble_released.functions, &checked_graph.modules[module_index].functions)
+            checked_graph.modules[module_index].functions = [TFunc]{}
+        }
     }
+    jet_driver_trace_step_end(request.trace_sink, "driver.preassemble.release", preassemble_released.functions.len())
     stage_diagnostics = load.diagnostics
     load.diagnostics = [Diagnostic]{}
     if request.trace_sink == .Val(sink) -> sink.begin("assemble", "", -1, -1)
-    program := jet_driver_assemble_mir(
+    program := jet_driver_assemble_releasing(
+        ^preassemble_released,
+        request.compiler_threads,
         load,
         runtime_semantic_modules,
         checked_graph.imports,
