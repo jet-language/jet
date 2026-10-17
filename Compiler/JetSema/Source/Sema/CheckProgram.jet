@@ -3557,20 +3557,20 @@ fn sema_check_registered_module_item_count(environment: SemaScopeEnvironment, pr
     panic("an owning registered-module pass lost its registration graph")
 }
 
-// SP15: a module's top-level function bodies checked on compiler threads.
-// The parallel pass (sema_check_bodies_parallel) checks every body
-// sema_check_parallel_jobs selects against the module scope as it stands
-// after the view summaries, each thread on its own copy of that scope and
-// all of them on the one shared environment. The module's serial body loop
-// then takes each prepared result in item order instead of checking the
-// function again (sema_check_module_function). It checks a function itself
-// when the prepared result no longer applies: an earlier body published a
-// return view that changed the module scope, or the check wanted a host
-// callback, which never runs on a compiler thread. Reports, facts and
-// functions are appended in item order either way, so the module result is
-// the same for any thread count.
+// SP15: a module's top-level function and method bodies checked on compiler
+// threads. The parallel pass (sema_check_bodies_parallel) checks every body
+// sema_check_parallel_jobs and sema_check_parallel_method_jobs select against
+// the module scope as it stands after the view summaries, each thread on its
+// own copy of that scope and all of them on the one shared environment. The
+// module's serial body loop then takes each prepared result in body-loop
+// order instead of checking the body again (sema_check_module_function). It
+// checks a body itself when the prepared result no longer applies: an
+// earlier body published a return view that changed the module scope, or the
+// check wanted a host callback, which never runs on a compiler thread.
+// Reports, facts and functions are appended in body-loop order either way,
+// so the module result is the same for any thread count.
 // `checked` is optional only so the body loop can move it out
-// (sema_check_take_prepared); every prepared body has one.
+// (sema_check_drain_body); every prepared body has one.
 struct SemaParallelBody {
     job_index: Int
     checked: SemaFunctionResult?
