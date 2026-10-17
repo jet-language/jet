@@ -457,16 +457,16 @@ fn jet_eval_frame(function: MIRFunctionID, entry: MIRBlockID, args: [JetEvalRunt
     }
 }
 
-fn jet_eval_function_result(failure: MIRFailureCarrier, data: TComptimeValue) -> TComptimeValue Never! {
+fn jet_eval_function_result(failure: MIRFailureCarrier, data: ^TComptimeValue) -> TComptimeValue Never! {
     if failure == {
         .Result(_, _) | .Optional(_) -> {
-            if data == .Present(_) -> return data.copy()
-            if data == .Failed(_) -> return data.copy()
+            if data == .Present(_) -> return data
+            if data == .Failed(_) -> return data
             return TComptimeValue.Present{value: data}
         }
         else -> {}
     }
-    data.copy()
+    data
 }
 fn jet_eval_result(machine: ^JetEvalMachine, value: JetEvalRuntimeValue?, complete: Bool) -> JetEvalResult Never! {
     jet_eval_session_result(JetEvalRuntimeSession{machine: machine, retired: false}, value, complete)
@@ -865,7 +865,7 @@ fn jet_eval_function_in(machine: &JetEvalMachine, function_id: MIRFunctionID, ar
         if !jet_eval_has_failure(machine) -> jet_eval_compiler_fail(&machine, function.span, "the value of `{function.key}` did not retire cleanly")
         return None
     }
-    result_data := jet_eval_function_result(function.failure, data)
+    result_data := jet_eval_function_result(function.failure, ^data)
     Val(JetEvalRuntimeValue.Data{value: result_data})
 }
 
@@ -1938,6 +1938,9 @@ fn jet_eval_capture(machine: &JetEvalMachine, frame_index: Int, slot: Int, span:
     }
     if machine.program.functions[function].capture_params[slot].place_only {
         // This is the existing place address, not the cell's uninitialized value.
+        // copy: the capture slot's place address (a few ints) (owner: the machine) is handed to
+        // jet_eval_borrow_value beside `&machine`; a view into machine would be live across that
+        // exclusive borrow (E0212), and the machine keeps its own row.
         anchor :: machine.frames[frame_index].captures[slot].copy()
         if anchor == .Address(_, _, _) -> return jet_eval_borrow_value(anchor, &machine, span)
         jet_eval_compiler_fail(&machine, span, "place-only MIR capture must retain an actual place address")
@@ -2161,6 +2164,9 @@ fn jet_eval_constant_instruction(machine: &JetEvalMachine, constant: MIRConstant
 fn jet_eval_option_element(ty: MIRType) -> MIRType Never! {
     // copy: `inner` is a payload of read parameter `ty`, which keeps the original; the returned value owns this one
     if ty.kind == .Option(inner) -> return inner.copy()
+    // copy: the caller keeps its type (owner: the read parameter) and gets the unchanged type as
+    // its own result (owner: the returned MIRType); the Option arm returns the inner type, so the
+    // result is not always the input.
     ty.copy()
 }
 
@@ -2357,7 +2363,7 @@ fn jet_eval_native_call_exchange(machine: &JetEvalMachine, binding: JetEvalNativ
 
 fn jet_eval_native_call(machine: &JetEvalMachine, binding: JetEvalNativeCallBinding, args: [JetEvalRuntimeValue], move_permissions: [Bool], result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
     result := jet_eval_native_call_exchange(&machine, binding, args, move_permissions, result_ty, span)
-    jet_eval_discharge_call_boundary(&machine, args, move_permissions, result, span)
+    jet_eval_discharge_call_boundary(&machine, args, move_permissions, ^result, span)
 }
 
 fn jet_eval_trait_method_function(machine: &JetEvalMachine, values: [JetEvalRuntimeValue], method_id: MIRTraitMethodID, trait_ref: MIRTraitRef, receiver_ty: MIRType, span: Span) -> MIRFunctionID? {
@@ -2496,7 +2502,7 @@ fn jet_eval_call(machine: &JetEvalMachine, frame_index: Int, callee: MIRCallee, 
         .Method(function, _) -> return jet_eval_invoke(&machine, function, values, [JetEvalRuntimeValue]{}, span)
         .Prelude(call) -> {
             result := jet_eval_route_prelude_dispatch(&machine, call, values, type_args, result_ty, span)
-            return jet_eval_discharge_call_boundary(&machine, values, prepared.move_permissions, result, span)
+            return jet_eval_discharge_call_boundary(&machine, values, prepared.move_permissions, ^result, span)
         }
         .TraitMethod(method, trait_ref, receiver) -> {
             if values.len() > 0 {
@@ -2540,7 +2546,7 @@ fn jet_eval_call(machine: &JetEvalMachine, frame_index: Int, callee: MIRCallee, 
                         }
                         result := jet_eval_native_call(&machine, callable, values, prepared.move_permissions, result_ty, span)
                         if callee_borrowed -> return result
-                        return jet_eval_discharge_boundary(&machine, [JetEvalRuntimeValue]{closure}, result, span)
+                        return jet_eval_discharge_boundary(&machine, [JetEvalRuntimeValue]{closure}, ^result, span)
                     }
                     None -> {}
                 }
@@ -3005,7 +3011,7 @@ fn jet_eval_initialize_iterator(machine: &JetEvalMachine, frame_index: Int, call
     source_runtime :: jet_eval_value(&machine, frame_index, collection, span) ?? return None
     result := jet_eval_initialize_iterator_from(&machine, frame_index, call, source_runtime, step_id, by_value, source_kind, span)
     owned := machine.frames[frame_index].borrowed_values.get(collection.value) != (Val(true))
-    jet_eval_discharge_call_boundary(&machine, [JetEvalRuntimeValue]{source_runtime}, [Bool]{owned}, result, span)
+    jet_eval_discharge_call_boundary(&machine, [JetEvalRuntimeValue]{source_runtime}, [Bool]{owned}, ^result, span)
 }
 
 // `source_runtime` is borrowed; every owned temporary built here (step value,
@@ -3069,7 +3075,7 @@ fn jet_eval_initialize_iterator_from(machine: &JetEvalMachine, frame_index: Int,
             JetEvalRuntimeValue.Data{value: TComptimeValue.String{value: jet_eval_loop_source_wire(source_kind)}},
         }
         exchanged := jet_eval_host_row_with_moves(&machine, init_row, init_args, None, [Bool]{by_value, false, false, false, false}, span)
-        cursor :: jet_eval_discharge_boundary(&machine, init_args, exchanged, span) ?? return None
+        cursor :: jet_eval_discharge_boundary(&machine, init_args, ^exchanged, span) ?? return None
         if cursor == {
             .ForeignHandle(handle, raw, token) -> {
                 if !jet_eval_cursor_handle_matches(&machine, handle, raw, token, span) {
@@ -3212,6 +3218,9 @@ fn jet_eval_closure_captures(machine: &JetEvalMachine, frame_index: Int, functio
     output := [JetEvalRuntimeValue]{}
     index := 0
     loop index < operands.len() {
+        // copy: the capture parameter row (owner: the machine) is handed to jet_eval_take and the
+        // drop helpers beside `&machine`; a view into machine would be live across that exclusive
+        // borrow (E0212), and the machine keeps its own row.
         parameter :: machine.program.functions[target].capture_params[index].copy()
         operand := operands[index]
         if operand == {
@@ -5482,6 +5491,9 @@ fn jet_eval_host_success_type(ty: MIRType) -> MIRType Never! {
         .Result(ok, _) -> return jet_eval_host_success_type(ok)
         else -> {}
     }
+    // copy: the caller keeps its type (owner: the read parameter) and gets the unchanged type as
+    // its own result (owner: the returned MIRType); the Option/Result arms recurse into an inner
+    // type instead.
     ty.copy()
 }
 fn jet_eval_host_retype(source: MIRType, kind: MIRTypeKind) -> MIRType Never! {
@@ -5528,6 +5540,9 @@ fn jet_eval_host_substitute_type(ty: MIRType, params: [MIRGenericParam], args: [
         }
         // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new MIRTypeKind.Quantity owns this one
         .Quantity(inner, dimension) -> return jet_eval_host_retype(ty, MIRTypeKind.Quantity{base: jet_eval_host_substitute_type(inner, params, args), dimension: dimension.copy()})
+        // copy: a type with no generic parameter to substitute is returned unchanged (owner: the
+        // result) while the caller keeps its own (owner: the read parameter, reused across
+        // substitutions).
         else -> return ty.copy()
     }
 }
@@ -6225,16 +6240,16 @@ fn jet_eval_drain_callbacks(machine: &JetEvalMachine, span: Span) -> Bool {
 // Every native boundary owns its argument list: the exchange borrows it and
 // the boundary discharges each owned alias exactly once afterwards, whether
 // or not the exchange produced a value.
-fn jet_eval_discharge_boundary(machine: &JetEvalMachine, args: [JetEvalRuntimeValue], result: JetEvalRuntimeValue?, span: Span) -> JetEvalRuntimeValue? {
-    if jet_eval_drop_values(&machine, args, span) -> return result.copy()
+fn jet_eval_discharge_boundary(machine: &JetEvalMachine, args: [JetEvalRuntimeValue], result: ^JetEvalRuntimeValue?, span: Span) -> JetEvalRuntimeValue? {
+    if jet_eval_drop_values(&machine, args, span) -> return result
     if result == {
         Val(produced) -> jet_eval_drop_value(&machine, produced, span)
         None -> {}
     }
     None
 }
-fn jet_eval_discharge_call_boundary(machine: &JetEvalMachine, args: [JetEvalRuntimeValue], move_permissions: [Bool], result: JetEvalRuntimeValue?, span: Span) -> JetEvalRuntimeValue? {
-    if jet_eval_drop_call_values(&machine, args, move_permissions, span) -> return result.copy()
+fn jet_eval_discharge_call_boundary(machine: &JetEvalMachine, args: [JetEvalRuntimeValue], move_permissions: [Bool], result: ^JetEvalRuntimeValue?, span: Span) -> JetEvalRuntimeValue? {
+    if jet_eval_drop_call_values(&machine, args, move_permissions, span) -> return result
     if result == {
         Val(produced) -> jet_eval_drop_value(&machine, produced, span)
         None -> {}
@@ -7120,7 +7135,7 @@ fn jet_eval_host_handle_method(machine: &JetEvalMachine, frame_index: Int, row: 
             jet_eval_host_row_exchange(&machine, row, values, result_ty, arg_shapes, move_permissions, static_operand, span)
         }
     }
-    jet_eval_discharge_call_boundary(&machine, values, temporary_owned, result, span)
+    jet_eval_discharge_call_boundary(&machine, values, temporary_owned, ^result, span)
 }
 
 fn jet_eval_host_call(machine: &JetEvalMachine, frame_index: Int, call: MIRPreludeCallID, args: [MIRCallArg], result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
@@ -7149,7 +7164,7 @@ fn jet_eval_host_call(machine: &JetEvalMachine, frame_index: Int, call: MIRPrelu
         })
     }
     result := jet_eval_host_row_with_shapes(&machine, row, values, result_ty, arg_shapes, move_permissions, span)
-    jet_eval_discharge_call_boundary(&machine, values, prepared.move_permissions, result, span)
+    jet_eval_discharge_call_boundary(&machine, values, prepared.move_permissions, ^result, span)
 }
 fn jet_eval_semantic_values_prepared(machine: &JetEvalMachine, frame_index: Int, values: [MIRValueID], span: Span) -> JetEvalPreparedValues? {
     output := [JetEvalRuntimeValue]{}
@@ -7238,7 +7253,7 @@ fn jet_eval_semantic_pattern_match(
         return None
     }
     result := jet_eval_host_static_row(&machine, row, [JetEvalRuntimeValue]{JetEvalRuntimeValue.Data{value: subject_data}}, result_ty, [JetEvalHostTypeShape]{}, [Bool]{false}, pattern, span)
-    jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.owned, result, span)
+    jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.owned, ^result, span)
 }
 
 fn jet_eval_byte_list(value: TComptimeValue) -> [U8]? {
@@ -7323,7 +7338,7 @@ fn jet_eval_host_take_pattern(
         None,
         span,
     )
-    jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.owned, result, span)
+    jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.owned, ^result, span)
 }
 fn jet_eval_host_semantic_arg_shapes(machine: &JetEvalMachine, frame_index: Int, values: [MIRValueID], span: Span) -> [JetEvalHostTypeShape]? {
     shapes := [JetEvalHostTypeShape]{}
@@ -7426,7 +7441,7 @@ fn jet_eval_host_plugin_invoke(
         Val(JetEvalHostStaticOperand.PluginInvoke{export_name: export_name, signature: signature}),
         span,
     )
-    jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.owned, result, span)
+    jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.owned, ^result, span)
 }
 
 fn jet_eval_host_nominal_type_name(ty: MIRType) -> String? {
@@ -7637,7 +7652,7 @@ fn jet_eval_host_http_router_register(
             exchange.result = None
         }
     }
-    jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.owned, exchange.result, span)
+    jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.owned, ^exchange.result, span)
 }
 
 fn jet_eval_host_allocator_type_name(ty: MIRType) -> String? {
@@ -8246,10 +8261,10 @@ fn jet_eval_host_alloc_new(
             static_operand,
             span,
         )
-        return jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.move_permissions, fixed_result, span)
+        return jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.move_permissions, ^fixed_result, span)
     }
     result := jet_eval_host_row_exchange(&machine, row, prepared.values, result_ty, shapes, move_permissions, Val(static_operand), span)
-    jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.move_permissions, result, span)
+    jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.move_permissions, ^result, span)
 }
 
 
@@ -8361,7 +8376,7 @@ fn jet_eval_cell_guard_project(
         JetEvalHostStaticOperand.CellGuardProject{paths: paths, editable: editable, edit_paths_disjoint: edit_paths_disjoint, split_route: split_route},
         span,
     )
-    jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.owned, result, span)
+    jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.owned, ^result, span)
 }
 
 fn jet_eval_gc_edit_route_valid(row: MIRPreludeCall, kind: MIRGCEditKind) -> Bool Never! {
@@ -8496,7 +8511,7 @@ fn jet_eval_gc_edit(
     &move_permissions.push(true)
     static_operand := JetEvalHostStaticOperand.GCEdit{kind: kind, site: site, edge_count: edges.len(), has_index: index != None, edge_shapes: edge_shapes}
     result := jet_eval_host_static_row(&machine, row, args, result_ty, [JetEvalHostTypeShape]{}, move_permissions, static_operand, span)
-    jet_eval_discharge_call_boundary(&machine, args, owned, result, span)
+    jet_eval_discharge_call_boundary(&machine, args, owned, ^result, span)
 }
 
 
@@ -8505,7 +8520,7 @@ fn jet_eval_gc_edit(
 fn jet_eval_semantic_prelude(machine: &JetEvalMachine, frame_index: Int, call: MIRPreludeCallID, values: [MIRValueID], type_args: [MIRType], result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
     prepared :: jet_eval_semantic_values_prepared(&machine, frame_index, values, span) ?? return None
     result := jet_eval_route_prelude_dispatch(&machine, call, prepared.values, type_args, result_ty, span)
-    jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.owned, result, span)
+    jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.owned, ^result, span)
 }
 fn jet_eval_semantic_route_values(machine: &JetEvalMachine, frame_index: Int, call: MIRPreludeCallID, receiver: MIRValueID?, values: [MIRValueID], result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
     output := [JetEvalRuntimeValue]{}
@@ -8527,7 +8542,7 @@ fn jet_eval_semantic_route_values(machine: &JetEvalMachine, frame_index: Int, ca
         &owned.push(prepared.owned[index])
     }
     result := jet_eval_route_prelude_dispatch(&machine, call, output, [MIRType]{}, result_ty, span)
-    jet_eval_discharge_call_boundary(&machine, output, owned, result, span)
+    jet_eval_discharge_call_boundary(&machine, output, owned, ^result, span)
 }
 fn jet_eval_hardware(machine: &JetEvalMachine, frame_index: Int, call: MIRPreludeCallID, operation: MIRHardwareOp, receiver: MIRValueID?, args: [MIRCallArg], result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
     row :: jet_eval_route_prelude_row(&machine, call, span) ?? return None
@@ -8587,7 +8602,7 @@ fn jet_eval_hardware(machine: &JetEvalMachine, frame_index: Int, call: MIRPrelud
             move_permissions := [Bool]{false, false, false, false}
             loop permission in prepared.move_permissions -> &move_permissions.push(permission)
             result := jet_eval_route_prelude_dispatch(&machine, call, values, [MIRType]{}, result_ty, span)
-            return jet_eval_discharge_call_boundary(&machine, values, move_permissions, result, span)
+            return jet_eval_discharge_call_boundary(&machine, values, move_permissions, ^result, span)
         }
         .DMAStart(_, _, _) | .DMAWait(_, _, _) -> {
             loop argument in args -> jet_eval_value(&machine, frame_index, argument.value, span) ?? return None
@@ -8978,7 +8993,7 @@ fn jet_eval_task_group_exchange(machine: &JetEvalMachine, call: MIRPreludeCallID
 fn jet_eval_task_group(machine: &JetEvalMachine, frame_index: Int, call: MIRPreludeCallID, kind: MIRTaskGroupKind, task_ids: [MIRValueID], result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
     prepared :: jet_eval_semantic_values_prepared(&machine, frame_index, task_ids, span) ?? return None
     result := jet_eval_task_group_exchange(&machine, call, kind, prepared.values, result_ty, span)
-    jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.owned, result, span)
+    jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.owned, ^result, span)
 }
 
 fn jet_eval_channel_select_exchange(machine: &JetEvalMachine, call: MIRPreludeCallID, kind: MIRSelectKind, values: [JetEvalRuntimeValue], result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
@@ -9046,7 +9061,7 @@ fn jet_eval_channel_select_exchange(machine: &JetEvalMachine, call: MIRPreludeCa
 fn jet_eval_channel_select(machine: &JetEvalMachine, frame_index: Int, call: MIRPreludeCallID, kind: MIRSelectKind, value_ids: [MIRValueID], result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
     prepared :: jet_eval_semantic_values_prepared(&machine, frame_index, value_ids, span) ?? return None
     result := jet_eval_channel_select_exchange(&machine, call, kind, prepared.values, result_ty, span)
-    jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.owned, result, span)
+    jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.owned, ^result, span)
 }
 
 fn jet_eval_semantic(machine: &JetEvalMachine, frame_index: Int, operation: MIRSemanticOp, result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
@@ -9249,7 +9264,7 @@ fn jet_eval_semantic(machine: &JetEvalMachine, frame_index: Int, operation: MIRS
         .StaticPreludeCall(call, args, _, type_args) -> {
             prepared :: jet_eval_call_arguments(&machine, frame_index, args, span) ?? return None
             result := jet_eval_route_prelude_dispatch(&machine, call, prepared.values, type_args, result_ty, span)
-            return jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.move_permissions, result, span)
+            return jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.move_permissions, ^result, span)
         }
         .HardwareCall(call, hardware_operation, receiver, args) -> return jet_eval_hardware(&machine, frame_index, call, hardware_operation, receiver, args, result_ty, span)
         .CoreClosureCall(call, kind, values, closure, site, label) -> return jet_eval_core_closure_call(&machine, frame_index, call, kind, values, closure, site, label, span)
@@ -9346,7 +9361,7 @@ fn jet_eval_semantic(machine: &JetEvalMachine, frame_index: Int, operation: MIRS
                 &owned.push(prepared.move_permissions[index])
             }
             result := jet_eval_route_prelude_dispatch(&machine, call, values, [MIRType]{}, result_ty, span)
-            return jet_eval_discharge_call_boundary(&machine, values, owned, result, span)
+            return jet_eval_discharge_call_boundary(&machine, values, owned, ^result, span)
         }
         .HostBorrowCallback(callable, _) -> {
             value :: jet_eval_value(&machine, frame_index, callable, span) ?? return None
@@ -9406,7 +9421,7 @@ fn jet_eval_semantic(machine: &JetEvalMachine, frame_index: Int, operation: MIRS
                     &read_temporaries.push(is_read && prepared.owned[index])
                 }
                 invoked := jet_eval_invoke_with_borrowed_captures(&machine, function_id, prepared.values, captures, closure_borrowed, span)
-                return jet_eval_discharge_call_boundary(&machine, prepared.values, read_temporaries, invoked, span)
+                return jet_eval_discharge_call_boundary(&machine, prepared.values, read_temporaries, ^invoked, span)
             }
             if !closure_borrowed -> jet_eval_drop_value(&machine, closure, span)
             jet_eval_drop_call_values(&machine, prepared.values, prepared.owned, span)
@@ -9631,12 +9646,12 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
                         return None
                     }
                     result := jet_eval_route_prelude_dispatch(&machine, call, route_args, [MIRType]{}, result_ty, span)
-                    return jet_eval_discharge_boundary(&machine, route_args, result, span)
+                    return jet_eval_discharge_boundary(&machine, route_args, ^result, span)
                 }
                 else -> {}
             }
             result := jet_eval_binary(&machine, op, left_value, right_value, result_ty, left_ty, right_ty, span)
-            jet_eval_discharge_boundary(&machine, [JetEvalRuntimeValue]{left_value, right_value}, result, span)
+            jet_eval_discharge_boundary(&machine, [JetEvalRuntimeValue]{left_value, right_value}, ^result, span)
         }
         .BuildString(parts) -> return jet_eval_build_string(&machine, parts, frame_index, span)
         .BuildList(values, _) -> return jet_eval_build_list(&machine, values, frame_index, span)
@@ -9932,10 +9947,10 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
             route_row :: jet_eval_route_prelude_row(&machine, route, span) ?? return None
             if route_row.module_name == "core.builtin" && route_row.member == "view_mut_new" {
                 window := jet_eval_write_subrange(&machine, route, args, prepared.values, span)
-                return jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.move_permissions, window, span)
+                return jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.move_permissions, ^window, span)
             }
             result := jet_eval_route_core(&machine, call, route, prepared.values, type_args, fallibility, result_ty, span)
-            return jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.move_permissions, result, span)
+            return jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.move_permissions, ^result, span)
         }
         .AttachTag(source, _) -> return jet_eval_value(&machine, frame_index, source, span)
         .Todo(_, _, _) -> {

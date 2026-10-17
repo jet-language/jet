@@ -53,6 +53,9 @@ fn jet_eval_string_home_data(value: TComptimeValue, path: [JetEvalStringHomeProj
             }
         }
         .Index(_, index, _, _, _, _, _) -> {
+            // copy: the frame's index operand (owner: the machine) is handed to jet_eval_data
+            // beside `&machine`; a view into machine would be live across that exclusive borrow
+            // (E0212), and the machine keeps its own row.
             index_value :: machine.frames[path[position].frame].values[index.value].copy()
             wanted :: jet_eval_data(index_value, &machine, span) ?? return None
             if value == .List(items) {
@@ -145,6 +148,9 @@ fn jet_eval_string_home_runtime(value: JetEvalRuntimeValue, path: [JetEvalString
                 }
             }
             if position < path.len() && path[position].projection == .Index(_, index, _, _, _, _, _) {
+                // copy: the frame's index operand (owner: the machine) is handed to jet_eval_data
+                // beside `&machine`; a view into machine would be live across that exclusive borrow
+                // (E0212), and the machine keeps its own row.
                 index_value :: machine.frames[path[position].frame].values[index.value].copy()
                 wanted :: jet_eval_data(index_value, &machine, span) ?? return None
                 if aggregate == .List(items) {
@@ -187,12 +193,18 @@ fn jet_eval_string_home_place(frame: Int, id: MIRPlaceID, tail: [JetEvalStringHo
     loop index in position..<tail.len() -> &path.push(tail[index])
     if place.base == {
         .Local(local) -> {
+            // copy: the frame local (owner: the machine) is handed to jet_eval_string_home_runtime
+            // beside `&machine`; a view into machine would be live across that exclusive borrow
+            // (E0212), and the machine keeps its own row.
             value :: machine.frames[frame].locals[local.value].copy()
             return jet_eval_string_home_runtime(value, path, 0, frame, ^JetEvalStringHomeRequest{root: JetEvalStringHomeRoot.Local{frame: frame, local: local.value}, selectors: [JetEvalStringHomeSelector]{}}, &machine, span)
         }
         .Parameter(value) | .Capture(value) | .Temporary(value) -> return jet_eval_string_home_value(frame, value, path, &machine, span)
         .Static(name) -> {
             if machine.config.globals.get(name) != None {
+                // copy: the configured global (owner: the machine) is handed to
+                // jet_eval_string_home_data beside `&machine`; a view into machine would be live
+                // across that exclusive borrow (E0212), and the machine keeps its own row.
                 value :: machine.config.globals[name].copy()
                 return jet_eval_string_home_data(value, path, 0, frame, ^JetEvalStringHomeRequest{root: JetEvalStringHomeRoot.Global{name: name}, selectors: [JetEvalStringHomeSelector]{}}, &machine, span)
             }
@@ -240,6 +252,11 @@ fn jet_eval_string_home_value(frame: Int, id: MIRValueID, tail: [JetEvalStringHo
                         if operation == {
                             .Call(_, args, _) | .IndirectCall(_, args, _) -> {
                                 if index >= 0 && index < args.len() && args[index].access == MIRAccess.Read {
+                                    // copy: the call-site argument operand (program row) (owner:
+                                    // the machine) is handed to jet_eval_string_home_argument
+                                    // beside `&machine`; a view into machine would be live across
+                                    // that exclusive borrow (E0212), and the machine keeps its own
+                                    // row.
                                     arg := args[index].copy()
                                     return jet_eval_string_home_argument(site_frame, arg, tail, &machine, span)
                                 }
@@ -247,15 +264,25 @@ fn jet_eval_string_home_value(frame: Int, id: MIRValueID, tail: [JetEvalStringHo
                             else -> {}
                         }
                     }
+                    // copy: the frame parameter (owner: the machine) is handed to
+                    // jet_eval_string_home_runtime beside `&machine`; a view into machine would be
+                    // live across that exclusive borrow (E0212), and the machine keeps its own row.
                     value :: machine.frames[frame].params[index].copy()
                     return jet_eval_string_home_runtime(value, tail, 0, frame, ^JetEvalStringHomeRequest{root: JetEvalStringHomeRoot.Parameter{frame: frame, index: index}, selectors: [JetEvalStringHomeSelector]{}}, &machine, span)
                 }
                 .Capture(index) -> {
+                    // copy: the frame capture (owner: the machine) is handed to
+                    // jet_eval_string_home_runtime beside `&machine`; a view into machine would be
+                    // live across that exclusive borrow (E0212), and the machine keeps its own row.
                     value :: machine.frames[frame].captures[index].copy()
                     return jet_eval_string_home_runtime(value, tail, 0, frame, ^JetEvalStringHomeRequest{root: JetEvalStringHomeRoot.Capture{frame: frame, index: index}, selectors: [JetEvalStringHomeSelector]{}}, &machine, span)
                 }
                 .Global(name) -> {
                     if machine.config.globals.get(name) != None {
+                        // copy: the configured global (owner: the machine) is handed to
+                        // jet_eval_string_home_data beside `&machine`; a view into machine would be
+                        // live across that exclusive borrow (E0212), and the machine keeps its own
+                        // row.
                         value :: machine.config.globals[name].copy()
                         return jet_eval_string_home_data(value, tail, 0, frame, ^JetEvalStringHomeRequest{root: JetEvalStringHomeRoot.Global{name: name}, selectors: [JetEvalStringHomeSelector]{}}, &machine, span)
                     }
@@ -264,6 +291,9 @@ fn jet_eval_string_home_value(frame: Int, id: MIRValueID, tail: [JetEvalStringHo
             }
         }
     }
+    // copy: the frame value (owner: the machine) is handed to jet_eval_string_home_runtime beside
+    // `&machine`; a view into machine would be live across that exclusive borrow (E0212), and the
+    // machine keeps its own row.
     value :: machine.frames[frame].values[id.value].copy()
     jet_eval_string_home_runtime(value, tail, 0, frame, ^JetEvalStringHomeRequest{root: JetEvalStringHomeRoot.Value{frame: frame, value: id.value}, selectors: [JetEvalStringHomeSelector]{}}, &machine, span)
 }
