@@ -2,6 +2,13 @@
 // module must satisfy before any code generator level reads it. Lowering
 // bugs surface here with the function and block they occur in, instead of as
 // wrong machine code.
+//
+// The lint runs once per module, on the final LIR, inside the x64 compile
+// (SPEED-500K D6): lir_lint_module_rows checks the module's tables, and
+// lir_lint_function_row each function in its final form, reading of other
+// functions only their name and signature (so a function whose body the
+// streaming compile already released still lints its callers correctly).
+// lir_lint_module is the two together, in table-then-function order.
 
 struct LIRLintIssue {
     function: String
@@ -17,6 +24,15 @@ struct LIRLintSite {
 }
 
 fn lir_lint_module(program: LIRModule) -> [LIRLintIssue] Never! {
+    issues := lir_lint_module_rows(program)
+    loop (index, function) in program.functions {
+        loop issue in lir_lint_function_row(program, index, function) -> &issues.push(issue)
+    }
+    issues
+}
+
+// The module's signature and data tables.
+fn lir_lint_module_rows(program: LIRModule) -> [LIRLintIssue] Never! {
     issues := [LIRLintIssue]{}
     loop (index, signature) in program.signatures {
         if signature.id.value != index -> &issues.push(LIRLintIssue{function: "", block: -1, message: "signature {index} carries ID {signature.id.value}"})
@@ -35,10 +51,15 @@ fn lir_lint_module(program: LIRModule) -> [LIRLintIssue] Never! {
             if reloc.target.value < 0 || reloc.target.value >= program.data.len() -> &issues.push(LIRLintIssue{function: "", block: -1, message: "data {index} relocation names missing data {reloc.target.value}"})
         }
     }
-    loop (index, function) in program.functions {
-        if function.id.value != index -> &issues.push(LIRLintIssue{function: function.name, block: -1, message: "function {index} carries ID {function.id.value}"})
-        loop issue in lir_lint_function(program, function) -> &issues.push(issue)
-    }
+    issues
+}
+
+// Function `function` at row `index` of the module's function table: its
+// identity row, then lir_lint_function.
+fn lir_lint_function_row(program: LIRModule, index: Int, function: LIRFunction) -> [LIRLintIssue] Never! {
+    issues := [LIRLintIssue]{}
+    if function.id.value != index -> &issues.push(LIRLintIssue{function: function.name, block: -1, message: "function {index} carries ID {function.id.value}"})
+    loop issue in lir_lint_function(program, function) -> &issues.push(issue)
     issues
 }
 

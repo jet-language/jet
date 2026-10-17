@@ -12,7 +12,7 @@ use jet_backend.[
     LIRModule,
     X64ExecutableResult,
     x64_execution_service,
-    lir_lint_module, lir_lower_entry_in_place, lir_lower_entry_keep_going_in_place, lir_optimize_module,
+    lir_lower_entry_in_place, lir_lower_entry_keep_going_in_place,
     x64_link_executable,
     x64_relocatable_object_owned,
 ]
@@ -433,13 +433,14 @@ fn jet_cli_rust_foreign_attached(facts: JetDriverRustForeignFacts, program: MIRP
 // JET_TRACE_FILE / `--trace`: the route's phases are spans of the compile's
 // trace sink (`trace_sink`, the result's): `native.lower` (MIR to LIR, on the
 // threads `threads` admits), `native.foreign` (the C closure, the last reader
-// of the MIR), `native.object` (x64 selection, encoding and the object; at
-// O1/O2 it holds `native.optimize`, the LIR passes of `level`) and
-// `native.link`; before them `native.sources` (the C sources the snapshot
-// declares) and `native.rust_foreign` (a Rust foreign helper's realization).
-// A span a failure returns from stays open. The lowered module moves through
-// the LIR passes into the object, so no phase holds two copies of it, and the
-// object's functions compile on the threads `threads` admits.
+// of the MIR), `native.object` (per function on the threads `threads`
+// admits: the LIR passes of `level`, the one LIR lint, x64 selection and
+// encoding; then the object) and `native.link`; before them `native.sources`
+// (the C sources the snapshot declares) and `native.rust_foreign` (a Rust
+// foreign helper's realization). A span a failure returns from stays open.
+// The lowered module moves into the object compile, which replaces each
+// function's body by its final form and releases it once compiled and
+// inlined (x64_compile_module_owned), so no phase holds two copies of it.
 //
 // The MIR half of the route: lowers the entry's functions and realizes the C
 // inputs, then pushes both onto `fronts` for jet_cli_native_back, so the
@@ -454,7 +455,7 @@ fn jet_cli_native_front(entry_function: MIRFunctionID?, trace_sink: CompilerTrac
     entry_id :: entry_function ?? return Val(JetCLINativeFailure.NoEntry)
     // Only functions the entry reaches are lowered, generic ones per instance.
     if trace_sink == .Val(sink) -> sink.begin("native.lower", "", -1, -1)
-    lowered :: if keep_going -> lir_lower_entry_keep_going_in_place(&unpruned, entry_id, threads, trace_sink) else -> lir_lower_entry_in_place(&unpruned, entry_id, threads, trace_sink)
+    lowered :: if keep_going -> lir_lower_entry_keep_going_in_place(&unpruned, entry_id, threads) else -> lir_lower_entry_in_place(&unpruned, entry_id, threads)
     function_count :: lowered.lir.functions.len()
     if trace_sink == .Val(sink) -> sink.end("native.lower", function_count)
     jet_cli_trace_lir_counters(trace_sink, "native.lower", lowered.lir)
@@ -499,13 +500,14 @@ struct JetCLINativeFront {
 // inputs linked into the executable.
 fn jet_cli_native_back(front: ^JetCLINativeFront, trace_sink: CompilerTraceSink?, threads: CompilerThreads, level: Int, runtime_dir: String, object_path: String, executable_path: String, keep_going: Bool, census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
     // No absolute source root enters DWARF: comp_dir stays "." on every
-    // route, so the output never depends on the checkout path. O0 (`run`, comptime)
-    // leaves the lowered module unchanged, so its object compile reuses the
-    // lowering's lint of that module; O1/O2 lint the optimized module again.
+    // route, so the output never depends on the checkout path.
     if trace_sink == .Val(sink) -> sink.begin("native.object", "", -1, -1)
     // The memory term is read now: the compile before this holds most of it.
     object_threads :: CompilerThreads{cap: threads.cap, cores: threads.cores, memory_available: jet_cli_memory_available()}
-    object :: if level > 0 -> jet_cli_native_object_optimized(jet_cli_native_optimize(^front.lowered.lir, level, trace_sink), front.entry, object_threads, keep_going, trace_sink) else -> x64_relocatable_object_owned(^front.lowered.lir, front.entry, object_threads, keep_going, front.lowered.lint)
+    // `outcome.faults` carries the final LIR of every function whose job
+    // failed (a lint finding or a compile error), for a fault dump.
+    outcome := x64_relocatable_object_owned(^front.lowered.lir, front.entry, object_threads, level, keep_going)
+    object := ^outcome.object
     if trace_sink == .Val(sink) {
         sink.end("native.object", front.function_count)
         sink.progress("counters.native.object.bytes", object.bytes.len(), -1)
@@ -550,26 +552,6 @@ fn jet_cli_native_back(front: ^JetCLINativeFront, trace_sink: CompilerTraceSink?
 fn jet_cli_native_level(command: String, release: Bool) -> Int Never! {
     if release -> return 2
     if command == "build" -> 1 else -> 0
-}
-
-// The LIR passes of `level` (AGENTS.md I9: `build` O1, `--release` O2),
-// traced as `native.optimize`. The module moves in and out.
-fn jet_cli_native_optimize(lir: ^LIRModule, level: Int, trace_sink: CompilerTraceSink?) -> LIRModule Never! {
-    if trace_sink == .Val(sink) -> sink.begin("native.optimize", "", -1, -1)
-    optimized :: lir_optimize_module(^lir, level)
-    if trace_sink == .Val(sink) -> sink.end("native.optimize", optimized.functions.len())
-    jet_cli_trace_lir_counters(trace_sink, "native.optimize", optimized)
-    optimized
-}
-
-// The O1/O2 object of the optimized module: its one LIR lint, traced as
-// `native.lir_lint` (detail `object`; SPEED-500K D6), whose findings the
-// object compile reports instead of linting the module again.
-fn jet_cli_native_object_optimized(lir: ^LIRModule, entry: LIRFunctionID, threads: CompilerThreads, keep_going: Bool, trace_sink: CompilerTraceSink?) -> X64ExecutableResult Never! {
-    if trace_sink == .Val(sink) -> sink.begin("native.lir_lint", "object", -1, -1)
-    findings :: lir_lint_module(lir)
-    if trace_sink == .Val(sink) -> sink.end("native.lir_lint", lir.functions.len())
-    x64_relocatable_object_owned(^lir, entry, threads, keep_going, Val(findings))
 }
 
 // SPEED-500K work counters of a LIR phase, after its span closed:

@@ -17,8 +17,6 @@
 // `.eh_frame` and the DWARF 5 sections (Image/Dwarf.jet) describe every
 // function's frame, source lines and variables.
 
-use jet_foundation.[CompilerThreads, compiler_take_rows]
-
 ELF64_SECTION_HEADER_SIZE :: prep { 64 }
 ELF64_SYMBOL_SIZE :: prep { 24 }
 ELF64_RELA_SIZE :: prep { 24 }
@@ -145,7 +143,9 @@ fn x64_object_debug_section(name: String, bytes: [U8]) -> X64ObjectSection Never
 }
 
 // Compile `program` into a relocatable object whose `main` runs `entry`,
-// which takes no parameters and returns nothing.
+// which takes no parameters and returns nothing, on the calling thread
+// (x64_compile_module). The native route's object, on the threads it admits
+// and at its level, is x64_relocatable_object_owned (Opt/Opt.jet).
 fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64ExecutableResult Never! {
     if entry.value < 0 || entry.value >= program.functions.len() -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {entry.value} is not in the module"}}
     signature :: lir_signature(program, program.functions[entry.value].signature) ?? return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function has no signature"}}
@@ -161,33 +161,6 @@ fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Execut
     loop row in compiled.debug -> &debug.push(row)
 
     x64_object_functions(program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}})
-}
-
-// x64_relocatable_object over a module it owns, compiled on as many threads
-// as `threads` admits (x64_compile_module_owned): the object bytes are the
-// same for any thread count. The module moves through the compile, uncopied.
-// `keep_going` (JET_KEEP_GOING, the bootstrap native feed): every function is
-// present (a trap where compiling it failed), so the object is written
-// whenever its own writer succeeds, and the result keeps the compile errors
-// before the writer's. It is never shipped. `linted`: the module's lint when
-// its producer already ran it (x64_compile_module_owned).
-fn x64_relocatable_object_owned(program: ^LIRModule, entry: LIRFunctionID, threads: CompilerThreads, keep_going: Bool, linted: [LIRLintIssue]?) -> X64ExecutableResult Never! {
-    if entry.value < 0 || entry.value >= program.functions.len() -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {entry.value} is not in the module"}}
-    signature :: lir_signature(program, program.functions[entry.value].signature) ?? return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function has no signature"}}
-    if signature.params.len() != 0 || signature.result != None -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {program.functions[entry.value].name} must take no parameters and return nothing"}}
-    kept := x64_compile_module_owned(^program, threads, keep_going, linted)
-    if !keep_going && kept.compiled.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: compiler_take_rows<String>(&kept.compiled.errors)}
-    main :: x64_object_main(entry)
-    functions := [X64CompiledFunction]{main}
-    &functions.extend(compiler_take_rows<X64CompiledFunction>(&kept.compiled.functions))
-    debug := [X64FunctionDebug]{x64_object_main_debug(main)}
-    &debug.extend(compiler_take_rows<X64FunctionDebug>(&kept.compiled.debug))
-    written := x64_object_functions(kept.program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}})
-    if !keep_going -> return written
-    errors := compiler_take_rows<String>(&kept.compiled.errors)
-    &errors.extend(compiler_take_rows<String>(&written.errors))
-    written.errors = errors
-    written
 }
 
 // Shared section/relocation writer for hosted program and runtime objects.

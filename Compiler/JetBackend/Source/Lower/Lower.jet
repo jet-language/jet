@@ -66,7 +66,6 @@ use jet_foundation.[
     MIRVariant,
     MIRVariantPayload,
     CompilerThreads,
-    CompilerTraceSink,
     compiler_take_rows,
     compiler_threads_failure_text,
     compiler_threads_single,
@@ -110,9 +109,11 @@ struct LIRCoreCallableExport {
     function: LIRFunctionID
 }
 
-// `lir` is complete only when `issues` is empty; the lowering lints the
-// module itself and reports lint findings as issues. `entry` is the LIR
-// function of the entry the program was lowered from (None with issues).
+// `lir` is complete only when `issues` is empty. The lowering does not lint
+// the module: the one LIR lint runs on the final LIR inside the x64 compile
+// (x64_compile_module, x64_compile_module_owned; SPEED-500K D6). `entry` is
+// the LIR function of the entry the program was lowered from (None with
+// issues).
 // `finalizer` is a compiler callable's zero-argument Unit static release,
 // run before its image is unmapped, after all native result owners retire.
 struct LIRLowering {
@@ -130,10 +131,6 @@ struct LIRLowering {
     shared_sites: [LIRSharedSiteExport]{[LIRSharedSiteExport]{}}
     core_callables: [LIRCoreCallableExport]{[LIRCoreCallableExport]{}}
     native_exports: [String:LIRFunctionID]{[String:LIRFunctionID]{}}
-    // The lint findings of `lir` as lowered, when the lowering linted it (an
-    // ordinary lowering without issues, or keep-going): a consumer of this
-    // exact module reuses them instead of linting it again.
-    lint: [LIRLintIssue]?{None}
 }
 
 // How one checked MIR type is carried in LIR.
@@ -439,12 +436,11 @@ fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Nev
 // lir_lower_entry over the caller's program in place: the type index is
 // attached to `program` for the lowering and detached after, so the native
 // route never copies the whole program (it is left exactly as it came). The
-// function bodies lower on the threads `threads` admits (Workers.jet). With a
-// trace, the LIR lint of the lowered module is its own `native.lir_lint` span.
-fn lir_lower_entry_in_place(program: &MIRProgram, entry: MIRFunctionID, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> LIRLowering Never! {
+// function bodies lower on the threads `threads` admits (Workers.jet).
+fn lir_lower_entry_in_place(program: &MIRProgram, entry: MIRFunctionID, threads: CompilerThreads) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
     native_pack :: program.native_pack
-    lower_selected_in_place(&program, [MIRFunctionID]{entry}, true, true, native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false, false, true, threads, trace_sink)
+    lower_selected_in_place(&program, [MIRFunctionID]{entry}, true, true, native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false, false, true, threads)
 }
 
 // JET_KEEP_GOING (the bootstrap native feed): lir_lower_entry_in_place,
@@ -452,10 +448,10 @@ fn lir_lower_entry_in_place(program: &MIRProgram, entry: MIRFunctionID, threads:
 // signature (lower_keep_going_functions), and the issues leave the entry and
 // the module in place, so every later phase still runs and reports. The
 // module is never shipped: the caller turns every issue into a census row.
-fn lir_lower_entry_keep_going_in_place(program: &MIRProgram, entry: MIRFunctionID, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> LIRLowering Never! {
+fn lir_lower_entry_keep_going_in_place(program: &MIRProgram, entry: MIRFunctionID, threads: CompilerThreads) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
     native_pack :: program.native_pack
-    lower_selected_in_place(&program, [MIRFunctionID]{entry}, true, true, native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, true, false, true, threads, trace_sink)
+    lower_selected_in_place(&program, [MIRFunctionID]{entry}, true, true, native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, true, false, true, threads)
 }
 
 // Compiler and test callbacks retain return carriers; only program entries
@@ -503,7 +499,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     // rewrite rows), while these read-parameter entry points leave the caller's MIR intact. Callers
     // that hand theirs over use the *_in_place entry points.
     lowered_program := program.copy()
-    lower_selected_in_place(&lowered_program, roots, wrap_entry, shared_sites_dynamic, native_pack, imports, c_exports, test_serial, checks, ^runtime_intrinsics, keep_going, comptime_budget, sentry, compiler_threads_single(), None)
+    lower_selected_in_place(&lowered_program, roots, wrap_entry, shared_sites_dynamic, native_pack, imports, c_exports, test_serial, checks, ^runtime_intrinsics, keep_going, comptime_budget, sentry, compiler_threads_single())
 }
 
 // lower_selected over `program` in place: preparation and body lowering
@@ -512,7 +508,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
 // caller handed it, and the caller gets it back unchanged. The function
 // bodies lower on the threads `threads` admits for their size
 // (lower_workers_lower); the result is the same for any thread count.
-fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, shared_sites_dynamic: Bool, native_pack: Bool, imports: [String], c_exports: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic], keep_going: Bool, comptime_budget: Bool, sentry: Bool, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> LIRLowering Never! {
+fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, shared_sites_dynamic: Bool, native_pack: Bool, imports: [String], c_exports: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic], keep_going: Bool, comptime_budget: Bool, sentry: Bool, threads: CompilerThreads) -> LIRLowering Never! {
     test_indices := [U64:Int]{}
     test_issues := [LIRLoweringIssue]{}
     if test_serial != None {
@@ -783,14 +779,6 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
     }
     lowered :: LIRModule{signatures: m.signatures.copy(), functions: functions, data: m.data.copy(), debug: LIRModuleDebug{directory: "", files: m.debug_files.copy(), types: m.debug_types.copy()}}
     issues := m.issues.copy()
-    lint := [LIRLintIssue]?{None}
-    if issues.len() == 0 || keep_going {
-        if trace_sink == .Val(sink) -> sink.begin("native.lir_lint", "lower", -1, -1)
-        findings :: lir_lint_module(lowered)
-        if trace_sink == .Val(sink) -> sink.end("native.lir_lint", lowered.functions.len())
-        loop issue in findings -> &issues.push(LIRLoweringIssue{function: issue.function, message: "LIR lint b{issue.block}: {issue.message}"})
-        lint = Val(findings)
-    }
     if issues.len() > 0 && !keep_going {
         lowered_entry = None
         finalizer = None
@@ -799,7 +787,7 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
         value_releases = [U64:LIRFunctionID]{}
         m.native_exports = [String:LIRFunctionID]{}
     }
-    LIRLowering{lir: lowered, issues: issues, entry: lowered_entry, finalizer: finalizer, callables: callables, value_callables: value_callables, value_releases: value_releases, closures: if issues.len() == 0 -> closures else -> [LIRClosureValueLayout]{}, shared_sites: m.shared_sites, core_callables: if issues.len() == 0 -> core_callables else -> [LIRCoreCallableExport]{}, native_exports: m.native_exports, lint: ^lint}
+    LIRLowering{lir: lowered, issues: issues, entry: lowered_entry, finalizer: finalizer, callables: callables, value_callables: value_callables, value_releases: value_releases, closures: if issues.len() == 0 -> closures else -> [LIRClosureValueLayout]{}, shared_sites: m.shared_sites, core_callables: if issues.len() == 0 -> core_callables else -> [LIRCoreCallableExport]{}, native_exports: m.native_exports}
 }
 
 // One function row of the inventory: a failed concrete function (or one
