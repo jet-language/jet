@@ -4458,6 +4458,54 @@ fn sema_stmt_compound_nested_hook(op: BinOp, base: Expr, field_ty: Type, environ
     }
 }
 
+// D-OPDEF1=A (Rust `check_stmt`): compound arithmetic is the same operator as
+// its binary form, so on a place whose type has no built-in arithmetic (a
+// nominal type: an operator-hook struct such as `Vec3`, a time, unit,
+// geometry or distinct carrier) `place op= value` checks as
+// `place = place op value` and TIR sees one binary spine. The binary check
+// then resolves the hook or reports E0360 at the operator, as Rust's
+// missing-hook report does. Numbers, exact numbers and `String +=` keep the
+// compound route. Only a local or a field of a local or indexed element
+// qualifies; a nominal field below an index keeps E0362, and an indexed
+// slot keeps E0164.
+fn sema_stmt_compound_hook_value(target: LValue, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Expr? {
+    operator :: op ?? return None
+    if operator != BinOp.Add && operator != BinOp.Sub && operator != BinOp.Mul && operator != BinOp.Div -> return None
+    if target == {
+        .Local(name, name_span) -> {
+            index :: sema_scope_resolve_index(scopes, name) ?? return None
+            place_ty :: sema_scope_binding_row(environment, scopes, index).symbol.ty ?? return None
+            if !sema_stmt_compound_hooked_place(place_ty) -> return None
+            return Val(Expr.Binary{op: operator, left: Expr.Ident{name: name, span: name_span}, right: expr, span: op_span})
+        }
+        .Field(base, field, span) -> {
+            indexed :: if base == {
+                .Ident(_, _) -> false
+                .Index(_, _, _, _) -> true
+                else -> return None
+            }
+            place :: Expr.Field{base: base, member: field, span: span}
+            probe_diagnostics := [Diagnostic]{}
+            probed :: sema_probe_expression(place, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return None
+            if indexed && sema_stmt_compound_nominal(probed.ty) -> return None
+            if !sema_stmt_compound_hooked_place(probed.ty) -> return None
+            return Val(Expr.Binary{op: operator, left: place, right: expr, span: op_span})
+        }
+        else -> return None
+    }
+}
+
+fn sema_stmt_compound_nominal(ty: Type) -> Bool Never! {
+    if ty == {
+        .Named(_) | .Apply(_, _) -> true
+        else -> false
+    }
+}
+
+fn sema_stmt_compound_hooked_place(ty: Type) -> Bool {
+    sema_stmt_compound_nominal(ty) && !sema_expr_is_numeric(ty) && sema_expr_precise_name(ty) == None && ty != Type.String
+}
+
 fn sema_stmt_check_assignment(target: LValue, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     diagnostics_before :: diagnostics.len()
     reasons_before :: context.incomplete_reasons.len()
@@ -4472,6 +4520,8 @@ fn sema_stmt_check_assignment(target: LValue, op: BinOp?, op_span: Span, expr: E
 
 fn sema_stmt_check_assignment_target(target: LValue, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     if sema_ownership_report_lending_view_escape(expr, "replace another value", scopes, context, &diagnostics) -> return None
+    hooked :: sema_stmt_compound_hook_value(target, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context)
+    if hooked == .Val(binary) -> return sema_stmt_check_assignment_target(target, None, op_span, binary, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if target == {
         .Local(name, name_span) -> sema_stmt_check_local_assignment(name, name_span, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .Field(_, _, _) -> sema_stmt_check_projected_assignment(target, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
