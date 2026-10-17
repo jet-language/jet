@@ -4233,17 +4233,47 @@ fn jet_codegen_foreign_hook_index(modules: [SemaGraphModuleResult]) -> JetCodege
     JetCodegenForeignHookIndex{functions: functions, foreign: foreign, ambiguous: ambiguous}
 }
 
-fn jet_codegen_find_checked_foreign_row(modules: [SemaGraphModuleResult], key: String) -> SemaCheckedForeignFunction? {
-    found := SemaCheckedForeignFunction?{None}
-    loop semantic_module in modules {
-        loop row in semantic_module.foreign_functions {
-            if row.key == key || row.symbol_id.key == key {
-                if found != None -> panic("checked foreign call identity resolves to multiple rows")
-                found = Val(row)
-            }
+// One checked foreign function row of the program modules.
+struct JetCodegenForeignRowRef {
+    module_index: Int
+    row_index: Int
+}
+
+// Checked foreign rows by key and by symbol key (a row whose two keys are
+// equal counts once), built once per program: a call resolves its foreign
+// row with one probe instead of a scan of every module's foreign rows.
+struct JetCodegenForeignRowIndex {
+    rows: [String:JetCodegenForeignRowRef]
+    // Keys more than one row carries.
+    ambiguous: [String:Bool]
+}
+
+fn jet_codegen_foreign_row_index(modules: [SemaGraphModuleResult]) -> JetCodegenForeignRowIndex Never! {
+    rows := [String:JetCodegenForeignRowRef]{}
+    ambiguous := [String:Bool]{}
+    loop module_index in 0..<modules.len() {
+        loop row_index in 0..<modules[module_index].foreign_functions.len() {
+            row :: modules[module_index].foreign_functions[row_index]
+            reference :: JetCodegenForeignRowRef{module_index: module_index, row_index: row_index}
+            jet_codegen_foreign_row_index_add(&rows, &ambiguous, row.key, reference)
+            if row.symbol_id.key != row.key -> jet_codegen_foreign_row_index_add(&rows, &ambiguous, row.symbol_id.key, reference)
         }
     }
-    found
+    JetCodegenForeignRowIndex{rows: rows, ambiguous: ambiguous}
+}
+
+fn jet_codegen_foreign_row_index_add(rows: &[String:JetCodegenForeignRowRef], ambiguous: &[String:Bool], key: String, reference: JetCodegenForeignRowRef) Never! {
+    if rows.get(key) != None {
+        if ambiguous.get(key) == None -> _ := &ambiguous.add(key, true)
+        return
+    }
+    _ := &rows.add(key, reference)
+}
+
+fn jet_codegen_find_checked_foreign_row(program: JetCodegenProgram, key: String) -> SemaCheckedForeignFunction? {
+    if program.foreign_rows.ambiguous.get(key) != None -> panic("checked foreign call identity resolves to multiple rows")
+    reference :: program.foreign_rows.rows.get(key) ?? return None
+    Val(program.modules[reference.module_index].foreign_functions[reference.row_index])
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_foreign_rows

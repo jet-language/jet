@@ -102,12 +102,21 @@ struct JetCodegenTraitCandidate {
     canonical: String
 }
 
+// One declared trait of the program modules, by module and definition row.
+struct JetCodegenTraitDefRef {
+    module_index: Int
+    definition_index: Int
+}
+
 // Every declared trait under each spelling that names it
 // (jet_codegen_trait_spellings), candidates in module and declaration order:
 // resolving a checked trait name is one lookup instead of a scan that formats
 // every module's trait spellings. Built once per program lowering.
 struct JetCodegenTraitNames {
     candidates: [String:[JetCodegenTraitCandidate]]
+    // MIR trait ID value of each trait's canonical key -> the traits with
+    // that ID, in module and declaration order.
+    by_id: [U64:[JetCodegenTraitDefRef]]
 }
 
 // The distinct spellings that name a trait declared as `definition_name` with
@@ -124,9 +133,16 @@ fn jet_codegen_trait_spellings(module_name: String, module_identity: String, def
 
 fn jet_codegen_trait_names(modules: [SemaGraphModuleResult]) -> JetCodegenTraitNames Never! {
     candidates := [String:[JetCodegenTraitCandidate]]{}
-    loop semantic_module in modules {
-        loop definition in semantic_module.declarations.traits {
+    by_id := [U64:[JetCodegenTraitDefRef]]{}
+    loop module_index in 0..<modules.len() {
+        semantic_module :: modules[module_index]
+        loop definition_index in 0..<semantic_module.declarations.traits.len() {
+            definition :: semantic_module.declarations.traits[definition_index]
             canonical :: jet_codegen_canonical_target_type(semantic_module.module_identity, definition.key)
+            id :: mir_trait_ref(canonical).id.value
+            refs := by_id.get(id) ?? [JetCodegenTraitDefRef]{}
+            &refs.push(JetCodegenTraitDefRef{module_index: module_index, definition_index: definition_index})
+            by_id[id] = refs
             candidate :: JetCodegenTraitCandidate{module_identity: semantic_module.module_identity, canonical: canonical}
             loop spelling in jet_codegen_trait_spellings(semantic_module.module_name, semantic_module.module_identity, definition.key, definition.name, canonical) {
                 rows := candidates.get(spelling) ?? [JetCodegenTraitCandidate]{}
@@ -135,7 +151,7 @@ fn jet_codegen_trait_names(modules: [SemaGraphModuleResult]) -> JetCodegenTraitN
             }
         }
     }
-    JetCodegenTraitNames{candidates: candidates}
+    JetCodegenTraitNames{candidates: candidates, by_id: by_id}
 }
 
 // The trait a checked name resolves to among the traits it names, in module

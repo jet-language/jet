@@ -356,6 +356,8 @@ struct JetCodegenProgram {
     // (jet_codegen_nominal_index): a per-expression lookup reads one map row
     // instead of scanning every module's nominals or type definitions.
     nominals: JetCodegenNominalIndex
+    // Checked foreign rows by key (jet_codegen_foreign_row_index).
+    foreign_rows: JetCodegenForeignRowIndex
     source_files: [MIRSourceFile]
     source_index: JetCodegenSourceIndex
     edition: String
@@ -855,7 +857,8 @@ fn jet_codegen_function_owner_bindings(function: TFunc, receiver_type: Type, own
 // The nominal index is built over `modules` (jet_codegen_nominal_index).
 fn jet_codegen_new_program(function_index: ^JetCodegenFunctionIndex, modules: ^[SemaGraphModuleResult], nominals: ^JetCodegenNominalIndex, field_symbols: ^[String:[JetCodegenFieldSymbolRow]], source_files: [MIRSourceFile], source_index: ^JetCodegenSourceIndex, edition: String) -> JetCodegenProgram Never! {
     owners := jet_codegen_owner_index(modules, nominals)
-    JetCodegenProgram{function_index: function_index, modules: modules, owners: ^owners, field_symbols: field_symbols, nominals: nominals, source_files: source_files, source_index: source_index, edition: edition, stop_points: false, comptime_budget: false}
+    foreign_rows := jet_codegen_foreign_row_index(modules)
+    JetCodegenProgram{function_index: function_index, modules: modules, owners: ^owners, field_symbols: field_symbols, nominals: nominals, foreign_rows: ^foreign_rows, source_files: source_files, source_index: source_index, edition: edition, stop_points: false, comptime_budget: false}
 }
 
 // One nominal of `modules`: its module row, its row in that module's

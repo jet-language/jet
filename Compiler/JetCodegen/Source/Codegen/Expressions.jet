@@ -2759,12 +2759,11 @@ fn jet_codegen_resolve_trait_method(builder: JetCodegenBuilder, program: JetCode
     preferred_module := builder.function.module_identity
     if parts.len() >= 4 && parts[1] != "" -> preferred_module = parts[1]
     trait_ref :: jet_codegen_resolve_trait_name(program.nominals.traits, trait_name, preferred_module) ?? panic("checked call of trait `{trait_name}` method `{method.name}` has no trait declaration to dispatch through")
-    loop semantic_module in program.modules {
-        loop definition in semantic_module.declarations.traits {
-            if mir_trait_ref(jet_codegen_canonical_target_type(semantic_module.module_identity, definition.key)).id != trait_ref.id -> next
-            loop trait_method in definition.methods {
-                if trait_method.name == method.name -> return JetCodegenTraitMethod{trait_key: definition.key, trait_ref: trait_ref, method: trait_method}
-            }
+    references :: program.nominals.traits.by_id.get(trait_ref.id.value) ?? [JetCodegenTraitDefRef]{}
+    loop reference in references {
+        definition :: program.modules[reference.module_index].declarations.traits[reference.definition_index]
+        loop trait_method in definition.methods {
+            if trait_method.name == method.name -> return JetCodegenTraitMethod{trait_key: definition.key, trait_ref: trait_ref, method: trait_method}
         }
     }
     panic("checked trait `{trait_name}` declares no method `{method.name}`")
@@ -3211,7 +3210,7 @@ fn jet_codegen_callable_return_type(signature: Type) -> Type Never! {
 fn jet_codegen_expression_call_return_type(builder: JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr) -> Type? {
     if expression.kind == {
         .Call(callee, type_args, _) -> {
-            if jet_codegen_find_checked_foreign_row(program.modules, callee.key) != None -> return None
+            if jet_codegen_find_checked_foreign_row(program, callee.key) != None -> return None
             row :: jet_codegen_find_function_row(program.function_index, callee.key) ?? panic("checked call has no TFunc target")
             return Val(jet_codegen_executable_function_return_type(program.function_index.rows[row], type_args))
         }
@@ -5621,7 +5620,7 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.CoreCall{call: call, route: route, args: lowered_args, type_args: lowered_types, fallibility: call_failure, data_plan: data_plan})
         }
         .Call(callee, type_args, args) -> {
-            checked_foreign := jet_codegen_find_checked_foreign_row(program.modules, callee.key)
+            checked_foreign := jet_codegen_find_checked_foreign_row(program, callee.key)
             if checked_foreign != None {
                 foreign_row :: checked_foreign ?? panic("checked foreign call row disappeared")
                 if type_args.len() != 0 -> panic("checked foreign call carries type arguments")
@@ -5644,7 +5643,7 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
             jet_codegen_reconcile_plain_call_return(&builder, program, expression, callee.key, value, call_return_type)
         }
         .ExternCall(symbol, _, args) -> {
-            foreign_row :: jet_codegen_find_checked_foreign_row(program.modules, symbol) ?? panic("checked extern call has no foreign row")
+            foreign_row :: jet_codegen_find_checked_foreign_row(program, symbol) ?? panic("checked extern call has no foreign row")
             foreign_id := MIRForeignID{value: stable_id("mir-foreign", foreign_row.key)}
             lowered_args := jet_codegen_lower_extern_args(&builder, program, args)
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Call{callee: MIRCallee.Foreign{id: foreign_id}, args: lowered_args, type_args: [MIRType]{}})
@@ -6028,31 +6027,29 @@ fn jet_codegen_bind_nested_pattern(builder: &JetCodegenBuilder, program: JetCode
 
 fn jet_codegen_pattern_variant_payload_type(builder: JetCodegenBuilder, program: JetCodegenProgram, subject_ty: Type, owner: SymbolID, variant: String, index: Int) -> Type Never! {
     subject_type := jet_codegen_unwrap_pattern_tags(subject_ty)
-    loop semantic_module in program.modules {
-        loop nominal in semantic_module.nominals {
-            if nominal.symbol.id.key != owner.key -> next
-            variant_row := SemaRegistrationVariant?{None}
-            loop candidate in nominal.variants {
-                if candidate.symbol.name == variant -> variant_row = Val(candidate)
-            }
-            row :: variant_row ?? panic("checked pattern variant has no registered payload")
-            raw_type := if row.payload == {
-                .Unit -> panic("checked unit variant has a payload pattern")
-                .Single(ty, _) -> if index == 0 -> ty else -> panic("checked variant payload index is out of range")
-                .Named(fields) -> if index >= 0 && index < fields.len() -> fields[index].ty else -> panic("checked variant payload index is out of range")
-            }
-            generic_names := [String]{}
-            loop parameter in nominal.generic_params -> &generic_names.push(parameter.name)
-            generic_args := if subject_type == {
-                .Named(_) -> [Type]{}
-                .Apply(_, args) -> args
-                else -> panic("checked variant pattern subject is not its nominal owner")
-            }
-            if generic_names.len() != generic_args.len() -> panic("checked variant pattern has incomplete owner type arguments")
-            return sema_inference_substitute_type(raw_type, generic_names, generic_args)
-        }
+    // The first module nominal (in module order) declaring `owner`.
+    owner_rows :: program.nominals.rows.get(owner.key) ?? [JetCodegenNominalRow]{}
+    if owner_rows.len() == 0 -> panic("checked pattern owner has no registered nominal declaration")
+    nominal :: program.modules[owner_rows[0].module_index].nominals[owner_rows[0].nominal_index]
+    variant_row := SemaRegistrationVariant?{None}
+    loop candidate in nominal.variants {
+        if candidate.symbol.name == variant -> variant_row = Val(candidate)
     }
-    panic("checked pattern owner has no registered nominal declaration")
+    row :: variant_row ?? panic("checked pattern variant has no registered payload")
+    raw_type := if row.payload == {
+        .Unit -> panic("checked unit variant has a payload pattern")
+        .Single(ty, _) -> if index == 0 -> ty else -> panic("checked variant payload index is out of range")
+        .Named(fields) -> if index >= 0 && index < fields.len() -> fields[index].ty else -> panic("checked variant payload index is out of range")
+    }
+    generic_names := [String]{}
+    loop parameter in nominal.generic_params -> &generic_names.push(parameter.name)
+    generic_args := if subject_type == {
+        .Named(_) -> [Type]{}
+        .Apply(_, args) -> args
+        else -> panic("checked variant pattern subject is not its nominal owner")
+    }
+    if generic_names.len() != generic_args.len() -> panic("checked variant pattern has incomplete owner type arguments")
+    sema_inference_substitute_type(raw_type, generic_names, generic_args)
 }
 
 // The MIR enum a checked variant pattern tests and projects. A union subject
@@ -6780,18 +6777,16 @@ fn jet_codegen_lower_pattern_shape_test(builder: &JetCodegenBuilder, program: Je
 }
 
 fn jet_codegen_pattern_group_leaves(builder: JetCodegenBuilder, program: JetCodegenProgram, owner: SymbolID, group: String) -> [String]? {
-    loop semantic_module in program.modules {
-        loop nominal in semantic_module.nominals {
-            if nominal.symbol.id.key != owner.key -> next
-            leaves := [String]{}
-            prefix := "{group}."
-            loop variant in nominal.variants {
-                if variant.symbol.name.starts_with(prefix) -> &leaves.push(variant.symbol.name)
-            }
-            if leaves.len() > 0 -> return Val(leaves)
-            return None
-        }
+    // The first module nominal (in module order) declaring `owner`.
+    owner_rows :: program.nominals.rows.get(owner.key) ?? [JetCodegenNominalRow]{}
+    if owner_rows.len() == 0 -> return None
+    nominal :: program.modules[owner_rows[0].module_index].nominals[owner_rows[0].nominal_index]
+    leaves := [String]{}
+    prefix := "{group}."
+    loop variant in nominal.variants {
+        if variant.symbol.name.starts_with(prefix) -> &leaves.push(variant.symbol.name)
     }
+    if leaves.len() > 0 -> return Val(leaves)
     None
 }
 
