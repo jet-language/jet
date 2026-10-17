@@ -1232,14 +1232,13 @@ fn sema_inline_bind_module_imports(definition: CodeModule, surfaces: [SemaInline
             }
             if rewrite.diagnostics.len() != group_start -> next
             loop (index, local) in bound_locals {
-                target :: bound_targets[index]
-                if target.qualified {
-                    rewrite.qualified[local] = target
+                if bound_targets[index].qualified {
+                    rewrite.qualified[local] = bound_targets[index]
                 } else {
                     span :: if index < declaration.local_spans.len() -> declaration.local_spans[index] else -> declaration.span
-                    rewrite.imported[local] = SemaInlineFunctionBinding{semantic_name: sema_inline_member_name(target.module_alias, target.member), module_alias: target.module_alias.copy(), source_name: target.member.copy(), span: span, visibility: if declaration.is_pub -> 2 else -> if declaration.is_package_pub -> 1 else -> 0}
+                    rewrite.imported[local] = SemaInlineFunctionBinding{semantic_name: sema_inline_member_name(bound_targets[index].module_alias, bound_targets[index].member), module_alias: bound_targets[index].module_alias.copy(), source_name: bound_targets[index].member.copy(), span: span, visibility: if declaration.is_pub -> 2 else -> if declaration.is_package_pub -> 1 else -> 0}
                 }
-                if declaration.is_pub -> reexports[local] = target
+                if declaration.is_pub -> reexports[local] = bound_targets[index]
             }
         }
     }

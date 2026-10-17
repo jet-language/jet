@@ -153,9 +153,8 @@ fn envmodel_evaluate_named_fields(fields: [String: NamedFieldExpr], globals: [St
     source_bytes :: (source ?? "").bytes()
     provenance := [ComputedFieldProvenance]{}
     loop field in names {
-        named :: fields[field]
-        text :: if source == None -> "" else -> pkg_bytes_text(source_bytes, named.span.start, named.span.end)
-        &provenance.push(ComputedFieldProvenance{field: field, dependencies: envmodel_dependencies_for_expression(named.expr, names), pure: true, source: text.trim()})
+        text :: if source == None -> "" else -> pkg_bytes_text(source_bytes, fields[field].span.start, fields[field].span.end)
+        &provenance.push(ComputedFieldProvenance{field: field, dependencies: envmodel_dependencies_for_expression(fields[field].expr, names), pure: true, source: text.trim()})
     }
     Ok(ComputedFields{values: values, provenance: provenance})
 }

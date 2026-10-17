@@ -312,7 +312,7 @@ fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: Stri
             record :: core_receiver_method("Query", "collect") ?? return SemaMethodSpecialCheck{handled: false, value: None}
             source_arg :: CallArg{convention: AccessConvention.Read, expr: receiver, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
             result_type :: sema_data_result(Type.List{element: parameters[0]}, Type.Named{name: sema_data_source_type_name(environment, program, "DataError")})
-            value :: sema_data_core_emit(record, "Query.collect", [CallArg]{source_arg}, [Type]{receiver_value.ty}, [TExpr]{receiver_value}, [Type]{parameters[0]}, result_type, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
+            value :: sema_data_core_emit(record, "Query.collect", [CallArg]{^source_arg}, [Type]{receiver_value.ty}, [TExpr]{receiver_value}, [Type]{parameters[0]}, result_type, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
             return SemaMethodSpecialCheck{handled: true, value: value}
         }
     }
@@ -413,7 +413,7 @@ fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: Stri
                     loop index in 1..<args.len() -> _ := sema_check_expression(args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
                     operation := THandleOp.LoadableMethod{method: method}
-                    value := sema_tir_node(contract ?? Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: typed}, span)
+                    value := sema_tir_node(contract ?? Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: ^operation, args: ^typed}, span)
                     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
                 }
             }

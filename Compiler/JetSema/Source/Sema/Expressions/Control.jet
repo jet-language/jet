@@ -1046,7 +1046,6 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
         sema_ownership_fork_drop(&state, fork, fallback_path.share_found, [SemaOwnershipShareSite]{})
         return None
     }
-    fallback_payload :: checked_route.payload
     if checked_route.reaches_merge {
         sema_ownership_fork_rollback(&state, fork)
         joined :: sema_ownership_path_join(state, fork, sema_ownership_fork_base(fork), fallback_path, true, state.share_found)
@@ -1055,7 +1054,7 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
     } else {
         sema_ownership_fork_drop(&state, fork, fallback_path.share_found, [SemaOwnershipShareSite]{})
     }
-    route_value :: checked_route.value ?? TOrFallback.Value{value: sema_tir_node(fallback_payload, TExprKind.Unit, span)}
+    route_value :: checked_route.value ?? TOrFallback.Value{value: sema_tir_node(checked_route.payload, TExprKind.Unit, span)}
     // D-FAILURE-FOUNDATION1=A (Rust `lower_or_fallback`): a mixed `T? E!`
     // carrier has two failure routes, so `??` removes them one at a time:
     // first its Result route (where `err` is bound and a value fallback is
@@ -1067,10 +1066,10 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
             else -> route_value
         }
         after_result :: sema_tir_node(ok, TExprKind.OrFallback{value: subject, fallback: failure_route, ambient_err: checked_route.ambient_err}, span)
-        mixed :: sema_tir_node(fallback_payload, TExprKind.OrFallback{value: after_result, fallback: route_value, ambient_err: None}, span)
+        mixed :: sema_tir_node(checked_route.payload, TExprKind.OrFallback{value: after_result, fallback: route_value, ambient_err: None}, span)
         return sema_expr_expected_owned(^mixed, expected, environment, program, &diagnostics)
     }
-    result :: sema_tir_node(fallback_payload, TExprKind.OrFallback{value: subject, fallback: route_value, ambient_err: checked_route.ambient_err}, span)
+    result :: sema_tir_node(checked_route.payload, TExprKind.OrFallback{value: subject, fallback: route_value, ambient_err: checked_route.ambient_err}, span)
     sema_expr_expected(result, expected, environment, program, &diagnostics)
 }
 

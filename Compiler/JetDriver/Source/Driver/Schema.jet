@@ -85,14 +85,13 @@ fn load_all_snapshots(root: String) -[Env, FS]> [SchemaSnapshot] {
     loop (key, _) in snapshots -> &keys.push(key)
     &keys.sort()
     loop key in keys {
-        value :: snapshots[key]
-        &result.push(value)
+        &result.push(snapshots[key])
         index := result.len() - 1
-        loop index > 0 && result[index - 1].type_name > value.type_name {
+        loop index > 0 && result[index - 1].type_name > snapshots[key].type_name {
             result[index] = result[index - 1]
             index -= 1
         }
-        result[index] = value
+        result[index] = snapshots[key]
     }
     result
 }

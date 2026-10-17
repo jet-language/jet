@@ -546,25 +546,24 @@ fn sema_copy_classify(
     string_view: Bool,
 ) -> SemaCopyFacts Never! {
     owned :: sema_copy_owned_view_type(source, string_view)
-    target :: owned.ty
     materializes_view :: owned.materialized
     source_walk := sema_copy_walk()
     source_facts :: sema_copy_type_facts(source, program.registration_graph, env.module_identity, generic_params, &source_walk)
     target_walk := sema_copy_walk()
-    target_facts :: sema_copy_type_facts(target, program.registration_graph, env.module_identity, generic_params, &target_walk)
+    target_facts :: sema_copy_type_facts(owned.ty, program.registration_graph, env.module_identity, generic_params, &target_walk)
     lowering :: if {
         materializes_view -> SemaCopyLowering.MaterializeView
         intent == SemaCopyIntent.Explicit -> SemaCopyLowering.ExplicitCopy
         else -> SemaCopyLowering.Clone
     }
     accepted :: source_facts.complete && target_facts.complete && !source_facts.resource && (source_facts.copyable || target_facts.cloneable)
-    memory :: if target == {
+    memory :: if owned.ty == {
         .Shared(_) -> SemaCopyMemoryKind.RetainRelease
         else -> if target_facts.heap -> SemaCopyMemoryKind.Allocation else -> SemaCopyMemoryKind.NoEvent
     }
     SemaCopyFacts{
         source: source,
-        target: target,
+        target: owned.ty,
         intent: intent,
         lowering: lowering,
         materializes_view: materializes_view,

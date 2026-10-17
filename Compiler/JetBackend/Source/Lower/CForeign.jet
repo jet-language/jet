@@ -309,13 +309,12 @@ fn lower_c_import_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
         }
     }
     loop write in writes {
-        scalar :: write.ty
-        layout :: if lower_convert_type(scalar).kind == .Float -> lir_layout_float() else -> lir_layout_word()
+        layout :: if lower_convert_type(write.ty).kind == .Float -> lir_layout_float() else -> lir_layout_word()
         raw_value :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
         lower_emit(&f, LIRInst.Load{dst: raw_value, base: write.temporary, offset: 0})
-        native_layout :: lower_repr_layout(lower_repr(p, scalar)) ?? return
-        native :: lower_new_value(&f, native_layout, LIRDrop.Trivial, scalar.identity)
-        lower_c_decode(&m, &f, scalar, raw_value, native)
+        native_layout :: lower_repr_layout(lower_repr(p, write.ty)) ?? return
+        native :: lower_new_value(&f, native_layout, LIRDrop.Trivial, write.ty.identity)
+        lower_c_decode(&m, &f, write.ty, raw_value, native)
         lower_emit(&f, LIRInst.Store{base: write.writeback.cell, offset: 0, value: native})
         lower_write_back(p, c, &m, &f, write.writeback, None)
     }

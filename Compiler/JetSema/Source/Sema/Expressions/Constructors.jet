@@ -295,7 +295,7 @@ fn sema_atomic_field_initializer(field_ty: Type, value: TExpr, source: Expr) -> 
     row :: sema_call_builtin_static_row("Atomic", "new", "") ?? return None
     argument :: CallArg{convention: row.parameter_convention, expr: source, span: expr_span(source), flags: ast_empty_call_arg_flags(), label: None, spread: false}
     bindings :: [SemaInferenceBinding]{SemaInferenceBinding{name: row.type_params[0], ty: inner, source: "atomic field initializer"}}
-    kind :: sema_call_builtin_static_lowered(row, [TExpr]{value}, [CallArg]{argument}, bindings, 0, value.span) ?? return None
+    kind :: sema_call_builtin_static_lowered(row, [TExpr]{value}, [CallArg]{^argument}, bindings, 0, value.span) ?? return None
     Val(sema_tir_expr(field_ty, kind, value.span))
 }
 

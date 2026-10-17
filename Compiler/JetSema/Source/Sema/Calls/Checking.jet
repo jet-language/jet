@@ -488,10 +488,9 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
         // lowered[index].value is overwritten with the pin local below. Jet has no exchange on an
         // element of the write-borrowed `lowered`.
         original :: lowered[index].value.copy()
-        ty :: original.ty
         init := original
         if lowered[index].clone || lowered[index].arc_clone {
-            init = sema_tir_node(ty, TExprKind.Clone{value: init, fact: tir_call_arg_copy_fact(lowered[index].arc_clone)}, original.span)
+            init = sema_tir_node(original.ty, TExprKind.Clone{value: init, fact: tir_call_arg_copy_fact(lowered[index].arc_clone)}, original.span)
             lowered[index].clone = false
             lowered[index].arc_clone = false
         }
@@ -502,16 +501,16 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
         borrowed :: (lowered[index].borrow || lowered[index].mut_borrow) && place_value
         if borrowed {
             access :: if lowered[index].mut_borrow -> AccessConvention.Write else -> AccessConvention.Read
-            init = sema_tir_node(ty, TExprKind.Borrow{place: init, access: access}, original.span)
+            init = sema_tir_node(original.ty, TExprKind.Borrow{place: init, access: access}, original.span)
         }
-        symbol :: sema_call_binder_ref_symbol(environment, program, owner, typed.binder_site, pin_slot, params[slot].name, ty, span)
+        symbol :: sema_call_binder_ref_symbol(environment, program, owner, typed.binder_site, pin_slot, params[slot].name, original.ty, span)
         local := tir_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id)
         local.generated = true
         local.mutable = lowered[index].mut_borrow
         local.deref = borrowed
-        local_value :: sema_tir_node(ty, TExprKind.Local{local: local}, original.span)
+        local_value :: sema_tir_node(original.ty, TExprKind.Local{local: local}, original.span)
         moves_pin :: params[slot].convention == AccessConvention.Move || (params[slot].variadic && !lowered[index].spread)
-        lowered[index].value = if moves_pin -> sema_tir_node(ty, TExprKind.Move{value: local_value}, original.span) else -> local_value
+        lowered[index].value = if moves_pin -> sema_tir_node(original.ty, TExprKind.Move{value: local_value}, original.span) else -> local_value
         &bindings.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: span})
     }
     bindings

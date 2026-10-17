@@ -157,11 +157,10 @@ fn build_session_project(state: BuildSessionState) -> BuildGraph Never! {
 }
 fn build_session_graph(session: BuildSession, returned: BuildSessionValue) -> BuildSessionGraphResult Never! {
     permit :: session.storage.guard_read()
-    state :: permit.value
-    if !state.active -> return {graph: None, diagnostic: Val(build_session_diag(state, "build context expired"))}
-    default :: build_session_handle(state, returned, "BuildPlan") ?? return {graph: None, diagnostic: Val(build_session_diag(state, "argument 1 must be a BuildPlan returned by this build"))}
-    if build_session_validate(state, default) == .Val(error) -> return {graph: None, diagnostic: Val(error)}
-    {graph: Val(build_session_project(state)), diagnostic: None}
+    if !permit.value.active -> return {graph: None, diagnostic: Val(build_session_diag(permit.value, "build context expired"))}
+    default :: build_session_handle(permit.value, returned, "BuildPlan") ?? return {graph: None, diagnostic: Val(build_session_diag(permit.value, "argument 1 must be a BuildPlan returned by this build"))}
+    if build_session_validate(permit.value, default) == .Val(error) -> return {graph: None, diagnostic: Val(error)}
+    {graph: Val(build_session_project(permit.value)), diagnostic: None}
 }
 fn build_session_finish(session: &BuildSession, returned: BuildSessionValue) -> BuildSessionFinish Never! {
     permit := session.storage.guard_edit()
@@ -178,32 +177,31 @@ fn build_plan_graph(plan: BuildSessionPlan) -> BuildGraph Never! {
 }
 fn build_plan_selected_generated(plan: BuildSessionPlan) -> [BuildSessionGeneratedModule] Never! {
     permit :: plan.storage.guard_read()
-    state :: permit.value
     selected_targets := [Int]{}
     selected_actions := [Int]{}
     paths := [String]{}
     pending := [Int]{}
     if plan.default >= 0 -> &pending.push(plan.default)
-    else { loop index in 0..<state.targets.len() -> &pending.push(index) }
+    else { loop index in 0..<permit.value.targets.len() -> &pending.push(index) }
     loop pending.len() > 0 {
         current :: &pending.pop() ?? break
         if build_session_contains_int(selected_targets, current) -> next
         &selected_targets.push(current)
-        loop path in state.targets[current].sources -> build_session_append_unique(&paths, path)
-        loop action in state.targets[current].actions -> build_session_append_int(&selected_actions, action)
-        loop dependency in state.targets[current].deps -> &pending.push(dependency)
+        loop path in permit.value.targets[current].sources -> build_session_append_unique(&paths, path)
+        loop action in permit.value.targets[current].actions -> build_session_append_int(&selected_actions, action)
+        loop dependency in permit.value.targets[current].deps -> &pending.push(dependency)
     }
-    prerequisites :: build_session_prerequisites(state)
+    prerequisites :: build_session_prerequisites(permit.value)
     cursor := 0
     loop cursor < selected_actions.len() {
         current :: selected_actions[cursor].copy()
         cursor += 1
         loop dep in prerequisites[current] -> build_session_append_int(&selected_actions, dep)
     }
-    loop action in selected_actions { loop output in state.actions[action].outputs -> build_session_append_unique(&paths, output) }
+    loop action in selected_actions { loop output in permit.value.actions[action].outputs -> build_session_append_unique(&paths, output) }
     generated := [BuildSessionGeneratedModule]{}
-    loop generated_row in state.generated {
-        if state.targets.len() == 0 || build_session_contains_string(paths, generated_row.path) -> &generated.push(generated_row)
+    loop generated_row in permit.value.generated {
+        if permit.value.targets.len() == 0 || build_session_contains_string(paths, generated_row.path) -> &generated.push(generated_row)
     }
     &generated.sort_by((left: BuildSessionGeneratedModule, right: BuildSessionGeneratedModule) -> if left.path == right.path -> left.name <=> right.name else -> left.path <=> right.path)
     generated

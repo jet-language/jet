@@ -26,11 +26,10 @@ fn jet_driver_query_loaded_input_paths(request: JetDriverCompileRequest) -> JetD
     loop module_row in loaded.modules {
         index :: module_row.source_unit_index
         if index < 0 || index >= loaded.source_units.len() -> next
-        unit :: loaded.source_units[index]
-        if jet_driver_unit_is_core(unit) || unit.source_origin == SemaSourceOrigin.CompilerGenerated -> next
-        if seen.get(unit.path) == None {
-            seen[unit.path] = true
-            &paths.push(unit.path)
+        if jet_driver_unit_is_core(loaded.source_units[index]) || loaded.source_units[index].source_origin == SemaSourceOrigin.CompilerGenerated -> next
+        if seen.get(loaded.source_units[index].path) == None {
+            seen[loaded.source_units[index].path] = true
+            &paths.push(loaded.source_units[index].path)
         }
     }
     &paths.sort()

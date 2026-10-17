@@ -24,7 +24,7 @@ fn sema_gate_ledger_collect(modules: [SemaGateModule], names: NameLedger, gates:
         }
         provenance := gate.provenance
         &provenance.push("{gate.source}:{gate.span.start}..{gate.span.end}")
-        gate_ledger_push(&ledger, GateEntry{kind: GateKind.Unsafe, domain: "security", scope: "source", source: gate.source, span: Val(gate.span), subject: "#Unsafe", reason: gate.reason, status: Val(if discharged -> "discharged" else -> "missing"), detail: "mode={gate.mode}", provenance: provenance, operations: operations})
+        gate_ledger_push(&ledger, GateEntry{kind: GateKind.Unsafe, domain: "security", scope: "source", source: gate.source, span: Val(gate.span), subject: "#Unsafe", reason: gate.reason, status: Val(if discharged -> "discharged" else -> "missing"), detail: "mode={gate.mode}", provenance: provenance, operations: ^operations})
     }
     loop entry in inspection.diagnostics {
         &ledger.diagnostic_rows.push(GateDiagnostic{source: entry.source, diagnostic: entry.diagnostic})

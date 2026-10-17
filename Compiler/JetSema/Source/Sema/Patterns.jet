@@ -1088,17 +1088,16 @@ fn sema_pattern_validate_internal(subject_ty: Type, pattern: Pattern, env: SemaS
                 return SemaPatternValidation{shape: TPatternShape.Or{alternatives: [TPatternShape]{}, span: span}, enum_type: None, bindings: [TPatternBindingFact]{}, complete: false}
             }
             results :: loop alternative in alternatives -> sema_pattern_validate_internal(subject_ty, alternative, env, program, &writes, &state, &tail_store, &context, &diagnostics, mutable)
-            first :: results[0]
             shapes :: loop result in results -> result.shape
-            complete := first.complete
+            complete := results[0].complete
             loop index in 1..<results.len() {
                 alternative :: results[index]
-                if !alternative.complete || !sema_pattern_facts_equal(first.bindings, alternative.bindings) {
+                if !alternative.complete || !sema_pattern_facts_equal(results[0].bindings, alternative.bindings) {
                     &diagnostics.push(sema_error("E0317", span, "or-pattern alternatives bind different names or types", "every alternative must bind the same names at the same types", "rename bindings so all alternatives agree"))
                     complete = false
                 }
             }
-            SemaPatternValidation{shape: TPatternShape.Or{alternatives: shapes, span: span}, enum_type: first.enum_type, bindings: first.bindings, complete: complete}
+            SemaPatternValidation{shape: TPatternShape.Or{alternatives: shapes, span: span}, enum_type: results[0].enum_type, bindings: results[0].bindings, complete: complete}
         }
     }
 }

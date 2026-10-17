@@ -109,9 +109,8 @@ fn jet_config_program(expr: Expr, source: String, funcs: [String: Func], globals
     constants := [String: String]{}
     lines := [String]{}
     loop name in funcs.keys() {
-        function :: funcs[name]
-        if function.span.start < 0 || function.span.end > bytes.len() -> next
-        &lines.push(String.from_bytes(bytes.slice(function.span.start, function.span.end)) ?? return Err(jet_config_eval_error(expr, "the function `{name}` is not valid text")))
+        if funcs[name].span.start < 0 || funcs[name].span.end > bytes.len() -> next
+        &lines.push(String.from_bytes(bytes.slice(funcs[name].span.start, funcs[name].span.end)) ?? return Err(jet_config_eval_error(expr, "the function `{name}` is not valid text")))
     }
     text := [String]{}
     cursor := span.start

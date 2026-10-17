@@ -631,8 +631,7 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
         }
         &callables.add(root.value, lowered).drop("duplicate roots share the concrete callable")
         if !wrap_entry {
-            descriptor :: prepared.functions[row]
-            source :: if descriptor.instance_row >= 0 -> prepared.instances[descriptor.instance_row] else -> program.functions[descriptor.source_row]
+            source :: if prepared.functions[row].instance_row >= 0 -> prepared.instances[prepared.functions[row].instance_row] else -> program.functions[prepared.functions[row].source_row]
             &value_callables.add(root.value, lower_closure_helper_id(&m, "callable.value", row, source)).drop("requested roots are unique")
             &value_releases.add(root.value, lower_closure_helper_id(&m, "callable.release", row, source)).drop("requested roots are unique")
         }

@@ -93,7 +93,7 @@ fn sema_value_method_kind(row: BuiltinMethodRow, method: String, receiver_value:
         .StringRangeSlice -> {
             zero_start := sema_tir_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
             zero_end := sema_tir_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
-            TExprKind.Slice{base: receiver_value, start: zero_start, end: zero_end, range: Val(typed[0]), location: sema_expression_panic_location(environment, program, scopes, span)}
+            TExprKind.Slice{base: receiver_value, start: ^zero_start, end: ^zero_end, range: Val(typed[0]), location: sema_expression_panic_location(environment, program, scopes, span)}
         }
         .StringSplitOnce -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.StringSplitOnce{tuple_struct: sema_value_method_tuple_struct(result)}, args: typed}
         .StringCutLast -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.StringCutLast{tuple_struct: sema_value_method_tuple_struct(result)}, args: typed}

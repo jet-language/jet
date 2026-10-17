@@ -991,7 +991,7 @@ fn jet_codegen_lower_builtin_list_min_max(builder: &JetCodegenBuilder, program: 
     route := jet_codegen_builtin_route_plan(operation, receiver.ty, expression.ty, carrier)
     call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.BuiltinMethod, route.module_name, route.member, route.symbol, route.arity, route.borrow_mask, route.effect_kind, carrier, route.abi)
     lowered_receiver := jet_codegen_lower_builtin_receiver(&builder, program, receiver, false)
-    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: call, receiver: lowered_receiver.value, receiver_place: lowered_receiver.place, args: [MIRValueID]{}, aggregate_fields: Val(aggregate_fields)}})
+    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: ^call, receiver: lowered_receiver.value, receiver_place: lowered_receiver.place, args: [MIRValueID]{}, aggregate_fields: Val(^aggregate_fields)}})
 }
 
 // `map.to_list()` / `map.items()`: the Prelude fills one `(key, value)` named
@@ -1009,7 +1009,7 @@ fn jet_codegen_lower_builtin_map_to_list(builder: &JetCodegenBuilder, program: J
     route := jet_codegen_builtin_route_plan(operation, receiver.ty, expression.ty, carrier)
     call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.BuiltinMethod, route.module_name, route.member, route.symbol, route.arity, route.borrow_mask, route.effect_kind, carrier, route.abi)
     lowered_receiver := jet_codegen_lower_builtin_receiver(&builder, program, receiver, false)
-    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: call, receiver: lowered_receiver.value, receiver_place: lowered_receiver.place, args: [MIRValueID]{}, aggregate_fields: Val(aggregate_fields)}})
+    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: ^call, receiver: lowered_receiver.value, receiver_place: lowered_receiver.place, args: [MIRValueID]{}, aggregate_fields: Val(^aggregate_fields)}})
 }
 
 fn jet_codegen_lower_builtin_indexes(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, args: [TExpr]) -> MIRValueID {

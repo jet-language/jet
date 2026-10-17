@@ -162,9 +162,8 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
                 &diagnostics.push(sema_output_error(path.members[path.members.len() - 1].span, "module `{path.root}` has no function `{member_path}`", "Output entries use ordinary module member resolution", "update `entry:` to a function that exists"))
                 return None
             }
-            member :: path.members[0]
             registered := SemaRegistrationResolvedSymbol?{None}
-            if surface.reexports.get(member.name) == .Val(target) {
+            if surface.reexports.get(path.members[0].name) == .Val(target) {
                 // Consume the existing binder's authenticated target, not the
                 // exported spelling as a second invented function identity.
                 if target.qualified {
@@ -181,17 +180,17 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
                     registered = sema_registration_lookup_name(graph, owner.module_identity, sema_inline_member_name(target.module_alias, target.member))
                 }
             } else {
-                if surface.functions.get(member.name) == (Val(false)) {
-                    &diagnostics.push(sema_output_error(member.span, "function `{path.root}.{member.name}` is private", "an Output can only invoke code visible from its declaring module", "add `pub` before `fn {member.name}` in module `{path.root}`"))
+                if surface.functions.get(path.members[0].name) == (Val(false)) {
+                    &diagnostics.push(sema_output_error(path.members[0].span, "function `{path.root}.{path.members[0].name}` is private", "an Output can only invoke code visible from its declaring module", "add `pub` before `fn {path.members[0].name}` in module `{path.root}`"))
                     return None
                 }
-                registered = sema_registration_lookup_name(graph, owner.module_identity, sema_inline_member_name(path.root, member.name))
+                registered = sema_registration_lookup_name(graph, owner.module_identity, sema_inline_member_name(path.root, path.members[0].name))
             }
             callable :: if registered == .Val(found) -> graph.callable_rows.get(found.symbol.id.key) else -> None
             if callable == .Val(row) {
-                if row == .Function(module_index, function_index) -> return Val(SemaOutputTarget{module_index: module_index, function_index: function_index, source_name: member.name.copy(), references: ^references})
+                if row == .Function(module_index, function_index) -> return Val(SemaOutputTarget{module_index: module_index, function_index: function_index, source_name: path.members[0].name.copy(), references: ^references})
             }
-            &diagnostics.push(sema_output_error(member.span, "module `{path.root}` has no function `{member.name}`", "Output entries use ordinary module member resolution", "update `entry:` to a function that exists"))
+            &diagnostics.push(sema_output_error(path.members[0].span, "module `{path.root}` has no function `{path.members[0].name}`", "Output entries use ordinary module member resolution", "update `entry:` to a function that exists"))
             return None
         }
         imported_root := Int?{None}

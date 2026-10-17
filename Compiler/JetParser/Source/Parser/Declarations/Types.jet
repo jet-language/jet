@@ -244,8 +244,7 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after unit-family members")
     if base == None && !derived_without_base && (dimension != None || has_conversion) && members.len() > 0 {
-        first :: members[0]
-        base = Val(NamedSpan{name: first.name, span: first.name_span})
+        base = Val(NamedSpan{name: members[0].name, span: members[0].name_span})
     }
     if base == {
         .Val(base_value) -> {

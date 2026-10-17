@@ -5189,8 +5189,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         end_value := sema_stmt_check_range_endpoint(end_expr, "end", environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                         step_value := TExpr?{None}
                         if step_expr != None {
-                            stride :: step_expr
-                            step_value = sema_stmt_check_range_stride(stride, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                            step_value = sema_stmt_check_range_stride(step_expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                         }
                         // D-RANGE-BACKWARD1=A: written ends that count the wrong
                         // way are a check error; computed ends stay empty.
@@ -5211,9 +5210,8 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         sema_scope_enter(&scopes, &state, "for@{span.start}")
                         label_name := String?{None}
                         if label != None {
-                            named :: label
-                            label_name = Val(named.name)
-                            if !sema_scope_push_loop_label(&scopes, named.name) -> valid = false
+                            label_name = Val(label.name)
+                            if !sema_scope_push_loop_label(&scopes, label.name) -> valid = false
                         }
                         module_name := environment.module_identity
                         owner := sema_scope_local_owner_key(scopes)
@@ -5274,8 +5272,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         collection :: collection_value ?? sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, expr_span(collection_expr))
                         step_value := TExpr?{None}
                         if step_expr != None {
-                            stride :: step_expr
-                            step_value = sema_stmt_check_source_stride(stride, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                            step_value = sema_stmt_check_source_stride(step_expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                         }
                         valid := collection_value != None
                         if step_expr != None && step_value == None -> valid = false
@@ -5324,9 +5321,8 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         sema_scope_enter(&scopes, &state, "for.in@{span.start}")
                         label_name := String?{None}
                         if label != None {
-                            named :: label
-                            label_name = Val(named.name)
-                            if !sema_scope_push_loop_label(&scopes, named.name) -> valid = false
+                            label_name = Val(label.name)
+                            if !sema_scope_push_loop_label(&scopes, label.name) -> valid = false
                         }
                         first_type := item_type
                         second_type := Type?{None}
@@ -5346,8 +5342,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         if first_local == None -> valid = false
                         variable_two := TLocal?{None}
                         if var2 != None && (second_type != None || !source_checked) {
-                            second_name :: var2
-                            variable_two = sema_stmt_for_in_decl_loop_local(second_name.name, second_name.span, second_local_type, environment, program, &scopes, &state, &diagnostics)
+                            variable_two = sema_stmt_for_in_decl_loop_local(var2.name, var2.span, second_local_type, environment, program, &scopes, &state, &diagnostics)
                             if variable_two == None -> valid = false
                         }
                         lending_depth :: context.lending_view_parameter_keys.len()
@@ -5421,9 +5416,8 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                 loop_scope_valid := true
                 label_name := String?{None}
                 if label != None {
-                    named :: label
-                    label_name = Val(named.name)
-                    if !sema_scope_push_loop_label(&scopes, named.name) -> loop_scope_valid = false
+                    label_name = Val(label.name)
+                    if !sema_scope_push_loop_label(&scopes, label.name) -> loop_scope_valid = false
                 }
                 init_tir := sema_stmt_check_binding(init, init_lambda_escapes, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 cond_tir := sema_check_expression(cond, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -5445,8 +5439,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                 step_tir := TStmt?{None}
                 step_valid := true
                 if step != None {
-                    step_stmt :: step
-                    checked_step :: sema_stmt_check_loop_step(step_stmt, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                    checked_step :: sema_stmt_check_loop_step(step, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                     if checked_step == None -> step_valid = false else -> step_tir = checked_step
                 }
                 if label != None -> sema_scope_pop_loop_label(&scopes)
@@ -5486,9 +5479,8 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         sema_scope_enter(&scopes, &state, "while@{span.start}")
                         label_name := String?{None}
                         if label != None {
-                            named :: label
-                            label_name = Val(named.name)
-                            if !sema_scope_push_loop_label(&scopes, named.name) -> loop_scope_valid = false
+                            label_name = Val(label.name)
+                            if !sema_scope_push_loop_label(&scopes, label.name) -> loop_scope_valid = false
                         }
                         loop_frame_index := context.loop_value_frames.len()
                         sema_loop_value_push_frame(&context, label_name)
@@ -5514,9 +5506,8 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                 label_name := String?{None}
                 label_valid := true
                 if label != None {
-                    named :: label
-                    label_name = Val(named.name)
-                    if !sema_scope_push_loop_label(&scopes, named.name) -> label_valid = false
+                    label_name = Val(label.name)
+                    if !sema_scope_push_loop_label(&scopes, label.name) -> label_valid = false
                 }
                 loop_frame_index := context.loop_value_frames.len()
                 sema_loop_value_push_frame(&context, label_name)

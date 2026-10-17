@@ -7,14 +7,13 @@
 fn pkg_to_manifest(facts: PackageFacts, raw: String) -> Manifest ManifestError! {
     dependencies := [String: DepSpec]{}
     loop name in pkg_manifest_sorted(facts.deps.keys().to_list()) {
-        source :: facts.deps[name]
-        is_clib :: if source == {
+        is_clib :: if facts.deps[name] == {
             .CLib(_) -> true
             else -> false
         }
         if !pkg_validate_dependency_name(name) && !is_clib -> return Err(pkg_bad_dep_error(name, "dependency names must be one safe path component without `/`, `\\`, or `:`"))
         if is_clib -> next
-        spec :: if source == {
+        spec :: if facts.deps[name] == {
             .Foreign(language, reference) -> DepSpec.Foreign{language: language, reference: reference}
             .Version(version) -> DepSpec.Registry(version)
             .Git(url, selector) -> DepSpec.Git{url: url, selector: selector}

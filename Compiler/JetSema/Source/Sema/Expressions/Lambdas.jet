@@ -1788,14 +1788,13 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     }
 
     body_expected := if expected_ret == .Val(.Result(ok, _)) -> Val(ok) else -> expected_ret
-    child_return :: body_expected
     if {
         inline_loop -> {
             lambda_scopes.return_type = outer_return_type
             lambda_scopes.failure_carrier = outer_failure_carrier
         }
         else -> {
-            lambda_scopes.return_type = child_return
+            lambda_scopes.return_type = body_expected
             if task_body {
                 // Rust infers a callback carrier only for an expected
                 // callable; a `task` body has none. A failure it propagates
@@ -1814,7 +1813,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
                 // callback failure-carrier inference), so the closure's own type
                 // carries the failure. Every other callback has no failure route:
                 // a fallible call in it is E0403.
-                carrier_source := child_return
+                carrier_source := body_expected
                 if expected_ret == .Val(.Result(_, _)) -> carrier_source = expected_ret
                 infers :: expected_ret != (Val(Type.Named{name: "Unit"})) && !sema_expression_lambda_type_is_result(expected_ret ?? Type.Named{name: "Unit"})
                 lambda_scopes.failure_carrier = if infers -> None else -> Val(sema_expression_failure_carrier(carrier_source ?? Type.Named{name: "Unit"}))

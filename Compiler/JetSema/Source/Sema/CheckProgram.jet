@@ -625,8 +625,7 @@ fn sema_incremental_query(memo: SemaModuleMemo, key: String, input: ^String, eli
     permit :: memo.cache.state.guard_read()
     if eligible && permit.value.generation == memo.generation && (permit.value.scope_epochs.get(memo.module_identity) ?? -1) == memo.epoch {
         if permit.value.rows.has_key(key) {
-            row :: permit.value.rows[key]
-            replay = row.generation == memo.generation && row.epoch == memo.epoch && row.input == input
+            replay = permit.value.rows[key].generation == memo.generation && permit.value.rows[key].epoch == memo.epoch && permit.value.rows[key].input == input
         }
     }
     SemaBodyMemoQuery{module_memo: memo, key: key, input: ^input, eligible: eligible, replay: replay}
@@ -2055,7 +2054,6 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     return_view_provenance := sema_function_return_view_provenance(func, context.return_view_provenance, &diagnostics, &complete)
     if !complete -> return sema_function_check_incomplete(owner_id.key, context)
     source_line_value :: source_line ?? return sema_function_check_incomplete(owner_id.key, context)
-    return_ty :: effective_return
     source_file :: sema_source_file_at(updated.source_segments, fallback_source_file, updated.source_origin, func.span)
     visibility := TVisibility.Private
     if func.is_pub -> visibility = TVisibility.Public
@@ -2084,7 +2082,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         foreign: None,
         params: params,
         web_param_reconstructions: [TWebParamReconstruction]{},
-        ret: Val(return_ty),
+        ret: Val(effective_return),
         gc_return: func.gc_return,
         gc_scope: func.gc_scope,
         return_view_provenance: return_view_provenance,
@@ -3372,7 +3370,6 @@ fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_pl
     checked_result = None
     memory_complete :: owned_input.memory_complete
     owner_generic_complete :: owned_input.owner_generic_complete
-    normalized_owner_type :: owned_input.normalized_owner_type
     keep_going_stub := SemaFunctionResult?{None}
     if keep_going && (!memory_complete || !owner_generic_complete || !checked.complete || sema_check_function_failed(diagnostics, function_diagnostic_start, pending_obligations)) {
         keep_going_stub = sema_keep_going_registered_stub(job, module_index, memory_plan, owned_input.memory_position, owner_id, owned_input.function_kind, raw_protocol_return, &environment, program, &scopes, host_hooks)
@@ -3388,7 +3385,7 @@ fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_pl
     &compute_facts.push(checked.compute_facts)
     loop reference in function_name_references -> &name_references.push(reference)
     if !memory_complete && owned_input.memory_found -> &reasons.push("{label}: memory plan is incomplete")
-    if !owner_generic_complete -> &reasons.push("{label}: generic owner `{type_name(normalized_owner_type)}` could not be resolved to a registered nominal")
+    if !owner_generic_complete -> &reasons.push("{label}: generic owner `{type_name(owned_input.normalized_owner_type)}` could not be resolved to a registered nominal")
     if !memory_complete || !owner_generic_complete {
         if keep_going -> _ := sema_keep_going_push_stub(keep_going_stub, label, &functions, &reasons)
         return false
@@ -5066,27 +5063,26 @@ fn sema_comptime_probe_refresh(probe: &SemaScopeProbe, graph: SemaRegistrationGr
     if probe.constants.len() == 0 -> return
     waiting := [SemaScopeProbeConstant]{}
     loop index in 0..<probe.constants.len() {
-        constant :: probe.constants[index]
-        if constant.source == {
+        if probe.constants[index].source == {
             .Symbol(position) -> {
                 if sema_comptime_symbol_waits(graph.modules[module_index].symbols[position]) {
-                    &waiting.push(constant)
+                    &waiting.push(probe.constants[index])
                 } else {
-                    probe.table.bindings[constant.binding].symbol = graph.modules[module_index].symbols[position]
+                    probe.table.bindings[probe.constants[index].binding].symbol = graph.modules[module_index].symbols[position]
                 }
             }
             .Import(import_index, binding) -> {
                 if sema_comptime_symbol_waits(graph.modules[module_index].imports[import_index].bindings[binding].symbol) {
-                    &waiting.push(constant)
+                    &waiting.push(probe.constants[index])
                 } else {
-                    probe.table.bindings[constant.binding].symbol = graph.modules[module_index].imports[import_index].bindings[binding].symbol
+                    probe.table.bindings[probe.constants[index].binding].symbol = graph.modules[module_index].imports[import_index].bindings[binding].symbol
                 }
             }
             .Namespace(owner, position) -> {
                 if sema_comptime_symbol_waits(graph.modules[owner].symbols[position]) {
-                    &waiting.push(constant)
+                    &waiting.push(probe.constants[index])
                 } else {
-                    probe.table.bindings[constant.binding].symbol = graph.modules[owner].symbols[position]
+                    probe.table.bindings[probe.constants[index].binding].symbol = graph.modules[owner].symbols[position]
                 }
             }
         }

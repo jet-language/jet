@@ -74,11 +74,10 @@ fn sema_call_http_mount(receiver: Expr, receiver_value: TExpr, args: [CallArg], 
                         params := [LambdaParam]{}
                         call_args := [CallArg]{}
                         loop index in 1..<method.params.len() {
-                            parameter :: method.params[index]
-                            parameter_ty :: sema_type_resolve_declared(graph, parameter.ty, method_environment.module_identity)
-                            &params.push(LambdaParam{name: parameter.name, name_span: parameter.name_span, ty: Val(parameter_ty), ty_span: None})
-                            argument := sema_http_mount_arg(Expr.Ident{name: parameter.name, span: parameter.name_span}, parameter.name_span)
-                            argument.convention = parameter.convention
+                            parameter_ty :: sema_type_resolve_declared(graph, method.params[index].ty, method_environment.module_identity)
+                            &params.push(LambdaParam{name: method.params[index].name, name_span: method.params[index].name_span, ty: Val(parameter_ty), ty_span: None})
+                            argument := sema_http_mount_arg(Expr.Ident{name: method.params[index].name, span: method.params[index].name_span}, method.params[index].name_span)
+                            argument.convention = method.params[index].convention
                             &call_args.push(argument)
                         }
                         invocation :: Expr.MethodCall{receiver: Expr.Ident{name: value_name, span: span}, method: method.name, method_span: method.name_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false, checked_callee: None}

@@ -5140,17 +5140,16 @@ fn jet_driver_keep_going_optimize(kg: &JetDriverKeepGoingLog, program: &MIRProgr
 fn jet_driver_keep_going_emit(kg: &JetDriverKeepGoingLog, program: &MIRProgram, trace_sink: CompilerTraceSink?, threads: CompilerThreads) -> JetRustEmitResult {
     kept := jet_rust_emit_program_keep_going(program, jet_driver_native_emit_config(threads, MIRArtifactBuildMode.Dev), trace_sink)
     loop kept_failure in kept.failures {
-        failure :: kept_failure.failure
         item := "-"
         site := "-"
-        if failure.span == .Val(span) -> site = "{span.start}..{span.end}"
+        if kept_failure.failure.span == .Val(span) -> site = "{span.start}..{span.end}"
         if kept_failure.function == .Val(function_id) {
             if jet_driver_mir_function_index_for_id(program.functions, function_id) == .Val(index) {
                 item = "{program.functions[index].name} [{program.functions[index].key}]"
-                if failure.span == .Val(span) -> site = jet_driver_keep_going_mir_site(program, program.functions[index], span)
+                if kept_failure.failure.span == .Val(span) -> site = jet_driver_keep_going_mir_site(program, program.functions[index], span)
             }
         }
-        jet_driver_keep_going_row(&kg, "emit", item, failure.code, "{failure.message}: {failure.detail}", site)
+        jet_driver_keep_going_row(&kg, "emit", item, kept_failure.failure.code, "{kept_failure.failure.message}: {kept_failure.failure.detail}", site)
     }
     kept.result
 }

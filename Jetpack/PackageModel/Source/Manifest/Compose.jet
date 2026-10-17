@@ -151,14 +151,13 @@ fn pkg_merge_optional_field(current: String?, incoming: String?, field: String, 
 
 fn pkg_merge_dep_map(current: &[String: DepSource], incoming: [String: DepSource], field: String, fallback: String, origin: String, provenance: &[String: [String]]) ComposeError! {
     loop key in pkg_manifest_sorted(incoming.keys().to_list()) {
-        value :: incoming[key]
         path :: "{field}.{key}"
         left_origin :: pkg_provenance_origin(provenance, path, fallback)
         if current.get(key) == {
             .Val(existing) -> {
-                if existing != value -> return Err(ComposeError.Conflict{field: path, left_origin: left_origin, right_origin: origin, left: pkg_dep_display(existing), right: pkg_dep_display(value)})
+                if existing != incoming[key] -> return Err(ComposeError.Conflict{field: path, left_origin: left_origin, right_origin: origin, left: pkg_dep_display(existing), right: pkg_dep_display(incoming[key])})
             }
-            .None -> current[key] = value
+            .None -> current[key] = incoming[key]
         }
         pkg_record_provenance(&provenance, path, origin)
     }
@@ -181,17 +180,16 @@ fn pkg_merge_string_map(current: &[String: String], incoming: [String: String], 
 
 fn pkg_merge_services(current: &[String: ServiceFact], incoming: [String: ServiceFact], field: String, fallback: String, origin: String, provenance: &[String: [String]]) ComposeError! {
     loop key in pkg_manifest_sorted(incoming.keys().to_list()) {
-        value :: incoming[key]
         path :: "{field}.{key}"
         if current.get(key) == {
             .Val(existing) -> {
                 merged := existing
-                pkg_merge_service_fact(&merged, value, path, fallback, origin, &provenance)
+                pkg_merge_service_fact(&merged, incoming[key], path, fallback, origin, &provenance)
                 current[key] = merged
             }
             .None -> {
-                current[key] = value
-                pkg_record_service_provenance(&provenance, path, origin, value)
+                current[key] = incoming[key]
+                pkg_record_service_provenance(&provenance, path, origin, incoming[key])
             }
         }
     }
@@ -207,19 +205,18 @@ fn pkg_merge_service_fact(current: &ServiceFact, incoming: ServiceFact, path: St
 
 fn pkg_merge_outputs(current: &[String: OutputFact], incoming: [String: OutputFact], field: String, fallback: String, origin: String, provenance: &[String: [String]]) ComposeError! {
     loop key in pkg_manifest_sorted(incoming.keys().to_list()) {
-        value :: incoming[key]
         path :: "{field}.{key}"
         existing :: current.get(key) ?? {
-            current[key] = value
-            pkg_record_output_provenance(&provenance, path, origin, value)
+            current[key] = incoming[key]
+            pkg_record_output_provenance(&provenance, path, origin, incoming[key])
             next
         }
-        if existing.kind != value.kind {
-            return Err(ComposeError.Conflict{field: "{path}.kind", left_origin: pkg_provenance_origin(provenance, "{path}.kind", fallback), right_origin: origin, left: existing.kind.debug_name(), right: value.kind.debug_name()})
+        if existing.kind != incoming[key].kind {
+            return Err(ComposeError.Conflict{field: "{path}.kind", left_origin: pkg_provenance_origin(provenance, "{path}.kind", fallback), right_origin: origin, left: existing.kind.debug_name(), right: incoming[key].kind.debug_name()})
         }
         merged := existing
-        pkg_merge_output_fields(&merged.fields, value.fields, path, fallback, origin, &provenance)
-        merged.payload = pkg_merge_output_payload(merged.payload, value.payload, path, fallback, origin, &provenance)
+        pkg_merge_output_fields(&merged.fields, incoming[key].fields, path, fallback, origin, &provenance)
+        merged.payload = pkg_merge_output_payload(merged.payload, incoming[key].payload, path, fallback, origin, &provenance)
         merged.name = if merged.fields.get("name") == {
             .Val(raw) -> pkg_scalar(raw)
             .None -> key
@@ -262,10 +259,9 @@ fn pkg_merge_output_payload(current: OutputPayload, incoming: OutputPayload, pat
         merged := current_fields
         loop key in pkg_manifest_sorted(incoming_fields.keys().to_list()) {
             field :: "{path}.{key}"
-            value :: incoming_fields[key]
             merged[key] = if merged.get(key) == {
-                .Val(existing) -> pkg_merge_output_payload(existing, value, field, fallback, origin, &provenance)
-                .None -> value
+                .Val(existing) -> pkg_merge_output_payload(existing, incoming_fields[key], field, fallback, origin, &provenance)
+                .None -> incoming_fields[key]
             }
             pkg_record_provenance(&provenance, field, origin)
         }
@@ -288,32 +284,31 @@ fn pkg_merge_output_payload(current: OutputPayload, incoming: OutputPayload, pat
 
 fn pkg_merge_environments(current: &[String: EnvironmentFact], incoming: [String: EnvironmentFact], field: String, fallback: String, origin: String, provenance: &[String: [String]]) ComposeError! {
     loop key in pkg_manifest_sorted(incoming.keys().to_list()) {
-        value :: incoming[key]
         path :: "{field}.{key}"
         existing :: current.get(key) ?? {
-            current[key] = value
-            pkg_record_environment_provenance(&provenance, path, origin, value)
+            current[key] = incoming[key]
+            pkg_record_environment_provenance(&provenance, path, origin, incoming[key])
             next
         }
         merged := existing
         scalar_fields := [String: String]{}
-        loop name in value.fields.keys().to_list() {
+        loop name in incoming[key].fields.keys().to_list() {
             if name == {
                 "name" | "tools" | "services" | "secrets" -> {}
-                else -> scalar_fields[name] = value.fields[name]
+                else -> scalar_fields[name] = incoming[key].fields[name]
             }
         }
         pkg_merge_string_fields(&merged.fields, scalar_fields, path, fallback, origin, &provenance)
-        if value.fields.get("name") == .Val(name) {
+        if incoming[key].fields.get("name") == .Val(name) {
             pkg_merge_string_fields(&merged.fields, [String: String]{"name": name}, path, fallback, origin, &provenance)
         }
-        loop tool in value.tools {
+        loop tool in incoming[key].tools {
             if !merged.tools.contains(tool) -> &merged.tools.push(tool)
         }
         merged.tools = pkg_manifest_sorted(merged.tools)
         pkg_record_provenance(&provenance, "{path}.tools", origin)
-        pkg_merge_string_map(&merged.secrets, value.secrets, "{path}.secrets", fallback, origin, &provenance)
-        pkg_merge_services(&merged.services, value.services, "{path}.services", fallback, origin, &provenance)
+        pkg_merge_string_map(&merged.secrets, incoming[key].secrets, "{path}.secrets", fallback, origin, &provenance)
+        pkg_merge_services(&merged.services, incoming[key].services, "{path}.services", fallback, origin, &provenance)
         merged.name = if merged.fields.get("name") == {
             .Val(raw) -> pkg_scalar(raw)
             .None -> key

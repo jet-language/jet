@@ -993,7 +993,6 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     lexed :: lex_config(source.bytes())
     loop diagnostic in lexed.diagnostics -> &diagnostics.push(diagnostic)
     tokens :: lexed.tokens
-    tables :: lexed.tables
     name := ""
     version := String?{None}
     edition := JET_DRIVER_LATEST_EDITION
@@ -1025,7 +1024,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
         token := tokens[index]
         if token.kind == TOKEN_EOF -> break
         if brace_depth == 0 && token.kind == TOKEN_IDENT && index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_COLON {
-            field :: token_decoded(tables, token)
+            field :: token_decoded(lexed.tables, token)
             value_index :: index + 2
             if field == {
                 "name" | "version" | "edition" -> {
@@ -1034,18 +1033,18 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                         "name" -> {
                             if name_seen -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package name is declared more than once", "one manifest root has one package identity", "keep one `name:` field"))
                             name_seen = true
-                            if valid_string -> name = token_decoded(tables, tokens[value_index]) else -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package name must be a string", "package identity uses the manifest's declared name", "write `name: \"package_name\"`"))
+                            if valid_string -> name = token_decoded(lexed.tables, tokens[value_index]) else -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package name must be a string", "package identity uses the manifest's declared name", "write `name: \"package_name\"`"))
                         }
                         "version" -> {
                             if version_seen -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package version is declared more than once", "dependency selection uses one declared package version", "keep one `version:` field"))
                             version_seen = true
-                            if valid_string -> version = Val(token_decoded(tables, tokens[value_index])) else -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package version must be a string", "dependency selection uses the manifest's declared version", "write `version: \"0.1.0\"`"))
+                            if valid_string -> version = Val(token_decoded(lexed.tables, tokens[value_index])) else -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package version must be a string", "dependency selection uses the manifest's declared version", "write `version: \"0.1.0\"`"))
                         }
                         else -> {
                             if edition_seen -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package edition is declared more than once", "one manifest root selects one language edition", "keep one `edition:` field"))
                             edition_seen = true
                             if {
-                                valid_string -> edition = token_decoded(tables, tokens[value_index])
+                                valid_string -> edition = token_decoded(lexed.tables, tokens[value_index])
                                 else -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package edition must be a string", "language edition selection comes from the canonical package manifest", "write `edition: \"2028\"`"))
                             }
                         }
@@ -1059,7 +1058,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                     runtime_value := ""
                     if {
                         runtime_value_index < tokens.len() && (jet_driver_is_manifest_string(tokens[runtime_value_index].kind) || tokens[runtime_value_index].kind == TOKEN_IDENT) -> {
-                            runtime_value = token_decoded(tables, tokens[runtime_value_index])
+                            runtime_value = token_decoded(lexed.tables, tokens[runtime_value_index])
                             runtime_layer := jet_ring_parse_manifest_layer(runtime_value)
                             if {
                                 runtime_layer == None -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package runtime ceiling is unsupported", "runtime ceilings are the canonical core, alloc, or hosted layers", "select `runtime: core`, `runtime: alloc`, or `runtime: hosted`"))
@@ -1082,9 +1081,9 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                                 authority_close_index == None -> &diagnostics.push(jet_driver_authority_diagnostic(token.span, "`authority:` must be a closed record value"))
                                 else -> {
                                     authority_close :: authority_close_index ?? authority_open_index
-                                    jet_driver_validate_authority_fields(tokens, tables, authority_open_index, authority_close, token.span, &diagnostics)
-                                    authority_needs = jet_driver_parse_authority_needs(source, tokens, tables, authority_open_index, authority_close, token.span, &diagnostics)
-                                    authority_holds :: jet_driver_parse_authority_holds(source, tokens, tables, authority_open_index, authority_close, token.span, &diagnostics)
+                                    jet_driver_validate_authority_fields(tokens, lexed.tables, authority_open_index, authority_close, token.span, &diagnostics)
+                                    authority_needs = jet_driver_parse_authority_needs(source, tokens, lexed.tables, authority_open_index, authority_close, token.span, &diagnostics)
+                                    authority_holds :: jet_driver_parse_authority_holds(source, tokens, lexed.tables, authority_open_index, authority_close, token.span, &diagnostics)
                                     authority_allow = authority_holds.allow
                                     authority_deny = authority_holds.deny
                                     index = authority_close
@@ -1129,7 +1128,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                             if {
                                 close_index == None -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "the package dependency block is not closed", "dependency names and values are delimited by one balanced block", "close the `deps: .{{ ... }}` block"))
                                 else -> {
-                                    dependencies = jet_driver_parse_dependency_entries(source, manifest_path, tokens, tables, block_open_index, close_index, &diagnostics)
+                                    dependencies = jet_driver_parse_dependency_entries(source, manifest_path, tokens, lexed.tables, block_open_index, close_index, &diagnostics)
                                     index = close_index
                                 }
                             }
@@ -1150,7 +1149,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                     loop config_index in (list_open + 1)..<list_close {
                         config_token :: tokens[config_index]
                         if jet_driver_is_manifest_string(config_token.kind) {
-                            path :: jet_driver_file_import_path("package.jet", token_decoded(tables, config_token))
+                            path :: jet_driver_file_import_path("package.jet", token_decoded(lexed.tables, config_token))
                             if path.valid -> &configs.push(path.path)
                         }
                     }
@@ -1167,8 +1166,8 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                             if {
                                 close_index == None -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "the package outputs block is not closed", "output entry bindings are delimited by one balanced block", "close the `outputs: .{{ ... }}` block"))
                                 else -> {
-                                    entry = jet_driver_manifest_entry_function(manifest_path, tokens, tables, block_open_index, close_index, &diagnostics)
-                                    outputs = jet_driver_manifest_outputs(tokens, tables, block_open_index, close_index)
+                                    entry = jet_driver_manifest_entry_function(manifest_path, tokens, lexed.tables, block_open_index, close_index, &diagnostics)
+                                    outputs = jet_driver_manifest_outputs(tokens, lexed.tables, block_open_index, close_index)
                                     index = close_index
                                 }
                             }
@@ -1198,10 +1197,9 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
             field_failure := ""
             kept := [Diagnostic]{}
             loop diagnostic_index in manifest_diagnostic_start..<diagnostics.len() {
-                diagnostic :: diagnostics[diagnostic_index]
                 if {
-                    diagnostic.severity != DIAGNOSTIC_ERROR -> &kept.push(diagnostic)
-                    field_failure.len() == 0 -> field_failure = diagnostic.what
+                    diagnostics[diagnostic_index].severity != DIAGNOSTIC_ERROR -> &kept.push(diagnostics[diagnostic_index])
+                    field_failure.len() == 0 -> field_failure = diagnostics[diagnostic_index].what
                     else -> {}
                 }
             }
@@ -3354,7 +3352,6 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
     }
 
     source_units := catalog.source_units
-    units_by_source :: source_index_result.index
     selected_entry :: source_units[entry_index ?? 0]
     // Rust read_load threads the entry package's policy through the entire
     // user-source closure, including imports, not each dependency's own floor.
@@ -3501,14 +3498,13 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
         jet_driver_scoped_imports(program.imports, program.items, "", true, &scoped_imports)
         aliases := [String:Int]{}
         loop scoped in scoped_imports {
-            declaration :: scoped.declaration
-            if jet_driver_is_foreign_provider_import(declaration) -> next
-            if !jet_driver_check_reserved_import(declaration, &diagnostics) {
+            if jet_driver_is_foreign_provider_import(scoped.declaration) -> next
+            if !jet_driver_check_reserved_import(scoped.declaration, &diagnostics) {
                 failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
                 next
             }
             target_index := Int?{None}
-            if declaration.kind == {
+            if scoped.declaration.kind == {
                 .File(path, span) -> {
                     // D-MOD-CYCLE1=A: the files of one package share one
                     // namespace; only loose files import files by path. A
@@ -3525,7 +3521,7 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
                     }
                 }
                 .Module(name, span) -> {
-                    core_module :: jet_driver_core_import_module(declaration)
+                    core_module :: jet_driver_core_import_module(scoped.declaration)
                     if core_module == .Val(core_name) {
                         target_index = jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, core_name, importer_core, entry_module, entry_index ?? 0, span, &diagnostics)
                     } else if is_core {
@@ -3543,16 +3539,16 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
                             break
                         }
                         if target_index == None {
-                            target_index = jet_driver_find_module_import_target(unit, name, declaration.inline_version, catalog.packages, source_units, units_by_source, span, &diagnostics)
+                            target_index = jet_driver_find_module_import_target(unit, name, scoped.declaration.inline_version, catalog.packages, source_units, source_index_result.index, span, &diagnostics)
                         }
                     } else {
                         target_index = jet_driver_find_module_import_target(
                             unit,
                             name,
-                            declaration.inline_version,
+                            scoped.declaration.inline_version,
                             catalog.packages,
                             source_units,
-                            units_by_source,
+                            source_index_result.index,
                             span,
                             &diagnostics,
                         )
@@ -3564,12 +3560,12 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
                 failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
                 next
             }
-            if !jet_driver_validate_alias(declaration.alias, declaration.alias_span, &diagnostics) {
+            if !jet_driver_validate_alias(scoped.declaration.alias, scoped.declaration.alias_span, &diagnostics) {
                 failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
                 next
             }
             target_unit_index :: target_index ?? 0
-            alias_key :: if scoped.scope == "" -> declaration.alias else -> "{scoped.scope}.{declaration.alias}"
+            alias_key :: if scoped.scope == "" -> scoped.declaration.alias else -> "{scoped.scope}.{scoped.declaration.alias}"
             _ := &aliases.add(alias_key, target_unit_index)
             target_unit :: source_units[target_unit_index]
             target_identity :: jet_driver_unit_module_identity(target_unit)
@@ -3585,7 +3581,7 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
                 source_scope_exported: scoped.exported,
                 target_module_identity: target_identity,
                 target_package_identity: target_unit.package_identity,
-                declaration: declaration,
+                declaration: scoped.declaration,
                 foreign_binding: None,
             }
             jet_driver_module_edges_add(&module_edges, edge)
@@ -3640,9 +3636,8 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
             }
         }
         loop scoped in scoped_imports {
-            declaration :: scoped.declaration
-            if jet_driver_is_foreign_provider_import(declaration) -> next
-            if declaration.kind == {
+            if jet_driver_is_foreign_provider_import(scoped.declaration) -> next
+            if scoped.declaration.kind == {
                 .File(_, _) | .Module(_, _) -> next
                 .Unqualified(module_alias, module_alias_span, selected_items, _, _) -> {
                     // An inline `module x { ... }` of this file binds its own
@@ -3667,7 +3662,7 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
                         }
                     }
                     // `use core.perf.[PerfError]` selects from the Core module itself.
-                    core_module :: jet_driver_core_import_module(declaration)
+                    core_module :: jet_driver_core_import_module(scoped.declaration)
                     if target_index == None {
                         if core_module == .Val(core_name) {
                             // Rust reports an unknown selective Core path per
@@ -3697,7 +3692,7 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
                         source_scope_exported: scoped.exported,
                         target_module_identity: jet_driver_unit_module_identity(target_unit),
                         target_package_identity: target_unit.package_identity,
-                        declaration: declaration,
+                        declaration: scoped.declaration,
                         foreign_binding: None,
                     })
                 }
