@@ -3980,8 +3980,8 @@ fn jet_codegen_functions_from_rows(lowered_rows: ^[JetCodegenLoweredFunction], f
         module_key :: "{lowered.function.module_id.value}:{lowered.function.key}"
         if top_ids.get(id_key) != None || top_keys.get(module_key) != None -> panic("duplicate top-level MIR function identity")
         if nested_ids.get(id_key) != None || nested_keys.get(module_key) != None -> panic("top-level MIR function collides with a nested function")
-        // A field moves only when a write in the same block refills it
-        // (LastUse.jet); the bodiless signature row is that refill.
+        // The bodiless signature row refills the moved field, so `lowered`
+        // is whole again for the nested-function loop below.
         shell := jet_rust_emit_signature_row(lowered.function)
         function := ^lowered.function
         lowered.function = ^shell

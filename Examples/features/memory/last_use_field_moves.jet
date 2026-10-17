@@ -1,9 +1,10 @@
 // Values that nothing reads afterwards move instead of copying: a list built
 // in a loop that can stop early and then returned or stored in a record, an
-// owned field handed off with `^` and refilled before anything reads it, and
-// an optional unwrapped with `^x ?? ...`. Value semantics stay exact: a
-// value still read later is copied, and an owner a view still reads keeps
-// its value.
+// owned field handed off with `^` and refilled before anything reads it, a
+// field of an owner nothing reads again (the owner's cleanup releases only
+// the fields still in place), and an optional unwrapped with `^x ?? ...`.
+// Value semantics stay exact: a value still read later is copied, and an
+// owner a view still reads keeps its value.
 
 struct Graph {
     names: [String]
@@ -29,8 +30,13 @@ struct Entry {
     path: String
 }
 
-// Two fields of a loop's element copy feed a record and the copy is never
-// refilled: the fields stay copies, so the copy is whole when it is dropped.
+struct Pair {
+    left: [String]
+    right: [String]
+}
+
+// Two fields of a loop's element copy feed a record and nothing reads the
+// copy again: both fields move out, and the copy's cleanup releases the rest.
 fn entries(units: [SourceUnit]) -> [Entry] {
     out := [Entry]{}
     loop index in 0..<units.len() {
@@ -38,6 +44,59 @@ fn entries(units: [SourceUnit]) -> [Entry] {
         &out.push(Entry{name: unit.name, path: unit.path})
     }
     out
+}
+
+fn make_pair(seed: String) -> Pair {
+    Pair{left: [String]{seed, "l"}, right: [String]{"r"}}
+}
+
+// One field moves into a record; the other is released with the owner.
+fn pick_left(seed: String) -> Graph {
+    pair :: make_pair(seed)
+    Graph{names: pair.left}
+}
+
+// A moved field leaves its sibling readable: `right` moves into the list,
+// `left` is still read, then moves too.
+fn split(seed: String) -> [[String]] {
+    pair :: make_pair(seed)
+    out := [[String]]{}
+    &out.push(pair.right)
+    print("split left {pair.left.len()}")
+    &out.push(pair.left)
+    out
+}
+
+// A field of an owned parameter is returned by move.
+fn take_right(pair: ^Pair) -> [String] {
+    pair.right
+}
+
+// A read parameter still owns its field: storing it is a copy.
+fn keep_left(pair: Pair) -> Graph {
+    Graph{names: pair.left}
+}
+
+// Moved on one path only: the cleanup after the early return releases
+// `right`, the fall-through path still reads both fields.
+fn maybe_left(pair_seed: String, moving: Bool) -> Int {
+    pair :: make_pair(pair_seed)
+    if moving {
+        kept :: Graph{names: pair.left}
+        return kept.names.len() * 10
+    }
+    pair.left.len() + pair.right.len()
+}
+
+// Read again by the next iteration: every iteration stores a copy.
+fn repeated(rounds: Int) -> Int {
+    pair :: make_pair("x")
+    sum := 0
+    loop round in 0..<rounds {
+        graph :: Graph{names: pair.left}
+        sum += graph.names.len() + round
+    }
+    sum + pair.left.len()
 }
 
 fn project(n: Int) -> Host? {
@@ -108,4 +167,17 @@ fn run() {
 
     listed := entries([SourceUnit]{SourceUnit{name: "a", path: "a.jet"}, SourceUnit{name: "b", path: "b.jet"}})
     print("entries {listed.len()} {listed[1].name} {listed[1].path}")
+
+    picked :: pick_left("p")
+    print("pick {picked.names[0]} {picked.names.len()}")
+    parts :: split("s")
+    print("split {parts[0][0]} {parts[1][0]}")
+    whole :: make_pair("o")
+    taken :: take_right(whole)
+    print("take {taken[0]}")
+    lent :: make_pair("k")
+    copy_graph :: keep_left(lent)
+    print("keep {copy_graph.names[0]} still {lent.left[0]}")
+    print("maybe {maybe_left("m", true)} {maybe_left("m", false)}")
+    print("repeated {repeated(3)}")
 }

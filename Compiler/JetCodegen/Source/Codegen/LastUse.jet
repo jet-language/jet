@@ -7,11 +7,14 @@
 // is consumed (stored, returned, wrapped, or passed to an owning parameter)
 // and no later code can observe the place, the copy and the value are
 // indistinguishable, so the read becomes MovePlace. A whole local's drop
-// flag clears, exactly as an explicit move lowers; a field moves only when a
-// write later in the same block refills it (`^x.f` followed by `x.f = ...`),
-// so its owner is whole again before anything, its own cleanup included,
-// reads it. A read that only inspects its value (`list.len()`) stays a
-// read. The same
+// flag clears, exactly as an explicit move lowers. A field moves when
+// nothing reads it again before a write refills it (`^x.f` followed by
+// `x.f = ...`) or before its owner's remainder drop: a scope-end cleanup
+// that moves the whole owner only to release it releases just the fields
+// still in place (Legality mir_pass_remainder_drops; native glue skips the
+// zeroed field, the Rust tier's partial-move plan drops the rest), so it
+// reads none of the moved ones. A read that only inspects its value
+// (`list.len()`) stays a read. The same
 // liveness fact lets a match arm take the payloads of a subject value that
 // nothing reads after the arm binds them: a Move of the subject feeds those
 // EnumPayloads, which the emitter extracts by value.
@@ -291,6 +294,52 @@ fn jet_codegen_last_use_new_candidate(local: Bool, field: Bool, copied: Bool, pl
     JetCodegenLastUseCandidate{local: local, field: field, copied: copied, place: place, flag: flag, value: value, root: root, path: path}
 }
 
+// The results of whole-root MovePlaces that only feed releasing Drops: an
+// owner's remainder drop (its scope-end cleanup), which releases only the
+// fields still in place (Legality.jet mir_pass_remainder_drops).
+fn jet_codegen_last_use_remainder_moves(builder: JetCodegenBuilder, place_row: [U64:Int]) -> [U64:Bool] Never! {
+    // 0: no user yet; 1: every user so far is a releasing Drop; 2: another user.
+    states := [U64:Int]{}
+    order := [U64]{}
+    loop row in builder.blocks {
+        loop instruction in row.instructions {
+            if instruction.operation == .MovePlace(place) {
+                if instruction.result == .Val(result) {
+                    if place_row.get(place.value) == .Val(place_index) {
+                        if builder.places[place_index].projections.len() == 0 {
+                            _ := &states.add(result.value, 0)
+                            &order.push(result.value)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    remainder := [U64:Bool]{}
+    if order.len() == 0 -> return remainder
+    loop row in builder.blocks {
+        loop instruction in row.instructions {
+            released := MIRValueID?{None}
+            if instruction.operation == .Drop(dropped, kind) {
+                if kind != MIRDropKind.NoDrop -> released = Val(dropped)
+            }
+            loop value in mir_operation_value_uses(instruction.operation) {
+                state :: states.get(value.value) ?? next
+                if state != 2 -> _ := &states.add(value.value, if released == Val(value) -> 1 else -> 2)
+            }
+        }
+        loop value in mir_terminator_value_uses(row.terminator) {
+            if states.get(value.value) != None -> _ := &states.add(value.value, 2)
+        }
+    }
+    loop value in order {
+        if states.get(value) == .Val(state) {
+            if state == 1 -> _ := &remainder.add(value, true)
+        }
+    }
+    remainder
+}
+
 // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_last_use.rs::LowerCtx::move_last_uses
 fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenProgram) Never! {
     block_count :: builder.blocks.len()
@@ -355,10 +404,10 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
         if root_candidate.get(key) == .Val(candidate) -> _ := &place_candidate.add(row.id.value, candidate)
     }
 
-    // Field paths of owned locals that some ReadPlace reads: one candidate
-    // per (local, path), whichever place rows name it. A field has no
-    // scope-end `close` of its own (its owner drops it), so moving it out
-    // changes no observable release.
+    // Field paths of owned locals and owned (`^`) parameters that some
+    // ReadPlace reads: one candidate per (root, path), whichever place rows
+    // name it. A field has no scope-end `close` of its own (its owner drops
+    // it), so moving it out changes no observable release.
     read_places := [U64:Bool]{}
     loop row in builder.blocks {
         loop instruction in row.instructions {
@@ -371,9 +420,13 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
     loop row in builder.places {
         if read_places.get(row.id.value) == None || row.projections.len() == 0 || row.persist_key != None -> next
         if jet_codegen_last_use_view(row.ty) -> next
-        local_key := String?{None}
-        if row.base == .Local(local) -> local_key = Val("local:{local.value}")
-        key :: local_key ?? next
+        root_key := String?{None}
+        if row.base == {
+            .Local(local) -> root_key = Val("local:{local.value}")
+            .Parameter(value) -> root_key = Val("parameter:{value.value}")
+            else -> {}
+        }
+        key :: root_key ?? next
         owner :: root_candidate.get(key) ?? next
         path :: jet_codegen_last_use_field_path(row.projections) ?? next
         path_key := "{owner}"
@@ -696,6 +749,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
     copy_end := [U64:Int]{}
     events := [JetCodegenLastUseEvent]{}
     event_start := [Int]{}
+    remainder :: jet_codegen_last_use_remainder_moves(builder, place_row)
     loop (block, row) in builder.blocks {
         &event_start.push(events.len())
         loop (index, instruction) in row.instructions {
@@ -720,8 +774,9 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
                         }
                     } else if entry.field {
                         // A write of the field or of a record prefix replaces
-                        // it; a replace that releases a larger owner, and the
-                        // owner's own cleanup, read it.
+                        // it; a replace that releases a larger owner reads
+                        // it, and so does every move of a prefix except the
+                        // owner's remainder drop, which skips moved fields.
                         if instruction.operation == {
                             .WritePlace(_, _) | .InitializeUninit(_) -> {
                                 if jet_codegen_last_use_covers(projections, entry.path) -> outcome = 1
@@ -729,7 +784,9 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
                             .ReplacePlace(_, _) -> {
                                 if projections.len() == entry.path.len() && jet_codegen_last_use_covers(projections, entry.path) -> outcome = 1
                             }
-                            .MovePlace(_) -> {}
+                            .MovePlace(_) -> {
+                                if projections.len() == 0 && remainder.get((instruction.result ?? no_value).value) != None -> outcome = -1
+                            }
                             else -> {}
                         }
                     } else {
@@ -842,11 +899,10 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
                 if target < 0 -> target = field_candidate.get(place.value) ?? -1
                 if builder.blocks[block].instructions[index].result == .Val(result) && target >= 0 {
                     // A field move pays for splitting its owner only for an
-                    // owned (heap) value; a Copy field stays a read. MIR
-                    // legality admits a field move only when a write that
-                    // refills the field dominates every later use of its
-                    // owner: a refill later in the move's own block does,
-                    // since every path out of the move runs it.
+                    // owned (heap) value; a Copy field stays a read. The
+                    // liveness right after the read already proves nothing
+                    // reads the field before a refill or its owner's
+                    // remainder drop (MIR legality admits both).
                     root := target
                     worth := true
                     if candidates[target].field {
@@ -858,11 +914,6 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
                                 else -> {}
                             }
                         }
-                        refilled := false
-                        loop event_index in event_start[block]..<event_start[block + 1] {
-                            if events[event_index].kill && events[event_index].candidate == target && events[event_index].index > index -> refilled = true
-                        }
-                        if !refilled -> worth = false
                     }
                     own :: copy_bit.get(result.value) ?? -1
                     other_copy := false

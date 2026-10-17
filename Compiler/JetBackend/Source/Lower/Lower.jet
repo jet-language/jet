@@ -4548,7 +4548,16 @@ fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
                 return
             }
             walked :: lower_walk_place(p, c, &m, &f, root, c.slots[slot].ty, row.projections) ?? return
-            if moving && walked.borrowed -> return lower_fail(&m, &f, "moving out of a field of runtime handle is not lowered at O0 yet")
+            if moving && walked.borrowed {
+                // A runtime handle lends its fields (lower_handle_field_place):
+                // a last-use move out of one copies the field, which the
+                // handle keeps and releases with itself.
+                dst :: lower_result(p, c, &m, &f, instruction) ?? return
+                layout :: lower_repr_layout(lower_repr_of(p, &f, row.ty)) ?? return
+                lent :: lower_new_value(&f, layout, LIRDrop.Trivial, row.ty.identity)
+                lower_read_into(p, &f, lent, walked.address.base, walked.address.offset, row.ty)
+                return lower_clone_into(p, &m, &f, lent, dst, row.ty)
+            }
             walk = walked.address
         }
     }
