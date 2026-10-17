@@ -707,20 +707,19 @@ fn jet_codegen_loop_body_blocks(builder: JetCodegenBuilder, program: JetCodegenP
     region
 }
 
-fn jet_codegen_loop_value_is_indexed(builder: JetCodegenBuilder, program: JetCodegenProgram, body_blocks: [MIRBlockID], advance: MIRBlockID?, value: MIRValueID) -> Bool Never! {
+// The values an Index instruction of the loop body (outside `advance`) uses
+// as its index, once per loop instead of rescanning the body per cursor read.
+fn jet_codegen_loop_indexed_values(builder: JetCodegenBuilder, body_blocks: [MIRBlockID], advance: MIRBlockID?) -> [U64:Bool] Never! {
+    indexed := [U64:Bool]{}
     loop block_id in body_blocks {
         if advance != (Val(block_id)) {
             at :: builder.block_positions.get(block_id.value) ?? next
             loop instruction in builder.blocks[at].instructions {
-                indexed := if instruction.operation == {
-                    .Index(_, _, index, _, _, _, _) -> index == value
-                    else -> false
-                }
-                if indexed -> return true
+                if instruction.operation == .Index(_, _, index, _, _, _, _) -> indexed[index.value] = true
             }
         }
     }
-    return false
+    indexed
 }
 
 fn jet_codegen_checked_loop_cursor(builder: JetCodegenBuilder, program: JetCodegenProgram, condition: TExpr, body_blocks: [MIRBlockID], advance: MIRBlockID?) -> MIRValueID? {
@@ -743,6 +742,7 @@ fn jet_codegen_checked_loop_cursor(builder: JetCodegenBuilder, program: JetCodeg
     if cursor_place == None -> return None
     first := MIRValueID?{None}
     indexed := MIRValueID?{None}
+    indexed_values :: jet_codegen_loop_indexed_values(builder, body_blocks, advance)
     loop block_id in body_blocks {
         if advance != (Val(block_id)) {
             at :: builder.block_positions.get(block_id.value) ?? next
@@ -754,7 +754,7 @@ fn jet_codegen_checked_loop_cursor(builder: JetCodegenBuilder, program: JetCodeg
                                 None -> {}
                                 Val(value) -> {
                                     if first == None -> first = Val(value)
-                                    if indexed == None && jet_codegen_loop_value_is_indexed(builder, program, body_blocks, advance, value) -> indexed = Val(value)
+                                    if indexed == None && indexed_values.get(value.value) != None -> indexed = Val(value)
                                 }
                             }
                         }
