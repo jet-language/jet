@@ -5222,7 +5222,7 @@ fn lower_cycle_blocks(index: LowerUseIndex) -> [Bool] Never! {
             at := stack[stack.len() - 1]
             if next_edge[at] < successors[at].len() {
                 target :: successors[at][next_edge[at]]
-                next_edge[at] += 1
+                next_edge[at] = next_edge[at] + 1
                 if !visited[target] {
                     visited[target] = true
                     &stack.push(target)
@@ -5247,7 +5247,7 @@ fn lower_cycle_blocks(index: LowerUseIndex) -> [Bool] Never! {
         stack := [Int]{root}
         loop stack.len() > 0 {
             at := &stack.pop() ?? { break }
-            sizes[id] += 1
+            sizes[id] = sizes[id] + 1
             loop predecessor in index.predecessors[at] {
                 if component[predecessor] < 0 {
                     component[predecessor] = id

@@ -183,7 +183,8 @@ fn x64_emit_move(emitter: &X64Emitter, src: X64Loc, dst: X64Loc) Never! {
             if x64_imm32(src) == .Val(value) {
                 x64_store_imm32(&emitter.code, X64_RBP, x64_slot_disp(emitter.saved.len(), slot), value)
             } else {
-                x64_store_slot(&emitter, slot, x64_operand(&emitter, src, X64_R11))
+                operand :: x64_operand(&emitter, src, X64_R11)
+                x64_store_slot(&emitter, slot, operand)
             }
         }
         else -> {}
