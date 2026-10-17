@@ -450,7 +450,7 @@ fn sema_failure_items_nominal_is_error(items: [Item], module_identity: String, l
 fn sema_failure_alias_target_is_error(target_name: String, module_identity: String, seen: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
     if program.registration_graph == .Val(graph) {
         resolved :: sema_type_graph_lookup_symbol(graph, module_identity, target_name) ?? return None
-        row :: sema_type_graph_nominal_row(graph, resolved.symbol.id.key) ?? return None
+        row :: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return None
         home :: graph.modules[row.module_index]
         return sema_failure_items_nominal_is_error(home.program.items, home.module_identity, sema_error_conversion_leaf(target_name), seen, environment, program)
     }

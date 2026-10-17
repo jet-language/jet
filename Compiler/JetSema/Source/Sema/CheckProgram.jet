@@ -905,7 +905,7 @@ fn sema_incremental_module_headers(modules: [SemaRegistrationModule]) -> [SemaRe
             source_segments: source_module.source_segments, source_origin: source_module.source_origin,
             program: sema_incremental_program_header(source_module.program), source: "",
             declarations: sema_incremental_item_headers(source_module.declarations),
-            symbols: source_module.symbols, symbol_positions: source_module.symbol_positions,
+            symbols: source_module.symbols, symbol_nominal_rows: source_module.symbol_nominal_rows, symbol_positions: source_module.symbol_positions,
             declaration_positions: source_module.declaration_positions,
             impls: sema_incremental_registered_impl_headers(source_module.impls),
             functions: sema_incremental_registered_function_headers(source_module.functions),
@@ -4729,6 +4729,7 @@ fn sema_graph_module_mark(module_row: SemaRegistrationModule) -> SemaGraphModule
 fn sema_graph_module_rollback(module_row: &SemaRegistrationModule, mark: SemaGraphModuleMark, name: String) Never! {
     appended :: module_row.symbols.len() > mark.symbols
     loop module_row.symbols.len() > mark.symbols -> _ := &module_row.symbols.pop()
+    loop module_row.symbol_nominal_rows.len() > mark.symbols -> _ := &module_row.symbol_nominal_rows.pop()
     loop module_row.declarations.len() > mark.declarations -> _ := &module_row.declarations.pop()
     loop module_row.functions.len() > mark.functions -> _ := &module_row.functions.pop()
     loop module_row.nominals.len() > mark.nominals -> _ := &module_row.nominals.pop()

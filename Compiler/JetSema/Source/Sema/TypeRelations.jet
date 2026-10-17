@@ -442,8 +442,16 @@ fn sema_type_graph_nominal_row(graph: SemaRegistrationGraph, key: String) -> Sem
     graph.nominal_symbol_rows.get(key)
 }
 
+// The registered row of a resolved type symbol: the row the lookup found
+// beside the symbol, else the key map (import bindings and export rows
+// carry none). Both name the key's first registered row.
+fn sema_type_graph_resolved_nominal_row(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> SemaRegistrationRowRef? {
+    if resolved.nominal_row == .Val(row) -> return Val(row)
+    graph.nominal_symbol_rows.get(resolved.symbol.id.key)
+}
+
 fn sema_type_graph_canonical_symbol_name(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> String Never! {
-    row :: sema_type_graph_nominal_row(graph, resolved.symbol.id.key) ?? return resolved.symbol.name
+    row :: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return resolved.symbol.name
     nominal :: graph.modules[row.module_index].nominals[row.row]
     // Compiler-owned nominals keep the bare shared spelling (`Ordering`).
     if nominal.compiler_owned -> nominal.symbol.name else -> "{nominal.symbol.module_name}::{nominal.symbol.name}"
@@ -462,7 +470,7 @@ fn sema_type_graph_resolve_named(graph: SemaRegistrationGraph, name: String, cal
     if resolved.symbol.kind == {
         .Trait -> Type.TraitObject{bounds: [String]{sema_type_graph_canonical_symbol_name(graph, resolved)}}
         .Type -> {
-            if sema_type_graph_nominal_row(graph, resolved.symbol.id.key) == .Val(row) {
+            if sema_type_graph_resolved_nominal_row(graph, resolved) == .Val(row) {
                 nominal :: graph.modules[row.module_index].nominals[row.row]
                 // Single-level matches read the alias in place; a nested
                 // `.SourceAST(.TypeAlias(definition))` pattern clones the Item.
@@ -474,7 +482,7 @@ fn sema_type_graph_resolve_named(graph: SemaRegistrationGraph, name: String, cal
                     }
                 }
             }
-            if sema_type_graph_nominal_row(graph, resolved.symbol.id.key) != None -> return Type.Named{name: sema_type_graph_canonical_symbol_name(graph, resolved)}
+            if sema_type_graph_resolved_nominal_row(graph, resolved) != None -> return Type.Named{name: sema_type_graph_canonical_symbol_name(graph, resolved)}
             if resolved.source_module_identity.starts_with("<corelib>/") -> return resolved.symbol.ty ?? Type.Named{name: name}
             Type.Named{name: name}
         }
@@ -485,13 +493,13 @@ fn sema_type_graph_resolve_named(graph: SemaRegistrationGraph, name: String, cal
 fn sema_type_graph_resolve_apply_name(graph: SemaRegistrationGraph, name: String, caller_module_identity: String) -> String Never! {
     resolved :: sema_type_graph_lookup_symbol(graph, caller_module_identity, name) ?? return name
     if sema_type_source_owns_nominal(graph, name, caller_module_identity) -> return sema_type_graph_canonical_symbol_name(graph, resolved)
-    if resolved.symbol.kind == SymbolKind.Type && resolved.source_module_identity.starts_with("<corelib>/") && sema_type_graph_nominal_row(graph, resolved.symbol.id.key) == None {
+    if resolved.symbol.kind == SymbolKind.Type && resolved.source_module_identity.starts_with("<corelib>/") && sema_type_graph_resolved_nominal_row(graph, resolved) == None {
         if resolved.symbol.ty == .Val(builtin) {
             if builtin == .Named(leaf) -> return leaf
         }
     }
     if {
-        resolved.symbol.kind == SymbolKind.Type && sema_type_graph_nominal_row(graph, resolved.symbol.id.key) != None -> sema_type_graph_canonical_symbol_name(graph, resolved)
+        resolved.symbol.kind == SymbolKind.Type && sema_type_graph_resolved_nominal_row(graph, resolved) != None -> sema_type_graph_canonical_symbol_name(graph, resolved)
         else -> name
     }
 }
@@ -682,21 +690,22 @@ fn sema_type_graph_lookup_symbol(graph: SemaRegistrationGraph, module_identity: 
         loop row in sema_registration_nominal_rows_named(graph, name) {
             // The module and nominal are passed as places: binding the module
             // copied it whole per row.
-            found :: sema_type_graph_bare_alias(graph.modules[row.module_index], graph.modules[row.module_index].nominals[row.row], owner_name)
+            found :: sema_type_graph_bare_alias(graph.modules[row.module_index], graph.modules[row.module_index].nominals[row.row], row, owner_name)
             if found != None -> return found
         }
     }
     sema_type_graph_unique_type_owner(graph, module_identity, name)
 }
 
-// The established bare-owner alias `nominal` of `module_row`, when it is one.
-fn sema_type_graph_bare_alias(module_row: SemaRegistrationModule, nominal: SemaRegistrationNominal, owner_name: String) -> SemaRegistrationResolvedSymbol? Never! {
+// The established bare-owner alias `nominal` (graph row `row`) of
+// `module_row`, when it is one.
+fn sema_type_graph_bare_alias(module_row: SemaRegistrationModule, nominal: SemaRegistrationNominal, row: SemaRegistrationRowRef, owner_name: String) -> SemaRegistrationResolvedSymbol? Never! {
     if module_row.module_name != owner_name
         || !module_row.module_identity.starts_with("<corelib>/")
         || nominal.kind != SemaRegistrationNominalKind.TypeAlias
         || nominal.generic_params.len() != 0
         || nominal.symbol.visibility < 2 -> return None
-    Val(SemaRegistrationResolvedSymbol{symbol: nominal.symbol, source_module_identity: module_row.module_identity, target_module_identity: module_row.module_identity, visibility: nominal.symbol.visibility})
+    Val(SemaRegistrationResolvedSymbol{symbol: nominal.symbol, source_module_identity: module_row.module_identity, target_module_identity: module_row.module_identity, visibility: nominal.symbol.visibility, nominal_row: Val(row)})
 }
 
 // Rust `struct_owner_module`'s tail: a bare type name the caller neither
@@ -725,7 +734,7 @@ fn sema_type_graph_unique_type_owner(graph: SemaRegistrationGraph, module_identi
                     if (target_name.contains("::") || target_name.contains(".")) && sema_type_graph_leaf(target_name) == name {
                         home :: sema_type_graph_lookup_symbol(graph, alias_row.module_identity, target_name)
                         if home == .Val(resolved) {
-                            if sema_type_graph_nominal_row(graph, resolved.symbol.id.key) == .Val(home_row) -> owner = home_row
+                            if sema_type_graph_resolved_nominal_row(graph, resolved) == .Val(home_row) -> owner = home_row
                         }
                     }
                 }
@@ -747,7 +756,7 @@ fn sema_type_graph_unique_type_owner(graph: SemaRegistrationGraph, module_identi
     chosen :: found ?? return None
     owner_row :: graph.modules[chosen.module_index]
     symbol :: owner_row.nominals[chosen.row].symbol
-    Val(SemaRegistrationResolvedSymbol{symbol: symbol, source_module_identity: owner_row.module_identity, target_module_identity: owner_row.module_identity, visibility: symbol.visibility})
+    Val(SemaRegistrationResolvedSymbol{symbol: symbol, source_module_identity: owner_row.module_identity, target_module_identity: owner_row.module_identity, visibility: symbol.visibility, nominal_row: Val(chosen)})
 }
 
 // Rust `split_type_name`'s leaf: after the last `::`, else after the last `.`.
@@ -771,7 +780,7 @@ fn sema_type_resolve_nominal_row(graph: SemaRegistrationGraph, actual: Type, cal
     name :: sema_type_graph_base_name(actual) ?? return None
     resolved :: sema_type_graph_lookup_symbol(graph, caller_module_identity, name) ?? return None
     if resolved.symbol.kind != SymbolKind.Type -> return None
-    sema_type_graph_nominal_row(graph, resolved.symbol.id.key)
+    sema_type_graph_resolved_nominal_row(graph, resolved)
 }
 
 // The ledger alone is not declaration authority: require the registered row.
