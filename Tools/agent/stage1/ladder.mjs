@@ -81,7 +81,7 @@ fn jet_ladder_sema_functions(source: [U8]) -> Int {
 
 fn jet_ladder_optimizer_complete(program: &MIRProgram) -> Bool {
     journal := canonical_pass_journal(CanonicalPassOptions{})
-    optimize_mir_program(&program, false, false, compiler_threads_single(), &journal, None).complete
+    optimize_mir_program(&program, false, compiler_threads_single(), &journal).complete
 }
 `,
   codegen: `use jet_codegen.[JetRustEmitConfig, JetRustEmitResult, jet_rust_emit_program, lower_functions]

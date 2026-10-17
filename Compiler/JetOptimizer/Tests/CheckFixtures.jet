@@ -105,7 +105,6 @@ fn run() {
     schema_program.schema_version = schema_program.schema_version + 1
     schema :: cf_check(schema_program, true)
     schema_keep_going :: mir_optimizer_function_failures(schema_program, mixed[0])
-    findings :: mir_pass_program_row_failures(schema_program, MIROptimizationPassID.CanonicalLoopFacts)
 
     results :: [Bool]{
         cf_expect("clean program", clean.len() == 0, cf_rows(clean)),
@@ -114,9 +113,8 @@ fn run() {
         cf_expect("duplicate function identity", duplicate.len() == 1 && duplicate[0].kind == .InvalidSchema && duplicate[0].message == "MIR function identity is duplicated", cf_rows(duplicate)),
         cf_expect("zero function identity", zero.len() == 1 && zero[0].kind == .InvalidSchema && zero[0].message == "MIR function has a zero stable identity", cf_rows(zero)),
         cf_expect("keep-going scan names both rule sets' rejects", keep_going.len() == 2 && cf_is_lint(keep_going[0], 2) && cf_is_legality(keep_going[1], 3), cf_rows(keep_going)),
-        cf_expect("keep-going scan lists functions only, not program-level failures", schema_keep_going.len() == 1 && cf_is_lint(schema_keep_going[0], 2), cf_rows(schema_keep_going)),
-        cf_expect("program-level legality failure ends a normal check", schema.len() == 1 && schema[0].function == None && schema[0].message == "MIR schema version does not match the canonical schema", cf_rows(schema)),
-        cf_expect("program-level failures are program-scoped census findings", findings.len() == 1 && findings[0].item == "<program> schema_version {schema_program.schema_version}" && findings[0].error.function == None, "{findings.len()} findings"),
+        cf_expect("keep-going lists a program-level failure after the error and stops", schema_keep_going.len() == 2 && cf_is_lint(schema_keep_going[0], 2) && schema_keep_going[1].function == None, cf_rows(schema_keep_going)),
+        cf_expect("program-level legality failure ends the check", schema.len() == 1 && schema[0].function == None && schema[0].message == "MIR schema version does not match the canonical schema", cf_rows(schema)),
     }
     loop ok in results {
         if {

@@ -180,24 +180,13 @@ fn mir_pass_legality_tables(program: MIRProgram) -> MIRPassLegalityTables {
     }
 }
 
-// One program-level legality failure and the program-scoped item a
-// keep-going census row names: `<program>` and the schema or the
-// publication site (constant key) it is about.
-struct MIRPassProgramFinding {
-    item: String
-    error: MIROptimizationError
-}
-
-// The program-level legality rules, collected: the schema version, then the
-// Core publication sites among the constants, every violation in row order.
-// The one MIR checker (Pipeline mir_pass_check_wave) runs them on the calling
-// thread before any function is checked. A normal compile stops at the first
-// (mir_pass_validate_program_rows); under keep-going each is a census row and
-// the check goes on.
-fn mir_pass_program_row_failures(program: MIRProgram, pass: MIROptimizationPassID) -> [MIRPassProgramFinding] {
-    findings := [MIRPassProgramFinding]{}
+// The program-level legality rules: the schema version, then the Core
+// publication sites among the constants. The one MIR checker
+// (Pipeline mir_pass_check_wave) runs them on the calling thread before any
+// function is checked; a failure here names no function and ends the check.
+fn mir_pass_validate_program_rows(program: MIRProgram, pass: MIROptimizationPassID) -> MIROptimizationError? {
     if program.schema_version != MIR_SCHEMA_VERSION {
-        &findings.push(MIRPassProgramFinding{item: "<program> schema_version {program.schema_version}", error: mir_pass_error(pass, .InvalidSchema, None, Span{start: 0, end: 0}, "MIR schema version does not match the canonical schema")})
+        return Val(mir_pass_error(pass, .InvalidSchema, None, Span{start: 0, end: 0}, "MIR schema version does not match the canonical schema"))
     }
     site_initializers := [U64:Bool]{}
     loop constant in program.constants {
@@ -239,16 +228,9 @@ fn mir_pass_program_row_failures(program: MIRProgram, pass: MIROptimizationPassI
             }
             else -> if mir_pass_nested_shared_site(constant.value) -> problem = Val("publication site nested in constant value")
         }
-        if problem == .Val(message) -> &findings.push(MIRPassProgramFinding{item: "<program> {constant.key}", error: mir_pass_error(pass, .InvalidSchema, None, constant.span, message)})
+        if problem == .Val(message) -> return Val(mir_pass_error(pass, .InvalidSchema, None, constant.span, message))
     }
-    findings
-}
-
-// The first program-level legality failure: a normal compile's verdict.
-fn mir_pass_validate_program_rows(program: MIRProgram, pass: MIROptimizationPassID) -> MIROptimizationError? {
-    findings :: mir_pass_program_row_failures(program, pass)
-    if findings.len() == 0 -> return None
-    Val(findings[0].error)
+    None
 }
 
 // Per function, in program order: the error that stands in for its
