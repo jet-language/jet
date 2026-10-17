@@ -9,6 +9,8 @@
 //   aot    the same unit, for `jet test`
 //   run    implementation + the same test bodies as functions, driven by one
 //          generated `fn run()` for the default `jet run` tier (I9)
+//   hosted implementation only + Jetpack/main.jet, for the standalone native
+//          `jetpack` engine binary (`jet build`)
 //   publication  INTERNAL Store implementation closure + the one registered
 //                native runtime-pack publisher entry; no test driver
 import { createHash } from "node:crypto";
@@ -20,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { compilerSliceDrift } from "./compiler-slice.mjs";
 
 const mode = process.argv[2] ?? "check";
-if (!["check", "aot", "run", "publication"].includes(mode)) fail(`unknown mode ${mode}; expected check, aot, run, or internal publication`);
+if (!["check", "aot", "run", "hosted", "publication"].includes(mode)) fail(`unknown mode ${mode}; expected check, aot, run, hosted, or internal publication`);
 
 const bootstrapDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(bootstrapDir, "../..");
@@ -37,6 +39,7 @@ const selectedAreas = mode === "publication"
   : process.env.JETPACK_BOOTSTRAP_AREAS
     ? new Set(process.env.JETPACK_BOOTSTRAP_AREAS.split(",").map((area) => area.trim()).filter(Boolean))
     : null;
+if (mode === "hosted" && selectedAreas !== null) fail("hosted builds require every Jetpack area");
 const workerName = process.env.JETPACK_WORKER ?? "lead";
 if (!/^[A-Za-z0-9_-]+$/.test(workerName)) fail("JETPACK_WORKER must be a plain name");
 const rootTag = createHash("sha256")
@@ -294,7 +297,7 @@ function renderTests(text, sourcePath) {
 
 // Proving one area runs only that area's tests; each dependency area proves its
 // own tests in its own unit.
-const unitTests = mode === "publication" ? [] : ownArea === null ? tests : tests.filter((entry) => entry.section === ownArea);
+const unitTests = mode === "publication" || mode === "hosted" ? [] : ownArea === null ? tests : tests.filter((entry) => entry.section === ownArea);
 const units = [...sources, ...unitTests];
 if (mode === "hosted") {
   const sourcePath = "Jetpack/main.jet";
@@ -314,17 +317,44 @@ function append(text) {
   nextLine += (text.match(/\n/g) ?? []).length;
 }
 // D-MOD-CYCLE1=A (as Compiler/Bootstrap/assemble.mjs): the listed Compiler/
-// front-end files import their sibling packages with `use <package>.[names]`.
-// This unit is one namespace, so those imports are blanked to spaces of the
-// same length (every byte offset and line in the source map still matches),
-// and a repeated single-line Core import after its first occurrence is
-// blanked the same way (a duplicate import name is E0105).
-const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_optimizer|jet_sema|jet_codegen|jet_eval|jet_driver|jet_backend|jet_cli|compiler_bootstrap)\.\[[^\]]*\]/gm;
+// front-end files import their sibling packages with `use <package>.[names]`
+// or `use <package>.name`. This unit is one namespace, so those imports are
+// blanked to spaces of the same length (every byte offset and line in the
+// source map still matches). A repeated single-line Core import after its first
+// occurrence is blanked the same way (a duplicate import name is E0105), and
+// grouped Core member imports are deduplicated per member.
+const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_optimizer|jet_sema|jet_codegen|jet_eval|jet_repl|jet_driver|jet_backend|jet_cli|compiler_bootstrap)\.(?:\[[^\]]*\]|[A-Za-z_][A-Za-z0-9_]*[ \t]*$)/gm;
 const CORE_IMPORT = /^use core\.[^\[\n]*$/gm;
+const CORE_MEMBER_IMPORT = /^use (core(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\.\[([^\]]*)\]/gm;
 const seenCoreImports = new Set();
+const seenCoreMembers = new Set();
 const blank = (block) => block.replace(/[^\n]/g, " ");
+function blankRepeatedCoreMembers(importText, module, members) {
+  const parts = members.split(",");
+  const bindings = parts.map((part) => part.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?\s*$/));
+  // Leave unsupported or commented forms to the parser; do not guess names.
+  if (bindings.some((binding, index) => !binding && parts[index].trim() !== "")) return importText;
+  let removed = false;
+  const kept = bindings.map((binding) => {
+    if (!binding) return false;
+    const key = `${module}.${binding[1]} as ${binding[2] ?? binding[1]}`;
+    if (seenCoreMembers.has(key)) { removed = true; return false; }
+    seenCoreMembers.add(key);
+    return true;
+  });
+  if (!removed) return importText;
+  const last = kept.lastIndexOf(true);
+  if (last < 0) return blank(importText);
+  const rewritten = parts.map((part, index) =>
+    (kept[index] ? part : blank(part)) +
+    (index === parts.length - 1 ? "" : kept[index] && index < last ? "," : " ")
+  ).join("");
+  return importText.slice(0, importText.indexOf("[") + 1) + rewritten + "]";
+}
 function blankPackageImports(text) {
-  return text.replace(PACKAGE_IMPORT, blank).replace(CORE_IMPORT, (line) => {
+  return text.replace(PACKAGE_IMPORT, blank)
+    .replace(CORE_MEMBER_IMPORT, blankRepeatedCoreMembers)
+    .replace(CORE_IMPORT, (line) => {
     const key = line.trimEnd();
     if (!seenCoreImports.has(key)) {
       seenCoreImports.add(key);

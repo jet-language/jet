@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
 # Jetpack bootstrap proof: assemble the explicit Jetpack Jet unit and run the
 # repository's supported `jet` commands on it, mirroring Compiler/Bootstrap.
+# JET names the admitted native jet compiler; every stage uses it.
 #
-#   Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh                    # jet check, one unit of every area
-#   Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --tests            # + AOT and default-tier tests
+#   JET=<native jet> Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh   # jet check, one unit of every area
+#   JET=<native jet> Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --tests  # + AOT and default-tier tests
 #   JETPACK_WORKER=<name> ... check.sh --area PackageModel [--tests]       # one area + its declared deps
 #   ... check.sh --each [--tests]                                          # every area as its own unit
 #   JETPACK_WORKER=<name> ... check.sh --areas Foundation,PackageModel     # an explicit section list
+#   ... check.sh --hosted                                                  # native `jetpack` engine binary
 #
 # Jetpack/Bootstrap/areas.list declares which areas each area may use. An area's
 # unit holds only itself and that closure, so code cannot reach an undeclared
 # area, and another writer's unfinished area cannot break an unrelated proof.
 # JETPACK_WORKER gives each concurrent writer its own scratch directory.
 #
-# Standalone engine assembly: `node Jetpack/Bootstrap/assemble.mjs hosted`
-# includes only implementation files plus Jetpack/main.jet. Emit that unit with
-# `jet emit --rust` for the interim split-per-area build, not the test driver.
+# `--hosted` assembles every implementation file plus Jetpack/main.jet
+# (`node Jetpack/Bootstrap/assemble.mjs hosted`) and builds the standalone
+# engine with `jet build`; the receipt records the binary's path and sha256.
 #
 # Every jet command runs in its own cgroup scope with a hard memory cap and no
 # swap, under a wall-clock timeout; AOT builds take one of a few shared slots.
@@ -42,20 +44,26 @@ own_area=""
 each=0
 deps_from_head=0
 syntax_only=0
+hosted=0
 while (( $# > 0 )); do
   case "$1" in
     --tests) with_tests=1 ;;
     --syntax) syntax_only=1 ;;
+    --hosted) hosted=1 ;;
     --areas) areas="${2:?--areas needs a comma-separated list}"; shift ;;
     --areas=*) areas="${1#--areas=}" ;;
     --area) own_area="${2:?--area needs an area name}"; areas="$(node "$bootstrap/areas.mjs" closure "$own_area")"; shift ;;
     --area=*) own_area="${1#--area=}"; areas="$(node "$bootstrap/areas.mjs" closure "$own_area")" ;;
     --each) each=1 ;;
     --deps-from-head) deps_from_head=1 ;;
-    *) echo "usage: check.sh [--syntax | --tests] [--area Area [--deps-from-head] | --areas Area,Area | --each]" >&2; exit 64 ;;
+    *) echo "usage: check.sh [--syntax | --tests | --hosted] [--area Area [--deps-from-head] | --areas Area,Area | --each]" >&2; exit 64 ;;
   esac
   shift
 done
+if (( hosted == 1 )) && [[ -n "$areas" || $each == 1 || $with_tests == 1 || $syntax_only == 1 ]]; then
+  echo "jetpack-bootstrap: --hosted builds the whole engine; it takes no area selection, --each, --tests or --syntax" >&2
+  exit 64
+fi
 if (( each == 1 )); then
   # One unit per populated area, a few at a time; each child caps its own memory.
   parallel="${JETPACK_EACH_PARALLEL:-4}"
@@ -89,11 +97,12 @@ if [[ ! "$worker" =~ ^[A-Za-z0-9_-]+$ ]]; then
 fi
 sorted_areas="$(printf '%s' "$areas" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | sed '/^$/d' | sort | paste -sd, -)"
 
-# Worktrees have no local build: use the main checkout's compiler.
-common="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)"
-jet="${JETPACK_JET_BIN:-$(dirname "$common")/target/debug/jet}"
-if [[ ! -x "$jet" ]]; then
-  echo "jetpack-bootstrap: no jet compiler at $jet (set JETPACK_JET_BIN)" >&2
+# JET names the admitted native compiler. It is an immutable candidate path
+# whose runtime pack sits beside it, so it runs in place (a private copy would
+# lose the runtime pack); the receipt records its sha256.
+jet="${JET:-}"
+if [[ -z "$jet" || ! -x "$jet" ]]; then
+  echo "jetpack-bootstrap: JET must name the admitted native jet compiler" >&2
   exit 69
 fi
 
@@ -108,16 +117,9 @@ if (( deps_from_head == 1 )); then
 else
   unset JETPACK_BOOTSTRAP_DEPS_FROM_HEAD
 fi
-receipt="$scratch/check.receipt"
+receipt="$scratch/$( (( hosted == 1 )) && echo hosted || echo check ).receipt"
 mkdir -p "$scratch" "$HOME/.cache/jet-dev/jetpack-bootstrap/slots"
-# Pin one compiler for every stage: a private copy keeps this exact binary even
-# if cargo replaces target/debug/jet mid-proof. JETPACK_JET_BIN often lives on
-# another filesystem than the scratch, so a hard link is not possible (removed at exit).
-jet_pinned="$scratch/jet-pinned"
-cp --reflink=auto -f "$jet" "$jet_pinned"
-jet_source="$jet"
-jet="$jet_pinned"
-trap 'rm -f "$JETPACK_CHECK_SNAPSHOT" "$jet_pinned"' EXIT
+trap 'rm -f "$JETPACK_CHECK_SNAPSHOT"' EXIT
 
 check_mem="${JETPACK_CHECK_MEM:-6G}"
 aot_mem="${JETPACK_AOT_MEM:-10G}"
@@ -183,20 +185,38 @@ unit_record() {
   elif [[ -n "$sorted_areas" ]]; then
     selection=" --areas $sorted_areas"
   fi
-  printf 'entry-command: JETPACK_WORKER=%s Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh%s%s\n' "$worker" "$([[ $with_tests == 1 ]] && echo ' --tests')" "$selection"
+  printf 'entry-command: JETPACK_WORKER=%s JET=%s Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh%s%s%s\n' "$worker" "$jet" "$([[ $with_tests == 1 ]] && echo ' --tests')" "$([[ $hosted == 1 ]] && echo ' --hosted')" "$selection"
   printf 'worker: %s\n' "$worker"
   printf 'areas: %s\n' "${sorted_areas:-all}"
   printf 'proved-area: %s\n' "${own_area:-all selected}"
   printf 'input-source-root: %s\n' "$source_root"
   printf 'source-head: %s\n' "$(git -C "$source_root" rev-parse HEAD 2>/dev/null || echo unknown)"
-  printf 'jet-binary: %s (pinned as %s)\n' "$jet_source" "$jet"
+  printf 'jet-binary: %s\n' "$jet"
   printf 'jet-binary-mtime: %s\n' "$(stat -c %y "$jet")"
   printf 'jet-binary-sha256: %s\n' "$(sha256sum "$jet" | cut -d' ' -f1)"
   printf 'sources-list-sha256: %s\n' "$(sha256sum "$source_root/Jetpack/Bootstrap/sources.list" | cut -d' ' -f1)"
   printf 'tests-list-sha256: %s\n' "$(sha256sum "$source_root/Jetpack/Bootstrap/tests.list" | cut -d' ' -f1)"
 } > "$receipt"
-
 overall=0
+if (( hosted == 1 )); then
+  # The standalone engine: one native `jet build` of every implementation file
+  # plus Jetpack/main.jet. The binary is the project's build output.
+  node "$bootstrap/assemble.mjs" hosted
+  unit_record hosted
+  bounded hosted "${JETPACK_HOSTED_MEM:-20G}" "${JETPACK_HOSTED_SECS:-5400}" "$scratch/hosted/project" "$jet" build src/jetpack.jet || overall=1
+  node "$bootstrap/locate.mjs" check "$scratch/hosted/jetpack.map.json" "$scratch/hosted.log" > "$scratch/hosted-errors.txt" || true
+  binary="$scratch/hosted/project/jetpack"
+  if (( overall == 0 )) && [[ -x "$binary" ]]; then
+    printf 'hosted-binary: %s\nhosted-binary-sha256: %s\n' "$binary" "$(sha256sum "$binary" | cut -d' ' -f1)" >> "$receipt"
+  else
+    overall=1
+    echo "--- errors by source file ($scratch/hosted-errors.txt)"; grep -A200 '^errors per file:' "$scratch/hosted-errors.txt" || true
+  fi
+  printf 'exit: %d\n' "$overall" >> "$receipt"
+  echo "jetpack-bootstrap receipt: $receipt"
+  (( overall == 0 )) && echo "JETPACK HOSTED OK $binary"
+  exit "$overall"
+fi
 node "$bootstrap/assemble.mjs" check
 unit_record check
 if (( ${syntax_only:-0} == 1 )); then
