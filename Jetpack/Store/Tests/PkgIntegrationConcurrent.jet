@@ -73,3 +73,49 @@ fn store_concurrent_original() {
 #Test("concurrent_jet_builds_share_store_lock_and_run") {
     store_concurrent_original()
 }
+
+// Child half of `concurrent_jet_processes_open_one_fresh_store` (jet-store
+// `fresh_store_open_child`): a no-op unless the parent names the shared root.
+fn store_concurrent_fresh_open_child() {
+    root :: sys.get("JET_STORE_RACE_ROOT") ?? return
+    _ :: ArtifactStore.open(ArtifactStoreConfig.new(root).with_cap_bytes(1024 * 1024).with_reserve_bytes(0)) ?? panic("open fresh store: {err}")
+}
+
+#Test("S2 concurrent fresh store open child") {
+    store_concurrent_fresh_open_child()
+}
+
+// #4687 (jet-store `concurrent_processes_open_one_fresh_store`): eight jet
+// processes open one EMPTY store at once, four rounds; every opener succeeds
+// and the complete layout exists after each round. All children also share one
+// initially absent JET_STORE_DIR, so the jet CLI store is created by racing
+// processes too.
+fn store_concurrent_fresh_original() {
+    if sys.get("JET_STORE_RACE_ROOT") != None || sys.get("JET_TEST_STORE_HOLDER") != None -> return
+    jet :: sys.get("JET_BIN") ?? panic("JET_BIN must name the admitted test jet")
+    tests :: sys.get("JET_TEST_STORE_FILE") ?? "Jetpack/Store/Tests/PkgIntegrationConcurrent.jet"
+    scratch :: files.tmpdir("concurrent-fresh-store-") ?? panic("fresh store scratch")
+    jet_store :: files.join(scratch, "jet-store")
+    root :: files.join(scratch, "store")
+    loop round in 0..<4 {
+        if files.exists(root) -> files.remove_all(root) ?? panic("reset fresh store")
+        children := [ProcessChild]{}
+        loop _ in 0..<8 {
+            &children.push(concurrent_process.cmd([String]{jet, "test", tests, "--filter", "S2 concurrent fresh store open child"})
+                .env("JET_STORE_RACE_ROOT", root).env("JET_STORE_DIR", jet_store).env("NO_COLOR", "1")
+                .stdout(.Capture).stderr(.Capture).spawn() ?? panic("spawn fresh store opener"))
+        }
+        loop at in 0..<children.len() {
+            opened :: &children[at].wait() ?? panic("wait fresh store opener")
+            assert(opened.success, "round {round}: a concurrent open of a fresh store failed: {opened.output} {opened.errors}")
+        }
+        loop name in ([String]{"cas", "ac", "lto", "locks", "leases", "quarantine", "build-records/records"}) {
+            assert(files.is_dir(files.join(root, name)), "round {round}: missing {name}")
+        }
+    }
+    files.remove_all(scratch).drop("fresh store scratch cleanup")
+}
+
+#Test("concurrent_jet_processes_open_one_fresh_store") {
+    store_concurrent_fresh_original()
+}
