@@ -322,6 +322,22 @@ fn scheduler_assert_not_root_cancel(control: I64) {
     control :: scheduler_control_current()
     if (control != I64{0}) -> sync_store(control + I64{104}, saved_flags)
 }
+// Compiler cleanup frames (Codegen/Builder.jet jet_codegen_emit_cleanup_frame,
+// lowered by Routes.jet lower_native_control_call) are one runtime cleanup
+// scope plus Shield, the idiom of every runtime-owned close: a stop pending at
+// entry stays in its control slot while Check/Propagate delivery of it is
+// masked, a new panic over it is process-fatal (scheduler_panic_check), and
+// cancellation/deadlines arriving meanwhile are held until leave delivers them
+// (Scheduler.rs:234-244). The returned word is the owned session token.
+#Export(c) fn jet_rt_cleanup_enter() -> I64 {
+    saved :: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
+    jet_scheduler_shield_enter()
+    saved
+}
+#Export(c) fn jet_rt_cleanup_leave(saved: I64) {
+    jet_scheduler_shield_leave()
+    jet_rt_session_cleanup_leave(saved)
+}
 #Export(c) fn jet_rt_stop_domain() -> I64 {
     control :: scheduler_control_current()
     if (control == I64{0}) -> return I64{0}

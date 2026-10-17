@@ -89,10 +89,12 @@ boundary's panic-to-TaskFailure catch rather than letting an ordinary native
 task panic abort its whole process. Plain/no-task MIR production uses the
 same false-mode implementation; its output is expected to remain byte-identical.
 
-Native cleanup frames lend TCB64 bit4 through `jet_rt_cleanup_enter/leave`,
-saving/restoring the whole word for nesting. The first owned Stop stays in the
-control slot, while Check/Propagate delivery is masked even inside deferred
-thunks and resource closes. Cancellation and deadlines do not interrupt those
+Native cleanup frames bracket their actions with `jet_rt_cleanup_enter/leave`:
+one runtime cleanup scope (`jet_rt_session_cleanup_enter/leave`, whose owned
+token restores the control's scope flags for nesting) plus Shield. The first
+owned Stop stays in the control slot, while Check/Propagate delivery of it is
+masked even inside deferred thunks and resource closes. Cancellation and
+deadlines do not interrupt those
 closes. A new panic during cleanup with a pending Stop is process-fatal (70),
 matching the Rust seed's panic-during-unwinding abort semantics
 (`crates/jet-codegen/src/Prelude/Scheduler.rs:234–244`). No additional TLS state
