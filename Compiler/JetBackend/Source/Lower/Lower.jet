@@ -2792,7 +2792,13 @@ fn lower_release_semantic_kind(p: MIRProgram, m: LowerModule, function: MIRFunct
     if semantic == .CoreClosureCall(_, kind, _, _, _, _) {
         if kind == .Spawn -> return lower_release_result_kind(function, fact_index, instruction)
     }
-    if semantic == .BuiltinMethod(call, _, _, _, _) {
+    if semantic == .BuiltinMethod(call, receiver, receiver_place, _, _) {
+        // A method on a place (`&rows.push(x)`, `&seen.add(k, v)`) works on
+        // the place's value in place for the call: its borrowed receiver (no
+        // owner of its own, so never released here) is borrowed for the call
+        // like a Read argument, and a later write of the place may release
+        // that value (lower_release_write_drops).
+        if receiver == value && receiver_place != None && !lower_release_owned_value(function, fact_index, value) -> return lower_release_result_kind(function, fact_index, instruction)
         row :: m.prelude_positions.get(call.value) ?? return LOWER_RELEASE_KEEP
         if LOWER_RELEASE_BORROWING_BUILTINS.contains(lower_runtime_symbol(p.prelude_calls[row])) -> return lower_release_result_kind(function, fact_index, instruction)
     }
@@ -2820,6 +2826,12 @@ fn lower_release_result_kind(function: MIRFunction, fact_index: [U64:Int], instr
     mode :: function.values[row].ownership.mode
     if mode == MIROwnershipMode.Owned || mode == MIROwnershipMode.Copy || mode == MIROwnershipMode.Move -> return LOWER_RELEASE_BORROW
     LOWER_RELEASE_KEEP
+}
+
+// Whether `value` owns what it holds (unknown values count as owned).
+fn lower_release_owned_value(function: MIRFunction, fact_index: [U64:Int], value: MIRValueID) -> Bool Never! {
+    row :: fact_index.get(value.value) ?? return true
+    lower_is_owned(function.values[row].ownership)
 }
 
 // The uses that keep `value` alive: its own, and those of every result that
@@ -3053,10 +3065,13 @@ fn lower_release_write_drops(plan: &LowerReleasePlan, p: MIRProgram, m: LowerMod
 // the slot passes lower_release_write_drops' read rule): on each edge out
 // of a block holding it (live into the block or written in it) into a block
 // it is not live into, and before the return of a block holding it. An owned
-// local carried in its slot (lower_release_cleared_slot) that passes the
+// local carried in its slot (lower_release_cleared_slot), an inline
+// aggregate (List, Map, struct) as well as a boxed value, that passes the
 // same rule dies on those edges too: a block that overwrites it before any
 // read is not one it is live into, so the write itself finds no old value
-// (MIR drops such a local only where its scope ends, behind its drop flag).
+// (MIR drops such a local only where its scope ends, behind its drop flag;
+// a loop that rebinds a list local each iteration releases each old list
+// on the edge into the rebinding block, lower_release_slots).
 // It is never released before a return (MIR drops it there), nor when a
 // field of it is moved out (its partial-drop flags own that). A slot
 // written with a value anything else also uses is left alone.
@@ -3069,7 +3084,7 @@ fn lower_release_slot_deaths(plan: &LowerReleasePlan, p: MIRProgram, m: LowerMod
         if row.base == .Local(_) {
             if lower_release_copy_local(p, row.ownership, row.ty) {
                 _ := &dying.add(slot, true)
-            } else if !lower_is_inline(p, row.ty) && lower_needs_drop(p, m, row.ty) && lower_close_method(p, m.close_methods, row.ty) == None {
+            } else if lower_needs_drop(p, m, row.ty) && lower_close_method(p, m.close_methods, row.ty) == None {
                 _ := &dying.add(slot, true)
                 _ := &owned.add(slot, true)
             }
@@ -3789,21 +3804,21 @@ fn lower_terminator(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
                 returned :: value ?? return lower_fail(&m, &f, "return without a value from a function returning {mir_type_display_name(c.mir.return_type)}")
                 lowered :: lower_use(&m, &f, returned) ?? return
                 lower_write_at(p, &f, storage, 0, lowered, c.mir.return_type)
-                lower_release_return_slots(c, &f, None)
+                lower_release_return_slots(p, c, &m, &f, None)
                 lower_comptime_leave(&m, &f)
                 return lower_seal(&f, LIRTerminator.Return{value: None})
             }
             if lower_repr_layout(c.result) == None {
-                lower_release_return_slots(c, &f, None)
+                lower_release_return_slots(p, c, &m, &f, None)
                 lower_comptime_leave(&m, &f)
                 return lower_seal(&f, LIRTerminator.Return{value: None})
             }
             returned :: value ?? {
-                lower_release_return_slots(c, &f, None)
+                lower_release_return_slots(p, c, &m, &f, None)
                 return lower_return_implicit_ok(p, c, &m, &f)
             }
             lowered :: lower_use(&m, &f, returned) ?? return
-            lower_release_return_slots(c, &f, Val(lowered))
+            lower_release_return_slots(p, c, &m, &f, Val(lowered))
             lower_comptime_leave(&m, &f)
             lower_seal(&f, LIRTerminator.Return{value: Val(lowered)})
         }
@@ -4116,15 +4131,18 @@ fn lower_edge_slot_releases(c: LowerContext, f: LowerFunction, target: MIRBlockI
 
 fn lower_release_edge(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, target: MIRBlockID) Never! {
     dying :: lower_edge_slot_releases(c, f, target)
-    lower_release_slots(&f, dying, None)
+    lower_release_slots(p, c, &m, &f, dying, None)
     loop value in lower_edge_releases(c, f, target) -> lower_temp_release(p, c, &m, &f, value)
 }
 
 // Releases the values local slots hold where they die
 // (lower_release_slot_deaths); never `kept`, the value a return hands over.
 // A pointer may be the slot's null placeholder (unassigned or moved out):
-// it is released only behind a null test.
-fn lower_release_slots(f: &LowerFunction, slots: [Int], kept: LIRValueID?) Never! {
+// it is released only behind a null test. An inline aggregate (a List, Map
+// or struct carried as its storage pointer, whose LIR value owns nothing
+// itself) is released through its drop glue (lower_inline_drop), as a root
+// write that finds it in its slot releases it (lower_write_place).
+fn lower_release_slots(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, slots: [Int], kept: LIRValueID?) Never! {
     loop slot in slots {
         // copy: the held value is read while the release writes `&f` (f.current is cleared below),
         // so a view into f.current would be live across that write.
@@ -4132,8 +4150,9 @@ fn lower_release_slots(f: &LowerFunction, slots: [Int], kept: LIRValueID?) Never
         if kept == .Val(returned) {
             if returned == held -> next
         }
-        if lower_value_drop(f, held) == .Trivial -> next
-        if lower_value_layout(f, held) != lir_layout_pointer() {
+        inline :: lower_is_inline(p, c.slots[slot].ty)
+        if !inline && lower_value_drop(f, held) == .Trivial -> next
+        if !inline && lower_value_layout(f, held) != lir_layout_pointer() {
             lower_release_lir(&f, held)
             next
         }
@@ -4145,15 +4164,15 @@ fn lower_release_slots(f: &LowerFunction, slots: [Int], kept: LIRValueID?) Never
         done :: lower_new_block(&f)
         lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(body, [LIRValueID]{})})
         lower_start(&f, body, [LIRValueID]{})
-        lower_release_lir(&f, held)
+        if inline -> lower_inline_drop(p, &m, &f, held, c.slots[slot].ty) else -> lower_release_lir(&f, held)
         lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
         lower_start(&f, done, [LIRValueID]{})
     }
 }
 
-fn lower_release_return_slots(c: LowerContext, f: &LowerFunction, kept: LIRValueID?) Never! {
+fn lower_release_return_slots(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, kept: LIRValueID?) Never! {
     position :: c.block_index.get(f.mir_block.value) ?? return
-    lower_release_slots(&f, c.releases.slot_returns.get(position) ?? [Int]{}, kept)
+    lower_release_slots(p, c, &m, &f, c.releases.slot_returns.get(position) ?? [Int]{}, kept)
 }
 
 fn lower_instruction_operation(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction) Never! {
