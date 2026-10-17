@@ -566,20 +566,24 @@ fn jet_cli_build_result(file: String, source: String, color: Bool, release: Bool
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
+// A compiled result's source snapshot, copied out through a read parameter
+// so the caller can borrow the result exclusively afterwards.
+fn jet_cli_compiled_snapshot(compiled: JetCLICompiled) -> JetDriverAuthorizedSourceSnapshot? Never! {
+    // copy: a few source-root rows; the result keeps its own snapshot.
+    if compiled == .Compiled(_, snapshot) -> return Val(snapshot.copy())
+    None
+}
+
 fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Bool, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     // The result is matched in place: binding it out of an owned local
     // would copy its whole MIR program for the length of the native route.
     compiled := jet_cli_compile_entry(file, color, false, threads, JetDriverCompileMode.Program, None, trace_sink)
+    // The snapshot is copied out before `compiled` is borrowed exclusively below.
+    authorized :: jet_cli_compiled_snapshot(compiled)
     if &compiled == {
         .Refused(refusal) -> output = refusal.copy()
-        .Compiled(result, snapshot) -> {
-            // copy: the snapshot (a few source-root rows) is read before the
-            // exclusive borrow of `result`; both are payloads of the borrowed
-            // `compiled`, so one call may not read one while writing the other.
-            authorized :: snapshot.copy()
-            output = jet_cli_build_result(file, source, color, release, invocation, &result, authorized)
-        }
+        .Compiled(result, _) -> output = jet_cli_build_result(file, source, color, release, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot"))
     }
     output
 }
@@ -640,15 +644,11 @@ fn jet_cli_compile_run(file: String, source: String, color: Bool, release: Bool,
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     // Matched in place, as jet_cli_compile_build does.
     compiled := jet_cli_compile_entry(file, color, false, threads, JetDriverCompileMode.Program, None, trace_sink)
+    // The snapshot is copied out before `compiled` is borrowed exclusively below.
+    authorized :: jet_cli_compiled_snapshot(compiled)
     if &compiled == {
         .Refused(refusal) -> output = refusal.copy()
-        .Compiled(result, snapshot) -> {
-            // copy: the snapshot (a few source-root rows) is read before the
-            // exclusive borrow of `result`; both are payloads of the borrowed
-            // `compiled`, so one call may not read one while writing the other.
-            authorized :: snapshot.copy()
-            output = jet_cli_run_result(file, source, color, release, verbose, program_args, invocation, &result, authorized)
-        }
+        .Compiled(result, _) -> output = jet_cli_run_result(file, source, color, release, verbose, program_args, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot"))
     }
     output
 }

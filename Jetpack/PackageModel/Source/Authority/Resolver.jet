@@ -227,11 +227,12 @@ struct AuthorityResolver {
             if entry.info.is_symlink -> return Err(AuthorityError.Symlink(entry.path))
             if !entry.info.is_dir -> next
             relative :: pkg_authority_relative_join(scan.relative, entry.name)
-            // Moved out of the owned result: pushing a payload bound from the
-            // call itself copies the member, and its manifest's CheckedFile
-            // holds a FileReader, which cannot be copied natively.
-            checked :: self.checked_member(relative)
-            if ^checked == {
+            // The member is moved into the list (`^member`): a copying push
+            // would need clone glue for CheckedMember, whose manifest's
+            // CheckedFile holds a FileReader, which cannot be copied natively.
+            // (Binding the call with `::` would unwrap its Result, so the
+            // call is matched directly.)
+            if self.checked_member(relative) == {
                 .Ok(member) -> {
                     self.revalidate_member(member)
                     &members.push(^member)
