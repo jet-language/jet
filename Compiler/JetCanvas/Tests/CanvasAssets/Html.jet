@@ -1,0 +1,57 @@
+use core.process as canvas_html_test_process
+
+// Real JavaScript execution of the public Jet-produced HTML, not source-string
+// assertions and not copied bootstrap JS. Node is required: missing Node or a
+// harness failure is a test failure, never a skip or a success fallback.
+fn canvas_html_test_bootstrap(scenario: String, html: String) -[Exec, IO, Time.Wait]> {
+    child :: canvas_html_test_process.cmd([String]{"node", "Compiler/JetCanvas/Tests/CanvasAssets/bootstrap-dom.mjs", scenario})
+        .stdin(.Stream).stdout(.Capture).stderr(.Capture)
+        .spawn() ?? panic("Canvas bootstrap requires Node and the scenario harness")
+    child.stdin.write(html) ?? panic("Canvas bootstrap HTML input failed")
+    child.stdin.close()
+    receipt :: child.wait() ?? panic("Canvas bootstrap JS evaluation failed to finish")
+    if !receipt.success -> panic("Canvas bootstrap {scenario}: {receipt.errors}")
+}
+
+#Test("canvas_html_default_bootstrap_evaluates_before_versioned_app") {
+    assert_eq(canvas_html(), canvas_html_for("/canvas"))
+    canvas_html_test_bootstrap("default", canvas_html())
+}
+
+#Test("canvas_html_dynamic_base_retains_trailing_slash") {
+    canvas_html_test_bootstrap("nested", canvas_html_for("/project/canvas/"))
+}
+
+#Test("canvas_html_empty_path_mode_does_not_enable_query_routes") {
+    canvas_html_test_bootstrap("empty", canvas_html_for(""))
+}
+
+#Test("canvas_html_base_is_opaque_not_url_normalized") {
+    canvas_html_test_bootstrap("opaque", canvas_html_for("/雪?q=1&path=../#leaf"))
+}
+
+#Test("canvas_html_hostile_base_uses_json_escaping_in_both_positions") {
+    controls :: String.from_bytes([U8]{127, 194, 133, 0}) ?? panic("control fixture UTF-8")
+    carriage :: String.from_bytes([U8]{13}) ?? panic("CR fixture UTF-8")
+    // #4303: pass the interpolation directly, not a local String-view binding.
+    canvas_html_test_bootstrap("hostile", canvas_html_for("/a\"\\\n{carriage}\t<>&'雪{controls}"))
+}
+
+#Test("canvas_html_marker_in_base_is_not_recursively_replaced") {
+    canvas_html_test_bootstrap("marker", canvas_html_for("/__JET_CANVAS_BOOTSTRAP__"))
+}
+
+#Test("canvas_html_query_bootstrap_evaluates_all_route_overrides") {
+    canvas_html_test_bootstrap("query", canvas_html_query())
+}
+
+// Integration prerequisite, not registered fake claims: Rust canvas.rs:6080
+// independently syntax-checks all twelve JS assets (DEV-A2); canvas_scenarios
+// canvas-workbench-e2e/session-surface-matrix/devserver-real-client-survival and
+// canvas_cli_lifecycle require the actual browser, checked producer, runtime,
+// session-secret serving host, source transaction and asset composition.
+// The vm scenarios above prove ONLY emitted inline bootstrap JS and raw routes;
+// they do not assert DOM controls, draft/selection/reconnect or host journeys.
+// #3598: the frozen runtime lacks the unrelated Foundation protocol parser's
+// parse_with_limits export. Focused bootstrap proof composes the actual shared
+// json_escape/helper bodies only; full Foundation package integration is gated.

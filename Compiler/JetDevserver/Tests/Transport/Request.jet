@@ -1,0 +1,142 @@
+fn devserver_test_request(raw: String) -> DevserverRequest Never! {
+    if DevserverRequest.read(raw.bytes()) == {
+        .Ok(value) -> if value == {
+            .Val(request) -> request
+            None -> panic("missing request")
+        }
+        .Err(_) -> panic("request rejected")
+    }
+}
+fn devserver_test_request_fails(raw: String) -> Bool Never! {
+    if DevserverRequest.read(raw.bytes()) == {
+        .Err(_) -> true
+        .Ok(_) -> false
+    }
+}
+fn devserver_test_header_error(lines: [String]) -> String Never! {
+    if devserver_request_headers(devserver_http.headers_parse(lines)) == {
+        .Err(.InvalidData(message)) -> message
+        else -> panic("missing devserver header refusal")
+    }
+}
+
+// Rust lib.rs:1218–1224. Host added for Main's strict Core framing cutover.
+#Test("request_and_query_policy") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    r :: devserver_test_request("POST /x?q=a%20b HTTP/1.1{cr}\nHost: localhost{cr}\nContent-Length: 2{cr}\n{cr}\nok")
+    assert_eq(r.method, "POST")
+    assert_eq(r.target, "/x?q=a%20b")
+    assert_eq(r.body, "ok".bytes())
+    assert_eq(r.headers.get("content-length"), Val("2"))
+    assert_eq(devserver_query_param_raw_value(r.target, "q"), Val("a%20b"))
+    // #4428: original query_param(r.target,"q") == Some("a b") awaits
+    // public tolerant/lossy Core value decoding; not replaced by raw output.
+}
+
+// Rust lib.rs:1226–1239, preserving the hostile metadata with a valid Host.
+#Test("malformed_request_metadata_fails_closed") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    assert(devserver_test_request_fails("POST /x HTTP/1.1{cr}\nHost: localhost{cr}\nContent-Length: nope{cr}\n{cr}\n"))
+    assert(devserver_test_request_fails("GET /x{cr}\nHost: localhost{cr}\n{cr}\n"))
+    assert(devserver_test_request_fails("POST /x HTTP/1.1{cr}\nHost: localhost{cr}\nContent-Length: {MAX_REQUEST_BODY_BYTES + 1}{cr}\n{cr}\n"))
+    assert(devserver_test_request_fails("POST /x HTTP/1.1{cr}\nHost: localhost{cr}\nContent-Length: 2{cr}\n{cr}\nx"))
+}
+
+// Rust lib.rs:1241–1253.
+// Original names retained; these exercise rejection, not allocator timing.
+// #4431 and DC1/DC2/DC5 gate before-proportional-allocation integration proof.
+#Test("request_lines_and_headers_are_bounded_before_allocation") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    assert(devserver_test_request_fails("GET /{"x".repeat(MAX_REQUEST_LINE_BYTES)} HTTP/1.1{cr}\nHost: localhost{cr}\n{cr}\n"))
+    assert(devserver_test_request_fails("GET / HTTP/1.1{cr}\nHost: localhost{cr}\nX-Hostile: {"x".repeat(MAX_REQUEST_LINE_BYTES)}{cr}\n{cr}\n"))
+}
+// Rust lib.rs:1256–1263.
+#Test("aggregate_request_headers_are_bounded_before_parse") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    lines := [String]{"GET / HTTP/1.1{cr}\nHost: localhost{cr}\n"}
+    loop index in 0..<8 -> &lines.push("X-Fill-{index}: {"x".repeat(4090)}{cr}\n")
+    &lines.push("{cr}\n")
+    assert(devserver_test_request_fails(lines.join("")))
+}
+// Rust lib.rs:1266–1273.
+#Test("request_header_count_is_bounded_before_parse") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    lines := [String]{"GET / HTTP/1.1{cr}\nHost: localhost{cr}\n"}
+    loop index in 0..<(MAX_REQUEST_HEADER_COUNT + 1) -> &lines.push("X-Count-{index}: y{cr}\n")
+    &lines.push("{cr}\n")
+    assert(devserver_test_request_fails(lines.join("")))
+}
+
+#Test("request_uses_canonical_strict_core_framing") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    assert(if DevserverRequest.read([U8]{}) == {
+        .Ok(value) -> if value == {
+            None -> true
+            else -> false
+        }
+        .Err(_) -> false
+    })
+    assert_eq(devserver_test_request("GET / HTTP/1.0{cr}\nHost: localhost{cr}\n{cr}\n").method, "GET")
+    assert_eq(devserver_test_request("GET / HTTP/1.0{cr}\n{cr}\n").method, "GET")
+    assert(devserver_test_request_fails("GET / HTTP/1.1\nHost: localhost\n\n"))
+    assert(devserver_test_request_fails("GET / HTTP/1.1{cr}\nHost: localhost{cr}\n"))
+    assert(devserver_test_request_fails("GET / HTTP/1.1{cr}\n{cr}\n"))
+    assert(devserver_test_request_fails("G@T / HTTP/1.1{cr}\nHost: localhost{cr}\n{cr}\n"))
+    assert(devserver_test_request_fails("GET relative HTTP/1.1{cr}\nHost: localhost{cr}\n{cr}\n"))
+    assert(devserver_test_request_fails("GET / HTTP/2{cr}\nHost: localhost{cr}\n{cr}\n"))
+}
+
+#Test("request_header_projection_keeps_devserver_security_policy") {
+    names :: [String]{"Authorization", "Content-Length", "Host", "Origin"}
+    loop name in names {
+        assert_eq(devserver_test_header_error([String]{"{name}: x", "{name}: x"}), "duplicate devserver security header")
+    }
+    assert_eq(devserver_test_header_error([String]{"Transfer-Encoding: chunked"}), "devserver does not accept transfer-encoded requests")
+    // Transfer-Encoding's first occurrence is already refused (Rust order);
+    // no dead duplicate-only branch or replacement message is manufactured.
+    headers :: devserver_request_headers(devserver_http.headers_parse([String]{"X-Trace: first", "x-trace: last"})) ?? panic("ordinary duplicate")
+    assert_eq(headers.get("x-trace"), Val("last"))
+}
+
+#Test("request_adapter_rejects_duplicate_authorization_and_origin") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    names :: [String]{"Authorization", "Origin"}
+    loop name in names {
+        raw :: "GET / HTTP/1.1{cr}\nHost: localhost{cr}\n{name}: x{cr}\n{name}: y{cr}\n{cr}\n"
+        assert(if DevserverRequest.read(raw.bytes()) == {
+            .Err(.InvalidData(message)) -> message == "duplicate devserver security header"
+            else -> false
+        })
+    }
+}
+
+#Test("core_refusals_are_not_suppressed_or_reparsed") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    messages :: [String]{
+        "GET / HTTP/1.1{cr}\nHost: localhost{cr}\nHost: localhost{cr}\n{cr}\n",
+        "POST / HTTP/1.1{cr}\nHost: localhost{cr}\nContent-Length: 0{cr}\nContent-Length: 1{cr}\n{cr}\n",
+        "POST / HTTP/1.1{cr}\nHost: localhost{cr}\nTransfer-Encoding: chunked{cr}\n{cr}\n",
+    }
+    loop raw in messages {
+        assert(if DevserverRequest.read(raw.bytes()) == {
+            .Err(.CoreHTTP(_)) -> true
+            else -> false
+        })
+    }
+}
+
+#Test("query_selection_uses_raw_names_first_match_and_no_query_budget") {
+    assert_eq(devserver_query_param_raw_value("/x", "q"), None)
+    assert_eq(devserver_query_param_raw_value("/x?%71=wrong&q=a+b&q=later", "q"), Val("a+b"))
+    assert_eq(devserver_query_param_raw_value("/x?q&q=later", "q"), Val(""))
+    assert_eq(devserver_query_param_raw_value("/x?qq=no&q=a=b?c#d", "q"), Val("a=b?c#d"))
+    assert_eq(devserver_query_param_raw_value("/x?q=%G0%2%", "q"), Val("%G0%2%"))
+    value :: "x".repeat(MAX_REQUEST_LINE_BYTES + 1)
+    assert_eq(devserver_query_param_raw_value("/x?q={value}", "q"), Val(value))
+}
+
+// #4428 integration cases, explicitly unrun: body [0,255,128] must remain
+// [0,255,128]; query values a+b -> "a b", %G0%2% -> "%G0%2%",
+// %FF -> U+FFFD, %C3%28 -> U+FFFD + "(", %E2%82%AC -> "€".
+// No decoder symbol exists yet; these are not fake passing placeholder tests.
+// Static traversal/authority and owned Canvas route tests (1275–1498) are T2.

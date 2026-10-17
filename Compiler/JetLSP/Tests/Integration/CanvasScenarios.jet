@@ -1,0 +1,426 @@
+// Rust: tests/canvas_scenarios.rs:1
+// D-CANVASTEST1=A: stdlib-only browser scenarios for Canvas.
+use std.[fs, env, process, thread]
+use std.net.[TcpListener, TcpStream]
+use std.process.[Child, Command, Stdio]
+use std.sync.[Condvar, Mutex, Once, OnceLock]
+use std.sync.atomic.[AtomicU64, Ordering]
+use std.time.[Duration, Instant]
+use std.io.[BufReader, ErrorKind]
+use jet.SHA256.[sha256_hex]
+// GATE #4494: actual native process/thread/synchronization/socket/filesystem providers.
+// GATE #4483: selected-family dispatch for native process-tree cleanup.
+// GATE #4409: artifact cleanup preserves NotFound error-kind distinction.
+
+// Rust: tests/canvas_scenarios.rs:17
+BUILD_JET :: Once.new()
+// Rust: tests/canvas_scenarios.rs:18
+NEXT_CANVAS_CASE :: AtomicU64.new(0)
+// Rust: tests/canvas_scenarios.rs:19
+MAX_CANVAS_BROWSERS :: 4
+// Rust: tests/canvas_scenarios.rs:20
+BIG_PROJECT_SCENARIO :: "big-project-perf"
+// Rust: tests/canvas_scenarios.rs:21
+DEVSERVER_REAL_CLIENT_SCENARIO :: "devserver-real-client-survival"
+// Rust: tests/canvas_scenarios.rs:22
+SESSION_SURFACE_MATRIX_SCENARIO :: "session-surface-matrix"
+// Rust: tests/canvas_scenarios.rs:23
+WORKBENCH_E2E_SCENARIO :: "canvas-workbench-e2e"
+// Rust: tests/canvas_scenarios.rs:24
+EXPLICIT_WEB_TARGET :: "web"
+// Rust: tests/canvas_scenarios.rs:25
+BIG_FUNCTION_COUNT :: 300
+// Rust: tests/canvas_scenarios.rs:26
+BIG_MODULE_COUNT :: 12
+// Rust: tests/canvas_scenarios.rs:27
+BIG_FUNCTIONS_PER_MODULE :: BIG_FUNCTION_COUNT / BIG_MODULE_COUNT
+// Rust: tests/canvas_scenarios.rs:28
+BIG_FILE_COUNT :: BIG_MODULE_COUNT + 1
+// Rust: tests/canvas_scenarios.rs:29
+CANVAS_BROWSER_POOL :: OnceLock<(Mutex<USize>, Condvar)>.new()
+// Rust: tests/canvas_scenarios.rs:30
+CANVAS_SESSIONS :: OnceLock<Mutex<[U16:String]>>.new()
+// Rust: tests/canvas_scenarios.rs:32
+struct CanvasTools { chromium: OSPath, node: OSPath }
+// Rust: tests/canvas_scenarios.rs:37
+struct GeckoTools { firefox: OSPath, geckodriver: OSPath, node: OSPath }
+// Rust: tests/canvas_scenarios.rs:43
+CANVAS_TOOLS :: OnceLock<CanvasTools?>.new()
+// Rust: tests/canvas_scenarios.rs:44
+GECKO_TOOLS :: OnceLock<GeckoTools Err!>.new()
+
+// Rust: tests/canvas_scenarios.rs:267
+struct CanvasBrowserPermit {
+    // Rust: tests/canvas_scenarios.rs:270
+    fn acquire() -> CanvasBrowserPermit {
+        (available, wake) :: CANVAS_BROWSER_POOL.get_or_init(() -> (_0: Mutex.new(MAX_CANVAS_BROWSERS), _1: Condvar.new()))
+        available := available.lock().expect("Canvas browser permit lock poisoned")
+        loop available.deref() == 0 {
+            available = wake.wait(^available).expect("Canvas browser permit lock poisoned")
+        }
+        available.deref_mut() -= 1
+        CanvasBrowserPermit{}
+    }
+    // Rust: tests/canvas_scenarios.rs:287
+    fn drop(&self) {
+        (available, wake) :: CANVAS_BROWSER_POOL.get_or_init(() -> (_0: Mutex.new(MAX_CANVAS_BROWSERS), _1: Condvar.new()))
+        available.lock().expect("Canvas browser permit lock poisoned").deref_mut() += 1
+        wake.notify_one()
+    }
+}
+
+// Rust: tests/canvas_scenarios.rs:297
+DEMO :: "fn helper() -> Int {{\n    return 1\n}}\n\n/// Squares an integer input for this Canvas example.\nfn square(n: Int) -> Int {{\n    return n * n\n}}\n\n/// Summarizes a checked value for Canvas hover guidance.\nfn summarize(limit: Int) -> Int {{\n    total := square(limit)\n    if total > 10 {{\n        return total\n    }} else {{\n        return total + 1\n    }}\n}}\n\nfn scratch(limit: Int, text: String, flag: Bool, ratio: Float) {{\n    print(limit)\n}}\n\nfn run() {{\n    print(summarize(4))\n}}\n"
+// Rust: tests/canvas_scenarios.rs:325
+CALLBACK_DEMO :: "fn on_start() {{\n    print(\"start\")\n}}\n\nfn helper() -> Int {{\n    return 1\n}}\n\nfn run() {{\n    on_start()\n}}\n"
+// Rust: tests/canvas_scenarios.rs:338
+DEBUG_DEMO :: "fn helper() -> Int {{\n    return 1\n}}\n\nfn square(n: Int) -> Int {{\n    return n * n\n}}\n\nfn summarize(limit: Int) -> Int {{\n    total := square(limit)\n    if total > 10 {{\n        return total\n    }} else {{\n        return total + 1\n    }}\n}}\n\nfn scratch(limit: Int, text: String, flag: Bool, ratio: Float) {{\n    print(limit)\n}}\n\nfn run() {{\n    value := summarize(4)\n    print(value)\n    print(value)\n}}\n"
+// Rust: tests/canvas_scenarios.rs:366
+EVENTS_PANEL_SOURCE :: "use core.event as event\n\nfn dev() {{\n    scope :: event.scope()\n    clicked :: event.new<Int>()\n    clicked.on(scope, n -> print(\"clicked {{n}}\"))\n    clicked.once(scope, n -> print(\"once {{n}}\"))\n    print(&clicked.emit(1).summary())\n    scope.cancel()\n}}\n\nfn run() {{\n    dev()\n}}\n"
+
+// Rust: tests/canvas_scenarios.rs:382
+struct BigFixtureFacts { file_count: USize, function_count: USize, source_bytes: USize, source_sha256: String }
+// Rust: tests/canvas_scenarios.rs:389
+fn write_big_fixture(dir: OSPath) -> BigFixtureFacts {
+    main := String.new()
+    loop module in 0..BIG_MODULE_COUNT -> main.push_str("use \"./part_{module:02}\" as p{module:02}\n")
+    main.push('\n')
+    main.push_str("fn run() {{\n")
+    loop function in 0..BIG_FUNCTION_COUNT {
+        module_ref :: function / BIG_FUNCTIONS_PER_MODULE
+        main.push_str("    value_{function:03} :: p{module:02}.function_{function:03}()\n")
+    }
+    main.push_str("    print(value_299)\n}}\n")
+    canonical := String.new()
+    fs.write(dir.join("main.jet"), main).expect("write generated Canvas entry source")
+    canonical.push_str("main.jet\n")
+    canonical.push_str(main)
+    loop module in 0..BIG_MODULE_COUNT {
+        first :: module_ref * BIG_FUNCTIONS_PER_MODULE
+        source := String.new()
+        loop function in first..first + BIG_FUNCTIONS_PER_MODULE -> source.push_str("pub fn function_{function:03}() Int -[]> {{ return 1 }}\n\n")
+        name :: "part_{module:02}.jet"
+        fs.write(dir.join(name), source).expect("write generated Canvas module source")
+        canonical.push_str(name)
+        canonical.push('\n')
+        canonical.push_str(source)
+    }
+    BigFixtureFacts{file_count: BIG_FILE_COUNT, function_count: BIG_FUNCTION_COUNT, source_bytes: canonical.len(), source_sha256: sha256_hex(canonical.as_bytes())}
+}
+// Rust: tests/canvas_scenarios.rs:435
+fn read_big_fixture_facts(dir: OSPath) -> BigFixtureFacts {
+    canonical := String.new()
+    loop name in std.iter.once("main.jet".to_string()).chain((0..BIG_MODULE_COUNT).map(module_ref -> "part_{module:02}.jet")) {
+        source :: fs.read_to_string(dir.join(name)).expect("read generated Canvas source")
+        canonical.push_str(name)
+        canonical.push('\n')
+        canonical.push_str(source)
+    }
+    BigFixtureFacts{file_count: BIG_FILE_COUNT, function_count: BIG_FUNCTION_COUNT, source_bytes: canonical.len(), source_sha256: sha256_hex(canonical.as_bytes())}
+}
+// Rust: tests/canvas_scenarios.rs:453
+fn assert_big_fixture_preflight(repo: &OSPath, case: &CanvasCase, port: U16) {
+    expected :: case.big_fixture.as_ref().expect("big fixture facts for big-project-perf")
+    actual :: read_big_fixture_facts(case.dir)
+    assert_eq(actual.file_count, expected.file_count, "generated file count changed")
+    assert_eq(actual.function_count, expected.function_count, "generated function count changed")
+    assert_eq(actual.source_bytes, expected.source_bytes, "generated source bytes changed")
+    assert_eq(actual.source_sha256, expected.source_sha256, "generated source changed")
+    jet :: cargo_target_dir(repo).join("debug/jet")
+    check :: Command.new(jet).current_dir(case.dir).args(["check", "main.jet", "--target=web"]).output().expect("check generated Canvas fixture with Jet")
+    assert(check.status.success(), "generated Canvas fixture failed Jet check\n--- stdout ---\n{String.from_utf8_lossy(check.stdout)}\n--- stderr ---\n{String.from_utf8_lossy(check.stderr)}")
+    graph :: http_body(port, "/canvas/graph")
+    graph_count :: graph.matches("\"graph_id\":").count()
+    assert_eq(graph_count, BIG_FUNCTION_COUNT + 1, "Jet served an unexpected generated graph count")
+    assert(graph.contains("\"title\":\"run\""), "generated entry graph is missing")
+    eprintln("BIG_PROJECT_PREFLIGHT files={actual.file_count} functions={actual.function_count} source_bytes={actual.source_bytes} source_sha256={actual.source_sha256} graphs={graph_count} jet_check=passed")
+}
+
+// Rust: tests/canvas_scenarios.rs:1019
+fn run_gecko_cleanup_probe(tools: &GeckoTools) {
+    repo :: OSPath.from(env.manifest_dir())
+    output :: Command.new(tools.node).current_dir(repo).env("FIREFOX", tools.firefox).env("GECKODRIVER", tools.geckodriver)
+        .arg("Tools/canvas-test/gecko-lifecycle.mjs").output().expect("run Gecko cleanup lifecycle probe")
+    assert(output.status.success(), "Gecko cleanup lifecycle probe failed\n--- stdout ---\n{String.from_utf8_lossy(output.stdout)}\n--- stderr ---\n{String.from_utf8_lossy(output.stderr)}")
+    eprintln("{String.from_utf8_lossy(output.stdout)}")
+}
+// Rust: tests/canvas_scenarios.rs:1037
+fn run_canvas_scenario(name: &String) {
+    tools :: canvas_tools()
+    if tools == none {
+        eprintln("ignored: Canvas scenario `{name}` needs dev-shell Chromium and Node")
+        return
+    }
+    run_browser_scenario(name, "chromium", tools.unwrap().node, [(_0: "CHROMIUM", _1: tools.unwrap().chromium)])
+}
+// Rust: tests/canvas_scenarios.rs:1051
+fn run_target_independent_scenario(name: &String) {
+    tools :: canvas_tools().unwrap_or_else(() -> panic("Canvas scenario `{name}` needs dev-shell Chromium and Node"))
+    run_browser_scenario_with_server(name, "chromium", tools.node, [(_0: "CHROMIUM", _1: tools.chromium)], true, none)
+}
+// Rust: tests/canvas_scenarios.rs:1066
+fn run_target_independent_scenario_for_target(name: &String, target: &String) {
+    tools :: canvas_tools().unwrap_or_else(() -> panic("Canvas scenario `{name}` needs dev-shell Chromium and Node"))
+    run_browser_scenario_with_server(name, "chromium", tools.node, [(_0: "CHROMIUM", _1: tools.chromium)], true, target)
+}
+// Rust: tests/canvas_scenarios.rs:1081
+fn run_browser_scenario(name: &String, browser: &String, node: &OSPath, environment: &[(String, OSPath)]) {
+    run_browser_scenario_with_server(name, browser, node, environment, false, none)
+}
+// Rust: tests/canvas_scenarios.rs:1085
+fn run_browser_scenario_with_server(name: &String, browser: &String, node: &OSPath, environment: &[(String, OSPath)], target_independent: Bool, program_target: String?) {
+    browser_count :: if name == SESSION_SURFACE_MATRIX_SCENARIO -> 2 else -> 1
+    _browser_permits :: (0..browser_count).map(_ -> CanvasBrowserPermit.acquire()).collect()
+    ensure_jet_built()
+    repo :: OSPath.from(env.manifest_dir())
+    case :: CanvasCase.new(repo, name)
+    port :: free_port()
+    server := DevServer.start(repo, case.dir, case.entry, port, target_independent, program_target)
+    if case.big_fixture != none -> assert_big_fixture_preflight(repo, case, port)
+    session :: CANVAS_SESSIONS.get_or_init(() -> Mutex.new({})).lock().unwrap().get(port).cloned().expect("Canvas server session secret")
+    command := Command.new(node)
+    command.current_dir(repo).envs(environment.iter().copied()).env("TMPDIR", "/home/nate/.cache/jet-test-scratch")
+        .env("JET_BIN", cargo_target_dir(repo).join("debug/jet")).env("JETPACK_BIN", cargo_target_dir(repo).join("debug/jetpack"))
+        .arg("Tools/canvas-test/run.mjs").arg("--scenario").arg(name).arg("--browser").arg(browser).arg("--port").arg(port.to_string())
+        .arg("--session").arg(session).arg("--out-dir").arg(case.screenshots).arg("--seed").arg("373")
+    if program_target != none -> command.arg("--program-target").arg(program_target.unwrap())
+    output :: command.output().expect("run Canvas scenario driver")
+    server_exit :: server.child.try_wait().expect("poll Canvas devserver after browser load")
+    server_log :: server.stop()
+    if !output.status.success() -> panic("Canvas scenario `{name}` failed\n\n--- driver stdout ---\n{String.from_utf8_lossy(output.stdout)}\n--- driver stderr ---\n{String.from_utf8_lossy(output.stderr)}\n--- jet dev ---\n{server_log}")
+    assert(server_exit == none, "Canvas devserver exited after the real browser loaded its projection: {server_exit}\n\n--- jet dev ---\n{server_log}")
+    eprintln("{String.from_utf8_lossy(output.stdout)}")
+}
+// Rust: tests/canvas_scenarios.rs:1164
+fn ensure_jet_built() {
+    BUILD_JET.call_once(() -> {
+        repo :: OSPath.from(env.manifest_dir())
+        // The harness builds its external reference CLI in the checkout-local cache.
+        target :: cargo_target_dir(repo)
+        status :: Command.new("cargo").current_dir(repo).arg("build").status().expect("cargo build for Canvas scenarios")
+        assert(status.success(), "cargo build failed before Canvas scenarios")
+        assert(target.join("debug/jet").is_file(), "cargo build did not produce the Canvas scenario jet binary")
+    })
+}
+// Rust: tests/canvas_scenarios.rs:1188
+fn cargo_target_dir(repo: OSPath) -> OSPath {
+    dir :: env.var_os("CARGO_TARGET_DIR")
+    if dir == none -> repo.join("target")
+    else if OSPath.from(dir.unwrap()).is_absolute() -> OSPath.from(dir.unwrap())
+    else -> repo.join(dir.unwrap())
+}
+// Rust: tests/canvas_scenarios.rs:1196
+fn canvas_tools() -> CanvasTools? {
+    CANVAS_TOOLS.get_or_init(() -> {
+        strict :: env.var_os("JET_CANVAS_PREREQUISITES").as_deref() == "strict"
+        chromium :: resolve_canvas_tool("chromium", strict)?
+        node :: resolve_canvas_tool("node", strict)?
+        CanvasTools{chromium: ^chromium, node: ^node}
+    }).as_ref()
+}
+// Rust: tests/canvas_scenarios.rs:1208
+fn gecko_tools() -> GeckoTools Err! {
+    GECKO_TOOLS.get_or_init(() -> {
+        strict :: env.var_os("JET_CANVAS_PREREQUISITES").as_deref() == "strict"
+        firefox :: resolve_canvas_tool("firefox", strict).ok_or_else(() -> "Gecko smoke needs a valid Firefox executable")?
+        geckodriver :: resolve_canvas_tool("geckodriver", strict).ok_or_else(() -> "Gecko smoke needs a valid geckodriver executable")?
+        node :: resolve_canvas_tool("node", strict).ok_or_else(() -> "Gecko smoke needs a valid Node executable")?
+        GeckoTools{firefox: ^firefox, geckodriver: ^geckodriver, node: ^node}
+    }).as_ref().map_err(error -> error.as_str())
+}
+// Rust: tests/canvas_scenarios.rs:1229
+fn resolve_canvas_tool(name: String, strict: Bool) -> OSPath? {
+    resolved_key :: "JET_CANVAS_{name.to_ascii_uppercase()}_RESOLVED"
+    override_key :: "JET_CANVAS_{name.to_ascii_uppercase()}"
+    candidate :: (if strict -> env.var_os(resolved_key) else -> env.var_os(override_key).or_else(() -> name.into()))?
+    path :: resolve_executable(OSPath.from(candidate))?
+    output :: Command.new(path).arg("--version").output().ok()?
+    version :: "{String.from_utf8_lossy(output.stdout)}{String.from_utf8_lossy(output.stderr)}"
+    valid :: if name == {
+        "chromium" -> version.contains("Chromium") || version.contains("Chrome")
+        "firefox" -> version.contains("Firefox")
+        "geckodriver" -> version.starts_with("geckodriver")
+        "node" -> version.starts_with('v') && version.as_bytes().get(1).is_some_and(byte -> byte.is_ascii_digit())
+        else -> false
+    }
+    if valid -> ^path else -> none
+}
+// Rust: tests/canvas_scenarios.rs:1256
+fn resolve_executable(candidate: OSPath) -> OSPath? {
+    if candidate.components().count() > 1 {
+        return if candidate.is_file() -> candidate.to_path_buf() else -> none
+    }
+    env.split_paths(env.var_os("PATH")?).map(dir -> dir.join(candidate)).find(path -> path.is_file())
+}
+
+// Rust: tests/canvas_scenarios.rs:1266
+struct CanvasCase {
+    dir: OSPath
+    entry: OSPath
+    screenshots: OSPath
+    big_fixture: BigFixtureFacts?
+    // Rust: tests/canvas_scenarios.rs:1274
+    fn new(repo: OSPath, name: String) -> CanvasCase {
+        root :: env.var("JET_VERIFY_TMPDIR").map(value -> OSPath.from(value)).unwrap_or_else(_ -> env.temp_dir().join("jet-test-tmp"))
+        serial :: NEXT_CANVAS_CASE.fetch_add(1, Ordering.Relaxed)
+        normalized_name :: name.replace('-', "_")
+        dir :: root.join("canvas_scenario_{normalized_name}_{process.id()}_{serial}")
+        _ :: fs.remove_dir_all(dir)
+        fs.create_dir_all(dir).expect("create Canvas scenario dir")
+        matrix :: name == SESSION_SURFACE_MATRIX_SCENARIO || name == WORKBENCH_E2E_SCENARIO
+        entry :: if matrix -> dir.join("run.jet") else -> dir.join("main.jet")
+        big_fixture :: if name == BIG_PROJECT_SCENARIO -> write_big_fixture(dir)
+        else if name == "canvas-onboarding-tour" {
+            fs.copy(repo.join("Examples/features/tooling/canvas_blueprint_demo.jet"), entry).expect("copy Canvas onboarding example source")
+            none
+        } else if name == DEVSERVER_REAL_CLIENT_SCENARIO {
+            fs.copy(repo.join("Examples/features/web/ui_showcase.jet"), entry).expect("copy Canvas devserver regression source")
+            none
+        } else if matrix {
+            fs.write(dir.join("package.jet"), "name: \"canvas_session_matrix\"\nversion: \"0.1.0\"\noutputs: {{\n    cli: .Executable{{ name: \"cli\", entry: run }}\n    service: .Service{{ name: \"service\", entry: serve }}\n    web: .Executable{{ name: \"web\", entry: web }}\n    ui: .Executable{{ name: \"ui\", entry: ui }}\n    game: .Executable{{ name: \"game\", entry: game }}\n    library: .Library{{ name: \"library\", entry: run }}\n    build: .Check{{ name: \"build\", entry: build }}\n}}\ndefaults: {{ run: cli }}\n").expect("write Canvas session matrix package fixture")
+            fs.write(dir.join("env.jet"), "module env.dev {{\n    prompt: \"canvas-session-matrix\",\n    services: {{ custom_server: {{ enable: false, ports: [43817], run: [\"node\", \"custom-server.mjs\"], ready: \"custom-server-ready\" }}, canvas_service: {{ enable: true, run: [\"node\", \"--eval\", \"console.log('canvas-service-ready'); setInterval(() -> {{{{}}}}, 1000);\"] }} }},\n}}\n").expect("write Canvas session matrix environment fixture")
+            fs.write(dir.join("custom-server.mjs"), "import http from \"node:http\";\nconst server = http.createServer((request, response) -> {{\n    response.setHeader(\"content-type\", \"text/plain\");\n    response.end(request.url === \"/health\" ? \"custom-server-ready\" : \"custom-server\");\n}});\nserver.listen(43817, \"127.0.0.1\", () => console.log(\"custom-server-ready\"));\nprocess.on(\"SIGTERM\", () => server.close(() => process.exit(0)));\n").expect("write Canvas custom server fixture")
+            fs.write(entry, "use core.term as io\n\nfn run() {{ io.print(\"cli\") }}\nfn serve() {{ io.print(\"service\") }}\nfn web() {{ io.print(\"web\") }}\nfn ui() {{ io.print(\"ui\") }}\nfn game() {{ io.print(\"game\") }}\n\nfn build(b: BuildContext) -> BuildPlan {{\n    return b.plan()\n}}\n").expect("write Canvas session matrix source fixture")
+            none
+        } else {
+            if name == "library-panel" || name == "library-panel-events" {
+                fs.write(dir.join("package.jet"), "name: \"canvas_library\"\nversion: \"0.1.0\"\n").expect("write Canvas library package fixture")
+            }
+            if name == "library-panel-events" {
+                fs.copy(repo.join("Examples/features/ui/events.jet"), entry).expect("copy Canvas library events source")
+            } else {
+                source :: if name == "debug-breakpoints-run-control-gestures" || name == "debug-runtime-values-staleness-liveness" -> DEBUG_DEMO
+                    else if name.starts_with("canvas-rad-callback-") || name == "canvas-rad-handler-navigation" -> CALLBACK_DEMO
+                    else -> DEMO
+                fs.write(entry, source).expect("write Canvas scenario source")
+                if name == "events-panel-authoring" -> fs.write(dir.join("events.jet"), EVENTS_PANEL_SOURCE).expect("write Canvas events source fixture")
+            }
+            none
+        }
+        screenshots :: dir.join("screenshots")
+        fs.create_dir_all(screenshots).expect("create Canvas screenshot dir")
+        CanvasCase{dir: ^dir, entry: ^entry, screenshots: ^screenshots, big_fixture: ^big_fixture}
+    }
+    // Rust: tests/canvas_scenarios.rs:1372
+    fn drop(&self) {
+        if fs.remove_dir_all(self.dir) == {
+            Err(err) -> if err.kind() != ErrorKind.NotFound -> eprintln("warning: could not remove Canvas scenario artifacts at {self.dir.display()}: {err}")
+            Ok(_) -> {}
+        }
+    }
+}
+
+// Rust: tests/canvas_scenarios.rs:1392
+struct DevServer {
+    child: Child
+    // Rust: tests/canvas_scenarios.rs:1397
+    fn start(repo: OSPath, cwd: OSPath, entry: OSPath, port: U16, target_independent: Bool, program_target: String?) -> DevServer {
+        jet :: cargo_target_dir(repo).join("debug/jet")
+        command := if cwd.join("env.jet").is_file() {
+            command := Command.new(cargo_target_dir(repo).join("debug/jetpack"))
+            command.current_dir(cwd).env("JET_ROOT", cwd).args(["env", "-y", "--"]).arg(jet)
+            ^command
+        } else -> Command.new(jet)
+        command.current_dir(cwd).arg("dev").arg(entry)
+        if target_independent {
+            command.arg("--canvas").arg("--canvas-port={port}")
+            if program_target != none -> command.arg("--target={program_target.unwrap()}")
+        } else {
+            command.arg("--canvas").arg("--target=web").arg("--canvas-port={port}")
+        }
+        child := command.stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("start jet dev Canvas server")
+        stdout :: child.stdout.take()
+        if stdout != none {
+            thread.spawn(() -> {
+                loop line in BufReader.new(^stdout.unwrap()).lines().map_while(result -> result.ok()) {
+                    url :: line.split("Canvas: ").nth(1)
+                    if url == none -> next
+                    port :: url.unwrap().split("http://127.0.0.1:").nth(1)
+                        .or_else(() -> url.unwrap().split("http://localhost:").nth(1))
+                        .and_then(rest -> rest.split(c -> !c.is_ascii_digit()).next())
+                        .and_then(value -> value.parse<U16>().ok())
+                    if port == none -> next
+                    token :: url.unwrap().split("session=").nth(1).map(value -> value.split(c -> !c.is_ascii_hexdigit()).next().unwrap_or_default().to_string())
+                    if token == none -> next
+                    if token.unwrap().len() >= 32 -> CANVAS_SESSIONS.get_or_init(() -> Mutex.new({})).lock().unwrap().insert(port.unwrap(), ^token.unwrap())
+                }
+            })
+        }
+        wait_for_server(&child, port)
+        DevServer{child: ^child}
+    }
+    // Rust: tests/canvas_scenarios.rs:1473
+    fn stop(&self) -> String {
+        stop_process_tree(&self.child)
+        out := String.new()
+        stdout := self.child.stdout.take()
+        if stdout != none -> _ :: stdout.unwrap().read_to_string(&out)
+        stderr := self.child.stderr.take()
+        if stderr != none {
+            err := String.new()
+            _ :: stderr.unwrap().read_to_string(&err)
+            out.push_str(err)
+        }
+        ^out
+    }
+    // Rust: tests/canvas_scenarios.rs:1489
+    fn drop(&self) { stop_process_tree(&self.child) }
+}
+// Rust: tests/canvas_scenarios.rs:1494
+fn stop_process_tree(child: &Child) {
+    if core.sys.target.selected_family() == "unix" -> stop_process_tree_unix(child.id())
+    else -> _ :: child.kill()
+    _ :: child.wait()
+}
+// Rust: tests/canvas_scenarios.rs:1505
+fn stop_process_tree_unix(pid: U32) {
+    children_path :: "/proc/{pid}/task/{pid}/children"
+    if fs.read_to_string(children_path) == {
+        Ok(children) -> loop child in children.split_whitespace().filter_map(value -> value.parse<U32>().ok()) -> stop_process_tree_unix(child)
+        Err(_) -> {}
+    }
+    _ :: Command.new("kill").args(["-KILL", pid.to_string()]).status()
+}
+// Rust: tests/canvas_scenarios.rs:1520
+fn wait_for_server(child: &Child, port: U16) {
+    start :: Instant.now()
+    loop start.elapsed() < Duration.from_secs(30) {
+        status :: child.try_wait().expect("poll jet dev")
+        if status != none -> panic("jet dev exited before serving Canvas: {status.unwrap()}")
+        if http_ok(port, "/__jet_dev_status") {
+            if CANVAS_SESSIONS.get_or_init(() -> Mutex.new({})).lock().unwrap().contains_key(port) -> return
+        }
+        thread.sleep(Duration.from_millis(80))
+    }
+    panic("timed out waiting for jet dev on port {port}")
+}
+// Rust: tests/canvas_scenarios.rs:1541
+fn http_ok(port: U16, path: &String) -> Bool {
+    stream := if TcpStream.connect(("127.0.0.1", port)) == {
+        Ok(stream) -> ^stream
+        Err(_) -> { return false }
+    }
+    authorization :: CANVAS_SESSIONS.get_or_init(() -> Mutex.new({})).lock().unwrap().get(port)
+        .map(token -> "Authorization: Bearer {token}{Char{13}}\n").unwrap_or_default()
+    request :: "GET {path} HTTP/1.1{Char{13}}\nHost: 127.0.0.1:{port}{Char{13}}\nOrigin: http://127.0.0.1:{port}{Char{13}}\n{authorization}Connection: close{Char{13}}\n{Char{13}}\n"
+    if stream.write_all(request.as_bytes()).is_err() -> return false
+    response := String.new()
+    if stream.read_to_string(&response).is_err() -> return false
+    response.starts_with("HTTP/1.1 200")
+}
+// Rust: tests/canvas_scenarios.rs:1565
+fn http_body(port: U16, path: &String) -> String {
+    stream := TcpStream.connect((_0: "127.0.0.1", _1: port)).expect("connect to Jet Canvas server")
+    authorization :: CANVAS_SESSIONS.get_or_init(() -> Mutex.new({})).lock().unwrap().get(port)
+        .map(token -> "Authorization: Bearer {token}{Char{13}}\n").unwrap_or_default()
+    request :: "GET {path} HTTP/1.1{Char{13}}\nHost: 127.0.0.1:{port}{Char{13}}\nOrigin: http://127.0.0.1:{port}{Char{13}}\n{authorization}Connection: close{Char{13}}\n{Char{13}}\n"
+    stream.write_all(request.as_bytes()).expect("request Jet Canvas preflight body")
+    response := String.new()
+    stream.read_to_string(&response).expect("read Jet Canvas preflight body")
+    assert(response.starts_with("HTTP/1.1 200"), "Jet Canvas preflight failed: {response}")
+    response.split_once("{Char{13}}\n{Char{13}}\n").map((_, body) -> body.to_string()).expect("Jet Canvas response missing body separator")
+}
+// Rust: tests/canvas_scenarios.rs:1594
+fn free_port() -> U16 {
+    TcpListener.bind((_0: "127.0.0.1", _1: 0)).expect("bind free local port").local_addr().expect("local addr").port()
+}

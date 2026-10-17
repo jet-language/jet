@@ -1,0 +1,852 @@
+// Typed, bounded projections of recorded local development-service failures.
+// HTML and JSON render the same facts; no terminal output is parsed.
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:9
+use jet_foundation.Diagnostics.[Diagnostic, Span, TextEdit, Severity]
+use jet_foundation.JSON.[quote as json_string]
+use jet_foundation.Outcome.[JetErrorContextFrame, JetErrorJourneyFrame, JetErrorReport]
+use jet_foundation.SHA256.[sha256_hex]
+use jet_semindex.[html_escape]
+use std.cmp.[Ordering]
+
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:16
+WEB_ERROR_PAGE_SCHEMA :: "jet.dev.error/v1"
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:17
+MAX_WEB_ERROR_ID_BYTES :: 256
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:18
+MAX_WEB_ERROR_TEXT_BYTES :: 8 * 1024
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:19
+MAX_WEB_ERROR_SOURCE_BYTES :: 16 * 1024
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:20
+MAX_WEB_ERROR_LINK_BYTES :: 2 * 1024
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:21
+MAX_WEB_ERROR_ACCEPT_BYTES :: 8 * 1024
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:22
+MAX_WEB_ERROR_SOURCE_EXCERPTS :: 32
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:23
+MAX_WEB_ERROR_ACTION_LINKS :: 16
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:24
+MAX_WEB_ERROR_EDITS :: 64
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:25
+MAX_WEB_ERROR_INPUT_BYTES :: 64 * 1024
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:26
+MAX_WEB_ERROR_OUTPUT_BYTES :: 256 * 1024
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:27
+MAX_WEB_ERROR_SPAN_BYTES :: 1024 * 1024
+
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:32
+#Error
+enum WebErrorPageError {
+    EmptyField(String), InvalidIdentity(String), InvalidSpan, InvalidStatus,
+    InvalidLink, InvalidAccept, ControlCharacter(String), UnsafeContent(String),
+    TextTooLarge(String), TooManyItems(String), InputTooLarge, OutputTooLarge
+}
+impl WebErrorPageError {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:48
+    fn fmt(self: Self) -> String {
+        return if self == {
+            .EmptyField(field) -> "{field} must not be empty"
+            .InvalidIdentity(field) -> "invalid {field} identity"
+            .InvalidSpan -> "invalid source span"
+            .InvalidStatus -> "web error status must be between 400 and 599"
+            .InvalidLink -> "action link is not a safe local or HTTPS URL"
+            .InvalidAccept -> "invalid or oversized Accept header"
+            .ControlCharacter(field) -> "{field} contains a control character"
+            .UnsafeContent(field) -> "{field} contains unpublished sensitive content"
+            .TextTooLarge(field) -> "{field} exceeds its byte budget"
+            .TooManyItems(field) -> "too many {field}"
+            .InputTooLarge -> "web error facts exceed the input byte budget"
+            .OutputTooLarge -> "web error projection exceeds the output byte budget"
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:70
+enum WebErrorContentType { Html, Json }
+impl WebErrorContentType {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:76
+    fn as_str(self: Self) -> String {
+        return match self { .Html -> "text/html; charset=utf-8"; .Json -> "application/json; charset=utf-8" }
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:83
+    fn media_type(self: Self) -> String {
+        return match self { .Html -> "text/html"; .Json -> "application/json" }
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:92
+    fn fmt(self: Self) -> String { return self.as_str() }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:100
+struct WebErrorCapabilities { local: Bool; release: Bool }
+impl WebErrorCapabilities {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:106
+    fn new(local: Bool, release: Bool) -> Self { return Self { local, release } }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:110
+    fn local() -> Self { return Self { local: true, release: false } }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:117
+    fn redacted() -> Self { return Self { local: false, release: true } }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:124
+    fn permits_local_details(self: Self) -> Bool { return self.local && !self.release }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:130
+    fn default() -> Self { return Self.redacted() }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:137
+trait WebErrorCapabilityInput {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:138
+    fn local_details(self: Self) -> Bool
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:139
+    fn release_build(self: Self) -> Bool
+}
+impl WebErrorCapabilities.WebErrorCapabilityInput {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:143
+    fn local_details(self: Self) -> Bool { return self.permits_local_details() }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:147
+    fn release_build(self: Self) -> Bool { return self.release }
+}
+impl[T: WebErrorCapabilityInput] WebErrorCapabilityInput for.bit_and(T {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:153
+    fn local_details(self: Self) -> Bool { return (*self).local_details() }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:157
+    fn release_build(self: Self) -> Bool { return (*self).release_build() }
+})
+impl Bool.WebErrorCapabilityInput {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:163
+    fn local_details(self: Self) -> Bool { return *self }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:167
+    fn release_build(self: Self) -> Bool { return false }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:174
+struct WebErrorPageIdentity {
+    request_id: String; session_id: String; source_id: String
+    build_id: String; revision: String
+}
+impl WebErrorPageIdentity {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:183
+    fn new(request_id: String, session_id: String, source_id: String, build_id: String, revision: String) -> Self WebErrorPageError! {
+        identity :: Self {
+            request_id: normalize_identity(^request_id, "request id")?,
+            session_id: normalize_identity(^session_id, "session id")?,
+            source_id: normalize_source_identity(^source_id)?,
+            build_id: normalize_identity(^build_id, "build id")?,
+            revision: normalize_identity(^revision, "revision")?
+        }
+        identity.validate()?
+        return identity
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:201
+    fn validate(self: &Self) WebErrorPageError! {
+        validate_identity(self.request_id, "request id")?
+        validate_identity(self.session_id, "session id")?
+        validate_source_identity(self.source_id)?
+        validate_identity(self.build_id, "build id")?
+        validate_identity(self.revision, "revision")?
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:210
+    fn json(self: Self) -> String {
+        return "{{" + "\"request_id\":" + json_string(self.request_id) + ",\"session_id\":" + json_string(self.session_id) + ",\"source_id\":" + json_string(self.source_id) + ",\"build_id\":" + json_string(self.build_id) + ",\"revision\":" + json_string(self.revision) + "}}"
+    }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:225
+struct WebErrorSpan { start: Usize; end: Usize }
+impl WebErrorSpan {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:231
+    fn new(start: Usize, end: Usize) -> Self WebErrorPageError! {
+        span :: Self { start, end }
+        span.validate()?
+        return span
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:237
+    fn validate(self: &Self) WebErrorPageError! {
+        if self.end < self.start || self.start > MAX_WEB_ERROR_SPAN_BYTES || self.end > MAX_WEB_ERROR_SPAN_BYTES -> return .Err(.InvalidSpan)
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:247
+    fn json(self: Self) -> String { return "{{\"start\":" + self.start.to_string() + ",\"end\":" + self.end.to_string() + "}}" }
+}
+impl From[WebErrorSpan] for Span {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:253
+    fn from(span: WebErrorSpan) -> Self { return Span.new(span.start, span.end) }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:261
+struct WebErrorSourceExcerpt {
+    source_id: String; label: String; span: WebErrorSpan?
+    line: U32?; column: U32?; excerpt: String?
+}
+impl WebErrorSourceExcerpt {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:271
+    fn new(source_id: String, label: String, start: Usize, end: Usize, excerpt: String?) -> Self WebErrorPageError! {
+        return Self.with_parts(^source_id, ^label, .Val(WebErrorSpan.new(start, end)?), .None, .None, ^excerpt)
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:282
+    fn without_span(source_id: String, label: String, excerpt: String?) -> Self WebErrorPageError! {
+        return Self.with_parts(^source_id, ^label, .None, .None, .None, ^excerpt)
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:297
+    fn with_location(self: Self, line: U32?, column: U32?) -> Self WebErrorPageError! {
+        if line.is_some_and((v) -> v == 0) || column.is_some_and((v) -> v == 0) -> return .Err(.InvalidSpan)
+        self.line = line
+        self.column = column
+        return self
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:310
+    fn validate(self: &Self) WebErrorPageError! {
+        validate_source_identity(self.source_id)?
+        validate_identity(self.label, "source label")?
+        if self.span == .Val(span) -> span.validate()?
+        if self.line.is_some_and((v) -> v == 0) || self.column.is_some_and((v) -> v == 0) -> return .Err(.InvalidSpan)
+        validate_optional_text(&self.excerpt, "source excerpt", MAX_WEB_ERROR_SOURCE_BYTES)?
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:323
+    fn with_parts(source_id: String, label: String, span: WebErrorSpan?, line: U32?, column: U32?, excerpt: String?) -> Self WebErrorPageError! {
+        item :: Self { source_id: normalize_source_identity(^source_id)?, label: normalize_identity(^label, "source label")?, span, line, column, excerpt: normalize_optional_text(^excerpt, "source excerpt", MAX_WEB_ERROR_SOURCE_BYTES)? }
+        item.validate()?
+        return item
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:343
+    fn json(self: Self) -> String {
+        fields := ["\"source_id\":" + json_string(self.source_id), "\"label\":" + json_string(self.label)]
+        if self.span == .Val(span) -> fields.push("\"span\":" + span.json())
+        if self.line == .Val(line) -> fields.push("\"line\":" + line.to_string())
+        if self.column == .Val(column) -> fields.push("\"column\":" + column.to_string())
+        if self.excerpt.as_ref() == .Val(excerpt) -> fields.push("\"excerpt\":" + json_string(excerpt))
+        return "{" + fields.join(",") + "}"
+    }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:367
+struct WebErrorActionLink { label: String; href: String }
+impl WebErrorActionLink {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:373
+    fn new(label: String, href: String) -> Self WebErrorPageError! {
+        link :: Self { label: normalize_identity(^label, "action label")?, href: normalize_href(^href)? }
+        link.validate()?
+        return link
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:385
+    fn validate(self: &Self) WebErrorPageError! {
+        validate_identity(self.label, "action label")?
+        return validate_href(self.href)
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:390
+    fn json(self: Self) -> String { return "{{\"label\":" + json_string(self.label) + ",\"href\":" + json_string(self.href) + "}}" }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:404
+struct WebErrorEdit {
+    source_id: String; span: WebErrorSpan; new_text: String
+    applicability: String?; safety: String?
+}
+impl WebErrorEdit {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:413
+    fn new(source_id: String, span: WebErrorSpan, new_text: String, applicability: String?, safety: String?) -> Self WebErrorPageError! {
+        edit :: Self {
+            source_id: normalize_source_identity(^source_id)?, span,
+            new_text: normalize_text(^new_text, "fix edit", MAX_WEB_ERROR_TEXT_BYTES)?,
+            applicability: applicability.map((value) -> normalize_identity(value, "fix applicability")).transpose()?,
+            safety: safety.map((value) -> normalize_identity(value, "fix safety")).transpose()?
+        }
+        edit.validate()?
+        return edit
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:435
+    fn from_diagnostic(source_id: String, edit: &TextEdit, applicability: String?, safety: String?) -> Self WebErrorPageError! {
+        return Self.new(source_id, web_span_from_span(edit.span)?, edit.new_text.clone(), applicability.map((v) -> v.to_string()), safety.map((v) -> v.to_string()))
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:450
+    fn validate(self: &Self) WebErrorPageError! {
+        validate_source_identity(self.source_id)?
+        self.span.validate()?
+        if self.new_text.len() > MAX_WEB_ERROR_TEXT_BYTES -> return .Err(.TextTooLarge("fix edit"))
+        if self.new_text.chars().any((c) -> c.is_control() && c != '\n' && c != Char{13} && c != '\t') -> return .Err(.ControlCharacter("fix edit"))
+        if contains_sensitive_marker(self.new_text) -> return .Err(.UnsafeContent("fix edit"))
+        if self.applicability.as_ref() == .Val(v) -> validate_identity(v, "fix applicability")?
+        if self.safety.as_ref() == .Val(v) -> validate_identity(v, "fix safety")?
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:474
+    fn json(self: Self) -> String {
+        fields := ["\"source_id\":" + json_string(self.source_id), "\"span\":" + self.span.json(), "\"new_text\":" + json_string(self.new_text)]
+        if self.applicability.as_ref() == .Val(v) -> fields.push("\"applicability\":" + json_string(v))
+        if self.safety.as_ref() == .Val(v) -> fields.push("\"safety\":" + json_string(v))
+        return "{" + fields.join(",") + "}"
+    }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:496
+struct WebErrorInternalFact { code: String; message: String }
+impl WebErrorInternalFact {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:502
+    fn new(code: String, message: String) -> Self WebErrorPageError! {
+        fact :: Self { code: normalize_code(^code)?, message: normalize_required_text(^message, "internal error message", MAX_WEB_ERROR_TEXT_BYTES)? }
+        fact.validate()?
+        return fact
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:518
+    fn validate(self: &Self) WebErrorPageError! {
+        validate_code(self.code)?
+        if self.message.is_empty() -> return .Err(.EmptyField("internal error message"))
+        return validate_optional_text(&.Val(self.message.clone()), "internal error message", MAX_WEB_ERROR_TEXT_BYTES)
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:530
+    fn json(self: Self) -> String { return "{{\"code\":" + json_string(self.code) + ",\"message\":" + json_string(self.message) + "}}" }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:546
+struct WebErrorDevStatusFacts { state: String; code: String; diagnostic: String }
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:557
+DEV_STATUS_INTERNAL_ERROR_CODE :: "ICE"
+impl WebErrorDevStatusFacts {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:560
+    fn new(state: String, code: String, diagnostic: String) -> Self { return Self { state, code, diagnostic } }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:576
+    fn is_internal_failure(self: Self) -> Bool { return self.code == DEV_STATUS_INTERNAL_ERROR_CODE }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:583
+    fn is_error(self: Self) -> Bool { return self.state == "error" }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:591
+struct WebErrorDiagnosticFact {
+    code: String?; what: String?; why: String?; fix: String?
+    severity: String?; moment: String?; typed_identity: String?; span: WebErrorSpan?
+}
+impl WebErrorDiagnosticFact {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:604
+    fn new(code: String, what: String, why: String, fix: String) -> Self WebErrorPageError! {
+        fact :: Self {
+            code: .Val(normalize_code(^code)?),
+            what: .Val(normalize_required_text(^what, "diagnostic what", MAX_WEB_ERROR_TEXT_BYTES)?),
+            why: .Val(normalize_required_text(^why, "diagnostic why", MAX_WEB_ERROR_TEXT_BYTES)?),
+            fix: .Val(normalize_required_text(^fix, "diagnostic fix", MAX_WEB_ERROR_TEXT_BYTES)?),
+            severity: .None, moment: .None, typed_identity: .None, span: .None
+        }
+        fact.validate()?
+        return fact
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:638
+    fn from_diagnostic(diagnostic: Diagnostic) -> Self WebErrorPageError! {
+        fact :: Self {
+            code: .Val(normalize_code(diagnostic.code.clone())?),
+            what: .Val(normalize_required_text(diagnostic.what.clone(), "diagnostic what", MAX_WEB_ERROR_TEXT_BYTES)?),
+            why: normalize_optional_text(.Val(diagnostic.why.clone()), "diagnostic why", MAX_WEB_ERROR_TEXT_BYTES)?,
+            fix: normalize_optional_text(.Val(diagnostic.fix.clone()), "diagnostic fix", MAX_WEB_ERROR_TEXT_BYTES)?,
+            severity: .Val(match diagnostic.severity { .Error -> "error"; .Lint -> "lint" }),
+            moment: .Val(diagnostic.moment.as_str().to_string()), typed_identity: .None,
+            span: diagnostic.span.map(web_span_from_span).transpose()?
+        }
+        fact.validate()?
+        return fact
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:671
+    fn from_report(report: JetErrorReport) -> Self WebErrorPageError! {
+        typed_identity :: report.typed_identity.clone().map((v) -> normalize_identity(v, "typed error identity")).transpose()?
+        span :: report.details.as_ref().and_then((d) -> d.source_span.clone()).map((s) -> WebErrorSpan.new(s.start, s.end)).transpose()?
+        fact :: Self {
+            code: report.code.clone().map(normalize_code).transpose()?,
+            what: .Val(normalize_required_text(report.message.clone(), "diagnostic what", MAX_WEB_ERROR_TEXT_BYTES)?),
+            why: .None, fix: .None, severity: .None, moment: .None, typed_identity, span
+        }
+        fact.validate()?
+        return fact
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:708
+    fn from_dev_status(facts: WebErrorDevStatusFacts) -> Self WebErrorPageError! {
+        code :: if facts.code.is_empty() -> .None else -> .Val(normalize_code(facts.code.clone())?)
+        fact :: Self { code, what: .Val(normalize_required_text(facts.diagnostic.clone(), "diagnostic what", MAX_WEB_ERROR_TEXT_BYTES)?), why: .None, fix: .None, severity: .None, moment: .None, typed_identity: .None, span: .None }
+        fact.validate()?
+        return fact
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:732
+    fn with_span(self: Self, span: WebErrorSpan?) -> Self WebErrorPageError! {
+        if span == .Val(v) -> v.validate()?
+        self.span = span
+        self.validate()?
+        return self
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:741
+    fn validate(self: &Self) WebErrorPageError! {
+        if self.code.as_ref() == .Val(v) -> validate_code(v)?
+        if self.what.is_none() -> return .Err(.EmptyField("diagnostic what"))
+        validate_optional_text(&self.what, "diagnostic what", MAX_WEB_ERROR_TEXT_BYTES)?
+        validate_optional_text(&self.why, "diagnostic why", MAX_WEB_ERROR_TEXT_BYTES)?
+        validate_optional_text(&self.fix, "diagnostic fix", MAX_WEB_ERROR_TEXT_BYTES)?
+        if self.severity.as_ref() == .Val(v) -> validate_identity(v, "diagnostic severity")?
+        if self.moment.as_ref() == .Val(v) -> validate_identity(v, "diagnostic moment")?
+        if self.typed_identity.as_ref() == .Val(v) -> validate_identity(v, "typed error identity")?
+        if self.span == .Val(v) -> v.validate()?
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:766
+    fn json(self: Self) -> String { return self.json_with_edits(&[]) }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:770
+    fn json_with_edits(self: Self, edits: [WebErrorEdit]) -> String {
+        fields := [String]{}
+        if self.code.as_ref() == .Val(v) -> fields.push("\"code\":" + json_string(v))
+        if self.what.as_ref() == .Val(v) -> fields.push("\"what\":" + json_string(v))
+        if self.why.as_ref() == .Val(v) -> fields.push("\"why\":" + json_string(v))
+        if self.fix.as_ref() == .Val(v) -> fields.push("\"fix\":" + json_string(v))
+        if self.severity.as_ref() == .Val(v) -> fields.push("\"severity\":" + json_string(v))
+        if self.moment.as_ref() == .Val(v) -> fields.push("\"moment\":" + json_string(v))
+        if self.typed_identity.as_ref() == .Val(v) -> fields.push("\"typed_identity\":" + json_string(v))
+        if self.span == .Val(v) -> fields.push("\"span\":" + v.json())
+        if !edits.is_empty() -> fields.push("\"fix_edits\":[" + edits.iter().map(WebErrorEdit.json).collect[[String]]().join(",") + "]")
+        return "{" + fields.join(",") + "}"
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:807
+    fn internal_placeholder() -> Self {
+        return Self { code: .None, what: .Val("Internal development-service failure"), why: .None, fix: .None, severity: .None, moment: .None, typed_identity: .None, span: .None }
+    }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:824
+struct WebErrorProjection {
+    status: U16; content_type: WebErrorContentType; body: String
+    fact_digest: String; failure_id: String; redacted: Bool
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:835
+struct WebErrorPage {
+    identity: WebErrorPageIdentity; diagnostic: WebErrorDiagnosticFact; internal: WebErrorInternalFact?
+    edits: [WebErrorEdit]; source_excerpts: [WebErrorSourceExcerpt]; related_cause: WebErrorDiagnosticFact?
+    action_links: [WebErrorActionLink]; status: U16; failure_id: String
+}
+impl WebErrorPage {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:848
+    fn new(identity: WebErrorPageIdentity, diagnostic: WebErrorDiagnosticFact, source_excerpts: [WebErrorSourceExcerpt], related_cause: WebErrorDiagnosticFact?, action_links: [WebErrorActionLink]) -> Self WebErrorPageError! {
+        return Self.new_with_status(500, ^identity, ^diagnostic, ^source_excerpts, ^related_cause, ^action_links)
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:865
+    fn new_with_status(status: U16, identity: WebErrorPageIdentity, diagnostic: WebErrorDiagnosticFact, source_excerpts: [WebErrorSourceExcerpt], related_cause: WebErrorDiagnosticFact?, action_links: [WebErrorActionLink]) -> Self WebErrorPageError! {
+        validate_status(status)?
+        identity.validate()?
+        diagnostic.validate()?
+        if related_cause.as_ref() == .Val(cause) -> cause.validate()?
+        if source_excerpts.len() > MAX_WEB_ERROR_SOURCE_EXCERPTS -> return .Err(.TooManyItems("source excerpts"))
+        if action_links.len() > MAX_WEB_ERROR_ACTION_LINKS -> return .Err(.TooManyItems("action links"))
+        loop excerpt in &source_excerpts -> excerpt.validate()?
+        loop link in &action_links -> link.validate()?
+        source_excerpts.sort_by(source_excerpt_order)
+        action_links.sort_by(action_link_order)
+        page := Self { identity: ^identity, diagnostic: ^diagnostic, internal: .None, edits: [], source_excerpts: ^source_excerpts, related_cause: ^related_cause, action_links: ^action_links, status, failure_id: "" }
+        page.validate_size()?
+        page.failure_id = page.compute_failure_id()
+        return page
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:911
+    fn from_report(identity: WebErrorPageIdentity, report: &JetErrorReport, action_links: [WebErrorActionLink]) -> Self WebErrorPageError! {
+        diagnostic :: WebErrorDiagnosticFact.from_report(report)?
+        source_excerpts :: report_source_excerpts(report)?
+        related_cause :: report.causes.first().map(WebErrorDiagnosticFact.from_report).transpose()?
+        return Self.new(^identity, ^diagnostic, ^source_excerpts, ^related_cause, ^action_links)
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:934
+    fn from_diagnostic(identity: WebErrorPageIdentity, diagnostic: &Diagnostic, source_excerpts: [WebErrorSourceExcerpt], action_links: [WebErrorActionLink]) -> Self WebErrorPageError! {
+        source_id :: identity.source_id.clone()
+        applicability :: diagnostic.applicability.map((v) -> v.as_str())
+        safety :: diagnostic.safety.map((v) -> v.as_str())
+        edits := [WebErrorEdit]{}
+        loop edit in diagnostic.all_edits().iter() -> edits.push(WebErrorEdit.from_diagnostic(source_id, edit, applicability, safety)?)
+        return Self.new(^identity, WebErrorDiagnosticFact.from_diagnostic(diagnostic)?, ^source_excerpts, .None, ^action_links)?.with_edits(^edits)
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:961
+    fn from_internal(identity: WebErrorPageIdentity, code: String, message: String, action_links: [WebErrorActionLink]) -> Self WebErrorPageError! {
+        internal :: WebErrorInternalFact.new(^code, ^message)?
+        page := Self.new(^identity, WebErrorDiagnosticFact.internal_placeholder(), [], .None, ^action_links)?
+        page.internal = .Val(^internal)
+        page.failure_id = page.compute_failure_id()
+        page.validate_size()?
+        return page
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:987
+    fn from_dev_status(identity: WebErrorPageIdentity, facts: &WebErrorDevStatusFacts, action_links: [WebErrorActionLink]) -> Self? WebErrorPageError! {
+        if !facts.is_error() -> return .None
+        if facts.is_internal_failure() -> return .Val(Self.from_internal(^identity, facts.code.clone(), facts.diagnostic.clone(), ^action_links)?)
+        diagnostic :: WebErrorDiagnosticFact.from_dev_status(facts)?
+        return .Val(Self.new(^identity, ^diagnostic, [], .None, ^action_links)?)
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1008
+    fn with_edits(self: Self, edits: [WebErrorEdit]) -> Self WebErrorPageError! {
+        if edits.len() > MAX_WEB_ERROR_EDITS -> return .Err(.TooManyItems("fix edits"))
+        loop edit in &edits -> edit.validate()?
+        edits.sort_by(web_error_edit_order)
+        self.edits = ^edits
+        self.failure_id = self.compute_failure_id()
+        self.validate_size()?
+        return self
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1022
+    fn with_status(self: Self, status: U16) -> Self WebErrorPageError! {
+        validate_status(status)?
+        self.status = status
+        self.failure_id = self.compute_failure_id()
+        self.validate_size()?
+        return self
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1030
+    fn identity(self: Self) -> WebErrorPageIdentity { return &self.identity }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1034
+    fn diagnostic(self: Self) -> WebErrorDiagnosticFact { return &self.diagnostic }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1037
+    fn internal(self: Self) -> WebErrorInternalFact? { return self.internal.as_ref() }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1041
+    fn is_internal(self: Self) -> Bool { return self.internal.is_some() }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1045
+    fn edits(self: Self) -> [WebErrorEdit] { return &self.edits }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1049
+    fn with_source_excerpts(self: Self, source_excerpts: [WebErrorSourceExcerpt]) -> Self WebErrorPageError! {
+        if source_excerpts.len() > MAX_WEB_ERROR_SOURCE_EXCERPTS -> return .Err(.TooManyItems("source excerpts"))
+        loop excerpt in &source_excerpts -> excerpt.validate()?
+        source_excerpts.sort_by(source_excerpt_order)
+        self.source_excerpts = ^source_excerpts
+        self.failure_id = self.compute_failure_id()
+        self.validate_size()?
+        return self
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1067
+    fn source_excerpts(self: Self) -> [WebErrorSourceExcerpt] { return &self.source_excerpts }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1071
+    fn related_cause(self: Self) -> WebErrorDiagnosticFact? { return self.related_cause.as_ref() }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1075
+    fn action_links(self: Self) -> [WebErrorActionLink] { return &self.action_links }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1079
+    fn status(self: Self) -> U16 { return self.status }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1083
+    fn failure_id(self: Self) -> String { return self.failure_id }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1087
+    fn validate(self: &Self) WebErrorPageError! {
+        validate_status(self.status)?
+        self.identity.validate()?
+        self.diagnostic.validate()?
+        if self.internal.as_ref() == .Val(v) -> v.validate()?
+        if self.related_cause.as_ref() == .Val(v) -> v.validate()?
+        if self.source_excerpts.len() > MAX_WEB_ERROR_SOURCE_EXCERPTS -> return .Err(.TooManyItems("source excerpts"))
+        if self.edits.len() > MAX_WEB_ERROR_EDITS -> return .Err(.TooManyItems("fix edits"))
+        if self.action_links.len() > MAX_WEB_ERROR_ACTION_LINKS -> return .Err(.TooManyItems("action links"))
+        loop edit in &self.edits -> edit.validate()?
+        loop excerpt in &self.source_excerpts -> excerpt.validate()?
+        loop link in &self.action_links -> link.validate()?
+        return self.validate_size()
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1121
+    fn project[C: WebErrorCapabilityInput](self: Self, accept: String, capabilities: C) -> WebErrorProjection WebErrorPageError! {
+        if accept.len() > MAX_WEB_ERROR_ACCEPT_BYTES || accept.chars().any((c) -> c.is_control()) -> return .Err(.InvalidAccept)
+        self.validate()?
+        // GATE #4483: selected build's debug assertions, not the porting host's.
+        local :: core.sys.target.debug_assertions() && capabilities.local_details() && !capabilities.release_build()
+        facts :: WebErrorFacts.from_page(self, local)
+        fact_digest :: sha256_hex(facts.canonical_json().as_bytes())
+        content_type :: negotiate_content_type(accept)
+        body :: match content_type { .Html -> facts.render_html(); .Json -> facts.render_json() }
+        if body.len() > MAX_WEB_ERROR_OUTPUT_BYTES -> return .Err(.OutputTooLarge)
+        return WebErrorProjection { status: self.status, content_type, body: ^body, fact_digest: ^fact_digest, failure_id: self.failure_id.clone(), redacted: facts.redacted }
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1152
+    fn validate_size(self: &Self) WebErrorPageError! {
+        bytes := self.identity.request_id.len() + self.identity.session_id.len() + self.identity.source_id.len() + self.identity.build_id.len() + self.identity.revision.len() + diagnostic_bytes(&self.diagnostic)
+        if self.internal.as_ref() == .Val(v) -> bytes = bytes.saturating_add(v.code.len()).saturating_add(v.message.len())
+        loop edit in &self.edits -> bytes = bytes.saturating_add(edit.source_id.len()).saturating_add(edit.new_text.len()).saturating_add(edit.applicability.as_ref().map_or(0, (v) -> v.len())).saturating_add(edit.safety.as_ref().map_or(0, (v) -> v.len()))
+        if self.related_cause.as_ref() == .Val(v) -> bytes = bytes.saturating_add(diagnostic_bytes(v))
+        loop excerpt in &self.source_excerpts -> bytes = bytes.saturating_add(excerpt.source_id.len()).saturating_add(excerpt.label.len()).saturating_add(excerpt.excerpt.as_ref().map_or(0, (v) -> v.len()))
+        loop link in &self.action_links -> bytes = bytes.saturating_add(link.label.len()).saturating_add(link.href.len())
+        if bytes > MAX_WEB_ERROR_INPUT_BYTES -> return .Err(.InputTooLarge)
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1189
+    fn compute_failure_id(self: Self) -> String {
+        facts :: WebErrorFacts.from_page(self, true)
+        return "fail-" + sha256_hex(facts.canonical_json().as_bytes())
+    }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1196
+struct WebErrorFacts {
+    status: U16; failure_id: String; identity: WebErrorPageIdentity; diagnostic: WebErrorDiagnosticFact
+    internal: WebErrorInternalFact?; edits: [WebErrorEdit]; source_excerpts: [WebErrorSourceExcerpt]
+    related_cause: WebErrorDiagnosticFact?; action_links: [WebErrorActionLink]; redacted: Bool
+}
+impl WebErrorFacts {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1210
+    fn from_page(page: WebErrorPage, local: Bool) -> Self {
+        diagnostic := page.diagnostic.clone()
+        if !local {
+            diagnostic.why = .None
+            diagnostic.fix = .None
+            diagnostic.typed_identity = .None
+            diagnostic.span = .None
+        }
+        return Self {
+            status: page.status, failure_id: page.failure_id.clone(),
+            identity: WebErrorPageIdentity { request_id: redact_identity(page.identity.request_id), session_id: redact_identity(page.identity.session_id), source_id: redact_identity(page.identity.source_id), build_id: redact_identity(page.identity.build_id), revision: redact_identity(page.identity.revision) },
+            diagnostic: ^diagnostic,
+            internal: page.internal.as_ref().map((v) -> if local -> v.clone() else -> WebErrorInternalFact { code: v.code.clone(), message: "[redacted]" }),
+            edits: if local -> page.edits.clone() else -> [],
+            source_excerpts: if local -> page.source_excerpts.clone() else -> [],
+            related_cause: if local -> page.related_cause.clone() else -> .None,
+            action_links: if local -> page.action_links.clone() else -> [], redacted: !local
+        }
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1261
+    fn canonical_json(self: Self) -> String { return self.json(false) }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1265
+    fn render_json(self: Self) -> String { return self.json(true) }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1269
+    fn json(self: Self, include_failure_id: Bool) -> String {
+        source_excerpts :: self.source_excerpts.iter().map(WebErrorSourceExcerpt.json).collect[[String]]().join(",")
+        action_links :: self.action_links.iter().map(WebErrorActionLink.json).collect[[String]]().join(",")
+        fields := ["\"schema\":" + json_string(WEB_ERROR_PAGE_SCHEMA), "\"status\":" + self.status.to_string()]
+        if include_failure_id -> fields.push("\"failure_id\":" + json_string(self.failure_id))
+        fields.push("\"kind\":" + json_string(if self.internal.is_some() -> "internal" else -> "diagnostic"))
+        fields.push("\"redacted\":" + (if self.redacted -> "true" else -> "false"))
+        fields.push("\"identity\":" + self.identity.json())
+        if self.internal.as_ref() == .Val(internal) {
+            fields.push("\"internal\":" + internal.json())
+            fields.push("\"diagnostic\":null")
+        } else { fields.push("\"diagnostic\":" + self.diagnostic.json_with_edits(&self.edits)) }
+        fields.push("\"related_cause\":" + self.related_cause.as_ref().map_or_else(() -> "null", WebErrorDiagnosticFact.json))
+        fields.push("\"source_excerpts\":[" + source_excerpts + "]")
+        fields.push("\"action_links\":[" + action_links + "]")
+        return "{" + fields.join(",") + "}"
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1319
+    fn render_html(self: Self) -> String {
+        html := String.with_capacity(4096)
+        html.push_str("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\"><title>Jet development error</title><style>body{font:16px system-ui,sans-serif;max-width:58rem;margin:2rem auto;padding:0 1rem;color:#202124}main{border:1px solid #d0d7de;border-radius:.5rem;padding:1.5rem}h1{font-size:1.5rem;margin:.25rem 0 1rem}h2{font-size:1rem;margin:1.5rem 0 .5rem}dl{display:grid;grid-template-columns:max-content 1fr;gap:.35rem .9rem}dt{font-weight:600}dd{margin:0;overflow-wrap:anywhere}pre{background:#f6f8fa;padding:.75rem;overflow:auto;white-space:pre-wrap}a{display:inline-block;margin:.25rem .5rem .25rem 0}code{font-family:ui-monospace,monospace}.muted{color:#57606a}.redacted{background:#fff8c5;padding:.75rem}</style></head><body><main data-schema=\"jet.dev.error/v1\">")
+        html.push_str("<p class=\"muted\">Jet local development error</p><h1>")
+        if self.diagnostic.what.as_ref() == .Val(v) -> html.push_str(html_escape(v))
+        html.push_str("</h1><p><code>")
+        if self.diagnostic.code.as_ref() == .Val(v) -> html.push_str(html_escape(v)) else -> html.push_str("diagnostic code unavailable")
+        html.push_str("</code> · HTTP ")
+        html.push_str(self.status.to_string())
+        html.push_str(" · <code data-failure-id=\"")
+        html.push_str(html_escape(self.failure_id))
+        html.push_str("\">")
+        html.push_str(html_escape(self.failure_id))
+        html.push_str("</code></p><h2>Request identity</h2><dl>")
+        html.push_str(html_pair("request id", self.identity.request_id))
+        html.push_str(html_pair("session id", self.identity.session_id))
+        html.push_str(html_pair("source id", self.identity.source_id))
+        html.push_str(html_pair("build id", self.identity.build_id))
+        html.push_str(html_pair("revision", self.identity.revision))
+        html.push_str("</dl><h2>Diagnostic</h2><dl>")
+        if self.diagnostic.why.as_ref() == .Val(v) -> html.push_str(html_pair("why", v))
+        if self.diagnostic.fix.as_ref() == .Val(v) -> html.push_str(html_pair("fix", v))
+        if self.diagnostic.moment.as_ref() == .Val(v) -> html.push_str(html_pair("moment", v))
+        if self.diagnostic.severity.as_ref() == .Val(v) -> html.push_str(html_pair("severity", v))
+        if self.diagnostic.typed_identity.as_ref() == .Val(v) -> html.push_str(html_pair("typed identity", v))
+        if self.diagnostic.span == .Val(v) -> html.push_str(html_pair("span", "{v.start}..{v.end}"))
+        html.push_str("</dl>")
+        if self.redacted -> html.push_str("<p class=\"redacted\">Local source, cause, and action details are unavailable outside a local development capability.</p>") else {
+            render_source_html(&html, &self.source_excerpts)
+            if self.related_cause.as_ref() == .Val(cause) {
+                html.push_str("<h2>Related cause</h2><dl>")
+                if cause.code.as_ref() == .Val(v) -> html.push_str(html_pair("code", v))
+                if cause.what.as_ref() == .Val(v) -> html.push_str(html_pair("what", v))
+                if cause.why.as_ref() == .Val(v) -> html.push_str(html_pair("why", v))
+                if cause.fix.as_ref() == .Val(v) -> html.push_str(html_pair("fix", v))
+                html.push_str("</dl>")
+            }
+            if !self.action_links.is_empty() {
+                html.push_str("<h2>Actions</h2><p>")
+                loop link in &self.action_links {
+                    html.push_str("<a rel=\"noreferrer\" href=\"")
+                    html.push_str(html_escape(link.href))
+                    html.push_str("\">")
+                    html.push_str(html_escape(link.label))
+                    html.push_str("</a>")
+                }
+                html.push_str("</p>")
+            }
+        }
+        html.push_str("</main></body></html>")
+        return html
+    }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1401
+fn report_source_excerpts(report: JetErrorReport) -> [WebErrorSourceExcerpt] WebErrorPageError! {
+    excerpts := [WebErrorSourceExcerpt]{}
+    loop frame in report.origin.iter().chain(&report.source_journey) -> excerpts.push(source_excerpt_from_journey(frame)?)
+    loop frame in &report.context_frames -> excerpts.push(source_excerpt_from_context(frame)?)
+    return excerpts
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1414
+fn source_excerpt_from_journey(frame: JetErrorJourneyFrame) -> WebErrorSourceExcerpt WebErrorPageError! {
+    excerpt :: if frame.note.is_empty() -> .None else -> .Val(frame.note.clone())
+    return WebErrorSourceExcerpt.without_span(frame.file.clone(), frame.fn_name.clone(), ^excerpt)?.with_location(if frame.line > 0 -> .Val(frame.line) else -> .None, if frame.column > 0 -> .Val(frame.column) else -> .None)
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1425
+fn source_excerpt_from_context(frame: JetErrorContextFrame) -> WebErrorSourceExcerpt WebErrorPageError! {
+    return WebErrorSourceExcerpt.without_span(frame.file.clone(), "context", .Val(frame.text.clone()))?.with_location(if frame.line > 0 -> .Val(frame.line) else -> .None, .None)
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1436
+fn web_span_from_span(span: Span) -> WebErrorSpan WebErrorPageError! { return WebErrorSpan.new(span.start, span.end) }
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1440
+fn diagnostic_bytes(fact: WebErrorDiagnosticFact) -> Usize {
+    return fact.code.as_ref().map_or(0, (v) -> v.len()) + fact.what.as_ref().map_or(0, (v) -> v.len()) + fact.why.as_ref().map_or(0, (v) -> v.len()) + fact.fix.as_ref().map_or(0, (v) -> v.len()) + fact.severity.as_ref().map_or(0, (v) -> v.len()) + fact.moment.as_ref().map_or(0, (v) -> v.len()) + fact.typed_identity.as_ref().map_or(0, (v) -> v.len())
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1450
+fn normalize_identity(value: String, field: String) -> String WebErrorPageError! {
+    validate_identity(value, field)?
+    return redact_identity(value)
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1455
+fn normalize_source_identity(value: String) -> String WebErrorPageError! {
+    validate_source_identity(value)?
+    return redact_identity(value)
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1460
+fn redact_identity(value: String) -> String { return if contains_sensitive_marker(value) -> "[redacted]" else -> value.to_string() }
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1468
+fn validate_identity(value: String, field: String) WebErrorPageError! {
+    if value.is_empty() -> return .Err(.EmptyField(field))
+    if value.len() > MAX_WEB_ERROR_ID_BYTES -> return .Err(.TextTooLarge(field))
+    if value.chars().any((c) -> c.is_control()) -> return .Err(.ControlCharacter(field))
+    if value.chars().any((c) -> c.is_whitespace() || c == '<' || c == '>' || c == '"' || c == Char{39} || c == '`' || c == '\\') -> return .Err(.InvalidIdentity(field))
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1487
+fn validate_source_identity(value: String) WebErrorPageError! {
+    validate_identity(value, "source id")?
+    if value.split('/').any((part) -> part == "..") || value.starts_with("//") -> return .Err(.InvalidIdentity("source id"))
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1495
+fn normalize_code(value: String) -> String WebErrorPageError! { validate_code(value)?; return value }
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1500
+fn validate_code(value: String) WebErrorPageError! { return validate_identity(value, "diagnostic code") }
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1504
+fn normalize_required_text(value: String, field: String, limit: Usize) -> String WebErrorPageError! {
+    if value.is_empty() -> return .Err(.EmptyField(field))
+    normalized := normalize_text(^value, field, limit)?
+    if contains_sensitive_marker(normalized) -> normalized = "[redacted]"
+    return normalized
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1519
+fn normalize_optional_text(value: String?, field: String, limit: Usize) -> String? WebErrorPageError! {
+    value :: value ?? return .None
+    if value.is_empty() -> return .None
+    normalized :: normalize_text(^value, field, limit)?
+    if contains_sensitive_marker(normalized) -> return .None
+    return .Val(normalized)
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1537
+fn normalize_text(value: String, field: String, limit: Usize) -> String WebErrorPageError! {
+    if value.len() > limit -> return .Err(.TextTooLarge(field))
+    normalized := String.with_capacity(value.len())
+    loop c in value.chars() {
+        if c == '\n' || c == Char{13} || c == '\t' -> normalized.push(c)
+        else if c.is_control() -> normalized.push('�')
+        else -> normalized.push(c)
+    }
+    return normalized
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1556
+fn validate_optional_text(value: &String?, field: String, limit: Usize) WebErrorPageError! {
+    value :: value.as_ref() ?? return ()
+    if value.is_empty() -> return .Err(.EmptyField(field))
+    if value.len() > limit -> return .Err(.TextTooLarge(field))
+    if value.chars().any((c) -> c.is_control()) && value.chars().any((c) -> c != '\n' && c != Char{13} && c != '\t' && c.is_control()) -> return .Err(.ControlCharacter(field))
+    if contains_sensitive_marker(value) -> return .Err(.UnsafeContent(field))
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1581
+fn contains_sensitive_marker(value: String) -> Bool {
+    lower :: value.to_ascii_lowercase()
+    return ["password=", "password:", "secret=", "secret:", "authorization:", "authorization=", "bearer ", "api_key", "apikey", "access_token", "client_secret", "private_key", "set-cookie", "cookie:", "sk_live_", "ghp_", "xoxb-"].iter().any((marker) -> lower.contains(marker))
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1606
+fn normalize_href(value: String) -> String WebErrorPageError! { validate_href(value)?; return value }
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1611
+fn validate_href(value: String) WebErrorPageError! {
+    if value.is_empty() -> return .Err(.EmptyField("action href"))
+    if value.len() > MAX_WEB_ERROR_LINK_BYTES -> return .Err(.TextTooLarge("action href"))
+    if value.chars().any((c) -> c.is_control()) || value.chars().any((c) -> c.is_whitespace()) -> return .Err(.InvalidLink)
+    if contains_sensitive_marker(value) || value.contains('@') -> return .Err(.InvalidLink)
+    lower :: value.to_ascii_lowercase()
+    allowed :: (value.starts_with('/') && !value.starts_with("//")) || lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("jet://")
+    if !allowed || lower.starts_with("javascript:") || lower.starts_with("data:") || lower.starts_with("vbscript:") || lower.starts_with("file:") -> return .Err(.InvalidLink)
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1641
+fn validate_status(status: U16) WebErrorPageError! { if status < 400 || status > 599 -> return .Err(.InvalidStatus) }
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1649
+fn source_excerpt_order(left: WebErrorSourceExcerpt, right: WebErrorSourceExcerpt) -> Ordering {
+    return left.source_id.cmp(right.source_id).then_with(() -> left.label.cmp(right.label)).then_with(() -> left.span.map((s) -> (_0: s.start, _1: s.end)).cmp(right.span.map((s) -> (_0: s.start, _1: s.end)))).then_with(() -> left.line.cmp(right.line)).then_with(() -> left.column.cmp(right.column)).then_with(() -> left.excerpt.cmp(right.excerpt))
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1663
+fn action_link_order(left: WebErrorActionLink, right: WebErrorActionLink) -> Ordering { return left.label.cmp(right.label).then_with(() -> left.href.cmp(right.href)) }
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1666
+fn web_error_edit_order(left: WebErrorEdit, right: WebErrorEdit) -> Ordering {
+    return left.source_id.cmp(right.source_id).then_with(() -> left.span.start.cmp(right.span.start).then_with(() -> left.span.end.cmp(right.span.end))).then_with(() -> left.new_text.cmp(right.new_text)).then_with(() -> left.applicability.cmp(right.applicability)).then_with(() -> left.safety.cmp(right.safety))
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1680
+fn html_pair(label: String, value: String) -> String { return "<dt>" + html_escape(label) + "</dt><dd>" + html_escape(value) + "</dd>" }
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1688
+fn render_source_html(html: String, excerpts: [WebErrorSourceExcerpt]) -> Unit {
+    if excerpts.is_empty() -> return
+    html.push_str("<h2>Source</h2>")
+    loop excerpt in excerpts {
+        html.push_str("<section><h3>")
+        html.push_str(html_escape(excerpt.label))
+        html.push_str("</h3><p><code>")
+        html.push_str(html_escape(excerpt.source_id))
+        if excerpt.line == .Val(line) {
+            html.push(':')
+            html.push_str(line.to_string())
+            if excerpt.column == .Val(column) { html.push(':'); html.push_str(column.to_string()) }
+        }
+        if excerpt.span == .Val(span) {
+            html.push_str(" bytes ")
+            html.push_str(span.start.to_string())
+            html.push_str("..")
+            html.push_str(span.end.to_string())
+        }
+        html.push_str("</code></p>")
+        if excerpt.excerpt.as_ref() == .Val(text) { html.push_str("<pre>"); html.push_str(html_escape(text)); html.push_str("</pre>") }
+        html.push_str("</section>")
+    }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1722
+fn accept_candidate_better(candidate: (U16, U8, Usize), current: (U16, U8, Usize)?) -> Bool {
+    return current.is_none_or((v) -> candidate._1 > v._1 || (candidate._1 == v._1 && candidate._2 < v._2))
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1732
+fn negotiate_content_type(accept: String) -> WebErrorContentType {
+    // Specificity wins within a representation before comparing qualities.
+    html := (_0: U16, _1: U8, _2: Usize)?{.None}
+    json := (_0: U16, _1: U8, _2: Usize)?{.None}
+    loop (index, item) in accept.split(',').enumerate() {
+        pieces := item.split(';')
+        media := pieces.next().unwrap_or("").trim() // #4303
+        if media.is_empty() -> next
+        quality := U16{1000}
+        valid := true
+        loop parameter in pieces {
+            parameter := parameter.trim() // #4303
+            (name, value) :: parameter.split_once('=') ?? next
+            name := name.trim() // #4303
+            if name.eq_ignore_ascii_case("q") {
+                value := value.trim() // #4303
+                match parse_quality(value) { .Val(v) -> quality = v; .None -> valid = false }
+            }
+        }
+        if !valid -> next
+        content_type := WebErrorContentType?{.None}
+        specificity := U8{0}
+        if media.eq_ignore_ascii_case("text/html") { content_type = .Val(.Html); specificity = 2 }
+        else if media.eq_ignore_ascii_case("application/json") { content_type = .Val(.Json); specificity = 2 }
+        else if media.eq_ignore_ascii_case("text/*") { content_type = .Val(.Html); specificity = 1 }
+        else if media.eq_ignore_ascii_case("application/*") { content_type = .Val(.Json); specificity = 1 }
+        else if media != "*/*" && media != "*" -> next
+        candidate :: (_0: quality, _1: specificity, _2: index)
+        if content_type == {
+            .Val(.Html) -> { if accept_candidate_better(candidate, html) -> html = .Val(candidate) }
+            .Val(.Json) -> { if accept_candidate_better(candidate, json) -> json = .Val(candidate) }
+            .None -> {
+                if accept_candidate_better(candidate, html) -> html = .Val(candidate)
+                if accept_candidate_better(candidate, json) -> json = .Val(candidate)
+            }
+        }
+    }
+    if (html, json) == {
+        (_0: .Val(h), _1: .Val(j)) -> {
+            if j.0 > h.0 || (j.0 == h.0 && (j.1 > h.1 || (j.1 == h.1 && j.2 < h.2))) -> return .Json
+            return .Html
+        }
+        (_0: .Val(_), _1: _) -> return .Html
+        (_0: .None, _1: .None) -> return .Html
+        (_0: .None, _1: .Val(_)) -> return .Json
+    }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1810
+fn parse_quality(value: String) -> U16? {
+    if value == "0" -> return .Val(0)
+    if value == "1" -> return .Val(1000)
+    (whole, fraction) :: value.split_once('.') ?? return .None
+    if whole != "0" && whole != "1" -> return .None
+    if fraction.is_empty() || fraction.len() > 3 || !fraction.bytes().all((b) -> b.is_ascii_digit()) -> return .None
+    padded := fraction.to_string()
+    loop padded.len() < 3 -> padded.push('0')
+    fractional :: padded.parse[U16]().ok() ?? return .None
+    if whole == "1" && fractional != 0 -> return .None
+    return .Val(if whole == "1" -> 1000 else -> fractional)
+}

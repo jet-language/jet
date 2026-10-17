@@ -1,0 +1,15 @@
+// Additional preparation controls: real lexical provider, no mocked symbols.
+#Test("call hierarchy preparation at whitespace returns empty without checking") {
+    server :: lsp_handler_test_server("fn run() {{\n    \n}}\n")
+    params :: lsp_handler_test_params("{{\"textDocument\":{{\"uri\":\"file:///lsp/handler.jet\"}},\"position\":{{\"line\":1,\"character\":2}}}}")
+    assert_eq(lsp_prepare_call_hierarchy_response(server, Val(params), DataTree.Int(1)), Val(lsp_response(DataTree.Int(1), "[]")))
+    assert_eq(server.queries.stats().recomputes, 1)
+}
+
+#Test("navigation handlers reject nonstring document identity before invoking providers") {
+    server :: lsp_handler_test_server("fn run() {{}}\n")
+    params :: lsp_handler_test_params("{{\"textDocument\":{{\"uri\":1}},\"position\":{{\"line\":0,\"character\":3}}}}")
+    assert_eq(lsp_hover_response(server, Val(params), DataTree.Int(1)), None)
+    assert_eq(lsp_definition_response(server, Val(params), DataTree.Int(1)), None)
+    assert_eq(server.queries.stats().recomputes, 0)
+}

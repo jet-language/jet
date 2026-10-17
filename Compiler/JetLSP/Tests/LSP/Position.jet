@@ -1,0 +1,151 @@
+// Source/LSP/Position.rs:145–209 and Server.rs:4575–4586 parity oracles.
+use core.encoding.json as lsp_test_json
+
+#Test("validated_edits_follow_utf16_and_lsp_line_rules") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR fixture")
+    src :: "a😀{cr}\nbc{cr}d\n"
+    table :: LineTable.new(src)
+    assert_eq(table.checked_offset(src, LSPPos{line: 0, character: 2}), None)
+    assert_eq(table.checked_offset(src, LSPPos{line: 0, character: 99}), Val(5))
+    assert_eq(table.checked_offset(src, LSPPos{line: 2, character: 0}), Val(10))
+    assert_eq(lsp_byte_offset_to_lsp(src, 6), LSPPos{line: 0, character: 3})
+    assert_eq(lsp_byte_offset_to_lsp(src, 10), LSPPos{line: 2, character: 0})
+    edited :: lsp_apply_edit(src, LSPRange{
+        start: LSPPos{line: 1, character: 1},
+        end: LSPPos{line: 1, character: 99},
+    }, Val(1), "X")
+    assert_eq(edited, Val("a😀{cr}\nbX{cr}d\n"))
+}
+
+#Test("file_uri_percent_encoding_rejects_hostile_escapes") {
+    assert_eq(lsp_uri_to_path("file:///tmp/a%20b", false), "/tmp/a b")
+    assert_eq(lsp_path_to_uri("/tmp/a b#c%"), "file:///tmp/a%20b%23c%25")
+    loop uri in ([String]{"file:///tmp/%", "file:///tmp/%GG", "file:///tmp/%FF"}) {
+        assert_eq(lsp_uri_to_path(uri, false), "")
+    }
+}
+
+#Test("empty_and_final_newline_document_endpoints") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR fixture")
+    empty :: LineTable.new("")
+    assert_eq(empty.checked_offset("", LSPPos{line: 0, character: 9}), Val(0))
+    assert_eq(empty.checked_offset("", LSPPos{line: 1, character: 0}), None)
+    assert_eq(empty.offset("", LSPPos{line: 1, character: 0}), 0)
+    assert_eq(lsp_full_document_range(""), LSPRange{start: LSPPos{line: 0, character: 0}, end: LSPPos{line: 0, character: 0}})
+    loop src in ([String]{"a\n", "a{cr}", "a{cr}\n"}) {
+        range :: lsp_full_document_range(src)
+        assert_eq(range.end, LSPPos{line: 1, character: 0})
+        assert_eq(lsp_pos_to_offset(src, range.end), src.bytes().len())
+        assert_eq(LineTable.new(src).checked_offset(src, LSPPos{line: 2, character: 0}), None)
+        assert_eq(lsp_pos_to_offset(src, LSPPos{line: 2, character: 0}), src.bytes().len())
+    }
+    assert_eq(lsp_full_document_range("é😀").end, LSPPos{line: 0, character: 3})
+    assert_eq(lsp_byte_offset_to_lsp("é😀", 99), LSPPos{line: 0, character: 3})
+}
+
+#Test("crlf_offsets_and_byte_span_use_utf16_not_scalar_counts") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR fixture")
+    src :: "é😀{cr}\nz"
+    assert_eq(src.bytes().len(), 9)
+    assert_eq(lsp_byte_offset_to_lsp(src, 2), LSPPos{line: 0, character: 1})
+    assert_eq(lsp_byte_offset_to_lsp(src, 6), LSPPos{line: 0, character: 3})
+    assert_eq(lsp_byte_offset_to_lsp(src, 7), LSPPos{line: 0, character: 3})
+    assert_eq(lsp_byte_offset_to_lsp(src, 8), LSPPos{line: 1, character: 0})
+    assert_eq(lsp_byte_span_to_range(src, Span{start: 2, end: 8}), LSPRange{start: LSPPos{line: 0, character: 1}, end: LSPPos{line: 1, character: 0}})
+    assert_eq(lsp_pos_to_offset(src, LSPPos{line: 0, character: 99}), 6)
+}
+
+#Test("validated_edit_rejects_surrogate_interiors_invalid_lines_and_reversed_ranges") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR fixture")
+    src :: "a😀{cr}\nb"
+    start :: LSPPos{line: 0, character: 1}
+    interior :: LSPPos{line: 0, character: 2}
+    end :: LSPPos{line: 0, character: 3}
+    assert_eq(LineTable.new(src).checked_offset(src, start), Val(1))
+    assert_eq(LineTable.new(src).checked_offset(src, end), Val(5))
+    assert_eq(lsp_apply_edit(src, LSPRange{start: start, end: interior}, None, "X"), None)
+    assert_eq(lsp_apply_edit(src, LSPRange{start: interior, end: end}, None, "X"), None)
+    assert_eq(lsp_apply_edit(src, LSPRange{start: end, end: start}, None, "X"), None)
+    assert_eq(lsp_apply_edit(src, LSPRange{start: start, end: LSPPos{line: 2, character: 0}}, None, "X"), None)
+    assert_eq(lsp_apply_edit(src, LSPRange{start: LSPPos{line: 2, character: 0}, end: end}, None, "X"), None)
+    assert_eq(lsp_apply_edit(src, LSPRange{start: start, end: end}, Val(1), "X"), None)
+    assert_eq(lsp_apply_edit(src, LSPRange{start: start, end: end}, Val(4), "X"), None)
+    assert_eq(lsp_apply_edit(src, LSPRange{start: start, end: end}, Val(2), "X"), Val("aX{cr}\nb"))
+    assert_eq(lsp_apply_edit(src, LSPRange{start: start, end: end}, None, "é"), Val("aé{cr}\nb"))
+    assert_eq(lsp_apply_edit(src, LSPRange{start: end, end: end}, Val(0), "X"), Val("a😀X{cr}\nb"))
+    // rangeLength includes both CRLF code units when the edit spans lines.
+    assert_eq(lsp_apply_edit(src, LSPRange{start: end, end: LSPPos{line: 1, character: 0}}, Val(1), ""), None)
+    assert_eq(lsp_apply_edit(src, LSPRange{start: end, end: LSPPos{line: 1, character: 0}}, Val(2), ""), Val("a😀b"))
+    assert_eq(lsp_pos_to_offset(src, interior), src.bytes().len())
+}
+
+#Test("range_json_round_trips_and_protocol_numbers_are_bounded_integers") {
+    range :: LSPRange{start: LSPPos{line: 1, character: 2}, end: LSPPos{line: 3, character: 4}}
+    text :: lsp_range_json(range)
+    assert_eq(text, `{"start":{"line":1,"character":2},"end":{"line":3,"character":4}}`)
+    parsed :: lsp_test_json.parse(text) ?? panic("range JSON")
+    assert_eq(lsp_range_from_json(parsed), Val(range))
+    assert_eq(lsp_uinteger(DataTree.Int(0)), Val(0))
+    assert_eq(lsp_uinteger(DataTree.Int(2147483647)), Val(2147483647))
+    loop number in ([Int]{-1, 2147483648, 4294967296}) {
+        assert_eq(lsp_uinteger(DataTree.Int(number)), None)
+    }
+    loop value in ([DataTree]{DataTree.Float(1.0), DataTree.Text("1"), DataTree.Bool(true), DataTree.Null}) {
+        assert_eq(lsp_uinteger(value), None)
+        assert_eq(lsp_pos_from_json(value), None)
+        assert_eq(lsp_range_from_json(value), None)
+    }
+    loop position_text in ([String]{
+        `{"line":0}`, `{"character":0}`, `{"line":0,"character":1.0}`,
+        `{"line":0,"character":2147483648}`, `{"line":-1,"character":0}`,
+    }) {
+        value :: lsp_test_json.parse(position_text) ?? panic("position fixture")
+        assert_eq(lsp_pos_from_json(value), None)
+    }
+    loop range_text in ([String]{
+        `{"start":{"line":0,"character":0}}`,
+        `{"end":{"line":0,"character":0}}`,
+        `{"start":{"line":0},"end":{"line":0,"character":0}}`,
+    }) {
+        value :: lsp_test_json.parse(range_text) ?? panic("range fixture")
+        assert_eq(lsp_range_from_json(value), None)
+    }
+    // Decoding does not invent ordered-range validation; edit application owns it.
+    reversed :: lsp_test_json.parse(`{"start":{"line":2,"character":0},"end":{"line":1,"character":0}}`) ?? panic("reversed range")
+    assert_eq(lsp_range_from_json(reversed), Val(LSPRange{start: LSPPos{line: 2, character: 0}, end: LSPPos{line: 1, character: 0}}))
+}
+
+#Test("file_uri_preserves_paths_and_validates_percent_utf8") {
+    path :: "/tmp/é😀/:a?b+c%2f"
+    encoded :: lsp_path_to_uri(path)
+    assert_eq(encoded, "file:///tmp/%C3%A9%F0%9F%98%80/:a%3Fb%2Bc%252f")
+    assert_eq(lsp_uri_to_path(encoded, false), path)
+    assert_eq(lsp_uri_to_path("file:///tmp/%c3%a9", false), "/tmp/é")
+    assert_eq(lsp_uri_to_path("file:///a+b", false), "/a+b")
+    nul :: String.from_bytes([U8]{0}) ?? panic("NUL fixture")
+    assert_eq(lsp_uri_to_path("file:///a%00b", false), "/a{nul}b")
+    assert_eq(lsp_path_to_uri("/a{nul}b"), "file:///a%00b")
+    loop uri in ([String]{"file:///tmp/%A", "file:///tmp/%C3", "file:///tmp/%C0%AF", "file:///tmp/%ED%A0%80", "file:///tmp/%F4%90%80%80"}) {
+        assert_eq(lsp_uri_to_path(uri, false), "")
+    }
+    // No host, query, fragment, dot-segment, separator or case normalization.
+    assert_eq(lsp_uri_to_path("file://host/a/../b?x#y+z", false), "host/a/../b?x#y+z")
+    assert_eq(lsp_uri_to_path("file:///a%2Fb", false), "/a/b")
+    assert_eq(lsp_uri_to_path("FILE:///tmp/%FF", false), "FILE:///tmp/%FF")
+    assert_eq(lsp_uri_to_path("/tmp/%FF", false), "/tmp/%FF")
+    assert_eq(lsp_uri_to_path("file:///C:/a%20b", true), "C:\\a b")
+    assert_eq(lsp_uri_to_path("file://///C:/a/b", true), "C:\\a\\b")
+    assert_eq(lsp_uri_to_path("/a/b", true), "/a/b")
+}
+
+#Test("three_byte_scalars_and_windows_slash_trim_keep_scalar_boundaries") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR fixture")
+    src :: "界a{cr}\n界"
+    assert_eq(LineTable.new(src).checked_offset(src, LSPPos{line: 0, character: 1}), Val(3))
+    assert_eq(lsp_byte_offset_to_lsp(src, 4), LSPPos{line: 0, character: 2})
+    assert_eq(lsp_full_document_range(src).end, LSPPos{line: 1, character: 1})
+    assert_eq(lsp_apply_edit(src, LSPRange{start: LSPPos{line: 0, character: 0}, end: LSPPos{line: 0, character: 1}}, Val(1), "é"), Val("éa{cr}\n界"))
+    // trim_start_matches('/') counts ASCII slashes; following scalars survive whole.
+    assert_eq(lsp_uri_to_path("file:////%E7%95%8C/%C3%A9", true), "界\\é")
+    assert_eq(lsp_uri_to_path("file:///", true), "")
+}

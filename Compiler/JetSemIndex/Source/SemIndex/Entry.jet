@@ -1,0 +1,108 @@
+// Stable semantic-index opening API. Canonical facts remain at their owners.
+// Rust: crates/jet-semindex/src/lib.rs:6
+// Build/Structure/Signatures own builder and binder queries; Docs owns doc graphs;
+// Receipts owns semantic operations; Symbols owns symbol facts; Facts and
+// CallableFacts own schema records; Foundation owns derivations; Codec owns JSON.
+// PackageModel owns PackageFacts and effect projections; Sema owns effect facts.
+use jet_driver.Driver.[check_file_with_effect_facts, check_file_with_overlays, check_file_with_overlays_and_import_root]
+use jet_semindex.Build.[build_index, build_symbol_db]
+use jet_pkg_model.[WorkspaceDeclarationCache]
+
+// Rust: crates/jet-semindex/src/lib.rs:57
+// SemIndexError::Load and its Display/Error contracts are canonical in Open.jet.
+// Rust: crates/jet-semindex/src/lib.rs:74
+// from_checked is canonical as semindex_from_checked in Open.jet, using the
+// checked graph/source/effect inputs rather than copying a retained bundle.
+// Rust: crates/jet-semindex/src/lib.rs:82
+// package_facts_for_entry is canonical as semindex_package_facts_for_entry.
+// Its diagnostic join is semindex_package_facts_error_text, both in Open.jet.
+// Rust: crates/jet-semindex/src/lib.rs:99
+// package_facts_diagnostic is semindex_package_facts_diagnostic in Open.jet.
+// Rust: crates/jet-semindex/src/lib.rs:113
+// workspace_overlay_policy_for_entry is semindex_workspace_overlay_policy_for_entry.
+// Rust: crates/jet-semindex/src/lib.rs:148
+// workspace_lock_at is semindex_workspace_lock_at in Open.jet: missing versus
+// stale/invalid lock and nearest workspace boundaries retain their own branches.
+// Rust: crates/jet-semindex/src/lib.rs:170
+// attach_package_facts is semindex_attach_package_facts in Open.jet.
+
+// Rust: crates/jet-semindex/src/lib.rs:185
+fn semindex_open(entry: OSPath) -[FS, Env]> SemIndex SemIndexError! {
+    entry_str :: entry.to_string_lossy()
+    (diags, bundle, facts) :: check_file_with_effect_facts(entry_str, None, false)
+    if !semindex_open_has_errors(diags) {
+        if bundle == .Val(checked_bundle) {
+            index := build_index(checked_bundle, facts)
+            cache := WorkspaceDeclarationCache.new()
+            semindex_attach_package_facts(&index, &cache, entry_str)
+            return Ok(^index)
+        }
+    }
+    Err(SemIndexError.Load{diagnostics: ^diags})
+}
+
+// Rust: crates/jet-semindex/src/lib.rs:203
+fn semindex_open_symbols(entry: OSPath) -[FS, Env]> SemanticSymbolIndex SemIndexError! {
+    entry_str :: entry.to_string_lossy()
+    (diags, bundle, facts) :: check_file_with_effect_facts(entry_str, None, false)
+    if !semindex_open_has_errors(diags) {
+        if bundle == .Val(checked_bundle) {
+            return Ok(build_symbol_db(checked_bundle, facts).symbols)
+        }
+    }
+    Err(SemIndexError.Load{diagnostics: ^diags})
+}
+
+// Rust: crates/jet-semindex/src/lib.rs:219
+fn semindex_open_with_overlays(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> SemIndex SemIndexError! {
+    entry_str :: entry.to_string_lossy()
+    (diags, bundle, facts) :: check_file_with_overlays(entry_str, overlays, false)
+    if !semindex_open_has_errors(diags) {
+        if bundle == .Val(checked_bundle) {
+            index := build_index(checked_bundle, facts)
+            cache := WorkspaceDeclarationCache.new()
+            semindex_attach_package_facts(&index, &cache, entry_str)
+            return Ok(^index)
+        }
+    }
+    Err(SemIndexError.Load{diagnostics: ^diags})
+}
+
+// Rust: crates/jet-semindex/src/lib.rs:241
+fn semindex_open_structural_with_overlays(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> SemIndex SemIndexError! {
+    entry_str :: entry.to_string_lossy()
+    (diags, bundle, facts) :: check_file_with_overlays_and_import_root(entry_str, overlays)
+    if !semindex_open_has_errors(diags) {
+        if bundle == .Val(checked_bundle) {
+            index := build_index(checked_bundle, facts)
+            cache := WorkspaceDeclarationCache.new()
+            semindex_attach_package_facts(&index, &cache, entry_str)
+            return Ok(^index)
+        }
+    }
+    Err(SemIndexError.Load{diagnostics: ^diags})
+}
+
+// Rust: crates/jet-semindex/src/lib.rs:264
+fn semindex_open_with_overlays_and_diagnostics(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> (SemIndex, [Diagnostic]) SemIndexError! {
+    (index, diagnostics, _) :: semindex_open_with_overlays_diagnostics_and_inputs(entry, overlays)
+    Ok((_0: ^index, _1: ^diagnostics))
+}
+
+// Rust: crates/jet-semindex/src/lib.rs:275
+fn semindex_open_with_overlays_diagnostics_and_inputs(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> (SemIndex, [Diagnostic], [OSPath]) SemIndexError! {
+    entry_str :: entry.to_string_lossy()
+    (diags, bundle, facts) :: check_file_with_overlays(entry_str, overlays, false)
+    if bundle == {
+        .Val(checked_bundle) -> {
+            // Preserve physical loader membership and order, including modules
+            // with no definitions. Expected diagnostics do not reject a bundle.
+            inputs :: loop module in checked_bundle.modules -> module_ref.path.copy()
+            index := build_index(checked_bundle, facts)
+            cache := WorkspaceDeclarationCache.new()
+            semindex_attach_package_facts(&index, &cache, entry_str)
+            Ok((_0: ^index, _1: ^diags, _2: ^inputs))
+        }
+        .None -> Err(SemIndexError.Load{diagnostics: ^diags})
+    }
+}

@@ -1,0 +1,463 @@
+use std.io as io
+use std.fs as fs
+use core.files.[OSPath]
+use jet_debug.Dap.[DapServer, State, BreakpointAction, BreakpointSpec, AttachArguments, MAX_DAP_MESSAGE_BYTES]
+use jet_debug.Inferior.[Inferior, ResumeResult]
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.JSON.[json_escape, json_get, json_str, json_u32, parse_json_with_limit, MAX_PROTOCOL_HEADER_BYTES, MAX_PROTOCOL_HEADER_COUNT]
+
+impl DapServer {
+    // Rust: crates/jet-debug/src/Dap.rs:3656
+    fn resume_hidden_stop(&self, resume_command: String) -> ResumeResult IOError! {
+        self.state = .Running
+        inf :: self.inf ?? return .Err(io.Error.new(.NotFound, "the native debugger has no target while skipping a non-Jet stop"))
+        return &inf.resume_and_locate(resume_command) // GATE #4494
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:3667
+    fn exception_kind(self, backtrace: String) -> String? {
+        // Only the stop banner carries the reason; unwind frames do not.
+        reason := backtrace.lines().find((line) -> line.contains("stop reason =")) ?? ""
+        reason = reason.to_ascii_lowercase()
+        if self.last_signal != None || reason.contains("stop reason = signal ") -> return .Val("signal")
+        if reason.contains("panic") -> return .Val("panic")
+        if reason.contains("exception") || reason.contains("fatal error") || reason.contains("exc_") -> return .Val("error")
+        return None
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:3691
+    fn exception_filter_enabled(self, kind: String) -> Bool {
+        self.exception_filters.contains("all") || self.exception_filters.contains(kind)
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:3695
+    fn terminate_backend(&self, out: &io.Write, error: io.Error, message: String) {
+        id :: backend_error_id(error)
+        (diagnostic, _, _) :: diagnostic_details(id, message)
+        &self.terminate_with_diagnostic(out, diagnostic, message)
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:3701
+    fn terminate_with_diagnostic(&self, out: &io.Write, diagnostic: String, message: String) {
+        self.terminal_failure = true
+        self.state = .Terminated
+        &self.invalidate_references()
+        cleanup_proven :: &self.cleanup_after_terminal_state(out)
+        body :: "{{\"category\":\"stderr\",\"output\":\"[{json_escape(diagnostic)}] {json_escape(message)}\\n\"}}"
+        &self.event(out, "output", body)
+        if cleanup_proven -> &self.event(out, "terminated", "{{}}")
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:3717
+    fn breakpoint_action(&self, line: USize) -> BreakpointAction {
+        if self.pending_specs.is_empty() -> return .Continue
+        log := None
+        matched := false
+        stop_ids := [U32]{}
+        should_stop := false
+        loop index in 0..<self.pending_specs.len() {
+            spec :: self.pending_specs[index]
+            if spec.line != line -> next
+            matched = true
+            count := U32{1}
+            if index < self.hit_counts.len() {
+                self.hit_counts[index] = self.hit_counts[index].saturating_add(1)
+                count = self.hit_counts[index]
+            }
+            if spec.condition == .Val(condition) && !&self.condition_matches(condition) -> next
+            if spec.hit_condition == .Val(condition) && !hit_condition_matches(condition, count) -> next
+            if spec.log_message == .Val(message) {
+                log = .Val(&self.expand_log_message(message))
+            } else {
+                should_stop = true
+                if self.client_breakpoint_ids.get(index) == .Val(id) -> &stop_ids.push(id)
+            }
+        }
+        if should_stop -> return .Stop(^stop_ids)
+        if log == .Val(message) -> return .Log(^message)
+        // Matched conditional failures and ordinary mapped statements stay hidden.
+        _ :: matched
+        return .Continue
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:3774
+    fn condition_matches(&self, condition: String) -> Bool {
+        loop operator in ["==", "!=", ">=", "<=", ">", "<"] {
+            if condition.split_once(operator) == .Val((left, right)) {
+                left := left.trim() // #4303
+                value :: &self.read_jet_value(left) ?? return false
+                right := right.trim() // #4303
+                if value.parse[F64]().ok() == .Val(a) && right.parse[F64]().ok() == .Val(b) {
+                    return if operator == {
+                        "==" -> a == b, "!=" -> a != b, ">=" -> a >= b
+                        "<=" -> a <= b, ">" -> a > b, "<" -> a < b, else -> false
+                    }
+                }
+                return if operator == {
+                    "==" -> value == right
+                    "!=" -> value != right
+                    else -> false
+                }
+            }
+        }
+        return &self.read_jet_value(condition) == .Val("true")
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:3807
+    fn read_jet_value(&self, expression: String) -> String? {
+        (root, suffix) :: jet_expression(expression) ?? return None
+        rust_expression :: Inferior.jet_path_to_rust(root, suffix) ?? return None
+        inf :: self.inf ?? return None
+        output :: &inf.frame_variable(rust_expression).ok() ?? return None // GATE #4494
+        locals :: Inferior.parse_typed_locals(output)
+        if locals.first() == .Val((ty, _, value)) -> return .Val(Inferior.safe_value(ty, value))
+        return None
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:3817
+    fn expand_log_message(&self, message: String) -> String {
+        rendered := ""
+        rest := message
+        loop {
+            open :: rest.find('{') ?? break
+            &rendered.push_str(rest[0..<open])
+            after_open := rest[open + 1..<rest.len()] // #4303
+            close :: after_open.find('}') ?? {
+                &rendered.push_str(rest[open..<rest.len()])
+                return rendered
+            }
+            expression := after_open[0..<close] // #4303
+            &rendered.push_str(&self.read_jet_value(expression) ?? "<unavailable>")
+            rest = after_open[close + 1..<after_open.len()]
+        }
+        &rendered.push_str(rest)
+        return rendered
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:3839
+    fn respond(&self, out: &io.Write, request_seq: I64, command: String, success: Bool, body: String) {
+        seq :: &self.next_seq()
+        json :: "{{\"seq\":{seq},\"type\":\"response\",\"request_seq\":{request_seq},\"success\":{success},\"command\":\"{json_escape(command)}\",\"body\":{body}}}"
+        if write_message(out, json).is_err() -> self.terminal_failure = true
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:3861
+    fn respond_err(&self, out: &io.Write, request_seq: I64, command: String, message: String) {
+        id :: if message.contains("must") || message.contains("required") || message.contains("positive") || message.contains("invalid") || message.contains("array") -> 22032 else -> 22034
+        &self.respond_jet_error(out, request_seq, command, id, message)
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:3881
+    fn respond_backend_error(&self, out: &io.Write, request_seq: I64, command: String, error: io.Error, message: String) {
+        &self.respond_jet_error(out, request_seq, command, backend_error_id(error), message)
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:3893
+    fn respond_stale_reference(&self, out: &io.Write, request_seq: I64, command: String) {
+        &self.respond_jet_error(out, request_seq, command, 22036, "frame, scope, or variable reference expired when execution resumed")
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:3903
+    fn respond_jet_error(&self, out: &io.Write, request_seq: I64, command: String, id: I64, format: String) {
+        message :: if id == {
+            22031 -> "jet.invalidState", 22032 -> "jet.invalidArguments", 22033 -> "jet.unsupported"
+            22034 -> "jet.unavailable", 22035 -> "jet.timeout", 22036 -> "jet.staleReference"
+            22037 -> "jet.mapMismatch", 22038 -> "jet.cancelled", 22039 -> "jet.noSourceLocation"
+            else -> "jet.unavailable"
+        }
+        (diagnostic, why, fix) :: diagnostic_details(id, format)
+        body :: "{{\"error\":{{\"id\":{id},\"format\":\"{json_escape(format)}\",\"showUser\":true,\"variables\":{{\"retryable\":\"false\"}}}},\"jetDiagnostic\":{{\"schema\":\"jet.diagnostic/v1\",\"code\":\"{diagnostic}\",\"what\":\"{json_escape(format)}\",\"why\":\"{json_escape(why)}\",\"fix\":\"{json_escape(fix)}\"}}}}"
+        seq :: &self.next_seq()
+        json :: "{{\"seq\":{seq},\"type\":\"response\",\"request_seq\":{request_seq},\"success\":false,\"command\":\"{json_escape(command)}\",\"message\":\"{json_escape(message)}\",\"body\":{body}}}"
+        if write_message(out, json).is_err() -> self.terminal_failure = true
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:3947
+    fn event(&self, out: &io.Write, event: String, body: String) {
+        seq :: &self.next_seq()
+        json :: "{{\"seq\":{seq},\"type\":\"event\",\"event\":\"{event}\",\"body\":{body}}}"
+        if write_message(out, json).is_err() -> self.terminal_failure = true
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:3958
+    fn progress_start(&self, out: &io.Write, progress_id: String, title: String) {
+        &self.event(out, "progressStart", "{{\"progressId\":\"{json_escape(progress_id)}\",\"title\":\"{json_escape(title)}\",\"cancellable\":false}}")
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:3970
+    fn progress_end(&self, out: &io.Write, progress_id: String, message: String) {
+        &self.event(out, "progressEnd", "{{\"progressId\":\"{json_escape(progress_id)}\",\"message\":\"{json_escape(message)}\"}}")
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:3982
+    fn next_seq(&self) -> I64 {
+        s :: self.seq
+        self.seq += 1
+        return s
+    }
+}
+// Rust: crates/jet-debug/src/Dap.rs:3989
+fn backend_error_id(error: io.Error) -> I64 {
+    if error.kind() == {
+        .TimedOut -> 22035
+        .BrokenPipe | .UnexpectedEof | .ConnectionAborted | .ConnectionReset -> 22038
+        else -> 22034
+    }
+}
+// Rust: crates/jet-debug/src/Dap.rs:4000
+fn cleanup_error_details(error: io.Error) -> (I64, String) {
+    if error.kind() == {
+        .PermissionDenied -> (_0: 22037, _1: "debugger could not verify attach target identity")
+        .BrokenPipe | .UnexpectedEof | .ConnectionAborted | .ConnectionReset -> (22038, "debug session connection closed before cleanup was proven")
+        else -> (22034, "the debugger could not cleanly close the target")
+    }
+}
+// Rust: crates/jet-debug/src/Dap.rs:4016
+fn default_exception_filters() -> [String:Bool] { [String:Bool]{"panic":true} }
+// Rust: crates/jet-debug/src/Dap.rs:4020
+fn diagnostic_details(id: I64, format: String) -> (String, String, String) {
+    if id == {
+        22031 -> (_0: "E2232", _1: "the DAP lifecycle or stop generation does not permit the request", _2: "wait for the stated lifecycle event, then retry")
+        22032 -> ("E2236", "a request field violates the debugger's bounded local contract", "correct the field named in the diagnostic, then retry")
+        22033 -> ("E2234", "the supported local backend is missing or returned an unsupported result", "install or repair the supported backend, then retry")
+        22034 -> {
+            if format.contains("attach") || format.contains("identity") -> return ("E2231", "the process identity, executable, source hashes, or `.jetmap` did not remain verified", "stop the target or choose the matching local Jet build, then attach again")
+            ("E2234", "the supported local backend is missing, lost, or returned an unsupported result", "install or repair the supported backend, then retry")
+        }
+        22035 -> ("E2233", "the backend did not answer before the bounded read deadline", "check the target process and start a new session")
+        22036 -> ("E2238", "a frame, scope, or variable reference expired when execution resumed", "refresh the editor's stack and variables after the next stop")
+        22037 -> ("E2231", "the process identity, executable, source hashes, or `.jetmap` did not remain verified", "stop the target or choose the matching local Jet build, then attach again")
+        22038 -> ("E2237", "the editor, adapter, or debugger control channel closed before cleanup was proven", "check the target process, then start a new debug session")
+        22039 -> ("E2235", "the requested thread has no verified Jet source location", "select a stopped Jet task or move the breakpoint to a mapped Jet statement")
+        else -> ("E2239", "Jet could not preserve a debugger invariant", "start a new session and report the diagnostic if it repeats")
+    }
+}
+// Rust: crates/jet-debug/src/Dap.rs:4080
+fn parse_dap_request(body: String) -> DataTree Err! {
+    message :: parse_json_with_limit(body, MAX_DAP_MESSAGE_BYTES) ?? return .Err("invalid JSON")
+    if message != .Object(_) -> return .Err("request must be an object")
+    if json_get(message, "type").and_then(json_str) != .Val("request") -> return .Err("type must be request")
+    seq :: json_get(message, "seq").and_then(json_u32) ?? return .Err("seq must be a nonnegative integer")
+    if seq == 0 -> return .Err("seq must be positive")
+    command :: json_get(message, "command").and_then(json_str) ?? return .Err("command must be a string")
+    if command.is_empty() -> return .Err("command must not be empty")
+    if json_get(message, "arguments") == {
+        None | .Val(.Object(_)) -> {}
+        else -> return .Err("arguments must be an object")
+    }
+    return message
+}
+// Rust: crates/jet-debug/src/Dap.rs:4110
+fn jet_expression(value: String) -> (String, String)? {
+    value := value.trim() // #4303
+    if value.is_empty() || value.len() > 256 || value.chars().any((c) -> c.is_control()) -> return None
+    root_len :: value.char_indices().find((pair) -> !pair._1.is_ascii_alphanumeric() && pair._1 != '_').map((pair) -> pair._0) ?? value.len()
+    root := value[0..<root_len] // #4303
+    if root.is_empty() || root.starts_with('_') || !root.chars().next().is_some_and((c) -> c.is_ascii_alphabetic()) -> return None
+    suffix := value[root_len..<value.len()] // #4303
+    if !suffix.chars().all((c) -> c == '.' || c == '[' || c == ']' || c.is_ascii_digit()) -> return None
+    return .Val((_0: root.to_string(), _1: suffix.to_string()))
+}
+// Rust: crates/jet-debug/src/Dap.rs:4137
+struct InitializeArguments { lines_start_at_1: Bool; columns_start_at_1: Bool; supports_ansi_styling: Bool }
+// Rust: crates/jet-debug/src/Dap.rs:4143
+fn parse_initialize_arguments(args: DataTree?) -> InitializeArguments Err! {
+    args :: args ?? return .Err("initialize arguments are required")
+    if json_get(args, "adapterID").and_then(json_str) != .Val("jet") -> return .Err("initialize adapterID must be `jet`")
+    if json_get(args, "pathFormat") == .Val(value) && json_str(value) != .Val("path") -> return .Err("initialize pathFormat must be `path`")
+    lines_start_at_1 := true
+    if json_get(args, "linesStartAt1") == .Val(value) -> lines_start_at_1 = json_bool(value) ?? return .Err("initialize linesStartAt1 must be a boolean")
+    columns_start_at_1 := true
+    if json_get(args, "columnsStartAt1") == .Val(value) -> columns_start_at_1 = json_bool(value) ?? return .Err("initialize columnsStartAt1 must be a boolean")
+    supports_ansi_styling := false
+    if json_get(args, "supportsANSIStyling") == .Val(value) -> supports_ansi_styling = json_bool(value) ?? return .Err("initialize supportsANSIStyling must be a boolean")
+    return InitializeArguments { lines_start_at_1: lines_start_at_1, columns_start_at_1: columns_start_at_1, supports_ansi_styling: supports_ansi_styling }
+}
+// Rust: crates/jet-debug/src/Dap.rs:4176
+struct LaunchArguments { args: [String]; cwd: String?; env: [(String, String)]; show_raw_frames: Bool }
+// Rust: crates/jet-debug/src/Dap.rs:4183
+fn parse_launch_arguments(args: DataTree?, jet_file: String) -> LaunchArguments Err! {
+    if args.and_then((a) -> json_get(a, "program")).and_then(json_str) == .Val(program) && !same_path(program, jet_file) -> return .Err("launch program must be the selected Jet source file")
+    values := [String]{}
+    if args.and_then((a) -> json_get(a, "args")) == .Val(value) {
+        if value == {
+            .Array(items) -> loop item in items { &values.push((json_str(item) ?? return .Err("launch args must be strings")).to_string()) }
+            else -> return .Err("launch args must be an array")
+        }
+    }
+    // GATE #4494: local native filesystem metadata and canonical paths.
+    cwd := fs.canonicalize(OSPath(jet_file)).ok().and_then((path) -> path.parent()).map((path) -> path.to_string_lossy())
+    if args.and_then((a) -> json_get(a, "cwd")) == .Val(value) {
+        raw :: json_str(value) ?? return .Err("launch cwd must be a string")
+        path :: fs.canonicalize(OSPath(raw)) ?? return .Err("launch cwd must be a local directory")
+        if !path.is_dir() -> return .Err("launch cwd must be a local directory")
+        if fs.canonicalize(OSPath(jet_file)).ok() == .Val(source) && !source.starts_with(path) -> return .Err("launch cwd must contain the selected Jet source")
+        cwd = .Val(path.to_string_lossy())
+    }
+    env := [(String, String)]{}
+    if args.and_then((a) -> json_get(a, "env")) == .Val(value) {
+        if value == {
+            .Object(items) -> loop (key, item) in items {
+                if !valid_launch_env_key(key) -> return .Err("launch environment keys must be ASCII letters, digits, or `_`")
+                text :: json_str(item) ?? return .Err("launch environment values must be strings")
+                &env.push((_0: key.copy(), _1: text.to_string()))
+            }
+            else -> return .Err("launch env must be an object of strings")
+        }
+    }
+    show_raw_frames := false
+    if args.and_then((a) -> json_get(a, "showRawFrames")) == .Val(value) -> show_raw_frames = json_bool(value) ?? return .Err("showRawFrames must be a boolean")
+    return LaunchArguments { args: ^values, cwd: ^cwd, env: ^env, show_raw_frames: show_raw_frames }
+}
+// Rust: crates/jet-debug/src/Dap.rs:4256
+fn valid_launch_env_key(key: String) -> Bool { !key.is_empty() && key.chars().all((c) -> c.is_ascii_alphanumeric() || c == '_') }
+// Rust: crates/jet-debug/src/Dap.rs:4260
+fn same_path(left: String, right: String) -> Bool {
+    left_path :: OSPath(left)
+    right_path :: OSPath(right)
+    if left_path == right_path -> return true
+    // GATE #4494
+    if fs.canonicalize(left_path).ok() == .Val(a) && fs.canonicalize(right_path).ok() == .Val(b) -> return a == b
+    return false
+}
+// Rust: crates/jet-debug/src/Dap.rs:4275
+fn data_breakpoint_places(args: DataTree?) -> [String] Err! {
+    value :: args.and_then((a) -> json_get(a, "breakpoints")) ?? return .Err("setDataBreakpoints requires a breakpoints array")
+    items :: if value == {
+        .Array(items) -> items
+        else -> { return .Err("setDataBreakpoints breakpoints must be an array") }
+    }
+    if items.len() > 32 -> return .Err("setDataBreakpoints supports at most 32 session watchpoints")
+    places := [String]{}
+    seen := [String:Bool]{}
+    loop item in items {
+        place :: json_get(item, "dataId").and_then(json_str) ?? return .Err("data breakpoint dataId must be a Jet local path")
+        if jet_expression(place) == None -> return .Err("data breakpoint dataId must be a bounded Jet local path")
+        if json_get(item, "accessType").and_then(json_str) == .Val(access) && access != "write" -> return .Err("Jet data breakpoints support write access only")
+        if !seen.contains(place) { &seen.insert(place, true); &places.push(place.to_string()) }
+    }
+    return places
+}
+// Rust: crates/jet-debug/src/Dap.rs:4345
+fn breakpoint_source(args: DataTree?, jet_file: String) Err! {
+    source :: args.and_then((a) -> json_get(a, "source")) ?? return .Err("setBreakpoints requires a source object")
+    path :: json_get(source, "path").and_then(json_str).filter((path) -> !path.is_empty() && !path.chars().any((c) -> c.is_control())) ?? return .Err("setBreakpoints source.path must be a non-empty string")
+    if !same_path(path, jet_file) -> return .Err("setBreakpoints source.path is not the selected Jet file")
+}
+// Rust: crates/jet-debug/src/Dap.rs:4359
+fn breakpoint_specs_for_origin(args: DataTree?, lines_start_at_1: Bool) -> [BreakpointSpec] Err! {
+    value :: args.and_then((a) -> json_get(a, "breakpoints")) ?? return []
+    items :: if value == {
+        .Array(items) -> items
+        else -> { return .Err("breakpoints must be an array") }
+    }
+    specs := [BreakpointSpec]{}
+    seen := [BreakpointSpec:Bool]{}
+    loop item in items {
+        line := json_get(item, "line").and_then(json_u32) ?? return .Err("breakpoint line must be a nonnegative integer")
+        if lines_start_at_1 && line == 0 -> return .Err("breakpoint line must be a positive integer")
+        if !lines_start_at_1 -> line = line.checked_add(1) ?? return .Err("breakpoint line is too large")
+        converted :: USize.try_from(line) ?? return .Err("breakpoint line is too large")
+        condition :: breakpoint_text(item, "condition") ?? return .Err(err)
+        hit_condition :: breakpoint_text(item, "hitCondition") ?? return .Err(err)
+        log_message :: breakpoint_text(item, "logMessage") ?? return .Err(err)
+        spec :: BreakpointSpec { line: converted, condition: ^condition, hit_condition: ^hit_condition, log_message: ^log_message }
+        if !seen.contains(spec) { &seen.insert(spec, true); &specs.push(^spec) }
+    }
+    return specs
+}
+// Rust: crates/jet-debug/src/Dap.rs:4403
+fn breakpoint_text(item: DataTree, key: String) -> String? Err! {
+    value :: json_get(item, key) ?? return None
+    text :: json_str(value) ?? return .Err("breakpoint conditions and log messages must be strings")
+    if text.len() > 512 || text.chars().any((c) -> c.is_control()) -> return .Err("breakpoint condition or log message is too long or contains control text")
+    return .Val(text.to_string())
+}
+// Rust: crates/jet-debug/src/Dap.rs:4414
+fn hit_condition_matches(condition: String, count: U32) -> Bool {
+    condition := condition.trim() // #4303
+    if condition.strip_prefix(">=") == .Val(raw) {
+        value := raw.trim() // #4303
+        return value.parse[U32]().ok().filter((n) -> n > 0).is_some_and((n) -> count >= n)
+    }
+    return condition.parse[U32]().ok().filter((n) -> n > 0).is_some_and((n) -> count == n)
+}
+// Rust: crates/jet-debug/src/Dap.rs:4432
+fn valid_hit_condition(condition: String) -> Bool {
+    condition := condition.trim() // #4303
+    value := (condition.strip_prefix(">=") ?? condition).trim() // #4303
+    !value.is_empty() && value.bytes().all((b) -> b.is_ascii_digit()) && value.parse[U32]().ok().is_some_and((n) -> n > 0)
+}
+// Rust: crates/jet-debug/src/Dap.rs:4440
+fn valid_condition(condition: String) -> Bool {
+    condition := condition.trim() // #4303
+    if jet_expression(condition) != None -> return true
+    loop operator in ["==", "!=", ">=", "<=", ">", "<"] {
+        if condition.split_once(operator) == .Val((left, right)) {
+            left := left.trim() // #4303
+            return jet_expression(left) != None && !right.trim().is_empty() && !right.chars().any((c) -> c.is_control())
+        }
+    }
+    return false
+}
+// Rust: crates/jet-debug/src/Dap.rs:4455
+fn validate_breakpoint_specs(specs: [BreakpointSpec]) Err! {
+    if specs.iter().any((spec) -> spec.condition.is_some_and((condition) -> !valid_condition(condition))) -> return .Err("breakpoint condition must be a bounded read-only Jet local expression")
+    if specs.iter().any((spec) -> spec.hit_condition.is_some_and((condition) -> !valid_hit_condition(condition))) -> return .Err("breakpoint hitCondition must be a positive integer or `>=` integer")
+}
+// Rust: crates/jet-debug/src/Dap.rs:4473
+fn parse_attach_arguments(args: DataTree?) -> AttachArguments Err! {
+    args :: args ?? return .Err("attach arguments are required")
+    pid :: json_get(args, "processId").and_then(json_u32).filter((pid) -> pid > 0) ?? return .Err("attach processId must be a positive integer")
+    program :: attach_path(args, "program") ?? return .Err(err)
+    map :: attach_path(args, "map") ?? return .Err(err)
+    show_raw_frames := false
+    if json_get(args, "showRawFrames") == .Val(value) -> show_raw_frames = json_bool(value) ?? return .Err("showRawFrames must be a boolean")
+    return AttachArguments { pid: pid, program: ^program, map: ^map, show_raw_frames: show_raw_frames }
+}
+// Rust: crates/jet-debug/src/Dap.rs:4493
+fn attach_path(args: DataTree, key: String) -> OSPath Err! {
+    raw :: json_get(args, key).and_then(json_str).filter((value) -> !value.is_empty() && !value.chars().any((c) -> c.is_control())) ?? return .Err("attach paths must be non-empty strings")
+    // GATE #4494: symlink metadata without following the link.
+    metadata :: fs.symlink_metadata(OSPath(raw)) ?? return .Err("attach path is not a local file")
+    if metadata.file_type().is_symlink() -> return .Err("attach paths must not be symbolic links")
+    path :: fs.canonicalize(OSPath(raw)) ?? return .Err("attach path is not a local file")
+    if !path.is_file() -> return .Err("attach path is not a local file")
+    return path
+}
+// Rust: crates/jet-debug/src/Dap.rs:4509
+fn json_bool(value: DataTree) -> Bool? { if value == {
+    .Bool(value) -> .Val(value)
+    else -> None
+} }
+// Rust: crates/jet-debug/src/Dap.rs:4518
+// DAP and LSP share Content-Length framing.
+fn read_message(reader: io.BufRead) -> String? IOError! {
+    // GATE #4494: bounded retained-descriptor reads, exact IO errors #4409.
+    content_length := None
+    total := USize{0}
+    fields := USize{0}
+    saw_header := false
+    len := USize{0}
+    loop {
+        remaining :: MAX_PROTOCOL_HEADER_BYTES.saturating_sub(total)
+        line := ""
+        read :: io.Read.take(reader, U64(remaining + 1)).read_line(&line) ?? return .Err(err)
+        if read == 0 {
+            if saw_header -> return .Err(io.Error.new(.UnexpectedEof, "protocol headers ended before the frame body"))
+            return .Ok(None)
+        }
+        saw_header = true
+        if read > remaining -> return .Err(io.Error.new(.InvalidData, "protocol headers exceed the 8192-byte limit"))
+        total += read
+        if line == "{Char{13}}\n" || line == "\n" {
+            len = content_length ?? return .Err(io.Error.new(.InvalidData, "protocol frame has no Content-Length"))
+            break
+        }
+        fields += 1
+        if fields > MAX_PROTOCOL_HEADER_COUNT -> return .Err(io.Error.new(.InvalidData, "protocol headers exceed the 64-field limit"))
+        header := line.strip_suffix("{Char{13}}\n") ?? line.strip_suffix('\n') ?? line // #4303
+        (name, value) :: header.split_once(':') ?? return .Err(io.Error.new(.InvalidData, "protocol header is malformed"))
+        if !name.is_ascii() -> return .Err(io.Error.new(.InvalidData, "protocol header name is not ASCII"))
+        if name.trim().eq_ignore_ascii_case("Content-Length") {
+            if content_length != None -> return .Err(io.Error.new(.InvalidData, "protocol frame has duplicate Content-Length headers"))
+            value := value.trim() // #4303
+            if value.is_empty() || !value.bytes().all((byte) -> byte.is_ascii_digit()) -> return .Err(io.Error.new(.InvalidData, "protocol Content-Length is invalid"))
+            content_length = .Val(value.parse[USize]() ?? return .Err(io.Error.new(.InvalidData, "protocol Content-Length is invalid")))
+        }
+    }
+    if len > MAX_DAP_MESSAGE_BYTES -> return .Err(io.Error.new(.InvalidData, "protocol message exceeds the 16777216-byte limit"))
+    body := [U8].repeat(0, len)
+    _ :: &reader.read_exact(&body) ?? return .Err(err)
+    text :: String.from_utf8(^body) ?? return .Err(io.Error.new(.InvalidData, "protocol message is not UTF-8"))
+    return .Ok(.Val(^text))
+}
+// Rust: crates/jet-debug/src/Dap.rs:4611
+fn write_message(w: &io.Write, json: String) IOError! {
+    // GATE #4494
+    _ :: &w.write_all("Content-Length: {json.as_bytes().len()}{Char{13}}\n{Char{13}}\n{json}".as_bytes()) ?? return .Err(err)
+    return &w.flush()
+}

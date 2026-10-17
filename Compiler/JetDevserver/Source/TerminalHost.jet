@@ -1,0 +1,840 @@
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1
+// Deterministic terminal facts for the shared jet.devtools.v1 stream.
+use std.collections.[VecDeque]
+use jet_devserver.Devtools.[JetDevtoolsEvent, JetDevtoolsHostKind, JetDevtoolsPanelAvailability, JetDevtoolsPanelAvailabilityState, JetDevtoolsPanelCapability, JetDevtoolsPanelCatalog, JetDevtoolsPanelCatalogError, JetDevtoolsPanelDescriptor, JetDevtoolsPanelFreshnessPolicy, JetDevtoolsPanelId, JetDevtoolsPanelUnavailableReason]
+use jet_devserver.Devtools.catalog.[descriptors]
+use jet_devserver.Session.[DevtoolsProjection, DevtoolsSessionState, DevtoolsStatusFact, ResidentDevSession, DevtoolsSelectionFact]
+
+// Rust: crates/jet-devserver/src/TerminalHost.rs:21
+fn first_panel_id() -> String { descriptors().first().map((d) -> d.id.as_str()).unwrap_or("") }
+// Rust: crates/jet-devserver/src/TerminalHost.rs:29
+fn panel_availability(host: JetDevtoolsHostKind, grants: [JetDevtoolsPanelCapability]) -> [JetDevtoolsPanelAvailability] {
+    JetDevtoolsPanelCatalog.canonical().map((catalog) -> catalog.available_for(host, grants)).unwrap_or([])
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:40
+fn terminal_panel_availability(access: TerminalHostAccess) -> [JetDevtoolsPanelAvailability] {
+    grants :: if access.local_details_enabled() -> JetDevtoolsPanelCapability.ALL else -> []
+    panel_availability(.Terminal, grants)
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:59
+struct TerminalHostAccess {
+    local: Bool; release: Bool; read_only: Bool
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:66
+    fn new(local: Bool, release: Bool, read_only: Bool) -> TerminalHostAccess { TerminalHostAccess{local, release, read_only} }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:74
+    fn interactive() -> TerminalHostAccess { TerminalHostAccess.new(true, false, false) }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:78
+    fn local_details_enabled(self) -> Bool { self.local && !self.release }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:82
+    fn actions_enabled(self) -> Bool { !self.read_only }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:87
+    fn default() -> TerminalHostAccess { TerminalHostAccess.interactive() }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:98
+struct TerminalHostCapabilities {
+    tty: Bool; ansi: Bool; no_color: Bool; width: USize
+    verbose: Bool; quiet: Bool; access: TerminalHostAccess
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:109
+    fn new(tty: Bool, ansi: Bool, no_color: Bool, width: USize, verbose: Bool, quiet: Bool, access: TerminalHostAccess) -> TerminalHostCapabilities {
+        TerminalHostCapabilities{tty, ansi, no_color, width: width.max(1), verbose, quiet, access}
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:129
+    fn color() -> TerminalHostCapabilities { TerminalHostCapabilities.new(true, true, false, DEFAULT_TERMINAL_COLUMNS, false, false, TerminalHostAccess.interactive()) }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:141
+    fn plain() -> TerminalHostCapabilities { TerminalHostCapabilities.new(false, false, true, DEFAULT_TERMINAL_COLUMNS, false, false, TerminalHostAccess.interactive()) }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:153
+    fn color_enabled(self) -> Bool { self.tty && self.ansi && !self.no_color }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:158
+    fn default() -> TerminalHostCapabilities { TerminalHostCapabilities.plain() }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:164
+JET_DEVTOOLS_PROTOCOL :: "jet.devtools.v1"
+// Rust: crates/jet-devserver/src/TerminalHost.rs:167
+MAX_TERMINAL_EVENTS :: 256
+// Rust: crates/jet-devserver/src/TerminalHost.rs:168
+MAX_TERMINAL_FACTS :: 64
+// Rust: crates/jet-devserver/src/TerminalHost.rs:169
+MAX_TERMINAL_TEXT_BYTES :: 16 * 1024
+// Rust: crates/jet-devserver/src/TerminalHost.rs:170
+MAX_TERMINAL_NODES :: 2048
+// Rust: crates/jet-devserver/src/TerminalHost.rs:171
+DEFAULT_TERMINAL_COLUMNS :: 80
+// Rust: crates/jet-devserver/src/TerminalHost.rs:172
+DEFAULT_TERMINAL_ROWS :: 24
+// Rust: crates/jet-devserver/src/TerminalHost.rs:176
+struct TerminalBounds {
+    x: USize; y: USize; width: USize; height: USize
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:184
+    fn new(x: USize, y: USize, width: USize, height: USize) -> TerminalBounds { TerminalBounds{x, y, width, height} }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:193
+    fn right(self) -> USize { self.x.saturating_add(self.width) }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:197
+    fn bottom(self) -> USize { self.y.saturating_add(self.height) }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:201
+    fn contains(self, x: USize, y: USize) -> Bool { x >= self.x && y >= self.y && x < self.right() && y < self.bottom() }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:210
+struct TerminalViewport {
+    width: USize; height: USize; scroll: USize
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:216
+    fn new(width: USize, height: USize) -> TerminalViewport { TerminalViewport{width: width.max(1), height: height.max(1), scroll: 0} }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:224
+    fn with_scroll(width: USize, height: USize, scroll: USize) -> TerminalViewport { TerminalViewport{width: width.max(1), height: height.max(1), scroll} }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:232
+    fn columns(self) -> USize { self.width }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:236
+    fn rows(self) -> USize { self.height }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:240
+    fn bounds(self) -> TerminalBounds { TerminalBounds.new(0, 0, self.width, self.height) }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:244
+    fn resize(self, width: USize, height: USize) -> TerminalViewport { TerminalViewport.with_scroll(width, height, self.scroll) }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:250
+    fn default() -> TerminalViewport { TerminalViewport.new(DEFAULT_TERMINAL_COLUMNS, DEFAULT_TERMINAL_ROWS) }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:257
+struct TerminalHostConfig {
+    viewport: TerminalViewport; capabilities: TerminalHostCapabilities
+    max_events: USize; max_nodes: USize
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:265
+    fn new(viewport: TerminalViewport, capabilities: TerminalHostCapabilities) -> TerminalHostConfig {
+        TerminalHostConfig{viewport, capabilities, max_events: MAX_TERMINAL_EVENTS, max_nodes: MAX_TERMINAL_NODES}
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:274
+    fn with_limits(self: TerminalHostConfig, max_events: USize, max_nodes: USize) -> TerminalHostConfig {
+        self := ^self
+        self.max_events = max_events.clamp(1, MAX_TERMINAL_EVENTS)
+        self.max_nodes = max_nodes.clamp(1, MAX_TERMINAL_NODES)
+        ^self
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:280
+    fn with_viewport(self: TerminalHostConfig, viewport: TerminalViewport) -> TerminalHostConfig {
+        self := ^self; self.viewport = viewport; ^self
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:285
+    fn with_capabilities(self: TerminalHostConfig, capabilities: TerminalHostCapabilities) -> TerminalHostConfig {
+        self := ^self; self.capabilities = capabilities; ^self
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:292
+    fn default() -> TerminalHostConfig { TerminalHostConfig.new(TerminalViewport.default(), TerminalHostCapabilities.default()) }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:298
+enum TerminalFactValue {
+    Text(String); Integer(I64); Boolean(Bool); DurationMs(U64)
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:306
+    fn display(self) -> String {
+        if self == {
+            .Text(value) -> value.clone()
+            .Integer(value) -> "{value}"
+            .Boolean(value) -> "{value}"
+            .DurationMs(value) -> "{value}ms"
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:322
+struct TerminalHostFact {
+    key: String; value: TerminalFactValue?; published: Bool
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:328
+    fn redacted(key: String) -> TerminalHostFact { TerminalHostFact{key: ^key, value: None, published: false} }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:336
+    fn text(key: String, value: String) -> TerminalHostFact { TerminalHostFact{key: ^key, value: .Val(.Text(^value)), published: true} }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:344
+    fn text_bounded(key: String, value: String) -> TerminalHostFact { TerminalHostFact.text(^key, bounded_text(value, MAX_TERMINAL_TEXT_BYTES)) }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:348
+    fn integer(key: String, value: I64) -> TerminalHostFact { TerminalHostFact{key: ^key, value: .Val(.Integer(value)), published: true} }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:356
+    fn boolean(key: String, value: Bool) -> TerminalHostFact { TerminalHostFact{key: ^key, value: .Val(.Boolean(value)), published: true} }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:364
+    fn duration_ms(key: String, value: U64) -> TerminalHostFact { TerminalHostFact{key: ^key, value: .Val(.DurationMs(value)), published: true} }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:372
+    fn validate(self) Err! {
+        validate_text(self.key, "fact key")
+        if !self.published && self.value.is_some() -> return Err("terminal fact `{self.key}` is redacted but carries a value")
+        if self.value == .Val(.Text(value)) -> validate_text(value, "fact value")
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:383
+    fn display(self) -> String {
+        if self.published { if self.value == .Val(value) -> return "{self.key}={value.display()}" }
+        "{self.key}=<redacted>"
+    }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:400
+struct TerminalHostEvent {
+    protocol: String; session_id: String; revision: String; sequence: U64; observed_at: U64
+    source: String; kind: String; entity: String; panel_id: JetDevtoolsPanelId; facts: [TerminalHostFact]
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:413
+    fn new(panel_id: JetDevtoolsPanelId, session_id: String, revision: String, sequence: U64, observed_at: U64, source: String, kind: String, entity: String, facts: [TerminalHostFact]) -> TerminalHostEvent {
+        TerminalHostEvent.from_projection(panel_id, JET_DEVTOOLS_PROTOCOL, ^session_id, ^revision, sequence, observed_at, ^source, ^kind, ^entity, ^facts)
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:438
+    fn from_projection(panel_id: JetDevtoolsPanelId, protocol: String, session_id: String, revision: String, sequence: U64, observed_at: U64, source: String, kind: String, entity: String, facts: [TerminalHostFact]) -> TerminalHostEvent {
+        TerminalHostEvent{protocol: ^protocol, session_id: ^session_id, revision: ^revision, sequence, observed_at, source: ^source, kind: ^kind, entity: ^entity, panel_id, facts: ^facts}
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:464
+    fn from_devtools_event(event: JetDevtoolsEvent, protocol: String, session_id: String, revision: String, panel_id: JetDevtoolsPanelId) -> TerminalHostEvent {
+        facts := [TerminalHostFact.text_bounded("fields", event.fields_json())]
+        if event.payload_json() == .Val(payload) -> &facts.push(TerminalHostFact.text_bounded("payload", payload))
+        TerminalHostEvent.from_projection(panel_id, protocol.clone(), session_id.clone(), revision.clone(), event.sequence(), event.timestamp_ms, event.source().to_string(), event.kind().to_string(), event.entity().to_string(), ^facts)
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:489
+    fn published_fact_count(self) -> USize { self.facts.iter().filter((fact) -> fact.published).count() }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:493
+    fn validate(self) Err! {
+        if self.protocol != JET_DEVTOOLS_PROTOCOL -> return Err("terminal event protocol must be {JET_DEVTOOLS_PROTOCOL}")
+        validate_text(self.session_id, "session id")
+        validate_optional_text(self.revision, "revision", true)
+        if self.sequence == 0 -> return Err("terminal event sequence must be positive")
+        validate_text(self.source, "event source"); validate_text(self.kind, "event kind"); validate_text(self.entity, "event entity")
+        if self.facts.len() > MAX_TERMINAL_FACTS -> return Err("terminal event exceeds its fact bound")
+        keys := [String:Bool]{}
+        loop fact in self.facts {
+            fact.validate()
+            if keys.contains_key(fact.key) -> return Err("terminal event repeats fact key `{fact.key}`")
+            &keys.insert(fact.key.clone(), true)
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:524
+struct TerminalFocus {
+    panel_id: String?; item_key: String?
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:529
+    fn panel(panel_id: String) -> TerminalFocus { TerminalFocus{panel_id: .Val(^panel_id), item_key: None} }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:536
+    fn item(panel_id: String, item_key: String) -> TerminalFocus { TerminalFocus{panel_id: .Val(^panel_id), item_key: .Val(^item_key)} }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:543
+    fn clear_item(self: TerminalFocus) -> () { self.item_key = None }
+    fn default() -> TerminalFocus { TerminalFocus{panel_id: None, item_key: None} }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:550
+enum TerminalKey { Tab; BackTab; Up; Down; Left; Right; Enter; Escape; Character(Char) }
+// Rust: crates/jet-devserver/src/TerminalHost.rs:563
+enum TerminalInput { Key(TerminalKey); Resize(TerminalViewport) }
+// Rust: crates/jet-devserver/src/TerminalHost.rs:569
+enum TerminalAction {
+    FocusPanel{panel_id: String}; Inspect{panel_id: String, item_key: String}; ReturnToPanel; MoveCursor{cursor: U64}
+    Rerun; Restart; FocusJob; Quit; Ignored
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:582
+struct TerminalKeyboardState {
+    last_key: TerminalKey?; last_action: TerminalAction?
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:587
+    fn default() -> TerminalKeyboardState { TerminalKeyboardState{last_key: None, last_action: None} }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:597
+enum TerminalFreshness {
+    Empty; Fresh; Stale
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:603
+    fn label(self) -> String { if self == {
+        .Empty -> "empty"
+        .Fresh -> "fresh"
+        .Stale -> "stale"
+    } }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:614
+enum TerminalNodeKind { Root; Panel; Table; Text; Status }
+// Rust: crates/jet-devserver/src/TerminalHost.rs:623
+struct TerminalStatus { label: String; detail: String; freshness: TerminalFreshness }
+// Rust: crates/jet-devserver/src/TerminalHost.rs:630
+struct TerminalTableRow { key: String; cells: [String] }
+// Rust: crates/jet-devserver/src/TerminalHost.rs:636
+struct TerminalTable { columns: [String]; rows: [TerminalTableRow] }
+// Rust: crates/jet-devserver/src/TerminalHost.rs:642
+struct TerminalNode {
+    id: String; kind: TerminalNodeKind; label: String; bounds: TerminalBounds
+    freshness: TerminalFreshness; focusable: Bool; text: String?; status: TerminalStatus?; table: TerminalTable?
+    children: [TerminalNode]
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:655
+    fn container(id: String, kind: TerminalNodeKind, label: String, bounds: TerminalBounds, freshness: TerminalFreshness, children: [TerminalNode]) -> TerminalNode {
+        TerminalNode{id: ^id, kind, label: ^label, bounds, freshness, focusable: false, text: None, status: None, table: None, children: ^children}
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:677
+    fn text(id: String, label: String, text: String, bounds: TerminalBounds, freshness: TerminalFreshness) -> TerminalNode {
+        TerminalNode{id: ^id, kind: .Text, label: ^label, bounds, freshness, focusable: false, text: .Val(^text), status: None, table: None, children: []}
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:698
+    fn status(id: String, label: String, status: TerminalStatus, bounds: TerminalBounds, focusable: Bool) -> TerminalNode {
+        freshness :: status.freshness
+        TerminalNode{id: ^id, kind: .Status, label: ^label, bounds, freshness, focusable, text: None, status: .Val(^status), table: None, children: []}
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:719
+    fn table(id: String, label: String, table: TerminalTable, bounds: TerminalBounds, freshness: TerminalFreshness) -> TerminalNode {
+        TerminalNode{id: ^id, kind: .Table, label: ^label, bounds, freshness, focusable: false, text: None, status: None, table: .Val(^table), children: []}
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:740
+    fn is_leaf(self) -> Bool { self.children.is_empty() }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:744
+    fn find(self, id: String) -> TerminalNode? {
+        if self.id == id -> return .Val(self)
+        self.children.iter().find_map((child) -> child.find(id))
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:751
+    fn flatten(self, out: &[String:&TerminalNode]) -> () {
+        &out.insert(self.id.clone(), &self)
+        loop child in self.children { child.flatten(&out) }
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:758
+    fn count(self) -> USize { 1 + self.children.iter().map((child) -> child.count()).sum() }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:765
+struct TerminalPanelTree {
+    root: TerminalNode; bounds: TerminalBounds; node_count: USize; node_limit: USize; panel_count: USize
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:773
+    fn panel(self, panel_id: String) -> TerminalNode? { self.root.children.iter().find((node) -> node.id == "panel:{panel_id}") }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:780
+    fn nodes(self) -> [String:&TerminalNode] { nodes := [String:&TerminalNode]{}; self.root.flatten(&nodes); ^nodes }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:789
+struct TerminalFrame {
+    protocol: String; session_id: String; source_id: String?; build_id: String?; world_id: String?
+    observed_at: U64?; status: DevtoolsStatusFact?; revision: String; cursor: U64?
+    viewport: TerminalViewport; capabilities: TerminalHostCapabilities; focus: TerminalFocus
+    keyboard: TerminalKeyboardState; freshness: TerminalFreshness; event_count: USize; event_limit: USize
+    tree: TerminalPanelTree; lines: [String]
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:810
+    fn text(self) -> String { self.lines.join("\n") }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:814
+    fn plain_text(self) -> String { self.lines.iter().map((line) -> strip_ansi(line)).collect().join("\n") }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:822
+    fn panel(self, panel_id: String) -> TerminalNode? { self.tree.panel(panel_id) }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:826
+    fn diff(self, previous: TerminalFrame) -> TerminalDiff {
+        before :: previous.tree.nodes(); after :: self.tree.nodes()
+        ids := [String:Bool]{}
+        loop id in before.keys() { &ids.insert(id.clone(), true) }
+        loop id in after.keys() { &ids.insert(id.clone(), true) }
+        ordered_ids := ids.keys().cloned().collect(); &ordered_ids.sort()
+        operations := [TerminalDiffOperation]{}
+        loop id in ordered_ids {
+            if (_0: before.get(id), _1: after.get(id)) == {
+                (None, .Val(node)) -> &operations.push(.Insert{id: id.clone(), node: node.clone()})
+                (_0: .Val(_), _1: None) -> &operations.push(.Remove{id: id.clone()})
+                (_0: .Val(old), _1: .Val(new)) -> { if old != new -> &operations.push(.Replace{id: id.clone(), node: new.clone()}) }
+                else -> {}
+            }
+        }
+        TerminalDiff{
+            from_revision: previous.revision.clone(), to_revision: self.revision.clone(), operations: ^operations,
+            viewport_changed: previous.viewport != self.viewport, focus_changed: previous.focus != self.focus,
+            keyboard_changed: previous.keyboard != self.keyboard,
+            metadata_changed: previous.protocol != self.protocol || previous.session_id != self.session_id
+                || previous.source_id != self.source_id || previous.build_id != self.build_id || previous.world_id != self.world_id
+                || previous.observed_at != self.observed_at || previous.status != self.status || previous.capabilities != self.capabilities
+                || previous.cursor != self.cursor || previous.freshness != self.freshness || previous.event_count != self.event_count || previous.event_limit != self.event_limit,
+            lines_changed: previous.lines.iter().map((line) -> strip_ansi(line)).collect() != self.lines.iter().map((line) -> strip_ansi(line)).collect()
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:889
+enum TerminalDiffOperation { Insert{id: String, node: TerminalNode}; Remove{id: String}; Replace{id: String, node: TerminalNode} }
+// Rust: crates/jet-devserver/src/TerminalHost.rs:896
+struct TerminalDiff {
+    from_revision: String; to_revision: String; operations: [TerminalDiffOperation]
+    viewport_changed: Bool; focus_changed: Bool; keyboard_changed: Bool; metadata_changed: Bool; lines_changed: Bool
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:907
+    fn initial(frame: TerminalFrame) -> TerminalDiff {
+        nodes :: frame.tree.nodes()
+        ids := nodes.keys().cloned().collect(); &ids.sort()
+        operations :: ids.iter().map((id) -> {id: id.clone(), node: nodes[id].clone()}).collect()
+        TerminalDiff{from_revision: "", to_revision: frame.revision.clone(), operations,
+            viewport_changed: true, focus_changed: true, keyboard_changed: true, metadata_changed: true, lines_changed: true}
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:928
+    fn is_empty(self) -> Bool { self.operations.is_empty() && !self.viewport_changed && !self.focus_changed && !self.keyboard_changed && !self.metadata_changed && !self.lines_changed }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:943
+// Retains the bounded typed event ring; derives frames without a second panel model.
+struct TerminalHost {
+    config: TerminalHostConfig; events: VecDeque<TerminalHostEvent>
+    session_id: String?; source_id: String?; build_id: String?; world_id: String?; revision: String?
+    cursor: U64?; time_cursor: U64?; observed_at: U64?; status: DevtoolsStatusFact?
+    focus: TerminalFocus; keyboard: TerminalKeyboardState
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:958
+    fn new(config: TerminalHostConfig) -> TerminalHost {
+        config := ^config
+        config.max_events = config.max_events.clamp(1, MAX_TERMINAL_EVENTS)
+        config.max_nodes = config.max_nodes.clamp(1, MAX_TERMINAL_NODES)
+        TerminalHost{config: ^config, events: VecDeque.new(), session_id: None, source_id: None, build_id: None,
+            world_id: None, revision: None, cursor: None, time_cursor: None, observed_at: None, status: None,
+            focus: TerminalFocus.panel(first_panel_id()), keyboard: TerminalKeyboardState.default()}
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:978
+    fn config(self) -> TerminalHostConfig { &self.config }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:982
+    fn capabilities(self) -> TerminalHostCapabilities { self.config.capabilities }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:987
+    fn panel_availability(self) -> [JetDevtoolsPanelAvailability] { terminal_panel_availability(self.config.capabilities.access) }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:992
+    fn viewport(self) -> TerminalViewport { self.effective_viewport() }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:996
+    fn event_count(self) -> USize { self.events.len() }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1000
+    fn source_id(self) -> String? { self.source_id.as_ref() }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1004
+    fn build_id(self) -> String? { self.build_id.as_ref() }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1008
+    fn world_id(self) -> String? { self.world_id.as_ref() }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1012
+    fn observed_at(self) -> U64? { self.observed_at }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1016
+    fn status(self) -> DevtoolsStatusFact? { self.status.as_ref() }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1020
+    fn cursor(self) -> U64? { self.time_cursor.or(self.cursor) }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1023
+    fn events(self) -> Iterator<TerminalHostEvent> { self.events.iter() }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1027
+    fn session_id(self) -> String? { self.session_id.as_ref() }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1031
+    fn revision(self) -> String? { self.revision.as_ref() }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1035
+    fn focus(self) -> TerminalFocus { &self.focus }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1039
+    fn keyboard(self) -> TerminalKeyboardState { &self.keyboard }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1045
+    fn append_event(self: &TerminalHost, event: TerminalHostEvent) Err! {
+        event.validate()
+        if self.session_id == .Val(session_id) {
+            if session_id != event.session_id -> return Err("terminal event session id does not match the host")
+        } else { self.session_id = .Val(event.session_id.clone()) }
+        if self.revision == .Val(revision) {
+            if revision != event.revision -> return Err("terminal event revision does not match the host")
+        } else { self.revision = .Val(event.revision.clone()) }
+        if self.cursor.is_some_and((cursor) -> event.sequence <= cursor) -> return Err("terminal event sequence is not newer than the host cursor")
+        self.observed_at = .Val(event.observed_at); self.cursor = .Val(event.sequence)
+        if self.time_cursor.is_none() -> self.time_cursor = .Val(event.sequence)
+        first_event :: self.events.is_empty(); panel_id :: event.panel_id.as_str().to_string(); item_key :: event_key(event)
+        if self.events.len() == self.config.max_events -> _ :: &self.events.pop_front()
+        &self.events.push_back(^event)
+        if first_event { self.focus = TerminalFocus.item(panel_id.clone(), ^item_key) }
+        else if self.focus.panel_id.is_none() { self.focus.panel_id = .Val(panel_id.clone()) }
+        self.keyboard.last_action = .Val(.FocusPanel{panel_id: self.focus.panel_id.clone().unwrap_or(^panel_id)})
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1095
+    fn sync_projection(self: TerminalHost, projection: DevtoolsProjection, panel_ids: [U64:JetDevtoolsPanelId]) -> TerminalFrame Err! {
+        validate_projection(projection)
+        session_changed :: self.session_id.is_some_and((id) -> id != projection.session_id)
+        revision_changed :: self.revision.is_some_and((revision) -> revision != projection.revision)
+        if session_changed || revision_changed || projection.reset || projection.truncation {
+            self.time_cursor = None; &self.events.clear(); self.cursor = None
+            self.focus = TerminalFocus.panel(first_panel_id()); self.keyboard.last_action = None
+        }
+        self.session_id = .Val(projection.session_id.clone()); self.source_id = projection.source_id.clone()
+        self.build_id = projection.build_id.clone(); self.world_id = projection.world_id.clone()
+        self.revision = .Val(projection.revision.clone()); self.observed_at = .Val(projection.observed_at)
+        self.status = .Val(bounded_status(projection.status))
+        previous_time_cursor :: self.time_cursor; previous_cursor :: self.cursor
+        loop event in projection.panels {
+            sequence :: event.sequence()
+            if previous_cursor.is_some_and((cursor) -> sequence <= cursor) -> next
+            if panel_ids.get(sequence) == .Val(panel_id) {
+                &self.append_event(TerminalHostEvent.from_devtools_event(event, projection.protocol, projection.session_id, projection.revision, panel_id))
+            }
+        }
+        self.cursor = .Val(projection.sequence)
+        if previous_time_cursor.is_none() -> self.time_cursor = if projection.sequence != 0 -> .Val(projection.sequence) else -> None
+        &self.apply_selection(projection.selection.as_ref())
+        Ok(self.render())
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1152
+    fn sync_session(self: TerminalHost, session: ResidentDevSession) -> TerminalFrame Err! {
+        projection :: session.devtools_events_since(self.cursor)
+        grants :: if self.config.capabilities.access.local_details_enabled() -> JetDevtoolsPanelCapability.ALL else -> []
+        panels :: session.devtools_panels(.Terminal, grants).map_err((error) -> error.to_string())
+        panel_ids := [U64:JetDevtoolsPanelId]{}
+        loop panel in panels {
+            panel_id :: panel.availability.descriptor.id
+            loop event in panel.events { &panel_ids.entry(event.sequence()).or_insert(panel_id) }
+        }
+        &self.sync_projection(projection, panel_ids)
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1176
+    fn apply_selection(self: TerminalHost, selection: DevtoolsSelectionFact?) -> () {
+        if selection == .Val(selection) {
+            if descriptors().iter().find((d) -> d.id.as_str() == selection.panel_id) == .Val(descriptor) {
+                panel_id :: descriptor.id.as_str()
+                if selection.item_key.is_empty() { _ :: &self.focus_panel(panel_id) }
+                else { _ :: &self.focus_item(panel_id, selection.item_key) }
+                return
+            }
+        }
+        self.focus = TerminalFocus.panel(first_panel_id())
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1196
+    fn set_viewport(self: TerminalHost, viewport: TerminalViewport) -> () { self.config.viewport = viewport }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1200
+    fn set_capabilities(self: TerminalHost, capabilities: TerminalHostCapabilities) -> () { self.config.capabilities = capabilities }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1204
+    fn set_cursor(self: TerminalHost, cursor: U64?) -> () { self.cursor = cursor; self.time_cursor = cursor }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1209
+    fn focus_panel(self: TerminalHost, panel_id: String) -> Bool {
+        if descriptors().iter().find((d) -> d.id.as_str() == panel_id) == .Val(descriptor) {
+            panel_id :: descriptor.id.as_str().to_string()
+            self.focus = TerminalFocus.panel(panel_id.clone())
+            self.keyboard.last_action = .Val(.FocusPanel{panel_id: ^panel_id})
+            return true
+        }
+        false
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1222
+    fn focus_item(self: TerminalHost, panel_id: String, item_key: String) -> Bool {
+        if !&self.focus_panel(panel_id) -> return false
+        self.focus.item_key = .Val(item_key.to_string())
+        self.keyboard.last_action = .Val(.Inspect{panel_id: self.focus.panel_id.clone().unwrap_or(""), item_key: item_key.to_string()})
+        true
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1234
+    fn clear_item_focus(self: TerminalHost) -> () { &self.focus.clear_item(); self.keyboard.last_action = .Val(.ReturnToPanel) }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1239
+    fn handle(self: TerminalHost, input: TerminalInput) -> TerminalAction {
+        if input == {
+            .Key(key) -> &self.handle_key(key)
+            .Resize(viewport) -> { &self.set_viewport(viewport); action :: TerminalAction.Ignored; self.keyboard.last_action = .Val(action.clone()); action }
+        }
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1254
+    fn handle_key(self: TerminalHost, key: TerminalKey) -> TerminalAction {
+        self.keyboard.last_key = .Val(key)
+        action :: if key == {
+            .Tab | .Down -> &self.move_panel(1)
+            .BackTab | .Up -> &self.move_panel(-1)
+            .Enter | .Right -> &self.inspect_focused()
+            .Escape | .Left -> {
+                if self.focus.item_key.is_some() { &self.clear_item_focus(); TerminalAction.ReturnToPanel }
+                else { TerminalAction.Ignored }
+            }
+            .Character('r') -> if self.config.capabilities.access.actions_enabled() -> TerminalAction.Rerun else -> TerminalAction.Ignored
+            .Character('R') -> if self.config.capabilities.access.actions_enabled() -> TerminalAction.Restart else -> TerminalAction.Ignored
+            .Character('j') -> { _ :: &self.focus_panel("jobs"); TerminalAction.FocusJob }
+            .Character('q') -> TerminalAction.Quit
+            .Character('t') -> &self.move_cursor()
+            .Character(_) -> TerminalAction.Ignored
+        }
+        self.keyboard.last_action = .Val(action.clone())
+        action
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1286
+    fn render(self) -> TerminalFrame {
+        ordered :: ordered_events(self.events); viewport :: self.effective_viewport(); tree :: self.build_tree(ordered)
+        freshness :: overall_freshness(ordered, self.display_cursor())
+        revision :: self.revision.clone().or_else(() -> ordered.last().map((event) -> event.revision.clone())).unwrap_or("")
+        lines :: render_lines(tree, viewport, self.config.capabilities, self.session_id.as_ref().unwrap_or(""), self.source_id.as_ref(),
+            self.build_id.as_ref(), self.world_id.as_ref(), revision, self.display_cursor(), self.observed_at, self.status.as_ref(),
+            self.focus, self.keyboard, ordered.len(), self.config.max_events, freshness)
+        TerminalFrame{protocol: JET_DEVTOOLS_PROTOCOL.to_string(), session_id: self.session_id.clone().unwrap_or(""),
+            source_id: self.source_id.clone(), build_id: self.build_id.clone(), world_id: self.world_id.clone(),
+            observed_at: self.observed_at, status: self.status.clone(), revision: ^revision, cursor: self.display_cursor(),
+            viewport, capabilities: self.config.capabilities, focus: self.focus.clone(), keyboard: self.keyboard.clone(),
+            freshness, event_count: ordered.len(), event_limit: self.config.max_events, tree: ^tree, lines: ^lines}
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1336
+    fn move_panel(self: TerminalHost, direction: ISize) -> TerminalAction {
+        catalog :: descriptors()
+        if catalog.is_empty() -> return .Ignored
+        current :: self.focus.panel_id.as_ref().and_then((panel) -> catalog.iter().position((d) -> d.id.as_str() == panel)).unwrap_or(0)
+        len :: ISize(catalog.len()); next :: USize((ISize(current) + direction).rem_euclid(len))
+        panel_id :: catalog[next].id.as_str().to_string(); self.focus = TerminalFocus.panel(panel_id.clone())
+        .FocusPanel{panel_id: ^panel_id}
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1359
+    fn inspect_focused(self: TerminalHost) -> TerminalAction {
+        panel_id :: self.focus.panel_id.clone().unwrap_or_else(() -> first_panel_id().to_string())
+        if self.focus.item_key.clone() == .Val(item_key) -> return .Inspect{panel_id: ^panel_id, item_key: ^item_key}
+        item_key :: ordered_events(self.events).iter().rev().find((event) -> self.panel_id_for_event(event) == panel_id).map((event) -> event_key(event))
+        if item_key == .Val(item_key) {
+            self.focus.item_key = .Val(item_key.clone())
+            return .Inspect{panel_id: ^panel_id, item_key: ^item_key}
+        }
+        .FocusPanel{panel_id: ^panel_id}
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1380
+    fn move_cursor(self: TerminalHost) -> TerminalAction {
+        sequences := ordered_events(self.events).iter().map((event) -> event.sequence).collect()
+        &sequences.sort_unstable(); &sequences.dedup()
+        if sequences.is_empty() -> return .Ignored
+        current :: self.time_cursor.unwrap_or(sequences[0])
+        next :: sequences.iter().find((sequence) -> sequence > current).unwrap_or(sequences[0])
+        self.time_cursor = .Val(next); .MoveCursor{cursor: next}
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1399
+    fn effective_viewport(self) -> TerminalViewport {
+        configured :: self.config.viewport
+        configured.resize(configured.width.min(self.config.capabilities.width.max(1)), configured.height)
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1406
+    fn panel_id_for_event(self, event: TerminalHostEvent) -> String { event.panel_id.as_str() }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1409
+    fn display_cursor(self) -> U64? { self.time_cursor.or(self.cursor) }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1414
+    fn build_tree(self, ordered: [&TerminalHostEvent]) -> TerminalPanelTree {
+        viewport :: self.effective_viewport(); root_bounds :: viewport.bounds()
+        children := [TerminalNode]{}; availability :: self.panel_availability()
+        remaining := self.config.max_nodes.saturating_sub(1); panel_height :: USize{3}
+        loop (index, descriptor) in descriptors().iter().enumerate() {
+            panel_id :: descriptor.id.as_str(); panel_title :: descriptor.title
+            if remaining == 0 -> break
+            remaining -= 1
+            panel_events :: ordered.iter().filter((event) -> self.panel_id_for_event(event) == panel_id).collect()
+            freshness :: panel_freshness(panel_events, self.display_cursor())
+            y :: index.saturating_mul(panel_height); height :: viewport.height.saturating_sub(y).min(panel_height)
+            panel_bounds :: TerminalBounds.new(0, y, viewport.width, height); panel_children := [TerminalNode]{}
+            if remaining > 0 {
+                panel_state :: availability.iter().find((row) -> row.descriptor.id == descriptor.id)
+                available :: panel_state.map((row) -> row.is_available()).unwrap_or(true)
+                status :: TerminalStatus{
+                    label: if available -> freshness.label().to_string() else -> "unavailable",
+                    detail: if available -> "{panel_events.len()} event(s), retained {ordered.len()}/{self.config.max_events}"
+                        else -> panel_state.map((row) -> unavailable_panel_detail(row.unavailable_reasons())).unwrap_or("unavailable"),
+                    freshness}
+                &panel_children.push(TerminalNode.status("panel:{panel_id}:status", "freshness", ^status,
+                    TerminalBounds.new(0, y, viewport.width, height.min(1)), self.focus.panel_id.as_ref() == .Val(panel_id)))
+                remaining -= 1
+            }
+            if remaining > 0 {
+                summary :: panel_events.last().map((event) -> event_summary(event, self.config.capabilities)).unwrap_or("No recorded facts")
+                &panel_children.push(TerminalNode.text("panel:{panel_id}:summary", "summary", ^summary,
+                    TerminalBounds.new(0, y.saturating_add(1), viewport.width, height.saturating_sub(1).min(1)), freshness))
+                remaining -= 1
+            }
+            if remaining > 0 {
+                rows :: panel_events.iter().map((event) -> {key: event_key(event),
+                    cells: [event.revision.clone(), "{event.sequence}", "{event.observed_at}", event.kind.clone(), event.entity.clone(),
+                        event.source.clone(), "{event.published_fact_count()}"]}).collect()
+                &panel_children.push(TerminalNode.table("panel:{panel_id}:events", "events",
+                    TerminalTable{columns: ["revision", "sequence", "observed_at", "kind", "entity", "source", "published_facts"], rows},
+                    TerminalBounds.new(0, y.saturating_add(2), viewport.width, height.saturating_sub(2)), freshness))
+                remaining -= 1
+            }
+            &children.push(TerminalNode.container("panel:{panel_id}", .Panel, panel_title, panel_bounds, freshness, ^panel_children))
+        }
+        root :: TerminalNode.container("terminal-root", .Root, "jet devtools", root_bounds, overall_freshness(ordered, self.display_cursor()), ^children)
+        panel_count :: root.children.len(); node_count :: root.count()
+        TerminalPanelTree{root: ^root, bounds: root_bounds, node_count, node_limit: self.config.max_nodes, panel_count}
+    }
+    // Rust: crates/jet-devserver/src/TerminalHost.rs:1556
+    fn default() -> TerminalHost { TerminalHost.new(TerminalHostConfig.default()) }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1560
+fn validate_text(value: String, label: String) Err! { validate_optional_text(value, label, false) }
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1564
+fn validate_optional_text(value: String, label: String, allow_empty: Bool) Err! {
+    if (!allow_empty && value.is_empty()) || value.len() > MAX_TERMINAL_TEXT_BYTES || value.chars().any((c) -> c.is_control()) {
+        return Err("terminal {label} is empty, too long, or contains control text")
+    }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1574
+fn validate_projection(projection: DevtoolsProjection) Err! {
+    if projection.protocol != JET_DEVTOOLS_PROTOCOL -> return Err("devtools projection protocol must be {JET_DEVTOOLS_PROTOCOL}")
+    validate_text(projection.session_id, "session id"); validate_optional_text(projection.revision, "revision", true)
+    loop (value, label) in [(_0: projection.source_id.as_ref(), _1: "source id"), (_0: projection.build_id.as_ref(), _1: "build id"), (_0: projection.world_id.as_ref(), _1: "world id")] {
+        if value == .Val(value) -> validate_text(value, label)
+    }
+    validate_status(projection.status)
+    loop event in projection.panels {
+        if event.sequence() == 0 -> return Err("devtools event sequence must be positive")
+        if event.sequence() > projection.sequence -> return Err("devtools event sequence exceeds the projection cursor")
+        validate_text(event.source(), "event source"); validate_text(event.kind(), "event kind")
+        validate_text(event.entity(), "event entity"); validate_text(event.fields_json(), "event fields")
+        if event.payload_json() == .Val(payload) -> validate_text(payload, "event payload")
+    }
+    if projection.selection == .Val(selection) {
+        valid_panel :: descriptors().iter().any((d) -> d.id.as_str() == selection.panel_id)
+        if !valid_panel -> return Err("devtools selection panel `{selection.panel_id}` is not canonical")
+        validate_optional_text(selection.item_key, "selection item", true)
+    }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1622
+fn validate_status(status: DevtoolsStatusFact) Err! {
+    loop (value, label) in [(_0: status.diagnostic_code.as_ref(), _1: "diagnostic code"), (_0: status.diagnostic.as_ref(), _1: "diagnostic"),
+        (_0: status.accepted_revision.as_ref(), _1: "accepted revision"), (_0: status.last_good_revision.as_ref(), _1: "last good revision"),
+        (_0: status.run_target.as_ref(), _1: "run target"), (_0: status.run_output.as_ref(), _1: "run output"), (_0: status.test_state.as_ref(), _1: "test state")] {
+        if value == .Val(value) { if value.is_empty() -> return Err("terminal {label} is empty") }
+    }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1641
+fn bounded_status(status: DevtoolsStatusFact) -> DevtoolsStatusFact Err! {
+    validate_status(status)
+    bounded := status.clone()
+    loop value in [&bounded.diagnostic_code, &bounded.diagnostic, &bounded.accepted_revision, &bounded.last_good_revision,
+        &bounded.run_target, &bounded.run_output, &bounded.test_state] {
+        if value == .Val(text) -> value = .Val(bounded_text(text, MAX_TERMINAL_TEXT_BYTES))
+    }
+    Ok(^bounded)
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1660
+fn bounded_text(value: String, limit: USize) -> String {
+    if limit == 0 -> return ""
+    output := String.with_capacity(value.len().min(limit))
+    loop character in value.chars() {
+        replacement :: if character == {
+            '\n' -> "\\n"
+            Char{13} -> "\\r"
+            '\t' -> "\\t"
+            else -> if character.is_control() -> "?" else -> ""
+        }
+        if replacement.is_empty() {
+            if output.len().saturating_add(character.len_utf8()) > limit -> break
+            &output.push(character)
+            next
+        }
+        if output.len().saturating_add(replacement.len()) > limit -> break
+        &output.push_str(replacement)
+    }
+    ^output
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1687
+fn display_optional(value: String) -> String { if value.is_empty() -> "-" else -> value }
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1695
+fn yes_no(value: Bool) -> String { if value -> "yes" else -> "no" }
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1699
+fn access_label(access: TerminalHostAccess) -> String {
+    if access.read_only -> "read-only" else if access.release -> "release" else if access.local -> "local" else -> "remote"
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1711
+fn session_state_label(state: DevtoolsSessionState) -> String {
+    if state == {
+        .Starting -> "starting"
+        .Building -> "building"
+        .Ready -> "ready"
+        .Error -> "error"
+        .Unavailable -> "unavailable"
+        .Stopped -> "stopped"
+    }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1722
+fn status_summary(status: DevtoolsStatusFact, reveal: Bool) -> String {
+    fields := ["state={session_state_label(status.state)}"]
+    loop (key, value) in [(_0: "diagnostic_code", _1: status.diagnostic_code.as_ref()), (_0: "diagnostic", _1: status.diagnostic.as_ref()),
+        (_0: "accepted_revision", _1: status.accepted_revision.as_ref()), (_0: "last_good_revision", _1: status.last_good_revision.as_ref()),
+        (_0: "run_target", _1: status.run_target.as_ref()), (_0: "run_output", _1: status.run_output.as_ref()), (_0: "test_state", _1: status.test_state.as_ref())] {
+        rendered :: if value == {
+            .Val(value) -> if reveal -> value else -> "<redacted>"
+            None -> "-"
+        }
+        &fields.push("{key}={rendered}")
+    }
+    fields.join(" ")
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1744
+fn unavailable_panel_detail(reasons: [JetDevtoolsPanelUnavailableReason]) -> String {
+    details :: reasons.iter().map((reason) -> if reason == {
+        .UnsupportedHost(host) -> "unsupported host {host.as_str()}"
+        .MissingCapability(capability) -> "missing {capability.grant()}"
+    }).collect()
+    if details.is_empty() -> "unavailable" else -> details.join(", ")
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1765
+fn ordered_events(events: VecDeque<TerminalHostEvent>) -> [&TerminalHostEvent] {
+    ordered := events.iter().collect()
+    &ordered.sort_by((left, right) -> left.sequence.cmp(right.sequence)
+        .then_with(() -> left.observed_at.cmp(right.observed_at))
+        .then_with(() -> left.revision.cmp(right.revision))
+        .then_with(() -> left.kind.cmp(right.kind))
+        .then_with(() -> left.entity.cmp(right.entity))
+        .then_with(() -> left.source.cmp(right.source)))
+    ^ordered
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1779
+fn event_key(event: TerminalHostEvent) -> String { "event:{event.revision}:{event.sequence}:{event.kind}:{event.entity}" }
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1783
+fn event_summary(event: TerminalHostEvent, capabilities: TerminalHostCapabilities) -> String {
+    details_enabled :: capabilities.access.local_details_enabled()
+    published :: if details_enabled -> event.facts.iter().filter((fact) -> fact.published).map((fact) -> fact.display()).collect().join(",")
+        else -> "<redacted>"
+    values :: if published.is_empty() -> "-" else -> published
+    verbose :: if capabilities.verbose -> " details=on" else -> ""
+    revision :: if event.revision.is_empty() -> "-" else -> event.revision
+    "{event.kind} · {event.entity} · {revision} · {event.observed_at}ms · source={event.source} · published_facts={event.published_fact_count()} · values={values}{verbose}"
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1819
+fn panel_freshness(events: [&TerminalHostEvent], cursor: U64?) -> TerminalFreshness {
+    if events.iter().map((event) -> event.sequence).max() == .Val(latest) {
+        if cursor.is_some_and((cursor) -> cursor < latest) -> .Stale else -> .Fresh
+    } else { .Empty }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1830
+fn overall_freshness(events: [&TerminalHostEvent], cursor: U64?) -> TerminalFreshness {
+    if events.is_empty() -> return .Empty
+    if events.iter().any((event) -> cursor.is_some_and((cursor) -> cursor < event.sequence)) -> .Stale else -> .Fresh
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1844
+fn render_lines(tree: TerminalPanelTree, viewport: TerminalViewport, capabilities: TerminalHostCapabilities,
+    session_id: String, source_id: String?, build_id: String?, world_id: String?, revision: String,
+    cursor: U64?, observed_at: U64?, status: DevtoolsStatusFact?, focus: TerminalFocus, keyboard: TerminalKeyboardState,
+    event_count: USize, event_limit: USize, freshness: TerminalFreshness) -> [String] {
+    if capabilities.quiet -> return []
+    raw := [String]{}
+    sequence :: cursor.map((value) -> "{value}").unwrap_or("-")
+    observed :: observed_at.map((value) -> "{value}").unwrap_or("-")
+    state :: status.map((status) -> session_state_label(status.state)).unwrap_or("-")
+    &raw.push("jet devtools  session={display_optional(session_id)}  source_id={display_optional(source_id.unwrap_or(""))}  build_id={display_optional(build_id.unwrap_or(""))}  world_id={display_optional(world_id.unwrap_or(""))}  revision={display_optional(revision)}  sequence={sequence}  observed_at={observed}  state={state}  freshness={freshness.label()}")
+    &raw.push("terminal={viewport.width}x{viewport.height}  tty={yes_no(capabilities.tty)}  ansi={yes_no(capabilities.ansi)}  no_color={yes_no(capabilities.no_color)}  verbose={yes_no(capabilities.verbose)}  quiet={yes_no(capabilities.quiet)}  access={access_label(capabilities.access)}  local={yes_no(capabilities.access.local)}  release={yes_no(capabilities.access.release)}  read_only={yes_no(capabilities.access.read_only)}  nodes={tree.node_count}/{tree.node_limit}  events={event_count}/{event_limit}  focus={focus.panel_id.as_ref().unwrap_or("-")}")
+    if status == .Val(status) -> &raw.push("status: {status_summary(status, capabilities.access.local_details_enabled())}")
+    loop panel in tree.root.children {
+        selected :: focus.panel_id.as_ref().is_some_and((id) -> panel.id.strip_prefix("panel:").is_some_and((candidate) -> candidate == id))
+        marker :: if selected -> ">" else -> " "
+        panel_label :: if selected -> style("{marker}[{panel.label}]", "36", capabilities) else -> "{marker}[{panel.label}]"
+        &raw.push("{panel_label} {panel.freshness.label()}")
+        loop child in panel.children {
+            if child.kind == {
+                .Status -> { if child.status == .Val(status) -> &raw.push("  status={style(status.label, "33", capabilities)}  {status.detail}") }
+                .Text -> &raw.push("  {child.text.as_ref().unwrap_or("")}")
+                .Table -> { if child.table == .Val(table) { loop row in table.rows { &raw.push("  {row.cells.join(" | ")}") } } }
+                .Root | .Panel -> {}
+            }
+        }
+    }
+    action_help :: if capabilities.access.actions_enabled() -> "r rerun  R restart" else -> "r/R disabled(read-only)"
+    last :: keyboard.last_action.as_ref().map((action) -> action_label(action)).unwrap_or("none")
+    &raw.push("keys: Tab/Down next panel  Shift-Tab/Up previous  Enter inspect  Esc back  {action_help}  j jobs  t time  q quit  last={last}")
+    skip :: viewport.scroll.min(raw.len())
+    raw.iter().skip(skip).take(viewport.height).map((line) -> truncate_columns(line, viewport.width)).collect()
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1965
+fn action_label(action: TerminalAction) -> String {
+    if action == { .FocusPanel{..} -> "focus-panel", .Inspect{..} -> "inspect", .ReturnToPanel -> "back", .MoveCursor{..} -> "time"
+        .Rerun -> "rerun", .Restart -> "restart", .FocusJob -> "jobs", .Quit -> "quit", .Ignored -> "ignored" }
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1979
+fn style(text: String, code: String, capabilities: TerminalHostCapabilities) -> String {
+    if capabilities.color_enabled() -> "{Char{27}}[{code}m{text}{Char{27}}[0m" else -> text.to_string()
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:1987
+fn strip_ansi(text: String) -> String {
+    output := String.with_capacity(text.len()); chars := text.chars()
+    loop {
+        ch :: &chars.next()
+        if ch == .Val(ch) {
+            if ch == Char{27} && &chars.next() == .Val('[') {
+                loop {
+                    code :: &chars.next()
+                    if code == .Val(code) { if code >= '@' && code <= '~' -> break }
+                    else { break }
+                }
+            } else { &output.push(ch) }
+        } else { break }
+    }
+    ^output
+}
+// Rust: crates/jet-devserver/src/TerminalHost.rs:2004
+fn truncate_columns(text: String, width: USize) -> String {
+    limit :: width.max(1); output := String.with_capacity(text.len().min(limit.saturating_add(16)))
+    chars := text.chars().peekable(); visible := USize{0}; clipped := false; has_ansi :: text.contains(Char{27})
+    loop {
+        character :: &chars.next()
+        if character == .Val(character) {
+            if character == Char{27} && &chars.peek() == .Val('[') {
+                &output.push(character); &output.push(&chars.next().expect("CSI introducer follows escape"))
+                loop {
+                    code :: &chars.next()
+                    if code == .Val(code) { &output.push(code); if code >= '@' && code <= '~' -> break }
+                    else { break }
+                }
+                next
+            }
+            if visible >= limit { clipped = true; break }
+            &output.push(character); visible += 1
+        } else { break }
+    }
+    if clipped && has_ansi -> &output.push_str("{Char{27}}[0m")
+    ^output
+}
+
+

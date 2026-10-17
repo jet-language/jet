@@ -1,0 +1,159 @@
+// TOOLS-S10: all original checked fixtures/assertions remain UNREGISTERED.
+// CP-NAMES, canonical AST handles/UnitFamily expansion, C4, S8, S11 and S12
+// must deliver actual parsed/checked inputs before these tests run. No fixture
+// here manufactures an index, name ledger, resolved module or callable facts.
+// Original fixture homes are shared intentionally (no divergent oracle copies):
+// lib.rs313–466 typed/default/extern: CallableFacts.jet;
+// lib.rs762–816 generic module key/applications: Build.jet;
+// lib.rs829–895 import alias/member/receiver anchors: Build.jet;
+// tests/semindex.rs169–227 CheckedText: Convert.jet;
+// tests/semindex.rs486–534 state owner;774–795 imports: Items.jet;
+// tests/semindex.rs923–1033 union/aggregate views: CallableFacts.jet;
+// tests/semindex.rs537–564 checked Output: Build.jet;
+// tests/semindex.rs1435–1473 public labels/defaults/zones/rest: Signatures.jet.
+use jet_foundation.[Func, Program, MIRNameFacts, ExternFn]
+
+// A real parser supplies the function from the exact S6 method-contract fixture.
+// Rust hover2821–2900 intentionally differs from fn_signature: effective return
+// first, default ellipsis instead of evaluated/default-source values.
+fn semindex_s10_hover_method_contract_assertions(function: Func) Never! {
+    assert_eq(semindex_hover_for_fn(function), "fn connect(host: String, /, timeout seconds: Int{{…}}, *, tls enabled: Bool{{…}}, rest: ...String) String\nfailure: String (implicit default !Err)")
+}
+
+// C4 must parse these source fixtures and pass their original Func values
+// before sema's inferred-failure mutation. The empty checked effect spelling is
+// distinct from absent effects in Rust's hover (no audit-signature filtering).
+fn semindex_s10_hover_empty_source() -> String Never! {
+    "fn ready() -[]> Bool {{ return true }}\nfn run() {{}}\n"
+}
+fn semindex_s10_hover_empty_assertions(function: Func) Never! {
+    assert_eq(semindex_hover_for_fn(function), "fn ready() Bool -[]>\nfailure: Bool (implicit default !Err)")
+}
+fn semindex_s10_hover_via_source() -> String Never! {
+    semindex_s20_via_signature_source()
+}
+fn semindex_s10_hover_via_assertions(function: Func) Never! {
+    text :: semindex_hover_for_fn(function)
+    assert(text.contains(" -[via act]>"))
+    assert(!text.contains(" -[IO]>"))
+}
+
+// Feed the actual ExternFn extracted from semindex_test_typed_callable_fixture;
+// source defaults/parameter spans and all unavailable stages are canonical facts.
+fn semindex_s10_extern_boundary_assertions(function: ExternFn, source: String) Never! {
+    kind :: semindex_extern_callable_kind(function, source)
+    if kind == {
+        .Function(params, sources, available, contract, variadic, ret, failure, foreign, effects, via, access, defaults, policies, generics) -> {
+            assert_eq(params.len(), 1)
+            assert_eq(params[0].name, "value")
+            assert_eq(params[0].ty, Type.String)
+            assert_eq(sources.len(), 1)
+            selected := source.bytes()[sources[0].start..<sources[0].end] // #4303
+            assert_eq(String.from_bytes(selected) ?? panic("valid extern name span"), "value")
+            assert(available && foreign)
+            assert_eq(contract.len(), 1)
+            assert_eq(contract[0].name, "value")
+            assert_eq(contract[0].label, "value")
+            assert(contract[0].zone == .Either)
+            assert_eq(variadic, [Bool]{false})
+            assert(ret == None && effects == None && via == None)
+            assert_eq(access, [AccessConvention]{.Move})
+            assert_eq(defaults.len(), 1)
+            assert(defaults[0] == None)
+            assert_eq(policies.len(), 0)
+            if failure == {
+                .Unavailable(reason) -> {
+                    assert(reason.required_stage == .Typed)
+                    assert_eq(reason.reason, "extern Jet boundary has no checked failure contract")
+                }
+                .Checked(_) -> panic("extern failure facts are not checked")
+            }
+            if generics == {
+                .Unavailable(reason) -> {
+                    assert(reason.required_stage == .Typed)
+                    assert_eq(reason.reason, "extern declarations expose no generic parameter facts")
+                }
+                .Checked(_) -> panic("extern generic facts are not checked")
+            }
+        }
+        else -> panic("extern boundary must retain its signature")
+    }
+}
+
+// Same checked source/path as Build.jet's original generic oracle. In addition
+// to that complete public index assertion, inspect the real S8-produced DB to
+// ensure CodeModule changed only semantic scope, not physical module identity.
+fn semindex_s10_generic_body_owner_assertions(db: SymbolDB, index: SemIndex, path: String, json: String) {
+    semindex_build_test_generic_instance_identity_reaches_index_and_symbol_database(index, path, json)
+    instance := InstanceFact?{None}
+    loop row in index.instances() -> instance = Val(row)
+    fingerprint :: (instance ?? panic("checked generic instance")).fingerprint
+    owner :: "instance:{fingerprint}"
+    found := false
+    loop definition in db.defs {
+        if definition.name != "value" -> next
+        assert_eq(definition.identity, "fn:{owner}::value")
+        assert_eq(definition.module_path, path)
+        found = true
+    }
+    assert(found, "checked instantiated code-module body owns value")
+}
+
+// The exact lib829 two-file fixture is already retained in Build.jet; both
+// alias definition identity and receiver-specific method anchors stay checked.
+fn semindex_s10_import_reference_assertions(index: SemIndex) {
+    semindex_build_test_checked_reference_facts_cover_import_members_aliases_and_receivers(index)
+}
+// This is the separate original tests774 two-file selected-import fixture.
+fn semindex_s10_selected_import_assertions(symbols: SemanticSymbolIndex) Never! {
+    semindex_s9_import_assertions(symbols)
+}
+
+// Complete original item identity fixture tests/semindex.rs813–920: open both
+// revisions at the SAME identity_reorder.jet path through the actual driver.
+fn semindex_s10_item_reorder_before() -> String Never! {
+    "\nmodule math {{\n    pub fn double(n: Int) -> Int {{\n        return n * 2\n    }}\n}}\n\nstruct Point {{\n    x: Int\n    y: Int\n\n    fn sum(self) -> Int {{\n        return self.x + self.y\n    }}\n}}\n\nimpl Point {{\n    fn origin() -> Point {{\n        return Point.{{x: 0, y: 0}}\n    }}\n}}\n\nenum Light {{\n    Red\n    Green\n}}\n\nfn helper(p: Point) -> Int {{\n    return p.sum()\n}}\n\nfn run() {{\n    p :: Point.origin()\n    print(helper(p))\n}}\n"
+}
+fn semindex_s10_item_reorder_after() -> String Never! {
+    "\nenum Light {{\n    Red\n    Green\n}}\n\nfn helper(p: Point) -> Int {{\n    return p.sum()\n}}\n\nstruct Point {{\n    x: Int\n    y: Int\n\n    fn sum(self) -> Int {{\n        return self.x + self.y\n    }}\n}}\n\nmodule math {{\n    pub fn double(n: Int) -> Int {{\n        return n * 2\n    }}\n}}\n\nimpl Point {{\n    fn origin() -> Point {{\n        return Point.{{x: 0, y: 0}}\n    }}\n}}\n\nfn run() {{\n    p :: Point.origin()\n    print(helper(p))\n}}\n"
+}
+fn semindex_s10_item_reorder_assertions(before: SemIndex, after: SemIndex) Never! {
+    before_ids := [String]{}
+    after_ids := [String]{}
+    loop definition in before.definitions() -> &before_ids.push(definition.identity)
+    loop definition in after.definitions() -> &after_ids.push(definition.identity)
+    &before_ids.sort()
+    &after_ids.sort()
+    assert_eq(before_ids, after_ids)
+    module_found := false
+    function_found := false
+    type_found := false
+    field_found := false
+    variant_found := false
+    method_found := false
+    loop identity in before_ids {
+        if identity.contains("module:") -> module_found = true
+        if identity.contains("fn:") -> function_found = true
+        if identity.contains("type:") && identity.contains("Point") -> type_found = true
+        if identity.contains("field:") && identity.contains("Point.x") -> field_found = true
+        if identity.contains("variant:") && identity.contains("Light.Red") -> variant_found = true
+        if identity.contains("method:") && identity.contains("Point.sum") -> method_found = true
+    }
+    assert(module_found && function_found && type_found && field_found && variant_found && method_found)
+}
+
+// Real parser/checked producers supply both contexts/DBs. The incoming state
+// belongs to S9's already-pushed root; S10 neither pushes nor pops ancestry.
+fn semindex_s10_context_restoration_assertions(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, item: Item, mp: String) {
+    previous_scope :: ctx.scope_identity
+    previous_caller :: ctx.caller
+    previous_depth :: ctx.structural_parents.len()
+    previous_slot :: ctx.structural_slot
+    previous_kind :: ctx.structural_slot_kind
+    semindex_collect_item_facts(&db, &ctx, names, program, source, item, mp)
+    assert_eq(ctx.scope_identity, previous_scope)
+    assert_eq(ctx.caller, previous_caller)
+    assert_eq(ctx.structural_parents.len(), previous_depth)
+    assert_eq(ctx.structural_slot, previous_slot)
+    assert_eq(ctx.structural_slot_kind, previous_kind)
+}

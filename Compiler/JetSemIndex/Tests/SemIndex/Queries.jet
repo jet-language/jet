@@ -1,0 +1,331 @@
+// Pure Rust Types.rs:994–1070 algorithms: genuine typed input records, not a
+// fabricated checked-source producer. Full checked oracles below require S4/C4.
+fn semindex_query_test_member(name: String, kind: MemberKind, origin: MemberOrigin, module_path: String, start: Int, identity: String) -> MemberFact Never! {
+    MemberFact{owner: "Widget", name: name, identity: identity, kind: kind, origin: origin, signature: "retained", module_path: module_path, span: SourceSpan{start: start, end: start + 1}}
+}
+#Test("semindex_member_sort_preserves_rank_location_and_stable_ties") {
+    members := [MemberFact]{
+        semindex_query_test_member("a", .Method, .TraitRequirement{trait_name: "Draw"}, "a", 0, "requirement"),
+        semindex_query_test_member("a", .Method, .TraitImpl{trait_name: "Draw"}, "a", 0, "trait"),
+        semindex_query_test_member("a", .Method, .InherentImpl, "a", 0, "inherent"),
+        semindex_query_test_member("z", .Method, .TypeBody, "a", 0, "body"),
+        semindex_query_test_member("z", .Variant, .TraitImpl{trait_name: "Draw"}, "a", 0, "variant"),
+        semindex_query_test_member("z", .Field, .TraitRequirement{trait_name: "Draw"}, "a", 0, "field"),
+        semindex_query_test_member("a", .Method, .TraitImpl{trait_name: "Other"}, "a", 0, "tie"),
+        semindex_query_test_member("a", .Method, .InherentImpl, "b", 0, "module"),
+        semindex_query_test_member("a", .Method, .InherentImpl, "a", 1, "offset"),
+    }
+    semindex_sort_members(&members)
+    identities := [String]{}
+    loop member in members -> &identities.push(member.identity)
+    assert_eq(identities, [String]{"field", "variant", "body", "inherent", "offset", "module", "trait", "tie", "requirement"})
+}
+
+#Test("semindex_structural_signature_ignores_parameter_spelling_but_keeps_contract") {
+    before :: SemIndexSymbolKind.Function{params: [SemIndexNameTypeFact]{SemIndexNameTypeFact{name: "name", ty: "String"}}, call_contract: [SemIndexCallContractEntry]{}, ret: Val("Int")}
+    renamed :: SemIndexSymbolKind.Function{params: [SemIndexNameTypeFact]{SemIndexNameTypeFact{name: "other", ty: "String"}}, call_contract: [SemIndexCallContractEntry]{}, ret: Val("Int")}
+    assert_eq(semindex_structural_signature(before, [ViewProvenanceFact]{}), semindex_structural_signature(renamed, [ViewProvenanceFact]{}))
+    assert_eq(semindex_structural_signature(before, [ViewProvenanceFact]{}), "fn(String);call_contract=[]=>Int;view_source=")
+    contract :: SemIndexSymbolKind.Function{params: [SemIndexNameTypeFact]{SemIndexNameTypeFact{name: "name", ty: "String"}}, call_contract: [SemIndexCallContractEntry]{SemIndexCallContractEntry{label: "timeout", zone: "named", variadic: true}}, ret: Val("Int")}
+    assert(semindex_structural_signature(before, [ViewProvenanceFact]{}) != semindex_structural_signature(contract, [ViewProvenanceFact]{}))
+    assert_eq(semindex_structural_signature(contract, [ViewProvenanceFact]{}), "fn(String);call_contract=[timeout:named:true]=>Int;view_source=")
+    void :: SemIndexSymbolKind.Function{params: [SemIndexNameTypeFact]{}, call_contract: [SemIndexCallContractEntry]{}, ret: None}
+    assert_eq(semindex_structural_signature(void, [ViewProvenanceFact]{}), "fn();call_contract=[]=>();view_source=")
+}
+#Test("semindex_structural_signature_keeps_returned_view_sources") {
+    kind :: SemIndexSymbolKind.Function{params: [SemIndexNameTypeFact]{}, call_contract: [SemIndexCallContractEntry]{}, ret: Val("View<Int>")}
+    left :: ViewProvenanceFact{output_path: [String]{}, sources: [ViewSourcePathFact]{ViewSourcePathFact{source: .Parameter{index: 0}, projections: [ViewProjectionFact]{.Range}}}, mutable: false}
+    right :: ViewProvenanceFact{output_path: [String]{}, sources: [ViewSourcePathFact]{ViewSourcePathFact{source: .Parameter{index: 1}, projections: [ViewProjectionFact]{.Range}}}, mutable: false}
+    assert(semindex_structural_signature(kind, [ViewProvenanceFact]{left}) != semindex_structural_signature(kind, [ViewProvenanceFact]{right}))
+    assert_eq(semindex_structural_signature(kind, [ViewProvenanceFact]{left}), "fn();call_contract=[]=>View<Int>;view_source=slot:$;parameter:0;access:read;path:range")
+}
+#Test("semindex_structural_signature_keeps_all_noncallable_shapes") {
+    kinds :: [SemIndexSymbolKind]{
+        .Module,
+        .Struct{fields: [SemIndexNameTypeFact]{SemIndexNameTypeFact{name: "x", ty: "Int"}, SemIndexNameTypeFact{name: "y", ty: "Float"}}},
+        .Enum{variants: [String]{"A", "B"}}, .Trait, .Tag, .Type, .Const,
+        .EnumVariant{parent: "E"}, .Field{ty: "Int", parent: "S"}, .Local{mutable: true, ty: None}, .Local{mutable: false, ty: Val("String")}, .Param{ty: "Bool"},
+    }
+    signatures := [String]{}
+    loop kind in kinds -> &signatures.push(semindex_structural_signature(kind, [ViewProvenanceFact]{}))
+    assert_eq(signatures, [String]{"module", "struct{{x:Int,y:Float}}", "enum{{A,B}}", "trait", "tag", "type", "const", "variant:E", "field:S:Int", "local:true:?", "local:false:String", "param:Bool"})
+    reversed :: SemIndexSymbolKind.Enum{variants: [String]{"B", "A"}}
+    assert(semindex_structural_signature(kinds[2], [ViewProvenanceFact]{}) != semindex_structural_signature(reversed, [ViewProvenanceFact]{}))
+}
+
+// Algorithm fixtures are input to the retained-fact query layer, not checked
+// verdicts about source text. Shared compiler producer tests remain separate.
+fn semindex_query_test_definition(identity: String, name: String, kind: SemIndexSymbolKind) -> SymbolDef Never! {
+    SymbolDef{
+        identity: identity,
+        declaration_identity_unavailable: CallableFactUnavailable{required_stage: CompilerStage.Resolved, reason: "query algorithm input"},
+        name: name, qualified_name: name, module_path: "main",
+        def_span: SourceSpan{start: 0, end: 1}, kind: kind,
+        view_provenance: [ViewProvenanceFact]{}, callable_signature: None,
+        derives: [String]{}, nominal_base: None, trait_contracts: [TraitContractFact]{},
+    }
+}
+fn semindex_query_test_index(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[CallEdge], members: ^[MemberFact]) -> SemIndex Never! {
+    SemIndex.new(^defs, ^refs, ^calls, [EffectFact]{}, ^members, [StructuralNode]{}, [DefinitionFact]{})
+}
+#Test("semindex_queries_keep_first_match_and_exact_reference_spelling") {
+    index :: semindex_query_test_index(
+        [SymbolDef]{
+            semindex_query_test_definition("first", "score", .Const),
+            semindex_query_test_definition("second", "score", .Type),
+            semindex_query_test_definition("first", "other", .Tag),
+        },
+        [SymbolRef]{
+            SymbolRef{name: "score", module_path: "b", scope_identity: None, target: None, fact: None, span: SourceSpan{start: 9, end: 10}},
+            SymbolRef{name: "main::score", module_path: "a", scope_identity: None, target: None, fact: None, span: SourceSpan{start: 1, end: 2}},
+            SymbolRef{name: "score", module_path: "a", scope_identity: None, target: None, fact: None, span: SourceSpan{start: 2, end: 3}},
+        },
+        [CallEdge]{
+            CallEdge{caller: "first", callee: "score", module_path: "b", call_span: SourceSpan{start: 9, end: 10}},
+            CallEdge{caller: "qualified", callee: "main::score", module_path: "a", call_span: SourceSpan{start: 1, end: 2}},
+            CallEdge{caller: "second", callee: "score", module_path: "a", call_span: SourceSpan{start: 2, end: 3}},
+        }, [MemberFact]{},
+    )
+    // #4393: explicit option match; do not use ?? return None for View options.
+    if index.lookup("score") == {
+        .Val(row) -> assert_eq(row[0].identity, "first")
+        None -> panic("first lookup result absent")
+    }
+    if index.lookup_identity("first") == {
+        .Val(row) -> assert_eq(row[0].name, "score")
+        None -> panic("first identity result absent")
+    }
+    assert(index.lookup("main::score") == None)
+    assert(index.lookup_identity("missing") == None)
+    refs :: index.references_to("score")
+    assert_eq(refs.len(), 2)
+    assert_eq(refs[0][0].span.start, 9)
+    assert_eq(refs[1][0].span.start, 2)
+    calls :: index.call_sites("score")
+    assert_eq(calls.len(), 2)
+    assert_eq(calls[0][0].caller, "first")
+    assert_eq(calls[1][0].caller, "second")
+    assert_eq(index.call_sites("missing").len(), 0)
+    // #4395: retain the original owner-backed View.len claim, no copied vector.
+    assert_eq(index.definitions().len(), 3)
+    assert_eq(index.references().len(), 3)
+    assert_eq(index.call_edges().len(), 3)
+}
+#Test("semindex_structural_audit_sorts_ids_and_ignores_locations_and_metadata") {
+    before :: semindex_query_test_index([SymbolDef]{
+        semindex_query_test_definition("z", "removed", .Const),
+        semindex_query_test_definition("point", "Point", .Struct{fields: [SemIndexNameTypeFact]{SemIndexNameTypeFact{name: "x", ty: "Int"}}}),
+        semindex_query_test_definition("a", "removed", .Type),
+        semindex_query_test_definition("body", "keep", .Module),
+    }, [SymbolRef]{}, [CallEdge]{}, [MemberFact]{})
+    unchanged := semindex_query_test_definition("body", "renamed", .Module)
+    unchanged.def_span = SourceSpan{start: 100, end: 200}
+    unchanged.module_path = "other"
+    unchanged.derives = [String]{"New"}
+    after :: semindex_query_test_index([SymbolDef]{
+        semindex_query_test_definition("y", "new", .Tag),
+        semindex_query_test_definition("point", "Point", .Struct{fields: [SemIndexNameTypeFact]{SemIndexNameTypeFact{name: "x", ty: "Float"}}}),
+        semindex_query_test_definition("b", "new", .Trait),
+        ^unchanged,
+    }, [SymbolRef]{}, [CallEdge]{}, [MemberFact]{})
+    audit :: before.structural_audit(after)
+    assert_eq(audit.added, [String]{"b", "y"})
+    assert_eq(audit.removed, [String]{"a", "z"})
+    assert_eq(audit.changed, [String]{"point"})
+}
+#Test("semindex_dossier_identity_join_retains_program_bypasses_and_owner_graphs") {
+    index := semindex_query_test_index([SymbolDef]{semindex_query_test_definition("widget-id", "Widget", .Type)}, [SymbolRef]{
+        SymbolRef{name: "Widget", module_path: "z", scope_identity: None, target: None, fact: None, span: SourceSpan{start: 1, end: 2}},
+        SymbolRef{name: "Widget", module_path: "a", scope_identity: None, target: None, fact: None, span: SourceSpan{start: 1, end: 3}},
+        SymbolRef{name: "Widget", module_path: "a", scope_identity: None, target: None, fact: None, span: SourceSpan{start: 1, end: 2}},
+        SymbolRef{name: "Other", module_path: "a", scope_identity: None, target: None, fact: None, span: SourceSpan{start: 0, end: 1}},
+    }, [CallEdge]{}, [MemberFact]{
+        semindex_query_test_member("render", .Method, .TraitImpl{trait_name: "Draw"}, "a", 3, "render"),
+        semindex_query_test_member("title", .Field, .TypeBody, "a", 1, "title"),
+    })
+    &index.set_bypasses([BypassFact]{
+        BypassFact{kind: .ExplicitDrop, site: "unrelated", detail: "telemetry only", module_path: "z", span: SourceSpan{start: 0, end: 1}},
+        BypassFact{kind: .UnsafeFn, site: "unrelated", detail: "audited", module_path: "a", span: SourceSpan{start: 3, end: 4}},
+    })
+    &index.set_state_graphs([StateGraphFact]{
+        StateGraphFact{owner: "Other", module_path: "a", states: [StateNodeFact]{}, transitions: [StateTransitionFact]{}},
+        StateGraphFact{owner: "Widget", module_path: "b", states: [StateNodeFact]{}, transitions: [StateTransitionFact]{}},
+    })
+    dossier :: index.dossier("widget-id")
+    assert_eq(dossier.target, "Widget")
+    assert_eq(dossier.members[0].name, "title")
+    assert_eq(dossier.members[1].signature, "retained")
+    assert_eq(dossier.references.len(), 3)
+    assert_eq(dossier.references[0].span.end, 2)
+    assert_eq(dossier.references[1].span.end, 3)
+    assert_eq(dossier.references[2].module_path, "z")
+    assert_eq(dossier.bypass_facts.len(), 2)
+    assert_eq(dossier.bypass_facts[0].site, "unrelated")
+    assert_eq(dossier.bypass_facts[1].detail, "telemetry only")
+    assert_eq(dossier.state_graphs.len(), 1)
+    assert_eq(dossier.state_graphs[0].module_path, "b")
+    missing :: index.dossier("missing")
+    assert(missing.definition == None)
+    assert_eq(missing.target, "missing")
+    assert_eq(missing.members.len(), 0)
+    assert_eq(missing.bypass_facts.len(), 2)
+}
+
+// Requires the canonical CP-DERIVATIONS invalidation helper, not a local
+// reimplementation of Foundation's identity/disposition law.
+#Test("semindex_derivations_keep_sorted_evidence_ids_and_invalidate_only_current") {
+    identity :: derivation_identity("source", "build", "run", "target")
+    first :: derivation_record("subject", "a", "checker", .StaticDerivation, "rule", [String]{}, identity)
+    second :: derivation_record("subject", "b", "checker", .StaticDerivation, "rule", [String]{first.id}, identity)
+    retained := derivation_record("redacted", "c", "checker", .StaticDerivation, "rule", [String]{}, identity)
+    retained.disposition = .Redacted
+    index := semindex_query_test_index([SymbolDef]{}, [SymbolRef]{}, [CallEdge]{}, [MemberFact]{})
+    &index.set_derivations([DerivationRecord]{second, retained, first})
+    expected :: if first.id < second.id -> first.id else -> second.id
+    if index.derivation_ref("subject") == {
+        .Val(reference) -> assert_eq(reference.id, expected)
+        None -> panic("retained subject evidence absent")
+    }
+    if index.derivation(first.id) == {
+        .Val(record) -> assert_eq(record[0].id, first.id)
+        None -> panic("retained evidence id absent")
+    }
+    assert(index.derivation("absent") == None)
+    assert(index.derivation_ref("absent") == None)
+    assert_eq(&index.invalidate_derivations(identity), 0)
+    changed :: derivation_identity("source", "build", "run", "changed-target")
+    assert_eq(&index.invalidate_derivations(changed), 2)
+    assert_eq(&index.invalidate_derivations(changed), 0)
+    if index.derivation(first.id) == {
+        .Val(record) -> assert(record[0].disposition == .Stale)
+        None -> panic("invalidation must retain exact evidence id")
+    }
+    if index.derivation(retained.id) == {
+        .Val(record) -> assert(record[0].disposition == .Redacted)
+        None -> panic("redacted evidence must be retained")
+    }
+}
+
+// Checked integration oracles: these consume real indices opened from the
+// original Rust fixtures. Register through S4/C4 rather than fake snapshots.
+// Rust tests/semindex.rs:1036–1060, original Point.x Int -> Float fixture.
+fn semindex_test_structural_audit_reports_signature_change(before: SemIndex, after: SemIndex) {
+    audit :: before.structural_audit(after)
+    assert_eq(audit.added.len(), 0)
+    assert_eq(audit.removed.len(), 0)
+    found := false
+    loop identity in audit.changed { if identity.contains("Point") -> found = true }
+    assert(found)
+}
+// Rust tests/semindex.rs:1063–1104, original score(String)->Int changes to
+// score(String,Int)->Float. A signature edit is changed, not added/removed.
+fn semindex_test_structural_audit_tracks_callable_signature_changes(before: SemIndex, after: SemIndex) {
+    audit :: before.structural_audit(after)
+    loop identity in audit.added -> assert(!(identity.starts_with("fn:") && identity.ends_with("::score")))
+    loop identity in audit.removed -> assert(!(identity.starts_with("fn:") && identity.ends_with("::score")))
+    found := false
+    loop identity in audit.changed { if identity.starts_with("fn:") && identity.ends_with("::score") -> found = true }
+    assert(found)
+}
+// Rust tests/semindex.rs:1378–1427, original Widget/DrawThing fixture.
+fn semindex_test_dossier_stitches_scattered_members(index: SemIndex) {
+    dossier :: index.dossier("Widget")
+    signatures := [String]{}
+    loop member in dossier.members -> &signatures.push("{member.name}:{member.signature}")
+    assert(signatures.contains("title:title: String"))
+    label := false
+    size := false
+    render := false
+    loop signature in signatures {
+        if signature.contains("label:fn label() -> String") -> label = true
+        if signature.contains("size:fn size() -> Int") -> size = true
+        if signature.contains("render:fn render() -> String") -> render = true
+    }
+    assert(label && size && render)
+}
+// Rust tests/semindex.rs:1435–1473, original Client.connect fixture.
+fn semindex_test_dossier_preserves_method_call_contract(index: SemIndex) {
+    dossier :: index.dossier("Client")
+    found := false
+    loop member in dossier.members {
+        if member.name != "connect" -> next
+        assert(member.signature.contains("timeout seconds: Int"))
+        assert(member.signature.contains("*, tls enabled: Bool"))
+        assert(member.signature.contains("rest: ...String"))
+        found = true
+        break
+    }
+    assert(found)
+}
+// Rust tests/semindex.rs:1476–1543, original Invoice/risky_fn/fetch_it fixture.
+// JSON/text consumer assertions1545–1551 need S17–S20, not copied wire strings.
+fn semindex_test_dossier_bypass_facts(index: SemIndex) {
+    dossier :: index.dossier("run")
+    kinds := [String]{}
+    allow := false
+    drop := false
+    loop fact in dossier.bypass_facts {
+        &kinds.push(fact.kind.as_str())
+        if fact.kind == .LintAllow && !allow {
+            assert_eq(fact.site, "price")
+            assert_eq(fact.detail, "float_money")
+            allow = true
+        }
+        if fact.kind == .ExplicitDrop && !drop {
+            assert_eq(fact.detail, "telemetry only")
+            drop = true
+        }
+    }
+    assert(kinds.contains("lint_allow"))
+    assert(kinds.contains("unsafe_region"))
+    assert(kinds.contains("unsafe_fn"))
+    assert(kinds.contains("explicit_drop"))
+    assert(allow && drop)
+}
+
+// Scalar projections consume the real retained owner through a READ parameter.
+// No owned getter, one-row owner container, encoded wrapper or deep index copy.
+fn semindex_query_test_scalar_consumers(index: SemIndex, expected_name: String, expected_unfree: [String]) Never! {
+    if index.package_facts == {
+        .Val(facts) -> {
+            assert_eq(facts.name, expected_name)
+            assert(package_facts_json(facts).contains("\"name\":{foundation_json_quote(expected_name)}"))
+        }
+        .None -> panic("attached package owner absent")
+    }
+    if index.workspace_overlay_policy == {
+        .Val(policy) -> {
+            assert_eq(policy.allow_unfree, expected_unfree)
+            assert(workspace_overlay_policy_json(policy).contains(semindex_json_string_array(expected_unfree)))
+        }
+        .None -> panic("attached overlay owner absent")
+    }
+    assert_eq(index.effect_projection.required_effects, [String]{"IO"})
+    assert_eq(index.effect_projection.granted_effects, [String]{"Net"})
+    assert_eq(index.effect_projection.denied_effects, [String]{"IO"})
+    assert_eq(index.effect_projection.authority, "package.jet authority.holds")
+}
+
+#Test("semindex_scalar_consumers_read_retained_owner_and_updated_policy") {
+    index := semindex_query_test_index([SymbolDef]{}, [SymbolRef]{}, [CallEdge]{}, [MemberFact]{})
+    assert(index.package_facts == None)
+    assert(index.workspace_overlay_policy == None)
+    &index.set_effect_projection(pkg_project_application_effects([String]{"IO"}, None))
+    facts := PackageFacts.default()
+    facts.name = "first"
+    facts.authority.holds.allow = Val([String]{"Net"})
+    facts.authority.holds.deny = Val([String]{"IO"})
+    &index.attach_package_facts(^facts)
+    &index.attach_workspace_overlay_policy(OverlayPolicy{allow_unfree: [String]{"first", "first"}, build_deny: [String]{},
+        build_grants: [BuildGrant]{}, overlays: [OverlaySet]{}})
+    semindex_query_test_scalar_consumers(index, "first", [String]{"first", "first"})
+    replacement := PackageFacts.default()
+    replacement.name = "replacement"
+    replacement.authority.holds.allow = Val([String]{"Net"})
+    replacement.authority.holds.deny = Val([String]{"IO"})
+    &index.attach_package_facts(^replacement)
+    &index.attach_workspace_overlay_policy(OverlayPolicy{allow_unfree: [String]{}, build_deny: [String]{},
+        build_grants: [BuildGrant]{}, overlays: [OverlaySet]{}})
+    semindex_query_test_scalar_consumers(index, "replacement", [String]{})
+    assert_eq(index.definitions().len(), 0)
+}

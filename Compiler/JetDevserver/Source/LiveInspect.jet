@@ -1,0 +1,449 @@
+// D-OBSERVE-LIVE1=A: bounded runtime-owned snapshot readers and projections.
+// Never reads process memory or exposes payloads, locals, environment or credentials.
+// Rust: crates/jet-devserver/src/LiveInspect.rs:5
+use jet_foundation.Devtools.[JetDevtoolsEnvelope, JET_DEVTOOLS_MAX_ENVELOPE_BYTES]
+use jet_foundation.DevtoolsControl.[JetDevtoolsDecodedEnvelope]
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.JSON.[json_get, json_int, json_str, parse_json, quote]
+use jet_foundation.MIR.[MirDecisionLedger]
+use jet_devserver.WebHost.[decode_devtools_envelope]
+use jet_debug.[render_event_observations]
+use std.fs as fs
+use std.fs.[OpenOptions]
+use std.time.[SystemTime, UNIX_EPOCH]
+use core.files.[OSPath]
+use core.sys.target.[selected_os, selected_family]
+
+// Rust: crates/jet-devserver/src/LiveInspect.rs:14
+MAX_SNAPSHOT_BYTES :: U64{1024 * 1024}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:15
+MAX_SNAPSHOT_AGE_MS :: U128{2_000}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:16
+MAX_SNAPSHOT_ITEMS :: Usize{4096}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:17
+MAX_DEVTOOLS_RELAY_BYTES :: U64{4 * 1024 * 1024}
+
+// Rust: crates/jet-devserver/src/LiveInspect.rs:20
+struct LiveTask {
+    id: I64; parent: I64; state: String; wait: String
+    deadline_ms: I64?; cancelled: Bool
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:30
+struct LiveChannel {
+    id: I64; depth: I64; capacity: I64?
+    send_waiters: I64; recv_waiters: I64; closed: Bool
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:40
+struct LiveEffects { compute: I64; waiting: I64; channel: I64; time: I64; io: I64 }
+// Rust: crates/jet-devserver/src/LiveInspect.rs:48
+struct LiveInspectValue {
+    value_id: String; type_identity: String; disposition: String
+    reason: String; rendered_value: String?
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:58
+struct LiveInspectShape { type_identity: String; value_ids: [String] }
+// Rust: crates/jet-devserver/src/LiveInspect.rs:64
+struct LiveInspectProjection {
+    plane: String; scope: String; pid: U32
+    protocol: String; session_id: String; source_id: String
+    build_id: String; revision: String; world_id: String
+    values: [LiveInspectValue]; shapes: [LiveInspectShape]
+    decision_ledger: MirDecisionLedger?
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:81
+struct LiveResources {
+    workers: I64; running: I64; queued: I64; cancelled: I64
+    arenas: I64; arena_allocations: I64; arena_bytes: I64
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:91
+// Runtime-published run-phase window, including the synchronous exit seam.
+struct LiveRuntimeWindow { elapsed_ns: U64; cpu_ns: U64?; exit: Bool }
+// Rust: crates/jet-devserver/src/LiveInspect.rs:104
+struct LiveSnapshot {
+    protocol: String; session_id: String; source_id: String; build_id: String
+    revision: String; world_id: String; pid: I64; start_id: String; captured_ms: U128
+    tasks: [LiveTask]; channels: [LiveChannel]; effects: LiveEffects
+    resources: LiveResources; values: [LiveInspectValue]
+    decision_ledger: MirDecisionLedger?; has_event_observations: Bool
+    runtime: LiveRuntimeWindow?
+}
+
+// Rust: crates/jet-devserver/src/LiveInspect.rs:124
+fn checked_object(value: DataTree, required: [String], optional: [String], label: String) -> [String: DataTree] Err! {
+    fields :: if value == {
+        .Object(fields) -> fields.iter().cloned().collect()
+        else -> { return .Err("{label} must be an object") }
+    }
+    if fields.keys().any((key) -> !required.contains(key) && !optional.contains(key)) || required.iter().any((key) -> !fields.contains_key(key)) {
+        return .Err("{label} has missing or unsafe fields")
+    }
+    return fields
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:144
+fn int_field(object: DataTree, key: String, label: String, nonnegative: Bool) -> I64 Err! {
+    value :: json_get(object, key).and_then(json_int) ?? return .Err("{label} has invalid `{key}`")
+    if nonnegative && value < 0 -> return .Err("{label} has negative `{key}`")
+    return value
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:154
+fn optional_int_field(object: DataTree, key: String, label: String) -> I64? Err! {
+    if json_get(object, key) == {
+        .None | .Val(.Null) -> return .None
+        .Val(value) -> {
+            number :: json_int(value) ?? return .Err("{label} has invalid `{key}`")
+            return .Val(number)
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:167
+fn string_field(object: DataTree, key: String, label: String) -> String Err! {
+    value :: json_get(object, key).and_then(json_str) ?? return .Err("{label} has invalid `{key}`")
+    if value.chars().any((c) -> c.is_control()) -> return .Err("{label} has control characters in `{key}`")
+    return value.to_string()
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:177
+fn bool_field(object: DataTree, key: String, label: String) -> Bool Err! {
+    if json_get(object, key) == {
+        .Val(.Bool(value)) -> return value
+        else -> return .Err("{label} has invalid `{key}`")
+    }
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:184
+fn canonical_json_value(value: DataTree) -> String Err! {
+    if value == {
+        .Null -> return "null"
+        .Bool(value) -> return value.to_string()
+        .Int(value) -> return value.to_string()
+        .Float(value) -> {
+            if !value.is_finite() -> return .Err("decision ledger contains a non-finite number")
+            return value.to_string()
+        }
+        .Number(value) -> return value.copy()
+        .TypedText(value) | .Text(value) -> return quote(value)
+        .Bytes(values) -> return "[{values.iter().map((v) -> v.to_string()).collect().join(",")}]"
+        .Array(values) -> {
+            rendered := [String]{}
+            loop value in values -> rendered.push(canonical_json_value(value)?)
+            return "[{rendered.join(",")}]"
+        }
+        .Object(fields) -> {
+            fields := fields.iter().collect()
+            fields.sort_by((left, right) -> left.0.cmp(right.0))
+            rendered := [String]{}
+            loop (key, value) in fields -> rendered.push("{quote(key)}:{canonical_json_value(value)?}")
+            return "{{{rendered.join(",")}}}"
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:229
+fn parse_decision_ledger(value: DataTree?) -> MirDecisionLedger? Err! {
+    value :: value ?? return .None
+    if value == .Null -> return .None
+    payload :: canonical_json_value(&value)?
+    if payload.len() > 512 * 1024 -> return .Err("live decision ledger exceeds its transport limit")
+    return .Val(MirDecisionLedger.from_json(payload)?)
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:243
+fn parse_live_snapshot(snapshot: String) -> LiveSnapshot Err! {
+    root :: parse_json(snapshot) ?? return .Err("live runtime snapshot is not valid JSON")
+    root_fields :: checked_object(&root,
+        &["protocol", "session_id", "source_id", "build_id", "revision", "world_id", "values", "schema_version", "pid", "start_id", "captured_ms", "tasks", "channels", "effects", "resources"],
+        &["event_observations", "decisions", "runtime"], "live runtime snapshot")?
+    decision_ledger :: parse_decision_ledger(root_fields.get("decisions"))?
+    schema_version :: int_field(&root, "schema_version", "live runtime snapshot", true)?
+    protocol :: string_field(&root, "protocol", "live runtime snapshot")?
+    if protocol != "jet.live.v1" -> return .Err("live runtime snapshot protocol must be jet.live.v1")
+    session_id :: string_field(&root, "session_id", "live runtime snapshot")?
+    source_id :: string_field(&root, "source_id", "live runtime snapshot")?
+    build_id :: string_field(&root, "build_id", "live runtime snapshot")?
+    revision :: string_field(&root, "revision", "live runtime snapshot")?
+    world_id :: string_field(&root, "world_id", "live runtime snapshot")?
+    if schema_version != 1 -> return .Err("live runtime snapshot has an unsupported schema version")
+    pid :: int_field(&root, "pid", "live runtime snapshot", true)?
+    start_id :: string_field(&root, "start_id", "live runtime snapshot")?
+    captured :: int_field(&root, "captured_ms", "live runtime snapshot", true)?
+    captured_ms :: U128.try_from(captured) ?? return .Err("live runtime snapshot capture time is out of range")
+
+    values_value :: root_fields.get("values") ?? return .Err("live runtime snapshot has no values")
+    value_values :: if values_value == {
+        .Array(values) -> values
+        else -> { return .Err("live runtime snapshot values are not an array") }
+    }
+    if value_values.len() > MAX_SNAPSHOT_ITEMS -> return .Err("live runtime snapshot has too many values")
+    values := [LiveInspectValue]{[].with_capacity(value_values.len())}
+    loop value in value_values {
+        _ :: checked_object(&value, &["value_id", "type_identity", "disposition", "reason"], &["rendered_value"], "live value")?
+        disposition :: string_field(&value, "disposition", "live value")?
+        if !["kept", "migrated", "reset", "rejected"].contains(disposition) -> return .Err("live value has an unsupported disposition")
+        rendered_value :: if json_get(&value, "rendered_value") == {
+            .None | .Val(.Null) -> .None
+            .Val(.Text(rendered)) -> {
+                if rendered.len() > 16 * 1024 -> return .Err("live value `rendered_value` exceeds the Prelude limit")
+                if rendered.chars().any((c) -> c.is_control()) -> return .Err("live value has control characters in `rendered_value`")
+                .Val(rendered.to_string())
+            }
+            else -> { return .Err("live value has invalid `rendered_value`") }
+        }
+        values.push(LiveInspectValue {
+            value_id: string_field(&value, "value_id", "live value")?,
+            type_identity: string_field(&value, "type_identity", "live value")?, disposition,
+            reason: string_field(&value, "reason", "live value")?, rendered_value
+        })
+    }
+    tasks_value :: root_fields.get("tasks") ?? return .Err("live runtime snapshot has no tasks")
+    task_values :: if tasks_value == {
+        .Array(values) -> values
+        else -> { return .Err("live runtime snapshot tasks are not an array") }
+    }
+    if task_values.len() > MAX_SNAPSHOT_ITEMS -> return .Err("live runtime snapshot has too many tasks")
+    tasks := [LiveTask]{[].with_capacity(task_values.len())}
+    loop value in task_values {
+        _ :: checked_object(&value, &["id", "parent", "state", "wait", "deadline_ms", "cancelled"], &["label", "spawn_site"], "live task")?
+        tasks.push(LiveTask {
+            id: int_field(&value, "id", "live task", true)?, parent: int_field(&value, "parent", "live task", true)?,
+            state: string_field(&value, "state", "live task")?, wait: string_field(&value, "wait", "live task")?,
+            deadline_ms: optional_int_field(&value, "deadline_ms", "live task")?, cancelled: bool_field(&value, "cancelled", "live task")?
+        })
+    }
+    channels_value :: root_fields.get("channels") ?? return .Err("live runtime snapshot has no channels")
+    channel_values :: if channels_value == {
+        .Array(values) -> values
+        else -> { return .Err("live runtime snapshot channels are not an array") }
+    }
+    if channel_values.len() > MAX_SNAPSHOT_ITEMS -> return .Err("live runtime snapshot has too many channels")
+    channels := [LiveChannel]{[].with_capacity(channel_values.len())}
+    loop value in channel_values {
+        _ :: checked_object(&value, &["id", "depth", "capacity", "send_waiters", "recv_waiters", "closed"], &[], "live channel")?
+        channels.push(LiveChannel {
+            id: int_field(&value, "id", "live channel", true)?, depth: int_field(&value, "depth", "live channel", true)?,
+            capacity: optional_int_field(&value, "capacity", "live channel")?, send_waiters: int_field(&value, "send_waiters", "live channel", true)?,
+            recv_waiters: int_field(&value, "recv_waiters", "live channel", true)?, closed: bool_field(&value, "closed", "live channel")?
+        })
+    }
+    effects :: root_fields.get("effects") ?? return .Err("live runtime snapshot has no effects")
+    _ :: checked_object(&effects, &["compute", "waiting", "channel", "time", "io"], &[], "live effects")?
+    effects :: LiveEffects {
+        compute: int_field(&effects, "compute", "live effects", true)?, waiting: int_field(&effects, "waiting", "live effects", true)?,
+        channel: int_field(&effects, "channel", "live effects", true)?, time: int_field(&effects, "time", "live effects", true)?, io: int_field(&effects, "io", "live effects", true)?
+    }
+    resources :: root_fields.get("resources") ?? return .Err("live runtime snapshot has no resources")
+    _ :: checked_object(&resources, &["workers", "running", "queued", "cancelled", "arenas", "arena_allocations", "arena_bytes"], &[], "live resources")?
+    resources :: LiveResources {
+        workers: int_field(&resources, "workers", "live resources", true)?, running: int_field(&resources, "running", "live resources", true)?,
+        queued: int_field(&resources, "queued", "live resources", true)?, cancelled: int_field(&resources, "cancelled", "live resources", true)?,
+        arenas: int_field(&resources, "arenas", "live resources", true)?, arena_allocations: int_field(&resources, "arena_allocations", "live resources", true)?,
+        arena_bytes: int_field(&resources, "arena_bytes", "live resources", true)?
+    }
+    runtime :: if root_fields.get("runtime") == {
+        .None -> .None
+        .Val(runtime) -> {
+            _ :: checked_object(&runtime, &["elapsed_ns", "cpu_ns", "exit"], &[], "live runtime window")?
+            elapsed_ns :: int_field(&runtime, "elapsed_ns", "live runtime window", true)?
+            cpu_ns :: optional_int_field(&runtime, "cpu_ns", "live runtime window")?
+            if cpu_ns.is_some_and((value) -> value < 0) -> return .Err("live runtime window has negative `cpu_ns`")
+            .Val(LiveRuntimeWindow { elapsed_ns: U64{elapsed_ns}, cpu_ns: cpu_ns.map((value) -> U64{value}), exit: bool_field(&runtime, "exit", "live runtime window")? })
+        }
+    }
+    return LiveSnapshot {
+        protocol, session_id, source_id, build_id, revision, world_id, pid, start_id, captured_ms,
+        tasks, channels, effects, resources, values, decision_ledger,
+        has_event_observations: root_fields.contains_key("event_observations"), runtime
+    }
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:473
+// Runtime-published window, if this producer supplies one.
+fn runtime_window(snapshot: String) -> LiveRuntimeWindow? Err! { return parse_live_snapshot(snapshot)?.runtime }
+// Rust: crates/jet-devserver/src/LiveInspect.rs:479
+fn snapshot_path(pid: U32) -> OSPath { return std.env.temp_dir().join("jet-observe-{pid}.json") }
+// Rust: crates/jet-devserver/src/LiveInspect.rs:483
+// Process-scoped length-delimited relay; envelope event deque is the retained ring.
+fn devtools_relay_path(pid: U32) -> OSPath { return std.env.temp_dir().join("jet-devtools-relay-{pid}.ring") }
+// Rust: crates/jet-devserver/src/LiveInspect.rs:490
+fn read_devtools_relay(pid: U32) -> JetDevtoolsEnvelope Err! {
+    if pid == 0 -> return .Err("process id must be greater than zero")
+    return read_devtools_relay_path(devtools_relay_path(pid))
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:497
+// Shared attach/perf reader for caller-provisioned relays.
+fn read_devtools_relay_path(path: OSPath) -> JetDevtoolsEnvelope Err! {
+    // GATE #4494: native retained file descriptor, no-follow open, metadata and bounded IO.
+    // GATE #4483: all OS/family branches use selected-target facts.
+    link_metadata :: fs.symlink_metadata(path) ?? return .Err("no live jet.devtools.v1 relay is available")
+    if !link_metadata.file_type().is_file() -> return .Err("jet.devtools.v1 relay is not a regular file")
+    options := OpenOptions.new()
+    options.read(true)
+    if selected_os() == "linux" || selected_os() == "android" -> options.custom_flags(0o400000)
+    file :: options.open(path) ?? return .Err("cannot securely open jet.devtools.v1 relay")
+    metadata :: file.metadata() ?? return .Err("cannot inspect jet.devtools.v1 relay: {err}")
+    if !metadata.file_type().is_file() -> return .Err("jet.devtools.v1 relay is not a regular file")
+    if selected_family() == "unix" {
+        if metadata.permissions().mode().bit_and(0o077) != 0 -> return .Err("jet.devtools.v1 relay permissions expose runtime state")
+        if fs.metadata(OSPath.from("/proc/self")) == .Ok(self_metadata) {
+            if metadata.uid() != self_metadata.uid() -> return .Err("jet.devtools.v1 relay belongs to another user")
+        }
+    }
+    if metadata.len() > MAX_DEVTOOLS_RELAY_BYTES -> return .Err("jet.devtools.v1 relay exceeds its byte limit")
+    bytes := [U8]{}
+    file.take(MAX_DEVTOOLS_RELAY_BYTES + 1).read_to_end(&bytes) ?? return .Err("cannot read jet.devtools.v1 relay: {err}")
+    if U64{bytes.len()} > MAX_DEVTOOLS_RELAY_BYTES -> return .Err("jet.devtools.v1 relay exceeds its byte limit")
+    offset := Usize{0}
+    latest := (_0: Usize, _1: Usize)?{.None}
+    loop offset < bytes.len() {
+        header_end :: offset.checked_add(4) ?? return .Err("jet.devtools.v1 relay length overflow")
+        if header_end > bytes.len() -> return .Err("jet.devtools.v1 relay has a truncated frame length")
+        header :: bytes[offset..header_end].try_into() ?? return .Err("jet.devtools.v1 relay frame length is invalid")
+        frame_len :: Usize{U32.from_be_bytes(header)}
+        if frame_len == 0 || frame_len > JET_DEVTOOLS_MAX_ENVELOPE_BYTES -> return .Err("jet.devtools.v1 relay frame exceeds its envelope limit")
+        frame_end :: header_end.checked_add(frame_len) ?? return .Err("jet.devtools.v1 relay frame length overflow")
+        if frame_end > bytes.len() -> return .Err("jet.devtools.v1 relay has a truncated envelope frame")
+        latest = .Val((_0: header_end, _1: frame_end))
+        offset = frame_end
+    }
+    (start, end) :: latest ?? return .Err("jet.devtools.v1 relay has no envelope frame")
+    payload :: std.str.from_utf8(bytes[start..end]) ?? return .Err("jet.devtools.v1 relay envelope is not UTF-8")
+    if decode_devtools_envelope(payload)? == {
+        .Events(envelope) -> return envelope
+        .Commands(_) -> return .Err("jet.devtools.v1 relay must contain runtime events, not host commands")
+    }
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:581
+fn read_devtools_relay_path_with_identity(path: OSPath, expected_session_id: String?, expected_source_id: String?, expected_build_id: String?, expected_revision: String?, expected_world_id: String?) -> JetDevtoolsEnvelope Err! {
+    envelope :: read_devtools_relay_path(path)?
+    validate_devtools_relay_identity(&envelope, expected_session_id, expected_source_id, expected_build_id, expected_revision, expected_world_id)?
+    return envelope
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:603
+// Identity/completeness gate shared by attach and perf. Expectations are optional
+// only where callers cannot know a producer's identity.
+fn validate_devtools_relay_identity(envelope: &JetDevtoolsEnvelope, expected_session_id: String?, expected_source_id: String?, expected_build_id: String?, expected_revision: String?, expected_world_id: String?) Err! {
+    if envelope.truncated -> return .Err("jet.devtools.v1 relay is truncated; refusing incomplete trace")
+    if expected_session_id == .Val(expected) {
+        if envelope.session_id != expected -> return .Err("jet.devtools.v1 relay session identity mismatch")
+    }
+    identity_expected :: expected_source_id.is_some() || expected_build_id.is_some() || expected_revision.is_some() || expected_world_id.is_some()
+    identity :: envelope.source_identity.as_ref()
+    if identity_expected && identity.is_none() -> return .Err("jet.devtools.v1 relay is missing source/build identity")
+    if identity == .Val(identity) {
+        identity.validate()?
+        for (expected, actual, label) in [
+            (expected_source_id, identity.source_id.as_deref(), "source"),
+            (expected_build_id, identity.build_id.as_deref(), "build"),
+            (expected_revision, identity.revision.as_deref(), "revision"),
+            (expected_world_id, identity.world_id.as_deref(), "world")
+        ] {
+            if expected == .Val(expected) {
+                if actual != .Val(expected) -> return .Err("jet.devtools.v1 relay {label} identity mismatch")
+            }
+        }
+    }
+    return ()
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:650
+fn read(pid: U32) -> String Err! {
+    // GATE #4494: native descriptor/metadata, bounded IO, process identity and clock.
+    // GATE #4483: preserve selected Linux/Android and Unix branches.
+    if pid == 0 -> return .Err("process id must be greater than zero")
+    path :: snapshot_path(pid)
+    link_metadata :: fs.symlink_metadata(path) ?? return .Err("no live Jet runtime is observable at process {pid}")
+    if !link_metadata.file_type().is_file() -> return .Err("live runtime snapshot is not a regular file")
+    options := OpenOptions.new()
+    options.read(true)
+    if selected_os() == "linux" || selected_os() == "android" -> options.custom_flags(0o400000)
+    file :: options.open(path) ?? return .Err("cannot securely open live runtime snapshot for process {pid}")
+    metadata :: file.metadata() ?? return .Err("cannot inspect live runtime snapshot: {err}")
+    if !metadata.file_type().is_file() -> return .Err("live runtime snapshot is not a regular file")
+    if selected_family() == "unix" {
+        if metadata.permissions().mode().bit_and(0o077) != 0 -> return .Err("live runtime snapshot permissions expose runtime state")
+        if selected_os() == "linux" || selected_os() == "android" {
+            if fs.metadata(OSPath.from("/proc/self")) == .Ok(self_metadata) {
+                if metadata.uid() != self_metadata.uid() -> return .Err("live runtime snapshot belongs to another user")
+            }
+        }
+    }
+    if metadata.len() > MAX_SNAPSHOT_BYTES -> return .Err("live runtime snapshot exceeds the 1 MiB safety limit")
+    snapshot := ""
+    file.take(MAX_SNAPSHOT_BYTES + 1).read_to_string(&snapshot) ?? return .Err("cannot read live runtime snapshot: {err}")
+    if U64{snapshot.len()} > MAX_SNAPSHOT_BYTES -> return .Err("live runtime snapshot exceeds the 1 MiB safety limit")
+    parsed :: parse_live_snapshot(snapshot) ?? return .Err("live runtime snapshot has an invalid or unsafe schema: {err}")
+    if parsed.pid != I64.from(pid) -> return .Err("live runtime snapshot does not belong to process {pid}")
+    _ :: render_event_observations(snapshot) ?? return .Err("live runtime event observations are invalid: {err}")
+    now_ms :: SystemTime.now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis()
+    if now_ms.saturating_sub(parsed.captured_ms) > MAX_SNAPSHOT_AGE_MS -> return .Err("process {pid} is not publishing a live runtime snapshot")
+    if selected_os() == "linux" || selected_os() == "android" {
+        proc_path :: OSPath.from("/proc/{pid}")
+        if !proc_path.is_dir() -> return .Err("process {pid} is no longer running")
+        expected_start_id :: fs.read_to_string(proc_path.join("stat")).ok().and_then((stat) -> {
+            return stat.rsplit_once(") ").and_then(((_0: _, _1: tail)) -> tail.split_whitespace().nth(19)).map((value) -> value.to_string())
+        }) ?? return .Err("cannot verify process {pid} identity")
+        if parsed.start_id != expected_start_id -> return .Err("live runtime snapshot does not belong to process {pid}")
+    }
+    return snapshot
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:742
+// All inspect planes share the canonical live value/type identity projection.
+fn read_plane(pid: U32, plane: String) -> LiveInspectProjection Err! {
+    if !["types", "rights", "claims", "shapes", "structure", "build", "gates", "decisions"].contains(plane) -> return .Err("unknown live inspect plane `{plane}`")
+    snapshot :: read(pid)?
+    parsed :: parse_live_snapshot(snapshot)?
+    pid :: U32.try_from(parsed.pid) ?? return .Err("live runtime snapshot pid is out of range")
+    shape_values := [String: [String]]{}
+    loop value in &parsed.values -> shape_values.entry(value.type_identity.copy()).or_default().push(value.value_id.copy())
+    keys := shape_values.keys().cloned().collect()
+    keys.sort()
+    shapes := [LiveInspectShape]{[].with_capacity(keys.len())}
+    loop type_identity in keys -> shapes.push(LiveInspectShape { type_identity, value_ids: shape_values.remove(type_identity).unwrap() })
+    return LiveInspectProjection {
+        plane: plane.to_string(), scope: "live", pid,
+        protocol: ^parsed.protocol, session_id: ^parsed.session_id, source_id: ^parsed.source_id,
+        build_id: ^parsed.build_id, revision: ^parsed.revision, world_id: ^parsed.world_id,
+        values: ^parsed.values, shapes, decision_ledger: ^parsed.decision_ledger
+    }
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:792
+fn render(snapshot: String) -> String {
+    parsed :: parse_live_snapshot(snapshot) ?? return "jet inspect live · invalid snapshot: {err}\n"
+    event_lines :: if parsed.has_event_observations {
+        events :: render_event_observations(snapshot) ?? return "jet inspect live · invalid snapshot: {err}\n"
+        .Val(events)
+    } else -> .None
+    pid :: parsed.pid.to_string()
+    out := "jet inspect live · pid {pid}\nprotocol={parsed.protocol} session={parsed.session_id} source={parsed.source_id} build={parsed.build_id} revision={parsed.revision} world={parsed.world_id}\n\ntask tree\n"
+    if parsed.tasks.is_empty() -> out.push_str("  (no live tasks)\n")
+    else {
+        loop task in &parsed.tasks {
+            deadline :: task_ref.deadline_ms.map_or_else(() -> "-", (deadline) -> deadline.to_string())
+            wait :: if task_ref.wait.is_empty() -> "-" else -> task_ref.wait
+            out.push_str("  task {task.id:<5} parent {task.parent:<5} {task.state:<8} wait={wait} deadline={deadline} cancelled={task.cancelled}\n")
+        }
+    }
+    out.push_str("\nchannels\n")
+    if parsed.channels.is_empty() -> out.push_str("  (no live channels)\n")
+    else {
+        loop channel in &parsed.channels {
+            capacity :: channel.capacity.map_or_else(() -> "∞", (capacity) -> capacity.to_string())
+            out.push_str("  channel {channel.id:<5} depth {channel.depth}/{capacity} blocked send={channel.send_waiters} recv={channel.recv_waiters} closed={channel.closed}\n")
+        }
+    }
+    out.push_str("\neffects: compute={parsed.effects.compute} waiting={parsed.effects.waiting} channel={parsed.effects.channel} time={parsed.effects.time} io={parsed.effects.io}\nresources: workers={parsed.resources.workers} running={parsed.resources.running} queued={parsed.resources.queued} cancelled={parsed.resources.cancelled} arenas={parsed.resources.arenas} arena_allocations={parsed.resources.arena_allocations} arena_bytes={parsed.resources.arena_bytes}\n")
+    out.push_str("\nvalues\n")
+    if parsed.values.is_empty() -> out.push_str("  (no live value decisions)\n")
+    else {
+        loop value in &parsed.values {
+            rendered :: value.rendered_value.as_deref().map((value) -> " value={value}").unwrap_or_default()
+            reason :: if value.reason.is_empty() -> "" else -> " reason={value.reason}"
+            out.push_str("  {value.value_id} type={value.type_identity} {value.disposition}{reason}{rendered}\n")
+        }
+    }
+    if event_lines == .Val(events) {
+        out.push_str("\nevents\n")
+        if events.is_empty() -> out.push_str("  (no runtime event observations)\n")
+        else {
+            loop event in events.lines() {
+                out.push_str("  ")
+                out.push_str(event)
+                out.push('\n')
+            }
+        }
+    }
+    return out
+}

@@ -1,0 +1,17 @@
+// Additional response admission controls; original completion providers/tests
+// remain 0734 and native transcript packets, not duplicate registrations here.
+#Test("signature help without an active call returns protocol null before semantic checking") {
+    server :: lsp_handler_test_server("fn run() {{\n    value :: 1\n}}\n")
+    params :: lsp_handler_test_params("{{\"textDocument\":{{\"uri\":\"file:///lsp/handler.jet\"}},\"position\":{{\"line\":1,\"character\":14}}}}")
+    before :: server.queries.stats().recomputes
+    assert_eq(lsp_signature_help_response(server, Val(params), DataTree.Text("sig")), Val(lsp_response(DataTree.Text("sig"), "null")))
+    assert_eq(server.queries.stats().recomputes, before)
+}
+
+#Test("completion rejects out-of-domain position before invoking its dynamic provider") {
+    server :: lsp_handler_test_server("fn run() {{}}\n")
+    params :: lsp_handler_test_params("{{\"textDocument\":{{\"uri\":\"file:///lsp/handler.jet\"}},\"position\":{{\"line\":-1,\"character\":0}}}}")
+    before :: server.queries.stats().recomputes
+    assert_eq(lsp_completion_response(server, Val(params), DataTree.Int(1)), None)
+    assert_eq(server.queries.stats().recomputes, before)
+}

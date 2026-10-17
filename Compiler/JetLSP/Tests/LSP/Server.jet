@@ -1,0 +1,142 @@
+// Original tests/lsp1091–1169/1172–1344 ingress fixtures. These exercise the
+// real transaction and UTF16 edit owner, not the gated live process/handlers.
+// Full diagnostic-before-response and closed-pipe ordering additionally need
+// L19's canonical runtime byte stream/concurrency/unwind owners and Driver.
+fn lsp_loop_test_params(text: String) -> DataTree Never! {
+    foundation_parse_protocol_json(text) ?? panic("valid fixture JSON")
+}
+fn lsp_loop_test_change(uri: String, version: String, changes: String) -> DataTree Never! {
+    lsp_loop_test_params("{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)},\"version\":{version}}},\"contentChanges\":[{changes}]}}")
+}
+fn lsp_loop_test_open(state: &LSPDiagnosticState, uri: String, version: Int, source: String) Never! {
+    params :: lsp_loop_test_params("{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)},\"version\":{version},\"text\":{foundation_json_quote(source)}}}}}")
+    assert_eq(lsp_update_document(&state, Val(params), true, lsp_loop_path.PathPlatform.Unix), Val(uri))
+}
+
+#Test("incremental sync range edit updates document and coalesces dirtiness") {
+    state := LSPDiagnosticState.new()
+    uri :: "file:///tmp/lsp_incremental_test.jet"
+    lsp_loop_test_open(&state, uri, 1, "fn run() {{\n    x :: 1\n}}\n")
+    change :: lsp_loop_test_change(uri, "2", "{{\"range\":{{\"start\":{{\"line\":1,\"character\":4}},\"end\":{{\"line\":1,\"character\":10}}}},\"rangeLength\":6,\"text\":\"let x = 1\"}}")
+    assert_eq(lsp_update_document(&state, Val(change), false, lsp_loop_path.PathPlatform.Unix), Val(uri))
+    assert_eq(state.docs[uri].text, "fn run() {{\n    let x = 1\n}}\n")
+    assert_eq(state.docs[uri].version, 2)
+    lsp_publish_after_change(&state, Val(lsp_loop_test_change(uri, "3", "{{\"text\":\"new\"}}")), lsp_loop_path.PathPlatform.Unix)
+    assert_eq(state.docs[uri].text, "new")
+    assert_eq(lsp_dirty_documents(&state), [String]{uri})
+    assert_eq(lsp_dirty_documents(&state), [String]{})
+}
+
+#Test("incremental sync rejects stale and every original malformed edit without consuming version") {
+    state := LSPDiagnosticState.new()
+    uri :: "file:///tmp/lsp_validated_sync.jet"
+    lsp_loop_test_open(&state, uri, 10, "// 😀\nfn kept() {{}}\n")
+    accepted :: "{{\"range\":{{\"start\":{{\"line\":1,\"character\":3}},\"end\":{{\"line\":1,\"character\":7}}}},\"rangeLength\":4,\"text\":\"fresh\"}}"
+    assert_eq(lsp_update_document(&state, Val(lsp_loop_test_change(uri, "11", accepted)), false, lsp_loop_path.PathPlatform.Unix), Val(uri))
+    _ :: lsp_dirty_documents(&state)
+    stale :: "{{\"range\":{{\"start\":{{\"line\":1,\"character\":3}},\"end\":{{\"line\":1,\"character\":8}}}},\"rangeLength\":5,\"text\":\"stale\"}}"
+    assert_eq(lsp_update_document(&state, Val(lsp_loop_test_change(uri, "11", stale)), false, lsp_loop_path.PathPlatform.Unix), None)
+    rejected :: [String]{
+        "{{\"range\":{{\"start\":{{\"line\":0,\"character\":4}},\"end\":{{\"line\":0,\"character\":5}}}},\"rangeLength\":1,\"text\":\"X\"}}",
+        "{{\"range\":{{\"start\":{{\"line\":1,\"character\":8}},\"end\":{{\"line\":1,\"character\":3}}}},\"rangeLength\":5,\"text\":\"backward\"}}",
+        "{{\"range\":{{\"start\":{{\"line\":99,\"character\":0}},\"end\":{{\"line\":99,\"character\":0}}}},\"rangeLength\":0,\"text\":\"outside\"}}",
+        "1",
+        "{{\"range\":{{\"start\":{{\"line\":1,\"character\":2147483648}},\"end\":{{\"line\":1,\"character\":2147483648}}}},\"rangeLength\":0,\"text\":\"wide_position\"}}",
+        "{{\"range\":{{\"start\":{{\"line\":1,\"character\":3}},\"end\":{{\"line\":1,\"character\":8}}}},\"rangeLength\":2147483648,\"text\":\"wide_length\"}}",
+        "{{\"range\":{{\"start\":{{\"line\":1,\"character\":3}},\"end\":{{\"line\":1,\"character\":8}}}},\"rangeLength\":\"5\",\"text\":\"bad_type\"}}",
+        "{{\"range\":{{\"start\":{{\"line\":1,\"character\":3}},\"end\":{{\"line\":1,\"character\":8}}}},\"rangeLength\":4,\"text\":\"bad_length\"}}",
+    }
+    loop changes in rejected {
+        assert_eq(lsp_update_document(&state, Val(lsp_loop_test_change(uri, "12", changes)), false, lsp_loop_path.PathPlatform.Unix), None)
+        assert_eq(state.docs[uri].text, "// 😀\nfn fresh() {{}}\n")
+        assert_eq(state.docs[uri].version, 11)
+        assert_eq(state.dirty.len(), 0)
+    }
+    loop version in [String]{"12.5", "2147483648"} {
+        assert_eq(lsp_update_document(&state, Val(lsp_loop_test_change(uri, version, "{{\"text\":\"wide\"}}")), false, lsp_loop_path.PathPlatform.Unix), None)
+    }
+    final :: "{{\"range\":{{\"start\":{{\"line\":1,\"character\":3}},\"end\":{{\"line\":1,\"character\":8}}}},\"rangeLength\":5,\"text\":\"final\"}}"
+    assert_eq(lsp_update_document(&state, Val(lsp_loop_test_change(uri, "12", final)), false, lsp_loop_path.PathPlatform.Unix), Val(uri))
+    assert_eq(state.docs[uri].text, "// 😀\nfn final() {{}}\n")
+    assert_eq(state.docs[uri].version, 12)
+}
+
+#Test("change transaction is sequential and rolls back the whole list on a bad later edit") {
+    state := LSPDiagnosticState.new()
+    uri :: "file:///tmp/atomic.jet"
+    lsp_loop_test_open(&state, uri, -1, "a😀b")
+    edits :: "{{\"text\":\"abc\"}},{{\"range\":{{\"start\":{{\"line\":0,\"character\":1}},\"end\":{{\"line\":0,\"character\":2}}}},\"rangeLength\":2,\"text\":\"x\"}}"
+    assert_eq(lsp_update_document(&state, Val(lsp_loop_test_change(uri, "0", edits)), false, lsp_loop_path.PathPlatform.Unix), None)
+    assert_eq(state.docs[uri].text, "a😀b")
+    assert_eq(state.docs[uri].version, -1)
+    assert_eq(state.dirty.len(), 0)
+    full_length :: "{{\"rangeLength\":4,\"text\":\"bad\"}}"
+    assert_eq(lsp_update_document(&state, Val(lsp_loop_test_change(uri, "0", full_length)), false, lsp_loop_path.PathPlatform.Unix), None)
+    assert_eq(lsp_update_document(&state, Val(lsp_loop_test_change(uri, "0", "")), false, lsp_loop_path.PathPlatform.Unix), Val(uri))
+    assert_eq(state.docs[uri].version, 0)
+    assert_eq(state.docs[uri].text, "a😀b")
+}
+
+#Test("didOpen replaces the document independent of prior version but malformed opens do not") {
+    state := LSPDiagnosticState.new()
+    uri :: "file:///tmp/open%20document.jet"
+    lsp_loop_test_open(&state, uri, 10, "old")
+    lsp_loop_test_open(&state, uri, -2147483648, "replacement")
+    assert_eq(state.docs[uri].text, "replacement")
+    assert_eq(state.docs[uri].version, -2147483648)
+    assert(lsp_loop_path.equals(state.docs[uri].path, lsp_loop_path.from_text("/tmp/open document.jet", lsp_loop_path.PathPlatform.Unix)))
+    missing_text :: lsp_loop_test_params("{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)},\"version\":12}}}}")
+    assert_eq(lsp_update_document(&state, Val(missing_text), true, lsp_loop_path.PathPlatform.Unix), None)
+    assert_eq(state.docs[uri].text, "replacement")
+    assert_eq(state.docs[uri].version, -2147483648)
+}
+
+#Test("ordinary lexing uses the resident query while inline package lexing uses canonical masking") {
+    queries := JetDriverCompilerQueries.new()
+    cwd :: lsp_loop_path.from_text("/lsp", lsp_loop_path.PathPlatform.Unix)
+    doc :: LSPDocument.new(lsp_loop_path.from_text("/lsp/lex.jet", cwd.platform), "fn run() {{}}", 1)
+    first :: lsp_lex_document(&queries, cwd, doc)
+    second :: lsp_lex_document(&queries, cwd, doc)
+    a :: first.guard_read()
+    b :: second.guard_read()
+    assert_eq(a.value.len(), b.value.len())
+    assert_eq(queries.stats().recomputes, 1)
+    assert_eq(queries.stats().hits, 1)
+    inline :: LSPDocument.new(lsp_loop_path.from_text("/lsp/inline.jet", cwd.platform), "package {{ name: \"inline\" }}\nfn run() {{}}", 1)
+    masked :: pkg_mask_inline_package_source(inline.text) ?? panic("canonical package mask")
+    expected :: lex(masked.source.bytes()).tokens
+    actual :: lsp_lex_document(&queries, cwd, inline)
+    tokens :: actual.guard_read()
+    assert_eq(tokens.value.len(), expected.len())
+    loop (index, token) in expected {
+        assert_eq(tokens.value[index].span, token.span)
+        assert_eq(tokens.value[index].kind, token.kind)
+    }
+    assert_eq(queries.stats().recomputes, 1)
+}
+
+#Test("server checked requests retain the shared Driver result and capture the current version witness") {
+    source :: "fn run() {{}}\n"
+    server := LSPServer.new(lsp_diag_test_snapshot("witness.jet", source, [JetDriverAuthorizedSourceFile]{}), lsp_diag_test_path("/fixture/build-source"))
+    uri :: "file:///lsp/witness.jet"
+    lsp_loop_test_open(&server.diagnostic_state, uri, 1, source)
+    first :: server.check_with_bundle(server.diagnostic_state.docs[uri])
+    assert_eq(first.checked_versions.get(uri), Val(1))
+    recomputes :: server.queries.stats().recomputes
+    second :: server.check_with_bundle(server.diagnostic_state.docs[uri])
+    assert_eq(server.queries.stats().recomputes, recomputes)
+    assert(server.queries.stats().hits > 0)
+    before :: first.checked.guard_read()
+    after :: second.checked.guard_read()
+    assert_eq(before.value.result.diagnostics.len(), after.value.result.diagnostics.len())
+    assert_eq(before.value.result.loaded_module_rows, after.value.result.loaded_module_rows)
+    assert_eq(before.value.source, source)
+    params :: lsp_loop_test_change(uri, "2", "")
+    assert_eq(lsp_update_document(&server.diagnostic_state, Val(params), false, lsp_loop_path.PathPlatform.Unix), Val(uri))
+    // Same text/query result can be retained, but each request owns its own
+    // checked version witness. Old requests must never observe this new version.
+    latest :: server.check_with_bundle(server.diagnostic_state.docs[uri])
+    assert_eq(first.checked_versions.get(uri), Val(1))
+    assert_eq(latest.checked_versions.get(uri), Val(2))
+    assert_eq(server.queries.stats().recomputes, recomputes)
+}

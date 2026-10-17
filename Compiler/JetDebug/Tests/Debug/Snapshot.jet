@@ -1,0 +1,229 @@
+// TOOLS-D1 Snapshot behavior: lib.rs:65-395,1870-1912 has no Rust unit tests;
+// these pin the reference algorithm. Digests are SHA-256 of the exact Rust
+// identity material. Paused-native product proof (tests/debug.rs 111/131,
+// Canvas debug_source_git) needs a real native pause and is not claimed here.
+
+fn debug_snapshot_test_text(bytes: [U8]) -> String Never! { String.from_bytes(bytes) ?? panic("test bytes are not UTF-8") }
+
+fn debug_snapshot_test_repeat(byte: U8, count: Int) -> String Never! {
+    bytes := [U8]{}
+    loop _ in 0..<count -> &bytes.push(byte)
+    debug_snapshot_test_text(bytes)
+}
+
+fn debug_snapshot_test_run() -> DebugSnapshot Never! {
+    DebugSnapshot{
+        function: "run",
+        line: 3,
+        locals: [ValueSnapshot]{ValueSnapshot{name: "total", type_name: "Int", value: "1"}},
+        call_stack: [FrameSnapshot]{FrameSnapshot{function: "run", line: 3}},
+    }
+}
+
+fn debug_snapshot_test_one(type_name: String, value: String) -> DebugSnapshot Never! {
+    DebugSnapshot{
+        function: "main",
+        line: 1,
+        locals: [ValueSnapshot]{ValueSnapshot{name: "probe", type_name: type_name, value: value}},
+        call_stack: [FrameSnapshot]{},
+    }
+}
+
+fn debug_snapshot_test_value(type_name: String, value: String) -> DebugValue Never! {
+    evaluation :: evaluate_snapshot(debug_snapshot_test_one(type_name, value), "probe") ?? panic("expected a typed value: {err.message}")
+    evaluation.value
+}
+
+fn debug_snapshot_test_error(snapshot: DebugSnapshot, expression: String) -> String Never! {
+    if evaluate_snapshot(snapshot, expression) == {
+        .Ok(_) -> panic("expected `{expression}` to be refused")
+        .Err(error) -> error.message
+    }
+}
+
+fn debug_snapshot_test_value_error(type_name: String, value: String) -> String Never! {
+    debug_snapshot_test_error(debug_snapshot_test_one(type_name, value), "probe")
+}
+
+#Test("snapshot_identities_hash_exact_frame_and_local_fact_material") {
+    snapshot := debug_snapshot_test_run()
+    // sha256("run:3|run:3") and sha256("run:3|run:3|total:Int=1"), first 24 hex.
+    assert_eq(snapshot.frame_id(), "frame-4ee716030c9071d2e49ccbe1")
+    assert_eq(snapshot.pause_id(), "pause-ae7d14661f6b17fe5bd7287c")
+    // A changed local value is a new pause but the same frame.
+    snapshot.locals[0].value = "2"
+    assert_eq(snapshot.frame_id(), "frame-4ee716030c9071d2e49ccbe1")
+    assert_eq(snapshot.pause_id(), "pause-8bc35178c53d90cfe6f4d769")
+}
+
+#Test("snapshot_identities_cover_every_stack_frame_and_raw_local_text") {
+    snapshot :: DebugSnapshot{
+        function: "helper",
+        line: 9,
+        locals: [ValueSnapshot]{
+            ValueSnapshot{name: "x", type_name: "String", value: "\"é\""},
+            ValueSnapshot{name: "y", type_name: "[Int]", value: "[1, 2]"},
+        },
+        call_stack: [FrameSnapshot]{FrameSnapshot{function: "main", line: 4}, FrameSnapshot{function: "helper", line: 9}},
+    }
+    assert_eq(snapshot.frame_id(), "frame-3fbfa6b5809359c0a856cf4d")
+    assert_eq(snapshot.pause_id(), "pause-b4c9b51cfb39ceac54b57202")
+    // No stack and no locals: both identities hash only `main:1`.
+    empty :: DebugSnapshot{function: "main", line: 1, locals: [ValueSnapshot]{}, call_stack: [FrameSnapshot]{}}
+    assert_eq(empty.frame_id(), "frame-e4b040dfb6aaf10091f03d26")
+    assert_eq(empty.pause_id(), "pause-e4b040dfb6aaf10091f03d26")
+}
+
+#Test("evaluate_snapshot_publishes_one_trimmed_root_with_usage") {
+    evaluation :: evaluate_snapshot(debug_snapshot_test_run(), "  total\n") ?? panic("root local should evaluate: {err.message}")
+    assert_eq(evaluation.expression, "total")
+    assert_eq(evaluation.name, "total")
+    assert_eq(evaluation.type_name, "Int")
+    assert_eq(evaluation.value, DebugValue.Int{value: 1})
+    assert_eq(evaluation.usage, DebugEvaluationUsage{depth: 1, nodes: 1, bytes: 8, steps: 1})
+    text :: evaluate_snapshot(debug_snapshot_test_one("String", "\"é!\""), "probe") ?? panic("text local should evaluate: {err.message}")
+    assert_eq(text.value, DebugValue.Text{text: "é!"})
+    // Text accounting is UTF-8 bytes of the decoded text.
+    assert_eq(text.usage.bytes, 3)
+}
+
+#Test("evaluate_snapshot_refuses_nested_paths_until_child_facts_exist") {
+    nested :: "nested debugger evaluation is unavailable until the paused backend publishes child facts"
+    expressions :: [String]{"total.amount", "total[0]", "total._x", "total[12].name", " total[0] "}
+    loop expression in expressions {
+        assert_eq(debug_snapshot_test_error(debug_snapshot_test_run(), expression), nested)
+    }
+}
+
+#Test("evaluate_snapshot_rejects_paths_outside_the_bounded_grammar") {
+    refused :: "only bounded read-only Jet local paths can be evaluated"
+    bell :: debug_snapshot_test_text([U8]{U8{7}})
+    nul :: debug_snapshot_test_text([U8]{U8{0}})
+    c1 :: debug_snapshot_test_text([U8]{U8{194}, U8{133}})
+    hostile :: [String]{"", "   ", "_total", "1total", "total.", "total.9", "total..x", "total[]", "total[x]", "total[1", "total]", "total x", "total()", "café", "é", "total\tx", "total{bell}", "{bell}total", "total.a{nul}", "total[1{c1}]", "to{c1}tal"}
+    loop expression in hostile {
+        assert_eq(debug_snapshot_test_error(debug_snapshot_test_run(), expression), refused)
+    }
+    // Outer trimming is Rust str::trim (Unicode White_Space): U+0085 is
+    // trimmed away, so the remaining root is evaluated rather than refused.
+    nel :: evaluate_snapshot(debug_snapshot_test_run(), "{c1}total{c1}") ?? panic("NEL is outer whitespace: {err.message}")
+    assert_eq(nel.expression, "total")
+}
+
+#Test("evaluate_snapshot_bounds_the_trimmed_expression_to_16_kib") {
+    at_limit :: debug_snapshot_test_repeat(U8{97}, 16384)
+    // Within the bound the grammar accepts the root, so the lookup itself fails.
+    assert_eq(debug_snapshot_test_error(debug_snapshot_test_run(), at_limit), "no readable local named `{at_limit}` at this stop")
+    // Outer whitespace is trimmed before the byte bound.
+    assert_eq(debug_snapshot_test_error(debug_snapshot_test_run(), " {at_limit}\n"), "no readable local named `{at_limit}` at this stop")
+    over :: debug_snapshot_test_repeat(U8{97}, 16385)
+    assert_eq(debug_snapshot_test_error(debug_snapshot_test_run(), over), "only bounded read-only Jet local paths can be evaluated")
+}
+
+#Test("evaluate_snapshot_reports_unknown_and_unreadable_locals") {
+    assert_eq(debug_snapshot_test_error(debug_snapshot_test_run(), "missing"), "no readable local named `missing` at this stop")
+    // Lookup is exact: a case-different name is a different local.
+    assert_eq(debug_snapshot_test_error(debug_snapshot_test_run(), "Total"), "no readable local named `Total` at this stop")
+    assert_eq(debug_snapshot_test_value_error("Int", "<optimized out>"), "local `probe` has no readable value at this stop")
+    assert_eq(debug_snapshot_test_value_error("String", " <unavailable> "), "local `probe` has no readable value at this stop")
+}
+
+#Test("evaluate_snapshot_reads_the_first_matching_local") {
+    snapshot :: DebugSnapshot{
+        function: "main",
+        line: 1,
+        locals: [ValueSnapshot]{ValueSnapshot{name: "x", type_name: "Int", value: "1"}, ValueSnapshot{name: "x", type_name: "Bool", value: "true"}},
+        call_stack: [FrameSnapshot]{},
+    }
+    evaluation :: evaluate_snapshot(snapshot, "x") ?? panic("x should evaluate: {err.message}")
+    assert_eq(evaluation.value, DebugValue.Int{value: 1})
+    assert_eq(evaluation.type_name, "Int")
+}
+
+#Test("debug_values_parse_bool_and_i64_exactly") {
+    assert_eq(debug_snapshot_test_value("Bool", "true"), DebugValue.Bool{value: true})
+    assert_eq(debug_snapshot_test_value(" bool ", " false "), DebugValue.Bool{value: false})
+    assert_eq(debug_snapshot_test_value_error("Bool", "True"), "local `probe` has an invalid Bool value")
+    assert_eq(debug_snapshot_test_value_error("Bool", "1"), "local `probe` has an invalid Bool value")
+    assert_eq(debug_snapshot_test_value("i64", "-9223372036854775808"), DebugValue.Int{value: -9223372036854775808})
+    assert_eq(debug_snapshot_test_value("unsigned long long", "9223372036854775807"), DebugValue.Int{value: 9223372036854775807})
+    assert_eq(debug_snapshot_test_value("u8", "+7"), DebugValue.Int{value: 7})
+    assert_eq(debug_snapshot_test_value("long", "007"), DebugValue.Int{value: 7})
+    unavailable :: "local `probe` has an unavailable Int value"
+    assert_eq(debug_snapshot_test_value_error("u64", "18446744073709551615"), unavailable)
+    assert_eq(debug_snapshot_test_value_error("Int", "9223372036854775808"), unavailable)
+    assert_eq(debug_snapshot_test_value_error("Int", "1.0"), unavailable)
+    assert_eq(debug_snapshot_test_value_error("Int", "0x10"), unavailable)
+    assert_eq(debug_snapshot_test_value_error("Int", "-"), unavailable)
+}
+
+#Test("debug_values_publish_exact_finite_float_bits") {
+    assert_eq(debug_snapshot_test_value("Float", "1.5"), DebugValue.FloatBits{bits: 4609434218613702656})
+    // Negative values keep the full u64 sign-bit pattern.
+    assert_eq(debug_snapshot_test_value("f64", "-2.5"), DebugValue.FloatBits{bits: 13836183955189006336})
+    unavailable :: "local `probe` has an unavailable Float value"
+    rejected :: [String]{"inf", "-inf", "NaN", "1e400", "one"}
+    loop raw in rejected {
+        assert_eq(debug_snapshot_test_value_error("f32", raw), unavailable)
+    }
+}
+
+#Test("debug_values_unit_text_and_unit_shape_fallthrough") {
+    assert_eq(debug_snapshot_test_value("Unit", ""), DebugValue.Unit)
+    assert_eq(debug_snapshot_test_value("()", "()"), DebugValue.Unit)
+    // A Unit type with other text falls through to the shape arms.
+    assert_eq(debug_snapshot_test_value("Unit", "[1]"), DebugValue.Aggregate{kind: DebugAggregateKind.List, length: 1})
+    assert_eq(debug_snapshot_test_value_error("Unit", "nothing"), "local `probe` has a value shape the safe debugger cannot publish")
+    assert_eq(debug_snapshot_test_value("String", "plain"), DebugValue.Text{text: "plain"})
+    cr :: debug_snapshot_test_text([U8]{U8{13}})
+    assert_eq(debug_snapshot_test_value("&str", "\"a\\nb\\tc\\rd\\\\e\\\"f\""), DebugValue.Text{text: "a\nb\tc{cr}d\\e\"f"})
+    // Unknown escapes drop the backslash; a dangling one is kept.
+    assert_eq(debug_snapshot_test_value("char", "\"\\é\\q\""), DebugValue.Text{text: "éq"})
+    assert_eq(debug_snapshot_test_value("Char", "\"x\\\""), DebugValue.Text{text: "x\\"})
+    // A lone quote is not a quoted pair.
+    assert_eq(debug_snapshot_test_value("str", "\""), DebugValue.Text{text: "\""})
+    assert_eq(debug_snapshot_test_value("String", "\"\""), DebugValue.Text{text: ""})
+}
+
+#Test("debug_values_publish_aggregate_shape_and_top_level_length") {
+    assert_eq(debug_snapshot_test_value("[Int]", "[1, [2, 3], {{a: 4}}, (5, 6)]"), DebugValue.Aggregate{kind: DebugAggregateKind.List, length: 4})
+    assert_eq(debug_snapshot_test_value("[Int]", "[]"), DebugValue.Aggregate{kind: DebugAggregateKind.List, length: 0})
+    assert_eq(debug_snapshot_test_value("[Int]", "[   ]"), DebugValue.Aggregate{kind: DebugAggregateKind.List, length: 0})
+    assert_eq(debug_snapshot_test_value("Point", "{{x: 1, y: 2}}"), DebugValue.Aggregate{kind: DebugAggregateKind.Record, length: 2})
+    // Comma counting is shape-only: quoted commas still count, unbalanced closers saturate.
+    assert_eq(debug_snapshot_test_value("Label", "{{text: \"a,b\"}}"), DebugValue.Aggregate{kind: DebugAggregateKind.Record, length: 2})
+    assert_eq(debug_snapshot_test_value("[Int]", "[)), 1, 2]"), DebugValue.Aggregate{kind: DebugAggregateKind.List, length: 3})
+    assert_eq(debug_snapshot_test_value("Map<String, Int>", "{{\"a\": 1}}"), DebugValue.Aggregate{kind: DebugAggregateKind.Record, length: 1})
+    assert_eq(debug_snapshot_test_value("Table", "HashMap {{a: 1, b: 2}}"), DebugValue.Aggregate{kind: DebugAggregateKind.Map, length: 1})
+    // A Map opener without its closer keeps the whole raw text, opener included.
+    assert_eq(debug_snapshot_test_value("Map", "[a, b"), DebugValue.Aggregate{kind: DebugAggregateKind.Map, length: 1})
+    assert_eq(debug_snapshot_test_value("Map", "a, b"), DebugValue.Aggregate{kind: DebugAggregateKind.Map, length: 2})
+    assert_eq(debug_snapshot_test_value("Pair", "(1, 2)"), DebugValue.Aggregate{kind: DebugAggregateKind.Variant, length: 2})
+    assert_eq(debug_snapshot_test_value("Option", "Some(1, 2)"), DebugValue.Aggregate{kind: DebugAggregateKind.Variant, length: 1})
+    shape :: "local `probe` has a value shape the safe debugger cannot publish"
+    unpublishable :: [String]{"opaque", "[", "]", "{{", "Some(1", "(1) x"}
+    loop raw in unpublishable {
+        assert_eq(debug_snapshot_test_value_error("Widget", raw), shape)
+    }
+}
+
+#Test("debug_path_segments_split_validated_places_without_trimming") {
+    assert_eq(debug_path_segments("account.items[12].name") ?? panic("valid place"), [String]{"account", "items", "[12]", "name"})
+    assert_eq(debug_path_segments("a") ?? panic("valid root"), [String]{"a"})
+    assert_eq(debug_path_segments("a._b[0][7]") ?? panic("valid place"), [String]{"a", "_b", "[0]", "[7]"})
+    invalid :: [String]{" a", "a ", "", "a[]", "a.", "a.1", "_a", "a[1"}
+    loop place in invalid {
+        assert(debug_path_segments(place) == None)
+    }
+}
+
+#Test("render_snapshot_locals_orders_by_name_stably") {
+    assert_eq(debug_render_snapshot_locals([ValueSnapshot]{}), "locals:  (none)")
+    locals :: [ValueSnapshot]{
+        ValueSnapshot{name: "b", type_name: "Int", value: "2"},
+        ValueSnapshot{name: "a", type_name: "Int", value: "1"},
+        ValueSnapshot{name: "b", type_name: "Int", value: "3"},
+        ValueSnapshot{name: "B", type_name: "Int", value: "0"},
+    }
+    assert_eq(debug_render_snapshot_locals(locals), "locals:  B = 0   a = 1   b = 2   b = 3")
+}

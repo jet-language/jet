@@ -1,0 +1,83 @@
+// Adapter.rs has no inline original tests. These are behavioral boundary controls
+// over its real typed parsers/transport, not a replacement host or handler.
+fn lsp_editor_test_json(source: String) -> DataTree Never! {
+    foundation_parse_protocol_json(source) ?? panic("editor adapter JSON fixture")
+}
+fn lsp_editor_test_context() -> LSPRequestContext Never! {
+    LSPRequestContext.parse(lsp_editor_test_json("{{\"editor\":\"vscode\",\"session_id\":\"session-a\",\"source_id\":\"src/main.jet\",\"source_path\":\"src/main.jet\",\"revision\":\"revision-a\",\"workbench_url\":\"http://127.0.0.1:7341/\"}}")) ?? panic("real editor context")
+}
+
+#Test("editor adapter distinguishes missing null wrong-type and first-present alias") {
+    empty :: lsp_editor_test_json("{{}}")
+    assert_eq(lsp_editor_optional_string(empty, "x"), Ok(None))
+    assert_eq(lsp_editor_required_string(empty, "x"), Err(EditorHostError.InvalidRequest("editor host field `x` must be a string")))
+    value :: lsp_editor_test_json("{{\"workbench_url\":null,\"workbenchUrl\":\"ignored\",\"cursor\":-1}}")
+    assert_eq(lsp_editor_optional_string_alias(value, [String]{"workbench_url", "workbenchUrl"}), Ok(None))
+    assert_eq(lsp_editor_optional_u64(value, "cursor"), Err(EditorHostError.InvalidRequest("editor host field `cursor` must be a nonnegative integer or null")))
+    assert_eq(lsp_editor_optional_string(lsp_editor_test_json("{{\"x\":1}}"), "x"), Err(EditorHostError.InvalidRequest("editor host field `x` must be a string or null")))
+    assert_eq(lsp_editor_optional_u64(lsp_editor_test_json("{{\"x\":null}}"), "x"), Ok(None))
+    assert_eq(lsp_editor_required_u64(lsp_editor_test_json("{{\"x\":9223372036854775807}}"), "x"), Ok(U64{9223372036854775807}))
+}
+
+#Test("editor navigation narrows line before reading column and restores positive") {
+    context :: lsp_editor_test_context()
+    bad :: lsp_editor_test_json("{{\"line\":4294967296,\"column\":\"bad\"}}")
+    assert_eq(lsp_editor_parse_navigation(bad, context), Err(EditorHostError.InvalidRequest("navigate.line exceeds u32")))
+    bad_column :: lsp_editor_test_json("{{\"line\":1,\"column\":4294967296}}")
+    assert_eq(lsp_editor_parse_navigation(bad_column, context), Err(EditorHostError.InvalidRequest("navigate.column exceeds u32")))
+    good :: lsp_editor_parse_navigation(lsp_editor_test_json("{{\"line\":4294967295,\"column\":0}}"), context) ?? panic("checked navigation")
+    assert_eq(good.line, U32{4294967295})
+    assert_eq(good.column, U32{0})
+    opened :: lsp_editor_parse_open(lsp_editor_test_json("{{\"panel_id\":null,\"cursor\":7}}"), context) ?? panic("open")
+    assert_eq(opened.panel_id, None)
+    assert_eq(opened.cursor, Val(U64{7}))
+    selected :: lsp_editor_parse_selection(lsp_editor_test_json("{{\"panel_id\":\"source\",\"item_key\":\"a\"}}"), context) ?? panic("selection")
+    assert_eq(selected.item_key, Val("a"))
+    reconnect :: lsp_editor_parse_reconnect(lsp_editor_test_json("{{}}"), context) ?? panic("reconnect")
+    assert_eq(reconnect.cursor, None)
+}
+
+#Test("editor grants preserve absence versus explicit empty and reject Unicode controls") {
+    assert_eq(lsp_editor_parse_grants(lsp_editor_test_json("{{}}")), Ok(None))
+    assert_eq(lsp_editor_parse_grants(lsp_editor_test_json("{{\"grants\":null}}")), Ok(Val([String]{})))
+    assert_eq(lsp_editor_parse_grants(lsp_editor_test_json("{{\"grants\":[\"editor.command:check\",\"editor.command:check\"]}}")), Ok(Val([String]{"editor.command:check", "editor.command:check"})))
+    assert_eq(lsp_editor_parse_grants(lsp_editor_test_json("{{\"grants\":[1]}}")), Err(EditorHostError.InvalidRequest("editor host grants must be strings")))
+    assert_eq(lsp_editor_parse_grants(lsp_editor_test_json("{{\"grants\":[\"x\\u0085\"]}}")), Err(EditorHostError.InvalidRequest("editor host grants must be nonempty and free of control characters")))
+    assert_eq(lsp_editor_parse_grants(lsp_editor_test_json("{{\"grants\":[\"x\\n\"]}}")), Err(EditorHostError.InvalidRequest("editor host grants must be nonempty and free of control characters")))
+    values := [DataTree]{}
+    loop _ in 0..<(EDITOR_MAX_HISTORY + 1) -> &values.push(DataTree.Text("x"))
+    // Bounds are tested through the actual parser's same decoded object shape.
+    excessive :: DataTree.Object([String:DataTree]{"grants": DataTree.Array(values)})
+    assert_eq(lsp_editor_parse_grants(excessive), Err(EditorHostError.InvalidRequest("editor host grants exceed the bounded limit")))
+}
+
+#Test("editor command validates arguments before command name") {
+    context :: lsp_editor_test_context()
+    bad :: lsp_editor_test_json("{{\"arguments\":[1],\"command\":\"unknown\"}}")
+    assert_eq(lsp_editor_parse_command(bad, context), Err(EditorHostError.InvalidRequest("command arguments must be strings")))
+    assert_eq(lsp_editor_parse_command(lsp_editor_test_json("{{\"arguments\":1}}"), context), Err(EditorHostError.InvalidRequest("command arguments must be an array or null")))
+    good :: lsp_editor_parse_command(lsp_editor_test_json("{{\"command\":\"check\",\"arguments\":[\"src/main.jet\"]}}"), context) ?? panic("real command parser")
+    assert_eq(good.arguments, [String]{"src/main.jet"})
+}
+
+#Test("editor typed transport rejects changed identity URL and duplicate grants") {
+    adapter := EditorHostAdapter.new()
+    assert_eq(&adapter.dispatch("unknown", None), Err(EditorHostError.InvalidRequest("editor host request is missing `params`")))
+    assert_eq(&adapter.dispatch("unknown", Val(DataTree.Null)), Err(EditorHostError.InvalidRequest("editor host request `params` must be an object")))
+    context :: lsp_editor_test_context()
+    &adapter.sync_transport(context) ?? panic("real transport initialization")
+    &adapter.sync_transport(context) ?? panic("stable real transport")
+    changed := lsp_editor_test_context()
+    changed.session_id = "session-b"
+    assert_eq(&adapter.sync_transport(changed), Err(EditorHostError.SessionMismatch{expected: "session-a", actual: "session-b"}))
+    changed = lsp_editor_test_context()
+    changed.workbench_url = Val("http://127.0.0.1:7342/")
+    assert_eq(&adapter.sync_transport(changed), Err(EditorHostError.InvalidRequest("workbench_url cannot change for an active editor session")))
+    changed = lsp_editor_test_context()
+    changed.grants = Val([String]{"editor.command:check"})
+    assert_eq(&adapter.sync_transport(changed), Err(EditorHostError.InvalidRequest("command grants cannot change for an active editor session")))
+    &adapter.sync_transport(context) ?? panic("restored real transport")
+    assert_eq(editor_host_error_code(EditorHostError.InvalidRequest("x")), I64{-32602})
+    assert_eq(editor_host_error_code(EditorHostError.SessionMismatch{expected: "a", actual: "b"}), I64{-32803})
+    assert_eq(editor_host_error_code(EditorHostError.LoopbackViolation("remote")), I64{-32090})
+}

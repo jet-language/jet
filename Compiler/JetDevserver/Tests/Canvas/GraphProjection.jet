@@ -1,0 +1,34 @@
+use jet_devserver.Canvas.GraphProjection.*
+use jet_semindex.[SourceSpan]
+// Behavioral control for Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1365-1435
+#Test("event_aliases_are_deduplicated_and_constructor_receiver_is_required") {
+    src := "use core.event as events\nuse core.event as events // duplicate\nuse core.tasks as tasks\nevents.new<Int>()\n"
+    aliases := event_module_aliases(src)
+    assert_eq(aliases, ["events"])
+    start := src.find("new<Int>").unwrap()
+    span := SourceSpan { start: start, end: start + 3 }
+    assert_eq(event_constructor_kind(src, span, "new", "new<Int>()", aliases), .Val("event_stream_create"))
+    assert_eq(constructor_type("new", "new<Int>()"), .Val("Event<Int>"))
+    assert_eq(event_constructor_kind("new<Int>()", SourceSpan { start: 0, end: 3 }, "new", "new<Int>()", aliases), .None)
+    assert_eq(constructor_type("new", "new()"), .None)
+}
+// Behavioral control for Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:862-894,1436-1474
+#Test("call_spans_balance_nested_calls_and_ignore_quoted_parentheses") {
+    src := "emit(other(1), \"a)\\\"b(\") trailing"
+    open := src.find('(').unwrap()
+    end := src.find(" trailing").unwrap()
+    assert_eq(matching_call_close(src, open), .Val(end))
+    assert_eq(event_call_span(src, SourceSpan { start: 0, end: 4 }), .Val(SourceSpan { start: 0, end: end }))
+    assert_eq(matching_call_close("call(\"unterminated", 4), .None)
+    assert_eq(event_call_span("call", SourceSpan { start: 0, end: 4 }), .None)
+}
+// Behavioral control for Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1526-1562
+#Test("event_method_projection_preserves_receiver_type_semantics") {
+    assert_eq(event_method_kind("Event<Int>", "on"), .Val("event_subscribe"))
+    assert_eq(event_method_kind("AsyncEvent<Int>", "blocked_count"), .Val("event_pending_count"))
+    assert_eq(event_method_kind("DecisionHook<Int>", "run"), .Val("decision_hook_run"))
+    assert_eq(event_method_kind("EventTrace", "dropped"), .Val("event_trace_count"))
+    assert_eq(event_method_kind("DispatchReport<Int>", "failures"), .Val("event_report_failures"))
+    assert_eq(event_method_kind("Event<Int>", "emit_async"), .None)
+    assert_eq(event_method_kind("NotAnEvent", "on"), .None)
+}

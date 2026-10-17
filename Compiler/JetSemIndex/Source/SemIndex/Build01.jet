@@ -1,0 +1,132 @@
+// Wave 0809: extend the canonical SemIndex build, never a second walker.
+// The following inspected owners already implement the original Rust items;
+// callers publish those exact existing functions, not forwarding aliases.
+use jet_foundation.[Expr, Span, expr_span]
+
+// Rust: crates/jet-semindex/src/Build.rs:514
+// Owner Identity.jet:76 semindex_project_generated_presentation: collect all
+// longest-first byte-length display replacements before mutating hover/inlay/member.
+// Rust: crates/jet-semindex/src/Build.rs:567
+// Owner Finalize.jet:31 semindex_loaded_source_rows_by_path: first display-or-alias
+// match, retaining loaded row indices; indexed lookup replaces repeated position.
+// Rust: crates/jet-semindex/src/Build.rs:574
+// Owner Identity.jet:19 semindex_project_text: ordered replacement, presentation only.
+// Rust: crates/jet-semindex/src/Build.rs:580
+// Owner Identity.jet:23 semindex_caller_key: optional owner::name effect key.
+// Rust: crates/jet-semindex/src/Build.rs:584
+// Owner Identity.jet:30 semindex_root_identity.
+// Rust: crates/jet-semindex/src/Build.rs:588
+// Owner Identity.jet:33 semindex_module_identity.
+// Rust: crates/jet-semindex/src/Build.rs:592
+// Owner Identity.jet:36 semindex_type_identity.
+// Rust: crates/jet-semindex/src/Build.rs:596
+// Owner Identity.jet:39 semindex_member_identity.
+// Rust: crates/jet-semindex/src/Build.rs:600
+// Owner Identity.jet:44 semindex_callable_identity; unused Func is omitted.
+// Rust: crates/jet-semindex/src/Build.rs:607
+// Owner Identity.jet:50 semindex_trait_method_identity.
+// Rust: crates/jet-semindex/src/Build.rs:611
+// Owner Identity.jet:53 semindex_active_scope.
+// Rust: crates/jet-semindex/src/Build.rs:618
+// Owner Identity.jet:59 semindex_local_identity.
+// Rust: crates/jet-semindex/src/Build.rs:622
+// Owner Signatures.jet:91 semindex_fn_signature: zone separators, access/defaults,
+// deny-only root filtering, via ceilings, returned-view/policy/failure provenance.
+// Rust: crates/jet-semindex/src/Build.rs:730
+// Owner Signatures.jet:137 semindex_method_parameter_defaults.
+// Rust: crates/jet-semindex/src/Build.rs:734
+// Owner Signatures.jet:140 semindex_parameter_defaults: exact source byte window,
+// Prepared-stage value unavailability, optional defaults and self filtering.
+// Rust: crates/jet-semindex/src/Build.rs:760
+// Owner Signatures.jet:161 semindex_callable_policies: first Policy, empty on parse error.
+// Rust: crates/jet-semindex/src/Build.rs:769
+// Owner Signatures.jet:202 semindex_callable_kind: checked function contract facts.
+// Rust: crates/jet-semindex/src/Build.rs:793
+// Owner Signatures.jet:172 semindex_method_params.
+// Rust: crates/jet-semindex/src/Build.rs:801
+// Owner Signatures.jet:179 semindex_method_parameter_contract.
+// Rust: crates/jet-semindex/src/Build.rs:805
+// Owner Signatures.jet:189 semindex_method_parameter_variadic.
+// Rust: crates/jet-semindex/src/Build.rs:813
+// Owner Signatures.jet:197 semindex_method_parameter_access.
+// Rust: crates/jet-semindex/src/Build.rs:822
+// Owner Signatures.jet:182 semindex_parameter_contract.
+// Rust: crates/jet-semindex/src/Build.rs:830
+// Owner Signatures.jet:192 semindex_parameter_variadic.
+// Rust: crates/jet-semindex/src/Build.rs:841
+// Owner Signatures.jet:16 semindex_function_parameter_parts: public labels, zones, rest.
+// Rust: crates/jet-semindex/src/Build.rs:885
+// Owner Signatures.jet:43 semindex_binder_active_parameter: first eligible unconsumed
+// label, saturating positional subtraction, label-only declaration slots, visible clamp.
+// Rust: crates/jet-semindex/src/Build.rs:942
+// Owner Signatures.jet:86 semindex_consumed_slots_contains.
+// Rust: crates/jet-semindex/src/Build.rs:946
+// Owner Signatures.jet:215 semindex_method_fact: effective return/failure contract.
+// Rust: crates/jet-semindex/src/Build.rs:985
+// Owner Identity.jet:65 semindex_origin_label: type/impl/trait origin labels.
+// Rust: crates/jet-semindex/src/Build.rs:994
+// Owner Identity.jet:62 semindex_scoped_local_identity.
+// Rust: crates/jet-semindex/src/Build.rs:998
+// Owner Identity.jet:107 semindex_scoped_ref: checked reference target and builtin fact.
+// Rust: crates/jet-semindex/src/Build.rs:1019
+// Owner Identity.jet:115 semindex_declaration_ref: checked declaration identity, no fact.
+// Rust: crates/jet-semindex/src/Build.rs:1045
+// Owner Structure.jet:15 semindex_state_marker_path: recursively qualified field path.
+// Rust: crates/jet-semindex/src/Build.rs:1055
+// Owner Structure.jet:26 semindex_collect_state_marker_references_for_method:
+// State slot0/Transition slots0,1, skip _, reference leaf with checked qualified target.
+// Rust: crates/jet-semindex/src/Build.rs:1083
+// Owner Structure.jet:44 semindex_collect_state_marker_references: all method homes.
+// Rust: crates/jet-semindex/src/Build.rs:1113
+// Owner Structure.jet:63 semindex_record_node: valid spans, explicit child slots,
+// real optional-parent/slot key, per-key ordinal, node id and source span.
+// Rust: crates/jet-semindex/src/Build.rs:1155
+// Owner Structure.jet:114 semindex_structural_slot and :86 semindex_claim_slot_boundary:
+// partition by parent start, exact real-arm upper bound/head-only exception,
+// earliest unclaimed span, invoke callback even for empty slots, restore name/kind.
+// Rust: crates/jet-semindex/src/Build.rs:1204
+// Owner Structure.jet:76 semindex_is_lexical_structural_slot.
+// Rust: crates/jet-semindex/src/Build.rs:1208
+// Owner Structure.jet:126 semindex_expr_shape: Rust declaration-order discriminants.
+
+// Rust: crates/jet-semindex/src/Build.rs:1212
+// Genuine gap: Structure.jet185 used plain addition, not usize saturation.
+// Integration replaces that body and migrates every walker caller to this body.
+// GATE #4483: USize.MAX is the compilation target's unsigned pointer maximum.
+// Foundation's Span carrier must retain every offset in that range.
+// Rust: crates/jet-semindex/src/Build.rs:1218
+fn structural_span_add(offset: Int, extra: Int) -> Int {
+    maximum :: Int{USize.MAX}
+    if offset > maximum - extra -> maximum else -> offset + extra
+}
+// Rust: crates/jet-semindex/src/Build.rs:1212
+fn structural_expr_span(expr: Expr) -> Span {
+    if expr == {
+        .Call(call) -> {
+            end :: if call.args.is_empty() -> structural_span_add(call.name_span.end, 2)
+                else -> structural_span_add(structural_expr_span(call.args[call.args.len() - 1].expr).end, 1)
+            Span{start: call.name_span.start, end: end}
+        }
+        .MethodCall(receiver, _, method_span, _, _, args, _, _, _, _) -> {
+            end :: if args.is_empty() -> structural_span_add(method_span.end, 2)
+                else -> structural_span_add(structural_expr_span(args[args.len() - 1].expr).end, 1)
+            Span{start: structural_expr_span(receiver).start, end: end}
+        }
+        else -> expr_span(expr)
+    }
+}
+
+// Rust: crates/jet-semindex/src/Build.rs:1238
+// Owner Structure.jet:202 semindex_stmt_shape: Rust declaration-order discriminants.
+// Rust: crates/jet-semindex/src/Build.rs:1242
+// Owner Structure.jet:243 semindex_item_shape: Rust declaration-order discriminants.
+// Rust: crates/jet-semindex/src/Build.rs:1246
+// Owner Structure.jet:274 semindex_item_span: every item, ErrorConv from_span.
+// Rust: crates/jet-semindex/src/Build.rs:1276
+// Owner Structure.jet:304 semindex_record_func_type_nodes: params list and optional return.
+// Rust: crates/jet-semindex/src/Build.rs:1292
+// Owner Structure.jet:315 semindex_collect_allow_markers: one fact per identifier lint.
+// Rust: crates/jet-semindex/src/Build.rs:1311
+// Owner Structure.jet:329 semindex_record_call: only active caller, exact key/span.
+// Rust: crates/jet-semindex/src/Build.rs:1322
+// Owner Structure.jet:332 semindex_with_caller: callback once, restore previous frame.

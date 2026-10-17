@@ -1,0 +1,108 @@
+use core.files as entry_files
+use core.process as entry_process
+use std.env as entry_env // GATE #4494: native environment reads.
+
+// Rust: crates/jet-semindex/src/lib.rs:302
+fn fixture(name: String) -[Env]> OSPath {
+    // GATE #4494: build-time package source root, matching CARGO_MANIFEST_DIR.
+    OSPath.from(entry_env.manifest_dir()).join("../../Examples/features").join(name)
+}
+
+// Rust: crates/jet-semindex/src/lib.rs:309
+// #Test("schema_version_constant") remains registered in Open.jet.
+
+// Rust: crates/jet-semindex/src/lib.rs:314
+#Test("callable_signature_facts_keep_typed_and_unavailable_states") {
+    scratch :: OSPath.from(entry_env.var_os("HOME").expect("the semantic-index test needs a home directory"))
+        .join(".cache").join("jet-test-scratch")
+        .join("jet_semindex_typed_callable_{entry_process.current_pid()}")
+    entry_files.create_dir_all(scratch).expect("create callable scratch")
+    path :: scratch.join("main.jet")
+    entry_files.write(scratch.join("package.jet"), semindex_test_typed_callable_package_fixture()).expect("write callable package")
+    entry_files.write(path, semindex_test_typed_callable_fixture()).expect("write callable source")
+    index :: semindex_open(path).expect("typed callable fixture should index")
+    repeated :: semindex_open(path).expect("same checked fixture should index again")
+    // Complete parameter/default/effect/generic/foreign/identity/JSON assertions
+    // already have one canonical oracle, including repeated stable identity.
+    semindex_open_test_typed_callable_indices(index, repeated)
+    entry_files.remove_file(path).expect("remove callable source")
+    entry_files.remove_file(scratch.join("package.jet")).expect("remove callable package")
+    entry_files.remove_dir(scratch).expect("remove callable scratch")
+}
+
+// Rust: crates/jet-semindex/src/lib.rs:470
+#Test("open_finds_definitions_and_calls") {
+    index :: semindex_open(fixture("effects/effects.jet")).expect("effects example should index")
+    semindex_open_test_effects_index(index)
+}
+
+// Rust: crates/jet-semindex/src/lib.rs:487
+#Test("references_filter_by_name") {
+    index :: semindex_open(fixture("basics/hello.jet")).expect("hello example should index")
+    assert(!index.references_to("print").is_empty())
+}
+
+// Rust: crates/jet-semindex/src/lib.rs:495
+#Test("json_snapshot_shape") {
+    index :: semindex_open(fixture("basics/hello.jet")).expect("hello example should index")
+    json :: index.to_json()
+    assert(json.contains("\"schema_version\":{SEMINDEX_SCHEMA_VERSION}"))
+    loop field in [String]{"outputs", "definitions", "identity", "references", "calls", "effects", "members", "instances", "run"} {
+        assert(json.contains("\"{field}\""))
+    }
+}
+
+// Rust: crates/jet-semindex/src/lib.rs:512
+#Test("package_config_facts_are_shared_with_the_index_json") {
+    root :: semindex_open_test_root("package-facts")
+    semindex_open_test_package_fixture(root)
+    index :: semindex_open(OSPath.from(root).join("run.jet")).expect("package entry should index")
+    semindex_open_test_shared_package_index(index)
+    semindex_open_test_clean(root)
+}
+
+// Rust: crates/jet-semindex/src/lib.rs:566
+// #Test("malformed_package_facts_are_not_dropped_from_projection") is in Open.jet.
+// Rust: crates/jet-semindex/src/lib.rs:598
+#Test("semantic_index_consumes_persisted_workspace_overlay_facts") {
+    root :: semindex_open_test_root("workspace-overlay")
+    semindex_open_test_workspace_fixture(root)
+    index :: semindex_open(OSPath.from(root).join("run.jet")).expect("workspace source should index")
+    semindex_open_test_persisted_workspace_index(index)
+    semindex_open_test_clean(root)
+}
+
+// Rust: crates/jet-semindex/src/lib.rs:643
+// #Test("stale_workspace_lock_returns_e1202_instead_of_empty_policy") is in Open.jet.
+// Rust: crates/jet-semindex/src/lib.rs:670
+// #Test("outer_stale_workspace_lock_does_not_cross_inner_workspace_boundary") is in Open.jet.
+// Rust: crates/jet-semindex/src/lib.rs:704
+// #Test("ancestor_lock_scan_uses_an_arbitrary_workspace_source") is in Open.jet.
+// Rust: crates/jet-semindex/src/lib.rs:734
+// #Test("malformed_workspace_boundary_is_not_hidden_by_an_outer_lock") is in Open.jet.
+
+// Rust: crates/jet-semindex/src/lib.rs:763
+#Test("generic_instance_identity_reaches_index_and_symbol_database") {
+    root :: semindex_open_test_root("generic-instance")
+    path :: OSPath.from(root).join("main.jet")
+    entry_files.write(path, semindex_package_codec_test_instance_fixture()).expect("write generic source")
+    index :: semindex_open(path).expect("generic module should index")
+    semindex_open_test_generic_index(index, path.to_string_lossy())
+    semindex_open_test_clean(root)
+}
+
+// Rust: crates/jet-semindex/src/lib.rs:820
+#Test("every_structural_child_has_explicit_slot") {
+    index :: semindex_open(fixture("basics/default_refs.jet")).expect("default-ref example should index")
+    semindex_open_test_default_refs_index(index)
+}
+
+// Rust: crates/jet-semindex/src/lib.rs:830
+#Test("checked_reference_facts_cover_import_members_aliases_and_receivers") {
+    root :: semindex_open_test_root("reference-facts")
+    semindex_open_test_write(root, "library.jet", semindex_build_test_reference_library_source())
+    semindex_open_test_write(root, "main.jet", semindex_build_test_reference_main_source())
+    index :: semindex_open(OSPath.from(root).join("main.jet")).expect("multi-file reference fixture should index")
+    semindex_open_test_checked_reference_index(index)
+    semindex_open_test_clean(root)
+}

@@ -1,0 +1,42 @@
+use jet_devserver.LiveInspect.*
+use std.fs as fs
+use core.sys.target.[selected_family]
+
+// Rust: crates/jet-devserver/src/LiveInspect.rs:915
+#Test("render_uses_only_bounded_runtime_facts") {
+    snapshot :: "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"session\",\"source_id\":\"app.jet\",\"build_id\":\"build-1\",\"revision\":\"rev-1\",\"world_id\":\"world-1\",\"values\":[{{\"value_id\":\"app::counter\",\"type_identity\":\"Int\",\"disposition\":\"kept\",\"reason\":\"\"}}],\"schema_version\":1,\"pid\":42,\"start_id\":\"test\",\"captured_ms\":1,\"tasks\":[{{\"id\":1,\"parent\":0,\"state\":\"running\",\"wait\":\"\",\"deadline_ms\":null,\"cancelled\":false}},{{\"id\":2,\"parent\":1,\"state\":\"blocked\",\"wait\":\"channel send\",\"deadline_ms\":480,\"cancelled\":false}}],\"channels\":[{{\"id\":1,\"depth\":4,\"capacity\":4,\"send_waiters\":1,\"recv_waiters\":0,\"closed\":false}}],\"effects\":{{\"compute\":1,\"waiting\":1,\"channel\":1,\"time\":0,\"io\":0}},\"resources\":{{\"workers\":4,\"running\":1,\"queued\":0,\"cancelled\":0,\"arenas\":0,\"arena_allocations\":0,\"arena_bytes\":0}}}}"
+    rendered :: render(snapshot)
+    assert(rendered.contains("task 2"))
+    assert(rendered.contains("channel send"))
+    assert(rendered.contains("depth 4/4"))
+    assert(!rendered.contains("payload"))
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:925
+#Test("runtime_window_is_optional_and_strictly_shaped") {
+    snapshot :: (runtime: String) -> "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"s\",\"source_id\":\"app.jet\",\"build_id\":\"b\",\"revision\":\"r\",\"world_id\":\"w\",\"values\":[],\"schema_version\":1,\"pid\":42,\"start_id\":\"test\",\"captured_ms\":1,\"tasks\":[],\"channels\":[],\"effects\":{{\"compute\":0,\"waiting\":0,\"channel\":0,\"time\":0,\"io\":0}},\"resources\":{{\"workers\":0,\"running\":0,\"queued\":0,\"cancelled\":0,\"arenas\":0,\"arena_allocations\":0,\"arena_bytes\":0}}{runtime}}}"
+    assert_eq(runtime_window(snapshot("")).unwrap(), .None)
+    assert_eq(runtime_window(snapshot(",\"runtime\":{{\"elapsed_ns\":7,\"cpu_ns\":5,\"exit\":true}}")).unwrap(), .Val(LiveRuntimeWindow { elapsed_ns: 7, cpu_ns: .Val(5), exit: true }))
+    assert_eq(runtime_window(snapshot(",\"runtime\":{{\"elapsed_ns\":7,\"cpu_ns\":null,\"exit\":false}}")).unwrap(), .Val(LiveRuntimeWindow { elapsed_ns: 7, cpu_ns: .None, exit: false }))
+    assert(runtime_window(snapshot(",\"runtime\":{{\"elapsed_ns\":-1,\"cpu_ns\":null,\"exit\":true}}")).is_err())
+    assert(runtime_window(snapshot(",\"runtime\":{{\"elapsed_ns\":7,\"cpu_ns\":-1,\"exit\":true}}")).is_err())
+    assert(runtime_window(snapshot(",\"runtime\":{{\"elapsed_ns\":7,\"exit\":true}}")).is_err())
+}
+// Rust: crates/jet-devserver/src/LiveInspect.rs:947
+#Test("reader_rejects_symlinks_and_open_permissions") {
+    if selected_family() != "unix" -> return
+    // GATE #4494: real filesystem symlink, process id and permission primitives.
+    pid :: std.process.id().saturating_add(1_000_000_000)
+    path :: snapshot_path(pid)
+    target :: path.with_extension("hostile-target")
+    _ :: fs.remove_file(path)
+    _ :: fs.remove_file(target)
+    fs.write(target, "attacker-controlled").unwrap()
+    std.os.unix.fs.symlink(target, path).unwrap()
+    assert(read(pid).unwrap_err().contains("not a regular file"))
+    fs.remove_file(path).unwrap()
+    fs.write(path, "{{}}").unwrap()
+    fs.set_permissions(path, fs.Permissions.from_mode(0o644)).unwrap()
+    assert(read(pid).unwrap_err().contains("permissions expose"))
+    fs.remove_file(path).unwrap()
+    fs.remove_file(target).unwrap()
+}

@@ -1,0 +1,230 @@
+// Typed bridge from a real jet_debug stop to the paused devtools kernel.
+use jet_foundation.Devtools.[JetDevtoolsSourceIdentityFact]
+use jet_debug.[DebugAggregateKind, DebugEvaluation, DebugSnapshot, DebugValue, evaluate_snapshot]
+use jet_devserver.PausedEvaluate.[AggregateKind, AuthorityGrant, AuthorityRequirement, AuthoritySet, EvaluateRequest, EvaluationMode, EvaluationUsage, EvaluatorResult, LexicalScope, PausedEvaluateHost, PausedSession, SessionIdentity, SessionState, SourceLocation, TypedValue, ValueProjection, DEFAULT_EVALUATION_BUDGET, EVALUATE_AUTHORITY, INSPECT_AUTHORITY, MAX_VALUE_BYTES]
+use jet_foundation.SHA256.[sha256_hex]
+
+// Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:18
+UNKNOWN_TYPE :: "Unknown"
+// Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:19
+MAX_SOURCE_COMPONENT_BYTES :: prep { USize{256} }
+// Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:27
+struct PausedDebugSessionAdapter {
+    identity: SessionIdentity; source: JetDevtoolsSourceIdentityFact; scope_id: String
+    snapshot: DebugSnapshot; authority: AuthoritySet; state: SessionState
+}
+impl PausedDebugSessionAdapter {
+    // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:37
+    fn new(identity: SessionIdentity, source: JetDevtoolsSourceIdentityFact, scope_id: String, snapshot: DebugSnapshot, authority: AuthoritySet) -> PausedDebugSessionAdapter Err! {
+        adapter := PausedDebugSessionAdapter { identity: identity, source: source, scope_id: scope_id, snapshot: snapshot, authority: authority, state: .Paused }
+        adapter.validate()?
+        adapter
+    }
+    // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:57
+    fn debugger_authority(scope_id: String) -> AuthoritySet Err! {
+        AuthoritySet.new([AuthorityGrant.new(INSPECT_AUTHORITY, scope_id)?, AuthorityGrant.new(EVALUATE_AUTHORITY, scope_id)?])
+    }
+    // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:64
+    fn identity(&self) -> SessionIdentity { &self.identity }
+    // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:68
+    fn is_paused(&self) -> Bool { self.state == .Paused }
+    // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:73
+    fn refresh_snapshot(&self, identity: SessionIdentity, snapshot: DebugSnapshot) Err! {
+        if identity.session_id != self.identity.session_id || identity.source_id != self.identity.source_id || identity.source_revision != self.identity.source_revision ->
+            throw "paused debugger refresh changed session or source identity"
+        self.identity = identity
+        self.snapshot = snapshot
+        self.state = .Paused
+        self.validate()?
+    }
+    // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:91
+    fn inject_into(&self, host: &PausedEvaluateHost) Err! {
+        if self.state != .Paused {
+            host.clear_session()
+            return
+        }
+        location := self.source_location()?
+        bindings := [ValueProjection]{}
+        bindings.reserve(self.snapshot.locals.len())
+        loop (index, local) in self.snapshot.locals.iter().enumerate() {
+            id := self.value_id(index, local.name)
+            type_name := normalized_type_name(local.type_name)
+            value := evaluate_snapshot(self.snapshot, local.name).ok()
+                .and_then((evaluation) -> self.projection_value(evaluation, id, location).ok())
+            projection := value.unwrap_or_else(() -> ValueProjection.redacted(id, bounded_name(local.name), type_name, location.clone()))
+            if projection.type_name.is_empty() -> projection.type_name = UNKNOWN_TYPE
+            bindings.push(projection)
+        }
+        scope := LexicalScope.new(self.scope_id.clone(), bounded_scope_name(self.snapshot.function), .None, location, bindings)?
+        session := PausedSession.paused(self.identity.clone(), [scope], self.authority.clone(), DEFAULT_EVALUATION_BUDGET)?
+        host.clear_evaluator_result()
+        host.set_session(session)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:139
+    fn evaluate(&self, request: &EvaluateRequest) -> EvaluatorResult {
+        usage := EvaluationUsage.new(0, 0, 0, 0)
+        if request.identity != self.identity || request.scope_id != self.scope_id ->
+            return EvaluatorResult.failed(request.identity.clone(), request.scope_id.clone(), "paused debugger request does not match the published stop", usage)
+        if request.cancellation.requested || self.state == .Cancelled ->
+            return EvaluatorResult.cancelled(request.identity.clone(), request.scope_id.clone(), usage)
+        if self.state != .Paused ->
+            return EvaluatorResult.failed(request.identity.clone(), request.scope_id.clone(), "paused debugger is no longer stopped", usage)
+        if request.mode == .Mutate ->
+            return EvaluatorResult.failed(request.identity.clone(), request.scope_id.clone(), "paused debugger evaluation is read-only; mutation is unsupported", usage)
+        requirement := AuthorityRequirement.new(EVALUATE_AUTHORITY, self.scope_id) ?? {
+            error :: err
+            return EvaluatorResult.failed(request.identity.clone(), request.scope_id.clone(), error, usage)
+        }
+        if !self.authority.allows(requirement) || request.authority.iter().any((requirement) -> !self.authority.allows(requirement)) ->
+            return EvaluatorResult.failed(request.identity.clone(), request.scope_id.clone(), "paused debugger lacks read-only evaluation authority", usage)
+        evaluation := evaluate_snapshot(self.snapshot, request.expression) ?? {
+            error :: err
+            return EvaluatorResult.failed(request.identity.clone(), request.scope_id.clone(), error, usage)
+        }
+        usage = EvaluationUsage.new(evaluation.usage.depth, evaluation.usage.nodes, evaluation.usage.bytes.min(MAX_VALUE_BYTES), evaluation.usage.steps)
+        location := self.source_location() ?? {
+            error :: err
+            return EvaluatorResult.failed(request.identity.clone(), request.scope_id.clone(), error, usage)
+        }
+        index := self.snapshot.locals.iter().position((local) -> local.name == evaluation.name).unwrap_or(0)
+        id := self.value_id(index, evaluation.name)
+        value := self.projection_value(evaluation, id, location) ?? {
+            error :: err
+            return EvaluatorResult.failed(request.identity.clone(), request.scope_id.clone(), error, usage)
+        }
+        EvaluatorResult.completed(request.identity.clone(), request.scope_id.clone(), .Val(value), usage)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:252
+    fn resume(&self, host: &PausedEvaluateHost) -> Unit {
+        self.state = .Running
+        self.clear_if_current(host)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:257
+    fn cancel(&self, host: &PausedEvaluateHost, reason: String) Err! {
+        self.state = .Cancelled
+        if self.host_is_current(host) {
+            host.cancel_session(reason) ?? {
+                error :: err
+                throw error.to_string()
+            }
+            host.clear_evaluator_result()
+        }
+    }
+    // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:270
+    fn exit(&self, host: &PausedEvaluateHost) -> Unit {
+        self.state = .Finished
+        self.clear_if_current(host)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:275
+    fn stale(&self, host: &PausedEvaluateHost) -> Unit {
+        self.state = .Stale
+        self.clear_if_current(host)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:280
+    fn validate(&self) Err! {
+        if self.source.source_id != .Val(self.identity.source_id) -> throw "paused debugger source identity does not match the session"
+        if self.source.revision != .Val(self.identity.source_revision) -> throw "paused debugger revision identity does not match the session"
+        loop (value, label) in [(_0: self.source.build_id, _1: "build identity"), (_0: self.source.world_id, _1: "world identity")] {
+            if value == .Val(value) {
+                if value.is_empty() || value.len() > MAX_SOURCE_COMPONENT_BYTES || value.chars().any((ch) -> ch.is_control()) ->
+                    throw "{label} is outside the bounded identity contract"
+            }
+        }
+        if self.scope_id.is_empty() || self.scope_id.len() > MAX_SOURCE_COMPONENT_BYTES || self.scope_id.chars().any((ch) -> ch.is_control()) ->
+            throw "paused debugger scope identity is outside the bounded contract"
+        if self.snapshot.function.is_empty() || self.snapshot.line == 0 || self.snapshot.locals.len() > 4_096 || self.snapshot.call_stack.len() > 256 ->
+            throw "paused debugger snapshot is outside the bounded fact contract"
+    }
+    // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:316
+    fn source_location(&self) -> SourceLocation Err! {
+        line := U64{self.snapshot.line}
+        SourceLocation.new(self.identity.source_id.clone(), self.identity.source_revision.clone(), line, line)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:326
+    fn value_id(&self, index: USize, name: String) -> String {
+        candidate := "{self.identity.session_id}-value-{index}-{bounded_name(name)}"
+        if candidate.len() <= MAX_SOURCE_COMPONENT_BYTES && !candidate.chars().any((ch) -> ch.is_control()) -> candidate
+        else {
+            digest := sha256_hex("{self.identity.session_id}:{index}:{name}".as_bytes())
+            prefix := digest[0..<32] // #4303
+            "value-{prefix}"
+        }
+    }
+    // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:338
+    fn projection_value(&self, evaluation: &DebugEvaluation, id: String, location: &SourceLocation) -> ValueProjection Err! {
+        projection := ValueProjection.published(id.to_string(), bounded_name(evaluation.name), normalized_type_name(evaluation.type_name), location.clone(), typed_value(evaluation.value)?)
+        if projection.value == .Val(.Text(text)) {
+            (bounded, truncated) := bounded_text(text)
+            projection.value = .Val(.Text(bounded))
+            projection.truncated = truncated
+        }
+        projection
+    }
+    // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:359
+    fn host_is_current(&self, host: &PausedEvaluateHost) -> Bool {
+        host.session().is_some_and((session) -> session.identity == self.identity)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:364
+    fn clear_if_current(&self, host: &PausedEvaluateHost) -> Unit {
+        if self.host_is_current(host) -> host.clear_session()
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:371
+fn normalized_type_name(value: String) -> String {
+    value := value.trim() // #4303
+    if value.is_empty() || value.chars().any((ch) -> ch.is_control()) -> UNKNOWN_TYPE else bounded_name(value)
+}
+// Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:380
+fn bounded_name(value: String) -> String {
+    name := String.new()
+    loop ch in value.chars().filter((ch) -> !ch.is_control()) {
+        if name.len().saturating_add(ch.len_utf8()) > MAX_SOURCE_COMPONENT_BYTES -> break
+        name.push(ch)
+    }
+    if name.is_empty() -> UNKNOWN_TYPE else name
+}
+// Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:395
+fn bounded_scope_name(value: String) -> String { bounded_name(value) }
+// Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:399
+fn bounded_text(value: String) -> (String, Bool) {
+    result := String.new()
+    truncated := false
+    loop ch in value.chars() {
+        if ch.is_control() {
+            if ch == {
+                '\n' -> result.push_str("\\n")
+                Char{13} -> result.push_str("\\r")
+                '\t' -> result.push_str("\\t")
+                else -> result.push('�')
+            }
+        } else { result.push(ch) }
+        if result.len() > USize{MAX_VALUE_BYTES} {
+            loop result.len() > USize{MAX_VALUE_BYTES} -> _ :: result.pop()
+            truncated = true
+            break
+        }
+    }
+    (_0: result, _1: truncated)
+}
+// Rust: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:424
+fn typed_value(value: DebugValue) -> TypedValue Err! {
+    if value == {
+        .Unit -> .Unit
+        .Bool(value) -> .Bool(value)
+        .Int(value) -> .Int(value)
+        .FloatBits(bits) -> .FloatBits(bits)
+        .Text(value) -> .Text(value.clone())
+        .Bytes { length, sha256 } -> .Bytes { length: length, sha256: sha256.clone() }
+        .Aggregate { kind, length } -> .Aggregate {
+            kind: if kind == {
+                .Record -> .Record
+                .List -> .List
+                .Map -> .Map
+                .Set -> .Set
+                .Tuple -> .Tuple
+                .Variant -> .Variant
+            },
+            length: length
+        }
+    }
+}

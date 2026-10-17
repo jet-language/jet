@@ -1,0 +1,62 @@
+use Compiler.JetLSP.Tests.Integration.Lsp.[jet_bin, lock_lsp_process, send_msg, read_msg, json_string]
+use std.[fs, process]
+use std.process.[Command, Stdio]
+use std.time.[Duration]
+// GATE #4494: actual native process/pipe/mutex/filesystem providers.
+
+// Rust: tests/lsp.rs:2079
+// Run a transcript test against a live server process.
+fn run_transcript(source: &String, steps: &[TranscriptStep]) {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    _guard :: lock_lsp_process()
+    child := Command.new(jet).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
+    stdin := child.stdin.take().expect("stdin")
+    stdout := child.stdout.take().expect("stdout")
+    tmp_path :: OSPath.from("/tmp/lsp_transcript_{process.id()}.jet")
+    loop step in steps {
+        if step == {
+            TranscriptStep.Send { msg, expect_contains } -> {
+                send_msg(&stdin, msg)
+                if expects :: expect_contains {
+                    resp :: read_msg(&stdout)
+                    loop expect in expects {
+                        assert(resp.contains(expect), "transcript step: expected {expect} in response, got:\n{resp}")
+                    }
+                }
+            }
+            TranscriptStep.Open { uri, expect_notification } -> {
+                open :: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}"
+                send_msg(&stdin, open)
+                if expect_notification {
+                    notif :: read_msg(&stdout)
+                    assert(notif.contains("publishDiagnostics"), "expected publishDiagnostics after open, got: {notif}")
+                }
+            }
+        }
+    }
+    drop(^stdin)
+    _ :: child.wait()
+    _ :: fs.remove_file(tmp_path)
+}
+
+// Rust: tests/lsp.rs:2146
+enum TranscriptStep {
+    Send { msg: String, expect_contains: [String]? }
+    Open { uri: String, expect_notification: Bool }
+}
+
+// Rust: tests/lsp.rs:3469
+fn costly_source(marker: String, callers: USize) -> String {
+    source := "fn target(value: Int) -> Int {{ return value }}\nfn {marker}() -> Int {{ return target(1) }}\n"
+    loop index in 0..callers {
+        source.push_str("fn caller_{index}() -> Int {{ return target({index}) }}\n")
+    }
+    ^source
+}
+
+// Rust: tests/lsp.rs:3557
+fn percentile(samples: [Duration], pct: USize) -> Duration {
+    samples.sort()
+    samples[((samples.len() - 1) * pct) / 100]
+}

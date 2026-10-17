@@ -1,0 +1,163 @@
+// Rust: crates/jet-debug/src/LineMap.rs:1
+// The native backend's sole generated-source to Jet-source line translator.
+// Sidecar hashes and rebuilt entries reject stale or edited build identities.
+use std.io as io
+use std.fs as fs
+use std.process as process
+use std.sync.atomic.[AtomicU64, Ordering]
+use core.files.[OSPath]
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.JSON.[json_escape, json_get, json_int, json_str, parse_json]
+use jet_foundation.SHA256.[sha256_file_hex, sha256_hex]
+// Rust: crates/jet-debug/src/LineMap.rs:18
+MAP_SCHEMA_VERSION :: I64{1}
+// Rust: crates/jet-debug/src/LineMap.rs:168
+// GATE #4494: process-local atomic counter, relaxed ordering.
+static MAP_COUNTER: AtomicU64 = AtomicU64.new(0)
+// Rust: crates/jet-debug/src/LineMap.rs:20
+struct LineMap {
+    rust_to_jet: [USize:USize]
+    jet_to_rust: [USize:USize]
+    // Sorted BTreeMap keys retained once for logarithmic range queries.
+    rust_lines: [USize]
+    jet_body_end: USize?
+}
+impl LineMap {
+    // Rust: crates/jet-debug/src/LineMap.rs:38
+    fn build(rust_src: String) -> LineMap {
+        rust_to_jet := [USize:USize]{}
+        jet_to_rust := [USize:USize]{}
+        rust_lines := [USize]{}
+        pending := None
+        loop (i, line) in rust_src.lines().enumerate() {
+            rust_line :: i + 1
+            if pending == .Val(n) {
+                &rust_to_jet.insert(rust_line, n)
+                &rust_lines.push(rust_line)
+                if !jet_to_rust.contains(n) -> &jet_to_rust.insert(n, rust_line)
+                pending = None
+            }
+            if line.trim_start().strip_prefix("// jet:line ") == .Val(rest) {
+                rest := rest.trim() // #4303
+                pending = rest.parse[USize]().ok()
+            }
+        }
+        jet_body_end := None
+        if rust_src.lines().any((line) -> line.trim_start().starts_with("pub fn __jet_run(")) {
+            in_jet_entry := false
+            loop (index, line) in rust_src.lines().enumerate() {
+                if line.trim_start().starts_with("pub fn __jet_run(") {
+                    in_jet_entry = true
+                    next
+                }
+                if in_jet_entry && line.starts_with("fn main(") {
+                    jet_body_end = .Val(index + 1)
+                    break
+                }
+            }
+        }
+        return LineMap { rust_to_jet: ^rust_to_jet, jet_to_rust: ^jet_to_rust, rust_lines: ^rust_lines, jet_body_end: jet_body_end }
+    }
+    // Rust: crates/jet-debug/src/LineMap.rs:78
+    fn jet_line_for(self, rust_line: USize) -> USize? {
+        if self.jet_body_end == .Val(end) && rust_line >= end -> return None
+        lo := USize{0}
+        hi := self.rust_lines.len()
+        loop lo < hi {
+            mid :: lo + (hi - lo) / 2
+            if self.rust_lines[mid] <= rust_line -> lo = mid + 1 else -> hi = mid
+        }
+        if lo == 0 -> return None
+        return self.rust_to_jet.get(self.rust_lines[lo - 1])
+    }
+    // Rust: crates/jet-debug/src/LineMap.rs:95
+    fn jet_line_for_file(self, rust_file: String, expected_rust_file: String, rust_line: USize) -> USize? {
+        if !source_file_matches(rust_file, expected_rust_file) -> return None
+        self.jet_line_for(rust_line)
+    }
+    // Rust: crates/jet-debug/src/LineMap.rs:107
+    fn rust_line_for(self, jet_line: USize) -> USize? { self.jet_to_rust.get(jet_line) }
+    // Rust: crates/jet-debug/src/LineMap.rs:116
+    fn first_at_or_after(self, rust_line: USize) -> USize? {
+        lo := USize{0}
+        hi := self.rust_lines.len()
+        loop lo < hi {
+            mid :: lo + (hi - lo) / 2
+            if self.rust_lines[mid] < rust_line -> lo = mid + 1 else -> hi = mid
+        }
+        return self.rust_lines.get(lo)
+    }
+    // Rust: crates/jet-debug/src/LineMap.rs:125
+    fn main_entry_line(self, rust_src: String) -> USize? {
+        entry := rust_src.lines().position((line) -> line.trim_start().starts_with("pub fn __jet_run("))
+        if entry == None -> entry = rust_src.lines().position((line) -> line.trim_start().starts_with("fn main("))
+        entry_header :: entry.map((i) -> i + 1) ?? 1
+        self.first_at_or_after(entry_header)
+    }
+    // Rust: crates/jet-debug/src/LineMap.rs:143
+    fn write_artifact(path: OSPath, jet_file: String, jet_src: String, rust_file: String, rust_src: String, binary: OSPath) IOError! {
+        map :: LineMap.build(rust_src)
+        binary_sha256 :: sha256_file_hex(binary) ?? return .Err(err)
+        entries :: map.rust_lines.iter().map((rust) -> "{{\"rust\":{rust},\"jet\":{map.rust_to_jet[rust]}}}").collect[[String]]().join(",")
+        json :: "{{\"schema_version\":{MAP_SCHEMA_VERSION},\"jet_file\":\"{json_escape(jet_file)}\",\"rust_file\":\"{json_escape(rust_file)}\",\"jet_sha256\":\"{sha256_hex(jet_src.as_bytes())}\",\"rust_sha256\":\"{sha256_hex(rust_src.as_bytes())}\",\"binary_sha256\":\"{binary_sha256}\",\"entries\":[{entries}]}}\n"
+        // GATE #4494: atomic publication via native file rename, process id.
+        counter :: MAP_COUNTER.fetch_add(1, Ordering.Relaxed)
+        temporary :: path.with_extension("jetmap.tmp-{process.id()}-{counter}")
+        if fs.write(temporary, json.as_bytes()) == .Err(error) {
+            _ :: fs.remove_file(temporary)
+            return .Err(error)
+        }
+        if fs.rename(temporary, path) == .Err(error) {
+            _ :: fs.remove_file(temporary)
+            return .Err(error)
+        }
+        return .Ok(())
+    }
+    // Rust: crates/jet-debug/src/LineMap.rs:185
+    fn load_verified(path: OSPath, jet_file: String, jet_src: String, rust_file: String, rust_src: String, binary: OSPath) -> LineMap Err! {
+        // GATE #4494: local sidecar and binary reads, native path identities.
+        text :: fs.read_to_string(path) ?? return .Err("cannot read debugger map {path.display()}: {err}")
+        root :: parse_json(text) ?? return .Err("debugger map is not valid JSON")
+        schema :: json_get(root, "schema_version").and_then(json_int) ?? return .Err("debugger map has no schema version")
+        if schema != MAP_SCHEMA_VERSION -> return .Err("unsupported debugger map schema {schema}")
+        jet_sha256 :: sha256_hex(jet_src.as_bytes())
+        rust_sha256 :: sha256_hex(rust_src.as_bytes())
+        loop (field, expected) in [(_0: "jet_file", _1: jet_file), (_0: "rust_file", _1: rust_file), (_0: "jet_sha256", _1: jet_sha256), (_0: "rust_sha256", _1: rust_sha256)] {
+            actual :: json_get(root, field).and_then(json_str) ?? return .Err("debugger map has no {field}")
+            if field.ends_with("_file") {
+                expected_path :: fs.canonicalize(OSPath(expected)).ok().map((p) -> p.display().to_string())
+                if actual != expected && expected_path != .Val(actual) && !(field == "rust_file" && OSPath(actual).file_name() == OSPath(expected).file_name()) -> return .Err("debugger map {field} does not match the target")
+            } else if actual != expected -> return .Err("debugger map {field} does not match the target")
+        }
+        expected_binary :: sha256_file_hex(binary) ?? return .Err("cannot hash debugger binary: {err}")
+        actual_binary :: json_get(root, "binary_sha256").and_then(json_str) ?? return .Err("debugger map has no binary_sha256")
+        if actual_binary != expected_binary -> return .Err("debugger map does not match the debug binary")
+        entries :: json_get(root, "entries").and_then((value) -> if value == {
+            .Array(values) -> .Val(values)
+            else -> None
+        }) ?? return .Err("debugger map has no entries")
+        rust_to_jet := [USize:USize]{}
+        jet_to_rust := [USize:USize]{}
+        loop entry in entries {
+            rust :: json_get(entry, "rust").and_then(json_int).and_then((value) -> USize.try_from(value).ok()).filter((value) -> value > 0) ?? return .Err("debugger map has an invalid rust line")
+            jet :: json_get(entry, "jet").and_then(json_int).and_then((value) -> USize.try_from(value).ok()).filter((value) -> value > 0) ?? return .Err("debugger map has an invalid Jet line")
+            if &rust_to_jet.insert(rust, jet) != None -> return .Err("debugger map has duplicate line entries")
+            // Preserve entry order's first Rust line exactly as the reference.
+            if !jet_to_rust.contains(jet) -> &jet_to_rust.insert(jet, rust)
+        }
+        // Hashes do not authenticate edited tables: rebuild before trusting them.
+        expected :: LineMap.build(rust_src)
+        if rust_to_jet != expected.rust_to_jet || jet_to_rust != expected.jet_to_rust -> return .Err("debugger map entries do not match the generated source")
+        return LineMap { rust_to_jet: ^rust_to_jet, jet_to_rust: ^jet_to_rust, rust_lines: ^expected.rust_lines, jet_body_end: expected.jet_body_end }
+    }
+}
+// Rust: crates/jet-debug/src/LineMap.rs:279
+fn source_file_matches(actual: String, expected: String) -> Bool {
+    if actual == expected -> return true
+    actual_path :: OSPath(actual)
+    expected_path :: OSPath(expected)
+    // GATE #4494
+    if fs.canonicalize(actual_path).ok() == fs.canonicalize(expected_path).ok() && actual_path.exists() && expected_path.exists() -> return true
+    if actual_path.file_name() == .Val(a) && expected_path.file_name() == .Val(e) -> return a == e
+    return false
+}
