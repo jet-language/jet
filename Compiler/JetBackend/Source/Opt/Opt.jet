@@ -6,6 +6,7 @@
 // refuses the build instead of producing wrong code.
 
 fn lir_optimize_module(program: LIRModule, level: Int) -> LIRModule Never! {
+    // copy: O0 returns a new owned LIRModule equal to `program`; the caller's module (a read parameter) stays with the caller.
     if level <= 0 -> return program.copy()
     // Bottom-up over the call graph (callees first, Opt/Inline.jet): each
     // function inlines the final, already optimized bodies of its callees

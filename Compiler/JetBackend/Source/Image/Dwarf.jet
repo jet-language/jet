@@ -446,6 +446,7 @@ fn dwarf_variable_ranges(ranges: [X64VariableRange], variable: Int) -> [X64Varia
         &sorted.push(range)
         at := sorted.len() - 1
         loop at > 0 && sorted[at - 1].start > sorted[at].start {
+            // copy: the row is held while sorted[at - 1] is overwritten in place; a view of that element would be live across the write.
             earlier :: sorted[at - 1].copy()
             sorted[at - 1] = sorted[at]
             sorted[at] = earlier
