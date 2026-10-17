@@ -8,6 +8,9 @@
 TEST_SCOPE_E3001 :: prep { I64{211261862725} }
 TEST_SCOPE_E3010 :: prep { I64{206983672645} }
 TEST_SCOPE_E3011 :: prep { I64{211278639941} }
+TEST_SCOPE_R0801 :: prep { I64{211262386258} }
+TEST_SCOPE_R0802 :: prep { I64{215557353554} }
+TEST_SCOPE_R0803 :: prep { I64{219852320850} }
 
 fn test_scope_clone(text: I64) -> I64 {
     if (text == I64{0}) -> I64{0} else -> test_text_clone(text)
@@ -218,6 +221,44 @@ fn test_scope_stopped_index(state: I64) -> I64 {
     true
 }
 
+// The five code bytes of a recorded stop as one little-endian word.
+fn test_scope_code_word(code: I64) -> I64 {
+    if (trap_word(code + I64{8}) != I64{5}) -> return I64{0}
+    bytes :: trap_word(code)
+    word := I64{0}
+    at := I64{0}
+    loop at < (I64{5}) {
+        word = word.bit_or(trap_byte(bytes + at) << (at * I64{8}))
+        at += I64{1}
+    }
+    word
+}
+
+// Native stopped MIR has no host unwind to catch. Only a pending panic whose
+// stop the panic rail recorded raw (E3001/E3010/E3011, Sentry R0801-R0803) in
+// the innermost stopped expectation of this scope can consume it. Keep
+// cancellation, deadlines, skip, and unrelated scope probes untouched.
+#Export(c) fn jet_rt_test_catch_for_scope(scope: I64) -> Bool {
+    control :: scheduler_control_current()
+    if (control == I64{0} || scheduler_control_status(control) != I64{5}) -> return false
+    state :: test_capture_state()
+    if (state == I64{0} || trap_word(state + I64{80}) != I64{0}) -> return false
+    index :: test_scope_stopped_index(state)
+    if (index < I64{0}) -> return false
+    row :: trap_word(state + I64{48}) + index * I64{8}
+    if (trap_word(row) != scope) -> return false
+    word :: test_scope_code_word(trap_word(row + I64{24}))
+    if (word != TEST_SCOPE_E3001 && word != TEST_SCOPE_E3010 && word != TEST_SCOPE_E3011 &&
+        word != TEST_SCOPE_R0801 && word != TEST_SCOPE_R0802 && word != TEST_SCOPE_R0803) -> return false
+    // Clear before matching: a mismatch must replace the original stop with
+    // E3001, rather than lose to scheduler first-stop-wins publication.
+    scheduler_control_discard_stop(control)
+    saved :: jet_rt_poll_call_enter()
+    caught :: jet_rt_test_expect_fail_catch_scope(I64{0})
+    jet_rt_poll_call_leave(saved)
+    caught
+}
+
 fn test_scope_quoted(builder: I64, text: I64) {
     quoted :: jet_rt_require_debug_string(text)
     jet_rt_string_builder_push(builder, quoted)
@@ -310,7 +351,7 @@ fn test_scope_catch(output: I64, native: Bool) -> Bool {
     completed :: test_scope_push(state + I64{56}, I64{2})
     trap_store(completed, scope)
     trap_store(completed + I64{8}, code)
-    trap_store(output, scope)
+    if (output != I64{0}) -> trap_store(output, scope)
     true
 }
 

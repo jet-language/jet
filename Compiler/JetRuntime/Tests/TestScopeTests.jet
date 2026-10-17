@@ -5,6 +5,7 @@
     scratch :: jet_rt_alloc(I64{64}, I64{8})
     scheduler_control_enter(control, scratch)
     body :: scheduler_body_enter()
+    capability :: jet_rt_poll_call_enter()
     output :: scratch + I64{32}
     jet_rt_test_expect_fail_abort()
     jet_rt_test_expect_fail_enter_scope(I64{1}, wrong, I64{0})
@@ -44,6 +45,53 @@
     test_text_drop(actual)
     test_text_drop(expected)
     scheduler_stop_drop(stop)
+    // Exercise the native probe against a real published panic, including
+    // the exact scope match and replacement stop on expectation mismatch.
+    jet_rt_test_expect_fail_abort()
+    jet_rt_test_expect_fail_enter_scope(I64{5}, wrong, I64{0})
+    jet_rt_panic_message(trap_word(message), trap_word(message + I64{8}))
+    if jet_rt_test_catch_for_scope(I64{6}) -> jet_rt_unreachable(I64{0}, I64{0})
+    if !jet_rt_test_catch_for_scope(I64{5}) -> jet_rt_unreachable(I64{0}, I64{0})
+    if (scheduler_control_status(control) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+    caught_code :: jet_rt_test_expect_fail_leave_scope(I64{5})
+    if !jet_rt_string_eq(caught_code, wrong) -> jet_rt_unreachable(I64{0}, I64{0})
+    test_text_drop(caught_code)
+    jet_rt_test_expect_fail_enter_scope(I64{6}, code, I64{0})
+    jet_rt_panic_message(trap_word(message), trap_word(message + I64{8}))
+    if jet_rt_test_catch_for_scope(I64{6}) -> jet_rt_unreachable(I64{0}, I64{0})
+    if (trap_word(test_capture_state() + I64{80}) != I64{1}) -> jet_rt_unreachable(I64{0}, I64{0})
+    if (scheduler_control_status(control) != I64{5}) -> jet_rt_unreachable(I64{0}, I64{0})
+    scheduler_control_discard_stop(control)
+    jet_rt_test_expect_fail_abort()
+    jet_rt_test_expect_fail_enter_scope(I64{7}, wrong, I64{0})
+    jet_rt_test_record_stop(wrong, message)
+    kind := I64{1}
+    loop kind < (I64{5}) {
+        record :: scheduler_stop_new(kind, I64{0})
+        _ := scheduler_native_publish(record)
+        if jet_rt_test_catch_for_scope(I64{7}) -> jet_rt_unreachable(I64{0}, I64{0})
+        if (sync_load(control + I64{40}) != record) -> jet_rt_unreachable(I64{0}, I64{0})
+        scheduler_control_discard_stop(control)
+        kind += I64{1}
+    }
+    // First stop wins: a recorded E3010 is the code a later panic is caught as
+    // (Core.rs jet_test_record_stop), so it matches its E3010 expectation.
+    jet_rt_test_expect_fail_abort()
+    jet_rt_test_expect_fail_enter_scope(I64{8}, code, I64{0})
+    jet_rt_test_record_stop(code, message)
+    jet_rt_panic_message(trap_word(message), trap_word(message + I64{8}))
+    if !jet_rt_test_catch_for_scope(I64{8}) -> jet_rt_unreachable(I64{0}, I64{0})
+    caught_first :: jet_rt_test_expect_fail_leave_scope(I64{8})
+    if !jet_rt_string_eq(caught_first, code) -> jet_rt_unreachable(I64{0}, I64{0})
+    test_text_drop(caught_first)
+    // An unregistered recorded code never consumes the pending panic.
+    jet_rt_test_expect_fail_enter_scope(I64{9}, code, I64{0})
+    jet_rt_test_record_stop(message, message)
+    jet_rt_panic_message(trap_word(message), trap_word(message + I64{8}))
+    if jet_rt_test_catch_for_scope(I64{9}) -> jet_rt_unreachable(I64{0}, I64{0})
+    if (scheduler_control_status(control) != I64{5}) -> jet_rt_unreachable(I64{0}, I64{0})
+    scheduler_control_discard_stop(control)
+    jet_rt_test_expect_fail_abort()
     // Mutate only the fixture's owned timer record, not a clock provider. The
     // first record simulates Duration::as_nanos exceeding i64::MAX; the second
     // simulates Instant moving backward. Both are deterministic arithmetic.
@@ -60,6 +108,7 @@
     if !jet_rt_test_timeout_leave(I64{4}, output) -> jet_rt_unreachable(I64{0}, I64{0})
     if (trap_word(output) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
     jet_rt_test_timeout_abort()
+    jet_rt_poll_call_leave(capability)
     scheduler_body_leave(body)
     scheduler_control_leave(scratch)
     scheduler_control_drop(control)
