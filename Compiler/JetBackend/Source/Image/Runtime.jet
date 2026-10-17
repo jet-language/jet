@@ -8,7 +8,8 @@
 // Representations, private to this runtime:
 // - memory comes from mmap and returns to munmap (`jet_rt_free` passes the size);
 // - a String handle points at `[len: word][bytes]`; bit 63 marks frozen static
-//   storage, never freed. Readers mask it and clone returns an unflagged owner;
+//   storage, never freed. Heap strings carry a reference count just before the
+//   handle (`[count][len][bytes]`): clone retains, drop releases;
 // - a string builder points at `[buffer: String-shaped, capacity: word]`;
 // - a range cursor points at `[current, end, step, exclusive, done]` words.
 // Int words are inline integers only: a result outside the inline range stops
@@ -509,21 +510,25 @@ fn x64_image_free() -> X64CompiledFunction Never! {
 // Strings.
 
 // Immutable module strings mark bit 63 of the length; every byte reader strips
-// it, while clone builds a normal unflagged heap carrier.
+// it. They are immortal: clone returns them and drop ignores them.
 fn x64_image_string_length(code: &[U8], reg: Int) Never! {
     x64_shift_ri(&code, X64Shift.Shl, reg, 1)
     x64_shift_ri(&code, X64Shift.Shr, reg, 1)
 }
 
-// jet_image_string_new(len) -> String with its length set and bytes unwritten.
+// jet_image_string_new(len) -> String with its length set, its count 1 and its
+// bytes unwritten. The mapping is `[count][len][bytes]`; the handle is +8.
 fn x64_image_string_new() -> X64CompiledFunction Never! {
     a := x64_image_asm()
     x64_push(&a.code, X64_RBX)
     x64_mov_rr(&a.code, X64_RBX, X64_RDI)
-    x64_lea(&a.code, X64_RDI, X64_RBX, 8)
+    x64_lea(&a.code, X64_RDI, X64_RBX, 16)
     x64_mov_ri(&a.code, X64_RSI, 8)
     x64_image_call(&a, "jet_rt_alloc")
-    x64_store(&a.code, X64_RAX, 0, X64_RBX)
+    x64_mov_ri(&a.code, X64_RDX, 1)
+    x64_store(&a.code, X64_RAX, 0, X64_RDX)
+    x64_store(&a.code, X64_RAX, 8, X64_RBX)
+    x64_lea(&a.code, X64_RAX, X64_RAX, 8)
     x64_pop(&a.code, X64_RBX)
     x64_ret(&a.code)
     x64_image_finish(&a, "jet_image_string_new")
@@ -552,24 +557,34 @@ fn x64_image_string_from_static() -> X64CompiledFunction Never! {
     x64_image_finish(&a, "jet_rt_string_from_static")
 }
 
-// jet_rt_string_clone(String) -> String
+// jet_rt_string_clone(String) -> String: one more owner of the same string.
 fn x64_image_string_clone() -> X64CompiledFunction Never! {
     a := x64_image_asm()
+    done :: x64_image_label(&a)
     x64_load(&a.code, X64_RSI, X64_RDI, 0)
-    x64_image_string_length(&a.code, X64_RSI)
-    x64_lea(&a.code, X64_RDI, X64_RDI, 8)
-    x64_image_tail(&a, "jet_rt_string_from_static")
+    x64_test_rr(&a.code, X64_RSI, X64_RSI)
+    x64_image_jcc(&a, X64Cond.L, done)
+    x64_mov_ri(&a.code, X64_RSI, 1)
+    x64_lock_xadd(&a.code, X64_RDI, -8, X64_RSI)
+    x64_image_bind(&a, done)
+    x64_mov_rr(&a.code, X64_RAX, X64_RDI)
+    x64_ret(&a.code)
     x64_image_finish(&a, "jet_rt_string_clone")
 }
 
-// jet_rt_string_drop(String)
+// jet_rt_string_drop(String): the last owner unmaps `[count][len][bytes]`.
 fn x64_image_string_drop() -> X64CompiledFunction Never! {
     a := x64_image_asm()
     done :: x64_image_label(&a)
     x64_load(&a.code, X64_RSI, X64_RDI, 0)
     x64_test_rr(&a.code, X64_RSI, X64_RSI)
     x64_image_jcc(&a, X64Cond.L, done)
-    x64_alu_ri(&a.code, X64Alu.Add, X64_RSI, 8)
+    x64_mov_ri(&a.code, X64_RDX, -1)
+    x64_lock_xadd(&a.code, X64_RDI, -8, X64_RDX)
+    x64_alu_ri(&a.code, X64Alu.Cmp, X64_RDX, 1)
+    x64_image_jcc(&a, X64Cond.NE, done)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_RSI, 16)
+    x64_alu_ri(&a.code, X64Alu.Sub, X64_RDI, 8)
     x64_image_syscall(&a, 11)
     x64_image_bind(&a, done)
     x64_ret(&a.code)

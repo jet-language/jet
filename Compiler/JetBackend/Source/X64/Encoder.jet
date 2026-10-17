@@ -369,6 +369,16 @@ fn x64_rep_movsb(code: &[U8]) Never! {
     x64_byte(&code, 0xa4)
 }
 
+// lock xadd [base + disp], src (F0 REX.W 0F C1 /r): atomically adds src to the
+// word and leaves the previous value in src.
+fn x64_lock_xadd(code: &[U8], base: Int, disp: Int, src: Int) Never! {
+    x64_byte(&code, 0xf0)
+    x64_rex(&code, true, src, base)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0xc1)
+    x64_modrm_mem(&code, src, base, disp)
+}
+
 // repe cmpsb (F3 A6): compare rcx bytes at [rsi] and [rdi] while equal.
 fn x64_repe_cmpsb(code: &[U8]) Never! {
     x64_byte(&code, 0xf3)
