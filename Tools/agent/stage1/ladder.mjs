@@ -51,7 +51,7 @@ const RUNGS = [
 // The `use` lines name the package APIs; the assembler blanks them, as in
 // every compiler file.
 const ANCHORS = {
-  foundation: `use jet_foundation.[MIRProgram, compiler_threads_single, mir_program_digest]
+  foundation: `use jet_foundation.[CanonicalPassOptions, MIRProgram, canonical_pass_journal, compiler_threads_single, mir_program_digest]
 
 fn jet_ladder_foundation_digest(program: MIRProgram) -> String {
     mir_program_digest(program)
@@ -80,13 +80,14 @@ fn jet_ladder_sema_functions(source: [U8]) -> Int {
   optimizer: `use jet_optimizer.[optimize_mir_program]
 
 fn jet_ladder_optimizer_complete(program: &MIRProgram) -> Bool {
-    optimize_mir_program(&program, false, compiler_threads_single()).complete
+    journal := canonical_pass_journal(CanonicalPassOptions{})
+    optimize_mir_program(&program, false, compiler_threads_single(), &journal).complete
 }
 `,
   codegen: `use jet_codegen.[JetRustEmitConfig, JetRustEmitResult, jet_rust_emit_program, lower_functions]
 
 fn jet_ladder_codegen_lower(functions: &[TFunc], modules: &[SemaGraphModuleResult], source_files: [MIRSourceFile]) -> Int {
-    lower_functions(&functions, &modules, source_files, compiler_threads_single(), None, false).functions.len()
+    lower_functions(&functions, &modules, source_files, compiler_threads_single(), None, false, "2028", false).functions.len()
 }
 
 fn jet_ladder_codegen_emit(program: MIRProgram, config: JetRustEmitConfig) -> Bool {
