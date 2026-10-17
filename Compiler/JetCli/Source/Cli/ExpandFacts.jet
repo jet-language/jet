@@ -73,15 +73,7 @@ fn jet_cli_expand_memory(modules: [JetDriverDocModule], index: JetCLISemIndex) -
             &facts.push(JetCLIExpandFact{source: declaration.source, offset: declaration.span.start, name: root, text: "{root}: {declaration.fact} — {status.text} ({declaration.provenance})", value: jet_cli_status_object(fields)})
         }
     }
-    loop position in 1..<facts.len() {
-        row :: facts[position].copy()
-        destination := position
-        loop destination > 0 && facts[destination - 1].text > row.text {
-            facts[destination] = facts[destination - 1]
-            destination -= 1
-        }
-        facts[destination] = row
-    }
+    &facts.sort_by((left: JetCLIExpandFact, right: JetCLIExpandFact) -> left.text <=> right.text)
     facts
 }
 fn jet_cli_expand_layout_missing(value: TComptimeValue, names: [String]) -> Bool Never! {

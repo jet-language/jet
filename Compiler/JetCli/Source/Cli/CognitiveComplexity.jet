@@ -12,22 +12,8 @@ fn jet_cli_complexity_reports(program: Program) -> [JetCLIComplexityReport] Neve
     reports := [JetCLIComplexityReport]{}
     jet_cli_complexity_items(program.items, &reports)
     // Descending score, then source position, then name: Rust's stable order.
-    loop position in 1..<reports.len() {
-        current :: reports[position].copy()
-        slot := position
-        loop slot > 0 && jet_cli_complexity_before(current, reports[slot - 1]) {
-            reports[slot] = reports[slot - 1]
-            slot -= 1
-        }
-        reports[slot] = current
-    }
+    &reports.sort_by((left: JetCLIComplexityReport, right: JetCLIComplexityReport) -> (right.score <=> left.score).then(left.span.start <=> right.span.start).then(left.name <=> right.name))
     reports
-}
-
-fn jet_cli_complexity_before(left: JetCLIComplexityReport, right: JetCLIComplexityReport) -> Bool Never! {
-    if left.score != right.score -> return left.score > right.score
-    if left.span.start != right.span.start -> return left.span.start < right.span.start
-    left.name < right.name
 }
 
 fn jet_cli_complexity_items(items: [Item], reports: &[JetCLIComplexityReport]) Never! {

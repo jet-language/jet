@@ -188,8 +188,9 @@ fn jet_cli_compile_fill(target: String, json: Bool, color: Bool) -> JetDriverVer
             line = Val(number)
         }
     }
-    if jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Doc) == {
-        .Refused(refusal) -> return refusal.copy()
+    compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Doc)
+    if compiled == {
+        .Refused(refusal) -> return ^refusal
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             if jet_cli_errors(diagnostics).len() > 0 {

@@ -383,21 +383,17 @@ fn jet_cli_sem_declaration_ref(name: String, span: Span, ctx: JetCLISemWalk, mod
     target := JetCLISemAnchor?{None}
     loop doc_module in modules {
         if doc_module.path != ctx.module_path -> next
-        if jet_cli_sem_declaration_kind(doc_module.items, name) == .Val(found) {
-            anchor := found.copy()
-            anchor.module_path = doc_module.path
-            target = Val(anchor)
-        }
+        anchor := jet_cli_sem_declaration_kind(doc_module.items, name) ?? next
+        anchor.module_path = doc_module.path
+        target = Val(anchor)
     }
     if target == None {
         loop doc_module in modules {
             if doc_module.path == ctx.module_path -> next
-            if jet_cli_sem_declaration_kind(doc_module.items, name) == .Val(found) {
-                anchor := found.copy()
-                anchor.module_path = doc_module.path
-                target = Val(anchor)
-                break
-            }
+            anchor := jet_cli_sem_declaration_kind(doc_module.items, name) ?? next
+            anchor.module_path = doc_module.path
+            target = Val(anchor)
+            break
         }
     }
     JetCLISemRef{name: name, span: span, module_path: ctx.module_path, scope_identity: Val(jet_cli_sem_active_scope(ctx)), target: target, fact: None}
@@ -655,6 +651,9 @@ fn jet_cli_sem_param_defs(params: [Param], owner_identity: String, db: &JetCLISe
 }
 
 fn jet_cli_sem_with_caller_body(frame: JetCLISemCallerFrame, slot: String, body: [Stmt], db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: [JetDriverDocModule]) {
+    // copy: the enclosing caller frame (owner: ctx, a write parameter that the body walk
+    // reads) is restored after the body (owner: `previous`); a write parameter's field cannot
+    // be left moved out across the calls that borrow ctx.
     previous :: ctx.caller.copy()
     ctx.caller = Val(frame)
     saved :: jet_cli_sem_slot_enter(&db, &ctx, slot, "list")
@@ -1440,6 +1439,8 @@ fn jet_cli_sem_summaries(modules: [JetDriverDocModule]) -> [JetCLISemSummary] {
             if other.local == summary.local -> count += 1
         }
         if count == 1 && summary.local != summary.key {
+            // copy: the summary stays in `summaries` under its qualified key (owner: summaries)
+            // and its short-key twin is a second row (owner: shorts); both are read afterwards.
             short := summary.copy()
             short.key = summary.local
             &shorts.push(short)
@@ -1551,30 +1552,41 @@ fn jet_cli_sem_apply_inferred_rows(db: &JetCLISemDB, doc_module: JetDriverDocMod
         }
     }
     loop index in 0..<db.defs.len() {
-        definition :: db.defs[index].copy()
-        if definition.module_path != doc_module.path -> next
-        callable :: jet_cli_sem_callable(definition) ?? next
-        if callable.foreign_boundary || callable.effects != None || callable.effect_via != None -> next
-        local_key := definition.name
-        if inline_keys.get("{definition.def_span.start}:{definition.def_span.end}") == .Val(key) {
-            local_key = key
-        } else if definition.identity.starts_with("method:") {
-            parts :: definition.identity.split("::").to_list()
-            tail :: parts[parts.len() - 1]
-            suffix :: ".{definition.name}"
-            if tail.ends_with(suffix) -> local_key = "{tail.slice(0, tail.len() - suffix.len())}::{definition.name}"
-        }
-        summary :: jet_cli_sem_summary(summaries, "{prefix}{local_key}") ?? next
-        rows :: loop effect_name in summary.solved -> EffectRowEntry{name: effect_name, span: definition.def_span}
-        updated := callable.copy()
-        updated.effects = Val(rows)
-        db.defs[index].kind = JetCLISemKind.Function{callable: updated}
-        ret :: if updated.failure_contract == .Val(contract) -> Val(failure_contract_effective_type(contract)) else -> updated.return_type
-        signature :: jet_cli_sem_fn_signature(definition.name, updated, ret, db.view_provenance.get(definition.identity))
+        inferred :: jet_cli_sem_inferred_row(db.defs[index], doc_module, summaries, prefix, inline_keys, db.view_provenance) ?? next
         loop member_index in 0..<db.members.len() {
-            if db.members[member_index].identity == definition.identity -> db.members[member_index].signature = signature
+            if db.members[member_index].identity == db.defs[index].identity -> db.members[member_index].signature = inferred.signature
         }
+        db.defs[index].kind = JetCLISemKind.Function{callable: inferred.callable}
     }
+}
+
+// One definition's solved effect row: its callable carrying the row, and the
+// signature its member rows show.
+struct JetCLISemInferredRow {
+    callable: JetCLISemCallable
+    signature: String
+}
+
+fn jet_cli_sem_inferred_row(definition: JetCLISemDef, doc_module: JetDriverDocModule, summaries: [JetCLISemSummary], prefix: String, inline_keys: [String: String], view_provenance: [String: ViewProvenanceMap]) -> JetCLISemInferredRow? {
+    if definition.module_path != doc_module.path -> return None
+    callable :: jet_cli_sem_callable(definition) ?? return None
+    if callable.foreign_boundary || callable.effects != None || callable.effect_via != None -> return None
+    local_key := definition.name
+    if inline_keys.get("{definition.def_span.start}:{definition.def_span.end}") == .Val(key) {
+        local_key = key
+    } else if definition.identity.starts_with("method:") {
+        parts :: definition.identity.split("::").to_list()
+        tail :: parts[parts.len() - 1]
+        suffix :: ".{definition.name}"
+        if tail.ends_with(suffix) -> local_key = "{tail.slice(0, tail.len() - suffix.len())}::{definition.name}"
+    }
+    summary :: jet_cli_sem_summary(summaries, "{prefix}{local_key}") ?? return None
+    rows :: loop effect_name in summary.solved -> EffectRowEntry{name: effect_name, span: definition.def_span}
+    updated := ^callable
+    updated.effects = Val(rows)
+    ret :: if updated.failure_contract == .Val(contract) -> Val(failure_contract_effective_type(contract)) else -> updated.return_type
+    signature :: jet_cli_sem_fn_signature(definition.name, updated, ret, view_provenance.get(definition.identity))
+    Val(JetCLISemInferredRow{callable: ^updated, signature: signature})
 }
 
 // Build.rs `definition_matches_target`.
@@ -1618,6 +1630,9 @@ fn jet_cli_sem_anchor_kind(db: JetCLISemDB, target: JetCLISemAnchor) -> String N
 fn jet_cli_sem_align_reference_targets(db: &JetCLISemDB) {
     loop index in 0..<db.refs.len() {
         target :: db.refs[index].target ?? next
+        // copy: the reference's target (owner: db.refs[index], replaced below) and the aligned
+        // anchor built from it (owner: `anchor`) are both live while db is read for its kind and
+        // matches; an element field cannot be moved out (E0225).
         anchor := target.copy()
         anchor.kind = jet_cli_sem_anchor_kind(db, target)
         matches := [String]{}
@@ -2049,16 +2064,8 @@ fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: JetC
     definitions :: jet_cli_sem_convert_defs(db, modules)
     definition_facts :: jet_cli_sem_definition_facts(definitions, db.nodes, modules)
     derivations :: loop fact in definition_facts -> derivation_record(fact.stable_id, fact.human_identity, "jet-sema", MIRDerivationMethod.StaticDerivation, "checked-definition", [String]{fact.signature_id, fact.content_id}, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
-    arithmetic := db.arithmetic.copy()
-    loop index in 1..<arithmetic.len() {
-        value :: arithmetic[index].copy()
-        position := index
-        loop position > 0 && (arithmetic[position - 1].module_path > value.module_path || (arithmetic[position - 1].module_path == value.module_path && (arithmetic[position - 1].operation_span.start > value.operation_span.start || (arithmetic[position - 1].operation_span.start == value.operation_span.start && arithmetic[position - 1].operation_span.end > value.operation_span.end)))) {
-            arithmetic[position] = arithmetic[position - 1]
-            position -= 1
-        }
-        arithmetic[position] = value
-    }
+    arithmetic := ^db.arithmetic
+    &arithmetic.sort_by((left: JetCLISemArithmetic, right: JetCLISemArithmetic) -> (left.module_path <=> right.module_path).then(left.operation_span.start <=> right.operation_span.start).then(left.operation_span.end <=> right.operation_span.end))
     JetCLISemIndex{
         definitions: definitions,
         definition_facts: definition_facts,

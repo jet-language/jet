@@ -432,9 +432,10 @@ fn jet_cli_inspect_entry(scope: JetCLIInspectScope, plane: String, color: Bool) 
         .File(path, _) -> root = path
     }
     notices := [String]{}
-    if jet_cli_find_project_entry(root, "inspect {plane}", color, &notices) == {
+    found_entry :: jet_cli_find_project_entry(root, "inspect {plane}", color, &notices)
+    if found_entry == {
         .Entry(entry) -> return JetCLIInspectEntry.File{path: entry.path, notice: notices.join("")}
-        .Refused(plan) -> return JetCLIInspectEntry.Refused{plan: jet_cli_with_notices(notices, plan)}
+        .Refused(plan) -> return JetCLIInspectEntry.Refused{plan: jet_cli_with_notices(notices, ^plan)}
         .Absent -> {}
     }
     JetCLIInspectEntry.File{path: jet_cli_entry_join(root, JET_CLI_DEFAULT_ENTRY_FILE), notice: notices.join("")}
@@ -1468,7 +1469,7 @@ fn jet_cli_inspect_replay_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     if !clean -> return jet_cli_replay_fail(job, "E3621", identity_what, "entry identity must be a clean project-relative path", identity_fix, JET_DRIVER_EXIT_USER_ERROR)
     compiled :: jet_cli_compile_file(job.file, job.color, false, job.threads, JetDriverCompileMode.Program)
     if compiled == {
-        .Refused(refusal) -> return refusal.copy()
+        .Refused(refusal) -> return ^refusal
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             if jet_cli_errors(diagnostics).len() > 0 || result.internal_problem != None {
@@ -1529,7 +1530,7 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     watch :: cli_time.start()
     compiled :: jet_cli_compile_file(job.file, job.color, false, job.threads, mode)
     if compiled == {
-        .Refused(refusal) -> output = refusal.copy()
+        .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             errors :: jet_cli_errors(diagnostics)

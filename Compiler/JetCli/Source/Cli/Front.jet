@@ -467,9 +467,10 @@ fn jet_cli_status(status_args: [String], color: Bool, json: Bool) -[FS, Env, Tim
     if explicit == None {
         root :: jet_cli_manifest_root(cwd) ?? cwd
         entry := ""
-        if jet_cli_find_project_entry(root, "status", color, &notices) == {
+        found_entry :: jet_cli_find_project_entry(root, "status", color, &notices)
+        if found_entry == {
             .Entry(found) -> entry = found.path
-            .Refused(plan) -> return jet_cli_with_notices(notices, plan)
+            .Refused(plan) -> return jet_cli_with_notices(notices, ^plan)
             .Absent -> entry = jet_cli_entry_join(cli_files.realpath(root) ?? root, JET_CLI_DEFAULT_ENTRY_FILE)
         }
         prefix :: if cwd.ends_with("/") -> cwd else -> "{cwd}/"
@@ -576,9 +577,10 @@ fn jet_cli_check(jet_argv: [String], args: [String], command: String, color: Boo
             return jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet {command} <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
         }
         notices := [String]{}
-        if jet_cli_resolve_bare_entry(command, directory, member_flag, !show_default, color, &notices) == {
+        resolved :: jet_cli_resolve_bare_entry(command, directory, member_flag, !show_default, color, &notices)
+        if resolved == {
             .Entry(entry) -> return jet_cli_read_entry(entry.path, command, color, quiet, threads, command == "check", "{notices.join("")}{status}", json)
-            .Refused(plan) -> return jet_cli_with_notices(notices, plan)
+            .Refused(plan) -> return jet_cli_with_notices(notices, ^plan)
             .Absent -> return jet_cli_with_notices(notices, jet_cli_missing_bare_entry(command, directory, color))
         }
     }

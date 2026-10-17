@@ -107,7 +107,7 @@ fn jet_cli_structure_core(json: Bool) -> JetDriverVerbOutput Never! {
 fn jet_cli_structure_host(file: String, color: Bool, json: Bool, threads: Int?) -> JetDriverVerbOutput {
     compiled :: jet_cli_compile_file(file, color, false, threads, JetDriverCompileMode.Doc)
     if compiled == {
-        .Refused(refusal) -> return refusal.copy()
+        .Refused(refusal) -> return ^refusal
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             errors :: jet_cli_errors(diagnostics)
@@ -115,6 +115,9 @@ fn jet_cli_structure_host(file: String, color: Bool, json: Bool, threads: Int?) 
             ledger := GateLedger{}
             if jet_cli_gate_ledger(result) == .Val(storage) {
                 permit :: storage.guard_read()
+                // copy: the compile result's shared gate ledger (owner: its storage cell, still
+                // read by the result) seeds this verb's ledger (owner: `ledger`, rebuilt below on
+                // errors); the read guard only lends a view, so there is no value to move.
                 ledger = permit.value.copy()
             }
             if errors.len() > 0 {

@@ -72,7 +72,7 @@ fn jet_cli_comparison_persist(run: JetCLIComparisonRun, target: String, argv: [S
     evidence_index := jet_cli_record_index_load(evidence_root)
     evidence_identity :: JetCLIRecordIdentity{target_inputs_sha256: artifact_id, tool_version: report.build.toolchain, engine: "jet-test"}
     evidence_entry :: jet_cli_comparison_index_entry(evidence_index, evidence_identity, "evidence", report_id, ".jet/evidence/{report_id}.json", evidence_bytes.len(), [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, true)
-    jet_cli_record_index_publish_and_store(&evidence_index, evidence_root, evidence_entry)
+    jet_cli_record_index_publish_and_store(&evidence_index, evidence_root, ^evidence_entry)
 
     paths :: jet_cli_comparison_input_paths(&cache, target)
     if paths.len() == 0 -> return Err(jet_cli_read_error("comparison corpus has no current input path"))
@@ -100,7 +100,7 @@ fn jet_cli_comparison_persist(run: JetCLIComparisonRun, target: String, argv: [S
     receipt_identity :: JetCLIRecordIdentity{target_inputs_sha256: target_digest.input_sha256, tool_version: JET_CLI_VERSION, engine: "jet-receipt-v2"}
     receipt_bytes :: jet_cli_receipt_encode(published)
     receipt_entry :: jet_cli_comparison_index_entry(index, receipt_identity, "receipt", claim.key, path, receipt_bytes.len(), consumed, produced, false)
-    jet_cli_record_index_upsert_many_and_store(&index, receipt_root, [JetCLIRecordIndexEntry]{comparison_entry, receipt_entry})
+    jet_cli_record_index_upsert_many_and_store(&index, receipt_root, [JetCLIRecordIndexEntry]{^comparison_entry, ^receipt_entry})
 }
 
 fn jet_cli_comparison_history_notice(error: String) -> String Never! {

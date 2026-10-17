@@ -111,7 +111,7 @@ fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool,
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_entry(file, color, false, threads, JetDriverCompileMode.Program, None, trace_sink)
     if compiled == {
-        .Refused(refusal) -> output = refusal.copy()
+        .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> {
             diagnostics := jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             if requires_run -> &diagnostics.push(jet_cli_no_run_diagnostic())
@@ -168,7 +168,7 @@ fn jet_cli_compile_emit(file: String, source: String, color: Bool, json: Bool, t
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_entry(file, color, true, None, JetDriverCompileMode.Program, None, trace_sink)
     if compiled == {
-        .Refused(refusal) -> output = refusal.copy()
+        .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> output = jet_cli_emit_result(file, source, color, json, requires_run, result, snapshot)
     }
     output
@@ -212,7 +212,7 @@ fn jet_cli_compile_eval(file: String, pure: Bool, color: Bool, json: Bool) -> Je
     mode :: if pure -> JetDriverCompileMode.Eval else -> JetDriverCompileMode.Interpreter
     compiled :: jet_cli_compile_file(file, color, false, None, mode)
     if compiled == {
-        .Refused(refusal) -> output = refusal.copy()
+        .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> output = jet_cli_eval_result(file, source, color, json, ^result, snapshot)
     }
     output
@@ -391,6 +391,9 @@ fn jet_cli_native_executable(result: &JetDriverCompileResult, sources: JetCLIFor
 fn jet_cli_rust_foreign_attached(facts: JetDriverRustForeignFacts, program: MIRProgram) -[FS, Env, Exec, Time.Wait]> [MIRProgram] JetDriverRustForeignError! {
     realized :: jet_cli_rust_foreign_realize(facts, program)
     if realized == {
+        // copy: the program stays the compile result's (owner: result.mir, read by the native
+        // route and the caller afterwards); the Rust foreign helper attaches to its own
+        // rewritten program (owner: the returned list). Only programs with a helper pay this.
         .Val(artifact) -> { return Ok([MIRProgram]{jet_cli_rust_foreign_attach(artifact.plan, artifact.target_dir, artifact.release, program.copy())}) }
         .None -> { return Ok([MIRProgram]{}) }
     }
@@ -588,10 +591,8 @@ fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Boo
     compiled := jet_cli_compile_entry(file, color, false, threads, JetDriverCompileMode.Program, None, trace_sink)
     // The snapshot is copied out before `compiled` is borrowed exclusively below.
     authorized :: jet_cli_compiled_snapshot(compiled)
-    if &compiled == {
-        .Refused(refusal) -> output = refusal.copy()
-        .Compiled(result, _) -> output = jet_cli_build_result(file, source, color, release, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot"))
-    }
+    if compiled == .Refused(refusal) -> return ^refusal
+    if &compiled == .Compiled(result, _) -> output = jet_cli_build_result(file, source, color, release, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot"))
     output
 }
 
@@ -640,8 +641,9 @@ fn jet_cli_run_result(file: String, source: String, color: Bool, release: Bool, 
     if jet_cli_authority_check(file, source, color, "run", invocation, result) == .Val(refusal) -> return refusal
     if verbose -> jet_cli_write_verbose_lints(file, source, color, jet_cli_present_shown(result, snapshot, true))
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    if jet_cli_build_binary(file, "run", color, release, &result, snapshot) == {
-        .Failed(failure) -> output = failure.copy()
+    built :: jet_cli_build_binary(file, "run", color, release, &result, snapshot)
+    if built == {
+        .Failed(failure) -> output = ^failure
         .Binary(binary) -> output = jet_cli_exec(binary, program_args, color)
     }
     output
@@ -653,10 +655,8 @@ fn jet_cli_compile_run(file: String, source: String, color: Bool, release: Bool,
     compiled := jet_cli_compile_entry(file, color, false, threads, JetDriverCompileMode.Program, None, trace_sink)
     // The snapshot is copied out before `compiled` is borrowed exclusively below.
     authorized :: jet_cli_compiled_snapshot(compiled)
-    if &compiled == {
-        .Refused(refusal) -> output = refusal.copy()
-        .Compiled(result, _) -> output = jet_cli_run_result(file, source, color, release, verbose, program_args, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot"))
-    }
+    if compiled == .Refused(refusal) -> return ^refusal
+    if &compiled == .Compiled(result, _) -> output = jet_cli_run_result(file, source, color, release, verbose, program_args, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot"))
     output
 }
 fn jet_cli_native_test_unrun_check_report() -> String Never! {
@@ -724,7 +724,7 @@ fn jet_cli_compile_test(file: String, source: String, color: Bool, verbose: Bool
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_entry(file, color, false, threads, JetDriverCompileMode.Test, None, trace_sink)
     if compiled == {
-        .Refused(refusal) -> output = refusal.copy()
+        .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> output = jet_cli_test_result(file, source, color, verbose, options, result, snapshot)
     }
     output
@@ -861,7 +861,7 @@ fn jet_cli_doc_undocumented_report(graph: JetCLIDocGraph, modules: [JetDriverDoc
     jet_cli_doc_sort_strings(&paths)
     rendered := ""
     loop path in paths {
-        doc_module :: jet_cli_doc_module_at(modules, path) ?? next
+        position :: jet_cli_doc_module_position(modules, path) ?? next
         diagnostics := [Diagnostic]{}
         loop item in jet_cli_doc_undocumented_public(graph) {
             if item.source.path != path -> next
@@ -874,7 +874,7 @@ fn jet_cli_doc_undocumented_report(graph: JetCLIDocGraph, modules: [JetDriverDoc
                 "Add a `///` summary before `{name}`, or move it into a `priv module` when it is not part of the public API.",
             ))
         }
-        rendered = if json -> "{rendered}{jet_cli_render_all_json(cwd, doc_module.physical_path, doc_module.source, diagnostics)}" else -> "{rendered}{diagnostic_render_all(path, doc_module.source, diagnostics, color)}"
+        rendered = if json -> "{rendered}{jet_cli_render_all_json(cwd, modules[position].physical_path, modules[position].source, diagnostics)}" else -> "{rendered}{diagnostic_render_all(path, modules[position].source, diagnostics, color)}"
     }
     rendered
 }
@@ -886,7 +886,7 @@ fn jet_cli_compile_doc(file: String, source: String, color: Bool, json: Bool, ch
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Doc)
     if compiled == {
-        .Refused(refusal) -> output = refusal.copy()
+        .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> output = jet_cli_doc_result(file, source, color, json, check, result, snapshot)
     }
     output
@@ -927,7 +927,7 @@ fn jet_cli_compile_semindex(file: String, color: Bool, json: Bool) -> JetDriverV
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Doc)
     if compiled == {
-        .Refused(refusal) -> output = refusal.copy()
+        .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> output = jet_cli_semindex_result(file, color, json, result, snapshot)
     }
     output
@@ -1582,15 +1582,19 @@ fn jet_cli_policy_explain_host(key: PolicyKey, file: String, site: String?, line
 // choices in `args`), queried without checking bodies. Transfer the prepared
 // request when replacing its ledger; its execution host cannot be copied.
 fn jet_cli_gates_run(file: String, args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
-    if jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc) == {
-        .Refused(output) -> return output.copy()
+    prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc)
+    if prepared == {
+        .Refused(output) -> return ^output
         .Prepared(request, _) -> {
-            ledger := GateLedger{}
-            loop entry in request.external_gate_entries -> gate_ledger_push(&ledger, entry.copy())
-            store :: trust_store_path()
-            loop entry in jet_cli_gate_trust_entries(store, trust_list_records(store)) -> gate_ledger_push(&ledger, entry.copy())
-            jet_cli_gate_append_invocation(&ledger, args)
             gated := ^request
+            // The ledger takes the request's own rows, then replaces them.
+            external :: ^gated.external_gate_entries
+            ledger := GateLedger{}
+            loop entry in ^external -> gate_ledger_push(&ledger, ^entry)
+            store :: trust_store_path()
+            trusted :: jet_cli_gate_trust_entries(store, trust_list_records(store))
+            loop entry in ^trusted -> gate_ledger_push(&ledger, ^entry)
+            jet_cli_gate_append_invocation(&ledger, args)
             gated.external_gate_entries = ledger.rows
             return jet_cli_gates_host(gated, args, file, color, json)
         }
@@ -1600,8 +1604,9 @@ fn jet_cli_gates_run(file: String, args: [String], color: Bool, json: Bool) -> J
 // CmdInspect.rs `run_output`: the canonical Output query (run intent, dev
 // profile) over the authorized request of `file`.
 fn jet_cli_output_run(file: String, address: String?, color: Bool, json: Bool) -> JetDriverVerbOutput {
-    if jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc) == {
-        .Refused(output) -> return output.copy()
+    prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc)
+    if prepared == {
+        .Refused(output) -> return ^output
         .Prepared(request, _) -> return jet_cli_output_host(^request, address, file, json)
     }
 }
@@ -1623,7 +1628,7 @@ fn jet_cli_maintenance_host(action: String, args: [String], color: Bool, json: B
 fn jet_cli_main(args: [String]) -> Int {
     plan :: jet_cli_front(args)
     trace_sink :: if jet_cli_plan_compiles(plan) -> jet_cli_trace_sink(jet_cli_trace_flag(jet_cli_owned_flags(args))) else -> None
-    output :: jet_cli_execute(plan, trace_sink)
+    output :: jet_cli_execute(^plan, trace_sink)
     if output.stdout.len() > 0 {
         out := cli_term.stdout()
         &out.write(output.stdout).drop("jet stdout")
@@ -1645,10 +1650,10 @@ fn jet_cli_plan_compiles(plan: JetCLIPlan) -> Bool Never! {
 
 // Carry out one plan; a host step that finishes as a plan runs that plan.
 // `trace_sink` traces a compiling verb's compile (`jet_cli_main`).
-fn jet_cli_execute(plan: JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> JetDriverVerbOutput {
+fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}
     if plan == {
-        .Done(done) -> output = done.copy()
+        .Done(done) -> output = ^done
         .Refused(report, color, exit_code, notice) -> output = JetDriverVerbOutput{stdout: "", stderr: "{notice}{diagnostic_render_all("", "", [Diagnostic]{report}, color)}", exit_code: exit_code}
         .Diagnostics(file, source, report, color, notice) -> output = jet_cli_diagnostics_output(file, source, report, color, false, notice)
         .Check(file, source, color, quiet, threads, project, notice, json) -> {

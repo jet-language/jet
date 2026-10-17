@@ -1173,6 +1173,9 @@ fn jet_cli_trace_sink(requested: String?) -> JetCLITraceSink? {
 // through the sink's one shared state.
 fn jet_cli_trace_boxed(sink: JetCLITraceSink?) -> CompilerTraceSink? Never! {
     opened :: sink ?? return None
+    // copy: the caller's sink (owner: the request's option, boxed again for the result) and
+    // this trait object (owner: the boxed sink) each hold the sink; the copy shares its one
+    // traced state cell (a refcount bump plus flags).
     Val(jet_cli_trace_object(opened.copy()))
 }
 

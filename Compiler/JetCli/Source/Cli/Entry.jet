@@ -1210,13 +1210,14 @@ fn jet_cli_stale_manifest(dir: String, stale: String) -> Diagnostic Never! {
 // entry.
 fn jet_cli_resolve_directory_target(command: String, raw: String, member_flag: String?, use_override: Bool, color: Bool) -[FS, Env]> JetCLITarget Never! {
     notices := [String]{}
-    if jet_cli_resolve_bare_entry(command, raw, member_flag, use_override, color, &notices) == {
+    resolved :: jet_cli_resolve_bare_entry(command, raw, member_flag, use_override, color, &notices)
+    if resolved == {
         .Entry(entry) -> {
             if cli_files.is_file(entry.path) {
                 return JetCLITarget.File{path: entry.path, callable: entry.callable, notice: notices.join("")}
             }
         }
-        .Refused(plan) -> return JetCLITarget.Refused{plan: jet_cli_with_notices(notices, plan)}
+        .Refused(plan) -> return JetCLITarget.Refused{plan: jet_cli_with_notices(notices, ^plan)}
         .Absent -> {}
     }
     jet_cli_resolve_source_path(command, raw, color, notices)
@@ -1230,14 +1231,16 @@ fn jet_cli_resolve_source_path(command: String, raw: String, color: Bool, notice
     written := notices
     root :: cli_files.realpath(raw) ?? raw
     entry := ""
-    if jet_cli_find_project_entry(root, command, color, &written) == {
+    found_entry :: jet_cli_find_project_entry(root, command, color, &written)
+    if found_entry == {
         .Entry(found) -> { entry = found.path }
-        .Refused(plan) -> return JetCLITarget.Refused{plan: jet_cli_with_notices(written, plan)}
+        .Refused(plan) -> return JetCLITarget.Refused{plan: jet_cli_with_notices(written, ^plan)}
         .Absent -> entry = jet_cli_entry_join(root, JET_CLI_DEFAULT_ENTRY_FILE)
     }
     if !cli_files.is_file(entry) {
-        if jet_cli_manifest_problem(root, color) == .Val(problem) {
-            return JetCLITarget.Refused{plan: jet_cli_with_notices(written, problem)}
+        manifest_problem :: jet_cli_manifest_problem(root, color)
+        if manifest_problem == .Val(problem) {
+            return JetCLITarget.Refused{plan: jet_cli_with_notices(written, ^problem)}
         }
         if jet_cli_checked_file(root, JET_CLI_PACKAGE_FILE) == .None {
             return JetCLITarget.Refused{plan: jet_cli_with_notices(written, jet_cli_fail("E2105", "no `{JET_CLI_DEFAULT_ENTRY_FILE}` entry in `{raw}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR))}
@@ -1247,15 +1250,15 @@ fn jet_cli_resolve_source_path(command: String, raw: String, color: Bool, notice
 }
 
 // The notices resolution wrote, ahead of the report that stopped it.
-fn jet_cli_with_notices(notices: [String], plan: JetCLIPlan) -> JetCLIPlan Never! {
-    if notices.len() == 0 -> return plan.copy()
+fn jet_cli_with_notices(notices: [String], plan: ^JetCLIPlan) -> JetCLIPlan Never! {
+    if notices.len() == 0 -> return plan
     if plan == {
         .Done(output) -> return jet_cli_done(output.stdout, "{notices.join("")}{output.stderr}", output.exit_code)
-        .Refused(report, color, exit_code, notice) -> return JetCLIPlan.Refused{report: report.copy(), color: color, exit_code: exit_code, notice: "{notices.join("")}{notice}"}
-        .Diagnostics(file, source, report, color, notice) -> return JetCLIPlan.Diagnostics{file: file, source: source, report: report.copy(), color: color, notice: "{notices.join("")}{notice}"}
+        .Refused(report, color, exit_code, notice) -> return JetCLIPlan.Refused{report: ^report, color: color, exit_code: exit_code, notice: "{notices.join("")}{notice}"}
+        .Diagnostics(file, source, report, color, notice) -> return JetCLIPlan.Diagnostics{file: ^file, source: ^source, report: ^report, color: color, notice: "{notices.join("")}{notice}"}
         else -> {}
     }
-    plan.copy()
+    plan
 }
 
 // CmdInspect.rs `package_is_library_only`: a project check of a library

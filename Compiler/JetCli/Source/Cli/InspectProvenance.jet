@@ -484,15 +484,7 @@ fn jet_cli_provenance_reports(packages: [JetCLILockPackage], target: String?) ->
         }
         &reports.push(jet_cli_provenance_report(package))
     }
-    loop index in 1..<reports.len() {
-        value :: reports[index].copy()
-        position := index
-        loop position > 0 && (reports[position - 1].name > value.name || (reports[position - 1].name == value.name && reports[position - 1].version > value.version)) {
-            reports[position] = reports[position - 1]
-            position -= 1
-        }
-        reports[position] = value
-    }
+    &reports.sort_by((left: JetCLIProvenanceReport, right: JetCLIProvenanceReport) -> (left.name <=> right.name).then(left.version <=> right.version))
     reports
 }
 
@@ -556,9 +548,10 @@ fn jet_cli_inspect_provenance(args: [String], color: Bool, json: Bool, threads: 
     }
     notices := [String]{}
     entry := ""
-    if jet_cli_find_project_entry(root, "inspect provenance", color, &notices) == {
+    found_entry :: jet_cli_find_project_entry(root, "inspect provenance", color, &notices)
+    if found_entry == {
         .Entry(found) -> entry = found.path
-        .Refused(plan) -> return jet_cli_with_notices(notices, plan)
+        .Refused(plan) -> return jet_cli_with_notices(notices, ^plan)
         .Absent -> return jet_cli_with_notices(notices, jet_cli_not_ported("inspect provenance <project without an entry>", color))
     }
     target := String?{None}

@@ -410,15 +410,7 @@ fn jet_cli_find_matches(symbols: [JetCLISymbol], effects: [JetCLISemEffect], mod
         if why == "" -> next
         &matches.push(JetCLIFindMatch{name: symbol.qualified_name, signature: symbol.signature, why: why})
     }
-    loop index in 1..<matches.len() {
-        value :: matches[index].copy()
-        position := index
-        loop position > 0 && (matches[position - 1].name > value.name || (matches[position - 1].name == value.name && matches[position - 1].signature > value.signature)) {
-            matches[position] = matches[position - 1]
-            position -= 1
-        }
-        matches[position] = value
-    }
+    &matches.sort_by((left: JetCLIFindMatch, right: JetCLIFindMatch) -> (left.name <=> right.name).then(left.signature <=> right.signature))
     matches
 }
 
@@ -518,9 +510,10 @@ fn jet_cli_find(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan 
     }
     if directory == .Val(root) {
         notices := [String]{}
-        if jet_cli_resolve_bare_entry("find", root, member, false, color, &notices) == {
+        resolved :: jet_cli_resolve_bare_entry("find", root, member, false, color, &notices)
+        if resolved == {
             .Entry(found) -> entry = Val(found.path)
-            .Refused(plan) -> return jet_cli_with_notices(notices, plan)
+            .Refused(plan) -> return jet_cli_with_notices(notices, ^plan)
             .Absent -> {}
         }
     }
@@ -535,7 +528,7 @@ fn jet_cli_compile_find(file: String?, query: String, mode: JetCLIFindMode, json
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(path, false, false, None, JetDriverCompileMode.Doc)
     if compiled == {
-        .Refused(refusal) -> output = refusal.copy()
+        .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> output = jet_cli_find_result(path, query, mode, json, result, snapshot)
     }
     output
