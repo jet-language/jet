@@ -218,7 +218,13 @@ fn lower_convert_exact(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, valu
         lower_emit(&f, LIRInst.Convert{dst: fast, src: value})
         lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{fast})})
     } else {
+        // The merge parameter is a word copy, not an owner: the jump hands
+        // nothing over (LowerFunction.consumed), so a temporary converted for a
+        // call is still released after it (lower_temp_release).
+        tracking :: f.track_consumes
+        f.track_consumes = false
         lower_seal(&f, LIRTerminator.Branch{condition: fits, then_target: lower_target(merge_block, [LIRValueID]{value}), else_target: lower_target(slow_block, no_args)})
+        f.track_consumes = tracking
     }
     lower_start(&f, slow_block, no_args)
     slow :: lower_new_value(&f, layout, LIRDrop.Trivial, None)

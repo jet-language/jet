@@ -8,11 +8,15 @@
 // moves, projected writes, replacements, addresses, receiver and call-argument
 // places, require diagnostics' locals) before the block
 // defines it; a whole-root WritePlace, or the value a temporary or parameter
-// place stands for, defines it. A slot no later block uses is not carried, so
-// an edge never passes it; the entry still starts every slot as its
-// placeholder (Lower.jet lower_clear_slot).
+// place stands for, defines it. A borrowed read of a slot's place (no
+// consumer takes it, so it names the slot's value) is a use of the slot
+// wherever that value or a member or copy of it may still be used
+// (lower_live_aliases): the slot holds the value until then. A slot no later
+// block uses is not carried, so an edge never passes it; the entry still
+// starts every slot as its placeholder (Lower.jet lower_clear_slot).
 use jet_foundation.[
-    MIRCallArg, MIRFunction, MIROperation, MIRPlaceID, MIRScopeKind, MIRSemanticOp, mir_operation_place_uses,
+    MIRCallArg, MIRFunction, MIROperation, MIRPlaceID, MIRScopeKind, MIRSemanticOp, MIRValueID, mir_operation_place_uses,
+    mir_operation_value_uses, mir_terminator_value_uses,
 ]
 
 LOWER_LIVE_BITS :: prep { 48 }
@@ -65,12 +69,18 @@ fn lower_instruction_places(operation: MIROperation) -> [MIRPlaceID] Never! {
 
 // Per MIR block position: the carried slots live on entry, ascending. Blocks
 // outside `order` (unreachable) need none.
-fn lower_live_slots(function: MIRFunction, slots: [LowerSlot], place_slots: [U64:Int], local_slots: [U64:Int], defined_slots: [U64:Int], successors: [[Int]], order: [Int]) -> [[Int]] Never! {
+fn lower_live_slots(function: MIRFunction, slots: [LowerSlot], place_slots: [U64:Int], local_slots: [U64:Int], defined_slots: [U64:Int], sunk: [U64:Bool], successors: [[Int]], order: [Int]) -> [[Int]] Never! {
     words :: (slots.len() + LOWER_LIVE_BITS - 1) /% LOWER_LIVE_BITS
     roots := [U64:Bool]{}
+    // A place's projection operands (an index, a range, a map key) are read
+    // whenever an instruction names the place.
+    place_operands := [U64:[MIRValueID]]{}
     loop place in function.places {
         if place.projections.len() == 0 -> _ := &roots.add(place.id.value, true)
+        operands :: lower_release_projection_operands(place)
+        if operands.len() > 0 -> _ := &place_operands.add(place.id.value, operands)
     }
+    aliases :: lower_live_aliases(function, slots, place_slots, sunk)
     uses := [[Int]]{}
     defs := [[Int]]{}
     loop block in function.blocks {
@@ -116,6 +126,11 @@ fn lower_live_slots(function: MIRFunction, slots: [LowerSlot], place_slots: [U64
                     }
                 }
             }
+            if aliases.len() > 0 {
+                loop value in lower_live_operands(instruction.operation, place_operands) {
+                    if aliases.get(value.value) == .Val(slot) -> &touched.push(slot)
+                }
+            }
             loop slot in touched {
                 if slots[slot].carried && !lower_live_has(defined, slot) -> lower_live_set(&used, slot)
             }
@@ -123,6 +138,13 @@ fn lower_live_slots(function: MIRFunction, slots: [LowerSlot], place_slots: [U64
             if instruction.result == .Val(result) {
                 if defined_slots.get(result.value) == .Val(slot) {
                     if slots[slot].carried -> lower_live_set(&defined, slot)
+                }
+            }
+        }
+        if aliases.len() > 0 {
+            loop value in mir_terminator_value_uses(block.terminator) {
+                if aliases.get(value.value) == .Val(slot) {
+                    if slots[slot].carried && !lower_live_has(defined, slot) -> lower_live_set(&used, slot)
                 }
             }
         }
@@ -163,4 +185,70 @@ fn lower_live_slots(function: MIRFunction, slots: [LowerSlot], place_slots: [U64
         &rows.push(row)
     }
     rows
+}
+
+// The values an instruction reads: its operands and the projection operands
+// of the places it names.
+fn lower_live_operands(operation: MIROperation, place_operands: [U64:[MIRValueID]]) -> [MIRValueID] Never! {
+    values := lower_operand_values(operation)
+    if place_operands.len() == 0 -> return values
+    loop place in lower_instruction_places(operation) {
+        operands :: place_operands.get(place.value) ?? next
+        loop operand in operands -> &values.push(operand)
+    }
+    values
+}
+
+// MIR value -> the carried slot whose value it may name: a borrowed read
+// (ReadPlace or AddressOf no consumer takes, lower_release_place_kind) of any
+// place of the slot, and, transitively, a member, element, slice, copy or
+// move of such a value (any of which may point into it). Phis are left out:
+// the release plan keeps a slot whose read a phi merges.
+fn lower_live_aliases(function: MIRFunction, slots: [LowerSlot], place_slots: [U64:Int], sunk: [U64:Bool]) -> [U64:Int] Never! {
+    aliases := [U64:Int]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            result :: instruction.result ?? next
+            if sunk.get(result.value) != None -> next
+            read := MIRPlaceID{value: U64.MAX}
+            if instruction.operation == {
+                .ReadPlace(place) -> read = place
+                .AddressOf(place, _) -> read = place
+                else -> next
+            }
+            slot :: place_slots.get(read.value) ?? next
+            if slots[slot].carried -> _ := &aliases.add(result.value, slot)
+        }
+    }
+    if aliases.len() == 0 -> return aliases
+    // Member reads follow their base in block order except across a loop's
+    // back edge; a second pass picks those up, a third their own members.
+    loop _ in 0..<3 {
+        grew := false
+        loop block in function.blocks {
+            loop instruction in block.instructions {
+                result :: instruction.result ?? next
+                if aliases.get(result.value) != None || !lower_live_alias_operation(instruction.operation) -> next
+                loop value in mir_operation_value_uses(instruction.operation) {
+                    if aliases.get(value.value) == .Val(slot) {
+                        _ := &aliases.add(result.value, slot)
+                        grew = true
+                        break
+                    }
+                }
+            }
+        }
+        if !grew -> break
+    }
+    aliases
+}
+
+// Operations whose result may point into an operand (lower_release_use_kind's
+// LOWER_RELEASE_ALIAS uses, and borrowed member reads).
+fn lower_live_alias_operation(operation: MIROperation) -> Bool Never! {
+    if operation == {
+        .Field(_, _) | .EnumPayload(_, _, _, _) | .OptionValue(_) | .ResultValue(_, _) | .ProjectMembers(_, _) | .Index(_, _, _, _, _, _, _) -> true
+        .Slice(_, _, _, _, _, _) | .Copy(_, _) | .Move(_) -> true
+        else -> false
+    }
 }
