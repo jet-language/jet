@@ -45,7 +45,7 @@ test("process CPU per line, nested checks and digests subtracted from their phas
     { name: "optimize", cat: "optimize", ph: "B", ts: 20000 },
     ...span("optimize.legality", 20000, 21000, 50_000_000),
     ...span("mir.digest", 21000, 22000, 20_000_000, "optimize.seal"),
-    ...span("optimize.lint", 22000, 23000, 30_000_000),
+    ...span("optimize.check", 22000, 23000, 30_000_000),
     { name: "optimize", cat: "optimize", ph: "E", ts: 30000, args: { proc_cpu_ns: 200_000_000 } },
     { name: "native.lower", cat: "native.lower", ph: "B", ts: 30000 },
     ...span("native.lir_lint", 31000, 32000, 4_000_000, "lower"),
@@ -58,7 +58,7 @@ test("process CPU per line, nested checks and digests subtracted from their phas
   assert.match(out, /lines:\s+1,000 \(trace counter parse\.user_lines\)/);
   // load (9 ms) + sources (1 ms) = 10 ms over 1,000 lines.
   assert.deepEqual(row(out, "P1+P2").slice(3, 7), ["10,000", "400", "25.0x", "OVER"]);
-  // optimize 200 ms less legality 50, lint 30 and digest 20.
+  // optimize 200 ms less legality 50 (a pre-D3 trace span), check 30 and digest 20.
   assert.deepEqual(row(out, "P8").slice(3, 7), ["100,000", "1,300", "76.9x", "OVER"]);
   assert.deepEqual(row(out, "P9").slice(3, 7), ["80,000", "500", "160.0x", "OVER"]);
   assert.deepEqual(row(out, "D5").slice(3, 7), ["20,000", "0", "inf", "OVER"]);

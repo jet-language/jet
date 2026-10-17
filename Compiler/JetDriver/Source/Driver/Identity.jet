@@ -224,10 +224,10 @@ struct JetDriverCompileRequest {
     schema_snapshots: [String:SchemaSnapshot]?{None}
     // The host's streaming trace (`JET_TRACE_FILE`); `None` traces nothing.
     trace_sink: CompilerTraceSink?
-    // Full verification: the optimizer re-verifies legality and runs MIR
-    // Lint on the lowered program and the result of every pass, not only
-    // legality on entry and Lint on the final program. Tests and `--verify`
-    // turn it on; ordinary compiles leave it off.
+    // Full verification: the optimizer's one MIR checker (legality, then MIR
+    // Lint) also runs on the lowered program and the result of every pass,
+    // not only on the final program. Tests and `--verify` turn it on;
+    // ordinary compiles leave it off.
     mir_lint_every_pass: Bool
     // The compiler threads this compile may use (D-JOBS1=A `--threads N`;
     // automatic, memory-aware admission without it). Every thread count gives

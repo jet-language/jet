@@ -25,8 +25,10 @@ What the native `jet` writes for the checker (Compiler/JetCli/Source/Cli/Request
 - the spans the plan had no measurement for: `native.lir_lint` (detail `lower`
   or `object`, D6), `load.marker_groups.relex` / `.reparse` (D10b),
   `comptime.lower` (detail `program` or `grow`, D12) with the overlap counter,
-  `mir.digest` (detail: the consumer, `optimize.seal_check`, `optimize.seal`,
-  `web.semantic`; D5), and `optimize.legality` / `optimize.lint` (P9).
+  `mir.digest` (detail: the consumer, `web.semantic`; D5; traces written
+  before the D5 cutover also carry `optimize.seal_check` and `optimize.seal`),
+  and `optimize.check`, the one MIR checker (P9; traces written before the D3
+  cutover carry `optimize.legality` and `optimize.lint` instead).
 
 The default clock is the process CPU time when the trace carries it, else wall
 time (traces written before these spans and clocks; their P9, D5 and P11 time

@@ -16,13 +16,18 @@ observation must not consume the destination before its final owner is dropped.
 ## When it runs
 
 - Once on the program the optimizer returns, on every compile and in every
-  build mode, including a program that skips the passes because it carries a
-  complete seal.
+  build mode, as the second half of the optimizer's one MIR checker
+  (`Compiler/JetOptimizer/Source/Pipeline.jet` `mir_pass_check_wave`): per
+  function, the legality rules (`Verification/Legality.jet`) run first and the
+  lint rules run when they hold. That check runs once, on the final MIR; the
+  passes are proven per rule by their own fixtures. The checker's own
+  fixtures (rule order, program order, keep-going scan) are
+  `Compiler/JetOptimizer/Tests/CheckFixtures.jet`
+  (`run-lint-fixtures.mjs --check`).
 - After every optimizer pass, and on the lowered input, when full MIR
-  verification is on (`optimize_mir_program(program, full_verification: true)`),
-  together with the legality re-verification after every pass. An ordinary
-  compile verifies legality once on entry and trusts the passes after it, as
-  the Rust reference's `validate_after` does.
+  verification is on (`optimize_mir_program(program, full_verification: true)`,
+  `JET_MIR_LINT_EVERY_PASS=1`), so a failure names the pass that broke the
+  program.
 - A failure is an internal compiler error. The report names the pass that
   produced the program, the rule family, the function, and the offending
   operation.

@@ -4,9 +4,11 @@
 // operand and result type from the operation, every call from the callee row
 // named by ID, every enum and struct shape from its declaration, ownership
 // from one forward dataflow over sparse bit sets, and effect rows from the
-// callee's solved row. The optimizer pipeline runs it once after the last
-// pass, and after every pass when full verification is on; a failure is an
-// internal compiler error that names the pass and the rule.
+// callee's solved row. Its rules are the second half of the optimizer's one
+// MIR checker (Pipeline mir_pass_check_wave: legality rules, then these, per
+// function), which runs once on the final MIR, and after every pass when full
+// verification is on; a failure is an internal compiler error that names the
+// pass and the rule.
 use jet_foundation.[
     MIRAccess,
     MIRBasicBlock,
@@ -114,10 +116,10 @@ fn mir_lint_program(program: MIRProgram) -> MIRLintError? Never! {
 }
 
 // Lint failures in program order, one per rejected function; without `all`
-// the first failure ends the scan. `all` serves the keep-going driver, which
-// traps every rejected function before one rerun. The program is read in
-// place, so each function is copied into the context it is checked in; the
-// optimizer's own final lint moves functions instead (mir_lint_owned_part).
+// the first failure ends the scan. The lint fixtures and corpus read the
+// MIR Lint rules alone through it. The program is read in place, so each
+// function is copied into the context it is checked in; the optimizer's one
+// MIR checker moves functions instead (Pipeline mir_pass_check_owned_part).
 fn mir_lint_program_scan(program: MIRProgram, all: Bool) -> [MIRLintError] Never! {
     failures := [MIRLintError]{}
     if program.functions.len() == 0 -> return failures
@@ -136,37 +138,6 @@ fn mir_lint_program_scan(program: MIRProgram, all: Bool) -> [MIRLintError] Never
         failure :: mir_lint_function(ctx) ?? next
         &failures.push(failure)
         if !all -> return failures
-    }
-    failures
-}
-
-// Lint one part of a program whose functions are owned by the caller,
-// last-first (the optimizer wave law, Pipeline mir_pass_wave): each function
-// moves into the context, is checked, and moves back (a field move refilled
-// in the same block, LastUse.jet), so the part again holds its functions
-// last-first. Failures are in program order; without `all` the part stops at
-// its first failure, leaving the unchecked functions in place.
-fn mir_lint_owned_part(index: ^MIRLintIndex, functions: &[MIRFunction], all: Bool) -> [MIRLintError] Never! {
-    failures := [MIRLintError]{}
-    first := &functions.pop() ?? return failures
-    ctx := mir_lint_context(^index, ^first)
-    checked := [MIRFunction]{}
-    loop {
-        if mir_lint_function(ctx) == .Val(failure) {
-            &failures.push(failure)
-            if !all -> break
-        }
-        next_function := &functions.pop() ?? break
-        previous := ^ctx.function
-        ctx.function = ^next_function
-        &checked.push(^previous)
-        mir_lint_enter(&ctx)
-    }
-    current := ^ctx.function
-    &functions.push(^current)
-    loop {
-        function := &checked.pop() ?? break
-        &functions.push(^function)
     }
     failures
 }
