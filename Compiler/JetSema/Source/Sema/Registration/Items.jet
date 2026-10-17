@@ -2901,6 +2901,16 @@ fn sema_registration_resolve_export(graph: SemaRegistrationGraph, module_index: 
     None
 }
 
+// The loader emits one edge per source import, including each import declared
+// inside an inline `module name { … }` body (its `source_scope`), so every
+// such declaration is a source declaration of its file.
+fn sema_registration_declared_import_spans(module_index: Int, imports: [ImportDecl], items: [Item], spans: &[String:Bool]) Never! {
+    loop declaration in imports -> spans["{module_index}|{declaration.span.start}|{declaration.span.end}"] = true
+    loop item in items {
+        if item == .CodeModule(code_module) && code_module.body == .Val(body) -> sema_registration_declared_import_spans(module_index, code_module.imports, body, &spans)
+    }
+}
+
 // The imports registered so far, by "{module}|{span start}|{span end}" and,
 // for module (qualified) imports, by "{module}|{alias}": a duplicate or alias
 // check per import scanned every registered import of its module, which a
@@ -3257,14 +3267,13 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     sema_registration_inject_compiler_builtins(&graph)
     graph.unit_facts = sema_registration_unit_facts(graph)
 
-    // Source import spans by "{module}|{start}|{end}" and edge spans by
+    // Source import spans by "{module}|{start}|{end}" (top-level and inline
+    // `module name { use … }` imports alike) and edge spans by
     // "{source identity}|{start}|{end}", each built once: matching every edge
     // against its module's imports and every import against every edge made
     // registration M³ and M⁴ for a package of M files.
     declared_spans := [String:Bool]{}
-    loop declared_module in 0..<graph.modules.len() {
-        loop source_declaration in graph.modules[declared_module].program.imports -> declared_spans["{declared_module}|{source_declaration.span.start}|{source_declaration.span.end}"] = true
-    }
+    loop declared_module in 0..<graph.modules.len() -> sema_registration_declared_import_spans(declared_module, graph.modules[declared_module].program.imports, graph.modules[declared_module].program.items, &declared_spans)
     edge_spans := [String:Bool]{}
     loop edge in edges -> edge_spans["{edge.source_module_identity}|{edge.declaration.span.start}|{edge.declaration.span.end}"] = true
     registered := SemaRegistrationImportIndex{spans: [String:Bool]{}, aliases: [String:Bool]{}}
