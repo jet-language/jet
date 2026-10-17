@@ -607,7 +607,7 @@ fn core_member_status_json(member: CoreCatalogMember) -> String {
 // Rust: crates/jet-devserver/src/Canvas/query_actions.rs:1743
 fn core_member_pins_json(params: [(String, String)], receiver_type: String?) -> String {
     pins := [String]{}
-    if receiver_type.filter((ty) == .Val(receiver_type) -> !ty.is_empty()) -> pins.push("{{\"name\":\"receiver\",\"direction\":\"input\",\"type\":{json_str(receiver_type)}}}")
+    if receiver_type.filter((ty) -> !ty.is_empty()) == .Val(receiver) -> pins.push("{{\"name\":\"receiver\",\"direction\":\"input\",\"type\":{json_str(receiver)}}}")
     pins.extend(params.iter().map(((name, ty)) -> "{{\"name\":{json_str(name)},\"direction\":\"input\",\"type\":{json_str(ty)}}}"))
     pins.join(",")
 }

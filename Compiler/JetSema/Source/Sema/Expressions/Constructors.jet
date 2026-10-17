@@ -594,7 +594,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
     if type_name == "" {
         inferred_owner :: sema_expression_type_symbol(&scopes, environment, program, resolved_name)
         inferred_is_enum := false
-        if inferred_owner == .Val(owner_symbol) -> inferred_is_enum = sema_scope_declaration_is(environment, program, owner_symbol.id, SemaScopeDeclarationKind.Enum)
+        if inferred_owner == .Val(inferred_symbol) -> inferred_is_enum = sema_scope_declaration_is(environment, program, inferred_symbol.id, SemaScopeDeclarationKind.Enum)
         if !inferred_is_enum {
             &diagnostics.push(sema_error("E0330", span, "can't infer the enum type for `.{variant}`", "a leading-dot variant needs a known enum type from context", "write the full form `EnumName.{variant}`, or use it where its enum type is already expected"))
             return None

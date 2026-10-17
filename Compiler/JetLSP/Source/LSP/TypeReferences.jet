@@ -144,7 +144,7 @@ fn lsp_add_named_type_reference(name: String, span: Span, module_idx: Int, modul
     loop reference in db.refs {
         if reference.module_path != module_path || reference.span != span -> next
         if reference.target == .Val(target) {
-            if target.semantic_identity == Val(identity) -> return
+            if target.semantic_identity == Val((identity)) -> return
         }
     }
     &db.refs.push(SymRef{name: name.copy(), span: span, module_path: module_path.copy(), scope_identity: None, target: Val(DefinitionAnchor{module_path: target_path.copy(), kind: declaration.kind.copy(), def_span: SourceSpan{start: declaration.span.start, end: declaration.span.end}, semantic_identity: Val(identity)}), fact: None})

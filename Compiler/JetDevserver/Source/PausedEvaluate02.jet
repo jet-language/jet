@@ -164,8 +164,8 @@ fn project_node(value: &ValueProjection, identity: &SessionIdentity, budget: Eva
             projected.truncated = true
         } else {
             loop child in &value.children {
-                if project_node(child, identity, budget, depth.saturating_add(1), false, nodes, stats) == .Val(child) {
-                    projected.children.push(^child)
+                if project_node(child, identity, budget, depth.saturating_add(1), false, nodes, stats) == .Val(projected_child) {
+                    projected.children.push(^projected_child)
                 } else {
                     stats.truncated = true
                     projected.truncated = true

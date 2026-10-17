@@ -155,8 +155,8 @@ impl ResidentDevSession {
     }
     // Rust: crates/jet-devserver/src/Session.rs:2100
     fn select_output_values(self: Self, output: String?, target: String?) -> Unit {
-        if output.filter((output) -> !output.is_empty()) == .Val(output) -> *self.selected_output.lock().unwrap() = output.copy()
-        if target.filter((target) -> !target.is_empty()) == .Val(target) -> *self.selected_target.lock().unwrap() = target.copy()
+        if output.filter((output) -> !output.is_empty()) == .Val(selected) -> *self.selected_output.lock().unwrap() = selected.copy()
+        if target.filter((target) -> !target.is_empty()) == .Val(selected) -> *self.selected_target.lock().unwrap() = selected.copy()
     }
     // Rust: crates/jet-devserver/src/Session.rs:2109
     fn id(self: Self) -> String { &self.id }
@@ -422,7 +422,7 @@ fn json_string_any(text: String, key: String) -> String? {
         if value == {
             .Object(object) -> {
                 if object.iter().find_map(((name, value)) -> if name == key -> .Val(value) else -> .None) == .Val(found) {
-                    if json_string(found) == .Val(text) -> return .Val(text.copy())
+                    if json_string(found) == .Val(found_text) -> return .Val(found_text.copy())
                 }
                 object.iter().find_map(((_, value)) -> find(value, key))
             }

@@ -107,7 +107,7 @@ fn dap_response(output: String, request_seq: U32, command: String) -> String? {
             Val(.Bool(_)) -> true
             else -> false
         }
-        if type_name == Val("response") && actual_request_seq == Val(I64{request_seq}) && success_is_bool && actual_command == Val(command) {
+        if type_name == Val("response") && actual_request_seq == Val(I64{request_seq}) && success_is_bool && actual_command == Val((command)) {
             return Val(body.to_string())
         }
         cursor = body_end
@@ -184,7 +184,7 @@ fn wait_for_target_binary(pid: U32, binary: OSPath) {
     expected :: fs.canonicalize(binary).expect("canonicalize attach target")
     deadline :: Instant.now() + Duration.from_secs(5)
     loop {
-        if fs.canonicalize(OSPath("/proc/{pid}/exe")).ok() == Val(expected) -> return
+        if fs.canonicalize(OSPath("/proc/{pid}/exe")).ok() == Val((expected)) -> return
         assert(Instant.now() < deadline, "attach target did not exec the matching native debug binary")
         thread.sleep(Duration.from_millis(20))
     }

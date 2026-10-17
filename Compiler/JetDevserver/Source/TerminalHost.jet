@@ -768,7 +768,7 @@ fn render_lines(tree: TerminalPanelTree, viewport: TerminalViewport, capabilitie
         &raw.push("{panel_label} {panel.freshness.label()}")
         loop child in panel.children {
             if child.kind == {
-                .Status -> { if child.status == .Val(status) -> &raw.push("  status={style(status.label, "33", capabilities)}  {status.detail}") }
+                .Status -> { if child.status == .Val(child_status) -> &raw.push("  status={style(child_status.label, "33", capabilities)}  {child_status.detail}") }
                 .Text -> &raw.push("  {child.text.as_ref().unwrap_or("")}")
                 .Table -> { if child.table == .Val(table) { loop row in table.rows { &raw.push("  {row.cells.join(" | ")}") } } }
                 .Root | .Panel -> {}

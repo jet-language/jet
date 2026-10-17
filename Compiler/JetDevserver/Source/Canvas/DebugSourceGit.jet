@@ -236,24 +236,24 @@ impl DebugSessions {
                 SessionResult { status: status, transcript: ^transcript, snapshot: ^final_result.snapshot, history: ^final_result.history }
             }
         }
-        if sessions.get_mut(id) == .Val(session) {
-            if !result.history.events.is_empty() -> session.history = .Val(result.history.copy())
+        if sessions.get_mut(id) == .Val(live_session) {
+            if !result.history.events.is_empty() -> live_session.history = .Val(result.history.copy())
             snapshot := result.snapshot.copy()
-            session.snapshot = snapshot.copy()
+            live_session.snapshot = snapshot.copy()
             if result.status == .Running {
                 if snapshot == .Val(snapshot) {
-                    source :: JetDevtoolsSourceIdentityFact.new(.Val(session.source_id.copy()),
-                        session.native.as_ref().and_then((native) -> native.build_id.copy()), .Val(session.revision.copy()), .None)
-                    identity :: SessionIdentity.new(id.copy(), session.source_id.copy(), session.revision.copy(), snapshot.pause_id(), snapshot.frame_id())
+                    source :: JetDevtoolsSourceIdentityFact.new(.Val(live_session.source_id.copy()),
+                        live_session.native.as_ref().and_then((native) -> native.build_id.copy()), .Val(live_session.revision.copy()), .None)
+                    identity :: SessionIdentity.new(id.copy(), live_session.source_id.copy(), live_session.revision.copy(), snapshot.pause_id(), snapshot.frame_id())
                     scope_id :: "scope-{id}"
                     authority :: PausedDebugSessionAdapter.debugger_authority(scope_id)
-                    if session.paused_adapter.as_mut() == .Val(adapter) {
+                    if live_session.paused_adapter.as_mut() == .Val(adapter) {
                         adapter.refresh_snapshot(^identity, ^snapshot)
                     } else {
-                        session.paused_adapter = .Val(PausedDebugSessionAdapter.new(^identity, ^source, scope_id, ^snapshot, ^authority)?)
+                        live_session.paused_adapter = .Val(PausedDebugSessionAdapter.new(^identity, ^source, scope_id, ^snapshot, ^authority)?)
                     }
-                } else { session.paused_adapter = .None }
-            } else { session.paused_adapter = .None }
+                } else { live_session.paused_adapter = .None }
+            } else { live_session.paused_adapter = .None }
         }
         if result.status != .Running -> _ :: sessions.remove(id)
         return .Ok(DebugExecution { id: ^id, status: result.status, transcript: ^result.transcript, snapshot: ^result.snapshot, tier: session_tier })

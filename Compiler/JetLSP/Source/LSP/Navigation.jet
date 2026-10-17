@@ -34,7 +34,7 @@ fn enum_variant_definition_at(db: SymbolDB, tokens: [Token], path: String, index
         head :: pattern_head_start(tokens, index) ?? return None
         if active_pattern_subject(tokens, index) == .Val(subject) {
             enum_name = checked_subject_type_name(db, tokens, path, subject) ?? return None
-        } else if bare_function_head_start(tokens, index) == Val(head) {
+        } else if bare_function_head_start(tokens, index) == Val((head)) {
             enum_name = function_head_type_name(db, tokens, path, head) ?? return None
         } else { return None }
     }
@@ -304,7 +304,7 @@ fn compute_definition(db: SymbolDB, tokens: [Token], _src: String, path: String,
     identity :: checked_semantic_identity_at(db, tokens, path, offset) ?? return None
     if checked_reference_in_span(db, path, offset, offset) == .Ok(.Val(reference)) {
         if reference.target == .Val(target) {
-            if checked_anchor_identity(db, target) == Val(identity) -> return Val((_0: target.module_path.copy(), _1: target.def_span.into()))
+            if checked_anchor_identity(db, target) == Val((identity)) -> return Val((_0: target.module_path.copy(), _1: target.def_span.into()))
         }
     }
     definition := None
@@ -425,7 +425,7 @@ fn compute_rename(db: SymbolDB, tokens: [Token], path: String, offset: USize, ne
         spans := [(_0: target.module_path, _1: Span.new(target.def_span.start, target.def_span.end))]
         loop reference in db.refs {
             candidate :: reference.target ?? next
-            if candidate.kind == "import_alias" && checked_anchor_identity(db, candidate) == Val(identity) -> &spans.push((_0: reference.module_path, _1: reference.span))
+            if candidate.kind == "import_alias" && checked_anchor_identity(db, candidate) == Val((identity)) -> &spans.push((_0: reference.module_path, _1: reference.span))
         }
         spans.sort_by((left, right) -> { left._0.cmp(right._0).then(left._1.start.cmp(right._1.start)).then(left._1.end.cmp(right._1.end)) })
         spans.dedup()

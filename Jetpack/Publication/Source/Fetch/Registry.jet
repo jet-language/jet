@@ -116,7 +116,7 @@ fn pkg_fetch_registry_node(verification: &StoreVerification, roots: HangarRoots,
             }
             mode :: if resolver.options.resolution == .LowestDirect && chain.len() > 2 -> PublicationResolveMode.Latest else -> resolver.options.resolution
             version :: publication_select_compatible(name, [PublicationVersionConstraint]{PublicationVersionConstraint{package: name, req: requirement, from: chain.join(" -> ")}}, versions, mode) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
-            loop entry in available.entries { if publication_parse_semver(entry.version) == Val(version) -> selected = Val(entry) }
+            loop entry in available.entries { if publication_parse_semver(entry.version) == Val((version)) -> selected = Val(entry) }
         }
     }
     entry :: selected ?? return Err(pkg_fetch_registry_error(name, "no published version satisfies `{raw_requirement}`"))

@@ -132,7 +132,7 @@ impl WebHost {
             handle :: thread.spawn(() -> serve_forever(^listener, ^status, ^debug_sessions, ^session, ^canvas_file, .Canvas, ^bind_host, ^session_secret, ^shutdown, ^static_root, ^release_policy, ^browser_state, ^paused_evaluate, ^terminal_style))
             self.server_threads.lock().unwrap().push(^handle)
         }
-        if self.application_listener.lock().unwrap().take() == .Val(listener) {
+        if self.application_listener.lock().unwrap().take() == .Val(application_listener) {
             status :: Arc.clone(&self.status)
             debug_sessions :: Arc.clone(&self.debug_sessions)
             session :: Arc.clone(&self.session)
@@ -145,7 +145,7 @@ impl WebHost {
             paused_evaluate :: Arc.clone(&self.paused_evaluate)
             terminal_style :: Arc.clone(&self.terminal_style)
             shutdown :: Arc.clone(&self.shutdown)
-            handle :: thread.spawn(() -> serve_forever(^listener, ^status, ^debug_sessions, ^session, ^canvas_file, .Application, ^application_host, ^session_secret, ^shutdown, ^static_root, ^release_policy, ^browser_state, ^paused_evaluate, ^terminal_style))
+            handle :: thread.spawn(() -> serve_forever(^application_listener, ^status, ^debug_sessions, ^session, ^canvas_file, .Application, ^application_host, ^session_secret, ^shutdown, ^static_root, ^release_policy, ^browser_state, ^paused_evaluate, ^terminal_style))
             self.server_threads.lock().unwrap().push(^handle)
         }
         _ :: (() -> {

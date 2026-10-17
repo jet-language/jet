@@ -276,7 +276,7 @@ fn diagnostic_push_snippet(out: &[U8], diagnostic: Diagnostic, color: Bool, file
     // Color only the caret glyphs, not the leading pad (keeps columns).
     marks :: diagnostic_theme_severity(color, diagnostic.severity, "^".repeat(caret_len))
     if {
-        message == .Val(text) -> diagnostic_push_text(&out, "    | {pad}{marks} {diagnostic_escape_terminal_text(text)}\n")
+        message == .Val(label_text) -> diagnostic_push_text(&out, "    | {pad}{marks} {diagnostic_escape_terminal_text(label_text)}\n")
         else -> diagnostic_push_text(&out, "    | {pad}{marks}\n")
     }
 }

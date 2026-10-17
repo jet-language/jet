@@ -44,7 +44,7 @@ struct LifecycleWriteControl {
     }
 
     fn hit(self, phase: LifecycleWritePhase) StoreError! {
-        if self.fail == Val(phase) {
+        if self.fail == Val((phase)) {
             return Err(StoreError.IO(IOError.Other(IOContext{operation: .Write, resource: None, os_code: Val(self.raw_os_error), cause: Val("injected lifecycle journal failure")})))
         }
     }

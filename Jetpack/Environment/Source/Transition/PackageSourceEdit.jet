@@ -131,7 +131,7 @@ struct TransitionFieldEntry {
 fn env_transition_required_field(entries: [TransitionSourceEntry], field: String, path: String) -> TransitionFieldEntry EnvironmentError! {
     matches := [TransitionSourceEntry]{}
     loop entry in entries {
-        if entry.field == .Val(field) -> &matches.push(entry)
+        if entry.field == Val((field)) -> &matches.push(entry)
     }
     if matches.len() != 1 {
         return Err(env_transition_error("{field} must be declared exactly once in {path}"))
@@ -146,7 +146,7 @@ fn env_transition_required_inline_config(entries: [TransitionSourceEntry], name:
     key :: "::{name}"
     matches := [TransitionSourceEntry]{}
     loop entry in entries {
-        if entry.field == .Val(key) -> &matches.push(entry)
+        if entry.field == Val((key)) -> &matches.push(entry)
     }
     if matches.len() != 1 {
         return Err(env_transition_error("closed Config {name} was not found in {path}"))
@@ -259,7 +259,7 @@ fn env_transition_set_or_add_field(source: String, field: String, value: String)
     replacement :: "{field}: {value.trim()}"
     matches := [TransitionSourceEntry]{}
     loop entry in entries {
-        if entry.field == .Val(field) -> &matches.push(entry)
+        if entry.field == Val((field)) -> &matches.push(entry)
     }
     if matches.len() > 1 {
         return Err(env_transition_error("{field} is ambiguous; migration stopped before writing"))
