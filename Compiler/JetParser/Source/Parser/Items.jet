@@ -1757,16 +1757,15 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
     start :: parser_bump(&state)
     name :: parser_expect_name(&state, "after `struct`")
     value := ast_struct(parser_value(state, name), name.span, start.span)
-    // D-AUTODERIVE1=E: a parsed declaration starts on the package default
-    // (Rust parser `auto_derive_default: true`); signed markers decide each trait.
-    value.auto_derive_default = true
     value.is_pub = modifiers.is_pub
     value.is_package_pub = modifiers.is_package_pub
     value.type_params = parser_parse_type_params(&state)
-    value.type_markers = modifiers.markers
+    // Rust `attach_type_markers`: the markers, the derives and serde markers
+    // they request, the package auto-derive default (D-AUTODERIVE1=E) and the
+    // SingleUse/MustUse/PublishedSchema facts.
+    parser_apply_struct_type_markers(&value, modifiers.markers)
     value.layout = parser_layout_marker_fact(&state, modifiers.markers, modifiers.grouped_markers, false)
     value.layout_span = parser_layout_marker_span(modifiers.markers, modifiers.grouped_markers, value.layout)
-    parser_apply_type_markers(&value, modifiers.markers)
     if parser_current_kind(&state) != TOKEN_LBRACE {
         parser_add_error_here(&state, "expected `{{` before struct fields", "record fields are declared inside a struct body", "open a struct body with `{{`")
         return value
@@ -1867,26 +1866,13 @@ fn parser_parse_enum(state: &JetParserState, modifiers: ParsedItemModifiers) -> 
     start :: parser_bump(&state)
     name :: parser_expect_name(&state, "after `enum`")
     value := ast_enum(parser_value(state, name), name.span, start.span)
-    // D-AUTODERIVE1=E: as for structs, the package default applies.
-    value.auto_derive_default = true
     value.is_pub = modifiers.is_pub
     value.is_package_pub = modifiers.is_package_pub
     value.type_params = parser_parse_type_params(&state)
-    value.type_markers = modifiers.markers
+    // Rust `attach_type_markers`, as for structs: markers, derives, serde
+    // markers, the package auto-derive default and SingleUse/MustUse.
+    parser_apply_enum_type_markers(&value, modifiers.markers)
     _ := parser_layout_marker_fact(&state, modifiers.markers, modifiers.grouped_markers, true)
-    index := 0
-    loop index < modifiers.markers.len() {
-        marker :: modifiers.markers[index]
-        if marker.name == "SingleUse" {
-            value.is_single_use = true
-            value.single_use_span = Val(marker.span)
-        }
-        if marker.name == "MustUse" {
-            value.is_must_use = true
-            value.must_use_span = Val(marker.span)
-        }
-        index += 1
-    }
     parser_expect(&state, TOKEN_LBRACE, "`{{` before enum variants")
     // A fatal error ends the whole enum, as Rust's `?` does; the item loop
     // resynchronizes.
