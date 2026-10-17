@@ -2144,7 +2144,9 @@ fn check_program(input: Program, module_name: String, source_file: String, sourc
     exact_int_reachable := false
     copy_events := [SemaCopyEvent]{}
     memory_plan := sema_function_memory_plan_for_program(source_program, module_name, "")
-    complete := source_program.script_body.len() == 0 && source_program.imports.len() == 0 && source_program.block_spans.len() == 0 && source_program.web_target_ceiling == None && !source_program.no_prelude && source_program.default_target == None && source_program.html_path == None && !sema_function_memory_has_unsupported_policies(source_program.policy_declarations) && source_program.user_policy_declarations.len() == 0 && source_program.applied_rules.len() == 0 && source_program.rule_facts.len() == 0
+    // User policies are materialized above and `#allow` is validated, so only
+    // other rule applications leave the slice incomplete.
+    complete := source_program.script_body.len() == 0 && source_program.imports.len() == 0 && source_program.block_spans.len() == 0 && source_program.web_target_ceiling == None && !source_program.no_prelude && source_program.default_target == None && source_program.html_path == None && !sema_function_memory_has_unsupported_policies(source_program.policy_declarations) && !sema_policy_has_unsupported_applications(source_program)
     item_index := 0
     loop item_index < source_program.items.len() {
         item :: source_program.items[item_index]

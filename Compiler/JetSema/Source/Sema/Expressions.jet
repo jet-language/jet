@@ -2466,6 +2466,9 @@ fn sema_expr_check_direct_call(call: Call, expected: Type?, environment: SemaSco
     // D-SHAPE-RESOURCE2=A: `close(^value)` is the ambient `Close` sugar ahead
     // of every declared function (Rust `check_call_inner`).
     if call.name == "close" -> return sema_call_check_ambient_close(call, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    // Teaching forms, `measurement` and `apply` precede name resolution.
+    forms := sema_call_try_direct_forms(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if forms.handled -> return forms.value
     // A loaded declaration owns the call even when Core also imports the name.
     if sema_expr_declared_function_named(scopes, call.name) {
         return sema_expr_check_declared_direct_call(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)

@@ -513,6 +513,26 @@ fn pc_named_struct_pattern_rhs() {
     shaped :: if init == .PatternTest(_, pattern, _) -> (if pattern == .Struct(fields, _, _, head) -> fields.len() == 2 && (if head == .Val(_) -> true else -> false) else -> false) else -> false
     pc_require(shaped, "a named struct pattern still binds and compares fields")
 }
+fn pc_allow_and_fact_roots() {
+    allowed :: parse_source("fn run() {{ #allow(unit_scalar_rewrap, \"reviewed\")\n print(\"kept\")\n }}".bytes())
+    pc_require(allowed.diagnostics.len() == 0, "allow attaches across layout")
+    pc_require(allowed.program.applied_rules.len() == 1 && allowed.program.rule_facts.len() == 1, "allow keeps its application and fact")
+    application :: allowed.program.applied_rules[0]
+    pc_require(application.site == Val(RuleSite.Statement) && application.target != None, "allow records its ordinary statement site")
+    loop word in [String]{"$unknown", "$HOME", "$Build"} {
+        rejected :: parse_source("fn run() {{ print({word})\n print(\"after\")\n }}".bytes())
+        pc_require(rejected.diagnostics.len() == 1 && rejected.diagnostics[0].code == "E0003", "unknown dollar word has one parser diagnosis")
+        span :: rejected.diagnostics[0].span ?? panic("dollar diagnosis lost its span")
+        pc_require(span.end - span.start == word.bytes().len(), "dollar diagnosis covers the whole word")
+        source :: "fn run() {{ print({word})\n print(\"after\")\n }}"
+        pc_require(source.slice(span.start..<span.end) == word, "dollar diagnosis highlights exactly the authored word")
+        pc_require(if word == "$HOME" -> rejected.diagnostics[0].what.contains("config") else -> rejected.diagnostics[0].what.contains("compiler fact"), "ALL_CAPS environment read and unknown fact diagnoses remain distinct")
+    }
+    loop root in [String]{"$build", "$package", "$phase", "$program"} {
+        pc_require(parse_source("fn run() {{ print({root}.name) }}".bytes()).diagnostics.len() == 0, "canonical fact root parses")
+    }
+    pc_require(parse_source("fn run() {{ print(Int.$layout) }}".bytes()).diagnostics.len() == 0, "subject member fact parses")
+}
 fn run() {
     canonical :: parse_source("fn run() {{\n values :: [JSON]{{JSON.Null}}\n print(values.len())\n}}\n".bytes())
     pc_require(canonical.diagnostics.len() == 0, "canonical newline collection consumer")
@@ -528,6 +548,7 @@ fn run() {
     pc_enum_methods()
     pc_explicit_privacy()
     pc_qualified_generic_literal()
+    pc_allow_and_fact_roots()
     print("V48 semicolon edits/recovery: passed")
     print("marker registry/parser status: passed")
     print("trait effect-arrow slots: passed")

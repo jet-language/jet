@@ -1167,9 +1167,12 @@ fn sema_call_check_direct_target(state: &SemaOwnershipState, target: SemaCallDir
     Val(checked.value)
 }
 
-fn sema_call_check_direct(state: &SemaOwnershipState, call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    // Rust direct_calls teaching forms precede ordinary name resolution,
-    // including a same-spelled lexical binding. Still infer every argument.
+// The Rust direct_calls forms ahead of ordinary name resolution
+// (check_call_inner), taken first by sema_expr_check_direct_call. The
+// getenv/async/await teaching errors win even over a same-spelled lexical
+// binding and still infer every argument; `measurement(value, uncertainty:)`
+// and D-STRUCT-POLICY1=A's `apply(policy..., f)` apply only unshadowed.
+fn sema_call_try_direct_forms(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.name == "getenv" || call.name == "async" || call.name == "await" {
         if call.name == "getenv" {
             &diagnostics.push(sema_error("E0039", call.name_span, "`getenv` is written `env.get` in Jet", "environment access lives in the `core.sys` module", "import `core.sys as env` and call `env.get(name)`"))
@@ -1179,42 +1182,26 @@ fn sema_call_check_direct(state: &SemaOwnershipState, call: Call, expected: Type
         loop argument_index in 0..<call.args.len() {
             _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
-        return None
+        return SemaDirectSpecialCheck{handled: true, value: None}
     }
     if call.name == "measurement" && sema_scope_resolve_index(scopes, call.name) == None {
         labeled :: call.args.len() == 2 && call.args[0].label == None && (if call.args[1].label == { .Val(label) -> label.name == "uncertainty" else -> false })
         if !labeled {
             loop argument_index in 0..<call.args.len() -> _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             &diagnostics.push(sema_error("E0104", call.name_span, "`measurement` needs a value and labeled uncertainty", "a measured value enters the exactness plane at one explicit constructor", "write `measurement(value, uncertainty: standard_uncertainty)`"))
-            return None
+            return SemaDirectSpecialCheck{handled: true, value: None}
         }
         values := [TExpr]{}
         loop argument_index in 0..<call.args.len() {
-            value :: sema_check_expression(call.args[argument_index].expr, Val(Type.Float), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-            if !sema_ownership_check_call_receiver(&state, call.args[argument_index].expr, AccessConvention.Read, scopes, call.args[argument_index].span, &diagnostics) -> return None
+            value :: sema_check_expression(call.args[argument_index].expr, Val(Type.Float), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+            if !sema_ownership_check_call_receiver(&state, call.args[argument_index].expr, AccessConvention.Read, scopes, call.args[argument_index].span, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
             &values.push(value)
         }
         result :: Type.Apply{name: "Measurement", args: [Type]{Type.Float}}
-        value :: sema_expression_measurement_source_call("__measurement_new", values, result, call.name_span, environment, program) ?? return None
-        return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
+        value :: sema_expression_measurement_source_call("__measurement_new", values, result, call.name_span, environment, program) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)}
     }
-    // D-STRUCT-POLICY1=A (Rust check_call_inner `apply`): an unshadowed
-    // `apply(policy..., f)` wraps `f` in its user policy chain.
-    policy :: sema_policy_try_apply(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    if policy.handled -> return policy.value
-    special :: sema_call_try_knowledge_builtin(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    if special.handled -> return special.value
-    if sema_call_default_err_candidate(call, expected, scopes) {
-        return sema_call_check_default_err(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    }
-    target :: sema_call_resolve_direct(call.name, call.type_args, environment, program, &scopes, call.name_span, &diagnostics) ?? return None
-    checked :: sema_call_direct_checked_from_target(&state, target, call, [SemaCallDefaultValue]{}, expected, environment, program, &scopes, &tail_store, &context, &diagnostics) ?? return None
-    if call.name == "assert_eq" && sema_call_gate_is_unshadowed(call.name, scopes) {
-        if checked.value.kind == .Call(_, _, arguments) {
-            if !sema_comparability_check_assert_eq(arguments, call.name_span, environment, program, &diagnostics) -> return None
-        }
-    }
-    Val(checked.value)
+    sema_policy_try_apply(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
 
