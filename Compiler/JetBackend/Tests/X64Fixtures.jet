@@ -323,7 +323,8 @@ fn x64_fixtures() -> Bool Never! {
     address_plan :: x64_fx_address_plan()
     memory :: x64_fx_memory()
     arithmetic :: x64_fx_address_arithmetic()
-    encoder && allocation && abi64 && abi32 && entry && sib && address_plan && memory && arithmetic
+    frame :: x64_fx_frame_branch()
+    encoder && allocation && abi64 && abi32 && entry && sib && address_plan && memory && arithmetic && frame
 }
 
 fn x64_fx_executable(name: String, program: LIRModule, argument: Int?, expected: Int) -> Bool Never! {
@@ -614,4 +615,85 @@ fn x64_fx_address_arithmetic() -> Bool Never! {
     }
     program :: LIRModule{signatures: [LIRSignature]{LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())}}, functions: [LIRFunction]{function}, data: [LIRData]{}, debug: lir_module_debug_none()}
     x64_fx_executable("address-arithmetic", program, Val(5), 80)
+}
+
+// Frame addresses take no register: the StackSlot's stores and loads are
+// `[rbp + d]`, and passing it to a call materializes one `lea` straight into
+// rdi. Overflows feeding a Branch become `jo`; a then block that follows is
+// reached by falling through an inverted jcc; a Const edge argument and the
+// spilled values are written with immediate moves. Exit 42 or a wrong path.
+fn x64_fx_frame_branch() -> Bool Never! {
+    reader := x64_fx_builder()
+    reader.id = LIRFunctionID{value: 1}
+    reader.signature = LIRSignatureID{value: 1}
+    slot_in :: lir_builder_value(&reader, lir_layout_pointer(), .Trivial, None)
+    first :: lir_builder_word(&reader)
+    second :: lir_builder_word(&reader)
+    pair :: lir_builder_word(&reader)
+    lir_builder_push(&reader, .Load{dst: first, base: slot_in, offset: 0})
+    lir_builder_push(&reader, .Load{dst: second, base: slot_in, offset: 8})
+    lir_builder_push(&reader, .Binary{dst: pair, op: .Add, left: first, right: second})
+    lir_builder_seal(&reader, LIRBlockID{value: 0}, [LIRValueID]{slot_in}, .Return{value: Val(pair)})
+
+    b := x64_fx_builder()
+    slot :: lir_builder_value(&b, lir_layout_pointer(), .Trivial, None)
+    seven :: lir_builder_word(&b)
+    five :: lir_builder_word(&b)
+    sum :: lir_builder_word(&b)
+    twelve :: lir_builder_word(&b)
+    matched :: lir_builder_bool(&b)
+    lir_builder_push(&b, .StackSlot{dst: slot, size: 16, align: 8})
+    lir_builder_push(&b, .Const{dst: seven, value: 7})
+    lir_builder_push(&b, .Const{dst: five, value: 5})
+    lir_builder_push(&b, .Store{base: slot, offset: 0, value: seven})
+    lir_builder_push(&b, .Store{base: slot, offset: 8, value: five})
+    lir_builder_push(&b, .Call{dst: Val(sum), signature: LIRSignatureID{value: 1}, callee: .Function{id: LIRFunctionID{value: 1}}, args: [LIRValueID]{slot}})
+    lir_builder_push(&b, .Const{dst: twelve, value: 12})
+    lir_builder_push(&b, .Compare{dst: matched, condition: .Eq, left: sum, right: twelve})
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{}, .Branch{condition: matched, then_target: LIRJumpTarget{block: LIRBlockID{value: 1}, args: [LIRValueID]{}}, else_target: LIRJumpTarget{block: LIRBlockID{value: 2}, args: [LIRValueID]{}}})
+    // b1 (follows b0): MAX + 1 overflows.
+    largest :: lir_builder_word(&b)
+    one :: lir_builder_word(&b)
+    wrapped :: lir_builder_bool(&b)
+    lir_builder_push(&b, .Const{dst: largest, value: 9223372036854775807})
+    lir_builder_push(&b, .Const{dst: one, value: 1})
+    lir_builder_push(&b, .Overflows{dst: wrapped, op: .Add, left: largest, right: one})
+    lir_builder_seal(&b, LIRBlockID{value: 1}, [LIRValueID]{}, .Branch{condition: wrapped, then_target: LIRJumpTarget{block: LIRBlockID{value: 3}, args: [LIRValueID]{}}, else_target: LIRJumpTarget{block: LIRBlockID{value: 4}, args: [LIRValueID]{}}})
+    wrong_compare :: lir_builder_word(&b)
+    lir_builder_push(&b, .Const{dst: wrong_compare, value: 99})
+    lir_builder_seal(&b, LIRBlockID{value: 2}, [LIRValueID]{}, .Return{value: Val(wrong_compare)})
+    // b3 (follows b2): reload through the frame, then 17 + 1 does not overflow.
+    reloaded :: lir_builder_word(&b)
+    partial :: lir_builder_word(&b)
+    plus :: lir_builder_word(&b)
+    unsigned :: lir_builder_bool(&b)
+    twenty_four :: lir_builder_word(&b)
+    lir_builder_push(&b, .Load{dst: reloaded, base: slot, offset: 8})
+    lir_builder_push(&b, .Binary{dst: partial, op: .Add, left: reloaded, right: sum})
+    lir_builder_push(&b, .Binary{dst: plus, op: .Add, left: partial, right: one})
+    lir_builder_push(&b, .Const{dst: twenty_four, value: 24})
+    lir_builder_push(&b, .Overflows{dst: unsigned, op: .UAdd, left: partial, right: one})
+    lir_builder_seal(&b, LIRBlockID{value: 3}, [LIRValueID]{}, .Branch{condition: unsigned, then_target: LIRJumpTarget{block: LIRBlockID{value: 5}, args: [LIRValueID]{}}, else_target: LIRJumpTarget{block: LIRBlockID{value: 6}, args: [LIRValueID]{plus, twenty_four}}})
+    wrong_overflow :: lir_builder_word(&b)
+    lir_builder_push(&b, .Const{dst: wrong_overflow, value: 98})
+    lir_builder_seal(&b, LIRBlockID{value: 4}, [LIRValueID]{}, .Return{value: Val(wrong_overflow)})
+    wrong_unsigned :: lir_builder_word(&b)
+    lir_builder_push(&b, .Const{dst: wrong_unsigned, value: 97})
+    lir_builder_seal(&b, LIRBlockID{value: 5}, [LIRValueID]{}, .Return{value: Val(wrong_unsigned)})
+    left :: lir_builder_word(&b)
+    right :: lir_builder_word(&b)
+    answer :: lir_builder_word(&b)
+    lir_builder_push(&b, .Binary{dst: answer, op: .Add, left: left, right: right})
+    lir_builder_seal(&b, LIRBlockID{value: 6}, [LIRValueID]{left, right}, .Return{value: Val(answer)})
+    function :: lir_builder_finish(b)
+    a :: x64_allocate(function)
+    if a.locations[slot.value] != .Frame(slot.value) {
+        print("X64 FAIL frame address took a location other than its frame")
+        return false
+    }
+    program :: LIRModule{signatures: [LIRSignature]{
+        LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())},
+        LIRSignature{id: LIRSignatureID{value: 1}, convention: .SystemV, params: [LIRLayout]{lir_layout_pointer()}, result: Val(lir_layout_word())}
+    }, functions: [LIRFunction]{function, lir_builder_finish(reader)}, data: [LIRData]{}, debug: lir_module_debug_none()}
+    x64_fx_executable("frame-branch", program, None, 42)
 }

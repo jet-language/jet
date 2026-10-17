@@ -18,7 +18,10 @@
 //
 // A value defined by Const takes no register: its location is the immediate
 // itself, which instruction selection encodes into the instruction using it
-// or materializes in that instruction's scratch register.
+// or materializes in that instruction's scratch register. Likewise a
+// StackSlot's address takes no register: it is a fixed rbp displacement,
+// folded into every memory operand based on it and rematerialized with one
+// `lea` where a register is needed (LLVM's frame-index elimination).
 //
 // rax, r10 and r11 are never allocated: instruction selection uses them as the
 // result, operand and parallel-move scratch registers. rsp and rbp hold the frame.
@@ -30,6 +33,8 @@ enum X64Loc {
     FloatStack(slot: Int, single: Bool)
     Stack(slot: Int)
     Imm(value: Int)
+    // The address of the StackSlot that defines `value` (X64Emitter.stack).
+    Frame(value: Int)
     Folded
 }
 
@@ -529,20 +534,26 @@ fn x64_allocate(function: LIRFunction) -> X64Allocation Never! {
     loop _ in 0..<32 -> &owners.push(-1)
     spill_slots := 0
     active := [Int]{}
-    // Const-defined values live in their instructions as immediates.
+    // Const-defined values live in their instructions as immediates, and
+    // StackSlot addresses as rbp displacements.
     immediate := x64_falses(count)
+    frame := x64_falses(count)
     immediates := [Int]{}
     loop _ in 0..<count -> &immediates.push(0)
     loop block in function.blocks {
         loop inst in block.insts {
-            if inst == .Const(dst, value) {
-                immediate[dst.value] = true
-                immediates[dst.value] = value
+            if inst == {
+                .Const(dst, value) -> {
+                    immediate[dst.value] = true
+                    immediates[dst.value] = value
+                }
+                .StackSlot(dst, _, _) -> frame[dst.value] = true
+                else -> {}
             }
         }
     }
     loop value in order {
-        if immediate[value] || folds.skipped[value] -> next
+        if immediate[value] || frame[value] || folds.skipped[value] -> next
         kept := [Int]{}
         loop other in active {
             if ends[other] < starts[value] {
@@ -613,6 +624,7 @@ fn x64_allocate(function: LIRFunction) -> X64Allocation Never! {
         &locations.push(if {
             folds.skipped[value] -> X64Loc.Folded
             immediate[value] -> X64Loc.Imm{value: immediates[value]}
+            frame[value] -> X64Loc.Frame{value: value}
             registers[value] >= 16 -> X64Loc.Xmm{reg: registers[value] - 16, single: function.values[value].layout == lir_layout_float32()}
             registers[value] >= 0 -> X64Loc.Reg{reg: registers[value]}
             function.values[value].layout.class == .Float -> X64Loc.FloatStack{slot: slots[value], single: function.values[value].layout == lir_layout_float32()}

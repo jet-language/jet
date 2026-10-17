@@ -45,6 +45,28 @@ fn x64_cond_code(cond: X64Cond) -> Int Never! {
     }
 }
 
+// The condition that holds exactly when `cond` does not (cc xor 1).
+fn x64_cond_invert(cond: X64Cond) -> X64Cond Never! {
+    if cond == {
+        .O -> X64Cond.NO
+        .NO -> X64Cond.O
+        .B -> X64Cond.AE
+        .AE -> X64Cond.B
+        .E -> X64Cond.NE
+        .NE -> X64Cond.E
+        .BE -> X64Cond.A
+        .A -> X64Cond.BE
+        .S -> X64Cond.NS
+        .NS -> X64Cond.S
+        .P -> X64Cond.NP
+        .NP -> X64Cond.P
+        .L -> X64Cond.GE
+        .GE -> X64Cond.L
+        .LE -> X64Cond.G
+        .G -> X64Cond.LE
+    }
+}
+
 fn x64_byte(code: &[U8], value: Int) Never! {
     &code.push(U8{(value).bit_and(255)})
 }
@@ -123,6 +145,14 @@ fn x64_mov_ri(code: &[U8], dst: Int, value: Int) Never! {
         x64_byte(&code, 0xb8 + ((dst).bit_and(7)))
         x64_u64(&code, value)
     }
+}
+
+// mov qword [base + disp], imm32 sign-extended (REX.W C7 /0 id).
+fn x64_store_imm32(code: &[U8], base: Int, disp: Int, value: Int) Never! {
+    x64_rex(&code, true, 0, base)
+    x64_byte(&code, 0xc7)
+    x64_modrm_mem(&code, 0, base, disp)
+    x64_u32(&code, value)
 }
 
 fn x64_alu_opcode(op: X64Alu) -> Int Never! {

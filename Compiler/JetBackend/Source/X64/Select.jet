@@ -46,10 +46,12 @@ struct X64CompiledFunction {
 // variable lives over which code range.
 struct X64LineRow { at: Int, line: Int }
 
-// A register (hardware number) or a frame slot at `offset` from rbp.
+// A register (hardware number), a frame slot at `offset` from rbp, or the
+// frame address rbp + `offset` itself (a StackSlot's address).
 enum X64DebugLocation {
     Register(reg: Int)
     Frame(offset: Int)
+    FrameAddress(offset: Int)
 }
 
 // LIRFunctionDebug.variables[variable] is at `location` for code offsets
@@ -170,11 +172,20 @@ fn x64_emit_move(emitter: &X64Emitter, src: X64Loc, dst: X64Loc) Never! {
         from :: x64_float_operand(&emitter, src, single, 0)
         return x64_finish_float(&emitter, dst, from)
     }
-    if dst == .Imm(_) -> return
-    from :: x64_operand(&emitter, src, X64_R11)
+    if dst == .Imm(_) || dst == .Frame(_) -> return
     if dst == {
-        .Reg(to) -> { if from != to -> x64_mov_rr(&emitter.code, to, from) }
-        .Stack(slot) -> x64_store_slot(&emitter, slot, from)
+        // Loads, immediates and frame addresses go straight to the register.
+        .Reg(to) -> {
+            from :: x64_operand(&emitter, src, to)
+            if from != to -> x64_mov_rr(&emitter.code, to, from)
+        }
+        .Stack(slot) -> {
+            if x64_imm32(src) == .Val(value) {
+                x64_store_imm32(&emitter.code, X64_RBP, x64_slot_disp(emitter.saved.len(), slot), value)
+            } else {
+                x64_store_slot(&emitter, slot, x64_operand(&emitter, src, X64_R11))
+            }
+        }
         else -> {}
     }
 }
@@ -278,6 +289,10 @@ fn x64_operand(emitter: &X64Emitter, loc: X64Loc, scratch: Int) -> Int Never! {
         }
         .Imm(value) -> {
             x64_mov_ri(&emitter.code, scratch, value)
+            scratch
+        }
+        .Frame(value) -> {
+            x64_lea(&emitter.code, scratch, X64_RBP, emitter.stack[value])
             scratch
         }
         .Folded -> panic("x64 selector read an eliminated address definition")
@@ -586,9 +601,15 @@ fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Compile
         &defining.push(false)
         located :: block.lines.len() == block.insts.len() + 1
         fused := false
+        // A Compare or Overflows whose only use is this block's Branch sets
+        // the flags the branch tests: no setcc/movzx/test round trip.
         if block.terminator == .Branch(condition, _, _) {
             if block.insts.len() > 0 {
-                if block.insts[block.insts.len() - 1] == .Compare(dst, _, left, _) -> fused = dst == condition && uses[dst.value] == 1 && !x64_is_float(function, left)
+                if block.insts[block.insts.len() - 1] == {
+                    .Compare(dst, _, left, _) -> fused = dst == condition && uses[dst.value] == 1 && !x64_is_float(function, left)
+                    .Overflows(dst, _, _, _) -> fused = dst == condition && uses[dst.value] == 1
+                    else -> {}
+                }
             }
         }
         loop (inst_index, inst) in block.insts {
@@ -613,7 +634,7 @@ fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Compile
         dwarf_cfa_restore_state(&cfi)
         cfa_at = at + 1
     }
-    debug :: X64FunctionDebug{lines: lines, body: body, cfi: cfi, ranges: x64_variable_ranges(function, allocation, positions, defining)}
+    debug :: X64FunctionDebug{lines: lines, body: body, cfi: cfi, ranges: x64_variable_ranges(function, allocation, emitter.stack, positions, defining)}
     X64CompileResult{
         function: Val(X64CompiledFunction{id: function.id, name: function.name, code: emitter.code, relocs: emitter.relocs}),
         debug: Val(debug),
@@ -625,7 +646,7 @@ fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Compile
 // interval, from after its definition (or its block's start, for a block
 // parameter) through its last position. A value bound twice to one
 // variable yields one range.
-fn x64_variable_ranges(function: LIRFunction, allocation: X64Allocation, positions: [Int], defining: [Bool]) -> [X64VariableRange] Never! {
+fn x64_variable_ranges(function: LIRFunction, allocation: X64Allocation, stack: [Int], positions: [Int], defining: [Bool]) -> [X64VariableRange] Never! {
     ranges := [X64VariableRange]{}
     seen := [Int:Bool]{}
     count :: function.values.len()
@@ -643,6 +664,7 @@ fn x64_variable_ranges(function: LIRFunction, allocation: X64Allocation, positio
             .Reg(reg) -> X64DebugLocation.Register{reg: reg}
             .Xmm(reg, _) -> X64DebugLocation.Register{reg: 16 + reg}
             .Stack(slot) | .FloatStack(slot, _) -> X64DebugLocation.Frame{offset: x64_slot_disp(allocation.callee_saved.len(), slot)}
+            .Frame(slot) -> X64DebugLocation.FrameAddress{offset: stack[slot]}
             .Imm(_) | .Folded -> { next }
         }
         &ranges.push(X64VariableRange{variable: binding.variable, start: start, end: end, location: location})
@@ -763,6 +785,27 @@ fn x64_select_binary_imm(emitter: &X64Emitter, locations: [X64Loc], dst: LIRValu
     true
 }
 
+// The flags of `left op right` in rax (rdx preserved); returns the condition
+// set exactly when the operation overflows. MUL's carry tests unsigned range;
+// IMUL's overflow tests signed range (FixedArithmetic.rs:318-326).
+fn x64_emit_overflow(emitter: &X64Emitter, locations: [X64Loc], op: LIRBinaryOp, left: LIRValueID, right: LIRValueID) -> X64Cond Never! {
+    left_reg :: x64_operand(&emitter, locations[left.value], X64_R10)
+    right_reg :: x64_operand(&emitter, locations[right.value], X64_R11)
+    if op == .UMul && right_reg != X64_R11 -> x64_mov_rr(&emitter.code, X64_R11, right_reg)
+    x64_mov_rr(&emitter.code, X64_RAX, left_reg)
+    if op == .UMul -> x64_push(&emitter.code, X64_RDX)
+    if op == {
+        .Add | .UAdd -> x64_alu_rr(&emitter.code, X64Alu.Add, X64_RAX, right_reg)
+        .Sub | .USub -> x64_alu_rr(&emitter.code, X64Alu.Sub, X64_RAX, right_reg)
+        .UMul -> x64_mul(&emitter.code, X64_R11)
+        else -> x64_imul_rr(&emitter.code, X64_RAX, right_reg)
+    }
+    // POP does not alter MUL's carry flag.
+    if op == .UMul -> x64_pop(&emitter.code, X64_RDX)
+    if op == .UAdd || op == .USub || op == .UMul -> return X64Cond.B
+    X64Cond.O
+}
+
 struct X64SelectedAddress {
     base: Int
     index: Int
@@ -770,9 +813,14 @@ struct X64SelectedAddress {
     disp: Int
 }
 
+// A frame-address base folds into the displacement: `[rbp + slot + disp]`.
 fn x64_select_address(emitter: &X64Emitter, locations: [X64Loc], address: X64Address) -> X64SelectedAddress Never! {
-    base :: x64_operand(&emitter, locations[address.base.value], X64_R10)
     index :: if address.index == .Val(value) -> x64_operand(&emitter, locations[value.value], X64_R11) else -> -1
+    if locations[address.base.value] == .Frame(slot) {
+        disp :: emitter.stack[slot] + address.disp
+        if x64_fits_i32(disp) -> return X64SelectedAddress{base: X64_RBP, index: index, scale: address.scale, disp: disp}
+    }
+    base :: x64_operand(&emitter, locations[address.base.value], X64_R10)
     X64SelectedAddress{base: base, index: index, scale: address.scale, disp: address.disp}
 }
 
@@ -961,24 +1009,9 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             }
         }
         .Overflows(dst, op, left, right) -> {
-            left_reg :: x64_operand(&emitter, locations[left.value], X64_R10)
-            right_reg :: x64_operand(&emitter, locations[right.value], X64_R11)
-            // MUL's carry tests unsigned range; IMUL's overflow tests signed
-            // range (FixedArithmetic.rs:318-326). Preserve allocated rdx.
-            if op == .UMul && right_reg != X64_R11 -> x64_mov_rr(&emitter.code, X64_R11, right_reg)
-            x64_mov_rr(&emitter.code, X64_RAX, left_reg)
-            if op == .UMul -> x64_push(&emitter.code, X64_RDX)
-            if op == {
-                .Add | .UAdd -> x64_alu_rr(&emitter.code, X64Alu.Add, X64_RAX, right_reg)
-                .Sub | .USub -> x64_alu_rr(&emitter.code, X64Alu.Sub, X64_RAX, right_reg)
-                .UMul -> x64_mul(&emitter.code, X64_R11)
-                else -> x64_imul_rr(&emitter.code, X64_RAX, right_reg)
-            }
-            // POP does not alter MUL's carry flag.
-            if op == .UMul -> x64_pop(&emitter.code, X64_RDX)
+            cond :: x64_emit_overflow(&emitter, locations, op, left, right)
             reg :: x64_result_register(locations[dst.value], X64_RAX)
-            unsigned :: op == .UAdd || op == .USub || op == .UMul
-            x64_setcc(&emitter.code, if unsigned -> X64Cond.B else -> X64Cond.O, reg)
+            x64_setcc(&emitter.code, cond, reg)
             x64_movzx_r8(&emitter.code, reg, reg)
             x64_finish_result(&emitter, locations[dst.value], reg)
         }
@@ -1006,11 +1039,9 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             address :: x64_select_address(&emitter, locations, x64_memory_address(folds, base, offset))
             x64_store_indexed(&emitter.code, address.base, address.index, address.scale, address.disp, stored_reg, function.values[value.value].layout.size)
         }
-        .StackSlot(dst, _, _) -> {
-            reg :: x64_result_register(locations[dst.value], X64_RAX)
-            x64_lea(&emitter.code, reg, X64_RBP, emitter.stack[dst.value])
-            x64_finish_result(&emitter, locations[dst.value], reg)
-        }
+        // The allocator gives every StackSlot result its frame address as
+        // location (RegAlloc.jet): uses fold or rematerialize it.
+        .StackSlot(_, _, _) -> {}
         .DataAddress(dst, data) -> {
             reg :: x64_result_register(locations[dst.value], X64_RAX)
             at :: x64_lea_rip(&emitter.code, reg)
@@ -1043,7 +1074,11 @@ fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation
         .Branch(condition, then_target, else_target) -> {
             cond := X64Cond.NE
             if fused {
-                if block.insts[block.insts.len() - 1] == .Compare(_, compare, left, right) -> cond = x64_emit_compare(&emitter, allocation.locations, compare, left, right)
+                if block.insts[block.insts.len() - 1] == {
+                    .Compare(_, compare, left, right) -> cond = x64_emit_compare(&emitter, allocation.locations, compare, left, right)
+                    .Overflows(_, op, left, right) -> cond = x64_emit_overflow(&emitter, allocation.locations, op, left, right)
+                    else -> {}
+                }
             } else {
                 reg :: x64_operand(&emitter, allocation.locations[condition.value], X64_R10)
                 x64_test_rr(&emitter.code, reg, reg)
@@ -1051,6 +1086,16 @@ fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation
             then_index :: lir_block_index(function, then_target.block)
             else_index :: lir_block_index(function, else_target.block)
             then_moves :: x64_edge_moves(function, allocation, then_target)
+            else_moves :: x64_edge_moves(function, allocation, else_target)
+            // The then block follows and the else edge moves nothing: one
+            // inverted jcc to the else block, then fall through (LLVM's
+            // branch layout) instead of `jcc then; jmp else`.
+            if then_index == block_index + 1 && else_moves.len() == 0 {
+                at :: x64_jcc_rel32(&emitter.code, x64_cond_invert(cond))
+                &emitter.fixups.push(X64BlockFixup{at: at, block: else_index})
+                x64_emit_parallel_moves(&emitter, then_moves)
+                return
+            }
             stub_at := -1
             if then_moves.len() == 0 {
                 at :: x64_jcc_rel32(&emitter.code, cond)
@@ -1058,7 +1103,7 @@ fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation
             } else {
                 stub_at = x64_jcc_rel32(&emitter.code, cond)
             }
-            x64_emit_parallel_moves(&emitter, x64_edge_moves(function, allocation, else_target))
+            x64_emit_parallel_moves(&emitter, else_moves)
             if stub_at >= 0 || else_index != block_index + 1 -> x64_emit_jump(&emitter, else_index)
             if stub_at >= 0 {
                 stub :: emitter.code.len()

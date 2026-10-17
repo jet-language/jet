@@ -408,7 +408,8 @@ fn dwarf_types(info: &[U8], types: [LIRDebugType]) -> [Int] Never! {
 
 // The location of a variable carried at `location`: the value itself, or
 // for an `indirect` variable the memory its value points at. The frame base
-// is rbp.
+// is rbp. A FrameAddress value is rbp + offset itself: indirect, that is the
+// memory at fbreg(offset); direct, the computed address (DW_OP_stack_value).
 fn dwarf_location(location: X64DebugLocation, indirect: Bool) -> [U8] Never! {
     expr := [U8]{}
     if location == {
@@ -425,6 +426,11 @@ fn dwarf_location(location: X64DebugLocation, indirect: Bool) -> [U8] Never! {
             dwarf_u8(&expr, 0x91)
             dwarf_sleb(&expr, offset)
             if indirect -> dwarf_u8(&expr, 0x06)
+        }
+        .FrameAddress(offset) -> {
+            dwarf_u8(&expr, 0x91)
+            dwarf_sleb(&expr, offset)
+            if !indirect -> dwarf_u8(&expr, 0x9f)
         }
     }
     expr
