@@ -155,6 +155,32 @@ hold N threads' scratch.
 never `jetc0`) with `jet-runtime/` beside it, `JET_TOOLCHAIN_ROOT`, and the
 same identity (`--factory-receipt`); run it through the same `jet-env`.
 
+A self-hosted chain needs no factory, no Rust and no stage 0. `--seed
+<published dir>` takes a GREEN publication whose `self-rebuild.json` proves
+stage 2 == stage 3 and uses its `stage3/jet` as the builder of stage 1:
+
+```sh
+Tools/agent/jet-env node Tools/agent/stage1/native-feed.mjs \
+  --seed /disk/previous/native-compiler/r29 --out /disk/native-fixedpoint \
+  --repo /disk/pinned-source
+Tools/agent/jet-env node Tools/agent/stage1/native-feed.mjs \
+  --self-rebuild --out /disk/native-fixedpoint
+```
+
+The seed's real `build` argv links stage 1 against `jet-runtime/` beside the
+seed: the pack its own lowering produced, so stage 1's code and runtime share
+one layout. Stage 1 then produces this source's runtime pack through the
+runtime-library seam (`prebuild-runtime.mjs <stage1/jet>`, written to
+`native-runtime/` and copied beside stage 1), and stages 2 and 3 link against
+that pack. Each stage runs under the identity of the compiler running it:
+stage 1 under the seed's, stages 2 and 3 under this source's, both computed as
+`compilerSourceIdentity` (`native-factory.mjs`, the `BuildIdentity.rs`
+`compiler_source_id` framing) since there is no factory receipt. The C
+toolchain reference is the one stage 1 resolves. The receipt records the seed
+(publication and self-rebuild hashes, stage 3 binary/object sha256, identity,
+runtime key and pack sha256) instead of `factorySha256`; stage 1 (the seed's
+lowering) differs from stage 2 by design, and the gate stays stage 2 == stage 3.
+
 `native-lowering-census.mjs FACTORY_RECORD PINNED_SOURCE FRESH_OUT` may run in
 parallel with the pack producer. It uses the existing `Entry.native` object
 boundary and deliberately supplies no pack: all front-end TSV and backend
