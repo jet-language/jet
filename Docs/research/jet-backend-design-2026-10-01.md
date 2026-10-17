@@ -3879,7 +3879,9 @@ dispatch immediately (AllowDepthFirst, the sole policy). A cancelled scope
 returns an inactive Subscription and releases the handler unregistered; the
 last EventScope handle cancels, unsubscribing every tracked Subscription; the
 last Event handle releases its handlers while Subscriptions outlive it. A
-handler stop ends the dispatch and leaves the trace null.
+handler stop ends the dispatch and leaves the trace null. `emit` holds its own
+strong count for the whole dispatch (Rust: `&self` on the `Rc`), so a handler
+that drops the last Event handle leaves the core alive until `emit` returns.
 
 The backend (`Lower/Events.jet`) lowers every `core.event` ClosureMethod row and
 `core.event.__event_with_policy` to these exports. A handler is the moved
@@ -3892,7 +3894,8 @@ method returns); handlers are retained `Fn(T) -> Unit` callbacks.
 `JetRuntime/Tests/EventProviderWitness.c` links the real object with
 `--wrap=jet_rt_alloc --wrap=jet_rt_free` and checks registration order,
 priority, once, unsubscribe (also mid-dispatch), cancelled-scope registration,
-scope and Event teardown, nested emit, trace text, and that every scenario
+scope and Event teardown, nested emit, the last Event handle dropped mid-emit
+(freed blocks are poisoned), trace text, and that every scenario
 returns to its allocation baseline. `Examples/features/concurrency/event_lifecycle.jet`
 is the end-to-end golden. AsyncEvent, Hook and DecisionHook are not part of
 this provider.

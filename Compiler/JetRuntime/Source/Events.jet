@@ -387,7 +387,10 @@ fn event_ranks_below(snapshot: I64, position: I64, priority: I64) -> Bool {
 // priority (highest first) then registration; a listener deactivated before
 // its turn is skipped; a once listener is consumed before its handler runs.
 // A stop delivered by a handler ends the dispatch and returns no trace.
+// The dispatch holds its own strong count: a handler that drops the last
+// Event handle leaves the core alive until the dispatch releases it.
 #Export(c) fn jet_event_emit(core: I64, payload: I64) -> I64 {
+    event_store(core, event_word(core) + I64{1})
     base :: core + I64{24}
     length :: event_word(base)
     snapshot :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{8}, I64{8})
@@ -432,6 +435,7 @@ fn event_ranks_below(snapshot: I64, position: I64, priority: I64) -> Bool {
     jet_rt_free(scratch, I64{16}, I64{8})
     if (length != I64{0}) -> jet_rt_free(snapshot, length * I64{8}, I64{8})
     event_prune_listeners(core)
+    jet_rt_handle_drop_jet_event(core)
     if stopped -> return I64{0}
     event_trace_new(delivered, I64{0}, I64{0})
 }

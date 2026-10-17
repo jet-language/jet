@@ -1,8 +1,9 @@
 // Link real composed Jet runtime exports with -Wl,--wrap=jet_rt_alloc
 // -Wl,--wrap=jet_rt_free. Events.jet against the Rust meaning
 // (ReactiveEventWatch.rs JetEventScope/JetSubscription/JetEvent): registration
-// order, priority, once, cancellation, scope teardown, nested emit, and every
-// provider allocation freed exactly once.
+// order, priority, once, cancellation, scope teardown, nested emit, the last
+// Event handle dropped mid-emit, and every provider allocation freed exactly
+// once.
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -55,6 +56,8 @@ void __wrap_jet_rt_free(void *pointer, int64_t size, int64_t alignment) {
         if (at < live_count) {
             assert(live[at].size == size);
             live[at] = live[--live_count];
+            // Poison tracked blocks so a read after free fails loudly.
+            memset(pointer, 0xA5, (size_t)size);
         }
     }
     __real_jet_rt_free(pointer, size, alignment);
@@ -287,10 +290,34 @@ static void event_drop_first(void) {
     jet_rt_handle_drop_jet_event_scope(scope);
 }
 
+// A handler drops the last Event handle and its scope mid-emit (the scope's
+// cancel unsubscribes the later listener). The dispatch holds its own count
+// (Rust: `&self` on the Rc), so the core outlives the handler and is freed
+// when emit returns, not while emit still reads it.
+static void drop_event_and_scope(Handler *self, int64_t payload) {
+    (void)payload;
+    jet_rt_handle_drop_jet_event(self->event);
+    jet_rt_handle_drop_jet_event_scope(self->other);
+}
+static void event_dropped_mid_emit(void) {
+    char log[64] = "";
+    void *scope = jet_event_scope_new();
+    void *event = new_event();
+    Handler first = handler("first", log), second = handler("second", log);
+    first.body = drop_event_and_scope;
+    first.event = event;
+    first.other = scope;
+    jet_rt_handle_drop_jet_subscription(listen(event, scope, 0, 0, &first));
+    jet_rt_handle_drop_jet_subscription(listen(event, scope, 0, 0, &second));
+    emit(event, 1, 1);
+    assert(strcmp(log, "first:1 ") == 0);
+    assert(first.released == 1 && second.released == 1);
+}
+
 typedef void (*Scenario)(void);
 int main(void) {
     jet_rt_alloc_init();
-    Scenario scenarios[] = {goldens, once_and_unsubscribe, priority_order, scope_teardown, cancelled_scope, mutation_during_dispatch, nested_emit, event_drop_first};
+    Scenario scenarios[] = {goldens, once_and_unsubscribe, priority_order, scope_teardown, cancelled_scope, mutation_during_dispatch, nested_emit, event_drop_first, event_dropped_mid_emit};
     goldens(); // warm any runtime-lifetime allocation before baselines
     for (size_t i = 0; i < sizeof scenarios / sizeof scenarios[0]; ++i) {
         size_t before = live_count;
@@ -298,6 +325,6 @@ int main(void) {
         assert(live_count == before);
     }
     assert(allocated > 0); // the provider's own allocations are intercepted
-    puts("Event provider: order, priority, once, cancellation, teardown, nested emit, ownership OK");
+    puts("Event provider: order, priority, once, cancellation, teardown, nested emit, drop mid-emit, ownership OK");
     return 0;
 }

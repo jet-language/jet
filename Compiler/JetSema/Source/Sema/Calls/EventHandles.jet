@@ -22,14 +22,28 @@ fn sema_event_unit() -> Type Never! {
     Type.Named{name: "Unit"}
 }
 
-// The handle family of a receiver: `Event<T>`, `EventScope`, `Subscription`,
-// `EventTrace`; None for any other type (a user `Event` struct included).
-fn sema_event_handle_owner(ty: Type) -> String? {
+// The handle family a receiver type is named for: `Event<T>`, `EventScope`,
+// `Subscription`, `EventTrace`; None for any other type (a non-generic
+// `Event` included).
+fn sema_event_handle_family(ty: Type) -> String? {
     if ty == {
         .Apply(name, args) -> if name == "Event" && args.len() == 1 -> Val(name) else -> None
         .Named(name) -> if name == "EventScope" || name == "Subscription" || name == "EventTrace" -> Val(name) else -> None
         else -> None
     }
+}
+
+// The built-in handle family of a receiver. These are compiler-known types
+// with no source declaration (the lowering's `lower_event_repr` guard): a
+// visible user nominal of the same name shadows them, as a user
+// `Sender`/`Receiver` shadows the channel endpoints (StreamHandles.jet
+// `sema_stream_handle_is_canonical`).
+fn sema_event_handle_owner(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
+    owner :: sema_event_handle_family(ty) ?? return None
+    if program.registration_graph == .Val(graph) {
+        if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None -> return None
+    }
+    Val(owner)
 }
 
 // (arity, result) of a known method, or None.
@@ -81,7 +95,7 @@ fn sema_event_handler_type(payload: Type) -> Type Never! {
 
 fn sema_call_try_event_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     receiver_type :: sema_call_resolved_type(receiver_value.ty, environment, program)
-    owner :: sema_event_handle_owner(receiver_type) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    owner :: sema_event_handle_owner(receiver_type, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     payload :: if receiver_type == {
         .Apply(_, type_args) -> if type_args.len() == 1 -> sema_call_resolved_type(type_args[0], environment, program) else -> Type.Int
         else -> Type.Int

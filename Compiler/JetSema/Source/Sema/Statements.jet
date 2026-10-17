@@ -4356,7 +4356,17 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
             return None
         }
     }
-    place := sema_stmt_check_assignment_place(target, op != None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    place :: sema_stmt_check_assignment_place(target, op != None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    // D-OPDEF1=A on a field of a local: the type of the place just checked
+    // decides the route, so the field expression is checked once.
+    hooked :: sema_stmt_compound_field_hook_value(target, op, op_span, expr, place.ty)
+    if hooked == .Val(binary) -> return sema_stmt_check_place_assignment(target, ^place, None, op_span, binary, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    sema_stmt_check_place_assignment(target, ^place, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+// The write of `expr` (combined by `op`) through the checked `place` of `target`.
+fn sema_stmt_check_place_assignment(target: LValue, checked_place: ^TExpr, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
+    place := ^checked_place
     // D-DATATREE-RULES1 (Rust `check_stmt` __dyn_set_path): a plain write
     // through a Dyn member/index chain sets the path on the root in place.
     if place.kind == .HandleMethod(_, operation, _) && sema_stmt_is_dyn_index(operation) {
@@ -4465,32 +4475,34 @@ fn sema_stmt_compound_nested_hook(op: BinOp, base: Expr, field_ty: Type, environ
 // `place = place op value` and TIR sees one binary spine. The binary check
 // then resolves the hook or reports E0360 at the operator, as Rust's
 // missing-hook report does. Numbers, exact numbers and `String +=` keep the
-// compound route. Only a local or a field of a local or indexed element
-// qualifies; a nominal field below an index keeps E0362, and an indexed
-// slot keeps E0164.
-fn sema_stmt_compound_hook_value(target: LValue, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Expr? {
+// compound route. Only a local or a field of a local qualifies: a nominal
+// field below an index keeps E0362, and an indexed slot keeps E0164.
+fn sema_stmt_compound_hook_operator(op: BinOp?) -> BinOp? Never! {
     operator :: op ?? return None
     if operator != BinOp.Add && operator != BinOp.Sub && operator != BinOp.Mul && operator != BinOp.Div -> return None
-    if target == {
-        .Local(name, name_span) -> {
-            index :: sema_scope_resolve_index(scopes, name) ?? return None
-            place_ty :: sema_scope_binding_row(environment, scopes, index).symbol.ty ?? return None
-            if !sema_stmt_compound_hooked_place(place_ty) -> return None
-            return Val(Expr.Binary{op: operator, left: Expr.Ident{name: name, span: name_span}, right: expr, span: op_span})
-        }
-        .Field(base, field, span) -> {
-            plain_root :: base == .Ident(_, _)
-            indexed :: base == .Index(_, _, _, _)
-            if !plain_root && !indexed -> return None
-            place :: Expr.Field{base: base, member: field, span: span}
-            probe_diagnostics := [Diagnostic]{}
-            probed :: sema_probe_expression(place, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return None
-            if indexed && sema_stmt_compound_nominal(probed.ty) -> return None
-            if !sema_stmt_compound_hooked_place(probed.ty) -> return None
-            return Val(Expr.Binary{op: operator, left: place, right: expr, span: op_span})
-        }
-        else -> return None
+    Val(operator)
+}
+
+// A local reads its binding's declared type.
+fn sema_stmt_compound_hook_value(target: LValue, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Expr? {
+    operator :: sema_stmt_compound_hook_operator(op) ?? return None
+    if target == .Local(name, name_span) {
+        index :: sema_scope_resolve_index(scopes, name) ?? return None
+        place_ty :: sema_scope_binding_row(environment, scopes, index).symbol.ty ?? return None
+        if !sema_stmt_compound_hooked_place(place_ty) -> return None
+        return Val(Expr.Binary{op: operator, left: Expr.Ident{name: name, span: name_span}, right: expr, span: op_span})
     }
+    None
+}
+
+// A field of a local reads the type of the place the projected assignment
+// already checked (`sema_stmt_check_projected_assignment`).
+fn sema_stmt_compound_field_hook_value(target: LValue, op: BinOp?, op_span: Span, expr: Expr, place_ty: Type) -> Expr? {
+    operator :: sema_stmt_compound_hook_operator(op) ?? return None
+    if target == .Field(base, field, span) {
+        if base == .Ident(_, _) && sema_stmt_compound_hooked_place(place_ty) -> return Val(Expr.Binary{op: operator, left: Expr.Field{base: base, member: field, span: span}, right: expr, span: op_span})
+    }
+    None
 }
 
 fn sema_stmt_compound_nominal(ty: Type) -> Bool Never! {
@@ -4518,7 +4530,7 @@ fn sema_stmt_check_assignment(target: LValue, op: BinOp?, op_span: Span, expr: E
 
 fn sema_stmt_check_assignment_target(target: LValue, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     if sema_ownership_report_lending_view_escape(expr, "replace another value", scopes, context, &diagnostics) -> return None
-    hooked :: sema_stmt_compound_hook_value(target, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context)
+    hooked :: sema_stmt_compound_hook_value(target, op, op_span, expr, environment, scopes)
     if hooked == .Val(binary) -> return sema_stmt_check_assignment_target(target, None, op_span, binary, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if target == {
         .Local(name, name_span) -> sema_stmt_check_local_assignment(name, name_span, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
