@@ -1754,7 +1754,10 @@ fn jet_cli_maintenance_host(action: String, args: [String], color: Bool, json: B
 // verbs), else of JET_TRACE_FILE (Request.jet `jet_cli_trace_sink`).
 // A verb that holds a compile result ends the process itself (jet_cli_finish);
 // every other verb's output ends it here.
-fn jet_cli_main(args: [String]) -> Never {
+// `Never Never!`: the verbs' calls are `Never!` (cannot fail); a0_001, which
+// seeds round 4, requires a fallible caller for them (E0403) where later
+// checkers know a `Never` error cannot occur.
+fn jet_cli_main(args: [String]) -> Never Never! {
     plan :: jet_cli_front(args)
     trace_sink :: if jet_cli_plan_compiles(plan) -> jet_cli_trace_sink(jet_cli_trace_flag(jet_cli_owned_flags(args))) else -> None
     jet_cli_finish(jet_cli_execute(^plan, trace_sink))
