@@ -3,9 +3,10 @@
 // commands (E2101) and flags (E2102), then the verbs the Jet driver owns
 // (`explain <CODE>`, `check [<file>|<dir>]`, `build <file>`,
 // `run [<file>|<dir>]`, `test <file>`, `new <name>`, `doc <file>`, `fmt`,
-// and `emit --rust <file>`; a bare or directory target resolves the project
-// entry, Entry.jet), and the inspect group (Inspect.jet). Every report is
-// the Rust host's exact bytes and exit status for the same argv. A command
+// and `emit --ast|--mir|--lir|--rust <file>`; a bare or directory target
+// resolves the project entry, Entry.jet), and the inspect group
+// (Inspect.jet). Every report is the Rust host's exact bytes and exit
+// status for the same argv, except the Jet-only `emit` tiers. A command
 // whose Jet port has not landed yet is refused with E2104 instead of
 // guessing its behavior.
 use core.files as cli_files
@@ -68,9 +69,10 @@ enum JetCLIPlan {
     // `jet doc <file>` (Source/CmdDoc.rs `run_doc`): `json` prints the
     // `inspect.doc` status, `check` reports undocumented public items.
     Doc(file: String, source: String, color: Bool, json: Bool, check: Bool)
-    // `jet emit --rust <file>`: print the Rust generated for the entry
-    // (CmdDevTools.rs `run_emit_rust`).
-    Emit(file: String, source: String, color: Bool, json: Bool)
+    // `jet emit --ast|--mir|--lir|--rust <file>`: print one tier of the
+    // entry (`--rust`: CmdDevTools.rs `run_emit_rust`); `function` is the
+    // `--fn` selection of the AST, MIR and LIR tiers.
+    Emit(file: String, source: String, color: Bool, json: Bool, tier: String, function: String?)
     // `jet eval <file>` (CmdDevTools.rs `run_eval`): evaluate the entry's
     // `run` and print its value; `pure` (`--pure`) adds the transitive E3401
     // purity walk; `notice` is resolution's stderr.
@@ -198,7 +200,7 @@ JET_CLI_SEPARATE_VALUE_FLAGS :: [String]{
     "--token", "--base-receipt", "--receipt", "--head-receipt", "--after-receipt", "--canvas-host",
     "--canvas-port", "--canvas-transport", "--canvas-authority", "--where", "--capture",
     "--browser", "--browser-retries", "--browser-reporter", "--filter", "--shuffle", "--verify",
-    "--template", "--sort", "--threads",
+    "--template", "--sort", "--threads", "--fn",
 }
 
 // `--name=value` spellings that never become positional words.
@@ -206,7 +208,7 @@ JET_CLI_VALUE_PREFIXES :: [String]{
     "--verify=", "--output=", "--where=", "--capture=", "--endpoint=", "--channel=",
     "--platform=", "--trust-key=", "--set=", "--scope=", "--kind=", "--live=", "--replay=",
     "--target=", "--app=", "--share=", "--token=", "--canvas-host=", "--canvas-port=",
-    "--canvas-transport=", "--canvas-authority=", "--threads=",
+    "--canvas-transport=", "--canvas-authority=", "--threads=", "--fn=",
 }
 
 // Flags an external formatter accepts with `jet fmt --lang`.
@@ -1089,17 +1091,46 @@ fn jet_cli_fuzz_command(jet_argv: [String], args: [String], color: Bool, quiet: 
     jet_cli_with_notices([String]{notice}, jet_cli_fuzz(file, test_name, iterations, color))
 }
 
-// `jet emit --rust <file>` (Source/main.rs `"emit"`, CmdDevTools.rs
-// `run_emit_rust`): with no target the command's help is a usage error; a
-// target without `--rust` is E2102; the file is read as typed.
+// The tiers `jet emit` prints, one mode flag each (`--ast`, `--mir`,
+// `--lir`, `--rust`).
+JET_CLI_EMIT_TIERS :: [String]{"ast", "mir", "lir", "rust"}
+
+// `jet emit --ast|--mir|--lir|--rust <file>` (`--rust`: Source/main.rs
+// `"emit"`, CmdDevTools.rs `run_emit_rust`): with no target the command's
+// help is a usage error; a target needs exactly one mode flag (E2102); the
+// file is read as typed. `--fn NAME` selects one function's tree on the
+// AST, MIR and LIR tiers.
 fn jet_cli_emit(jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
     if args.len() < 2 -> return jet_cli_done("", if quiet -> "" else -> jet_cli_command_help("emit"), JET_DRIVER_EXIT_USAGE)
-    if !jet_argv.contains("--rust") {
-        return jet_cli_fail("E2102", "usage: jet emit --rust <file.jet>", "`emit` needs a mode flag; today only `--rust` is supported", "run `jet emit --rust <file.jet>` to print the generated Rust", color, JET_DRIVER_EXIT_USAGE)
+    modes := [String]{}
+    loop tier in JET_CLI_EMIT_TIERS {
+        if jet_argv.contains("--{tier}") -> &modes.push(tier)
+    }
+    if modes.len() == 0 {
+        return jet_cli_fail("E2102", "usage: jet emit --ast|--mir|--lir|--rust <file.jet>", "`emit` needs a mode flag naming the tier it prints", "run `jet emit --mir <file.jet>`; `--ast`, `--lir` and `--rust` print the other tiers", color, JET_DRIVER_EXIT_USAGE)
+    }
+    if modes.len() > 1 {
+        return jet_cli_fail("E2102", "`jet emit` prints one tier, but both `--{modes[0]}` and `--{modes[1]}` were given", "`emit` writes a single tier so its output has one meaning", "keep one of the mode flags", color, JET_DRIVER_EXIT_USAGE)
+    }
+    tier :: modes[0]
+    function := String?{None}
+    asked := false
+    loop argument in jet_argv {
+        if argument == "--fn" || argument.starts_with("--fn=") -> asked = true
+    }
+    if asked {
+        name :: jet_cli_option_value(jet_argv, "--fn") ?? ""
+        if name == "" || name.starts_with("-") {
+            return jet_cli_fail("E2104", "`--fn` needs a function name", jet_cli_why("E2104"), "write `jet emit --{tier} <file.jet> --fn <name>`", color, JET_DRIVER_EXIT_USAGE)
+        }
+        if tier == "rust" {
+            return jet_cli_fail("E2102", "`--fn` doesn't apply to `jet emit --rust`", "`--rust` prints the whole generated program", "use `--fn` with `--ast`, `--mir` or `--lir`, or drop it", color, JET_DRIVER_EXIT_USAGE)
+        }
+        function = Val(name)
     }
     file :: args[1]
     source :: cli_files.read(file) ?? return jet_cli_fail("E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color, JET_DRIVER_EXIT_USER_ERROR)
-    JetCLIPlan.Emit{file: file, source: source, color: color, json: json}
+    JetCLIPlan.Emit{file: file, source: source, color: color, json: json, tier: tier, function: function}
 }
 
 // `jet eval <file.jet | expression>` (Source/main.rs `"eval"`): a file, a

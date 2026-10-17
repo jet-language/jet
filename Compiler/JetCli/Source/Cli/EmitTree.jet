@@ -1,0 +1,61 @@
+// `jet emit --ast | --mir | --lir`: every tier is one ordered tree of
+// printed nodes. The text form indents each child two spaces under its
+// parent; `--json` is the same tree in the `emit` status envelope, so both
+// forms carry one meaning (I9).
+
+// One printed node: `kind` names the construct (`function`, `block`, `Call`,
+// ...), `text` is its line in the text form.
+struct JetCLIEmitNode {
+    kind: String
+    text: String
+    children: [JetCLIEmitNode]
+}
+
+fn jet_cli_emit_node(kind: String, text: String, children: [JetCLIEmitNode]) -> JetCLIEmitNode Never! {
+    JetCLIEmitNode{kind: kind, text: text, children: children}
+}
+
+fn jet_cli_emit_leaf(kind: String, text: String) -> JetCLIEmitNode Never! {
+    JetCLIEmitNode{kind: kind, text: text, children: [JetCLIEmitNode]{}}
+}
+
+// The text form: one line per node, two spaces per depth, a final newline.
+fn jet_cli_emit_tree_text(nodes: [JetCLIEmitNode]) -> String Never! {
+    lines := [String]{}
+    loop node in nodes -> jet_cli_emit_tree_lines(node, "", &lines)
+    if lines.len() == 0 -> return ""
+    "{lines.join("\n")}\n"
+}
+
+fn jet_cli_emit_tree_lines(node: JetCLIEmitNode, indent: String, lines: &[String]) Never! {
+    &lines.push("{indent}{node.text}")
+    loop child in node.children -> jet_cli_emit_tree_lines(child, "{indent}  ", &lines)
+}
+
+// The `--json` form: `{"schema":"jet.status/v1","action":"emit","ok":true,
+// "reports":[],"tier":…,"file":…,"function":…,"nodes":[{"kind","text","children"}]}`.
+fn jet_cli_emit_tree_json(tier: String, file: String, function: String?, nodes: [JetCLIEmitNode]) -> String Never! {
+    rendered :: loop node in nodes -> jet_cli_emit_node_json(node)
+    fields :: [JetCLIStatusField]{
+        jet_cli_status_field("tier", jet_cli_status_text(tier)),
+        jet_cli_status_field("file", jet_cli_status_text(file)),
+        jet_cli_status_field("function", jet_cli_status_optional_text(function)),
+        jet_cli_status_field("nodes", jet_cli_status_array(rendered)),
+    }
+    "{jet_cli_status_render("emit", true, fields)}\n"
+}
+
+fn jet_cli_emit_node_json(node: JetCLIEmitNode) -> JetCLIStatusValue Never! {
+    children :: loop child in node.children -> jet_cli_emit_node_json(child)
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("kind", jet_cli_status_text(node.kind)),
+        jet_cli_status_field("text", jet_cli_status_text(node.text)),
+        jet_cli_status_field("children", jet_cli_status_array(children)),
+    })
+}
+
+// The bytes of one tier in the requested form.
+fn jet_cli_emit_tree_output(tier: String, file: String, function: String?, json: Bool, nodes: [JetCLIEmitNode]) -> String Never! {
+    if json -> return jet_cli_emit_tree_json(tier, file, function, nodes)
+    jet_cli_emit_tree_text(nodes)
+}

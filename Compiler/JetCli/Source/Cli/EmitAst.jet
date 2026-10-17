@@ -1,0 +1,726 @@
+// `jet emit --ast <file>`: the parsed syntax tree of the entry file as
+// EmitTree nodes. Each node names one item, statement, expression or pattern
+// with its written names, operators and types; children are its operands and
+// bodies in source order. Spans are not printed, so the output depends only
+// on the program's structure.
+use jet_foundation.[
+    BindName,
+    BindPattern,
+    Binding,
+    CallArg,
+    Expr,
+    ExprField,
+    ExprPair,
+    ExternFn,
+    Func,
+    ImportDecl,
+    ImportedItem,
+    Item,
+    LValue,
+    LambdaBody,
+    LambdaParam,
+    ListPatRest,
+    MapPatEntry,
+    MigrationOp,
+    NamedSpan,
+    OrFallback,
+    Param,
+    PatSlot,
+    Pattern,
+    PlaceAccess,
+    Program,
+    Stmt,
+    StrFormat,
+    StrPart,
+    StructPatField,
+    SwitchArm,
+    TupleField,
+    Type,
+    TypeParam,
+    UnOp,
+    access_sigil,
+    type_name,
+]
+use jet_parser.[jfmt_bin_op_spell, jfmt_compound_spell]
+
+// The top-level nodes of `program`: its imports, then its items. With
+// `function`, only the functions of that name (top-level or methods).
+fn jet_cli_emit_ast_program(program: Program, function: String?) -> [JetCLIEmitNode] Never! {
+    nodes := [JetCLIEmitNode]{}
+    if function == .Val(name) {
+        loop item in program.items -> jet_cli_emit_ast_find_functions(item, name, &nodes)
+        return nodes
+    }
+    loop import in program.imports -> &nodes.push(jet_cli_emit_leaf("import", jet_cli_emit_ast_import(import)))
+    loop item in program.items -> &nodes.push(jet_cli_emit_ast_item(item))
+    if program.script_body.len() > 0 -> &nodes.push(jet_cli_emit_ast_body("script", "script", program.script_body))
+    nodes
+}
+
+fn jet_cli_emit_ast_find_functions(item: Item, name: String, found: &[JetCLIEmitNode]) Never! {
+    if item == {
+        .Func(value) -> {
+            if value.name == name -> &found.push(jet_cli_emit_ast_func(value))
+        }
+        .Struct(value) -> jet_cli_emit_ast_find_methods(value.methods, name, &found)
+        .Enum(value) -> jet_cli_emit_ast_find_methods(value.methods, name, &found)
+        .Impl(value) -> jet_cli_emit_ast_find_methods(value.methods, name, &found)
+        .CodeModule(value) -> {
+            body :: value.body ?? [Item]{}
+            loop inner in body -> jet_cli_emit_ast_find_functions(inner, name, &found)
+        }
+        .GenericModule(value) -> {
+            loop inner in value.body -> jet_cli_emit_ast_find_functions(inner, name, &found)
+        }
+        else -> {}
+    }
+}
+
+fn jet_cli_emit_ast_find_methods(methods: [Func], name: String, found: &[JetCLIEmitNode]) Never! {
+    loop method in methods {
+        if method.name == name -> &found.push(jet_cli_emit_ast_func(method))
+    }
+}
+
+fn jet_cli_emit_ast_import(import: ImportDecl) -> String Never! {
+    target :: if import.kind == {
+        .File(path, _) -> jet_cli_debug_quote(path)
+        .Module(name, _) -> name
+        .Unqualified(module_alias, _, items, _, _) -> {
+            names :: loop item in items -> jet_cli_emit_ast_imported(item)
+            "{module_alias}.[{names.join(", ")}]"
+        }
+    }
+    if import.kind == .Unqualified(_, _, _, _, _) -> return "use {target}"
+    if import.alias == "" || import.alias == target -> return "use {target}"
+    "use {target} as {import.alias}"
+}
+
+fn jet_cli_emit_ast_imported(item: ImportedItem) -> String Never! {
+    alias :: item.alias ?? return item.original
+    "{item.original} as {alias}"
+}
+
+fn jet_cli_emit_ast_body(kind: String, text: String, body: [Stmt]) -> JetCLIEmitNode Never! {
+    children :: loop statement in body -> jet_cli_emit_ast_stmt(statement)
+    jet_cli_emit_node(kind, text, children)
+}
+
+fn jet_cli_emit_ast_type_params(params: [TypeParam]) -> String Never! {
+    if params.len() == 0 -> return ""
+    names :: loop param in params -> jet_cli_emit_ast_type_param(param)
+    "<{names.join(", ")}>"
+}
+
+fn jet_cli_emit_ast_type_param(param: TypeParam) -> String Never! {
+    if param.bounds.len() == 0 -> return param.name
+    "{param.name}: {param.bounds.join(" + ")}"
+}
+
+fn jet_cli_emit_ast_type_args(args: [Type]) -> String Never! {
+    if args.len() == 0 -> return ""
+    names :: loop arg in args -> type_name(arg)
+    "<{names.join(", ")}>"
+}
+
+fn jet_cli_emit_ast_params(params: [Param]) -> String Never! {
+    names :: loop param in params -> "{access_sigil(param.convention)}{param.name}: {type_name(param.ty)}"
+    names.join(", ")
+}
+
+fn jet_cli_emit_ast_return(ty: Type?) -> String Never! {
+    returned :: ty ?? return ""
+    " -> {type_name(returned)}"
+}
+
+fn jet_cli_emit_ast_func(value: Func) -> JetCLIEmitNode Never! {
+    children := [JetCLIEmitNode]{}
+    loop param in value.params {
+        if param.default == .Val(default) -> &children.push(jet_cli_emit_node("default", "default {param.name}", [JetCLIEmitNode]{jet_cli_emit_ast_expr(default)}))
+    }
+    loop statement in value.body -> &children.push(jet_cli_emit_ast_stmt(statement))
+    jet_cli_emit_node("function", "fn {value.name}{jet_cli_emit_ast_type_params(value.type_params)}({jet_cli_emit_ast_params(value.params)}){jet_cli_emit_ast_return(value.return_type)}", children)
+}
+
+fn jet_cli_emit_ast_methods(methods: [Func], children: &[JetCLIEmitNode]) Never! {
+    loop method in methods -> &children.push(jet_cli_emit_ast_func(method))
+}
+
+fn jet_cli_emit_ast_items(kind: String, text: String, items: [Item]) -> JetCLIEmitNode Never! {
+    children :: loop item in items -> jet_cli_emit_ast_item(item)
+    jet_cli_emit_node(kind, text, children)
+}
+
+fn jet_cli_emit_ast_extern_fns(kind: String, text: String, functions: [ExternFn]) -> JetCLIEmitNode Never! {
+    children :: loop function in functions -> jet_cli_emit_leaf("extern-function", "fn {function.name}({jet_cli_emit_ast_params(function.params)}){jet_cli_emit_ast_return(function.return_type)}")
+    jet_cli_emit_node(kind, text, children)
+}
+
+fn jet_cli_emit_ast_item(item: Item) -> JetCLIEmitNode Never! {
+    if item == {
+        .Func(value) -> jet_cli_emit_ast_func(value)
+        .Struct(value) -> {
+            children := [JetCLIEmitNode]{}
+            loop field in value.fields {
+                inner := [JetCLIEmitNode]{}
+                if field.computed == .Val(computed) -> &inner.push(jet_cli_emit_node("computed", "computed", [JetCLIEmitNode]{jet_cli_emit_ast_expr(computed)}))
+                if field.default == .Val(default) -> &inner.push(jet_cli_emit_node("default", "default", [JetCLIEmitNode]{jet_cli_emit_ast_expr(default)}))
+                &children.push(jet_cli_emit_node("field", "field {field.name}: {type_name(field.ty)}", inner))
+            }
+            jet_cli_emit_ast_methods(value.methods, &children)
+            jet_cli_emit_node("struct", "struct {value.name}{jet_cli_emit_ast_type_params(value.type_params)}", children)
+        }
+        .Enum(value) -> {
+            children := [JetCLIEmitNode]{}
+            loop variant in value.variants {
+                payload :: if variant.payload == {
+                    .Unit -> ""
+                    .Single(ty, _) -> "({type_name(ty)})"
+                    .Named(fields) -> {
+                        names :: loop field in fields -> "{field.name}: {type_name(field.ty)}"
+                        "({names.join(", ")})"
+                    }
+                }
+                &children.push(jet_cli_emit_leaf("variant", "variant {variant.name}{payload}"))
+            }
+            jet_cli_emit_ast_methods(value.methods, &children)
+            jet_cli_emit_node("enum", "enum {value.name}{jet_cli_emit_ast_type_params(value.type_params)}", children)
+        }
+        .Distinct(value) -> jet_cli_emit_leaf("distinct", "distinct {value.name} :: {type_name(value.base)}")
+        .TypeAlias(value) -> jet_cli_emit_leaf("type-alias", "type {value.name}{jet_cli_emit_ast_type_params(value.type_params)} = {type_name(value.target)}")
+        .UnitFamily(value) -> {
+            children :: loop member in value.members -> jet_cli_emit_leaf("unit", "unit {member.name}")
+            jet_cli_emit_node("unit-family", "units {value.family}", children)
+        }
+        .Trait(value) -> {
+            children := [JetCLIEmitNode]{}
+            loop method in value.methods {
+                text :: "fn {method.name}({jet_cli_emit_ast_params(method.params)}){jet_cli_emit_ast_return(method.return_type)}"
+                if method.default_body == .Val(body) {
+                    &children.push(jet_cli_emit_ast_body("trait-method", text, body))
+                } else {
+                    &children.push(jet_cli_emit_leaf("trait-method", text))
+                }
+            }
+            supertraits :: if value.supertraits.len() == 0 -> "" else -> ": {value.supertraits.join(" + ")}"
+            jet_cli_emit_node("trait", "trait {value.name}{supertraits}", children)
+        }
+        .Tag(value) -> jet_cli_emit_leaf("tag", "tag {value.name}")
+        .EffectDecl(value) -> jet_cli_emit_leaf("effect", "effect {value.name}")
+        .Impl(value) -> {
+            children := [JetCLIEmitNode]{}
+            jet_cli_emit_ast_methods(value.methods, &children)
+            head :: if value.trait_name == .Val(trait_name) -> "impl {trait_name} for {value.type_name}" else -> "impl {value.type_name}"
+            jet_cli_emit_node("impl", head, children)
+        }
+        .Const(value) -> {
+            typed :: if value.ty == .Val(ty) -> ": {type_name(ty)}" else -> ""
+            jet_cli_emit_node("const", "const {value.name}{typed}", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value.value)})
+        }
+        .Test(value) -> {
+            name :: value.name ?? ""
+            jet_cli_emit_ast_body("test", "test {jet_cli_debug_quote(name)}", value.body)
+        }
+        .ExternRust(value) -> jet_cli_emit_ast_extern_fns("extern-rust", "extern rust {jet_cli_debug_quote(value.crate_spec)}", value.functions)
+        .Module(value) -> {
+            children :: loop source in value.sources -> jet_cli_emit_leaf("source", "source {source.name}")
+            jet_cli_emit_node("module", "module {value.name}", children)
+        }
+        .CModule(value) -> jet_cli_emit_ast_extern_fns("c-module", "c module {jet_cli_debug_quote(value.lib)}", value.functions)
+        .CodeModule(value) -> jet_cli_emit_ast_items("code-module", "module {value.name}", value.body ?? [Item]{})
+        .ErrorConv(value) -> jet_cli_emit_ast_body("error-conversion", "error conversion {value.from_ty} -> {value.to_ty}", value.body)
+        .Migration(value) -> {
+            children :: loop op in value.ops -> jet_cli_emit_ast_migration_op(op)
+            jet_cli_emit_node("migration", "migration {value.type_name}", children)
+        }
+        .ProtocolDecl(value) -> {
+            children :: loop message in value.messages -> jet_cli_emit_leaf("message", "message {message.name}")
+            jet_cli_emit_node("protocol", "protocol {value.name}", children)
+        }
+        .UserDerive(value) -> jet_cli_emit_leaf("derive", "derive {value.trait_name}<{value.type_param}>")
+        .TemplateLoop(value) -> jet_cli_emit_node("template-loop", "prep loop {value.var}", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value.source)})
+        .GenericModule(value) -> jet_cli_emit_ast_items("generic-module", "generic module {value.name}", value.body)
+        .ModuleAlias(value) -> jet_cli_emit_leaf("module-alias", "module {value.name} = {value.target}")
+        .MarkerDecl(value) -> jet_cli_emit_leaf("marker", "marker {value.name}")
+        .FactDecl(value) -> jet_cli_emit_leaf("fact", "fact {value.name}")
+    }
+}
+
+fn jet_cli_emit_ast_migration_op(op: MigrationOp) -> JetCLIEmitNode Never! {
+    if op == {
+        .Rename(from, _, to, _) -> jet_cli_emit_leaf("rename", "rename {from} -> {to}")
+        .Add(field, _, ty, _, default, _, _) -> jet_cli_emit_node("add", "add {field}: {type_name(ty)}", [JetCLIEmitNode]{jet_cli_emit_ast_expr(default)})
+        .Remove(field, _) -> jet_cli_emit_leaf("remove", "remove {field}")
+        .Change(field, _, from_ty, _, to_ty, _, _, _, _) -> jet_cli_emit_leaf("change", "change {field}: {type_name(from_ty)} -> {type_name(to_ty)}")
+    }
+}
+
+fn jet_cli_emit_ast_label(label: NamedSpan?) -> String Never! {
+    named :: label ?? return ""
+    " {named.name}:"
+}
+
+fn jet_cli_emit_ast_binding(binding: Binding) -> JetCLIEmitNode Never! {
+    mutable :: if binding.mutable -> "mut " else -> ""
+    typed :: if binding.ty == .Val(ty) -> ": {type_name(ty)}" else -> ""
+    children := [JetCLIEmitNode]{}
+    if binding.pattern == .Val(pattern) -> &children.push(jet_cli_emit_ast_bind_pattern(pattern))
+    &children.push(jet_cli_emit_ast_expr(binding.init))
+    jet_cli_emit_node("binding", "bind {mutable}{binding.name}{typed}", children)
+}
+
+fn jet_cli_emit_ast_bind_names(names: [BindName]) -> String Never! {
+    texts :: loop name in names -> jet_cli_emit_ast_bind_name(name)
+    texts.join(", ")
+}
+
+fn jet_cli_emit_ast_bind_name(name: BindName) -> String Never! {
+    rename :: name.rename ?? return name.name
+    "{name.name}: {rename.name}"
+}
+
+fn jet_cli_emit_ast_bind_pattern(pattern: BindPattern) -> JetCLIEmitNode Never! {
+    if pattern == {
+        .Struct(owner, _, fields, _, _) -> jet_cli_emit_leaf("bind-pattern", "destructure {owner}({jet_cli_emit_ast_bind_names(fields)})")
+        .List(elems, _) -> jet_cli_emit_leaf("bind-pattern", "destructure [{jet_cli_emit_ast_bind_names(elems)}]")
+        .Tuple(elems, _) -> jet_cli_emit_leaf("bind-pattern", "destructure ({jet_cli_emit_ast_bind_names(elems)})")
+        .Refutable(inner, fallback, _, _) -> jet_cli_emit_node("bind-pattern", "destructure", [JetCLIEmitNode]{jet_cli_emit_ast_pattern(inner), jet_cli_emit_ast_fallback(fallback)})
+    }
+}
+
+fn jet_cli_emit_ast_lvalue(target: LValue) -> JetCLIEmitNode Never! {
+    if target == {
+        .Local(name, _) -> jet_cli_emit_leaf("Ident", "ident {name}")
+        .Index(base, index, _, _) -> jet_cli_emit_node("Index", "index", [JetCLIEmitNode]{jet_cli_emit_ast_expr(base), jet_cli_emit_ast_expr(index)})
+        .Field(base, field, _) -> jet_cli_emit_node("Field", "field .{field}", [JetCLIEmitNode]{jet_cli_emit_ast_expr(base)})
+    }
+}
+
+fn jet_cli_emit_ast_arms(arms: [SwitchArm], else_body: [Stmt]?, children: &[JetCLIEmitNode]) Never! {
+    loop arm in arms {
+        arm_children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(arm.cond)}
+        &arm_children.push(jet_cli_emit_ast_body("body", "then", arm.body))
+        &children.push(jet_cli_emit_node("arm", "arm", arm_children))
+    }
+    if else_body == .Val(body) -> &children.push(jet_cli_emit_ast_body("else", "else", body))
+}
+
+fn jet_cli_emit_ast_optional(kind: String, text: String, value: Expr?) -> JetCLIEmitNode Never! {
+    inner :: value ?? return jet_cli_emit_leaf(kind, text)
+    jet_cli_emit_node(kind, text, [JetCLIEmitNode]{jet_cli_emit_ast_expr(inner)})
+}
+
+fn jet_cli_emit_ast_stmt(statement: Stmt) -> JetCLIEmitNode Never! {
+    if statement == {
+        .Expr(value) -> jet_cli_emit_ast_expr(value)
+        .Val(binding) -> jet_cli_emit_ast_binding(binding)
+        .Assign(target, op, _, value) -> {
+            operator :: if op == .Val(binary) -> jfmt_compound_spell(binary) else -> "="
+            jet_cli_emit_node("assign", "assign {operator}", [JetCLIEmitNode]{jet_cli_emit_ast_lvalue(target), jet_cli_emit_ast_expr(value)})
+        }
+        .Return(value, _) -> jet_cli_emit_ast_optional("return", "return", value)
+        .While(cond, body, _, _, label) -> jet_cli_emit_node("while", "while{jet_cli_emit_ast_label(label)}", [JetCLIEmitNode]{jet_cli_emit_ast_expr(cond), jet_cli_emit_ast_body("body", "do", body)})
+        .For(var, _, var2, kind, body, _, _, label, _) -> {
+            names :: if var2 == .Val(second) -> "{var}, {second.name}" else -> var
+            children := [JetCLIEmitNode]{}
+            if kind == {
+                .Range(start, end, step, exclusive) -> {
+                    range_children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(start), jet_cli_emit_ast_expr(end)}
+                    if step == .Val(value) -> &range_children.push(jet_cli_emit_node("step", "step", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value)}))
+                    &children.push(jet_cli_emit_node("range", if exclusive -> "range ..<" else -> "range ..", range_children))
+                }
+                .In(collection, step) -> {
+                    &children.push(jet_cli_emit_ast_expr(collection))
+                    if step == .Val(value) -> &children.push(jet_cli_emit_node("step", "step", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value)}))
+                }
+            }
+            &children.push(jet_cli_emit_ast_body("body", "do", body))
+            jet_cli_emit_node("for", "for{jet_cli_emit_ast_label(label)} {names} in", children)
+        }
+        .Switch(subject, arms, else_body, _) -> {
+            children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(subject)}
+            jet_cli_emit_ast_arms(arms, else_body, &children)
+            jet_cli_emit_node("switch", "switch", children)
+        }
+        .Break(_) -> jet_cli_emit_leaf("break", "break")
+        .BreakValue(value, _) -> jet_cli_emit_node("break", "break", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value)})
+        .Continue(_) -> jet_cli_emit_leaf("continue", "next")
+        .BreakLabel(name, _) -> jet_cli_emit_leaf("break", "break {name}")
+        .BreakLabelValue(name, _, value, _) -> jet_cli_emit_node("break", "break {name}", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value)})
+        .ContinueLabel(name, _) -> jet_cli_emit_leaf("continue", "next {name}")
+        .Loop(body, _, _, label) -> jet_cli_emit_ast_body("loop", "loop{jet_cli_emit_ast_label(label)}", body)
+        .CountedLoop(init, cond, step, body, _, _, label) -> {
+            children := [JetCLIEmitNode]{jet_cli_emit_ast_binding(init), jet_cli_emit_ast_expr(cond)}
+            if step == .Val(value) -> &children.push(jet_cli_emit_node("step", "step", [JetCLIEmitNode]{jet_cli_emit_ast_stmt(value)}))
+            &children.push(jet_cli_emit_ast_body("body", "do", body))
+            jet_cli_emit_node("loop", "loop{jet_cli_emit_ast_label(label)} counted", children)
+        }
+        .Unsafe(audit, _, body, _) -> jet_cli_emit_ast_body("unsafe", "unsafe {jet_cli_debug_quote(audit ?? "")}", body)
+        .Impure(reason, _, body, _) -> jet_cli_emit_ast_body("impure", "impure {jet_cli_debug_quote(reason ?? "")}", body)
+        .Reactive(body, _) -> jet_cli_emit_ast_body("reactive", "reactive", body)
+        .Shield(body, _) -> jet_cli_emit_ast_body("shield", "shield", body)
+        .Switched(marker, body, _) -> jet_cli_emit_ast_body("switched", "switched #{marker.name}", body)
+        .Region(name, _, body, _) -> jet_cli_emit_ast_body("region", "region {name}", body)
+        .Policy(declarations, body, _) -> jet_cli_emit_ast_body("policy", "policy ({declarations.len()} declarations)", body)
+        .TaskGroup(name, _, limit, body, _) -> {
+            children := [JetCLIEmitNode]{}
+            if limit == .Val(value) -> &children.push(jet_cli_emit_node("limit", "limit", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value)}))
+            loop inner in body -> &children.push(jet_cli_emit_ast_stmt(inner))
+            jet_cli_emit_node("task-group", "task group {name}", children)
+        }
+        .Layout(name, _, body, _) -> jet_cli_emit_ast_body("layout", "layout {name}", body)
+        .AuthorityScope(caps, _, binding, body, _) -> {
+            names :: loop cap in caps -> cap.name
+            bound :: if binding == .Val(named) -> " as {named.name}" else -> ""
+            jet_cli_emit_ast_body("authority", "authority [{names.join(", ")}]{bound}", body)
+        }
+        .ComptimeIf(cond, _, then_body, else_body, _, _) -> {
+            children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(cond), jet_cli_emit_ast_body("body", "then", then_body)}
+            if else_body == .Val(body) -> &children.push(jet_cli_emit_ast_body("else", "else", body))
+            jet_cli_emit_node("comptime-if", "prep if", children)
+        }
+        .ComptimeSwitch(subject, arms, else_body, _) -> {
+            children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(subject)}
+            jet_cli_emit_ast_arms(arms, else_body, &children)
+            jet_cli_emit_node("comptime-switch", "prep switch", children)
+        }
+        .ComptimeBlock(body, _, _) -> jet_cli_emit_ast_body("comptime-block", "prep", body)
+        .ContextBlock(fields, body, _) -> {
+            children := [JetCLIEmitNode]{}
+            loop field in fields -> &children.push(jet_cli_emit_node("context-field", "{field.name}:", [JetCLIEmitNode]{jet_cli_emit_ast_expr(field.value)}))
+            loop inner in body -> &children.push(jet_cli_emit_ast_stmt(inner))
+            jet_cli_emit_node("context", "context", children)
+        }
+        .Live(body, _) -> jet_cli_emit_ast_body("live", "live", body)
+        .AssumeDet(reason, _, body, _) -> jet_cli_emit_ast_body("assume-deterministic", "assume deterministic {jet_cli_debug_quote(reason)}", body)
+        .Transact(name, _, body, _, _) -> jet_cli_emit_ast_body("transact", "transact{jet_cli_emit_ast_suffix(" ", name)}", body)
+        .Yield(value, _) -> jet_cli_emit_node("yield", "yield", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value)})
+        .ScopeMember(name, _, args, _, body, _, _, _) -> {
+            children :: loop arg in args -> jet_cli_emit_ast_expr(arg)
+            node := jet_cli_emit_node("scope-member", ".{name}", children)
+            loop inner in body -> &node.children.push(jet_cli_emit_ast_stmt(inner))
+            node
+        }
+        .DeferClose(close, _) -> jet_cli_emit_node("defer-close", "defer close", [JetCLIEmitNode]{jet_cli_emit_ast_expr(close)})
+    }
+}
+
+fn jet_cli_emit_ast_format(format: StrFormat) -> String Never! {
+    if format == {
+        .Display -> ""
+        .Debug -> ":Debug"
+        .Pretty -> ":Pretty"
+        .Fixed(digits) -> ":Fixed({digits})"
+        .Grouped(digits) -> ":Grouped({digits})"
+        .Hex(digits) -> ":Hex({digits})"
+        .Pad(width, fill) -> ":Pad({width}, {jet_cli_debug_quote(fill)})"
+        .PadLeft(width, fill) -> ":PadLeft({width}, {jet_cli_debug_quote(fill)})"
+        .Sci(digits) -> ":Sci({digits})"
+        .Percent(digits) -> ":Percent({digits})"
+        .Bin -> ":Bin"
+        .Oct -> ":Oct"
+        .Unit(_) -> ":Unit"
+    }
+}
+
+fn jet_cli_emit_ast_args(args: [CallArg], children: &[JetCLIEmitNode]) Never! {
+    loop arg in args {
+        value :: jet_cli_emit_ast_expr(arg.expr)
+        label :: if arg.label == .Val(written) -> "{written.name}: " else -> ""
+        sigil :: access_sigil(arg.convention)
+        spread :: if arg.spread -> ".." else -> ""
+        if label == "" && sigil == "" && spread == "" {
+            &children.push(value)
+        } else {
+            &children.push(jet_cli_emit_node("arg", "arg {label}{spread}{sigil}", [JetCLIEmitNode]{value}))
+        }
+    }
+}
+
+fn jet_cli_emit_ast_fields(fields: [ExprField], children: &[JetCLIEmitNode]) Never! {
+    loop field in fields -> &children.push(jet_cli_emit_node("field", "{field.name}:", [JetCLIEmitNode]{jet_cli_emit_ast_expr(field.value)}))
+}
+
+fn jet_cli_emit_ast_pairs(entries: [ExprPair], children: &[JetCLIEmitNode]) Never! {
+    loop entry in entries -> &children.push(jet_cli_emit_node("entry", "entry", [JetCLIEmitNode]{jet_cli_emit_ast_expr(entry.key), jet_cli_emit_ast_expr(entry.value)}))
+}
+
+fn jet_cli_emit_ast_exprs(kind: String, text: String, values: [Expr]) -> JetCLIEmitNode Never! {
+    children :: loop value in values -> jet_cli_emit_ast_expr(value)
+    jet_cli_emit_node(kind, text, children)
+}
+
+fn jet_cli_emit_ast_unary(kind: String, text: String, value: Expr) -> JetCLIEmitNode Never! {
+    jet_cli_emit_node(kind, text, [JetCLIEmitNode]{jet_cli_emit_ast_expr(value)})
+}
+
+fn jet_cli_emit_ast_expr(expression: Expr) -> JetCLIEmitNode Never! {
+    if expression == {
+        .Str(parts, _) -> {
+            children :: loop part in parts -> jet_cli_emit_ast_str_part(part)
+            jet_cli_emit_node("Str", "string", children)
+        }
+        .StrMatchLit(parts, _) -> jet_cli_emit_leaf("StrMatchLit", "string pattern ({parts.len()} parts)")
+        .BinMatchLit(parts, _) -> jet_cli_emit_leaf("BinMatchLit", "bytes pattern ({parts.len()} parts)")
+        .Int(value, _, _, raw) -> jet_cli_emit_leaf("Int", "int {jet_cli_emit_ast_spelling(raw, "{value}")}")
+        .Float(value, _, _, raw) -> jet_cli_emit_leaf("Float", "float {jet_cli_emit_ast_spelling(raw, "{value}")}")
+        .Bool(value, _) -> jet_cli_emit_leaf("Bool", if value -> "bool true" else -> "bool false")
+        .Unit(_) -> jet_cli_emit_leaf("Unit", "unit")
+        .Char(value, _) -> jet_cli_emit_leaf("Char", "char {jet_cli_debug_quote(value)}")
+        .ListLit(elements, _) -> jet_cli_emit_ast_exprs("ListLit", "list", elements)
+        .MemberSpread(base, members, _) -> {
+            names :: loop member in members -> member.name
+            jet_cli_emit_ast_unary("MemberSpread", "members .[{names.join(", ")}]", base)
+        }
+        .Spread(value, _) -> jet_cli_emit_ast_unary("Spread", "spread", value)
+        .MapLit(entries, _) -> {
+            children := [JetCLIEmitNode]{}
+            jet_cli_emit_ast_pairs(entries, &children)
+            jet_cli_emit_node("MapLit", "map", children)
+        }
+        .Index(base, index, _, _) -> jet_cli_emit_node("Index", "index", [JetCLIEmitNode]{jet_cli_emit_ast_expr(base), jet_cli_emit_ast_expr(index)})
+        .Slice(base, start, end, range, _) -> {
+            children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(base), jet_cli_emit_ast_expr(start), jet_cli_emit_ast_expr(end)}
+            if range == .Val(value) -> &children.push(jet_cli_emit_ast_expr(value))
+            jet_cli_emit_node("Slice", "slice", children)
+        }
+        .Range(start, end, exclusive, _) -> jet_cli_emit_node("Range", if exclusive -> "range ..<" else -> "range ..", [JetCLIEmitNode]{jet_cli_emit_ast_expr(start), jet_cli_emit_ast_expr(end)})
+        .Ident(name, _) -> jet_cli_emit_leaf("Ident", "ident {name}")
+        .Call(call) -> {
+            children := [JetCLIEmitNode]{}
+            jet_cli_emit_ast_args(call.args, &children)
+            jet_cli_emit_node("Call", "call {call.name}{jet_cli_emit_ast_type_args(call.type_args)}", children)
+        }
+        .Unary(op, operand, _) -> jet_cli_emit_ast_unary("Unary", jet_cli_emit_ast_unary_op(op), operand)
+        .Binary(op, left, right, _) -> jet_cli_emit_node("Binary", "binary {jfmt_bin_op_spell(op)}", [JetCLIEmitNode]{jet_cli_emit_ast_expr(left), jet_cli_emit_ast_expr(right)})
+        .CompareChain(operands, ops, _, _) -> {
+            spelled :: loop op in ops -> jfmt_bin_op_spell(op)
+            jet_cli_emit_ast_exprs("CompareChain", "compare {spelled.join(" ")}", operands)
+        }
+        .UnitLit(raw, _, _, suffix, _, _) -> jet_cli_emit_leaf("UnitLit", "unit literal {raw} {suffix}")
+        .Deref(value, _) -> jet_cli_emit_ast_unary("Deref", "deref", value)
+        .RawOf(value, _) -> jet_cli_emit_ast_unary("RawOf", "raw", value)
+        .Copy(value, _) -> jet_cli_emit_ast_unary("Copy", "copy", value)
+        .Place(value, access, _) -> jet_cli_emit_ast_unary("Place", jet_cli_emit_ast_place_access(access), value)
+        .Field(base, member, _) -> jet_cli_emit_ast_unary("Field", "field .{member}", base)
+        .OptField(base, member, _, _, _) -> jet_cli_emit_ast_unary("OptField", "field ?.{member}", base)
+        .MethodCall(receiver, method, _, _, type_args, args, _, _, _, _, _) -> {
+            children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(receiver)}
+            jet_cli_emit_ast_args(args, &children)
+            jet_cli_emit_node("MethodCall", "method .{method}{jet_cli_emit_ast_type_args(type_args)}", children)
+        }
+        .OptMethodCall(receiver, method, _, type_args, args, _) -> {
+            children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(receiver)}
+            jet_cli_emit_ast_args(args, &children)
+            jet_cli_emit_node("OptMethodCall", "method ?.{method}{jet_cli_emit_ast_type_args(type_args)}", children)
+        }
+        .StructLit(owner, type_args, _, _, fields, _, _) -> {
+            children := [JetCLIEmitNode]{}
+            jet_cli_emit_ast_fields(fields, &children)
+            jet_cli_emit_node("StructLit", "struct {owner}{jet_cli_emit_ast_type_args(type_args)}", children)
+        }
+        .TypedLit(head, body, _) -> {
+            written :: if head == .Val(ty) -> " {type_name(ty)}" else -> ""
+            children := [JetCLIEmitNode]{}
+            if body == {
+                .Fields(fields) -> jet_cli_emit_ast_fields(fields, &children)
+                .Elements(elements) -> loop element in elements -> &children.push(jet_cli_emit_ast_expr(element))
+                .Entries(entries) -> jet_cli_emit_ast_pairs(entries, &children)
+                .Value(value) -> &children.push(jet_cli_emit_ast_expr(value))
+                .ByteText(parts) -> &children.push(jet_cli_emit_leaf("bytes", "bytes ({parts.len()} parts)"))
+                .Empty -> {}
+            }
+            jet_cli_emit_node("TypedLit", "literal{written}", children)
+        }
+        .EnumLit(owner, variant, _, args, _, _) -> {
+            children := [JetCLIEmitNode]{}
+            loop arg in args {
+                if arg == {
+                    .Positional(value) -> &children.push(jet_cli_emit_ast_expr(value))
+                    .Named(label, value) -> &children.push(jet_cli_emit_node("arg", "arg {label}:", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value)}))
+                }
+            }
+            jet_cli_emit_node("EnumLit", "variant {owner}.{variant}", children)
+        }
+        .Tainted(value, marked, _) -> jet_cli_emit_ast_unary("Tainted", "tainted{jet_cli_emit_ast_suffix(" #", marked)}", value)
+        .Present(value, _) -> jet_cli_emit_ast_unary("Present", "present", value)
+        .Absent(_) -> jet_cli_emit_leaf("Absent", "absent")
+        .Todo(_, _) -> jet_cli_emit_leaf("Todo", "todo")
+        .NoElse(_) -> jet_cli_emit_leaf("NoElse", "no else")
+        .ReduceMarker(name, _) -> jet_cli_emit_leaf("ReduceMarker", "reduce {name}")
+        .PatternTest(subject, pattern, _) -> jet_cli_emit_node("PatternTest", "matches", [JetCLIEmitNode]{jet_cli_emit_ast_expr(subject), jet_cli_emit_ast_pattern(pattern)})
+        .Ok(value, _) -> jet_cli_emit_ast_unary("Ok", "ok", value)
+        .Err(value, _) -> jet_cli_emit_ast_unary("Err", "err", value)
+        .Try(value, _, _, context) -> {
+            children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(value)}
+            if context == .Val(note) -> &children.push(jet_cli_emit_node("context", "context", [JetCLIEmitNode]{jet_cli_emit_ast_expr(note)}))
+            jet_cli_emit_node("Try", "try", children)
+        }
+        .OrFallback(value, fallback, _, _) -> jet_cli_emit_node("OrFallback", "or else", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value), jet_cli_emit_ast_fallback(fallback)})
+        .If(cond, then_body, then_value, else_body, else_value, _) -> {
+            then_node := jet_cli_emit_ast_body("then", "then", then_body)
+            &then_node.children.push(jet_cli_emit_ast_expr(then_value))
+            else_node := jet_cli_emit_ast_body("else", "else", else_body)
+            &else_node.children.push(jet_cli_emit_ast_expr(else_value))
+            jet_cli_emit_node("If", "if", [JetCLIEmitNode]{jet_cli_emit_ast_expr(cond), then_node, else_node})
+        }
+        .TupleLit(fields, _, _) -> {
+            children :: loop field in fields -> jet_cli_emit_ast_tuple_field(field)
+            jet_cli_emit_node("TupleLit", "tuple", children)
+        }
+        .Lambda(lambda) -> {
+            params :: loop param in lambda.params -> jet_cli_emit_ast_lambda_param(param)
+            jet_cli_emit_node("Lambda", "lambda ({params.join(", ")})", jet_cli_emit_ast_lambda_body(lambda.body))
+        }
+        .CallValue(callee, args, _) -> {
+            children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(callee)}
+            jet_cli_emit_ast_args(args, &children)
+            jet_cli_emit_node("CallValue", "call value", children)
+        }
+        .PtrFromAddr(alias, _, elem, address, _) -> jet_cli_emit_ast_unary("PtrFromAddr", "pointer {alias}: {type_name(elem)}", address)
+        .ComptimeName(name, _, _) -> jet_cli_emit_leaf("ComptimeName", "prep name {name}")
+        .Paren(value, _) -> jet_cli_emit_ast_unary("Paren", "paren", value)
+    }
+}
+
+fn jet_cli_emit_ast_str_part(part: StrPart) -> JetCLIEmitNode Never! {
+    if part == {
+        .Lit(text) -> jet_cli_emit_leaf("text", "text {jet_cli_debug_quote(text)}")
+        .Interp(value, format) -> jet_cli_emit_node("interpolation", "interpolation{jet_cli_emit_ast_format(format)}", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value)})
+        .Byte(value) -> jet_cli_emit_leaf("byte", "byte {Int.from_u8(value)}")
+    }
+}
+
+// A literal as written when the parser kept its spelling.
+fn jet_cli_emit_ast_spelling(raw: String?, value: String) -> String Never! {
+    raw ?? value
+}
+
+// `{separator}{value}` for a written optional name, "" without one.
+fn jet_cli_emit_ast_suffix(separator: String, value: String?) -> String Never! {
+    written :: value ?? return ""
+    "{separator}{written}"
+}
+
+fn jet_cli_emit_ast_unary_op(op: UnOp) -> String Never! {
+    if op == {
+        .Neg -> "unary -"
+        .Not -> "unary !"
+    }
+}
+
+fn jet_cli_emit_ast_place_access(access: PlaceAccess) -> String Never! {
+    if access == {
+        .Read -> "place read"
+        .Write -> "place &"
+        .Take -> "place ^"
+    }
+}
+
+fn jet_cli_emit_ast_tuple_field(field: TupleField) -> JetCLIEmitNode Never! {
+    if field.name == "" -> return jet_cli_emit_ast_expr(field.value)
+    jet_cli_emit_node("field", "{field.name}:", [JetCLIEmitNode]{jet_cli_emit_ast_expr(field.value)})
+}
+
+fn jet_cli_emit_ast_lambda_param(param: LambdaParam) -> String Never! {
+    ty :: param.ty ?? return param.name
+    "{param.name}: {type_name(ty)}"
+}
+
+fn jet_cli_emit_ast_lambda_body(body: LambdaBody) -> [JetCLIEmitNode] Never! {
+    if body == .Expr(value) -> return [JetCLIEmitNode]{jet_cli_emit_ast_expr(value)}
+    statements :: if body == .Block(written) -> written else -> [Stmt]{}
+    loop statement in statements -> jet_cli_emit_ast_stmt(statement)
+}
+
+fn jet_cli_emit_ast_fallback(fallback: OrFallback) -> JetCLIEmitNode Never! {
+    if fallback == {
+        .Value(value) -> jet_cli_emit_ast_unary("fallback", "fallback", value)
+        .Block(body, value, _) -> {
+            node := jet_cli_emit_ast_body("fallback", "fallback block", body)
+            if value == .Val(tail) -> &node.children.push(jet_cli_emit_ast_expr(tail))
+            node
+        }
+        .Return(value, _) -> jet_cli_emit_ast_optional("fallback", "fallback return", value)
+        .Panic(_, args) -> {
+            children := [JetCLIEmitNode]{}
+            jet_cli_emit_ast_args(args, &children)
+            jet_cli_emit_node("fallback", "fallback panic", children)
+        }
+        .Break(_) -> jet_cli_emit_leaf("fallback", "fallback break")
+        .Continue(_) -> jet_cli_emit_leaf("fallback", "fallback next")
+        .BreakLabel(name, _) -> jet_cli_emit_leaf("fallback", "fallback break {name}")
+        .ContinueLabel(name, _) -> jet_cli_emit_leaf("fallback", "fallback next {name}")
+    }
+}
+
+fn jet_cli_emit_ast_binder(inner: Pattern?) -> [JetCLIEmitNode] Never! {
+    nested :: inner ?? return [JetCLIEmitNode]{}
+    [JetCLIEmitNode]{jet_cli_emit_ast_pattern(nested)}
+}
+
+fn jet_cli_emit_ast_pattern(pattern: Pattern) -> JetCLIEmitNode Never! {
+    if pattern == {
+        .Variant(variant, bindings, _, _) -> {
+            children :: loop slot in bindings -> jet_cli_emit_ast_slot(slot)
+            jet_cli_emit_node("pattern", "pattern .{variant}", children)
+        }
+        .Present(binding, _, inner, _) -> jet_cli_emit_node("pattern", "pattern .Val({binding})", jet_cli_emit_ast_binder(inner))
+        .Absent(_) -> jet_cli_emit_leaf("pattern", "pattern None")
+        .Ok(binding, _, inner, _) -> jet_cli_emit_node("pattern", "pattern .Ok({binding})", jet_cli_emit_ast_binder(inner))
+        .Err(binding, _, inner, _) -> jet_cli_emit_node("pattern", "pattern .Err({binding})", jet_cli_emit_ast_binder(inner))
+        .Range(lo, hi, _) -> jet_cli_emit_leaf("pattern", "pattern {lo}..{hi}")
+        .Or(alternatives, _) -> {
+            children :: loop alternative in alternatives -> jet_cli_emit_ast_pattern(alternative)
+            jet_cli_emit_node("pattern", "pattern or", children)
+        }
+        .Struct(fields, rest, _, owner) -> {
+            children :: loop field in fields -> jet_cli_emit_ast_struct_pattern_field(field)
+            head :: if owner == .Val(written) -> " {written.name}" else -> ""
+            tail :: if rest != None -> " .." else -> ""
+            jet_cli_emit_node("pattern", "pattern struct{head}{tail}", children)
+        }
+        .List(items, rest, _) -> {
+            children :: loop slot in items -> jet_cli_emit_ast_slot(slot)
+            jet_cli_emit_node("pattern", "pattern list{jet_cli_emit_ast_list_rest(rest)}", children)
+        }
+        .Map(entries, rest, _) -> {
+            children :: loop entry in entries -> jet_cli_emit_ast_map_pattern_entry(entry)
+            tail :: if rest != None -> " .." else -> ""
+            jet_cli_emit_node("pattern", "pattern map{tail}", children)
+        }
+        .StrMatch(parts, _) -> jet_cli_emit_leaf("pattern", "pattern string ({parts.len()} parts)")
+        .BinMatch(parts, _) -> jet_cli_emit_leaf("pattern", "pattern bytes ({parts.len()} parts)")
+    }
+}
+
+fn jet_cli_emit_ast_struct_pattern_field(field: StructPatField) -> JetCLIEmitNode Never! {
+    if field == {
+        .Bind(name, _, local, _) -> jet_cli_emit_leaf("field", "{name}: bind {local}")
+        .Value(name, _, value) -> jet_cli_emit_node("field", "{name}:", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value)})
+        .Nested(name, _, inner) -> jet_cli_emit_node("field", "{name}:", [JetCLIEmitNode]{jet_cli_emit_ast_pattern(inner)})
+    }
+}
+
+fn jet_cli_emit_ast_list_rest(rest: ListPatRest?) -> String Never! {
+    written :: rest ?? return ""
+    bound :: written.name ?? return " .."
+    " ..{bound.name}"
+}
+
+fn jet_cli_emit_ast_map_pattern_entry(entry: MapPatEntry) -> JetCLIEmitNode Never! {
+    text :: if entry.optional -> "entry?" else -> "entry"
+    jet_cli_emit_node("entry", text, [JetCLIEmitNode]{jet_cli_emit_ast_expr(entry.key), jet_cli_emit_ast_slot(entry.slot)})
+}
+
+fn jet_cli_emit_ast_slot(slot: PatSlot) -> JetCLIEmitNode Never! {
+    if slot == {
+        .Wildcard -> jet_cli_emit_leaf("slot", "_")
+        .Bind(name, _) -> jet_cli_emit_leaf("slot", "bind {name}")
+        .Range(lo, hi) -> jet_cli_emit_leaf("slot", "{lo}..{hi}")
+        .Nested(pattern) -> jet_cli_emit_ast_pattern(pattern)
+        .Named(field, _, inner) -> jet_cli_emit_node("slot", "{field}:", [JetCLIEmitNode]{jet_cli_emit_ast_slot(inner)})
+        .Rest(_) -> jet_cli_emit_leaf("slot", "..")
+        .Value(value) -> jet_cli_emit_ast_expr(value)
+    }
+}

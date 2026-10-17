@@ -283,10 +283,11 @@ export function readJetTable(text) {
   };
 }
 
-// Flags only the Jet table carries: the Jet CLI's `--trace` (owner-directed
-// 2026-10-16), added after the Rust host froze. They are compared out of both
-// tables, so every shared row still has to agree in order.
-export const JET_ONLY_FLAGS = new Set(["--trace"]);
+// Flags only the Jet table carries, added after the Rust host froze: the
+// Jet CLI's `--trace` (owner-directed 2026-10-16) and the `jet emit` tiers
+// `--ast`, `--mir`, `--lir` and `--fn` (owner-directed 2026-10-15). They are
+// compared out of both tables, so every shared row still has to agree in order.
+export const JET_ONLY_FLAGS = new Set(["--trace", "--ast", "--mir", "--lir", "--fn"]);
 
 // Section-by-section differences, each row named by its key.
 export function tableDifferences(jetTable, rust) {

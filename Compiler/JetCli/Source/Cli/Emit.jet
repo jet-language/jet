@@ -1,10 +1,89 @@
-// Source/CmdDevTools.rs `run_emit_rust`: successful --json still prints raw
-// generated Rust. The mode flag changes only compiler diagnostic routing.
-use jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR, jet_driver_report_problems]
+// `jet emit`. `--rust` follows Source/CmdDevTools.rs `run_emit_rust`:
+// successful --json still prints raw generated Rust; the mode flag changes
+// only compiler diagnostic routing. `--ast`, `--mir` and `--lir` print one
+// EmitTree (EmitTree.jet): text by default, the `emit` status under --json.
+use jet_backend.[lir_lower_entry]
+use jet_driver.[
+    JetDriverAuthorizedSourceSnapshot,
+    JetDriverCompileResult,
+    JetDriverVerbOutput,
+    JET_DRIVER_EXIT_OK,
+    JET_DRIVER_EXIT_USER_ERROR,
+    jet_driver_is_a11y_lint,
+    jet_driver_present_diagnostics,
+    jet_driver_report_problems,
+]
+use jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_render_all]
+use jet_parser.[parse_source]
 
 fn jet_cli_emit_check_failure(file: String, source: String, errors: [Diagnostic], color: Bool, json: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
     if json {
         return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("diagnostics", false, jet_cli_report_cwd(), file, source, errors), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+}
+
+// `--fn NAME` named no function of the tier.
+fn jet_cli_emit_missing_function(file: String, source: String, tier: String, name: String, color: Bool, json: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
+    report :: diagnostic_from_registry("E2104", None, "`{file}` has no function named `{name}`", "`--fn` selects a function the file declares", "check the spelling, or run `jet emit --{tier} {file}` without `--fn` to see every function")
+    jet_cli_emit_check_failure(file, source, [Diagnostic]{report}, color, json)
+}
+
+fn jet_cli_emit_printed(tier: String, file: String, function: String?, json: Bool, nodes: [JetCLIEmitNode], stderr: String) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{stdout: jet_cli_emit_tree_output(tier, file, function, json, nodes), stderr: stderr, exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// `jet emit --ast <file>`: the parsed entry file. Parsing is the whole tier,
+// so a syntax error stops it and nothing is checked.
+fn jet_cli_emit_ast(file: String, source: String, color: Bool, json: Bool, function: String?) -[FS, Env]> JetDriverVerbOutput Never! {
+    parsed :: parse_source(source.bytes())
+    errors :: jet_cli_errors(parsed.diagnostics)
+    if errors.len() > 0 -> return jet_cli_emit_check_failure(file, source, errors, color, json)
+    nodes :: jet_cli_emit_ast_program(parsed.program, function)
+    if function == .Val(name) {
+        if nodes.len() == 0 -> return jet_cli_emit_missing_function(file, source, "ast", name, color, json)
+    }
+    jet_cli_emit_printed("ast", file, function, json, nodes, "")
+}
+
+// `jet emit --mir|--lir <file>`: the file checks as `jet emit --rust` does
+// (Run mode; errors stop it, visible lints go to stderr); `--mir` prints the
+// checked MIR, `--lir` the LIR `jet build` lowers from it, before the LIR
+// passes of its optimization level.
+fn jet_cli_emit_tier_result(file: String, source: String, color: Bool, json: Bool, requires_run: Bool, tier: String, function: String?, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
+    diagnostics := jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+    if requires_run -> &diagnostics.push(jet_cli_no_run_diagnostic())
+    errors :: jet_cli_errors(diagnostics)
+    if errors.len() > 0 -> return jet_cli_emit_check_failure(file, source, errors, color, json)
+    if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+    if !result.complete -> return jet_cli_ice("the Jet compiler stopped before finishing `{file}`")
+    lints := [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        if !jet_driver_is_a11y_lint(diagnostic.code) -> &lints.push(diagnostic)
+    }
+    stderr :: if lints.len() > 0 -> diagnostic_render_all(file, source, lints, color) else -> ""
+    program :: result.mir ?? return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
+    selected :: jet_cli_emit_mir_selected(program, result.package_identity, function)
+    if function == .Val(name) {
+        if selected.len() == 0 -> return jet_cli_emit_missing_function(file, source, tier, name, color, json)
+    }
+    if tier == "mir" -> return jet_cli_emit_printed(tier, file, function, json, jet_cli_emit_mir_nodes(program, selected), stderr)
+    keys := [String]?{None}
+    if function != None {
+        chosen :: loop row in selected -> row.key
+        keys = Val(chosen)
+    }
+    entry :: result.entry_function ?? return jet_cli_ice("the MIR program of `{file}` lost its entry function")
+    // As the native route does (Host.jet jet_cli_native_executable): a Rust
+    // foreign helper lowers from its own attached copy of the program.
+    attached :: jet_cli_rust_foreign_attached(result.rust_foreign, program) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_rust_foreign_report(err, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    lowered :: if attached.len() == 1 -> lir_lower_entry(attached[0], entry) else -> lir_lower_entry(program, entry)
+    if lowered.issues.len() > 0 {
+        functions :: loop issue in lowered.issues -> issue.function
+        messages :: loop issue in lowered.issues -> issue.message
+        what :: "the Jet backend can't lower `{file}` yet:\n{jet_cli_native_lowering_rows(functions, messages, ": ").join("\n")}"
+        return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", what, jet_cli_why("E2104"), "correct the reported native backend problems, then retry `jet emit --lir {file}`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    shown :: jet_cli_emit_lir_shown(lowered.lir, result.package_identity, keys)
+    jet_cli_emit_printed(tier, file, function, json, jet_cli_emit_lir_nodes(lowered.lir, shown), stderr)
 }

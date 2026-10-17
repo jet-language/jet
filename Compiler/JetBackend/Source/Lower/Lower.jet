@@ -4609,7 +4609,7 @@ fn lower_instruction_operation(p: MIRProgram, c: LowerContext, m: &LowerModule, 
             if lower_atexit_call(p, c, &m, &f, instruction, route, args) -> return
             if lower_codec_call(p, c, &m, &f, instruction, route, args, type_args) -> return
             if type_args.len() > 0 {
-                route_name :: lower_route_name(p, m, route)
+                route_name :: lower_route_name(p, m.prelude_positions, route)
                 return lower_fail(&m, &f, "generic CoreCall {route_name} is not lowered at O0 yet")
             }
             values :: lower_route_values(p, &m, &f, route, args, "CoreCall") ?? return
@@ -7003,7 +7003,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         if lower_transaction_method(p, c, &m, &f, instruction, call, receiver, args) -> return
         if lower_dyn_len(p, c, &m, &f, instruction, call, receiver, args) -> return
         if frame_schedule != None {
-            route_name :: lower_route_name(p, m, call)
+            route_name :: lower_route_name(p, m.prelude_positions, call)
             return lower_fail(&m, &f, "frame-scheduled HandleMethod {route_name} is not lowered at O0 yet")
         }
         values := [MIRValueID]{receiver}
@@ -7033,7 +7033,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         if lower_list_concat(p, c, &m, &f, instruction, call, args) -> return
         if lower_codec_call(p, c, &m, &f, instruction, call, args, type_args) -> return
         if owner_type_args.len() > 0 || type_args.len() > 0 {
-            route_name :: lower_route_name(p, m, call)
+            route_name :: lower_route_name(p, m.prelude_positions, call)
             return lower_fail(&m, &f, "generic StaticPreludeCall {route_name} is not lowered at O0 yet")
         }
         if "{row.module_name}.{row.member}" == "core.compare.eq" && args.len() == 2 -> return lower_core_equal(p, c, &m, &f, instruction, args[0].value, args[1].value)
@@ -7045,7 +7045,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     // has no route and is reported by lower_route_values.
     if semantic == .AllocNew(call, _, inline_size, args) {
         if inline_size != None {
-            route_name :: lower_route_name(p, m, call)
+            route_name :: lower_route_name(p, m.prelude_positions, call)
             return lower_fail(&m, &f, "AllocNew {route_name} with inline backing is not lowered at O0 yet")
         }
         values :: lower_route_values(p, &m, &f, call, args, "AllocNew") ?? return
@@ -7070,7 +7070,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         }
         return lower_route_result(p, c, &m, &f, instruction, route, [LIRValueID]{input}, "AmbientInput", row.member, [String]{})
     }
-    semantic_name :: lower_semantic_name(p, m, semantic)
+    semantic_name :: lower_semantic_name(p, m.prelude_positions, semantic)
     lower_fail(&m, &f, "semantic operation {semantic_name} is not lowered at O0 yet")
 }
 
@@ -7176,15 +7176,18 @@ fn lower_carrier_fact(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
 
 // The variant (and, for Prelude routes, the route) an unlowered semantic
 // operation reports, so a count of first blockers names what is missing.
-fn lower_route_name(p: MIRProgram, m: LowerModule, call: MIRPreludeCallID) -> String Never! {
-    row :: lower_prelude_row(p, m, call) ?? return "?"
-    "{row.module_name}.{row.member}"
+// `positions` is the program's Prelude position index
+// (lower_prelude_positions; LowerModule.prelude_positions while lowering),
+// so `jet emit --mir` names routes the way lowering reports them.
+fn lower_route_name(p: MIRProgram, positions: [U64:Int], call: MIRPreludeCallID) -> String Never! {
+    row :: positions.get(call.value) ?? return "?"
+    "{p.prelude_calls[row].module_name}.{p.prelude_calls[row].member}"
 }
 
-fn lower_semantic_name(p: MIRProgram, m: LowerModule, semantic: MIRSemanticOp) -> String Never! {
+fn lower_semantic_name(p: MIRProgram, positions: [U64:Int], semantic: MIRSemanticOp) -> String Never! {
     if semantic == {
-        .MathBuiltin(_, call, _) -> "MathBuiltin {lower_route_name(p, m, call)}"
-        .PreciseBuiltin(_, call, _) -> "PreciseBuiltin {lower_route_name(p, m, call)}"
+        .MathBuiltin(_, call, _) -> "MathBuiltin {lower_route_name(p, positions, call)}"
+        .PreciseBuiltin(_, call, _) -> "PreciseBuiltin {lower_route_name(p, positions, call)}"
         .Print(_, _) -> "Print"
         .AmbientInput(_, _) -> "AmbientInput"
         .RequireStop(_, _, _, _, _, _, _) -> "RequireStop"
@@ -7197,26 +7200,26 @@ fn lower_semantic_name(p: MIRProgram, m: LowerModule, semantic: MIRSemanticOp) -
         .SharedGuardSplit(_, _, _, _, _, _) -> "SharedGuardSplit"
         .SharedGuardWait(_, _, _, _) -> "SharedGuardWait"
         .ConditionNotify(_, _, _) -> "ConditionNotify"
-        .AllocNew(call, _, _, _) -> "AllocNew {lower_route_name(p, m, call)}"
+        .AllocNew(call, _, _, _) -> "AllocNew {lower_route_name(p, positions, call)}"
         .ColumnarRead(_, _, _, _, _) -> "ColumnarRead"
-        .StaticPreludeCall(call, _, _, _) -> "StaticPreludeCall {lower_route_name(p, m, call)}"
+        .StaticPreludeCall(call, _, _, _) -> "StaticPreludeCall {lower_route_name(p, positions, call)}"
         .DecodeUnder(_, _, _) -> "DecodeUnder"
-        .HardwareCall(call, _, _, _) -> "HardwareCall {lower_route_name(p, m, call)}"
-        .BuiltinMethod(call, _, _, _, _) -> "BuiltinMethod {lower_route_name(p, m, call)}"
-        .OptionLift2(call, _, _, _) -> "OptionLift2 {lower_route_name(p, m, call)}"
-        .ClosureMethod(_, _, call) -> "ClosureMethod {lower_route_name(p, m, call)}"
+        .HardwareCall(call, _, _, _) -> "HardwareCall {lower_route_name(p, positions, call)}"
+        .BuiltinMethod(call, _, _, _, _) -> "BuiltinMethod {lower_route_name(p, positions, call)}"
+        .OptionLift2(call, _, _, _) -> "OptionLift2 {lower_route_name(p, positions, call)}"
+        .ClosureMethod(_, _, call) -> "ClosureMethod {lower_route_name(p, positions, call)}"
         .HostBorrowCallback(_, _) -> "HostBorrowCallback"
         .TextPatternMatch(_, _, _) -> "TextPatternMatch"
         .BinaryPatternMatch(_, _, _) -> "BinaryPatternMatch"
         .CursorTakePattern(_, _, _) -> "CursorTakePattern"
         .ReaderTakePattern(_, _, _) -> "ReaderTakePattern"
-        .NumericMethod(call, _) -> "NumericMethod {lower_route_name(p, m, call)}"
-        .NumericBinaryMethod(call, _, _) -> "NumericBinaryMethod {lower_route_name(p, m, call)}"
-        .OverflowOption(call, _, _, _) -> "OverflowOption {lower_route_name(p, m, call)}"
-        .HandleMethod(call, _, _, _, _) -> "HandleMethod {lower_route_name(p, m, call)}"
+        .NumericMethod(call, _) -> "NumericMethod {lower_route_name(p, positions, call)}"
+        .NumericBinaryMethod(call, _, _) -> "NumericBinaryMethod {lower_route_name(p, positions, call)}"
+        .OverflowOption(call, _, _, _) -> "OverflowOption {lower_route_name(p, positions, call)}"
+        .HandleMethod(call, _, _, _, _) -> "HandleMethod {lower_route_name(p, positions, call)}"
         .PluginInvoke(_, _, _, _, _) -> "PluginInvoke"
         .HTTPRouterRegister(_, _, _, _, _, _, _, _) -> "HTTPRouterRegister"
-        .CoreClosureCall(call, _, _, _, _, _) -> "CoreClosureCall {lower_route_name(p, m, call)}"
+        .CoreClosureCall(call, _, _, _, _, _) -> "CoreClosureCall {lower_route_name(p, positions, call)}"
         .TaskGroup(_, _, _) -> "TaskGroup"
         .Select(_, _, _) -> "Select"
         .PolicyFunction(_, _) -> "PolicyFunction"
@@ -7225,7 +7228,7 @@ fn lower_semantic_name(p: MIRProgram, m: LowerModule, semantic: MIRSemanticOp) -
         .GCEdit(_, _, _, _, _, _, _) -> "GCEdit"
         .TypedTextInterp(_, _, _, _, _) -> "TypedTextInterp"
         .CCallback(_, _, _) -> "CCallback"
-        .HostCall(call, _) -> "HostCall {lower_route_name(p, m, call)}"
+        .HostCall(call, _) -> "HostCall {lower_route_name(p, positions, call)}"
     }
 }
 
