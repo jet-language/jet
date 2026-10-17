@@ -12,10 +12,14 @@ use core.math as math
 // four FNV-1a lanes as each byte is written, so a digest never materializes
 // the byte list. The lanes are scalar fields, and multi-byte writers keep them
 // in locals, so a hashed byte costs four multiply-xors and no list access or
-// call.
+// call. A counting writer (mir_digest_counter) only adds up the bytes the
+// text pieces (mir_digest_put*) would write: a debug-text frame is sized
+// with it first, so its text is written piece by piece and never built.
 struct MIRCanonicalWriter {
     bytes: [U8]
     hashing: Bool
+    counting: Bool
+    count: Int
     lane0: U64
     lane1: U64
     lane2: U64
@@ -23,11 +27,15 @@ struct MIRCanonicalWriter {
 }
 
 fn mir_digest_writer() -> MIRCanonicalWriter Never! {
-    MIRCanonicalWriter{bytes: [U8]{}, hashing: false, lane0: U64{0}, lane1: U64{0}, lane2: U64{0}, lane3: U64{0}}
+    MIRCanonicalWriter{bytes: [U8]{}, hashing: false, counting: false, count: 0, lane0: U64{0}, lane1: U64{0}, lane2: U64{0}, lane3: U64{0}}
 }
 
 fn mir_digest_hash_writer() -> MIRCanonicalWriter Never! {
-    MIRCanonicalWriter{bytes: [U8]{}, hashing: true, lane0: U64{0xcbf29ce484222325}, lane1: U64{0x84222325cbf29ce4}, lane2: U64{0x9e3779b185ebca87}, lane3: U64{0xd6e8feb86659fd93}}
+    MIRCanonicalWriter{bytes: [U8]{}, hashing: true, counting: false, count: 0, lane0: U64{0xcbf29ce484222325}, lane1: U64{0x84222325cbf29ce4}, lane2: U64{0x9e3779b185ebca87}, lane3: U64{0xd6e8feb86659fd93}}
+}
+
+fn mir_digest_counter() -> MIRCanonicalWriter Never! {
+    MIRCanonicalWriter{bytes: [U8]{}, hashing: false, counting: true, count: 0, lane0: U64{0}, lane1: U64{0}, lane2: U64{0}, lane3: U64{0}}
 }
 
 fn mir_digest_u8(writer: &MIRCanonicalWriter, value: U8) Never! {
@@ -111,7 +119,14 @@ fn mir_digest_tag(writer: &MIRCanonicalWriter, value: String) Never! {
 
 fn mir_digest_bytes(writer: &MIRCanonicalWriter, value: [U8]) Never! {
     mir_digest_len(&writer, value.len())
-    if !writer.hashing {
+    mir_digest_raw_bytes(&writer, value)
+}
+
+// `value` without its length frame: one piece of a frame's bytes.
+fn mir_digest_raw_bytes(writer: &MIRCanonicalWriter, value: [U8]) Never! {
+    if writer.counting {
+        writer.count += value.len()
+    } else if !writer.hashing {
         loop byte in value -> &writer.bytes.push(byte)
     } else {
         lane0 := writer.lane0
@@ -177,8 +192,51 @@ fn mir_digest_option_type(writer: &MIRCanonicalWriter, value: MIRType?) Never! {
     }
 }
 
+// Text pieces of a debug-text frame (mir_digest_layout_text,
+// mir_digest_ownership_text): the bytes `"{...}"` text would hold, written
+// (or counted) in order, without the text.
+fn mir_digest_put(writer: &MIRCanonicalWriter, text: String) Never! {
+    mir_digest_raw_bytes(&writer, text.bytes())
+}
+
+fn mir_digest_put_byte(writer: &MIRCanonicalWriter, byte: U8) Never! {
+    if writer.counting {
+        writer.count += 1
+        return
+    }
+    mir_digest_u8(&writer, byte)
+}
+
+// The decimal digits of `value`, as `"{value}"` renders it.
+fn mir_digest_put_int(writer: &MIRCanonicalWriter, value: Int) Never! {
+    magnitude := value
+    if value < 0 {
+        mir_digest_put_byte(&writer, U8{45})
+        magnitude = 0 - value
+    }
+    divisor := 1
+    loop divisor * 10 <= magnitude -> divisor = divisor * 10
+    loop divisor > 0 {
+        mir_digest_put_byte(&writer, U8{48 + magnitude /% divisor})
+        magnitude = magnitude % divisor
+        divisor = divisor /% 10
+    }
+}
+
 // Rust: crates/jet-foundation/src/MIROptimization.rs::CanonicalWriter::debug
+// Text whose every byte is printable ASCII other than `"` and `\` quotes
+// as itself, built once; any other text goes byte by byte (a lone
+// non-ASCII byte is not text on its own and adds nothing, as before).
 fn mir_digest_debug_quote(value: String) -> String Never! {
+    plain := true
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if code < 32 || code > 126 || code == 34 || code == 92 {
+            plain = false
+            break
+        }
+    }
+    if plain -> return "\"{value}\""
     parts := [String]{"\""}
     loop byte in value.bytes() {
         code :: Int.from_u8(byte)
@@ -270,8 +328,27 @@ fn mir_digest_function_kind_debug(value: MIRFunctionKind) -> String Never! {
     }
 }
 
-fn mir_digest_ownership_debug(value: MIROwnership) -> String Never! {
-    "MirOwnership {{ mode: {mir_digest_ownership_mode_debug(value.mode)}, drop: {mir_digest_drop_kind_debug(value.drop)}, moved: {mir_digest_debug_bool(value.moved)}, last_use: {mir_digest_debug_bool(value.last_use)}, gc_root: {mir_digest_debug_bool(value.gc_root)} }}"
+// The Rust `MirOwnership { mode: …, drop: …, moved: …, last_use: …,
+// gc_root: … }` debug text as one string frame, written piece by piece.
+fn mir_digest_ownership_text(writer: &MIRCanonicalWriter, value: MIROwnership) Never! {
+    counter := mir_digest_counter()
+    mir_digest_ownership_put(&counter, value)
+    mir_digest_len(&writer, counter.count)
+    mir_digest_ownership_put(&writer, value)
+}
+
+fn mir_digest_ownership_put(writer: &MIRCanonicalWriter, value: MIROwnership) Never! {
+    mir_digest_put(&writer, "MirOwnership {{ mode: ")
+    mir_digest_put(&writer, mir_digest_ownership_mode_debug(value.mode))
+    mir_digest_put(&writer, ", drop: ")
+    mir_digest_put(&writer, mir_digest_drop_kind_debug(value.drop))
+    mir_digest_put(&writer, ", moved: ")
+    mir_digest_put(&writer, mir_digest_debug_bool(value.moved))
+    mir_digest_put(&writer, ", last_use: ")
+    mir_digest_put(&writer, mir_digest_debug_bool(value.last_use))
+    mir_digest_put(&writer, ", gc_root: ")
+    mir_digest_put(&writer, mir_digest_debug_bool(value.gc_root))
+    mir_digest_put(&writer, " }}")
 }
 
 fn mir_digest_scalar_kind_debug(value: MIRScalarKind) -> String Never! {
@@ -285,27 +362,50 @@ fn mir_digest_scalar_kind_debug(value: MIRScalarKind) -> String Never! {
     }
 }
 
-fn mir_digest_abi_debug(value: MIRABI) -> String Never! {
+fn mir_digest_abi_put(writer: &MIRCanonicalWriter, value: MIRABI) Never! {
     if value == {
-        .Scalar(kind) -> "Scalar({mir_digest_scalar_kind_debug(kind)})"
-        .Aggregate -> "Aggregate"
-        .Sequence -> "Sequence"
-        .Function -> "Function"
-        .Nominal -> "Nominal"
-        .Dynamic -> "Dynamic"
-        .Never -> "Never"
+        .Scalar(kind) -> {
+            mir_digest_put(&writer, "Scalar(")
+            mir_digest_put(&writer, mir_digest_scalar_kind_debug(kind))
+            mir_digest_put(&writer, ")")
+        }
+        .Aggregate -> mir_digest_put(&writer, "Aggregate")
+        .Sequence -> mir_digest_put(&writer, "Sequence")
+        .Function -> mir_digest_put(&writer, "Function")
+        .Nominal -> mir_digest_put(&writer, "Nominal")
+        .Dynamic -> mir_digest_put(&writer, "Dynamic")
+        .Never -> mir_digest_put(&writer, "Never")
     }
 }
 
-fn mir_digest_size_debug(value: MIRSize) -> String Never! {
+fn mir_digest_size_put(writer: &MIRCanonicalWriter, value: MIRSize) Never! {
     if value == {
-        .Static(bytes) -> "Static({bytes})"
-        .Dynamic -> "Dynamic"
+        .Static(bytes) -> {
+            mir_digest_put(&writer, "Static(")
+            mir_digest_put_int(&writer, bytes)
+            mir_digest_put(&writer, ")")
+        }
+        .Dynamic -> mir_digest_put(&writer, "Dynamic")
     }
 }
 
-fn mir_digest_layout_debug(value: MIRLayout) -> String Never! {
-    "MirLayout {{ abi: {mir_digest_abi_debug(value.abi)}, size: {mir_digest_size_debug(value.size)}, align: {mir_digest_size_debug(value.align)} }}"
+// The Rust `MirLayout { abi: …, size: …, align: … }` debug text as one
+// string frame, written piece by piece (every MIR type carries one).
+fn mir_digest_layout_text(writer: &MIRCanonicalWriter, value: MIRLayout) Never! {
+    counter := mir_digest_counter()
+    mir_digest_layout_put(&counter, value)
+    mir_digest_len(&writer, counter.count)
+    mir_digest_layout_put(&writer, value)
+}
+
+fn mir_digest_layout_put(writer: &MIRCanonicalWriter, value: MIRLayout) Never! {
+    mir_digest_put(&writer, "MirLayout {{ abi: ")
+    mir_digest_abi_put(&writer, value.abi)
+    mir_digest_put(&writer, ", size: ")
+    mir_digest_size_put(&writer, value.size)
+    mir_digest_put(&writer, ", align: ")
+    mir_digest_size_put(&writer, value.align)
+    mir_digest_put(&writer, " }}")
 }
 
 fn mir_digest_measure_debug(value: MIRMeasure) -> String Never! {
@@ -553,7 +653,7 @@ fn mir_digest_type(writer: &MIRCanonicalWriter, value: MIRType) Never! {
     mir_digest_tag(&writer, "mir-type")
     mir_digest_option_u64(&writer, value.identity.map(row -> row.value))
     mir_digest_type_kind(&writer, value.kind)
-    mir_digest_string(&writer, mir_digest_layout_debug(value.layout))
+    mir_digest_layout_text(&writer, value.layout)
 }
 
 fn mir_digest_values(writer: &MIRCanonicalWriter, values: [MIRValueID]) Never! {
@@ -2361,7 +2461,7 @@ fn mir_digest_param(writer: &MIRCanonicalWriter, value: MIRParam) Never! {
     mir_digest_span(&writer, value.span)
     mir_digest_type(&writer, value.ty)
     mir_digest_string(&writer, mir_digest_access_debug(value.access))
-    mir_digest_string(&writer, mir_digest_ownership_debug(value.ownership))
+    mir_digest_ownership_text(&writer, value.ownership)
     mir_digest_string(&writer, value.public_label)
 }
 
@@ -2371,7 +2471,7 @@ fn mir_digest_capture_param(writer: &MIRCanonicalWriter, value: MIRCaptureParam)
     mir_digest_span(&writer, value.span)
     mir_digest_type(&writer, value.ty)
     mir_digest_string(&writer, mir_digest_access_debug(value.access))
-    mir_digest_string(&writer, mir_digest_ownership_debug(value.ownership))
+    mir_digest_ownership_text(&writer, value.ownership)
     mir_digest_bool(&writer, value.place_only)
 }
 
@@ -3594,7 +3694,7 @@ fn mir_digest_local(writer: &MIRCanonicalWriter, value: MIRLocal) Never! {
         }
         .None -> mir_digest_bool(&writer, false)
     }
-    mir_digest_string(&writer, mir_digest_ownership_debug(value.ownership))
+    mir_digest_ownership_text(&writer, value.ownership)
     mir_digest_bool(&writer, value.mutable)
     mir_digest_bool(&writer, value.is_comptime)
     mir_digest_bool(&writer, value.uninit)
@@ -3624,6 +3724,77 @@ fn mir_digest_terminator_debug(terminator: MIRTerminator) -> String Never! {
             "Poll({name}, MirBlockId({resume.value}), MirBlockId({stop.value}))"
         }
         .Stopped -> "Stopped"
+    }
+}
+
+// mir_digest_terminator_debug as one string frame. The shapes every block
+// ends with are written piece by piece; a Switch, Unreachable or Poll
+// writes its built text.
+fn mir_digest_terminator_text(writer: &MIRCanonicalWriter, terminator: MIRTerminator) Never! {
+    counter := mir_digest_counter()
+    mir_digest_terminator_put(&counter, terminator)
+    mir_digest_len(&writer, counter.count)
+    mir_digest_terminator_put(&writer, terminator)
+}
+
+fn mir_digest_put_id(writer: &MIRCanonicalWriter, value: U64) Never! {
+    mir_digest_put_int(&writer, Int.from_u64(value))
+}
+
+// mir_digest_debug_u64_option of a value ID, piece by piece.
+fn mir_digest_put_value_option(writer: &MIRCanonicalWriter, value: MIRValueID?) Never! {
+    if value == {
+        None -> mir_digest_put(&writer, "None")
+        Val(id) -> {
+            mir_digest_put(&writer, "Some(")
+            mir_digest_put_id(&writer, id.value)
+            mir_digest_put(&writer, ")")
+        }
+    }
+}
+
+fn mir_digest_terminator_put(writer: &MIRCanonicalWriter, terminator: MIRTerminator) Never! {
+    if terminator == {
+        .Jump(target) -> {
+            mir_digest_put(&writer, "Jump(MirBlockId(")
+            mir_digest_put_id(&writer, target.value)
+            mir_digest_put(&writer, "))")
+        }
+        .Branch(condition, then_target, else_target) -> {
+            mir_digest_put(&writer, "Branch(MirValueId(")
+            mir_digest_put_id(&writer, condition.value)
+            mir_digest_put(&writer, "), MirBlockId(")
+            mir_digest_put_id(&writer, then_target.value)
+            mir_digest_put(&writer, "), MirBlockId(")
+            mir_digest_put_id(&writer, else_target.value)
+            mir_digest_put(&writer, "))")
+        }
+        .Return(value) -> {
+            mir_digest_put(&writer, "Return(")
+            mir_digest_put_value_option(&writer, value)
+            mir_digest_put(&writer, ")")
+        }
+        .Yield(value, resume) -> {
+            mir_digest_put(&writer, "Yield(MirValueId(")
+            mir_digest_put_id(&writer, value.value)
+            mir_digest_put(&writer, "), MirBlockId(")
+            mir_digest_put_id(&writer, resume.value)
+            mir_digest_put(&writer, "))")
+        }
+        .Break(target, value) -> {
+            mir_digest_put(&writer, "Break(MirBlockId(")
+            mir_digest_put_id(&writer, target.value)
+            mir_digest_put(&writer, "), ")
+            mir_digest_put_value_option(&writer, value)
+            mir_digest_put(&writer, ")")
+        }
+        .Continue(target) -> {
+            mir_digest_put(&writer, "Continue(MirBlockId(")
+            mir_digest_put_id(&writer, target.value)
+            mir_digest_put(&writer, "))")
+        }
+        .Stopped -> mir_digest_put(&writer, "Stopped")
+        else -> mir_digest_put(&writer, mir_digest_terminator_debug(terminator))
     }
 }
 
@@ -3868,7 +4039,7 @@ fn mir_digest_function(writer: &MIRCanonicalWriter, value: MIRFunction) {
         mir_digest_span(&writer, value.blocks[position].span)
         mir_digest_len(&writer, value.blocks[position].instructions.len())
         loop instruction in value.blocks[position].instructions -> mir_digest_instruction(&writer, instruction)
-        mir_digest_string(&writer, mir_digest_terminator_debug(value.blocks[position].terminator))
+        mir_digest_terminator_text(&writer, value.blocks[position].terminator)
     }
     mir_digest_len(&writer, value.locals.len())
     loop position in mir_digest_sort_locals(value.locals) -> mir_digest_local(&writer, value.locals[position])
@@ -3877,7 +4048,7 @@ fn mir_digest_function(writer: &MIRCanonicalWriter, value: MIRFunction) {
         mir_digest_u64(&writer, value.values[position].id.value)
         mir_digest_type(&writer, value.values[position].ty)
         mir_digest_span(&writer, value.values[position].span)
-        mir_digest_string(&writer, mir_digest_ownership_debug(value.values[position].ownership))
+        mir_digest_ownership_text(&writer, value.values[position].ownership)
     }
     mir_digest_len(&writer, value.places.len())
     loop position in mir_digest_sort_places(value.places) -> mir_digest_place(&writer, value.places[position])
