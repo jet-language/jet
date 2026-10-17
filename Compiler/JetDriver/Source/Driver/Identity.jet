@@ -7,6 +7,7 @@ use jet_foundation.[
     CanonicalPassRecord,
     AppAuthorizedDirectory,
     CompilerThreads,
+    compiler_threads_single,
     CompilerTraceSink,
     Diagnostic,
     GateLedger,
@@ -618,6 +619,10 @@ struct JetDriverCompileResult {
     // (JetCli Request.jet `jet_cli_compile_for_target`) so the host's own
     // phases after it (the native backend route) trace through the same sink.
     trace_sink: CompilerTraceSink?{None}
+    // The request's compiler threads, handed back by the host's compile
+    // (JetCli Request.jet `jet_cli_compile_for_target`) so the native backend
+    // route after it compiles on the same threads.
+    compiler_threads: CompilerThreads{compiler_threads_single()}
 }
 
 struct JetDriverSandboxOutput {

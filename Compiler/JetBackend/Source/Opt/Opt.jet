@@ -5,14 +5,15 @@
 // lowered module: x64_compile_module lints it again, so an optimizer bug
 // refuses the build instead of producing wrong code.
 
-fn lir_optimize_module(program: LIRModule, level: Int) -> LIRModule Never! {
-    // copy: O0 returns a new owned LIRModule equal to `program`; the caller's module (a read parameter) stays with the caller.
-    if level <= 0 -> return program.copy()
+// The module moves in and the optimized module out, so the lowered and the
+// optimized module are never both resident.
+fn lir_optimize_module(program: ^LIRModule, level: Int) -> LIRModule Never! {
+    if level <= 0 -> return ^program
     // Bottom-up over the call graph (callees first, Opt/Inline.jet): each
     // function inlines the final, already optimized bodies of its callees
     // (P5/P4), then runs the per-function passes, and only then becomes
     // inlinable itself, so wrapper chains collapse into their callers.
-    state := lir_inline_start(program)
+    state := lir_inline_start(^program)
     loop position in 0..<state.order.len() {
         // copy: plain Int function id; lir_inline_finish writes `state`, so the id
         // cannot stay a view into `state.order`.

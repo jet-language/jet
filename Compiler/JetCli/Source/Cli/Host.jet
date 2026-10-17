@@ -11,8 +11,7 @@ use jet_backend.[
     x64_execution_service,
     lir_lower_entry_in_place, lir_lower_entry_keep_going_in_place, lir_optimize_module,
     x64_link_executable,
-    x64_relocatable_object,
-    x64_relocatable_object_keep_going,
+    x64_relocatable_object_owned,
 ]
 use jet_driver.[
     JetDriverAuthorizedSourceSnapshot,
@@ -61,6 +60,7 @@ use jet_foundation.[
     diagnostic_render_all,
     gate_ledger_push,
     mir_sha256_hex,
+    CompilerThreads,
 ]
 use jet_parser.[
     JetFormatResult,
@@ -379,8 +379,8 @@ fn jet_cli_native_executable(result: &JetDriverCompileResult, sources: JetCLIFor
             if result.trace_sink == .Val(sink) -> sink.begin("native.rust_foreign", "", -1, -1)
             attached := jet_cli_rust_foreign_attached(rust_foreign, program) ?? return Val(JetCLINativeFailure.RustForeign{error: err})
             if result.trace_sink == .Val(sink) -> sink.end("native.rust_foreign", attached.len())
-            if attached.len() == 1 -> return jet_cli_native_program_executable(entry_function, result.trace_sink, &attached[0], sources, level, runtime_dir, object_path, executable_path, keep_going, &census)
-            return jet_cli_native_program_executable(entry_function, result.trace_sink, &program, sources, level, runtime_dir, object_path, executable_path, keep_going, &census)
+            if attached.len() == 1 -> return jet_cli_native_program_executable(entry_function, result.trace_sink, result.compiler_threads, &attached[0], sources, level, runtime_dir, object_path, executable_path, keep_going, &census)
+            return jet_cli_native_program_executable(entry_function, result.trace_sink, result.compiler_threads, &program, sources, level, runtime_dir, object_path, executable_path, keep_going, &census)
         }
     }
     Val(JetCLINativeFailure.NoEntry)
@@ -405,8 +405,10 @@ fn jet_cli_rust_foreign_attached(facts: JetDriverRustForeignFacts, program: MIRP
 // holds `native.optimize`, the LIR passes of `level`), `native.foreign` (the C
 // closure) and `native.link`; before them `native.sources` (the C sources
 // the snapshot declares) and `native.rust_foreign` (a Rust foreign helper's
-// realization). A span a failure returns from stays open.
-fn jet_cli_native_program_executable(entry_function: MIRFunctionID?, trace_sink: CompilerTraceSink?, unpruned: &MIRProgram, sources: JetCLIForeignSources, level: Int, runtime_dir: String, object_path: String, executable_path: String, keep_going: Bool, census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
+// realization). A span a failure returns from stays open. The lowered module
+// moves through the LIR passes into the object, so no phase holds two copies
+// of it, and the object's functions compile on the threads `threads` admits.
+fn jet_cli_native_program_executable(entry_function: MIRFunctionID?, trace_sink: CompilerTraceSink?, threads: CompilerThreads, unpruned: &MIRProgram, sources: JetCLIForeignSources, level: Int, runtime_dir: String, object_path: String, executable_path: String, keep_going: Bool, census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
     entry_id :: entry_function ?? return Val(JetCLINativeFailure.NoEntry)
     // Only functions the entry reaches are lowered, generic ones per instance.
     if trace_sink == .Val(sink) -> sink.begin("native.lower", "", -1, -1)
@@ -426,14 +428,11 @@ fn jet_cli_native_program_executable(entry_function: MIRFunctionID?, trace_sink:
     entry :: lowered.entry ?? return Val(JetCLINativeFailure.LostEntry)
     // No absolute source root enters DWARF: comp_dir stays "." on every
     // route, so the output never depends on the checkout path. O0 (`run`, comptime)
-    // leaves the lowered module unchanged and uncopied.
+    // leaves the lowered module unchanged.
     if trace_sink == .Val(sink) -> sink.begin("native.object", "", -1, -1)
-    object :: if {
-        keep_going && level > 0 -> x64_relocatable_object_keep_going(jet_cli_native_optimize(lowered.lir, level, trace_sink), entry)
-        keep_going -> x64_relocatable_object_keep_going(^lowered.lir, entry)
-        level > 0 -> x64_relocatable_object(jet_cli_native_optimize(lowered.lir, level, trace_sink), entry)
-        else -> x64_relocatable_object(lowered.lir, entry)
-    }
+    // The memory term is read now: the compile before this holds most of it.
+    object_threads :: CompilerThreads{cap: threads.cap, cores: threads.cores, memory_available: jet_cli_memory_available()}
+    object :: if level > 0 -> x64_relocatable_object_owned(jet_cli_native_optimize(^lowered.lir, level, trace_sink), entry, object_threads, keep_going) else -> x64_relocatable_object_owned(^lowered.lir, entry, object_threads, keep_going)
     if trace_sink == .Val(sink) -> sink.end("native.object", function_count)
     if object.errors.len() > 0 {
         if keep_going {
@@ -477,10 +476,10 @@ fn jet_cli_native_level(command: String, release: Bool) -> Int Never! {
 }
 
 // The LIR passes of `level` (AGENTS.md I9: `build` O1, `--release` O2),
-// traced as `native.optimize`.
-fn jet_cli_native_optimize(lir: LIRModule, level: Int, trace_sink: CompilerTraceSink?) -> LIRModule Never! {
+// traced as `native.optimize`. The module moves in and out.
+fn jet_cli_native_optimize(lir: ^LIRModule, level: Int, trace_sink: CompilerTraceSink?) -> LIRModule Never! {
     if trace_sink == .Val(sink) -> sink.begin("native.optimize", "", -1, -1)
-    optimized :: lir_optimize_module(lir, level)
+    optimized :: lir_optimize_module(^lir, level)
     if trace_sink == .Val(sink) -> sink.end("native.optimize", optimized.functions.len())
     optimized
 }
@@ -593,7 +592,16 @@ fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Boo
     authorized :: jet_cli_compiled_snapshot(compiled)
     if compiled == .Refused(refusal) -> return ^refusal
     if &compiled == .Compiled(result, _) -> output = jet_cli_build_result(file, source, color, release, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot"))
-    output
+    jet_cli_finish(output)
+}
+
+// A compile verb ends the process with its output while its compile result
+// is still live: the exit returns the whole program's memory at once, where
+// drop glue would walk every MIR row and fault every swapped-out page back in
+// (minutes after the self-host unit's link).
+fn jet_cli_finish(output: JetDriverVerbOutput) -> Never {
+    jet_cli_write_output(output)
+    cli_process.exit(output.exit_code)
 }
 
 // Run the built program on this process's stdin, stdout, and stderr with the
@@ -657,7 +665,7 @@ fn jet_cli_compile_run(file: String, source: String, color: Bool, release: Bool,
     authorized :: jet_cli_compiled_snapshot(compiled)
     if compiled == .Refused(refusal) -> return ^refusal
     if &compiled == .Compiled(result, _) -> output = jet_cli_run_result(file, source, color, release, verbose, program_args, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot"))
-    output
+    jet_cli_finish(output)
 }
 fn jet_cli_native_test_unrun_check_report() -> String Never! {
     row :: diagnostic_registry_row("E3015") ?? panic("native output-check failure is registered")
@@ -1633,6 +1641,12 @@ fn jet_cli_main(args: [String]) -> Int {
     plan :: jet_cli_front(args)
     trace_sink :: if jet_cli_plan_compiles(plan) -> jet_cli_trace_sink(jet_cli_trace_flag(jet_cli_owned_flags(args))) else -> None
     output :: jet_cli_execute(^plan, trace_sink)
+    jet_cli_write_output(output)
+    output.exit_code
+}
+
+// A verb's output, written to the process's stdout and stderr.
+fn jet_cli_write_output(output: JetDriverVerbOutput) {
     if output.stdout.len() > 0 {
         out := cli_term.stdout()
         &out.write(output.stdout).drop("jet stdout")
@@ -1641,7 +1655,6 @@ fn jet_cli_main(args: [String]) -> Int {
         stderr_handle := cli_term.stderr()
         &stderr_handle.write(output.stderr).drop("jet stderr")
     }
-    output.exit_code
 }
 
 // The plans whose compile `--trace` and JET_TRACE_FILE trace.

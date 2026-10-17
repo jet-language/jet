@@ -21,7 +21,7 @@
 // and shifts need cl: rdx and rcx are saved around them with push/pop, so the
 // allocator may keep values there.
 
-use jet_foundation.[compiler_take_rows, compiler_threads_failure_text]
+use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition]
 
 enum X64RelocTarget {
     Function(id: LIRFunctionID)
@@ -1132,69 +1132,211 @@ fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation
     }
 }
 
-// Lint, then compile every function. Lint issues stop compilation.
+// Lint, then compile every function on the calling thread. Lint issues stop
+// compilation.
 fn x64_compile_module(program: LIRModule) -> X64ModuleResult Never! {
     errors := [String]{}
     loop issue in lir_lint_module(program) -> &errors.push("LIR lint: {issue.function} b{issue.block}: {issue.message}")
     if errors.len() > 0 -> return X64ModuleResult{functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, errors: errors}
-    functions := [X64CompiledFunction]{}
-    debug := [X64FunctionDebug]{}
-    loop function in program.functions {
-        result :: x64_compile_function(program, function)
-        loop error in result.errors -> &errors.push(error)
-        if result.function == .Val(compiled) {
-            &functions.push(compiled)
-            &debug.push(result.debug ?? X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}})
-        }
-    }
-    X64ModuleResult{functions: functions, debug: debug, errors: errors}
+    part := X64CompilePart{position: 0, last: program.functions.len(), functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, errors: [String]{}}
+    _ := x64_compile_part_rows(program, [String:Bool]{}, false, &part)
+    X64ModuleResult{functions: compiler_take_rows<X64CompiledFunction>(&part.functions), debug: compiler_take_rows<X64FunctionDebug>(&part.debug), errors: compiler_take_rows<String>(&part.errors)}
 }
 
-// JET_KEEP_GOING (the bootstrap native feed): x64_compile_module, except that
-// nothing stops it. Every lint finding is an error; a function a lint finding
-// names, whose selection reports gaps, or whose compilation stops (a panic,
-// caught at its task's join) compiles as a trap (x64_trap_function) with one
-// error naming it, so the function table stays whole and the object, link
-// and every later function still run and report. The module moves into the
-// tasks' shared inputs and back out, uncopied. It is never shipped: the
-// caller turns every error into a census row.
-fn x64_compile_module_keep_going(program: ^LIRModule) -> X64KeepGoingModule Never! {
+// Function compiling threads (D-JOBS1, compiler_threads_admit): a thread is
+// admitted for at least this many LIR instructions, so a small module
+// compiles on the calling thread.
+X64_COMPILE_MIN_INSTRUCTIONS_PER_THREAD :: 20000
+
+// Parts per admitted thread: enough that a thread which drew light parts
+// claims more while another finishes a heavy one, few enough that claiming
+// stays rare.
+X64_COMPILE_PARTS_PER_THREAD :: 8
+
+// x64_compile_module over a module it owns, on as many threads as `threads`
+// admits for its instructions. The functions are cut into consecutive parts
+// of about equal instruction count (compiler_threads_partition), and each
+// thread claims the next unclaimed part until none is left. A function's
+// compile reads only the module and writes only its own part, and the parts
+// join in part order, so the functions, debug rows and errors are those the
+// calling thread produces alone, for any thread count. The module moves into
+// the threads' shared inputs and back out, uncopied.
+// `keep_going` (JET_KEEP_GOING, the bootstrap native feed): nothing stops the
+// compile. Every lint finding is an error; a function a lint finding names,
+// whose selection reports gaps, or whose compilation stops (a panic, caught
+// at its task's join) compiles as a trap (x64_trap_function) with one error
+// naming it, so the function table stays whole and the object, link and
+// every later function still run and report. Its output is never shipped.
+fn x64_compile_module_owned(program: ^LIRModule, threads: CompilerThreads, keep_going: Bool) -> X64CompiledModule Never! {
     errors := [String]{}
     trapped := [String:Bool]{}
     loop issue in lir_lint_module(program) {
         &errors.push("LIR lint: {issue.function} b{issue.block}: {issue.message}")
-        if issue.function != "" -> trapped[issue.function] = true
+        if keep_going && issue.function != "" -> trapped[issue.function] = true
     }
-    inputs :: shared X64KeepGoingInputs{programs: [LIRModule]{^program}, trapped: ^trapped}
-    state :: shared X64KeepGoingState{position: 0, functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, errors: ^errors}
-    x64_keep_going_functions(inputs, state) ?? panic("the keep-going x64 compile tasks failed")
-    module_back :: x64_keep_going_take_program(inputs) ?? panic("the keep-going x64 compile inputs were lost")
-    compiled :: x64_keep_going_take(state) ?? panic("the keep-going x64 compile state was lost")
-    X64KeepGoingModule{program: module_back, compiled: compiled}
+    if !keep_going && errors.len() > 0 -> return X64CompiledModule{program: ^program, compiled: X64ModuleResult{functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, errors: ^errors}}
+    weights :: x64_compile_weights(program)
+    total := 0
+    loop weight in weights -> total += weight
+    workers :: compiler_threads_admit(threads, weights.len(), total, X64_COMPILE_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
+    count := workers * X64_COMPILE_PARTS_PER_THREAD
+    if count > weights.len() -> count = weights.len()
+    if count < 1 -> count = 1
+    bounds :: compiler_threads_partition(weights, count)
+    inputs :: shared X64CompileInputs{programs: [LIRModule]{^program}, trapped: ^trapped, keep_going: keep_going}
+    parts := [Shared<X64CompilePart>]{}
+    loop part in 0..<count {
+        row :: shared X64CompilePart{position: bounds[part], last: bounds[part + 1], functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, errors: [String]{}}
+        &parts.push(row)
+    }
+    queue :: shared X64CompileQueue{next: 0}
+    // Without JET_KEEP_GOING a stop stops the compile, so the calling thread
+    // claims parts too; with it every claiming thread is a task whose stop is
+    // caught at its join, and x64_compile_finish_parts completes its part.
+    if keep_going {
+        _ := x64_compile_claimers(inputs, parts, queue, workers, false, true)
+        x64_compile_finish_parts(inputs, parts)
+    } else {
+        _ := x64_compile_claimers(inputs, parts, queue, workers - 1, true, false)
+    }
+    program_back :: x64_compile_take_program(inputs)
+    compiled := X64ModuleResult{functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, errors: ^errors}
+    loop part in parts -> x64_compile_part_drain(part, &compiled)
+    X64CompiledModule{program: program_back, compiled: compiled}
 }
 
-struct X64KeepGoingModule {
+// x64_compile_module_owned's result: the compiled functions, and the module
+// moved back out of the compiling threads' shared inputs.
+struct X64CompiledModule {
     program: LIRModule
     compiled: X64ModuleResult
 }
 
-struct X64KeepGoingInputs {
+struct X64CompileInputs {
     // The one module, moved in for the compile and back out after.
     programs: [LIRModule]
-    // Functions (by name) a lint finding names.
+    // Functions (by name) a lint finding names (JET_KEEP_GOING only).
     trapped: [String:Bool]
+    keep_going: Bool
 }
 
-struct X64KeepGoingState {
+// One claimable part: its consecutive functions [position, last) still to
+// compile, and what its compiled functions so far produced, in order.
+struct X64CompilePart {
     position: Int
+    last: Int
     functions: [X64CompiledFunction]
     debug: [X64FunctionDebug]
     errors: [String]
 }
 
-fn x64_keep_going_take_program(inputs: Shared<X64KeepGoingInputs>) -> LIRModule {
+// The next unclaimed part.
+struct X64CompileQueue {
+    next: Int
+}
+
+// Each function's instructions (and one per block), in function order.
+fn x64_compile_weights(program: LIRModule) -> [Int] Never! {
+    weights := [Int]{}
+    loop function in program.functions {
+        size := 0
+        loop block in function.blocks -> size += block.insts.len() + 1
+        &weights.push(size)
+    }
+    weights
+}
+
+fn x64_compile_take_program(inputs: Shared<X64CompileInputs>) -> LIRModule {
     permit :: inputs.guard_edit()
-    &permit.value.programs.pop() ?? panic("the keep-going x64 module left its shared inputs")
+    &permit.value.programs.pop() ?? panic("the x64 compile module left its shared inputs")
+}
+
+// Moves a finished part's rows onto the end of `compiled`.
+fn x64_compile_part_drain(part: Shared<X64CompilePart>, compiled: &X64ModuleResult) {
+    permit := part.guard_edit()
+    &compiled.functions.extend(compiler_take_rows<X64CompiledFunction>(&permit.value.functions))
+    &compiled.debug.extend(compiler_take_rows<X64FunctionDebug>(&permit.value.debug))
+    &compiled.errors.extend(compiler_take_rows<String>(&permit.value.errors))
+}
+
+// Runs `tasks` claiming threads, one task each, and one more on this thread
+// when `inline`; returns how many functions they compiled. A claiming task
+// that stops re-raises its panic here unless `keep_going`.
+fn x64_compile_claimers(inputs: Shared<X64CompileInputs>, parts: [Shared<X64CompilePart>], queue: Shared<X64CompileQueue>, tasks: Int, inline: Bool, keep_going: Bool) -> Int {
+    if tasks <= 0 {
+        if inline -> return x64_compile_claimed(inputs, parts, queue)
+        return 0
+    }
+    compiled := 0
+    task.group x64_compile {
+        head :: task x64_compile_claimed(inputs, parts, queue)
+        compiled = x64_compile_claimers(inputs, parts, queue, tasks - 1, inline, keep_going)
+        compiled += head.join() ?? x64_compile_stopped(keep_going, err)
+    }
+    compiled
+}
+
+// A stopped claiming thread: its panic text, re-raised unchanged so an
+// internal error reads the same with any thread count; under JET_KEEP_GOING
+// its part is left open for x64_compile_finish_parts.
+fn x64_compile_stopped(keep_going: Bool, failure: TaskFailure) -> Int Never! {
+    if !keep_going -> panic(compiler_threads_failure_text(failure))
+    0
+}
+
+// One thread: compiles the parts it claims until none is left.
+fn x64_compile_claimed(inputs: Shared<X64CompileInputs>, parts: [Shared<X64CompilePart>], queue: Shared<X64CompileQueue>) -> Int {
+    compiled := 0
+    loop {
+        index :: x64_compile_claim(queue)
+        if index >= parts.len() -> break
+        compiled += x64_compile_part_run(inputs, parts[index])
+    }
+    compiled
+}
+
+fn x64_compile_claim(queue: Shared<X64CompileQueue>) -> Int {
+    permit :: queue.guard_edit()
+    index :: permit.value.next
+    permit.value.next = index + 1
+    index
+}
+
+fn x64_compile_part_run(inputs: Shared<X64CompileInputs>, part: Shared<X64CompilePart>) -> Int {
+    read :: inputs.guard_read()
+    permit := part.guard_edit()
+    // Passed straight through: a local binding of the guarded module would copy it.
+    x64_compile_part_rows(read.value.programs[0], read.value.trapped, read.value.keep_going, &permit.value)
+}
+
+// Compiles `part`'s functions from its position to its last, writing each
+// function and the next position into `part` as it goes, so a stop leaves
+// the position at the function it was compiling. With `keep_going` a
+// function a lint finding names (`trapped`) or whose selection reports gaps
+// compiles as a trap; without it a function that does not compile is left
+// out and its errors stop the object.
+fn x64_compile_part_rows(program: LIRModule, trapped: [String:Bool], keep_going: Bool, part: &X64CompilePart) -> Int Never! {
+    first :: part.position
+    loop part.position < part.last {
+        index :: part.position
+        if keep_going && trapped.get(program.functions[index].name) != None {
+            &part.functions.push(x64_trap_function(program.functions[index]))
+            &part.debug.push(x64_empty_debug())
+            part.position = index + 1
+            next
+        }
+        result :: x64_compile_function(program, program.functions[index])
+        loop error in result.errors -> &part.errors.push(error)
+        if result.function == .Val(compiled) {
+            &part.functions.push(compiled)
+            &part.debug.push(result.debug ?? x64_empty_debug())
+        } else if keep_going {
+            &part.functions.push(x64_trap_function(program.functions[index]))
+            &part.debug.push(x64_empty_debug())
+        }
+        part.position = index + 1
+    }
+    part.last - first
 }
 
 // A function that only stops (ud2), with the identity and name of `function`.
@@ -1204,89 +1346,55 @@ fn x64_trap_function(function: LIRFunction) -> X64CompiledFunction Never! {
     X64CompiledFunction{id: function.id, name: function.name, code: code, relocs: [X64Reloc]{}}
 }
 
-fn x64_keep_going_empty_debug() -> X64FunctionDebug Never! {
+fn x64_empty_debug() -> X64FunctionDebug Never! {
     X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}}
 }
 
-fn x64_keep_going_take(state: Shared<X64KeepGoingState>) -> X64ModuleResult {
-    permit := state.guard_edit()
-    X64ModuleResult{functions: compiler_take_rows<X64CompiledFunction>(&permit.value.functions), debug: compiler_take_rows<X64FunctionDebug>(&permit.value.debug), errors: compiler_take_rows<String>(&permit.value.errors)}
-}
-
-// One task compiles from the current position to the end, writing each
-// function and the next position into `state` as it goes; a stopped task
-// leaves `position` at the function it was compiling, which becomes a trap,
-// and a new task compiles the rest.
-fn x64_keep_going_functions(inputs: Shared<X64KeepGoingInputs>, state: Shared<X64KeepGoingState>) {
-    count :: x64_keep_going_count(inputs)
-    loop {
-        reason :: x64_keep_going_attempt(inputs, state)
-        if x64_keep_going_position(state) >= count -> break
-        x64_keep_going_trap(inputs, state, reason)
+// JET_KEEP_GOING: a part whose claiming thread stopped, or that no thread
+// claimed, compiles on from the function it stopped at, one task at a time;
+// the function a task stops at becomes one error and a trap, and a new task
+// compiles the rest of the part.
+fn x64_compile_finish_parts(inputs: Shared<X64CompileInputs>, parts: [Shared<X64CompilePart>]) {
+    loop part in parts {
+        loop x64_compile_part_open(part) {
+            reason :: x64_compile_attempt(inputs, part)
+            if !x64_compile_part_open(part) -> break
+            x64_compile_trap(inputs, part, reason)
+        }
     }
 }
 
-fn x64_keep_going_count(inputs: Shared<X64KeepGoingInputs>) -> Int {
-    permit :: inputs.guard_read()
-    permit.value.programs[0].functions.len()
-}
-
-fn x64_keep_going_position(state: Shared<X64KeepGoingState>) -> Int {
-    permit :: state.guard_read()
-    permit.value.position
+fn x64_compile_part_open(part: Shared<X64CompilePart>) -> Bool {
+    permit :: part.guard_read()
+    permit.value.position < permit.value.last
 }
 
 // The stop text when the task stopped, else "".
-fn x64_keep_going_attempt(inputs: Shared<X64KeepGoingInputs>, state: Shared<X64KeepGoingState>) -> String {
+fn x64_compile_attempt(inputs: Shared<X64CompileInputs>, part: Shared<X64CompilePart>) -> String {
     stopped := ""
     task.group x64_compile {
-        head :: task x64_keep_going_part(inputs, state)
+        head :: task x64_compile_part_task(inputs, part)
         stopped = head.join() ?? compiler_threads_failure_text(err)
     }
     stopped
 }
 
-fn x64_keep_going_part(inputs: Shared<X64KeepGoingInputs>, state: Shared<X64KeepGoingState>) -> String {
-    read :: inputs.guard_read()
-    permit := state.guard_edit()
-    // Passed straight through: a local binding of the guarded module would copy it.
-    x64_keep_going_rows(read.value.programs[0], read.value.trapped, &permit.value)
+fn x64_compile_part_task(inputs: Shared<X64CompileInputs>, part: Shared<X64CompilePart>) -> String {
+    _ := x64_compile_part_run(inputs, part)
     ""
 }
 
-fn x64_keep_going_rows(program: LIRModule, trapped: [String:Bool], state: &X64KeepGoingState) Never! {
-    loop state.position < program.functions.len() {
-        index :: state.position
-        if trapped.get(program.functions[index].name) != None {
-            &state.functions.push(x64_trap_function(program.functions[index]))
-            &state.debug.push(x64_keep_going_empty_debug())
-            state.position = index + 1
-            next
-        }
-        result :: x64_compile_function(program, program.functions[index])
-        loop error in result.errors -> &state.errors.push(error)
-        if result.function == .Val(compiled) {
-            &state.functions.push(compiled)
-            &state.debug.push(result.debug ?? x64_keep_going_empty_debug())
-        } else {
-            &state.functions.push(x64_trap_function(program.functions[index]))
-            &state.debug.push(x64_keep_going_empty_debug())
-        }
-        state.position = index + 1
-    }
-}
-
-fn x64_keep_going_trap(inputs: Shared<X64KeepGoingInputs>, state: Shared<X64KeepGoingState>, reason: String) {
+fn x64_compile_trap(inputs: Shared<X64CompileInputs>, part: Shared<X64CompilePart>, reason: String) {
     read :: inputs.guard_read()
-    permit := state.guard_edit()
-    x64_keep_going_trap_row(read.value.programs[0], &permit.value, reason)
+    permit := part.guard_edit()
+    x64_compile_trap_row(read.value.programs[0], &permit.value, reason)
 }
 
-// The function at `state.position` stopped: one error, and its trap.
-fn x64_keep_going_trap_row(program: LIRModule, state: &X64KeepGoingState, reason: String) Never! {
-    index :: state.position
-    &state.errors.push("x64: {program.functions[index].name}: keep-going trap: compiling it stopped: {reason}")
-    &state.functions.push(x64_trap_function(program.functions[index]))
-    &state.debug.push(x64_keep_going_empty_debug())
-    state.position = index + 1
+// The function at `part.position` stopped: one error, and its trap.
+fn x64_compile_trap_row(program: LIRModule, part: &X64CompilePart, reason: String) Never! {
+    index :: part.position
+    &part.errors.push("x64: {program.functions[index].name}: keep-going trap: compiling it stopped: {reason}")
+    &part.functions.push(x64_trap_function(program.functions[index]))
+    &part.debug.push(x64_empty_debug())
+    part.position = index + 1
 }

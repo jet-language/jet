@@ -968,11 +968,15 @@ fn jet_cli_compile_for_target(anchor: String, entry: String, overlays: [JetCLIOv
             selected.target = target
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)
             library_prefix :: if target == .Native -> cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") else -> None
+            // copy: a three-field row; the request moves into the compiler below.
+            compiler_threads :: selected.compiler_threads.copy()
             result := jet_cli_compile_request(^selected, emit_rust && library_prefix == None, trace_sink)
             if library_prefix == .Val(prefix) -> result = jet_cli_runtime_library(^result, prefix)
             // The host's phases after the compile (Host.jet's native backend
-            // route) trace through the same sink, which the result carries.
+            // route) trace through the same sink, which the result carries,
+            // and compile on the request's threads.
             result.trace_sink = jet_cli_trace_boxed(trace_sink)
+            result.compiler_threads = compiler_threads
             return JetCLICompiled.Compiled{result: result, snapshot: snapshot}
         }
     }

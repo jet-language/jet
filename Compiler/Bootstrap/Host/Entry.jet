@@ -90,7 +90,10 @@ fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String) -> Je
         runtime_dir = parts.join("/")
         if file != JET_CLI_RUNTIME_PACK_FILE || runtime_dir == "" || jet_cli_runtime_key(runtime_dir) != .Val(key) -> return jet_bootstrap_native_escaped([String]{}, "JET_RUNTIME_PACK must name <jet-runtime>/<native.key>/{JET_CLI_RUNTIME_PACK_FILE} in a packaged runtime directory")
     }
+    // copy: a three-field row; the request moves into the compiler below.
+    compiler_threads :: request.compiler_threads.copy()
     result := jet_bootstrap_mir(^request) ?? return jet_bootstrap_native_escaped([String]{}, "the native front end failed outside every compile stage")
+    result.compiler_threads = compiler_threads
     keep_going :: jet_cli_keep_going_enabled()
     if keep_going && result.mir == None -> return result
     if !keep_going && (!result.complete || result.internal_problem != None) -> return result

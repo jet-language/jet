@@ -159,7 +159,7 @@ fn jet_cli_native_test_build(program: MIRProgram, tests: [MIRTestCase], harness:
         return Err(findings.join("\n"))
     }
     entry :: lowered.entry ?? return Err("native test lowering lost the harness entry")
-    object :: x64_relocatable_object(lir_optimize_module(lowered.lir, optimization), entry)
+    object :: x64_relocatable_object(lir_optimize_module(^lowered.lir, optimization), entry)
     if object.errors.len() > 0 -> return Err(object.errors.join("\n"))
     pack :: native_test_files.read_bytes(pack_path) ?? return Err("couldn't read native test runtime {pack_path}: {err}")
     image :: x64_link_executable([String]{"{binary}.o", pack_path}, ^[[U8]]{object.bytes, pack})

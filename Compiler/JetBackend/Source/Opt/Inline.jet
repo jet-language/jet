@@ -6,6 +6,8 @@
 // 200-instruction caller budget are measured on exactly the body cloned.
 // The Simplify renumbering helpers preserve every instruction's full metadata.
 
+use jet_foundation.[compiler_take_rows]
+
 struct InlineGraph {
     edges: [[Int]]
     index: [Int]
@@ -32,25 +34,34 @@ struct LIRInlineState {
     order: [Int]
 }
 
-fn inline_direct(program: LIRModule, original: LIRFunction) -> LIRFunction Never! {
+// P5 over one function of the module: a call through an address the
+// function takes of a module function with the call's signature becomes a
+// direct call. `signatures[f]` is function f's signature.
+fn inline_direct(signatures: [LIRSignatureID], original: ^LIRFunction) -> LIRFunction Never! {
     addresses := [Int]{}
     loop _ in original.values -> &addresses.push(-1)
+    known := false
     loop block in original.blocks {
         loop inst in block.insts {
-            if inst == .FunctionAddress(dst, target) -> addresses[dst.value] = target.value
+            if inst == .FunctionAddress(dst, target) {
+                addresses[dst.value] = target.value
+                known = true
+            }
         }
     }
-    function := original
+    function := ^original
+    // Without a known code pointer no call changes.
+    if !known -> return function
     blocks := [LIRBlock]{}
-    loop block in original.blocks {
+    loop block in function.blocks {
         insts := [LIRInst]{}
         loop inst in block.insts {
             rewritten := inst
             if inst == .Call(dst, signature, callee, args) {
                 if callee == .Value(value) {
                     target :: addresses[value.value]
-                    if target >= 0 && target < program.functions.len() {
-                        if program.functions[target].signature == signature {
+                    if target >= 0 && target < signatures.len() {
+                        if signatures[target] == signature {
                             rewritten = LIRInst.Call{dst: dst, signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: target}}, args: args}
                         }
                     }
@@ -258,10 +269,24 @@ fn inline_caller(functions: [LIRFunction], original: LIRFunction, recursive: [Bo
 // P5 over every function, the call graph, and the bottom-up visit order.
 // Until lir_inline_finish measures a function's final body it is not
 // eligible (size 41); a non-recursive callee is always finished before any
-// caller is visited, and a recursive one is never inlined.
-fn lir_inline_start(program: LIRModule) -> LIRInlineState Never! {
+// caller is visited, and a recursive one is never inlined. The functions
+// move out of `program` one at a time (P5 reads only their signatures), so
+// the module is never resident twice.
+fn lir_inline_start(program: ^LIRModule) -> LIRInlineState Never! {
+    owned := ^program
+    signatures := [LIRSignatureID]{}
+    loop function in owned.functions -> &signatures.push(function.signature)
+    functions := compiler_take_rows<LIRFunction>(&owned.functions)
+    reversed := [LIRFunction]{}
+    loop functions.len() > 0 {
+        function := &functions.pop() ?? { break }
+        &reversed.push(inline_direct(signatures, ^function))
+    }
     direct := [LIRFunction]{}
-    loop function in program.functions -> &direct.push(inline_direct(program, function))
+    loop reversed.len() > 0 {
+        function := &reversed.pop() ?? { break }
+        &direct.push(^function)
+    }
     graph := inline_graph(direct)
     sizes := [Int]{}
     consumed := [[Bool]]{}
@@ -269,7 +294,7 @@ fn lir_inline_start(program: LIRModule) -> LIRInlineState Never! {
         &sizes.push(41)
         &consumed.push([Bool]{})
     }
-    LIRInlineState{signatures: program.signatures, functions: ^direct, data: program.data, debug: program.debug, recursive: ^graph.recursive, sizes: ^sizes, consumed: ^consumed, order: ^graph.order}
+    LIRInlineState{signatures: ^owned.signatures, functions: ^direct, data: ^owned.data, debug: ^owned.debug, recursive: ^graph.recursive, sizes: ^sizes, consumed: ^consumed, order: ^graph.order}
 }
 
 // Function `id` with its eligible direct calls inlined from the final
@@ -299,8 +324,8 @@ fn lir_inline_result(state: ^LIRInlineState) -> LIRModule Never! {
     LIRModule{signatures: ^state.signatures, functions: ^state.functions, data: ^state.data, debug: ^state.debug}
 }
 
-fn lir_inline_module(program: LIRModule) -> LIRModule Never! {
-    state := lir_inline_start(program)
+fn lir_inline_module(program: ^LIRModule) -> LIRModule Never! {
+    state := lir_inline_start(^program)
     loop position in 0..<state.order.len() {
         // copy: plain Int function id; lir_inline_finish writes `state`, so the id
         // cannot stay a view into `state.order`.

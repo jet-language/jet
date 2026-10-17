@@ -30,7 +30,8 @@ fn fx_runtime_o1_check() -> Bool Never! {
     if lowered.issues.len() != 0 -> return false
     id :: lowered.callables.get(function.id.value) ?? return false
     globals :: [X64RuntimeExport]{X64RuntimeExport{function: id, symbol: export.symbol}}
-    optimized :: lir_optimize_module(lowered.lir, 1)
+    // copy: `before` below compiles the unoptimized module too.
+    optimized :: lir_optimize_module(lowered.lir.copy(), 1)
     if optimized.functions[id.value].id != id -> return false
     if library.export_abis.len() != 1 -> return false
     abi :: library.export_abis[0]
@@ -174,7 +175,8 @@ fn fx_runtime_o1_effects_check() -> Bool Never! {
         debug: lir_module_debug_none(),
     }
     if lir_lint_module(unit).len() != 0 -> return false
-    optimized :: lir_optimize_module(unit, 1)
+    // copy: the effects of the unoptimized module are compared below.
+    optimized :: lir_optimize_module(unit.copy(), 1)
     if lir_lint_module(optimized).len() != 0 -> return false
     if optimized.functions.len() != 2 -> return false
     before :: fx_runtime_o1_effects(unit.functions[0])

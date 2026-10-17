@@ -38,7 +38,8 @@ fn ofxi_leaf() -> LIRFunction Never! {
 }
 
 fn ofxi_check(before: LIRModule, caller_body: String) -> Bool Never! {
-    after :: lir_inline_module(before)
+    // copy: the expected text and the input lint below read `before`.
+    after :: lir_inline_module(before.copy())
     header :: lir_print_module(LIRModule{signatures: before.signatures, functions: [LIRFunction]{}, data: before.data, debug: before.debug})
     expected := "{header}{caller_body}\n"
     loop (index, function) in before.functions {
@@ -212,7 +213,8 @@ fn ofxi_limit(size: Int, calls: Int, expected_sites: Int) -> Bool Never! {
     loop _ in 0..<size -> ofxi_call(&leaf, None, 1, LIRCallee.Runtime{symbol: "effect"}, [LIRValueID]{})
     lir_builder_seal(&leaf, LIRBlockID{value: 0}, [LIRValueID]{}, LIRTerminator.Return{value: None})
     before :: ofxi_module([LIRFunction]{lir_builder_finish(b), lir_builder_finish(leaf)})
-    after :: lir_inline_module(before)
+    // copy: `before` is printed and linted below.
+    after :: lir_inline_module(before.copy())
     print("=== {before.functions[0].name} before ===\n{lir_print_module(before)}=== {before.functions[0].name} after ===\n{lir_print_module(after)}")
     passed := true
     loop issue in lir_lint_module(before) {
@@ -289,7 +291,8 @@ fn ofxi_direct_calls(function: LIRFunction) -> Int Never! {
 
 fn ofxi_chain(optimized: Bool) -> Bool Never! {
     before :: ofxi_chain_module()
-    after :: if optimized -> lir_optimize_module(before, 1) else -> lir_inline_module(before)
+    // copy: the leaf check below compares against `before`.
+    after :: if optimized -> lir_optimize_module(before.copy(), 1) else -> lir_inline_module(before.copy())
     label :: if optimized -> "chain-o1" else -> "chain-inline"
     print("=== {label} after ===\n{lir_print_module(after)}")
     passed := true

@@ -164,11 +164,15 @@ const parts = [
     body("Compiler/JetFoundation/Source/Text/RustDebug.jet"),
     body("Compiler/JetFoundation/Source/Encoding/Json.jet"),
   ]),
-  // Lower.jet and X64/Select.jet move rows and re-raise worker panics with these
-  // Foundation helpers; their files otherwise hold the Sema collection registry
-  // and the thread-admission policy, so only the named items are copied.
+  // Lower.jet and X64/Select.jet move rows, admit and partition compile
+  // threads and re-raise worker panics with these Foundation helpers; their
+  // files otherwise hold the Sema collection registry, so only the named
+  // items are copied.
   "// [unit source: Foundation helpers named by Lower.jet and X64/Select.jet]",
   item("Compiler/JetFoundation/Source/Collections.jet", "fn compiler_take_rows<"),
+  item("Compiler/JetFoundation/Source/Threads.jet", "struct CompilerThreads {"),
+  item("Compiler/JetFoundation/Source/Threads.jet", "fn compiler_threads_admit("),
+  item("Compiler/JetFoundation/Source/Threads.jet", "fn compiler_threads_partition("),
   item("Compiler/JetFoundation/Source/Threads.jet", "fn compiler_threads_failure_text("),
   body("Compiler/JetBackend/Source/LIR/LIR.jet"),
   body("Compiler/JetBackend/Source/LIR/Lint.jet"),
