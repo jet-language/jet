@@ -696,8 +696,10 @@ fn sema_effect_node_index(node_by_key: [String:Int], key: String) -> Int? Never!
     node_by_key.get(key)
 }
 
-fn sema_effect_publish_diagnostics(all: &[Diagnostic], source_segments: [SemaSourceSegment], batch: [Diagnostic]) Never! {
-    loop diagnostic in batch {
+// Each diagnostic of the batch moves into `all` (the batch is the caller's
+// own list), so locating it never copies it.
+fn sema_effect_publish_diagnostics(all: &[Diagnostic], source_segments: [SemaSourceSegment], batch: ^[Diagnostic]) Never! {
+    loop diagnostic in ^batch {
         located :: if diagnostic.source_path != None -> ^diagnostic else -> sema_diagnostic_with_source_location(^diagnostic, source_segments)
         &all.push(located)
     }
@@ -2075,7 +2077,7 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
             if impure || conflicting -> &site_diagnostics.push(sema_call_core_shared_diagnostic(fact.shared_member, fact.span))
             if sites.get(initializer.key) == None -> sites[initializer.key] = lifetime
         }
-        sema_effect_publish_diagnostics(&diagnostics, inputs[module_index].source_segments, site_diagnostics)
+        sema_effect_publish_diagnostics(&diagnostics, inputs[module_index].source_segments, ^site_diagnostics)
     }
     secret_reach :: sema_effect_secret_reach(nodes, calls.node_by_key)
     dispatch_reach :: sema_effect_dispatch_reach(nodes, calls.node_by_key)
@@ -2095,18 +2097,18 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
             // Keep all diagnostics; the caller receives one complete graph
             // result instead of a partially updated function list.
         }
-        sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[node_index].module_index].source_segments, function_diagnostics)
+        sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[node_index].module_index].source_segments, ^function_diagnostics)
     }
     loop module_index in 0..<inputs.len() {
         module_row :: inputs[module_index]
         bound_diagnostics := [Diagnostic]{}
         sema_effect_check_trait_bounds(module_row, modules[module_row.module_index].functions, source_indices[module_index], nodes, calls.node_by_key, solved, &bound_diagnostics)
-        sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, bound_diagnostics)
+        sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, ^bound_diagnostics)
     }
     loop node_index in 0..<nodes.len() {
         memory_diagnostics := [Diagnostic]{}
         sema_effect_check_memory_denials(nodes, calls.node_by_key, node_index, &memory_diagnostics, &memory_facts)
-        sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[node_index].module_index].source_segments, memory_diagnostics)
+        sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[node_index].module_index].source_segments, ^memory_diagnostics)
     }
     // Rust bundle_memory_inputs: a manifest guarantee covers every qualified
     // function, including otherwise unreferenced bodies, not just entry.
@@ -2118,7 +2120,7 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
             memory_diagnostics := [Diagnostic]{}
             projection :: sema_effect_memory_project(nodes, calls.node_by_key, root, EffectRowEntry{name: name, span: Span{start: 0, end: 0}}, &memory_diagnostics)
             &memory_facts.projections.push(SemaMemoryProjectionRow{root: nodes[root].display_key, fact: fact, projection: projection})
-            sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[root].module_index].source_segments, memory_diagnostics)
+            sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[root].module_index].source_segments, ^memory_diagnostics)
         }
     }
     loop module_index in 0..<inputs.len() {
@@ -2147,7 +2149,7 @@ fn sema_effect_add_module_nodes(functions: [TFunc], module_row: SemaEffectModule
         function_diagnostics := [Diagnostic]{}
         if node_by_key.get(function.key) == None -> node_by_key[function.key] = nodes.len()
         &nodes.push(sema_effect_node_from_source(function, module_row.sources, sema_effect_source_position(function, source_index), module_index, &function_diagnostics))
-        sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, function_diagnostics)
+        sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, ^function_diagnostics)
     }
 }
 
@@ -2179,7 +2181,7 @@ fn sema_effect_collect_module(functions: [TFunc], module_row: SemaEffectModuleIn
             audited := function.is_unsafe && (function.unsafe_gate.map((gate) -> gate.enabled) ?? false)
             sema_effect_check_unsafe_statements_tir(&nodes, calls, sema_effect_caller_slot(calls, function.key), function.body, audited, &function_diagnostics)
         }
-        sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, function_diagnostics)
+        sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, ^function_diagnostics)
     }
 }
 
@@ -2207,7 +2209,7 @@ fn sema_effect_check_module_regions(functions: [TFunc], module_row: SemaEffectMo
             if over.len() > 0 -> &region_diagnostics.push(sema_effect_scope_diagnostic("FX", over, region.caps, region.caps_span))
         }
     }
-    sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, region_diagnostics)
+    sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, ^region_diagnostics)
 }
 
 // A discarded call result of a function whose row has no outcome (E0433).
@@ -2220,7 +2222,7 @@ fn sema_effect_check_discarded(call_facts: [SemaCallSiteFact], module_row: SemaE
         if !sema_effect_row_has_no_outcome(nodes[node_index], solved[node_index]) -> next
         &discarded.push(sema_effect_discarded_result_diagnostic(nodes[node_index], fact.span))
     }
-    sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, discarded)
+    sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, ^discarded)
 }
 
 fn sema_effect_check_unsafe_statements(statements: [Stmt], diagnostics: &[Diagnostic]) -> Bool {
