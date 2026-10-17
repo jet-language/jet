@@ -5245,7 +5245,10 @@ fn jet_driver_keep_going_mir_trap_row(kg: &JetDriverKeepGoingLog, program: MIRPr
 // Each optimizer failure is a row. The failing check then names every other
 // function it rejects in the program as it stands; all of them become traps
 // together and the optimizer runs again on the program, so reruns grow with
-// the failing checks rather than with the failing functions.
+// the failing checks rather than with the failing functions. A program-level
+// legality failure (schema, Core publication site) traps nothing: the
+// optimizer records it and goes on, and it is one row with a program-scoped
+// item (`<program>` and the site it names), taken from the final run.
 fn jet_driver_keep_going_optimize(kg: &JetDriverKeepGoingLog, program: &MIRProgram, first: ^MIROptimizationResult, full_verification: Bool, threads: CompilerThreads, journal: &CanonicalPassJournal, trace_sink: CompilerTraceSink?) -> MIROptimizationResult {
     optimization := ^first
     attempts := 0
@@ -5273,7 +5276,10 @@ fn jet_driver_keep_going_optimize(kg: &JetDriverKeepGoingLog, program: &MIRProgr
         if trapped == 0 -> break
         traps += trapped
         attempts += 1
-        optimization = optimize_mir_program(&program, full_verification, threads, &journal, trace_sink)
+        optimization = optimize_mir_program(&program, full_verification, true, threads, &journal, trace_sink)
+    }
+    loop finding in optimization.report.program_findings {
+        jet_driver_keep_going_row(&kg, "optimize", finding.item, "E0003", finding.error.message, "{finding.error.span.start}..{finding.error.span.end}")
     }
     if optimization.error != None -> jet_driver_keep_going_row(&kg, "optimize", "-", "STOPPED", "the optimizer still fails after {traps} keep-going traps in {attempts} reruns; emission runs on the program as the optimizer left it", "-")
     optimization
@@ -6313,11 +6319,13 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
 
     // The optimizer rewrites the program in place (no second copy of the
     // largest compile-time structure); an optimizer error is located through
-    // the function owners kept here. MIR Lint checks the optimized program on
-    // every compile and every pass when the request asks for full verification.
+    // the function owners kept here. The one MIR checker checks the optimized
+    // program on every compile and every pass when the request asks for full
+    // verification; under keep-going a program-level legality failure is a
+    // census row and the optimizer goes on.
     function_owners_for_errors := jet_driver_mir_function_owners(program_value)
     if request.trace_sink == .Val(sink) -> sink.begin("optimize", "", -1, -1)
-    optimization := optimize_mir_program(&program_value, request.mir_lint_every_pass, request.compiler_threads, &journal, request.trace_sink)
+    optimization := optimize_mir_program(&program_value, request.mir_lint_every_pass, kg.enabled, request.compiler_threads, &journal, request.trace_sink)
     if kg.enabled {
         optimization = jet_driver_keep_going_optimize(&kg, &program_value, ^optimization, request.mir_lint_every_pass, request.compiler_threads, &journal, request.trace_sink)
         jet_driver_keep_going_flush(&kg, request.trace_sink)

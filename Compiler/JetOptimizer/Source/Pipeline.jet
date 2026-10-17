@@ -58,6 +58,9 @@ struct MIROptimizationReport {
     fixed_reductions_normalized: Int
     acceleration_facts: Int
     decision_rows: Int
+    // Keep-going only: the program-level legality failures the checks
+    // recorded instead of stopping (each once), for the driver's census.
+    program_findings: [MIRPassProgramFinding]
 }
 
 // The optimizer rewrites the caller's program in place; a complete result
@@ -94,6 +97,7 @@ fn mir_optimizer_empty_report() -> MIROptimizationReport Never! {
         fixed_reductions_normalized: 0,
         acceleration_facts: 0,
         decision_rows: 0,
+        program_findings: [MIRPassProgramFinding]{},
     }
 }
 
@@ -130,11 +134,14 @@ fn mir_optimizer_succeeded(report: MIROptimizationReport) -> MIROptimizationResu
 // count. Nothing here digests the program: the MIR digest is computed by its
 // consumers (Web provenance, the Core-shared manifest). With a trace, the
 // check is its own span inside the caller's `optimize` (SPEED-500K P9):
-// `optimize.check`.
-fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threads: CompilerThreads, journal: &CanonicalPassJournal, trace_sink: CompilerTraceSink?) -> MIROptimizationResult {
+// `optimize.check`. With `keep_going` (the driver's JET_KEEP_GOING) a
+// program-level legality failure stops nothing: each is recorded once in
+// `report.program_findings` for the census and the pipeline goes on, so the
+// decision rows still derive; a normal compile fails on it as before.
+fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, keep_going: Bool, threads: CompilerThreads, journal: &CanonicalPassJournal, trace_sink: CompilerTraceSink?) -> MIROptimizationResult {
     report := mir_optimizer_empty_report()
     pipeline_before :: mir_pass_journal_before(program, journal, "mir.optimize-pipeline")
-    validation := mir_pass_validate_after(&program, .LegalityVerification, full_verification, threads)
+    validation := mir_pass_validate_after(&program, .LegalityVerification, full_verification, keep_going, &report.program_findings, threads)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
     mir_pass_journal_check(program, &journal, "mir.legality-verification")
 
@@ -150,7 +157,7 @@ fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threads: 
     mir_pass_mark(&program, .LegalityVerification)
     mir_pass_journal_after(program, &journal, "mir.pass-order-facts", mark_before)
     &report.completed.push(.LegalityVerification)
-    validation = mir_pass_validate_after(&program, .LegalityVerification, full_verification, threads)
+    validation = mir_pass_validate_after(&program, .LegalityVerification, full_verification, keep_going, &report.program_findings, threads)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
     // A wave ends where the next step needs the whole program: after every
@@ -208,7 +215,7 @@ fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threads: 
                 mir_pass_journal_after(program, &journal, "mir.pass-order-facts", pass_before)
             }
             &report.completed.push(pass)
-            validation = mir_pass_validate_after(&program, pass, full_verification, threads)
+            validation = mir_pass_validate_after(&program, pass, full_verification, keep_going, &report.program_findings, threads)
             if validation == .Val(error) -> return mir_optimizer_failed(error, report)
         }
         first = last + 1
@@ -218,7 +225,7 @@ fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threads: 
     mir_pass_canonicalize_program_order(&program)
     mir_pass_journal_after(program, &journal, "mir.canonical-program-order", order_before)
     if trace_sink == .Val(sink) -> sink.begin("optimize.check", "", -1, -1)
-    validation = mir_pass_check(&program, .CanonicalLoopFacts, full_verification, threads)
+    validation = mir_pass_check(&program, .CanonicalLoopFacts, full_verification, keep_going, &report.program_findings, threads)
     if trace_sink == .Val(sink) -> sink.end("optimize.check", program.functions.len())
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
     report.decision_rows = mir_pass_derive_decision_rows(&program)
@@ -502,8 +509,8 @@ fn mir_pass_wave_slots(slots: [Shared<MIRPassWaveSlot>], from: Int, first: Int, 
 // The one MIR checker over `program` (mir_pass_check_wave). Under full
 // verification (`debug`) a failure also names the pass whose output was
 // rejected and carries the rejected function's MIR (mir_pass_debug_failure).
-fn mir_pass_check(program: &MIRProgram, pass: MIROptimizationPassID, debug: Bool, threads: CompilerThreads) -> MIROptimizationError? {
-    failure :: mir_pass_check_wave(&program, pass, threads) ?? return None
+fn mir_pass_check(program: &MIRProgram, pass: MIROptimizationPassID, debug: Bool, keep_going: Bool, findings: &[MIRPassProgramFinding], threads: CompilerThreads) -> MIROptimizationError? {
+    failure :: mir_pass_check_wave(&program, pass, keep_going, &findings, threads) ?? return None
     if !debug -> return Val(failure)
     Val(mir_pass_debug_failure(program, failure))
 }
@@ -526,9 +533,9 @@ fn mir_pass_debug_failure(program: MIRProgram, error: MIROptimizationError) -> M
 // The check after `pass`, only under full verification (Rust
 // MIROptimization `validate_after`): the lowered input and every pass's
 // output, so a failure names the pass that broke the program.
-fn mir_pass_validate_after(program: &MIRProgram, pass: MIROptimizationPassID, full_verification: Bool, threads: CompilerThreads) -> MIROptimizationError? {
+fn mir_pass_validate_after(program: &MIRProgram, pass: MIROptimizationPassID, full_verification: Bool, keep_going: Bool, findings: &[MIRPassProgramFinding], threads: CompilerThreads) -> MIROptimizationError? {
     if !full_verification -> return None
-    mir_pass_check(&program, pass, true, threads)
+    mir_pass_check(&program, pass, true, keep_going, &findings, threads)
 }
 
 // The read-only rows every part of a check reads besides the MIR Lint index:
@@ -545,16 +552,25 @@ fn mir_pass_check_inputs(program: MIRProgram, pass: MIROptimizationPassID) -> MI
 
 // The one MIR checker (SPEED-500K D3): every legality rule (Legality.jet)
 // and every MIR Lint rule (Lint.jet), each run once per check. The
-// program-level legality rules run first on this thread; then the program
-// tables, identity failures and lint index are built once, and up to
-// `threads` parts check their functions (moved into one slot each, or all
-// into one part on one thread) in program order. The first failure of the
-// first failing part is the result: the program's first failure in program
-// order, as on one thread. Every part joins and every function moves back
-// before the result returns.
-fn mir_pass_check_wave(program: &MIRProgram, pass: MIROptimizationPassID, threads: CompilerThreads) -> MIROptimizationError? {
-    rows_failure :: mir_pass_validate_program_rows(program, pass)
-    if rows_failure != None -> return rows_failure
+// program-level legality rules run first on this thread: their first
+// failure is the result, or, with `keep_going`, every failure is recorded
+// once in `findings` (program-scoped census rows) and the check goes on.
+// Then the program tables, identity failures and lint index are built once,
+// and up to `threads` parts check their functions (moved into one slot each,
+// or all into one part on one thread) in program order. The first failure of
+// the first failing part is the result: the program's first failure in
+// program order, as on one thread. Every part joins and every function moves
+// back before the result returns.
+fn mir_pass_check_wave(program: &MIRProgram, pass: MIROptimizationPassID, keep_going: Bool, findings: &[MIRPassProgramFinding], threads: CompilerThreads) -> MIROptimizationError? {
+    rows :: mir_pass_program_row_failures(program, pass)
+    if rows.len() > 0 && !keep_going -> return Val(rows[0].error)
+    loop finding in rows {
+        recorded := false
+        loop seen in findings {
+            if seen.item == finding.item && seen.error.message == finding.error.message -> recorded = true
+        }
+        if !recorded -> &findings.push(finding)
+    }
     plan :: mir_pass_wave_plan(program, threads)
     if plan.workers <= 1 {
         inputs :: mir_pass_check_inputs(program, pass)
@@ -655,16 +671,14 @@ fn mir_pass_lint_error(pass: MIROptimizationPassID, failure: MIRLintError) -> MI
 // MIR checker rejects in `program` as it stands, one failure per function in
 // program order. The driver traps them all before a single rerun, so reruns
 // grow with the failing checks, not the failing functions. An error naming
-// no function is returned alone; a program-level legality failure follows
-// the error and ends the scan. The program is read in place (this is the
-// failure path), so the checked functions are copies.
+// no function is returned alone. Program-level legality failures are not
+// listed here: under keep-going the optimizer records them as program-scoped
+// census rows (MIROptimizationReport.program_findings) and goes on. The
+// program is read in place (this is the failure path), so the checked
+// functions are copies.
 fn mir_optimizer_function_failures(program: MIRProgram, error: MIROptimizationError) -> [MIROptimizationError] {
     reported :: error.function ?? return [MIROptimizationError]{error}
     failures := [MIROptimizationError]{error}
-    if mir_pass_validate_program_rows(program, error.pass) == .Val(rows) {
-        &failures.push(rows)
-        return failures
-    }
     index := mir_lint_index(program)
     functions := [MIRFunction]{}
     position := program.functions.len()
