@@ -315,7 +315,7 @@ struct SemaPreludeDemandWalk {
 // this module's prelude routine for a Core error family member reaching `Err`
 // demands it (first site per routine), then its children are walked in place
 // (sema_effect_walk_expr_children), in the order tir_expr_children gives them.
-fn sema_prelude_conversion_demands_visit(walk: SemaEffectWalk, state: Shared<SemaPreludeDemandWalk>, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, expression: TExpr) {
+fn sema_prelude_conversion_demands_visit(walk: SemaEffectWalk, state: Shared<SemaPreludeDemandWalk>, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, expression: TExpr) {
     conversion :: if expression.kind == {
         .Try(_, value, _) -> Val(value)
         .TryWithContext(_, _, value, _, _, _) -> Val(value)
@@ -324,7 +324,7 @@ fn sema_prelude_conversion_demands_visit(walk: SemaEffectWalk, state: Shared<Sem
     if conversion == .Val(value) {
         if value == .Typed(key, source, target) -> sema_prelude_conversion_demand_add(state, key, source, target, expression.span)
     }
-    sema_effect_walk_expr_children(walk, &nodes, facts, &diagnostics, caller_key, expression)
+    sema_effect_walk_expr_children(walk, &nodes, facts, &diagnostics, caller, expression)
 }
 
 fn sema_prelude_conversion_demand_add(state: Shared<SemaPreludeDemandWalk>, key: String, source: Type, target: Type, site: Span) {
@@ -363,7 +363,7 @@ fn sema_inject_prelude_error_conversions(module_identity: String, environment: &
     facts :: SemaEffectCallIndex{current_module: 0, modules: [SemaEffectModuleCalls]{}, node_by_key: [String:Int]{}}
     ignored := [Diagnostic]{}
     loop function in functions {
-        loop statement in function.body -> sema_effect_walk_stmt_children(walk, &nodes, facts, &ignored, function.key, statement)
+        loop statement in function.body -> sema_effect_walk_stmt_children(walk, &nodes, facts, &ignored, sema_effect_caller_slot(facts, function.key), statement)
     }
     demands :: sema_prelude_demand_walk_take(walk_state)
     complete := true

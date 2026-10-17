@@ -25,7 +25,7 @@ fn sema_pure_root_expr(root: String, modules: [SemaGraphModuleResult], positions
         calls.current_module = module_index
         // The call fact is read in place from its module (the call index
         // keeps positions in the same order as `call_facts`).
-        fact :: sema_effect_find_fact(calls, owner.key, expression.span)
+        fact :: sema_effect_find_fact(calls, sema_effect_caller_slot(calls, owner.key), expression.span)
         key := ""
         if fact == .Val(at) {
             if modules[module_index].call_facts[at].callee == .Val(callee) -> key = callee.key

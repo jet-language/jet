@@ -942,17 +942,26 @@ fn sema_effect_module_calls(facts: [SemaCallSiteFact]) -> SemaEffectModuleCalls 
     calls
 }
 
-// The position, in the current module's facts, of the narrowest fact of
-// `caller_key` whose span contains or is contained by `span`; the caller
-// reads the fact in place.
-fn sema_effect_find_fact(index: SemaEffectCallIndex, caller_key: String, span: Span) -> Int? Never! {
+// The slot of `key` among the current module's callers, or -1 when it owns
+// no facts there (or the index has no modules: FailureLaw's structure-only
+// walk). A walk resolves its caller once, so the per-expression fact lookups
+// below never search the caller map.
+fn sema_effect_caller_slot(index: SemaEffectCallIndex, key: String) -> Int Never! {
+    if index.current_module < 0 || index.current_module >= index.modules.len() -> return -1
+    index.modules[index.current_module].caller_slots.get(key) ?? -1
+}
+
+// The position, in the current module's facts, of the narrowest fact of the
+// caller in slot `caller` whose span contains or is contained by `span`; the
+// caller reads the fact in place.
+fn sema_effect_find_fact(index: SemaEffectCallIndex, caller: Int, span: Span) -> Int? Never! {
+    if caller < 0 -> return None
     calls :: index.modules[index.current_module]
-    slot :: calls.caller_slots.get(caller_key) ?? return None
-    exact :: sema_effect_exact_position(calls.callers[slot], calls.facts, span)
+    exact :: sema_effect_exact_position(calls.callers[caller], calls.facts, span)
     if exact != None -> return exact
     best := Int?{None}
     best_width := 2147483647
-    loop position in calls.callers[slot].positions {
+    loop position in calls.callers[caller].positions {
         fact_span :: calls.facts[position].span
         if sema_effect_span_contains(fact_span, span) || sema_effect_span_contains(span, fact_span) {
             width :: fact_span.end - fact_span.start
@@ -965,10 +974,10 @@ fn sema_effect_find_fact(index: SemaEffectCallIndex, caller_key: String, span: S
     best
 }
 
-fn sema_effect_find_exact_fact(index: SemaEffectCallIndex, caller_key: String, span: Span) -> Int? Never! {
+fn sema_effect_find_exact_fact(index: SemaEffectCallIndex, caller: Int, span: Span) -> Int? Never! {
+    if caller < 0 -> return None
     calls :: index.modules[index.current_module]
-    slot :: calls.caller_slots.get(caller_key) ?? return None
-    sema_effect_exact_position(calls.callers[slot], calls.facts, span)
+    sema_effect_exact_position(calls.callers[caller], calls.facts, span)
 }
 
 // The first of the caller's facts whose span is exactly `span`.
@@ -1134,10 +1143,10 @@ fn sema_effect_symbol_module(key: String) -> String? Never! {
     Val(kind_and_module.after)
 }
 
-fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String) {
+fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int) {
     if {
         sema_effect_is_call(expression) -> {
-            found :: sema_effect_find_fact(facts, caller_key, expression.span)
+            found :: sema_effect_find_fact(facts, caller, expression.span)
             if found == {
                 .Val(position) -> {
                     value :: facts.modules[facts.current_module].facts[position]
@@ -1159,7 +1168,7 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: 
             }
         }
         else -> {
-            found :: sema_effect_find_exact_fact(facts, caller_key, expression.span)
+            found :: sema_effect_find_exact_fact(facts, caller, expression.span)
             if found == .Val(position) -> sema_effect_record_fact(&nodes, facts.node_by_key, node_index, facts.modules[facts.current_module].facts[position], &diagnostics)
         }
     }
@@ -1210,18 +1219,19 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: 
         }
         else -> {}
     }
-    sema_effect_walk_expr_children(SemaEffectWalk.Collect{node_index: node_index}, &nodes, facts, &diagnostics, caller_key, expression)
+    sema_effect_walk_expr_children(SemaEffectWalk.Collect{node_index: node_index}, &nodes, facts, &diagnostics, caller, expression)
 }
 
 fn sema_effect_collect_function(nodes: &[SemaEffectNode], node_index: Int, function: TFunc, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic]) {
+    caller :: sema_effect_caller_slot(facts, function.key)
     loop statement in function.body {
-        sema_effect_walk_stmt_children(SemaEffectWalk.Collect{node_index: node_index}, &nodes, facts, &diagnostics, function.key, statement)
+        sema_effect_walk_stmt_children(SemaEffectWalk.Collect{node_index: node_index}, &nodes, facts, &diagnostics, caller, statement)
     }
 }
 
-fn sema_effect_check_unsafe_expr(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller_key: String, expression: TExpr, audited: Bool, diagnostics: &[Diagnostic]) {
+fn sema_effect_check_unsafe_expr(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller: Int, expression: TExpr, audited: Bool, diagnostics: &[Diagnostic]) {
     if sema_effect_is_call(expression) {
-        found :: sema_effect_find_fact(facts, caller_key, expression.span)
+        found :: sema_effect_find_fact(facts, caller, expression.span)
         if found == .Val(position) {
             if facts.modules[facts.current_module].facts[position].callee == .Val(callee) {
                 target_index :: sema_effect_node_index(facts.node_by_key, callee.key)
@@ -1235,185 +1245,185 @@ fn sema_effect_check_unsafe_expr(nodes: &[SemaEffectNode], facts: SemaEffectCall
         .Lambda(value) | .LambdaValue(value) -> {
             if value.executable == {
                 .Expr(inner) -> {
-                    sema_effect_check_unsafe_expr(&nodes, facts, caller_key, inner, false, &diagnostics)
+                    sema_effect_check_unsafe_expr(&nodes, facts, caller, inner, false, &diagnostics)
                 }
                 .Block(body) | .SharedBlock(body) -> {
-                    sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, false, &diagnostics)
+                    sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, body, false, &diagnostics)
                 }
             }
             return
         }
         else -> {}
     }
-    sema_effect_walk_expr_children(SemaEffectWalk.Unsafe{audited: audited}, &nodes, facts, &diagnostics, caller_key, expression)
+    sema_effect_walk_expr_children(SemaEffectWalk.Unsafe{audited: audited}, &nodes, facts, &diagnostics, caller, expression)
 }
 
-fn sema_effect_check_unsafe_condition(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller_key: String, condition: TIfCond, audited: Bool, diagnostics: &[Diagnostic]) {
+fn sema_effect_check_unsafe_condition(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller: Int, condition: TIfCond, audited: Bool, diagnostics: &[Diagnostic]) {
     if condition == {
-        .Plain(value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, value, audited, &diagnostics)
+        .Plain(value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, value, audited, &diagnostics)
         .And(left, right) -> {
-            sema_effect_check_unsafe_condition(&nodes, facts, caller_key, left, audited, &diagnostics)
-            sema_effect_check_unsafe_condition(&nodes, facts, caller_key, right, audited, &diagnostics)
+            sema_effect_check_unsafe_condition(&nodes, facts, caller, left, audited, &diagnostics)
+            sema_effect_check_unsafe_condition(&nodes, facts, caller, right, audited, &diagnostics)
         }
-        .IfLet(_, subject) | .IsNone(subject) | .Matches(_, subject) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, subject, audited, &diagnostics)
+        .IfLet(_, subject) | .IsNone(subject) | .Matches(_, subject) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, subject, audited, &diagnostics)
         .WithPrelude(prelude, nested) -> {
-            sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, prelude, audited, &diagnostics)
-            sema_effect_check_unsafe_condition(&nodes, facts, caller_key, nested, audited, &diagnostics)
+            sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, prelude, audited, &diagnostics)
+            sema_effect_check_unsafe_condition(&nodes, facts, caller, nested, audited, &diagnostics)
         }
     }
 }
 
-fn sema_effect_check_unsafe_contracts(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller_key: String, contracts: [TContract], audited: Bool, diagnostics: &[Diagnostic]) {
+fn sema_effect_check_unsafe_contracts(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller: Int, contracts: [TContract], audited: Bool, diagnostics: &[Diagnostic]) {
     loop contract in contracts {
-        sema_effect_check_unsafe_expr(&nodes, facts, caller_key, contract.condition, audited, &diagnostics)
-        sema_effect_check_unsafe_expr(&nodes, facts, caller_key, contract.message, audited, &diagnostics)
+        sema_effect_check_unsafe_expr(&nodes, facts, caller, contract.condition, audited, &diagnostics)
+        sema_effect_check_unsafe_expr(&nodes, facts, caller, contract.message, audited, &diagnostics)
     }
 }
 
-fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller_key: String, statements: [TStmt], audited: Bool, diagnostics: &[Diagnostic]) {
+fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller: Int, statements: [TStmt], audited: Bool, diagnostics: &[Diagnostic]) {
     loop statement in statements {
         if statement == {
             .Contract(contract) -> {
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, contract.condition, audited, &diagnostics)
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, contract.message, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, contract.condition, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, contract.message, audited, &diagnostics)
             }
             .ContractScope(pre, body, post, _, _) -> {
-                sema_effect_check_unsafe_contracts(&nodes, facts, caller_key, pre, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
-                sema_effect_check_unsafe_contracts(&nodes, facts, caller_key, post, audited, &diagnostics)
+                sema_effect_check_unsafe_contracts(&nodes, facts, caller, pre, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, body, audited, &diagnostics)
+                sema_effect_check_unsafe_contracts(&nodes, facts, caller, post, audited, &diagnostics)
             }
-            .Let(_, _, init, _, _, _) | .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _, _) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, init, audited, &diagnostics)
+            .Let(_, _, init, _, _, _) | .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _, _) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, init, audited, &diagnostics)
             .RefutableBind(_, init, fallback, _) -> {
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, init, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, fallback, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, init, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, fallback, audited, &diagnostics)
             }
             .Assign(place, _, value, _, _, _) -> {
                 if place == {
                     .Expr(place_value) -> {
-                        sema_effect_check_unsafe_expr(&nodes, facts, caller_key, place_value, audited, &diagnostics)
+                        sema_effect_check_unsafe_expr(&nodes, facts, caller, place_value, audited, &diagnostics)
                     }
                     else -> {}
                 }
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, value, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, value, audited, &diagnostics)
             }
             .CountedLoop(_, init, condition, step, _, body, _) -> {
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, [TStmt]{init}, audited, &diagnostics)
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, condition, audited, &diagnostics)
-                if step == .Val(step_statement) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, [TStmt]{step_statement}, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, [TStmt]{init}, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, condition, audited, &diagnostics)
+                if step == .Val(step_statement) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, [TStmt]{step_statement}, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, body, audited, &diagnostics)
             }
             .ForRange(_, _, start, end, step, _, body, _, _) -> {
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, start, audited, &diagnostics)
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, end, audited, &diagnostics)
-                if step == .Val(step_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, step_value, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, start, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, end, audited, &diagnostics)
+                if step == .Val(step_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, step_value, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, body, audited, &diagnostics)
             }
             .Range(_, _, source, start, end, step, _, _, body, _) -> {
-                if source == .Val(source_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, source_value, audited, &diagnostics)
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, start, audited, &diagnostics)
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, end, audited, &diagnostics)
-                if step == .Val(step_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, step_value, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
+                if source == .Val(source_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, source_value, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, start, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, end, audited, &diagnostics)
+                if step == .Val(step_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, step_value, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, body, audited, &diagnostics)
             }
-            .ExprStmt(value, _) | .DeferClose(value, _, _, _) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, value, audited, &diagnostics)
+            .ExprStmt(value, _) | .DeferClose(value, _, _, _) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, value, audited, &diagnostics)
             .TaskGroup(_, limit, body, _) -> {
-                if limit == .Val(limit_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, limit_value, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
+                if limit == .Val(limit_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, limit_value, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, body, audited, &diagnostics)
             }
             .If(condition, then_body, else_body, _, _) -> {
-                sema_effect_check_unsafe_condition(&nodes, facts, caller_key, condition, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, then_body, audited, &diagnostics)
-                if else_body == .Val(else_statements) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, else_statements, audited, &diagnostics)
+                sema_effect_check_unsafe_condition(&nodes, facts, caller, condition, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, then_body, audited, &diagnostics)
+                if else_body == .Val(else_statements) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, else_statements, audited, &diagnostics)
             }
-            .Loop(_, body, _) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
+            .Loop(_, body, _) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, body, audited, &diagnostics)
             .While(_, condition, body, _) -> {
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, condition, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, condition, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, body, audited, &diagnostics)
             }
-            .BreakValue(_, value, _) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, value, audited, &diagnostics)
+            .BreakValue(_, value, _) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, value, audited, &diagnostics)
             .Match(subject, arms, _, _) -> {
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, subject, audited, &diagnostics)
-                loop arm in arms -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, arm.body, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, subject, audited, &diagnostics)
+                loop arm in arms -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, arm.body, audited, &diagnostics)
             }
             .EnumMatch(scrutinee, _, arms, else_body, _, _) -> {
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, scrutinee, audited, &diagnostics)
-                loop arm in arms -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, arm.body, audited, &diagnostics)
-                if else_body == .Val(else_statements) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, else_statements, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, scrutinee, audited, &diagnostics)
+                loop arm in arms -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, arm.body, audited, &diagnostics)
+                if else_body == .Val(else_statements) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, else_statements, audited, &diagnostics)
             }
             .RangeSwitch(subject, arms, else_body, _) -> {
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, subject, audited, &diagnostics)
-                loop arm in arms -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, arm.body, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, else_body, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, subject, audited, &diagnostics)
+                loop arm in arms -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, arm.body, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, else_body, audited, &diagnostics)
             }
             .IndexAssign(_, base, index, _, value, _) | .IndexHookAssign(_, base, index, value, _) -> {
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, base, audited, &diagnostics)
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, index, audited, &diagnostics)
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, value, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, base, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, index, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, value, audited, &diagnostics)
             }
             .IndexFieldAssign(value, _) -> {
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, value.base, audited, &diagnostics)
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, value.index, audited, &diagnostics)
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, value.value, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, value.base, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, value.index, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, value.value, audited, &diagnostics)
             }
             .MathSwizzleAssign(base, _, _, value, _, _) -> {
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, base, audited, &diagnostics)
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, value, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, base, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, value, audited, &diagnostics)
             }
             .ForIn(_, _, _, source, collection, step, _, _, _, _, body, _) -> {
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, source, audited, &diagnostics)
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, collection, audited, &diagnostics)
-                if step == .Val(step_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, step_value, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, source, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, collection, audited, &diagnostics)
+                if step == .Val(step_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, step_value, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, body, audited, &diagnostics)
             }
             .Inline(body, _) | .DebugOnly(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> {
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, body, audited, &diagnostics)
             }
             .MixedSwitch(subject, _, arms, else_body, _) -> {
-                sema_effect_check_unsafe_expr(&nodes, facts, caller_key, subject, audited, &diagnostics)
+                sema_effect_check_unsafe_expr(&nodes, facts, caller, subject, audited, &diagnostics)
                 loop arm in arms {
-                    sema_effect_check_unsafe_expr(&nodes, facts, caller_key, arm.condition, audited, &diagnostics)
-                    sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, arm.body, audited, &diagnostics)
+                    sema_effect_check_unsafe_expr(&nodes, facts, caller, arm.condition, audited, &diagnostics)
+                    sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, arm.body, audited, &diagnostics)
                 }
-                if else_body == .Val(else_statements) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, else_statements, audited, &diagnostics)
+                if else_body == .Val(else_statements) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, else_statements, audited, &diagnostics)
             }
             .Unsafe(_, body) | .UnsafeBlock(_, body, _) -> {
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, true, &diagnostics)
+                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, body, true, &diagnostics)
             }
             .SentryPolicy(_, body, _) | .Impure(body, _) -> {
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, body, audited, &diagnostics)
             }
             .Reactive(executable, _) -> {
                 if executable.executable == {
                     .Expr(value) -> {
-                        sema_effect_check_unsafe_expr(&nodes, facts, caller_key, value, false, &diagnostics)
+                        sema_effect_check_unsafe_expr(&nodes, facts, caller, value, false, &diagnostics)
                     }
                     .Block(body) | .SharedBlock(body) -> {
-                        sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, false, &diagnostics)
+                        sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, body, false, &diagnostics)
                     }
                 }
             }
             .Layout(_, _, body, _) -> {
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, body, audited, &diagnostics)
             }
             .ContextBlock(guards, body, _) -> {
-                loop guard in guards -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, guard.value, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
+                loop guard in guards -> sema_effect_check_unsafe_expr(&nodes, facts, caller, guard.value, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, body, audited, &diagnostics)
             }
             .ScopeMember(_, body, _) -> {
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, body, audited, &diagnostics)
             }
             .Transact(_, _, _, body, _) -> {
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, body, audited, &diagnostics)
             }
             .GCEdit(_, _, _, _, index_temp, nested, _) -> {
-                if index_temp == .Val(index_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, index_value, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, [TStmt]{nested}, audited, &diagnostics)
+                if index_temp == .Val(index_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, index_value, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, [TStmt]{nested}, audited, &diagnostics)
             }
             .SplitViews(owner, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) -> {
-                if owner == .Val(owner_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, owner_value, audited, &diagnostics)
+                if owner == .Val(owner_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, owner_value, audited, &diagnostics)
             }
             else -> {
-                sema_effect_walk_stmt_children(SemaEffectWalk.Unsafe{audited: audited}, &nodes, facts, &diagnostics, caller_key, statement)
+                sema_effect_walk_stmt_children(SemaEffectWalk.Unsafe{audited: audited}, &nodes, facts, &diagnostics, caller, statement)
             }
         }
     }
@@ -1958,13 +1968,13 @@ fn sema_effect_discarded_result_diagnostic(node: SemaEffectNode, span: Span) -> 
 }
 
 // D-EFF1: the part of `expression` inside `region` (a `#FX` block span).
-fn sema_effect_walk_region_expr(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr, region: Span, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String) {
+fn sema_effect_walk_region_expr(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr, region: Span, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int) {
     if sema_effect_span_contains(region, expression.span) {
-        sema_effect_walk_expr(&nodes, node_index, expression, facts, &diagnostics, caller_key)
+        sema_effect_walk_expr(&nodes, node_index, expression, facts, &diagnostics, caller)
         return
     }
     if !sema_effect_span_contains(expression.span, region) -> return
-    sema_effect_walk_expr_children(SemaEffectWalk.Region{node_index: node_index, region: region}, &nodes, facts, &diagnostics, caller_key, expression)
+    sema_effect_walk_expr_children(SemaEffectWalk.Region{node_index: node_index, region: region}, &nodes, facts, &diagnostics, caller, expression)
 }
 
 // D-EFF1 (Rust `check_region_caps`): the effects a `#FX(…)` region reaches:
@@ -1986,8 +1996,9 @@ fn sema_effect_region_inferred(nodes: &[SemaEffectNode], solved: [[String]], own
     &nodes.push(^region_node)
     region_index :: nodes.len() - 1
     ignored := [Diagnostic]{}
+    caller :: sema_effect_caller_slot(facts, function.key)
     loop statement in function.body {
-        sema_effect_walk_stmt_children(SemaEffectWalk.Region{node_index: region_index, region: region.span}, &nodes, facts, &ignored, function.key, statement)
+        sema_effect_walk_stmt_children(SemaEffectWalk.Region{node_index: region_index, region: region.span}, &nodes, facts, &ignored, caller, statement)
     }
     walked := &nodes.pop() ?? panic("the #FX region node left the graph")
     inferred := ^walked.direct
@@ -2166,7 +2177,7 @@ fn sema_effect_collect_module(functions: [TFunc], module_row: SemaEffectModuleIn
         // `#Unsafe` function; with none in the graph the walk finds nothing.
         if any_unsafe {
             audited := function.is_unsafe && (function.unsafe_gate.map((gate) -> gate.enabled) ?? false)
-            sema_effect_check_unsafe_statements_tir(&nodes, calls, function.key, function.body, audited, &function_diagnostics)
+            sema_effect_check_unsafe_statements_tir(&nodes, calls, sema_effect_caller_slot(calls, function.key), function.body, audited, &function_diagnostics)
         }
         sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, function_diagnostics)
     }
@@ -2286,12 +2297,12 @@ enum SemaEffectWalk {
     PreludeDemands(state: Shared<SemaPreludeDemandWalk>)
 }
 
-fn sema_effect_walk_visit(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, expression: TExpr) {
+fn sema_effect_walk_visit(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, expression: TExpr) {
     if walk == {
-        .Collect(node_index) -> sema_effect_walk_expr(&nodes, node_index, expression, facts, &diagnostics, caller_key)
-        .Unsafe(audited) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, expression, audited, &diagnostics)
-        .Region(node_index, region) -> sema_effect_walk_region_expr(&nodes, node_index, expression, region, facts, &diagnostics, caller_key)
-        .PreludeDemands(state) -> sema_prelude_conversion_demands_visit(walk, state, &nodes, facts, &diagnostics, caller_key, expression)
+        .Collect(node_index) -> sema_effect_walk_expr(&nodes, node_index, expression, facts, &diagnostics, caller)
+        .Unsafe(audited) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, expression, audited, &diagnostics)
+        .Region(node_index, region) -> sema_effect_walk_region_expr(&nodes, node_index, expression, region, facts, &diagnostics, caller)
+        .PreludeDemands(state) -> sema_prelude_conversion_demands_visit(walk, state, &nodes, facts, &diagnostics, caller, expression)
     }
 }
 
@@ -2302,409 +2313,409 @@ fn sema_effect_walk_visit(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts:
 // function). Every match below names each variant and has no wildcard arm, so
 // a new TIR variant fails to compile here instead of being silently skipped;
 // add it here in the order TIR.jet's child functions give it.
-fn sema_effect_walk_expr_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, expression: TExpr) {
+fn sema_effect_walk_expr_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, expression: TExpr) {
     if expression.kind == {
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .DefaultLit | .Uninit | .CtLit(_) | .ConstRef(_) | .GlobalShared(_, _) | .ResourceTake(_) | .Todo(_) | .InvariantViolation(_, _) | .Unreachable(_) | .Absent | .SelectStart | .Never(_) -> {}
         .StrLit(parts) -> loop part in parts {
             if part == {
-                .Interpolation(value, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+                .Interpolation(value, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
                 .Literal(_) -> {}
             }
         }
-        .InlineBlock(body) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, body)
-        .Call(_, _, args) -> loop argument in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, argument.value)
+        .InlineBlock(body) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, body)
+        .Call(_, _, args) -> loop argument in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, argument.value)
         .IndirectCall(callee, _, args, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, callee)
-            loop argument in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, argument.value)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, callee)
+            loop argument in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, argument.value)
         }
         .MethodCall(receiver, _, _, args) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, receiver)
-            loop argument in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, argument.value)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, receiver)
+            loop argument in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, argument.value)
         }
-        .DistinctCtor(_, argument, _) | .RangeCheckedCtor(_, argument, _) | .DistinctConvert(_, argument, _, _, _) | .TraitBox(argument, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, argument)
+        .DistinctCtor(_, argument, _) | .RangeCheckedCtor(_, argument, _) | .DistinctConvert(_, argument, _, _, _) | .TraitBox(argument, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, argument)
         .UnitConvert(_, argument, _, _, rounding, _, _, _, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, argument)
-            if rounding == .Val(rounding_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, rounding_value.digits)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, argument)
+            if rounding == .Val(rounding_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, rounding_value.digits)
         }
-        .MathBuiltin(_, _, args) | .PreciseBuiltin(_, _, args) -> loop value in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
-        .Print(value) | .Drop(value) | .Close(value) | .Move(value) | .ResourceNew(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+        .MathBuiltin(_, _, args) | .PreciseBuiltin(_, _, args) -> loop value in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
+        .Print(value) | .Drop(value) | .Close(value) | .Move(value) | .ResourceNew(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         .AmbientInput(prompt) -> {
-            if prompt == .Val(prompt_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, prompt_value)
+            if prompt == .Val(prompt_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, prompt_value)
         }
-        .RequireStop(kind, _, _) -> sema_effect_walk_require_children(walk, &nodes, facts, &diagnostics, caller_key, kind)
+        .RequireStop(kind, _, _) -> sema_effect_walk_require_children(walk, &nodes, facts, &diagnostics, caller, kind)
         .Binary(_, _, _, lhs, rhs) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, lhs)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, rhs)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, lhs)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, rhs)
         }
-        .CompareChain(operands, _, _) -> loop value in operands -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
-        .Unary(_, operand) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, operand)
-        .StructLit(fields, _) -> loop field in fields -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, field.value)
-        .Field(receiver, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, receiver)
+        .CompareChain(operands, _, _) -> loop value in operands -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
+        .Unary(_, operand) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, operand)
+        .StructLit(fields, _) -> loop field in fields -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, field.value)
+        .Field(receiver, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, receiver)
         .Index(base, index, _, _, _, _) | .IndexRead(base, index, _, _, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, base)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, index)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, base)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, index)
         }
         .Slice(base, start, end, range, _) | .SliceOwned(base, start, end, range, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, base)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, start)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, end)
-            if range == .Val(range_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, range_value)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, base)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, start)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, end)
+            if range == .Val(range_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, range_value)
         }
         .Range(start, end, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, start)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, end)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, start)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, end)
         }
-        .Tuple(values) | .List(values, _) -> loop value in values -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+        .Tuple(values) | .List(values, _) -> loop value in values -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         .Map(entries) | .MapLit(entries) -> loop entry in entries {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, entry.key)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, entry.value)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, entry.key)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, entry.value)
         }
         .EnumCtor(_, _, payload) | .EnumLit(_, _, payload) -> {
             if payload == {
-                .Positional(args) -> loop argument in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, argument.value)
-                .Named(fields) -> loop field in fields -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, field.value.value)
+                .Positional(args) -> loop argument in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, argument.value)
+                .Named(fields) -> loop field in fields -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, field.value.value)
                 .Unit -> {}
             }
         }
-        .Present(value) | .Ok(value) | .Err(value) | .DistinctRaw(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
-        .Try(value, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+        .Present(value) | .Ok(value) | .Err(value) | .DistinctRaw(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
+        .Try(value, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         .TryWithContext(inner, note, _, _, _, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, inner)
-            if note == .Val(note_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, note_value)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, inner)
+            if note == .Val(note_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, note_value)
         }
-        .Lambda(value) | .LambdaValue(value) -> sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller_key, value)
-        .Borrow(place, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, place)
-        .AddressOf(place, _, _) | .RawAddressOf(place) -> sema_effect_walk_place_children(walk, &nodes, facts, &diagnostics, caller_key, place)
-        .RawOf(value) | .Deref(value) | .PtrFromAddr(value, _) | .LayoutLiteral(value) | .LayoutLit(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+        .Lambda(value) | .LambdaValue(value) -> sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller, value)
+        .Borrow(place, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, place)
+        .AddressOf(place, _, _) | .RawAddressOf(place) -> sema_effect_walk_place_children(walk, &nodes, facts, &diagnostics, caller, place)
+        .RawOf(value) | .Deref(value) | .PtrFromAddr(value, _) | .LayoutLiteral(value) | .LayoutLit(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         .LayoutCompare(_, lhs, rhs) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, lhs)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, rhs)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, lhs)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, rhs)
         }
-        .SharedGuardValue(guard, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, guard)
-        .SharedGuardMap(guard, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, guard)
-        .SharedGuardSplit(guard, _, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, guard)
+        .SharedGuardValue(guard, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, guard)
+        .SharedGuardMap(guard, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, guard)
+        .SharedGuardSplit(guard, _, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, guard)
         .SharedGuardWait(guard, condition, predicate) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, guard)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, condition)
-            sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller_key, predicate)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, guard)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, condition)
+            sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller, predicate)
         }
-        .ConditionNotify(condition, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, condition)
-        .CoreCall(_, args, _, _, _, _, _) -> loop value in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
-        .HostCall(call) -> sema_effect_walk_host_call_children(walk, &nodes, facts, &diagnostics, caller_key, call)
+        .ConditionNotify(condition, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, condition)
+        .CoreCall(_, args, _, _, _, _, _) -> loop value in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
+        .HostCall(call) -> sema_effect_walk_host_call_children(walk, &nodes, facts, &diagnostics, caller, call)
         .JSONLit(_, argument, _) | .DBValueLit(_, argument, _) -> {
-            if argument == .Val(argument_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, argument_value)
+            if argument == .Val(argument_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, argument_value)
         }
-        .AllocNew(_, args) -> loop argument in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, argument.value)
-        .ListLit(values) -> loop value in values -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+        .AllocNew(_, args) -> loop argument in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, argument.value)
+        .ListLit(values) -> loop value in values -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         .ListSpread(parts) -> loop part in parts {
             if part == {
-                .Element(value) | .Spread(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+                .Element(value) | .Spread(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
             }
         }
-        .ColumnarListLit(_, elements) -> loop value in elements -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+        .ColumnarListLit(_, elements) -> loop value in elements -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         .ColumnarGather(base, index, _) | .ColumnarColumnRead(base, index, _, _, _, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, base)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, index)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, base)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, index)
         }
-        .TupleLit(_, fields) -> loop field in fields -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, field.value)
+        .TupleLit(_, fields) -> loop field in fields -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, field.value)
         .PoolSlot(pool, id, _, _, _, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, pool)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, id)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, pool)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, id)
         }
         .IndexHook(_, base, index, _) | .MathLaneIndex(_, base, index, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, base)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, index)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, base)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, index)
         }
-        .MathSwizzleRead(_, receiver, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, receiver)
-        .Clone(value, _) | .ExplicitCopy(value) | .MaterializeView(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
-        .StaticCall(_, _, _, _, args) -> loop argument in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, argument.value)
+        .MathSwizzleRead(_, receiver, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, receiver)
+        .Clone(value, _) | .ExplicitCopy(value) | .MaterializeView(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
+        .StaticCall(_, _, _, _, args) -> loop argument in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, argument.value)
         .DecodeUnder(segment, inner) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, segment)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, inner)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, segment)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, inner)
         }
         .BuiltinMethod(receiver, _, args) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, receiver)
-            loop value in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, receiver)
+            loop value in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         }
         .IfExpr(cond, then_body, then_value, else_body, else_value) -> {
-            sema_effect_walk_if_cond_children(walk, &nodes, facts, &diagnostics, caller_key, cond)
-            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, then_body)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, then_value)
-            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, else_body)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, else_value)
+            sema_effect_walk_if_cond_children(walk, &nodes, facts, &diagnostics, caller, cond)
+            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, then_body)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, then_value)
+            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, else_body)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, else_value)
         }
         .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, subject)
-            sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller_key, ok_pattern.shape)
-            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, ok_body)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, ok_value)
-            sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller_key, err_pattern.shape)
-            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, err_body)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, err_value)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, terminal)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, subject)
+            sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller, ok_pattern.shape)
+            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, ok_body)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, ok_value)
+            sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller, err_pattern.shape)
+            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, err_body)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, err_value)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, terminal)
         }
         .OrFallback(value, fallback, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
             if fallback == {
-                .Value(fallback_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, fallback_value)
+                .Value(fallback_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, fallback_value)
                 .Return(returned) -> {
-                    if returned == .Val(returned_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, returned_value)
+                    if returned == .Val(returned_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, returned_value)
                 }
-                .Panic(message, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, message)
+                .Panic(message, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, message)
                 .Break | .Continue | .BreakLabel(_) | .ContinueLabel(_) -> {}
             }
         }
-        .OptField(base, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, base)
+        .OptField(base, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, base)
         .OptMethodCall(base, _, call, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, base)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, call)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, base)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, call)
         }
         .PatternMatches(subject, pattern) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, subject)
-            sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller_key, pattern.shape)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, subject)
+            sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller, pattern.shape)
         }
         .OptionLift2(function, left, right) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, function)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, left)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, right)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, function)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, left)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, right)
         }
         .ClosureMethod(receiver, _, args) | .HandleMethod(receiver, _, args) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, receiver)
-            loop value in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, receiver)
+            loop value in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         }
-        .HostBorrowCallback(callable, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, callable)
-        .NumericMethod(receiver, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, receiver)
+        .HostBorrowCallback(callable, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, callable)
+        .NumericMethod(receiver, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, receiver)
         .NumericBinaryMethod(receiver, _, argument) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, receiver)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, argument)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, receiver)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, argument)
         }
         .OverflowOpt(_, _, _, _, lhs, rhs) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, lhs)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, rhs)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, lhs)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, rhs)
         }
-        .CoreClosureCall(kind) -> sema_effect_walk_core_closure_children(walk, &nodes, facts, &diagnostics, caller_key, kind)
-        .TaskGroupAll(tasks) | .TaskGroupRace(tasks) | .TaskGroupAny(tasks) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, tasks)
+        .CoreClosureCall(kind) -> sema_effect_walk_core_closure_children(walk, &nodes, facts, &diagnostics, caller, kind)
+        .TaskGroupAll(tasks) | .TaskGroupRace(tasks) | .TaskGroupAny(tasks) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tasks)
         .SelectRecv(builder, channel) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, builder)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, channel)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, builder)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, channel)
         }
         .SelectAfter(builder, duration, value) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, builder)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, duration)
-            if value == .Val(selected) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, selected)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, builder)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, duration)
+            if value == .Val(selected) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, selected)
         }
-        .SelectWait(builder, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, builder)
+        .SelectWait(builder, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, builder)
         .FnValue(kind) -> {
             if kind == {
                 .NamedFn(_, lambda) -> {
-                    if lambda == .Val(lambda_value) -> sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller_key, lambda_value)
+                    if lambda == .Val(lambda_value) -> sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller, lambda_value)
                 }
                 .Policy(_, policy_args, _, _, _, callee) -> {
-                    loop argument in policy_args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, argument.value)
-                    sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, callee)
+                    loop argument in policy_args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, argument.value)
+                    sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, callee)
                 }
                 .Call(callee, args) -> {
-                    sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, callee)
-                    loop argument in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, argument.value)
+                    sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, callee)
+                    loop argument in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, argument.value)
                 }
-                .Send(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+                .Send(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
             }
         }
-        .ModuleCall(_, _, _, _, args) -> loop argument in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, argument.value)
-        .ExternCall(_, _, args) -> loop argument in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, argument.value)
+        .ModuleCall(_, _, _, _, args) -> loop argument in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, argument.value)
+        .ExternCall(_, _, args) -> loop argument in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, argument.value)
     }
 }
 
 // tir_stmt_children in place (see sema_effect_walk_expr_children).
-fn sema_effect_walk_stmt_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, statement: TStmt) {
+fn sema_effect_walk_stmt_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, statement: TStmt) {
     if statement == {
         .Contract(contract) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, contract.condition)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, contract.message)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, contract.condition)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, contract.message)
         }
         .ContractScope(pre, body, post, _, _) -> {
             loop contract in pre {
-                sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, contract.condition)
-                sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, contract.message)
+                sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, contract.condition)
+                sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, contract.message)
             }
-            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, body)
+            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, body)
             loop contract in post {
-                sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, contract.condition)
-                sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, contract.message)
+                sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, contract.condition)
+                sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, contract.message)
             }
         }
-        .Let(_, _, init, _, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, init)
+        .Let(_, _, init, _, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, init)
         .RefutableBind(pattern, init, fallback, _) -> {
-            sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller_key, pattern.shape)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, init)
-            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, fallback)
+            sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller, pattern.shape)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, init)
+            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, fallback)
         }
-        .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, init)
+        .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, init)
         .Assign(place, _, value, _, _, _) -> {
-            sema_effect_walk_place_children(walk, &nodes, facts, &diagnostics, caller_key, place)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+            sema_effect_walk_place_children(walk, &nodes, facts, &diagnostics, caller, place)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         }
         .Return(value, _) -> {
-            if value == .Val(returned) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, returned)
+            if value == .Val(returned) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, returned)
         }
-        .ExprStmt(value, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+        .ExprStmt(value, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         .TaskGroup(_, limit, body, _) -> {
-            if limit == .Val(limit_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, limit_value)
-            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, body)
+            if limit == .Val(limit_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, limit_value)
+            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, body)
         }
-        .DeferClose(close, _, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, close)
+        .DeferClose(close, _, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, close)
         // An else-if chain is one `If` per `else`, whose children are exactly
         // tir_else_children_into's order.
         .If(condition, then_body, else_body, _, _) -> {
-            sema_effect_walk_if_cond_children(walk, &nodes, facts, &diagnostics, caller_key, condition)
-            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, then_body)
-            if else_body == .Val(else_statements) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, else_statements)
+            sema_effect_walk_if_cond_children(walk, &nodes, facts, &diagnostics, caller, condition)
+            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, then_body)
+            if else_body == .Val(else_statements) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, else_statements)
         }
-        .Loop(_, body, _) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, body)
+        .Loop(_, body, _) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, body)
         .While(_, condition, body, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, condition)
-            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, body)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, condition)
+            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, body)
         }
         .CountedLoop(_, init, condition, step, _, body, _) -> {
-            sema_effect_walk_stmt_children(walk, &nodes, facts, &diagnostics, caller_key, init)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, condition)
-            if step == .Val(step_statement) -> sema_effect_walk_stmt_children(walk, &nodes, facts, &diagnostics, caller_key, step_statement)
-            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, body)
+            sema_effect_walk_stmt_children(walk, &nodes, facts, &diagnostics, caller, init)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, condition)
+            if step == .Val(step_statement) -> sema_effect_walk_stmt_children(walk, &nodes, facts, &diagnostics, caller, step_statement)
+            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, body)
         }
         .ForRange(_, _, start, end, step, _, body, _, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, start)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, end)
-            if step == .Val(step_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, step_value)
-            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, body)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, start)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, end)
+            if step == .Val(step_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, step_value)
+            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, body)
         }
         .Range(_, _, source, start, end, step, _, _, body, _) -> {
-            if source == .Val(source_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, source_value)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, start)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, end)
-            if step == .Val(step_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, step_value)
-            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, body)
+            if source == .Val(source_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, source_value)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, start)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, end)
+            if step == .Val(step_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, step_value)
+            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, body)
         }
-        .BreakValue(_, value, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+        .BreakValue(_, value, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         .Match(subject, arms, _, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, subject)
-            sema_effect_walk_match_arm_children(walk, &nodes, facts, &diagnostics, caller_key, arms)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, subject)
+            sema_effect_walk_match_arm_children(walk, &nodes, facts, &diagnostics, caller, arms)
         }
         .EnumMatch(scrutinee, _, arms, else_body, _, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, scrutinee)
-            sema_effect_walk_match_arm_children(walk, &nodes, facts, &diagnostics, caller_key, arms)
-            if else_body == .Val(else_statements) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, else_statements)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, scrutinee)
+            sema_effect_walk_match_arm_children(walk, &nodes, facts, &diagnostics, caller, arms)
+            if else_body == .Val(else_statements) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, else_statements)
         }
         .RangeSwitch(subject, arms, else_body, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, subject)
-            loop arm in arms -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, arm.body)
-            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, else_body)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, subject)
+            loop arm in arms -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, arm.body)
+            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, else_body)
         }
         .IndexAssign(_, base, index, _, value, _) | .IndexHookAssign(_, base, index, value, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, base)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, index)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, base)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, index)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         }
         .IndexFieldAssign(value, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value.base)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value.index)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value.value)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value.base)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value.index)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value.value)
         }
         .MathSwizzleAssign(base, _, _, value, _, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, base)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, base)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         }
         .ForIn(_, _, _, source, collection, step, _, _, _, _, body, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, source)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, collection)
-            if step == .Val(step_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, step_value)
-            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, body)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, source)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, collection)
+            if step == .Val(step_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, step_value)
+            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, body)
         }
-        .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, body)
+        .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, body)
         .MixedSwitch(subject, _, arms, else_body, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, subject)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, subject)
             loop arm in arms {
-                sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, arm.condition)
-                sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, arm.body)
+                sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, arm.condition)
+                sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, arm.body)
             }
-            if else_body == .Val(else_statements) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, else_statements)
+            if else_body == .Val(else_statements) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, else_statements)
         }
-        .Unsafe(_, body) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, body)
-        .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, body)
-        .Reactive(executable, _) -> sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller_key, executable)
-        .Layout(_, _, body, _) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, body)
+        .Unsafe(_, body) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, body)
+        .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, body)
+        .Reactive(executable, _) -> sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller, executable)
+        .Layout(_, _, body, _) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, body)
         .ContextBlock(guards, body, _) -> {
-            loop guard in guards -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, guard.value)
-            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, body)
+            loop guard in guards -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, guard.value)
+            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, body)
         }
         .ScopeMember(kind, body, _) -> {
             if kind == {
-                .Timeout(duration) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, duration)
+                .Timeout(duration) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, duration)
                 .Setup | .ExpectFail(_, _) | .Measure | .Skip -> {}
             }
-            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, body)
+            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, body)
         }
-        .Transact(_, _, _, body, _) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, body)
+        .Transact(_, _, _, body, _) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, body)
         .GCEdit(_, _, _, _, index_temp, edited, _) -> {
-            if index_temp == .Val(index_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, index_value)
-            sema_effect_walk_stmt_children(walk, &nodes, facts, &diagnostics, caller_key, edited)
+            if index_temp == .Val(index_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, index_value)
+            sema_effect_walk_stmt_children(walk, &nodes, facts, &diagnostics, caller, edited)
         }
         .SplitViews(owner, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) -> {
-            if owner == .Val(owner_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, owner_value)
+            if owner == .Val(owner_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, owner_value)
         }
         .Break(_, _) | .Continue(_, _) | .Erased(_, _, _) | .InvariantViolation(_, _) | .LineMarker(_) | .SourceSpan(_) -> {}
     }
 }
 
-fn sema_effect_walk_stmt_list_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, statements: [TStmt]) {
-    loop statement in statements -> sema_effect_walk_stmt_children(walk, &nodes, facts, &diagnostics, caller_key, statement)
+fn sema_effect_walk_stmt_list_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, statements: [TStmt]) {
+    loop statement in statements -> sema_effect_walk_stmt_children(walk, &nodes, facts, &diagnostics, caller, statement)
 }
 
-fn sema_effect_walk_if_cond_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, condition: TIfCond) {
+fn sema_effect_walk_if_cond_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, condition: TIfCond) {
     if condition == {
-        .Plain(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+        .Plain(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         .And(left, right) -> {
-            sema_effect_walk_if_cond_children(walk, &nodes, facts, &diagnostics, caller_key, left)
-            sema_effect_walk_if_cond_children(walk, &nodes, facts, &diagnostics, caller_key, right)
+            sema_effect_walk_if_cond_children(walk, &nodes, facts, &diagnostics, caller, left)
+            sema_effect_walk_if_cond_children(walk, &nodes, facts, &diagnostics, caller, right)
         }
         .IfLet(pattern, subject) | .Matches(pattern, subject) -> {
-            sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller_key, pattern.shape)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, subject)
+            sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller, pattern.shape)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, subject)
         }
-        .IsNone(subject) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, subject)
+        .IsNone(subject) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, subject)
         .WithPrelude(prelude, nested) -> {
-            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, prelude)
-            sema_effect_walk_if_cond_children(walk, &nodes, facts, &diagnostics, caller_key, nested)
+            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, prelude)
+            sema_effect_walk_if_cond_children(walk, &nodes, facts, &diagnostics, caller, nested)
         }
     }
 }
 
 // Visit the canonical tir_pattern_children expressions in place, including
 // nested payloads and map keys, without materializing child lists.
-fn sema_effect_walk_pattern_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, shape: TPatternShape) {
+fn sema_effect_walk_pattern_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, shape: TPatternShape) {
     if shape == {
-        .Or(alternatives, _) -> loop alternative in alternatives -> sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller_key, alternative)
+        .Or(alternatives, _) -> loop alternative in alternatives -> sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller, alternative)
         .Struct(fields, _, _) -> loop field in fields {
             if field == {
-                .Value(_, value, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+                .Value(_, value, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
                 .Bind(_, _, _) -> {}
-                .Nested(_, inner, _) -> sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller_key, inner.shape)
+                .Nested(_, inner, _) -> sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller, inner.shape)
             }
         }
         .Variant(_, slots, _, _) | .List(slots, _, _) -> loop slot in slots {
             if slot == {
-                .Value(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
-                .Nested(inner) -> sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller_key, inner.shape)
+                .Value(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
+                .Nested(inner) -> sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller, inner.shape)
                 else -> {}
             }
         }
         .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
-            if inner == .Val(nested) -> sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller_key, nested.shape)
+            if inner == .Val(nested) -> sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller, nested.shape)
         }
         .Map(entries, _, _) -> loop entry in entries {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, entry.key)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, entry.key)
             if entry.slot == {
-                .Value(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
-                .Nested(inner) -> sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller_key, inner.shape)
+                .Value(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
+                .Nested(inner) -> sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller, inner.shape)
                 else -> {}
             }
         }
@@ -2712,10 +2723,10 @@ fn sema_effect_walk_pattern_children(walk: SemaEffectWalk, nodes: &[SemaEffectNo
     }
 }
 
-fn sema_effect_walk_match_arm_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, arms: [TMatchArm]) {
+fn sema_effect_walk_match_arm_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, arms: [TMatchArm]) {
     loop arm in arms {
-        sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller_key, arm.pattern.shape)
-        sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller_key, arm.body)
+        sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller, arm.pattern.shape)
+        sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, arm.body)
     }
 }
 
@@ -2727,105 +2738,104 @@ fn sema_effect_walk_match_arm_children(walk: SemaEffectWalk, nodes: &[SemaEffect
 // unknown callee (the maximal row). Rust records these bodies' effects on the
 // enclosing function as it checks them. A compiler-private loop carrier keeps
 // the enclosing key, so the lambda key applies only when it owns facts.
-fn sema_effect_walk_lambda_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, lambda: TLambda) {
-    lambda_key :: "lambda@{lambda.source_span.start}"
+fn sema_effect_walk_lambda_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, lambda: TLambda) {
     // A structure-only walk (FailureLaw) builds its index with no modules; its
-    // lambda bodies keep the enclosing key, as for a lambda that owns no facts.
-    owns_facts :: facts.current_module >= 0 && facts.current_module < facts.modules.len() && facts.modules[facts.current_module].caller_slots.get(lambda_key) != None
-    body_key :: if owns_facts -> lambda_key else -> caller_key
+    // lambda bodies keep the enclosing caller, as for a lambda that owns no facts.
+    lambda_slot :: sema_effect_caller_slot(facts, "lambda@{lambda.source_span.start}")
+    body_caller :: if lambda_slot >= 0 -> lambda_slot else -> caller
     if lambda.executable == {
-        .Expr(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, body_key, value)
-        .Block(body) | .SharedBlock(body) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, body_key, body)
+        .Expr(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, body_caller, value)
+        .Block(body) | .SharedBlock(body) -> sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, body_caller, body)
     }
 }
 
-fn sema_effect_walk_place_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, place: TPlace) {
+fn sema_effect_walk_place_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, place: TPlace) {
     if place == {
-        .Expr(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+        .Expr(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         .Local(_) -> {}
     }
 }
 
-fn sema_effect_walk_require_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, requirement: TRequireKind) {
+fn sema_effect_walk_require_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, requirement: TRequireKind) {
     if requirement == {
         .Require(condition, message) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, condition)
-            if message == .Val(message_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, message_value)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, condition)
+            if message == .Val(message_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, message_value)
         }
         .RequireEq(left, right) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, left)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, right)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, left)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, right)
         }
-        .Panic(message) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, message)
+        .Panic(message) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, message)
     }
 }
 
-fn sema_effect_walk_host_call_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, call: THostCall) {
+fn sema_effect_walk_host_call_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, call: THostCall) {
     if call == {
         .Method(receiver, _, args) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, receiver)
-            loop value in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, receiver)
+            loop value in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         }
-        .CarrierFact(receiver, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, receiver)
-        .CellGuardProject(receiver, _, _, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, receiver)
+        .CarrierFact(receiver, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, receiver)
+        .CellGuardProject(receiver, _, _, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, receiver)
         .FixedListIndex(base, index, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, base)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, index)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, base)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, index)
         }
-        .TypedText(_, argument) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, argument)
+        .TypedText(_, argument) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, argument)
         .GCEdit(_, _, _, edit, index_temp, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, edit)
-            if index_temp == .Val(index_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, index_value)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, edit)
+            if index_temp == .Val(index_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, index_value)
         }
-        .OptionProbe(inner, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, inner)
-        .TupleIndex(base, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, base)
-        .StrMatchScan(subject, _, _) | .BinMatchScan(subject, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, subject)
-        .YieldSend(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
-        .TypedTextInterp(_, _, holes, _) -> loop hole in holes -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, hole)
-        .ExpectSnapshot(value, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+        .OptionProbe(inner, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, inner)
+        .TupleIndex(base, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, base)
+        .StrMatchScan(subject, _, _) | .BinMatchScan(subject, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, subject)
+        .YieldSend(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
+        .TypedTextInterp(_, _, holes, _) -> loop hole in holes -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, hole)
+        .ExpectSnapshot(value, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         .EnvSet(name, value, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, name)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, value)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, name)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, value)
         }
-        .CCallback(_, lambda, _, _, _, _) -> sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller_key, lambda)
+        .CCallback(_, lambda, _, _, _, _) -> sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller, lambda)
         .FnName(_) | .MemoStats(_) | .GCRead(_) | .SwitchSubjectField(_) | .SwitchSubjectValue | .NumericBounds(_, _) -> {}
     }
 }
 
-fn sema_effect_walk_core_closure_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, kind: TCoreClosureKind) {
+fn sema_effect_walk_core_closure_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, kind: TCoreClosureKind) {
     if kind == {
         .Spawn(group, _, _, executable) -> {
-            if group == .Val(group_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, group_value)
-            sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller_key, executable)
+            if group == .Val(group_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, group_value)
+            sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller, executable)
         }
         .Realtime(rate, frames, executable) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, rate)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, frames)
-            sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller_key, executable)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, rate)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, frames)
+            sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller, executable)
         }
         .UITextInputOnDrop(state, ime, executable, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, state)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, ime)
-            sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller_key, executable)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, state)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, ime)
+            sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller, executable)
         }
         .Serve(address, executable) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, address)
-            sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller_key, executable)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, address)
+            sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller, executable)
         }
-        .OnInterrupt(callback) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, callback)
-        .Guard(executable) -> sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller_key, executable)
-        .ReactiveDerived(executable, _) | .ReactiveEffect(executable, _) | .UIReactiveRender(executable, _) -> sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller_key, executable)
-        .OnCommit(_, executable) | .OnRollback(_, executable) -> sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller_key, executable)
+        .OnInterrupt(callback) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, callback)
+        .Guard(executable) -> sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller, executable)
+        .ReactiveDerived(executable, _) | .ReactiveEffect(executable, _) | .UIReactiveRender(executable, _) -> sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller, executable)
+        .OnCommit(_, executable) | .OnRollback(_, executable) -> sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller, executable)
         .UIButtonOnClick(label, shortcut, accessible_label, executable, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, label)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, shortcut)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, accessible_label)
-            sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller_key, executable)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, label)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, shortcut)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, accessible_label)
+            sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller, executable)
         }
         .UIPreview(name, viewport, executable, _, _, _, _, _, _, _, _, _, _) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, name)
-            if viewport == .Val(viewport_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller_key, viewport_value)
-            sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller_key, executable)
+            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, name)
+            if viewport == .Val(viewport_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, viewport_value)
+            sema_effect_walk_lambda_children(walk, &nodes, facts, &diagnostics, caller, executable)
         }
     }
 }
