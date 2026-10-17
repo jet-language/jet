@@ -24,7 +24,7 @@ fn ci_scalar(kind: MIRTypeKind, value: TComptimeValue, layout: LIRLayout, runtim
     ci_require(answer.errors.len() == 0, "native compiler scalar call")
     decoded :: x64_comptime_decode_scalar(runtime, ty, answer.word)
     loop error in decoded.errors -> print(error)
-    ci_require(decoded.errors.len() == 0 && decoded.value == Val(value), "detached compiler value equality")
+    ci_require(decoded.errors.len() == 0 && decoded.value == Val((value)), "detached compiler value equality")
     // The identity returns its single owner unchanged; decode detached it.
     released :: x64_comptime_drop_scalar(runtime, ty, answer.word)
     loop error in released -> print(error)

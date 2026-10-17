@@ -124,7 +124,7 @@ fn method_wave_product_witnesses(graph: SemaRegistrationGraph, checked: SemaGrap
             if function.name == "window" -> consumer = function.return_view_provenance != None
             if function.name == "display" || function.name == "compare" {
                 expected :: if function.name == "display" -> Type.String else -> Type.Named{name: "Ordering"}
-                method_wave_require(function.ret == Val(expected) && function.params.len() > 0 && function.params[0].name == "self" && function.params[0].convention == AccessConvention.Read, "raw return and read receiver survive checking")
+                method_wave_require(function.ret == Val((expected)) && function.params.len() > 0 && function.params[0].name == "self" && function.params[0].convention == AccessConvention.Read, "raw return and read receiver survive checking")
                 raw_products += 1
             }
             if function.name != "fail" && function.name != "method_2" -> next

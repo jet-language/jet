@@ -820,6 +820,31 @@ fn sema_pattern_reused_hole(name: String, hole_span: Span, diagnostics: &[Diagno
     }
 }
 
+// S31/D-OPT-LIFT1=A with D-PATTERN-HOLE-NAME1=A (#4713): `subject == Val(name)`
+// binds `name` in every expression position, so one already holding a value
+// is E0118 in a value and in a condition alike. `Val((name))` is the
+// comparison with the held value: a parenthesized payload constructs it.
+fn sema_pattern_test_reused_payload_name(pattern: Pattern, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    name := ""
+    name_span := Span{start: 0, end: 0}
+    if pattern == {
+        .Present(binding, binding_span, inner, _) -> if inner == None {
+            name = binding
+            name_span = binding_span
+        }
+        .Variant(variant, slots, _, _) -> if variant == "Val" && slots.len() == 1 {
+            if slots[0] == .Bind(bound, bound_span) {
+                name = bound
+                name_span = bound_span
+            }
+        }
+        else -> {}
+    }
+    if name == "" || sema_pattern_hole_name_available(name, scopes) -> return false
+    &diagnostics.push(sema_error("E0118", name_span, "`Val({name})` would make a new `{name}`, but `{name}` already holds a value", "a payload name after `==` introduces a new name; it does not compare with an existing value", "write `Val(({name}))` to compare with the existing value, or pick a new name to bind"))
+    true
+}
+
 // S20: Jet text has only the `\n`, `\t`, `\"`, `\\` escapes plus doubled
 // braces, so any other scalar (a carriage return included) stays as the raw
 // source character.

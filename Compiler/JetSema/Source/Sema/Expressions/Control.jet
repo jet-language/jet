@@ -1558,6 +1558,7 @@ fn sema_expression_check_pattern_condition(subject: Expr, pattern: Pattern, span
     // Result carrier, so its call root must not propagate.
     subject_value :: if sema_pattern_consumes_result_carrier(pattern) -> sema_check_expression_carrier(subject, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(subject, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     checked_subject :: subject_value ?? return None
+    if sema_pattern_test_reused_payload_name(pattern, scopes, &diagnostics) -> return None
     source :: sema_expression_window_source(subject, scopes)
     window_names := [String]{}
     if source != None -> sema_expression_window_names(pattern, &window_names)

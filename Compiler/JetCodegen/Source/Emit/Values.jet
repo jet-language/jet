@@ -2328,7 +2328,7 @@ fn jet_rust_emit_inspected_only(ctx: &JetRustEmitContext, function: MIRFunction,
         used = true
         transfer :: function.blocks[user.block].instructions[user.instruction].result
         if transfer == .Val(result) {
-            transfers_read :: jet_rust_emit_transparent_read(ctx, function, result) == .Val(value)
+            transfers_read :: jet_rust_emit_transparent_read(ctx, function, result) == Val((value))
             if transfers_read && jet_rust_emit_inspected_transfer(&ctx, function, result) -> next
         }
         if operation == .Drop(operand, kind) && operand == value && kind != MIRDropKind.ForeignHandle {

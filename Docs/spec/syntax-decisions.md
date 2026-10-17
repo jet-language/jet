@@ -917,9 +917,12 @@ literal.
 
 In an equality RHS, `Val(v)` with a bare name introduces the S31 binding even
 if that name is already in scope (ordinary no-shadowing checks still apply).
-`Val(true)`, `Val(object.field)`, and `Val(compute(value))` are constructor
-values instead. `!=` introduces no binding. Dispatch-arm and nested
-leading-dot patterns retain their own pattern grammar.
+A name that already holds a value is therefore E0118 in a value position
+(`same :: code == Val(wanted)`) and in a condition alike, and its fix teaches
+the comparison `code == Val((wanted))`: a parenthesized payload is a
+constructor value (#4713). `Val(true)`, `Val(object.field)`, and
+`Val(compute(value))` are constructor values too. `!=` introduces no binding.
+Dispatch-arm and nested leading-dot patterns retain their own pattern grammar.
 
 **D-ENUMDOT1 / D-ENUMDOT2 — Leading-dot variants**: match-arm patterns require a
 leading dot (`.Circle(r)`, `.Empty`); bare `Circle(r)` / `Empty` is E0367.

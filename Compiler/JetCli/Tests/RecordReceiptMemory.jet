@@ -25,7 +25,7 @@ fn run() {
     record_receipt_memory_require(jet_cli_record_index_query(index, false).len() == 1, "idempotent rows")
     snapshot :: jet_cli_record_index_to_bytes(index) ?? panic("snapshot")
     restored :: jet_cli_record_index_from_bytes(snapshot) ?? panic("restore")
-    record_receipt_memory_require(jet_cli_record_index_find(restored, "replay", digest, false) == .Val(entry), "canonical JSONL snapshot round trip")
+    record_receipt_memory_require(jet_cli_record_index_find(restored, "replay", digest, false) == Val((entry)), "canonical JSONL snapshot round trip")
     sequence :: jet_cli_record_index_next_sequence(restored) ?? panic("sequence")
     record_receipt_memory_require(sequence == U64{2}, "sequence increment")
     fresh :: jet_cli_record_index_fresh_sequence(restored, JetCLIRecordIndexEntry{identity: identity, kind: "replay", artifact_id: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", path: ".jet/replays/new.jetreplay", recorded_sequence: U64{1}, size: U64{1}, capture: "safe", saved: false, consumed: [JetCLIRecordLink]{}, produced: [JetCLIRecordLink]{}}) ?? panic("fresh sequence")

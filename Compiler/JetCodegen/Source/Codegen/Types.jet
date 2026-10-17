@@ -1350,7 +1350,7 @@ fn jet_codegen_resolve_field_by_name(modules: [SemaGraphModuleResult], nominals:
             if definition.kind == {
                 .Struct(fields, _) -> {
                     loop (index, field) in fields {
-                        indexed :: position == Val(index) && (field.name == "x" || field.name == "y" || field.name == "z" || field.name == "w")
+                        indexed :: position == Val((index)) && (field.name == "x" || field.name == "y" || field.name == "z" || field.name == "w")
                         if field.name == member || indexed -> return JetCodegenResolvedField{owner_key: definition.key, field_name: field.name}
                     }
                 }
@@ -1374,7 +1374,7 @@ fn jet_codegen_resolve_field_by_name(modules: [SemaGraphModuleResult], nominals:
     owner_key :: if identity == {.Val(row) -> row.key else -> owner_name}
     if jet_codegen_compiler_owned_record_fields(owner_key) == .Val(fields) {
         loop (index, field) in fields {
-            indexed :: position == Val(index) && (field.name == "x" || field.name == "y" || field.name == "z" || field.name == "w")
+            indexed :: position == Val((index)) && (field.name == "x" || field.name == "y" || field.name == "z" || field.name == "w")
             if field.name == member || indexed -> return JetCodegenResolvedField{owner_key: owner_key, field_name: field.name}
         }
     }
